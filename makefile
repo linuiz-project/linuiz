@@ -8,10 +8,10 @@ gsai_os.img: src/boot/bootloader.bin kernel.bin
 # build kernel binary
 # - kernel_entry jumps to kernel_main()
 # - the compiled C kernel
-kernel.bin: src/kernel_entry.o target/i686-unknown-linux-gnu/debug/libkernel.a
+kernel.bin: src/kernel_entry.o target/i686-unknown-linux-gnu/release/libkernel.a
 	ld -Ttext 0x1000 --oformat=binary -m elf_i386 $^ -o $@
 
-target/i686-unknown-linux-gnu/debug/libkernel.a:
+target/i686-unknown-linux-gnu/release/libkernel.a:
 	cargo build --release
 
 # generic rule for building `.o` from `.asm`

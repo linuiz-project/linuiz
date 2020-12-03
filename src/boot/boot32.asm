@@ -21,9 +21,9 @@ protected_start:
     mov ebx, booting_protected_string
     call println32
     
-    call query_cpuid_support
+    ; call query_cpuid_support
 
-    ; call kernel_offset  ; enter kernel
+    call kernel_offset  ; enter kernel
 
     jmp $
 

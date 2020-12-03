@@ -1,3 +1,8 @@
+; remark: the first 512 bytes of the bootloader are reserved for the initial bootsector
+;   so! as a rule, be very careful with adding or including code in this file.
+;
+;   * nasm will however error when it is attempts to compile with negative pad because the size is too large
+
 ; — NASM directives —
 bits 16
 org 0x7C00
@@ -48,7 +53,7 @@ load_kernel:
     call println
 
     mov bx, kernel_offset   ; set up parameters for disk loading, so that
-    mov dh, 15            ; when we kernel sectors into memory (excluding
+    mov dh, 2               ; when we kernel sectors into memory (excluding
     mov dl, [boot_disk]     ; the boot sector) from the boot disk to `kernel_offset`
     call disk_read
 
