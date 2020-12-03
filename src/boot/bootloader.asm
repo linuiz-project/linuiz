@@ -8,6 +8,7 @@ bits 16
 org 0x7C00
 global _start
 
+
 kernel_offset equ 0x1000
 
 ; — code —
@@ -27,10 +28,8 @@ kernel_offset equ 0x1000
     mov si, booting_real_string
     call println
     
-    call load_kernel
-
-    ; enter protected mode
-    call enter_32bit_protected
+    call load_kernel    ; load the kernel into memory from disk
+    call enter_32bit_protected  ; enter protected mode
 
 
 enter_32bit_protected:
@@ -47,15 +46,15 @@ enter_32bit_protected:
     jmp code_segment:initialize_protected_mode
     ; we're now in 32bit protected mode
 
+
 load_kernel:
     ; print status to screen
     mov bx, load_kernel_string 
     call println
 
     mov bx, kernel_offset   ; set up parameters for disk loading, so that
-    mov dh, 2               ; when we kernel sectors into memory (excluding
-    mov dl, [boot_disk]     ; the boot sector) from the boot disk to `kernel_offset`
-    call disk_read
+    mov dh, 4               ;   we can load kernel sectors into memory
+    call disk_read          ;   from the boot disk to `kernel_offset`
 
     ret
 
@@ -139,10 +138,10 @@ disk_read:
     jne disk_error  ;   display error message
     ret
 
-disk_error:
-    mov si, disk_error_string
-    call println
-    hlt
+    disk_error:
+        mov si, disk_error_string
+        call println
+        hlt
 
 
 ; — data —
@@ -151,18 +150,17 @@ boot_disk                   db 0
 booting_real_string         db 'Successfully booted into real mode... ', 0
 load_kernel_string          db 'Loading kernel image... ', 0
 disk_error_string           db 'Failed to read disk. ', 0
-hex_ref_table               db '0123456789ABCDEF', 0
-hex_template                db '0x0000', 0
+hex_ref_table               db '0123456789ABCDEF', 0    ; lookup table for printing hex
+hex_template                db '0x0000', 0      ; used as an output template for printing hex
 
+; remark: the paths are relative to wherever the file is being compiled from
+%include "./src/boot/boot16_gdt.asm"  ; global descriptor table for entering 32bit protected
 
-
-; — includes —
-%include "src/boot/boot16_gdt.asm"
 
 ; — end (512-byte padding + magic number) —
 times 510 - ($ - $$) db 0   ; pad binary with zero bytes up to 510 (remaining two bytes are magic number)
 dw 0xAA55                   ; magic boot signature
-                            ;   remark: this number tell the BIOS that the preceding
-                            ;   512 bytes are a bootloader, and not random code.
+                            ; remark: this number tell the BIOS that the preceding
+                            ;         512 bytes are a bootloader, and not random code.
 
-%include "src/boot/boot32.asm"
+%include "./src/boot/boot32.asm"

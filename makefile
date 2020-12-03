@@ -2,6 +2,11 @@ all: gsai_os.img
 
 gsai_os.img: src/boot/bootloader.bin kernel.bin
 	cat $^ > $@
+
+	# pad file to 4kb
+	dd if=/dev/zero of=$@ bs=1 count=1 seek=4095
+	
+	# cleanup intermediate build files
 	find ./src/ -type f -name '*.o' -delete
 	find ./ -type f -name '*.bin' -delete
 

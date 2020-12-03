@@ -1,6 +1,7 @@
 bits 32
 
 initialize_protected_mode:
+    jmp $
     ; update segment register to point to data segment
     mov ax, data_segment
     mov ds, ax
@@ -92,7 +93,7 @@ query_cpuid_support:
     no_cpuid_support:
         mov ebx, no_cpuid_support_string
         call println32
-        jmp $
+        hlt
 
 ; — data —
 video_memory equ 0xB8000

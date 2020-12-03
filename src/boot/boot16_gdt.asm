@@ -2,8 +2,7 @@
 ; 16-bit real mode to 32-bit protected mode
 ;
 ; it is in a separate file to help isolate it, and ensure
-; that its code (and place within `boot16.asm`) isn't modified
-; without express intent
+; that its code isn't modified without express intent
 
 gdt_start:
 
@@ -33,12 +32,13 @@ gdt_data:   ; data segment descriptor
     db 11001111b    ; 2nd flags, Limit (bits 16-19)
     db 0x0          ; Base (bits 24-31)
 
+
 ; this label is here to let the assembler 
 ; calculate the size of the GDT (below)
 gdt_end:
 
-; — GDT descriptor —
-gdt_descriptor:
+
+gdt_descriptor:     ; gdt descriptor
     dw gdt_end - gdt_start - 1  ; size of our GDT, always less one of the true size
     dd gdt_start                ; start of our GDT
 
