@@ -15,8 +15,9 @@ pub struct EFITableHeader {
 #[repr(usize)]
 pub enum EFIStatus {
     Success = 0,
-    DeviceError = 1,
-    Unsupported = 2
+    DeviceError,
+    Unsupported,
+    StringTooLong
 }
 
 #[repr(C)]
@@ -54,21 +55,25 @@ impl EFISystemTable {
 pub struct EFISimpleTextOutputProtocol {
     reset: unsafe extern "win64" fn(this: &EFISimpleTextOutputProtocol, extended: bool) -> EFIStatus,
     output_string: unsafe extern "win64" fn(this: &EFISimpleTextOutputProtocol, string: *const u16) -> EFIStatus,
-    query_mode: unsafe extern "win64" fn(this: &EFISimpleTextOutputProtocol, mode_number: u32, columns: *mut u32, rows: *mut u32) -> EFIStatus
+    query_mode: unsafe extern "win64" fn(this: &EFISimpleTextOutputProtocol, mode_number: usize, columns: *mut usize, rows: *mut usize) -> EFIStatus,
+    set_mode: unsafe extern "win64" fn(this: &EFISimpleTextOutputProtocol, mode_number: usize) -> EFIStatus,
 }
 
 impl EFISimpleTextOutputProtocol {
-    pub fn reset(&self, extended: bool) -> EFIStatus {
+    pub fn reset(&self, extended: bool) -> Result<(), EFIStatus> {
         unsafe {
-            (self.reset)(&self, extended)
+            match (self.reset)(&self, extended) {
+                EFIStatus::Success => Ok(()),
+                status => Err(status)
+            }
         }
     }
 
-    pub fn write_string(&self, string: &str) -> Option<EFIStatus> {
+    pub fn write_string(&self, string: &str) -> Result<(), EFIStatus> {
         let string_length = string.len();
         
-        if (string_length > 512) {
-            None
+        if string_length > 512 {
+                Err(EFIStatus::StringTooLong)
         } else {
         let string_bytes = string.as_bytes();
         let mut buffer = [0u16; 512];
@@ -77,29 +82,30 @@ impl EFISimpleTextOutputProtocol {
             buffer[i] = string_bytes[i] as u16;
         }
 
-        unsafe {
-        (self.output_string)(&self, buffer.as_ptr());
+
+        match unsafe { (self.output_string)(&self, buffer.as_ptr()) } {
+            EFIStatus::Success => Ok(()),
+            status => Err(status)
         }
-        Some(EFIStatus::Success)
     }
     }
 
-    pub fn query_mode(&self, mode: u32) -> Result<(u32, u32), EFIStatus> {
-        let columns: u32;
-        let rows: u32;
-        let status: EFIStatus;
+    pub fn query_mode(&self, mode: usize) -> Result<(usize, usize), EFIStatus> {
+        let columns = 0 as *mut usize;
+        let rows = 0 as *mut usize;
 
         unsafe {
-            let columns_ptr = 0x0 as *mut u32;
-            let rows_ptr = 0x0 as *mut u32;
-            status = (self.query_mode)(&self, mode, columns_ptr, rows_ptr);
-            columns = *columns_ptr;
-            rows = *rows_ptr;
+        match (self.query_mode)(&self, mode, columns, rows) {
+            EFIStatus::Success => Ok((*columns, *rows)),
+            status => Err(status)
         }
+    }
+    }
 
-        match status {
-            EFIStatus::Success => Ok((columns, rows)),
-            _ => Err(status)
+    pub fn set_mode(&self, mode: usize) -> Result<(), EFIStatus> {
+        match unsafe { (self.set_mode)(&self, mode) } {
+            EFIStatus::Success => Ok(()),
+            status => Err(status)
         }
-    } 
+    }
 }

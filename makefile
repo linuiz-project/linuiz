@@ -1,5 +1,5 @@
 boot_deps = $(shell find ./efi-boot/src -type f -name '*.rs')
-kernel_deps = $(shell find ./efi-kernel/src -type f -name '*.rs')
+kernel_deps = $(shell find ./kernel/src -type f -name '*.rs')
 
 all: image/EFI/BOOT/BOOTX64.efi image/EFI/gsai/kernel.elf
 
