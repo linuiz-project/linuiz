@@ -16,6 +16,6 @@ panic = "abort"
 [profile.release]
 panic = "abort"
 
-[lib]
+[[bin]]
+name = "kernel"
 path = "src/kernel.rs"
-crate-type = ["staticlib"]
