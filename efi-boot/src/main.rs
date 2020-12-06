@@ -6,7 +6,9 @@
 extern crate log;
 
 
-use uefi::{alloc::Allocator, Guid, Handle, Identify, Status, prelude::BootServices, proto::{Protocol, loaded_image::LoadedImage, media::fs::SimpleFileSystem}, table::{Boot, SystemTable}, unsafe_guid};
+use core::cell::UnsafeCell;
+
+use uefi::{Guid, Handle, Identify, Status, prelude::BootServices, proto::{Protocol, loaded_image::LoadedImage, media::fs::SimpleFileSystem}, table::{Boot, SystemTable}, unsafe_guid};
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
@@ -28,7 +30,7 @@ pub extern "C" fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>
     let _device_path = get_protocol::<DevicePath>(boot_services, image.device()).expect("failed to acquire boot image device path");
     info!("Successfully acquired boot image device path.");
     
-    let mut file_system = locate_protocol::<SimpleFileSystem>(boot_services).expect("failed to acquire file system.");
+    let file_system = locate_protocol::<SimpleFileSystem>(boot_services).expect("failed to acquire file system.");
     info!("Successfully acquired boot file system.");
     let mut _root_directory = file_system.open_volume().expect("failed to open boot file system root directory").with_status(Status::SUCCESS).unwrap();
     info!("Successfully loaded boot file system root directory.");
@@ -36,32 +38,21 @@ pub extern "C" fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>
     loop {}
 }
 
-fn get_protocol<P>(boot_services: &BootServices, handle: Handle) -> Option<&mut P> where P : Protocol 
-{
-    unsafe {
-        match boot_services.handle_protocol(handle) {
-            Ok(unsafe_cell_completion) => {
-                info!("Protocol found, attempting to acquire...");
-
-                if (!unsafe_cell_completion.status().is_success()) {
-                    panic!("failed to acquire protocol: {:?}", unsafe_cell_completion.status());
-                } else {
-                    info!("Protocol acquired, attempting to unwrap...");
-                    Some(&mut *(unsafe_cell_completion.unwrap().get() as *mut P))
-                }                
-            },
-            Err(error) => { error!("{:?}", error.status()); panic!("{:?}", error.status()) }
-        }
-    }
+fn get_protocol<P>(boot_services: &BootServices, handle: Handle) -> Option<&mut P> where P : Protocol {
+    acquire_protocol(boot_services.handle_protocol(handle))
 }
 
 fn locate_protocol<P>(boot_services: &BootServices) -> Option<&mut P> where P : Protocol {
+    acquire_protocol(boot_services.locate_protocol::<P>())
+}
+
+fn acquire_protocol<P>(result: uefi::Result<&UnsafeCell<P>, >) -> Option<&mut P> where P : Protocol {
     unsafe {
-        match boot_services.locate_protocol::<P>() {
+        match result {
             Ok(unsafe_cell_completion) =>{
                 info!("Protocol found, attempting to acquire...");
 
-                if (!unsafe_cell_completion.status().is_success()) {
+                if !unsafe_cell_completion.status().is_success() {
                     panic!("failed to locate and acquire protocol: {:?}", unsafe_cell_completion.status());
                 } else {
                     info!("Protocol acquired, attempting to unwrap...");
