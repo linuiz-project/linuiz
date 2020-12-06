@@ -7,5 +7,5 @@ edition = "2018"
 
 [dependencies]
 uefi = "*"
-uefi-services = "*"
+uefi-services = { version = "*", features = ["qemu"] }
 log = { version = "*", default-features = false }
