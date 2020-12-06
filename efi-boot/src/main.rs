@@ -8,11 +8,11 @@ extern crate log;
 
 use core::cell::UnsafeCell;
 use uefi_macros::entry;
-use uefi::{table::Boot, CStr16, Handle, Status, prelude::BootServices, proto::{Protocol, media::fs::SimpleFileSystem, loaded_image::{LoadedImage, DevicePath}}, table::SystemTable};
+use uefi::{CStr16, Handle, Status, prelude::BootServices, proto::{Protocol, media::fs::SimpleFileSystem, loaded_image::{LoadedImage, DevicePath}}, proto::media::file::Directory, proto::media::file::File, proto::media::file::FileInfo, proto::media::file::FileMode, proto::media::file::RegularFile, table::Boot, proto::media::file::FileAttribute, table::SystemTable};
 
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
-static ELF_ROOT: &'static CStr16 = CStr16::from_u16_with_nul(&[b'E'.into(), b'L'.into(), b'F'.into(), b'\0'.into()]).ok().unwrap();
+const FAIL_ROOT_READ: &'static str = "failed to read root directory";
 
 #[entry]
 fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
@@ -36,30 +36,19 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
     let mut root_directory = file_system.open_volume().expect("failed to open boot file system root directory").unwrap();
     info!("Successfully loaded boot file system root directory.");
     
-    let mut buffer: [u8; 255] = [0; 255];
+    let mut buffer = [0u8; 255];
+    let efi_root_directory_info = match read_directory_entry(&mut root_directory, &mut buffer) {
+        Ok(file_info) => file_info,
+        Err(_) => panic!(FAIL_ROOT_READ)
+    };
+    let efi_root_directory: File = efi_root_directory_info.into();
 
-    loop {
-        let newdir_result = root_directory.read_entry(&mut buffer);
-        
-        if (newdir_result.is_err()) {
-            break
-        }
+    let kernel_file: RegularFile = match efi_root_directory.open("gsai/kernel.elf", FileMode::Read, FileAttribute::SYSTEM) {
+        Ok(completion) => completion.expect("failed to find kernel file (should be at ELF/gsai/kernel.elf)."),
+        Err(error) => panic!("{:?}", error)
+    }.into_type();
 
-        let newdir_option = newdir_result.ok().unwrap().unwrap();
-
-        if (newdir_option.is_none()) {
-            break
-        }
-
-        let newdir = newdir_option.unwrap();
-        let file_name = newdir.file_name();
-
-        if (file_name == ELF_ROOT) {
-            info!("success");
-        }
-
-        info!("{:?}", file_name);
-    }
+    info!("{}", kernel_file.get_info(&mut buffer).unwrap().unwrap());
 
 
 
@@ -87,5 +76,22 @@ fn acquire_protocol_unwrapped<P: Protocol>(result: uefi::Result<&UnsafeCell<P>, 
             }       
         },
         Err(error) => panic!("{:?}", error.status())
+    }
+}
+
+fn read_directory_entry<'buf>(directory: &mut Directory, read_buffer: &'buf mut [u8]) -> Result<&'buf mut FileInfo, usize> {
+    match directory.read_entry(read_buffer) {
+        Ok(completion) => {
+            let option = completion.expect(FAIL_ROOT_READ);
+            
+            match option {
+                Some(info) => Ok(info),
+                None => panic!(FAIL_ROOT_READ)
+            }
+        },
+        Err(error) => match error.data() {
+            Some(size) => Err(size.clone()),
+            None => panic!("{} {:?}", FAIL_ROOT_READ, error.status())
+        }
     }
 }
