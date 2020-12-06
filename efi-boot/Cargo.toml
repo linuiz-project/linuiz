@@ -6,7 +6,10 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-uefi = { path = "../../uefi-rs/" }
-uefi-macros = { path = "../../uefi-rs/uefi-macros" }
-uefi-services = { path = "../../uefi-rs/uefi-services", features = ["qemu"] }
+uefi = "*"
+uefi-macros = "*"
+uefi-services = { version = "*", features = ["qemu"] }
 log = { version = "*", default-features = false }
+
+[patch.crates-io]
+uefi = { path = "../../uefi-rs/" }

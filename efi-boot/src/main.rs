@@ -1,6 +1,6 @@
 #![no_std]
 #![no_main]
-#![feature(unsafe_cell_get_mut, negative_impls, abi_efiapi)]
+#![feature(unsafe_cell_get_mut, negative_impls, abi_efiapi, const_option)]
 
 #[macro_use]
 extern crate log;
@@ -8,10 +8,11 @@ extern crate log;
 
 use core::cell::UnsafeCell;
 use uefi_macros::entry;
-use uefi::{Guid, Handle, Identify, Status, proto::{Protocol, loaded_image::LoadedImage, media::fs::SimpleFileSystem}, prelude::BootServices, table::{Boot, SystemTable}, unsafe_guid};
+use uefi::{table::Boot, CStr16, Handle, Status, prelude::BootServices, proto::{Protocol, media::fs::SimpleFileSystem, loaded_image::{LoadedImage, DevicePath}}, table::SystemTable};
 
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+static ELF_ROOT: &'static CStr16 = CStr16::from_u16_with_nul(&[b'E'.into(), b'L'.into(), b'F'.into(), b'\0'.into()]).ok().unwrap();
 
 #[entry]
 fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
@@ -26,16 +27,42 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
     info!("Attempting to acquire boot image from boot services.");
     let image = get_protocol_unwrap::<LoadedImage>(boot_services, image_handle).expect("failed to acquire boot image");
     info!("Successfully acquired boot image from boot services.");
-
-
     let device_path = get_protocol_unwrap::<DevicePath>(boot_services, image.device()).expect("failed to acquire boot image device path");
     info!("Successfully acquired boot image device path.");
-    
-    let file_system = locate_protocol_unwrap::<SimpleFileSystem>(boot_services).expect("failed to acquire file system.");
-    info!("Successfully acquired boot file system.");
-    let mut _root_directory = file_system.open_volume().expect("failed to open boot file system root directory").with_status(Status::SUCCESS).unwrap();
+    let file_handle = boot_services.locate_device_path::<SimpleFileSystem>(device_path).expect("failed to acquire file handle from device path").unwrap();
+    info!("Successfully acquired file handle from device path.");
+    let file_system = get_protocol_unwrap::<SimpleFileSystem>(boot_services, file_handle).expect("failed to load file system from file handle");
+    info!("Successfully acquired file system from file handle.");
+    let mut root_directory = file_system.open_volume().expect("failed to open boot file system root directory").unwrap();
     info!("Successfully loaded boot file system root directory.");
     
+    let mut buffer: [u8; 255] = [0; 255];
+
+    loop {
+        let newdir_result = root_directory.read_entry(&mut buffer);
+        
+        if (newdir_result.is_err()) {
+            break
+        }
+
+        let newdir_option = newdir_result.ok().unwrap().unwrap();
+
+        if (newdir_option.is_none()) {
+            break
+        }
+
+        let newdir = newdir_option.unwrap();
+        let file_name = newdir.file_name();
+
+        if (file_name == ELF_ROOT) {
+            info!("success");
+        }
+
+        info!("{:?}", file_name);
+    }
+
+
+
     loop {}
 }
 
@@ -61,34 +88,4 @@ fn acquire_protocol_unwrapped<P: Protocol>(result: uefi::Result<&UnsafeCell<P>, 
         },
         Err(error) => panic!("{:?}", error.status())
     }
-}
-
-#[repr(u8)]
-#[derive(Debug)]
-pub enum DeviceType {
-    Hardware = 0x01,
-    ACPI = 0x02,
-    Messaging = 0x03,
-    Media = 0x04,
-    BIOSBootSpec = 0x05,
-    End = 0x7F
-}
-
-#[repr(u8)]
-#[derive(Debug)]
-pub enum DeviceSubType {
-    EndInstance = 0x01,
-    EndEntire = 0xFF
-}
-
-#[repr(C)]
-#[unsafe_guid("09576e91-6d3f-11d2-8e39-00a0c969723b")]
-pub struct DevicePath {
-    pub device_type: DeviceType,
-    pub sub_type: DeviceSubType,
-    pub length: [u8; 2]
-}
-
-impl Protocol for DevicePath {
-    
 }
