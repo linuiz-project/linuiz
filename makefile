@@ -2,11 +2,25 @@ uefi-deps = $(shell find ../uefi-rs/ -type f -name '*.rs')
 boot_deps = $(shell find ./efi-boot/src/ -type f -name '*.rs')
 kernel_deps = $(shell find ./kernel/src/ -type f -name '*.rs')
 
+# RELEASE
 bootloader = image/EFI/BOOT/BOOTX64.efi
 kernel = image/EFI/gsai/kernel.elf
 
 all: $(bootloader) $(kernel)
 
+reset:
+	rm -f $(bootloader) $(kernel)
+
+debug:
+	rm -f $(bootloader) $(kernel)
+
+	cd /media/carl/GitHub/gsai/efi-boot/;\
+		cargo build -Z unstable-options
+	
+	cd /media/carl/GitHub/gsai/kernel/;\
+		cargo build -Z unstable-options;\
+		mv ../image/EFI/gsai/kernel ../$(kernel)
+	
 $(bootloader): $(boot_deps) $(uefi-deps)
 	rm -f $(bootloader)
 	cd /media/carl/GitHub/gsai/efi-boot/;\

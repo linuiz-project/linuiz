@@ -48,7 +48,7 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
     // load kernel
     let mut kernel_file = acquire_kernel_file(root_directory);
     info!("Acquired kernel image file.");
-    let kernel_memory = allocate_kernel_memory(&boot_services, &mut kernel_file);
+    let kernel_memory = read_kernel_into_memory(&boot_services, &mut kernel_file);
     info!("Kernel image data successfully read into memory.");
     let kernel_raw_elf = match Elf::from_bytes(&kernel_memory.buffer) {
         Ok(elf) => {
@@ -59,9 +59,11 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
     };
 
     // allocate space for memory map
-    let mmap_alloc_alignment = core::mem::size_of::<MemoryDescriptor>();
-    let mmap_alloc_size_unaligned = boot_services.memory_map_size() + /* padding */ (2 * mmap_alloc_alignment);
-    let mmap_alloc_size_aligned = (mmap_alloc_alignment - (mmap_alloc_size_unaligned % mmap_alloc_alignment)) % mmap_alloc_alignment;
+    info!("Preparing to exit boot services environment.");
+    let memory_descriptor_size = core::mem::size_of::<MemoryDescriptor>();
+    let mmap_alloc_size_unaligned = boot_services.memory_map_size() + /* padding */ (2 * memory_descriptor_size);
+    let mmap_alloc_size_aligned = align(mmap_alloc_size_unaligned, memory_descriptor_size);
+    info!("Memory map buffer alignment: {} -> {}", mmap_alloc_size_unaligned, mmap_alloc_size_aligned);
     let mmap_pool_alloc_ptr = 
         match boot_services.allocate_pool(MemoryType::LOADER_DATA, mmap_alloc_size_aligned) {
             Ok(completion) => match completion.status() {
@@ -71,19 +73,10 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
             Err(error) => panic!("failed to allocate pooled memory for memory map: {:?}", error)
         };
     let mut mmap_alloc_buffer = unsafe {
-        &mut *slice_from_raw_parts_mut(mmap_pool_alloc_ptr, mmap_alloc_size_unaligned)
+        &mut *slice_from_raw_parts_mut(mmap_pool_alloc_ptr, mmap_alloc_size_aligned)
     };
 
-    // get memory map
-    // let memory_map = match boot_services.memory_map(memory_map_allocation_buffer) {
-    //     Ok(completion) => match completion.status() {
-    //         Status::SUCCESS => completion.unwrap(),
-    //         status => panic!("failed to read memory map: {:?}", status)
-    //     },
-    //     Err(error) => panic!("failed to read memory map: {:?}", error)
-    // };
-
-    info!("Preparing to exit boot services environment.");
+    info!("Finalizing exit from boot services environment.");
     let (runtime_table, descriptor_iterator) = 
         match system_table.exit_boot_services(image_handle, mmap_alloc_buffer) {
             Ok(completion) => completion.unwrap(),
@@ -92,7 +85,7 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
     info!("Exited UEFI boot services environment.");
     warn!("UEFI boot services are no longer usable beyond this point.");
 
-    enter_kernel_main(kernel_memory.pointer, kernel_raw_elf);
+    //enter_kernel_main(kernel_memory.pointer, kernel_raw_elf);
 
     loop {}
 }
@@ -100,7 +93,12 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
 
 /* HELPER FUNCTIONS */
 
+fn align(size: usize, alignment: usize) -> usize {
+    size + ((alignment - (size % alignment)) % alignment)
+}
+
 fn open_file<F: File>(current: &mut F, name: &str) -> RegularFile {
+    info!("Attempting to load file system object: {}", name);
     match current.open(name, FileMode::Read, FileAttribute::READ_ONLY) {
         // this is unsafe due to the possibility of passing an invalid file handle to external code
         Ok(completion) => unsafe { RegularFile::new(completion.expect("failed to find file")) },
@@ -117,22 +115,26 @@ fn acquire_kernel_file(root_directory: &mut Directory) -> RegularFile {
     kernel_file
 }
 
-fn allocate_kernel_memory<'buf>(boot_services: &BootServices, kernel_file: &mut RegularFile) -> PointerBuffer<'buf> {
-    let file_info_buffer = &mut [0u8; 255];
+fn read_kernel_into_memory<'buf>(boot_services: &BootServices, kernel_file: &mut RegularFile) -> PointerBuffer<'buf> {
+    let file_info_buffer = &mut [0u8; 256];
     let kernel_file_size = kernel_file.get_info::<FileInfo>(file_info_buffer).unwrap().unwrap().file_size() as usize;
-    let minimum_pages_count = size_to_pages(kernel_file_size);
     let allocated_address_ptr = 
-        match boot_services.allocate_pool(MemoryType::LOADER_CODE, minimum_pages_count) {
-            Ok(memory_address) =>
+        match boot_services.allocate_pool(MemoryType::LOADER_CODE, kernel_file_size) {
+            Ok(memory_address) => {
+                info!("Partially allocated kernel image memory, attempting to unwrap...");
+
                 match memory_address.status() {
-                    Status::SUCCESS => memory_address.unwrap() as *mut u8,
+                    Status::SUCCESS => memory_address.unwrap(),
                     status => panic!("failed to allocate memory for kernel image: {:?}", status)
-                },
+                }
+            },
             Err(error) => panic!("failed to allocate memory for kernel image: {:?}", error)
         };
 
+    info!("Unwrapped and fully allocated memory for kernel image.");
+
     // read the kernel image into pooled memory
-    let allocated_buffer = unsafe { &mut *slice_from_raw_parts_mut(allocated_address_ptr, minimum_pages_count * PAGE_SIZE) };
+    let allocated_buffer = unsafe { &mut *slice_from_raw_parts_mut(allocated_address_ptr, kernel_file_size) };
     match kernel_file.read(allocated_buffer) {
         Ok(completion) => {
             let size = completion.unwrap();
