@@ -5,14 +5,24 @@
 #[macro_use]
 extern crate log;
 
+mod protocol_helper;
 
-use core::cell::UnsafeCell;
+use core::ptr::slice_from_raw_parts_mut;
+use elf_rs::Elf;
+use protocol_helper::get_protocol_unwrap;
 use uefi_macros::entry;
-use uefi::{CStr16, Handle, Status, prelude::BootServices, proto::{Protocol, media::fs::SimpleFileSystem, loaded_image::{LoadedImage, DevicePath}}, proto::media::file::Directory, proto::media::file::File, proto::media::file::FileAttribute, proto::media::file::FileInfo, proto::media::file::FileMode, proto::media::file::RegularFile, table::Boot, proto::media::file::FileProtocolInfo, table::SystemTable};
+use uefi::{Handle, Status,
+     proto::{
+        media::{fs::SimpleFileSystem, 
+            file::{File, FileInfo, FileMode, FileAttribute, RegularFile}}, 
+        loaded_image::{LoadedImage, DevicePath}}, 
+    table::{Boot, SystemTable, 
+        boot::{AllocateType, MemoryType}}
+};
 
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
-const FAIL_ROOT_READ: &'static str = "failed to read root directory";
+const PAGE_SIZE: &'static usize = &4096;
 
 #[entry]
 fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
@@ -21,49 +31,64 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
     info!("Configuring bootloader environment.");
 
     let boot_services = system_table.boot_services();
-    info!("Successfully acquired boot services from UEFI firmware.");
+    info!("Acquired boot services from UEFI firmware.");
 
     let image = get_protocol_unwrap::<LoadedImage>(boot_services, image_handle).expect("failed to acquire boot image");
-    info!("Successfully acquired boot image from boot services.");
+    info!("Acquired boot image from boot services.");
     let device_path = get_protocol_unwrap::<DevicePath>(boot_services, image.device()).expect("failed to acquire boot image device path");
-    info!("Successfully acquired boot image device path.");
+    info!("Acquired boot image device path.");
     let file_handle = boot_services.locate_device_path::<SimpleFileSystem>(device_path).expect("failed to acquire file handle from device path").unwrap();
-    info!("Successfully acquired file handle from device path.");
+    info!("Acquired file handle from device path.");
     let file_system = get_protocol_unwrap::<SimpleFileSystem>(boot_services, file_handle).expect("failed to load file system from file handle");
-    info!("Successfully acquired file system from file handle.");
+    info!("Acquired file system protocol from file handle.");
     let mut root_directory = file_system.open_volume().expect("failed to open boot file system root directory").unwrap();
-    info!("Successfully loaded boot file system root directory.");
+    info!("Loaded boot file system root directory.");
     
-    let kernel_file = acquire_kernel_file(&mut root_directory);
-    info!("Successfully acquired kernel image file.");
+    let mut kernel_file = acquire_kernel_file(&mut root_directory);
+    info!("Acquired kernel image file.");
 
-    
+    let file_info_buffer = &mut [0u8; 255];
+    let kernel_file_info = kernel_file.get_info::<FileInfo>(file_info_buffer).unwrap().unwrap();
+    let kernel_file_size = kernel_file_info.file_size() as usize;
+    let minimum_pages_count = size_to_pages(kernel_file_size);
+    let allocated_address = match boot_services.allocate_pages(AllocateType::AnyPages, MemoryType::LOADER_DATA, minimum_pages_count) {
+        Ok(memory_address) => match memory_address.status() {
+            Status::SUCCESS => memory_address.unwrap(),
+            status => panic!("failed to allocate memory for kernel image: {:?}", status)
+        },
+        Err(error) => panic!("failed to allocate memory for kernel image: {:?}", error)
+    };
+
+    let allocated_buffer = unsafe { &mut *slice_from_raw_parts_mut(allocated_address as *mut u8, minimum_pages_count * PAGE_SIZE) };
+    let read_bytes = match kernel_file.read(allocated_buffer) {
+        Ok(completion) => {
+            let size = completion.unwrap();
+            if size != kernel_file_size {
+                panic!("failed to correctly read full kernel image (unknown error)");
+            } else {
+                info!("Kernel image data successfully read into memory.");
+                size
+            }
+        },
+        Err(error_option) => match error_option.data() {
+            Some(_required_size) => panic!("TODO pass required size"),
+            None => panic!("{:?}", error_option.status())
+        }
+    };
+
+    let kernel_elf = match Elf::from_bytes(&allocated_buffer[0..kernel_file_size]) {
+        Ok(elf) => {
+            info!("ELF file successfully parsed from kernel image.");
+            elf
+        },
+        Err(error) => panic!("Failed to parse ELF from kernel image: {:?}", error)
+    };
+
+    if let Elf::Elf64(kernel_elf64) = kernel_elf {
+        info!("{:?} header: {:?}", kernel_elf64, kernel_elf64.header());
+    }
 
     loop {}
-}
-
-fn get_protocol_unwrap<P: Protocol>(boot_services: &BootServices, handle: Handle) -> Option<&mut P> {
-    acquire_protocol_unwrapped(boot_services.handle_protocol(handle))
-}
-
-fn locate_protocol_unwrap<P: Protocol>(boot_services: &BootServices) -> Option<&mut P> {
-    acquire_protocol_unwrapped(boot_services.locate_protocol::<P>())
-}
-
-fn acquire_protocol_unwrapped<P: Protocol>(result: uefi::Result<&UnsafeCell<P>, >) -> Option<&mut P> {
-    match result {
-        Ok(unsafe_cell_completion) =>{
-            info!("Protocol found, attempting to acquire...");
-
-            if !unsafe_cell_completion.status().is_success() {
-                panic!("failed to locate and acquire protocol: {:?}", unsafe_cell_completion.status());
-            } else {
-                info!("Protocol acquired, attempting to unwrap...");
-                Some(unsafe { &mut *(unsafe_cell_completion.unwrap().get() as *mut P) })
-            }       
-        },
-        Err(error) => panic!("{:?}", error.status())
-    }
 }
 
 fn open_file<F: File>(current: &mut F, name: &str) -> RegularFile {
@@ -74,29 +99,17 @@ fn open_file<F: File>(current: &mut F, name: &str) -> RegularFile {
     }
 }
 
-fn print_file_name<F: File>(file: &mut F, buffer: &mut [u8]) {
-    info!("{}", file.get_info::<FileInfo>(buffer).unwrap().unwrap().file_name());
-}
-
 fn acquire_kernel_file<F: File>(root_directory: &mut F) -> RegularFile {
     let kernel_directory = &mut open_file(root_directory, "EFI");
     let gsai_directory = &mut open_file(kernel_directory, "gsai");
     open_file(gsai_directory, "kernel.elf")
 }
 
-fn read_directory_entry<'buf>(directory: &mut Directory, read_buffer: &'buf mut [u8]) -> Result<&'buf mut FileInfo, usize> {
-    match directory.read_entry(read_buffer) {
-        Ok(completion) => {
-            let option = completion.expect(FAIL_ROOT_READ);
-            
-            match option {
-                Some(info) => Ok(info),
-                None => panic!(FAIL_ROOT_READ)
-            }
-        },
-        Err(error) => match error.data() {
-            Some(size) => Err(size.clone()),
-            None => panic!("{} {:?}", FAIL_ROOT_READ, error.status())
-        }
+/// returns the minimum necessary memory pages to contain the given size in bytes.
+fn size_to_pages(size: usize) -> usize {
+    if (size % PAGE_SIZE) == 0 {
+        size / PAGE_SIZE
+    } else {
+        (size / PAGE_SIZE) + 1
     }
 }

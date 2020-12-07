@@ -1,8 +1,6 @@
 #![no_std]
 #![no_main]
 
-mod io;
-
 use core::panic::PanicInfo;
 
 #[panic_handler]
@@ -11,6 +9,11 @@ fn panic(_info: &PanicInfo) -> ! {
 }
 
 #[no_mangle]
-pub extern "C" fn main() -> ! {
+pub extern "C" fn kernel_main() -> ! {
+    unsafe {
+        let mut buffer = 0xb8000 as *mut u8;
+        buffer.offset(0) = b'X'
+    };
+
     loop {}
 }
