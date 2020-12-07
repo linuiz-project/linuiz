@@ -7,7 +7,7 @@ extern crate log;
 
 mod protocol_helper;
 
-use core::{ptr::slice_from_raw_parts_mut, intrinsics::transmute};
+use core::{mem::align_of, intrinsics::transmute, ptr::slice_from_raw_parts_mut};
 use elf_rs::Elf;
 use protocol_helper::get_protocol_unwrap;
 use uefi_macros::entry;
@@ -59,16 +59,19 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
     };
 
     // allocate space for memory map
-    let memory_map_allocation_size = boot_services.memory_map_size() + /* padding */ (2 * core::mem::size_of::<MemoryDescriptor>());
-    let memory_map_pool_allocation_ptr = match boot_services.allocate_pool(MemoryType::LOADER_DATA, memory_map_allocation_size) {
-        Ok(completion) => match completion.status() {
-            Status::SUCCESS => completion.unwrap(),
-            status => panic!("failed to allocate pooled memory for memory map: {:?}", status)
-        },
-        Err(error) => panic!("failed to allocate pooled memory for memory map: {:?}", error)
-    };
-    let mut memory_map_allocation_buffer = unsafe {
-        &mut *slice_from_raw_parts_mut(memory_map_pool_allocation_ptr, memory_map_allocation_size)
+    let mmap_alloc_alignment = core::mem::size_of::<MemoryDescriptor>();
+    let mmap_alloc_size_unaligned = boot_services.memory_map_size() + /* padding */ (2 * mmap_alloc_alignment);
+    let mmap_alloc_size_aligned = (mmap_alloc_alignment - (mmap_alloc_size_unaligned % mmap_alloc_alignment)) % mmap_alloc_alignment;
+    let mmap_pool_alloc_ptr = 
+        match boot_services.allocate_pool(MemoryType::LOADER_DATA, mmap_alloc_size_aligned) {
+            Ok(completion) => match completion.status() {
+                Status::SUCCESS => completion.unwrap(),
+                status => panic!("failed to allocate pooled memory for memory map: {:?}", status)
+            },
+            Err(error) => panic!("failed to allocate pooled memory for memory map: {:?}", error)
+        };
+    let mut mmap_alloc_buffer = unsafe {
+        &mut *slice_from_raw_parts_mut(mmap_pool_alloc_ptr, mmap_alloc_size_unaligned)
     };
 
     // get memory map
@@ -82,26 +85,20 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
 
     info!("Preparing to exit boot services environment.");
     let (runtime_table, descriptor_iterator) = 
-        match system_table.exit_boot_services(image_handle, memory_map_allocation_buffer) {
+        match system_table.exit_boot_services(image_handle, mmap_alloc_buffer) {
             Ok(completion) => completion.unwrap(),
             Err(error) => panic!("{:?}", error)
         };
     info!("Exited UEFI boot services environment.");
     warn!("UEFI boot services are no longer usable beyond this point.");
 
-   // enter_kernel_main(kernel_memory.pointer, kernel_raw_elf);
+    enter_kernel_main(kernel_memory.pointer, kernel_raw_elf);
 
-
-
-
-    loop {
-
-    }
+    loop {}
 }
 
 
 /* HELPER FUNCTIONS */
-
 
 fn open_file<F: File>(current: &mut F, name: &str) -> RegularFile {
     match current.open(name, FileMode::Read, FileAttribute::READ_ONLY) {
