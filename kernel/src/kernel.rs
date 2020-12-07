@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![feature(lang_items, start)]
 
 mod io;
 
@@ -13,9 +14,10 @@ fn panic(_info: &PanicInfo) -> ! {
 }
 
 #[no_mangle]
-pub extern "C" fn kernel_main(a: u8) {
-    vga_buffer::safe_lock(|writer| {
-        writer.write_string("TEST");
-        writer.write_byte(a);
-    });
+fn kernel_main() {
+    // vga_buffer::safe_lock(|writer| {
+    //     writer.write_string("TEST");
+    // });
+    
+    loop {}
 }
