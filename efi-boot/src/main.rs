@@ -88,7 +88,7 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
         kernel_header.entry_address()
     };
 
-    let runtime_table = safe_exit_boot_services(image_handle, system_table);
+    let mut runtime_table = safe_exit_boot_services(image_handle, system_table);
 
     // at this point, the given system_table is invalid
     let result = kernel_transfer(kernel_entry_point);
@@ -303,8 +303,8 @@ fn safe_exit_boot_services(
 
 fn kernel_transfer(kernel_entry_point: usize) -> u32 {
     unsafe {
-        type EntryPoint = fn() -> u32;
-        let entry_point: EntryPoint = core::mem::transmute(kernel_entry_point);
-        entry_point()
+        type KernelMain = fn() -> u32;
+        let kernel_main: KernelMain = core::mem::transmute(kernel_entry_point);
+        kernel_main()
     }
 }

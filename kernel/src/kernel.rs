@@ -1,10 +1,12 @@
 #![no_std]
 #![no_main]
+#![feature(asm)]
 
+mod drivers;
 mod io;
 
 use core::panic::PanicInfo;
-use io::vga_buffer;
+use drivers::serial;
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
@@ -12,10 +14,10 @@ fn panic(_info: &PanicInfo) -> ! {
 }
 
 #[no_mangle]
-fn _start() -> u32 {
-    // vga_buffer::safe_lock(|writer| {
-    //     writer.write_string("TEST");
-    // });
+fn _start() -> i32 {
+    serial::safe_lock(|serial| {
+        serial.data_port.write(b'X');
+    });
 
-    1234
+    loop {}
 }
