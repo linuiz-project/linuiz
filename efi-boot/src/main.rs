@@ -8,7 +8,7 @@
 
 #[macro_use]
 extern crate log;
-extern crate alloc;
+extern crate rlibc;
 
 mod elf;
 mod protocol_helper;
@@ -33,13 +33,13 @@ use uefi::{
         runtime::ResetType,
         Boot, Runtime, SystemTable,
     },
-    Handle, Status,
+    Handle, ResultExt, Status,
 };
 use uefi_macros::entry;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 const KERNEL_VADDRESS: usize = 0xFFFFFFFF80000000;
-const PAGE_SIZE: usize = 4096;
+const PAGE_SIZE: usize = 0x1000; // 4096
 
 struct PointerBuffer<'buf> {
     pointer: *mut u8,
@@ -49,9 +49,7 @@ struct PointerBuffer<'buf> {
 #[entry]
 fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
     let kernel_entry_point = {
-        uefi_services::init(&system_table)
-            .expect("failed to initialize UEFI services")
-            .expect("failed to unwrap UEFI services");
+        uefi_services::init(&system_table).expect_success("failed to unwrap UEFI services");
         log::info!("Loaded Gsai UEFI bootloader v{}.", VERSION);
         info!("Configuring bootloader environment.");
 
@@ -67,16 +65,14 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
         info!("Acquired boot image device path.");
         let file_handle = boot_services
             .locate_device_path::<SimpleFileSystem>(device_path)
-            .expect("failed to acquire file handle from device path")
-            .unwrap();
+            .expect_success("failed to acquire file handle from device path");
         info!("Acquired file handle from device path.");
         let file_system = get_protocol_unwrap::<SimpleFileSystem>(boot_services, file_handle)
             .expect("failed to load file system from file handle");
         info!("Acquired file system protocol from file handle.");
         let root_directory = &mut file_system
             .open_volume()
-            .expect("failed to open boot file system root directory")
-            .unwrap();
+            .expect_success("failed to open boot file system root directory");
         info!("Loaded boot file system root directory.");
 
         // load kernel
@@ -84,80 +80,18 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
         info!("Acquired kernel image file.");
         let kernel_header = acquire_kernel_header(&mut kernel_file);
         info!("Kernel header read into memory.");
-        let mut program_header_buffer = [0u8; core::mem::size_of::<ProgramHeader>()];
+        debug!("{:?}", kernel_header);
 
-        for index in 0..kernel_header.program_header_count() {
-            let current_program_header_offset = kernel_header.program_header_offset()
-                + ((index * kernel_header.program_header_size()) as usize);
-            // ensure we properly set the offset in the file to read the correct program header
-            kernel_file
-                .set_position(current_program_header_offset as u64)
-                .ok()
-                .unwrap()
-                .unwrap();
-
-            // get program header
-            kernel_file
-                .read(&mut program_header_buffer)
-                .ok()
-                .unwrap()
-                .unwrap();
-
-            let program_header = ProgramHeader::parse(&program_header_buffer)
-                .expect("failed to parse program header from buffer");
-
-            if program_header.ph_type() == ProgramHeaderType::PT_LOAD {
-                info!(
-                    "Identified program header for loading (offset {}:{}): {:?}",
-                    index, current_program_header_offset, program_header
-                );
-
-                // calculate required variables for correctly loading header into memory
-                let aligned_page_address = align_down(program_header.physical_address(), PAGE_SIZE);
-                let unaligned_offset =
-                    wrapping_sub(program_header.physical_address(), aligned_page_address);
-                let aligned_program_header_size = program_header.memory_size() + unaligned_offset;
-                let pages_count = size_to_pages(aligned_program_header_size);
-
-                info!(
-                    "Loading program header: pages {}, aligned addr {}, addr offset {}",
-                    pages_count, aligned_page_address, unaligned_offset
-                );
-
-                // allocate pages for header
-                let ph_buffer = page_alloc_buffer(
-                    boot_services,
-                    AllocateType::Address(aligned_page_address),
-                    MemoryType::LOADER_CODE,
-                    pages_count,
-                );
-
-                info!(
-                    "Defining program header memory range from: offset {}, end {}",
-                    unaligned_offset, aligned_program_header_size
-                );
-                let proper_read_range =
-                    &mut ph_buffer.buffer[unaligned_offset..aligned_program_header_size];
-                // offse the kernel file to read from the program's file offset
-                kernel_file
-                    .set_position(program_header.offset() as u64)
-                    .ok()
-                    .unwrap()
-                    .unwrap();
-
-                // read the program into
-                kernel_file.read(proper_read_range).ok().unwrap().unwrap();
-
-                info!("Allocated memory pages for program header.");
-            }
-        }
+        allocate_program_segments(boot_services, &mut kernel_file, &kernel_header);
+        info!("Allocated all program segments into memory.");
 
         kernel_header.entry_address()
     };
 
     let runtime_table = safe_exit_boot_services(image_handle, system_table);
 
-    kernel_transfer(kernel_entry_point);
+    // at this point, the given system_table is invalid
+    let result = kernel_transfer(kernel_entry_point);
 
     unsafe {
         runtime_table
@@ -187,7 +121,7 @@ fn size_to_pages(size: usize) -> usize {
     }
 }
 
-fn pool_alloc_buffer(
+fn alloc_pool_buffer(
     boot_services: &BootServices,
     memory_type: MemoryType,
     size: usize,
@@ -204,7 +138,7 @@ fn pool_alloc_buffer(
     }
 }
 
-fn page_alloc_buffer(
+fn alloc_page_buffer(
     boot_services: &BootServices,
     allocate_type: AllocateType,
     memory_type: MemoryType,
@@ -223,7 +157,7 @@ fn page_alloc_buffer(
     }
 }
 
-fn free_buffer(boot_services: &BootServices, buffer: PointerBuffer) {
+fn free_pool_buffer(boot_services: &BootServices, buffer: PointerBuffer) {
     match boot_services.free_pool(buffer.pointer) {
         Ok(completion) => completion.unwrap(),
         Err(error) => panic!("{:?}", error),
@@ -255,16 +189,77 @@ fn acquire_kernel_header(kernel_file: &mut RegularFile) -> ELFHeader64 {
     // read the file into the buffer
     kernel_file
         .read(&mut kernel_header_buffer)
-        .ok()
-        .unwrap()
-        .unwrap();
-    let kernel_header = match ELFHeader64::parse(&kernel_header_buffer) {
-        Some(header) => header,
-        None => panic!("failed to parse header from buffer"),
-    };
+        .expect_success("failed to read kernel header into memory");
+    let kernel_header =
+        ELFHeader64::parse(&kernel_header_buffer).expect("failed to parse header from buffer");
 
-    // return the kernel header
     kernel_header
+}
+
+fn allocate_program_segments(
+    boot_services: &BootServices,
+    kernel_file: &mut RegularFile,
+    kernel_header: &ELFHeader64,
+) {
+    let mut program_header_buffer = [0u8; core::mem::size_of::<ProgramHeader>()];
+
+    for index in 0..kernel_header.program_header_count() {
+        let current_program_header_offset = kernel_header.program_header_offset()
+            + ((index * kernel_header.program_header_size()) as usize);
+        // ensure we properly set the offset in the file to read the correct program header
+        kernel_file
+            .set_position(current_program_header_offset as u64)
+            .expect_success("failed to set position of kernel file");
+        kernel_file
+            .read(&mut program_header_buffer)
+            .expect_success("failed to read program header into memory");
+
+        let program_header = ProgramHeader::parse(&program_header_buffer)
+            .expect("failed to parse program header from buffer");
+
+        if program_header.ph_type() == ProgramHeaderType::PT_LOAD {
+            debug!(
+                "Identified program header for loading (offset {}:{}): {:?}",
+                index, current_program_header_offset, program_header
+            );
+
+            // calculate required variables for correctly loading header into memory
+            let aligned_page_address = align_down(program_header.physical_address(), PAGE_SIZE);
+            let unaligned_offset =
+                wrapping_sub(program_header.physical_address(), aligned_page_address);
+            let aligned_program_header_size = program_header.memory_size() + unaligned_offset;
+            let pages_count = size_to_pages(aligned_program_header_size);
+
+            debug!(
+                "Loading program header: pages {}, aligned addr {}, addr offset {}",
+                pages_count, aligned_page_address, unaligned_offset
+            );
+
+            // allocate pages for header
+            let ph_buffer = alloc_page_buffer(
+                boot_services,
+                AllocateType::Address(aligned_page_address),
+                MemoryType::LOADER_CODE,
+                pages_count,
+            );
+
+            debug!(
+                "Defining program header memory range from: offset {}, end {}",
+                unaligned_offset, aligned_program_header_size
+            );
+            let proper_read_range =
+                &mut ph_buffer.buffer[unaligned_offset..aligned_program_header_size];
+            // offse the kernel file to read from the program's file offset
+            kernel_file
+                .set_position(program_header.offset() as u64)
+                .expect_success("failed to set kernel file position to offset");
+
+            // read the program into
+            kernel_file.read(proper_read_range).ok().unwrap().unwrap();
+
+            debug!("Allocated memory pages for program header.");
+        }
+    }
 }
 
 fn safe_exit_boot_services(
@@ -282,10 +277,21 @@ fn safe_exit_boot_services(
                 Err(error) => panic!("{:?}", error),
             };
 
+        // we HAVE TO use an unsafe transmutation here, otherwise we run into issues with
+        // the system_table/boot_services getting consumed to give lifetime information
+        // to the buffer
         unsafe { &mut *slice_from_raw_parts_mut(alloc_pointer, mmap_alloc_size) }
     };
 
     info!("Finalizing exit from boot services environment.");
+
+    // clear the output
+    system_table
+        .stdout()
+        .reset(false)
+        .expect_success("failed to reset standard output");
+
+    // after this point point, the previous system_table and boot_services are no longer valid
     let (runtime_table, _descriptor_iterator) =
         match system_table.exit_boot_services(image_handle, mmap_alloc) {
             Ok(completion) => completion.unwrap(),
@@ -295,10 +301,10 @@ fn safe_exit_boot_services(
     runtime_table
 }
 
-fn kernel_transfer(entry_point_address: usize) {
+fn kernel_transfer(kernel_entry_point: usize) -> u32 {
     unsafe {
-        type EntryPoint = extern "C" fn() -> !;
-        let entry_point = entry_point_address as *const EntryPoint;
-        (*entry_point)();
+        type EntryPoint = fn() -> u32;
+        let entry_point: EntryPoint = core::mem::transmute(kernel_entry_point);
+        entry_point()
     }
 }

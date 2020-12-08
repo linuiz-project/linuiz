@@ -12,10 +12,10 @@ fn panic(_info: &PanicInfo) -> ! {
 }
 
 #[no_mangle]
-pub extern "C" fn _start() -> ! {
+fn _start() -> u32 {
     // vga_buffer::safe_lock(|writer| {
     //     writer.write_string("TEST");
     // });
 
-    loop {}
+    1234
 }
