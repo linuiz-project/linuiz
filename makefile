@@ -18,16 +18,17 @@ debug:
 		cargo build -Z unstable-options
 	
 	cd /media/carl/GitHub/gsai/kernel/;\
-		cargo build -Z unstable-options;\
-		mv ../image/EFI/gsai/kernel ../$(kernel)
+		cargo build -Z unstable-options
 	
 $(bootloader): $(boot_deps) $(uefi-deps)
 	rm -f $(bootloader)
 	cd /media/carl/GitHub/gsai/efi-boot/;\
+		rustfmt **/*.rs;\
 		cargo build --release -Z unstable-options
 
 $(kernel): $(kernel_deps) $(uefi-deps)
 	rm -f $(kernel)
 	cd /media/carl/GitHub/gsai/kernel/;\
-		cargo build --release -Z unstable-options;\
-		mv ../image/EFI/gsai/kernel ../$(kernel)
+		rustfmt **/*.rs;\
+		cargo build --release -Z unstable-options
+		
