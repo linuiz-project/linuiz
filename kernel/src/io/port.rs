@@ -3,12 +3,12 @@ use core::marker::PhantomData;
 /* PORT */
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct Port<T: PortIO> {
+pub struct Port<T: PortIO + Copy> {
     port: u16,
     phantom: PhantomData<T>,
 }
 
-impl<T: PortIO> Port<T> {
+impl<T: PortIO + Copy> Port<T> {
     /// constructs a port wrapping the given address
     ///
     /// this method is unsafe due to being able to specify
@@ -28,10 +28,8 @@ impl<T: PortIO> Port<T> {
     }
 
     pub fn write_buffer(&mut self, buffer: &[T]) {
-        unsafe {
-            for index in 0..buffer.len() {
-                self.write(buffer[index])
-            }
+        for index in 0..buffer.len() {
+            self.write(buffer[index]);
         }
     }
 }
@@ -72,32 +70,32 @@ impl PortIO for u32 {
 /* 8 BIT */
 unsafe fn read8(port: u16) -> u8 {
     let result: u8;
-    asm!("inb dx, al", in("dx") port, out("al") result, options(nostack));
+    asm!("in al, dx", out("al") result, in("dx") port, options(nostack));
     result
 }
 
 unsafe fn write8(port: u16, value: u8) {
-    asm!("outb al, dx", in("al") value, in("dx") port, options(nostack));
+    asm!("out dx, al", in("dx") port, in("al") value, options(nostack));
 }
 
 /* 16 BIT */
 unsafe fn read16(port: u16) -> u16 {
     let result: u16;
-    asm!("inw dx, ax", in("dx") port, out("ax") result, options(nostack));
+    asm!("in ax, dx", out("ax") result, in("dx") port, options(nostack));
     result
 }
 
 unsafe fn write16(port: u16, value: u16) {
-    asm!("outw ax, dx", in("ax") value, in("dx") port, options(nostack));
+    asm!("out dx, ax", in("dx") port, in("ax") value, options(nostack));
 }
 
 /* 32 BIT */
 unsafe fn read32(port: u16) -> u32 {
     let result: u32;
-    asm!("inl, dx, eax", in("dx") port, out("eax") result, options(nostack));
+    asm!("in eax, dx", out("eax") result, in("dx") port, options(nostack));
     result
 }
 
 unsafe fn write32(port: u16, value: u32) {
-    asm!("outl eax, dx", in("eax") value, in("dx") port, options(nostack));
+    asm!("out dx, eax", in("dx") port, in("eax") value, options(nostack));
 }
