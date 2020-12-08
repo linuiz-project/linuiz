@@ -13,7 +13,6 @@ mod elf;
 mod protocol_helper;
 
 use core::{
-    fmt::Pointer,
     intrinsics::{wrapping_add, wrapping_mul, wrapping_sub},
     ptr::slice_from_raw_parts_mut,
 };
@@ -24,14 +23,12 @@ use uefi::{
     proto::{
         loaded_image::{DevicePath, LoadedImage},
         media::{
-            file::{Directory, File, FileAttribute, FileInfo, FileMode, RegularFile},
+            file::{Directory, File, FileAttribute, FileMode, RegularFile},
             fs::SimpleFileSystem,
         },
     },
-    table::boot::MemoryDescriptor,
-    table::boot::MemoryMapKey,
     table::{
-        boot::{AllocateType, MemoryType},
+        boot::{AllocateType, MemoryDescriptor, MemoryType},
         runtime::ResetType,
         Boot, Runtime, SystemTable,
     },
@@ -50,7 +47,7 @@ struct PointerBuffer<'buf> {
 
 #[entry]
 fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
-    {
+    let kernel_entry_point = {
         uefi_services::init(&system_table)
             .expect("failed to initialize UEFI services")
             .expect("failed to unwrap UEFI services");
@@ -91,11 +88,20 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
             let current_program_header_offset = kernel_header.program_header_offset()
                 + ((index * kernel_header.program_header_size()) as usize);
             // ensure we properly set the offset in the file to read the correct program header
-            kernel_file.set_position(current_program_header_offset as u64);
+            kernel_file
+                .set_position(current_program_header_offset as u64)
+                .ok()
+                .unwrap()
+                .unwrap();
 
             // get program header
             let mut program_header_buffer = [0u8; core::mem::size_of::<ProgramHeader>()];
-            kernel_file.read(&mut program_header_buffer);
+            kernel_file
+                .read(&mut program_header_buffer)
+                .ok()
+                .unwrap()
+                .unwrap();
+
             let program_header = ProgramHeader::parse(&program_header_buffer)
                 .expect("failed to parse program header from buffer");
 
@@ -132,16 +138,25 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
                 let proper_read_range =
                     &mut ph_buffer.buffer[unaligned_offset..aligned_program_header_size];
                 // offse the kernel file to read from the program's file offset
-                kernel_file.set_position(program_header.offset() as u64);
+                kernel_file
+                    .set_position(program_header.offset() as u64)
+                    .ok()
+                    .unwrap()
+                    .unwrap();
+
                 // read the program into
-                kernel_file.read(proper_read_range);
+                kernel_file.read(proper_read_range).ok().unwrap().unwrap();
 
                 info!("Allocated memory pages for program header.");
             }
         }
-    }
+
+        kernel_header.entry_address()
+    };
 
     let runtime_table = safe_exit_boot_services(image_handle, system_table);
+
+    kernel_transfer(kernel_entry_point);
 
     unsafe {
         runtime_table
@@ -237,7 +252,11 @@ fn acquire_kernel_header(kernel_file: &mut RegularFile) -> ELFHeader64 {
     let mut kernel_header_buffer = [0u8; core::mem::size_of::<ELFHeader64>()];
 
     // read the file into the buffer
-    kernel_file.read(&mut kernel_header_buffer).ok().unwrap();
+    kernel_file
+        .read(&mut kernel_header_buffer)
+        .ok()
+        .unwrap()
+        .unwrap();
     let kernel_header = match ELFHeader64::parse(&kernel_header_buffer) {
         Some(header) => header,
         None => panic!("failed to parse header from buffer"),
@@ -275,4 +294,10 @@ fn safe_exit_boot_services(
     runtime_table
 }
 
-fn kernel_transfer() {}
+fn kernel_transfer(entry_point_address: usize) {
+    unsafe {
+        type EntryPoint = extern "C" fn() -> !;
+        let entry_point = entry_point_address as *const EntryPoint;
+        (*entry_point)();
+    }
+}

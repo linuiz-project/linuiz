@@ -1,5 +1,3 @@
-use core::ffi::c_void;
-
 #[repr(u8)]
 #[allow(unused_imports, non_camel_case_types)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

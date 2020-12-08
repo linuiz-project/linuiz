@@ -1,5 +1,3 @@
-use core::{ffi::c_void, fmt::Pointer};
-
 #[repr(u32)]
 #[allow(unused_imports, non_camel_case_types)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
