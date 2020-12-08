@@ -8,6 +8,7 @@
 
 #[macro_use]
 extern crate log;
+extern crate alloc;
 
 mod elf;
 mod protocol_helper;
@@ -83,6 +84,7 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
         info!("Acquired kernel image file.");
         let kernel_header = acquire_kernel_header(&mut kernel_file);
         info!("Kernel header read into memory.");
+        let mut program_header_buffer = [0u8; core::mem::size_of::<ProgramHeader>()];
 
         for index in 0..kernel_header.program_header_count() {
             let current_program_header_offset = kernel_header.program_header_offset()
@@ -95,7 +97,6 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
                 .unwrap();
 
             // get program header
-            let mut program_header_buffer = [0u8; core::mem::size_of::<ProgramHeader>()];
             kernel_file
                 .read(&mut program_header_buffer)
                 .ok()
@@ -107,8 +108,8 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
 
             if program_header.ph_type() == ProgramHeaderType::PT_LOAD {
                 info!(
-                    "Identified program header for loading: {:?}",
-                    program_header
+                    "Identified program header for loading (offset {}:{}): {:?}",
+                    index, current_program_header_offset, program_header
                 );
 
                 // calculate required variables for correctly loading header into memory
