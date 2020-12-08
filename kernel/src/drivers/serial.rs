@@ -70,7 +70,7 @@ impl Serial {
         // enable FIFO, clear them, with 14b threshold
         fifo_port.write(0xC7);
 
-        // TODO enable interrupts?
+        // todo enable interrupts?
         // IRQs enabled, RTS/DSR set
         modem_port.write(0x0B);
 
@@ -81,5 +81,13 @@ impl Serial {
             modem_port,
             status_port,
         }
+    }
+
+    pub fn is_fifo_empty(&mut self) -> bool {
+        (self.status_port.read() & 0x20) > 0x0
+    }
+
+    pub fn serial_received(&mut self) -> bool {
+        (self.status_port.read() & 0x1) > 0x0
     }
 }

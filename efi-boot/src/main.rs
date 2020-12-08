@@ -262,6 +262,12 @@ fn allocate_program_segments(
     }
 }
 
+fn allocate_section_segments(    boot_services: &BootServices,
+    kernel_file: &mut RegularFile,
+    kernel_header: &ELFHeader64,) {
+        // todo load the section headers into memory
+}
+
 fn safe_exit_boot_services(
     image_handle: Handle,
     system_table: SystemTable<Boot>,
@@ -303,7 +309,7 @@ fn safe_exit_boot_services(
 
 fn kernel_transfer(kernel_entry_point: usize) -> u32 {
     unsafe {
-        type KernelMain = fn() -> u32;
+        type KernelMain = extern "C" fn() -> u32;
         let kernel_main: KernelMain = core::mem::transmute(kernel_entry_point);
         kernel_main()
     }
