@@ -2,7 +2,7 @@ use core::{ffi::c_void, fmt::Pointer};
 
 #[repr(u32)]
 #[allow(unused_imports, non_camel_case_types)]
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ProgramHeaderType {
     PT_NULL = 0x0,
     PT_LOAD = 0x1,
@@ -24,12 +24,12 @@ pub struct ProgramHeader {
     ph_type: ProgramHeaderType,
     flags: u32,
     offset: usize,
-    vaddr: *mut c_void,
-    paddr: *mut c_void,
-    file_size: usize,
+    vaddr: usize,
+    paddr: usize,
+    disk_size: usize,
     mem_size: usize,
     seg_flags: u32,
-    align: usize,
+    alignment: usize,
 }
 
 impl ProgramHeader {
@@ -46,5 +46,46 @@ impl ProgramHeader {
                 Some(temp_header.clone())
             }
         }
+    }
+
+    pub fn ph_type(&self) -> ProgramHeaderType {
+        self.ph_type
+    }
+
+    /// offset of the segment in the file image
+    pub fn offset(&self) -> usize {
+        self.offset
+    }
+
+    pub fn virtual_address(&self) -> usize {
+        self.vaddr
+    }
+
+    pub fn physical_address(&self) -> usize {
+        self.paddr
+    }
+
+    pub fn disk_size(&self) -> usize {
+        self.disk_size
+    }
+
+    pub fn memory_size(&self) -> usize {
+        self.mem_size
+    }
+}
+
+impl core::fmt::Debug for ProgramHeader {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter) -> Result<(), core::fmt::Error> {
+        formatter
+            .debug_struct("Program Header")
+            .field("Type", &self.ph_type)
+            .field("Flags", &self.flags)
+            .field("Offset", &self.offset)
+            .field("VAaddr", &self.vaddr)
+            .field("PAddr", &self.paddr)
+            .field("Disk Size", &self.disk_size)
+            .field("Mem Size", &self.mem_size)
+            .field("Alignment", &self.alignment)
+            .finish()
     }
 }

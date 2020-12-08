@@ -15,7 +15,7 @@ pub fn locate_protocol_unwrap<P: Protocol>(boot_services: &BootServices) -> Opti
 fn acquire_protocol_unwrapped<P: Protocol>(result: uefi::Result<&UnsafeCell<P>>) -> Option<&mut P> {
     match result {
         Ok(unsafe_cell_completion) => {
-            info!("Protocol found, attempting to acquire...");
+            debug!("Protocol found, attempting to acquire...");
 
             if !unsafe_cell_completion.status().is_success() {
                 panic!(
@@ -23,7 +23,7 @@ fn acquire_protocol_unwrapped<P: Protocol>(result: uefi::Result<&UnsafeCell<P>>)
                     unsafe_cell_completion.status()
                 );
             } else {
-                info!("Protocol acquired, attempting to unwrap...");
+                debug!("Protocol acquired, attempting to unwrap...");
                 Some(unsafe { &mut *(unsafe_cell_completion.unwrap().get() as *mut P) })
             }
         }

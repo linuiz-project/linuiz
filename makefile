@@ -15,9 +15,11 @@ debug:
 	rm -f $(bootloader) $(kernel)
 
 	cd /media/carl/GitHub/gsai/efi-boot/;\
+		rustfmt **/*.rs;\
 		cargo build -Z unstable-options
 	
 	cd /media/carl/GitHub/gsai/kernel/;\
+		rustfmt **/*.rs;\
 		cargo build -Z unstable-options
 	
 $(bootloader): $(boot_deps) $(uefi-deps)

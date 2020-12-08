@@ -83,7 +83,7 @@ pub struct ELFHeader64 {
     elf_type: ELFType,
     machine: ELFMachine,
     eversion: u32,
-    entry: *mut c_void,
+    entry: usize,
     phoff: usize,
     shoff: usize,
     flags: u32,
@@ -111,7 +111,7 @@ impl ELFHeader64 {
         }
     }
 
-    pub fn entry_point(&self) -> *mut c_void {
+    pub fn entry_address(&self) -> usize {
         self.entry
     }
 

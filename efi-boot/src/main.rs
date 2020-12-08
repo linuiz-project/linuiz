@@ -1,6 +1,10 @@
 #![no_std]
 #![no_main]
-#![feature(unsafe_cell_get_mut, negative_impls, abi_efiapi, const_option)]
+#![feature(abi_efiapi)]
+#![feature(const_option)]
+#![feature(negative_impls)]
+#![feature(core_intrinsics)]
+#![feature(unsafe_cell_get_mut)]
 
 #[macro_use]
 extern crate log;
@@ -8,8 +12,12 @@ extern crate log;
 mod elf;
 mod protocol_helper;
 
-use core::{fmt::Pointer, ptr::slice_from_raw_parts_mut};
-use elf::headers::ELFHeader64;
+use core::{
+    fmt::Pointer,
+    intrinsics::{wrapping_add, wrapping_mul, wrapping_sub},
+    ptr::slice_from_raw_parts_mut,
+};
+use elf::headers::{ELFHeader64, ProgramHeader, ProgramHeaderType};
 use protocol_helper::get_protocol_unwrap;
 use uefi::{
     prelude::BootServices,
@@ -22,7 +30,11 @@ use uefi::{
     },
     table::boot::MemoryDescriptor,
     table::boot::MemoryMapKey,
-    table::{boot::MemoryType, Boot, Runtime, SystemTable},
+    table::{
+        boot::{AllocateType, MemoryType},
+        runtime::ResetType,
+        Boot, Runtime, SystemTable,
+    },
     Handle, Status,
 };
 use uefi_macros::entry;
@@ -78,20 +90,88 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
         for index in 0..kernel_header.program_header_count() {
             let current_program_header_offset = kernel_header.program_header_offset()
                 + ((index * kernel_header.program_header_size()) as usize);
+            // ensure we properly set the offset in the file to read the correct program header
             kernel_file.set_position(current_program_header_offset as u64);
+
+            // get program header
+            let mut program_header_buffer = [0u8; core::mem::size_of::<ProgramHeader>()];
+            kernel_file.read(&mut program_header_buffer);
+            let program_header = ProgramHeader::parse(&program_header_buffer)
+                .expect("failed to parse program header from buffer");
+
+            if program_header.ph_type() == ProgramHeaderType::PT_LOAD {
+                info!(
+                    "Identified program header for loading: {:?}",
+                    program_header
+                );
+
+                // calculate required variables for correctly loading header into memory
+                let aligned_page_address = align_down(program_header.physical_address(), PAGE_SIZE);
+                let unaligned_offset =
+                    wrapping_sub(program_header.physical_address(), aligned_page_address);
+                let aligned_program_header_size = program_header.memory_size() + unaligned_offset;
+                let pages_count = size_to_pages(aligned_program_header_size);
+
+                info!(
+                    "Loading program header: pages {}, aligned addr {}, addr offset {}",
+                    pages_count, aligned_page_address, unaligned_offset
+                );
+
+                // allocate pages for header
+                let ph_buffer = page_alloc_buffer(
+                    boot_services,
+                    AllocateType::Address(aligned_page_address),
+                    MemoryType::LOADER_CODE,
+                    pages_count,
+                );
+
+                info!(
+                    "Defining program header memory range from: offset {}, end {}",
+                    unaligned_offset, aligned_program_header_size
+                );
+                let proper_read_range =
+                    &mut ph_buffer.buffer[unaligned_offset..aligned_program_header_size];
+                // offse the kernel file to read from the program's file offset
+                kernel_file.set_position(program_header.offset() as u64);
+                // read the program into
+                kernel_file.read(proper_read_range);
+
+                info!("Allocated memory pages for program header.");
+            }
         }
     }
 
-    exit_and_kernel_transfer(image_handle, system_table)
+    let runtime_table = safe_exit_boot_services(image_handle, system_table);
+
+    unsafe {
+        runtime_table
+            .runtime_services()
+            .reset(ResetType::Shutdown, Status::SUCCESS, None);
+    }
 }
 
 /* HELPER FUNCTIONS */
 
-fn align(size: usize, alignment: usize) -> usize {
-    size + ((alignment - (size % alignment)) % alignment)
+fn align_up(value: usize, alignment: usize) -> usize {
+    let super_aligned = wrapping_add(value, alignment);
+    let force_under_aligned = wrapping_sub(super_aligned, 1);
+    wrapping_mul(force_under_aligned / alignment, alignment)
 }
 
-fn alloc_buffer(
+fn align_down(value: usize, alignment: usize) -> usize {
+    (value / alignment) * alignment
+}
+
+/// returns the minimum necessary memory pages to contain the given size in bytes.
+fn size_to_pages(size: usize) -> usize {
+    if (size % PAGE_SIZE) == 0 {
+        size / PAGE_SIZE
+    } else {
+        (size / PAGE_SIZE) + 1
+    }
+}
+
+fn pool_alloc_buffer(
     boot_services: &BootServices,
     memory_type: MemoryType,
     size: usize,
@@ -101,6 +181,25 @@ fn alloc_buffer(
         Err(error) => panic!("{:?}", error),
     };
     let alloc_buffer = unsafe { &mut *slice_from_raw_parts_mut(alloc_pointer, size) };
+
+    PointerBuffer {
+        pointer: alloc_pointer,
+        buffer: alloc_buffer,
+    }
+}
+
+fn page_alloc_buffer(
+    boot_services: &BootServices,
+    allocate_type: AllocateType,
+    memory_type: MemoryType,
+    page_count: usize,
+) -> PointerBuffer {
+    let alloc_pointer = match boot_services.allocate_pages(allocate_type, memory_type, page_count) {
+        Ok(completion) => completion.unwrap() as *mut u8,
+        Err(error) => panic!("{:?}", error),
+    };
+    let alloc_buffer =
+        unsafe { &mut *slice_from_raw_parts_mut(alloc_pointer, page_count * PAGE_SIZE) };
 
     PointerBuffer {
         pointer: alloc_pointer,
@@ -148,7 +247,10 @@ fn acquire_kernel_header(kernel_file: &mut RegularFile) -> ELFHeader64 {
     kernel_header
 }
 
-fn exit_and_kernel_transfer(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
+fn safe_exit_boot_services(
+    image_handle: Handle,
+    system_table: SystemTable<Boot>,
+) -> SystemTable<Runtime> {
     info!("Preparing to exit boot services environment.");
     let mmap_alloc = {
         let boot_services = system_table.boot_services();
@@ -164,20 +266,13 @@ fn exit_and_kernel_transfer(image_handle: Handle, system_table: SystemTable<Boot
     };
 
     info!("Finalizing exit from boot services environment.");
-    let (_runtime_table, _descriptor_iterator) =
+    let (runtime_table, _descriptor_iterator) =
         match system_table.exit_boot_services(image_handle, mmap_alloc) {
             Ok(completion) => completion.unwrap(),
             Err(error) => panic!("{:?}", error),
         };
 
-    Status::SUCCESS
+    runtime_table
 }
 
-/// returns the minimum necessary memory pages to contain the given size in bytes.
-fn size_to_pages(size: usize) -> usize {
-    if (size % PAGE_SIZE) == 0 {
-        size / PAGE_SIZE
-    } else {
-        (size / PAGE_SIZE) + 1
-    }
-}
+fn kernel_transfer() {}
