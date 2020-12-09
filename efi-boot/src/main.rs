@@ -51,8 +51,22 @@ struct PointerBuffer<'buf> {
     buffer: &'buf mut [u8],
 }
 
+#[cfg(debug_assertions)]
+fn configure_log_level() {
+    use log::{set_max_level, LevelFilter};
+    set_max_level(LevelFilter::Debug);
+}
+
+#[cfg(not(debug_assertions))]
+fn configure_log_level() {
+    use log::{set_max_level, LevelFilter};
+    set_max_level(LevelFilter::Info);
+}
+
 #[entry]
 fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
+    configure_log_level();
+
     let kernel_entry_point = {
         uefi_services::init(&system_table).expect_success("failed to unwrap UEFI services");
         info!("Loaded Gsai UEFI bootloader v{}.", VERSION);
@@ -308,7 +322,7 @@ fn allocate_section_segments(
         match section_header.sh_type() {
             SectionHeaderType::SHT_NULL => {}
             _ => {
-                info!(
+                debug!(
                     "Identified section header for loading (offset {}:{}): {:?}",
                     index, current_section_header_offset, section_header
                 );
@@ -319,7 +333,7 @@ fn allocate_section_segments(
                 let aligned_section_header_size = section_header.section_size() + unaligned_offset;
                 let pages_count = size_to_pages(aligned_section_header_size);
 
-                info!(
+                debug!(
                     "Loading section header: pages {}, aligned addr {}, addr offset {}",
                     pages_count, aligned_page_address, unaligned_offset
                 );
@@ -331,7 +345,7 @@ fn allocate_section_segments(
                     pages_count,
                 );
 
-                info!(
+                debug!(
                     "Defining section header memory range from: offset {}, end {}",
                     unaligned_offset, aligned_section_header_size
                 );
@@ -349,7 +363,7 @@ fn allocate_section_segments(
                 kernel_file
                     .read(proper_read_range)
                     .expect_success("failed to read section entry from kernel file into memory");
-                info!("Allocated memory pages for section header's entry.");
+                    debug!("Allocated memory pages for section header's entry.");
             }
         }
     }
