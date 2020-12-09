@@ -1,5 +1,5 @@
 #[repr(u32)]
-#[allow(unused_imports, non_camel_case_types)]
+#[allow(dead_code, non_camel_case_types)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum SectionHeaderType {
     SHT_NULL = 0x0,
@@ -24,7 +24,7 @@ pub enum SectionHeaderType {
 }
 
 #[repr(usize)]
-#[allow(unused_imports, non_camel_case_types)]
+#[allow(dead_code, non_camel_case_types)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum SectionHeaderFlags {
     SHF_WRITE = 0x1,
@@ -51,11 +51,11 @@ pub struct SectionHeader {
     flags: SectionHeaderFlags,
     addr: usize,
     offset: usize,
-    size: usize,
+    entry_size: usize,
     link: u32,
     info: u32,
     addralign: usize,
-    section_size: usize,
+    fixed_entry_size: usize,
 }
 
 impl SectionHeader {
@@ -95,7 +95,7 @@ impl SectionHeader {
     }
 
     pub fn size(&self) -> usize {
-        self.size
+        self.entry_size
     }
 
     pub fn link(&self) -> u32 {
@@ -110,8 +110,8 @@ impl SectionHeader {
         self.addralign
     }
 
-    pub fn section_size(&self) -> usize {
-        self.section_size
+    pub fn entry_size(&self) -> usize {
+        self.fixed_entry_size
     }
 }
 
@@ -124,11 +124,11 @@ impl core::fmt::Debug for SectionHeader {
             .field("Flags", &self.flags)
             .field("Address", &self.addr)
             .field("Offset", &self.offset)
-            .field("Size", &self.size)
+            .field("Size", &self.entry_size)
             .field("Link", &self.link)
             .field("Info", &self.info)
             .field("Address Alignment", &self.addralign)
-            .field("Section Size", &self.section_size)
+            .field("Section Size", &self.fixed_entry_size)
             .finish()
     }
 }

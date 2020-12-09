@@ -1,8 +1,12 @@
 # exits script on command error
 set -e
 
+PROFILE=${1:-release}
+
+echo "Compiling with profile '$PROFILE'"
+
 # compile and link deps
-make $1
+make PROFILE=$PROFILE
 
 # run the bootloader image
 qemu-system-x86_64 \

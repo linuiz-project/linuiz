@@ -1,5 +1,5 @@
 #[repr(u32)]
-#[allow(unused_imports, non_camel_case_types)]
+#[allow(dead_code, non_camel_case_types)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ProgramHeaderType {
     PT_NULL = 0x0,

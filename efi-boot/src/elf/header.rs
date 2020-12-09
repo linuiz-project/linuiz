@@ -1,7 +1,7 @@
 const HEADER_MAGIC: [u8; 4] = [0x7F, b'E', b'L', b'F'];
 
 #[repr(u8)]
-#[allow(unused_imports, non_camel_case_types)]
+#[allow(dead_code, non_camel_case_types)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ELFABI {
     SystemV = 0x0,
@@ -25,7 +25,7 @@ pub enum ELFABI {
 }
 
 #[repr(u16)]
-#[allow(unused_imports, non_camel_case_types)]
+#[allow(dead_code, non_camel_case_types)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ELFType {
     ET_NONE = 0x0,
@@ -40,7 +40,7 @@ pub enum ELFType {
 }
 
 #[repr(u16)]
-#[allow(unused_imports, non_camel_case_types)]
+#[allow(dead_code, non_camel_case_types)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ELFMachine {
     None = 0x0,
@@ -70,7 +70,7 @@ pub enum ELFMachine {
 }
 
 #[repr(C)]
-#[allow(unused_imports, non_camel_case_types)]
+#[allow(dead_code, non_camel_case_types)]
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct ELFHeader64 {
     magic: [u8; 4],
@@ -89,9 +89,9 @@ pub struct ELFHeader64 {
     flags: u32,
     ehsize: u16,
     phentsize: u16,
-    phnum: u16,
+    phcnt: u16,
     shentsize: u16,
-    shnum: u16,
+    shcnt: u16,
     shstrndx: u16,
 }
 
@@ -136,24 +136,24 @@ impl ELFHeader64 {
         self.phentsize
     }
 
-    pub fn program_header_offset(&self) -> usize {
+    pub fn program_headers_offset(&self) -> usize {
         self.phoff
     }
 
     pub fn program_header_count(&self) -> u16 {
-        self.phnum
+        self.phcnt
     }
 
     pub fn section_header_size(&self) -> u16 {
         self.shentsize
     }
 
-    pub fn section_header_offset(&self) -> usize {
+    pub fn section_headers_offset(&self) -> usize {
         self.shoff
     }
 
     pub fn section_header_count(&self) -> u16 {
-        self.shnum
+        self.shcnt
     }
 
     /// Contains index of the section header table entry that contains the section names.
@@ -180,9 +180,9 @@ impl core::fmt::Debug for ELFHeader64 {
             .field("Flags", &self.flags)
             .field("ELF Header Size", &self.ehsize)
             .field("Program Header Size", &self.phentsize)
-            .field("Program Header Number", &self.phnum)
+            .field("Program Header Count", &self.phcnt)
             .field("Section Header Size", &self.shentsize)
-            .field("Section Header Number", &self.shnum)
+            .field("Section Header Count", &self.shcnt)
             .field("Section Header String Index", &self.shstrndx)
             .finish()
     }

@@ -20,7 +20,7 @@ use core::{
 };
 use elf::{
     program_header::{ProgramHeader, ProgramHeaderType},
-    section_header::{SectionHeader, SectionHeaderType},
+    section_header::SectionHeader,
     ELFHeader64,
 };
 use protocol_helper::get_protocol_unwrap;
@@ -65,11 +65,12 @@ fn configure_log_level() {
 
 #[entry]
 fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
-    configure_log_level();
-
     let kernel_entry_point = {
         uefi_services::init(&system_table).expect_success("failed to unwrap UEFI services");
         info!("Loaded Gsai UEFI bootloader v{}.", VERSION);
+
+        configure_log_level();
+        info!("Configured log level to '{:?}'.", log::max_level());
         info!("Configuring bootloader environment.");
 
         let boot_services = system_table.boot_services();
@@ -137,14 +138,10 @@ fn align_down(value: usize, alignment: usize) -> usize {
 
 /// returns the minimum necessary memory pages to contain the given size in bytes.
 fn size_to_pages(size: usize) -> usize {
-    if (size % PAGE_SIZE) == 0 {
-        size / PAGE_SIZE
-    } else {
-        (size / PAGE_SIZE) + 1
-    }
+    ((size + PAGE_SIZE) - 1) / PAGE_SIZE
 }
 
-fn alloc_pool_buffer(
+fn allocate_pool(
     boot_services: &BootServices,
     memory_type: MemoryType,
     size: usize,
@@ -161,18 +158,19 @@ fn alloc_pool_buffer(
     }
 }
 
-fn alloc_page_buffer(
+fn allocate_pages(
     boot_services: &BootServices,
     allocate_type: AllocateType,
     memory_type: MemoryType,
-    page_count: usize,
+    pages_count: usize,
 ) -> PointerBuffer {
-    let alloc_pointer = match boot_services.allocate_pages(allocate_type, memory_type, page_count) {
+    let alloc_pointer = match boot_services.allocate_pages(allocate_type, memory_type, pages_count)
+    {
         Ok(completion) => completion.unwrap() as *mut u8,
         Err(error) => panic!("{:?}", error),
     };
     let alloc_buffer =
-        unsafe { &mut *slice_from_raw_parts_mut(alloc_pointer, page_count * PAGE_SIZE) };
+        unsafe { &mut *slice_from_raw_parts_mut(alloc_pointer, pages_count * PAGE_SIZE) };
 
     PointerBuffer {
         pointer: alloc_pointer,
@@ -180,27 +178,35 @@ fn alloc_page_buffer(
     }
 }
 
-fn free_pool_buffer(boot_services: &BootServices, buffer: PointerBuffer) {
+fn free_pool(boot_services: &BootServices, buffer: PointerBuffer) {
     match boot_services.free_pool(buffer.pointer) {
         Ok(completion) => completion.unwrap(),
         Err(error) => panic!("{:?}", error),
     }
 }
 
-fn free_page_buffer(boot_services: &BootServices, buffer: PointerBuffer, count: usize) {
+fn free_pages(boot_services: &BootServices, buffer: PointerBuffer, count: usize) {
     match boot_services.free_pages(buffer.pointer as u64, count) {
         Ok(completion) => completion.unwrap(),
         Err(error) => panic!("{:?}", error),
     }
 }
 
-fn open_file<F: File>(current: &mut F, name: &str) -> RegularFile {
-    trace!("Attempting to load file system object: {}", name);
-    match current.open(name, FileMode::Read, FileAttribute::READ_ONLY) {
+fn open_file<F: File>(file: &mut F, name: &str) -> RegularFile {
+    debug!("Attempting to load file system object: {}", name);
+    match file.open(name, FileMode::Read, FileAttribute::READ_ONLY) {
         // this is unsafe due to the possibility of passing an invalid file handle to external code
         Ok(completion) => unsafe { RegularFile::new(completion.expect("failed to find file")) },
         Err(error) => panic!("{:?}", error),
     }
+}
+
+fn read_file(file: &mut RegularFile, position: u64, buffer: &mut [u8]) {
+    debug!("Reading file contents into memory (pos {}).", position);
+    file.set_position(position)
+        .expect_success("failed to set position of file");
+    file.read(buffer)
+        .expect_success("failed to read file into memory");
 }
 
 fn acquire_kernel_file(root_directory: &mut Directory) -> RegularFile {
@@ -232,41 +238,38 @@ fn allocate_program_segments(
     kernel_header: &ELFHeader64,
 ) {
     let mut program_header_buffer = &mut [0u8; size_of::<ProgramHeader>()];
+    let mut current_disk_offset = kernel_header.program_headers_offset();
 
     for index in 0..kernel_header.program_header_count() {
-        let current_program_header_offset = kernel_header.program_header_offset()
-            + ((index * kernel_header.program_header_size()) as usize);
-        // ensure we properly set the offset in the file to read the correct program header
-        kernel_file
-            .set_position(current_program_header_offset as u64)
-            .expect_success("failed to set position of kernel file");
-        kernel_file
-            .read(program_header_buffer)
-            .expect_success("failed to read program header into memory");
-
+        read_file(
+            kernel_file,
+            current_disk_offset as u64,
+            program_header_buffer,
+        );
         let program_header = ProgramHeader::parse(program_header_buffer)
             .expect("failed to parse program header from buffer");
 
+        // use exclusive if to ensure we are able to increment disk offset at end of for
         if program_header.ph_type() == ProgramHeaderType::PT_LOAD {
             debug!(
-                "Identified program header for loading (offset {}:{}): {:?}",
-                index, current_program_header_offset, program_header
+                "Identified program header for loading (index {}, disk offset {}): {:?}",
+                index, current_disk_offset, program_header
             );
 
             // calculate required variables for correctly loading header into memory
             let aligned_page_address = align_down(program_header.physical_address(), PAGE_SIZE);
             let unaligned_offset =
                 wrapping_sub(program_header.physical_address(), aligned_page_address);
-            let aligned_program_header_size = program_header.memory_size() + unaligned_offset;
-            let pages_count = size_to_pages(aligned_program_header_size);
+            let aligned_program_memory_size = program_header.memory_size() + unaligned_offset;
+            let pages_count = size_to_pages(aligned_program_memory_size);
 
             debug!(
-                "Loading program header: pages {}, aligned addr {}, addr offset {}",
-                pages_count, aligned_page_address, unaligned_offset
+                "Loading program header: size p{}:mem{}:ua{}, aligned addr {}, unaligned addr {}, addr offset {}",
+                pages_count, program_header.memory_size(), aligned_program_memory_size, aligned_page_address, program_header.physical_address(), unaligned_offset
             );
 
             // allocate pages for header
-            let ph_buffer = alloc_page_buffer(
+            let ph_buffer = allocate_pages(
                 boot_services,
                 AllocateType::Address(aligned_page_address),
                 MemoryType::LOADER_CODE,
@@ -275,26 +278,79 @@ fn allocate_program_segments(
 
             debug!(
                 "Defining program header memory range from: offset {}, end {}",
-                unaligned_offset, aligned_program_header_size
+                unaligned_offset, aligned_program_memory_size
             );
 
             // the program entries are unlikely to be aligned to pages, so we must
             // cut a slice into our current memory buffer, so the program entry can
             // be at the proper memory address.
             let proper_read_range =
-                &mut ph_buffer.buffer[unaligned_offset..aligned_program_header_size];
-
-            // offset the kernel file and read the program entry into memory
-            kernel_file
-                .set_position(program_header.offset() as u64)
-                .expect_success("failed to set kernel file position to offset");
-            kernel_file
-                .read(proper_read_range)
-                .expect_success("failed to read program entry from kernel file into memory");
-
+                &mut ph_buffer.buffer[unaligned_offset..aligned_program_memory_size];
+            read_file(
+                kernel_file,
+                program_header.offset() as u64,
+                proper_read_range,
+            );
             debug!("Allocated memory pages for program header's entry.");
         }
+
+        current_disk_offset += kernel_header.program_header_size() as usize;
     }
+}
+
+fn determine_section_segment_bounds(
+    boot_services: &BootServices,
+    kernel_file: &mut RegularFile,
+    kernel_header: &ELFHeader64,
+) -> (Option<usize>, Option<usize>) {
+    // REMARK (TODO?): it seems inefficient to read the section headers twice.
+    //      the overhead is probably neglible, but it's something to keep in mind.
+
+    // prepare variables
+    let mut low_address: Option<usize> = None;
+    let mut high_address: Option<usize> = None;
+    let mut section_header_buffer = &mut [0u8; size_of::<SectionHeader>()];
+
+    let mut section_disk_offset = kernel_header.section_headers_offset();
+    for index in 0..kernel_header.section_header_count() {
+        // set position in file and read section header into memory
+        read_file(
+            kernel_file,
+            section_disk_offset as u64,
+            section_header_buffer,
+        );
+        let section_header = SectionHeader::parse(section_header_buffer)
+            .expect("failed to read section header from buffer");
+
+        debug!(
+            "Determining address space of section (index {}): {:?}",
+            index, section_header
+        );
+
+        // use exclusive if to ensure we are able to increment disk offset at end of for
+        if section_header.address() > 0x0 {
+            // high address is the highest possible address the section overlaps
+            let section_high_address = section_header.address() + section_header.entry_size();
+            debug!(
+                "Determining section address space (index {}): low {}, high {}",
+                index,
+                section_header.address(),
+                section_high_address
+            );
+
+            if low_address.is_none() || section_header.address() < low_address.unwrap() {
+                low_address = Some(section_header.address());
+            }
+
+            if high_address.is_none() || section_high_address > high_address.unwrap() {
+                high_address = Some(section_high_address);
+            }
+        }
+
+        section_disk_offset += kernel_header.section_header_size() as usize;
+    }
+
+    (low_address, high_address)
 }
 
 fn allocate_section_segments(
@@ -302,70 +358,84 @@ fn allocate_section_segments(
     kernel_file: &mut RegularFile,
     kernel_header: &ELFHeader64,
 ) {
+    // this will help determine where and how many pages we need to allocate for section entries
+    let (low_address_option, high_address_option) =
+        determine_section_segment_bounds(boot_services, kernel_file, kernel_header);
+
+    if low_address_option.is_none() || high_address_option.is_none() {
+        debug!(
+            "Address space for section entires is invalid: low {:?}, high {:?}",
+            low_address_option, high_address_option
+        );
+        return;
+    }
+
+    let low_address = low_address_option.unwrap();
+    let high_address = high_address_option.unwrap();
+    let section_buffer_size = high_address - low_address;
+    debug!(
+        "Determined section entry address space: low {}, high {}, span {}",
+        low_address, high_address, section_buffer_size
+    );
+
+    if section_buffer_size == 0x0 {
+        return; // no section entries to load
+    }
+
+    // get data relative to a low address that is aligned on page boundries
+    let aligned_low_address = align_down(low_address, PAGE_SIZE);
+    let aligned_section_buffer_size = high_address - aligned_low_address;
+    // this offset tells us how far from index 0 we need to travel to get the true bottom of
+    // the addressed section memory
+    let aligned_section_buffer_offset = low_address - aligned_low_address;
+    let pages_count = size_to_pages(aligned_section_buffer_size);
+
+    debug!(
+        "Allocating {} pages at address {} for section buffer.",
+        pages_count, aligned_low_address
+    );
+    // allocate buffer for section entries
+    let section_buffer = allocate_pages(
+        boot_services,
+        AllocateType::Address(aligned_low_address),
+        MemoryType::LOADER_DATA,
+        pages_count,
+    )
+    // we just want the buffer, we won't explicitly deallocate this
+    .buffer;
+
+    // just a container to hold current section header
     let mut section_header_buffer = &mut [0u8; size_of::<SectionHeader>()];
-
+    let mut section_disk_offset = kernel_header.section_headers_offset();
     for index in 0..kernel_header.section_header_count() {
-        // calculate the correct file offset on disk
-        let current_section_header_offset = kernel_header.section_header_offset()
-            + ((index * kernel_header.section_header_size()) as usize);
-
-        // set position in file and read section header into memory
-        kernel_file
-            .set_position(current_section_header_offset as u64)
-            .expect_success("failed to set kernel file position to section header offset");
-        kernel_file
-            .read(section_header_buffer)
-            .expect_success("failed to read section header from kernel file");
+        read_file(
+            kernel_file,
+            section_disk_offset as u64,
+            section_header_buffer,
+        );
         let section_header = SectionHeader::parse(section_header_buffer)
             .expect("failed to read section header from buffer");
 
-        match section_header.sh_type() {
-            SectionHeaderType::SHT_NULL => {}
-            _ => {
-                debug!(
-                    "Identified section header for loading (offset {}:{}): {:?}",
-                    index, current_section_header_offset, section_header
-                );
+        // use exclusive if to ensure we are able to increment disk offset at end of for
+        if section_header.entry_size() > 0 {
+            debug!(
+                "Identified section header for loading (index {}, disk offset {}): {:?}",
+                index, section_disk_offset, section_header
+            );
 
-                // calculate required variables for correctly loading header into memory
-                let aligned_page_address = align_down(section_header.address(), PAGE_SIZE);
-                let unaligned_offset = wrapping_sub(section_header.address(), aligned_page_address);
-                let aligned_section_header_size = section_header.section_size() + unaligned_offset;
-                let pages_count = size_to_pages(aligned_section_header_size);
+            // low address of the section relative to the allocated section buffer
+            let relative_section_low_address = section_header.address() - aligned_low_address;
+            let relative_section_high_address =
+                relative_section_low_address + section_header.entry_size();
+            // get slice of buffer representing section
+            let section_slice =
+                &mut section_buffer[relative_section_low_address..relative_section_high_address];
 
-                debug!(
-                    "Loading section header: pages {}, aligned addr {}, addr offset {}",
-                    pages_count, aligned_page_address, unaligned_offset
-                );
-
-                let sh_buffer = alloc_page_buffer(
-                    boot_services,
-                    AllocateType::Address(aligned_page_address),
-                    MemoryType::LOADER_DATA,
-                    pages_count,
-                );
-
-                debug!(
-                    "Defining section header memory range from: offset {}, end {}",
-                    unaligned_offset, aligned_section_header_size
-                );
-
-                // the section entries are unlikely to be aligned to pages, so we must
-                // cut a slice into our current memory buffer, so the section entry can
-                // be at the proper memory address.
-                let proper_read_range =
-                    &mut sh_buffer.buffer[unaligned_offset..aligned_section_header_size];
-
-                // offset the kernel file and read the section entry into memory
-                kernel_file
-                    .set_position(section_header.offset() as u64)
-                    .expect_success("failed to set kernel file position to section offset");
-                kernel_file
-                    .read(proper_read_range)
-                    .expect_success("failed to read section entry from kernel file into memory");
-                    debug!("Allocated memory pages for section header's entry.");
-            }
+            read_file(kernel_file, section_header.offset() as u64, section_slice);
+            debug!("Allocated memory pages for section header's entry.");
         }
+
+        section_disk_offset += section_header.size();
     }
 }
 
