@@ -19,7 +19,7 @@ use core::{
     ptr::slice_from_raw_parts_mut,
 };
 use elf::{
-    program_header::{ProgramHeader, ProgramHeaderType},
+    program_header::{self, ProgramHeader, ProgramHeaderType},
     section_header::SectionHeader,
     ELFHeader64,
 };
@@ -266,33 +266,42 @@ fn allocate_segments(
             let pages_count = aligned_slices(aligned_size, program_header.alignment());
 
             debug!(
-                "Loading program header: size p{}:mem{}:ua{}, aligned addr {}, unaligned addr {}, addr offset {} kaddr {}(p{})",
-                pages_count, program_header.memory_size(), aligned_size, aligned_address, program_header.physical_address(),
-                relative_address, kernel_relative_address, kernel_relative_address / PAGE_SIZE
+                "Loading program header:\n Unaligned Address: {}\n Aligned Address: {}\n Constant Offset Address: {}\n Unaligned Size: {}\n Aligned Size: {}\n",
+                program_header.physical_address(), aligned_address, kernel_relative_address, program_header.memory_size(), aligned_size
             );
 
             // allocate pages for header
-            let ph_buffer = allocate_pages(
+            let segment_page_buffer = allocate_pages(
                 boot_services,
+                // we take an address relative to kernel insertion
+                // point, but that doesn't really matter to the code
+                // in this context
                 AllocateType::Address(kernel_relative_address),
                 MemoryType::LOADER_CODE,
                 pages_count,
-            );
+            )
+            // we won't ever explicitly deallocate this, so we only
+            // care about the buffer (pointer is used to deallocate, usually)
+            .buffer;
 
-            debug!(
-                "Defining program header memory range from: offset {}, end {}",
-                relative_address, aligned_size
-            );
-
-            // the program entries are unlikely to be aligned to pages, so we must
-            // cut a slice into our current memory buffer, so the program entry can
-            // be at the proper memory address.
-            let proper_read_range = &mut ph_buffer.buffer[relative_address..aligned_size];
+            // the segments are unlikely to be aligned to pages, so take the slice of the buffer
+            // that is equal to the segment's lowaddr..highaddr
+            let slice_end_index = relative_address + program_header.disk_size();
             read_file(
                 kernel_file,
                 program_header.offset() as u64,
-                proper_read_range,
+                &mut segment_page_buffer[relative_address..slice_end_index],
             );
+
+            if program_header.memory_size() > program_header.disk_size() {
+                // in this case, we need to zero-out the remaining memory so the segment
+                // doesn't point to garbage data (since we won't be reading anything valid into it)
+                let memory_end_index = relative_address + program_header.memory_size();
+                for index in slice_end_index..memory_end_index {
+                    segment_page_buffer[index] = 0x0;
+                }
+            }
+
             debug!("Allocated memory pages for program header's entry.");
         }
 

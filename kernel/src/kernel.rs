@@ -15,7 +15,6 @@ fn panic(_info: &PanicInfo) -> ! {
 
 #[no_mangle]
 fn kernel_main() -> i32 {
-    loop {}
     serial::safe_lock(|serial| {
         serial.data_port().write(b'X');
     });
