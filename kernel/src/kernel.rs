@@ -6,7 +6,7 @@ mod drivers;
 mod io;
 
 use core::panic::PanicInfo;
-use drivers::serial;
+use drivers::{serial, vga};
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
@@ -15,8 +15,8 @@ fn panic(_info: &PanicInfo) -> ! {
 
 #[no_mangle]
 fn kernel_main() -> i32 {
-    serial::safe_lock(|serial| {
-        serial.data_port().write(b'X');
+    vga::safe_lock(|writer| {
+        writer.write_string("testssssssssssssss");
     });
 
     loop {}

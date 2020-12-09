@@ -7,6 +7,7 @@ edition = "2018"
 
 [dependencies]
 lazy_static = { version = "*", features = ["spin_no_std"] }
+volatile = "0.2.6"
 spin = "*"
 
 [profile.dev]

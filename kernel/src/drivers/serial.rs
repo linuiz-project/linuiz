@@ -26,7 +26,7 @@ pub enum SerialSpeed {
 }
 
 lazy_static! {
-    static ref SERIAL: Mutex<Serial> =
+    pub static ref SERIAL: Mutex<Serial> =
         Mutex::new(unsafe { Serial::init(COM1, SerialSpeed::S115200) });
 }
 
