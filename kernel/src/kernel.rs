@@ -1,27 +1,30 @@
 #![no_std]
 #![no_main]
 #![feature(asm)]
+#![feature(alloc_error_handler)]
 
 mod drivers;
 mod io;
 
-use core::panic::PanicInfo;
-use drivers::{serial, vga};
+use core::{alloc::Layout, panic::PanicInfo};
+use efi_boot::{
+    drivers::graphics::{Color8i, ProtocolGraphics},
+    entrypoint,
+};
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     loop {}
 }
 
-#[no_mangle]
-fn kernel_main(full_transfer: bool) -> i32 {
-    // vga::safe_lock(|writer| {
-    //     writer.write_string("testssssssssssssss");
-    // });
+#[alloc_error_handler]
+fn alloc_error(error: Layout) -> ! {
+    loop {}
+}
 
-    if full_transfer {
-        loop {}
-    } else {
-        1234
-    }
+entrypoint!(kernel_main);
+
+fn kernel_main(mut protocol_graphics: ProtocolGraphics) -> i32 {
+    protocol_graphics.clear(Color8i::new(125, 150, 22), true);
+    loop {}
 }

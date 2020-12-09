@@ -1,5 +1,5 @@
 [package]
-name = "BOOTX64"
+name = "efi_boot"
 version = "0.0.1"
 edition = "2018"
 
@@ -14,3 +14,7 @@ rlibc = "*"
 
 [patch.crates-io]
 uefi = { path = "../../uefi-rs/" }
+
+[[bin]]
+name = "BOOTX64"
+path = "src/boot.rs"
