@@ -54,7 +54,7 @@ pub struct SectionHeader {
     entry_size: usize,
     link: u32,
     info: u32,
-    addralign: usize,
+    alignment: usize,
     fixed_entry_size: usize,
 }
 
@@ -106,8 +106,8 @@ impl SectionHeader {
         self.info
     }
 
-    pub fn address_align(&self) -> usize {
-        self.addralign
+    pub fn alignment(&self) -> usize {
+        self.alignment
     }
 
     pub fn entry_size(&self) -> usize {
@@ -127,7 +127,7 @@ impl core::fmt::Debug for SectionHeader {
             .field("Size", &self.entry_size)
             .field("Link", &self.link)
             .field("Info", &self.info)
-            .field("Address Alignment", &self.addralign)
+            .field("Address Alignment", &self.alignment)
             .field("Section Size", &self.fixed_entry_size)
             .finish()
     }

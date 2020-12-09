@@ -102,15 +102,13 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
         info!("Kernel header read into memory.");
         debug!("{:?}", kernel_header);
 
-        allocate_program_segments(boot_services, &mut kernel_file, &kernel_header);
+        allocate_segments(boot_services, &mut kernel_file, &kernel_header);
         info!("Allocated all program segments into memory.");
-        allocate_section_segments(boot_services, &mut kernel_file, &kernel_header);
-        info!("Allocated all section segments into memory.");
+        // allocate_sections(boot_services, &mut kernel_file, &kernel_header);
+        // info!("Allocated all section segments into memory.");
 
         kernel_header.entry_address()
     };
-
-    loop {}
 
     let mut runtime_table = safe_exit_boot_services(image_handle, system_table);
 
@@ -137,8 +135,8 @@ fn align_down(value: usize, alignment: usize) -> usize {
 }
 
 /// returns the minimum necessary memory pages to contain the given size in bytes.
-fn size_to_pages(size: usize) -> usize {
-    ((size + PAGE_SIZE) - 1) / PAGE_SIZE
+fn aligned_slices(size: usize, alignment: usize) -> usize {
+    ((size + alignment) - 1) / alignment
 }
 
 fn allocate_pool(
@@ -232,7 +230,7 @@ fn acquire_kernel_header(kernel_file: &mut RegularFile) -> ELFHeader64 {
     kernel_header
 }
 
-fn allocate_program_segments(
+fn allocate_segments(
     boot_services: &BootServices,
     kernel_file: &mut RegularFile,
     kernel_header: &ELFHeader64,
@@ -249,43 +247,44 @@ fn allocate_program_segments(
         let program_header = ProgramHeader::parse(program_header_buffer)
             .expect("failed to parse program header from buffer");
 
-        // use exclusive if to ensure we are able to increment disk offset at end of for
+        // ensure we are able to increment disk offset at end of for
         if program_header.ph_type() == ProgramHeaderType::PT_LOAD {
             debug!(
                 "Identified program header for loading (index {}, disk offset {}): {:?}",
                 index, current_disk_offset, program_header
             );
 
-            // calculate required variables for correctly loading header into memory
-            let aligned_page_address = align_down(program_header.physical_address(), PAGE_SIZE);
-            let unaligned_offset =
-                wrapping_sub(program_header.physical_address(), aligned_page_address);
-            let aligned_program_memory_size = program_header.memory_size() + unaligned_offset;
-            let pages_count = size_to_pages(aligned_program_memory_size);
+            // calculate required variables for correctly loading segment into memory
+            let aligned_address = align_down(
+                program_header.physical_address(),
+                program_header.alignment(),
+            );
+            let relative_address = wrapping_sub(program_header.physical_address(), aligned_address);
+            let aligned_size = program_header.memory_size() + relative_address;
+            let pages_count = aligned_slices(aligned_size, program_header.alignment());
 
             debug!(
                 "Loading program header: size p{}:mem{}:ua{}, aligned addr {}, unaligned addr {}, addr offset {}",
-                pages_count, program_header.memory_size(), aligned_program_memory_size, aligned_page_address, program_header.physical_address(), unaligned_offset
+                pages_count, program_header.memory_size(), aligned_size, aligned_address, program_header.physical_address(), relative_address
             );
 
             // allocate pages for header
             let ph_buffer = allocate_pages(
                 boot_services,
-                AllocateType::Address(aligned_page_address),
+                AllocateType::Address(aligned_address),
                 MemoryType::LOADER_CODE,
                 pages_count,
             );
 
             debug!(
                 "Defining program header memory range from: offset {}, end {}",
-                unaligned_offset, aligned_program_memory_size
+                relative_address, aligned_size
             );
 
             // the program entries are unlikely to be aligned to pages, so we must
             // cut a slice into our current memory buffer, so the program entry can
             // be at the proper memory address.
-            let proper_read_range =
-                &mut ph_buffer.buffer[unaligned_offset..aligned_program_memory_size];
+            let proper_read_range = &mut ph_buffer.buffer[relative_address..aligned_size];
             read_file(
                 kernel_file,
                 program_header.offset() as u64,
@@ -298,7 +297,7 @@ fn allocate_program_segments(
     }
 }
 
-fn determine_section_segment_bounds(
+fn determine_section_bounds(
     boot_services: &BootServices,
     kernel_file: &mut RegularFile,
     kernel_header: &ELFHeader64,
@@ -353,14 +352,14 @@ fn determine_section_segment_bounds(
     (low_address, high_address)
 }
 
-fn allocate_section_segments(
+fn allocate_sections(
     boot_services: &BootServices,
     kernel_file: &mut RegularFile,
     kernel_header: &ELFHeader64,
 ) {
     // this will help determine where and how many pages we need to allocate for section entries
     let (low_address_option, high_address_option) =
-        determine_section_segment_bounds(boot_services, kernel_file, kernel_header);
+        determine_section_bounds(boot_services, kernel_file, kernel_header);
 
     if low_address_option.is_none() || high_address_option.is_none() {
         debug!(
@@ -388,7 +387,7 @@ fn allocate_section_segments(
     // this offset tells us how far from index 0 we need to travel to get the true bottom of
     // the addressed section memory
     let aligned_section_buffer_offset = low_address - aligned_low_address;
-    let pages_count = size_to_pages(aligned_section_buffer_size);
+    let pages_count = aligned_slices(aligned_section_buffer_size, PAGE_SIZE);
 
     debug!(
         "Allocating {} pages at address {} for section buffer.",
@@ -461,6 +460,7 @@ fn safe_exit_boot_services(
     };
 
     info!("Finalizing exit from boot services environment.");
+    system_table.boot_services().stall(3_000_000);
 
     // clear the output
     system_table

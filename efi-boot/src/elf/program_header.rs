@@ -26,7 +26,6 @@ pub struct ProgramHeader {
     paddr: usize,
     disk_size: usize,
     mem_size: usize,
-    seg_flags: u32,
     alignment: usize,
 }
 
@@ -39,9 +38,9 @@ impl ProgramHeader {
             unsafe {
                 let header_ptr = bytes.as_ptr() as *const ProgramHeader;
                 // this version of the header relies on the buffer data, which is unsafe
-                let temp_header = *header_ptr;
+                let header = *header_ptr;
                 // so we return a clone
-                Some(temp_header.clone())
+                Some(header.clone())
             }
         }
     }
@@ -71,6 +70,10 @@ impl ProgramHeader {
 
     pub fn memory_size(&self) -> usize {
         self.mem_size
+    }
+
+    pub fn alignment(&self) -> usize {
+        self.alignment
     }
 }
 

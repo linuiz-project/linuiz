@@ -11,6 +11,7 @@
   "executables": true,
   "function-sections": true,
   "relocation-model": "static",
+  
   "code-model": "small",
   "exe-suffix": ".elf",
   

@@ -2,8 +2,8 @@ use crate::io::port::Port;
 use lazy_static::lazy_static;
 use spin::mutex::{Mutex, MutexGuard};
 
-const COM1: u16 = 0x3FB;
-const LINE_ENABLE_DLAB: u8 = 0x80;
+pub const COM1: u16 = 0x3FB;
+pub const LINE_ENABLE_DLAB: u8 = 0x80;
 
 #[repr(u16)]
 #[allow(dead_code)]
@@ -43,11 +43,11 @@ where
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Serial {
-    pub data_port: Port<u8>,
-    pub fifo_port: Port<u8>,
-    pub line_port: Port<u8>,
-    pub modem_port: Port<u8>,
-    pub status_port: Port<u8>,
+    data_port: Port<u8>,
+    fifo_port: Port<u8>,
+    line_port: Port<u8>,
+    modem_port: Port<u8>,
+    status_port: Port<u8>,
 }
 
 impl Serial {
@@ -81,6 +81,26 @@ impl Serial {
             modem_port,
             status_port,
         }
+    }
+
+    pub fn data_port(&self) -> Port<u8> {
+        self.data_port
+    }
+
+    pub fn fifo_port(&self) -> Port<u8> {
+        self.fifo_port
+    }
+
+    pub fn line_port(&self) -> Port<u8> {
+        self.line_port
+    }
+
+    pub fn modem_port(&self) -> Port<u8> {
+        self.modem_port
+    }
+
+    pub fn status_port(&self) -> Port<u8> {
+        self.status_port
     }
 
     pub fn is_fifo_empty(&mut self) -> bool {
