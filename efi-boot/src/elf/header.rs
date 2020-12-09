@@ -149,7 +149,7 @@ impl ELFHeader64 {
     }
 
     pub fn section_header_offset(&self) -> usize {
-        self.phoff
+        self.shoff
     }
 
     pub fn section_header_count(&self) -> u16 {
