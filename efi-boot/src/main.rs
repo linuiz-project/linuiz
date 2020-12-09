@@ -45,6 +45,9 @@ use uefi_macros::entry;
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 const KERNEL_VADDRESS: usize = 0xFFFFFFFF80000000;
 const PAGE_SIZE: usize = 0x1000; // 4096
+                                 // TODO some sort of checking to ensure we have enough address
+                                 // space to actually load the kernel
+const KERNEL_PADDRESS: usize = 1024 * PAGE_SIZE; // ~4MB
 
 struct PointerBuffer<'buf> {
     pointer: *mut u8,
@@ -104,8 +107,6 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
 
         allocate_segments(boot_services, &mut kernel_file, &kernel_header);
         info!("Allocated all program segments into memory.");
-        // allocate_sections(boot_services, &mut kernel_file, &kernel_header);
-        // info!("Allocated all section segments into memory.");
 
         kernel_header.entry_address()
     };
@@ -260,18 +261,20 @@ fn allocate_segments(
                 program_header.alignment(),
             );
             let relative_address = wrapping_sub(program_header.physical_address(), aligned_address);
+            let kernel_relative_address = KERNEL_PADDRESS + aligned_address;
             let aligned_size = program_header.memory_size() + relative_address;
             let pages_count = aligned_slices(aligned_size, program_header.alignment());
 
             debug!(
-                "Loading program header: size p{}:mem{}:ua{}, aligned addr {}, unaligned addr {}, addr offset {}",
-                pages_count, program_header.memory_size(), aligned_size, aligned_address, program_header.physical_address(), relative_address
+                "Loading program header: size p{}:mem{}:ua{}, aligned addr {}, unaligned addr {}, addr offset {} kaddr {}(p{})",
+                pages_count, program_header.memory_size(), aligned_size, aligned_address, program_header.physical_address(),
+                relative_address, kernel_relative_address, kernel_relative_address / PAGE_SIZE
             );
 
             // allocate pages for header
             let ph_buffer = allocate_pages(
                 boot_services,
-                AllocateType::Address(aligned_address),
+                AllocateType::Address(kernel_relative_address),
                 MemoryType::LOADER_CODE,
                 pages_count,
             );
@@ -481,7 +484,7 @@ fn safe_exit_boot_services(
 fn kernel_transfer(kernel_entry_point: usize) -> u32 {
     unsafe {
         type KernelMain = fn() -> u32;
-        let kernel_main: KernelMain = transmute(kernel_entry_point);
+        let kernel_main: KernelMain = transmute(KERNEL_PADDRESS + kernel_entry_point);
 
         // and finally, we enter the kernel
         kernel_main()

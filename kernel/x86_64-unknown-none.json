@@ -11,13 +11,17 @@
   "executables": true,
   "function-sections": true,
   "relocation-model": "static",
-  
+
   "code-model": "small",
   "exe-suffix": ".elf",
   
   "linker": "rust-lld",
   "linker-flavor": "ld.lld",
-
+  "pre-link-args":
+  {
+    "ld.lld": ["--entry=kernel_main"]
+  },
+  
   "panic-strategy": "abort",
   "disable-redzone": true
 }
