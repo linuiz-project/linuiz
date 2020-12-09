@@ -9,19 +9,12 @@
 #[macro_use]
 extern crate log;
 extern crate rlibc;
-extern crate volatile;
-
-mod elf;
-mod file;
-mod kernel_loader;
-mod memory;
-mod protocol;
-mod protocol_graphics;
 
 use core::{
     mem::{size_of, transmute},
     ptr::slice_from_raw_parts_mut,
 };
+use efi_boot::drivers::ProtocolGraphics;
 use file::open_file;
 use protocol::{get_protocol, locate_protocol};
 use uefi::{
@@ -35,7 +28,7 @@ use uefi::{
         },
     },
     table::{
-        boot::{MemoryDescriptor, MemoryType},
+        boot::{AllocateType, MemoryDescriptor, MemoryType},
         runtime::ResetType,
         Boot, Runtime, SystemTable,
     },
@@ -100,6 +93,7 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
         let graphics_output =
             locate_protocol::<GraphicsOutput>(boot_services).expect("no graphics output!");
         info!("Acquired graphics output protocol.");
+        let protocol_graphics = ProtocolGraphics::new(boot_services, graphics_output);
 
         // load kernel
         let kernel_file = acquire_kernel_file(root_directory);
@@ -123,9 +117,11 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
 
 fn ensure_enough_memory(boot_services: &BootServices) {
     let minimum_address = MINIMUM_MEMORY - memory::PAGE_SIZE;
-    if let Ok(completion) =
-        boot_services.allocate_pages(AllocateType::Address(), MemoryType::LOADER_DATA, 1)
-    {
+    if let Ok(completion) = boot_services.allocate_pages(
+        AllocateType::Address(minimum_address),
+        MemoryType::LOADER_DATA,
+        1,
+    ) {
         let allocated_address = completion.unwrap();
         boot_services.free_pages(allocated_address, 1);
     } else {

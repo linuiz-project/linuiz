@@ -11,7 +11,6 @@ uefi-macros = "*"
 uefi-services = { version = "*", features = ["qemu"] }
 log = { version = "*", default-features = false }
 rlibc = "*"
-volatile = "*"
 
 [patch.crates-io]
 uefi = { path = "../../uefi-rs/" }

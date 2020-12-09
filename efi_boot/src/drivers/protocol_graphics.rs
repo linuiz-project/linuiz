@@ -1,14 +1,11 @@
 ///! Graphics driver utilizing the EFI_GRAPHICS_OUTPUT_PROTOCOL to write to framebuffer.
-use core::marker::PhantomData;
-
-use crate::memory::{self, align_down, aligned_slices};
+use crate::memory::{align_down, aligned_slices};
 use uefi::{
     prelude::BootServices,
     proto::console::gop::{BltPixel, GraphicsOutput, Mode, ModeInfo},
     table::boot::MemoryType,
     ResultExt,
 };
-use volatile::Volatile;
 
 #[repr(C)]
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -19,14 +16,18 @@ pub struct Color8i {
 }
 
 pub struct ProtocolGraphics<'boot> {
+    // TODO lock on these fields
     graphics_output: &'boot mut GraphicsOutput<'boot>,
-    backbuffer: *mut Volatile<Color8i>,
+    backbuffer: *mut Color8i,
 }
 
 impl<'boot> ProtocolGraphics<'boot> {
-    pub fn new(boot_services: &BootServices, graphics_output: &'boot mut GraphicsOutput) -> Self {
+    pub fn new(
+        boot_services: &BootServices,
+        graphics_output: &'boot mut GraphicsOutput<'boot>,
+    ) -> Self {
         // TODO(?) add some sensible way to choose the output mode
-        let mode = select_graphics_mode(&graphics_output);
+        let mode = select_graphics_mode(graphics_output);
         let mode_info = mode.info();
 
         // get framebuffer size
@@ -37,7 +38,7 @@ impl<'boot> ProtocolGraphics<'boot> {
         let backbuffer = if let Ok(completion) =
             boot_services.allocate_pool(MemoryType::LOADER_DATA, framebuffer_size)
         {
-            completion.unwrap() as *mut Volatile<Color8i>
+            completion.unwrap() as *mut Color8i
         } else {
             panic!("not enough memory to allocate backbuffer")
         };
@@ -48,6 +49,7 @@ impl<'boot> ProtocolGraphics<'boot> {
         }
     }
 
+    // this is technically unsafe since you can modify from multiple threads (?)
     pub fn write_pixel(&self, xy: (usize, usize), color: Color8i) {
         let dimensions = self.graphics_output.current_mode_info().resolution();
         if xy.0 < 0 || xy.0 >= dimensions.0 || xy.1 < 0 || xy.1 >= dimensions.1 {
@@ -55,7 +57,7 @@ impl<'boot> ProtocolGraphics<'boot> {
         } else {
             unsafe {
                 let index = (xy.0 + (xy.1 * dimensions.0)) as isize;
-                (*self.backbuffer.offset(index)).write(color);
+                self.backbuffer.offset(index).write_volatile(color);
             }
         }
     }
@@ -63,7 +65,7 @@ impl<'boot> ProtocolGraphics<'boot> {
     pub fn flush_buffer() {}
 }
 
-fn select_graphics_mode(graphics_output: &GraphicsOutput) -> Mode {
+fn select_graphics_mode(graphics_output: &mut GraphicsOutput) -> Mode {
     let graphics_mode = graphics_output
         .modes()
         .map(|mode| mode.expect("warning encountered while querying mode"))
