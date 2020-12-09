@@ -1,3 +1,5 @@
+const HEADER_MAGIC: [u8; 4] = [0x7F, b'E', b'L', b'F'];
+
 #[repr(u8)]
 #[allow(unused_imports, non_camel_case_types)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -103,11 +105,24 @@ impl ELFHeader64 {
                 let header_ptr = bytes.as_ptr() as *const ELFHeader64;
                 // this version of the header relies on the buffer data, which is unsafe
                 let temp_header = *header_ptr;
-                // so we return a clone
-                Some(temp_header.clone())
+
+                // verify the header's magic number
+                if !temp_header
+                    .magic
+                    .iter()
+                    .zip(HEADER_MAGIC.iter())
+                    .all(|(a, b)| a == b)
+                {
+                    None
+                } else {
+                    // so we return a clone
+                    Some(temp_header.clone())
+                }
             }
         }
     }
+
+    // todo add getters for all properties
 
     pub fn entry_address(&self) -> usize {
         self.entry
@@ -140,6 +155,11 @@ impl ELFHeader64 {
     pub fn section_header_count(&self) -> u16 {
         self.shnum
     }
+
+    /// Contains index of the section header table entry that contains the section names.
+    pub fn section_header_string_index(&self) -> u16 {
+        self.shstrndx
+    }
 }
 
 impl core::fmt::Debug for ELFHeader64 {
@@ -163,7 +183,7 @@ impl core::fmt::Debug for ELFHeader64 {
             .field("Program Header Number", &self.phnum)
             .field("Section Header Size", &self.shentsize)
             .field("Section Header Number", &self.shnum)
-            .field("Section Header Start Index", &self.shstrndx)
+            .field("Section Header String Index", &self.shstrndx)
             .finish()
     }
 }

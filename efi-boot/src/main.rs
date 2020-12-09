@@ -15,9 +15,10 @@ mod protocol_helper;
 
 use core::{
     intrinsics::{wrapping_add, wrapping_mul, wrapping_sub},
+    mem::{size_of, transmute},
     ptr::slice_from_raw_parts_mut,
 };
-use elf::headers::{ELFHeader64, ProgramHeader, ProgramHeaderType};
+use elf::{ELFHeader64, ProgramHeader, ProgramHeaderType, SectionHeader};
 use protocol_helper::get_protocol_unwrap;
 use uefi::{
     prelude::BootServices,
@@ -164,6 +165,13 @@ fn free_pool_buffer(boot_services: &BootServices, buffer: PointerBuffer) {
     }
 }
 
+fn free_page_buffer(boot_services: &BootServices, buffer: PointerBuffer, count: usize) {
+    match boot_services.free_pages(buffer.pointer, count) {
+        Ok(completion) => completion.unwrap(),
+        Err(error) => panic!("{:?}", error),
+    }
+}
+
 fn open_file<F: File>(current: &mut F, name: &str) -> RegularFile {
     trace!("Attempting to load file system object: {}", name);
     match current.open(name, FileMode::Read, FileAttribute::READ_ONLY) {
@@ -184,7 +192,7 @@ fn acquire_kernel_file(root_directory: &mut Directory) -> RegularFile {
 
 fn acquire_kernel_header(kernel_file: &mut RegularFile) -> ELFHeader64 {
     // allocate a block large enough to hold the header
-    let mut kernel_header_buffer = [0u8; core::mem::size_of::<ELFHeader64>()];
+    let mut kernel_header_buffer = [0u8; size_of::<ELFHeader64>()];
 
     // read the file into the buffer
     kernel_file
@@ -201,7 +209,7 @@ fn allocate_program_segments(
     kernel_file: &mut RegularFile,
     kernel_header: &ELFHeader64,
 ) {
-    let mut program_header_buffer = [0u8; core::mem::size_of::<ProgramHeader>()];
+    let mut program_header_buffer = [0u8; size_of::<ProgramHeader>()];
 
     for index in 0..kernel_header.program_header_count() {
         let current_program_header_offset = kernel_header.program_header_offset()
@@ -247,25 +255,83 @@ fn allocate_program_segments(
                 "Defining program header memory range from: offset {}, end {}",
                 unaligned_offset, aligned_program_header_size
             );
+
+            // the program entries are unlikely to be aligned to pages, so we must
+            // cut a slice into our current memory buffer, so the program entry can
+            // be at the proper memory address.
             let proper_read_range =
                 &mut ph_buffer.buffer[unaligned_offset..aligned_program_header_size];
-            // offse the kernel file to read from the program's file offset
+
+            // offset the kernel file and read the program entry into memory
             kernel_file
                 .set_position(program_header.offset() as u64)
                 .expect_success("failed to set kernel file position to offset");
+            kernel_file
+                .read(proper_read_range)
+                .expect_success("failed to read program entry from kernel file into memory");
 
-            // read the program into
-            kernel_file.read(proper_read_range).ok().unwrap().unwrap();
-
-            debug!("Allocated memory pages for program header.");
+            debug!("Allocated memory pages for program header's entry.");
         }
     }
 }
 
-fn allocate_section_segments(    boot_services: &BootServices,
+fn allocate_section_segments(
+    boot_services: &BootServices,
     kernel_file: &mut RegularFile,
-    kernel_header: &ELFHeader64,) {
-        // todo load the section headers into memory
+    kernel_header: &ELFHeader64,
+) {
+    let mut section_header_buffer = [0u8; size_of::<SectionHeader>];
+
+    for index in 0..kernel_header.section_header_count() {
+        let current_section_header_offset =
+            kernel_header.program_header_offset() + (index * kernel_header.section_header_size());
+        kernel_file
+            .set_position(current_section_header_offset)
+            .expect_success("failed to set kernel file position to section header offset");
+        kernel_file
+            .read(section_header_buffer)
+            .expect_success("failed to read section header from kernel file");
+        let section_header = SectionHeader::parse(section_header_buffer)
+            .expect("failed to read section header from buffer");
+
+        info!(
+            "Identified section header for loading (offset {}:{}): {:?}",
+            index, current_section_header_offset, section_header
+        );
+
+        // calculate required variables for correctly loading header into memory
+        let aligned_page_address = align_down(section_header.address(), PAGE_SIZE);
+        let unaligned_offset = wrapping_sub(section_header.address(), aligned_page_address);
+        let aligned_section_header_size = section_header.section_size() + unaligned_offset;
+        let pages_count = size_to_pages(aligned_section_header_size);
+
+        let sh_buffer = alloc_page_buffer(
+            boot_services,
+            AllocateType::Address(aligned_page_address),
+            MemoryType::LOADER_DATA,
+            pages_count,
+        );
+
+        info!(
+            "Defining program header memory range from: offset {}, end {}",
+            unaligned_offset, aligned_section_header_size
+        );
+
+        // the section entries are unlikely to be aligned to pages, so we must
+        // cut a slice into our current memory buffer, so the section entry can
+        // be at the proper memory address.
+        let proper_read_range =
+            &mut sh_buffer.buffer[unaligned_offset..aligned_section_header_size];
+
+        // offset the kernel file and read the program entry into memory
+        kernel_file
+            .set_position(section_header.offset())
+            .expect_success("failed to set kernel file position to section offset");
+        kernel_file
+            .read(proper_read_range)
+            .expect_success("failed to read section entry from kernel file into memory");
+        debug!("Allocated memory pages for section header's entry.");
+    }
 }
 
 fn safe_exit_boot_services(
@@ -275,7 +341,7 @@ fn safe_exit_boot_services(
     info!("Preparing to exit boot services environment.");
     let mmap_alloc = {
         let boot_services = system_table.boot_services();
-        let mem_descriptor_size = core::mem::size_of::<MemoryDescriptor>();
+        let mem_descriptor_size = size_of::<MemoryDescriptor>();
         let mmap_alloc_size = boot_services.memory_map_size() + (6 * mem_descriptor_size);
         let alloc_pointer =
             match boot_services.allocate_pool(MemoryType::LOADER_DATA, mmap_alloc_size) {
@@ -285,7 +351,7 @@ fn safe_exit_boot_services(
 
         // we HAVE TO use an unsafe transmutation here, otherwise we run into issues with
         // the system_table/boot_services getting consumed to give lifetime information
-        // to the buffer
+        // to the buffer (and thus not being able to be moved into the exit_boot_services call)
         unsafe { &mut *slice_from_raw_parts_mut(alloc_pointer, mmap_alloc_size) }
     };
 
@@ -309,8 +375,10 @@ fn safe_exit_boot_services(
 
 fn kernel_transfer(kernel_entry_point: usize) -> u32 {
     unsafe {
-        type KernelMain = extern "C" fn() -> u32;
-        let kernel_main: KernelMain = core::mem::transmute(kernel_entry_point);
+        type KernelMain = fn() -> u32;
+        let kernel_main: KernelMain = transmute(kernel_entry_point);
+
+        // and finally, we enter the kernel
         kernel_main()
     }
 }

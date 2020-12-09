@@ -20,6 +20,10 @@ impl<T: PortIO + Copy> Port<T> {
         }
     }
 
+    pub fn port_num(&self) -> u16 {
+        self.port
+    }
+
     pub fn read(&mut self) -> T {
         unsafe { T::read(self.port) }
     }

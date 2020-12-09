@@ -14,7 +14,7 @@ fn panic(_info: &PanicInfo) -> ! {
 }
 
 #[no_mangle]
-extern "C" fn _start() -> i32 {
+fn _start() -> i32 {
     serial::safe_lock(|serial| {
         serial.data_port.write(b'X');
     });

@@ -46,6 +46,8 @@ impl ProgramHeader {
         }
     }
 
+    // todo add getters for all properties
+
     pub fn ph_type(&self) -> ProgramHeaderType {
         self.ph_type
     }
