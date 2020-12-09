@@ -16,6 +16,16 @@ pub struct PointerBuffer<'buf> {
     pub buffer: &'buf mut [u8],
 }
 
+// impl<'buf> PointerBuffer<'buf> {
+//     pub fn pointer(&self) -> *mut u8 {
+//         self.pointer
+//     }
+
+//     pub fn buffer<'a: 'buf>(&'a mut self) -> &'a mut [u8] {
+//         self.buffer
+//     }
+// }
+
 pub fn allocate_pool(
     boot_services: &BootServices,
     memory_type: MemoryType,

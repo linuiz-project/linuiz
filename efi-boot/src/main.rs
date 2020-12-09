@@ -9,21 +9,25 @@
 #[macro_use]
 extern crate log;
 extern crate rlibc;
+extern crate volatile;
 
 mod elf;
 mod file;
 mod kernel_loader;
 mod memory;
 mod protocol;
+mod protocol_graphics;
 
 use core::{
     mem::{size_of, transmute},
     ptr::slice_from_raw_parts_mut,
 };
 use file::open_file;
-use protocol::get_protocol_unwrap;
+use protocol::{get_protocol, locate_protocol};
 use uefi::{
+    prelude::BootServices,
     proto::{
+        console::gop::{GraphicsOutput, Mode},
         loaded_image::{DevicePath, LoadedImage},
         media::{
             file::{Directory, File, RegularFile},
@@ -41,6 +45,7 @@ use uefi_macros::entry;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 const KERNEL_VADDRESS: usize = 0xFFFFFFFF80000000;
+const MINIMUM_MEMORY: usize = 0xF424000; // 256MB
 
 #[cfg(debug_assertions)]
 fn configure_log_level() {
@@ -56,6 +61,8 @@ fn configure_log_level() {
 
 #[entry]
 fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
+    // we have to encapsulate our usage of system_table.boot_services() so its lifetime doesn't
+    // keep us from calling exit_boot_services() later
     let kernel_entry_point = {
         uefi_services::init(&system_table).expect_success("failed to unwrap UEFI services");
         info!("Loaded Gsai UEFI bootloader v{}.", VERSION);
@@ -67,24 +74,32 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
         let boot_services = system_table.boot_services();
         info!("Acquired boot services from UEFI firmware.");
 
+        // test to see how much memory we're working with
+        ensure_enough_memory(boot_services);
+
         // prepare required environment data
-        let image = get_protocol_unwrap::<LoadedImage>(boot_services, image_handle)
+        let image = get_protocol::<LoadedImage>(boot_services, image_handle)
             .expect("failed to acquire boot image");
         info!("Acquired boot image from boot services.");
-        let device_path = get_protocol_unwrap::<DevicePath>(boot_services, image.device())
+        let device_path = get_protocol::<DevicePath>(boot_services, image.device())
             .expect("failed to acquire boot image device path");
         info!("Acquired boot image device path.");
         let file_handle = boot_services
             .locate_device_path::<SimpleFileSystem>(device_path)
             .expect_success("failed to acquire file handle from device path");
         info!("Acquired file handle from device path.");
-        let file_system = get_protocol_unwrap::<SimpleFileSystem>(boot_services, file_handle)
+        let file_system = get_protocol::<SimpleFileSystem>(boot_services, file_handle)
             .expect("failed to load file system from file handle");
         info!("Acquired file system protocol from file handle.");
         let root_directory = &mut file_system
             .open_volume()
             .expect_success("failed to open boot file system root directory");
         info!("Loaded boot file system root directory.");
+
+        // crate graphics output for kernel
+        let graphics_output =
+            locate_protocol::<GraphicsOutput>(boot_services).expect("no graphics output!");
+        info!("Acquired graphics output protocol.");
 
         // load kernel
         let kernel_file = acquire_kernel_file(root_directory);
@@ -95,12 +110,29 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
     let runtime_table = safe_exit_boot_services(image_handle, system_table);
 
     // at this point, the given system_table is invalid
-    let _result = kernel_transfer(kernel_entry_point);
+    type KernelMain = fn(bool) -> u32;
+    let kernel_main: KernelMain = unsafe { transmute(kernel_entry_point) };
+    //let _result = kernel_main(false);
 
     unsafe {
         runtime_table
             .runtime_services()
             .reset(ResetType::Shutdown, Status::SUCCESS, None);
+    }
+}
+
+fn ensure_enough_memory(boot_services: &BootServices) {
+    let minimum_address = MINIMUM_MEMORY - memory::PAGE_SIZE;
+    if let Ok(completion) =
+        boot_services.allocate_pages(AllocateType::Address(), MemoryType::LOADER_DATA, 1)
+    {
+        let allocated_address = completion.unwrap();
+        boot_services.free_pages(allocated_address, 1);
+    } else {
+        panic!(
+            "Host system requires a minimum of {} of RAM.",
+            MINIMUM_MEMORY / (0xF4240/* 1MB */)
+        );
     }
 }
 
@@ -150,14 +182,4 @@ fn safe_exit_boot_services(
         };
 
     runtime_table
-}
-
-fn kernel_transfer(kernel_entry_point: usize) -> u32 {
-    unsafe {
-        type KernelMain = fn() -> u32;
-        let kernel_main: KernelMain = transmute(kernel_entry_point);
-
-        // and finally, we enter the kernel
-        kernel_main()
-    }
 }

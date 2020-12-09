@@ -14,10 +14,14 @@ fn panic(_info: &PanicInfo) -> ! {
 }
 
 #[no_mangle]
-fn kernel_main() -> i32 {
-    vga::safe_lock(|writer| {
-        writer.write_string("testssssssssssssss");
-    });
+fn kernel_main(full_transfer: bool) -> i32 {
+    // vga::safe_lock(|writer| {
+    //     writer.write_string("testssssssssssssss");
+    // });
 
-    loop {}
+    if full_transfer {
+        loop {}
+    } else {
+        1234
+    }
 }
