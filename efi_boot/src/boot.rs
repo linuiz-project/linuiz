@@ -149,7 +149,7 @@ fn kernel_transfer(
     image_handle: Handle,
     system_table: SystemTable<Boot>,
     kernel_entry_point: usize,
-    protocol_graphics: ProtocolGraphics,
+    mut protocol_graphics: ProtocolGraphics,
 ) -> Status {
     info!("Preparing to exit boot services environment.");
     let mmap_alloc = {

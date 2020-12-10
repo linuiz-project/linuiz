@@ -13,7 +13,7 @@ pub type KernelMain = fn(crate::drivers::graphics::ProtocolGraphics) -> i32;
 macro_rules! entrypoint {
     ($path:path) => {
         #[export_name = "_start"]
-        pub fn __impl_kernel_main(
+        pub extern "C" fn __impl_kernel_main(
             protocol_graphics: $crate::drivers::graphics::ProtocolGraphics,
         ) -> i32 {
             let function: $crate::KernelMain = $path;

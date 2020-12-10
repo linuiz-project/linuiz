@@ -54,6 +54,7 @@ impl Into<Color8i> for Color {
     }
 }
 
+#[repr(C)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Size {
     width: usize,
@@ -66,10 +67,11 @@ impl Size {
     }
 }
 
+#[repr(C)]
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct ProtocolGraphics {
     // TODO(?) lock on these fields
-    framebuffer: *mut Color8i,
+    pub framebuffer: *mut Color8i,
     backbuffer: *mut Color8i,
     dimensions: Size,
 }

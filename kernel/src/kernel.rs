@@ -8,7 +8,7 @@ mod io;
 
 use core::{alloc::Layout, panic::PanicInfo};
 use efi_boot::{
-    drivers::graphics::{Color8i, ProtocolGraphics},
+    drivers::graphics::{Color, Color8i, ProtocolGraphics},
     entrypoint,
 };
 
@@ -24,7 +24,6 @@ fn alloc_error(error: Layout) -> ! {
 
 entrypoint!(kernel_main);
 fn kernel_main(mut protocol_graphics: ProtocolGraphics) -> i32 {
-    loop {
-        protocol_graphics.clear(Color8i::new(125, 150, 22), true);
-    }
+    protocol_graphics.clear(Color::Gray.into(), true);
+    loop {}
 }
