@@ -10,7 +10,6 @@
 extern crate log;
 extern crate rlibc;
 
-mod drivers;
 mod elf;
 mod file;
 mod kernel_loader;
@@ -26,7 +25,7 @@ use core::{
     ptr::slice_from_raw_parts_mut,
 };
 use efi_boot::{
-    drivers::graphics::{Color8i, ProtocolGraphics},
+    drivers::graphics::{Color, Color8i, ProtocolGraphics},
     KernelMain,
 };
 use uefi::{
@@ -49,7 +48,6 @@ use uefi::{
 use uefi_macros::entry;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
-const KERNEL_VADDRESS: usize = 0xFFFFFFFF80000000;
 const MINIMUM_MEMORY: usize = 0xF424000; // 256MB
 
 #[cfg(debug_assertions)]
@@ -100,16 +98,16 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
         .expect_success("failed to open boot file system root directory");
     info!("Loaded boot file system root directory.");
 
-    // crate graphics output for kernel
-    let graphics_output =
-        locate_protocol::<GraphicsOutput>(boot_services).expect("no graphics output!");
-    info!("Acquired graphics output protocol.");
-    let mut protocol_graphics = ProtocolGraphics::new(boot_services, graphics_output);
-
     // load kernel
     let kernel_file = acquire_kernel_file(root_directory);
     info!("Acquired kernel image file.");
     let kernel_entry_point = kernel_loader::load_kernel(boot_services, kernel_file);
+
+    // crate graphics output for kernel
+    let graphics_output =
+        locate_protocol::<GraphicsOutput>(boot_services).expect("no graphics output!");
+    info!("Acquired graphics output protocol.");
+    let protocol_graphics = ProtocolGraphics::new(boot_services, graphics_output);
 
     kernel_transfer(
         image_handle,
@@ -151,7 +149,7 @@ fn kernel_transfer(
     image_handle: Handle,
     system_table: SystemTable<Boot>,
     kernel_entry_point: usize,
-    mut protocol_graphics: ProtocolGraphics,
+    protocol_graphics: ProtocolGraphics,
 ) -> Status {
     info!("Preparing to exit boot services environment.");
     let mmap_alloc = {

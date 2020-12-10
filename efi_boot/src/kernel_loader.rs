@@ -1,3 +1,4 @@
+///! Used to load a kernel file into memory, and return the kernel's entry point as a memory address.
 use crate::{
     elf::{
         program_header::{ProgramHeader, ProgramHeaderType},
@@ -14,6 +15,9 @@ use uefi::{
     table::boot::{AllocateType, MemoryType},
     ResultExt,
 };
+
+pub const KERNEL_VADDRESS: usize = 0xFFFFFFFF80000000;
+pub const KERNEL_PADDRESS: usize = 0x80000; // ~8MB
 
 /// reads an ELF binary from the given file, and loads it into
 /// memory, returning the entry address

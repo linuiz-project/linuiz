@@ -8,9 +8,6 @@ use uefi::{
     ResultExt,
 };
 
-pub const COLOR_BLACK: Color8i = Color8i::new(0, 0, 0);
-pub const COLOR_GRAY: Color8i = Color8i::new(100, 100, 100);
-
 #[repr(C)]
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct Color8i {
@@ -31,19 +28,59 @@ impl Color8i {
     }
 }
 
+impl From<u32> for Color8i {
+    fn from(from: u32) -> Self {
+        let r = ((from >> 24) & 0xFF) as u8;
+        let g = ((from >> 16) & 0xFF) as u8;
+        let b = ((from >> 8) & 0xFF) as u8;
+        let reserved = (from & 0xFF) as u8;
+
+        Self { r, g, b, reserved }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum Color {
+    Black,
+    Gray,
+}
+
+impl Into<Color8i> for Color {
+    fn into(self) -> Color8i {
+        match self {
+            Color::Black => Color8i::new(0, 0, 0),
+            Color::Gray => Color8i::new(100, 100, 100),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct Size {
+    width: usize,
+    height: usize,
+}
+
+impl Size {
+    fn new(width: usize, height: usize) -> Self {
+        Size { width, height }
+    }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub struct ProtocolGraphics {
     // TODO(?) lock on these fields
     framebuffer: *mut Color8i,
     backbuffer: *mut Color8i,
-    dimensions: (usize, usize),
+    dimensions: Size,
 }
 
 impl ProtocolGraphics {
     pub fn new(boot_services: &BootServices, graphics_output: &mut GraphicsOutput) -> Self {
         // TODO(?) add some sensible way to choose the output mode
         let framebuffer = graphics_output.frame_buffer().as_mut_ptr() as *mut Color8i;
-        let dimensions = select_graphics_mode(graphics_output).info().resolution();
-        let byte_length = dimensions.0 * dimensions.1 * size_of::<Color8i>();
+        let resolution = select_graphics_mode(graphics_output).info().resolution();
+        let dimensions = Size::new(resolution.0, resolution.1);
+        let byte_length = dimensions.width * dimensions.height * size_of::<Color8i>();
 
         // allocate pages for backbuffer
         let backbuffer = if let Ok(completion) =
@@ -61,14 +98,14 @@ impl ProtocolGraphics {
         }
     }
 
-    // this is technically unsafe since you can modify from multiple threads (?)
-    pub fn write_pixel(&self, xy: (usize, usize), color: Color8i) {
+    // TODO this is technically unsafe since you can modify from multiple threads (?)
+    pub fn write_pixel(&self, size: Size, color: Color8i) {
         let dimensions = self.dimensions();
-        if xy.0 >= dimensions.0 || xy.1 >= dimensions.1 {
+        if size.width >= dimensions.width || size.height >= dimensions.height {
             panic!("given coordinates are outside framebuffer");
         } else {
             unsafe {
-                let index = (xy.0 + (xy.1 * dimensions.0)) as isize;
+                let index = (size.width + (size.height * dimensions.width)) as isize;
                 self.backbuffer.offset(index).write_volatile(color);
             }
         }
@@ -77,9 +114,9 @@ impl ProtocolGraphics {
     pub fn clear(&mut self, color: Color8i, flush: bool) {
         unsafe {
             let length = self.length();
-            let framebuffer = self.framebuffer;
+            let backbuffer = self.backbuffer;
             for index in 0..length {
-                framebuffer.offset(index as isize).write_volatile(color);
+                backbuffer.offset(index as isize).write_volatile(color);
             }
         }
 
@@ -90,31 +127,39 @@ impl ProtocolGraphics {
 
     /// copy backbuffer to frontbuffer and zero backbuffer
     pub fn flush_pixels(&mut self) {
-        unsafe {
-            let length = self.length();
-            let backbuffer = self.backbuffer;
-            let framebuffer = self.framebuffer;
-            core::ptr::copy(backbuffer, framebuffer, length);
+        let length = self.length();
+        let backbuffer = self.backbuffer;
+        let framebuffer = self.framebuffer;
 
-            for index in 0..length {
-                backbuffer
-                    .offset(index as isize)
-                    .write_volatile(COLOR_BLACK);
-            }
+        unsafe {
+            core::ptr::copy(backbuffer, framebuffer, length);
         }
+
+        // clear the backbuffer
+        self.clear(Color::Black.into(), false)
     }
 
-    pub fn dimensions(&self) -> (usize, usize) {
+    pub fn dimensions(&self) -> Size {
         self.dimensions
     }
 
     pub fn length(&self) -> usize {
         let dimensions = self.dimensions();
-        dimensions.0 * dimensions.1
+        dimensions.width * dimensions.height
     }
 
     pub fn byte_length(&self) -> usize {
         self.length() * size_of::<Color8i>()
+    }
+}
+
+impl core::fmt::Debug for ProtocolGraphics {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
+        formatter
+            .debug_struct("ProtocolGraphics")
+            .field("Framebuffer", &self.framebuffer)
+            .field("Backbuffer", &self.backbuffer)
+            .finish()
     }
 }
 

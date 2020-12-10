@@ -23,8 +23,8 @@ fn alloc_error(error: Layout) -> ! {
 }
 
 entrypoint!(kernel_main);
-
 fn kernel_main(mut protocol_graphics: ProtocolGraphics) -> i32 {
-    protocol_graphics.clear(Color8i::new(125, 150, 22), true);
-    loop {}
+    loop {
+        protocol_graphics.clear(Color8i::new(125, 150, 22), true);
+    }
 }
