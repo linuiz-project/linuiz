@@ -26,7 +26,7 @@ use core::{
 };
 use efi_boot::{
     drivers::graphics::{Color, Color8i, ProtocolGraphics},
-    KernelMain,
+    Framebuffer, KernelMain,
 };
 use uefi::{
     prelude::BootServices,
@@ -107,14 +107,16 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
     let graphics_output =
         locate_protocol::<GraphicsOutput>(boot_services).expect("no graphics output!");
     info!("Acquired graphics output protocol.");
-    let protocol_graphics = ProtocolGraphics::new(boot_services, graphics_output);
+    let graphics_mode = select_graphics_mode(graphics_output);
 
-    kernel_transfer(
-        image_handle,
-        system_table,
-        kernel_entry_point,
-        protocol_graphics,
-    )
+    // TODO(?) add some sensible way to choose the output mode
+    let framebuffer = graphics_output.frame_buffer().as_mut_ptr() as *mut Color8i;
+    let resolution = select_graphics_mode(graphics_output).info().resolution();
+    let dimensions = Size::new(resolution.0, resolution.1);
+    let byte_length = dimensions.product() * size_of::<Color8i>();
+    let framebuffer = Framebuffer::new(framebuffer, dimensions);
+
+    kernel_transfer(image_handle, system_table, kernel_entry_point, framebuffer)
 }
 
 fn ensure_enough_memory(boot_services: &BootServices) {
@@ -136,6 +138,23 @@ fn ensure_enough_memory(boot_services: &BootServices) {
     }
 }
 
+fn select_graphics_mode(graphics_output: &mut GraphicsOutput) -> Mode {
+    let graphics_mode = graphics_output
+        .modes()
+        .map(|mode| mode.expect("warning encountered while querying mode"))
+        .find(|ref mode| {
+            let info = mode.info();
+            info.resolution() == (1024, 768)
+        })
+        .unwrap();
+
+    graphics_output
+        .set_mode(&graphics_mode)
+        .expect_success("failed to set graphics mode");
+
+    graphics_mode
+}
+
 fn acquire_kernel_file(root_directory: &mut Directory) -> RegularFile {
     let mut kernel_directory = open_file(root_directory, "EFI");
     let mut gsai_directory = open_file(&mut kernel_directory, "gsai");
@@ -149,7 +168,7 @@ fn kernel_transfer(
     image_handle: Handle,
     system_table: SystemTable<Boot>,
     kernel_entry_point: usize,
-    mut protocol_graphics: ProtocolGraphics,
+    framebuffer: Framebuffer,
 ) -> Status {
     info!("Preparing to exit boot services environment.");
     let mmap_alloc = {
@@ -184,7 +203,7 @@ fn kernel_transfer(
 
     // at this point, the given system_table is invalid
     let kernel_main: KernelMain = unsafe { transmute(kernel_entry_point) };
-    let _result = kernel_main(protocol_graphics);
+    let _result = kernel_main(runtime_table, framebuffer);
 
     unsafe {
         runtime_table

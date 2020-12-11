@@ -7,10 +7,7 @@ mod drivers;
 mod io;
 
 use core::{alloc::Layout, panic::PanicInfo};
-use efi_boot::{
-    drivers::graphics::{Color, Color8i, ProtocolGraphics},
-    entrypoint,
-};
+use efi_boot::{SystemTable, Runtime, Framebuffer};
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
@@ -23,7 +20,15 @@ fn alloc_error(error: Layout) -> ! {
 }
 
 entrypoint!(kernel_main);
-fn kernel_main(mut protocol_graphics: ProtocolGraphics) -> i32 {
-    protocol_graphics.clear(Color::Gray.into(), true);
+fn kernel_main(runtime_table: SystemTable<Runtime>, framebuffer: Framebuffer) -> i32 {
     loop {}
+}
+
+pub struct GDT {
+    table: [u64; 8],
+    free_index: usize,
+}
+
+pub struct GDTEntry {
+
 }

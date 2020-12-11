@@ -10,6 +10,7 @@ efi_boot = { path = "../efi_boot/" }
 lazy_static = { version = "*", features = ["spin_no_std"] }
 volatile = "0.2.6"
 spin = "*"
+bitflags = "*"
 
 [profile.dev]
 panic = "abort"
