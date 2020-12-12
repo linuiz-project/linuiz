@@ -56,7 +56,7 @@ impl Serial {
         let mut fifo_port = Port::<u8>::new(com + (SerialPort::FIFOCommandPort as u16));
         let mut line_port = Port::<u8>::new(com + (SerialPort::LineCommandPort as u16));
         let mut modem_port = Port::<u8>::new(com + (SerialPort::ModemCommandPort as u16));
-        let mut status_port = Port::<u8>::new(com + (SerialPort::LineStatusPort as u16));
+        let status_port = Port::<u8>::new(com + (SerialPort::LineStatusPort as u16));
 
         // configure the serial port
         // read https://littleosbook.github.io/#configuring-the-serial-port

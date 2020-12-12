@@ -1,3 +1,4 @@
+use crate::drivers::graphics::color::{Color8i, Colors};
 ///! Graphics driver utilizing the EFI_GRAPHICS_OUTPUT_PROTOCOL to write to framebuffer.
 use core::mem::size_of;
 use efi_boot::Size;
@@ -13,7 +14,7 @@ pub struct FramebufferDriver {
 
 impl FramebufferDriver {
     pub fn new(framebuffer: *mut Color8i, backbuffer: *mut Color8i, dimensions: Size) -> Self {
-                Framebuffer {
+        FramebufferDriver {
             framebuffer,
             backbuffer,
             dimensions,
@@ -58,7 +59,7 @@ impl FramebufferDriver {
         }
 
         // clear the backbuffer
-        self.clear(Color::Black.into(), false)
+        self.clear(Colors::Black.into(), false)
     }
 
     pub fn dimensions(&self) -> Size {
@@ -75,7 +76,7 @@ impl FramebufferDriver {
     }
 }
 
-impl core::fmt::Debug for Framebuffer {
+impl core::fmt::Debug for FramebufferDriver {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
         formatter
             .debug_struct("ProtocolGraphics")
@@ -84,5 +85,3 @@ impl core::fmt::Debug for Framebuffer {
             .finish()
     }
 }
-
-

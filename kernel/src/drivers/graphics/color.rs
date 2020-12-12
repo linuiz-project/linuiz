@@ -30,16 +30,16 @@ impl From<u32> for Color8i {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum Color {
+pub enum Colors {
     Black,
     Gray,
 }
 
-impl Into<Color8i> for Color {
+impl Into<Color8i> for Colors {
     fn into(self) -> Color8i {
         match self {
-            Color::Black => Color8i::new(0, 0, 0),
-            Color::Gray => Color8i::new(100, 100, 100),
+            Colors::Black => Color8i::new(0, 0, 0),
+            Colors::Gray => Color8i::new(100, 100, 100),
         }
     }
 }

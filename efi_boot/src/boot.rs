@@ -24,14 +24,11 @@ use core::{
     mem::{size_of, transmute},
     ptr::slice_from_raw_parts_mut,
 };
-use efi_boot::{
-    drivers::graphics::{Color, Color8i, ProtocolGraphics},
-    Framebuffer, KernelMain,
-};
+use efi_boot::Framebuffer;
 use uefi::{
     prelude::BootServices,
     proto::{
-        console::gop::GraphicsOutput,
+        console::gop::{GraphicsOutput, Mode},
         loaded_image::{DevicePath, LoadedImage},
         media::{
             file::{Directory, File, RegularFile},
@@ -41,7 +38,7 @@ use uefi::{
     table::{
         boot::{AllocateType, MemoryDescriptor, MemoryType},
         runtime::ResetType,
-        Boot, Runtime, SystemTable,
+        Boot, SystemTable,
     },
     Handle, ResultExt, Status,
 };
@@ -79,6 +76,22 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
     // test to see how much memory we're working with
     ensure_enough_memory(boot_services);
 
+    // acquire graphics output to ensure a gout device
+    let framebuffer = match locate_protocol::<GraphicsOutput>(boot_services) {
+        Some(graphics_output) => {
+            let framebuffer = graphics_output.frame_buffer().as_mut_ptr() as *mut u8;
+            let resolution = select_graphics_mode(graphics_output).info().resolution();
+            let dimensions = efi_boot::Size::new(resolution.0, resolution.1);
+            info!("Acquired and configured graphics output protocol.");
+
+            Some(Framebuffer::new(framebuffer, dimensions))
+        }
+        None => {
+            warn!("No graphics output found. Kernel will default to using serial output.");
+            None
+        }
+    };
+
     // prepare required environment data
     let image = get_protocol::<LoadedImage>(boot_services, image_handle)
         .expect("failed to acquire boot image");
@@ -102,19 +115,6 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
     let kernel_file = acquire_kernel_file(root_directory);
     info!("Acquired kernel image file.");
     let kernel_entry_point = kernel_loader::load_kernel(boot_services, kernel_file);
-
-    // crate graphics output for kernel
-    let graphics_output =
-        locate_protocol::<GraphicsOutput>(boot_services).expect("no graphics output!");
-    info!("Acquired graphics output protocol.");
-    let graphics_mode = select_graphics_mode(graphics_output);
-
-    // TODO(?) add some sensible way to choose the output mode
-    let framebuffer = graphics_output.frame_buffer().as_mut_ptr() as *mut Color8i;
-    let resolution = select_graphics_mode(graphics_output).info().resolution();
-    let dimensions = Size::new(resolution.0, resolution.1);
-    let byte_length = dimensions.product() * size_of::<Color8i>();
-    let framebuffer = Framebuffer::new(framebuffer, dimensions);
 
     kernel_transfer(image_handle, system_table, kernel_entry_point, framebuffer)
 }
@@ -168,10 +168,10 @@ fn kernel_transfer(
     image_handle: Handle,
     system_table: SystemTable<Boot>,
     kernel_entry_point: usize,
-    framebuffer: Framebuffer,
+    framebuffer: Option<Framebuffer>,
 ) -> Status {
     info!("Preparing to exit boot services environment.");
-    let mmap_alloc = {
+    let mmap_buffer = {
         let boot_services = system_table.boot_services();
         let mem_descriptor_size = size_of::<MemoryDescriptor>();
         let mmap_alloc_size = boot_services.memory_map_size() + (6 * mem_descriptor_size);
@@ -181,13 +181,14 @@ fn kernel_transfer(
                 Err(error) => panic!("{:?}", error),
             };
 
-        // we HAVE TO use an unsafe transmutation here, otherwise we run into issues with
+        // we HAVE TO use an unsafe transmutation for this retval, otherwise we run into issues with
         // the system_table/boot_services getting consumed to give lifetime information
         // to the buffer (and thus not being able to be moved into the exit_boot_services call)
         unsafe { &mut *slice_from_raw_parts_mut(alloc_pointer, mmap_alloc_size) }
     };
 
     info!("Finalizing exit from boot services environment.");
+    system_table.boot_services().stall(1_000_000);
 
     // reset the output
     system_table
@@ -196,14 +197,17 @@ fn kernel_transfer(
         .expect_success("failed to reset standard output");
 
     // after this point point, the previous system_table and boot_services are no longer valid
-    let (runtime_table, _) = match system_table.exit_boot_services(image_handle, mmap_alloc) {
+    let (mut runtime_table, _) = match system_table.exit_boot_services(image_handle, mmap_buffer) {
         Ok(completion) => completion.unwrap(),
         Err(error) => panic!("{:?}", error),
     };
 
-    // at this point, the given system_table is invalid
-    let kernel_main: KernelMain = unsafe { transmute(kernel_entry_point) };
-    let _result = kernel_main(runtime_table, framebuffer);
+    // at this point, the given SystemTable<Boot> is invalid, and replaced with the runtime_table (SystemTable<Runtime>)
+    let kernel_main: efi_boot::KernelMain = unsafe { transmute(kernel_entry_point) };
+    let _result = kernel_main(match framebuffer {
+        Some(some) => 0x100 as *const Framebuffer,
+        None => 0x100 as *const Framebuffer,
+    });
 
     unsafe {
         runtime_table

@@ -7,12 +7,12 @@ pub use uefi::table::{Runtime, SystemTable};
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Size {
-    width: usize,
-    height: usize,
+    pub width: usize,
+    pub height: usize,
 }
 
 impl Size {
-    fn new(width: usize, height: usize) -> Self {
+    pub fn new(width: usize, height: usize) -> Self {
         Size { width, height }
     }
 
@@ -35,18 +35,15 @@ impl Framebuffer {
     }
 }
 
-pub type KernelMain = fn(crate::SystemTable<crate::Runtime>, crate::Framebuffer) -> i32;
+pub type KernelMain = extern "C" fn(*const crate::Framebuffer) -> i32;
 
 #[macro_export]
 macro_rules! entrypoint {
     ($path:path) => {
         #[export_name = "_start"]
-        pub extern "C" fn __impl_kernel_main(
-            runtime_table: $crate::SystemTable<Runtime>,
-            framebuffer: $crate::FramebufferParameter,
-        ) -> i32 {
+        pub extern "C" fn __impl_kernel_main(framebuffer: *const $crate::Framebuffer) -> i32 {
             let function: $crate::KernelMain = $path;
-            function(runtime_table, framebuffer)
+            function(framebuffer)
         }
     };
 }

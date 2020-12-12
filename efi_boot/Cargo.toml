@@ -14,6 +14,8 @@ rlibc = "*"
 
 [patch.crates-io]
 uefi = { path = "../../uefi-rs/" }
+uefi-macros = { path = "../../uefi-rs/uefi-macros" }
+uefi-services = { path = "../../uefi-rs/uefi-services" }
 
 [[bin]]
 name = "BOOTX64"
