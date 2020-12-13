@@ -16,8 +16,8 @@ use uefi::{
     ResultExt,
 };
 
-pub const KERNEL_VADDRESS: usize = 0xFFFFFFFF80000000;
-pub const KERNEL_PADDRESS: usize = 0x80000; // ~8MB
+pub const KERNEL_VADDRESS: usize = 0xFFFFFFFF80000000; // -2GB, page-aligned
+pub const KERNEL_PADDRESS: usize = 0x1000000; // ~16MB, page-aligned
 
 /// reads an ELF binary from the given file, and loads it into
 /// memory, returning the entry address
@@ -29,7 +29,7 @@ pub fn load_kernel(boot_services: &BootServices, mut kernel_file: RegularFile) -
     allocate_segments(boot_services, &mut kernel_file, &kernel_header);
     info!("Allocated all program segments into memory.");
 
-    kernel_header.entry_address()
+    KERNEL_PADDRESS + kernel_header.entry_address()
 }
 
 fn acquire_kernel_header(kernel_file: &mut RegularFile) -> ELFHeader64 {
@@ -78,10 +78,11 @@ fn allocate_segments(
             let relative_address = wrapping_sub(program_header.physical_address(), aligned_address);
             let aligned_size = program_header.memory_size() + relative_address;
             let pages_count = aligned_slices(aligned_size, program_header.alignment());
+            let offset_address = KERNEL_PADDRESS + aligned_address;
 
             debug!(
-                "Loading program header:\n Unaligned Address: {}\n Aligned Address: {}\n Unaligned Size: {}\n Aligned Size: {}\n",
-                program_header.physical_address(), aligned_address, program_header.memory_size(), aligned_size
+                "Loading program header:\n Unaligned Address: {}\n Aligned Address: {}\n Unaligned Size: {}\n Aligned Size: {}\n Offset Address: {}",
+                program_header.physical_address(), aligned_address, program_header.memory_size(), aligned_size, offset_address
             );
 
             // allocate pages for header
@@ -90,7 +91,7 @@ fn allocate_segments(
                 // we take an address relative to kernel insertion
                 // point, but that doesn't really matter to the code
                 // in this context
-                AllocateType::Address(aligned_address),
+                AllocateType::Address(KERNEL_PADDRESS + aligned_address),
                 MemoryType::LOADER_CODE,
                 pages_count,
             )

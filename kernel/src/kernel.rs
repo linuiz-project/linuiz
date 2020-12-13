@@ -27,32 +27,10 @@ fn alloc_error(_error: Layout) -> ! {
 }
 
 entrypoint!(kernel_main);
-extern "C" fn kernel_main(framebuffer: *const Framebuffer) -> i32 {
-    if (framebuffer == 0x100 as *const Framebuffer) {
-        loop {}
-    }
-
-    unsafe {
-        asm!(
-            "mov r8, {}",
-            "mov rdx, [0xFFFFFFFFF]",
-             in(reg) framebuffer
-        );
-    }
-
+extern "win64" fn kernel_main(framebuffer: Option<Framebuffer>) -> i32 {
     init();
 
-    serial::safe_lock(|serial| {
-        serial
-            .data_port()
-            .write_buffer(&mut [b'H', b'E', b'L', b'L', b'O']);
-
-        // loop {
-        //     serial.data_port().write(b'X');
-        // }
-    });
-
-    1234
+    0
 }
 
 fn init() {

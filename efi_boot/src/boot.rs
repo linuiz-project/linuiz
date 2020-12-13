@@ -121,21 +121,22 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
 
 fn ensure_enough_memory(boot_services: &BootServices) {
     let minimum_address = MINIMUM_MEMORY - memory::PAGE_SIZE;
-    if let Ok(completion) = boot_services.allocate_pages(
-        AllocateType::Address(minimum_address),
-        MemoryType::LOADER_DATA,
-        1,
-    ) {
-        let allocated_address = completion.unwrap();
-        boot_services
-            .free_pages(allocated_address, 1)
-            .expect_success("failed to free memory when ensuring host system capacity");
-    } else {
-        panic!(
-            "Host system requires a minimum of {} of RAM.",
-            MINIMUM_MEMORY / (0xF4240/* 1MB */)
-        );
-    }
+    let allocated_address = boot_services
+        .allocate_pages(
+            AllocateType::Address(minimum_address),
+            MemoryType::LOADER_DATA,
+            1,
+        )
+        .expect_success("host system does not meet minimum memory requirements");
+
+    boot_services
+        .free_pages(allocated_address, 1)
+        .expect_success("failed to free memory when ensuring host system capacity");
+
+    info!(
+        "Verified minimum system memory: {}MB",
+        minimum_address / 0xF4240
+    );
 }
 
 fn select_graphics_mode(graphics_output: &mut GraphicsOutput) -> Mode {
@@ -188,7 +189,7 @@ fn kernel_transfer(
     };
 
     info!("Finalizing exit from boot services environment.");
-    system_table.boot_services().stall(1_000_000);
+    // system_table.boot_services().stall(1_000_000);
 
     // reset the output
     system_table
@@ -204,10 +205,7 @@ fn kernel_transfer(
 
     // at this point, the given SystemTable<Boot> is invalid, and replaced with the runtime_table (SystemTable<Runtime>)
     let kernel_main: efi_boot::KernelMain = unsafe { transmute(kernel_entry_point) };
-    let _result = kernel_main(match framebuffer {
-        Some(some) => 0x100 as *const Framebuffer,
-        None => 0x100 as *const Framebuffer,
-    });
+    let _result = kernel_main(framebuffer);
 
     unsafe {
         runtime_table

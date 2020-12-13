@@ -35,13 +35,13 @@ impl Framebuffer {
     }
 }
 
-pub type KernelMain = extern "C" fn(*const crate::Framebuffer) -> i32;
+pub type KernelMain = extern "win64" fn(Option<crate::Framebuffer>) -> i32;
 
 #[macro_export]
 macro_rules! entrypoint {
     ($path:path) => {
         #[export_name = "_start"]
-        pub extern "C" fn __impl_kernel_main(framebuffer: *const $crate::Framebuffer) -> i32 {
+        pub extern "win64" fn __impl_kernel_main(framebuffer: Option<$crate::Framebuffer>) -> i32 {
             let function: $crate::KernelMain = $path;
             function(framebuffer)
         }
