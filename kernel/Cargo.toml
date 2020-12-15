@@ -13,12 +13,6 @@ spin = "*"
 x86_64 = "*"
 pic8259_simple = "*"
 
-[profile.dev]
-panic = "abort"
-
-[profile.release]
-panic = "abort"
-
 [[bin]]
 name = "kernel"
 path = "src/kernel.rs"

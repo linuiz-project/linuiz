@@ -8,8 +8,6 @@ use uefi::{
 };
 
 pub const PAGE_SIZE: usize = 0x1000; // 4096
-                                     // TODO some sort of checking to ensure we have enough address
-                                     // space to actually load the kernel
 
 pub struct PointerBuffer<'buf> {
     pub pointer: *mut u8,
@@ -49,11 +47,18 @@ pub fn allocate_pages(
     memory_type: MemoryType,
     pages_count: usize,
 ) -> PointerBuffer {
+    if let AllocateType::MaxAddress(address) = allocate_type {
+        if (address % PAGE_SIZE) != 0x0 {
+            panic!("Address is not page-aligned ({})", address)
+        }
+    }
+
     let alloc_pointer = match boot_services.allocate_pages(allocate_type, memory_type, pages_count)
     {
         Ok(completion) => completion.unwrap() as *mut u8,
         Err(error) => panic!("{:?}", error),
     };
+
     let alloc_buffer =
         unsafe { &mut *slice_from_raw_parts_mut(alloc_pointer, pages_count * PAGE_SIZE) };
 

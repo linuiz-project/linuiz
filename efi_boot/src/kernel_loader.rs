@@ -17,7 +17,6 @@ use uefi::{
 };
 
 pub const KERNEL_VADDRESS: usize = 0xFFFFFFFF80000000; // -2GB, page-aligned
-pub const KERNEL_PADDRESS: usize = 0x1000000; // ~16MB, page-aligned
 
 /// reads an ELF binary from the given file, and loads it into
 /// memory, returning the entry address
@@ -27,9 +26,9 @@ pub fn load_kernel(boot_services: &BootServices, mut kernel_file: RegularFile) -
     debug!("{:?}", kernel_header);
 
     allocate_segments(boot_services, &mut kernel_file, &kernel_header);
-    info!("Allocated all program segments into memory.");
+    info!("Kernel successfully read into memory.");
 
-    KERNEL_PADDRESS + kernel_header.entry_address()
+    kernel_header.entry_address()
 }
 
 fn acquire_kernel_header(kernel_file: &mut RegularFile) -> ELFHeader64 {
@@ -63,61 +62,67 @@ fn allocate_segments(
         let program_header = ProgramHeader::parse(program_header_buffer)
             .expect("failed to parse program header from buffer");
 
-        // ensure we are able to increment disk offset at end of for
-        if program_header.ph_type() == ProgramHeaderType::PT_LOAD {
-            debug!(
-                "Identified program header for loading (index {}, disk offset {}): {:?}",
-                index, current_disk_offset, program_header
-            );
+        match program_header.ph_type() {
+            ProgramHeaderType::PT_LOAD => {
+                debug!(
+                    "Identified loadable segment (index {}, disk offset {}): {:?}",
+                    index, current_disk_offset, program_header
+                );
 
-            // calculate required variables for correctly loading segment into memory
-            let aligned_address = align_down(
-                program_header.physical_address(),
-                program_header.alignment(),
-            );
-            let relative_address = wrapping_sub(program_header.physical_address(), aligned_address);
-            let aligned_size = program_header.memory_size() + relative_address;
-            let pages_count = aligned_slices(aligned_size, program_header.alignment());
-            let offset_address = KERNEL_PADDRESS + aligned_address;
+                // calculate required variables for correctly loading segment into memory
+                let aligned_address = align_down(
+                    program_header.physical_address(),
+                    program_header.alignment(),
+                );
+                // this is the offset within the page that the segment starts
+                let page_offset = wrapping_sub(program_header.physical_address(), aligned_address);
+                // size of the segment size + offset within the page
+                let aligned_size = page_offset + program_header.memory_size();
+                let pages_count = aligned_slices(aligned_size, program_header.alignment());
 
-            debug!(
-                "Loading program header:\n Unaligned Address: {}\n Aligned Address: {}\n Unaligned Size: {}\n Aligned Size: {}\n Offset Address: {}",
-                program_header.physical_address(), aligned_address, program_header.memory_size(), aligned_size, offset_address
-            );
+                debug!(
+                    "Loading segment (index {}):\n Unaligned Address: {}\n Aligned Address: {}\n Unaligned Size: {}\n Aligned Size: {}",
+                    index, program_header.physical_address(), aligned_address, program_header.memory_size(), aligned_size
+                );
 
-            // allocate pages for header
-            let segment_page_buffer = allocate_pages(
-                boot_services,
-                // we take an address relative to kernel insertion
-                // point, but that doesn't really matter to the code
-                // in this context
-                AllocateType::Address(KERNEL_PADDRESS + aligned_address),
-                MemoryType::LOADER_CODE,
-                pages_count,
-            )
-            // we won't ever explicitly deallocate this, so we only
-            // care about the buffer (pointer is used to deallocate, usually)
-            .buffer;
+                // allocate pages for header
+                let segment_page_buffer = allocate_pages(
+                    boot_services,
+                    // we take an address relative to kernel insertion
+                    // point, but that doesn't really matter to the code
+                    // in this context
+                    AllocateType::Address(aligned_address),
+                    MemoryType::LOADER_CODE,
+                    pages_count,
+                )
+                // we won't ever explicitly deallocate this, so we only
+                // care about the buffer (pointer is used to deallocate, usually)
+                .buffer;
 
-            // the segments are unlikely to be aligned to pages, so take the slice of the buffer
-            // that is equal to the segment's lowaddr..highaddr
-            let slice_end_index = relative_address + program_header.disk_size();
-            read_file(
-                kernel_file,
-                program_header.offset() as u64,
-                &mut segment_page_buffer[relative_address..slice_end_index],
-            );
+                // the segments won't always be aligned to pages, so take the slice of the buffer
+                // that is equal to the program segment's lowaddr..highaddr
 
-            if program_header.memory_size() > program_header.disk_size() {
-                // in this case, we need to zero-out the remaining memory so the segment
-                // doesn't point to garbage data (since we won't be reading anything valid into it)
-                let memory_end_index = relative_address + program_header.memory_size();
-                for index in slice_end_index..memory_end_index {
-                    segment_page_buffer[index] = 0x0;
+                let slice_end_index = page_offset + program_header.disk_size();
+                let segment_slice = &mut segment_page_buffer[page_offset..slice_end_index];
+                read_file(kernel_file, program_header.offset() as u64, segment_slice);
+
+                if program_header.memory_size() > program_header.disk_size() {
+                    // in this case, we need to zero-out the remaining memory so the segment
+                    // doesn't point to garbage data (since we won't be reading anything valid into it)
+                    let memory_end_index = page_offset + program_header.memory_size();
+                    debug!(
+                        "Zeroing segment section (index {}): from {} to {}",
+                        index, slice_end_index, memory_end_index
+                    );
+
+                    for index in slice_end_index..memory_end_index {
+                        segment_page_buffer[index] = 0x0;
+                    }
                 }
-            }
 
-            debug!("Allocated memory pages for program header's entry.");
+                debug!("Segment loaded (index {}).", index);
+            }
+            _ => {}
         }
 
         current_disk_offset += kernel_header.program_header_size() as usize;
@@ -188,18 +193,17 @@ fn allocate_sections(
         determine_section_bounds(kernel_file, kernel_header);
 
     if low_address_option.is_none() || high_address_option.is_none() {
-        debug!(
+        panic!(
             "Address space for section entires is invalid: low {:?}, high {:?}",
             low_address_option, high_address_option
         );
-        return;
     }
 
     let low_address = low_address_option.unwrap();
     let high_address = high_address_option.unwrap();
     let section_buffer_size = high_address - low_address;
     debug!(
-        "Determined section entry address space: low {}, high {}, span {}",
+        "Determined section entry address space:\n Low Address {}\n High Address {}\n Address Space {}",
         low_address, high_address, section_buffer_size
     );
 
