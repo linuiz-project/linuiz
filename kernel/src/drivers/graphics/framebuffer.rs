@@ -34,9 +34,9 @@ impl FramebufferDriver {
     }
 
     pub fn clear(&mut self, color: Color8i, flush: bool) {
+        let length = self.length();
+        let backbuffer = self.backbuffer();
         unsafe {
-            let length = self.length();
-            let backbuffer = self.backbuffer();
             for index in 0..length {
                 backbuffer.offset(index as isize).write_volatile(color);
             }

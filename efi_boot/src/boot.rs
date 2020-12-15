@@ -80,7 +80,10 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
     let framebuffer = match locate_protocol::<GraphicsOutput>(boot_services) {
         Some(graphics_output) => {
             let framebuffer = graphics_output.frame_buffer().as_mut_ptr() as *mut u8;
-            let resolution = select_graphics_mode(graphics_output).info().resolution();
+            let mode = select_graphics_mode(graphics_output);
+            let mode_info = mode.info();
+            info!("Selected graphics mode: {:?}", mode_info);
+            let resolution = mode_info.resolution();
             let dimensions = efi_boot::Size::new(resolution.0, resolution.1);
             info!("Acquired and configured graphics output protocol.");
 
@@ -143,10 +146,7 @@ fn select_graphics_mode(graphics_output: &mut GraphicsOutput) -> Mode {
     let graphics_mode = graphics_output
         .modes()
         .map(|mode| mode.expect("warning encountered while querying mode"))
-        .find(|ref mode| {
-            let info = mode.info();
-            info.resolution() == (1024, 768)
-        })
+        .last()
         .unwrap();
 
     graphics_output
@@ -198,7 +198,7 @@ fn kernel_transfer(
         .expect_success("failed to reset standard output");
 
     // after this point point, the previous system_table and boot_services are no longer valid
-    let (mut runtime_table, _) = match system_table.exit_boot_services(image_handle, mmap_buffer) {
+    let (runtime_table, _) = match system_table.exit_boot_services(image_handle, mmap_buffer) {
         Ok(completion) => completion.unwrap(),
         Err(error) => panic!("{:?}", error),
     };

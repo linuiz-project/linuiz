@@ -37,7 +37,8 @@ extern "win64" fn kernel_main(framebuffer: Option<Framebuffer>) -> i32 {
         framebuffer.unwrap().size,
     );
 
-    framebuffer_driver.clear(Colors::Gray.into(), true);
+    framebuffer_driver.clear(Colors::LightBlue.into(), true);
+    init();
 
     loop {}
 }

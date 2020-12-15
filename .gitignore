@@ -12,5 +12,4 @@ Cargo.lock
 *.img
 
 image/*
-full-clean.sh
 references/*
