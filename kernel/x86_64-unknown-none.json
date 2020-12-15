@@ -16,14 +16,8 @@
 
   "panic-strategy": "abort",
   "disable-redzone": true,
-  "relro-level": "full",
-  "executables": true,
-  "dynamic-linking": false,
-  "position-independent-executables": false,
-  "static-position-independent-executables": false,
   "relocation-model": "static",
-  "function-sections": true,
-  "eh-frame-header": false,
+  "executables": true,
   "code-model": "small",
 
   "os": "none",
