@@ -8,10 +8,8 @@ edition = "2018"
 [dependencies]
 efi_boot = { path = "../efi_boot/" }
 lazy_static = { version = "*", features = ["spin_no_std"] }
-volatile = "0.2.6"
-spin = "*"
-x86_64 = "*"
 pic8259_simple = "*"
+spin = "*"
 
 [[bin]]
 name = "kernel"

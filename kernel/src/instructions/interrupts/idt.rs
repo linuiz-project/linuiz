@@ -4,15 +4,13 @@ use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
 
 /* FAULT HANDLERS */
 
-// TODO
-
 /* INTERRUPT HANDLERS */
 
 extern "x86-interrupt" fn timer_interrupt_handler(_: &mut InterruptStackFrame) {
     end_of_interrupt(InterruptOffset::Timer);
 }
 
-/* DEFAULT IDT */
+/* IDT */
 
 lazy_static! {
     static ref IDT: InterruptDescriptorTable = {

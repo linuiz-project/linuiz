@@ -8,7 +8,7 @@ extern crate pic8259_simple;
 
 mod drivers;
 mod gdt;
-mod interrupts;
+mod instructions;
 mod io;
 mod pic;
 
@@ -47,5 +47,5 @@ fn init() {
     gdt::init();
     interrupts::load_idt();
     pic::init();
-    x86_64::instructions::interrupts::enable();
+    instructions::interrupts::enable();
 }
