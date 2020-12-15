@@ -17,12 +17,12 @@ $(bootloader): $(boot_deps) $(uefi-deps)
 	echo $(PROFILE)
 	cd /media/carl/GitHub/gsai/efi_boot/;\
 		rustfmt **/*.rs;\
-		cargo build --profile $(PROFILE) -Z unstable-options -vvv
+		cargo build --profile $(PROFILE) -Z unstable-options
 
 $(kernel): $(kernel_deps) $(uefi-deps)
 	rm -f $(kernel)
 	echo $(PROFILE)
 	cd /media/carl/GitHub/gsai/kernel/;\
 		rustfmt **/*.rs;\
-		cargo build --profile $(PROFILE) -Z unstable-options -vvv
+		cargo build --profile $(PROFILE) -Z unstable-options
 		
