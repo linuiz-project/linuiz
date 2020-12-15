@@ -6,21 +6,19 @@
   "target-endian": "little",
   "target-pointer-width": "64",
   "target-c-int-width": "32",
-
-  "relocation-model": "static",
-  "function-sections": true,
-  "eh-frame-header": false,
-  "code-model": "small",
   
   "linker": "rust-lld",
   "linker-flavor": "ld.lld",
   "linker-is-gnu": true,
-  "pre-link-args":            {
-    "ld.lld": ["-T./x86_64-unknown-none.lds"]
+  "pre-link-args": {
+    "ld.lld": ["--script=x86_64-unknown-none.lds"]
   },
 
+  "panic-strategy": "abort",
+  "disable-redzone": true,
+  "relocation-model": "static",
+  "function-sections": true,
+  "code-model": "small",
 
   "os": "none",
-  "panic-strategy": "abort",
-  "disable-redzone": true
 }

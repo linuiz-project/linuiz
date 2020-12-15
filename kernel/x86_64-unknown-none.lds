@@ -1,6 +1,5 @@
 ENTRY(_start)
 OUTPUT_FORMAT(elf64-x86-64)
-OUTPUT(kernel12.elf)
 
 SECTIONS
 {
