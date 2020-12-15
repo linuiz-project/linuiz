@@ -25,13 +25,13 @@ impl Size {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Framebuffer {
-    framebuffer: *mut u8,
-    size: Size,
+    pub pointer: *mut u8,
+    pub size: Size,
 }
 
 impl Framebuffer {
-    pub fn new(framebuffer: *mut u8, size: Size) -> Self {
-        Self { framebuffer, size }
+    pub fn new(pointer: *mut u8, size: Size) -> Self {
+        Self { pointer, size }
     }
 }
 

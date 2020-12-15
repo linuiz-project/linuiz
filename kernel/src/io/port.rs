@@ -33,9 +33,7 @@ impl<T: PortIO + Copy> Port<T> {
 
     pub fn write_buffer(&mut self, buffer: &[T]) {
         for byte in buffer {
-            unsafe {
-                self.write(*byte);
-            }
+            self.write(*byte);
         }
     }
 }

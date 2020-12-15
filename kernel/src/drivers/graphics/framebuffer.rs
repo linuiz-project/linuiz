@@ -1,5 +1,5 @@
-use crate::drivers::graphics::color::{Color8i, Colors};
 ///! Graphics driver utilizing the EFI_GRAPHICS_OUTPUT_PROTOCOL to write to framebuffer.
+use crate::drivers::graphics::color::{Color8i, Colors};
 use core::mem::size_of;
 use efi_boot::Size;
 
@@ -21,15 +21,14 @@ impl FramebufferDriver {
         }
     }
 
-    // TODO this is technically unsafe since you can modify from multiple threads (?)
-    pub fn write_pixel(&self, size: Size, color: Color8i) {
+    pub fn write_pixel(&self, xy: (usize, usize), color: Color8i) {
         let dimensions = self.dimensions();
-        if size.width >= dimensions.width || size.height >= dimensions.height {
+        if xy.0 >= dimensions.width || xy.1 >= dimensions.height {
             panic!("given coordinates are outside framebuffer");
         } else {
             unsafe {
-                let index = (size.width + (size.height * dimensions.width)) as isize;
-                self.backbuffer.offset(index).write_volatile(color);
+                let index = (xy.0 + (xy.1 * dimensions.width)) as isize;
+                self.backbuffer().offset(index).write_volatile(color);
             }
         }
     }
@@ -37,7 +36,7 @@ impl FramebufferDriver {
     pub fn clear(&mut self, color: Color8i, flush: bool) {
         unsafe {
             let length = self.length();
-            let backbuffer = self.backbuffer;
+            let backbuffer = self.backbuffer();
             for index in 0..length {
                 backbuffer.offset(index as isize).write_volatile(color);
             }
@@ -50,16 +49,18 @@ impl FramebufferDriver {
 
     /// copy backbuffer to frontbuffer and zero backbuffer
     pub fn flush_pixels(&mut self) {
-        let length = self.length();
-        let backbuffer = self.backbuffer;
-        let framebuffer = self.framebuffer;
+        if self.has_backbuffer() {
+            let length = self.length();
+            let backbuffer = self.backbuffer;
+            let framebuffer = self.framebuffer;
 
-        unsafe {
-            core::ptr::copy(backbuffer, framebuffer, length);
+            unsafe {
+                core::ptr::copy_nonoverlapping(backbuffer, framebuffer, length);
+            }
+
+            // clear the backbuffer
+            self.clear(Colors::Black.into(), false)
         }
-
-        // clear the backbuffer
-        self.clear(Colors::Black.into(), false)
     }
 
     pub fn dimensions(&self) -> Size {
@@ -73,6 +74,18 @@ impl FramebufferDriver {
 
     pub fn byte_length(&self) -> usize {
         self.length() * size_of::<Color8i>()
+    }
+
+    fn backbuffer(&self) -> *mut Color8i {
+        if self.has_backbuffer() {
+            self.backbuffer
+        } else {
+            self.framebuffer
+        }
+    }
+
+    fn has_backbuffer(&self) -> bool {
+        self.backbuffer != core::ptr::null_mut::<Color8i>()
     }
 }
 

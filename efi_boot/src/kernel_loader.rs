@@ -84,9 +84,6 @@ fn allocate_segments(
                     index, program_header.physical_address(), program_header.memory_size(), aligned_address, aligned_size, aligned_address + (pages_count * PAGE_SIZE), pages_count
                 );
 
-            // 128109228
-            // 128109232
-
             // allocate pages for header
             let segment_page_buffer = allocate_pages(
                 boot_services,
