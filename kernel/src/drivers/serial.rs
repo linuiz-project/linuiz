@@ -62,8 +62,8 @@ impl Serial {
         // read https://littleosbook.github.io/#configuring-the-serial-port
 
         line_port.write(LINE_ENABLE_DLAB);
-        data_port.write((((speed as u16) >> 8) * 0x00FF) as u8);
-        data_port.write(((speed as u16) & 0x00FF) as u8);
+        data_port.write((((speed as u16) >> 8) * 0xFF) as u8);
+        data_port.write(((speed as u16) & 0xFF) as u8);
 
         line_port.write(0x3);
 
@@ -104,10 +104,10 @@ impl Serial {
     }
 
     pub fn is_fifo_empty(&mut self) -> bool {
-        (self.status_port.read() & 0x20) > 0x0
+        (self.status_port.read() & 0x20) == 0x0
     }
 
     pub fn serial_received(&mut self) -> bool {
-        (self.status_port.read() & 0x1) > 0x0
+        (self.status_port.read() & 0x1) == 0x0
     }
 }

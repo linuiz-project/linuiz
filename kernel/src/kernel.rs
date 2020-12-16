@@ -13,9 +13,12 @@ mod io;
 mod pic;
 
 use core::{alloc::Layout, panic::PanicInfo};
-use drivers::graphics::{
-    color::{Color8i, Colors},
-    framebuffer::FramebufferDriver,
+use drivers::{
+    graphics::{
+        color::{Color8i, Colors},
+        framebuffer::FramebufferDriver,
+    },
+    serial::{self, Serial},
 };
 use efi_boot::{entrypoint, Framebuffer};
 
@@ -31,21 +34,17 @@ fn alloc_error(_error: Layout) -> ! {
 
 entrypoint!(kernel_main);
 extern "win64" fn kernel_main(framebuffer: Option<Framebuffer>) -> i32 {
-    let mut framebuffer_driver = FramebufferDriver::new(
-        framebuffer.unwrap().pointer as *mut Color8i,
-        0xB71B000 as *mut Color8i,
-        framebuffer.unwrap().size,
-    );
+    serial::safe_lock(|serial| {
+        serial.data_port().write(b'X');
+    });
 
-    framebuffer_driver.clear(Colors::LightBlue.into(), true);
-    init();
+    // let mut framebuffer_driver = FramebufferDriver::new(
+    //     framebuffer.unwrap().pointer as *mut Color8i,
+    //     0xB71B000 as *mut Color8i,
+    //     framebuffer.unwrap().size,
+    // );
+
+    // framebuffer_driver.clear(Colors::LightBlue.into(), true);
 
     loop {}
-}
-
-fn init() {
-    gdt::init();
-    interrupts::load_idt();
-    pic::init();
-    instructions::interrupts::enable();
 }
