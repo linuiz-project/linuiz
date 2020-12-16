@@ -26,7 +26,7 @@ pub enum SerialSpeed {
 }
 
 lazy_static! {
-    pub static ref SERIAL: Mutex<Serial> =
+    static ref SERIAL: Mutex<Serial> =
         Mutex::new(unsafe { Serial::init(COM1, SerialSpeed::S115200) });
 }
 
@@ -67,10 +67,9 @@ impl Serial {
 
         line_port.write(0x3);
 
-        // enable FIFO, clear them, with 14b threshold
+        // enable FIFO, clear queue, with 14b threshold
         fifo_port.write(0xC7);
 
-        // todo enable interrupts?
         // IRQs enabled, RTS/DSR set
         modem_port.write(0x0B);
 

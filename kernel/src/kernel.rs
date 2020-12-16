@@ -1,40 +1,14 @@
 #![no_std]
 #![no_main]
-#![feature(asm)]
-#![feature(abi_x86_interrupt)]
-#![feature(alloc_error_handler)]
 
-extern crate pic8259_simple;
+extern crate kernel;
 
-mod drivers;
-mod gdt;
-mod instructions;
-mod io;
-mod pic;
-
-use core::{alloc::Layout, panic::PanicInfo};
-use drivers::{
-    graphics::{
-        color::{Color8i, Colors},
-        framebuffer::FramebufferDriver,
-    },
-    serial::{self, Serial},
-};
 use efi_boot::{entrypoint, Framebuffer};
-
-#[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
-    loop {}
-}
-
-#[alloc_error_handler]
-fn alloc_error(_error: Layout) -> ! {
-    loop {}
-}
+use kernel::drivers::serial;
 
 entrypoint!(kernel_main);
 extern "win64" fn kernel_main(framebuffer: Option<Framebuffer>) -> i32 {
-    serial::safe_lock(|serial| {
+    Serial::safe_lock(|serial| {
         serial.data_port().write(b'X');
     });
 

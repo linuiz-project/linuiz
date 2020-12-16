@@ -9,7 +9,10 @@ edition = "2018"
 efi_boot = { path = "../efi_boot/" }
 lazy_static = { version = "*", features = ["spin_no_std"] }
 pic8259_simple = "*"
+bit_field = "*"
+bitflags = "*"
 spin = "*"
+
 
 [[bin]]
 name = "kernel"
