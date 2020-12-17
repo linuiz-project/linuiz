@@ -1,4 +1,19 @@
+use crate::structures::gdt::segment_selector::SegmentSelector;
+
 pub mod interrupts;
+pub mod tables;
+
+pub unsafe fn set_cs(sel: SegmentSelector) {
+    asm!(
+        "push {sel}",
+        "lea {tmp}, [1F + rip]",
+        "push {tmp}",
+        "retfq",
+        "1:",
+        sel = in(reg) u64::from(sel.0),
+        tmp = lateout(reg) _,
+    );
+} 
 
 pub fn hlt() {
     unsafe {

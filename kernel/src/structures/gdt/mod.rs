@@ -6,6 +6,8 @@ use segment_descriptor::{SegmentDescriptor, SegmentDescriptorFlags};
 use segment_selector::SegmentSelector;
 use lazy_static::lazy_static;
 
+use super::DescriptorTablePointer;
+
 pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
 
 struct Selectors {
@@ -65,6 +67,17 @@ impl GlobalDescriptorTable {
             panic!("GDT is full")
         }
     }
+
+    const fn pointer(&self) -> DescriptorTablePointer {
+        DescriptorTablePointer {
+            base: self.table.as_ptr() as u64,
+            limit: (self.next_free * core::mem::size_of::<u64>() - 1) as u16
+        }
+    }
+
+    pub const fn load(&'static self) {
+        unsafe { lgdt(&self.pointer()) };
+    }
 }
 
 lazy_static! {
@@ -98,5 +111,20 @@ lazy_static! {
 }
 
 pub fn init() {
+    // set code segment
+    asm!(
+        "push {sel}",
+        "lea {tmp}, [1F + rip]",
+        "push {tmp}",
+        "retfq",
+        "1:",
+        sel = in(reg) u64::from(GDT.1.code_selector),
+        tmp = lateout(reg) _
+    );
+
+    // set task state segment
+    asm!("ltr {0:x}", in(reg) GDT.1.tss_selector.0, options(nomem, nostack));
+
+    GDT.0.load();
 
 }
