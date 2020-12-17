@@ -1,6 +1,6 @@
-use crate::io::port::Port;
 use lazy_static::lazy_static;
 use spin::mutex::{Mutex, MutexGuard};
+use x86_64::instructions::port::Port;
 
 pub const COM1: u16 = 0x3FB;
 pub const LINE_ENABLE_DLAB: u8 = 0x80;
@@ -41,7 +41,7 @@ where
     callback(&mut SERIAL.lock());
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Serial {
     data_port: Port<u8>,
     fifo_port: Port<u8>,
@@ -82,31 +82,31 @@ impl Serial {
         }
     }
 
-    pub fn data_port(&self) -> Port<u8> {
-        self.data_port
+    pub fn data_port(&mut self) -> &mut Port<u8> {
+        &mut self.data_port
     }
 
-    pub fn fifo_port(&self) -> Port<u8> {
-        self.fifo_port
+    pub fn fifo_port(&mut self) -> &mut Port<u8> {
+        &mut self.fifo_port
     }
 
-    pub fn line_port(&self) -> Port<u8> {
-        self.line_port
+    pub fn line_port(&mut self) -> &mut Port<u8> {
+        &mut self.line_port
     }
 
-    pub fn modem_port(&self) -> Port<u8> {
-        self.modem_port
+    pub fn modem_port(&mut self) -> &mut Port<u8> {
+        &mut self.modem_port
     }
 
-    pub fn status_port(&self) -> Port<u8> {
-        self.status_port
+    pub fn status_port(&mut self) -> &mut Port<u8> {
+        &mut self.status_port
     }
 
     pub fn is_fifo_empty(&mut self) -> bool {
-        (self.status_port.read() & 0x20) == 0x0
+        (unsafe { self.status_port.read() } & 0x20) == 0x0
     }
 
     pub fn serial_received(&mut self) -> bool {
-        (self.status_port.read() & 0x1) == 0x0
+        (unsafe { self.status_port.read() } & 0x1) == 0x0
     }
 }
