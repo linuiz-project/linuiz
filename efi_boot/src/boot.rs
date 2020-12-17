@@ -87,8 +87,7 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
             let dimensions = efi_boot::Size::new(resolution.0, resolution.1);
             info!("Acquired and configured graphics output protocol.");
 
-            None
-            // Some(Framebuffer::new(framebuffer, dimensions))
+            Some(Framebuffer::new(framebuffer, dimensions))
         }
         None => {
             warn!("No graphics output found. Kernel will default to using serial output.");

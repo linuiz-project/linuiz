@@ -9,11 +9,13 @@ pub mod drivers;
 use core::{alloc::Layout, panic::PanicInfo};
 
 #[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
+fn panic(info: &PanicInfo) -> ! {
+    write!("{}", info);
     loop {}
 }
 
 #[alloc_error_handler]
-fn alloc_error(_error: Layout) -> ! {
+fn alloc_error(error: Layout) -> ! {
+    write!("{:?}", error);
     loop {}
 }
