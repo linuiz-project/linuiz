@@ -62,20 +62,9 @@ impl From<u16> for PrivilegeLevel {
     }
 }
 
-#[repr(transparent)]
+#[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct VirtAddr(usize);
-
-impl VirtAddr {
-    pub const fn zero() -> Self {
-        VirtAddr::from(0x0)
-    }
-}
-
-impl From<u64> for VirtAddr {
-    fn from(val: u64) -> Self {
-        Self {
-            0: val
-        }
-    }
+pub enum Address {
+    Physical(usize),
+    Virtual(usize)
 }

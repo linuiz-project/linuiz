@@ -1,9 +1,17 @@
 pub mod segment_selector;
 pub mod segment_descriptor;
 
+use crate::{Address, PrivilegeLevel, structures::tss::TaskStateSegment};
 use segment_descriptor::{SegmentDescriptor, SegmentDescriptorFlags};
 use segment_selector::SegmentSelector;
-use crate::PrivilegeLevel;
+use lazy_static::lazy_static;
+
+pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
+
+struct Selectors {
+    code_selector: SegmentSelector,
+    tss_selector: SegmentSelector
+}
 
 #[derive(Debug, Clone)]
 pub struct GlobalDescriptorTable {
@@ -36,7 +44,7 @@ impl GlobalDescriptorTable {
                 } else if SegmentDescriptorFlags::from_bits_truncate(segment).contains(SegmentDescriptorFlags::DPL_RING_2) {
                     PrivilegeLevel::Ring2
                 } else if SegmentDescriptorFlags::from_bits_truncate(segment).contains(SegmentDescriptorFlags::DPL_RING_1) {
-                    PrivilegeLevel:: Ring1
+                    PrivilegeLevel::Ring1
                 } else {
                     PrivilegeLevel::Ring0
                 }
@@ -57,4 +65,38 @@ impl GlobalDescriptorTable {
             panic!("GDT is full")
         }
     }
+}
+
+lazy_static! {
+    static ref TSS: TaskStateSegment = {
+        let mut tss = TaskStateSegment::new();
+        tss.interrupt_stack_table[DOUBLE_FAULT_IST_INDEX as usize] = {
+            const STACK_SIZE: usize = 4096 * 5;
+            static mut STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
+
+            let stack_start = Address::from(unsafe { &STACK });
+            let stack_end = stack_start + STACK_SIZE;
+            stack_end
+
+        };
+
+        tss
+    };
+}
+
+lazy_static! {
+    static ref GDT: (GlobalDescriptorTable, Selectors) = {
+        let mut gdt = GlobalDescriptorTable::new();
+        let code_selector = gdt.add_entry(SegmentDescriptor::kernel_code_segment());
+        let tss_selector = gdt.add_entry(SegmentDescriptor::tss_segment(&TSS));
+
+    (gdt, Selectors {
+        code_selector,
+        tss_selector
+    })
+    };
+}
+
+pub fn init() {
+
 }
