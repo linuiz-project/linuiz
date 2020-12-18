@@ -17,11 +17,12 @@ lazy_static! {
         idt.page_fault.set_handler_fn(page_fault_handler);
 
         unsafe {
-        idt.double_fault.set_handler_fn(double_fault_handler).set_stack_index(crate::boot::gdt::DOUBLE_FAULT_IST_INDEX);
+            idt.double_fault.set_handler_fn(double_fault_handler).set_stack_index(crate::boot::gdt::DOUBLE_FAULT_IST_INDEX);
         }
 
         // regular interrupts
         idt[InterruptOffset::Timer.into()].set_handler_fn(timer_interrupt_handler);
+        idt[InterruptOffset::Keyboard.into()].set_handler_fn(keyboard_interrupt_handler);
 
         idt
     };

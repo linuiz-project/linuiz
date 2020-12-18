@@ -1,6 +1,9 @@
-use crate::{write, boot::pic::{end_of_interrupt, InterruptOffset}};
-use x86_64::structures::idt::InterruptStackFrame;
+use crate::{
+    boot::pic::{end_of_interrupt, InterruptOffset},
+    write,
+};
 use lazy_static::lazy_static;
+use x86_64::structures::idt::InterruptStackFrame;
 
 pub(super) extern "x86-interrupt" fn timer_interrupt_handler(_: &mut InterruptStackFrame) {
     end_of_interrupt(InterruptOffset::Timer);
@@ -8,8 +11,8 @@ pub(super) extern "x86-interrupt" fn timer_interrupt_handler(_: &mut InterruptSt
 
 pub(super) extern "x86-interrupt" fn keyboard_interrupt_handler(_: &mut InterruptStackFrame) {
     use pc_keyboard::{layouts, DecodedKey, HandleControl, Keyboard, ScancodeSet1};
-    use x86_64::instructions::port::Port;
     use spin::Mutex;
+    use x86_64::instructions::port::Port;
 
     lazy_static! {
         static ref KEYBOARD: Mutex<Keyboard<layouts::Us104Key, ScancodeSet1>> = Mutex::new(
@@ -22,11 +25,13 @@ pub(super) extern "x86-interrupt" fn keyboard_interrupt_handler(_: &mut Interrup
     let scancode: u8 = unsafe { port.read() };
 
     if let Ok(Some(key_event)) = keyboard.add_byte(scancode) {
-        if let Some(key) = keyboard.process_keyevents(key_event) {
+        if let Some(key) = keyboard.process_keyevent(key_event) {
             match key {
                 DecodedKey::Unicode(character) => write!("{}", character),
-                DecodedKey::RawKey(key) => write!("{:?}", key)
+                DecodedKey::RawKey(key) => write!("{:?}", key),
             }
         }
     }
+
+    end_of_interrupt(InterruptOffset::Keyboard);
 }
