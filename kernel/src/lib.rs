@@ -5,6 +5,7 @@
 
 pub mod boot;
 pub mod drivers;
+pub mod io;
 
 use core::{alloc::Layout, panic::PanicInfo};
 

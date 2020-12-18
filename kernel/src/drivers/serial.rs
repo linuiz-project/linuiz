@@ -1,21 +1,25 @@
+use crate::io::port::Port;
 use lazy_static::lazy_static;
 use spin::mutex::{Mutex, MutexGuard};
-use x86_64::instructions::port::Port;
 
 pub const COM1: u16 = 0x3F8;
 pub const LINE_ENABLE_DLAB: u8 = 0x80;
 
+/// COM/Serial port address offsets.
 #[repr(u16)]
 #[allow(dead_code)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum SerialPort {
-    DataPort = 0x0,
-    FIFOCommandPort = 0x2,
-    LineCommandPort = 0x3,
-    ModemCommandPort = 0x4,
-    LineStatusPort = 0x5,
+    Data = 0x0,
+    FIFOControl = 0x2,
+    LineControl = 0x3,
+    ModemControl = 0x4,
+    LineStatus = 0x5,
+    ModemStatus = 0x6,
+    Scratch = 0x7
 }
 
+/// Serial port speed, measured in bauds.
 #[repr(u16)]
 #[allow(dead_code)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -43,54 +47,60 @@ where
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Serial {
-    data_port: Port<u8>,
-    fifo_port: Port<u8>,
-    line_port: Port<u8>,
-    modem_port: Port<u8>,
-    status_port: Port<u8>,
+    data: Port<u8>,
+    fifo_control: Port<u8>,
+    line_control: Port<u8>,
+    modem_control: Port<u8>,
+    line_status: Port<u8>,
+    modem_status: Port<u8>,
+    scratch: Port<u8>,
 }
 
 impl Serial {
     pub unsafe fn init(com: u16, speed: SerialSpeed) -> Self {
-        let mut data_port = Port::<u8>::new(com + (SerialPort::DataPort as u16));
-        let mut fifo_port = Port::<u8>::new(com + (SerialPort::FIFOCommandPort as u16));
-        let mut line_port = Port::<u8>::new(com + (SerialPort::LineCommandPort as u16));
-        let mut modem_port = Port::<u8>::new(com + (SerialPort::ModemCommandPort as u16));
-        let status_port = Port::<u8>::new(com + (SerialPort::LineStatusPort as u16));
+        let mut data = Port::<u8>::new(com + (SerialPort::Data as u16));
+        let mut fifo_control = Port::<u8>::new(com + (SerialPort::FIFOControl as u16));
+        let mut line_control = Port::<u8>::new(com + (SerialPort::LineControl as u16));
+        let mut modem_control = Port::<u8>::new(com + (SerialPort::ModemControl as u16));
+        let line_status = Port::<u8>::new(com + (SerialPort::LineStatus as u16));
+        let modem_status = Port::<u8>::new(com + (SerialPort::ModemStatus as u16));
+        let scratch = Port::<u8>::new(com + (SerialPort::Scratch as u16));
 
         // configure the serial port
         // read https://littleosbook.github.io/#configuring-the-serial-port
 
-        line_port.write(LINE_ENABLE_DLAB);
-        data_port.write((((speed as u16) >> 8) * 0xFF) as u8);
-        data_port.write(((speed as u16) & 0xFF) as u8);
+        line_control.write(LINE_ENABLE_DLAB);
+        data.write((((speed as u16) >> 8) * 0xFF) as u8);
+        data.write(((speed as u16) & 0xFF) as u8);
 
-        line_port.write(0x3);
+        line_control.write(0x3);
 
         // enable FIFO, clear queue, with 14b threshold
-        fifo_port.write(0xC7);
+        fifo_control.write(0xC7);
 
         // IRQs enabled, RTS/DSR set
-        modem_port.write(0x0B);
+        modem_control.write(0x0B);
 
         Serial {
-            data_port,
-            fifo_port,
-            line_port,
-            modem_port,
-            status_port,
+            data,
+            fifo_control,
+            line_control,
+            modem_control,
+            line_status,
+            modem_status,
+            scratch
         }
     }
 
     pub fn write(&mut self, port: SerialPort, byte: u8) {
-        unsafe {
-            match port {
-                SerialPort::DataPort => self.data_port.write(byte),
-                SerialPort::FIFOCommandPort => self.fifo_port.write(byte),
-                SerialPort::LineCommandPort => self.line_port.write(byte),
-                SerialPort::ModemCommandPort => self.modem_port.write(byte),
-                SerialPort::LineStatusPort => self.status_port.write(byte),
-            }
+        match port {
+            SerialPort::Data => self.data.write(byte),
+            SerialPort::FIFOControl => self.fifo_control.write(byte),
+            SerialPort::LineControl => self.line_control.write(byte),
+            SerialPort::ModemControl => self.modem_control.write(byte),
+            SerialPort::LineStatus => self.line_status.write(byte),
+            SerialPort::ModemStatus => self.modem_status.write(byte),
+            SerialPort::Scratch => self.scratch.write(byte)
         }
     }
 
@@ -110,29 +120,29 @@ impl Serial {
     }
 
     pub fn read(&mut self, port: SerialPort) -> u8 {
-        unsafe {
-            match port {
-                SerialPort::DataPort => self.data_port.read(),
-                SerialPort::FIFOCommandPort => self.fifo_port.read(),
-                SerialPort::LineCommandPort => self.line_port.read(),
-                SerialPort::ModemCommandPort => self.modem_port.read(),
-                SerialPort::LineStatusPort => self.status_port.read(),
-            }
+        match port {
+            SerialPort::Data => self.data.read(),
+            SerialPort::FIFOControl => self.fifo_control.read(),
+            SerialPort::LineControl => self.line_control.read(),
+            SerialPort::ModemControl => self.modem_control.read(),
+            SerialPort::LineStatus => self.line_status.read(),
+            SerialPort::ModemStatus => self.modem_status.read(),
+            SerialPort::Scratch => self.scratch.read()
         }
     }
 
     pub fn is_fifo_empty(&mut self) -> bool {
-        (self.read(SerialPort::LineStatusPort) & 0x20) == 0x0
+        (self.read(SerialPort::LineStatus) & 0x20) == 0x0
     }
 
     pub fn serial_received(&mut self) -> bool {
-        (self.read(SerialPort::LineStatusPort) & 0x1) == 0x0
+        (self.read(SerialPort::LineStatus) & 0x1) == 0x0
     }
 }
 
 impl core::fmt::Write for Serial {
     fn write_str(&mut self, string: &str) -> core::fmt::Result {
-        self.write_string(SerialPort::DataPort, string);
+        self.write_string(SerialPort::Data, string);
         Ok(())
     }
 }
