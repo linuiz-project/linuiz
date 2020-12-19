@@ -7,7 +7,7 @@ const MODE_8806: u8 = 0x01;
 struct PIC {
     offset: u8,
     command: Port<u8>,
-    data: Port<u8>
+    data: Port<u8>,
 }
 
 impl PIC {
@@ -24,25 +24,25 @@ impl PIC {
 ///
 /// Remark: This is the standard setup on x86.
 pub struct ChainedPICs {
-    pics: [PIC; 2]
+    pics: [PIC; 2],
 }
 
 impl ChainedPICs {
     /// Create a new interface for the standard PIC1 and PIC2 controllers, specifying the desired interrupt offsets.
-    pub const unsafe fn new(offset1: u8, offset2: u8) -> Self {
+    pub unsafe fn new(offset1: u8, offset2: u8) -> Self {
         Self {
             pics: [
                 PIC {
                     offset: offset1,
                     command: Port::new(0x20),
-                    data: Port::new(0x21)
+                    data: Port::new(0x21),
                 },
                 PIC {
                     offset: offset2,
                     command: Port::new(0xA0),
-                    data: Port::new(0xA1)
-                }
-            ]
+                    data: Port::new(0xA1),
+                },
+            ],
         }
     }
 
@@ -57,7 +57,7 @@ impl ChainedPICs {
         // tend to required interrupts. This is usually worked around by writing garbage data to port 0x80,
         // which should take long enough to make everything work (* on most hardware).
         let mut io_wait_port = Port::<u8>::new(0x80);
-        let mut io_wait = || { io_wait_port.write(0x0) };
+        let mut io_wait = || io_wait_port.write(0x0);
 
         // save the masks stored in data port
         let saved_mask1 = self.pics[0].data.read();
@@ -88,10 +88,12 @@ impl ChainedPICs {
 
     // Indicates whether any of the chained PICs handle the given interrupt.
     pub fn handles_interrupt(&self, interrupt_id: u8) -> bool {
-        self.pics.iter().any(|pic| pic.handles_interrupt(interrupt_id))
+        self.pics
+            .iter()
+            .any(|pic| pic.handles_interrupt(interrupt_id))
     }
 
-    pub unsafe fn end_of_interrupt(&mut self, interrupt_id: u8)  {
+    pub unsafe fn end_of_interrupt(&mut self, interrupt_id: u8) {
         if self.handles_interrupt(interrupt_id) {
             // If the interrupt belongs to the slave PIC, we send the EOI command to it.
             if self.pics[1].handles_interrupt(interrupt_id) {

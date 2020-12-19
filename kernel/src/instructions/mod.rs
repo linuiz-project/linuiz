@@ -1,5 +1,7 @@
 pub fn hlt() {
-    asm!("hlt", options(nomem, nostack));
+    unsafe {
+        asm!("hlt", options(nomem, nostack));
+    }
 }
 
 pub fn htl_indefinite() -> ! {

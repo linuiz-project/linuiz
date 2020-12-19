@@ -6,7 +6,7 @@ use efi_boot::{entrypoint, Framebuffer};
 use gsai::writeln;
 
 entrypoint!(kernel_main);
-extern "win64" fn kernel_main(framebuffer: Option<Framebuffer>) -> i32 {
+extern "win64" fn kernel_main(_framebuffer: Option<Framebuffer>) -> i32 {
     writeln!("Successfully loaded into kernel.");
     writeln!("Initializing CPU structures.");
 
@@ -16,11 +16,11 @@ extern "win64" fn kernel_main(framebuffer: Option<Framebuffer>) -> i32 {
 }
 
 fn init() {
-    gsai::boot::gdt::init();
+    gsai::structures::gdt::init();
     writeln!("Successfully initialized GDT.");
-    gsai::boot::pic::init();
+    gsai::structures::pic::init();
     writeln!("Successfully initialized PIC.");
-    gsai::boot::interrupts::load_idt();
+    gsai::structures::interrupts::load_idt();
     writeln!("Successfully initialized and configured IDT.");
 
     x86_64::instructions::interrupts::enable();

@@ -3,10 +3,10 @@
 #![feature(abi_x86_interrupt)]
 #![feature(alloc_error_handler)]
 
-pub mod structures;
 pub mod drivers;
-pub mod io;
 pub mod instructions;
+pub mod io;
+pub mod structures;
 
 use core::{alloc::Layout, panic::PanicInfo};
 

@@ -1,4 +1,4 @@
-use crate::{writeln, instructions::htl_indefinite};
+use crate::{instructions::htl_indefinite, writeln};
 use x86_64::structures::idt::{InterruptStackFrame, PageFaultErrorCode};
 
 pub(super) extern "x86-interrupt" fn breakpoint_handler(stack_frame: &mut InterruptStackFrame) {

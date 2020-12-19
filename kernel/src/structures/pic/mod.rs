@@ -7,6 +7,7 @@ Information about the PIC can be found here: https://en.wikipedia.org/wiki/Intel
 
 pub mod pic8259;
 
+use lazy_static::lazy_static;
 use pic8259::ChainedPICs;
 use spin;
 
@@ -33,11 +34,10 @@ impl Into<usize> for InterruptOffset {
     }
 }
 
-const fn create_pics() -> ChainedPICs {
-    unsafe { ChainedPICs::new(PIC_1_OFFSET, PIC_2_OFFSET) }
+lazy_static! {
+    pub static ref PICS: spin::Mutex<ChainedPICs> =
+        spin::Mutex::new(unsafe { ChainedPICs::new(PIC_1_OFFSET, PIC_2_OFFSET) });
 }
-
-pub static PICS: spin::Mutex<ChainedPICs> = spin::Mutex::new(create_pics());
 
 pub fn init() {
     unsafe {
