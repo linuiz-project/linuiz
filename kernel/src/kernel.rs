@@ -23,6 +23,6 @@ fn init() {
     gsai::structures::interrupts::load_idt();
     writeln!("Successfully initialized and configured IDT.");
 
-    x86_64::instructions::interrupts::enable();
+    gsai::instructions::interrupts::enable();
     writeln!("(WARN: Interrupts are now enabled)");
 }
