@@ -1,7 +1,5 @@
-use crate::writeln;
+use crate::{writeln, instructions::htl_indefinite};
 use x86_64::structures::idt::{InterruptStackFrame, PageFaultErrorCode};
-
-use super::halt_until_interrupt_indefinite;
 
 pub(super) extern "x86-interrupt" fn breakpoint_handler(stack_frame: &mut InterruptStackFrame) {
     writeln!("CPU EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
@@ -25,5 +23,5 @@ pub(super) extern "x86-interrupt" fn page_fault_handler(
     writeln!("Error Code: {:?}", error_code);
     writeln!("{:#?}", stack_frame);
 
-    halt_until_interrupt_indefinite();
+    htl_indefinite();
 }

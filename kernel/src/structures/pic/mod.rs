@@ -5,7 +5,9 @@ based around the Intel 8259 PIC, which is still supported in favor of backwards 
 Information about the PIC can be found here: https://en.wikipedia.org/wiki/Intel_8259
 */
 
-use pic8259_simple::ChainedPics;
+pub mod pic8259;
+
+use pic8259::ChainedPICs;
 use spin;
 
 pub const PIC_1_OFFSET: u8 = 32;
@@ -27,16 +29,15 @@ impl Into<u8> for InterruptOffset {
 
 impl Into<usize> for InterruptOffset {
     fn into(self) -> usize {
-        let byte: u8 = self.into();
-        usize::from(byte)
+        usize::from(self as u8)
     }
 }
 
-const fn crate_pics() -> ChainedPics {
-    unsafe { ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET) }
+const fn create_pics() -> ChainedPICs {
+    unsafe { ChainedPICs::new(PIC_1_OFFSET, PIC_2_OFFSET) }
 }
 
-pub static PICS: spin::Mutex<ChainedPics> = spin::Mutex::new(crate_pics());
+pub static PICS: spin::Mutex<ChainedPICs> = spin::Mutex::new(create_pics());
 
 pub fn init() {
     unsafe {
@@ -46,6 +47,6 @@ pub fn init() {
 
 pub fn end_of_interrupt(offset: InterruptOffset) {
     unsafe {
-        PICS.lock().notify_end_of_interrupt(offset.into());
+        PICS.lock().end_of_interrupt(offset.into());
     }
 }

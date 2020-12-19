@@ -22,7 +22,6 @@ lazy_static! {
 
         // regular interrupts
         idt[InterruptOffset::Timer.into()].set_handler_fn(timer_interrupt_handler);
-        idt[InterruptOffset::Keyboard.into()].set_handler_fn(keyboard_interrupt_handler);
 
         idt
     };
@@ -30,10 +29,4 @@ lazy_static! {
 
 pub fn load_idt() {
     IDT.load();
-}
-
-pub fn halt_until_interrupt_indefinite() -> ! {
-    loop {
-        x86_64::instructions::hlt();
-    }
 }
