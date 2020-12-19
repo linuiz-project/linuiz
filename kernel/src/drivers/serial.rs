@@ -16,7 +16,7 @@ pub enum SerialPort {
     ModemControl = 0x4,
     LineStatus = 0x5,
     ModemStatus = 0x6,
-    Scratch = 0x7
+    Scratch = 0x7,
 }
 
 /// Serial port speed, measured in bauds.
@@ -88,11 +88,15 @@ impl Serial {
             modem_control,
             line_status,
             modem_status,
-            scratch
+            scratch,
         }
     }
 
     pub fn write(&mut self, port: SerialPort, byte: u8) {
+        // this ensures we don't overwrite pending data
+        while !self.is_write_empty() {}
+
+        // write to port
         match port {
             SerialPort::Data => self.data.write(byte),
             SerialPort::FIFOControl => self.fifo_control.write(byte),
@@ -100,7 +104,7 @@ impl Serial {
             SerialPort::ModemControl => self.modem_control.write(byte),
             SerialPort::LineStatus => self.line_status.write(byte),
             SerialPort::ModemStatus => self.modem_status.write(byte),
-            SerialPort::Scratch => self.scratch.write(byte)
+            SerialPort::Scratch => self.scratch.write(byte),
         }
     }
 
@@ -120,23 +124,29 @@ impl Serial {
     }
 
     pub fn read(&mut self, port: SerialPort) -> u8 {
-        match port {
-            SerialPort::Data => self.data.read(),
-            SerialPort::FIFOControl => self.fifo_control.read(),
-            SerialPort::LineControl => self.line_control.read(),
-            SerialPort::ModemControl => self.modem_control.read(),
-            SerialPort::LineStatus => self.line_status.read(),
-            SerialPort::ModemStatus => self.modem_status.read(),
-            SerialPort::Scratch => self.scratch.read()
+        // ensure there's data to be read
+        if self.serial_received() {
+            // read data from port
+            match port {
+                SerialPort::Data => self.data.read(),
+                SerialPort::FIFOControl => self.fifo_control.read(),
+                SerialPort::LineControl => self.line_control.read(),
+                SerialPort::ModemControl => self.modem_control.read(),
+                SerialPort::LineStatus => self.line_status.read(),
+                SerialPort::ModemStatus => self.modem_status.read(),
+                SerialPort::Scratch => self.scratch.read(),
+            }
+        } else {
+            0x0
         }
     }
 
-    pub fn is_fifo_empty(&mut self) -> bool {
-        (self.read(SerialPort::LineStatus) & 0x20) == 0x0
+    pub fn is_write_empty(&mut self) -> bool {
+        (self.read(SerialPort::LineStatus) & 0x20) > 0x0
     }
 
     pub fn serial_received(&mut self) -> bool {
-        (self.read(SerialPort::LineStatus) & 0x1) == 0x0
+        (self.read(SerialPort::LineStatus) & 0x1) > 0x0
     }
 }
 
