@@ -1,7 +1,11 @@
 mod segment_descriptor;
 mod segment_selector;
 
-use crate::{structures::DescriptorTablePointer, PrivilegeLevel};
+use crate::{
+    instructions::tables::lgdt,
+    structures::{tss::TaskStateSegment, DescriptorTablePointer},
+    Address, PrivilegeLevel,
+};
 use lazy_static::lazy_static;
 
 pub use segment_descriptor::{SegmentDescriptor, SegmentDescriptorFlags};
@@ -105,7 +109,7 @@ lazy_static! {
     static ref GDT: (GlobalDescriptorTable, Selectors) = {
         let mut gdt = GlobalDescriptorTable::new();
         let code_selector = gdt.add_entry(SegmentDescriptor::kernel_code_segment());
-        let tss_selector = gdt.add_entry(Descriptor::tss_segment(&TSS));
+        let tss_selector = gdt.add_entry(SegmentDescriptor::tss_segment(&TSS));
 
         (
             gdt,

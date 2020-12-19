@@ -36,6 +36,7 @@ bitflags! {
         /// This flag must be set for user segments (in contrast to system segments).
         const USER_SEGMENT      = 1 << 44;
         /// The DPL for this descriptor is Ring 3. In 64-bit mode, ignored for data segments.
+        const DPL_RING_0        = u64::from(PrivilegeLevel::Ring0) << 45;
         const DPL_RING_1        = u64::from(PrivilegeLevel::Ring1) << 45;
         const DPL_RING_2        = u64::from(PrivilegeLevel::Ring2) << 45;
         const DPL_RING_3        = u64::from(PrivilegeLevel::Ring3) << 45;
