@@ -1,5 +1,13 @@
+use crate::structures::gdt::SegmentSelector;
+
 pub mod interrupts;
 pub mod tables;
+
+pub fn cs() -> SegmentSelector {
+    let segment: u16;
+    unsafe  { asm!("mov {0:x}, cs", out(reg) segment, option(nomem, nostack)) };
+    SegmentSelector(segment)
+}
 
 pub unsafe fn set_cs(sel: crate::structures::gdt::SegmentSelector) {
     asm!(
