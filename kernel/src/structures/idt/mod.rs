@@ -1,18 +1,16 @@
 mod fault_handlers;
 mod interrupt_handlers;
-pub mod interrupt_vector;
+mod interrupt_vector;
 
-use crate::structures::pic::InterruptOffset;
+pub use interrupt_vector::InterruptStackFrame;
+
+use crate::structures::{pic::InterruptOffset, DescriptorTablePointer};
 use bitflags::bitflags;
+use core::ops::{Index, IndexMut};
 use fault_handlers::*;
 use interrupt_handlers::*;
-use interrupt_vector::{
-    DivergingHandler, DivergingHandlerWithErrCode, InterruptHandler, InterruptHandlerWithErrCode,
-    InterruptVector, PageFaultHandler,
-};
+use interrupt_vector::*;
 use lazy_static::lazy_static;
-
-use super::DescriptorTablePointer;
 
 bitflags! {
     #[repr(transparent)]
@@ -127,9 +125,7 @@ impl Index<usize> for InterruptDescriptorTable {
 }
 
 impl IndexMut<usize> for InterruptDescriptorTable {
-    type Output = InterruptVector<InterruptHandler>;
-
-    fn index(&mut self, index: usize) -> &mut Self::Output {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         match index {
             0 => &mut self.divide_error,
             1 => &mut self.debug,

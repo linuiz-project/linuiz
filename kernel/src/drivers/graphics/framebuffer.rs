@@ -90,7 +90,7 @@ impl FramebufferDriver {
 }
 
 impl core::fmt::Debug for FramebufferDriver {
-    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
             .debug_struct("ProtocolGraphics")
             .field("Framebuffer", &self.framebuffer)

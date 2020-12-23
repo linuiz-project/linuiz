@@ -1,12 +1,17 @@
 use crate::{Address, PrivilegeLevel};
 use bit_field::BitField;
-use core::{marker::PhantomData, ops::Add};
+use core::marker::PhantomData;
 
 pub type InterruptHandler = extern "x86-interrupt" fn(&mut InterruptStackFrame);
-pub type InterruptHandlerWithErrCode = extern "x86-interrupt" fn(&mut InterruptStackFrame, error_code: u64);
-pub type PageFaultHandler = extern "x86-interrupt" fn(&mut InterruptStackFrame, error_code: crate::structures::interrupts::PageFaultError);
+pub type InterruptHandlerWithErrCode =
+    extern "x86-interrupt" fn(&mut InterruptStackFrame, error_code: u64);
+pub type PageFaultHandler = extern "x86-interrupt" fn(
+    &mut InterruptStackFrame,
+    error_code: crate::structures::idt::PageFaultError,
+);
 pub type DivergingHandler = extern "x86-interrupt" fn(&mut InterruptStackFrame) -> !;
-pub type DivergingHandlerWithErrCode = extern "x86-interrupt" fn(&mut InterruptStackFrame, error_code: u64);
+pub type DivergingHandlerWithErrCode =
+    extern "x86-interrupt" fn(&mut InterruptStackFrame, error_code: u64);
 
 /// Wrapper type for the interrupt stack frame pushed by the CPU.
 ///
@@ -56,7 +61,7 @@ impl<F> InterruptVector<F> {
             pointer_high: 0,
             options: InterruptVectorOptions::minimal(),
             reserved: 0,
-            phantom: PhantomData
+            phantom: PhantomData,
         }
     }
 
@@ -66,7 +71,7 @@ impl<F> InterruptVector<F> {
         self.pointer_high = (addr >> 32) as u32; // capture 32..64
         self.gdt_selector = crate::instructions::cs();
         self.options.set_present(true);
-        
+
         &mut self.options
     }
 }
@@ -98,5 +103,23 @@ impl InterruptVectorOptions {
     pub unsafe fn set_stack_index(&mut self, index: u16) -> &mut Self {
         self.0.set_bits(0..3, index + 1);
         self
+    }
+}
+
+impl core::fmt::Debug for InterruptStackFrame {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+impl core::fmt::Debug for InterruptStackFrameValue {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("InterruptStackFrame")
+            .field("Instruction Pointer", &self.instruction_pointer)
+            .field("Code Segment", &self.cpu_flags)
+            .field("Stack Pointer", &self.stack_pointer)
+            .field("Stack Segment", &self.stack_segment)
+            .finish()
     }
 }

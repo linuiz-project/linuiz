@@ -21,6 +21,17 @@ impl From<PrivilegeLevel> for u8 {
     }
 }
 
+impl From<PrivilegeLevel> for u16 {
+    fn from(val: PrivilegeLevel) -> Self {
+        match val {
+            PrivilegeLevel::Ring0 => 0,
+            PrivilegeLevel::Ring1 => 1,
+            PrivilegeLevel::Ring2 => 2,
+            PrivilegeLevel::Ring3 => 3,
+        }
+    }
+}
+
 impl From<PrivilegeLevel> for u64 {
     fn from(val: PrivilegeLevel) -> Self {
         match val {

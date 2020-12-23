@@ -116,7 +116,7 @@ impl SectionHeader {
 }
 
 impl core::fmt::Debug for SectionHeader {
-    fn fmt(&self, formatter: &mut core::fmt::Formatter) -> Result<(), core::fmt::Error> {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
         formatter
             .debug_struct("Section Header")
             .field("Name", &self.name)

@@ -1,5 +1,5 @@
 pub mod gdt;
-pub mod interrupts;
+pub mod idt;
 pub mod pic;
 pub mod tss;
 

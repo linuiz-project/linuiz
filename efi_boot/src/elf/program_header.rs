@@ -78,7 +78,7 @@ impl ProgramHeader {
 }
 
 impl core::fmt::Debug for ProgramHeader {
-    fn fmt(&self, formatter: &mut core::fmt::Formatter) -> Result<(), core::fmt::Error> {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
         formatter
             .debug_struct("Program Header")
             .field("Type", &self.ph_type)

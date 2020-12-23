@@ -163,7 +163,7 @@ impl ELFHeader64 {
 }
 
 impl core::fmt::Debug for ELFHeader64 {
-    fn fmt(&self, formatter: &mut core::fmt::Formatter) -> Result<(), core::fmt::Error> {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
         formatter
             .debug_struct("ELF")
             .field("Class", &self.class)
