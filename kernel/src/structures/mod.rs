@@ -3,6 +3,8 @@ pub mod idt;
 pub mod pic;
 pub mod tss;
 
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
 pub struct DescriptorTablePointer {
     // size of the DT
     limit: u16,
