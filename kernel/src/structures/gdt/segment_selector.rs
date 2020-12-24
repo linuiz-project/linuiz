@@ -1,7 +1,7 @@
 use crate::PrivilegeLevel;
 use bit_field::BitField;
 
-#[repr(C)]
+#[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct SegmentSelector(pub u16);
 
@@ -17,7 +17,7 @@ impl SegmentSelector {
     }
 
     pub fn rpl(self) -> PrivilegeLevel {
-        PrivilegeLevel::from(self.0.get_bits(0..2))
+        PrivilegeLevel::from(self.0.get_bits(0..2).into())
     }
 
     pub fn set_rpl(&mut self, rpl: PrivilegeLevel) {

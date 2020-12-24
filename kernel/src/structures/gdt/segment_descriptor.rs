@@ -36,10 +36,10 @@ bitflags! {
         /// This flag must be set for user segments (in contrast to system segments).
         const USER_SEGMENT      = 1 << 44;
         /// The DPL for this descriptor is Ring 3. In 64-bit mode, ignored for data segments.
-        const DPL_RING_0        = u64::from(PrivilegeLevel::Ring0) << 45;
-        const DPL_RING_1        = u64::from(PrivilegeLevel::Ring1) << 45;
-        const DPL_RING_2        = u64::from(PrivilegeLevel::Ring2) << 45;
-        const DPL_RING_3        = u64::from(PrivilegeLevel::Ring3) << 45;
+        const DPL_RING_0        = PrivilegeLevel::Ring0.as_u64() << 45;
+        const DPL_RING_1        = PrivilegeLevel::Ring1.as_u64() << 45;
+        const DPL_RING_2        = PrivilegeLevel::Ring2.as_u64() << 45;
+        const DPL_RING_3        = PrivilegeLevel::Ring3.as_u64() << 45;
         /// Must be set for any segment, causes a segment not present exception if not set.
         const PRESENT           = 1 << 47;
         /// Available for use by the Operating System
@@ -137,17 +137,13 @@ impl SegmentDescriptor {
     /// Creates a TSS system descriptor for the given TSS.
     #[inline]
     pub fn tss_segment(tss: &'static TaskStateSegment) -> SegmentDescriptor {
-        use self::SegmentDescriptorFlags as Flags;
-        use core::mem::size_of;
-
         let ptr = tss as *const _ as u64;
-
-        let mut low = Flags::PRESENT.bits();
+        let mut low = SegmentDescriptorFlags::PRESENT.bits();
         // base
         low.set_bits(16..40, ptr.get_bits(0..24));
         low.set_bits(56..64, ptr.get_bits(24..32));
         // limit (the `-1` in needed since the bound is inclusive)
-        low.set_bits(0..16, (size_of::<TaskStateSegment>() - 1) as u64);
+        low.set_bits(0..16, (core::mem::size_of::<TaskStateSegment>() - 1) as u64);
         // type (0b1001 = available 64-bit tss)
         low.set_bits(40..44, 0b1001);
 

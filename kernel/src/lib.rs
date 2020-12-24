@@ -1,7 +1,10 @@
 #![no_std]
 #![feature(asm)]
+#![feature(const_panic)]
+#![feature(const_mut_refs)]
 #![feature(abi_x86_interrupt)]
 #![feature(alloc_error_handler)]
+#![feature(const_raw_ptr_to_usize_cast)]
 
 mod privilege_level;
 
@@ -11,7 +14,7 @@ pub mod io;
 pub mod structures;
 pub use privilege_level::PrivilegeLevel;
 
-use core::{alloc::Layout, panic::PanicInfo};
+use core::{alloc::Layout, ffi::c_void, ops::Add, panic::PanicInfo};
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -30,4 +33,13 @@ fn alloc_error(error: Layout) -> ! {
 pub enum Address {
     Physical(usize),
     Virtual(usize),
+}
+
+impl Address {
+    pub const fn as_ptr(self) -> *const c_void {
+        match self {
+            Address::Virtual(address) => address as *const c_void,
+            Address::Physical(address) => address as *const c_void,
+        }
+    }
 }

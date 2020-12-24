@@ -13,7 +13,7 @@ pub fn cs() -> SegmentSelector {
 pub unsafe fn set_cs(sel: crate::structures::gdt::SegmentSelector) {
     asm!(
         "push {sel}",
-        "lea {tmp}, [1F + rip]",
+        "lea {tmp}, [1f + rip]",
         "push {tmp}",
         "retfq",
         "1:",

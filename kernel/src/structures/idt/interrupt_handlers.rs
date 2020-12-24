@@ -4,5 +4,6 @@ use crate::structures::{
 };
 
 pub(super) extern "x86-interrupt" fn timer_interrupt_handler(_: &mut InterruptStackFrame) {
+    crate::write!(".");
     end_of_interrupt(InterruptOffset::Timer);
 }

@@ -10,6 +10,8 @@ extern "win64" fn kernel_main(_framebuffer: Option<Framebuffer>) -> i32 {
     writeln!("Successfully loaded into kernel.");
     writeln!("Initializing CPU structures.");
 
+    writeln!("{}", core::mem::size_of::<gsai::Address>());
+    loop {}
     init();
 
     loop {}
@@ -18,9 +20,10 @@ extern "win64" fn kernel_main(_framebuffer: Option<Framebuffer>) -> i32 {
 fn init() {
     gsai::structures::gdt::init();
     writeln!("Successfully initialized GDT.");
+    loop {}
     gsai::structures::pic::init();
     writeln!("Successfully initialized PIC.");
-    gsai::structures::interrupts::load_idt();
+    gsai::structures::idt::init();
     writeln!("Successfully initialized and configured IDT.");
 
     gsai::instructions::interrupts::enable();

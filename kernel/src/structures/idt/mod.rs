@@ -1,8 +1,9 @@
 mod fault_handlers;
 mod interrupt_handlers;
+mod interrupt_stack_frame;
 mod interrupt_vector;
 
-pub use interrupt_vector::InterruptStackFrame;
+pub use interrupt_stack_frame::InterruptStackFrame;
 
 use crate::structures::{pic::InterruptOffset, DescriptorTablePointer};
 use bitflags::bitflags;
@@ -54,7 +55,7 @@ pub struct InterruptDescriptorTable {
 }
 
 impl InterruptDescriptorTable {
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             divide_error: InterruptVector::missing(),
             debug: InterruptVector::missing(),
@@ -86,6 +87,14 @@ impl InterruptDescriptorTable {
 
     pub fn reset(&mut self) {
         *self = Self::new();
+    }
+
+    pub fn load(&'static self) {
+        unsafe { self.load_unsafe() }
+    }
+
+    unsafe fn load_unsafe(&self) {
+        crate::instructions::interrupts::lidt(&self.pointer());
     }
 
     fn pointer(&self) -> DescriptorTablePointer {
@@ -155,20 +164,20 @@ lazy_static! {
         let mut idt = InterruptDescriptorTable::new();
 
         // fault interrupts
-        idt.breakpoint.set_handler_fn(breakpoint_handler);
-        idt.page_fault.set_handler_fn(page_fault_handler);
+        idt.breakpoint.set_handler(breakpoint_handler);
+        idt.page_fault.set_handler(page_fault_handler);
 
         unsafe {
-            idt.double_fault.set_handler_fn(double_fault_handler).set_stack_index(crate::structures::gdt::DOUBLE_FAULT_IST_INDEX);
+            idt.double_fault.set_handler(double_fault_handler).set_stack_index(crate::structures::gdt::DOUBLE_FAULT_IST_INDEX);
         }
 
         // regular interrupts
-        idt[InterruptOffset::Timer.into()].set_handler_fn(timer_interrupt_handler);
+        idt[InterruptOffset::Timer.into()].set_handler(timer_interrupt_handler);
 
         idt
     };
 }
 
-pub fn load_idt() {
+pub fn init() {
     IDT.load();
 }

@@ -2,7 +2,6 @@ mod segment_descriptor;
 mod segment_selector;
 
 use crate::{
-    instructions::tables::lgdt,
     structures::{tss::TaskStateSegment, DescriptorTablePointer},
     Address, PrivilegeLevel,
 };
@@ -60,7 +59,7 @@ impl GlobalDescriptorTable {
                     PrivilegeLevel::Ring0
                 }
             }
-            SegmentDescriptor::SystemSegment(segment_low, segment_high) => PrivilegeLevel::Ring0,
+            SegmentDescriptor::SystemSegment(_, _) => PrivilegeLevel::Ring0,
         };
 
         SegmentSelector::new(index as u16, rpl)
@@ -77,15 +76,15 @@ impl GlobalDescriptorTable {
         }
     }
 
-    const fn pointer(&self) -> DescriptorTablePointer {
+    fn pointer(&self) -> DescriptorTablePointer {
         DescriptorTablePointer {
             base: self.table.as_ptr() as u64,
             limit: (self.next_free * core::mem::size_of::<u64>() - 1) as u16,
         }
     }
 
-    pub const fn load(&'static self) {
-        unsafe { lgdt(&self.pointer()) };
+    pub fn load(&'static self) {
+        unsafe { crate::instructions::tables::lgdt(&self.pointer()) };
     }
 }
 
