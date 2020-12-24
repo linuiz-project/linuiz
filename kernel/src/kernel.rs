@@ -6,10 +6,14 @@
 extern crate log;
 
 use efi_boot::{entrypoint, Framebuffer};
-use gsai::logging::LOGGER;
+use gsai::{logging::LOGGER, serial};
 
 entrypoint!(kernel_main);
 extern "win64" fn kernel_main(_framebuffer: Option<Framebuffer>) -> i32 {
+    serial!("xxxx");
+
+    loop {}
+
     if let Err(error) = unsafe { gsai::logging::init() } {
         panic!("{}", error);
     }

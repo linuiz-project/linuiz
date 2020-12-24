@@ -9,10 +9,14 @@ PROFILE=release
 
 all: $(bootloader) $(kernel)
 
+soft-reset: 
+	rm -f $(bootloader) $(kernel)
+
 reset:
 	rm -f $(bootloader) $(kernel)
 	rm -rf ./efi_boot/Cargo.lock ./efi_boot/target/
 	rm -rf ./kernel/Cargo.lock ./kernel/target/
+
 	
 $(bootloader): $(boot_deps) $(uefi-deps)
 	rm -f $(bootloader)

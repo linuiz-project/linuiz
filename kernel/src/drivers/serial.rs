@@ -162,7 +162,7 @@ pub fn __print(args: core::fmt::Arguments) {
     safe_lock(|serial| {
         use core::fmt::Write;
         serial.write_fmt(args).unwrap();
-    })
+    });
 }
 
 #[macro_export]
