@@ -1,5 +1,3 @@
-use crate::Address;
-
 /// Wrapper type for the interrupt stack frame pushed by the CPU.
 ///
 /// This helps to ensure no modifications of the ISF are made without
@@ -21,10 +19,10 @@ impl InterruptStackFrame {
 #[repr(C)]
 #[derive(Clone)]
 pub struct InterruptStackFrameValue {
-    pub instruction_pointer: Address,
+    pub instruction_pointer: usize,
     pub code_segment: u64,
     pub cpu_flags: u64,
-    pub stack_pointer: Address,
+    pub stack_pointer: usize,
     pub stack_segment: u64,
 }
 

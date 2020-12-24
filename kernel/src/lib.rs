@@ -11,6 +11,7 @@ mod privilege_level;
 pub mod drivers;
 pub mod instructions;
 pub mod io;
+pub mod logging;
 pub mod structures;
 pub use privilege_level::PrivilegeLevel;
 

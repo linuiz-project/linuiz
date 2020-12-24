@@ -14,7 +14,7 @@ pub type DivergingHandlerWithErrCode =
     extern "x86-interrupt" fn(&mut InterruptStackFrame, error_code: u64) -> !;
 
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InterruptVector<F> {
     pointer_low: u16,
     gdt_selector: u16,
@@ -44,8 +44,8 @@ impl<F> InterruptVector<F> {
         self.pointer_middle = (addr >> 16) as u16; // capture 16..32
         self.pointer_high = (addr >> 32) as u32; // capture 32..64
         self.gdt_selector = crate::instructions::cs().0;
-        self.options.set_present(true);
 
+        self.options.set_present(true);
         &mut self.options
     }
 

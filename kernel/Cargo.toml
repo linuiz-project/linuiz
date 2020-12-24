@@ -8,6 +8,7 @@ edition = "2018"
 [dependencies]
 efi_boot = { path = "../efi_boot/" }
 lazy_static = { version = "*", features = ["spin_no_std"] }
+log = { version = "*", default-features = false }
 bit_field = "*"
 bitflags = "*"
 spin = "*"

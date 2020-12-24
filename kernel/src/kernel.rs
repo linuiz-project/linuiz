@@ -3,14 +3,18 @@
 #![feature(asm)]
 
 #[macro_use]
-extern crate gsai;
+extern crate log;
 
 use efi_boot::{entrypoint, Framebuffer};
 
 entrypoint!(kernel_main);
 extern "win64" fn kernel_main(_framebuffer: Option<Framebuffer>) -> i32 {
-    serialln!("Successfully loaded into kernel.");
-    serialln!("Initializing CPU structures.");
+    if let Err(error) = unsafe { gsai::logging::init() } {
+        panic!("{:?}", error);
+    }
+
+    info!("Successfully loaded into kernel.");
+    debug!("Initializing CPU structures.");
 
     init();
 
@@ -19,13 +23,12 @@ extern "win64" fn kernel_main(_framebuffer: Option<Framebuffer>) -> i32 {
 
 fn init() {
     gsai::structures::gdt::init();
-    serialln!("Successfully initialized GDT.");
-    loop {}
+    debug!("Successfully initialized GDT.");
     gsai::structures::pic::init();
-    serialln!("Successfully initialized PIC.");
+    debug!("Successfully initialized PIC.");
     gsai::structures::idt::init();
-    serialln!("Successfully initialized and configured IDT.");
+    debug!("Successfully initialized and configured IDT.");
 
     gsai::instructions::interrupts::enable();
-    serialln!("(WARN: Interrupts are now enabled)");
+    debug!("(WARN: Interrupts are now enabled)");
 }
