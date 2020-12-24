@@ -2,16 +2,16 @@
 #![no_main]
 #![feature(asm)]
 
+#[macro_use]
+extern crate gsai;
+
 use efi_boot::{entrypoint, Framebuffer};
-use gsai::writeln;
 
 entrypoint!(kernel_main);
 extern "win64" fn kernel_main(_framebuffer: Option<Framebuffer>) -> i32 {
-    writeln!("Successfully loaded into kernel.");
-    writeln!("Initializing CPU structures.");
+    serialln!("Successfully loaded into kernel.");
+    serialln!("Initializing CPU structures.");
 
-    writeln!("{}", core::mem::size_of::<gsai::Address>());
-    loop {}
     init();
 
     loop {}
@@ -19,13 +19,13 @@ extern "win64" fn kernel_main(_framebuffer: Option<Framebuffer>) -> i32 {
 
 fn init() {
     gsai::structures::gdt::init();
-    writeln!("Successfully initialized GDT.");
+    serialln!("Successfully initialized GDT.");
     loop {}
     gsai::structures::pic::init();
-    writeln!("Successfully initialized PIC.");
+    serialln!("Successfully initialized PIC.");
     gsai::structures::idt::init();
-    writeln!("Successfully initialized and configured IDT.");
+    serialln!("Successfully initialized and configured IDT.");
 
     gsai::instructions::interrupts::enable();
-    writeln!("(WARN: Interrupts are now enabled)");
+    serialln!("(WARN: Interrupts are now enabled)");
 }

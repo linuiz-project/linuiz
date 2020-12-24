@@ -29,22 +29,6 @@ pub enum SerialSpeed {
     S38400 = 3,
 }
 
-lazy_static! {
-    static ref SERIAL: Mutex<Serial> =
-        Mutex::new(unsafe { Serial::init(COM1, SerialSpeed::S115200) });
-}
-
-pub fn safe_lock<F>(callback: F)
-where
-    F: Fn(&mut MutexGuard<Serial>),
-{
-    // this allows us to semantically lock the serial driver
-    //
-    // for instance, in case we would like to avoid writing while
-    // an interrupt is in progress
-    callback(&mut SERIAL.lock());
-}
-
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Serial {
     data: Port<u8>,
@@ -142,7 +126,7 @@ impl Serial {
     }
 
     pub fn is_write_empty(&mut self) -> bool {
-        (self.read(SerialPort::LineStatus) & 0x20) > 0x0
+        (self.read(SerialPort::LineStatus) & 0x20) == 0x0
     }
 
     pub fn serial_received(&mut self) -> bool {
@@ -157,6 +141,22 @@ impl core::fmt::Write for Serial {
     }
 }
 
+lazy_static! {
+    static ref SERIAL: Mutex<Serial> =
+        Mutex::new(unsafe { Serial::init(COM1, SerialSpeed::S115200) });
+}
+
+pub fn safe_lock<F>(callback: F)
+where
+    F: Fn(&mut MutexGuard<Serial>),
+{
+    // this allows us to semantically lock the serial driver
+    //
+    // for instance, in case we would like to avoid writing while
+    // an interrupt is in progress
+    callback(&mut SERIAL.lock());
+}
+
 #[doc(hidden)]
 pub fn __print(args: core::fmt::Arguments) {
     safe_lock(|serial| {
@@ -166,12 +166,12 @@ pub fn __print(args: core::fmt::Arguments) {
 }
 
 #[macro_export]
-macro_rules! write {
+macro_rules! serial {
     ($($arg:tt)*) => ($crate::drivers::serial::__print(format_args!($($arg)*)));
 }
 
 #[macro_export]
-macro_rules! writeln {
+macro_rules! serialln {
     () => ($crate::print!('\n'));
-    ($($arg:tt)*) => ($crate::write!("{}\n", format_args!($($arg)*)));
+    ($($arg:tt)*) => ($crate::serial!("{}\n", format_args!($($arg)*)));
 }

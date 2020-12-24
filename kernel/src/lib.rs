@@ -14,17 +14,17 @@ pub mod io;
 pub mod structures;
 pub use privilege_level::PrivilegeLevel;
 
-use core::{alloc::Layout, ffi::c_void, ops::Add, panic::PanicInfo};
+use core::{alloc::Layout, ffi::c_void, panic::PanicInfo};
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    write!("{}", info);
+    serial!("{}", info);
     loop {}
 }
 
 #[alloc_error_handler]
 fn alloc_error(error: Layout) -> ! {
-    write!("{:?}", error);
+    serial!("{:?}", error);
     loop {}
 }
 
@@ -40,6 +40,13 @@ impl Address {
         match self {
             Address::Virtual(address) => address as *const c_void,
             Address::Physical(address) => address as *const c_void,
+        }
+    }
+
+    pub const fn as_usize(self) -> usize {
+        match self {
+            Address::Virtual(address) => address,
+            Address::Physical(address) => address,
         }
     }
 }

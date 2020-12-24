@@ -1,8 +1,11 @@
-use crate::structures::idt::{InterruptStackFrame, PageFaultError};
-use crate::{instructions::htl_indefinite, writeln};
+use crate::{
+    instructions::htl_indefinite,
+    serialln,
+    structures::idt::{InterruptStackFrame, PageFaultError},
+};
 
 pub(super) extern "x86-interrupt" fn breakpoint_handler(stack_frame: &mut InterruptStackFrame) {
-    writeln!("CPU EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
+    serialln!("CPU EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
 }
 
 pub(super) extern "x86-interrupt" fn double_fault_handler(
@@ -18,10 +21,10 @@ pub(super) extern "x86-interrupt" fn page_fault_handler(
 ) {
     use crate::instructions::registers::CR2;
 
-    writeln!("CPU EXCEPTION: PAGE FAULT");
-    writeln!("Accessed Address: {:?}", CR2::read());
-    writeln!("Error Code: {:?}", error_code);
-    writeln!("{:#?}", stack_frame);
+    serialln!("CPU EXCEPTION: PAGE FAULT");
+    serialln!("Accessed Address: {:?}", CR2::read());
+    serialln!("Error Code: {:?}", error_code);
+    serialln!("{:#?}", stack_frame);
 
     htl_indefinite();
 }
