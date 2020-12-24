@@ -5,13 +5,29 @@ mod interrupt_vector;
 
 pub use interrupt_stack_frame::InterruptStackFrame;
 
-use crate::structures::{pic::InterruptOffset, DescriptorTablePointer};
+use crate::structures::{pic::PICInterrupt, DescriptorTablePointer};
 use bitflags::bitflags;
 use core::ops::{Index, IndexMut};
 use fault_handlers::*;
 use interrupt_handlers::*;
 use interrupt_vector::*;
 use lazy_static::lazy_static;
+
+pub enum InterruptType {
+    DivideError,
+    Debug,
+    NonMaskableInterupt,
+    Breakpoint,
+    Overflow,
+    BoundRangeExceeded,
+    InvalidOpcode,
+    DeviceNotAvailable,
+    CoprocessorSegmentOverrun,
+    x87FloatingPoint,
+    SIMDFloatingPoint,
+    Virtualization,
+    Generic(usize),
+}
 
 bitflags! {
     #[repr(transparent)]
@@ -105,56 +121,60 @@ impl InterruptDescriptorTable {
     }
 }
 
-impl Index<usize> for InterruptDescriptorTable {
+impl Index<InterruptType> for InterruptDescriptorTable {
     type Output = InterruptVector<InterruptHandler>;
 
-    fn index(&self, index: usize) -> &Self::Output {
+    fn index(&self, index: InterruptType) -> &Self::Output {
         match index {
-            0 => &self.divide_error,
-            1 => &self.debug,
-            2 => &self.non_maskable_interrupt,
-            3 => &self.breakpoint,
-            4 => &self.overflow,
-            5 => &self.bound_range_exceeded,
-            6 => &self.invalid_opcode,
-            7 => &self.device_not_available,
-            9 => &self.coprocessor_segment_overrun,
-            16 => &self.x87_floating_point,
-            19 => &self.simd_floating_point,
-            20 => &self.virtualization,
-            i @ 32..=255 => &self.interrupts[i - 32],
-            i @ 15 | i @ 31 | i @ 21..=29 => panic!("entry {} is reserved", i),
-            i @ 8 | i @ 10..=14 | i @ 17 | i @ 30 => {
-                panic!("entry {} is an exception with error code", i)
-            }
-            i @ 18 => panic!("entry {} is a diverging exception (must not return)", i),
-            i => panic!("no entry with index {}", i),
+            InterruptType::DivideError => &self.divide_error,
+            InterruptType::Debug => &self.debug,
+            InterruptType::NonMaskableInterupt => &self.non_maskable_interrupt,
+            InterruptType::Breakpoint => &self.breakpoint,
+            InterruptType::Overflow => &self.overflow,
+            InterruptType::BoundRangeExceeded => &self.bound_range_exceeded,
+            InterruptType::InvalidOpcode => &self.invalid_opcode,
+            InterruptType::DeviceNotAvailable => &self.device_not_available,
+            InterruptType::CoprocessorSegmentOverrun => &self.coprocessor_segment_overrun,
+            InterruptType::x87FloatingPoint => &self.x87_floating_point,
+            InterruptType::SIMDFloatingPoint => &self.simd_floating_point,
+            InterruptType::Virtualization => &self.virtualization,
+            InterruptType::Generic(i) => match i {
+                i @ 32..=255 => &self.interrupts[i - 32],
+                i @ 15 | i @ 31 | i @ 21..=29 => panic!("entry {} is reserved", i),
+                i @ 8 | i @ 10..=14 | i @ 17 | i @ 30 => {
+                    panic!("entry {} is an exception with error code", i)
+                }
+                i @ 18 => panic!("entry {} is a diverging exception (must not return)", i),
+                i => panic!("no entry with index {}", i),
+            },
         }
     }
 }
 
-impl IndexMut<usize> for InterruptDescriptorTable {
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+impl IndexMut<InterruptType> for InterruptDescriptorTable {
+    fn index_mut(&mut self, index: InterruptType) -> &mut Self::Output {
         match index {
-            0 => &mut self.divide_error,
-            1 => &mut self.debug,
-            2 => &mut self.non_maskable_interrupt,
-            3 => &mut self.breakpoint,
-            4 => &mut self.overflow,
-            5 => &mut self.bound_range_exceeded,
-            6 => &mut self.invalid_opcode,
-            7 => &mut self.device_not_available,
-            9 => &mut self.coprocessor_segment_overrun,
-            16 => &mut self.x87_floating_point,
-            19 => &mut self.simd_floating_point,
-            20 => &mut self.virtualization,
-            i @ 32..=255 => &mut self.interrupts[i - 32],
-            i @ 15 | i @ 31 | i @ 21..=29 => panic!("entry {} is reserved", i),
-            i @ 8 | i @ 10..=14 | i @ 17 | i @ 30 => {
-                panic!("entry {} is an exception with error code", i)
-            }
-            i @ 18 => panic!("entry {} is a diverging exception (must not return)", i),
-            i => panic!("no entry with index {}", i),
+            InterruptType::DivideError => &mut self.divide_error,
+            InterruptType::Debug => &mut self.debug,
+            InterruptType::NonMaskableInterupt => &mut self.non_maskable_interrupt,
+            InterruptType::Breakpoint => &mut self.breakpoint,
+            InterruptType::Overflow => &mut self.overflow,
+            InterruptType::BoundRangeExceeded => &mut self.bound_range_exceeded,
+            InterruptType::InvalidOpcode => &mut self.invalid_opcode,
+            InterruptType::DeviceNotAvailable => &mut self.device_not_available,
+            InterruptType::CoprocessorSegmentOverrun => &mut self.coprocessor_segment_overrun,
+            InterruptType::x87FloatingPoint => &mut self.x87_floating_point,
+            InterruptType::SIMDFloatingPoint => &mut self.simd_floating_point,
+            InterruptType::Virtualization => &mut self.virtualization,
+            InterruptType::Generic(i) => match i {
+                i @ 32..=255 => &mut self.interrupts[i - 32],
+                i @ 15 | i @ 31 | i @ 21..=29 => panic!("entry {} is reserved", i),
+                i @ 8 | i @ 10..=14 | i @ 17 | i @ 30 => {
+                    panic!("entry {} is an exception with error code", i)
+                }
+                i @ 18 => panic!("entry {} is a diverging exception (must not return)", i),
+                i => panic!("no entry with index {}", i),
+            },
         }
     }
 }
@@ -172,7 +192,7 @@ lazy_static! {
         }
 
         // regular interrupts
-        idt[InterruptOffset::Timer.into()].set_handler(timer_interrupt_handler);
+        idt[PICInterrupt::Timer.into()].set_handler(timer_interrupt_handler);
 
         idt
     };

@@ -11,26 +11,34 @@ use lazy_static::lazy_static;
 use pic8259::ChainedPICs;
 use spin;
 
+use super::idt::InterruptType;
+
 pub const PIC_1_OFFSET: u8 = 32;
 pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
 
 #[repr(u8)]
 #[allow(dead_code)]
 #[derive(Debug, Copy, Clone)]
-pub enum InterruptOffset {
+pub enum PICInterrupt {
     Timer = PIC_1_OFFSET,
     Keyboard,
 }
 
-impl Into<u8> for InterruptOffset {
+impl Into<u8> for PICInterrupt {
     fn into(self) -> u8 {
         self as u8
     }
 }
 
-impl Into<usize> for InterruptOffset {
+impl Into<usize> for PICInterrupt {
     fn into(self) -> usize {
-        usize::from(self as u8)
+        self as usize
+    }
+}
+
+impl Into<InterruptType> for PICInterrupt {
+    fn into(self) -> InterruptType {
+        InterruptType::Generic(self.into())
     }
 }
 
@@ -45,7 +53,7 @@ pub fn init() {
     }
 }
 
-pub fn end_of_interrupt(offset: InterruptOffset) {
+pub fn end_of_interrupt(offset: PICInterrupt) {
     unsafe {
         PICS.lock().end_of_interrupt(offset.into());
     }

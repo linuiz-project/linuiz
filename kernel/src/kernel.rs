@@ -6,19 +6,21 @@
 extern crate log;
 
 use efi_boot::{entrypoint, Framebuffer};
+use gsai::logging::LOGGER;
 
 entrypoint!(kernel_main);
 extern "win64" fn kernel_main(_framebuffer: Option<Framebuffer>) -> i32 {
     if let Err(error) = unsafe { gsai::logging::init() } {
-        panic!("{:?}", error);
+        panic!("{}", error);
     }
 
     info!("Successfully loaded into kernel.");
     debug!("Initializing CPU structures.");
+    loop {}
 
     init();
 
-    loop {}
+    0
 }
 
 fn init() {
