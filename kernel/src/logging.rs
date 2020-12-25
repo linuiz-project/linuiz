@@ -53,6 +53,7 @@ pub unsafe fn init() -> Result<(), log::SetLoggerError> {
     if let Err(error) = log::set_logger_racy(&LOGGER) {
         Err(error)
     } else {
+        configure_log_level();
         Ok(())
     }
 }

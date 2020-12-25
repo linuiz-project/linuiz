@@ -5,11 +5,11 @@
 #[macro_use]
 extern crate log;
 
-use efi_boot::{entrypoint, Framebuffer};
+use efi_boot::{entrypoint, FFIOption, Framebuffer};
 use gsai::{logging::LOGGER, serial};
 
 entrypoint!(kernel_main);
-extern "win64" fn kernel_main(_framebuffer: Option<Framebuffer>) -> i32 {
+extern "win64" fn kernel_main(_framebuffer: FFIOption<Framebuffer>) -> i32 {
     serial!("xxxx");
 
     loop {}
