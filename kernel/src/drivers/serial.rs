@@ -1,9 +1,23 @@
 use crate::io::port::Port;
+use bitflags::bitflags;
 use lazy_static::lazy_static;
 use spin::mutex::{Mutex, MutexGuard};
 
 pub const COM1: u16 = 0x3F8;
 pub const LINE_ENABLE_DLAB: u8 = 0x80;
+
+bitflags! {
+    pub struct LineStatus : u8 {
+        const DATA_RECEIVED = 1 << 0;
+        const OVERRUN_ERROR = 1 << 1;
+        const PARITY_ERROR = 1 << 2;
+        const FRAMING_ERROR = 1 << 3;
+        const BREAK_INDICATOR = 1 << 4;
+        const TRANSMITTER_HOLDING_REGISTER_EMPTY = 1 << 5;
+        const TRANSMITTER_EMPTY = 1 << 6;
+        const IMPENDING_ERROR = 1 << 7;
+    }
+}
 
 /// COM/Serial port address offsets.
 #[repr(u16)]
@@ -11,6 +25,7 @@ pub const LINE_ENABLE_DLAB: u8 = 0x80;
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum SerialPort {
     Data = 0x0,
+    IRQControl = 0x1,
     FIFOControl = 0x2,
     LineControl = 0x3,
     ModemControl = 0x4,
@@ -32,6 +47,7 @@ pub enum SerialSpeed {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Serial {
     data: Port<u8>,
+    irq_control: Port<u8>,
     fifo_control: Port<u8>,
     line_control: Port<u8>,
     modem_control: Port<u8>,
@@ -43,6 +59,7 @@ pub struct Serial {
 impl Serial {
     pub unsafe fn init(com: u16, speed: SerialSpeed) -> Self {
         let mut data = Port::<u8>::new(com + (SerialPort::Data as u16));
+        let mut irq_control = Port::<u8>::new(com + (SerialPort::IRQControl as u16));
         let mut fifo_control = Port::<u8>::new(com + (SerialPort::FIFOControl as u16));
         let mut line_control = Port::<u8>::new(com + (SerialPort::LineControl as u16));
         let mut modem_control = Port::<u8>::new(com + (SerialPort::ModemControl as u16));
@@ -53,10 +70,17 @@ impl Serial {
         // configure the serial port
         // read https://littleosbook.github.io/#configuring-the-serial-port
 
+        // disable irqs
+        irq_control.write(0x0);
+
+        // enable DLAB
         line_control.write(LINE_ENABLE_DLAB);
+
+        // set port speed
         data.write((((speed as u16) >> 8) * 0xFF) as u8);
         data.write(((speed as u16) & 0xFF) as u8);
 
+        // disable DLAB and set data word length to 8 bits
         line_control.write(0x3);
 
         // enable FIFO, clear queue, with 14b threshold
@@ -65,8 +89,12 @@ impl Serial {
         // IRQs enabled, RTS/DSR set
         modem_control.write(0x0B);
 
+        // enable IRQs
+        irq_control.write(0x1);
+
         Serial {
             data,
+            irq_control,
             fifo_control,
             line_control,
             modem_control,
@@ -76,67 +104,60 @@ impl Serial {
         }
     }
 
+    fn get_port(&mut self, port: SerialPort) -> &mut Port<u8> {
+        match port {
+            SerialPort::Data => &mut self.data,
+            SerialPort::IRQControl => &mut self.irq_control,
+            SerialPort::FIFOControl => &mut self.fifo_control,
+            SerialPort::LineControl => &mut self.line_control,
+            SerialPort::ModemControl => &mut self.modem_control,
+            SerialPort::LineStatus => &mut self.line_status,
+            SerialPort::ModemStatus => &mut self.modem_status,
+            SerialPort::Scratch => &mut self.scratch,
+        }
+    }
+
     pub fn write(&mut self, port: SerialPort, byte: u8) {
         // this ensures we don't overwrite pending data
-        while !self.is_write_empty() {}
+        while !self.line_status(LineStatus::TRANSMITTER_EMPTY) {}
 
         // write to port
-        match port {
-            SerialPort::Data => self.data.write(byte),
-            SerialPort::FIFOControl => self.fifo_control.write(byte),
-            SerialPort::LineControl => self.line_control.write(byte),
-            SerialPort::ModemControl => self.modem_control.write(byte),
-            SerialPort::LineStatus => self.line_status.write(byte),
-            SerialPort::ModemStatus => self.modem_status.write(byte),
-            SerialPort::Scratch => self.scratch.write(byte),
-        }
+        self.get_port(port).write(byte);
     }
 
-    pub fn write_buffer(&mut self, port: SerialPort, buffer: &[u8]) {
+    pub fn write_buffer(&mut self, buffer: &[u8]) {
         for byte in buffer {
-            self.write(port, *byte);
+            self.write(SerialPort::Data, *byte);
         }
     }
 
-    pub fn write_string(&mut self, port: SerialPort, string: &str) {
+    pub fn write_string(&mut self, string: &str) {
         for byte in string.bytes() {
-            match byte {
-                0x20..=0x7E | b'\n' => self.write(port, byte),
-                _ => self.write(port, 0xFE),
-            }
+            self.write(SerialPort::Data, byte)
         }
     }
 
-    pub fn read(&mut self, port: SerialPort) -> u8 {
-        // ensure there's data to be read
-        if self.serial_received() {
-            // read data from port
-            match port {
-                SerialPort::Data => self.data.read(),
-                SerialPort::FIFOControl => self.fifo_control.read(),
-                SerialPort::LineControl => self.line_control.read(),
-                SerialPort::ModemControl => self.modem_control.read(),
-                SerialPort::LineStatus => self.line_status.read(),
-                SerialPort::ModemStatus => self.modem_status.read(),
-                SerialPort::Scratch => self.scratch.read(),
-            }
-        } else {
-            0x0
+    pub fn read_immediate(&mut self, port: SerialPort) -> u8 {
+        self.get_port(port).read()
+    }
+
+    pub fn read_wait(&mut self, port: SerialPort) -> u8 {
+        while !self.line_status(LineStatus::DATA_RECEIVED) {}
+
+        self.get_port(port).read()
+    }
+
+    pub fn line_status(&mut self, status: LineStatus) -> bool {
+        match LineStatus::from_bits(self.read_immediate(SerialPort::LineStatus)) {
+            Some(line_status) => line_status.contains(status),
+            None => panic!("failed to parse line status"),
         }
-    }
-
-    pub fn is_write_empty(&mut self) -> bool {
-        (self.read(SerialPort::LineStatus) & 0x20) == 0x0
-    }
-
-    pub fn serial_received(&mut self) -> bool {
-        (self.read(SerialPort::LineStatus) & 0x1) > 0x0
     }
 }
 
 impl core::fmt::Write for Serial {
     fn write_str(&mut self, string: &str) -> core::fmt::Result {
-        self.write_string(SerialPort::Data, string);
+        self.write_string(string);
         Ok(())
     }
 }
@@ -154,7 +175,9 @@ where
     //
     // for instance, in case we would like to avoid writing while
     // an interrupt is in progress
+    //x86_64::instructions::interrupts::without_interrupts(|| {
     callback(&mut SERIAL.lock());
+    //});
 }
 
 #[doc(hidden)]
