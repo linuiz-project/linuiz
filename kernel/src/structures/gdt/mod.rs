@@ -31,7 +31,7 @@ impl GlobalDescriptorTable {
         }
     }
 
-    pub const fn add_entry(&mut self, entry: SegmentDescriptor) -> SegmentSelector {
+    pub fn add_entry(&mut self, entry: SegmentDescriptor) -> SegmentSelector {
         let index = match entry {
             SegmentDescriptor::UserSegment(segment) => self.push(segment),
             SegmentDescriptor::SystemSegment(segment_low, segment_high) => {
@@ -65,7 +65,7 @@ impl GlobalDescriptorTable {
         SegmentSelector::new(index as u16, rpl)
     }
 
-    const fn push(&mut self, value: u64) -> usize {
+    fn push(&mut self, value: u64) -> usize {
         if self.next_free < self.table.len() {
             let index = self.next_free;
             self.table[index] = value;

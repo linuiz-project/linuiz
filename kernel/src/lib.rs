@@ -1,10 +1,7 @@
 #![no_std]
 #![feature(asm)]
-#![feature(const_panic)]
-#![feature(const_mut_refs)]
 #![feature(abi_x86_interrupt)]
 #![feature(alloc_error_handler)]
-#![feature(const_raw_ptr_to_usize_cast)]
 
 mod privilege_level;
 

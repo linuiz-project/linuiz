@@ -5,23 +5,6 @@
 pub use uefi::table::{Runtime, SystemTable};
 
 #[repr(C)]
-#[derive(Debug, Clone)]
-pub enum FFIOption<T> {
-    None,
-    Some(T),
-}
-
-impl<T> Into<FFIOption<T>> for Option<T> {
-    fn into(self) -> FFIOption<T> {
-        if let Some(some) = self {
-            FFIOption::Some(some)
-        } else {
-            FFIOption::None
-        }
-    }
-}
-
-#[repr(C)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Size {
     pub width: usize,
@@ -52,15 +35,13 @@ impl Framebuffer {
     }
 }
 
-pub type KernelMain = extern "win64" fn(crate::FFIOption<crate::Framebuffer>) -> i32;
+pub type KernelMain = extern "win64" fn(Option<crate::Framebuffer>) -> i32;
 
 #[macro_export]
 macro_rules! entrypoint {
     ($path:path) => {
         #[export_name = "_start"]
-        pub extern "win64" fn __impl_kernel_main(
-            framebuffer: $crate::FFIOption<$crate::Framebuffer>,
-        ) -> i32 {
+        pub extern "win64" fn __impl_kernel_main(framebuffer: Option<$crate::Framebuffer>) -> i32 {
             let function: $crate::KernelMain = $path;
             function(framebuffer)
         }

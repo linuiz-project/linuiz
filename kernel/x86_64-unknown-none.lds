@@ -5,7 +5,7 @@ SECTIONS
 {
     . = 0x7A12000;
 
-    .text : {
+    .text : ALIGN(0X1000) {
         _text_start = .;
 
         *(.text.*)

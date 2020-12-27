@@ -11,7 +11,7 @@ pub enum PrivilegeLevel {
 }
 
 impl PrivilegeLevel {
-    pub const fn from(val: u64) -> Self {
+    pub fn from(val: u64) -> Self {
         match val {
             0 => PrivilegeLevel::Ring0,
             1 => PrivilegeLevel::Ring1,

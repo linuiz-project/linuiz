@@ -188,9 +188,10 @@ fn kernel_transfer(
         unsafe { &mut *slice_from_raw_parts_mut(alloc_pointer, mmap_alloc_size) }
     };
 
-    info!("Finalizing exit from boot services environment.");
-    // system_table.boot_services().stall(1_000_000);
-
+    info!(
+        "Finalizing exit from boot services environment:\n Entrypoint: {}\n Framebuffer: {:?}",
+        kernel_entry_point, framebuffer
+    );
     // reset the output
     system_table
         .stdout()
@@ -205,7 +206,7 @@ fn kernel_transfer(
 
     // at this point, the given SystemTable<Boot> is invalid, and replaced with the runtime_table (SystemTable<Runtime>)
     let kernel_main: efi_boot::KernelMain = unsafe { transmute(kernel_entry_point) };
-    let _result = kernel_main(framebuffer.into());
+    let _result = kernel_main(framebuffer);
 
     unsafe {
         runtime_table
