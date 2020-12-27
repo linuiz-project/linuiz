@@ -52,7 +52,7 @@ pub struct Serial {
 
 impl Serial {
     pub unsafe fn init(com: u16, speed: SerialSpeed) -> Self {
-        let mut data = ReadWritePort::<u8>::new(com + DATA);
+        let mut data = ReadWritePort::<u8>::new(DATA);
         let mut irq_control = WriteOnlyPort::<u8>::new(IRQ_CONTROL);
         let mut fifo_control = WriteOnlyPort::<u8>::new(FIFO_CONTROL);
         let mut line_control = WriteOnlyPort::<u8>::new(LINE_CONTROL);
