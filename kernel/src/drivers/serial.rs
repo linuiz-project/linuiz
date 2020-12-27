@@ -1,10 +1,19 @@
-use crate::io::port::{Port, ReadOnlyPort, ReadWritePort, WriteOnlyPort};
+use crate::io::port::{ReadOnlyPort, ReadWritePort, WriteOnlyPort};
 use bitflags::bitflags;
 use lazy_static::lazy_static;
 use spin::mutex::{Mutex, MutexGuard};
 
 pub const COM1: u16 = 0x3F8;
 pub const LINE_ENABLE_DLAB: u8 = 0x80;
+
+pub const DATA: u16 = COM1 + 0x0;
+pub const IRQ_CONTROL: u16 = COM1 + 0x1;
+pub const FIFO_CONTROL: u16 = COM1 + 0x2;
+pub const LINE_CONTROL: u16 = COM1 + 0x3;
+pub const MODEM_CONTROL: u16 = COM1 + 0x4;
+pub const LINE_STATUS: u16 = COM1 + 0x5;
+pub const MODEM_STATUS: u16 = COM1 + 0x6;
+pub const SCRATCH: u16 = COM1 + 0x7;
 
 bitflags! {
     pub struct LineStatus : u8 {
@@ -17,21 +26,6 @@ bitflags! {
         const TRANSMITTER_EMPTY = 1 << 6;
         const IMPENDING_ERROR = 1 << 7;
     }
-}
-
-/// COM/Serial port address offsets.
-#[repr(u16)]
-#[allow(dead_code)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum SerialPort {
-    Data = 0x0,
-    IRQControl = 0x1,
-    FIFOControl = 0x2,
-    LineControl = 0x3,
-    ModemControl = 0x4,
-    LineStatus = 0x5,
-    ModemStatus = 0x6,
-    Scratch = 0x7,
 }
 
 /// Serial port speed, measured in bauds.
@@ -53,19 +47,19 @@ pub struct Serial {
     modem_control: WriteOnlyPort<u8>,
     line_status: ReadOnlyPort<u8>,
     modem_status: ReadOnlyPort<u8>,
-    scratch: Port<u8>,
+    scratch: ReadWritePort<u8>,
 }
 
 impl Serial {
     pub unsafe fn init(com: u16, speed: SerialSpeed) -> Self {
-        let mut data = Port::<u8>::new(com + (SerialPort::Data as u16));
-        let mut irq_control = Port::<u8>::new(com + (SerialPort::IRQControl as u16));
-        let mut fifo_control = Port::<u8>::new(com + (SerialPort::FIFOControl as u16));
-        let mut line_control = Port::<u8>::new(com + (SerialPort::LineControl as u16));
-        let mut modem_control = Port::<u8>::new(com + (SerialPort::ModemControl as u16));
-        let line_status = Port::<u8>::new(com + (SerialPort::LineStatus as u16));
-        let modem_status = Port::<u8>::new(com + (SerialPort::ModemStatus as u16));
-        let scratch = Port::<u8>::new(com + (SerialPort::Scratch as u16));
+        let mut data = ReadWritePort::<u8>::new(com + DATA);
+        let mut irq_control = WriteOnlyPort::<u8>::new(IRQ_CONTROL);
+        let mut fifo_control = WriteOnlyPort::<u8>::new(FIFO_CONTROL);
+        let mut line_control = WriteOnlyPort::<u8>::new(LINE_CONTROL);
+        let mut modem_control = WriteOnlyPort::<u8>::new(MODEM_CONTROL);
+        let line_status = ReadOnlyPort::<u8>::new(LINE_STATUS);
+        let modem_status = ReadOnlyPort::<u8>::new(MODEM_STATUS);
+        let scratch = ReadWritePort::<u8>::new(SCRATCH);
 
         // configure the serial port
         // read https://littleosbook.github.io/#configuring-the-serial-port
@@ -104,56 +98,43 @@ impl Serial {
         }
     }
 
-    fn get_port(&mut self, port: SerialPort) -> &mut Port<u8> {
-        match port {
-            SerialPort::Data => &mut self.data,
-            SerialPort::IRQControl => &mut self.irq_control,
-            SerialPort::FIFOControl => &mut self.fifo_control,
-            SerialPort::LineControl => &mut self.line_control,
-            SerialPort::ModemControl => &mut self.modem_control,
-            SerialPort::LineStatus => &mut self.line_status,
-            SerialPort::ModemStatus => &mut self.modem_status,
-            SerialPort::Scratch => &mut self.scratch,
+    /// Checks whether the given LineStatus bit is present.
+    pub fn line_status(&mut self, status: LineStatus) -> bool {
+        match LineStatus::from_bits(self.line_status.read()) {
+            Some(line_status) => line_status.contains(status),
+            None => panic!("failed to parse line status"),
         }
     }
 
-    pub fn write(&mut self, port: SerialPort, byte: u8) {
+    pub fn write(&mut self, byte: u8) {
         // This ensures we don't overwrite pending data.
         while !self.line_status(LineStatus::TRANSMITTER_EMPTY) {}
 
-        self.get_port(port).write(byte);
+        self.data.write(byte);
     }
 
     pub fn write_buffer(&mut self, buffer: &[u8]) {
         for byte in buffer {
-            self.write(SerialPort::Data, *byte);
+            self.write(*byte);
         }
     }
 
     pub fn write_string(&mut self, string: &str) {
         for byte in string.bytes() {
-            self.write(SerialPort::Data, byte)
+            self.write(byte);
         }
     }
 
     /// Reads the immediate value in the specified port.
-    pub fn read_immediate(&mut self, port: SerialPort) -> u8 {
-        self.get_port(port).read()
+    pub fn read_immediate(&mut self) -> u8 {
+        self.data.read()
     }
 
     /// Waits for data to be ready on the data port, and then reads it.
     pub fn read_wait(&mut self) -> u8 {
         while !self.line_status(LineStatus::DATA_RECEIVED) {}
 
-        self.get_port(SerialPort::Data).read()
-    }
-
-    /// Checks whether the given LineStatus bit is present.
-    pub fn line_status(&mut self, status: LineStatus) -> bool {
-        match LineStatus::from_bits(self.read_immediate(SerialPort::LineStatus)) {
-            Some(line_status) => line_status.contains(status),
-            None => panic!("failed to parse line status"),
-        }
+        self.data.read()
     }
 }
 

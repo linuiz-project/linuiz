@@ -1,4 +1,4 @@
-use crate::io::port::Port;
+use crate::io::port::{ReadWritePort, WriteOnlyPort};
 
 const CMD_INIT: u8 = 0x11;
 const CMD_END_OF_INTERRUPT: u8 = 0x20;
@@ -6,8 +6,8 @@ const MODE_8806: u8 = 0x01;
 
 struct PIC {
     offset: u8,
-    command: Port<u8>,
-    data: Port<u8>,
+    command: WriteOnlyPort<u8>,
+    data: ReadWritePort<u8>,
 }
 
 impl PIC {
@@ -34,13 +34,13 @@ impl ChainedPICs {
             pics: [
                 PIC {
                     offset: offset1,
-                    command: Port::new(0x20),
-                    data: Port::new(0x21),
+                    command: WriteOnlyPort::new(0x20),
+                    data: ReadWritePort::new(0x21),
                 },
                 PIC {
                     offset: offset2,
-                    command: Port::new(0xA0),
-                    data: Port::new(0xA1),
+                    command: WriteOnlyPort::new(0xA0),
+                    data: ReadWritePort::new(0xA1),
                 },
             ],
         }
@@ -56,7 +56,7 @@ impl ChainedPICs {
         // Additionally, at this point we don't necessarily have any kind of timer yet, because they
         // tend to required interrupts. This is usually worked around by writing garbage data to port 0x80,
         // which should take long enough to make everything work (* on most hardware).
-        let mut io_wait_port = Port::<u8>::new(0x80);
+        let mut io_wait_port = WriteOnlyPort::<u8>::new(0x80);
         let mut io_wait = || io_wait_port.write(0x0);
 
         // save the masks stored in data port
