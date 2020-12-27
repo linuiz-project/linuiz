@@ -1,4 +1,4 @@
-use crate::io::port::Port;
+use crate::io::port::{Port, ReadOnlyPort, ReadWritePort, WriteOnlyPort};
 use bitflags::bitflags;
 use lazy_static::lazy_static;
 use spin::mutex::{Mutex, MutexGuard};
@@ -46,13 +46,13 @@ pub enum SerialSpeed {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Serial {
-    data: Port<u8>,
-    irq_control: Port<u8>,
-    fifo_control: Port<u8>,
-    line_control: Port<u8>,
-    modem_control: Port<u8>,
-    line_status: Port<u8>,
-    modem_status: Port<u8>,
+    data: ReadWritePort<u8>,
+    irq_control: WriteOnlyPort<u8>,
+    fifo_control: WriteOnlyPort<u8>,
+    line_control: WriteOnlyPort<u8>,
+    modem_control: WriteOnlyPort<u8>,
+    line_status: ReadOnlyPort<u8>,
+    modem_status: ReadOnlyPort<u8>,
     scratch: Port<u8>,
 }
 
@@ -118,10 +118,9 @@ impl Serial {
     }
 
     pub fn write(&mut self, port: SerialPort, byte: u8) {
-        // this ensures we don't overwrite pending data
+        // This ensures we don't overwrite pending data.
         while !self.line_status(LineStatus::TRANSMITTER_EMPTY) {}
 
-        // write to port
         self.get_port(port).write(byte);
     }
 
@@ -137,16 +136,19 @@ impl Serial {
         }
     }
 
+    /// Reads the immediate value in the specified port.
     pub fn read_immediate(&mut self, port: SerialPort) -> u8 {
         self.get_port(port).read()
     }
 
-    pub fn read_wait(&mut self, port: SerialPort) -> u8 {
+    /// Waits for data to be ready on the data port, and then reads it.
+    pub fn read_wait(&mut self) -> u8 {
         while !self.line_status(LineStatus::DATA_RECEIVED) {}
 
-        self.get_port(port).read()
+        self.get_port(SerialPort::Data).read()
     }
 
+    /// Checks whether the given LineStatus bit is present.
     pub fn line_status(&mut self, status: LineStatus) -> bool {
         match LineStatus::from_bits(self.read_immediate(SerialPort::LineStatus)) {
             Some(line_status) => line_status.contains(status),
