@@ -106,11 +106,14 @@ impl InterruptDescriptorTable {
     }
 
     pub fn load(&'static self) {
-        unsafe { self.load_unsafe() }
+        unsafe { self.load_impl() }
     }
 
-    unsafe fn load_unsafe(&self) {
-        crate::instructions::interrupts::lidt(&self.pointer());
+    unsafe fn load_impl(&self) {
+        let pointer = &self.pointer();
+        debug!("Loaded: {:#?}", self);
+
+        crate::instructions::interrupts::lidt(pointer);
     }
 
     fn pointer(&self) -> DescriptorTablePointer {
@@ -176,6 +179,16 @@ impl IndexMut<InterruptType> for InterruptDescriptorTable {
                 i => panic!("no entry with index {}", i),
             },
         }
+    }
+}
+
+impl core::fmt::Debug for InterruptDescriptorTable {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("Interrupt Descriptor Table")
+            .field("Table Pointer", &self.pointer())
+            .field("Size", &core::mem::size_of::<InterruptDescriptorTable>())
+            .finish()
     }
 }
 

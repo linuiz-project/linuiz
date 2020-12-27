@@ -6,23 +6,23 @@
 extern crate log;
 
 use efi_boot::{entrypoint, Framebuffer};
-use gsai::serial;
 
 entrypoint!(kernel_main);
 extern "win64" fn kernel_main(_framebuffer: Option<Framebuffer>) -> i32 {
-    serial!("xxxx");
-
-    loop {}
-
-    if let Err(error) = unsafe { gsai::logging::init() } {
+    if let Err(error) = gsai::logging::init() {
         panic!("{}", error);
     }
 
-    info!("Successfully loaded into kernel.");
+    info!("Successfully loaded into kernel, with logging enabled.");
     debug!("Initializing CPU structures.");
-    loop {}
 
     init();
+
+    unsafe {
+        asm!("mov rax, [0xfffffffffff]");
+    }
+
+    loop {}
 
     0
 }
@@ -36,5 +36,5 @@ fn init() {
     debug!("Successfully initialized and configured IDT.");
 
     gsai::instructions::interrupts::enable();
-    debug!("(WARN: Interrupts are now enabled)");
+    debug!("(WARN: interrupts are now enabled)");
 }

@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(dead_code)]
 #![feature(abi_efiapi)]
 #![feature(core_intrinsics)]
 

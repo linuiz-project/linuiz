@@ -17,7 +17,7 @@ struct Selectors {
     tss_selector: SegmentSelector,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct GlobalDescriptorTable {
     table: [u64; 8],
     next_free: usize,
@@ -88,6 +88,16 @@ impl GlobalDescriptorTable {
     }
 }
 
+impl core::fmt::Debug for GlobalDescriptorTable {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("Global Descriptor Table")
+            .field("Next Free Table Index", &self.next_free)
+            .field("Table", &self.table)
+            .finish()
+    }
+}
+
 lazy_static! {
     static ref TSS: TaskStateSegment = {
         let mut tss = TaskStateSegment::new();
@@ -122,6 +132,7 @@ lazy_static! {
 
 pub fn init() {
     GDT.0.load();
+    debug!("Loaded: {:#?}", GDT.0);
 
     unsafe {
         crate::instructions::set_cs(GDT.1.code_selector);

@@ -49,14 +49,12 @@ const MINIMUM_MEMORY: usize = 0xF424000; // 256MB
 
 #[cfg(debug_assertions)]
 fn configure_log_level() {
-    use log::{set_max_level, LevelFilter};
-    set_max_level(LevelFilter::Debug);
+    log::set_max_level(log::LevelFilter::Debug);
 }
 
 #[cfg(not(debug_assertions))]
 fn configure_log_level() {
-    use log::{set_max_level, LevelFilter};
-    set_max_level(LevelFilter::Info);
+    log::set_max_level(log::LevelFilter::Info);
 }
 
 #[entry]

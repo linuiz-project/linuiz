@@ -158,7 +158,7 @@ where
 }
 
 #[doc(hidden)]
-pub fn __print(args: core::fmt::Arguments) {
+pub fn __serial_out(args: core::fmt::Arguments) {
     safe_lock(|serial| {
         use core::fmt::Write;
         serial.write_fmt(args).unwrap();
@@ -167,11 +167,11 @@ pub fn __print(args: core::fmt::Arguments) {
 
 #[macro_export]
 macro_rules! serial {
-    ($($arg:tt)*) => ($crate::drivers::serial::__print(format_args!($($arg)*)));
+    ($($arg:tt)*) => ($crate::drivers::serial::__serial_out(format_args!($($arg)*)));
 }
 
 #[macro_export]
 macro_rules! serialln {
-    () => ($crate::print!('\n'));
+    () => ($crate::serial!("\n"));
     ($($arg:tt)*) => ($crate::serial!("{}\n", format_args!($($arg)*)));
 }

@@ -1,6 +1,3 @@
-use lazy_static::lazy_static;
-use log::Log;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KernelLoggingMode {
     Serial,
@@ -11,7 +8,7 @@ pub struct KernelLogger {
     pub mode: KernelLoggingMode,
 }
 
-impl Log for KernelLogger {
+impl log::Log for KernelLogger {
     fn enabled(&self, metadata: &log::Metadata) -> bool {
         metadata.level() <= log::Level::Trace
     }
@@ -34,7 +31,7 @@ const LOGGER: KernelLogger = KernelLogger {
     mode: KernelLoggingMode::Serial,
 };
 
-pub unsafe fn init() -> Result<(), log::SetLoggerError> {
+pub fn init() -> Result<(), log::SetLoggerError> {
     #[cfg(debug_assertions)]
     fn configure_log_level() {
         log::set_max_level(log::LevelFilter::Debug);
@@ -42,10 +39,10 @@ pub unsafe fn init() -> Result<(), log::SetLoggerError> {
 
     #[cfg(not(debug_assertions))]
     fn configure_log_level() {
-        log::set_max_level(log::LevelFilter::Info);
+        log::set_max_level(log::LevelFilter::Debug);
     }
 
-    if let Err(error) = log::set_logger_racy(&LOGGER) {
+    if let Err(error) = unsafe { log::set_logger_racy(&LOGGER) } {
         Err(error)
     } else {
         configure_log_level();
