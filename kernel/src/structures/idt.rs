@@ -8,13 +8,6 @@ extern "x86-interrupt" fn breakpoint_handler(stack_frame: &mut InterruptStackFra
     serialln!("CPU EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
 }
 
-extern "x86-interrupt" fn double_fault_handler(
-    stack_frame: &mut InterruptStackFrame,
-    _error_code: u64,
-) -> ! {
-    panic!("CPU EXCEPTION: DOUBLE FAULT\n{:#?}", stack_frame);
-}
-
 extern "x86-interrupt" fn page_fault_handler(
     stack_frame: &mut InterruptStackFrame,
     error_code: x86_64::structures::idt::PageFaultErrorCode,
@@ -27,7 +20,14 @@ extern "x86-interrupt" fn page_fault_handler(
     serialln!("Error Code: {:?}", error_code);
     serialln!("{:#?}", stack_frame);
 
-    crate::instructions::htl_indefinite();
+    crate::instructions::hlt_indefinite();
+}
+
+extern "x86-interrupt" fn double_fault_handler(
+    stack_frame: &mut InterruptStackFrame,
+    _error_code: u64,
+) -> ! {
+    panic!("CPU EXCEPTION: DOUBLE FAULT\n{:#?}", stack_frame);
 }
 
 /* REGULAR INTERRUPT HANDLERS */
@@ -52,7 +52,7 @@ lazy_static! {
         }
 
         // regular interrupts
-        //idt[PICInterrupt::Timer.into()].set_handler_fn(timer_interrupt_handler);
+        // idt[PICInterrupt::Timer.into()].set_handler_fn(timer_interrupt_handler);
 
         idt
     };

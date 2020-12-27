@@ -6,14 +6,14 @@ use spin::mutex::{Mutex, MutexGuard};
 pub const COM1: u16 = 0x3F8;
 pub const LINE_ENABLE_DLAB: u8 = 0x80;
 
-pub const DATA: u16 = COM1 + 0x0;
-pub const IRQ_CONTROL: u16 = COM1 + 0x1;
-pub const FIFO_CONTROL: u16 = COM1 + 0x2;
-pub const LINE_CONTROL: u16 = COM1 + 0x3;
-pub const MODEM_CONTROL: u16 = COM1 + 0x4;
-pub const LINE_STATUS: u16 = COM1 + 0x5;
-pub const MODEM_STATUS: u16 = COM1 + 0x6;
-pub const SCRATCH: u16 = COM1 + 0x7;
+pub const DATA: u16 = 0x0;
+pub const IRQ_CONTROL: u16 = 0x1;
+pub const FIFO_CONTROL: u16 = 0x2;
+pub const LINE_CONTROL: u16 = 0x3;
+pub const MODEM_CONTROL: u16 = 0x4;
+pub const LINE_STATUS: u16 = 0x5;
+pub const MODEM_STATUS: u16 = 0x6;
+pub const SCRATCH: u16 = 0x7;
 
 bitflags! {
     pub struct LineStatus : u8 {
@@ -51,15 +51,15 @@ pub struct Serial {
 }
 
 impl Serial {
-    pub unsafe fn init(com: u16, speed: SerialSpeed) -> Self {
-        let mut data = ReadWritePort::<u8>::new(DATA);
-        let mut irq_control = WriteOnlyPort::<u8>::new(IRQ_CONTROL);
-        let mut fifo_control = WriteOnlyPort::<u8>::new(FIFO_CONTROL);
-        let mut line_control = WriteOnlyPort::<u8>::new(LINE_CONTROL);
-        let mut modem_control = WriteOnlyPort::<u8>::new(MODEM_CONTROL);
-        let line_status = ReadOnlyPort::<u8>::new(LINE_STATUS);
-        let modem_status = ReadOnlyPort::<u8>::new(MODEM_STATUS);
-        let scratch = ReadWritePort::<u8>::new(SCRATCH);
+    pub unsafe fn init(base: u16, speed: SerialSpeed) -> Self {
+        let mut data = ReadWritePort::<u8>::new(base + DATA);
+        let mut irq_control = WriteOnlyPort::<u8>::new(base + IRQ_CONTROL);
+        let mut fifo_control = WriteOnlyPort::<u8>::new(base + FIFO_CONTROL);
+        let mut line_control = WriteOnlyPort::<u8>::new(base + LINE_CONTROL);
+        let mut modem_control = WriteOnlyPort::<u8>::new(base + MODEM_CONTROL);
+        let line_status = ReadOnlyPort::<u8>::new(base + LINE_STATUS);
+        let modem_status = ReadOnlyPort::<u8>::new(base + MODEM_STATUS);
+        let scratch = ReadWritePort::<u8>::new(base + SCRATCH);
 
         // configure the serial port
         // read https://littleosbook.github.io/#configuring-the-serial-port
