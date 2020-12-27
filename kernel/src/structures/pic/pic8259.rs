@@ -12,7 +12,7 @@ struct PIC {
 
 impl PIC {
     fn handles_interrupt(&self, interrupt_id: u8) -> bool {
-        self.offset <= interrupt_id && interrupt_id < (self.offset + 8)
+        interrupt_id >= self.offset && interrupt_id < (self.offset + 8)
     }
 
     fn end_of_interrupt(&mut self) {
@@ -48,7 +48,7 @@ impl ChainedPICs {
 
     /// Initializes the chained PICs. They're initialized together (at the same time) because
     /// I/O operations might not be intantaneous on older processors.
-    pub unsafe fn initialize(&mut self) {
+    pub unsafe fn init(&mut self) {
         // We need to add a delay bettween writes to the PICs, especially on older motherboards.
         // This is because the PIC may not be fast enough to react to the previous command before
         // the next is sent.

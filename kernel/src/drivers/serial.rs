@@ -94,9 +94,6 @@ impl Serial {
         let modem_status = ReadOnlyPort::<u8>::new(base + MODEM_STATUS);
         let scratch = ReadWritePort::<u8>::new(base + SCRATCH);
 
-        // configure the serial port
-        // read https://littleosbook.github.io/#configuring-the-serial-port
-
         // disable irqs
         irq_control.write(0x0);
 

@@ -54,7 +54,7 @@ lazy_static! {
 
 pub fn init() {
     unsafe {
-        PICS.lock().initialize();
+        PICS.lock().init();
     }
 }
 

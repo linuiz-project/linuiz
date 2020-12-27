@@ -18,7 +18,7 @@ extern "win64" fn kernel_main(_framebuffer: Option<Framebuffer>) -> i32 {
 
     init();
 
-    x86_64::instructions::interrupts::int3();
+    // x86_64::instructions::interrupts::int3();
 
     loop {}
 
@@ -28,10 +28,10 @@ extern "win64" fn kernel_main(_framebuffer: Option<Framebuffer>) -> i32 {
 fn init() {
     gsai::structures::gdt::init();
     debug!("Successfully initialized GDT.");
+    gsai::structures::idt::init();
+    debug!("Successfully initialized IDT.");
     gsai::structures::pic::init();
     debug!("Successfully initialized PIC.");
-    gsai::structures::idt::init();
-    debug!("Successfully initialized and configured IDT.");
 
     x86_64::instructions::interrupts::enable();
     debug!("(WARN: interrupts are now enabled)");
