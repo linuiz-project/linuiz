@@ -3,16 +3,34 @@ use bitflags::bitflags;
 use lazy_static::lazy_static;
 use spin::mutex::{Mutex, MutexGuard};
 
+/// Address of the first COM port.
+/// This port is VERY likely to be at this address.
 pub const COM1: u16 = 0x3F8;
-pub const LINE_ENABLE_DLAB: u8 = 0x80;
+/// Address of the second COM port.
+/// This port is likely to be at this address.
+pub const COM2: u16 = 0x2F8;
+/// Address of the third COM port.
+/// This address is configurable on some BIOSes, so it is not a very reliable port address.
+pub const COM3: u16 = 0x3E8;
+/// Address of the fourth COM port.
+/// This address is configurable on some BIOSes, so it is not a very reliable port address.
+pub const COM4: u16 = 0x2E8;
 
+/// Address offset of the data port.
 pub const DATA: u16 = 0x0;
+/// Address offset of the interrupt enable port.
 pub const IRQ_CONTROL: u16 = 0x1;
+/// Address offset of the FIFO control port.
 pub const FIFO_CONTROL: u16 = 0x2;
+/// Address offset of the line control port.
 pub const LINE_CONTROL: u16 = 0x3;
+/// Address offset of the modem control port.
 pub const MODEM_CONTROL: u16 = 0x4;
+/// Address offset of the line status port.
 pub const LINE_STATUS: u16 = 0x5;
+/// Address offset of the modem status port.
 pub const MODEM_STATUS: u16 = 0x6;
+/// Address offset of the scratch port.
 pub const SCRATCH: u16 = 0x7;
 
 bitflags! {
@@ -25,6 +43,21 @@ bitflags! {
         const TRANSMITTER_HOLDING_REGISTER_EMPTY = 1 << 5;
         const TRANSMITTER_EMPTY = 1 << 6;
         const IMPENDING_ERROR = 1 << 7;
+    }
+}
+
+bitflags! {
+    pub struct LineControlFlags : u8 {
+        const DATA_0 = 1 << 0;
+        const DATA_1 = 1 << 1;
+        const STOP = 1 << 2;
+        const PARITY_0 = 1 << 3;
+        const PARITY_1 = 1 << 4;
+        const PARITY_2 = 1 << 5;
+        const ENABLE_DLAB = 1 << 7;
+
+        /// Common bits for line control register
+        const COMMON = Self::DATA_0.bits() | Self::DATA_1.bits() | Self::STOP.bits();
     }
 }
 
@@ -68,20 +101,31 @@ impl Serial {
         irq_control.write(0x0);
 
         // enable DLAB
-        line_control.write(LINE_ENABLE_DLAB);
+        line_control.write(LineControlFlags::ENABLE_DLAB.bits());
 
         // set port speed
         data.write((((speed as u16) >> 8) * 0xFF) as u8);
         data.write(((speed as u16) & 0xFF) as u8);
 
-        // disable DLAB and set data word length to 8 bits
-        line_control.write(0x3);
+        // disable DLAB and set data word length to 8 bits, one stop bit
+        line_control.write(LineControlFlags::COMMON.bits());
 
         // enable FIFO, clear queue, with 14b threshold
         fifo_control.write(0xC7);
 
         // IRQs enabled, RTS/DSR set
         modem_control.write(0x0B);
+
+        // set in loopbkack mode and test serial
+        modem_control.write(0x1E);
+        data.write(0xAE);
+        if data.read() != 0xAE {
+            panic!("serial driver is in faulty state (data test failed)");
+        }
+
+        // if not faulty, set in normal operation mode
+        // (not-loopback with IRQs enabled and OUT#1 and OUT#2 bits enabled)
+        modem_control.write(0x0F);
 
         // enable IRQs
         irq_control.write(0x1);
