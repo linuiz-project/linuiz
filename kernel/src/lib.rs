@@ -1,21 +1,16 @@
 #![no_std]
 #![feature(asm)]
+#![feature(const_fn)]
 #![feature(abi_x86_interrupt)]
 #![feature(alloc_error_handler)]
-
-#[macro_use]
-extern crate log;
-
-mod privilege_level;
 
 pub mod drivers;
 pub mod instructions;
 pub mod io;
 pub mod logging;
 pub mod structures;
-pub use privilege_level::PrivilegeLevel;
 
-use core::{alloc::Layout, ffi::c_void, panic::PanicInfo};
+use core::{alloc::Layout, panic::PanicInfo};
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -27,27 +22,4 @@ fn panic(info: &PanicInfo) -> ! {
 fn alloc_error(error: Layout) -> ! {
     serial!("{:?}", error);
     loop {}
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Address {
-    Physical(usize),
-    Virtual(usize),
-}
-
-impl Address {
-    pub const fn as_ptr(self) -> *const c_void {
-        match self {
-            Address::Virtual(address) => address as *const c_void,
-            Address::Physical(address) => address as *const c_void,
-        }
-    }
-
-    pub const fn as_usize(self) -> usize {
-        match self {
-            Address::Virtual(address) => address,
-            Address::Physical(address) => address,
-        }
-    }
 }

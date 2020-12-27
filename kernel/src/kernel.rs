@@ -18,10 +18,6 @@ extern "win64" fn kernel_main(_framebuffer: Option<Framebuffer>) -> i32 {
 
     init();
 
-    unsafe {
-        asm!("mov rax, [0xfffffffffff]");
-    }
-
     loop {}
 
     0
@@ -35,6 +31,6 @@ fn init() {
     gsai::structures::idt::init();
     debug!("Successfully initialized and configured IDT.");
 
-    gsai::instructions::interrupts::enable();
+    x86_64::instructions::interrupts::enable();
     debug!("(WARN: interrupts are now enabled)");
 }

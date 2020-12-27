@@ -29,7 +29,7 @@ pub struct ChainedPICs {
 
 impl ChainedPICs {
     /// Create a new interface for the standard PIC1 and PIC2 controllers, specifying the desired interrupt offsets.
-    pub unsafe fn new(offset1: u8, offset2: u8) -> Self {
+    pub const unsafe fn new(offset1: u8, offset2: u8) -> Self {
         Self {
             pics: [
                 PIC {
@@ -60,8 +60,8 @@ impl ChainedPICs {
         let mut io_wait = || io_wait_port.write(0x0);
 
         // save the masks stored in data port
-        let saved_mask1 = self.pics[0].data.read();
-        let saved_mask2 = self.pics[1].data.read();
+        let saved_mask0 = self.pics[0].data.read();
+        let saved_mask1 = self.pics[1].data.read();
 
         // Tell each PIC that we're going to send it a 3-byte initialization sequence on its data port.
         self.pics[0].command.write(CMD_INIT);
@@ -70,20 +70,26 @@ impl ChainedPICs {
         io_wait();
 
         // Assign the relevant offsets to each PIC in the chain.
-        self.pics[0].command.write(self.pics[0].offset);
+        self.pics[0].data.write(self.pics[0].offset);
         io_wait();
-        self.pics[1].command.write(self.pics[1].offset);
+        self.pics[1].data.write(self.pics[1].offset);
+        io_wait();
+
+        // Configure chaining between PICs 1 & 2.
+        self.pics[0].data.write(4);
+        io_wait();
+        self.pics[1].data.write(2);
         io_wait();
 
         // Inform the PIC of what mode we'll be using them in.
-        self.pics[0].command.write(MODE_8806);
+        self.pics[0].data.write(MODE_8806);
         io_wait();
-        self.pics[1].command.write(MODE_8806);
+        self.pics[1].data.write(MODE_8806);
         io_wait();
 
-        // restore the saved masks in data port
-        self.pics[0].data.write(saved_mask1);
-        self.pics[1].data.write(saved_mask2);
+        // Restore saved masks
+        self.pics[0].data.write(saved_mask0);
+        self.pics[1].data.write(saved_mask1);
     }
 
     // Indicates whether any of the chained PICs handle the given interrupt.

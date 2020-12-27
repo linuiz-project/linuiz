@@ -78,7 +78,7 @@ impl<T: PortIO> Port<T> {
     /// Constructs a port wrapping the given address
     ///
     /// This method is unsafe because the caller must ensure the given port is a valid address
-    pub unsafe fn new(port: u16) -> Self {
+    pub const unsafe fn new(port: u16) -> Self {
         Port {
             port,
             phantom: PhantomData,

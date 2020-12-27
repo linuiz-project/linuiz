@@ -8,18 +8,14 @@ Information about the PIC can be found here: https://en.wikipedia.org/wiki/Intel
 pub mod pic8259;
 
 use core::convert::TryFrom;
-
 use lazy_static::lazy_static;
 use pic8259::ChainedPICs;
 use spin;
-
-use super::idt::InterruptType;
 
 pub const PIC_1_OFFSET: u8 = 32;
 pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
 
 #[repr(u8)]
-#[allow(dead_code)]
 #[derive(Debug, Copy, Clone)]
 pub enum PICInterrupt {
     Timer = PIC_1_OFFSET,
@@ -51,36 +47,15 @@ impl Into<usize> for PICInterrupt {
     }
 }
 
-impl Into<InterruptType> for PICInterrupt {
-    fn into(self) -> InterruptType {
-        InterruptType::Generic(self.into())
-    }
-}
-
 lazy_static! {
     static ref PICS: spin::Mutex<ChainedPICs> =
         spin::Mutex::new(unsafe { ChainedPICs::new(PIC_1_OFFSET, PIC_2_OFFSET) });
-}
-
-fn log_handled_interrupts() {
-    debug!("Loaded: Chaind PICs");
-    for interrupt_id in PIC_1_OFFSET..(PIC_1_OFFSET + 15) {
-        if handles_interrupt(interrupt_id) {
-            if let Ok(interrupt_name) = PICInterrupt::try_from(interrupt_id) {
-                debug!(" Handles {:?}", interrupt_name);
-            } else {
-                debug!(" Handles ID {}", interrupt_id);
-            }
-        }
-    }
 }
 
 pub fn init() {
     unsafe {
         PICS.lock().initialize();
     }
-
-    log_handled_interrupts();
 }
 
 pub fn end_of_interrupt(offset: PICInterrupt) {
