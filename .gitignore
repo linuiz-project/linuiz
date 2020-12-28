@@ -13,3 +13,4 @@ Cargo.lock
 
 image/*
 references/*
+kernel.out

@@ -9,7 +9,7 @@ bitflags! {
     pub struct InterruptLines : u16 {
         const TIMER = 1 << 0;
         const KEYBOARD = 1 << 1;
-        const SLAVE = 1 << 2;
+        const CASCADE = 1 << 2;
     }
 }
 

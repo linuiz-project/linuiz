@@ -3,7 +3,6 @@ use lazy_static::lazy_static;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
 
 /* FAULT INTERRUPT HANDLERS */
-
 extern "x86-interrupt" fn breakpoint_handler(stack_frame: &mut InterruptStackFrame) {
     serialln!("CPU EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
 }
@@ -53,7 +52,7 @@ extern "x86-interrupt" fn general_protection_fault_handler(
     let selector_index = (error_code >> 3) & 0x1FFF;
 
     panic!(
-        "CPU EXCEPTION: GENERAL PROTECTION FAULT:\n External: {}\n IndexType: {:?}\n Index: {}\n{:#?}",
+        "CPU EXCEPTION: GENERAL PROTECTION FAULT:\n External: {}\n IndexType: {:?}\n Index: {}\n {:#?}",
         external, selector_index_type, selector_index, stack_frame
     );
 }
@@ -66,14 +65,11 @@ extern "x86-interrupt" fn double_fault_handler(
 }
 
 /* REGULAR INTERRUPT HANDLERS */
-
 extern "x86-interrupt" fn timer_interrupt_handler(_: &mut InterruptStackFrame) {
-    crate::serial!(".");
     crate::structures::pic::end_of_interrupt(InterruptOffset::Timer);
 }
 
 /* IDT */
-
 lazy_static! {
     static ref IDT: InterruptDescriptorTable = {
         let mut idt = InterruptDescriptorTable::new();

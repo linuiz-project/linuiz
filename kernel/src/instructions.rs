@@ -3,3 +3,14 @@ pub fn hlt_indefinite() -> ! {
         x86_64::instructions::hlt();
     }
 }
+
+pub unsafe fn init_segment_registers(value: u16) {
+    asm!(
+        "mov ds, ax",
+        "mov es, ax",
+        "mov gs, ax",
+        "mov fs, ax",
+        "mov ss, ax",
+        in("ax") value
+    );
+}

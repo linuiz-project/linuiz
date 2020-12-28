@@ -18,7 +18,7 @@ extern "win64" fn kernel_main(_framebuffer: Option<Framebuffer>) -> i32 {
 
     init();
 
-    // x86_64::instructions::interrupts::int3();
+    x86_64::instructions::interrupts::int3();
 
     loop {}
 

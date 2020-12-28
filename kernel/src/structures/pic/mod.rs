@@ -43,7 +43,7 @@ lazy_static! {
 pub fn init() {
     unsafe {
         PICS.lock()
-            .init(InterruptLines::TIMER | InterruptLines::SLAVE);
+            .init(InterruptLines::TIMER | InterruptLines::CASCADE);
     }
 }
 
