@@ -1,12 +1,13 @@
 bitflags::bitflags! {
-    pub struct LoggingMode : u8 {
+    pub struct LoggingModes : u8 {
+        const NONE = 0;
         const SERIAL = 1 << 0;
         const GRAPHIC = 1 << 1;
     }
 }
 
 pub struct KernelLogger {
-    pub mode: LoggingMode,
+    pub modes: LoggingModes,
 }
 
 impl log::Log for KernelLogger {
@@ -16,11 +17,11 @@ impl log::Log for KernelLogger {
 
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
-            if self.mode.contains(LoggingMode::SERIAL) {
+            if self.modes.contains(LoggingModes::SERIAL) {
                 crate::serialln!("[{}] {}", record.level(), record.args());
             }
 
-            if self.mode.contains(LoggingMode::GRAPHIC) {
+            if self.modes.contains(LoggingModes::GRAPHIC) {
                 panic!("no graphics logging implemented!");
             }
         }
@@ -29,11 +30,13 @@ impl log::Log for KernelLogger {
     fn flush(&self) {}
 }
 
-const LOGGER: KernelLogger = KernelLogger {
-    mode: LoggingMode::SERIAL,
+static mut LOGGER: KernelLogger = KernelLogger {
+    modes: LoggingModes::NONE,
 };
 
-pub fn init(min_level: log::LevelFilter) -> Result<(), log::SetLoggerError> {
+pub fn init(modes: LoggingModes, min_level: log::LevelFilter) -> Result<(), log::SetLoggerError> {
+    unsafe { LOGGER = KernelLogger { modes } };
+
     if let Err(error) = unsafe { log::set_logger_racy(&LOGGER) } {
         Err(error)
     } else {

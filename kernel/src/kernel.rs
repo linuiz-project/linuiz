@@ -9,7 +9,9 @@ use efi_boot::{entrypoint, FramebufferPointer};
 
 entrypoint!(kernel_main);
 extern "win64" fn kernel_main(framebuffer_ptr: Option<FramebufferPointer>) -> i32 {
-    if let Err(error) = gsai::logging::init(log::LevelFilter::Trace) {
+    if let Err(error) =
+        gsai::logging::init(gsai::logging::LoggingModes::SERIAL, log::LevelFilter::Debug)
+    {
         panic!("{}", error);
     }
 
