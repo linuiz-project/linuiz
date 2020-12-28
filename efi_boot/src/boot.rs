@@ -24,7 +24,7 @@ use core::{
     mem::{size_of, transmute},
     ptr::slice_from_raw_parts_mut,
 };
-use efi_boot::Framebuffer;
+use efi_boot::FramebufferPointer;
 use uefi::{
     prelude::BootServices,
     proto::{
@@ -85,7 +85,7 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
             let dimensions = efi_boot::Size::new(resolution.0, resolution.1);
             info!("Acquired and configured graphics output protocol.");
 
-            Some(Framebuffer::new(framebuffer, dimensions))
+            Some(FramebufferPointer::new(framebuffer, dimensions))
         }
         None => {
             warn!("No graphics output found. Kernel will default to using serial output.");
@@ -167,7 +167,7 @@ fn kernel_transfer(
     image_handle: Handle,
     system_table: SystemTable<Boot>,
     kernel_entry_point: usize,
-    framebuffer: Option<Framebuffer>,
+    framebuffer: Option<FramebufferPointer>,
 ) -> Status {
     info!("Preparing to exit boot services environment.");
     let mmap_buffer = {

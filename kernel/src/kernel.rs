@@ -5,27 +5,32 @@
 #[macro_use]
 extern crate log;
 
-use efi_boot::{entrypoint, Framebuffer};
+use efi_boot::{entrypoint, FramebufferPointer};
 
 entrypoint!(kernel_main);
-extern "win64" fn kernel_main(_framebuffer: Option<Framebuffer>) -> i32 {
+extern "win64" fn kernel_main(framebuffer_ptr: Option<FramebufferPointer>) -> i32 {
     if let Err(error) = gsai::logging::init(log::LevelFilter::Trace) {
         panic!("{}", error);
     }
 
     info!("Successfully loaded into kernel, with logging enabled.");
-    debug!("Initializing CPU structures.");
 
-    init();
-
-    x86_64::instructions::interrupts::int3();
+    debug!("Configuring CPU state.");
+    unsafe { init_cpu_state() };
+    debug!("Initializing memory structures.");
+    init_structures();
 
     loop {}
 
     0
 }
 
-fn init() {
+unsafe fn init_cpu_state() {
+    gsai::instructions::init_segment_registers(0x0);
+    debug!("Zeroed segment registers.");
+}
+
+fn init_structures() {
     gsai::structures::gdt::init();
     debug!("Successfully initialized GDT.");
     gsai::structures::idt::init();

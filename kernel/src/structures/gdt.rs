@@ -50,9 +50,6 @@ pub fn init() {
     GDT.0.load();
 
     unsafe {
-        // initialize segment registers to zero values
-        crate::instructions::init_segment_registers(0x0);
-
         // load the code and tss segments
         x86_64::instructions::segmentation::set_cs(GDT.1.code_selector);
         x86_64::instructions::tables::load_tss(GDT.1.tss_selector);
