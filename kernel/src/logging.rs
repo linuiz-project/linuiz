@@ -31,21 +31,11 @@ const LOGGER: KernelLogger = KernelLogger {
     mode: KernelLoggingMode::Serial,
 };
 
-pub fn init() -> Result<(), log::SetLoggerError> {
-    #[cfg(debug_assertions)]
-    fn configure_log_level() {
-        log::set_max_level(log::LevelFilter::Debug);
-    }
-
-    #[cfg(not(debug_assertions))]
-    fn configure_log_level() {
-        log::set_max_level(log::LevelFilter::Debug);
-    }
-
+pub fn init(min_level: log::LevelFilter) -> Result<(), log::SetLoggerError> {
     if let Err(error) = unsafe { log::set_logger_racy(&LOGGER) } {
         Err(error)
     } else {
-        configure_log_level();
+        log::set_max_level(min_level);
         Ok(())
     }
 }

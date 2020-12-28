@@ -14,7 +14,6 @@ bitflags = "*"
 x86_64 = "*"
 spin = "*"
 
-
 [[bin]]
 name = "kernel"
 path = "src/kernel.rs"

@@ -4,6 +4,9 @@
 #![feature(abi_x86_interrupt)]
 #![feature(alloc_error_handler)]
 
+#[macro_use]
+extern crate log;
+
 pub mod drivers;
 pub mod instructions;
 pub mod io;
