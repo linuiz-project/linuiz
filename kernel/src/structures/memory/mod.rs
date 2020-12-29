@@ -1,3 +1,5 @@
+pub mod paging;
+
 use x86_64::PhysAddr;
 
 pub const PAGE_SIZE: u64 = 0x1000;
@@ -13,13 +15,13 @@ pub struct Frame {
 }
 
 impl Frame {
-    const fn new(address: u64) -> Self {
+    pub const fn new(address: u64) -> Self {
         Self {
             number: address / PAGE_SIZE,
         }
     }
 
-    const fn address(&self) -> PhysAddr {
+    pub const fn address(&self) -> PhysAddr {
         PhysAddr::new(self.number * PAGE_SIZE)
     }
 }

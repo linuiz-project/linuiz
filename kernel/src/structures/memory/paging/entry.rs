@@ -1,9 +1,7 @@
 use crate::structures::memory::Frame;
 
-const ENTRY_COUNT: usize = 512;
-
 bitflags::bitflags! {
-    pub struct EntryFlags : u64 {
+    pub struct PageEntryFlags : u64 {
         const PRESENT = 1 << 0;
         const WRITABLE = 1 << 1;
         const USER_ACCESSIBLE = 1 << 2;
@@ -17,22 +15,31 @@ bitflags::bitflags! {
     }
 }
 
-pub struct Entry(u64);
+pub struct PageEntry(u64);
 
-impl Entry {
-    pub fn flags(&self) -> EntryFlags {
-        EntryFlags::from_bits_truncate(self.0)
+impl PageEntry {
+    pub fn flags(&self) -> PageEntryFlags {
+        PageEntryFlags::from_bits_truncate(self.0)
     }
 
     pub fn frame(&self) -> Option<Frame> {
-        if self.flags().contains(EntryFlags::PRESENT) {
+        if self.flags().contains(PageEntryFlags::PRESENT) {
             Some(Frame::new(self.0 & 0x000FFFFF_FFFFF000))
         } else {
             None
         }
     }
-}
 
-pub struct Page {
-    number: usize,
+    pub fn set(&mut self, frame: Frame, flags: PageEntryFlags) {
+        assert!((frame.address() & !0x000FFFFF_FFFFF000000) == 0);
+        self.0 = frame.address() | flags.bits();
+    }
+
+    pub fn is_unused(&self) -> bool {
+        self.0 == 0
+    }
+
+    pub fn set_unused(&mut self) {
+        self.0 = 0;
+    }
 }
