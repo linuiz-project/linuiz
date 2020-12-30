@@ -214,7 +214,5 @@ fn kernel_transfer(
 
     // at this point, the given SystemTable<Boot> is invalid, and replaced with the runtime_table (SystemTable<Runtime>)
     let kernel_main: efi_boot::KernelMain = unsafe { transmute(kernel_entry_point) };
-    let _result = kernel_main(boot_info);
-
-    Status::SUCCESS
+    kernel_main(boot_info)
 }
