@@ -4,6 +4,7 @@ use x86_64::PhysAddr;
 
 pub const PAGE_SIZE: u64 = 0x1000; // 4096
 pub const KIBIBYTE: u64 = 0x400; // 1024
+pub const MIBIBYTE: u64 = KIBIBYTE * KIBIBYTE;
 
 pub trait FrameAllocator {
     fn allocate_frame(&mut self) -> Option<Frame>;
@@ -32,5 +33,5 @@ pub fn to_kibibytes(value: u64) -> u64 {
 }
 
 pub fn to_mibibytes(value: u64) -> u64 {
-    value / (KIBIBYTE * KIBIBYTE)
+    value / MIBIBYTE
 }

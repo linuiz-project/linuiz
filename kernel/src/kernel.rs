@@ -18,7 +18,7 @@ extern "win64" fn kernel_main(boot_info: BootInfo) -> Status {
 
     info!("Successfully loaded into kernel, with logging enabled.");
 
-    let total_memory: u64 = boot_info
+    let total_memory = boot_info
         .memory_map()
         .iter()
         .map(|descriptor| descriptor.page_count * PAGE_SIZE)
