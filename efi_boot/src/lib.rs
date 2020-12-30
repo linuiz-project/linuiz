@@ -3,23 +3,16 @@
 #![feature(abi_efiapi)]
 #![feature(core_intrinsics)]
 
-pub use uefi::table::{Runtime, SystemTable};
+pub use uefi::{
+    table::{boot::MemoryDescriptor, Runtime, SystemTable},
+    Status,
+};
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Size {
     pub width: usize,
     pub height: usize,
-}
-
-impl Size {
-    pub fn new(width: usize, height: usize) -> Self {
-        Size { width, height }
-    }
-
-    pub fn length(&self) -> usize {
-        self.width * self.height
-    }
 }
 
 // this is used to construct a FramebufferDriver from the kernel
@@ -30,23 +23,22 @@ pub struct FramebufferPointer {
     pub size: Size,
 }
 
-impl FramebufferPointer {
-    pub fn new(pointer: *mut u8, size: Size) -> Self {
-        Self { pointer, size }
-    }
+#[repr(C)]
+pub struct BootInfo<'info> {
+    mmap_iter: &'info dyn ExactSizeIterator<Item = &'info MemoryDescriptor>,
+    runtime_table: SystemTable<Runtime>,
+    framebuffer: Option<FramebufferPointer>,
 }
 
-pub type KernelMain = extern "win64" fn(Option<crate::FramebufferPointer>) -> i32;
+pub type KernelMain = extern "win64" fn(crate::BootInfo) -> Status;
 
 #[macro_export]
 macro_rules! entrypoint {
     ($path:path) => {
         #[export_name = "_start"]
-        pub extern "win64" fn __impl_kernel_main(
-            framebuffer: Option<$crate::FramebufferPointer>,
-        ) -> i32 {
+        pub extern "win64" fn __impl_kernel_main(boot_info: $crate::BootInfo) -> $uefi::Status {
             let function: $crate::KernelMain = $path;
-            function(framebuffer)
+            function(boot_info)
         }
     };
 }

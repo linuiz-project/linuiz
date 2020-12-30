@@ -5,10 +5,10 @@
 #[macro_use]
 extern crate log;
 
-use efi_boot::{entrypoint, FramebufferPointer};
+use efi_boot::{entrypoint, BootInfo, Status};
 
 entrypoint!(kernel_main);
-extern "win64" fn kernel_main(framebuffer_ptr: Option<FramebufferPointer>) -> i32 {
+extern "win64" fn kernel_main(boot_info: BootInfo) -> Status {
     if let Err(error) =
         gsai::logging::init(gsai::logging::LoggingModes::SERIAL, log::LevelFilter::Debug)
     {
