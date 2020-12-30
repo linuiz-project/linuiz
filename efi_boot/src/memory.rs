@@ -14,16 +14,7 @@ pub struct PointerBuffer<'buf> {
     pub buffer: &'buf mut [u8],
 }
 
-// impl<'buf> PointerBuffer<'buf> {
-//     pub fn pointer(&self) -> *mut u8 {
-//         self.pointer
-//     }
-
-//     pub fn buffer<'a: 'buf>(&'a mut self) -> &'a mut [u8] {
-//         self.buffer
-//     }
-// }
-
+#[allow(dead_code)]
 pub fn allocate_pool(
     boot_services: &BootServices,
     memory_type: MemoryType,
@@ -41,6 +32,7 @@ pub fn allocate_pool(
     }
 }
 
+#[allow(dead_code)]
 pub fn allocate_pages(
     boot_services: &BootServices,
     allocate_type: AllocateType,
@@ -68,6 +60,7 @@ pub fn allocate_pages(
     }
 }
 
+#[allow(dead_code)]
 pub fn free_pool(boot_services: &BootServices, buffer: PointerBuffer) {
     match boot_services.free_pool(buffer.pointer) {
         Ok(completion) => completion.unwrap(),
@@ -75,6 +68,7 @@ pub fn free_pool(boot_services: &BootServices, buffer: PointerBuffer) {
     }
 }
 
+#[allow(dead_code)]
 pub fn free_pages(boot_services: &BootServices, buffer: PointerBuffer, count: usize) {
     match boot_services.free_pages(buffer.pointer as u64, count) {
         Ok(completion) => completion.unwrap(),
@@ -82,17 +76,20 @@ pub fn free_pages(boot_services: &BootServices, buffer: PointerBuffer, count: us
     }
 }
 
+#[allow(dead_code)]
 pub fn align_up(value: usize, alignment: usize) -> usize {
     let super_aligned = wrapping_add(value, alignment);
     let force_under_aligned = wrapping_sub(super_aligned, 1);
     wrapping_mul(force_under_aligned / alignment, alignment)
 }
 
+#[allow(dead_code)]
 pub fn align_down(value: usize, alignment: usize) -> usize {
     (value / alignment) * alignment
 }
 
 /// returns the minimum necessary memory pages to contain the given size in bytes.
+#[allow(dead_code)]
 pub fn aligned_slices(size: usize, alignment: usize) -> usize {
     ((size + alignment) - 1) / alignment
 }

@@ -15,8 +15,6 @@ use uefi::{
     ResultExt,
 };
 
-pub const KERNEL_VADDRESS: usize = 0xFFFFFFFF80000000; // -2GB, page-aligned
-
 /// reads an ELF binary from the given file, and loads it into
 /// memory, returning the entry address
 pub fn load_kernel(boot_services: &BootServices, mut kernel_file: RegularFile) -> usize {

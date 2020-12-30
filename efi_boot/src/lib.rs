@@ -1,5 +1,4 @@
 #![no_std]
-#![allow(dead_code)]
 #![feature(abi_efiapi)]
 #![feature(core_intrinsics)]
 
@@ -25,9 +24,35 @@ pub struct FramebufferPointer {
 
 #[repr(C)]
 pub struct BootInfo<'info> {
-    mmap_iter: &'info dyn ExactSizeIterator<Item = &'info MemoryDescriptor>,
+    memory_map: &'info [MemoryDescriptor],
     runtime_table: SystemTable<Runtime>,
     framebuffer: Option<FramebufferPointer>,
+}
+
+impl<'info> BootInfo<'info> {
+    pub fn new(
+        memory_map: &'info [MemoryDescriptor],
+        runtime_table: SystemTable<Runtime>,
+        framebuffer: Option<FramebufferPointer>,
+    ) -> Self {
+        Self {
+            memory_map,
+            runtime_table,
+            framebuffer,
+        }
+    }
+
+    pub fn memory_map(&self) -> &[MemoryDescriptor] {
+        self.memory_map
+    }
+
+    pub fn runtime_table(&self) -> &SystemTable<Runtime> {
+        &self.runtime_table
+    }
+
+    pub fn framebuffer_pointer(&self) -> &Option<FramebufferPointer> {
+        &self.framebuffer
+    }
 }
 
 pub type KernelMain = extern "win64" fn(crate::BootInfo) -> Status;
@@ -36,7 +61,7 @@ pub type KernelMain = extern "win64" fn(crate::BootInfo) -> Status;
 macro_rules! entrypoint {
     ($path:path) => {
         #[export_name = "_start"]
-        pub extern "win64" fn __impl_kernel_main(boot_info: $crate::BootInfo) -> $uefi::Status {
+        pub extern "win64" fn __impl_kernel_main(boot_info: $crate::BootInfo) -> $crate::Status {
             let function: $crate::KernelMain = $path;
             function(boot_info)
         }

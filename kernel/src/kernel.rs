@@ -6,6 +6,7 @@
 extern crate log;
 
 use efi_boot::{entrypoint, BootInfo, Status};
+use gsai::structures::memory::PAGE_SIZE;
 
 entrypoint!(kernel_main);
 extern "win64" fn kernel_main(boot_info: BootInfo) -> Status {
@@ -17,6 +18,16 @@ extern "win64" fn kernel_main(boot_info: BootInfo) -> Status {
 
     info!("Successfully loaded into kernel, with logging enabled.");
 
+    let total_memory: u64 = boot_info
+        .memory_map()
+        .iter()
+        .map(|descriptor| descriptor.page_count * PAGE_SIZE)
+        .sum();
+    info!(
+        "Identified {} MB of system memory.",
+        gsai::structures::memory::to_mibibytes(total_memory)
+    );
+
     debug!("Configuring CPU state.");
     unsafe { init_cpu_state() };
     debug!("Initializing memory structures.");
@@ -24,7 +35,7 @@ extern "win64" fn kernel_main(boot_info: BootInfo) -> Status {
 
     loop {}
 
-    0
+    Status::SUCCESS
 }
 
 unsafe fn init_cpu_state() {

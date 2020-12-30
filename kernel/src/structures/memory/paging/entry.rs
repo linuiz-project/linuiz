@@ -31,8 +31,9 @@ impl PageEntry {
     }
 
     pub fn set(&mut self, frame: Frame, flags: PageEntryFlags) {
-        assert!((frame.address() & !0x000FFFFF_FFFFF000000) == 0);
-        self.0 = frame.address() | flags.bits();
+        let addr_u64 = frame.address().as_u64();
+        assert!((addr_u64 & !0x000FFFFF_FFFFF000000) == 0);
+        self.0 = addr_u64 | flags.bits();
     }
 
     pub fn is_unused(&self) -> bool {

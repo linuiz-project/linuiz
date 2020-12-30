@@ -70,7 +70,7 @@ pub enum ELFMachine {
 }
 
 #[repr(C)]
-#[allow(dead_code, non_camel_case_types)]
+#[allow(non_camel_case_types)]
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct ELFHeader64 {
     magic: [u8; 4],

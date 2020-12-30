@@ -45,7 +45,9 @@ impl ProgramHeader {
         }
     }
 
-    // todo add getters for all properties
+    pub fn flags(&self) -> u32 {
+        self.flags
+    }
 
     pub fn ph_type(&self) -> ProgramHeaderType {
         self.ph_type
@@ -81,14 +83,14 @@ impl core::fmt::Debug for ProgramHeader {
     fn fmt(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
         formatter
             .debug_struct("Program Header")
-            .field("Type", &self.ph_type)
-            .field("Flags", &self.flags)
-            .field("Offset", &self.offset)
-            .field("VAaddr", &self.vaddr)
-            .field("PAddr", &self.paddr)
-            .field("Disk Size", &self.disk_size)
-            .field("Mem Size", &self.mem_size)
-            .field("Alignment", &self.alignment)
+            .field("Type", &self.ph_type())
+            .field("Flags", &self.flags())
+            .field("Offset", &self.offset())
+            .field("VAaddr", &self.virtual_address())
+            .field("PAddr", &self.physical_address())
+            .field("Disk Size", &self.disk_size())
+            .field("Mem Size", &self.memory_size())
+            .field("Alignment", &self.alignment())
             .finish()
     }
 }

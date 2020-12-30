@@ -1,9 +1,9 @@
 use core::ops::{Index, IndexMut};
 
-use crate::structures::memory::paging::{ENTRY_COUNT, PageEntry, PageEntryFlags};
+use crate::structures::memory::paging::{PageEntry, ENTRY_COUNT};
 
 pub struct PageTable {
-    entries: [PageEntry; ENTRY_COUNT]
+    entries: [PageEntry; ENTRY_COUNT],
 }
 
 impl PageTable {
