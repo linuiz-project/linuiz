@@ -21,7 +21,10 @@ extern "win64" fn kernel_main(boot_info: BootInfo) -> Status {
     let total_memory = boot_info
         .memory_map()
         .iter()
-        .map(|descriptor| descriptor.page_count * PAGE_SIZE)
+        .map(|descriptor| {
+            trace!("{:#?}", descriptor);
+            descriptor.page_count * PAGE_SIZE
+        })
         .sum();
     info!(
         "Identified {} MB of system memory.",

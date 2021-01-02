@@ -123,23 +123,29 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
 }
 
 fn ensure_enough_memory(boot_services: &BootServices) {
-    let minimum_address = MINIMUM_MEMORY - memory::PAGE_SIZE;
-    let allocated_address = boot_services
-        .allocate_pages(
-            AllocateType::Address(minimum_address),
-            MemoryType::LOADER_DATA,
-            1,
-        )
-        .expect_success("host system does not meet minimum memory requirements");
+    let mmap_size_bytes = boot_services.memory_map_size() + (size_of::<MemoryDescriptor>() * 2);
+    let mmap_buffer =
+        memory::allocate_pool(boot_services, MemoryType::LOADER_DATA, mmap_size_bytes);
+    let total_memory: usize = match boot_services.memory_map(mmap_buffer.buffer) {
+        Ok(completion) => completion.unwrap().1,
+        Err(error) => panic!("{:?}", error),
+    }
+    .map(|descriptor| (descriptor.page_count as usize) * memory::PAGE_SIZE)
+    .sum::<usize>();
 
-    boot_services
-        .free_pages(allocated_address, 1)
-        .expect_success("failed to free memory when ensuring host system capacity");
+    if total_memory < MINIMUM_MEMORY {
+        panic!(
+            "system does not have the minimum required {}MB of RAM.",
+            MINIMUM_MEMORY / (1024 * 1024)
+        );
+    } else {
+        info!(
+            "Verified minimum system memory: {}MB",
+            MINIMUM_MEMORY / (1024 * 1024)
+        );
+    }
 
-    info!(
-        "Verified minimum system memory: {}MB",
-        minimum_address / 0xF4240
-    );
+    memory::free_pool(boot_services, mmap_buffer);
 }
 
 fn select_graphics_mode(graphics_output: &mut GraphicsOutput) -> Mode {
@@ -198,7 +204,6 @@ fn kernel_transfer(
         .stdout()
         .reset(false)
         .expect_success("failed to reset standard output");
-
 
     // Create the byte buffer to the used for filling in memory descriptors. This buffer, on the call to `ExitBootServices`, provides
     // lifetime information, and so cannot be reinterpreted easily.
