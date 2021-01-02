@@ -3,7 +3,7 @@
 #![feature(core_intrinsics)]
 
 pub use uefi::{
-    table::{boot::MemoryDescriptor, Runtime, SystemTable},
+    table::{boot::{MemoryDescriptor, MemoryType}, Runtime, SystemTable},
     Status,
 };
 
