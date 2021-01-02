@@ -172,9 +172,17 @@ fn kernel_transfer(
     framebuffer: Option<FramebufferPointer>,
 ) -> Status {
     info!("Preparing to exit boot services environment.");
+    // Retrieve a raw allocation pointer & size for the system memory map.
+    //
+    // Remark:
+    //  We can't use `memory::allocate_pool`, because the `system_table.boot_services()` would have its lifetime
+    //  used to provide a lifetime to the returned pointer buffer. This is a problem because `system_table` has
+    //  to be moved into `ExitBootServices`, which isn't possible if `boot_services()` has had its lifetime used
+    //  elsewhere.
     let (mmap_ptr, mmap_alloc_size) = {
         let boot_services = system_table.boot_services();
         let mem_descriptor_size = size_of::<MemoryDescriptor>();
+        // Determine the total allocation size of the memory map, in bytes (+2 to cover any extraneous entries created before `ExitBootServices`).
         let mmap_alloc_size = boot_services.memory_map_size() + (2 * mem_descriptor_size);
         let alloc_ptr =
             match boot_services.allocate_pool(MemoryType::BOOT_SERVICES_DATA, mmap_alloc_size) {
@@ -182,9 +190,6 @@ fn kernel_transfer(
                 Err(error) => panic!("{:?}", error),
             };
 
-        // we HAVE TO use an unsafe transmutation for this retval, otherwise we run into issues with
-        // the system_table/boot_services getting consumed to give lifetime information
-        // to the buffer (and thus not being able to be moved into the exit_boot_services call)
         (alloc_ptr, mmap_alloc_size)
     };
 
@@ -194,15 +199,18 @@ fn kernel_transfer(
         .reset(false)
         .expect_success("failed to reset standard output");
 
-    // after this point point, the previous system_table and boot_services are no longer valid
+
+    // Create the byte buffer to the used for filling in memory descriptors. This buffer, on the call to `ExitBootServices`, provides
+    // lifetime information, and so cannot be reinterpreted easily.
     let mmap_buffer = unsafe { &mut *slice_from_raw_parts_mut(mmap_ptr, mmap_alloc_size) };
+    // After this point point, the previous system_table and boot_services are no longer valid
     let (runtime_table, mmap_iter) =
         match system_table.exit_boot_services(image_handle, mmap_buffer) {
             Ok(completion) => completion.unwrap(),
             Err(error) => panic!("{:?}", error),
         };
 
-    // remark: for some reason, this cast itself doesn't result in a valid memory map, even provided
+    // Remark: For some reason, this cast itself doesn't result in a valid memory map, even provided
     //  the alignment is correct—so we have to read in the memory descriptors.
     let memory_map = unsafe {
         &mut *slice_from_raw_parts_mut(mmap_ptr as *mut MemoryDescriptor, mmap_iter.len())
@@ -211,9 +219,8 @@ fn kernel_transfer(
         memory_map[index] = *descriptor;
     }
 
-    // at this point, the given SystemTable<Boot> is invalid, and replaced with the runtime_table (SystemTable<Runtime>)
+    // Finally, drop into the kernel.
     let kernel_main: efi_boot::KernelMain = unsafe { transmute(kernel_entry_point) };
-
     let boot_info = BootInfo::new(memory_map, runtime_table, framebuffer);
     kernel_main(boot_info)
 }
