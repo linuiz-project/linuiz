@@ -15,8 +15,6 @@ use uefi::{
     ResultExt,
 };
 
-const KERNEL_CODE_TYPE: u32 = 0xFFFFFF00;
-
 /// reads an ELF binary from the given file, and loads it into
 /// memory, returning the entry address
 pub fn load_kernel(boot_services: &BootServices, mut kernel_file: RegularFile) -> usize {
@@ -90,7 +88,7 @@ fn allocate_segments(
                 // point, but that doesn't really matter to the code
                 // in this context
                 AllocateType::Address(aligned_address),
-                MemoryType::custom(KERNEL_CODE_TYPE),
+                efi_boot::KERNEL_CODE,
                 pages_count,
             )
             // we won't ever explicitly deallocate this, so we only

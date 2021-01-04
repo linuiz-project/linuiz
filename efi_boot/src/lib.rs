@@ -3,9 +3,15 @@
 #![feature(core_intrinsics)]
 
 pub use uefi::{
-    table::{boot::{MemoryDescriptor, MemoryType}, Runtime, SystemTable},
+    table::{
+        boot::{MemoryDescriptor, MemoryType},
+        Runtime, SystemTable,
+    },
     Status,
 };
+
+pub const KERNEL_CODE: MemoryType = MemoryType::custom(0xFFFFFF00);
+pub const KERNEL_DATA: MemoryType = MemoryType::custom(0xFFFFFF01);
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
