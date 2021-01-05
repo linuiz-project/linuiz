@@ -1,4 +1,4 @@
-const SECTION_BITS_COUNT: usize = core::mem::size_of::<usize>() * 8;
+pub const SECTION_BITS_COUNT: usize = core::mem::size_of::<usize>() * 8;
 
 struct Section {
     pub(self) index: usize,
@@ -11,9 +11,10 @@ pub struct BitArray<'arr> {
 }
 
 impl<'arr> BitArray<'arr> {
-    pub fn from_ptr(ptr: *mut usize, length: usize) -> Self {
-        let array =
-            unsafe { &mut *core::ptr::slice_from_raw_parts_mut(ptr, length / SECTION_BITS_COUNT) };
+    pub fn from_ptr(ptr: *mut usize, bits: usize) -> Self {
+        let array = unsafe {
+            &mut *core::ptr::slice_from_raw_parts_mut(ptr, (bits / SECTION_BITS_COUNT) + 1)
+        };
         // clear the array
         for index in 0..array.len() {
             array[index] = 0;
@@ -22,7 +23,7 @@ impl<'arr> BitArray<'arr> {
         Self { array }
     }
     pub fn get_bit(&self, index: usize) -> Option<bool> {
-        if index < self.length() {
+        if index < self.len() {
             let section = self.get_section(index);
             let section_bit = section.value & (1 << section.bit_offset);
 
@@ -33,7 +34,7 @@ impl<'arr> BitArray<'arr> {
     }
 
     pub fn set_bit(&mut self, index: usize, set: bool) -> Option<bool> {
-        if index < self.length() {
+        if index < self.len() {
             let section = self.get_section(index);
             let section_bit_mask = section.value & !(1 << section.bit_offset);
             let section_bit_set = (set as usize) << section.bit_offset;
@@ -58,7 +59,11 @@ impl<'arr> BitArray<'arr> {
         }
     }
 
-    pub fn length(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.array.len() * SECTION_BITS_COUNT
+    }
+
+    pub fn mem_len(&self) -> usize {
+        self.array.len() * core::mem::size_of::<usize>()
     }
 }

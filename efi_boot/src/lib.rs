@@ -29,26 +29,45 @@ pub struct FramebufferPointer {
 }
 
 #[repr(C)]
-pub struct BootInfo<'info> {
-    memory_map: &'info [MemoryDescriptor],
-    runtime_table: SystemTable<Runtime>,
-    framebuffer: Option<FramebufferPointer>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FFIOption<T> {
+    None,
+    Some(T),
 }
 
-impl<'info> BootInfo<'info> {
+impl<T> Into<Option<T>> for FFIOption<T> {
+    fn into(self) -> Option<T> {
+        match self {
+            FFIOption::Some(some) => Some(some),
+            FFIOption::None => None,
+        }
+    }
+}
+
+#[repr(C)]
+pub struct BootInfo<'info, 'item> {
+    memory_map: &'info mut dyn ExactSizeIterator<Item = &'item MemoryDescriptor>,
+    runtime_table: SystemTable<Runtime>,
+    framebuffer: FFIOption<FramebufferPointer>,
+}
+
+impl<'info, 'item> BootInfo<'info, 'item> {
     pub fn new(
-        memory_map: &'info [MemoryDescriptor],
+        memory_map: &'info mut impl ExactSizeIterator<Item = &'item MemoryDescriptor>,
         runtime_table: SystemTable<Runtime>,
         framebuffer: Option<FramebufferPointer>,
     ) -> Self {
         Self {
             memory_map,
             runtime_table,
-            framebuffer,
+            framebuffer: match framebuffer {
+                Some(some) => FFIOption::Some(some),
+                None => FFIOption::None,
+            },
         }
     }
 
-    pub fn memory_map(&self) -> &[MemoryDescriptor] {
+    pub fn memory_map(&mut self) -> &mut dyn ExactSizeIterator<Item = &'item MemoryDescriptor> {
         self.memory_map
     }
 
@@ -56,8 +75,8 @@ impl<'info> BootInfo<'info> {
         &self.runtime_table
     }
 
-    pub fn framebuffer_pointer(&self) -> &Option<FramebufferPointer> {
-        &self.framebuffer
+    pub fn framebuffer_pointer(&self) -> Option<FramebufferPointer> {
+        self.framebuffer.into()
     }
 }
 

@@ -9,10 +9,7 @@ use crate::{
 };
 use core::{intrinsics::wrapping_sub, mem::size_of};
 use uefi::{
-    prelude::BootServices,
-    proto::media::file::RegularFile,
-    table::boot::{AllocateType, MemoryType},
-    ResultExt,
+    prelude::BootServices, proto::media::file::RegularFile, table::boot::AllocateType, ResultExt,
 };
 
 /// reads an ELF binary from the given file, and loads it into

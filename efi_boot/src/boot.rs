@@ -25,6 +25,7 @@ use core::{
     ptr::slice_from_raw_parts_mut,
 };
 use efi_boot::{BootInfo, FramebufferPointer};
+use memory::PAGE_SIZE;
 use uefi::{
     prelude::BootServices,
     proto::{
@@ -36,7 +37,7 @@ use uefi::{
         },
     },
     table::{
-        boot::{AllocateType, MemoryDescriptor, MemoryType},
+        boot::{MemoryDescriptor, MemoryType},
         Boot, SystemTable,
     },
     Handle, ResultExt, Status,
@@ -187,9 +188,8 @@ fn kernel_transfer(
     //  elsewhere.
     let (mmap_ptr, mmap_alloc_size) = {
         let boot_services = system_table.boot_services();
-        let mem_descriptor_size = size_of::<MemoryDescriptor>();
-        // Determine the total allocation size of the memory map, in bytes (+2 to cover any extraneous entries created before `ExitBootServices`).
-        let mmap_alloc_size = boot_services.memory_map_size() + (6 * mem_descriptor_size);
+        // Determine the total allocation size of the memory map, in bytes (+ to cover any extraneous entries created before `ExitBootServices`).
+        let mmap_alloc_size = boot_services.memory_map_size() + (4 * size_of::<MemoryDescriptor>());
         let alloc_ptr = match boot_services.allocate_pool(MemoryType::LOADER_DATA, mmap_alloc_size)
         {
             Ok(completion) => completion.unwrap(),
@@ -209,7 +209,7 @@ fn kernel_transfer(
     // lifetime information, and so cannot be reinterpreted easily.
     let mmap_buffer = unsafe { &mut *slice_from_raw_parts_mut(mmap_ptr, mmap_alloc_size) };
     // After this point point, the previous system_table and boot_services are no longer valid
-    let (runtime_table, mmap_iter) =
+    let (runtime_table, mut mmap_iter) =
         match system_table.exit_boot_services(image_handle, mmap_buffer) {
             Ok(completion) => completion.unwrap(),
             Err(error) => panic!("{:?}", error),
@@ -217,15 +217,16 @@ fn kernel_transfer(
 
     // Remark: For some reason, this cast itself doesn't result in a valid memory map, even provided
     //  the alignment is correct—so we have to read in the memory descriptors.
-    let iter_len = mmap_iter.len();
-    let memory_map =
-        unsafe { &mut *slice_from_raw_parts_mut(mmap_ptr as *mut MemoryDescriptor, iter_len) };
-    for (index, descriptor) in mmap_iter.enumerate() {
-        memory_map[index] = *descriptor;
-    }
+    // TODO FIX THIS DAMN MEMORY MAP
+    // let memory_map = unsafe {
+    //     &mut *slice_from_raw_parts_mut(mmap_ptr as *mut MemoryDescriptor, mmap_iter.len())
+    // };
+    // for (index, descriptor) in mmap_iter.enumerate() {
+    //     memory_map[index] = *descriptor;
+    // }
 
     // Finally, drop into the kernel.
     let kernel_main: efi_boot::KernelMain = unsafe { transmute(kernel_entry_point) };
-    let boot_info = BootInfo::new(&memory_map[..iter_len], runtime_table, framebuffer);
+    let boot_info = BootInfo::new(&mut mmap_iter, runtime_table, framebuffer);
     kernel_main(boot_info)
 }
