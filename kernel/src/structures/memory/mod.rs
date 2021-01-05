@@ -2,9 +2,9 @@ pub mod paging;
 
 use x86_64::PhysAddr;
 
-pub const PAGE_SIZE: u64 = 0x1000; // 4096
-pub const KIBIBYTE: u64 = 0x400; // 1024
-pub const MIBIBYTE: u64 = KIBIBYTE * KIBIBYTE;
+pub const PAGE_SIZE: usize = 0x1000; // 4096
+pub const KIBIBYTE: usize = 0x400; // 1024
+pub const MIBIBYTE: usize = KIBIBYTE * KIBIBYTE;
 
 pub trait FrameAllocator {
     fn allocate_frame(&mut self) -> Option<Frame>;
@@ -13,25 +13,25 @@ pub trait FrameAllocator {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Frame {
-    number: u64,
+    number: usize,
 }
 
 impl Frame {
-    pub const fn new(address: u64) -> Self {
+    pub const fn new(address: usize) -> Self {
         Self {
             number: address / PAGE_SIZE,
         }
     }
 
     pub fn address(&self) -> PhysAddr {
-        PhysAddr::new(self.number * PAGE_SIZE)
+        PhysAddr::new((self.number * PAGE_SIZE) as u64)
     }
 }
 
-pub fn to_kibibytes(value: u64) -> u64 {
+pub fn to_kibibytes(value: usize) -> usize {
     value / KIBIBYTE
 }
 
-pub fn to_mibibytes(value: u64) -> u64 {
+pub fn to_mibibytes(value: usize) -> usize {
     value / MIBIBYTE
 }

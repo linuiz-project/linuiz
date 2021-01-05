@@ -7,11 +7,13 @@
 #[macro_use]
 extern crate log;
 
+mod bitarray;
 pub mod drivers;
 pub mod instructions;
 pub mod io;
 pub mod logging;
 pub mod structures;
+pub use bitarray::BitArray;
 
 use core::{alloc::Layout, panic::PanicInfo};
 

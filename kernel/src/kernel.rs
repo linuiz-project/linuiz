@@ -6,7 +6,10 @@
 extern crate log;
 
 use efi_boot::{entrypoint, BootInfo, MemoryDescriptor, MemoryType, Status};
-use gsai::structures::memory::PAGE_SIZE;
+use gsai::{
+    structures::memory::{paging::PageFrameAllocator, PAGE_SIZE},
+    BitArray,
+};
 
 entrypoint!(kernel_main);
 extern "win64" fn kernel_main(boot_info: BootInfo) -> Status {
@@ -31,22 +34,10 @@ extern "win64" fn kernel_main(boot_info: BootInfo) -> Status {
 }
 
 fn init_memory(memory_map: &[MemoryDescriptor]) {
+    let page_frame_allocator = PageFrameAllocator::from_mmap(memory_map);
     info!(
         "Identified {} MB of system memory.",
-        gsai::structures::memory::to_mibibytes(
-            memory_map
-                .iter()
-                .map(|descriptor| { descriptor.page_count * PAGE_SIZE })
-                .sum()
-        )
-    );
-
-    let valid_descriptors = memory_map
-        .iter()
-        .filter(|descriptor| descriptor.ty == efi_boot::KERNEL_CODE);
-    info!(
-        "Found {} persistable memory descriptors (kernel code, data, etc.).",
-        valid_descriptors.count()
+        gsai::structures::memory::to_mibibytes(page_frame_allocator.total_memory())
     );
 }
 

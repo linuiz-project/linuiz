@@ -24,7 +24,7 @@ impl PageEntry {
 
     pub fn frame(&self) -> Option<Frame> {
         if self.flags().contains(PageEntryFlags::PRESENT) {
-            Some(Frame::new(self.0 & 0x000FFFFF_FFFFF000))
+            Some(Frame::new((self.0 & 0x000FFFFF_FFFFF000) as usize))
         } else {
             None
         }
