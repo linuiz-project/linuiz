@@ -7,6 +7,10 @@ extern "x86-interrupt" fn breakpoint_handler(stack_frame: &mut InterruptStackFra
     serialln!("CPU EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
 }
 
+extern "x86-interrupt" fn invalid_opcode_handler(stack_frame: &mut InterruptStackFrame) {
+    panic!("CPU EXCEPTION: INVALID OPCODE\n{:#?}", stack_frame);
+}
+
 extern "x86-interrupt" fn page_fault_handler(
     stack_frame: &mut InterruptStackFrame,
     error_code: x86_64::structures::idt::PageFaultErrorCode,
@@ -77,6 +81,7 @@ lazy_static! {
         // fault interrupts
         idt.breakpoint.set_handler_fn(breakpoint_handler);
         idt.page_fault.set_handler_fn(page_fault_handler);
+        idt.invalid_opcode.set_handler_fn(invalid_opcode_handler);
         idt.general_protection_fault.set_handler_fn(general_protection_fault_handler);
 
         unsafe {

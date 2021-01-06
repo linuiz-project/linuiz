@@ -18,21 +18,23 @@ extern "win64" fn kernel_main(mut boot_info: BootInfo) -> Status {
         info!("Successfully loaded into kernel, with logging enabled.");
     }
 
-    info!("{}", boot_info.memory_map().len());
-    for descriptor in boot_info.memory_map().take(6) {
-        info!("{:#?}", descriptor);
-        //memory_map[index] = *descriptor;
-    }
-    loop {}
-
-    info!("Initializing memory (map, page tables, etc.).");
-    //init_memory(boot_info.memory_map());
     info!("Configuring CPU state.");
     unsafe { init_cpu_state() };
     info!("Initializing memory structures.");
     init_structures();
+    info!(
+        "{}",
+        boot_info.framebuffer_pointer().unwrap().pointer as u64
+    );
 
-    loop {}
+    //info!("{}", boot_info.memory_map().len());
+    for descriptor in boot_info.memory_map().take(6) {
+        info!("{:#?}", descriptor);
+        //memory_map[index] = *descriptor;
+    }
+
+    info!("Initializing memory (map, page tables, etc.).");
+    //init_memory(boot_info.memory_map());
 
     Status::SUCCESS
 }
