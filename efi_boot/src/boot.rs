@@ -22,7 +22,7 @@ use efi_boot::{
         ELFHeader64,
     },
     memory::PAGE_SIZE,
-    BootInfo, FramebufferPointer,
+    FramebufferPointer,
 };
 use uefi::{
     prelude::BootServices,
@@ -459,6 +459,6 @@ fn kernel_transfer(
 
     // Finally, drop into the kernel.
     let kernel_main: efi_boot::KernelMain = unsafe { transmute(kernel_entry_point) };
-    let boot_info = BootInfo::new(memory_map, runtime_table, framebuffer);
+    let boot_info = efi_boot::BootInfo::new(memory_map, runtime_table, framebuffer);
     kernel_main(boot_info)
 }

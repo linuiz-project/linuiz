@@ -1,7 +1,10 @@
 use efi_boot::{MemoryDescriptor, MemoryType};
 use x86_64::PhysAddr;
 
-use crate::{bitarray::SECTION_BITS_COUNT, structures::memory::PAGE_SIZE, BitArray};
+use crate::{
+    structures::memory::{Frame, PAGE_SIZE},
+    BitArray,
+};
 
 pub struct PageFrameAllocator<'arr> {
     total_memory: usize,
@@ -49,7 +52,10 @@ impl<'arr> PageFrameAllocator<'arr> {
         );
         let bitarray =
             BitArray::from_ptr(descriptor.phys_start as *mut usize, bitarray_bits as usize);
-        debug!("BitArray initialized with a length of {}.", bitarray.len());
+        debug!(
+            "BitArray initialized with a length of {}.",
+            bitarray.bit_count()
+        );
 
         // crate the page frame allocator
         let mut this = Self {
@@ -108,6 +114,7 @@ impl<'arr> PageFrameAllocator<'arr> {
             self.bitarray.set_bit(index, false);
             self.free_memory += PAGE_SIZE;
             self.used_memory -= PAGE_SIZE;
+            trace!("Freed page: index {}, {:?}", index, address);
         }
     }
 
@@ -128,6 +135,7 @@ impl<'arr> PageFrameAllocator<'arr> {
             self.bitarray.set_bit(index, true);
             self.free_memory -= PAGE_SIZE;
             self.used_memory += PAGE_SIZE;
+            trace!("Locked page: index {}, {:?}", index, address);
         }
     }
 
@@ -148,6 +156,7 @@ impl<'arr> PageFrameAllocator<'arr> {
             self.bitarray.set_bit(index, false);
             self.free_memory += PAGE_SIZE;
             self.reserved_memory -= PAGE_SIZE;
+            trace!("Unreserved page: index {}, {:?}", index, address);
         }
     }
 
@@ -168,7 +177,35 @@ impl<'arr> PageFrameAllocator<'arr> {
             self.bitarray.set_bit(index, false);
             self.free_memory -= PAGE_SIZE;
             self.reserved_memory += PAGE_SIZE;
+            trace!("Reserved page: index {}, {:?}", index, address);
         }
+    }
+
+    pub fn next_free(&mut self) -> Option<Frame> {
+        match self.bitarray.iter().enumerate().find(|tuple| !tuple.1) {
+            Some(result) => unsafe { Some(Frame::from_index(result.0 as u64)) },
+            None => None,
+        }
+    }
+
+    pub fn next_free_range(&mut self, count: usize) -> Option<PhysAddr> {
+        for (index, locked) in self.bitarray.iter().enumerate() {
+            if self
+                .bitarray
+                .iter()
+                .skip(index)
+                .take(count)
+                .all(|locked| !locked)
+            {
+                for index0 in index..(index + count) {
+                    self.bitarray.set_bit(index0, true);
+                }
+
+                return Some(PhysAddr::new((index * PAGE_SIZE) as u64));
+            }
+        }
+
+        None
     }
 
     pub fn total_memory(&self) -> usize {
@@ -181,5 +218,9 @@ impl<'arr> PageFrameAllocator<'arr> {
 
     pub fn used_memory(&self) -> usize {
         self.used_memory
+    }
+
+    pub fn reserved_memory(&self) -> usize {
+        self.reserved_memory
     }
 }
