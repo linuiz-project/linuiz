@@ -5,42 +5,34 @@
 #[macro_use]
 extern crate log;
 
-use efi_boot::{entrypoint, BootInfo, MemoryDescriptor, Status};
+use efi_boot::{entrypoint, BootInfo, MemoryDescriptor, ResetType, Status};
 use gsai::structures::memory::paging::PageFrameAllocator;
 
 entrypoint!(kernel_main);
 extern "win64" fn kernel_main(mut boot_info: BootInfo) -> Status {
-    if let Err(error) =
-        gsai::logging::init(gsai::logging::LoggingModes::SERIAL, log::LevelFilter::Debug)
-    {
-        panic!("{}", error);
-    } else {
-        info!("Successfully loaded into kernel, with logging enabled.");
+    match gsai::logging::init(gsai::logging::LoggingModes::SERIAL, log::LevelFilter::Debug) {
+        Ok(()) => info!("Successfully loaded into kernel, with logging enabled."),
+        Err(error) => panic!("{}", error),
     }
 
+    info!("Validating state of BootInfo.");
+    boot_info.validate_magic();
     info!("Configuring CPU state.");
     unsafe { init_cpu_state() };
     info!("Initializing memory structures.");
     init_structures();
-    info!(
-        "{}",
-        boot_info.framebuffer_pointer().unwrap().pointer as u64
-    );
-
-    //info!("{}", boot_info.memory_map().len());
-    for descriptor in boot_info.memory_map().take(6) {
-        info!("{:#?}", descriptor);
-        //memory_map[index] = *descriptor;
-    }
-
     info!("Initializing memory (map, page tables, etc.).");
-    //init_memory(boot_info.memory_map());
+    let frame_allocator = init_memory(boot_info.memory_map());
 
-    Status::SUCCESS
+    unsafe { boot_info.runtime_table().runtime_services() }.reset(
+        ResetType::Shutdown,
+        Status::SUCCESS,
+        None,
+    )
 }
 
-fn init_memory(memory_map: &[MemoryDescriptor]) {
-    let _page_frame_allocator = PageFrameAllocator::from_mmap(memory_map);
+fn init_memory(memory_map: &[MemoryDescriptor]) -> PageFrameAllocator {
+    PageFrameAllocator::from_mmap(memory_map)
 }
 
 unsafe fn init_cpu_state() {

@@ -2,9 +2,13 @@
 #![feature(abi_efiapi)]
 #![feature(core_intrinsics)]
 
+pub mod elf;
+pub mod memory;
+
 pub use uefi::{
     table::{
         boot::{MemoryDescriptor, MemoryType},
+        runtime::ResetType,
         Runtime, SystemTable,
     },
     Status,
@@ -45,21 +49,25 @@ impl<T> Into<Option<T>> for FFIOption<T> {
 }
 
 #[repr(C)]
-pub struct BootInfo<'info, 'item> {
-    memory_map: &'info mut dyn ExactSizeIterator<Item = &'item MemoryDescriptor>,
+pub struct BootInfo {
+    memory_map_ptr: *const MemoryDescriptor,
+    memory_map_len: usize,
     runtime_table: SystemTable<Runtime>,
+    magic: u32,
     framebuffer: FFIOption<FramebufferPointer>,
 }
 
-impl<'info, 'item> BootInfo<'info, 'item> {
+impl BootInfo {
     pub fn new(
-        memory_map: &'info mut impl ExactSizeIterator<Item = &'item MemoryDescriptor>,
+        memory_map: &[MemoryDescriptor],
         runtime_table: SystemTable<Runtime>,
         framebuffer: Option<FramebufferPointer>,
     ) -> Self {
         Self {
-            memory_map,
+            memory_map_ptr: memory_map.as_ptr(),
+            memory_map_len: memory_map.len(),
             runtime_table,
+            magic: 0xAABB11FF,
             framebuffer: match framebuffer {
                 Some(some) => FFIOption::Some(some),
                 None => FFIOption::None,
@@ -67,8 +75,8 @@ impl<'info, 'item> BootInfo<'info, 'item> {
         }
     }
 
-    pub fn memory_map(&mut self) -> &mut dyn ExactSizeIterator<Item = &'item MemoryDescriptor> {
-        self.memory_map
+    pub fn memory_map(&mut self) -> &[MemoryDescriptor] {
+        unsafe { &*core::ptr::slice_from_raw_parts(self.memory_map_ptr, self.memory_map_len) }
     }
 
     pub fn runtime_table(&self) -> &SystemTable<Runtime> {
@@ -77,6 +85,12 @@ impl<'info, 'item> BootInfo<'info, 'item> {
 
     pub fn framebuffer_pointer(&self) -> Option<FramebufferPointer> {
         self.framebuffer.into()
+    }
+
+    pub fn validate_magic(&self) {
+        if self.magic != 0xAABB11FF {
+            panic!("boot_info is unaligned, or magic is otherwise corrupted");
+        }
     }
 }
 

@@ -13,13 +13,12 @@ pub struct PageFrameAllocator<'arr> {
 
 impl<'arr> PageFrameAllocator<'arr> {
     pub fn from_mmap(memory_map: &[MemoryDescriptor]) -> Self {
-        let total_memory = memory_map
+        let last_descriptor = memory_map
             .iter()
-            .map(|descriptor| (descriptor.page_count as usize) * PAGE_SIZE)
-            .sum();
-        // let desc = memory_map.iter().max_by_key(|d| d.phys_start).unwrap();
-        // let total_memory_2 = desc.phys_start + (desc.page_count * PAGE_SIZE as u64);
-        // panic!("{} {}", total_memory, total_memory_2);
+            .max_by_key(|descriptor| descriptor.phys_start)
+            .expect("no descriptor with max value");
+        let total_memory =
+            last_descriptor.phys_start as usize + (last_descriptor.page_count as usize * PAGE_SIZE);
         debug!(
             "Page frame allocator will represent {} MB ({} bytes) of system memory.",
             crate::structures::memory::to_mibibytes(total_memory),
@@ -92,29 +91,23 @@ impl<'arr> PageFrameAllocator<'arr> {
         this
     }
 
-    pub unsafe fn free_page(&mut self, address: PhysAddr) {
-        let index = (address.as_u64() as usize) / PAGE_SIZE;
-
-        if self.bitarray.get_bit(index).unwrap() {
-            self.bitarray.set_bit(index, false);
-            self.free_memory += PAGE_SIZE;
-            self.used_memory -= PAGE_SIZE;
-        }
-    }
-
     pub unsafe fn free_pages(&mut self, address: PhysAddr, count: usize) {
         for index in 0..count {
             self.free_page(address + (index * PAGE_SIZE));
         }
     }
 
-    pub unsafe fn lock_page(&mut self, address: PhysAddr) {
+    pub unsafe fn free_page(&mut self, address: PhysAddr) {
         let index = (address.as_u64() as usize) / PAGE_SIZE;
 
-        if !self.bitarray.get_bit(index).unwrap() {
-            self.bitarray.set_bit(index, true);
-            self.free_memory -= PAGE_SIZE;
-            self.used_memory += PAGE_SIZE;
+        if self
+            .bitarray
+            .get_bit(index)
+            .expect("failed to reserve page")
+        {
+            self.bitarray.set_bit(index, false);
+            self.free_memory += PAGE_SIZE;
+            self.used_memory -= PAGE_SIZE;
         }
     }
 
@@ -124,20 +117,37 @@ impl<'arr> PageFrameAllocator<'arr> {
         }
     }
 
-    pub(crate) unsafe fn reserve_page(&mut self, address: PhysAddr) {
+    pub unsafe fn lock_page(&mut self, address: PhysAddr) {
         let index = (address.as_u64() as usize) / PAGE_SIZE;
 
-        if let Some(bit) = self.bitarray.get_bit(index) {
-            if bit {
-                self.bitarray.set_bit(index, false);
-                self.free_memory += PAGE_SIZE;
-                self.reserved_memory -= PAGE_SIZE;
-            }
-        } else {
-            panic!(
-                "failed to reserve page: address {:?}, bit index {}",
-                address, index
-            );
+        if !self
+            .bitarray
+            .get_bit(index)
+            .expect("failed to reserve page")
+        {
+            self.bitarray.set_bit(index, true);
+            self.free_memory -= PAGE_SIZE;
+            self.used_memory += PAGE_SIZE;
+        }
+    }
+
+    pub(crate) unsafe fn unreserve_pages(&mut self, address: PhysAddr, count: usize) {
+        for index in 0..count {
+            self.unreserve_page(address + (index * PAGE_SIZE));
+        }
+    }
+
+    pub(crate) unsafe fn unreserve_page(&mut self, address: PhysAddr) {
+        let index = (address.as_u64() as usize) / PAGE_SIZE;
+
+        if self
+            .bitarray
+            .get_bit(index)
+            .expect("failed to reserve page")
+        {
+            self.bitarray.set_bit(index, false);
+            self.free_memory += PAGE_SIZE;
+            self.reserved_memory -= PAGE_SIZE;
         }
     }
 
@@ -147,19 +157,17 @@ impl<'arr> PageFrameAllocator<'arr> {
         }
     }
 
-    pub(crate) unsafe fn unreserve_page(&mut self, address: PhysAddr) {
+    pub(crate) unsafe fn reserve_page(&mut self, address: PhysAddr) {
         let index = (address.as_u64() as usize) / PAGE_SIZE;
 
-        if self.bitarray.get_bit(index).unwrap() {
+        if !self
+            .bitarray
+            .get_bit(index)
+            .expect("failed to reserve page")
+        {
             self.bitarray.set_bit(index, false);
-            self.free_memory += PAGE_SIZE;
-            self.reserved_memory -= PAGE_SIZE;
-        }
-    }
-
-    pub(crate) unsafe fn unreserve_pages(&mut self, address: PhysAddr, count: usize) {
-        for index in 0..count {
-            self.unreserve_page(address + (index * PAGE_SIZE));
+            self.free_memory -= PAGE_SIZE;
+            self.reserved_memory += PAGE_SIZE;
         }
     }
 

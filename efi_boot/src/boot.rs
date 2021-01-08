@@ -10,19 +10,20 @@
 extern crate log;
 extern crate rlibc;
 
-mod elf;
-mod file;
-mod kernel_loader;
-mod memory;
-
-use crate::file::open_file;
 use core::{
     cell::UnsafeCell,
+    intrinsics::{wrapping_add, wrapping_mul, wrapping_sub},
     mem::{size_of, transmute},
     ptr::slice_from_raw_parts_mut,
 };
-use efi_boot::{BootInfo, FramebufferPointer};
-use memory::PAGE_SIZE;
+use efi_boot::{
+    elf::{
+        program_header::{ProgramHeader, ProgramHeaderType},
+        ELFHeader64,
+    },
+    memory::PAGE_SIZE,
+    BootInfo, FramebufferPointer,
+};
 use uefi::{
     prelude::BootServices,
     proto::{
@@ -35,7 +36,7 @@ use uefi::{
         Protocol,
     },
     table::{
-        boot::{MemoryDescriptor, MemoryType},
+        boot::{AllocateType, MemoryDescriptor, MemoryType},
         Boot, SystemTable,
     },
     Handle, ResultExt, Status,
@@ -73,6 +74,91 @@ fn acquire_protocol_unwrapped<P: Protocol>(result: uefi::Result<&UnsafeCell<P>>)
     } else {
         None
     }
+}
+
+pub struct PointerBuffer<'buf> {
+    pub pointer: *mut u8,
+    pub buffer: &'buf mut [u8],
+}
+
+#[allow(dead_code)]
+pub fn allocate_pool(
+    boot_services: &BootServices,
+    memory_type: MemoryType,
+    size: usize,
+) -> PointerBuffer {
+    let alloc_pointer = match boot_services.allocate_pool(memory_type, size) {
+        Ok(completion) => completion.unwrap(),
+        Err(error) => panic!("{:?}", error),
+    };
+    let alloc_buffer = unsafe { &mut *slice_from_raw_parts_mut(alloc_pointer, size) };
+
+    PointerBuffer {
+        pointer: alloc_pointer,
+        buffer: alloc_buffer,
+    }
+}
+
+#[allow(dead_code)]
+pub fn allocate_pages(
+    boot_services: &BootServices,
+    allocate_type: AllocateType,
+    memory_type: MemoryType,
+    pages_count: usize,
+) -> PointerBuffer {
+    if let AllocateType::MaxAddress(address) = allocate_type {
+        if (address % PAGE_SIZE) != 0x0 {
+            panic!("Address is not page-aligned ({})", address)
+        }
+    }
+
+    let alloc_pointer = match boot_services.allocate_pages(allocate_type, memory_type, pages_count)
+    {
+        Ok(completion) => completion.unwrap() as *mut u8,
+        Err(error) => panic!("{:?}", error),
+    };
+
+    let alloc_buffer =
+        unsafe { &mut *slice_from_raw_parts_mut(alloc_pointer, pages_count * PAGE_SIZE) };
+
+    PointerBuffer {
+        pointer: alloc_pointer,
+        buffer: alloc_buffer,
+    }
+}
+
+#[allow(dead_code)]
+pub fn free_pool(boot_services: &BootServices, buffer: PointerBuffer) {
+    match boot_services.free_pool(buffer.pointer) {
+        Ok(completion) => completion.unwrap(),
+        Err(error) => panic!("{:?}", error),
+    }
+}
+
+#[allow(dead_code)]
+pub fn free_pages(boot_services: &BootServices, buffer: PointerBuffer, count: usize) {
+    match boot_services.free_pages(buffer.pointer as u64, count) {
+        Ok(completion) => completion.unwrap(),
+        Err(error) => panic!("{:?}", error),
+    }
+}
+
+#[allow(dead_code)]
+pub fn align_up(value: usize, alignment: usize) -> usize {
+    let super_aligned = wrapping_add(value, alignment);
+    let force_under_aligned = wrapping_sub(super_aligned, 1);
+    wrapping_mul(force_under_aligned / alignment, alignment)
+}
+
+#[allow(dead_code)]
+pub fn align_down(value: usize, alignment: usize) -> usize {
+    (value / alignment) * alignment
+}
+
+/// returns the minimum necessary memory pages to contain the given size in bytes.
+#[allow(dead_code)]
+pub fn aligned_slices(size: usize, alignment: usize) -> usize {
+    ((size + alignment) - 1) / alignment
 }
 
 pub fn open_file<F: File>(file: &mut F, name: &str) -> RegularFile {
@@ -153,20 +239,19 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
     // load kernel
     let kernel_file = acquire_kernel_file(root_directory);
     info!("Acquired kernel image file.");
-    let kernel_entry_point = kernel_loader::load_kernel(boot_services, kernel_file);
+    let kernel_entry_point = load_kernel(boot_services, kernel_file);
 
     kernel_transfer(image_handle, system_table, kernel_entry_point, framebuffer)
 }
 
 fn ensure_enough_memory(boot_services: &BootServices) {
     let mmap_size_bytes = boot_services.memory_map_size() + (size_of::<MemoryDescriptor>() * 2);
-    let mmap_buffer =
-        memory::allocate_pool(boot_services, MemoryType::LOADER_DATA, mmap_size_bytes);
+    let mmap_buffer = allocate_pool(boot_services, MemoryType::LOADER_DATA, mmap_size_bytes);
     let total_memory: usize = match boot_services.memory_map(mmap_buffer.buffer) {
         Ok(completion) => completion.unwrap().1,
         Err(error) => panic!("{:?}", error),
     }
-    .map(|descriptor| (descriptor.page_count as usize) * memory::PAGE_SIZE)
+    .map(|descriptor| (descriptor.page_count as usize) * PAGE_SIZE)
     .sum::<usize>();
 
     if total_memory < MINIMUM_MEMORY {
@@ -181,7 +266,7 @@ fn ensure_enough_memory(boot_services: &BootServices) {
         );
     }
 
-    memory::free_pool(boot_services, mmap_buffer);
+    free_pool(boot_services, mmap_buffer);
 }
 
 fn select_graphics_mode(graphics_output: &mut GraphicsOutput) -> Mode {
@@ -355,7 +440,7 @@ fn kernel_transfer(
     // lifetime information, and so cannot be reinterpreted easily.
     let mmap_buffer = unsafe { &mut *slice_from_raw_parts_mut(mmap_ptr, mmap_alloc_size) };
     // After this point point, the previous system_table and boot_services are no longer valid
-    let (runtime_table, mut mmap_iter) =
+    let (runtime_table, mmap_iter) =
         match system_table.exit_boot_services(image_handle, mmap_buffer) {
             Ok(completion) => completion.unwrap(),
             Err(error) => panic!("{:?}", error),
@@ -363,16 +448,17 @@ fn kernel_transfer(
 
     // Remark: For some reason, this cast itself doesn't result in a valid memory map, even provided
     //  the alignment is correct—so we have to read in the memory descriptors.
-    // TODO FIX THIS DAMN MEMORY MAP
-    // let memory_map = unsafe {
-    //     &mut *slice_from_raw_parts_mut(mmap_ptr as *mut MemoryDescriptor, mmap_iter.len())
-    // };
-    // for (index, descriptor) in mmap_iter.enumerate() {
-    //     memory_map[index] = *descriptor;
-    // }
+    //
+    // This could be due to the actual entry size not being equal to size_of::<MemoryDescriptor>().
+    let mut memory_map = unsafe {
+        &mut *slice_from_raw_parts_mut(mmap_ptr as *mut MemoryDescriptor, mmap_iter.len())
+    };
+    for (index, descriptor) in mmap_iter.enumerate() {
+        memory_map[index] = *descriptor;
+    }
 
     // Finally, drop into the kernel.
     let kernel_main: efi_boot::KernelMain = unsafe { transmute(kernel_entry_point) };
-    let boot_info = BootInfo::new(&mut mmap_iter, runtime_table, framebuffer);
+    let boot_info = BootInfo::new(memory_map, runtime_table, framebuffer);
     kernel_main(boot_info)
 }
