@@ -50,7 +50,8 @@ impl PageTableEntry {
         self.0 = 0;
     }
 
-    pub unsafe fn as_page_table_mut(&mut self) -> &mut PageTable {
+    /// Gets a PageTable struct from the address this descriptor points at.
+    pub unsafe fn get_page_table_mut(&mut self) -> &mut PageTable {
         &mut *(self
             .frame()
             .expect("descriptor has no valid frame")

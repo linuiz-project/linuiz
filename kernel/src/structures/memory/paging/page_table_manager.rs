@@ -18,12 +18,16 @@ impl PageTableManager {
     }
 
     pub fn map_memory(&mut self, virt_addr: VirtAddr, frame: &Frame) {
-        assert_eq!(virt_addr.as_u64() % 0x1000, 0);
+        assert_eq!(
+            virt_addr.as_u64() % 0x1000,
+            0,
+            "address must be page-aligned"
+        );
 
         let addr = (virt_addr.as_u64() >> 12) as usize;
         let mut page_table = &mut self.page_table;
 
-        for iter_index in (0..4).rev() {
+        for iter_index in (1..4).rev() {
             let descriptor = &mut self.page_table[(addr >> (iter_index * 9)) & 0x1FF];
 
             let mut clear_page_table = false;
@@ -44,7 +48,7 @@ impl PageTableManager {
                 clear_page_table = true;
             }
 
-            page_table = unsafe { descriptor.as_page_table_mut() };
+            page_table = unsafe { descriptor.get_page_table_mut() };
             if clear_page_table {
                 page_table.clear();
             }
