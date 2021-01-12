@@ -106,6 +106,22 @@ impl<'arr> FrameAllocator<'arr> {
         this
     }
 
+    pub fn total_memory(&self) -> usize {
+        self.total_memory
+    }
+
+    pub fn free_memory(&self) -> usize {
+        self.free_memory
+    }
+
+    pub fn used_memory(&self) -> usize {
+        self.used_memory
+    }
+
+    pub fn reserved_memory(&self) -> usize {
+        self.reserved_memory
+    }
+
     /* SINGLE OPS */
     pub unsafe fn deallocate_frame(&mut self, address: PhysAddr) {
         let index = (address.as_u64() as usize) / PAGE_SIZE;
@@ -176,22 +192,6 @@ impl<'arr> FrameAllocator<'arr> {
             }
             None => None,
         }
-    }
-
-    pub fn total_memory(&self) -> usize {
-        self.total_memory
-    }
-
-    pub fn free_memory(&self) -> usize {
-        self.free_memory
-    }
-
-    pub fn used_memory(&self) -> usize {
-        self.used_memory
-    }
-
-    pub fn reserved_memory(&self) -> usize {
-        self.reserved_memory
     }
 }
 

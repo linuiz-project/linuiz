@@ -19,7 +19,7 @@ use core::{alloc::Layout, panic::PanicInfo};
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    serial!("{}", info);
+    serial!("\n{}", info);
     loop {}
 }
 
