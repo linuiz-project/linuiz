@@ -141,10 +141,7 @@ impl Serial {
 
     /// Checks whether the given LineStatus bit is present.
     pub fn line_status(&mut self, status: LineStatus) -> bool {
-        match LineStatus::from_bits(self.line_status.read()) {
-            Some(line_status) => line_status.contains(status),
-            None => panic!("failed to parse line status"),
-        }
+        LineStatus::from_bits_truncate(self.line_status.read()).contains(status)
     }
 
     pub fn write(&mut self, byte: u8) {
@@ -191,7 +188,7 @@ lazy_static! {
         Mutex::new(unsafe { Serial::init(COM1, SerialSpeed::S115200) });
 }
 
-pub fn safe_lock<F>(callback: F)
+pub fn serial_line<F>(callback: F)
 where
     F: Fn(&mut MutexGuard<Serial>),
 {
@@ -206,7 +203,7 @@ where
 
 #[doc(hidden)]
 pub fn __serial_out(args: core::fmt::Arguments) {
-    safe_lock(|serial| {
+    serial_line(|serial| {
         use core::fmt::Write;
         serial.write_fmt(args).unwrap();
     });

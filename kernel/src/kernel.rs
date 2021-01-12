@@ -6,10 +6,7 @@
 extern crate log;
 
 use efi_boot::{entrypoint, BootInfo, ResetType, Status};
-use gsai::structures::memory::{
-    paging::{FrameAllocator, PageTableManager},
-    Frame,
-};
+use gsai::structures::memory::{paging::PageTableManager, Frame};
 use x86_64::VirtAddr;
 
 entrypoint!(kernel_main);
@@ -26,14 +23,10 @@ extern "win64" fn kernel_main(mut boot_info: BootInfo) -> Status {
     info!("Initializing memory structures.");
     init_structures();
     info!("Initializing memory (map, page tables, etc.).");
-    let frame_allocator = FrameAllocator::from_mmap(boot_info.memory_map());
-    let mut page_table_manager = PageTableManager::new(frame_allocator);
-    page_table_manager
-        .map_memory(VirtAddr::new(0x2000), &Frame::from_addr(0x1000))
-        .ok();
-    page_table_manager
-        .map_memory(VirtAddr::new(0x3000), &Frame::from_addr(0x9000))
-        .ok();
+    unsafe { gsai::structures::memory::paging::init_global_allocator(boot_info.memory_map()) };
+    let mut page_table_manager = PageTableManager::new();
+    page_table_manager.map_memory(VirtAddr::new(0x2000), &Frame::from_addr(0x1000));
+    page_table_manager.map_memory(VirtAddr::new(0x3000), &Frame::from_addr(0x9000));
 
     unsafe { boot_info.runtime_table().runtime_services() }.reset(
         ResetType::Shutdown,

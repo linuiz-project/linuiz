@@ -3,6 +3,7 @@ use crate::{
     BitArray,
 };
 use efi_boot::{MemoryDescriptor, MemoryType};
+use spin::Mutex;
 use x86_64::PhysAddr;
 
 pub struct FrameAllocator<'arr> {
@@ -14,7 +15,7 @@ pub struct FrameAllocator<'arr> {
 }
 
 impl<'arr> FrameAllocator<'arr> {
-    pub fn from_mmap(memory_map: &[MemoryDescriptor]) -> Self {
+    fn from_mmap(memory_map: &[MemoryDescriptor]) -> Self {
         let last_descriptor = memory_map
             .iter()
             .max_by_key(|descriptor| descriptor.phys_start)
@@ -191,5 +192,21 @@ impl<'arr> FrameAllocator<'arr> {
 
     pub fn reserved_memory(&self) -> usize {
         self.reserved_memory
+    }
+}
+
+static mut GLOBAL_ALLOCATOR: Mutex<Option<FrameAllocator<'static>>> = Mutex::new(None);
+
+pub unsafe fn init_global_allocator(memory_map: &[MemoryDescriptor]) {
+    GLOBAL_ALLOCATOR = Mutex::new(Some(FrameAllocator::from_mmap(memory_map)));
+}
+
+pub fn global_allocator<F, T>(mut callback: F) -> T
+where
+    F: FnMut(&mut FrameAllocator) -> T,
+{
+    match &mut *unsafe { GLOBAL_ALLOCATOR.lock() } {
+        Some(allocator) => callback(allocator),
+        None => panic!("global allocator has not been initialized"),
     }
 }

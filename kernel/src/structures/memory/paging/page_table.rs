@@ -1,62 +1,54 @@
-use crate::structures::memory::paging::{FrameAllocator, PageAttributes, PageDescriptor};
+use crate::structures::memory::paging::PageTableEntry;
 use core::ops::{Index, IndexMut};
 
 #[repr(C, align(0x1000))]
 pub struct PageTable {
-    descriptors: [PageDescriptor; 512],
+    entries: [PageTableEntry; 512],
 }
 
 impl PageTable {
     pub const fn new() -> Self {
         Self {
-            descriptors: [PageDescriptor::unused(); 512],
+            entries: [PageTableEntry::unused(); 512],
         }
     }
 
     pub fn clear(&mut self) {
-        for descriptor in self.descriptors.iter_mut() {
-            descriptor.set_unused();
-        }
+        self.iter_mut()
+            .for_each(|descriptor| descriptor.set_unused());
     }
 
-    pub fn allocated_descriptor(
-        &mut self,
-        index: usize,
-        frame_allocator: &mut FrameAllocator,
-    ) -> &mut PageDescriptor {
-        let descriptor = &mut self[index];
-        trace!("Found descriptor for index {}: {:?}", index, descriptor);
+    pub fn iter(&self) -> core::slice::Iter<PageTableEntry> {
+        self.entries.iter()
+    }
 
-        if !descriptor.attribs().contains(PageAttributes::PRESENT) {
-            trace!("Descriptor doesn't point to an allocated frame, so one will be allocated.");
-
-            match frame_allocator.allocate_next() {
-                Some(mut frame) => {
-                    descriptor.set(&frame, PageAttributes::PRESENT | PageAttributes::WRITABLE);
-                    unsafe {
-                        frame.clear();
-                    }
-                }
-                None => panic!("failed to lock a frame for new page table"),
-            }
-
-            trace!("Allocated descriptor: {:?}", descriptor);
-        }
-
-        descriptor
+    pub fn iter_mut(&mut self) -> core::slice::IterMut<PageTableEntry> {
+        self.entries.iter_mut()
     }
 }
 
 impl Index<usize> for PageTable {
-    type Output = PageDescriptor;
+    type Output = PageTableEntry;
 
     fn index(&self, index: usize) -> &Self::Output {
-        &self.descriptors[index]
+        &self.entries[index]
     }
 }
 
 impl IndexMut<usize> for PageTable {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        &mut self.descriptors[index]
+        &mut self.entries[index]
+    }
+}
+
+impl core::fmt::Debug for PageTable {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut debug_struct = formatter.debug_struct("Page Table");
+
+        for entry in self.iter() {
+            debug_struct.field("Entry", entry);
+        }
+
+        debug_struct.finish()
     }
 }

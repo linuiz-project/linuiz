@@ -1,6 +1,5 @@
+use crate::structures::memory::{paging::PageTable, Frame};
 use bitflags::bitflags;
-
-use crate::structures::memory::Frame;
 
 bitflags! {
     pub struct PageAttributes : u64 {
@@ -20,9 +19,9 @@ bitflags! {
 
 #[repr(transparent)]
 #[derive(Clone, Copy)]
-pub struct PageDescriptor(u64);
+pub struct PageTableEntry(u64);
 
-impl PageDescriptor {
+impl PageTableEntry {
     pub const fn unused() -> Self {
         Self { 0: 0 }
     }
@@ -50,14 +49,22 @@ impl PageDescriptor {
     pub fn set_unused(&mut self) {
         self.0 = 0;
     }
+
+    pub unsafe fn as_page_table_mut(&mut self) -> &mut PageTable {
+        &mut *(self
+            .frame()
+            .expect("descriptor has no valid frame")
+            .addr()
+            .as_u64() as *mut PageTable)
+    }
 }
 
-impl core::fmt::Debug for PageDescriptor {
+impl core::fmt::Debug for PageTableEntry {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
-            .debug_struct("Page Descriptor")
-            .field("Attributes", &self.attribs())
-            .field("Address", &self.frame())
+            .debug_tuple("PageDescriptor")
+            .field(&self.frame())
+            .field(&self.attribs())
             .finish()
     }
 }
