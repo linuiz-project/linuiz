@@ -1,12 +1,11 @@
-use efi_boot::{MemoryDescriptor, MemoryType};
-use x86_64::PhysAddr;
-
 use crate::{
     structures::memory::{Frame, PAGE_SIZE},
     BitArray,
 };
+use efi_boot::{MemoryDescriptor, MemoryType};
+use x86_64::PhysAddr;
 
-pub struct PageFrameAllocator<'arr> {
+pub struct FrameAllocator<'arr> {
     total_memory: usize,
     free_memory: usize,
     used_memory: usize,
@@ -14,7 +13,7 @@ pub struct PageFrameAllocator<'arr> {
     bitarray: BitArray<'arr>,
 }
 
-impl<'arr> PageFrameAllocator<'arr> {
+impl<'arr> FrameAllocator<'arr> {
     pub fn from_mmap(memory_map: &[MemoryDescriptor]) -> Self {
         let last_descriptor = memory_map
             .iter()
@@ -66,15 +65,21 @@ impl<'arr> PageFrameAllocator<'arr> {
             bitarray,
         };
 
-        // lock pages this page frame allocator exists on
+        // lock frames this page frame allocator exists on
+        debug!(
+            "Reserving frames for this allocator's bitarray (total {} frames).",
+            bitarray_mem_size_pages
+        );
         unsafe {
-            this.lock_pages(
+            this.reserve_frames(
                 PhysAddr::new(descriptor.phys_start),
                 bitarray_mem_size_pages,
             );
         }
 
-        // reserve system pages
+        // reserve null frame
+        unsafe { this.reserve_frame(PhysAddr::zero()) };
+        // reserve system frames
         for descriptor in memory_map {
             match descriptor.ty {
                 MemoryType::LOADER_CODE
@@ -84,8 +89,11 @@ impl<'arr> PageFrameAllocator<'arr> {
                 | MemoryType::CONVENTIONAL => {}
                 _ => {
                     let phys_addr = PhysAddr::new(descriptor.phys_start);
-                    debug!("Reserving pages at {:?}:\n{:#?}", phys_addr, descriptor);
-                    unsafe { this.reserve_pages(phys_addr, descriptor.page_count as usize) }
+                    debug!(
+                        "Reserving {} frames at {:?}:\n{:#?}",
+                        descriptor.page_count, phys_addr, descriptor
+                    );
+                    unsafe { this.reserve_frames(phys_addr, descriptor.page_count as usize) }
                 }
             }
         }
@@ -97,115 +105,76 @@ impl<'arr> PageFrameAllocator<'arr> {
         this
     }
 
-    pub unsafe fn free_pages(&mut self, address: PhysAddr, count: usize) {
-        for index in 0..count {
-            self.free_page(address + (index * PAGE_SIZE));
-        }
-    }
-
-    pub unsafe fn free_page(&mut self, address: PhysAddr) {
+    /* SINGLE OPS */
+    pub unsafe fn deallocate_frame(&mut self, address: PhysAddr) {
         let index = (address.as_u64() as usize) / PAGE_SIZE;
 
-        if self
-            .bitarray
-            .get_bit(index)
-            .expect("failed to reserve page")
-        {
+        if self.bitarray.get_bit(index).expect("failed to free frame") {
             self.bitarray.set_bit(index, false);
             self.free_memory += PAGE_SIZE;
             self.used_memory -= PAGE_SIZE;
-            trace!("Freed page: index {}, {:?}", index, address);
+            trace!("Freed frame {}: {:?}", index, address);
         }
     }
 
-    pub unsafe fn lock_pages(&mut self, address: PhysAddr, count: usize) {
-        for index in 0..count {
-            self.lock_page(address + (index * PAGE_SIZE));
-        }
-    }
-
-    pub unsafe fn lock_page(&mut self, address: PhysAddr) {
+    // todo return frames maybe? with identity
+    pub unsafe fn allocate_frame(&mut self, address: PhysAddr) {
         let index = (address.as_u64() as usize) / PAGE_SIZE;
 
-        if !self
-            .bitarray
-            .get_bit(index)
-            .expect("failed to reserve page")
-        {
+        if !self.bitarray.get_bit(index).expect("failed to lock frame") {
             self.bitarray.set_bit(index, true);
             self.free_memory -= PAGE_SIZE;
             self.used_memory += PAGE_SIZE;
-            trace!("Locked page: index {}, {:?}", index, address);
+            trace!("Locked frame {}: {:?}", index, address);
         }
     }
 
-    pub(crate) unsafe fn unreserve_pages(&mut self, address: PhysAddr, count: usize) {
-        for index in 0..count {
-            self.unreserve_page(address + (index * PAGE_SIZE));
-        }
-    }
-
-    pub(crate) unsafe fn unreserve_page(&mut self, address: PhysAddr) {
-        let index = (address.as_u64() as usize) / PAGE_SIZE;
-
-        if self
-            .bitarray
-            .get_bit(index)
-            .expect("failed to reserve page")
-        {
-            self.bitarray.set_bit(index, false);
-            self.free_memory += PAGE_SIZE;
-            self.reserved_memory -= PAGE_SIZE;
-            trace!("Unreserved page: index {}, {:?}", index, address);
-        }
-    }
-
-    pub(crate) unsafe fn reserve_pages(&mut self, address: PhysAddr, count: usize) {
-        for index in 0..count {
-            self.reserve_page(address + (index * PAGE_SIZE));
-        }
-    }
-
-    pub(crate) unsafe fn reserve_page(&mut self, address: PhysAddr) {
+    pub(crate) unsafe fn reserve_frame(&mut self, address: PhysAddr) {
         let index = (address.as_u64() as usize) / PAGE_SIZE;
 
         if !self
             .bitarray
             .get_bit(index)
-            .expect("failed to reserve page")
+            .expect("failed to reserve frame")
         {
-            self.bitarray.set_bit(index, false);
+            self.bitarray.set_bit(index, true);
             self.free_memory -= PAGE_SIZE;
             self.reserved_memory += PAGE_SIZE;
-            trace!("Reserved page: index {}, {:?}", index, address);
+            trace!("Reserved frame {}: {:?}", index, address);
         }
     }
 
-    pub fn next_free(&mut self) -> Option<Frame> {
+    /* MANY OPS */
+    pub unsafe fn deallocate_frames(&mut self, address: PhysAddr, count: usize) {
+        for index in 0..count {
+            self.deallocate_frame(address + (index * PAGE_SIZE));
+        }
+    }
+
+    pub unsafe fn allocate_frames(&mut self, address: PhysAddr, count: usize) {
+        for index in 0..count {
+            self.allocate_frame(address + (index * PAGE_SIZE));
+        }
+    }
+
+    pub(crate) unsafe fn reserve_frames(&mut self, address: PhysAddr, count: usize) {
+        for index in 0..count {
+            self.reserve_frame(address + (index * PAGE_SIZE));
+        }
+    }
+
+    pub fn allocate_next(&mut self) -> Option<Frame> {
         match self.bitarray.iter().enumerate().find(|tuple| !tuple.1) {
-            Some(result) => unsafe { Some(Frame::from_index(result.0 as u64)) },
+            Some(tuple) => {
+                trace!(
+                    "Located frame {}, which is unallocated and safe for allocation.",
+                    tuple.0
+                );
+                self.bitarray.set_bit(tuple.0, true);
+                Some(Frame::from_index(tuple.0 as u64))
+            }
             None => None,
         }
-    }
-
-    pub fn next_free_range(&mut self, count: usize) -> Option<PhysAddr> {
-        for (index, locked) in self.bitarray.iter().enumerate() {
-            if self
-                .bitarray
-                .iter()
-                .skip(index)
-                .take(count)
-                .all(|locked| !locked)
-            {
-                for index0 in index..(index + count) {
-                    self.bitarray.set_bit(index0, true);
-                }
-
-                return Some(PhysAddr::new((index * PAGE_SIZE) as u64));
-            }
-        }
-
-        None
     }
 
     pub fn total_memory(&self) -> usize {

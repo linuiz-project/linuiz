@@ -1,5 +1,4 @@
 use bitflags::bitflags;
-use x86_64::PhysAddr;
 
 use crate::structures::memory::Frame;
 
@@ -20,7 +19,7 @@ bitflags! {
 }
 
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct PageDescriptor(u64);
 
 impl PageDescriptor {
@@ -34,16 +33,14 @@ impl PageDescriptor {
 
     pub fn frame(&self) -> Option<Frame> {
         if self.attribs().contains(PageAttributes::PRESENT) {
-            Some(Frame::new(Frame::trim_addr(self.0)))
+            Some(Frame::from_addr(self.0 >> 12))
         } else {
             None
         }
     }
 
     pub fn set(&mut self, frame: &Frame, attribs: PageAttributes) {
-        let addr = frame.addr().as_u64();
-        assert!((addr & !0x000FFFFF_FFFFF000000) == 0);
-        self.0 = addr | attribs.bits();
+        self.0 = (frame.addr().as_u64() << 12) | attribs.bits();
     }
 
     pub fn is_unused(&self) -> bool {
@@ -52,5 +49,15 @@ impl PageDescriptor {
 
     pub fn set_unused(&mut self) {
         self.0 = 0;
+    }
+}
+
+impl core::fmt::Debug for PageDescriptor {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("Page Descriptor")
+            .field("Attributes", &self.attribs())
+            .field("Address", &self.frame())
+            .finish()
     }
 }

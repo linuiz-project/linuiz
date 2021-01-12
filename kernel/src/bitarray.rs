@@ -1,5 +1,3 @@
-use core::ops::Index;
-
 pub const SECTION_BITS_COUNT: usize = core::mem::size_of::<usize>() * 8;
 
 struct Section {
@@ -38,10 +36,11 @@ impl BitArray<'_> {
     pub fn set_bit(&mut self, index: usize, set: bool) -> Option<bool> {
         if index < self.bit_count() {
             let section = self.get_section(index);
-            let section_bit_mask = section.value & !(1 << section.bit_offset);
+            let section_bits_nonset = section.value & !(1 << section.bit_offset);
             let section_bit_set = (set as usize) << section.bit_offset;
 
-            self.array[section.index] = section_bit_mask | section_bit_set;
+            self.array[section.index] = section_bits_nonset | section_bit_set;
+            assert!(self.get_bit(index).unwrap() == set);
             Some(set)
         } else {
             None
@@ -52,12 +51,12 @@ impl BitArray<'_> {
     fn get_section(&self, index: usize) -> Section {
         let section_index = index / SECTION_BITS_COUNT;
         let section_offset = index - (section_index * SECTION_BITS_COUNT);
-        let section = self.array[section_index];
+        let section_value = self.array[section_index];
 
         Section {
             index: section_index,
             bit_offset: section_offset,
-            value: section,
+            value: section_value,
         }
     }
 
@@ -90,7 +89,9 @@ impl Iterator for BitArrayIterator<'_> {
     }
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.bitarray.get_bit(self.index)
+        let item = self.bitarray.get_bit(self.index);
+        self.index += 1;
+        item
     }
 }
 

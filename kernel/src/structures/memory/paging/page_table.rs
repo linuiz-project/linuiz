@@ -1,11 +1,5 @@
-use x86_64::{PhysAddr, VirtAddr};
-
-use crate::structures::memory::{
-    paging::{PageAttributes, PageDescriptor},
-    Frame,
-};
-
-use super::{Page, PageFrameAllocator, ADDRESS_SHIFT};
+use crate::structures::memory::paging::{FrameAllocator, PageAttributes, PageDescriptor};
+use core::ops::{Index, IndexMut};
 
 #[repr(C, align(0x1000))]
 pub struct PageTable {
@@ -13,10 +7,6 @@ pub struct PageTable {
 }
 
 impl PageTable {
-    const fn get_index_from_addr(addr: u64) -> u64 {
-        addr & 0x1FF
-    }
-
     pub const fn new() -> Self {
         Self {
             descriptors: [PageDescriptor::unused(); 512],
@@ -29,42 +19,44 @@ impl PageTable {
         }
     }
 
-    pub fn get_page(
+    pub fn allocated_descriptor(
         &mut self,
-        addr: VirtAddr,
-        allocator: &mut PageFrameAllocator,
-    ) -> Result<(), ()> {
-        self.get_page_internal(addr.as_u64(), allocator, 4)
-    }
+        index: usize,
+        frame_allocator: &mut FrameAllocator,
+    ) -> &mut PageDescriptor {
+        let descriptor = &mut self[index];
+        trace!("Found descriptor for index {}: {:?}", index, descriptor);
 
-    fn get_page_internal(
-        &mut self,
-        addr: u64,
-        allocator: &mut PageFrameAllocator,
-        depth: u8,
-    ) -> Result<(), ()> {
-        let descriptor = &mut self.descriptors[addr as usize];
         if !descriptor.attribs().contains(PageAttributes::PRESENT) {
-            trace!("Table descriptor doesn't point to an allocated frame.");
-            trace!("Attempting to allocate frame for descriptor.");
+            trace!("Descriptor doesn't point to an allocated frame, so one will be allocated.");
 
-            match allocator.next_free() {
+            match frame_allocator.allocate_next() {
                 Some(mut frame) => {
                     descriptor.set(&frame, PageAttributes::PRESENT | PageAttributes::WRITABLE);
-                    unsafe { frame.clear() };
+                    unsafe {
+                        frame.clear();
+                    }
                 }
-                None => return Err(()), // todo error
+                None => panic!("failed to lock a frame for new page table"),
             }
+
+            trace!("Allocated descriptor: {:?}", descriptor);
         }
 
-        let frame = descriptor.frame().expect("failed to get frame");
+        descriptor
+    }
+}
 
-        if depth > 0 {
-            let sub_table = unsafe { &mut *(frame.addr().as_u64() as *mut PageTable) };
-            return sub_table.get_page_internal(addr >> 9, allocator, depth - 1);
-        } else {
-            info!("{:?}", frame.addr());
-            return Ok(());
-        }
+impl Index<usize> for PageTable {
+    type Output = PageDescriptor;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.descriptors[index]
+    }
+}
+
+impl IndexMut<usize> for PageTable {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.descriptors[index]
     }
 }
