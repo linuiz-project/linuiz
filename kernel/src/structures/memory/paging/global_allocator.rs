@@ -201,12 +201,14 @@ pub unsafe fn init_global_allocator(memory_map: &[MemoryDescriptor]) {
     GLOBAL_ALLOCATOR = Mutex::new(Some(FrameAllocator::from_mmap(memory_map)));
 }
 
-pub fn global_allocator<F, T>(mut callback: F) -> T
+pub fn global_allocator<F, R>(mut callback: F) -> R
 where
-    F: FnMut(&mut FrameAllocator) -> T,
+    F: FnMut(&mut FrameAllocator) -> R,
 {
-    match &mut *unsafe { GLOBAL_ALLOCATOR.lock() } {
-        Some(allocator) => callback(allocator),
-        None => panic!("global allocator has not been initialized"),
-    }
+    x86_64::instructions::interrupts::without_interrupts(|| {
+        match &mut *unsafe { GLOBAL_ALLOCATOR.lock() } {
+            Some(allocator) => callback(allocator),
+            None => panic!("global allocator has not been initialized"),
+        }
+    })
 }

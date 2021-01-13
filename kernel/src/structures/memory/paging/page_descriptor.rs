@@ -1,4 +1,4 @@
-use crate::structures::memory::{paging::PageTable, Frame};
+use crate::structures::memory::Frame;
 use bitflags::bitflags;
 
 bitflags! {
@@ -48,15 +48,6 @@ impl PageTableEntry {
 
     pub fn set_unused(&mut self) {
         self.0 = 0;
-    }
-
-    /// Gets a PageTable struct from the address this descriptor points at.
-    pub unsafe fn get_page_table_mut(&mut self) -> &mut PageTable {
-        &mut *(self
-            .frame()
-            .expect("descriptor has no valid frame")
-            .addr()
-            .as_u64() as *mut PageTable)
     }
 }
 

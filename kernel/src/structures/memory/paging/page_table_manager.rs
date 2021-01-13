@@ -1,13 +1,17 @@
 use crate::structures::memory::{
-    paging::{PageAttributes, PageTable},
+    paging::{
+        page_table::{Level4, PageTable},
+        PageAttributes,
+    },
     Frame,
 };
-use x86_64::VirtAddr;
-
-use super::frame_allocator::global_allocator;
+use x86_64::{
+    structures::paging::{PhysFrame, Size4KiB},
+    PhysAddr, VirtAddr,
+};
 
 pub struct PageTableManager {
-    page_table: PageTable,
+    page_table: PageTable<Level4>,
 }
 
 impl PageTableManager {
@@ -24,39 +28,18 @@ impl PageTableManager {
             "address must be page-aligned"
         );
 
-        let addr = (virt_addr.as_u64() >> 12) as usize;
-        let mut page_table = &mut self.page_table;
+        let addr_u64 = (virt_addr.as_u64() >> 12) as usize;
+        let entry = &mut self
+            .page_table
+            .sub_table_mut((addr_u64 >> 27) & 0x1FF)
+            .sub_table_mut((addr_u64 >> 18) & 0x1FF)
+            .sub_table_mut((addr_u64 >> 9) & 0x1FF)[(addr_u64 >> 0) & 0x1FF];
+        entry.set(&frame, PageAttributes::PRESENT | PageAttributes::WRITABLE);
+        trace!("Mapped {:?} to {:?}: {:?}", virt_addr, frame, entry);
+    }
 
-        for iter_index in (1..4).rev() {
-            let descriptor = &mut self.page_table[(addr >> (iter_index * 9)) & 0x1FF];
-
-            let mut clear_page_table = false;
-            if !descriptor.attribs().contains(PageAttributes::PRESENT) {
-                trace!("Descriptor doesn't point to an allocated frame, so one will be allocated.");
-
-                match global_allocator(|allocator| allocator.allocate_next()) {
-                    Some(mut frame) => {
-                        descriptor.set(&frame, PageAttributes::PRESENT | PageAttributes::WRITABLE);
-                        unsafe {
-                            frame.clear();
-                        }
-                    }
-                    None => panic!("failed to lock a frame for new page table"),
-                }
-
-                trace!("Allocated descriptor: {:?}", descriptor);
-                clear_page_table = true;
-            }
-
-            page_table = unsafe { descriptor.get_page_table_mut() };
-            if clear_page_table {
-                page_table.clear();
-            }
-        }
-
-        // At this point, `page_table` should be the L1 page table.
-        let descriptor = &mut page_table[addr & 0x1FF];
-        descriptor.set(&frame, PageAttributes::PRESENT | PageAttributes::WRITABLE);
-        trace!("Mapped {:?} to {:?}: {:?}", virt_addr, frame, descriptor);
+    pub fn phys_frame(&mut self) -> PhysFrame<Size4KiB> {
+        PhysFrame::from_start_address(PhysAddr::new(self.page_table.frame().addr().as_u64()))
+            .expect("frame address is not properly aligned")
     }
 }
