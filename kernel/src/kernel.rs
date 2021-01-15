@@ -6,11 +6,7 @@
 extern crate log;
 
 use efi_boot::{entrypoint, BootInfo, ResetType, Status};
-use gsai::structures::memory::{
-    paging::{global_allocator, PageTableManager},
-    Frame,
-};
-use x86_64::{registers::control::Cr3Flags, VirtAddr};
+use gsai::structures::memory::{global_allocator, paging::PageTableManager, Frame};
 
 entrypoint!(kernel_main);
 extern "win64" fn kernel_main(mut boot_info: BootInfo) -> Status {
@@ -19,27 +15,23 @@ extern "win64" fn kernel_main(mut boot_info: BootInfo) -> Status {
         Err(error) => panic!("{}", error),
     }
 
-    info!("Validating alignment of BootInfo.");
+    info!("Validating magic of BootInfo.");
     boot_info.validate_magic();
     info!("Configuring CPU state.");
     unsafe { init_cpu_state() };
     info!("Initializing memory structures.");
     init_structures();
-    info!("Initializing memory (map, page tables, etc.).");
-    unsafe { gsai::structures::memory::paging::init_global_allocator(boot_info.memory_map()) };
+
+    info!("Initializing memory (map, page tables, et al).");
+    unsafe { gsai::structures::memory::init_global_allocator(boot_info.memory_map()) };
     let mut page_table_manager = PageTableManager::new();
+    info!("Identity mapping all valid addresses to kernel page table manager.");
+    let total_memory = global_allocator(|allocator| allocator.total_memory()) as u64;
+    Frame::range(0x0..total_memory).for_each(|frame| page_table_manager.identity_map(&frame));
+    page_table_manager.write_pml4();
 
-    for addr in (0..global_allocator(|allocator| allocator.total_memory())).step_by(0x1000) {
-        page_table_manager.map_memory(VirtAddr::new(addr as u64), &Frame::from_addr(addr as u64));
-    }
-
-    unsafe {
-        x86_64::registers::control::Cr3::write(
-            page_table_manager.phys_frame(),
-            Cr3Flags::from_bits_truncate(0x0),
-        )
-    };
-
+    let ret_status = Status::SUCCESS;
+    info!("Exiting with status code: {:?}", ret_status);
     unsafe { boot_info.runtime_table().runtime_services() }.reset(
         ResetType::Shutdown,
         Status::SUCCESS,

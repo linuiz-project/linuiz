@@ -1,9 +1,12 @@
+use core::alloc::GlobalAlloc;
+
 use crate::{
+    bitarray::BitArrayIterator,
     structures::memory::{Frame, PAGE_SIZE},
     BitArray,
 };
 use efi_boot::{MemoryDescriptor, MemoryType};
-use spin::Mutex;
+use spin::RwLock;
 use x86_64::PhysAddr;
 
 pub struct FrameAllocator<'arr> {
@@ -122,6 +125,10 @@ impl<'arr> FrameAllocator<'arr> {
         self.reserved_memory
     }
 
+    pub fn iter(&self) -> BitArrayIterator {
+        self.bitarray.iter()
+    }
+
     /* SINGLE OPS */
     pub unsafe fn deallocate_frame(&mut self, address: PhysAddr) {
         let index = (address.as_u64() as usize) / PAGE_SIZE;
@@ -180,7 +187,7 @@ impl<'arr> FrameAllocator<'arr> {
         }
     }
 
-    pub fn allocate_next(&mut self) -> Option<Frame> {
+    pub fn alloc_next(&mut self) -> Option<Frame> {
         match self.bitarray.iter().enumerate().find(|tuple| !tuple.1) {
             Some(tuple) => {
                 trace!(
@@ -195,20 +202,28 @@ impl<'arr> FrameAllocator<'arr> {
     }
 }
 
-static mut GLOBAL_ALLOCATOR: Mutex<Option<FrameAllocator<'static>>> = Mutex::new(None);
+static mut GLOBAL_ALLOCATOR: RwLock<Option<FrameAllocator<'static>>> = RwLock::new(None);
 
 pub unsafe fn init_global_allocator(memory_map: &[MemoryDescriptor]) {
-    GLOBAL_ALLOCATOR = Mutex::new(Some(FrameAllocator::from_mmap(memory_map)));
+    GLOBAL_ALLOCATOR = RwLock::new(Some(FrameAllocator::from_mmap(memory_map)));
 }
 
-pub fn global_allocator<F, R>(mut callback: F) -> R
+pub fn global_allocator<F, R>(callback: F) -> R
+where
+    F: Fn(&FrameAllocator) -> R,
+{
+    match &*unsafe { GLOBAL_ALLOCATOR.read() } {
+        Some(allocator) => callback(allocator),
+        None => panic!("global allocator has not been initialized"),
+    }
+}
+
+pub fn global_allocator_mut<F, R>(mut callback: F) -> R
 where
     F: FnMut(&mut FrameAllocator) -> R,
 {
-    x86_64::instructions::interrupts::without_interrupts(|| {
-        match &mut *unsafe { GLOBAL_ALLOCATOR.lock() } {
-            Some(allocator) => callback(allocator),
-            None => panic!("global allocator has not been initialized"),
-        }
-    })
+    match &mut *unsafe { GLOBAL_ALLOCATOR.write() } {
+        Some(allocator) => callback(allocator),
+        None => panic!("global allocator has not been initialized"),
+    }
 }

@@ -1,5 +1,6 @@
 use crate::structures::memory::{
-    paging::{global_allocator, PageAttributes, PageTableEntry},
+    global_allocator_mut,
+    paging::{PageAttributes, PageTableEntry},
     Frame,
 };
 use core::{
@@ -51,7 +52,7 @@ where
 
     pub fn clear(&mut self) {
         self.iter_mut()
-            .for_each(|descriptor| descriptor.set_unused());
+            .for_each(|descriptor| descriptor.set_nonpresent());
     }
 
     pub fn iter(&self) -> core::slice::Iter<PageTableEntry> {
@@ -70,25 +71,24 @@ where
     pub fn sub_table_mut(&mut self, index: usize) -> &mut PageTable<L::NextLevel> {
         let entry = &mut self.entries[index];
 
-        if !entry.attribs().contains(PageAttributes::PRESENT) {
-            match global_allocator(|allocator| allocator.allocate_next()) {
-                Some(mut frame) => {
-                    entry.set(&frame, PageAttributes::PRESENT | PageAttributes::WRITABLE);
+        let frame = match entry.frame() {
+            Some(frame) => frame,
+            None => {
+                let alloc_frame = global_allocator_mut(|allocator| allocator.alloc_next())
+                    .expect("failed to allocate a frame for new page table");
+                entry.set(
+                    &alloc_frame,
+                    PageAttributes::PRESENT | PageAttributes::WRITABLE,
+                );
 
-                    unsafe {
-                        frame.clear();
-                    }
-                }
-                None => panic!("failed to lock a frame for new page table"),
+                // TODO map frame with a vaddr, and clear frame somehowa
+                alloc_frame
             }
-        }
+        };
 
         unsafe {
-            &mut *(entry
-                .frame()
-                .expect("descriptor has no valid frame")
-                .addr()
-                .as_u64() as *mut PageTable<L::NextLevel>)
+            // TODO this fails when memory isn't identity-mapped
+            &mut *(frame.addr().as_u64() as *mut PageTable<L::NextLevel>)
         }
     }
 
@@ -113,15 +113,3 @@ impl<L: TableLevel> IndexMut<usize> for PageTable<L> {
         &mut self.entries[index]
     }
 }
-
-// impl<L> core::fmt::Debug for PageTable<dyn TableLevel> {
-//     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-//         let mut debug_struct = formatter.debug_struct("Page Table");
-
-//         for entry in self.iter() {
-//             debug_struct.field("Entry", entry);
-//         }
-
-//         debug_struct.finish()
-//     }
-// }

@@ -31,23 +31,23 @@ impl PageTableEntry {
     }
 
     pub fn frame(&self) -> Option<Frame> {
-        if self.attribs().contains(PageAttributes::PRESENT) {
-            Some(Frame::from_addr(self.0 >> 12))
+        if self.is_present() {
+            Some(Frame::from_addr(self.0 & 0x000FFFFF_FFFFF000))
         } else {
             None
         }
     }
 
     pub fn set(&mut self, frame: &Frame, attribs: PageAttributes) {
-        self.0 = (frame.addr().as_u64() << 12) | attribs.bits();
+        self.0 = frame.addr().as_u64() | attribs.bits();
     }
 
-    pub fn is_unused(&self) -> bool {
-        self.0 == 0
+    pub fn is_present(&self) -> bool {
+        self.attribs().contains(PageAttributes::PRESENT)
     }
 
-    pub fn set_unused(&mut self) {
-        self.0 = 0;
+    pub fn set_nonpresent(&mut self) {
+        self.0 &= !PageAttributes::PRESENT.bits();
     }
 }
 

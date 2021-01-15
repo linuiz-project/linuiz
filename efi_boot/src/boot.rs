@@ -450,7 +450,7 @@ fn kernel_transfer(
     //  the alignment is correct—so we have to read in the memory descriptors.
     //
     // This could be due to the actual entry size not being equal to size_of::<MemoryDescriptor>().
-    let mut memory_map = unsafe {
+    let memory_map = unsafe {
         &mut *slice_from_raw_parts_mut(mmap_ptr as *mut MemoryDescriptor, mmap_iter.len())
     };
     for (index, descriptor) in mmap_iter.enumerate() {

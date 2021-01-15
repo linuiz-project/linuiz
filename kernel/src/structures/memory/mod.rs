@@ -1,7 +1,9 @@
 mod frame;
+mod global_allocator;
 
 pub mod paging;
 pub use frame::Frame;
+pub use global_allocator::*;
 
 pub const PAGE_SIZE: usize = 0x1000; // 4096
 pub const KIBIBYTE: usize = 0x400; // 1024
