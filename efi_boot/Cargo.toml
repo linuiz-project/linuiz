@@ -7,8 +7,8 @@ edition = "2018"
 
 [dependencies]
 uefi = { version = "*", features = ["exts"] }
-uefi-macros = "*"
 uefi-services = { version = "*", features = ["qemu"] }
+uefi-macros = "*"
 log = { version = "*", default-features = false }
 rlibc = "*"
 

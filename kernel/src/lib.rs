@@ -1,6 +1,7 @@
 #![no_std]
 #![feature(asm)]
 #![feature(const_fn)]
+#![feature(const_mut_refs)]
 #![feature(abi_x86_interrupt)]
 #![feature(alloc_error_handler)]
 

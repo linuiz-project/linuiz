@@ -12,11 +12,12 @@ extern crate rlibc;
 
 use core::{
     cell::UnsafeCell,
-    intrinsics::{wrapping_add, wrapping_mul, wrapping_sub},
+    intrinsics::wrapping_sub,
     mem::{size_of, transmute},
     ptr::slice_from_raw_parts_mut,
 };
 use efi_boot::{
+    align_down,
     elf::{
         program_header::{ProgramHeader, ProgramHeaderType},
         ELFHeader64,
@@ -143,20 +144,7 @@ pub fn free_pages(boot_services: &BootServices, buffer: PointerBuffer, count: us
     }
 }
 
-#[allow(dead_code)]
-pub fn align_up(value: usize, alignment: usize) -> usize {
-    let super_aligned = wrapping_add(value, alignment);
-    let force_under_aligned = wrapping_sub(super_aligned, 1);
-    wrapping_mul(force_under_aligned / alignment, alignment)
-}
-
-#[allow(dead_code)]
-pub fn align_down(value: usize, alignment: usize) -> usize {
-    (value / alignment) * alignment
-}
-
 /// returns the minimum necessary memory pages to contain the given size in bytes.
-#[allow(dead_code)]
 pub fn aligned_slices(size: usize, alignment: usize) -> usize {
     ((size + alignment) - 1) / alignment
 }

@@ -1,3 +1,5 @@
+use core::ops::Range;
+
 pub const SECTION_BITS_COUNT: usize = core::mem::size_of::<usize>() * 8;
 
 struct Section {
@@ -11,6 +13,12 @@ pub struct BitArray<'arr> {
 }
 
 impl BitArray<'_> {
+    pub const fn empty() -> Self {
+        Self {
+            array: &mut [0usize; 0],
+        }
+    }
+
     pub fn from_ptr(ptr: *mut usize, bits: usize) -> Self {
         let array = unsafe {
             &mut *core::ptr::slice_from_raw_parts_mut(ptr, (bits / SECTION_BITS_COUNT) + 1)
@@ -21,16 +29,6 @@ impl BitArray<'_> {
         }
 
         Self { array }
-    }
-    pub fn get_bit(&self, index: usize) -> Option<bool> {
-        if index < self.bit_count() {
-            let section = self.get_section(index);
-            let section_bit = section.value & (1 << section.bit_offset);
-
-            Some(section_bit != 0)
-        } else {
-            None
-        }
     }
 
     pub fn set_bit(&mut self, index: usize, set: bool) -> Option<bool> {
@@ -44,6 +42,29 @@ impl BitArray<'_> {
             Some(set)
         } else {
             None
+        }
+    }
+
+    pub fn get_bit(&self, index: usize) -> Option<bool> {
+        if index < self.bit_count() {
+            let section = self.get_section(index);
+            let section_bit = section.value & (1 << section.bit_offset);
+
+            Some(section_bit != 0)
+        } else {
+            None
+        }
+    }
+
+    pub fn get_bits(&self, range: Range<usize>) -> BitArrayIterator {
+        if range.end > self.bit_count() {
+            panic!("range exceeds collection bounds");
+        }
+
+        BitArrayIterator {
+            bitarray: self,
+            index: range.start,
+            end: range.end,
         }
     }
 
@@ -72,6 +93,7 @@ impl BitArray<'_> {
         BitArrayIterator {
             bitarray: self,
             index: 0,
+            end: self.bit_count(),
         }
     }
 }
@@ -79,6 +101,7 @@ impl BitArray<'_> {
 pub struct BitArrayIterator<'arr> {
     bitarray: &'arr BitArray<'arr>,
     index: usize,
+    end: usize,
 }
 
 impl Iterator for BitArrayIterator<'_> {
@@ -89,9 +112,14 @@ impl Iterator for BitArrayIterator<'_> {
     }
 
     fn next(&mut self) -> Option<Self::Item> {
-        let item = self.bitarray.get_bit(self.index);
-        self.index += 1;
-        item
+        if self.index < self.end {
+            if let Some(item) = self.bitarray.get_bit(self.index) {
+                self.index += 1;
+                return Some(item);
+            }
+        }
+
+        None
     }
 }
 

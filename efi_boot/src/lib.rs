@@ -94,6 +94,29 @@ impl BootInfo {
     }
 }
 
+pub fn align_up(value: usize, alignment: usize) -> usize {
+    assert!(
+        alignment.is_power_of_two(),
+        "`alignment` must be a power of two"
+    );
+
+    let alignment_mask = alignment - 1;
+    if value & alignment_mask == 0 {
+        value
+    } else {
+        (value | alignment_mask) + 1
+    }
+}
+
+pub fn align_down(value: usize, alignment: usize) -> usize {
+    assert!(
+        alignment.is_power_of_two(),
+        "alignment must be a power of two"
+    );
+
+    value & !(alignment - 1)
+}
+
 pub type KernelMain = extern "win64" fn(crate::BootInfo) -> Status;
 
 #[macro_export]
