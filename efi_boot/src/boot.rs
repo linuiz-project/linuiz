@@ -409,8 +409,7 @@ fn kernel_transfer(
         let boot_services = system_table.boot_services();
         // Determine the total allocation size of the memory map, in bytes (+ to cover any extraneous entries created before `ExitBootServices`).
         let mmap_alloc_size = boot_services.memory_map_size() + (4 * size_of::<MemoryDescriptor>());
-        let alloc_ptr = match boot_services.allocate_pool(MemoryType::LOADER_DATA, mmap_alloc_size)
-        {
+        let alloc_ptr = match boot_services.allocate_pool(efi_boot::KERNEL_DATA, mmap_alloc_size) {
             Ok(completion) => completion.unwrap(),
             Err(error) => panic!("{:?}", error),
         };

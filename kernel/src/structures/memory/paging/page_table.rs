@@ -1,3 +1,5 @@
+use x86_64::{PhysAddr, VirtAddr};
+
 use crate::structures::memory::{
     global_allocator_mut,
     paging::{PageAttributes, PageTableEntry},
@@ -68,6 +70,22 @@ impl<L> PageTable<L>
 where
     L: HeirarchicalLevel,
 {
+    fn sub_table_addr(&self, index: usize) -> Option<VirtAddr> {
+        let entry = self[index];
+        if entry.is_present() {
+            let table_address = self as *const _ as usize;
+            let addr = (table_address << 9) | (index << 12);
+            Some(VirtAddr::new(addr as u64))
+        } else {
+            None
+        }
+    }
+
+    pub fn sub_table(&self, index: usize) -> Option<&PageTable<L::NextLevel>> {
+        self.sub_table_addr(index)
+            .map(|virt_addr| unsafe { &*virt_addr.as_ptr() })
+    }
+
     pub fn sub_table_mut(&mut self, index: usize) -> &mut PageTable<L::NextLevel> {
         let entry = &mut self.entries[index];
 
@@ -97,7 +115,7 @@ where
     }
 
     pub fn frame(&self) -> Frame {
-        Frame::from_addr(self.entries.as_ptr() as u64)
+        Frame::from_addr(PhysAddr::new(self.entries.as_ptr() as u64))
     }
 }
 

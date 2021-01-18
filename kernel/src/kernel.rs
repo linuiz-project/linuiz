@@ -5,7 +5,7 @@
 #[macro_use]
 extern crate log;
 
-use efi_boot::{entrypoint, BootInfo, ResetType, Status};
+use efi_boot::{entrypoint, BootInfo, MemoryType, ResetType, Status};
 use gsai::structures::memory::{global_allocator, paging::PageTableManager, Frame};
 
 entrypoint!(kernel_main);
@@ -25,9 +25,18 @@ extern "win64" fn kernel_main(mut boot_info: BootInfo) -> Status {
     info!("Initializing memory (map, page tables, et al).");
     unsafe { gsai::structures::memory::init_global_allocator(boot_info.memory_map()) };
     let mut page_table_manager = PageTableManager::new();
-    info!("Identity mapping all valid addresses to kernel page table manager.");
-    let total_memory = global_allocator(|allocator| allocator.total_memory()) as u64;
-    Frame::range(0x0..total_memory).for_each(|frame| page_table_manager.identity_map(&frame));
+    info!("Identity mapping all utilized addresses to kernel page table manager.");
+    for descriptor in boot_info.memory_map() {
+        if descriptor.ty != MemoryType::CONVENTIONAL {
+            let phys_end = descriptor.phys_start + (descriptor.page_count * 0x1000);
+            for frame in Frame::range(descriptor.phys_start..phys_end) {
+                page_table_manager.identity_map(&frame);
+            }
+        }
+    }
+
+    // let total_memory = global_allocator(|allocator| allocator.total_memory()) as u64;
+    // Frame::range(0x0..total_memory).for_each(|frame| page_table_manager.identity_map(&frame));
     page_table_manager.write_pml4();
 
     let ret_status = Status::SUCCESS;

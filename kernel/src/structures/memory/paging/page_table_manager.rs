@@ -1,5 +1,5 @@
 use crate::structures::memory::{
-    paging::{Level4, PageAttributes, PageTable},
+    paging::{Level4, PageAttributes, PageTable, TableLevel},
     Frame,
 };
 use x86_64::VirtAddr;
@@ -9,10 +9,18 @@ pub struct PageTableManager {
 }
 
 impl PageTableManager {
-    pub fn new() -> Self {
-        Self {
+    pub fn new(page_table_frame: Frame) -> Self {
+        let mut this = Self {
             page_table: PageTable::new(),
-        }
+        };
+
+        let mut entry = this.page_table[511];
+        entry.set(
+            &page_table_frame,
+            PageAttributes::PRESENT | PageAttributes::WRITABLE,
+        );
+
+        this
     }
 
     pub fn map(&mut self, virt_addr: VirtAddr, frame: &Frame) {
@@ -68,6 +76,7 @@ impl PageTableManager {
             "Writing page table manager's PML4 to CR3 register: {:?}.",
             frame
         );
+
         unsafe { crate::registers::CR3::write(frame, None) };
     }
 }

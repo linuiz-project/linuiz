@@ -1,5 +1,4 @@
 use core::ops::Range;
-
 use x86_64::PhysAddr;
 
 #[repr(transparent)]
@@ -11,14 +10,17 @@ impl Frame {
         Self { 0: index }
     }
 
-    pub fn from_addr(addr: u64) -> Self {
+    pub fn from_addr(phys_addr: PhysAddr) -> Self {
+        let addr_u64 = phys_addr.as_u64();
         assert_eq!(
-            addr & !0x000FFFFF_FFFFF000,
+            addr_u64 & !0x000FFFFF_FFFFF000,
             0,
-            "frame address format is invalid: {}",
-            addr
+            "frame address format is invalid: {:?}",
+            phys_addr
         );
-        Self { 0: addr / 0x1000 }
+        Self {
+            0: addr_u64 / 0x1000,
+        }
     }
 
     pub const fn index(&self) -> u64 {
@@ -35,8 +37,8 @@ impl Frame {
 
     pub fn range(range: Range<u64>) -> FrameIterator {
         FrameIterator {
-            current: Frame::from_addr(range.start),
-            end: Frame::from_addr(range.end),
+            current: Frame::from_addr(PhysAddr::new(range.start)),
+            end: Frame::from_addr(PhysAddr::new(range.end)),
         }
     }
 }

@@ -261,7 +261,7 @@ unsafe impl GlobalAlloc for FrameAllocator<'static> {
     }
 }
 
-#[global_allocator]
+// #[global_allocator]
 static mut GLOBAL_ALLOCATOR: FrameAllocator<'static> = FrameAllocator::uninit();
 
 pub unsafe fn init_global_allocator(memory_map: &[MemoryDescriptor]) {

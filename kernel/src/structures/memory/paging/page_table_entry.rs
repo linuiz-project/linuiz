@@ -1,5 +1,6 @@
 use crate::structures::memory::Frame;
 use bitflags::bitflags;
+use x86_64::PhysAddr;
 
 bitflags! {
     pub struct PageAttributes : u64 {
@@ -32,7 +33,9 @@ impl PageTableEntry {
 
     pub fn frame(&self) -> Option<Frame> {
         if self.is_present() {
-            Some(Frame::from_addr(self.0 & 0x000FFFFF_FFFFF000))
+            Some(Frame::from_addr(PhysAddr::new(
+                self.0 & 0x000FFFFF_FFFFF000,
+            )))
         } else {
             None
         }

@@ -1,4 +1,5 @@
 use bitflags::bitflags;
+use x86_64::PhysAddr;
 
 use crate::structures::memory::Frame;
 
@@ -30,6 +31,9 @@ impl CR3 {
             asm!("mov {}, cr3", out(reg) value, options(nomem));
         }
 
-        (Frame::from_addr(value & !0xFFF), CR3Flags::from_bits(value))
+        (
+            Frame::from_addr(PhysAddr::new(value & !0xFFF)),
+            CR3Flags::from_bits(value),
+        )
     }
 }
