@@ -38,6 +38,7 @@ use uefi::{
     },
     table::{
         boot::{AllocateType, MemoryDescriptor, MemoryType},
+        runtime::ResetType,
         Boot, SystemTable,
     },
     Handle, ResultExt, Status,
@@ -46,6 +47,8 @@ use uefi_macros::entry;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 const MINIMUM_MEMORY: usize = 0xF424000; // 256MB
+const KERNEL_CODE: MemoryType = MemoryType::custom(0xFFFFFF00);
+const KERNEL_DATA: MemoryType = MemoryType::custom(0xFFFFFF01);
 
 #[cfg(debug_assertions)]
 fn configure_log_level() {
@@ -351,7 +354,7 @@ fn allocate_segments(
                 // point, but that doesn't really matter to the code
                 // in this context
                 AllocateType::Address(aligned_address),
-                efi_boot::KERNEL_CODE,
+                KERNEL_CODE,
                 pages_count,
             )
             // we won't ever explicitly deallocate this, so we only
@@ -396,7 +399,7 @@ fn kernel_transfer(
     system_table: SystemTable<Boot>,
     kernel_entry_point: usize,
     framebuffer: Option<FramebufferPointer>,
-) -> Status {
+) -> ! {
     info!("Preparing to exit boot services environment.");
     // Retrieve a raw allocation pointer & size for the system memory map.
     //
@@ -409,7 +412,7 @@ fn kernel_transfer(
         let boot_services = system_table.boot_services();
         // Determine the total allocation size of the memory map, in bytes (+ to cover any extraneous entries created before `ExitBootServices`).
         let mmap_alloc_size = boot_services.memory_map_size() + (4 * size_of::<MemoryDescriptor>());
-        let alloc_ptr = match boot_services.allocate_pool(efi_boot::KERNEL_DATA, mmap_alloc_size) {
+        let alloc_ptr = match boot_services.allocate_pool(KERNEL_DATA, mmap_alloc_size) {
             Ok(completion) => completion.unwrap(),
             Err(error) => panic!("{:?}", error),
         };
@@ -446,6 +449,9 @@ fn kernel_transfer(
 
     // Finally, drop into the kernel.
     let kernel_main: efi_boot::KernelMain = unsafe { transmute(kernel_entry_point) };
-    let boot_info = efi_boot::BootInfo::new(memory_map, runtime_table, framebuffer);
-    kernel_main(boot_info)
+    let boot_info = efi_boot::BootInfo::new(unsafe { memory_map.align_to().1 }, framebuffer);
+    let return_code = kernel_main(boot_info);
+    let return_status: Status = unsafe { transmute(return_code) };
+
+    unsafe { runtime_table.runtime_services() }.reset(ResetType::Shutdown, return_status, None)
 }

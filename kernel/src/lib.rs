@@ -3,6 +3,7 @@
 #![feature(const_fn)]
 #![feature(const_mut_refs)]
 #![feature(abi_x86_interrupt)]
+#![feature(unsafe_cell_get_mut)]
 #![feature(alloc_error_handler)]
 
 #[macro_use]

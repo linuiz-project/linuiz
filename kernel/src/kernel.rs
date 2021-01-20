@@ -5,7 +5,7 @@
 #[macro_use]
 extern crate log;
 
-use efi_boot::{entrypoint, BootInfo, ResetType, Status};
+use efi_boot::{entrypoint, BootInfo};
 use gsai::memory::{
     allocators::{global_memory, total_memory_iter},
     paging::{MappedVirtualAddessor, VirtualAddessor},
@@ -14,7 +14,7 @@ use gsai::memory::{
 use x86_64::{PhysAddr, VirtAddr};
 
 entrypoint!(kernel_main);
-extern "win64" fn kernel_main(mut boot_info: BootInfo) -> Status {
+extern "win64" fn kernel_main(boot_info: BootInfo) -> usize {
     match gsai::logging::init(gsai::logging::LoggingModes::SERIAL, log::LevelFilter::Debug) {
         Ok(()) => info!("Successfully loaded into kernel, with logging enabled."),
         Err(error) => panic!("{}", error),
@@ -40,13 +40,9 @@ extern "win64" fn kernel_main(mut boot_info: BootInfo) -> Status {
         .modify_mapped_addr(global_memory(|allocator| allocator.physical_mapping_addr()));
     virtual_addressor.swap_into();
 
-    let ret_status = Status::SUCCESS;
-    info!("Exiting with status code: {:?}", ret_status);
-    unsafe { boot_info.runtime_table().runtime_services() }.reset(
-        ResetType::Shutdown,
-        Status::SUCCESS,
-        None,
-    )
+    let ret_status = 0;
+    info!("Kernel exiting with status: {:?}", 0);
+    ret_status
 }
 
 unsafe fn init_cpu_state() {

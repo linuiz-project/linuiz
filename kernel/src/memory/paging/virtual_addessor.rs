@@ -112,7 +112,7 @@ impl VirtualAddessor for MappedVirtualAddessor {
 
     fn swap_into(&self) {
         info!(
-            "Writing page table manager's PML4 to CR3 register: {:?}.",
+            "Writing virtual addessor's PML4 to CR3 register: {:?}.",
             &self.pml4_frame
         );
 

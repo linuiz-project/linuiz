@@ -16,6 +16,10 @@ reset:
 	rm -f $(bootloader) $(kernel)
 	rm -rf ./efi_boot/Cargo.lock ./efi_boot/target/
 	rm -rf ./kernel/Cargo.lock ./kernel/target/
+	cd ./efi_boot/;\
+		cargo clean
+	cd ./kernel/;\
+		cargo clean
 
 	
 $(bootloader): $(boot_deps) $(uefi-deps)
