@@ -7,9 +7,9 @@ extern crate log;
 
 use efi_boot::{entrypoint, BootInfo, ResetType, Status};
 use gsai::structures::memory::{
-    global_allocator, memory_usize_iter,
+    global_allocator,
     paging::{MappedVirtualAddessor, VirtualAddessor},
-    Frame,
+    total_memory_iter, Frame,
 };
 use x86_64::{PhysAddr, VirtAddr};
 
@@ -33,7 +33,7 @@ extern "win64" fn kernel_main(mut boot_info: BootInfo) -> Status {
     // motivation: is the base address of RAM ever not 0x0?
     let mut virtual_addressor = unsafe { MappedVirtualAddessor::new(VirtAddr::zero()) };
     debug!("Identity mapping all available memory.");
-    memory_usize_iter().for_each(|addr| {
+    total_memory_iter().step_by(0x1000).for_each(|addr| {
         virtual_addressor.identity_map(&Frame::from_addr(PhysAddr::new(addr as u64)))
     });
     virtual_addressor.modify_mapped_addr(global_allocator(|allocator| {

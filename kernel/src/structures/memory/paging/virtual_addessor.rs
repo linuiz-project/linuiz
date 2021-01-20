@@ -18,6 +18,11 @@ pub struct MappedVirtualAddessor {
 }
 
 impl MappedVirtualAddessor {
+    /// Attempts to create a new MappedVirtualAddessor, with `current_mapped_addr` specifying the current virtual
+    /// address where the entirety of the system physical memory is mapped.
+    ///
+    /// Safety: this method is unsafe because `current_mapped_addr` can be any value; that is, not necessarily
+    /// a valid address in which physical memory is already mapped.
     pub unsafe fn new(current_mapped_addr: VirtAddr) -> Self {
         debug!(
             "Attempting to create a MappedVirtualAddessor (current mapped address supplied: {:?}).",
@@ -34,10 +39,6 @@ impl MappedVirtualAddessor {
                     .expect("failed to lock frame for PML4 of MappedVirtualAddessor")
             }),
         }
-    }
-
-    pub fn mapped_offset_addr(&self) -> VirtAddr {
-        self.mapped_addr.clone()
     }
 
     fn pml4_mut(&mut self) -> &mut PageTable<Level4> {
@@ -73,13 +74,13 @@ impl MappedVirtualAddessor {
 impl VirtualAddessor for MappedVirtualAddessor {
     fn map(&mut self, page: &Page, frame: &Frame) {
         trace!("Mapping: {:?} to {:?}", page, frame);
-        let addr_usize = (page.addr().as_u64() >> 12) as usize;
-        let offset = self.mapped_offset_addr();
+        let offset = self.mapped_addr;
+        let addr = (page.addr().as_u64() >> 12) as usize;
         let entry = &mut self
             .pml4_mut()
-            .sub_table_create((addr_usize >> 27) & 0x1FF, offset)
-            .sub_table_create((addr_usize >> 18) & 0x1FF, offset)
-            .sub_table_create((addr_usize >> 9) & 0x1FF, offset)[(addr_usize >> 0) & 0x1FF];
+            .sub_table_create((addr >> 27) & 0x1FF, offset)
+            .sub_table_create((addr >> 18) & 0x1FF, offset)
+            .sub_table_create((addr >> 9) & 0x1FF, offset)[(addr >> 0) & 0x1FF];
         if entry.is_present() {
             // we invalidate entry in the TLB to ensure it isn't incorrectly followed
             crate::instructions::tlb::invalidate(page);
@@ -90,13 +91,13 @@ impl VirtualAddessor for MappedVirtualAddessor {
     }
 
     fn unmap(&mut self, page: &Page) {
-        let addr_usize = (page.addr().as_u64() >> 12) as usize;
-        let offset = self.mapped_offset_addr();
+        let offset = self.mapped_addr;
+        let addr = (page.addr().as_u64() >> 12) as usize;
         let entry = &mut self
             .pml4_mut()
-            .sub_table_create((addr_usize >> 27) & 0x1FF, offset)
-            .sub_table_create((addr_usize >> 18) & 0x1FF, offset)
-            .sub_table_create((addr_usize >> 9) & 0x1FF, offset)[(addr_usize >> 0) & 0x1FF];
+            .sub_table_create((addr >> 27) & 0x1FF, offset)
+            .sub_table_create((addr >> 18) & 0x1FF, offset)
+            .sub_table_create((addr >> 9) & 0x1FF, offset)[(addr >> 0) & 0x1FF];
 
         entry.set_nonpresent();
         trace!("Unmapped {:?} from {:?}: {:?}", page, entry.frame(), entry);

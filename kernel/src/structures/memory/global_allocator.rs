@@ -247,6 +247,6 @@ where
     callback(unsafe { &mut GLOBAL_ALLOCATOR })
 }
 
-pub fn memory_usize_iter() -> core::iter::StepBy<core::ops::Range<usize>> {
-    (0..global_allocator(|allocator| allocator.total_memory())).step_by(0x1000)
+pub fn total_memory_iter() -> core::ops::Range<usize> {
+    0..global_allocator(|allocator| allocator.total_memory())
 }
