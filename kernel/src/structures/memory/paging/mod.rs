@@ -1,7 +1,7 @@
 mod page_table;
 mod page_table_entry;
-mod page_table_manager;
+mod virtual_addessor;
 
 pub use page_table::*;
 pub use page_table_entry::*;
-pub use page_table_manager::PageTableManager;
+pub use virtual_addessor::*;

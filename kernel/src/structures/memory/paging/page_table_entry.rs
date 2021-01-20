@@ -1,4 +1,4 @@
-use crate::structures::memory::Frame;
+use crate::structures::memory::{global_allocator_mut, Frame};
 use bitflags::bitflags;
 use x86_64::PhysAddr;
 
@@ -38,6 +38,26 @@ impl PageTableEntry {
             )))
         } else {
             None
+        }
+    }
+
+    pub fn frame_alloc(&mut self) -> Frame {
+        match self.frame() {
+            Some(frame) => frame,
+            None => {
+                let alloc_frame = global_allocator_mut(|allocator| {
+                    allocator
+                        .lock_next()
+                        .expect("failed to allocate a frame for new page table")
+                });
+
+                self.set(
+                    &alloc_frame,
+                    PageAttributes::PRESENT | PageAttributes::WRITABLE,
+                );
+
+                alloc_frame
+            }
         }
     }
 

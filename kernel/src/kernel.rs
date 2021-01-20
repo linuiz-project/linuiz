@@ -6,7 +6,7 @@
 extern crate log;
 
 use efi_boot::{entrypoint, BootInfo, ResetType, Status};
-use gsai::structures::memory::paging::PageTableManager;
+use gsai::structures::memory::paging::{MappedVirtualAddessor, VirtualAddessor};
 
 entrypoint!(kernel_main);
 extern "win64" fn kernel_main(mut boot_info: BootInfo) -> Status {
@@ -24,10 +24,10 @@ extern "win64" fn kernel_main(mut boot_info: BootInfo) -> Status {
 
     info!("Initializing memory (map, page tables, et al).");
     unsafe { gsai::structures::memory::init_global_allocator(boot_info.memory_map()) };
-    let mut page_table_manager = PageTableManager::new();
+    let mut virtual_addressor = MappedVirtualAddessor::new();
     info!("Identity mapping all utilized addresses to kernel page table manager.");
-    page_table_manager.identity_map_full();
-    page_table_manager.write_pml4();
+    virtual_addressor.identity_map_full();
+    virtual_addressor.swap_into();
 
     let ret_status = Status::SUCCESS;
     info!("Exiting with status code: {:?}", ret_status);
