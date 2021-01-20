@@ -42,23 +42,20 @@ impl PageTableEntry {
     }
 
     pub fn frame_alloc(&mut self) -> Frame {
-        match self.frame() {
-            Some(frame) => frame,
-            None => {
-                let alloc_frame = global_allocator_mut(|allocator| {
-                    allocator
-                        .lock_next()
-                        .expect("failed to allocate a frame for new page table")
-                });
+        self.frame().unwrap_or_else(|| {
+            let alloc_frame = global_allocator_mut(|allocator| {
+                allocator
+                    .lock_next()
+                    .expect("failed to allocate a frame for new page table")
+            });
 
-                self.set(
-                    &alloc_frame,
-                    PageAttributes::PRESENT | PageAttributes::WRITABLE,
-                );
+            self.set(
+                &alloc_frame,
+                PageAttributes::PRESENT | PageAttributes::WRITABLE,
+            );
 
-                alloc_frame
-            }
-        }
+            alloc_frame
+        })
     }
 
     pub fn set(&mut self, frame: &Frame, attribs: PageAttributes) {

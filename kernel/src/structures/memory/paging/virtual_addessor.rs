@@ -1,5 +1,5 @@
 use crate::structures::memory::{
-    global_allocator, global_allocator_mut,
+    global_allocator_mut,
     paging::{Level4, PageAttributes, PageTable},
     Frame, Page,
 };
@@ -14,65 +14,74 @@ pub trait VirtualAddessor {
 
 pub struct MappedVirtualAddessor {
     mapped_addr: VirtAddr,
-    pml4_ptr: *mut PageTable<Level4>,
+    pml4_frame: Frame,
 }
 
 impl MappedVirtualAddessor {
-    pub fn new() -> Self {
-        let (total_memory, pml4_frame) = global_allocator_mut(|allocator| {
-            (
-                allocator.total_memory(),
+    pub unsafe fn new(current_mapped_addr: VirtAddr) -> Self {
+        debug!(
+            "Attempting to create a MappedVirtualAddessor (current mapped address supplied: {:?}).",
+            current_mapped_addr
+        );
+
+        Self {
+            // we don't know where physical memory is mapped at this point,
+            // so rely on what the caller specifies for us
+            mapped_addr: current_mapped_addr,
+            pml4_frame: global_allocator_mut(|allocator| {
                 allocator
                     .lock_next()
-                    .expect("failed to lock frame for PML4 of MappedVirtualAddessor"),
-            )
-        });
-
-        let mapped_addr = VirtAddr::new(0xFFFFFFFFFFFF - (total_memory as u64));
-        Self {
-            mapped_addr,
-            pml4_ptr: unsafe {
-                mapped_addr
-                    .as_mut_ptr::<PageTable<Level4>>()
-                    .offset(pml4_frame.index() as isize)
-            },
+                    .expect("failed to lock frame for PML4 of MappedVirtualAddessor")
+            }),
         }
     }
 
-    fn pml4(&self) -> &PageTable<Level4> {
-        unsafe { &*self.pml4_ptr }
+    pub fn mapped_offset_addr(&self) -> VirtAddr {
+        self.mapped_addr.clone()
     }
 
     fn pml4_mut(&mut self) -> &mut PageTable<Level4> {
-        unsafe { &mut *self.pml4_ptr }
-    }
-
-    fn pml4_frame(&self) -> Frame {
-        Frame::from_addr(PhysAddr::new(
-            (self.pml4_ptr as u64) - self.mapped_addr.as_u64(),
-        ))
-    }
-
-    pub fn identity_map_full(&mut self) {
-        debug!("Identity mapping all available memory.");
-        let total_memory = global_allocator(|allocator| allocator.total_memory());
-        for addr in (0..total_memory).step_by(0x1000) {
-            self.identity_map(&Frame::from_addr(PhysAddr::new(addr as u64)));
+        unsafe {
+            &mut *self
+                .mapped_addr
+                .as_mut_ptr::<PageTable<Level4>>()
+                .offset(self.pml4_frame.index() as isize)
         }
+    }
+
+    pub fn modify_mapped_addr(&mut self, new_mapped_addr: VirtAddr) {
+        debug!(
+            "Modifying mapped offset: from {:?} to {:?}",
+            self.mapped_addr, new_mapped_addr
+        );
+        debug!(
+            "Mapping physical memory at offset address: {:?}",
+            new_mapped_addr
+        );
+
+        let total_memory = global_allocator_mut(|allocator| allocator.total_memory());
+        for addr in (0..(total_memory as u64)).step_by(0x1000) {
+            let virt_addr = VirtAddr::new(new_mapped_addr.as_u64() + addr);
+            let phys_addr = PhysAddr::new(addr);
+            self.map(&Page::from_addr(virt_addr), &Frame::from_addr(phys_addr));
+        }
+
+        self.mapped_addr = new_mapped_addr;
     }
 }
 
 impl VirtualAddessor for MappedVirtualAddessor {
     fn map(&mut self, page: &Page, frame: &Frame) {
+        trace!("Mapping: {:?} to {:?}", page, frame);
         let addr_usize = (page.addr().as_u64() >> 12) as usize;
-        let p1 = self
+        let offset = self.mapped_offset_addr();
+        let entry = &mut self
             .pml4_mut()
-            .sub_table_create((addr_usize >> 27) & 0x1FF, self.mapped_addr)
-            .sub_table_create((addr_usize >> 18) & 0x1FF, self.mapped_addr)
-            .sub_table_create((addr_usize >> 9) & 0x1FF, self.mapped_addr);
-
-        let entry = &mut p1[(addr_usize >> 0) & 0x1FF];
+            .sub_table_create((addr_usize >> 27) & 0x1FF, offset)
+            .sub_table_create((addr_usize >> 18) & 0x1FF, offset)
+            .sub_table_create((addr_usize >> 9) & 0x1FF, offset)[(addr_usize >> 0) & 0x1FF];
         if entry.is_present() {
+            // we invalidate entry in the TLB to ensure it isn't incorrectly followed
             crate::instructions::tlb::invalidate(page);
         }
 
@@ -81,14 +90,16 @@ impl VirtualAddessor for MappedVirtualAddessor {
     }
 
     fn unmap(&mut self, page: &Page) {
-        //let addr_usize = (page.addr().as_u64() >> 12) as usize;
-        // let entry = &mut self
-        //     .pml4_mut()
-        //     .sub_table_create((addr_usize >> 27) & 0x1FF)
-        //     .sub_table_create((addr_usize >> 18) & 0x1FF)
-        //     .sub_table_create((addr_usize >> 9) & 0x1FF)[(addr_usize >> 0) & 0x1FF];
-        // entry.set_nonpresent();
-        //trace!("Unmapped {:?} from {:?}: {:?}", page, entry.frame(), entry);
+        let addr_usize = (page.addr().as_u64() >> 12) as usize;
+        let offset = self.mapped_offset_addr();
+        let entry = &mut self
+            .pml4_mut()
+            .sub_table_create((addr_usize >> 27) & 0x1FF, offset)
+            .sub_table_create((addr_usize >> 18) & 0x1FF, offset)
+            .sub_table_create((addr_usize >> 9) & 0x1FF, offset)[(addr_usize >> 0) & 0x1FF];
+
+        entry.set_nonpresent();
+        trace!("Unmapped {:?} from {:?}: {:?}", page, entry.frame(), entry);
     }
 
     fn identity_map(&mut self, frame: &Frame) {
@@ -99,12 +110,11 @@ impl VirtualAddessor for MappedVirtualAddessor {
     }
 
     fn swap_into(&self) {
-        let frame = &self.pml4_frame();
         info!(
             "Writing page table manager's PML4 to CR3 register: {:?}.",
-            frame
+            &self.pml4_frame
         );
 
-        unsafe { crate::registers::CR3::write(frame, None) };
+        unsafe { crate::registers::CR3::write(&self.pml4_frame, None) };
     }
 }

@@ -70,6 +70,7 @@ where
         index: usize,
         offset: VirtAddr,
     ) -> &mut PageTable<L::NextLevel> {
+        trace!("Accessing sub-table: index {}, offset {:?}", index, offset);
         let entry = &mut self[index];
         let mapped_physical_addr = offset + entry.frame_alloc().addr().as_u64();
         unsafe { &mut *mapped_physical_addr.as_mut_ptr() }

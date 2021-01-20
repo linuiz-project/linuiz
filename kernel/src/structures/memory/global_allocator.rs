@@ -1,10 +1,10 @@
 use crate::{
-    structures::memory::{is_reservable_memory_type, Frame, FrameIterator, PAGE_SIZE},
+    structures::memory::{is_reservable_memory_type, Frame, FrameIterator},
     BitArray,
 };
 use efi_boot::MemoryDescriptor;
 use spin::Mutex;
-use x86_64::PhysAddr;
+use x86_64::{PhysAddr, VirtAddr};
 
 pub struct FrameAllocator<'arr> {
     total_memory: usize,
@@ -31,7 +31,7 @@ impl<'arr> FrameAllocator<'arr> {
             .max_by_key(|descriptor| descriptor.phys_start)
             .expect("no descriptor with max value");
         let total_memory =
-            last_descriptor.phys_start as usize + (last_descriptor.page_count as usize * PAGE_SIZE);
+            (last_descriptor.phys_start + (last_descriptor.page_count * 0x1000)) as usize;
         debug!(
             "Page frame allocator will represent {} MB ({} bytes) of system memory.",
             crate::structures::memory::to_mibibytes(total_memory),
@@ -39,7 +39,7 @@ impl<'arr> FrameAllocator<'arr> {
         );
 
         // allocate the bit array
-        let bitarray_bits = total_memory / PAGE_SIZE;
+        let bitarray_bits = total_memory / 0x1000;
         let bitarray_page_count: u64 =
             ((bitarray_bits / crate::bitarray::SECTION_BITS_COUNT) + 1) as u64;
         let descriptor = memory_map
@@ -118,6 +118,10 @@ impl<'arr> FrameAllocator<'arr> {
         self.reserved_memory
     }
 
+    pub fn physical_mapping_addr(&self) -> VirtAddr {
+        VirtAddr::new((0x1000000000000 - self.total_memory) as u64)
+    }
+
     /* SINGLE OPS */
     pub unsafe fn free_frame(&mut self, frame: Frame) {
         let mut bitarray = self.bitarray.lock();
@@ -125,8 +129,8 @@ impl<'arr> FrameAllocator<'arr> {
 
         if bitarray.get_bit(index).expect("failed to free frame") {
             bitarray.set_bit(index, false);
-            self.free_memory += PAGE_SIZE;
-            self.used_memory -= PAGE_SIZE;
+            self.free_memory += 0x1000;
+            self.used_memory -= 0x1000;
             trace!("Freed frame {}: {:?}", index, frame);
         }
     }
@@ -137,8 +141,8 @@ impl<'arr> FrameAllocator<'arr> {
 
         if bitarray.get_bit(index).expect("failed to lock frame") {
             bitarray.set_bit(index, true);
-            self.free_memory -= PAGE_SIZE;
-            self.used_memory += PAGE_SIZE;
+            self.free_memory -= 0x1000;
+            self.used_memory += 0x1000;
             trace!("Locked frame {}: {:?}", index, frame);
         }
     }
@@ -149,8 +153,8 @@ impl<'arr> FrameAllocator<'arr> {
 
         if !bitarray.get_bit(index).expect("failed to reserve frame") {
             bitarray.set_bit(index, true);
-            self.free_memory -= PAGE_SIZE;
-            self.reserved_memory += PAGE_SIZE;
+            self.free_memory -= 0x1000;
+            self.reserved_memory += 0x1000;
             trace!("Reserved frame {}: {:?}", index, frame);
         }
     }
@@ -241,4 +245,8 @@ where
     C: FnMut(&mut FrameAllocator) -> R,
 {
     callback(unsafe { &mut GLOBAL_ALLOCATOR })
+}
+
+pub fn memory_usize_iter() -> core::iter::StepBy<core::ops::Range<usize>> {
+    (0..global_allocator(|allocator| allocator.total_memory())).step_by(0x1000)
 }
