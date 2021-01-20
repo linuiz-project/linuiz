@@ -1,77 +1,76 @@
 use crate::structures::memory::{
-    paging::{Level4, PageAttributes, PageTable, TableLevel},
-    Frame,
+    global_allocator, global_allocator_mut,
+    paging::{Level4, PageAttributes, PageTable},
+    Frame, Page,
 };
-use x86_64::VirtAddr;
+use x86_64::{PhysAddr, VirtAddr};
 
 pub struct PageTableManager {
-    page_table: PageTable<Level4>,
+    pml4_ptr: *mut PageTable<Level4>,
 }
 
 impl PageTableManager {
-    pub fn new(page_table_frame: Frame) -> Self {
-        let mut this = Self {
-            page_table: PageTable::new(),
-        };
+    pub fn new() -> Self {
+        let pml4_frame = global_allocator_mut(|allocator| allocator.lock_next())
+            .expect("failed to lock frame for kernel's PML4");
+        let pml4_addr = VirtAddr::new(/* phys_map_offset + */ pml4_frame.addr().as_u64());
 
-        let mut entry = this.page_table[511];
-        entry.set(
-            &page_table_frame,
-            PageAttributes::PRESENT | PageAttributes::WRITABLE,
-        );
-
-        this
+        Self {
+            pml4_ptr: pml4_addr.as_mut_ptr(),
+        }
     }
 
-    pub fn map(&mut self, virt_addr: VirtAddr, frame: &Frame) {
-        assert_eq!(
-            virt_addr.as_u64() % 0x1000,
-            0,
-            "address must be page-aligned"
-        );
+    fn pml4(&self) -> &PageTable<Level4> {
+        unsafe { &*self.pml4_ptr }
+    }
 
-        let addr_u64 = (virt_addr.as_u64() >> 12) as usize;
+    fn pml4_mut(&mut self) -> &mut PageTable<Level4> {
+        unsafe { &mut *self.pml4_ptr }
+    }
+
+    pub fn map(&mut self, page: &Page, frame: &Frame) {
+        let addr_usize = (page.addr().as_u64() >> 12) as usize;
         let entry = &mut self
-            .page_table
-            .sub_table_mut((addr_u64 >> 27) & 0x1FF)
-            .sub_table_mut((addr_u64 >> 18) & 0x1FF)
-            .sub_table_mut((addr_u64 >> 9) & 0x1FF)[(addr_u64 >> 0) & 0x1FF];
+            .pml4_mut()
+            .sub_table_mut((addr_usize >> 27) & 0x1FF)
+            .sub_table_mut((addr_usize >> 18) & 0x1FF)
+            .sub_table_mut((addr_usize >> 9) & 0x1FF)[(addr_usize >> 0) & 0x1FF];
         if entry.is_present() {
-            crate::instructions::tlb::invalidate(virt_addr);
+            crate::instructions::tlb::invalidate(page);
         }
 
         entry.set(&frame, PageAttributes::PRESENT | PageAttributes::WRITABLE);
-        trace!("Mapped {:?} to {:?}: {:?}", virt_addr, entry.frame(), entry);
+        trace!("Mapped {:?} to {:?}: {:?}", page, entry.frame(), entry);
+    }
+
+    pub fn unmap(&mut self, page: &Page) {
+        let addr_usize = (page.addr().as_u64() >> 12) as usize;
+        let entry = &mut self
+            .pml4_mut()
+            .sub_table_mut((addr_usize >> 27) & 0x1FF)
+            .sub_table_mut((addr_usize >> 18) & 0x1FF)
+            .sub_table_mut((addr_usize >> 9) & 0x1FF)[(addr_usize >> 0) & 0x1FF];
+        entry.set_nonpresent();
+        trace!("Unmapped {:?} from {:?}: {:?}", page, entry.frame(), entry);
     }
 
     pub fn identity_map(&mut self, frame: &Frame) {
-        self.map(VirtAddr::new(frame.addr().as_u64()), frame);
+        self.map(
+            &Page::from_addr(VirtAddr::new(frame.addr().as_u64())),
+            frame,
+        );
     }
 
-    pub fn unmap(&mut self, virt_addr: VirtAddr) {
-        assert_eq!(
-            virt_addr.as_u64() % 0x1000,
-            0,
-            "address must be page-aligned"
-        );
-
-        let addr_u64 = (virt_addr.as_u64() >> 12) as usize;
-        let entry = &mut self
-            .page_table
-            .sub_table_mut((addr_u64 >> 27) & 0x1FF)
-            .sub_table_mut((addr_u64 >> 18) & 0x1FF)
-            .sub_table_mut((addr_u64 >> 9) & 0x1FF)[(addr_u64 >> 0) & 0x1FF];
-        entry.set_nonpresent();
-        trace!(
-            "Unmapped {:?} from {:?}: {:?}",
-            virt_addr,
-            entry.frame(),
-            entry
-        );
+    pub fn identity_map_full(&mut self) {
+        debug!("Identity mapping all available memory.");
+        let total_memory = global_allocator(|allocator| allocator.total_memory());
+        for addr in (0..total_memory).step_by(0x1000) {
+            self.identity_map(&Frame::from_addr(PhysAddr::new(addr as u64)));
+        }
     }
 
     pub fn write_pml4(&self) {
-        let frame = &self.page_table.frame();
+        let frame = &self.pml4().frame();
         info!(
             "Writing page table manager's PML4 to CR3 register: {:?}.",
             frame

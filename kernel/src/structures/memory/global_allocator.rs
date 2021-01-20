@@ -1,9 +1,8 @@
 use crate::{
-    structures::memory::{Frame, FrameIterator, PAGE_SIZE},
+    structures::memory::{is_reservable_memory_type, Frame, FrameIterator, PAGE_SIZE},
     BitArray,
 };
-use core::alloc::{GlobalAlloc, Layout};
-use efi_boot::{align_up, MemoryDescriptor, MemoryType};
+use efi_boot::MemoryDescriptor;
 use spin::Mutex;
 use x86_64::PhysAddr;
 
@@ -41,34 +40,24 @@ impl<'arr> FrameAllocator<'arr> {
 
         // allocate the bit array
         let bitarray_bits = total_memory / PAGE_SIZE;
-        let bitarray_mem_size_pages = (bitarray_bits / crate::bitarray::SECTION_BITS_COUNT) + 1;
-        debug!(
-            "Attempting to create a frame allocator with {} frames.",
-            bitarray_bits
-        );
+        let bitarray_page_count: u64 =
+            ((bitarray_bits / crate::bitarray::SECTION_BITS_COUNT) + 1) as u64;
         let descriptor = memory_map
             .iter()
-            .max_by_key(|descriptor| {
-                if descriptor.ty == MemoryType::CONVENTIONAL {
-                    descriptor.page_count
-                } else {
-                    0
-                }
-            })
+            .find(|descriptor| descriptor.page_count >= bitarray_page_count)
             .expect("failed to find viable memory descriptor for bit array.");
-
         debug!(
-            "Identified acceptable descriptor for bit array:\n{:#?}",
+            "Identified acceptable descriptor for bitarray:\n{:#?}",
             descriptor
         );
+
         let bitarray =
             BitArray::from_ptr(descriptor.phys_start as *mut usize, bitarray_bits as usize);
         debug!(
-            "BitArray initialized with a length of {}.",
+            "Successfully initialized bitarray with a length of {}.",
             bitarray.bit_count()
         );
 
-        // crate the page frame allocator
         let mut this = Self {
             total_memory,
             free_memory: total_memory,
@@ -77,37 +66,33 @@ impl<'arr> FrameAllocator<'arr> {
             bitarray: Mutex::new(bitarray),
         };
 
-        // lock frames this page frame allocator exists on
+        // reserve frames this page frame allocator exists on
         debug!(
             "Reserving frames for this allocator's bitarray (total {} frames).",
-            bitarray_mem_size_pages
+            bitarray_page_count
         );
         unsafe {
-            this.reserve_frames(
-                PhysAddr::new(descriptor.phys_start),
-                bitarray_mem_size_pages,
-            );
+            let start_addr = descriptor.phys_start;
+            let end_addr = start_addr + (bitarray_page_count * 0x1000);
+            this.reserve_frames(Frame::range(start_addr..end_addr));
         }
 
         // reserve null frame
-        unsafe { this.reserve_frame(PhysAddr::zero()) };
+        unsafe { this.reserve_frame(Frame::from_index(0)) };
         // reserve system frames
-        for descriptor in memory_map {
-            match descriptor.ty {
-                MemoryType::LOADER_CODE
-                | MemoryType::LOADER_DATA
-                | MemoryType::BOOT_SERVICES_CODE
-                | MemoryType::BOOT_SERVICES_DATA
-                | MemoryType::CONVENTIONAL => {}
-                _ => {
-                    let phys_addr = PhysAddr::new(descriptor.phys_start);
-                    debug!(
-                        "Reserving {} frames at {:?}:\n{:#?}",
-                        descriptor.page_count, phys_addr, descriptor
-                    );
-                    unsafe { this.reserve_frames(phys_addr, descriptor.page_count as usize) }
-                }
-            }
+        for descriptor in memory_map
+            .iter()
+            .filter(|descriptor| is_reservable_memory_type(descriptor.ty))
+        {
+            let start_addr = descriptor.phys_start;
+            let end_addr = start_addr + (descriptor.page_count * 0x1000);
+            trace!(
+                "Reserving {} frames at {:?}:\n{:#?}",
+                descriptor.page_count,
+                PhysAddr::new(start_addr),
+                descriptor
+            );
+            unsafe { this.reserve_frames(Frame::range(start_addr..end_addr)) };
         }
         info!(
             "{} KB of memory has been reserved by the system.",
@@ -125,7 +110,7 @@ impl<'arr> FrameAllocator<'arr> {
         self.free_memory
     }
 
-    pub fn used_memory(&self) -> usize {
+    pub fn locked_memory(&self) -> usize {
         self.used_memory
     }
 
@@ -134,63 +119,62 @@ impl<'arr> FrameAllocator<'arr> {
     }
 
     /* SINGLE OPS */
-    pub unsafe fn deallocate_frame(&mut self, address: PhysAddr) {
+    pub unsafe fn free_frame(&mut self, frame: Frame) {
         let mut bitarray = self.bitarray.lock();
-        let index = (address.as_u64() as usize) / PAGE_SIZE;
+        let index = frame.index() as usize;
 
         if bitarray.get_bit(index).expect("failed to free frame") {
             bitarray.set_bit(index, false);
             self.free_memory += PAGE_SIZE;
             self.used_memory -= PAGE_SIZE;
-            trace!("Freed frame {}: {:?}", index, address);
+            trace!("Freed frame {}: {:?}", index, frame);
         }
     }
 
-    // todo return frames maybe? with identity
-    pub unsafe fn allocate_frame(&mut self, address: PhysAddr) {
+    pub unsafe fn lock_frame(&mut self, frame: Frame) {
         let mut bitarray = self.bitarray.lock();
-        let index = (address.as_u64() as usize) / PAGE_SIZE;
+        let index = frame.index() as usize;
 
         if bitarray.get_bit(index).expect("failed to lock frame") {
             bitarray.set_bit(index, true);
             self.free_memory -= PAGE_SIZE;
             self.used_memory += PAGE_SIZE;
-            trace!("Locked frame {}: {:?}", index, address);
+            trace!("Locked frame {}: {:?}", index, frame);
         }
     }
 
-    pub(crate) unsafe fn reserve_frame(&mut self, address: PhysAddr) {
+    pub(crate) unsafe fn reserve_frame(&mut self, frame: Frame) {
         let mut bitarray = self.bitarray.lock();
-        let index = (address.as_u64() as usize) / PAGE_SIZE;
+        let index = frame.index() as usize;
 
         if !bitarray.get_bit(index).expect("failed to reserve frame") {
             bitarray.set_bit(index, true);
             self.free_memory -= PAGE_SIZE;
             self.reserved_memory += PAGE_SIZE;
-            trace!("Reserved frame {}: {:?}", index, address);
+            trace!("Reserved frame {}: {:?}", index, frame);
         }
     }
 
     /* MANY OPS */
-    pub unsafe fn deallocate_frames(&mut self, address: PhysAddr, count: usize) {
-        for index in 0..count {
-            self.deallocate_frame(address + (index * PAGE_SIZE));
+    pub unsafe fn free_frames(&mut self, frames: FrameIterator) {
+        for frame in frames {
+            self.free_frame(frame);
         }
     }
 
-    pub unsafe fn allocate_frames(&mut self, address: PhysAddr, count: usize) {
-        for index in 0..count {
-            self.allocate_frame(address + (index * PAGE_SIZE));
+    pub unsafe fn lock_frames(&mut self, frames: FrameIterator) {
+        for frame in frames {
+            self.lock_frame(frame);
         }
     }
 
-    pub(crate) unsafe fn reserve_frames(&mut self, address: PhysAddr, count: usize) {
-        for index in 0..count {
-            self.reserve_frame(address + (index * PAGE_SIZE));
+    pub(crate) unsafe fn reserve_frames(&mut self, frames: FrameIterator) {
+        for frame in frames {
+            self.reserve_frame(frame);
         }
     }
 
-    pub fn alloc_next(&mut self) -> Option<Frame> {
+    pub fn lock_next(&mut self) -> Option<Frame> {
         let mut bitarray = self.bitarray.lock();
 
         match bitarray.iter().enumerate().find(|tuple| !tuple.1) {
@@ -206,7 +190,7 @@ impl<'arr> FrameAllocator<'arr> {
         }
     }
 
-    pub fn alloc_many(&mut self, count: usize) -> Option<FrameIterator> {
+    pub fn lock_next_count(&mut self, count: usize) -> Option<FrameIterator> {
         let mut bitarray = self.bitarray.lock();
         let mut index = 0;
 
@@ -238,29 +222,6 @@ impl<'arr> FrameAllocator<'arr> {
     }
 }
 
-unsafe impl GlobalAlloc for FrameAllocator<'static> {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let frame_count = align_up(layout.size(), layout.align());
-
-        global_allocator_mut(|allocator| {
-            if let Some(mut frame_iter) = allocator.alloc_many(frame_count) {
-                frame_iter.next().unwrap().addr().as_u64() as *mut u8
-            } else {
-                core::ptr::null_mut::<u8>()
-            }
-        })
-    }
-
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        global_allocator_mut(|allocator| {
-            allocator.deallocate_frames(
-                PhysAddr::new(ptr as u64),
-                align_up(layout.size(), layout.align()),
-            );
-        })
-    }
-}
-
 // #[global_allocator]
 static mut GLOBAL_ALLOCATOR: FrameAllocator<'static> = FrameAllocator::uninit();
 
@@ -268,16 +229,16 @@ pub unsafe fn init_global_allocator(memory_map: &[MemoryDescriptor]) {
     GLOBAL_ALLOCATOR = FrameAllocator::from_mmap(memory_map);
 }
 
-pub fn global_allocator<F, R>(callback: F) -> R
+pub fn global_allocator<C, R>(callback: C) -> R
 where
-    F: Fn(&FrameAllocator) -> R,
+    C: Fn(&FrameAllocator) -> R,
 {
     callback(unsafe { &GLOBAL_ALLOCATOR })
 }
 
-pub fn global_allocator_mut<F, R>(mut callback: F) -> R
+pub fn global_allocator_mut<C, R>(mut callback: C) -> R
 where
-    F: FnMut(&mut FrameAllocator) -> R,
+    C: FnMut(&mut FrameAllocator) -> R,
 {
     callback(unsafe { &mut GLOBAL_ALLOCATOR })
 }

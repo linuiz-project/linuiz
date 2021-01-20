@@ -41,6 +41,13 @@ impl Frame {
             end: Frame::from_addr(PhysAddr::new(range.end)),
         }
     }
+
+    pub fn range_count(start_addr: PhysAddr, count: u64) -> FrameIterator {
+        FrameIterator {
+            current: Frame::from_addr(start_addr),
+            end: Frame::from_addr(start_addr + count),
+        }
+    }
 }
 
 pub struct FrameIterator {

@@ -92,7 +92,7 @@ where
         let frame = match entry.frame() {
             Some(frame) => frame,
             None => {
-                let alloc_frame = global_allocator_mut(|allocator| allocator.alloc_next())
+                let alloc_frame = global_allocator_mut(|allocator| allocator.lock_next())
                     .expect("failed to allocate a frame for new page table");
                 entry.set(
                     &alloc_frame,

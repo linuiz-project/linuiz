@@ -1,8 +1,8 @@
-use x86_64::VirtAddr;
+use crate::structures::memory::Page;
 
-pub fn invalidate(addr: VirtAddr) {
+pub fn invalidate(page: &Page) {
     unsafe {
-        asm!("invlpg [{}]", in(reg) addr.as_u64(), options(nostack));
+        asm!("invlpg [{}]", in(reg) page.addr().as_u64(), options(nostack));
     }
 }
 
