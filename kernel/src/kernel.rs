@@ -27,10 +27,11 @@ extern "win64" fn kernel_main(boot_info: BootInfo) -> usize {
     info!("Initializing memory structures.");
     init_structures();
 
-    info!("Initializing memory (map, page tables, et al).");
+    info!("Initializing global memory (physical frame allocator / journal).");
     unsafe { gsai::memory::allocators::init_global_memory(boot_info.memory_map()) };
     // TODO possibly retrieve base address using min_by_key so it's accurate and not a guess
     // motivation: is the base address of RAM ever not 0x0?
+    debug!("Creating virtual addressor for kernel (starting at 0x0, identity-mapped).");
     let mut virtual_addressor = unsafe { MappedVirtualAddressor::new(VirtAddr::zero()) };
     debug!("Identity mapping all available memory.");
     total_memory_iter().step_by(0x1000).for_each(|addr| {
@@ -40,7 +41,7 @@ extern "win64" fn kernel_main(boot_info: BootInfo) -> usize {
         .modify_mapped_addr(global_memory(|allocator| allocator.physical_mapping_addr()));
     virtual_addressor.swap_into();
 
-    let bump_allocator = BumpAllocator::new(&mut virtual_addressor);
+    //let bump_allocator = BumpAllocator::new(&mut virtual_addressor);
 
     let ret_status = 0;
     info!("Kernel exiting with status: {:?}", 0);
