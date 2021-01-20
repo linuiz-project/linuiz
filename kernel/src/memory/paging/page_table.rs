@@ -1,4 +1,4 @@
-use crate::structures::memory::paging::PageTableEntry;
+use crate::memory::paging::PageTableEntry;
 use core::{
     marker::PhantomData,
     ops::{Index, IndexMut},

@@ -6,10 +6,10 @@
 extern crate log;
 
 use efi_boot::{entrypoint, BootInfo, ResetType, Status};
-use gsai::structures::memory::{
-    global_allocator,
+use gsai::memory::{
+    allocators::{global_memory, total_memory_iter},
     paging::{MappedVirtualAddessor, VirtualAddessor},
-    total_memory_iter, Frame,
+    Frame,
 };
 use x86_64::{PhysAddr, VirtAddr};
 
@@ -28,7 +28,7 @@ extern "win64" fn kernel_main(mut boot_info: BootInfo) -> Status {
     init_structures();
 
     info!("Initializing memory (map, page tables, et al).");
-    unsafe { gsai::structures::memory::init_global_allocator(boot_info.memory_map()) };
+    unsafe { gsai::memory::allocators::init_global_memory(boot_info.memory_map()) };
     // TODO possibly retrieve base address using min_by_key so it's accurate and not a guess
     // motivation: is the base address of RAM ever not 0x0?
     let mut virtual_addressor = unsafe { MappedVirtualAddessor::new(VirtAddr::zero()) };
@@ -36,9 +36,8 @@ extern "win64" fn kernel_main(mut boot_info: BootInfo) -> Status {
     total_memory_iter().step_by(0x1000).for_each(|addr| {
         virtual_addressor.identity_map(&Frame::from_addr(PhysAddr::new(addr as u64)))
     });
-    virtual_addressor.modify_mapped_addr(global_allocator(|allocator| {
-        allocator.physical_mapping_addr()
-    }));
+    virtual_addressor
+        .modify_mapped_addr(global_memory(|allocator| allocator.physical_mapping_addr()));
     virtual_addressor.swap_into();
 
     let ret_status = Status::SUCCESS;

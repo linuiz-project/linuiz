@@ -1,5 +1,5 @@
-use crate::structures::memory::{
-    global_allocator_mut,
+use crate::memory::{
+    allocators::global_memory_mut,
     paging::{Level4, PageAttributes, PageTable},
     Frame, Page,
 };
@@ -33,7 +33,7 @@ impl MappedVirtualAddessor {
             // we don't know where physical memory is mapped at this point,
             // so rely on what the caller specifies for us
             mapped_addr: current_mapped_addr,
-            pml4_frame: global_allocator_mut(|allocator| {
+            pml4_frame: global_memory_mut(|allocator| {
                 allocator
                     .lock_next()
                     .expect("failed to lock frame for PML4 of MappedVirtualAddessor")
@@ -60,7 +60,7 @@ impl MappedVirtualAddessor {
             new_mapped_addr
         );
 
-        let total_memory = global_allocator_mut(|allocator| allocator.total_memory());
+        let total_memory = global_memory_mut(|allocator| allocator.total_memory());
         for addr in (0..(total_memory as u64)).step_by(0x1000) {
             let virt_addr = VirtAddr::new(new_mapped_addr.as_u64() + addr);
             let phys_addr = PhysAddr::new(addr);

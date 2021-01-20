@@ -13,6 +13,7 @@ pub mod drivers;
 pub mod instructions;
 pub mod io;
 pub mod logging;
+pub mod memory;
 pub mod registers;
 pub mod structures;
 pub use bitarray::BitArray;

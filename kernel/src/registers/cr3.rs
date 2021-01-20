@@ -1,7 +1,7 @@
 use bitflags::bitflags;
 use x86_64::PhysAddr;
 
-use crate::structures::memory::Frame;
+use crate::memory::Frame;
 
 bitflags! {
     pub struct CR3Flags : u64 {

@@ -1,12 +1,12 @@
 mod frame;
-mod global_allocator;
 mod page;
 
+pub mod allocators;
 pub mod paging;
-use efi_boot::MemoryType;
 pub use frame::*;
-pub use global_allocator::*;
 pub use page::*;
+
+use efi_boot::MemoryType;
 
 pub const KIBIBYTE: usize = 0x400; // 1024
 pub const MIBIBYTE: usize = KIBIBYTE * KIBIBYTE;

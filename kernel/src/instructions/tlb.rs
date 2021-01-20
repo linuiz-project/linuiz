@@ -1,4 +1,4 @@
-use crate::structures::memory::Page;
+use crate::memory::Page;
 
 pub fn invalidate(page: &Page) {
     unsafe {

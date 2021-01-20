@@ -1,5 +1,5 @@
 use crate::{
-    structures::memory::{is_reservable_memory_type, Frame, FrameIterator},
+    memory::{is_reservable_memory_type, Frame, FrameIterator},
     BitArray,
 };
 use efi_boot::MemoryDescriptor;
@@ -15,7 +15,7 @@ pub struct FrameAllocator<'arr> {
 }
 
 impl<'arr> FrameAllocator<'arr> {
-    pub(self) const fn uninit() -> Self {
+    pub(super) const fn uninit() -> Self {
         Self {
             total_memory: 0,
             free_memory: 0,
@@ -25,7 +25,7 @@ impl<'arr> FrameAllocator<'arr> {
         }
     }
 
-    fn from_mmap(memory_map: &[MemoryDescriptor]) -> Self {
+    pub(super) fn from_mmap(memory_map: &[MemoryDescriptor]) -> Self {
         let last_descriptor = memory_map
             .iter()
             .max_by_key(|descriptor| descriptor.phys_start)
@@ -34,7 +34,7 @@ impl<'arr> FrameAllocator<'arr> {
             (last_descriptor.phys_start + (last_descriptor.page_count * 0x1000)) as usize;
         debug!(
             "Page frame allocator will represent {} MB ({} bytes) of system memory.",
-            crate::structures::memory::to_mibibytes(total_memory),
+            crate::memory::to_mibibytes(total_memory),
             total_memory
         );
 
@@ -96,7 +96,7 @@ impl<'arr> FrameAllocator<'arr> {
         }
         info!(
             "{} KB of memory has been reserved by the system.",
-            crate::structures::memory::to_kibibytes(this.reserved_memory)
+            crate::memory::to_kibibytes(this.reserved_memory)
         );
 
         this
@@ -227,26 +227,26 @@ impl<'arr> FrameAllocator<'arr> {
 }
 
 // #[global_allocator]
-static mut GLOBAL_ALLOCATOR: FrameAllocator<'static> = FrameAllocator::uninit();
+static mut GLOBAL_MEMORY: FrameAllocator<'static> = FrameAllocator::uninit();
 
-pub unsafe fn init_global_allocator(memory_map: &[MemoryDescriptor]) {
-    GLOBAL_ALLOCATOR = FrameAllocator::from_mmap(memory_map);
+pub unsafe fn init_global_memory(memory_map: &[MemoryDescriptor]) {
+    GLOBAL_MEMORY = FrameAllocator::from_mmap(memory_map);
 }
 
-pub fn global_allocator<C, R>(callback: C) -> R
+pub fn global_memory<C, R>(callback: C) -> R
 where
     C: Fn(&FrameAllocator) -> R,
 {
-    callback(unsafe { &GLOBAL_ALLOCATOR })
+    callback(unsafe { &GLOBAL_MEMORY })
 }
 
-pub fn global_allocator_mut<C, R>(mut callback: C) -> R
+pub fn global_memory_mut<C, R>(mut callback: C) -> R
 where
     C: FnMut(&mut FrameAllocator) -> R,
 {
-    callback(unsafe { &mut GLOBAL_ALLOCATOR })
+    callback(unsafe { &mut GLOBAL_MEMORY })
 }
 
 pub fn total_memory_iter() -> core::ops::Range<usize> {
-    0..global_allocator(|allocator| allocator.total_memory())
+    0..global_memory(|allocator| allocator.total_memory())
 }
