@@ -5,19 +5,26 @@ use crate::memory::{
 };
 use x86_64::{PhysAddr, VirtAddr};
 
-pub trait VirtualAddessor {
+pub trait VirtualAddressor {
     fn map(&mut self, page: &Page, frame: &Frame);
     fn unmap(&mut self, page: &Page);
     fn identity_map(&mut self, frame: &Frame);
     fn swap_into(&self);
 }
 
-pub struct MappedVirtualAddessor {
+pub struct MappedVirtualAddressor {
     mapped_addr: VirtAddr,
     pml4_frame: Frame,
 }
 
-impl MappedVirtualAddessor {
+impl MappedVirtualAddressor {
+    pub const unsafe fn uninit() -> core::mem::MaybeUninit<Self> {
+        core::mem::MaybeUninit::new(Self {
+            mapped_addr: VirtAddr::zero(),
+            pml4_frame: Frame::from_index(0),
+        })
+    }
+
     /// Attempts to create a new MappedVirtualAddessor, with `current_mapped_addr` specifying the current virtual
     /// address where the entirety of the system physical memory is mapped.
     ///
@@ -71,7 +78,7 @@ impl MappedVirtualAddessor {
     }
 }
 
-impl VirtualAddessor for MappedVirtualAddessor {
+impl VirtualAddressor for MappedVirtualAddressor {
     fn map(&mut self, page: &Page, frame: &Frame) {
         trace!("Mapping: {:?} to {:?}", page, frame);
         let offset = self.mapped_addr;

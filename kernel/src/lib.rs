@@ -5,6 +5,7 @@
 #![feature(abi_x86_interrupt)]
 #![feature(unsafe_cell_get_mut)]
 #![feature(alloc_error_handler)]
+#![feature(const_maybe_uninit_assume_init)]
 
 #[macro_use]
 extern crate log;

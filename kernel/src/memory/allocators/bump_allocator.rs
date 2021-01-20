@@ -1,27 +1,33 @@
-use crate::memory::{
-    allocators::{global_memory_mut, GlobalAllocator},
-    paging::VirtualAddessor,
-    Page,
-};
+use crate::memory::{allocators::global_memory_mut, paging::VirtualAddressor, Page};
 use core::cell::RefCell;
+use spin::Mutex;
 use x86_64::VirtAddr;
 
+use super::Allocator;
+
 pub struct BumpAllocator<'vaddr> {
-    virtual_addessor: RefCell<&'vaddr mut dyn VirtualAddessor>,
+    virtual_addessor: RefCell<&'vaddr mut dyn VirtualAddressor>,
     bottom_page: RefCell<Page>,
+    guard: Mutex<usize>,
 }
 
 impl<'vaddr> BumpAllocator<'vaddr> {
-    pub fn new(virtual_addessor: &'vaddr mut dyn VirtualAddessor) -> Self {
+    pub fn new(virtual_addessor: &'vaddr mut dyn VirtualAddressor) -> Self {
         Self {
             virtual_addessor: RefCell::new(virtual_addessor),
             bottom_page: RefCell::new(Page::from_addr(VirtAddr::new(0x1000))),
+            guard: Mutex::new(0),
         }
     }
 }
 
-unsafe impl GlobalAllocator for BumpAllocator<'_> {
-    unsafe fn alloc(&self, size: usize) -> VirtAddr {
+unsafe impl Allocator for BumpAllocator<'_> {
+    unsafe fn alloc<R: Sized>(&self) -> R {
+        core::ptr::read_volatile(self.malloc(core::mem::size_of::<R>()).as_mut_ptr())
+    }
+
+    unsafe fn malloc(&self, size: usize) -> VirtAddr {
+        self.guard.lock();
         let bottom_addr = self.bottom_page.borrow().addr();
 
         let start_addr_usize = bottom_addr.as_u64() as usize;

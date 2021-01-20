@@ -14,14 +14,14 @@ pub struct FrameAllocator<'arr> {
 }
 
 impl<'arr> FrameAllocator<'arr> {
-    pub(super) const fn uninit() -> Self {
-        Self {
+    pub(super) const unsafe fn uninit() -> core::mem::MaybeUninit<Self> {
+        core::mem::MaybeUninit::new(Self {
             total_memory: 0,
             free_memory: 0,
             used_memory: 0,
             reserved_memory: 0,
             bitarray: BitArray::empty(),
-        }
+        })
     }
 
     pub(super) fn from_mmap(memory_map: &[crate::memory::UEFIMemoryDescriptor]) -> Self {
@@ -224,7 +224,8 @@ impl<'arr> FrameAllocator<'arr> {
     }
 }
 
-static mut GLOBAL_MEMORY: Mutex<FrameAllocator<'static>> = Mutex::new(FrameAllocator::uninit());
+static mut GLOBAL_MEMORY: Mutex<FrameAllocator<'static>> =
+    Mutex::new(unsafe { FrameAllocator::uninit().assume_init() });
 
 pub unsafe fn init_global_memory(memory_map: &[crate::memory::UEFIMemoryDescriptor]) {
     GLOBAL_MEMORY = Mutex::new(FrameAllocator::from_mmap(memory_map));

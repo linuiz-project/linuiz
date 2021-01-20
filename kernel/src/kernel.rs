@@ -7,9 +7,9 @@ extern crate log;
 
 use efi_boot::{entrypoint, BootInfo};
 use gsai::memory::{
-    allocators::{global_memory, init_global_allocator, total_memory_iter, BumpAllocator},
-    paging::{MappedVirtualAddessor, VirtualAddessor},
-    Frame, UEFIMemoryDescriptor,
+    allocators::{global_memory, total_memory_iter, BumpAllocator},
+    paging::{MappedVirtualAddressor, VirtualAddressor},
+    Frame,
 };
 use x86_64::{PhysAddr, VirtAddr};
 
@@ -31,7 +31,7 @@ extern "win64" fn kernel_main(boot_info: BootInfo) -> usize {
     unsafe { gsai::memory::allocators::init_global_memory(boot_info.memory_map()) };
     // TODO possibly retrieve base address using min_by_key so it's accurate and not a guess
     // motivation: is the base address of RAM ever not 0x0?
-    let mut virtual_addressor = unsafe { MappedVirtualAddessor::new(VirtAddr::zero()) };
+    let mut virtual_addressor = unsafe { MappedVirtualAddressor::new(VirtAddr::zero()) };
     debug!("Identity mapping all available memory.");
     total_memory_iter().step_by(0x1000).for_each(|addr| {
         virtual_addressor.identity_map(&Frame::from_addr(PhysAddr::new(addr as u64)))
@@ -40,15 +40,7 @@ extern "win64" fn kernel_main(boot_info: BootInfo) -> usize {
         .modify_mapped_addr(global_memory(|allocator| allocator.physical_mapping_addr()));
     virtual_addressor.swap_into();
 
-    let mut bump_allocator = BumpAllocator::new(&mut virtual_addressor);
-    unsafe { init_global_allocator(&mut bump_allocator) };
-
-    for i in 0..11 {
-        info!(
-            "{:?}",
-            gsai::memory::allocators::alloc::<UEFIMemoryDescriptor>()
-        );
-    }
+    let bump_allocator = BumpAllocator::new(&mut virtual_addressor);
 
     let ret_status = 0;
     info!("Kernel exiting with status: {:?}", 0);

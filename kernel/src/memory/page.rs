@@ -4,6 +4,10 @@ use x86_64::VirtAddr;
 pub struct Page(u64);
 
 impl Page {
+    pub const fn null() -> Self {
+        Self { 0: 0 }
+    }
+
     pub fn from_addr(virt_addr: VirtAddr) -> Self {
         let addr_u64 = virt_addr.as_u64();
         assert_eq!(
