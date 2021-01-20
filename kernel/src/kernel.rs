@@ -7,9 +7,9 @@ extern crate log;
 
 use efi_boot::{entrypoint, BootInfo};
 use gsai::memory::{
-    allocators::{global_memory, total_memory_iter},
+    allocators::{global_memory, init_global_allocator, total_memory_iter, BumpAllocator},
     paging::{MappedVirtualAddessor, VirtualAddessor},
-    Frame,
+    Frame, UEFIMemoryDescriptor,
 };
 use x86_64::{PhysAddr, VirtAddr};
 
@@ -40,6 +40,16 @@ extern "win64" fn kernel_main(boot_info: BootInfo) -> usize {
         .modify_mapped_addr(global_memory(|allocator| allocator.physical_mapping_addr()));
     virtual_addressor.swap_into();
 
+    let mut bump_allocator = BumpAllocator::new(&mut virtual_addressor);
+    unsafe { init_global_allocator(&mut bump_allocator) };
+
+    for i in 0..11 {
+        info!(
+            "{:?}",
+            gsai::memory::allocators::alloc::<UEFIMemoryDescriptor>()
+        );
+    }
+
     let ret_status = 0;
     info!("Kernel exiting with status: {:?}", 0);
     ret_status
@@ -59,5 +69,5 @@ fn init_structures() {
     info!("Successfully initialized PIC.");
 
     x86_64::instructions::interrupts::enable();
-    info!("(WARN: interrupts are now enabled)");
+    warn!("Interrupts are now enabled!");
 }
