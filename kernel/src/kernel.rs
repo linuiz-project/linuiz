@@ -18,7 +18,7 @@ static mut VIRTUAL_ADDESSOR: VirtualAddressorCell = VirtualAddressorCell::empty(
 
 #[export_name = "_start"]
 extern "win64" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor>) -> ! {
-    match gsai::logging::init_logger(gsai::logging::LoggingModes::SERIAL, log::LevelFilter::Debug) {
+    match gsai::logging::init_logger(gsai::logging::LoggingModes::SERIAL, log::LevelFilter::Trace) {
         Ok(()) => info!("Successfully loaded into kernel, with logging enabled."),
         Err(error) => panic!("{}", error),
     }
@@ -71,7 +71,6 @@ fn init_virtual_addressor<'balloc>(
         VIRTUAL_ADDESSOR.get_mut()
     };
 
-    debug!("Identity mapping all reserved memory.");
     for frame in memory_map
         .iter()
         .filter(|descriptor| gsai::memory::is_reserved_memory_type(descriptor.ty))

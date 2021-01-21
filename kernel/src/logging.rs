@@ -6,17 +6,23 @@ bitflags::bitflags! {
     }
 }
 
+static TRACE_ENABLED_PATHS: [&str; 1] = ["gsai::memory::paging::virtual_addresso"];
+
+fn trace_enabled(record: &log::Record) -> bool {
+    record.level() < log::Level::Trace || TRACE_ENABLED_PATHS.contains(&record.metadata().target())
+}
+
 pub struct KernelLogger {
     modes: LoggingModes,
 }
 
 impl log::Log for KernelLogger {
-    fn enabled(&self, metadata: &log::Metadata) -> bool {
-        metadata.level() <= log::Level::Trace
+    fn enabled(&self, _: &log::Metadata) -> bool {
+        true
     }
 
     fn log(&self, record: &log::Record) {
-        if self.enabled(record.metadata()) {
+        if self.enabled(record.metadata()) && trace_enabled(record) {
             if self.modes.contains(LoggingModes::SERIAL) {
                 crate::serialln!("[{}] {}", record.level(), record.args());
             }

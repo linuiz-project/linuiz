@@ -50,7 +50,6 @@ impl VirtualAddressor {
     }
 
     pub fn map(&self, page: &Page, frame: &Frame) {
-        trace!("Mapping: {:?} to {:?}", page, frame);
         self.guard.lock();
 
         let offset = self.mapped_addr.clone();
@@ -81,6 +80,7 @@ impl VirtualAddressor {
             .sub_table_create((addr >> 9) & 0x1FF, offset)[(addr >> 0) & 0x1FF];
 
         entry.set_nonpresent();
+        crate::instructions::tlb::invalidate(page);
         trace!("Unmapped {:?} from {:?}: {:?}", page, entry.frame(), entry);
     }
 

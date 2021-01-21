@@ -24,12 +24,12 @@ use core::{alloc::Layout, panic::PanicInfo};
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    serial!("\n{}", info);
+    serialln!("\n{}", info);
     loop {}
 }
 
 #[alloc_error_handler]
 fn alloc_error(error: Layout) -> ! {
-    serial!("{:?}", error);
+    serial!("{:#?}", error);
     loop {}
 }
