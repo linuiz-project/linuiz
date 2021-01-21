@@ -2,7 +2,7 @@ use crate::{
     memory::{is_reserved_memory_type, Frame, FrameIterator},
     BitArray,
 };
-use x86_64::{PhysAddr, VirtAddr};
+use x86_64::VirtAddr;
 
 pub struct FrameAllocator<'arr> {
     total_memory: usize,
@@ -19,7 +19,7 @@ impl<'arr> FrameAllocator<'arr> {
             .max_by_key(|descriptor| descriptor.phys_start)
             .expect("no descriptor with max value");
         let total_memory =
-            (last_descriptor.phys_start + (last_descriptor.page_count * 0x1000)) as usize;
+            (last_descriptor.phys_start.as_u64() + (last_descriptor.page_count * 0x1000)) as usize;
         debug!(
             "Page frame allocator will represent {} MB ({} bytes) of system memory.",
             crate::memory::to_mibibytes(total_memory),
@@ -39,8 +39,10 @@ impl<'arr> FrameAllocator<'arr> {
             descriptor
         );
 
-        let bitarray =
-            BitArray::from_ptr(descriptor.phys_start as *mut usize, bitarray_bits as usize);
+        let bitarray = BitArray::from_ptr(
+            descriptor.phys_start.as_u64() as *mut usize,
+            bitarray_bits as usize,
+        );
         debug!(
             "Successfully initialized bitarray with a length of {}.",
             bitarray.bit_count()
@@ -62,7 +64,9 @@ impl<'arr> FrameAllocator<'arr> {
         unsafe {
             let start_addr = descriptor.phys_start;
             let end_addr = start_addr + (bitarray_page_count * 0x1000);
-            this.reserve_frames(Frame::range_inclusive(start_addr..end_addr));
+            this.reserve_frames(Frame::range_inclusive(
+                start_addr.as_u64()..end_addr.as_u64(),
+            ));
         }
 
         // reserve null frame
@@ -77,10 +81,14 @@ impl<'arr> FrameAllocator<'arr> {
             trace!(
                 "Reserving {} frames at {:?}:\n{:#?}",
                 descriptor.page_count,
-                PhysAddr::new(start_addr),
+                start_addr,
                 descriptor
             );
-            unsafe { this.reserve_frames(Frame::range_inclusive(start_addr..end_addr)) };
+            unsafe {
+                this.reserve_frames(Frame::range_inclusive(
+                    start_addr.as_u64()..end_addr.as_u64(),
+                ))
+            };
         }
         info!(
             "{} KB of memory has been reserved by the system.",
@@ -210,5 +218,9 @@ impl<'arr> FrameAllocator<'arr> {
         }
 
         None
+    }
+
+    pub fn iter(&self) -> crate::bitarray::BitArrayIterator {
+        self.bitarray.iter()
     }
 }

@@ -7,20 +7,17 @@ extern crate log;
 extern crate alloc;
 
 use efi_boot::BootInfo;
-use gsai::{
-    memory::{
-        allocators::{global_memory, init_global_allocator, BumpAllocator},
-        paging::{VirtualAddressor, VirtualAddressorCell},
-        Frame, UEFIMemoryDescriptor,
-    },
-    structures::runtime_services::RuntimeTable,
+use gsai::memory::{
+    allocators::{global_memory, init_global_allocator, BumpAllocator},
+    paging::{VirtualAddressor, VirtualAddressorCell},
+    Frame, UEFIMemoryDescriptor,
 };
-use x86_64::{PhysAddr, VirtAddr};
+use x86_64::VirtAddr;
 
 static mut VIRTUAL_ADDESSOR: VirtualAddressorCell = VirtualAddressorCell::empty();
 
 #[export_name = "_start"]
-extern "win64" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor, RuntimeTable>) -> ! {
+extern "win64" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor>) -> ! {
     match gsai::logging::init_logger(gsai::logging::LoggingModes::SERIAL, log::LevelFilter::Debug) {
         Ok(()) => info!("Successfully loaded into kernel, with logging enabled."),
         Err(error) => panic!("{}", error),
@@ -78,15 +75,12 @@ fn init_virtual_addressor<'balloc>(
     for frame in memory_map
         .iter()
         .filter(|descriptor| gsai::memory::is_reserved_memory_type(descriptor.ty))
-        .flat_map(|descriptor| {
-            Frame::range_count(PhysAddr::new(descriptor.phys_start), descriptor.page_count)
-        })
+        .flat_map(|descriptor| Frame::range_count(descriptor.phys_start, descriptor.page_count))
     {
         virtual_addressor.identity_map(&frame);
     }
 
-    virtual_addressor
-        .modify_mapped_addr(global_memory(|allocator| allocator.physical_mapping_addr()));
+    //virtual_addressor.modify_mapped_addr(global_memory(|allocator| allocator.physical_mapping_addr()));
     virtual_addressor.swap_into();
 
     BumpAllocator::new(virtual_addressor)

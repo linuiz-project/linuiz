@@ -37,25 +37,19 @@ impl<T> Into<Option<T>> for FFIOption<T> {
 }
 
 #[repr(C)]
-pub struct BootInfo<MM, RT> {
+pub struct BootInfo<MM> {
     memory_map_ptr: *const MM,
     memory_map_len: usize,
     magic: u32,
-    runtime_table_ptr: *const RT,
     framebuffer: FFIOption<FramebufferPointer>,
 }
 
-impl<MM, RT> BootInfo<MM, RT> {
-    pub fn new(
-        memory_map: &[MM],
-        runtime_table_ptr: *const RT,
-        framebuffer: Option<FramebufferPointer>,
-    ) -> Self {
+impl<MM> BootInfo<MM> {
+    pub fn new(memory_map: &[MM], framebuffer: Option<FramebufferPointer>) -> Self {
         Self {
             memory_map_ptr: memory_map.as_ptr(),
             memory_map_len: memory_map.len(),
             magic: 0xAABB11FF,
-            runtime_table_ptr,
             framebuffer: match framebuffer {
                 Some(some) => FFIOption::Some(some),
                 None => FFIOption::None,
@@ -65,10 +59,6 @@ impl<MM, RT> BootInfo<MM, RT> {
 
     pub fn memory_map(&self) -> &[MM] {
         unsafe { &*core::ptr::slice_from_raw_parts(self.memory_map_ptr, self.memory_map_len) }
-    }
-
-    pub fn runtime_table(&self) -> &RT {
-        unsafe { &*(self.runtime_table_ptr) }
     }
 
     pub fn framebuffer_pointer(&self) -> Option<FramebufferPointer> {
@@ -105,4 +95,4 @@ pub fn align_down(value: usize, alignment: usize) -> usize {
     value & !(alignment - 1)
 }
 
-pub type KernelMain<MM, RT> = extern "win64" fn(crate::BootInfo<MM, RT>) -> !;
+pub type KernelMain<MM> = extern "win64" fn(crate::BootInfo<MM>) -> !;

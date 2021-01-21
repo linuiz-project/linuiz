@@ -36,7 +36,11 @@ pub enum MemoryType {
 
 pub fn is_reserved_memory_type(mem_type: MemoryType) -> bool {
     match mem_type {
-        MemoryType::LOADER_CODE | MemoryType::LOADER_DATA | MemoryType::CONVENTIONAL => false,
+        MemoryType::BOOT_SERVICES_CODE
+        | MemoryType::BOOT_SERVICES_DATA
+        | MemoryType::LOADER_CODE
+        | MemoryType::LOADER_DATA
+        | MemoryType::CONVENTIONAL => false,
         _ => true,
     }
 }

@@ -1,4 +1,3 @@
 pub mod gdt;
 pub mod idt;
 pub mod pic;
-pub mod runtime_services;

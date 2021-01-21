@@ -38,7 +38,7 @@ use uefi::{
     },
     table::{
         boot::{AllocateType, MemoryDescriptor, MemoryType},
-        Boot, Runtime, SystemTable,
+        Boot, SystemTable,
     },
     Handle, ResultExt, Status,
 };
@@ -429,11 +429,10 @@ fn kernel_transfer(
     // lifetime information, and so cannot be reinterpreted easily.
     let mmap_buffer = unsafe { &mut *slice_from_raw_parts_mut(mmap_ptr, mmap_alloc_size) };
     // After this point point, the previous system_table and boot_services are no longer valid
-    let (runtime_table, mmap_iter) =
-        match system_table.exit_boot_services(image_handle, mmap_buffer) {
-            Ok(completion) => completion.unwrap(),
-            Err(error) => panic!("{:?}", error),
-        };
+    let (_, mmap_iter) = match system_table.exit_boot_services(image_handle, mmap_buffer) {
+        Ok(completion) => completion.unwrap(),
+        Err(error) => panic!("{:?}", error),
+    };
 
     // Remark: For some reason, this cast itself doesn't result in a valid memory map, even provided
     //  the alignment is correct—so we have to read in the memory descriptors.
@@ -447,12 +446,8 @@ fn kernel_transfer(
     }
 
     // Finally, drop into the kernel.
-    let kernel_main: efi_boot::KernelMain<MemoryDescriptor, SystemTable<Runtime>> =
+    let kernel_main: efi_boot::KernelMain<MemoryDescriptor> =
         unsafe { transmute(kernel_entry_point) };
-    let boot_info = efi_boot::BootInfo::new(
-        unsafe { memory_map.align_to().1 },
-        &runtime_table as *const SystemTable<Runtime>,
-        framebuffer,
-    );
+    let boot_info = efi_boot::BootInfo::new(unsafe { memory_map.align_to().1 }, framebuffer);
     kernel_main(boot_info)
 }

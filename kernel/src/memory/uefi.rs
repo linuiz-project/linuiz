@@ -1,3 +1,5 @@
+use x86_64::{PhysAddr, VirtAddr};
+
 use crate::memory::MemoryType;
 
 bitflags::bitflags! {
@@ -22,8 +24,8 @@ bitflags::bitflags! {
 pub struct UEFIMemoryDescriptor {
     pub ty: MemoryType,
     padding: u32,
-    pub phys_start: u64,
-    pub virt_start: u64,
+    pub phys_start: PhysAddr,
+    pub virt_start: VirtAddr,
     pub page_count: u64,
     pub att: UEFIMemoryAttribute,
 }
