@@ -38,8 +38,7 @@ use uefi::{
     },
     table::{
         boot::{AllocateType, MemoryDescriptor, MemoryType},
-        runtime::ResetType,
-        Boot, SystemTable,
+        Boot, Runtime, SystemTable,
     },
     Handle, ResultExt, Status,
 };
@@ -448,10 +447,12 @@ fn kernel_transfer(
     }
 
     // Finally, drop into the kernel.
-    let kernel_main: efi_boot::KernelMain = unsafe { transmute(kernel_entry_point) };
-    let boot_info = efi_boot::BootInfo::new(unsafe { memory_map.align_to().1 }, framebuffer);
-    let return_code = kernel_main(boot_info);
-    let return_status: Status = unsafe { transmute(return_code) };
-
-    unsafe { runtime_table.runtime_services() }.reset(ResetType::Shutdown, return_status, None)
+    let kernel_main: efi_boot::KernelMain<MemoryDescriptor, SystemTable<Runtime>> =
+        unsafe { transmute(kernel_entry_point) };
+    let boot_info = efi_boot::BootInfo::new(
+        unsafe { memory_map.align_to().1 },
+        &runtime_table as *const SystemTable<Runtime>,
+        framebuffer,
+    );
+    kernel_main(boot_info)
 }

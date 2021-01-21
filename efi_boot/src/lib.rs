@@ -37,19 +37,25 @@ impl<T> Into<Option<T>> for FFIOption<T> {
 }
 
 #[repr(C)]
-pub struct BootInfo {
-    memory_map_ptr: *const u8,
+pub struct BootInfo<MM, RT> {
+    memory_map_ptr: *const MM,
     memory_map_len: usize,
     magic: u32,
+    runtime_table_ptr: *const RT,
     framebuffer: FFIOption<FramebufferPointer>,
 }
 
-impl BootInfo {
-    pub fn new(memory_map: &[u8], framebuffer: Option<FramebufferPointer>) -> Self {
+impl<MM, RT> BootInfo<MM, RT> {
+    pub fn new(
+        memory_map: &[MM],
+        runtime_table_ptr: *const RT,
+        framebuffer: Option<FramebufferPointer>,
+    ) -> Self {
         Self {
             memory_map_ptr: memory_map.as_ptr(),
             memory_map_len: memory_map.len(),
             magic: 0xAABB11FF,
+            runtime_table_ptr,
             framebuffer: match framebuffer {
                 Some(some) => FFIOption::Some(some),
                 None => FFIOption::None,
@@ -57,13 +63,12 @@ impl BootInfo {
         }
     }
 
-    pub fn memory_map<R: Sized>(&self) -> &[R] {
-        unsafe {
-            &*core::ptr::slice_from_raw_parts(
-                self.memory_map_ptr as *const R,
-                self.memory_map_len / core::mem::size_of::<R>(),
-            )
-        }
+    pub fn memory_map(&self) -> &[MM] {
+        unsafe { &*core::ptr::slice_from_raw_parts(self.memory_map_ptr, self.memory_map_len) }
+    }
+
+    pub fn runtime_table(&self) -> &RT {
+        unsafe { &*(self.runtime_table_ptr) }
     }
 
     pub fn framebuffer_pointer(&self) -> Option<FramebufferPointer> {
@@ -100,15 +105,4 @@ pub fn align_down(value: usize, alignment: usize) -> usize {
     value & !(alignment - 1)
 }
 
-pub type KernelMain = extern "win64" fn(crate::BootInfo) -> usize;
-
-#[macro_export]
-macro_rules! entrypoint {
-    ($path:path) => {
-        #[export_name = "_start"]
-        pub extern "win64" fn __impl_kernel_main(boot_info: $crate::BootInfo) -> usize {
-            let function: $crate::KernelMain = $path;
-            function(boot_info)
-        }
-    };
-}
+pub type KernelMain<MM, RT> = extern "win64" fn(crate::BootInfo<MM, RT>) -> !;

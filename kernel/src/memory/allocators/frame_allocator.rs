@@ -1,5 +1,5 @@
 use crate::{
-    memory::{is_reservable_memory_type, Frame, FrameIterator},
+    memory::{is_reserved_memory_type, Frame, FrameIterator},
     BitArray,
 };
 use x86_64::{PhysAddr, VirtAddr};
@@ -62,7 +62,7 @@ impl<'arr> FrameAllocator<'arr> {
         unsafe {
             let start_addr = descriptor.phys_start;
             let end_addr = start_addr + (bitarray_page_count * 0x1000);
-            this.reserve_frames(Frame::range(start_addr..end_addr));
+            this.reserve_frames(Frame::range_inclusive(start_addr..end_addr));
         }
 
         // reserve null frame
@@ -70,7 +70,7 @@ impl<'arr> FrameAllocator<'arr> {
         // reserve system frames
         for descriptor in memory_map
             .iter()
-            .filter(|descriptor| is_reservable_memory_type(descriptor.ty))
+            .filter(|descriptor| is_reserved_memory_type(descriptor.ty))
         {
             let start_addr = descriptor.phys_start;
             let end_addr = start_addr + (descriptor.page_count * 0x1000);
@@ -80,7 +80,7 @@ impl<'arr> FrameAllocator<'arr> {
                 PhysAddr::new(start_addr),
                 descriptor
             );
-            unsafe { this.reserve_frames(Frame::range(start_addr..end_addr)) };
+            unsafe { this.reserve_frames(Frame::range_inclusive(start_addr..end_addr)) };
         }
         info!(
             "{} KB of memory has been reserved by the system.",
@@ -204,7 +204,7 @@ impl<'arr> FrameAllocator<'arr> {
                     let low_addr = (index as u64) * 0x1000;
                     let high_addr = (high_index as u64) * 0x1000;
                     trace!("Many frames allocated from {} to {}", low_addr, high_addr);
-                    return Some(Frame::range(low_addr..high_addr));
+                    return Some(Frame::range_inclusive(low_addr..high_addr));
                 }
             }
         }

@@ -39,7 +39,7 @@ impl Frame {
         core::ptr::write_bytes((self.0 * 0x1000) as *mut u8, 0x0, 0x1000);
     }
 
-    pub fn range(range: Range<u64>) -> FrameIterator {
+    pub fn range_inclusive(range: Range<u64>) -> FrameIterator {
         FrameIterator {
             current: Frame::from_addr(PhysAddr::new(range.start)),
             end: Frame::from_addr(PhysAddr::new(range.end)),
@@ -49,7 +49,7 @@ impl Frame {
     pub fn range_count(start_addr: PhysAddr, count: u64) -> FrameIterator {
         FrameIterator {
             current: Frame::from_addr(start_addr),
-            end: Frame::from_addr(start_addr + count),
+            end: Frame::from_addr(start_addr + (count * 0x1000)),
         }
     }
 }
@@ -63,9 +63,9 @@ impl Iterator for FrameIterator {
     type Item = Frame;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.current.0 < self.end.0 {
+        if self.current.index() <= self.end.index() {
             let frame = self.current.clone();
-            self.current.0 += 1;
+            self.current = Frame::from_index(self.current.index() + 1);
             Some(frame)
         } else {
             None

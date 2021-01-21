@@ -129,7 +129,7 @@ impl ChainedPICs {
             // This is because the slave PIC is chained through the master PIC, so any interrupts
             // raise on the master as well.
             self.pics[0].end_of_interrupt();
-            trace!("Signalled EOI for Master: {}", interrupt_id);
+            //trace!("Signalled EOI for Master: {}", interrupt_id);
         } else {
             trace!("Invalid EOI request: {}", interrupt_id);
         }

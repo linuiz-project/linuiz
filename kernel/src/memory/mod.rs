@@ -34,13 +34,9 @@ pub enum MemoryType {
     KERNEL_DATA = 0xFFFFFF01,
 }
 
-pub fn is_reservable_memory_type(mem_type: MemoryType) -> bool {
+pub fn is_reserved_memory_type(mem_type: MemoryType) -> bool {
     match mem_type {
-        MemoryType::LOADER_CODE
-        | MemoryType::LOADER_DATA
-        // | MemoryType::BOOT_SERVICES_CODE
-        // | MemoryType::BOOT_SERVICES_DATA
-        | MemoryType::CONVENTIONAL => false,
+        MemoryType::LOADER_CODE | MemoryType::LOADER_DATA | MemoryType::CONVENTIONAL => false,
         _ => true,
     }
 }

@@ -1,7 +1,7 @@
 use core::cell::RefCell;
 
 use crate::memory::{
-    allocators::global_memory_mut,
+    allocators::{global_memory_mut, total_memory_iter},
     paging::{Level4, PageAttributes, PageTable},
     Frame, Page,
 };
@@ -101,8 +101,7 @@ impl VirtualAddressor {
             new_mapped_addr
         );
 
-        let total_memory = global_memory_mut(|allocator| allocator.total_memory());
-        for addr in (0..(total_memory as u64)).step_by(0x1000) {
+        for addr in total_memory_iter().step_by(0x1000).map(|addr| addr as u64) {
             let virt_addr = VirtAddr::new(new_mapped_addr.as_u64() + addr);
             let phys_addr = PhysAddr::new(addr);
             self.map(&Page::from_addr(virt_addr), &Frame::from_addr(phys_addr));
