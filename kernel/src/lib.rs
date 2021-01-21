@@ -1,6 +1,8 @@
 #![no_std]
 #![feature(asm)]
 #![feature(const_fn)]
+#![feature(once_cell)]
+#![feature(allocator_api)]
 #![feature(const_mut_refs)]
 #![feature(abi_x86_interrupt)]
 #![feature(unsafe_cell_get_mut)]

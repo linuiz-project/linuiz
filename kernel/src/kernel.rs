@@ -7,15 +7,17 @@ extern crate log;
 
 use efi_boot::{entrypoint, BootInfo};
 use gsai::memory::{
-    allocators::{global_memory, total_memory_iter, BumpAllocator},
-    paging::{MappedVirtualAddressor, VirtualAddressor},
+    allocators::{global_memory, init_global_allocator, total_memory_iter, BumpAllocator},
+    paging::{VirtualAddressor, VirtualAddressorCell},
     Frame,
 };
 use x86_64::{PhysAddr, VirtAddr};
 
+static mut VIRTUAL_ADDESSOR: VirtualAddressorCell = VirtualAddressorCell::empty();
+
 entrypoint!(kernel_main);
 extern "win64" fn kernel_main(boot_info: BootInfo) -> usize {
-    match gsai::logging::init(gsai::logging::LoggingModes::SERIAL, log::LevelFilter::Debug) {
+    match gsai::logging::init_logger(gsai::logging::LoggingModes::SERIAL, log::LevelFilter::Debug) {
         Ok(()) => info!("Successfully loaded into kernel, with logging enabled."),
         Err(error) => panic!("{}", error),
     }
@@ -31,17 +33,9 @@ extern "win64" fn kernel_main(boot_info: BootInfo) -> usize {
     unsafe { gsai::memory::allocators::init_global_memory(boot_info.memory_map()) };
     // TODO possibly retrieve base address using min_by_key so it's accurate and not a guess
     // motivation: is the base address of RAM ever not 0x0?
-    debug!("Creating virtual addressor for kernel (starting at 0x0, identity-mapped).");
-    let mut virtual_addressor = unsafe { MappedVirtualAddressor::new(VirtAddr::zero()) };
-    debug!("Identity mapping all available memory.");
-    total_memory_iter().step_by(0x1000).for_each(|addr| {
-        virtual_addressor.identity_map(&Frame::from_addr(PhysAddr::new(addr as u64)))
-    });
-    virtual_addressor
-        .modify_mapped_addr(global_memory(|allocator| allocator.physical_mapping_addr()));
-    virtual_addressor.swap_into();
 
-    //let bump_allocator = BumpAllocator::new(&mut virtual_addressor);
+    let bump_allocator = init_virtual_addressor();
+    unsafe { init_global_allocator(bump_allocator) };
 
     let ret_status = 0;
     info!("Kernel exiting with status: {:?}", 0);
@@ -63,4 +57,23 @@ fn init_structures() {
 
     x86_64::instructions::interrupts::enable();
     warn!("Interrupts are now enabled!");
+}
+
+fn init_virtual_addressor<'balloc>() -> BumpAllocator<'balloc> {
+    debug!("Creating virtual addressor for kernel (starting at 0x0, identity-mapped).");
+
+    let virtual_addressor = unsafe {
+        VIRTUAL_ADDESSOR.replace(VirtualAddressor::new(VirtAddr::zero()));
+        VIRTUAL_ADDESSOR.get_mut()
+    };
+
+    debug!("Identity mapping all available memory.");
+    total_memory_iter().step_by(0x1000).for_each(|addr| {
+        virtual_addressor.identity_map(&Frame::from_addr(PhysAddr::new(addr as u64)))
+    });
+    virtual_addressor
+        .modify_mapped_addr(global_memory(|allocator| allocator.physical_mapping_addr()));
+    virtual_addressor.swap_into();
+
+    BumpAllocator::new(virtual_addressor)
 }

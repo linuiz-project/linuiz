@@ -7,7 +7,7 @@ bitflags::bitflags! {
 }
 
 pub struct KernelLogger {
-    pub modes: LoggingModes,
+    modes: LoggingModes,
 }
 
 impl log::Log for KernelLogger {
@@ -30,17 +30,25 @@ impl log::Log for KernelLogger {
     fn flush(&self) {}
 }
 
-static mut LOGGER: KernelLogger = KernelLogger {
-    modes: LoggingModes::NONE,
-};
+static mut LOGGER: Option<KernelLogger> = None;
 
-pub fn init(modes: LoggingModes, min_level: log::LevelFilter) -> Result<(), log::SetLoggerError> {
-    unsafe { LOGGER = KernelLogger { modes } };
+pub fn init_logger(
+    modes: LoggingModes,
+    min_level: log::LevelFilter,
+) -> Result<(), log::SetLoggerError> {
+    unsafe {
+        if LOGGER.is_some() {
+            panic!("logger can only be configured once");
+        } else {
+            LOGGER = Some(KernelLogger { modes });
 
-    if let Err(error) = unsafe { log::set_logger_racy(&LOGGER) } {
-        Err(error)
-    } else {
-        log::set_max_level(min_level);
-        Ok(())
+            match log::set_logger_racy(LOGGER.as_ref().unwrap()) {
+                Ok(()) => {
+                    log::set_max_level(min_level);
+                    Ok(())
+                }
+                Err(error) => Err(error),
+            }
+        }
     }
 }

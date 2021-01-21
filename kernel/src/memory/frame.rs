@@ -6,6 +6,10 @@ use x86_64::PhysAddr;
 pub struct Frame(u64);
 
 impl Frame {
+    pub const fn null() -> Self {
+        Self { 0: 0 }
+    }
+
     pub const fn from_index(index: u64) -> Self {
         Self { 0: index }
     }
