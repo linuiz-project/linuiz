@@ -12,10 +12,7 @@ all: $(bootloader) $(kernel)
 soft-reset: 
 	rm -f $(bootloader) $(kernel)
 
-reset:
-	rm -f $(bootloader) $(kernel)
-	rm -rf ./efi_boot/Cargo.lock ./efi_boot/target/
-	rm -rf ./kernel/Cargo.lock ./kernel/target/
+reset: soft-reset
 	cd ./efi_boot/;\
 		cargo clean
 	cd ./kernel/;\

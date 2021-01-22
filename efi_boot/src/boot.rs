@@ -111,7 +111,7 @@ pub fn allocate_pages(
 ) -> PointerBuffer {
     if let AllocateType::MaxAddress(address) = allocate_type {
         if (address % PAGE_SIZE) != 0x0 {
-            panic!("Address is not page-aligned ({})", address)
+            panic!("address is not page-aligned ({})", address)
         }
     }
 
@@ -326,7 +326,7 @@ fn allocate_segments(
 
         if segment_header.ph_type() == ProgramHeaderType::PT_LOAD {
             debug!(
-                "Identified loadable segment (index {}, disk offset {}): {:?}",
+                "Identified loadable segment (index {}, disk offset {}):\n{:#?}",
                 index, segment_header_disk_offset, segment_header
             );
 
@@ -349,9 +349,6 @@ fn allocate_segments(
             // allocate pages for header
             let segment_page_buffer = allocate_pages(
                 boot_services,
-                // we take an address relative to kernel insertion
-                // point, but that doesn't really matter to the code
-                // in this context
                 AllocateType::Address(aligned_address),
                 KERNEL_CODE,
                 pages_count,
@@ -419,7 +416,7 @@ fn kernel_transfer(
         (alloc_ptr, mmap_alloc_size)
     };
 
-    info!("Finalizing exit from boot services environment.");
+    info!("Finalizing exit from boot services environment, then dropping into kernel_main (entrypoint {}).", kernel_entry_point);
     system_table
         .stdout()
         .reset(false)

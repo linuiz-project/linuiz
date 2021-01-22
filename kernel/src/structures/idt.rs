@@ -11,6 +11,36 @@ extern "x86-interrupt" fn invalid_opcode_handler(stack_frame: &mut InterruptStac
     panic!("CPU EXCEPTION: INVALID OPCODE\n{:#?}", stack_frame);
 }
 
+extern "x86-interrupt" fn invalid_tss_handler(
+    stack_frame: &mut InterruptStackFrame,
+    error_code: u64,
+) {
+    panic!(
+        "CPU EXCEPTION: INVALID TSS: {}\n{:#?}",
+        error_code, stack_frame
+    );
+}
+
+extern "x86-interrupt" fn stack_segment_handler(
+    stack_frame: &mut InterruptStackFrame,
+    error_code: u64,
+) {
+    panic!(
+        "CPU EXCEPTION: STACK-SEGMENT FAULT: {}\n{:#?}",
+        error_code, stack_frame
+    );
+}
+
+extern "x86-interrupt" fn segment_not_present_handler(
+    stack_frame: &mut InterruptStackFrame,
+    error_code: u64,
+) {
+    panic!(
+        "CPU EXCEPTION: SEGMENT NOT PRESENT: {}\n{:#?}",
+        error_code, stack_frame
+    );
+}
+
 extern "x86-interrupt" fn page_fault_handler(
     stack_frame: &mut InterruptStackFrame,
     error_code: x86_64::structures::idt::PageFaultErrorCode,
@@ -82,6 +112,9 @@ lazy_static! {
         idt.breakpoint.set_handler_fn(breakpoint_handler);
         idt.page_fault.set_handler_fn(page_fault_handler);
         idt.invalid_opcode.set_handler_fn(invalid_opcode_handler);
+        idt.invalid_tss.set_handler_fn(invalid_tss_handler);
+        idt.stack_segment_fault.set_handler_fn(stack_segment_handler);
+        idt.segment_not_present.set_handler_fn(segment_not_present_handler);
         idt.general_protection_fault.set_handler_fn(general_protection_fault_handler);
 
         unsafe {

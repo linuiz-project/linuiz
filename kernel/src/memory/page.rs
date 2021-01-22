@@ -45,6 +45,10 @@ impl Page {
             end: Page::from_addr(VirtAddr::new(range.end)),
         }
     }
+
+    pub fn offset(&self, count: u64) -> Self {
+        Self { 0: self.0 + count }
+    }
 }
 
 pub struct PageIterator {
@@ -56,9 +60,9 @@ impl Iterator for PageIterator {
     type Item = Page;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.current.index() <= self.end.index() {
+        if self.current.0 <= self.end.0 {
             let page = self.current.clone();
-            self.current = Page::from_index(self.current.index() + 1);
+            self.current.0 += 1;
             Some(page)
         } else {
             None

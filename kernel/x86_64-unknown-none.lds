@@ -3,9 +3,9 @@ OUTPUT_FORMAT(elf64-x86-64)
 
 SECTIONS
 {
-    . = 0x7A12000;
+    . = 0x190000;
 
-    .text : {
+    .text : ALIGN(0x1000) {
         _text_start = .;
 
         *(.text.*)

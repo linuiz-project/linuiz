@@ -8,20 +8,35 @@ extern crate alloc;
 
 use efi_boot::BootInfo;
 use gsai::memory::{
-    allocators::{global_memory, init_global_allocator, BumpAllocator},
-    paging::{VirtualAddressor, VirtualAddressorCell},
+    allocators::{global_memory, init_global_allocator},
+    paging::VirtualAddressorCell,
     Frame, UEFIMemoryDescriptor,
 };
-use x86_64::VirtAddr;
 
-static mut VIRTUAL_ADDESSOR: VirtualAddressorCell = VirtualAddressorCell::empty();
+#[cfg(debug_assertions)]
+fn get_log_level() -> log::LevelFilter {
+    log::LevelFilter::Debug
+}
+
+#[cfg(not(debug_assertions))]
+fn get_log_level() -> log::LevelFilter {
+    log::LevelFilter::Info
+}
+
+static KERNEL_ADDRESSOR: VirtualAddressorCell = VirtualAddressorCell::empty();
 
 #[export_name = "_start"]
 extern "win64" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor>) -> ! {
-    match gsai::logging::init_logger(gsai::logging::LoggingModes::SERIAL, log::LevelFilter::Trace) {
+    match gsai::logging::init_logger(gsai::logging::LoggingModes::SERIAL, get_log_level()) {
         Ok(()) => info!("Successfully loaded into kernel, with logging enabled."),
         Err(error) => panic!("{}", error),
     }
+    //info!("{:?}", unsafe { &_text_start as *const _ as *const char });
+    // boot_info
+    //     .memory_map()
+    //     .iter()
+    //     .filter(|descriptor| descriptor.ty == MemoryType::BOOT_SERVICES_DATA)
+    //     .for_each(|descriptor| debug!("{:#?}", descriptor));
 
     info!("Validating magic of BootInfo.");
     boot_info.validate_magic();
@@ -35,8 +50,7 @@ extern "win64" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor>) -> ! {
     // TODO possibly retrieve base address using min_by_key so it's accurate and not a guess
     // motivation: is the base address of RAM ever not 0x0?
 
-    let bump_allocator = init_virtual_addressor(boot_info.memory_map());
-    unsafe { init_global_allocator(bump_allocator) };
+    init_virtual_addressor(boot_info.memory_map());
 
     //let vec = alloc::vec![0u8; 1000];
 
@@ -61,26 +75,21 @@ fn init_structures() {
     warn!("Interrupts are now enabled!");
 }
 
-fn init_virtual_addressor<'balloc>(
-    memory_map: &[gsai::memory::UEFIMemoryDescriptor],
-) -> BumpAllocator<'balloc> {
+fn init_virtual_addressor<'balloc>(memory_map: &[gsai::memory::UEFIMemoryDescriptor]) {
     debug!("Creating virtual addressor for kernel (starting at 0x0, identity-mapped).");
-
-    let virtual_addressor = unsafe {
-        VIRTUAL_ADDESSOR.replace(VirtualAddressor::new(VirtAddr::zero()));
-        VIRTUAL_ADDESSOR.get_mut()
-    };
+    KERNEL_ADDRESSOR.init(gsai::memory::Page::null());
 
     for frame in memory_map
         .iter()
         .filter(|descriptor| gsai::memory::is_reserved_memory_type(descriptor.ty))
         .flat_map(|descriptor| Frame::range_count(descriptor.phys_start, descriptor.page_count))
     {
-        virtual_addressor.identity_map(&frame);
+        KERNEL_ADDRESSOR.identity_map(&frame);
     }
 
+    gsai::linker_statics::validate_section_mappings(&KERNEL_ADDRESSOR);
     //virtual_addressor.modify_mapped_addr(global_memory(|allocator| allocator.physical_mapping_addr()));
-    virtual_addressor.swap_into();
-
-    BumpAllocator::new(virtual_addressor)
+    KERNEL_ADDRESSOR.swap_into();
+    loop {}
+    unsafe { init_global_allocator(&KERNEL_ADDRESSOR) };
 }

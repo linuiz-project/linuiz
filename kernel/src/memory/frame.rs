@@ -63,9 +63,9 @@ impl Iterator for FrameIterator {
     type Item = Frame;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.current.index() <= self.end.index() {
+        if self.current.0 <= self.end.0 {
             let frame = self.current.clone();
-            self.current = Frame::from_index(self.current.index() + 1);
+            self.current.0 += 1;
             Some(frame)
         } else {
             None

@@ -52,6 +52,6 @@ where
     )
 }
 
-pub fn total_memory_iter() -> core::ops::Range<usize> {
+pub fn total_memory_range() -> core::ops::Range<usize> {
     0..global_memory(|allocator| allocator.total_memory())
 }
