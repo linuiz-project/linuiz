@@ -105,15 +105,6 @@ fn init_virtual_addressor<'balloc>(memory_map: &[gsai::memory::UEFIMemoryDescrip
     // let physical_mapping_addr = global_memory(|allocator| allocator.physical_mapping_addr());
     // KERNEL_ADDRESSOR.modify_mapped_page(Page::from_addr(physical_mapping_addr));
 
-    let virt_addr = VirtAddr::new(0xff06138);
-    if !KERNEL_ADDRESSOR.is_mapped(virt_addr) {
-        for descriptor in memory_map.iter() {
-            if descriptor.range().contains(&virt_addr.as_u64()) {
-                info!("{:?} CONTAINED BY:\n{:#?}", virt_addr, descriptor);
-            }
-        }
-    }
-
     unsafe { KERNEL_ADDRESSOR.swap_into() };
 
     init_global_allocator(&KERNEL_ADDRESSOR);
