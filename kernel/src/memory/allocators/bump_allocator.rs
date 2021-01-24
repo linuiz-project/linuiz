@@ -1,27 +1,24 @@
 use crate::memory::{allocators::global_memory_mut, paging::VirtualAddressorCell, Page};
+use core::lazy::OnceCell;
 use spin::Mutex;
 use x86_64::VirtAddr;
 
 pub struct BumpAllocaterCell<'vaddr> {
-    allocator: Mutex<Option<BumpAllocator<'vaddr>>>,
+    allocator: Mutex<OnceCell<BumpAllocator<'vaddr>>>,
 }
 
 impl<'vaddr> BumpAllocaterCell<'vaddr> {
     pub const fn empty() -> Self {
         Self {
-            allocator: Mutex::new(None),
+            allocator: Mutex::new(OnceCell::new()),
         }
     }
 
     pub fn init(&self, virtual_addressor: &'vaddr VirtualAddressorCell) {
-        let mut inner = self.allocator.lock();
-
-        if inner.is_some() {
-            panic!("allocator has already been configured");
-        } else {
-            let allocator = BumpAllocator::new(virtual_addressor);
-            core::mem::swap(&mut *inner, &mut Some(allocator));
-        }
+        self.allocator
+            .lock()
+            .set(BumpAllocator::new(virtual_addressor))
+            .ok();
     }
 }
 
@@ -33,7 +30,7 @@ struct BumpAllocator<'vaddr> {
 impl<'vaddr> BumpAllocator<'vaddr> {
     fn new(virtual_addressor: &'vaddr VirtualAddressorCell) -> Self {
         Self {
-            virtual_addressor: virtual_addressor,
+            virtual_addressor,
             // we set bottom page to second page, to avoid using 0x0, which is
             // usually a 'null' address
             bottom_page: Page::from_addr(VirtAddr::new(0x1000)),
@@ -58,17 +55,23 @@ impl<'vaddr> BumpAllocator<'vaddr> {
         old_page.addr().as_mut_ptr()
     }
 
-    unsafe fn dealloc(&self, _: *mut u8, __: core::alloc::Layout) {}
+    unsafe fn dealloc(&mut self, _: *mut u8, __: core::alloc::Layout) {}
 }
 
 unsafe impl core::alloc::GlobalAlloc for BumpAllocaterCell<'_> {
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
         self.allocator
             .lock()
-            .as_mut()
+            .get_mut()
             .expect("bump allocator has not been configured")
             .alloc(layout)
     }
 
-    unsafe fn dealloc(&self, _: *mut u8, __: core::alloc::Layout) {}
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
+        self.allocator
+            .lock()
+            .get_mut()
+            .expect("bump allocator has not been configured")
+            .dealloc(ptr, layout);
+    }
 }

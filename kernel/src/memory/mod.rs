@@ -15,7 +15,7 @@ pub const MIBIBYTE: usize = KIBIBYTE * KIBIBYTE;
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryType {
-    RESERVEDVED,
+    RESERVED,
     LOADER_CODE,
     LOADER_DATA,
     BOOT_SERVICES_CODE,

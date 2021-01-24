@@ -29,3 +29,10 @@ pub struct UEFIMemoryDescriptor {
     pub page_count: u64,
     pub att: UEFIMemoryAttribute,
 }
+
+impl UEFIMemoryDescriptor {
+    pub fn range(&self) -> core::ops::Range<u64> {
+        let addr_u64 = self.phys_start.as_u64();
+        addr_u64..(addr_u64 + (self.page_count * 0x1000))
+    }
+}

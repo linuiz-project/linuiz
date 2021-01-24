@@ -14,7 +14,6 @@ mod bitarray;
 pub mod drivers;
 pub mod instructions;
 pub mod io;
-pub mod linker_statics;
 pub mod logging;
 pub mod memory;
 pub mod registers;

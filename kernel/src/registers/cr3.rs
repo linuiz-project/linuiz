@@ -5,7 +5,7 @@ use crate::memory::Frame;
 
 bitflags! {
     pub struct CR3Flags : u64 {
-        const PAGE_LEVEL_WRITETHROUGH = 1 << 3;
+        const PAGE_LEVEL_WRITE_THROUGH = 1 << 3;
         const PAGE_LEVEL_CACHE_DISABLE = 1 << 4;
     }
 }
@@ -19,16 +19,15 @@ impl CR3 {
             Some(some) => some.bits(),
             None => 0,
         };
-        let value = addr | flags;
 
-        asm!("mov cr3, {}", in(reg) value, options(nomem, nostack));
+        asm!("mov cr3, {}", in(reg) addr | flags, options(nostack));
     }
 
     pub fn read() -> (Frame, Option<CR3Flags>) {
         let value: u64;
 
         unsafe {
-            asm!("mov {}, cr3", out(reg) value, options(nomem, nostack));
+            asm!("mov {}, cr3", out(reg) value, options(nostack));
         }
 
         (

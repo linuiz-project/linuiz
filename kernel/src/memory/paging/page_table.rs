@@ -65,7 +65,11 @@ impl<L> PageTable<L>
 where
     L: HeirarchicalLevel,
 {
-    pub fn sub_table(&self, index: usize, offset: VirtAddr) -> Option<&PageTable<L::NextLevel>> {
+    pub unsafe fn sub_table(
+        &self,
+        index: usize,
+        offset: VirtAddr,
+    ) -> Option<&PageTable<L::NextLevel>> {
         trace!(
             "Accessing sub-table (ref): index {}, offset {:?}",
             index,
@@ -75,13 +79,13 @@ where
         match entry.frame() {
             Some(frame) => {
                 let mapped_physical_addr = offset + frame.addr().as_u64();
-                Some(unsafe { &*mapped_physical_addr.as_ptr() })
+                Some(&*mapped_physical_addr.as_ptr())
             }
             None => None,
         }
     }
 
-    pub fn sub_table_mut(
+    pub unsafe fn sub_table_mut(
         &mut self,
         index: usize,
         offset: VirtAddr,
@@ -95,13 +99,13 @@ where
         match entry.frame() {
             Some(frame) => {
                 let mapped_physical_addr = offset + frame.addr().as_u64();
-                Some(unsafe { &mut *mapped_physical_addr.as_mut_ptr() })
+                Some(&mut *mapped_physical_addr.as_mut_ptr())
             }
             None => None,
         }
     }
 
-    pub fn sub_table_create(
+    pub unsafe fn sub_table_create(
         &mut self,
         index: usize,
         offset: VirtAddr,
@@ -113,7 +117,7 @@ where
         );
         let entry = &mut self[index];
         let mapped_physical_addr = offset + entry.frame_create().addr().as_u64();
-        unsafe { &mut *mapped_physical_addr.as_mut_ptr() }
+        &mut *mapped_physical_addr.as_mut_ptr()
     }
 }
 

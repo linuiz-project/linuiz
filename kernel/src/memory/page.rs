@@ -27,6 +27,12 @@ impl Page {
         }
     }
 
+    pub fn containing_addr(virt_addr: VirtAddr) -> Self {
+        Self {
+            0: virt_addr.as_u64() / 0x1000,
+        }
+    }
+
     pub const fn index(&self) -> u64 {
         self.0
     }
