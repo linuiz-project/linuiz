@@ -96,7 +96,7 @@ where
             offset
         );
         let entry = &mut self[index];
-        let mapped_physical_addr = offset + entry.frame_alloc().addr().as_u64();
+        let mapped_physical_addr = offset + entry.frame_create().addr().as_u64();
         unsafe { &mut *mapped_physical_addr.as_mut_ptr() }
     }
 }

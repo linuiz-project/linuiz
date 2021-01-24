@@ -41,7 +41,7 @@ impl PageTableEntry {
         }
     }
 
-    pub fn frame_alloc(&mut self) -> Frame {
+    pub fn frame_create(&mut self) -> Frame {
         self.frame().unwrap_or_else(|| {
             trace!("Allocating frame for previously nonpresent entry.");
             let alloc_frame = global_memory_mut(|allocator| {

@@ -23,7 +23,7 @@ pub fn validate_section_mappings(virtual_addressor: &VirtualAddressorCell) {
         for addr in section.step_by(0x1000) {
             let page = Page::from_addr(VirtAddr::new(addr));
             if !virtual_addressor.is_mapped(&page) {
-                panic!("failed to validate section: page {:?} not mapped.", page);
+                panic!("failed to validate section: page {:?} not mapped", page);
             }
         }
     }
@@ -50,17 +50,17 @@ pub fn validate_section_mappings(virtual_addressor: &VirtualAddressorCell) {
 }
 
 pub fn _text() -> core::ops::Range<u64> {
-    unsafe { (&_text_start as *const c_void as u64)..(&_text_end as *const c_void as u64) }
+    unsafe { ((&_text_start) as *const c_void as u64)..((&_text_end) as *const c_void as u64) }
 }
 
 pub fn _rodata() -> core::ops::Range<u64> {
-    unsafe { (&_rodata_start as *const c_void as u64)..(&_rodata_end as *const c_void as u64) }
+    unsafe { ((&_rodata_start) as *const c_void as u64)..((&_rodata_end) as *const c_void as u64) }
 }
 
 pub fn _data() -> core::ops::Range<u64> {
-    unsafe { (&_data_start as *const c_void as u64)..(&_data_end as *const c_void as u64) }
+    unsafe { ((&_data_start) as *const c_void as u64)..((&_data_end) as *const c_void as u64) }
 }
 
 pub fn _bss() -> core::ops::Range<u64> {
-    unsafe { (&_bss_start as *const c_void as u64)..(&_bss_end as *const c_void as u64) }
+    unsafe { ((&_bss_start) as *const c_void as u64)..((&_bss_end) as *const c_void as u64) }
 }

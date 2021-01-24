@@ -10,8 +10,9 @@ make PROFILE=$PROFILE
 
 # run the bootloader image
 qemu-system-x86_64 \
-    -nodefaults \
+    -m 256M \
     -nographic \
-    -m 512M \
     -bios ./ovmf/OVMF-pure-efi.fd \
-    -drive format=raw,file=fat:rw:./image/
+    -drive format=raw,file=fat:rw:./image/ \
+    -D qemu_debug.log \
+    -d guest_errors,int

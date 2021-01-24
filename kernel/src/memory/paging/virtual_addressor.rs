@@ -110,9 +110,9 @@ impl VirtualAddressor {
         unsafe {
             &mut *self
                 .mapped_page
+                .offset(self.pml4_frame.index())
                 .addr()
-                .as_mut_ptr::<PageTable<Level4>>()
-                .offset(self.pml4_frame.index() as isize)
+                .as_mut_ptr()
         }
     }
 

@@ -21,14 +21,14 @@ impl CR3 {
         };
         let value = addr | flags;
 
-        asm!("mov cr3, {}", in(reg) value, options(nomem));
+        asm!("mov cr3, {}", in(reg) value, options(nomem, nostack));
     }
 
     pub fn read() -> (Frame, Option<CR3Flags>) {
         let value: u64;
 
         unsafe {
-            asm!("mov {}, cr3", out(reg) value, options(nomem));
+            asm!("mov {}, cr3", out(reg) value, options(nomem, nostack));
         }
 
         (
