@@ -75,7 +75,7 @@ impl PageTableEntry {
 impl core::fmt::Debug for PageTableEntry {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
-            .debug_tuple("PageDescriptor")
+            .debug_tuple("PageTableEntry")
             .field(&self.frame())
             .field(&self.attribs())
             .finish()

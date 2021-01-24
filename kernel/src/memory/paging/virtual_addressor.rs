@@ -1,3 +1,5 @@
+use core::lazy::OnceCell;
+
 use crate::memory::{
     allocators::{global_memory, global_memory_mut},
     paging::{Level4, PageAttributes, PageTable, PageTableEntry},
@@ -7,31 +9,27 @@ use spin::Mutex;
 use x86_64::VirtAddr;
 
 pub struct VirtualAddressorCell {
-    addressor: Mutex<Option<VirtualAddressor>>,
+    addressor: Mutex<OnceCell<VirtualAddressor>>,
 }
 
 impl VirtualAddressorCell {
     pub const fn empty() -> Self {
         Self {
-            addressor: Mutex::new(None),
+            addressor: Mutex::new(OnceCell::new()),
         }
     }
 
     pub fn init(&self, page: Page) {
-        let mut inner = self.addressor.lock();
-
-        if inner.is_some() {
+        let virtual_addressor = unsafe { VirtualAddressor::new(page) };
+        if let Err(_) = self.addressor.lock().set(virtual_addressor) {
             panic!("virtual addressor has already been confgiured");
-        } else {
-            let addressor = unsafe { VirtualAddressor::new(page) };
-            core::mem::swap(&mut *inner, &mut Some(addressor));
         }
     }
 
     pub fn map(&self, page: &Page, frame: &Frame) {
         self.addressor
             .lock()
-            .as_mut()
+            .get_mut()
             .expect("virtual addressor has not been configured")
             .map(page, frame);
     }
@@ -39,7 +37,7 @@ impl VirtualAddressorCell {
     pub fn unmap(&self, page: &Page) {
         self.addressor
             .lock()
-            .as_mut()
+            .get_mut()
             .expect("virtual addressor has not been configured")
             .unmap(page);
     }
@@ -47,7 +45,7 @@ impl VirtualAddressorCell {
     pub fn identity_map(&self, frame: &Frame) {
         self.addressor
             .lock()
-            .as_mut()
+            .get_mut()
             .expect("virtual addressor has not been configured")
             .identity_map(frame);
     }
@@ -55,7 +53,7 @@ impl VirtualAddressorCell {
     pub fn is_mapped(&self, page: &Page) -> bool {
         self.addressor
             .lock()
-            .as_mut()
+            .get()
             .expect("virtual addressor has not been configured")
             .is_mapped(page)
     }
@@ -63,15 +61,15 @@ impl VirtualAddressorCell {
     pub fn modify_mapped_page(&self, page: Page) {
         self.addressor
             .lock()
-            .as_mut()
+            .get_mut()
             .expect("virtual addressor has not been configured")
             .modify_mapped_page(page)
     }
 
-    pub fn swap_into(&self) {
+    pub unsafe fn swap_into(&self) {
         self.addressor
             .lock()
-            .as_mut()
+            .get()
             .expect("virtual addressor has not been configured")
             .swap_into()
     }
@@ -106,6 +104,16 @@ impl VirtualAddressor {
         }
     }
 
+    fn pml4(&self) -> &PageTable<Level4> {
+        unsafe {
+            &*self
+                .mapped_page
+                .offset(self.pml4_frame.index())
+                .addr()
+                .as_ptr()
+        }
+    }
+
     fn pml4_mut(&mut self) -> &mut PageTable<Level4> {
         unsafe {
             &mut *self
@@ -114,6 +122,17 @@ impl VirtualAddressor {
                 .addr()
                 .as_mut_ptr()
         }
+    }
+
+    fn get_page_entry(&self, page: &Page) -> Option<&PageTableEntry> {
+        let offset = self.mapped_page.addr();
+        let addr = (page.addr().as_u64() >> 12) as usize;
+
+        self.pml4()
+            .sub_table((addr >> 27) & 0x1FF, offset)
+            .and_then(|p3| p3.sub_table((addr >> 18) & 0x1FF, offset))
+            .and_then(|p2| p2.sub_table((addr >> 9) & 0x1FF, offset))
+            .and_then(|p1| Some(&p1[(addr >> 0) & 0x1FF]))
     }
 
     fn get_page_entry_mut(&mut self, page: &Page) -> Option<&mut PageTableEntry> {
@@ -140,21 +159,20 @@ impl VirtualAddressor {
 
     fn map(&mut self, page: &Page, frame: &Frame) {
         let entry = self.get_page_entry_create(page);
-
         if entry.is_present() {
             crate::instructions::tlb::invalidate(page);
         }
-
         entry.set(&frame, PageAttributes::PRESENT | PageAttributes::WRITABLE);
-        trace!("Mapped {:?} to {:?}: {:?}", page, entry.frame(), entry);
+
+        trace!("Mapped {:?}: {:?}", page, entry);
     }
 
     fn unmap(&mut self, page: &Page) {
         let entry = self.get_page_entry_create(page);
-
         entry.set_nonpresent();
         crate::instructions::tlb::invalidate(page);
-        trace!("Unmapped {:?} from {:?}: {:?}", page, entry.frame(), entry);
+
+        trace!("Unmapped {:?}: {:?}", page, entry);
     }
 
     fn identity_map(&mut self, frame: &Frame) {
@@ -164,8 +182,8 @@ impl VirtualAddressor {
         );
     }
 
-    fn is_mapped(&mut self, page: &Page) -> bool {
-        self.get_page_entry_mut(page).is_some()
+    fn is_mapped(&self, page: &Page) -> bool {
+        self.get_page_entry(page).is_some()
     }
 
     fn modify_mapped_page(&mut self, page: Page) {
@@ -183,12 +201,12 @@ impl VirtualAddressor {
         self.mapped_page = page;
     }
 
-    fn swap_into(&self) {
+    unsafe fn swap_into(&self) {
         info!(
             "Writing virtual addressor's PML4 to CR3 register: {:?}.",
             self.pml4_frame
         );
 
-        unsafe { crate::registers::CR3::write(&self.pml4_frame, None) };
+        crate::registers::CR3::write(&self.pml4_frame, None);
     }
 }

@@ -65,6 +65,22 @@ impl<L> PageTable<L>
 where
     L: HeirarchicalLevel,
 {
+    pub fn sub_table(&self, index: usize, offset: VirtAddr) -> Option<&PageTable<L::NextLevel>> {
+        trace!(
+            "Accessing sub-table (ref): index {}, offset {:?}",
+            index,
+            offset
+        );
+        let entry = &self[index];
+        match entry.frame() {
+            Some(frame) => {
+                let mapped_physical_addr = offset + frame.addr().as_u64();
+                Some(unsafe { &*mapped_physical_addr.as_ptr() })
+            }
+            None => None,
+        }
+    }
+
     pub fn sub_table_mut(
         &mut self,
         index: usize,

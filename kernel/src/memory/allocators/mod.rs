@@ -7,9 +7,9 @@ pub use frame_allocator::*;
 pub use global_memory::*;
 
 #[global_allocator]
-static mut GLOBAL_ALLOCATOR: BumpAllocaterCell<'static> = BumpAllocaterCell::empty();
+static GLOBAL_ALLOCATOR: BumpAllocaterCell<'static> = BumpAllocaterCell::empty();
 
-pub unsafe fn init_global_allocator(
+pub fn init_global_allocator(
     virtual_addressor: &'static crate::memory::paging::VirtualAddressorCell,
 ) {
     GLOBAL_ALLOCATOR.init(virtual_addressor);

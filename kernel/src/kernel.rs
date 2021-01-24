@@ -28,15 +28,12 @@ static KERNEL_ADDRESSOR: VirtualAddressorCell = VirtualAddressorCell::empty();
 #[export_name = "_start"]
 extern "win64" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor>) -> ! {
     match gsai::logging::init_logger(gsai::logging::LoggingModes::SERIAL, get_log_level()) {
-        Ok(()) => info!("Successfully loaded into kernel, with logging enabled."),
+        Ok(()) => {
+            info!("Successfully loaded into kernel, with logging enabled.");
+            debug!("Minimum logging level configured as: {:?}", get_log_level());
+        }
         Err(error) => panic!("{}", error),
     }
-    //info!("{:?}", unsafe { &_text_start as *const _ as *const char });
-    // boot_info
-    //     .memory_map()
-    //     .iter()
-    //     .filter(|descriptor| descriptor.ty == MemoryType::BOOT_SERVICES_DATA)
-    //     .for_each(|descriptor| debug!("{:#?}", descriptor));
 
     info!("Validating magic of BootInfo.");
     boot_info.validate_magic();
@@ -71,13 +68,15 @@ fn init_structures() {
     gsai::structures::pic::init();
     info!("Successfully initialized PIC.");
 
-    x86_64::instructions::interrupts::enable();
+    //x86_64::instructions::interrupts::enable();
     warn!("Interrupts are now enabled!");
 }
 
 fn init_virtual_addressor<'balloc>(memory_map: &[gsai::memory::UEFIMemoryDescriptor]) {
+    use gsai::memory::Page;
+
     debug!("Creating virtual addressor for kernel (starting at 0x0, identity-mapped).");
-    KERNEL_ADDRESSOR.init(gsai::memory::Page::null());
+    KERNEL_ADDRESSOR.init(Page::null());
 
     for frame in memory_map
         .iter()
@@ -88,8 +87,11 @@ fn init_virtual_addressor<'balloc>(memory_map: &[gsai::memory::UEFIMemoryDescrip
     }
 
     gsai::linker_statics::validate_section_mappings(&KERNEL_ADDRESSOR);
-    //virtual_addressor.modify_mapped_addr(global_memory(|allocator| allocator.physical_mapping_addr()));
-    KERNEL_ADDRESSOR.swap_into();
-    loop {}
-    unsafe { init_global_allocator(&KERNEL_ADDRESSOR) };
+
+    let physical_mapping_addr = global_memory(|allocator| allocator.physical_mapping_addr());
+    KERNEL_ADDRESSOR.modify_mapped_page(Page::from_addr(physical_mapping_addr));
+
+    unsafe { KERNEL_ADDRESSOR.swap_into() };
+
+    init_global_allocator(&KERNEL_ADDRESSOR);
 }
