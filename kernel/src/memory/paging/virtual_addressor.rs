@@ -8,6 +8,8 @@ use crate::memory::{
 use spin::Mutex;
 use x86_64::VirtAddr;
 
+static VADDR_NOT_CFG: &str = "virtual addressor has not been configured";
+
 pub struct VirtualAddressorCell {
     addressor: Mutex<OnceCell<VirtualAddressor>>,
 }
@@ -22,7 +24,7 @@ impl VirtualAddressorCell {
     pub fn init(&self, page: Page) {
         let virtual_addressor = unsafe { VirtualAddressor::new(page) };
         if let Err(_) = self.addressor.lock().set(virtual_addressor) {
-            panic!("virtual addressor has already been confgiured");
+            panic!(VADDR_NOT_CFG);
         }
     }
 
@@ -30,7 +32,7 @@ impl VirtualAddressorCell {
         self.addressor
             .lock()
             .get_mut()
-            .expect("virtual addressor has not been configured")
+            .expect(VADDR_NOT_CFG)
             .map(page, frame);
     }
 
@@ -38,7 +40,7 @@ impl VirtualAddressorCell {
         self.addressor
             .lock()
             .get_mut()
-            .expect("virtual addressor has not been configured")
+            .expect(VADDR_NOT_CFG)
             .unmap(page);
     }
 
@@ -46,7 +48,7 @@ impl VirtualAddressorCell {
         self.addressor
             .lock()
             .get_mut()
-            .expect("virtual addressor has not been configured")
+            .expect(VADDR_NOT_CFG)
             .identity_map(frame);
     }
 
@@ -54,15 +56,23 @@ impl VirtualAddressorCell {
         self.addressor
             .lock()
             .get()
-            .expect("virtual addressor has not been configured")
+            .expect(VADDR_NOT_CFG)
             .is_mapped(virt_addr)
+    }
+
+    pub fn is_mapped_to(&self, page: &Page, frame: &Frame) -> bool {
+        self.addressor
+            .lock()
+            .get()
+            .expect(VADDR_NOT_CFG)
+            .is_mapped_to(page, frame)
     }
 
     pub fn modify_mapped_page(&self, page: Page) {
         self.addressor
             .lock()
             .get_mut()
-            .expect("virtual addressor has not been configured")
+            .expect(VADDR_NOT_CFG)
             .modify_mapped_page(page)
     }
 
@@ -70,7 +80,7 @@ impl VirtualAddressorCell {
         self.addressor
             .lock()
             .get()
-            .expect("virtual addressor has not been configured")
+            .expect(VADDR_NOT_CFG)
             .swap_into()
     }
 }
@@ -191,6 +201,13 @@ impl VirtualAddressor {
     fn is_mapped(&self, virt_addr: VirtAddr) -> bool {
         match self.get_page_entry(&Page::containing_addr(virt_addr)) {
             Some(entry) => entry.is_present(),
+            None => false,
+        }
+    }
+
+    fn is_mapped_to(&self, page: &Page, frame: &Frame) -> bool {
+        match self.get_page_entry(page).and_then(|entry| entry.frame()) {
+            Some(entry_frame) => frame.addr() == entry_frame.addr(),
             None => false,
         }
     }
