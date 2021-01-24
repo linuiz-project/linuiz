@@ -13,6 +13,7 @@ bitflags! {
 pub struct CR3;
 
 impl CR3 {
+    #[inline(always)]
     pub unsafe fn write(frame: &Frame, flags: Option<CR3Flags>) {
         let addr = frame.addr().as_u64();
         let flags = match flags {
@@ -23,6 +24,7 @@ impl CR3 {
         asm!("mov cr3, {}", in(reg) addr | flags, options(nostack));
     }
 
+    #[inline(always)]
     pub fn read() -> (Frame, Option<CR3Flags>) {
         let value: u64;
 

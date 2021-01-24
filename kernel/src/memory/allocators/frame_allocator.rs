@@ -70,7 +70,7 @@ impl<'arr> FrameAllocator<'arr> {
         }
 
         // reserve null frame
-        unsafe { this.reserve_frame(Frame::from_index(0)) };
+        unsafe { this.reserve_frame(&Frame::null()) };
         // reserve system frames
         for descriptor in memory_map
             .iter()
@@ -119,7 +119,7 @@ impl<'arr> FrameAllocator<'arr> {
     }
 
     /* SINGLE OPS */
-    pub unsafe fn free_frame(&mut self, frame: Frame) {
+    pub unsafe fn free_frame(&mut self, frame: &Frame) {
         let index = frame.index() as usize;
 
         if self.bitarray.get_bit(index).expect("failed to free frame") {
@@ -130,7 +130,7 @@ impl<'arr> FrameAllocator<'arr> {
         }
     }
 
-    pub unsafe fn lock_frame(&mut self, frame: Frame) {
+    pub unsafe fn lock_frame(&mut self, frame: &Frame) {
         let index = frame.index() as usize;
 
         if self.bitarray.get_bit(index).expect("failed to lock frame") {
@@ -141,7 +141,7 @@ impl<'arr> FrameAllocator<'arr> {
         }
     }
 
-    pub(crate) unsafe fn reserve_frame(&mut self, frame: Frame) {
+    pub(crate) unsafe fn reserve_frame(&mut self, frame: &Frame) {
         let index = frame.index() as usize;
 
         if !self
@@ -159,19 +159,19 @@ impl<'arr> FrameAllocator<'arr> {
     /* MANY OPS */
     pub unsafe fn free_frames(&mut self, frames: FrameIterator) {
         for frame in frames {
-            self.free_frame(frame);
+            self.free_frame(&frame);
         }
     }
 
     pub unsafe fn lock_frames(&mut self, frames: FrameIterator) {
         for frame in frames {
-            self.lock_frame(frame);
+            self.lock_frame(&frame);
         }
     }
 
     pub(crate) unsafe fn reserve_frames(&mut self, frames: FrameIterator) {
         for frame in frames {
-            self.reserve_frame(frame);
+            self.reserve_frame(&frame);
         }
     }
 

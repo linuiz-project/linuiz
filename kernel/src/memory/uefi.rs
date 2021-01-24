@@ -1,6 +1,5 @@
+use crate::memory::{Frame, FrameIterator, MemoryType};
 use x86_64::{PhysAddr, VirtAddr};
-
-use crate::memory::MemoryType;
 
 bitflags::bitflags! {
     pub struct UEFIMemoryAttribute: u64 {
@@ -34,5 +33,12 @@ impl UEFIMemoryDescriptor {
     pub fn range(&self) -> core::ops::Range<u64> {
         let addr_u64 = self.phys_start.as_u64();
         addr_u64..(addr_u64 + (self.page_count * 0x1000))
+    }
+
+    pub fn frame_iter(&self) -> FrameIterator {
+        FrameIterator::new(
+            Frame::from_addr(self.phys_start),
+            Frame::from_addr(self.phys_start + self.page_count * 0x1000),
+        )
     }
 }

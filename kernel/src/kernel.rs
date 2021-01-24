@@ -9,10 +9,11 @@ extern crate alloc;
 use core::ffi::c_void;
 use efi_boot::BootInfo;
 use gsai::memory::{
-    allocators::{global_memory, init_global_allocator},
+    allocators::{global_memory, global_memory_mut, init_global_allocator},
     paging::VirtualAddressorCell,
-    Frame, UEFIMemoryDescriptor,
+    Frame, Page, UEFIMemoryDescriptor,
 };
+use x86_64::VirtAddr;
 
 extern "C" {
     static _text_start: c_void;
@@ -60,8 +61,8 @@ extern "win64" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor>) -> ! {
     info!("Initializing global memory (physical frame allocator / journal).");
     unsafe { gsai::memory::allocators::init_global_memory(boot_info.memory_map()) };
     init_virtual_addressor(boot_info.memory_map());
-
-    //let vec = alloc::vec![0u8; 1000];
+    info!("Initializing global allocator (`alloc::*` usable after this point).");
+    init_global_allocator(&KERNEL_ADDRESSOR);
 
     info!("Kernel has reached safe shutdown state.");
     unsafe { gsai::instructions::pwm::qemu_shutdown() }
@@ -80,17 +81,15 @@ fn init_structures() {
     gsai::structures::pic::init();
     info!("Successfully initialized PIC.");
 
-    //x86_64::instructions::interrupts::enable();
-    warn!("Interrupts are now enabled!");
+    x86_64::instructions::interrupts::enable();
+    info!("Interrupts are now enabled.");
 }
 
 fn init_virtual_addressor<'balloc>(memory_map: &[gsai::memory::UEFIMemoryDescriptor]) {
-    use gsai::memory::Page;
-    use x86_64::VirtAddr;
-
     debug!("Creating virtual addressor for kernel (starting at 0x0, identity-mapped).");
     KERNEL_ADDRESSOR.init(Page::null());
 
+    debug!("Identity mapping all reserved memory blocks.");
     for frame in memory_map
         .iter()
         .filter(|descriptor| gsai::memory::is_reserved_memory_type(descriptor.ty))
@@ -99,63 +98,109 @@ fn init_virtual_addressor<'balloc>(memory_map: &[gsai::memory::UEFIMemoryDescrip
         KERNEL_ADDRESSOR.identity_map(&frame);
     }
 
-    debug!("Validating all kernel sections are mapped for addressor (using static linker labels).");
-    validate_section_mappings(&KERNEL_ADDRESSOR);
+    debug!("Validating all kernel sections are mapped for addressor (using extern linker labels).");
+    validate_program_segment_mappings(&KERNEL_ADDRESSOR);
 
-    // let physical_mapping_addr = global_memory(|allocator| allocator.physical_mapping_addr());
-    // KERNEL_ADDRESSOR.modify_mapped_page(Page::from_addr(physical_mapping_addr));
+    debug!("Mapping provided bootloader stack as kernel stack.");
+    const STACK_ADDRESS: u64 = 0xA000000000;
 
-    unsafe { KERNEL_ADDRESSOR.swap_into() };
+    // We have to allocate a new stack (and copy the old one).
+    //
+    // To make things fun, there's no pre-defined 'this is a stack'
+    //  descriptor. So, as a work-around, we read `rsp`, and find the
+    //  descriptor which contains it. I believe this is a flawless solution
+    //  that has no possibility of backfiring.
+    let rsp = gsai::registers::RSP::read();
+    // Still, this feels like I'm cheating on a math test
+    let stack_descriptor = memory_map
+        .iter()
+        .find(|descriptor| descriptor.range().contains(&rsp.as_u64()))
+        .expect("failed to find stack memory region");
+    debug!("Identified stack descriptor:\n{:#?}", stack_descriptor);
+    let stack_offset = STACK_ADDRESS - stack_descriptor.phys_start.as_u64();
+    // this allows `.offset(frame.index())` to align to our actual base address, STACK_ADDRESS
+    let base_page_offset = Page::from_addr(VirtAddr::new(stack_offset));
+    for frame in stack_descriptor.frame_iter() {
+        // This is a temporary identity mapping, purely
+        //  so `rsp` isn't invalid after we write the PML4.
+        KERNEL_ADDRESSOR.identity_map(&frame);
+        KERNEL_ADDRESSOR.map(&base_page_offset.offset(frame.index()), &frame);
+        global_memory_mut(|allocator| unsafe { allocator.lock_frame(&frame) });
+    }
 
-    init_global_allocator(&KERNEL_ADDRESSOR);
+    // Since we're using physical offset mapping for our page table modification strategy, the memory needs to be offset identity mapped.
+    let phys_mapping_addr = global_memory(|allocator| allocator.physical_mapping_addr());
+    debug!("Mapping physical memory at offset: {:?}", phys_mapping_addr);
+    KERNEL_ADDRESSOR.modify_mapped_page(Page::from_addr(phys_mapping_addr));
+
+    unsafe {
+        // Swap the PML4 into CR3
+        debug!("Writing kernel addressor's PML4 to the CR3 register.");
+        KERNEL_ADDRESSOR.swap_into();
+        // Adjust `rsp` so it points to our `STACK_ADDRESS` mapping,
+        //  plus its current offset from base.
+        debug!("Modifying RSP to point to new stack mapping.");
+        gsai::registers::RSP::add(stack_offset);
+    }
+
+    // Now unmap the temporary identity mappings, and our
+    //  virtual addressoris fully initialized.
+    for frame in stack_descriptor.frame_iter() {
+        KERNEL_ADDRESSOR.unmap(&Page::from_index(frame.index()));
+    }
 }
 
-pub fn validate_section_mappings(virtual_addressor: &VirtualAddressorCell) {
-    fn validate_section(virtual_addressor: &VirtualAddressorCell, section: core::ops::Range<u64>) {
-        for virt_addr in section
+pub fn validate_program_segment_mappings(virtual_addressor: &VirtualAddressorCell) {
+    fn validate_segment_mapping(
+        virtual_addressor: &VirtualAddressorCell,
+        section: core::ops::Range<u64>,
+    ) {
+        for page in section
             .step_by(0x1000)
-            .map(|addr| x86_64::VirtAddr::new(addr))
+            .map(|addr| gsai::memory::Page::from_addr(x86_64::VirtAddr::new(addr)))
         {
-            if !virtual_addressor.is_mapped(virt_addr) {
+            if !virtual_addressor.is_mapped_to(&page, &Frame::from_index(page.index())) {
                 panic!(
-                    "failed to validate section: addr {:?} not mapped",
-                    virt_addr
+                    "failed to validate section: page {:?} not identity mapped",
+                    page
                 );
             }
         }
     }
 
+    fn _text() -> core::ops::Range<u64> {
+        unsafe { ((&_text_start) as *const c_void as u64)..((&_text_end) as *const c_void as u64) }
+    }
+
+    fn _rodata() -> core::ops::Range<u64> {
+        unsafe {
+            ((&_rodata_start) as *const c_void as u64)..((&_rodata_end) as *const c_void as u64)
+        }
+    }
+
+    fn _data() -> core::ops::Range<u64> {
+        unsafe { ((&_data_start) as *const c_void as u64)..((&_data_end) as *const c_void as u64) }
+    }
+
+    fn _bss() -> core::ops::Range<u64> {
+        unsafe { ((&_bss_start) as *const c_void as u64)..((&_bss_end) as *const c_void as u64) }
+    }
+
     let text_section = _text();
     debug!("Validating .text section ({:?})...", text_section);
-    validate_section(virtual_addressor, text_section);
+    validate_segment_mapping(virtual_addressor, text_section);
 
     let rodata_section = _rodata();
     debug!("Validating .rodata section ({:?})...", rodata_section);
-    validate_section(virtual_addressor, rodata_section);
+    validate_segment_mapping(virtual_addressor, rodata_section);
 
     let data_section = _data();
     debug!("Validating .data section ({:?})...", data_section);
-    validate_section(virtual_addressor, data_section);
+    validate_segment_mapping(virtual_addressor, data_section);
 
     let bss_section = _bss();
     debug!("Validating .bss section ({:?})...", bss_section);
-    validate_section(virtual_addressor, bss_section);
+    validate_segment_mapping(virtual_addressor, bss_section);
 
     debug!("Validated all sections.");
-}
-
-pub fn _text() -> core::ops::Range<u64> {
-    unsafe { ((&_text_start) as *const c_void as u64)..((&_text_end) as *const c_void as u64) }
-}
-
-pub fn _rodata() -> core::ops::Range<u64> {
-    unsafe { ((&_rodata_start) as *const c_void as u64)..((&_rodata_end) as *const c_void as u64) }
-}
-
-pub fn _data() -> core::ops::Range<u64> {
-    unsafe { ((&_data_start) as *const c_void as u64)..((&_data_end) as *const c_void as u64) }
-}
-
-pub fn _bss() -> core::ops::Range<u64> {
-    unsafe { ((&_bss_start) as *const c_void as u64)..((&_bss_end) as *const c_void as u64) }
 }

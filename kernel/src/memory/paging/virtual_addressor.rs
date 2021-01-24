@@ -213,11 +213,6 @@ impl VirtualAddressor {
     }
 
     fn modify_mapped_page(&mut self, page: Page) {
-        debug!(
-            "Modifying mapped offset page: from {:?} to {:?}",
-            self.mapped_page, page
-        );
-
         let total_memory_pages =
             global_memory(|allocator| allocator.total_memory() / 0x1000) as u64;
         for index in 0..total_memory_pages {
@@ -227,12 +222,8 @@ impl VirtualAddressor {
         self.mapped_page = page;
     }
 
+    #[inline(always)]
     unsafe fn swap_into(&self) {
-        info!(
-            "Writing virtual addressor's PML4 to CR3 register: {:?}.",
-            self.pml4_frame
-        );
-
         crate::registers::CR3::write(&self.pml4_frame, None);
     }
 }
