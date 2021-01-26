@@ -11,7 +11,7 @@ pub trait BitValue {
 
 pub struct BitArray<'arr, BV>
 where
-    BV: BitValue + Eq + Sized,
+    BV: BitValue + Eq,
 {
     array: RwLock<&'arr mut [usize]>,
     phantom: PhantomData<BV>,
@@ -20,13 +20,15 @@ where
 impl<'arr, BV: BitValue + Eq> BitArray<'arr, BV> {
     const SECTION_SIZE: usize = core::mem::size_of::<usize>() * 8;
 
-    pub unsafe fn from_ptr(ptr: *mut BV, len: usize) -> Self {
-        let array_len = (len * BV::BIT_WIDTH) / Self::SECTION_SIZE;
-        let array = &mut *core::ptr::slice_from_raw_parts_mut(ptr as *mut usize, array_len);
-        core::ptr::write_bytes(ptr, 0x0, array.len());
+    pub const fn length_hint(element_count: usize) -> usize {
+        (element_count * BV::BIT_WIDTH) / Self::SECTION_SIZE
+    }
+
+    pub fn from_slice(slice: &'arr mut [usize]) -> Self {
+        slice.iter_mut().for_each(|section| *section = 0);
 
         Self {
-            array: RwLock::new(array),
+            array: RwLock::new(slice),
             phantom: PhantomData,
         }
     }

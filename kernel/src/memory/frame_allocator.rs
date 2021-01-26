@@ -76,50 +76,41 @@ impl<'arr> FrameAllocator<'arr> {
         );
 
         // allocate the memory map
-        let mem_pages_count = total_memory / 0x1000;
-        let size_bytes = (mem_pages_count * FrameType::BIT_WIDTH) / 8;
-        let array_pages_count = (efi_boot::align_up(size_bytes, 0x1000) as u64) / 0x1000;
-        debug!("Searching for memory descriptor which meets criteria:\n Pages (Memory): {}\n Bytes (Memory): >= {}\n Pages (Represented): >= {}", array_pages_count, size_bytes, mem_pages_count);
+        let element_count = total_memory / 0x1000;
+        let memory_size = (element_count * FrameType::BIT_WIDTH) / 8;
+        let memory_pages = (efi_boot::align_up(memory_size, 0x1000) as u64) / 0x1000;
+        debug!("Searching for memory descriptor which meets criteria:\n Pages (Memory): {}\n Bytes (Memory): >= {}\n Pages (Represented): >= {}", memory_pages, memory_size, element_count);
         let descriptor = uefi_memory_map
             .iter()
-            .find(|descriptor| descriptor.page_count >= array_pages_count)
+            .find(|descriptor| descriptor.page_count >= memory_pages)
             .expect("failed to find viable memory descriptor for memory map.");
         debug!("Located usable memory descriptor:\n{:#?}", descriptor);
 
         let mut this = Self {
-            memory_map: unsafe {
-                BitArray::from_ptr(descriptor.phys_start.as_u64() as *mut _, mem_pages_count)
-            },
+            memory_map: BitArray::from_slice(unsafe {
+                &mut *core::ptr::slice_from_raw_parts_mut(
+                    descriptor.phys_start.as_u64() as *mut _,
+                    BitArray::<FrameType>::length_hint(element_count),
+                )
+            }),
             memory: RwLock::new(FrameAllocatorMemory::new(total_memory)),
         };
 
-        // reserve frames this page frame allocator exists on
-        debug!(
-            "Reserving frames for this allocator's memory map (total {} frames).",
-            array_pages_count
-        );
         unsafe {
-            let start_addr = descriptor.phys_start;
-            let end_addr = start_addr + (array_pages_count * 0x1000);
-            this.reserve_frames(Frame::range_inclusive(
-                start_addr.as_u64()..end_addr.as_u64(),
-            ));
-        }
-
-        // reserve null frame
-        unsafe { this.reserve_frame(&Frame::null()) };
-        // reserve system frames
-        for descriptor in uefi_memory_map
-            .iter()
-            .filter(|descriptor| is_uefi_reserved_memory_type(descriptor.ty))
-        {
-            trace!("Reserving frames for descriptor:\n{:#?}", descriptor);
-            unsafe {
+            // reserve null frame
+            this.reserve_frame(&Frame::null());
+            // reserve bitarray frames
+            this.reserve_frames(Frame::range_count(descriptor.phys_start, memory_pages));
+            // reserve system & kernel frames
+            for descriptor in uefi_memory_map
+                .iter()
+                .filter(|descriptor| is_uefi_reserved_memory_type(descriptor.ty))
+            {
                 this.reserve_frames(Frame::range_count(
                     descriptor.phys_start,
                     descriptor.page_count,
                 ));
-            };
+            }
         }
 
         info!(
