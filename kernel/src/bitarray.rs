@@ -108,7 +108,7 @@ impl Iterator for BitArrayIterator<'_> {
     type Item = bool;
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.bitarray.bit_count(), Some(self.bitarray.bit_count()))
+        (self.index, Some(self.end))
     }
 
     fn next(&mut self) -> Option<Self::Item> {

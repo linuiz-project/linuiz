@@ -1,5 +1,4 @@
 mod cr3;
-mod rsp;
 
+pub mod stack;
 pub use cr3::*;
-pub use rsp::*;

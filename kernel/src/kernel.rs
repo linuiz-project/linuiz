@@ -9,9 +9,8 @@ extern crate alloc;
 use core::ffi::c_void;
 use efi_boot::BootInfo;
 use gsai::memory::{
-    allocators::{global_memory, global_memory_mut, init_global_allocator},
-    paging::VirtualAddressorCell,
-    Frame, Page, UEFIMemoryDescriptor,
+    global_lock, global_total, init_global_allocator, paging::VirtualAddressorCell, Frame, Page,
+    UEFIMemoryDescriptor,
 };
 use x86_64::VirtAddr;
 
@@ -31,7 +30,7 @@ extern "C" {
 
 #[cfg(debug_assertions)]
 fn get_log_level() -> log::LevelFilter {
-    log::LevelFilter::Debug
+    log::LevelFilter::Trace
 }
 
 #[cfg(not(debug_assertions))]
@@ -59,7 +58,7 @@ extern "win64" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor>) -> ! {
     init_structures();
 
     info!("Initializing global memory (physical frame allocator / journal).");
-    unsafe { gsai::memory::allocators::init_global_memory(boot_info.memory_map()) };
+    unsafe { gsai::memory::init_global_memory(boot_info.memory_map()) };
     init_virtual_addressor(boot_info.memory_map());
     info!("Initializing global allocator (`alloc::*` usable after this point).");
     init_global_allocator(&KERNEL_ADDRESSOR);
@@ -92,7 +91,7 @@ fn init_virtual_addressor<'balloc>(memory_map: &[gsai::memory::UEFIMemoryDescrip
     debug!("Identity mapping all reserved memory blocks.");
     for frame in memory_map
         .iter()
-        .filter(|descriptor| gsai::memory::is_reserved_memory_type(descriptor.ty))
+        .filter(|descriptor| gsai::memory::is_uefi_reserved_memory_type(descriptor.ty))
         .flat_map(|descriptor| Frame::range_count(descriptor.phys_start, descriptor.page_count))
     {
         KERNEL_ADDRESSOR.identity_map(&frame);
@@ -110,11 +109,11 @@ fn init_virtual_addressor<'balloc>(memory_map: &[gsai::memory::UEFIMemoryDescrip
     //  descriptor. So, as a work-around, we read `rsp`, and find the
     //  descriptor which contains it. I believe this is a flawless solution
     //  that has no possibility of backfiring.
-    let rsp = gsai::registers::RSP::read();
+    let rsp_addr = gsai::registers::stack::RSP::read();
     // Still, this feels like I'm cheating on a math test
     let stack_descriptor = memory_map
         .iter()
-        .find(|descriptor| descriptor.range().contains(&rsp.as_u64()))
+        .find(|descriptor| descriptor.range().contains(&rsp_addr.as_u64()))
         .expect("failed to find stack memory region");
     debug!("Identified stack descriptor:\n{:#?}", stack_descriptor);
     let stack_offset = STACK_ADDRESS - stack_descriptor.phys_start.as_u64();
@@ -122,14 +121,14 @@ fn init_virtual_addressor<'balloc>(memory_map: &[gsai::memory::UEFIMemoryDescrip
     let base_page_offset = Page::from_addr(VirtAddr::new(stack_offset));
     for frame in stack_descriptor.frame_iter() {
         // This is a temporary identity mapping, purely
-        //  so `rsp` isn't invalid after we write the PML4.
+        //  so `rsp` isn't invalid after we swap the PML4.
         KERNEL_ADDRESSOR.identity_map(&frame);
         KERNEL_ADDRESSOR.map(&base_page_offset.offset(frame.index()), &frame);
-        global_memory_mut(|allocator| unsafe { allocator.lock_frame(&frame) });
+        unsafe { global_lock(&frame) };
     }
 
     // Since we're using physical offset mapping for our page table modification strategy, the memory needs to be offset identity mapped.
-    let phys_mapping_addr = global_memory(|allocator| allocator.physical_mapping_addr());
+    let phys_mapping_addr = VirtAddr::new((0x1000000000000 - global_total()) as u64);
     debug!("Mapping physical memory at offset: {:?}", phys_mapping_addr);
     KERNEL_ADDRESSOR.modify_mapped_page(Page::from_addr(phys_mapping_addr));
 
@@ -140,7 +139,7 @@ fn init_virtual_addressor<'balloc>(memory_map: &[gsai::memory::UEFIMemoryDescrip
         // Adjust `rsp` so it points to our `STACK_ADDRESS` mapping,
         //  plus its current offset from base.
         debug!("Modifying RSP to point to new stack mapping.");
-        gsai::registers::RSP::add(stack_offset);
+        gsai::registers::stack::RSP::add(stack_offset);
     }
 
     // Now unmap the temporary identity mappings, and our

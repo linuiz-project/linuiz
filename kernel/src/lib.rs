@@ -3,12 +3,14 @@
 #![feature(const_fn)]
 #![feature(once_cell)]
 #![feature(abi_efiapi)]
+#![feature(const_panic)]
 #![feature(const_mut_refs)]
 #![feature(abi_x86_interrupt)]
 #![feature(alloc_error_handler)]
 
 #[macro_use]
 extern crate log;
+extern crate alloc;
 
 mod bitarray;
 pub mod drivers;

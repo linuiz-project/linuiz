@@ -1,5 +1,28 @@
-use crate::memory::{Frame, FrameIterator, MemoryType};
+use crate::memory::{Frame, FrameIterator};
 use x86_64::{PhysAddr, VirtAddr};
+
+#[repr(u32)]
+#[allow(non_camel_case_types)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UEFIMemoryType {
+    RESERVED,
+    LOADER_CODE,
+    LOADER_DATA,
+    BOOT_SERVICES_CODE,
+    BOOT_SERVICES_DATA,
+    RUNTIME_SERVICES_CODE,
+    RUNTIME_SERVICES_DATA,
+    CONVENTIONAL,
+    UNUSABLE,
+    ACPI_RECLAIM,
+    ACPI_NON_VOLATILE,
+    MMIO,
+    MMIO_PORT_SPACE,
+    PAL_CODE,
+    PERSISTENT_MEMORY,
+    KERNEL_CODE = 0xFFFFFF00,
+    KERNEL_DATA = 0xFFFFFF01,
+}
 
 bitflags::bitflags! {
     pub struct UEFIMemoryAttribute: u64 {
@@ -21,7 +44,7 @@ bitflags::bitflags! {
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct UEFIMemoryDescriptor {
-    pub ty: MemoryType,
+    pub ty: UEFIMemoryType,
     padding: u32,
     pub phys_start: PhysAddr,
     pub virt_start: VirtAddr,
@@ -40,5 +63,16 @@ impl UEFIMemoryDescriptor {
             Frame::from_addr(self.phys_start),
             Frame::from_addr(self.phys_start + self.page_count * 0x1000),
         )
+    }
+}
+
+pub const fn is_uefi_reserved_memory_type(mem_type: UEFIMemoryType) -> bool {
+    match mem_type {
+        UEFIMemoryType::BOOT_SERVICES_CODE
+        | UEFIMemoryType::BOOT_SERVICES_DATA
+        | UEFIMemoryType::LOADER_CODE
+        | UEFIMemoryType::LOADER_DATA
+        | UEFIMemoryType::CONVENTIONAL => false,
+        _ => true,
     }
 }

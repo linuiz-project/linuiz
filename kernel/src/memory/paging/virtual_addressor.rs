@@ -1,7 +1,7 @@
 use core::lazy::OnceCell;
 
 use crate::memory::{
-    allocators::{global_memory, global_memory_mut},
+    global_lock_next, global_total,
     paging::{Level4, PageAttributes, PageTable, PageTableEntry},
     Frame, Page,
 };
@@ -106,11 +106,8 @@ impl VirtualAddressor {
             // we don't know where physical memory is mapped at this point,
             // so rely on what the caller specifies for us
             mapped_page,
-            pml4_frame: global_memory_mut(|allocator| {
-                allocator
-                    .lock_next()
-                    .expect("failed to lock frame for PML4 of VirtualAddressor")
-            }),
+            pml4_frame: global_lock_next()
+                .expect("failed to lock frame for PML4 of VirtualAddressor"),
         }
     }
 
@@ -213,8 +210,7 @@ impl VirtualAddressor {
     }
 
     fn modify_mapped_page(&mut self, page: Page) {
-        let total_memory_pages =
-            global_memory(|allocator| allocator.total_memory() / 0x1000) as u64;
+        let total_memory_pages = (global_total() / 0x1000) as u64;
         for index in 0..total_memory_pages {
             self.map(&page.offset(index), &Frame::from_index(index));
         }

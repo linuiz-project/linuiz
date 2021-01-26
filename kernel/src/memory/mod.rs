@@ -1,54 +1,36 @@
+mod bump_allocator;
 mod frame;
+mod frame_allocator;
+mod frame_map;
+mod global_memory;
 mod page;
 mod uefi;
 
-pub mod allocators;
 pub mod paging;
+pub use bump_allocator::*;
 pub use frame::*;
+pub use frame_allocator::*;
+pub use frame_map::*;
+pub use global_memory::*;
 pub use page::*;
 pub use uefi::*;
 
 pub const KIBIBYTE: usize = 0x400; // 1024
 pub const MIBIBYTE: usize = KIBIBYTE * KIBIBYTE;
 
-#[repr(u32)]
-#[allow(non_camel_case_types)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MemoryType {
-    RESERVED,
-    LOADER_CODE,
-    LOADER_DATA,
-    BOOT_SERVICES_CODE,
-    BOOT_SERVICES_DATA,
-    RUNTIME_SERVICES_CODE,
-    RUNTIME_SERVICES_DATA,
-    CONVENTIONAL,
-    UNUSABLE,
-    ACPI_RECLAIM,
-    ACPI_NON_VOLATILE,
-    MMIO,
-    MMIO_PORT_SPACE,
-    PAL_CODE,
-    PERSISTENT_MEMORY,
-    KERNEL_CODE = 0xFFFFFF00,
-    KERNEL_DATA = 0xFFFFFF01,
-}
-
-pub fn is_reserved_memory_type(mem_type: MemoryType) -> bool {
-    match mem_type {
-        MemoryType::BOOT_SERVICES_CODE
-        | MemoryType::BOOT_SERVICES_DATA
-        | MemoryType::LOADER_CODE
-        | MemoryType::LOADER_DATA
-        | MemoryType::CONVENTIONAL => false,
-        _ => true,
-    }
-}
-
-pub fn to_kibibytes(value: usize) -> usize {
+pub const fn to_kibibytes(value: usize) -> usize {
     value / KIBIBYTE
 }
 
-pub fn to_mibibytes(value: usize) -> usize {
+pub const fn to_mibibytes(value: usize) -> usize {
     value / MIBIBYTE
+}
+
+#[global_allocator]
+static GLOBAL_ALLOCATOR: BumpAllocaterCell<'static> = BumpAllocaterCell::empty();
+
+pub fn init_global_allocator(
+    virtual_addressor: &'static crate::memory::paging::VirtualAddressorCell,
+) {
+    GLOBAL_ALLOCATOR.init(virtual_addressor);
 }

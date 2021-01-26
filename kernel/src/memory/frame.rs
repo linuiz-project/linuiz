@@ -31,8 +31,8 @@ impl Frame {
         self.0
     }
 
-    pub fn addr(&self) -> PhysAddr {
-        PhysAddr::new(self.0 * 0x1000)
+    pub const fn addr(&self) -> PhysAddr {
+        PhysAddr::new_truncate(self.0 * 0x1000)
     }
 
     pub unsafe fn clear(&mut self) {
@@ -49,7 +49,7 @@ impl Frame {
     pub fn range_count(start_addr: PhysAddr, count: u64) -> FrameIterator {
         FrameIterator::new(
             Frame::from_addr(start_addr),
-            Frame::from_addr(start_addr + (count * 0x1000)),
+            Frame::from_addr(start_addr + ((count - 1) * 0x1000)),
         )
     }
 }

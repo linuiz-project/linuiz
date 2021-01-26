@@ -1,7 +1,9 @@
-use crate::memory::{allocators::global_memory_mut, paging::VirtualAddressorCell, Page};
+use crate::memory::{paging::VirtualAddressorCell, Page};
 use core::lazy::OnceCell;
 use spin::Mutex;
 use x86_64::VirtAddr;
+
+use super::global_lock_next;
 
 pub struct BumpAllocaterCell<'vaddr> {
     allocator: Mutex<OnceCell<BumpAllocator<'vaddr>>>,
@@ -44,9 +46,7 @@ impl<'vaddr> BumpAllocator<'vaddr> {
         for page in Page::range_inclusive(start_u64..end_u64) {
             self.virtual_addressor.map(
                 &page,
-                &global_memory_mut(|allocator| {
-                    allocator.lock_next().expect("failed to allocate frames")
-                }),
+                &global_lock_next().expect("failed to allocate frames"),
             );
         }
 

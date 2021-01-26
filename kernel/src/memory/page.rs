@@ -27,7 +27,7 @@ impl Page {
         }
     }
 
-    pub fn containing_addr(virt_addr: VirtAddr) -> Self {
+    pub const fn containing_addr(virt_addr: VirtAddr) -> Self {
         Self {
             0: virt_addr.as_u64() / 0x1000,
         }
@@ -37,8 +37,8 @@ impl Page {
         self.0
     }
 
-    pub fn addr(&self) -> VirtAddr {
-        VirtAddr::new(self.0 * 0x1000)
+    pub const fn addr(&self) -> VirtAddr {
+        VirtAddr::new_truncate(self.0 * 0x1000)
     }
 
     pub unsafe fn clear(&mut self) {
