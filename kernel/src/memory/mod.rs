@@ -1,7 +1,7 @@
+mod block_allocator;
 mod bump_allocator;
 mod frame;
 mod frame_allocator;
-mod frame_map;
 mod global_memory;
 mod page;
 mod uefi;
@@ -10,7 +10,6 @@ pub mod paging;
 pub use bump_allocator::*;
 pub use frame::*;
 pub use frame_allocator::*;
-pub use frame_map::*;
 pub use global_memory::*;
 pub use page::*;
 pub use uefi::*;

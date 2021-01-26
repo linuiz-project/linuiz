@@ -1,126 +1,106 @@
-use core::ops::Range;
+use core::{marker::PhantomData, ops::Range};
+use spin::RwLock;
 
-pub const SECTION_BITS_COUNT: usize = core::mem::size_of::<usize>() * 8;
+pub trait BitValue {
+    const BIT_WIDTH: usize;
+    const MASK: usize;
 
-struct Section {
-    pub(self) index: usize,
-    pub(self) bit_offset: usize,
-    pub(self) value: usize,
+    fn as_usize(&self) -> usize;
+    fn from_usize(value: usize) -> Self;
 }
 
-pub struct BitArray<'arr> {
-    array: &'arr mut [usize],
+pub struct BitArray<'arr, BV>
+where
+    BV: BitValue + Eq + Sized,
+{
+    array: RwLock<&'arr mut [usize]>,
+    phantom: PhantomData<BV>,
 }
 
-impl BitArray<'_> {
-    pub const fn empty() -> Self {
+impl<'arr, BV: BitValue + Eq> BitArray<'arr, BV> {
+    const SECTION_SIZE: usize = core::mem::size_of::<usize>() * 8;
+
+    pub unsafe fn from_ptr(ptr: *mut BV, len: usize) -> Self {
+        let array_len = (len * BV::BIT_WIDTH) / Self::SECTION_SIZE;
+        let array = &mut *core::ptr::slice_from_raw_parts_mut(ptr as *mut usize, array_len);
+        core::ptr::write_bytes(ptr, 0x0, array.len());
+
         Self {
-            array: &mut [0usize; 0],
+            array: RwLock::new(array),
+            phantom: PhantomData,
         }
     }
 
-    pub fn from_ptr(ptr: *mut usize, bits: usize) -> Self {
-        let array = unsafe {
-            &mut *core::ptr::slice_from_raw_parts_mut(ptr, (bits / SECTION_BITS_COUNT) + 1)
-        };
-        // clear the array
-        for index in 0..array.len() {
-            array[index] = 0;
-        }
-
-        Self { array }
+    pub fn len(&self) -> usize {
+        self.array.read().len() * (Self::SECTION_SIZE * BV::BIT_WIDTH)
     }
 
-    pub fn set_bit(&mut self, index: usize, set: bool) -> Option<bool> {
-        if index < self.bit_count() {
-            let section = self.get_section(index);
-            let section_bits_nonset = section.value & !(1 << section.bit_offset);
-            let section_bit_set = (set as usize) << section.bit_offset;
+    pub fn get(&self, index: usize) -> BV {
+        if index < self.len() {
+            let element_index = index * BV::BIT_WIDTH;
+            let section_index = element_index / Self::SECTION_SIZE;
+            let section_offset = element_index - (section_index * Self::SECTION_SIZE);
+            let section_value = self.array.read()[section_index];
 
-            self.array[section.index] = section_bits_nonset | section_bit_set;
-            assert!(self.get_bit(index).unwrap() == set);
-            Some(set)
+            BV::from_usize((section_value >> section_offset) & BV::MASK)
         } else {
-            None
+            panic!(
+                "index must be less than the size of the collection !({} < {})",
+                index,
+                self.len()
+            );
         }
     }
 
-    pub fn get_bit(&self, index: usize) -> Option<bool> {
-        if index < self.bit_count() {
-            let section = self.get_section(index);
-            let section_bit = section.value & (1 << section.bit_offset);
+    pub fn set(&self, index: usize, mem_type: BV) {
+        if index < self.len() {
+            let element_index = index * BV::BIT_WIDTH;
+            let section_index = element_index / Self::SECTION_SIZE;
+            let section_offset = element_index - (section_index * Self::SECTION_SIZE);
 
-            Some(section_bit != 0)
+            let sections_read = self.array.upgradeable_read();
+            let section_value = sections_read[section_index];
+            let section_bits_set = mem_type.as_usize() << section_offset;
+            let section_bits_nonset = section_value & !(BV::MASK << section_offset);
+
+            let mut sections_write = sections_read.upgrade();
+            sections_write[section_index] = section_bits_set | section_bits_nonset;
         } else {
-            None
+            panic!(
+                "index must be less than the size of the collection !({} < {})",
+                index,
+                self.len()
+            );
         }
     }
 
-    pub fn get_bits(&self, range: Range<usize>) -> BitArrayIterator {
-        if range.end > self.bit_count() {
-            panic!("range exceeds collection bounds");
-        }
+    pub fn set_eq(&self, index: usize, mem_type: BV, eq_type: BV) -> bool {
+        if index < self.len() {
+            let element_index = index * BV::BIT_WIDTH;
+            let section_index = element_index / Self::SECTION_SIZE;
+            let section_offset = element_index - (section_index * Self::SECTION_SIZE);
 
-        BitArrayIterator {
-            bitarray: self,
-            index: range.start,
-            end: range.end,
-        }
-    }
+            let sections_read = self.array.upgradeable_read();
+            let section_value = sections_read[section_index];
+            let mem_type_actual = BV::from_usize((section_value >> section_offset) & BV::MASK);
 
-    #[inline(always)]
-    fn get_section(&self, index: usize) -> Section {
-        let section_index = index / SECTION_BITS_COUNT;
-        let section_offset = index - (section_index * SECTION_BITS_COUNT);
-        let section_value = self.array[section_index];
-
-        Section {
-            index: section_index,
-            bit_offset: section_offset,
-            value: section_value,
-        }
-    }
-
-    pub fn bit_count(&self) -> usize {
-        self.array.len() * SECTION_BITS_COUNT
-    }
-
-    pub fn byte_count(&self) -> usize {
-        self.array.len() * core::mem::size_of::<usize>()
-    }
-
-    pub fn iter(&self) -> BitArrayIterator {
-        BitArrayIterator {
-            bitarray: self,
-            index: 0,
-            end: self.bit_count(),
-        }
-    }
-}
-
-pub struct BitArrayIterator<'arr> {
-    bitarray: &'arr BitArray<'arr>,
-    index: usize,
-    end: usize,
-}
-
-impl Iterator for BitArrayIterator<'_> {
-    type Item = bool;
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.index, Some(self.end))
-    }
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index < self.end {
-            if let Some(item) = self.bitarray.get_bit(self.index) {
-                self.index += 1;
-                return Some(item);
+            if mem_type_actual != eq_type {
+                return false;
             }
+
+            let section_bits_set = mem_type.as_usize() << section_offset;
+            let section_bits_nonset = section_value & !(BV::MASK << section_offset);
+
+            let mut sections_write = sections_read.upgrade();
+            sections_write[section_index] = section_bits_set | section_bits_nonset;
+        } else {
+            panic!(
+                "index must be less than the size of the collection !({} < {})",
+                index,
+                self.len()
+            );
         }
 
-        None
+        true
     }
 }
-
-impl ExactSizeIterator for BitArrayIterator<'_> {}

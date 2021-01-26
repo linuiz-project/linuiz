@@ -1,5 +1,42 @@
-use crate::memory::{is_uefi_reserved_memory_type, Frame, FrameIterator, FrameMap, FrameType};
+use crate::{
+    memory::{is_uefi_reserved_memory_type, Frame, FrameIterator},
+    BitArray, BitValue,
+};
+use core::marker::PhantomData;
 use spin::RwLock;
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrameType {
+    Unallocated = 0,
+    Allocated,
+    Reserved,
+    Corrupted,
+}
+
+impl BitValue for FrameType {
+    const BIT_WIDTH: usize = 0x2;
+    const MASK: usize = (Self::BIT_WIDTH << 1) - 1;
+
+    fn from_usize(value: usize) -> Self {
+        match value {
+            0 => FrameType::Unallocated,
+            1 => FrameType::Allocated,
+            2 => FrameType::Reserved,
+            3 => FrameType::Corrupted,
+            _ => panic!("invalid cast"),
+        }
+    }
+
+    fn as_usize(&self) -> usize {
+        match self {
+            FrameType::Unallocated => 0,
+            FrameType::Allocated => 1,
+            FrameType::Reserved => 2,
+            FrameType::Corrupted => 3,
+        }
+    }
+}
 
 struct FrameAllocatorMemory {
     total_memory: usize,
@@ -20,7 +57,7 @@ impl FrameAllocatorMemory {
 }
 
 pub struct FrameAllocator<'arr> {
-    memory_map: FrameMap<'arr>,
+    memory_map: BitArray<'arr, FrameType>,
     memory: RwLock<FrameAllocatorMemory>,
 }
 
@@ -39,18 +76,19 @@ impl<'arr> FrameAllocator<'arr> {
         );
 
         // allocate the memory map
-        let len = total_memory / 0x1000;
-        let size_bytes = FrameMap::size_hint_bytes(len);
-        let page_count = (efi_boot::align_up(size_bytes, 0x1000) as u64) / 0x1000;
-        debug!("Searching for memory descriptor which meets criteria:\n Pages: >= {}\n Bytes: >= {}\n Length: {}", page_count, size_bytes, len);
+        let mem_pages_count = total_memory / 0x1000;
+        let size_bytes = (mem_pages_count * FrameType::BIT_WIDTH) / 8;
+        let array_pages_count = (efi_boot::align_up(size_bytes, 0x1000) as u64) / 0x1000;
+        debug!("Searching for memory descriptor which meets criteria:\n Pages (Memory): {}\n Bytes (Memory): >= {}\n Pages (Represented): >= {}", array_pages_count, size_bytes, mem_pages_count);
         let descriptor = uefi_memory_map
             .iter()
-            .find(|descriptor| descriptor.page_count >= page_count)
+            .find(|descriptor| descriptor.page_count >= array_pages_count)
             .expect("failed to find viable memory descriptor for memory map.");
+        debug!("Located usable memory descriptor:\n{:#?}", descriptor);
 
         let mut this = Self {
             memory_map: unsafe {
-                FrameMap::from_ptr(descriptor.phys_start.as_u64() as *mut usize, len)
+                BitArray::from_ptr(descriptor.phys_start.as_u64() as *mut _, mem_pages_count)
             },
             memory: RwLock::new(FrameAllocatorMemory::new(total_memory)),
         };
@@ -58,11 +96,11 @@ impl<'arr> FrameAllocator<'arr> {
         // reserve frames this page frame allocator exists on
         debug!(
             "Reserving frames for this allocator's memory map (total {} frames).",
-            page_count
+            array_pages_count
         );
         unsafe {
             let start_addr = descriptor.phys_start;
-            let end_addr = start_addr + (page_count * 0x1000);
+            let end_addr = start_addr + (array_pages_count * 0x1000);
             this.reserve_frames(Frame::range_inclusive(
                 start_addr.as_u64()..end_addr.as_u64(),
             ));

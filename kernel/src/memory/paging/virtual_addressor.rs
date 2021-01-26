@@ -1,10 +1,9 @@
-use core::lazy::OnceCell;
-
 use crate::memory::{
     global_lock_next, global_total,
     paging::{Level4, PageAttributes, PageTable, PageTableEntry},
     Frame, Page,
 };
+use core::lazy::OnceCell;
 use spin::Mutex;
 use x86_64::VirtAddr;
 
@@ -66,6 +65,14 @@ impl VirtualAddressorCell {
             .get()
             .expect(VADDR_NOT_CFG)
             .is_mapped_to(page, frame)
+    }
+
+    pub fn translate_page(&self, page: &Page) -> Option<Frame> {
+        self.addressor
+            .lock()
+            .get()
+            .expect(VADDR_NOT_CFG)
+            .translate_page(page)
     }
 
     pub fn modify_mapped_page(&self, page: Page) {
@@ -207,6 +214,10 @@ impl VirtualAddressor {
             Some(entry_frame) => frame.addr() == entry_frame.addr(),
             None => false,
         }
+    }
+
+    fn translate_page(&self, page: &Page) -> Option<Frame> {
+        self.get_page_entry(page).and_then(|entry| entry.frame())
     }
 
     fn modify_mapped_page(&mut self, page: Page) {

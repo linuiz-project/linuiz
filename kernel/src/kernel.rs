@@ -30,7 +30,7 @@ extern "C" {
 
 #[cfg(debug_assertions)]
 fn get_log_level() -> log::LevelFilter {
-    log::LevelFilter::Trace
+    log::LevelFilter::Debug
 }
 
 #[cfg(not(debug_assertions))]
@@ -101,7 +101,7 @@ fn init_virtual_addressor<'balloc>(memory_map: &[gsai::memory::UEFIMemoryDescrip
     validate_program_segment_mappings(&KERNEL_ADDRESSOR);
 
     debug!("Mapping provided bootloader stack as kernel stack.");
-    const STACK_ADDRESS: u64 = 0xA000000000;
+    const STACK_ADDRESS: u64 = 0xB000000000;
 
     // We have to allocate a new stack (and copy the old one).
     //
