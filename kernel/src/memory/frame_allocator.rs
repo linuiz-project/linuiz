@@ -4,6 +4,8 @@ use crate::{
 };
 use spin::RwLock;
 
+use super::{Page, PageIterator};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameType {
     Unallocated = 0,
@@ -49,7 +51,9 @@ pub struct FrameAllocator<'arr> {
 }
 
 impl<'arr> FrameAllocator<'arr> {
-    pub(super) fn from_mmap(uefi_memory_map: &[crate::memory::UEFIMemoryDescriptor]) -> Self {
+    pub(super) fn from_mmap(
+        uefi_memory_map: &[crate::memory::UEFIMemoryDescriptor],
+    ) -> (FrameIterator, Self) {
         let last_descriptor = uefi_memory_map
             .iter()
             .max_by_key(|descriptor| descriptor.phys_start)
@@ -110,7 +114,10 @@ impl<'arr> FrameAllocator<'arr> {
             crate::memory::to_kibibytes(this.memory.read().reserved_memory)
         );
 
-        this
+        (
+            Frame::range_count(descriptor.phys_start, memory_pages),
+            this,
+        )
     }
 
     pub fn total_memory(&self) -> usize {

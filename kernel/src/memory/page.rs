@@ -51,6 +51,13 @@ impl Page {
         }
     }
 
+    pub fn range_count(start_addr: VirtAddr, count: usize) -> PageIterator {
+        PageIterator {
+            current: Page::from_addr(start_addr),
+            end: Page::from_addr(start_addr + (((count - 1) * 0x1000) as u64)),
+        }
+    }
+
     pub fn offset(&self, count: usize) -> Self {
         Self { 0: self.0 + count }
     }

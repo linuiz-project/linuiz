@@ -59,10 +59,7 @@ impl UEFIMemoryDescriptor {
     }
 
     pub fn frame_iter(&self) -> FrameIterator {
-        FrameIterator::new(
-            Frame::from_addr(self.phys_start),
-            Frame::from_addr(self.phys_start + self.page_count * 0x1000),
-        )
+        Frame::range_count(self.phys_start, self.page_count as usize)
     }
 }
 

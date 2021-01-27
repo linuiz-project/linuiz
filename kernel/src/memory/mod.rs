@@ -6,7 +6,7 @@ mod page;
 mod uefi;
 
 pub mod paging;
-
+pub use block_allocator::*;
 pub use frame::*;
 pub use frame_allocator::*;
 pub use global_memory::*;

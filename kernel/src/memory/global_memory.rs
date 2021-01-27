@@ -1,6 +1,8 @@
 use crate::memory::{Frame, FrameAllocator, FrameIterator};
 use core::lazy::OnceCell;
 
+use super::PageIterator;
+
 struct GlobalMemory<'global> {
     frame_allocator: OnceCell<FrameAllocator<'global>>,
 }
@@ -23,8 +25,13 @@ unsafe impl Sync for GlobalMemory<'_> {}
 
 static GLOBAL_MEMORY: GlobalMemory<'static> = GlobalMemory::new();
 
-pub unsafe fn init_global_memory(memory_map: &[crate::memory::UEFIMemoryDescriptor]) {
-    GLOBAL_MEMORY.set_allocator(FrameAllocator::from_mmap(memory_map));
+pub unsafe fn init_global_memory(
+    memory_map: &[crate::memory::UEFIMemoryDescriptor],
+) -> FrameIterator {
+    let (used_frames_iter, allocator) = FrameAllocator::from_mmap(memory_map);
+    GLOBAL_MEMORY.set_allocator(allocator);
+
+    used_frames_iter
 }
 
 fn global_memory() -> &'static FrameAllocator<'static> {

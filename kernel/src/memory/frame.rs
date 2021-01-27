@@ -35,36 +35,23 @@ impl Frame {
     }
 
     pub fn range_inclusive(range: Range<usize>) -> FrameIterator {
-        FrameIterator::new(
-            Frame::from_addr(PhysAddr::new(range.start as u64)),
-            Frame::from_addr(PhysAddr::new(range.end as u64)),
-        )
+        FrameIterator {
+            current: Frame::from_addr(PhysAddr::new(range.start as u64)),
+            end: Frame::from_addr(PhysAddr::new(range.end as u64)),
+        }
     }
 
     pub fn range_count(start_addr: PhysAddr, count: usize) -> FrameIterator {
-        FrameIterator::new(
-            Frame::from_addr(start_addr),
-            Frame::from_addr(start_addr + (((count - 1) * 0x1000) as u64)),
-        )
+        FrameIterator {
+            current: Frame::from_addr(start_addr),
+            end: Frame::from_addr(start_addr + (((count - 1) * 0x1000) as u64)),
+        }
     }
 }
 
 pub struct FrameIterator {
     current: Frame,
     end: Frame,
-}
-
-impl FrameIterator {
-    pub fn new(start: Frame, end: Frame) -> Self {
-        if start.addr() >= end.addr() {
-            panic!("start address must be less than end address");
-        }
-
-        Self {
-            current: start,
-            end,
-        }
-    }
 }
 
 impl Iterator for FrameIterator {

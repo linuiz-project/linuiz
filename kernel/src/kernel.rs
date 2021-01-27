@@ -9,7 +9,8 @@ extern crate alloc;
 use core::ffi::c_void;
 use efi_boot::BootInfo;
 use gsai::memory::{
-    global_lock, global_total, paging::VirtualAddressorCell, Frame, Page, UEFIMemoryDescriptor,
+    global_lock, global_total, paging::VirtualAddressorCell, BlockAllocator, Frame, Page,
+    UEFIMemoryDescriptor,
 };
 use x86_64::VirtAddr;
 
@@ -57,11 +58,17 @@ extern "win64" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor>) -> ! {
     init_structures();
 
     info!("Initializing global memory (physical frame allocator / journal).");
-    unsafe { gsai::memory::init_global_memory(boot_info.memory_map()) };
+    let used_pages_iter = unsafe { gsai::memory::init_global_memory(boot_info.memory_map()) };
     init_virtual_addressor(boot_info.memory_map());
+
+    for frame in used_pages_iter {
+        KERNEL_ADDRESSOR.identity_map(&frame);
+    }
+
     info!("Initializing global allocator (`alloc::*` usable after this point).");
     // init_global_allocator(&KERNEL_ADDRESSOR);
 
+    let balloc = BlockAllocator::new(Page::from_addr(VirtAddr::new(0x7A12000)), &KERNEL_ADDRESSOR);
     info!("Kernel has reached safe shutdown state.");
     unsafe { gsai::instructions::pwm::qemu_shutdown() }
 }
