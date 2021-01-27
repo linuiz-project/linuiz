@@ -3,53 +3,48 @@ use x86_64::PhysAddr;
 
 #[repr(transparent)]
 #[derive(Clone)]
-pub struct Frame(u64);
+pub struct Frame(usize);
 
 impl Frame {
     pub const fn null() -> Self {
         Self { 0: 0 }
     }
 
-    pub const fn from_index(index: u64) -> Self {
+    pub const fn from_index(index: usize) -> Self {
         Self { 0: index }
     }
 
     pub fn from_addr(phys_addr: PhysAddr) -> Self {
-        let addr_u64 = phys_addr.as_u64();
-        assert_eq!(
-            addr_u64 & !0x000FFFFF_FFFFF000,
-            0,
-            "frame address format is invalid: {:?}",
-            phys_addr
-        );
+        let addr_usize = phys_addr.as_u64() as usize;
+
+        if (addr_usize & !0x000FFFFF_FFFFF000) > 0 {
+            panic!("frame address format is invalid: {:?}", phys_addr)
+        }
+
         Self {
-            0: addr_u64 / 0x1000,
+            0: addr_usize / 0x1000,
         }
     }
 
-    pub const fn index(&self) -> u64 {
+    pub const fn index(&self) -> usize {
         self.0
     }
 
     pub const fn addr(&self) -> PhysAddr {
-        PhysAddr::new_truncate(self.0 * 0x1000)
+        PhysAddr::new_truncate((self.0 as u64) * 0x1000)
     }
 
-    pub unsafe fn clear(&mut self) {
-        core::ptr::write_bytes((self.0 * 0x1000) as *mut u8, 0x0, 0x1000);
-    }
-
-    pub fn range_inclusive(range: Range<u64>) -> FrameIterator {
+    pub fn range_inclusive(range: Range<usize>) -> FrameIterator {
         FrameIterator::new(
-            Frame::from_addr(PhysAddr::new(range.start)),
-            Frame::from_addr(PhysAddr::new(range.end)),
+            Frame::from_addr(PhysAddr::new(range.start as u64)),
+            Frame::from_addr(PhysAddr::new(range.end as u64)),
         )
     }
 
-    pub fn range_count(start_addr: PhysAddr, count: u64) -> FrameIterator {
+    pub fn range_count(start_addr: PhysAddr, count: usize) -> FrameIterator {
         FrameIterator::new(
             Frame::from_addr(start_addr),
-            Frame::from_addr(start_addr + ((count - 1) * 0x1000)),
+            Frame::from_addr(start_addr + (((count - 1) * 0x1000) as u64)),
         )
     }
 }

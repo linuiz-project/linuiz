@@ -9,8 +9,7 @@ extern crate alloc;
 use core::ffi::c_void;
 use efi_boot::BootInfo;
 use gsai::memory::{
-    global_lock, global_total, init_global_allocator, paging::VirtualAddressorCell, Frame, Page,
-    UEFIMemoryDescriptor,
+    global_lock, global_total, paging::VirtualAddressorCell, Frame, Page, UEFIMemoryDescriptor,
 };
 use x86_64::VirtAddr;
 
@@ -61,7 +60,7 @@ extern "win64" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor>) -> ! {
     unsafe { gsai::memory::init_global_memory(boot_info.memory_map()) };
     init_virtual_addressor(boot_info.memory_map());
     info!("Initializing global allocator (`alloc::*` usable after this point).");
-    init_global_allocator(&KERNEL_ADDRESSOR);
+    // init_global_allocator(&KERNEL_ADDRESSOR);
 
     info!("Kernel has reached safe shutdown state.");
     unsafe { gsai::instructions::pwm::qemu_shutdown() }
@@ -92,7 +91,9 @@ fn init_virtual_addressor<'balloc>(memory_map: &[gsai::memory::UEFIMemoryDescrip
     for frame in memory_map
         .iter()
         .filter(|descriptor| gsai::memory::is_uefi_reserved_memory_type(descriptor.ty))
-        .flat_map(|descriptor| Frame::range_count(descriptor.phys_start, descriptor.page_count))
+        .flat_map(|descriptor| {
+            Frame::range_count(descriptor.phys_start, descriptor.page_count as usize)
+        })
     {
         KERNEL_ADDRESSOR.identity_map(&frame);
     }
@@ -101,7 +102,7 @@ fn init_virtual_addressor<'balloc>(memory_map: &[gsai::memory::UEFIMemoryDescrip
     validate_program_segment_mappings(&KERNEL_ADDRESSOR);
 
     debug!("Mapping provided bootloader stack as kernel stack.");
-    const STACK_ADDRESS: u64 = 0xB000000000;
+    const STACK_ADDRESS: usize = gsai::SYSTEM_SLICE_SIZE * 0xB;
 
     // We have to allocate a new stack (and copy the old one).
     //
@@ -116,14 +117,14 @@ fn init_virtual_addressor<'balloc>(memory_map: &[gsai::memory::UEFIMemoryDescrip
         .find(|descriptor| descriptor.range().contains(&rsp_addr.as_u64()))
         .expect("failed to find stack memory region");
     debug!("Identified stack descriptor:\n{:#?}", stack_descriptor);
-    let stack_offset = STACK_ADDRESS - stack_descriptor.phys_start.as_u64();
+    let stack_offset = (STACK_ADDRESS as u64) - stack_descriptor.phys_start.as_u64();
     // this allows `.offset(frame.index())` to align to our actual base address, STACK_ADDRESS
-    let base_page_offset = Page::from_addr(VirtAddr::new(stack_offset));
+    let base_offset_page = Page::from_addr(VirtAddr::new(stack_offset));
     for frame in stack_descriptor.frame_iter() {
         // This is a temporary identity mapping, purely
         //  so `rsp` isn't invalid after we swap the PML4.
         KERNEL_ADDRESSOR.identity_map(&frame);
-        KERNEL_ADDRESSOR.map(&base_page_offset.offset(frame.index()), &frame);
+        KERNEL_ADDRESSOR.map(&base_offset_page.offset(frame.index()), &frame);
         unsafe { global_lock(&frame) };
     }
 

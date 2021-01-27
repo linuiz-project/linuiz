@@ -2,10 +2,8 @@ use crate::{
     memory::{is_uefi_reserved_memory_type, Frame, FrameIterator},
     BitArray, BitValue,
 };
-use core::marker::PhantomData;
 use spin::RwLock;
 
-#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameType {
     Unallocated = 0,
@@ -41,19 +39,8 @@ impl BitValue for FrameType {
 struct FrameAllocatorMemory {
     total_memory: usize,
     free_memory: usize,
-    used_memory: usize,
+    locked_memory: usize,
     reserved_memory: usize,
-}
-
-impl FrameAllocatorMemory {
-    pub const fn new(total_memory: usize) -> Self {
-        Self {
-            total_memory,
-            free_memory: total_memory,
-            used_memory: 0,
-            reserved_memory: 0,
-        }
-    }
 }
 
 pub struct FrameAllocator<'arr> {
@@ -78,11 +65,11 @@ impl<'arr> FrameAllocator<'arr> {
         // allocate the memory map
         let element_count = total_memory / 0x1000;
         let memory_size = (element_count * FrameType::BIT_WIDTH) / 8;
-        let memory_pages = (efi_boot::align_up(memory_size, 0x1000) as u64) / 0x1000;
+        let memory_pages = efi_boot::align_up(memory_size, 0x1000) / 0x1000;
         debug!("Searching for memory descriptor which meets criteria:\n Pages (Memory): {}\n Bytes (Memory): >= {}\n Pages (Represented): >= {}", memory_pages, memory_size, element_count);
         let descriptor = uefi_memory_map
             .iter()
-            .find(|descriptor| descriptor.page_count >= memory_pages)
+            .find(|descriptor| descriptor.page_count >= (memory_pages as u64))
             .expect("failed to find viable memory descriptor for memory map.");
         debug!("Located usable memory descriptor:\n{:#?}", descriptor);
 
@@ -93,7 +80,12 @@ impl<'arr> FrameAllocator<'arr> {
                     BitArray::<FrameType>::length_hint(element_count),
                 )
             }),
-            memory: RwLock::new(FrameAllocatorMemory::new(total_memory)),
+            memory: RwLock::new(FrameAllocatorMemory {
+                total_memory,
+                free_memory: total_memory,
+                locked_memory: 0,
+                reserved_memory: 0,
+            }),
         };
 
         unsafe {
@@ -108,7 +100,7 @@ impl<'arr> FrameAllocator<'arr> {
             {
                 this.reserve_frames(Frame::range_count(
                     descriptor.phys_start,
-                    descriptor.page_count,
+                    descriptor.page_count as usize,
                 ));
             }
         }
@@ -130,7 +122,7 @@ impl<'arr> FrameAllocator<'arr> {
     }
 
     pub fn locked_memory(&self) -> usize {
-        self.memory.read().used_memory
+        self.memory.read().locked_memory
     }
 
     pub fn reserved_memory(&self) -> usize {
@@ -146,7 +138,7 @@ impl<'arr> FrameAllocator<'arr> {
         ) {
             let mut memory = self.memory.write();
             memory.free_memory += 0x1000;
-            memory.used_memory -= 0x1000;
+            memory.locked_memory -= 0x1000;
             trace!("Freed frame {}: {:?}", frame.index(), frame);
         } else {
             panic!("attempted to reserve a non-free frame: {:?}", frame);
@@ -161,7 +153,7 @@ impl<'arr> FrameAllocator<'arr> {
         ) {
             let mut memory = self.memory.write();
             memory.free_memory -= 0x1000;
-            memory.used_memory += 0x1000;
+            memory.locked_memory += 0x1000;
             trace!("Locked frame {}: {:?}", frame.index(), frame);
         } else {
             panic!("attempted to reserve a non-free frame: {:?}", frame);
@@ -207,7 +199,7 @@ impl<'arr> FrameAllocator<'arr> {
                 .memory_map
                 .set_eq(index, FrameType::Allocated, FrameType::Unallocated)
             {
-                let frame = Frame::from_index(index as u64);
+                let frame = Frame::from_index(index);
                 trace!("Locked next frame {}: {:?}", frame.index(), frame);
 
                 return Some(frame);
@@ -240,8 +232,8 @@ impl<'arr> FrameAllocator<'arr> {
                         self.memory_map.set(inner_index, FrameType::Allocated);
                     }
 
-                    let low_addr = (index as u64) * 0x1000;
-                    let high_addr = (high_index as u64) * 0x1000;
+                    let low_addr = index * 0x1000;
+                    let high_addr = high_index * 0x1000;
                     trace!("Many frames allocated from {} to {}", low_addr, high_addr);
                     return Some(Frame::range_inclusive(low_addr..high_addr));
                 }

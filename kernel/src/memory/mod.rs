@@ -1,5 +1,4 @@
 mod block_allocator;
-mod bump_allocator;
 mod frame;
 mod frame_allocator;
 mod global_memory;
@@ -7,7 +6,7 @@ mod page;
 mod uefi;
 
 pub mod paging;
-pub use bump_allocator::*;
+
 pub use frame::*;
 pub use frame_allocator::*;
 pub use global_memory::*;
@@ -25,11 +24,21 @@ pub const fn to_mibibytes(value: usize) -> usize {
     value / MIBIBYTE
 }
 
-#[global_allocator]
-static GLOBAL_ALLOCATOR: BumpAllocaterCell<'static> = BumpAllocaterCell::empty();
+struct NoAllocator;
 
-pub fn init_global_allocator(
-    virtual_addressor: &'static crate::memory::paging::VirtualAddressorCell,
-) {
-    GLOBAL_ALLOCATOR.init(virtual_addressor);
+unsafe impl core::alloc::GlobalAlloc for NoAllocator {
+    unsafe fn alloc(&self, _: core::alloc::Layout) -> *mut u8 {
+        0x0 as *mut u8
+    }
+
+    unsafe fn dealloc(&self, _: *mut u8, __: core::alloc::Layout) {}
 }
+
+#[global_allocator]
+static GLOBAL_ALLOCATOR: NoAllocator = NoAllocator;
+
+// pub fn init_global_allocator(
+//     virtual_addressor: &'static crate::memory::paging::VirtualAddressorCell,
+// ) {
+//     GLOBAL_ALLOCATOR.init(virtual_addressor);
+// }

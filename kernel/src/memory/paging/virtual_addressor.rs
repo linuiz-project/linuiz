@@ -221,7 +221,7 @@ impl VirtualAddressor {
     }
 
     fn modify_mapped_page(&mut self, page: Page) {
-        let total_memory_pages = (global_total() / 0x1000) as u64;
+        let total_memory_pages = global_total() / 0x1000;
         for index in 0..total_memory_pages {
             self.map(&page.offset(index), &Frame::from_index(index));
         }

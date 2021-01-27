@@ -1,4 +1,4 @@
-use core::{marker::PhantomData, ops::Range};
+use core::marker::PhantomData;
 use spin::RwLock;
 
 pub trait BitValue {
