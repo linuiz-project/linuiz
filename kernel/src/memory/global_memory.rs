@@ -1,8 +1,6 @@
 use crate::memory::{Frame, FrameAllocator, FrameIterator};
 use core::lazy::OnceCell;
 
-use super::PageIterator;
-
 struct GlobalMemory<'global> {
     frame_allocator: OnceCell<FrameAllocator<'global>>,
 }
@@ -55,10 +53,6 @@ pub unsafe fn global_reserve(frame: &Frame) {
 
 pub unsafe fn global_lock_next() -> Option<Frame> {
     global_memory().lock_next()
-}
-
-pub unsafe fn global_lock_count(count: usize) -> Option<FrameIterator> {
-    global_memory().lock_next_count(count)
 }
 
 pub fn global_total() -> usize {

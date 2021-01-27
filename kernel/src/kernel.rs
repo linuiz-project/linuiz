@@ -69,6 +69,11 @@ extern "win64" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor>) -> ! {
     // init_global_allocator(&KERNEL_ADDRESSOR);
 
     let balloc = BlockAllocator::new(Page::from_addr(VirtAddr::new(0x7A12000)), &KERNEL_ADDRESSOR);
+
+    for _ in 0..3 {
+        balloc.grow_once();
+    }
+
     info!("Kernel has reached safe shutdown state.");
     unsafe { gsai::instructions::pwm::qemu_shutdown() }
 }

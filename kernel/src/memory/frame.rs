@@ -1,4 +1,3 @@
-use core::ops::Range;
 use x86_64::PhysAddr;
 
 #[repr(transparent)]
@@ -6,14 +5,17 @@ use x86_64::PhysAddr;
 pub struct Frame(usize);
 
 impl Frame {
+    #[inline]
     pub const fn null() -> Self {
         Self { 0: 0 }
     }
 
+    #[inline]
     pub const fn from_index(index: usize) -> Self {
         Self { 0: index }
     }
 
+    #[inline]
     pub fn from_addr(phys_addr: PhysAddr) -> Self {
         let addr_usize = phys_addr.as_u64() as usize;
 
@@ -26,25 +28,20 @@ impl Frame {
         }
     }
 
+    #[inline]
     pub const fn index(&self) -> usize {
         self.0
     }
 
+    #[inline]
     pub const fn addr(&self) -> PhysAddr {
         PhysAddr::new_truncate((self.0 as u64) * 0x1000)
-    }
-
-    pub fn range_inclusive(range: Range<usize>) -> FrameIterator {
-        FrameIterator {
-            current: Frame::from_addr(PhysAddr::new(range.start as u64)),
-            end: Frame::from_addr(PhysAddr::new(range.end as u64)),
-        }
     }
 
     pub fn range_count(start_addr: PhysAddr, count: usize) -> FrameIterator {
         FrameIterator {
             current: Frame::from_addr(start_addr),
-            end: Frame::from_addr(start_addr + (((count - 1) * 0x1000) as u64)),
+            end: Frame::from_addr(start_addr + ((count * 0x1000) as u64)),
         }
     }
 }
@@ -58,7 +55,7 @@ impl Iterator for FrameIterator {
     type Item = Frame;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.current.0 <= self.end.0 {
+        if self.current.0 < self.end.0 {
             let frame = self.current.clone();
             self.current.0 += 1;
             Some(frame)

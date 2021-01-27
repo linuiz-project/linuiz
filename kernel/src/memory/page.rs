@@ -1,4 +1,3 @@
-use core::ops::Range;
 use x86_64::VirtAddr;
 
 #[repr(transparent)]
@@ -6,14 +5,17 @@ use x86_64::VirtAddr;
 pub struct Page(usize);
 
 impl Page {
+    #[inline]
     pub const fn null() -> Self {
         Self { 0: 0 }
     }
 
+    #[inline]
     pub const fn from_index(index: usize) -> Self {
         Self { 0: index }
     }
 
+    #[inline]
     pub const fn from_addr(virt_addr: VirtAddr) -> Self {
         let addr_usize = virt_addr.as_u64() as usize;
 
@@ -26,39 +28,44 @@ impl Page {
         }
     }
 
+    #[inline]
     pub const fn containing_addr(virt_addr: VirtAddr) -> Self {
         Self {
             0: (virt_addr.as_u64() as usize) / 0x1000,
         }
     }
 
+    #[inline]
     pub const fn index(&self) -> usize {
         self.0
     }
 
+    #[inline]
     pub const fn addr(&self) -> VirtAddr {
         VirtAddr::new_truncate((self.0 as u64) * 0x1000)
+    }
+
+    #[inline]
+    pub const fn iter_count(&self, count: usize) -> PageIterator {
+        PageIterator {
+            current: Page::from_index(self.0),
+            end: self.offset(count),
+        }
     }
 
     pub unsafe fn clear(&mut self) {
         core::ptr::write_bytes(self.addr().as_mut_ptr::<u8>(), 0x0, 0x1000);
     }
 
-    pub fn range_inclusive(range: Range<usize>) -> PageIterator {
-        PageIterator {
-            current: Page::from_addr(VirtAddr::new(range.start as u64)),
-            end: Page::from_addr(VirtAddr::new(range.end as u64)),
-        }
-    }
-
     pub fn range_count(start_addr: VirtAddr, count: usize) -> PageIterator {
         PageIterator {
             current: Page::from_addr(start_addr),
-            end: Page::from_addr(start_addr + (((count - 1) * 0x1000) as u64)),
+            end: Page::from_addr(start_addr + ((count * 0x1000) as u64)),
         }
     }
 
-    pub fn offset(&self, count: usize) -> Self {
+    #[inline]
+    pub const fn offset(&self, count: usize) -> Self {
         Self { 0: self.0 + count }
     }
 }
@@ -72,7 +79,7 @@ impl Iterator for PageIterator {
     type Item = Page;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.current.0 <= self.end.0 {
+        if self.current.0 < self.end.0 {
             let page = self.current.clone();
             self.current.0 += 1;
             Some(page)

@@ -4,8 +4,6 @@ use crate::{
 };
 use spin::RwLock;
 
-use super::{Page, PageIterator};
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameType {
     Unallocated = 0,
@@ -210,40 +208,6 @@ impl<'arr> FrameAllocator<'arr> {
                 trace!("Locked next frame {}: {:?}", frame.index(), frame);
 
                 return Some(frame);
-            }
-        }
-
-        None
-    }
-
-    // todo get rid of this
-    pub fn lock_next_count(&self, count: usize) -> Option<FrameIterator> {
-        for mut index in 0..self.memory_map.len() {
-            if self.memory_map.get(index) != FrameType::Unallocated {
-                continue;
-            } else {
-                let mut all_unallocated = true;
-                let high_bound = core::cmp::min(index + count, self.memory_map.len());
-
-                for inner_index in (index + 1)..high_bound {
-                    if self.memory_map.get(inner_index) != FrameType::Unallocated {
-                        all_unallocated = false;
-                        index = inner_index + 1;
-                        break;
-                    }
-                }
-
-                if all_unallocated && index >= (index + count) {
-                    let high_index = index + count;
-                    for inner_index in index..high_index {
-                        self.memory_map.set(inner_index, FrameType::Allocated);
-                    }
-
-                    let low_addr = index * 0x1000;
-                    let high_addr = high_index * 0x1000;
-                    trace!("Many frames allocated from {} to {}", low_addr, high_addr);
-                    return Some(Frame::range_inclusive(low_addr..high_addr));
-                }
             }
         }
 
