@@ -50,8 +50,6 @@ impl BlockAllocator<'_> {
     }
 
     fn ralloc(&self, size: usize) -> *mut u8 {
-        debug!("Attempting to allocate a section of {} bytes.", size);
-
         let size_in_blocks = efi_boot::align_up(size, Self::BLOCK_SIZE) / Self::BLOCK_SIZE;
 
         while size_in_blocks >= self.blocks_count() {
@@ -81,7 +79,7 @@ impl BlockAllocator<'_> {
 
         if current_run == size_in_blocks {
             let start_block_index = block_index - current_run;
-            debug!(
+            trace!(
                 "Allocating section: blocks {}..{}",
                 start_block_index,
                 start_block_index + size_in_blocks
@@ -104,7 +102,7 @@ impl BlockAllocator<'_> {
     }
 
     pub fn grow_once(&self) {
-        debug!(
+        trace!(
             "Allocator map too small: {} blocks; growing by one page.",
             self.blocks_count()
         );
