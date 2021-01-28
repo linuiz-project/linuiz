@@ -21,7 +21,10 @@ impl VirtualAddressorCell {
     }
 
     pub fn init(&self, page: Page) {
-        let virtual_addressor = unsafe { VirtualAddressor::new(page) };
+        self.set(unsafe { VirtualAddressor::new(page) });
+    }
+
+    pub fn set(&self, virtual_addressor: VirtualAddressor) {
         if let Err(_) = self.addressor.lock().set(virtual_addressor) {
             panic!(VADDR_NOT_CFG);
         }
@@ -92,7 +95,7 @@ impl VirtualAddressorCell {
     }
 }
 
-struct VirtualAddressor {
+pub struct VirtualAddressor {
     mapped_page: Page,
     pml4_frame: Frame,
 }
@@ -177,7 +180,7 @@ impl VirtualAddressor {
         }
     }
 
-    fn map(&mut self, page: &Page, frame: &Frame) {
+    pub fn map(&mut self, page: &Page, frame: &Frame) {
         let entry = self.get_page_entry_create(page);
         if entry.is_present() {
             crate::instructions::tlb::invalidate(page);
@@ -187,7 +190,7 @@ impl VirtualAddressor {
         trace!("Mapped {:?}: {:?}", page, entry);
     }
 
-    fn unmap(&mut self, page: &Page) {
+    pub fn unmap(&mut self, page: &Page) {
         let entry = self.get_page_entry_create(page);
         entry.set_nonpresent();
         crate::instructions::tlb::invalidate(page);
@@ -195,32 +198,32 @@ impl VirtualAddressor {
         trace!("Unmapped {:?}: {:?}", page, entry);
     }
 
-    fn identity_map(&mut self, frame: &Frame) {
+    pub fn identity_map(&mut self, frame: &Frame) {
         self.map(
             &Page::from_addr(VirtAddr::new(frame.addr().as_u64())),
             frame,
         );
     }
 
-    fn is_mapped(&self, virt_addr: VirtAddr) -> bool {
+    pub fn is_mapped(&self, virt_addr: VirtAddr) -> bool {
         match self.get_page_entry(&Page::containing_addr(virt_addr)) {
             Some(entry) => entry.is_present(),
             None => false,
         }
     }
 
-    fn is_mapped_to(&self, page: &Page, frame: &Frame) -> bool {
+    pub fn is_mapped_to(&self, page: &Page, frame: &Frame) -> bool {
         match self.get_page_entry(page).and_then(|entry| entry.frame()) {
             Some(entry_frame) => frame.addr() == entry_frame.addr(),
             None => false,
         }
     }
 
-    fn translate_page(&self, page: &Page) -> Option<Frame> {
+    pub fn translate_page(&self, page: &Page) -> Option<Frame> {
         self.get_page_entry(page).and_then(|entry| entry.frame())
     }
 
-    fn modify_mapped_page(&mut self, page: Page) {
+    pub fn modify_mapped_page(&mut self, page: Page) {
         let total_memory_pages = global_total() / 0x1000;
         for index in 0..total_memory_pages {
             self.map(&page.offset(index), &Frame::from_index(index));
@@ -230,7 +233,7 @@ impl VirtualAddressor {
     }
 
     #[inline(always)]
-    unsafe fn swap_into(&self) {
+    pub unsafe fn swap_into(&self) {
         crate::registers::CR3::write(&self.pml4_frame, None);
     }
 }

@@ -9,8 +9,7 @@ extern crate alloc;
 use core::ffi::c_void;
 use efi_boot::BootInfo;
 use gsai::memory::{
-    global_lock, global_total, paging::VirtualAddressorCell, BlockAllocator, Frame, Page,
-    UEFIMemoryDescriptor,
+    global_lock, global_total, paging::VirtualAddressor, Frame, Page, UEFIMemoryDescriptor,
 };
 use x86_64::VirtAddr;
 
@@ -38,8 +37,6 @@ fn get_log_level() -> log::LevelFilter {
     log::LevelFilter::Info
 }
 
-static KERNEL_ADDRESSOR: VirtualAddressorCell = VirtualAddressorCell::empty();
-
 #[export_name = "_start"]
 extern "win64" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor>) -> ! {
     match gsai::logging::init_logger(gsai::logging::LoggingModes::SERIAL, get_log_level()) {
@@ -58,24 +55,15 @@ extern "win64" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor>) -> ! {
     init_structures();
 
     info!("Initializing global memory (physical frame allocator / journal).");
-    let used_pages_iter = unsafe { gsai::memory::init_global_memory(boot_info.memory_map()) };
-    init_virtual_addressor(boot_info.memory_map());
+    let frame_map_frames = unsafe { gsai::memory::init_global_memory(boot_info.memory_map()) };
+    let mut global_addressor = init_global_addressor(boot_info.memory_map());
 
-    for frame in used_pages_iter {
-        KERNEL_ADDRESSOR.identity_map(&frame);
+    for frame in frame_map_frames {
+        global_addressor.identity_map(&frame);
     }
 
-    info!("Initializing global allocator (`alloc::*` usable after this point).");
-    // init_global_allocator(&KERNEL_ADDRESSOR);
-
-    let balloc = BlockAllocator::new(Page::from_addr(VirtAddr::new(0x7A12000)), &KERNEL_ADDRESSOR);
-
-    for _ in 0..3 {
-        balloc.grow_once();
-    }
-
-    balloc.alloc(4097);
-    balloc.alloc(8190003);
+    debug!("Setting global addressor (`alloc::*` will be usable after this point).");
+    unsafe { gsai::memory::set_global_addressor(global_addressor) };
 
     info!("Kernel has reached safe shutdown state.");
     unsafe { gsai::instructions::pwm::qemu_shutdown() }
@@ -98,9 +86,10 @@ fn init_structures() {
     info!("Interrupts are now enabled.");
 }
 
-fn init_virtual_addressor<'balloc>(memory_map: &[gsai::memory::UEFIMemoryDescriptor]) {
-    debug!("Creating virtual addressor for kernel (starting at 0x0, identity-mapped).");
-    KERNEL_ADDRESSOR.init(Page::null());
+fn init_global_addressor<'balloc>(
+    memory_map: &[gsai::memory::UEFIMemoryDescriptor],
+) -> VirtualAddressor {
+    let mut global_addressor = unsafe { VirtualAddressor::new(Page::null()) };
 
     debug!("Identity mapping all reserved memory blocks.");
     for frame in memory_map
@@ -110,11 +99,11 @@ fn init_virtual_addressor<'balloc>(memory_map: &[gsai::memory::UEFIMemoryDescrip
             Frame::range_count(descriptor.phys_start, descriptor.page_count as usize)
         })
     {
-        KERNEL_ADDRESSOR.identity_map(&frame);
+        global_addressor.identity_map(&frame);
     }
 
     debug!("Validating all kernel sections are mapped for addressor (using extern linker labels).");
-    validate_program_segment_mappings(&KERNEL_ADDRESSOR);
+    validate_program_segment_mappings(&global_addressor);
 
     debug!("Mapping provided bootloader stack as kernel stack.");
     const STACK_ADDRESS: usize = gsai::SYSTEM_SLICE_SIZE * 0xB;
@@ -138,20 +127,20 @@ fn init_virtual_addressor<'balloc>(memory_map: &[gsai::memory::UEFIMemoryDescrip
     for frame in stack_descriptor.frame_iter() {
         // This is a temporary identity mapping, purely
         //  so `rsp` isn't invalid after we swap the PML4.
-        KERNEL_ADDRESSOR.identity_map(&frame);
-        KERNEL_ADDRESSOR.map(&base_offset_page.offset(frame.index()), &frame);
+        global_addressor.identity_map(&frame);
+        global_addressor.map(&base_offset_page.offset(frame.index()), &frame);
         unsafe { global_lock(&frame) };
     }
 
     // Since we're using physical offset mapping for our page table modification strategy, the memory needs to be offset identity mapped.
     let phys_mapping_addr = VirtAddr::new((0x1000000000000 - global_total()) as u64);
     debug!("Mapping physical memory at offset: {:?}", phys_mapping_addr);
-    KERNEL_ADDRESSOR.modify_mapped_page(Page::from_addr(phys_mapping_addr));
+    global_addressor.modify_mapped_page(Page::from_addr(phys_mapping_addr));
 
     unsafe {
         // Swap the PML4 into CR3
         debug!("Writing kernel addressor's PML4 to the CR3 register.");
-        KERNEL_ADDRESSOR.swap_into();
+        global_addressor.swap_into();
         // Adjust `rsp` so it points to our `STACK_ADDRESS` mapping,
         //  plus its current offset from base.
         debug!("Modifying RSP to point to new stack mapping.");
@@ -161,13 +150,15 @@ fn init_virtual_addressor<'balloc>(memory_map: &[gsai::memory::UEFIMemoryDescrip
     // Now unmap the temporary identity mappings, and our
     //  virtual addressoris fully initialized.
     for frame in stack_descriptor.frame_iter() {
-        KERNEL_ADDRESSOR.unmap(&Page::from_index(frame.index()));
+        global_addressor.unmap(&Page::from_index(frame.index()));
     }
+
+    global_addressor
 }
 
-pub fn validate_program_segment_mappings(virtual_addressor: &VirtualAddressorCell) {
+pub fn validate_program_segment_mappings(virtual_addressor: &VirtualAddressor) {
     fn validate_segment_mapping(
-        virtual_addressor: &VirtualAddressorCell,
+        virtual_addressor: &VirtualAddressor,
         section: core::ops::Range<u64>,
     ) {
         for page in section

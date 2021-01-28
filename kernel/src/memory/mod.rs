@@ -24,21 +24,11 @@ pub const fn to_mibibytes(value: usize) -> usize {
     value / MIBIBYTE
 }
 
-struct NoAllocator;
-
-unsafe impl core::alloc::GlobalAlloc for NoAllocator {
-    unsafe fn alloc(&self, _: core::alloc::Layout) -> *mut u8 {
-        0x0 as *mut u8
-    }
-
-    unsafe fn dealloc(&self, _: *mut u8, __: core::alloc::Layout) {}
-}
-
 #[global_allocator]
-static GLOBAL_ALLOCATOR: NoAllocator = NoAllocator;
+static GLOBAL_ALLOCATOR: BlockAllocator<'static> = BlockAllocator::new(Page::from_addr(unsafe {
+    x86_64::VirtAddr::new_unsafe(0x7A12000)
+}));
 
-// pub fn init_global_allocator(
-//     virtual_addressor: &'static crate::memory::paging::VirtualAddressorCell,
-// ) {
-//     GLOBAL_ALLOCATOR.init(virtual_addressor);
-// }
+pub unsafe fn set_global_addressor(virtual_addressor: paging::VirtualAddressor) {
+    GLOBAL_ALLOCATOR.set_addressor(virtual_addressor);
+}
