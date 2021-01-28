@@ -74,6 +74,9 @@ extern "win64" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor>) -> ! {
         balloc.grow_once();
     }
 
+    balloc.alloc(4097);
+    balloc.alloc(8190003);
+
     info!("Kernel has reached safe shutdown state.");
     unsafe { gsai::instructions::pwm::qemu_shutdown() }
 }

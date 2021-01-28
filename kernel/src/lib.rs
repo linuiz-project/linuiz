@@ -122,3 +122,44 @@ impl core::ops::Add<usize> for VirtAddr {
         Self::new(self.0 + rhs)
     }
 }
+
+pub struct BitIterator<'arr, T: Into<u64>> {
+    array: &'arr [T],
+    index: usize,
+    shift: u8,
+}
+
+impl<'arr, T: Into<u64>> BitIterator<'arr, T> {
+    pub fn new(array: &'arr [T]) -> Self {
+        Self {
+            array,
+            index: 0,
+            shift: 0,
+        }
+    }
+
+    #[inline]
+    fn current_bit(&self) -> Option<bool> {
+        if self.index < self.array.len() {
+            let shift_bit = 1 << self.shift;
+            let and_bit = self.array[self.index] & shift_bit;
+
+            Some(and_bit > 0)
+        } else {
+            None
+        }
+    }
+}
+
+impl<T: Into<u64>> Iterator for BitIterator<'_, T> {
+    type Item = bool;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.current_bit().and_then(|bit| {
+            self.index += 1;
+            self.shift += 1;
+
+            bit
+        })
+    }
+}
