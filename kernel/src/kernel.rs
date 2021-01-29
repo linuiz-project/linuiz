@@ -52,7 +52,6 @@ extern "win64" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor>) -> ! {
     boot_info.validate_magic();
 
     libkernel::init(&boot_info);
-
     libkernel::structures::idt::set_interrupt_handler(
         libkernel::structures::pic::InterruptOffset::Timer,
         crate::timer::tick_handler,

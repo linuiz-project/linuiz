@@ -12,8 +12,8 @@ fn resolution_mask() -> usize {
 }
 
 pub fn tick_handler() {
-    let old_ticks = increment();
-    if (old_ticks & resolution_mask()) == 0 {
+    let old_tick = increment();
+    if (old_tick & resolution_mask()) == 0 {
         timer_lapse();
     }
 }
