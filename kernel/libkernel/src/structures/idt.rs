@@ -1,8 +1,4 @@
-use crate::{
-    serialln,
-    structures::pic::{end_of_interrupt, InterruptOffset},
-};
-use alloc::vec::Vec;
+use crate::structures::pic::{end_of_interrupt, InterruptOffset};
 use lazy_static::lazy_static;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
 
@@ -17,8 +13,8 @@ extern "x86-interrupt" fn debug_handler(stack_frame: &mut InterruptStackFrame) {
 
 // --- non-maskable interrupt (defined below, atop interrupt handlers)
 
-extern "x86-interrupt" fn breakpoint_handler(stack_frame: &mut InterruptStackFrame) {
-    serialln!("CPU EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
+extern "x86-interrupt" fn breakpoint_handler(_stack_frame: &mut InterruptStackFrame) {
+    // serialln!("CPU EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
 }
 
 extern "x86-interrupt" fn overflow_handler(stack_frame: &mut InterruptStackFrame) {
@@ -113,14 +109,12 @@ extern "x86-interrupt" fn page_fault_handler(
     stack_frame: &mut InterruptStackFrame,
     error_code: x86_64::structures::idt::PageFaultErrorCode,
 ) {
-    serialln!(
+    panic!(
         "CPU EXCEPTION: PAGE FAULT ({:?}): {:?}\n{:#?}",
         x86_64::registers::control::Cr2::read(),
         error_code,
         stack_frame
     );
-
-    crate::instructions::hlt_indefinite();
 }
 
 // --- reserved 15
@@ -175,8 +169,6 @@ extern "x86-interrupt" fn timer_interrupt(_: &mut InterruptStackFrame) {
     crate::structures::pic::end_of_interrupt(InterruptOffset::Timer);
 }
 
-static INTERRUPT_CALLBACKS: spin::RwLock<Vec<Vec<fn()>>> = spin::RwLock::new(Vec::new());
-
 static INTERRUPT_HANDLERS: spin::RwLock<[fn(); 2]> = spin::RwLock::new([
     || end_of_interrupt(InterruptOffset::Timer),
     || end_of_interrupt(InterruptOffset::Keyboard),
@@ -223,24 +215,6 @@ lazy_static! {
 
 pub fn init() {
     IDT.load();
-}
-
-pub unsafe fn enable_interrupt_callbacks() {
-    crate::instructions::interrupts::without_interrupts(|| {
-        let callbacks_read = INTERRUPT_CALLBACKS.upgradeable_read();
-        if !callbacks_read.is_empty() {
-            panic!("Interrupt handlers have already been enabled.");
-        } else {
-            let mut callbacks_write = callbacks_read.upgrade();
-            for offset in 0..16 {
-                debug!(
-                    "Enabling interrupt callbacks: {:?}.",
-                    InterruptOffset::base_offset(offset)
-                );
-                callbacks_write.push(Vec::new());
-            }
-        }
-    });
 }
 
 pub fn set_interrupt_handler(offset: InterruptOffset, handler: fn()) {

@@ -1,7 +1,7 @@
-use crate::io::port::{ReadOnlyPort, ReadWritePort, WriteOnlyPort};
 use bitflags::bitflags;
 use lazy_static::lazy_static;
-use spin::mutex::{Mutex, MutexGuard};
+use libkernel::io::port::{ReadOnlyPort, ReadWritePort, WriteOnlyPort};
+use spin::{Mutex, MutexGuard};
 
 /// Address of the first COM port.
 /// This port is VERY likely to be at this address.
@@ -196,7 +196,7 @@ where
     //
     // for instance, in case we would like to avoid writing while
     // an interrupt is in progress
-    x86_64::instructions::interrupts::without_interrupts(|| {
+    libkernel::instructions::interrupts::without_interrupts(|| {
         callback(&mut SERIAL.lock());
     });
 }

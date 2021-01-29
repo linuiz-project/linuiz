@@ -30,6 +30,7 @@ impl From<u32> for Color8i {
 }
 
 #[repr(u8)]
+#[allow(dead_code)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Colors {
     Black,
