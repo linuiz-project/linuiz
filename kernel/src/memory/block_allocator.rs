@@ -51,6 +51,11 @@ impl BlockAllocator<'_> {
 
     fn ralloc(&self, size: usize) -> *mut u8 {
         let size_in_blocks = efi_boot::align_up(size, Self::BLOCK_SIZE) / Self::BLOCK_SIZE;
+        trace!(
+            "Allocation requested: {} bytes => {} blocks",
+            size,
+            size_in_blocks
+        );
 
         while size_in_blocks >= self.blocks_count() {
             self.grow_once();

@@ -1,4 +1,5 @@
 use crate::{serialln, structures::pic::InterruptOffset};
+use alloc::vec::Vec;
 use lazy_static::lazy_static;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
 
@@ -167,8 +168,15 @@ extern "x86-interrupt" fn non_maskable_interrupt_handler(stack_frame: &mut Inter
 }
 
 extern "x86-interrupt" fn timer_interrupt_handler(_: &mut InterruptStackFrame) {
+    let callbacks_read = INTERRUPT_CALLBACKS.upgradeable_read();
+    if !callbacks_read.is_empty() {
+        callbacks_read[0].iter().for_each(|handler| (handler)());
+    }
+
     crate::structures::pic::end_of_interrupt(InterruptOffset::Timer);
 }
+
+static INTERRUPT_CALLBACKS: spin::RwLock<Vec<Vec<fn()>>> = spin::RwLock::new(Vec::new());
 
 /* IDT */
 lazy_static! {
@@ -211,4 +219,49 @@ lazy_static! {
 
 pub fn init() {
     IDT.load();
+}
+
+pub unsafe fn enable_interrupt_callbacks() {
+    debug!("Enabling interrupt callbacks.");
+    let interrupts_enabled = x86_64::instructions::interrupts::are_enabled();
+    if interrupts_enabled {
+        x86_64::instructions::interrupts::disable();
+    }
+
+    let callbacks_read = INTERRUPT_CALLBACKS.upgradeable_read();
+    if !callbacks_read.is_empty() {
+        panic!("Interrupt handlers have already been enabled.");
+    } else {
+        let mut callbacks_write = callbacks_read.upgrade();
+        for offset in 0..16 {
+            debug!("Enabling interrupt at offset {}.", offset);
+            callbacks_write.push(Vec::new());
+        }
+    }
+
+    if interrupts_enabled {
+        x86_64::instructions::interrupts::enable();
+    }
+}
+
+pub fn add_interrupt_callback(offset: InterruptOffset, handler: fn()) {
+    let mut callbacks = INTERRUPT_CALLBACKS.write();
+    match offset {
+        InterruptOffset::Timer => callbacks[0].push(handler),
+        InterruptOffset::Keyboard => callbacks[1].push(handler),
+        InterruptOffset::Cascade => callbacks[2].push(handler),
+        InterruptOffset::COM2 => callbacks[3].push(handler),
+        InterruptOffset::COM1 => callbacks[4].push(handler),
+        InterruptOffset::LPT2 => callbacks[5].push(handler),
+        InterruptOffset::FloppyDisk => callbacks[6].push(handler),
+        InterruptOffset::LPT1 => callbacks[7].push(handler),
+        InterruptOffset::CMOSClock => callbacks[8].push(handler),
+        InterruptOffset::Peripheral0 => callbacks[9].push(handler),
+        InterruptOffset::Peripheral1 => callbacks[10].push(handler),
+        InterruptOffset::Peripheral2 => callbacks[11].push(handler),
+        InterruptOffset::PS2Mouse => callbacks[12].push(handler),
+        InterruptOffset::FPU => callbacks[13].push(handler),
+        InterruptOffset::PrimaryATA => callbacks[14].push(handler),
+        InterruptOffset::SecondaryATA => callbacks[15].push(handler),
+    }
 }

@@ -8,8 +8,11 @@ extern crate alloc;
 
 use core::ffi::c_void;
 use efi_boot::BootInfo;
-use gsai::memory::{
-    global_lock, global_total, paging::VirtualAddressor, Frame, Page, UEFIMemoryDescriptor,
+use gsai::{
+    memory::{
+        global_lock, global_total, paging::VirtualAddressor, Frame, Page, UEFIMemoryDescriptor,
+    },
+    structures,
 };
 use x86_64::VirtAddr;
 
@@ -53,17 +56,23 @@ extern "win64" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor>) -> ! {
     unsafe { init_cpu_state() };
     info!("Initializing memory structures.");
     init_structures();
+    info!("Enabling interrupts.");
+    x86_64::instructions::interrupts::enable();
 
-    info!("Initializing global memory (physical frame allocator / journal).");
+    info!("Initializing global memory (frame allocator, global allocator, et al).");
     let frame_map_frames = unsafe { gsai::memory::init_global_memory(boot_info.memory_map()) };
     let mut global_addressor = init_global_addressor(boot_info.memory_map());
-
-    for frame in frame_map_frames {
-        global_addressor.identity_map(&frame);
-    }
+    frame_map_frames.for_each(|frame| global_addressor.identity_map(&frame));
 
     debug!("Setting global addressor (`alloc::*` will be usable after this point).");
     unsafe { gsai::memory::set_global_addressor(global_addressor) };
+
+    fn test() {
+        gsai::serial!(".");
+    }
+
+    unsafe { gsai::structures::idt::enable_interrupt_callbacks() };
+    gsai::structures::idt::add_interrupt_callback(structures::pic::InterruptOffset::Timer, test);
 
     info!("Kernel has reached safe shutdown state.");
     unsafe { gsai::instructions::pwm::qemu_shutdown() }
@@ -81,9 +90,6 @@ fn init_structures() {
     info!("Successfully initialized IDT.");
     gsai::structures::pic::init();
     info!("Successfully initialized PIC.");
-
-    x86_64::instructions::interrupts::enable();
-    info!("Interrupts are now enabled.");
 }
 
 fn init_global_addressor<'balloc>(

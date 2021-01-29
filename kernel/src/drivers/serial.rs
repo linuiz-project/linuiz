@@ -196,9 +196,9 @@ where
     //
     // for instance, in case we would like to avoid writing while
     // an interrupt is in progress
-    x86_64::instructions::interrupts::without_interrupts(|| {
-        callback(&mut SERIAL.lock());
-    });
+    //x86_64::instructions::interrupts::without_interrupts(|| {
+    callback(&mut SERIAL.lock());
+    //    });
 }
 
 #[doc(hidden)]
