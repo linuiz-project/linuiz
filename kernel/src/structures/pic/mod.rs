@@ -11,13 +11,10 @@ use lazy_static::lazy_static;
 use pic8259::{ChainedPICs, InterruptLines};
 use spin;
 
-pub const PIC_0_OFFSET: u8 = 32;
-pub const PIC_1_OFFSET: u8 = PIC_0_OFFSET + 8;
-
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InterruptOffset {
-    Timer = PIC_0_OFFSET,
+    Timer = Self::BASE,
     Keyboard,
     Cascade,
     COM2,
@@ -35,9 +32,11 @@ pub enum InterruptOffset {
     SecondaryATA,
 }
 
-impl From<usize> for InterruptOffset {
-    fn from(value: usize) -> Self {
-        match value {
+impl InterruptOffset {
+    pub const BASE: u8 = 32;
+
+    pub const fn base_offset(offset: u8) -> Self {
+        match offset {
             0 => InterruptOffset::Timer,
             1 => InterruptOffset::Keyboard,
             2 => InterruptOffset::Cascade,
@@ -54,37 +53,19 @@ impl From<usize> for InterruptOffset {
             13 => InterruptOffset::FPU,
             14 => InterruptOffset::PrimaryATA,
             15 => InterruptOffset::SecondaryATA,
-            _ => panic!("invalid interrupt offset, must be 0..15"),
+            _ => panic!("invalid interrupt offset, must be 0..=15",),
         }
     }
-}
 
-impl From<InterruptOffset> for usize {
-    fn from(value: InterruptOffset) -> Self {
-        match value {
-            InterruptOffset::Timer => 0,
-            InterruptOffset::Keyboard => 1,
-            InterruptOffset::Cascade => 2,
-            InterruptOffset::COM2 => 3,
-            InterruptOffset::COM1 => 4,
-            InterruptOffset::LPT2 => 5,
-            InterruptOffset::FloppyDisk => 6,
-            InterruptOffset::LPT1 => 7,
-            InterruptOffset::CMOSClock => 8,
-            InterruptOffset::Peripheral0 => 9,
-            InterruptOffset::Peripheral1 => 10,
-            InterruptOffset::Peripheral2 => 11,
-            InterruptOffset::PS2Mouse => 12,
-            InterruptOffset::FPU => 13,
-            InterruptOffset::PrimaryATA => 14,
-            InterruptOffset::SecondaryATA => 15,
-        }
+    pub const fn without_base(self) -> u8 {
+        (self as u8) - Self::BASE
     }
 }
 
 lazy_static! {
-    static ref PICS: spin::Mutex<ChainedPICs> =
-        spin::Mutex::new(unsafe { ChainedPICs::new(PIC_0_OFFSET, PIC_1_OFFSET) });
+    static ref PICS: spin::Mutex<ChainedPICs> = spin::Mutex::new(unsafe {
+        ChainedPICs::new(InterruptOffset::BASE, InterruptOffset::BASE + 8)
+    });
 }
 
 pub fn init() {

@@ -1,4 +1,7 @@
-use crate::{serialln, structures::pic::InterruptOffset};
+use crate::{
+    serialln,
+    structures::pic::{end_of_interrupt, InterruptOffset},
+};
 use alloc::vec::Vec;
 use lazy_static::lazy_static;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
@@ -167,16 +170,17 @@ extern "x86-interrupt" fn non_maskable_interrupt_handler(stack_frame: &mut Inter
     panic!("CPU EXCEPTION: NON-MASKABLE INTERRUPT\n{:#?}", stack_frame);
 }
 
-extern "x86-interrupt" fn timer_interrupt_handler(_: &mut InterruptStackFrame) {
-    let callbacks_read = INTERRUPT_CALLBACKS.upgradeable_read();
-    if !callbacks_read.is_empty() {
-        callbacks_read[0].iter().for_each(|handler| (handler)());
-    }
-
+extern "x86-interrupt" fn timer_interrupt(_: &mut InterruptStackFrame) {
+    (INTERRUPT_HANDLERS.read()[InterruptOffset::Timer.without_base() as usize])();
     crate::structures::pic::end_of_interrupt(InterruptOffset::Timer);
 }
 
 static INTERRUPT_CALLBACKS: spin::RwLock<Vec<Vec<fn()>>> = spin::RwLock::new(Vec::new());
+
+static INTERRUPT_HANDLERS: spin::RwLock<[fn(); 2]> = spin::RwLock::new([
+    || end_of_interrupt(InterruptOffset::Timer),
+    || end_of_interrupt(InterruptOffset::Keyboard),
+]);
 
 /* IDT */
 lazy_static! {
@@ -207,11 +211,11 @@ lazy_static! {
         idt.simd_floating_point.set_handler_fn(simd_floating_point_handler);
         idt.virtualization.set_handler_fn(virtualization_handler);
         // --- reserved 21-29
-                idt.security_exception.set_handler_fn(security_exception_handler);
+        idt.security_exception.set_handler_fn(security_exception_handler);
         // --- triple fault (can't handle)
 
         // regular interrupts
-        idt[InterruptOffset::Timer as usize].set_handler_fn(timer_interrupt_handler);
+        idt[InterruptOffset::Timer as usize].set_handler_fn(timer_interrupt);
 
         idt
     };
@@ -231,7 +235,7 @@ pub unsafe fn enable_interrupt_callbacks() {
             for offset in 0..16 {
                 debug!(
                     "Enabling interrupt callbacks: {:?}.",
-                    InterruptOffset::from(offset)
+                    InterruptOffset::base_offset(offset)
                 );
                 callbacks_write.push(Vec::new());
             }
@@ -239,9 +243,8 @@ pub unsafe fn enable_interrupt_callbacks() {
     });
 }
 
-pub fn add_interrupt_callback(offset: InterruptOffset, handler: fn()) {
+pub fn set_interrupt_handler(offset: InterruptOffset, handler: fn()) {
     crate::instructions::interrupts::without_interrupts(|| {
-        let mut callbacks = INTERRUPT_CALLBACKS.write();
-        callbacks[usize::from(offset)].push(handler);
+        INTERRUPT_HANDLERS.write()[offset.without_base() as usize] = handler;
     });
 }

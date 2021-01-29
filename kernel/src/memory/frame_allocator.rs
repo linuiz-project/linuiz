@@ -15,23 +15,19 @@ pub enum FrameType {
 impl BitValue for FrameType {
     const BIT_WIDTH: usize = 0x2;
     const MASK: usize = (Self::BIT_WIDTH << 1) - 1;
-}
 
-impl From<usize> for FrameType {
-    fn from(value: usize) -> Self {
+    fn from_usize(value: usize) -> Self {
         match value {
             0 => FrameType::Unallocated,
             1 => FrameType::Allocated,
             2 => FrameType::Reserved,
             3 => FrameType::Corrupted,
-            _ => panic!("invalid cast"),
+            _ => panic!("invalid value, must be 0..=3"),
         }
     }
-}
 
-impl From<FrameType> for usize {
-    fn from(value: FrameType) -> Self {
-        match value {
+    fn as_usize(&self) -> usize {
+        match self {
             FrameType::Unallocated => 0,
             FrameType::Allocated => 1,
             FrameType::Reserved => 2,

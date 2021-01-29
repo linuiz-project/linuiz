@@ -6,13 +6,10 @@
 extern crate log;
 extern crate alloc;
 
-use core::ffi::c_void;
+use core::{ffi::c_void, sync::atomic::AtomicUsize};
 use efi_boot::BootInfo;
-use gsai::{
-    memory::{
-        global_lock, global_total, paging::VirtualAddressor, Frame, Page, UEFIMemoryDescriptor,
-    },
-    structures,
+use gsai::memory::{
+    global_lock, global_total, paging::VirtualAddressor, Frame, Page, UEFIMemoryDescriptor,
 };
 use x86_64::VirtAddr;
 
@@ -67,16 +64,22 @@ extern "win64" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor>) -> ! {
     debug!("Setting global addressor (`alloc::*` will be usable after this point).");
     unsafe { gsai::memory::set_global_addressor(global_addressor) };
 
-    fn test() {
-        gsai::serial!(".");
+    fn timer_handler() {
+        TICK_COUNT.fetch_add(1, core::sync::atomic::Ordering::Acquire);
     }
 
     unsafe { gsai::structures::idt::enable_interrupt_callbacks() };
-    gsai::structures::idt::add_interrupt_callback(structures::pic::InterruptOffset::Timer, test);
+    gsai::structures::idt::set_interrupt_handler(
+        gsai::structures::pic::InterruptOffset::Timer,
+        timer_handler,
+    );
 
     info!("Kernel has reached safe shutdown state.");
+
     unsafe { gsai::instructions::pwm::qemu_shutdown() }
 }
+
+static TICK_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 unsafe fn init_cpu_state() {
     gsai::instructions::init_segment_registers(0x0);

@@ -17,11 +17,6 @@ impl VirtualAddressor {
     /// Safety: this method is unsafe because `mapped_page` can be any value; that is, not necessarily
     /// a valid address in which physical memory is already mapped.
     pub unsafe fn new(mapped_page: Page) -> Self {
-        debug!(
-            "Attempting to create a VirtualAddressor (current mapped address supplied: {:?}).",
-            mapped_page
-        );
-
         Self {
             // we don't know where physical memory is mapped at this point,
             // so rely on what the caller specifies for us
