@@ -1,3 +1,4 @@
+pub mod interrupts;
 pub mod pwm;
 pub mod tlb;
 

@@ -1,12 +1,9 @@
 use core::marker::PhantomData;
 use spin::RwLock;
 
-pub trait BitValue {
+pub trait BitValue: From<usize> + Into<usize> {
     const BIT_WIDTH: usize;
     const MASK: usize;
-
-    fn as_usize(&self) -> usize;
-    fn from_usize(value: usize) -> Self;
 }
 
 pub struct BitArray<'arr, BV>
@@ -44,7 +41,7 @@ impl<'arr, BV: BitValue + Eq> BitArray<'arr, BV> {
             let section_offset = element_index - (section_index * Self::SECTION_SIZE);
             let section_value = self.array.read()[section_index];
 
-            BV::from_usize((section_value >> section_offset) & BV::MASK)
+            ((section_value >> section_offset) & BV::MASK).into()
         } else {
             panic!(
                 "index must be less than the size of the collection !({} < {})",

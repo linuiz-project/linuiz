@@ -57,7 +57,7 @@ extern "win64" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor>) -> ! {
     info!("Initializing memory structures.");
     init_structures();
     info!("Enabling interrupts.");
-    x86_64::instructions::interrupts::enable();
+    gsai::instructions::interrupts::enable();
 
     info!("Initializing global memory (frame allocator, global allocator, et al).");
     let frame_map_frames = unsafe { gsai::memory::init_global_memory(boot_info.memory_map()) };

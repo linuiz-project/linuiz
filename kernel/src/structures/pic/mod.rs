@@ -35,6 +35,53 @@ pub enum InterruptOffset {
     SecondaryATA,
 }
 
+impl From<usize> for InterruptOffset {
+    fn from(value: usize) -> Self {
+        match value {
+            0 => InterruptOffset::Timer,
+            1 => InterruptOffset::Keyboard,
+            2 => InterruptOffset::Cascade,
+            3 => InterruptOffset::COM2,
+            4 => InterruptOffset::COM1,
+            5 => InterruptOffset::LPT2,
+            6 => InterruptOffset::FloppyDisk,
+            7 => InterruptOffset::LPT1,
+            8 => InterruptOffset::CMOSClock,
+            9 => InterruptOffset::Peripheral0,
+            10 => InterruptOffset::Peripheral1,
+            11 => InterruptOffset::Peripheral2,
+            12 => InterruptOffset::PS2Mouse,
+            13 => InterruptOffset::FPU,
+            14 => InterruptOffset::PrimaryATA,
+            15 => InterruptOffset::SecondaryATA,
+            _ => panic!("invalid interrupt offset, must be 0..15"),
+        }
+    }
+}
+
+impl From<InterruptOffset> for usize {
+    fn from(value: InterruptOffset) -> Self {
+        match value {
+            InterruptOffset::Timer => 0,
+            InterruptOffset::Keyboard => 1,
+            InterruptOffset::Cascade => 2,
+            InterruptOffset::COM2 => 3,
+            InterruptOffset::COM1 => 4,
+            InterruptOffset::LPT2 => 5,
+            InterruptOffset::FloppyDisk => 6,
+            InterruptOffset::LPT1 => 7,
+            InterruptOffset::CMOSClock => 8,
+            InterruptOffset::Peripheral0 => 9,
+            InterruptOffset::Peripheral1 => 10,
+            InterruptOffset::Peripheral2 => 11,
+            InterruptOffset::PS2Mouse => 12,
+            InterruptOffset::FPU => 13,
+            InterruptOffset::PrimaryATA => 14,
+            InterruptOffset::SecondaryATA => 15,
+        }
+    }
+}
+
 lazy_static! {
     static ref PICS: spin::Mutex<ChainedPICs> =
         spin::Mutex::new(unsafe { ChainedPICs::new(PIC_0_OFFSET, PIC_1_OFFSET) });
