@@ -10,16 +10,18 @@ bitflags! {
         const TIMER = 1 << 0;
         const KEYBOARD = 1 << 1;
         const CASCADE = 1 << 2;
+        const NONE = 0;
+        const ALL = u16::MAX; // 16 bits set
     }
 }
 
 impl InterruptLines {
     pub fn low(&self) -> u8 {
-        (self.bits() & 0xFF) as u8
+        self.bits() as u8
     }
 
     pub fn high(&self) -> u8 {
-        ((self.bits() >> 8) & 0xFF) as u8
+        (self.bits() >> 8) as u8
     }
 }
 
@@ -104,10 +106,11 @@ impl ChainedPICs {
 
         // Write masks to data port, specifying which interrupts are ignored.
         self.pics[0].data.write(!mask.low());
+        io_wait();
         self.pics[1].data.write(!mask.high());
     }
 
-    // Indicates whether any of the chained PICs handle the given interrupt.
+    /// Indicates whether any of the chained PICs handle the given interrupt.
     pub fn handles_interrupt(&self, interrupt_id: u8) -> bool {
         self.pics
             .iter()

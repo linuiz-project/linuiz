@@ -26,7 +26,7 @@ impl<T: PortRead> ReadOnlyPort<T> {
         self.port
     }
 
-    pub fn read(&mut self) -> T {
+    pub fn read(&self) -> T {
         unsafe { T::read(self.port) }
     }
 }
@@ -82,7 +82,7 @@ impl<T: PortReadWrite> ReadWritePort<T> {
         self.port
     }
 
-    pub fn read(&mut self) -> T {
+    pub fn read(&self) -> T {
         unsafe { T::read(self.port) }
     }
 

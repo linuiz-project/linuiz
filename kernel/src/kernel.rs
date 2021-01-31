@@ -51,11 +51,14 @@ extern "win64" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor>) -> ! {
     info!("Validating magic of BootInfo.");
     boot_info.validate_magic();
 
-    libkernel::init(&boot_info);
+    // configure interrupts and handlers
+    crate::timer::set_interval(8);
     libkernel::structures::idt::set_interrupt_handler(
         libkernel::structures::pic::InterruptOffset::Timer,
         crate::timer::tick_handler,
     );
+
+    libkernel::init(&boot_info);
 
     info!("Kernel has reached safe shutdown state.");
     unsafe { libkernel::instructions::pwm::qemu_shutdown() }
