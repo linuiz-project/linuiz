@@ -97,7 +97,7 @@ impl<'arr> FrameAllocator<'arr> {
 
         unsafe {
             // reserve null frame
-            this.reserve_frame(&Frame::null());
+            this.reserve_frame(&Frame::null()).ok();
             // reserve bitarray frames
             this.reserve_frames(Frame::range_count(descriptor.phys_start, memory_pages));
             // reserve system & kernel frames
@@ -198,19 +198,19 @@ impl<'arr> FrameAllocator<'arr> {
     /* MANY OPS */
     pub unsafe fn free_frames(&self, frames: FrameIterator) {
         for frame in frames {
-            self.free_frame(&frame);
+            self.free_frame(&frame).ok();
         }
     }
 
     pub unsafe fn lock_frames(&self, frames: FrameIterator) {
         for frame in frames {
-            self.lock_frame(&frame);
+            self.lock_frame(&frame).ok();
         }
     }
 
     pub(crate) unsafe fn reserve_frames(&mut self, frames: FrameIterator) {
         for frame in frames {
-            self.reserve_frame(&frame);
+            self.reserve_frame(&frame).ok();
         }
     }
 }

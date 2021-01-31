@@ -40,15 +40,15 @@ fn global_memory() -> &'static FrameAllocator<'static> {
 }
 
 pub unsafe fn global_lock(frame: &Frame) {
-    global_memory().lock_frame(frame);
+    global_memory().lock_frame(frame).ok();
 }
 
 pub unsafe fn global_free(frame: &Frame) {
-    global_memory().free_frame(frame);
+    global_memory().free_frame(frame).ok();
 }
 
 pub unsafe fn global_reserve(frame: &Frame) {
-    global_memory().reserve_frame(frame);
+    global_memory().reserve_frame(frame).ok();
 }
 
 pub unsafe fn global_lock_next() -> Option<Frame> {
