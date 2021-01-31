@@ -1,6 +1,6 @@
 use crate::{
     memory::{is_uefi_reserved_memory_type, Frame, FrameIterator},
-    BitArray, BitValue,
+    BitValue, RwBitArray,
 };
 use spin::RwLock;
 
@@ -36,6 +36,11 @@ impl BitValue for FrameType {
     }
 }
 
+pub enum FrameAllocationError {
+    NotAllocated,
+    NotUnallocated,
+}
+
 struct FrameAllocatorMemory {
     total_memory: usize,
     free_memory: usize,
@@ -44,7 +49,7 @@ struct FrameAllocatorMemory {
 }
 
 pub struct FrameAllocator<'arr> {
-    memory_map: BitArray<'arr, FrameType>,
+    memory_map: RwBitArray<'arr, FrameType>,
     memory: RwLock<FrameAllocatorMemory>,
 }
 
@@ -76,10 +81,10 @@ impl<'arr> FrameAllocator<'arr> {
         debug!("Located usable memory descriptor:\n{:#?}", descriptor);
 
         let mut this = Self {
-            memory_map: BitArray::from_slice(unsafe {
+            memory_map: RwBitArray::from_slice(unsafe {
                 &mut *core::ptr::slice_from_raw_parts_mut(
                     descriptor.phys_start.as_u64() as *mut _,
-                    BitArray::<FrameType>::length_hint(element_count),
+                    RwBitArray::<FrameType>::length_hint(element_count),
                 )
             }),
             memory: RwLock::new(FrameAllocatorMemory {
@@ -135,48 +140,59 @@ impl<'arr> FrameAllocator<'arr> {
     }
 
     /* SINGLE OPS */
-    pub unsafe fn free_frame(&self, frame: &Frame) {
-        if self.memory_map.set_eq(
-            frame.index() as usize,
-            FrameType::Unallocated,
-            FrameType::Allocated,
-        ) {
+    pub unsafe fn free_frame(&self, frame: &Frame) -> Result<(), FrameAllocationError> {
+        if self
+            .memory_map
+            .set_eq(frame.index(), FrameType::Unallocated, FrameType::Allocated)
+        {
             let mut memory = self.memory.write();
             memory.free_memory += 0x1000;
             memory.locked_memory -= 0x1000;
-            trace!("Freed frame {}: {:?}", frame.index(), frame);
+
+            Ok(())
         } else {
-            panic!("attempted to reserve a non-free frame: {:?}", frame);
+            Err(FrameAllocationError::NotAllocated)
         }
     }
 
-    pub unsafe fn lock_frame(&self, frame: &Frame) {
-        if self.memory_map.set_eq(
-            frame.index() as usize,
-            FrameType::Allocated,
-            FrameType::Unallocated,
-        ) {
+    pub unsafe fn lock_frame(&self, frame: &Frame) -> Result<(), FrameAllocationError> {
+        if self
+            .memory_map
+            .set_eq(frame.index(), FrameType::Allocated, FrameType::Unallocated)
+        {
             let mut memory = self.memory.write();
             memory.free_memory -= 0x1000;
             memory.locked_memory += 0x1000;
-            trace!("Locked frame {}: {:?}", frame.index(), frame);
+
+            Ok(())
         } else {
-            panic!("attempted to reserve a non-free frame: {:?}", frame);
+            Err(FrameAllocationError::NotUnallocated)
         }
     }
 
-    pub(crate) unsafe fn reserve_frame(&self, frame: &Frame) {
-        if self.memory_map.set_eq(
-            frame.index() as usize,
-            FrameType::Reserved,
-            FrameType::Unallocated,
-        ) {
+    pub fn lock_next(&self) -> Option<Frame> {
+        for frame in (0..self.memory_map.len()).map(|index| Frame::from_index(index)) {
+            if let Ok(()) = unsafe { self.lock_frame(&frame) } {
+                trace!("Locking next free frame: {:?}", frame);
+                return Some(frame);
+            }
+        }
+
+        None
+    }
+
+    pub(crate) unsafe fn reserve_frame(&self, frame: &Frame) -> Result<(), FrameAllocationError> {
+        if self
+            .memory_map
+            .set_eq(frame.index(), FrameType::Reserved, FrameType::Unallocated)
+        {
             let mut memory = self.memory.write();
             memory.free_memory -= 0x1000;
             memory.reserved_memory += 0x1000;
-            trace!("Reserved frame {}: {:?}", frame.index(), frame);
+
+            Ok(())
         } else {
-            panic!("attempted to reserve a non-free frame: {:?}", frame);
+            Err(FrameAllocationError::NotUnallocated)
         }
     }
     /* MANY OPS */
@@ -196,21 +212,5 @@ impl<'arr> FrameAllocator<'arr> {
         for frame in frames {
             self.reserve_frame(&frame);
         }
-    }
-
-    pub fn lock_next(&self) -> Option<Frame> {
-        for index in 0..self.memory_map.len() {
-            if self
-                .memory_map
-                .set_eq(index, FrameType::Allocated, FrameType::Unallocated)
-            {
-                let frame = Frame::from_index(index);
-                trace!("Locked next frame {}: {:?}", frame.index(), frame);
-
-                return Some(frame);
-            }
-        }
-
-        None
     }
 }

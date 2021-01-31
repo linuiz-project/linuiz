@@ -9,7 +9,7 @@ pub trait BitValue {
     fn from_usize(value: usize) -> Self;
 }
 
-pub struct BitArray<'arr, BV>
+pub struct RwBitArray<'arr, BV>
 where
     BV: BitValue + Eq,
 {
@@ -17,7 +17,7 @@ where
     phantom: PhantomData<BV>,
 }
 
-impl<'arr, BV: BitValue + Eq> BitArray<'arr, BV> {
+impl<'arr, BV: BitValue + Eq> RwBitArray<'arr, BV> {
     const SECTION_SIZE: usize = core::mem::size_of::<usize>() * 8;
 
     pub const fn length_hint(element_count: usize) -> usize {

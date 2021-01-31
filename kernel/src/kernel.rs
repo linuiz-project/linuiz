@@ -30,7 +30,7 @@ extern "C" {
 
 #[cfg(debug_assertions)]
 fn get_log_level() -> log::LevelFilter {
-    log::LevelFilter::Debug
+    log::LevelFilter::Trace
 }
 
 #[cfg(not(debug_assertions))]
@@ -59,6 +59,12 @@ extern "win64" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor>) -> ! {
     );
 
     libkernel::init(&boot_info);
+
+    fn tick_printer(tick: usize) {
+        info!("{}", tick);
+    }
+
+    crate::timer::add_callback(tick_printer);
 
     info!("Kernel has reached safe shutdown state.");
     unsafe { libkernel::instructions::pwm::qemu_shutdown() }

@@ -1,4 +1,6 @@
+use alloc::vec::Vec;
 use core::sync::atomic::AtomicUsize;
+use spin::RwLock;
 
 static TICKS: AtomicUsize = AtomicUsize::new(0);
 static INTERVAL: AtomicUsize = AtomicUsize::new(1);
@@ -27,5 +29,15 @@ pub fn tick_handler() {
 }
 
 pub fn timer_lapse() {
-    info!("{}", TICKS.load(core::sync::atomic::Ordering::Acquire));
+    let ticks = TICKS.load(core::sync::atomic::Ordering::Acquire);
+    for callback in LAPSE_CALLBACKS.read().iter() {
+        (callback)(ticks);
+    }
+}
+
+static LAPSE_CALLBACKS: RwLock<Vec<fn(usize)>> = RwLock::new(Vec::new());
+
+pub fn add_callback(callback: fn(usize)) {
+    debug!("Adding timer lapse callback: fn(usize) @{:?}", callback);
+    LAPSE_CALLBACKS.write().push(callback);
 }

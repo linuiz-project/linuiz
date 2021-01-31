@@ -6,7 +6,7 @@ bitflags::bitflags! {
     }
 }
 
-static TRACE_ENABLED_PATHS: [&str; 1] = ["gsai::memory::block_allocator"];
+static TRACE_ENABLED_PATHS: [&str; 1] = ["libkernel::memory::block_allocator"];
 
 fn trace_enabled(record: &log::Record) -> bool {
     record.level() < log::Level::Trace || TRACE_ENABLED_PATHS.contains(&record.metadata().target())

@@ -16,7 +16,7 @@ impl BlockAllocator<'_> {
     const BLOCK_SIZE: usize = 16;
     const BITS_PER_SELFPAGE: usize = 0x1000 * 8 /* bits per byte */;
     const REPR_BYTES_PER_SELFPAGE: usize = Self::BITS_PER_SELFPAGE * Self::BLOCK_SIZE;
-    const REPR_PAGES_PER_SELFPAGE: usize = Self::REPR_BYTES_PER_SELFPAGE / 0x1000;
+    const BLOCKS_PER_SELFPAGE: usize = Self::REPR_BYTES_PER_SELFPAGE / 0x1000;
 
     const ALLOCATOR_BASE_PAGE: Page =
         unsafe { Page::from_addr(VirtAddr::new_unsafe((SYSTEM_SLICE_SIZE as u64) * 0xA)) };
@@ -57,16 +57,32 @@ impl BlockAllocator<'_> {
             size_in_blocks
         );
 
-        while size_in_blocks >= self.blocks_count() {
-            self.grow_once();
+        let initial_block_count = self.blocks_count();
+        if size_in_blocks > self.blocks_count() {
+            let blocks_difference = core::cmp::max(0, size_in_blocks - initial_block_count);
+            let required_map_growth =
+                efi_boot::align_up(blocks_difference, Self::BLOCKS_PER_SELFPAGE)
+                    / Self::BLOCKS_PER_SELFPAGE;
+            trace!(
+                "Preliminary block size check resulted in a required {} pages of map growth.",
+                required_map_growth
+            );
+            for _ in 0..required_map_growth {
+                self.grow_once();
+                debug!("grew once");
+            }
         }
 
+        trace!("Allocator passed preliminary block size check.");
         let map_read = self.map.upgradeable_read();
         let max_map_index = (map_read.len() * 8) - size_in_blocks;
         let mut block_index = 0;
         let mut current_run = 0;
 
-        'byte: for byte in (0..max_map_index).map(|map_index| map_read[map_index]) {
+        'outer: for byte in (0..max_map_index).map(|map_index| {
+            trace!("Iterating allocator map index: {}", map_index);
+            map_read[map_index]
+        }) {
             for shift_bit in (0..8).map(|shift| 1 << shift) {
                 if (byte & shift_bit) == 0 {
                     current_run += 1;
@@ -77,7 +93,7 @@ impl BlockAllocator<'_> {
                 block_index += 1;
 
                 if current_run == size_in_blocks {
-                    break 'byte;
+                    break 'outer;
                 }
             }
         }
@@ -115,10 +131,10 @@ impl BlockAllocator<'_> {
         let map = self.map.upgradeable_read();
         if map.len() >= Self::ALLOCATOR_CAPACITY {
             panic!("allocator has reached maximum memory");
-        } else {
+        } else if let Some(addressor) = self.addressor.lock().get_mut() {
             let self_pages_count = map.len() / 0x1000;
             // map the next frame for the allocator map
-            self.addressor.lock().get_mut().unwrap().map(
+            addressor.map(
                 &Self::ALLOCATOR_BASE_PAGE.offset(self_pages_count),
                 unsafe { &global_lock_next().unwrap() },
             );
@@ -128,17 +144,19 @@ impl BlockAllocator<'_> {
             *map = unsafe { &mut *slice_from_raw_parts_mut(map.as_mut_ptr(), map.len() + 0x1000) };
 
             // allocate and map the pages that the new slice area covers
-            for page in self
+            for (index, page) in self
                 .base_page
-                .offset(self_pages_count * Self::REPR_PAGES_PER_SELFPAGE)
-                .iter_count(Self::REPR_PAGES_PER_SELFPAGE)
+                .offset(self_pages_count * Self::BLOCKS_PER_SELFPAGE)
+                .iter_count(Self::BLOCKS_PER_SELFPAGE)
+                .enumerate()
             {
-                self.addressor
-                    .lock()
-                    .get_mut()
-                    .unwrap()
-                    .map(&page, unsafe { &global_lock_next().unwrap() });
+                trace!("Clearing page after growing (iter {}): {:?}", index, page);
+                addressor.map(&page, unsafe { &global_lock_next().unwrap() });
             }
+
+            trace!("Successfully grew allocator map.");
+        } else {
+            panic!("Addressor has not been set for allocator.");
         }
     }
 }
