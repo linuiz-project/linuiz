@@ -95,4 +95,4 @@ pub fn align_down(value: usize, alignment: usize) -> usize {
     value & !(alignment - 1)
 }
 
-pub type KernelMain<MM> = extern "win64" fn(crate::BootInfo<MM>) -> !;
+pub type KernelMain<MM> = extern "efiapi" fn(crate::BootInfo<MM>) -> !;

@@ -1,14 +1,15 @@
 #![no_std]
-#![feature(asm)]
-#![feature(const_fn)]
-#![feature(once_cell)]
-#![feature(abi_efiapi)]
-#![feature(const_panic)]
-#![feature(const_mut_refs)]
-#![feature(abi_x86_interrupt)]
-#![feature(panic_info_message)]
-#![feature(alloc_error_handler)]
-#![feature(const_raw_ptr_to_usize_cast)]
+#![feature(
+    asm,
+    const_fn,
+    once_cell,
+    const_panic,
+    const_mut_refs,
+    abi_x86_interrupt,
+    panic_info_message,
+    alloc_error_handler,
+    const_raw_ptr_to_usize_cast
+)]
 
 #[macro_use]
 extern crate log;
@@ -53,8 +54,6 @@ pub fn init(boot_info: &BootInfo<UEFIMemoryDescriptor>) {
     unsafe { init_cpu_state() };
     info!("Initializing memory structures.");
     init_structures();
-    info!("Enabling interrupts.");
-    crate::instructions::interrupts::enable();
 
     info!("Initializing global memory (frame allocator, global allocator, et al).");
     let frame_map_frames = unsafe { crate::memory::init_global_memory(boot_info.memory_map()) };

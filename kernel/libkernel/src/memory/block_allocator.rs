@@ -63,13 +63,10 @@ impl BlockAllocator<'_> {
             let required_map_growth =
                 efi_boot::align_up(blocks_difference, Self::BLOCKS_PER_SELFPAGE)
                     / Self::BLOCKS_PER_SELFPAGE;
-            trace!(
-                "Preliminary block size check resulted in a required {} pages of map growth.",
-                required_map_growth
-            );
+            trace!("Allocator requires {} new pages.", required_map_growth);
+
             for _ in 0..required_map_growth {
                 self.grow_once();
-                debug!("grew once");
             }
         }
 
@@ -101,13 +98,13 @@ impl BlockAllocator<'_> {
         if current_run == size_in_blocks {
             let start_block_index = block_index - current_run;
             trace!(
-                "Allocating section: blocks {}..{}",
+                "Allocating blocks: {}..{}",
                 start_block_index,
                 start_block_index + size_in_blocks
             );
 
             let mut map_write = map_read.upgrade();
-            for map_index in (start_block_index / 8)..((block_index + 7) / 8) {
+            for map_index in (start_block_index / 8)..=(block_index / 8) {
                 if current_run >= 8 {
                     map_write[map_index] = u8::MAX;
                     current_run -= 8;
@@ -118,7 +115,7 @@ impl BlockAllocator<'_> {
 
             (self.base_page.addr() + (start_block_index * Self::BLOCK_SIZE)).as_mut_ptr()
         } else {
-            panic!("failed to allocate")
+            panic!("failed to fulfill allocation request")
         }
     }
 

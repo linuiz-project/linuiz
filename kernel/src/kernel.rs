@@ -1,6 +1,6 @@
 #![no_std]
 #![no_main]
-#![feature(asm)]
+#![feature(asm, abi_efiapi)]
 
 #[macro_use]
 extern crate log;
@@ -38,8 +38,9 @@ fn get_log_level() -> log::LevelFilter {
     log::LevelFilter::Info
 }
 
+#[no_mangle]
 #[export_name = "_start"]
-extern "win64" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor>) -> ! {
+extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor>) -> ! {
     match crate::logging::init_logger(crate::logging::LoggingModes::SERIAL, get_log_level()) {
         Ok(()) => {
             info!("Successfully loaded into kernel, with logging enabled.");
@@ -57,6 +58,14 @@ extern "win64" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor>) -> ! {
     );
 
     libkernel::init(&boot_info);
+    info!("Enabling interrupts.");
+    libkernel::instructions::interrupts::enable();
+
+    let mut vec = alloc::vec::Vec::<usize>::new();
+
+    for index in 0..10000 {
+        vec.push(index);
+    }
 
     info!("Kernel has reached safe shutdown state.");
     unsafe { libkernel::instructions::pwm::qemu_shutdown() }
