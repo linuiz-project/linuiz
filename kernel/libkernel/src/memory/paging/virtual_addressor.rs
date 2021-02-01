@@ -139,6 +139,6 @@ impl VirtualAddressor {
 
     #[inline(always)]
     pub unsafe fn swap_into(&self) {
-        crate::registers::CR3::write(&self.pml4_frame, None);
+        crate::registers::CR3::write(&self.pml4_frame, crate::registers::CR3Flags::empty());
     }
 }

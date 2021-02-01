@@ -111,7 +111,7 @@ extern "x86-interrupt" fn page_fault_handler(
 ) {
     panic!(
         "CPU EXCEPTION: PAGE FAULT ({:?}): {:?}\n{:#?}",
-        x86_64::registers::control::Cr2::read(),
+        crate::registers::CR2::read(),
         error_code,
         stack_frame
     );

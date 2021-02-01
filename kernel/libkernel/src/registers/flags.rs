@@ -1,6 +1,7 @@
 use bitflags::bitflags;
 
 bitflags! {
+    #[repr(transparent)]
     pub struct RFlags: u64 {
         /// Processor feature identification flag.
         ///

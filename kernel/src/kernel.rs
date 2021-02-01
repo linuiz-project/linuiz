@@ -60,8 +60,6 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor>) -> ! {
     libkernel::init(&boot_info);
     libkernel::instructions::interrupts::enable();
 
-    info!("{:?}", libkernel::instructions::cpuid_features());
-
     info!("Kernel has reached safe shutdown state.");
     unsafe { libkernel::instructions::pwm::qemu_shutdown() }
 }

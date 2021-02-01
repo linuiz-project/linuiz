@@ -10,8 +10,6 @@ bitflags! {
         const TIMER = 1 << 0;
         const KEYBOARD = 1 << 1;
         const CASCADE = 1 << 2;
-        const NONE = 0;
-        const ALL = u16::MAX; // 16 bits set
     }
 }
 

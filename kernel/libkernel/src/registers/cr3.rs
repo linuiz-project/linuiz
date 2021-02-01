@@ -14,18 +14,12 @@ pub struct CR3;
 
 impl CR3 {
     #[inline(always)]
-    pub unsafe fn write(frame: &Frame, flags: Option<CR3Flags>) {
-        let addr = frame.addr().as_u64();
-        let flags = match flags {
-            Some(some) => some.bits(),
-            None => 0,
-        };
-
-        asm!("mov cr3, {}", in(reg) addr | flags, options(nostack));
+    pub unsafe fn write(frame: &Frame, flags: CR3Flags) {
+        asm!("mov cr3, {}", in(reg) frame.addr().as_u64() | flags.bits(), options(nostack));
     }
 
     #[inline(always)]
-    pub fn read() -> (Frame, Option<CR3Flags>) {
+    pub fn read() -> (Frame, CR3Flags) {
         let value: u64;
 
         unsafe {
@@ -34,7 +28,7 @@ impl CR3 {
 
         (
             Frame::from_addr(PhysAddr::new(value & !0xFFF)),
-            CR3Flags::from_bits(value),
+            CR3Flags::from_bits_truncate(value),
         )
     }
 }

@@ -5,10 +5,15 @@ pub mod interrupts;
 pub mod pwm;
 pub mod tlb;
 
+pub fn hlt() {
+    unsafe {
+        asm!("hlt", options(nomem, nostack));
+    }
+}
 
 pub fn hlt_indefinite() -> ! {
     loop {
-        x86_64::instructions::hlt();
+        hlt();
     }
 }
 

@@ -22,6 +22,10 @@ impl BlockAllocator<'_> {
         unsafe { Page::from_addr(VirtAddr::new_unsafe((SYSTEM_SLICE_SIZE as u64) * 0xA)) };
     const ALLOCATOR_CAPACITY: usize = SYSTEM_SLICE_SIZE;
 
+    const MASK_MAP: [u8; 8] = [
+        0b1, 0b11, 0b111, 0b1111, 0b11111, 0b111111, 0b11111111, 0b11111111,
+    ];
+
     pub const fn new(base_page: Page) -> Self {
         Self {
             addressor: Mutex::new(OnceCell::new()),
@@ -100,9 +104,8 @@ impl BlockAllocator<'_> {
                 let traversed_blocks = map_index * 8;
                 let start_byte_bit = block_index - traversed_blocks;
                 let end_byte_bit = core::cmp::min(8, end_block_index - traversed_blocks);
-                let value = (start_byte_bit..end_byte_bit)
-                    .map(|shift| 1 << shift)
-                    .sum::<u8>();
+                let total_bits = end_byte_bit - start_byte_bit;
+                let value = Self::MASK_MAP[total_bits - 1] << start_byte_bit;
 
                 debug_assert_eq!(
                     *byte & value,
@@ -111,8 +114,7 @@ impl BlockAllocator<'_> {
                 );
 
                 *byte |= value;
-
-                block_index += end_byte_bit - start_byte_bit;
+                block_index += total_bits;
             }
 
             (self.base_page.addr() + (start_block_index * Self::BLOCK_SIZE)).as_mut_ptr()
@@ -145,9 +147,8 @@ impl BlockAllocator<'_> {
             let traversed_blocks = map_index * 8;
             let start_byte_bit = block_index - traversed_blocks;
             let end_byte_bit = core::cmp::min(8, end_block_index - traversed_blocks);
-            let value = (start_byte_bit..end_byte_bit)
-                .map(|shift| 1 << shift)
-                .sum::<u8>();
+            let total_bits = end_byte_bit - start_byte_bit;
+            let value = Self::MASK_MAP[total_bits - 1] << start_byte_bit;
 
             debug_assert_eq!(
                 *byte & value,
@@ -156,8 +157,7 @@ impl BlockAllocator<'_> {
             );
 
             *byte ^= value;
-
-            block_index += end_byte_bit - start_byte_bit;
+            block_index += total_bits;
         }
     }
 
