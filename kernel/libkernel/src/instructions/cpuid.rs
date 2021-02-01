@@ -1,5 +1,3 @@
-pub struct CPUID;
-
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CPUIDRequestType {
@@ -75,21 +73,19 @@ bitflags::bitflags! {
     }
 }
 
-impl CPUID {
-    pub fn get_features() -> CPUFeatures {
-        let mut feat_low: u32;
-        let mut feat_high: u32;
+pub fn cpuid_features() -> CPUFeatures {
+    let mut feat_low: u32;
+    let mut feat_high: u32;
 
-        unsafe {
-            asm!("mov eax, {:e}",
+    unsafe {
+        asm!("mov eax, {:e}",
                 "cpuid",
                 "mov {:e}, ecx",
                 "mov {:e}, edx",
                 in(reg) CPUIDRequestType::Features as u32,
                 out(reg) feat_low,
                 out(reg) feat_high);
-        }
-
-        CPUFeatures::from_bits_truncate(((feat_high as u64) << 32) | (feat_low as u64))
     }
+
+    CPUFeatures::from_bits_truncate(((feat_high as u64) << 32) | (feat_low as u64))
 }
