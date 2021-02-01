@@ -1,6 +1,10 @@
+mod cpuid;
+
+pub use cpuid::*;
 pub mod interrupts;
 pub mod pwm;
 pub mod tlb;
+
 
 pub fn hlt_indefinite() -> ! {
     loop {

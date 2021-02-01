@@ -117,7 +117,7 @@ impl BlockAllocator<'_> {
 
             (self.base_page.addr() + (start_block_index * Self::BLOCK_SIZE)).as_mut_ptr()
         } else {
-            panic!("failed to fulfill allocation request")
+            panic!("out of memory!")
         }
     }
 
@@ -195,7 +195,7 @@ impl BlockAllocator<'_> {
 
             trace!("Successfully grew allocator map.");
         } else {
-            panic!("Addressor has not been set for allocator.");
+            panic!("addressor has not been set for allocator.");
         }
     }
 }

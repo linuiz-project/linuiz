@@ -30,7 +30,7 @@ extern "C" {
 
 #[cfg(debug_assertions)]
 fn get_log_level() -> log::LevelFilter {
-    log::LevelFilter::Trace
+    log::LevelFilter::Debug
 }
 
 #[cfg(not(debug_assertions))]
@@ -58,14 +58,9 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor>) -> ! {
     );
 
     libkernel::init(&boot_info);
-    info!("Enabling interrupts.");
     libkernel::instructions::interrupts::enable();
 
-    let mut vec = alloc::vec::Vec::<usize>::new();
-
-    for index in 0..10000 {
-        vec.push(index);
-    }
+    info!("{:?}", libkernel::instructions::CPUID::get_features());
 
     info!("Kernel has reached safe shutdown state.");
     unsafe { libkernel::instructions::pwm::qemu_shutdown() }
