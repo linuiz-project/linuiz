@@ -45,43 +45,27 @@ impl BlockAllocator<'_> {
         self.map.read().len() * 8
     }
 
-    pub fn malloc(&self, size: usize) -> &mut [u8] {
-        unsafe { &mut *slice_from_raw_parts_mut(self.ralloc(size), size) }
-    }
+    fn raw_alloc(&self, size: usize) -> *mut u8 {
+        trace!("Allocation requested: {} bytes", size);
 
-    fn ralloc(&self, size: usize) -> *mut u8 {
-        let size_in_blocks = efi_boot::align_up(size, Self::BLOCK_SIZE) / Self::BLOCK_SIZE;
-        trace!(
-            "Allocation requested: {} bytes => {} blocks",
-            size,
-            size_in_blocks
-        );
-
+        let size_in_blocks = (size + (Self::BLOCK_SIZE - 1)) / Self::BLOCK_SIZE;
         let initial_block_count = self.blocks_count();
-        if size_in_blocks > self.blocks_count() {
-            let blocks_difference = core::cmp::max(0, size_in_blocks - initial_block_count);
-            let required_map_growth =
-                efi_boot::align_up(blocks_difference, Self::BLOCKS_PER_SELFPAGE)
-                    / Self::BLOCKS_PER_SELFPAGE;
-            trace!("Allocator requires {} new pages.", required_map_growth);
+        if size_in_blocks > initial_block_count {
+            let required_growth = ((size_in_blocks - initial_block_count)
+                + (Self::BLOCKS_PER_SELFPAGE - 1))
+                / Self::BLOCKS_PER_SELFPAGE;
 
-            for _ in 0..required_map_growth {
-                self.grow_once();
-            }
+            (0..required_growth).for_each(|_| self.grow_once());
         }
 
-        trace!("Allocator passed preliminary block size check.");
         let map_read = self.map.upgradeable_read();
         let max_map_index = (map_read.len() * 8) - size_in_blocks;
         let mut block_index = 0;
         let mut current_run = 0;
 
-        'outer: for byte in (0..max_map_index).map(|map_index| {
-            trace!("Iterating allocator map index: {}", map_index);
-            map_read[map_index]
-        }) {
-            for shift_bit in (0..8).map(|shift| 1 << shift) {
-                if (byte & shift_bit) == 0 {
+        'outer: for byte in (0..max_map_index).map(|map_index| map_read[map_index]) {
+            for bit in (0..8).map(|shift| (byte & (1 << shift)) == 0) {
+                if bit {
                     current_run += 1;
                 } else {
                     current_run = 0;
@@ -97,25 +81,83 @@ impl BlockAllocator<'_> {
 
         if current_run == size_in_blocks {
             let start_block_index = block_index - current_run;
+            let end_block_index = block_index;
+            block_index = start_block_index;
             trace!(
                 "Allocating blocks: {}..{}",
                 start_block_index,
-                start_block_index + size_in_blocks
+                end_block_index
             );
 
-            let mut map_write = map_read.upgrade();
-            for map_index in (start_block_index / 8)..=(block_index / 8) {
-                if current_run >= 8 {
-                    map_write[map_index] = u8::MAX;
-                    current_run -= 8;
-                } else if current_run > 0 {
-                    map_write[map_index] |= (0..current_run).map(|shift| 1 << shift).sum::<u8>();
-                }
+            let start_map_index = start_block_index / 8;
+            for (map_index, byte) in map_read
+                .upgrade()
+                .iter_mut()
+                .enumerate()
+                .skip(start_map_index)
+                .take(((end_block_index + 7) / 8) - start_map_index)
+            {
+                let traversed_blocks = map_index * 8;
+                let start_byte_bit = block_index - traversed_blocks;
+                let end_byte_bit = core::cmp::min(8, end_block_index - traversed_blocks);
+                let value = (start_byte_bit..end_byte_bit)
+                    .map(|shift| 1 << shift)
+                    .sum::<u8>();
+
+                debug_assert_eq!(
+                    *byte & value,
+                    0,
+                    "attempting to allocate blocks that are already allocated"
+                );
+
+                *byte |= value;
+
+                block_index += end_byte_bit - start_byte_bit;
             }
 
             (self.base_page.addr() + (start_block_index * Self::BLOCK_SIZE)).as_mut_ptr()
         } else {
             panic!("failed to fulfill allocation request")
+        }
+    }
+
+    fn raw_dealloc(&self, ptr: *mut u8, size: usize) {
+        let start_block_index =
+            ((ptr as usize) - (self.base_page.addr().as_u64() as usize)) / Self::BLOCK_SIZE;
+        let end_block_index =
+            start_block_index + (efi_boot::align_up(size, Self::BLOCK_SIZE) / Self::BLOCK_SIZE);
+        let mut block_index = start_block_index;
+        trace!(
+            "Deallocating blocks: {}..{}",
+            start_block_index,
+            end_block_index
+        );
+
+        let start_map_index = start_block_index / 8;
+        for (map_index, byte) in self
+            .map
+            .write()
+            .iter_mut()
+            .enumerate()
+            .skip(start_map_index)
+            .take(((end_block_index + 7) / 8) - start_map_index)
+        {
+            let traversed_blocks = map_index * 8;
+            let start_byte_bit = block_index - traversed_blocks;
+            let end_byte_bit = core::cmp::min(8, end_block_index - traversed_blocks);
+            let value = (start_byte_bit..end_byte_bit)
+                .map(|shift| 1 << shift)
+                .sum::<u8>();
+
+            debug_assert_eq!(
+                *byte & value,
+                value,
+                "attempting to deallocate blocks that are aren't allocated"
+            );
+
+            *byte ^= value;
+
+            block_index += end_byte_bit - start_byte_bit;
         }
     }
 
@@ -160,8 +202,10 @@ impl BlockAllocator<'_> {
 
 unsafe impl core::alloc::GlobalAlloc for BlockAllocator<'_> {
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
-        self.ralloc(layout.size())
+        self.raw_alloc(layout.size())
     }
 
-    unsafe fn dealloc(&self, _: *mut u8, __: core::alloc::Layout) {}
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
+        self.raw_dealloc(ptr, layout.size());
+    }
 }
