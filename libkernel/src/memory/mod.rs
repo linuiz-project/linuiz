@@ -32,3 +32,4 @@ static GLOBAL_ALLOCATOR: BlockAllocator<'static> = BlockAllocator::new(Page::fro
 pub unsafe fn set_global_addressor(virtual_addressor: paging::VirtualAddressor) {
     GLOBAL_ALLOCATOR.set_addressor(virtual_addressor);
 }
+

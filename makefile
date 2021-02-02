@@ -1,6 +1,7 @@
 uefi-deps = $(shell find ../uefi-rs/ -type f -name '*.rs')
 boot_deps = $(shell find ./efi_boot/src/ -type f -name '*.rs')
 kernel_deps = $(shell find ./kernel/ -type f -name '*.rs')
+libkernel_deps = $(shell find ./libkernel/ -type f -name '*.rs')
 
 bootloader = image/EFI/BOOT/BOOTX64.efi
 kernel = image/EFI/gsai/kernel.elf
@@ -26,7 +27,7 @@ $(bootloader): $(boot_deps) $(uefi-deps)
 		rustfmt **/*.rs;\
 		cargo build --profile $(PROFILE) -Z unstable-options
 
-$(kernel): $(kernel_deps) $(uefi-deps)
+$(kernel): $(uefi-deps) $(libkernel_deps) $(kernel_deps)
 	rm -f $(kernel)
 	echo $(PROFILE)
 	cd /media/carl/GitHub/gsai/kernel/;\

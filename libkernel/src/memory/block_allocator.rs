@@ -127,7 +127,7 @@ impl BlockAllocator<'_> {
         let start_block_index =
             ((ptr as usize) - (self.base_page.addr().as_u64() as usize)) / Self::BLOCK_SIZE;
         let end_block_index =
-            start_block_index + (efi_boot::align_up(size, Self::BLOCK_SIZE) / Self::BLOCK_SIZE);
+            start_block_index + ((size + (Self::BLOCK_SIZE - 1)) / Self::BLOCK_SIZE);
         let mut block_index = start_block_index;
         trace!(
             "Deallocating blocks: {}..{}",
