@@ -7,7 +7,7 @@ edition = "2018"
 
 [dependencies]
 efi_boot = { path = "../efi_boot/" }
-libkernel = { path = "../libkernel" }
+libkernel = { path = "../libkernel", features = [ "kernel_impls" ] }
 log = { version = "*", default-features = false }
 lazy_static = "*"
 bitflags = "*"

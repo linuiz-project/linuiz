@@ -1,7 +1,7 @@
 ///! Graphics driver utilizing the EFI_GRAPHICS_OUTPUT_PROTOCOL to write to framebuffer.
 use crate::drivers::graphics::color::{Color8i, Colors};
 use core::mem::size_of;
-use efi_boot::Size;
+use libkernel::Size;
 
 #[repr(C)]
 #[derive(Copy, Clone, Eq, PartialEq)]

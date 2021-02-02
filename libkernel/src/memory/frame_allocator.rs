@@ -72,7 +72,7 @@ impl<'arr> FrameAllocator<'arr> {
         // allocate the memory map
         let element_count = total_memory / 0x1000;
         let memory_size = (element_count * FrameType::BIT_WIDTH) / 8;
-        let memory_pages = efi_boot::align_up(memory_size, 0x1000) / 0x1000;
+        let memory_pages = crate::align_up(memory_size, 0x1000) / 0x1000;
         debug!("Searching for memory descriptor which meets criteria:\n Pages (Memory): {}\n Bytes (Memory): >= {}\n Pages (Represented): >= {}", memory_pages, memory_size, element_count);
         let descriptor = uefi_memory_map
             .iter()

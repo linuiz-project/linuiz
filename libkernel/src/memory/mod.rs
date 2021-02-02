@@ -24,12 +24,13 @@ pub const fn to_mibibytes(value: usize) -> usize {
     value / MIBIBYTE
 }
 
+#[cfg(kernel_impls)]
 #[global_allocator]
 static GLOBAL_ALLOCATOR: BlockAllocator<'static> = BlockAllocator::new(Page::from_addr(unsafe {
     x86_64::VirtAddr::new_unsafe(0x7A12000)
 }));
 
+#[cfg(kernel_impls)]
 pub unsafe fn set_global_addressor(virtual_addressor: paging::VirtualAddressor) {
     GLOBAL_ALLOCATOR.set_addressor(virtual_addressor);
 }
-

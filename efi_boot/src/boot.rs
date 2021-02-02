@@ -16,13 +16,8 @@ use core::{
     mem::{size_of, transmute},
     ptr::slice_from_raw_parts_mut,
 };
-use efi_boot::{
-    align_down,
-    elf::{
-        program_header::{ProgramHeader, ProgramHeaderType},
-        ELFHeader64,
-    },
-    memory::PAGE_SIZE,
+use libkernel::{
+    elf::{ELFHeader64, ProgramHeader, ProgramHeaderType},
     FramebufferPointer,
 };
 use uefi::{
@@ -48,6 +43,7 @@ const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 const MINIMUM_MEMORY: usize = 0xF424000; // 256MB
 const KERNEL_CODE: MemoryType = MemoryType::custom(0xFFFFFF00);
 const KERNEL_DATA: MemoryType = MemoryType::custom(0xFFFFFF01);
+const PAGE_SIZE: usize = 0x1000;
 
 #[cfg(debug_assertions)]
 fn configure_log_level() {
@@ -193,7 +189,7 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
             let mode_info = mode.info();
             info!("Selected graphics mode: {:?}", mode_info);
             let resolution = mode_info.resolution();
-            let size = efi_boot::Size {
+            let size = libkernel::Size {
                 width: resolution.0,
                 height: resolution.1,
             };
@@ -331,7 +327,7 @@ fn allocate_segments(
             );
 
             // calculate required variables for correctly loading segment into memory
-            let aligned_address = align_down(
+            let aligned_address = libkernel::align_down(
                 segment_header.physical_address(),
                 segment_header.alignment(),
             );
@@ -443,8 +439,8 @@ fn kernel_transfer(
     }
 
     // Finally, drop into the kernel.
-    let kernel_main: efi_boot::KernelMain<MemoryDescriptor> =
+    let kernel_main: libkernel::KernelMain<MemoryDescriptor> =
         unsafe { transmute(kernel_entry_point) };
-    let boot_info = efi_boot::BootInfo::new(unsafe { memory_map.align_to().1 }, framebuffer);
+    let boot_info = libkernel::BootInfo::new(unsafe { memory_map.align_to().1 }, framebuffer);
     kernel_main(boot_info)
 }
