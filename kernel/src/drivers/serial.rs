@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use bitflags::bitflags;
 use lazy_static::lazy_static;
 use libkernel::io::port::{ReadOnlyPort, ReadWritePort, WriteOnlyPort};

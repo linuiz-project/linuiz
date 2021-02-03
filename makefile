@@ -18,6 +18,8 @@ reset: soft-reset
 		cargo clean
 	cd ./kernel/;\
 		cargo clean
+	cd ./libkernel/;\
+		cargo clean
 
 	
 $(bootloader): $(boot_deps) $(uefi-deps)

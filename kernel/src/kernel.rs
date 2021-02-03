@@ -54,47 +54,31 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor>) -> ! {
     info!("Validating magic of BootInfo.");
     boot_info.validate_magic();
 
-    libkernel::structures::idt::set_interrupt_handler(
-        libkernel::structures::pic::InterruptOffset::Timer,
-        crate::timer::tick_handler,
-    );
+    unsafe { libkernel::instructions::init_segment_registers(0x0) };
+    debug!("Zeroed segment registers.");
 
-    init(&boot_info);
-    libkernel::instructions::interrupts::enable();
-
-    info!("Kernel has reached safe shutdown state.");
-    unsafe { libkernel::instructions::pwm::qemu_shutdown() }
-}
-
-pub fn init(boot_info: &BootInfo<UEFIMemoryDescriptor>) {
-    info!("Configuring CPU state.");
-    unsafe { init_cpu_state() };
-    info!("Initializing memory structures.");
-    init_structures();
-}
-
-unsafe fn init_cpu_state() {
-    libkernel::instructions::init_segment_registers(0x0);
-    info!("Zeroed segment registers.");
-}
-
-fn init_structures() {
     libkernel::structures::gdt::init();
     info!("Successfully initialized GDT.");
     libkernel::structures::idt::init();
     info!("Successfully initialized IDT.");
     libkernel::structures::pic::init();
     info!("Successfully initialized PIC.");
-}
 
-fn init_memory(memory_map: &[libkernel::memory::UEFIMemoryDescriptor]) {
     info!("Initializing global memory (frame allocator, global allocator, et al).");
-    let frame_map_frames = unsafe { libkernel::memory::init_global_memory(memory_map) };
-    let mut global_addressor = init_global_addressor(memory_map);
+    let frame_map_frames = unsafe { libkernel::memory::init_global_memory(boot_info.memory_map()) };
+    let mut global_addressor = init_global_addressor(boot_info.memory_map());
     frame_map_frames.for_each(|frame| global_addressor.identity_map(&frame));
-
     debug!("Setting global addressor (`alloc::*` will be usable after this point).");
     unsafe { libkernel::memory::set_global_addressor(global_addressor) };
+
+    libkernel::structures::idt::set_interrupt_handler(
+        libkernel::structures::pic::InterruptOffset::Timer,
+        crate::timer::tick_handler,
+    );
+    libkernel::instructions::interrupts::enable();
+
+    info!("Kernel has reached safe shutdown state.");
+    unsafe { libkernel::instructions::pwm::qemu_shutdown() }
 }
 
 fn init_global_addressor<'balloc>(

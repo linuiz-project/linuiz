@@ -32,7 +32,7 @@ pub use x86_64::{PhysAddr, VirtAddr};
 
 pub const SYSTEM_SLICE_SIZE: usize = 0x10000000000;
 
-#[cfg(kernel_impls)]
+#[cfg(feature = "kernel_impls")]
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     error!(
@@ -44,7 +44,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     loop {}
 }
 
-#[cfg(kernel_impls)]
+#[cfg(feature = "kernel_impls")]
 #[alloc_error_handler]
 fn alloc_error(error: core::alloc::Layout) -> ! {
     error!("{:#?}", error);
