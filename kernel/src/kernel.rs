@@ -12,6 +12,7 @@ mod timer;
 
 use core::ffi::c_void;
 use libkernel::{
+    io::pci::ConfigAddressPacket,
     memory::{paging::VirtualAddressor, UEFIMemoryDescriptor},
     BootInfo, VirtAddr,
 };
@@ -76,6 +77,11 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor>) -> ! {
         crate::timer::tick_handler,
     );
     libkernel::instructions::interrupts::enable();
+
+    info!(
+        "{:?}",
+        libkernel::io::pci::config_read(ConfigAddressPacket::new(0x0, 0x0, 0x0, 0x0))
+    );
 
     info!("Kernel has reached safe shutdown state.");
     unsafe { libkernel::instructions::pwm::qemu_shutdown() }
