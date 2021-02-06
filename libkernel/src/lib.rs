@@ -20,17 +20,15 @@ extern crate alloc;
 mod bitarray;
 mod boot_info;
 
+pub mod elf;
 pub mod instructions;
 pub mod io;
 pub mod memory;
 pub mod registers;
 pub mod structures;
 pub use bitarray::*;
-pub use boot_info::BootInfo;
-pub mod elf;
+pub use boot_info::*;
 pub use x86_64::{PhysAddr, VirtAddr};
-
-pub const SYSTEM_SLICE_SIZE: usize = 0x10000000000;
 
 #[cfg(feature = "kernel_impls")]
 #[panic_handler]
@@ -82,7 +80,7 @@ impl<T> Into<Option<T>> for FFIOption<T> {
     }
 }
 
-pub type KernelMain<MM> = extern "efiapi" fn(crate::BootInfo<MM>) -> !;
+pub type KernelMain<MM, CTE> = extern "efiapi" fn(crate::BootInfo<MM, CTE>) -> !;
 
 pub fn align_up(value: usize, alignment: usize) -> usize {
     assert!(

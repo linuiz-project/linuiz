@@ -6,6 +6,8 @@ use core::{lazy::OnceCell, ptr::slice_from_raw_parts_mut};
 use spin::{Mutex, RwLock};
 use x86_64::VirtAddr;
 
+use super::FrameIterator;
+
 pub struct BlockAllocator<'map> {
     addressor: Mutex<OnceCell<VirtualAddressor>>,
     map: RwLock<&'map mut [u8]>,

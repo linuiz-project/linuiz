@@ -422,10 +422,11 @@ fn kernel_transfer(
     // lifetime information, and so cannot be reinterpreted easily.
     let mmap_buffer = unsafe { &mut *slice_from_raw_parts_mut(mmap_ptr, mmap_alloc_size) };
     // After this point point, the previous system_table and boot_services are no longer valid
-    let (_, mmap_iter) = match system_table.exit_boot_services(image_handle, mmap_buffer) {
-        Ok(completion) => completion.unwrap(),
-        Err(error) => panic!("{:?}", error),
-    };
+    let (runtime_table, mmap_iter) =
+        match system_table.exit_boot_services(image_handle, mmap_buffer) {
+            Ok(completion) => completion.unwrap(),
+            Err(error) => panic!("{:?}", error),
+        };
 
     // Remark: For some reason, this cast itself doesn't result in a valid memory map, even provided
     //  the alignment is correct—so we have to read in the memory descriptors.
@@ -439,8 +440,12 @@ fn kernel_transfer(
     }
 
     // Finally, drop into the kernel.
-    let kernel_main: libkernel::KernelMain<MemoryDescriptor> =
+    let kernel_main: libkernel::KernelMain<MemoryDescriptor, uefi::table::cfg::ConfigTableEntry> =
         unsafe { transmute(kernel_entry_point) };
-    let boot_info = libkernel::BootInfo::new(unsafe { memory_map.align_to().1 }, framebuffer);
+    let boot_info = libkernel::BootInfo::new(
+        unsafe { memory_map.align_to().1 },
+        runtime_table.config_table(),
+        framebuffer,
+    );
     kernel_main(boot_info)
 }

@@ -70,3 +70,7 @@ pub fn global_freed() -> usize {
 pub fn global_reserved() -> usize {
     global_memory().reserved_memory()
 }
+
+pub fn global_top_offset() -> x86_64::VirtAddr {
+    x86_64::VirtAddr::new((0x1000000000000 - global_memory().total_memory()) as u64)
+}
