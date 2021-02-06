@@ -30,6 +30,8 @@ pub use bitarray::*;
 pub use boot_info::*;
 pub use x86_64::{PhysAddr, VirtAddr};
 
+pub const SYSTEM_SLICE_SIZE: usize = 0x10000000000;
+
 #[cfg(feature = "kernel_impls")]
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {

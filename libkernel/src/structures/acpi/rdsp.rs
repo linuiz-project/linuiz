@@ -1,3 +1,4 @@
+use crate::structures::acpi::Checksum;
 use x86_64::PhysAddr;
 
 #[repr(C, packed)]
@@ -17,26 +18,9 @@ impl RDSPDescriptor {
     pub fn oem_id(&self) -> &str {
         core::str::from_utf8(&self.oem_id).expect("invalid ascii sequence for OEM id")
     }
-
-    pub fn checksum(&self) -> bool {
-        self.sum() == 0
-    }
-
-    fn sum(&self) -> u8 {
-        let mut sum: u8 = 0;
-
-        unsafe {
-            &*core::ptr::slice_from_raw_parts(
-                core::mem::transmute::<&Self, *const u8>(self),
-                core::mem::size_of::<Self>(),
-            )
-        }
-        .iter()
-        .for_each(|byte| sum = sum.wrapping_add(*byte));
-
-        sum
-    }
 }
+
+impl Checksum for RDSPDescriptor {}
 
 #[repr(C, packed)]
 pub struct RDSPDescriptor2 {
@@ -56,22 +40,9 @@ impl RDSPDescriptor2 {
         self.base.oem_id()
     }
 
-    pub fn checksum(&self) -> bool {
-        self.sum() == 0
-    }
-
-    fn sum(&self) -> u8 {
-        let mut sum: u8 = 0;
-
-        unsafe {
-            &*core::ptr::slice_from_raw_parts(
-                core::mem::transmute::<&Self, *const u8>(self),
-                core::mem::size_of::<Self>() - self.reserved.len(),
-            )
-        }
-        .iter()
-        .for_each(|byte| sum = sum.wrapping_add(*byte));
-
-        sum
+    pub fn addr(&self) -> PhysAddr {
+        self.xsdt_addr
     }
 }
+
+impl Checksum for RDSPDescriptor2 {}
