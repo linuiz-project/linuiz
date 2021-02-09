@@ -26,7 +26,7 @@ pub const fn to_mibibytes(value: usize) -> usize {
 
 #[cfg(feature = "kernel_impls")]
 #[global_allocator]
-static GLOBAL_ALLOCATOR: BlockAllocator<'static> = BlockAllocator::new(Page::from_addr(unsafe {
+static GLOBAL_ALLOCATOR: BlockAllocator= BlockAllocator::new(Page::from_addr(unsafe {
     x86_64::VirtAddr::new_unsafe(0x7A12000)
 }));
 

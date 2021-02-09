@@ -2,24 +2,23 @@ use crate::{
     memory::{global_lock_next, paging::VirtualAddressor, Page},
     SYSTEM_SLICE_SIZE,
 };
-use core::{lazy::OnceCell, ptr::slice_from_raw_parts_mut};
+use alloc::vec::Vec;
+use core::lazy::OnceCell;
 use spin::{Mutex, RwLock};
 use x86_64::VirtAddr;
 
-pub struct BlockAllocator<'map> {
+pub struct BlockAllocator {
     addressor: Mutex<OnceCell<VirtualAddressor>>,
-    map: RwLock<&'map mut [u8]>,
-    base_page: Page,
+    map: RwLock<Vec<u8>>,
+    alloc_page: Page,
 }
 
-impl BlockAllocator<'_> {
+impl BlockAllocator {
     const BLOCK_SIZE: usize = 16;
-    const BITS_PER_SELFPAGE: usize = 0x1000 * 8 /* bits per byte */;
-    const REPR_BYTES_PER_SELFPAGE: usize = Self::BITS_PER_SELFPAGE * Self::BLOCK_SIZE;
-    const BLOCKS_PER_SELFPAGE: usize = Self::REPR_BYTES_PER_SELFPAGE / 0x1000;
+    const BLOCKS_PER_SELFPAGE: usize = Self::BLOCK_SIZE * 8;
 
-    const ALLOCATOR_BASE_PAGE: Page =
-        unsafe { Page::from_addr(VirtAddr::new_unsafe((SYSTEM_SLICE_SIZE as u64) * 0xA)) };
+    const ALLOCATOR_BASE: Page =
+        Page::from_addr(VirtAddr::new_truncate((SYSTEM_SLICE_SIZE as u64) * 0xA));
     const ALLOCATOR_CAPACITY: usize = SYSTEM_SLICE_SIZE;
 
     const MASK_MAP: [u8; 8] = [
@@ -29,19 +28,22 @@ impl BlockAllocator<'_> {
     pub const fn new(base_page: Page) -> Self {
         Self {
             addressor: Mutex::new(OnceCell::new()),
-            map: RwLock::new(&mut [0u8; 0]),
-            base_page,
+            map: RwLock::new(Vec::new()),
+            alloc_page: base_page,
         }
     }
 
     pub unsafe fn set_addressor(&self, virtual_addressor: VirtualAddressor) {
-        if virtual_addressor.is_mapped(Self::ALLOCATOR_BASE_PAGE.addr()) {
+        if virtual_addressor.is_mapped(Self::ALLOCATOR_BASE.addr()) {
             panic!("allocator already exists for this virtual addressor (or allocator memory zone has been otherwise mapped)");
         } else if let Err(_) = self.addressor.lock().set(virtual_addressor) {
             panic!("addressor has already been set for allocator");
         } else {
-            *self.map.write() =
-                &mut *slice_from_raw_parts_mut(Self::ALLOCATOR_BASE_PAGE.addr().as_mut_ptr(), 0);
+            *self.map.write() = Vec::from_raw_parts(
+                Self::ALLOCATOR_BASE.mut_ptr() as *mut u8,
+                0,
+                Self::ALLOCATOR_CAPACITY,
+            );
         }
     }
 
@@ -53,22 +55,19 @@ impl BlockAllocator<'_> {
         trace!("Allocation requested: {} bytes", size);
 
         let size_in_blocks = (size + (Self::BLOCK_SIZE - 1)) / Self::BLOCK_SIZE;
-        let initial_block_count = self.blocks_count();
-        if size_in_blocks > initial_block_count {
-            let required_growth = ((size_in_blocks - initial_block_count)
-                + (Self::BLOCKS_PER_SELFPAGE - 1))
-                / Self::BLOCKS_PER_SELFPAGE;
+        let (mut block_index, mut current_run);
 
-            (0..required_growth).for_each(|_| self.grow_once());
-        }
+        while {
+            block_index = 0;
+            current_run = 0;
+            let map_read = self.map.read();
 
-        let map_read = self.map.upgradeable_read();
-        let max_map_index = (map_read.len() * 8) - size_in_blocks;
-        let mut block_index = 0;
-        let mut current_run = 0;
-
-        'outer: for byte in (0..max_map_index).map(|map_index| map_read[map_index]) {
-            for bit in (0..8).map(|shift| (byte & (1 << shift)) == 0) {
+            for bit in map_read
+                .iter()
+                .take((map_read.len() * 8) - size_in_blocks)
+                .map(|byte| *byte)
+                .flat_map(|byte| (0..8).map(move |shift| (byte & (1 << shift)) == 0))
+            {
                 if bit {
                     current_run += 1;
                 } else {
@@ -78,54 +77,56 @@ impl BlockAllocator<'_> {
                 block_index += 1;
 
                 if current_run == size_in_blocks {
-                    break 'outer;
+                    break;
                 }
             }
+
+            // grow while we can't accomodate allocation
+            current_run < size_in_blocks
+        } {
+            self.grow_once();
         }
 
-        if current_run == size_in_blocks {
-            let start_block_index = block_index - current_run;
-            let end_block_index = block_index;
-            block_index = start_block_index;
-            trace!(
-                "Allocating blocks: {}..{}",
-                start_block_index,
-                end_block_index
+        let start_block_index = block_index - current_run;
+        let end_block_index = block_index;
+        block_index = start_block_index;
+        trace!(
+            "Allocating blocks: {}..{}",
+            start_block_index,
+            end_block_index
+        );
+
+        let start_map_index = start_block_index / 8;
+        for (traversed_blocks, byte) in self
+            .map
+            .write()
+            .iter_mut()
+            .enumerate()
+            .skip(start_map_index)
+            .take(((end_block_index + 7) / 8) - start_map_index)
+            .map(|(map_index, byte)| (map_index * 8, byte))
+        {
+            let start_byte_bits = block_index - traversed_blocks;
+            let total_bits =
+                core::cmp::min(8, end_block_index - traversed_blocks) - start_byte_bits;
+            let bits_mask = Self::MASK_MAP[total_bits - 1] << start_byte_bits;
+
+            debug_assert_eq!(
+                *byte & bits_mask,
+                0,
+                "attempting to allocate blocks that are already allocated"
             );
 
-            let start_map_index = start_block_index / 8;
-            for (map_index, byte) in map_read
-                .upgrade()
-                .iter_mut()
-                .enumerate()
-                .skip(start_map_index)
-                .take(((end_block_index + 7) / 8) - start_map_index)
-            {
-                let traversed_blocks = map_index * 8;
-                let start_byte_bit = block_index - traversed_blocks;
-                let end_byte_bit = core::cmp::min(8, end_block_index - traversed_blocks);
-                let total_bits = end_byte_bit - start_byte_bit;
-                let value = Self::MASK_MAP[total_bits - 1] << start_byte_bit;
-
-                debug_assert_eq!(
-                    *byte & value,
-                    0,
-                    "attempting to allocate blocks that are already allocated"
-                );
-
-                *byte |= value;
-                block_index += total_bits;
-            }
-
-            (self.base_page.addr() + (start_block_index * Self::BLOCK_SIZE)).as_mut_ptr()
-        } else {
-            panic!("out of memory!")
+            *byte |= bits_mask;
+            block_index += total_bits;
         }
+
+        (self.alloc_page.addr() + (start_block_index * Self::BLOCK_SIZE)).as_mut_ptr()
     }
 
     fn raw_dealloc(&self, ptr: *mut u8, size: usize) {
         let start_block_index =
-            ((ptr as usize) - (self.base_page.addr().as_u64() as usize)) / Self::BLOCK_SIZE;
+            ((ptr as usize) - (self.alloc_page.addr().as_u64() as usize)) / Self::BLOCK_SIZE;
         let end_block_index =
             start_block_index + ((size + (Self::BLOCK_SIZE - 1)) / Self::BLOCK_SIZE);
         let mut block_index = start_block_index;
@@ -136,18 +137,17 @@ impl BlockAllocator<'_> {
         );
 
         let start_map_index = start_block_index / 8;
-        for (map_index, byte) in self
+        for (traversed_blocks, byte) in self
             .map
             .write()
             .iter_mut()
             .enumerate()
             .skip(start_map_index)
             .take(((end_block_index + 7) / 8) - start_map_index)
+            .map(|(map_index, byte)| (map_index * 8, byte))
         {
-            let traversed_blocks = map_index * 8;
             let start_byte_bit = block_index - traversed_blocks;
-            let end_byte_bit = core::cmp::min(8, end_block_index - traversed_blocks);
-            let total_bits = end_byte_bit - start_byte_bit;
+            let total_bits = core::cmp::min(8, end_block_index - traversed_blocks) - start_byte_bit;
             let value = Self::MASK_MAP[total_bits - 1] << start_byte_bit;
 
             debug_assert_eq!(
@@ -167,29 +167,27 @@ impl BlockAllocator<'_> {
             self.blocks_count()
         );
 
-        let map = self.map.upgradeable_read();
-        if map.len() >= Self::ALLOCATOR_CAPACITY {
+        let map_read = self.map.upgradeable_read();
+        let map_read_len = map_read.len();
+        if map_read_len >= Self::ALLOCATOR_CAPACITY {
             panic!("allocator has reached maximum memory");
         } else if let Some(addressor) = self.addressor.lock().get_mut() {
-            let self_pages_count = map.len() / 0x1000;
+            let self_pages_count = map_read_len / 0x1000;
             // map the next frame for the allocator map
-            addressor.map(
-                &Self::ALLOCATOR_BASE_PAGE.offset(self_pages_count),
-                unsafe { &global_lock_next().unwrap() },
-            );
+            addressor.map(&Self::ALLOCATOR_BASE.offset(self_pages_count), unsafe {
+                &global_lock_next().unwrap()
+            });
 
             // update the map slice to reflect new size
-            let mut map = map.upgrade();
-            *map = unsafe { &mut *slice_from_raw_parts_mut(map.as_mut_ptr(), map.len() + 0x1000) };
+            map_read.upgrade().resize(map_read_len + 0x1000, 0);
 
             // allocate and map the pages that the new slice area covers
-            for (index, page) in self
-                .base_page
+            for page in self
+                .alloc_page
                 .offset(self_pages_count * Self::BLOCKS_PER_SELFPAGE)
                 .iter_count(Self::BLOCKS_PER_SELFPAGE)
-                .enumerate()
             {
-                trace!("Clearing page after growing (iter {}): {:?}", index, page);
+                trace!("Clearing page after growing: {:?}", page);
                 addressor.map(&page, unsafe { &global_lock_next().unwrap() });
             }
 
@@ -200,7 +198,7 @@ impl BlockAllocator<'_> {
     }
 }
 
-unsafe impl core::alloc::GlobalAlloc for BlockAllocator<'_> {
+unsafe impl core::alloc::GlobalAlloc for BlockAllocator {
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
         self.raw_alloc(layout.size())
     }

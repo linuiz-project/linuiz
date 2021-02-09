@@ -46,6 +46,16 @@ impl Page {
     }
 
     #[inline]
+    pub const fn ptr(&self) -> *const core::ffi::c_void {
+        self.0 as *const core::ffi::c_void
+    }
+
+    #[inline]
+    pub const fn mut_ptr(&self) -> *mut core::ffi::c_void {
+        self.0 as *mut core::ffi::c_void
+    }
+
+    #[inline]
     pub const fn iter_count(&self, count: usize) -> PageIterator {
         PageIterator {
             current: Page::from_index(self.0),
