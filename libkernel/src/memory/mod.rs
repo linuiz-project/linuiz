@@ -2,7 +2,6 @@ mod block_allocator;
 mod frame;
 mod frame_allocator;
 mod global_memory;
-mod linked_allocator;
 mod page;
 mod uefi;
 
@@ -23,6 +22,14 @@ pub const fn to_kibibytes(value: usize) -> usize {
 
 pub const fn to_mibibytes(value: usize) -> usize {
     value / MIBIBYTE
+}
+
+pub fn find_stack_descriptor(memory_map: &[UEFIMemoryDescriptor]) -> Option<&UEFIMemoryDescriptor> {
+    memory_map.iter().find(|descriptor| {
+        descriptor
+            .range()
+            .contains(&crate::registers::stack::RSP::read().as_u64())
+    })
 }
 
 #[cfg(feature = "kernel_impls")]

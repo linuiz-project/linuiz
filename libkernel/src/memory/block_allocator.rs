@@ -1,4 +1,5 @@
 use crate::{
+    align_up_div,
     memory::{paging::VirtualAddressor, Frame, FrameIterator, Page},
     SYSTEM_SLICE_SIZE,
 };
@@ -73,18 +74,22 @@ impl SectionState {
         }
     }
 
+    /// Whether the section state indicates an empty section.
     const fn is_empty(&self) -> bool {
         !self.had_bits && !self.has_bits
     }
 
+    /// Whether the section states indicates a section that should be allocated.
     const fn is_alloc(&self) -> bool {
         !self.had_bits && self.has_bits
     }
 
+    /// Whether the section states indicates a section that should be deallocated.
     const fn is_dealloc(&self) -> bool {
         self.had_bits && !self.has_bits
     }
 
+    /// Whether the given block page section states indicate an allocation.
     fn should_alloc(page_state: &[SectionState]) -> bool {
         page_state.iter().any(|state| state.is_alloc())
             && page_state
@@ -92,6 +97,7 @@ impl SectionState {
                 .all(|state| state.is_alloc() || state.is_empty())
     }
 
+    /// Whether the given block page section states indicate an deallocation.
     fn should_dealloc(page_state: &[SectionState]) -> bool {
         page_state.iter().any(|state| state.is_dealloc())
             && page_state
@@ -100,19 +106,23 @@ impl SectionState {
     }
 }
 
+/// Allocator utilizing blocks of memory, in size of 16 bytes per block, to
+///  easily and efficiently allocate.
 pub struct BlockAllocator {
     addressor: Mutex<core::lazy::OnceCell<VirtualAddressor>>,
     map: RwLock<Vec<BlockPage>>,
 }
 
 impl BlockAllocator {
+    /// The size of an allocator block.
     const BLOCK_SIZE: usize = 16;
 
+    /// Base page the allocator uses to store the internal block page map.
     const ALLOCATOR_BASE: Page = Page::from_addr(x86_64::VirtAddr::new_truncate(
         (SYSTEM_SLICE_SIZE as u64) * 0xA,
     ));
-    const ALLOCATOR_CAPACITY: usize = SYSTEM_SLICE_SIZE;
 
+    /// Provides a simple mechanism in which the mask of a u64 can be acquired by bit count.
     const MASK_MAP: [u64; 64] = [
         0x1,
         0x3,
@@ -187,42 +197,43 @@ impl BlockAllocator {
         }
     }
 
-    pub unsafe fn init(&self, memory_map: &[crate::memory::UEFIMemoryDescriptor]) {
+    fn with_addressor<F, R>(&self, mut closure: F) -> R
+    where
+        F: FnMut(&mut VirtualAddressor) -> R,
+    {
+        if let Some(addressor) = self.addressor.lock().get_mut() {
+            closure(addressor)
+        } else {
+            panic!("addressor has not been set")
+        }
+    }
+
+    /* INITIALIZATION */
+
+    pub fn init(&self, memory_map: &[crate::memory::UEFIMemoryDescriptor]) {
         debug!("Initializing global memory and mapping all frame allocator frames.");
         // TODO do this global memory init in a static / global context
         //  (allocators can't be considered global from the system's perspective)
-        let frame_allocator_frames = unsafe { crate::memory::init_global_memory(memory_map) };
+        let global_memory_frames = unsafe { crate::memory::init_global_memory(memory_map) };
 
-        if self
-            .addressor
-            .lock()
-            .set(unsafe { VirtualAddressor::new(Page::null()) })
-            .is_ok()
-        {
-            *self.map.write() = Vec::from_raw_parts(
-                Self::ALLOCATOR_BASE.mut_ptr(),
-                0,
-                Self::ALLOCATOR_CAPACITY / core::mem::size_of::<BlockPage>(),
-            );
-        } else {
-            panic!("addressor has already been set for allocator");
+        unsafe {
+            self.init_addressor();
+            self.init_map();
         }
 
-        // We have to remap the stack.
-        //
-        // To make things fun, there's no pre-defined 'this is a stack'
-        //  descriptor. So, as a work-around, we read `rsp`, and find the
-        //  descriptor which contains it. I believe this is a flawless solution
-        //  that has no possibility of backfiring.
-        let rsp_addr = crate::registers::stack::RSP::read();
-        // Still, this feels like I'm cheating on a math test
-        let stack_descriptor = memory_map
-            .iter()
-            .find(|descriptor| descriptor.range().contains(&rsp_addr.as_u64()))
+        let stack_descriptor = crate::memory::find_stack_descriptor(memory_map)
             .expect("failed to find stack memory region");
 
-        if let Some(addressor) = self.addressor.lock().get_mut() {
-            frame_allocator_frames.for_each(|frame| addressor.identity_map(&frame));
+        self.with_addressor(|addressor| {
+            global_memory_frames.for_each(|frame| addressor.identity_map(&frame));
+
+            debug!("Temporary identity mapping stack frames.");
+            for frame in stack_descriptor.frame_iter() {
+                // This is a temporary identity mapping, purely
+                //  so `rsp` isn't invalid after we swap the PML4.
+                addressor.identity_map(&frame);
+                unsafe { crate::memory::global_reserve(&frame) };
+            }
 
             debug!("Identity mapping all reserved memory blocks.");
             for frame in memory_map
@@ -233,14 +244,6 @@ impl BlockAllocator {
                 })
             {
                 addressor.identity_map(&frame);
-            }
-
-            debug!("Temporary identity mapping stack frames.");
-            for frame in stack_descriptor.frame_iter() {
-                // This is a temporary identity mapping, purely
-                //  so `rsp` isn't invalid after we swap the PML4.
-                addressor.identity_map(&frame);
-                unsafe { crate::memory::global_reserve(&frame) };
             }
 
             // Since we're using physical offset mapping for our page table modification
@@ -254,9 +257,7 @@ impl BlockAllocator {
                 debug!("Writing kernel addressor's PML4 to the CR3 register.");
                 addressor.swap_into();
             }
-        } else {
-            panic!("addressor has not been configured");
-        }
+        });
 
         // 'Allocate' the null page
         trace!("Allocating null frame.");
@@ -272,9 +273,51 @@ impl BlockAllocator {
             })
             .for_each(|frame| self.identity_map(&frame));
 
+        self.init_stack(stack_descriptor);
+    }
+
+    unsafe fn init_addressor(&self) {
+        if self
+            .addressor
+            .lock()
+            .set(VirtualAddressor::new(Page::null()))
+            .is_err()
+        {
+            panic!("addressor has already been set for allocator");
+        }
+    }
+
+    unsafe fn init_map(&self) {
+        *self.map.write() = Vec::from_raw_parts(
+            Self::ALLOCATOR_BASE.mut_ptr(),
+            0,
+            SYSTEM_SLICE_SIZE / core::mem::size_of::<BlockPage>(),
+        );
+    }
+
+    fn init_stack(&self, stack_descriptor: &crate::memory::UEFIMemoryDescriptor) {
         stack_descriptor
             .frame_iter()
             .for_each(|frame| self.identity_map(&frame));
+
+        // adjust the stack pointer to our new stack
+        unsafe {
+            let cur_stack_base = stack_descriptor.phys_start.as_u64();
+            let stack_ptr = self.alloc_to(stack_descriptor.frame_iter()) as u64;
+
+            if cur_stack_base > stack_ptr {
+                crate::registers::stack::RSP::sub(cur_stack_base - stack_ptr);
+            } else {
+                crate::registers::stack::RSP::add(stack_ptr - cur_stack_base);
+            }
+        }
+
+        // unmap the old stack mappings
+        self.with_addressor(|addressor| {
+            stack_descriptor
+                .frame_iter()
+                .for_each(|frame| addressor.unmap(&Page::from_index(frame.index())))
+        });
     }
 
     /* ALLOC & DEALLOC */
@@ -338,7 +381,7 @@ impl BlockAllocator {
             .iter_mut()
             .enumerate()
             .skip(start_map_index)
-            .take(crate::align_up_div(end_block_index, BlockPage::BLOCKS_COUNT) - start_map_index)
+            .take(align_up_div(end_block_index, BlockPage::BLOCKS_COUNT) - start_map_index)
         {
             let mut page_state: [SectionState; 4] = [SectionState::empty(); 4];
 
@@ -368,13 +411,11 @@ impl BlockAllocator {
 
             if SectionState::should_alloc(&page_state) {
                 // 'has bits', but not 'had bits'
-                if let Some(addressor) = self.addressor.lock().get_mut() {
+                self.with_addressor(|addressor| {
                     addressor.map(&Page::from_index(map_index), unsafe {
                         &crate::memory::global_lock_next().unwrap()
                     });
-                } else {
-                    panic!("addressor has not been configured");
-                }
+                });
             }
         }
 
@@ -382,6 +423,8 @@ impl BlockAllocator {
     }
 
     pub fn alloc_to(&self, mut frames: FrameIterator) -> *mut u8 {
+        trace!("Allocation requested to: {} frames", frames.remaining());
+        let size_in_frames = frames.remaining();
         let (mut map_index, mut current_run);
 
         while {
@@ -396,22 +439,32 @@ impl BlockAllocator {
                 }
 
                 map_index += 1;
+
+                if current_run == size_in_frames {
+                    break;
+                }
             }
 
-            current_run < frames.remaining()
+            current_run < size_in_frames
         } {
-            self.grow(frames.remaining() * BlockPage::BLOCKS_COUNT);
+            self.grow(size_in_frames * BlockPage::BLOCKS_COUNT);
         }
 
         let start_index = map_index - current_run;
-        if let Some(addressor) = self.addressor.lock().get_mut() {
+        trace!(
+            "Allocation fulfilling: pages {}..{}",
+            start_index,
+            start_index + size_in_frames
+        );
+
+        self.with_addressor(|addressor| {
             for (map_index, block_page) in self
                 .map
                 .write()
                 .iter_mut()
                 .enumerate()
                 .skip(start_index)
-                .take(frames.remaining())
+                .take(size_in_frames)
             {
                 addressor.map(
                     &Page::from_index(map_index),
@@ -419,9 +472,7 @@ impl BlockAllocator {
                 );
                 block_page.set_full();
             }
-        } else {
-            panic!("addressor has not been configured");
-        }
+        });
 
         (start_index * 0x1000) as *mut u8
     }
@@ -434,7 +485,7 @@ impl BlockAllocator {
             self.grow((frame.index() - map_len) * BlockPage::BLOCKS_COUNT)
         }
 
-        if let Some(addressor) = self.addressor.lock().get_mut() {
+        self.with_addressor(|addressor| {
             let block_page = &mut self.map.write()[frame.index()];
 
             if block_page.is_empty() {
@@ -443,50 +494,67 @@ impl BlockAllocator {
             } else {
                 panic!("attempting to identity map page with previously allocated blocks");
             }
-        } else {
-            panic!("addressor has not been configured");
+        });
+    }
+
+    fn raw_dealloc(&self, ptr: *mut u8, size: usize) {
+        let start_block_index = (ptr as usize) / Self::BLOCK_SIZE;
+        let end_block_index = start_block_index + align_up_div(size, Self::BLOCK_SIZE);
+        let mut block_index = start_block_index;
+        trace!(
+            "Deallocating requested: {}..{}",
+            start_block_index,
+            end_block_index
+        );
+
+        let start_map_index = start_block_index / BlockPage::BLOCKS_COUNT;
+        for (map_index, block_page) in self
+            .map
+            .write()
+            .iter_mut()
+            .enumerate()
+            .skip(start_map_index)
+            .take(align_up_div(end_block_index, BlockPage::BLOCKS_COUNT) - start_map_index)
+        {
+            let mut page_state: [SectionState; 4] = [SectionState::empty(); 4];
+
+            for (section_index, section) in block_page.iter_mut().enumerate() {
+                page_state[section_index].had_bits = *section > 0;
+
+                if block_index < end_block_index {
+                    let traversed_blocks =
+                        (map_index * BlockPage::BLOCKS_COUNT) + (section_index * 64);
+                    let start_byte_bits = block_index - traversed_blocks;
+                    let total_bits =
+                        core::cmp::min(64, end_block_index - traversed_blocks) - start_byte_bits;
+                    let bits_mask = Self::MASK_MAP[total_bits - 1] << start_byte_bits;
+
+                    debug_assert_eq!(
+                        *section & bits_mask,
+                        bits_mask,
+                        "attempting to allocate blocks that are already allocated"
+                    );
+
+                    *section ^= bits_mask;
+                    block_index += total_bits;
+                }
+
+                page_state[section_index].has_bits = *section > 0;
+            }
+
+            if SectionState::should_dealloc(&page_state) {
+                // 'has bits', but not 'had bits'
+                self.with_addressor(|addressor| {
+                    let page = &Page::from_index(map_index);
+                    unsafe { crate::memory::global_free(&addressor.translate_page(page).unwrap()) };
+                    addressor.unmap(page);
+                });
+            }
         }
     }
 
-    fn raw_dealloc(&self, _ptr: *mut u8, _size: usize) {
-        //     let start_block_index =
-        //         ((ptr as usize) - (self.alloc_page.addr().as_u64() as usize)) / Self::BLOCK_SIZE;
-        //     let end_block_index =
-        //         start_block_index + ((size + (Self::BLOCK_SIZE - 1)) / Self::BLOCK_SIZE);
-        //     let mut block_index = start_block_index;
-        //     trace!(
-        //         "Deallocating blocks: {}..{}",
-        //         start_block_index,
-        //         end_block_index
-        //     );
-
-        //     let start_map_index = start_block_index / 8;
-        //     for (traversed_blocks, byte) in self
-        //         .map
-        //         .write()
-        //         .iter_mut()
-        //         .enumerate()
-        //         .skip(start_map_index)
-        //         .take(((end_block_index + 7) / 8) - start_map_index)
-        //         .map(|(map_index, byte)| (map_index * 8, byte))
-        //     {
-        //         let start_byte_bit = block_index - traversed_blocks;
-        //         let total_bits = core::cmp::min(8, end_block_index - traversed_blocks) - start_byte_bit;
-        //         let value = Self::MASK_MAP[total_bits - 1] << start_byte_bit;
-
-        //         debug_assert_eq!(
-        //             *byte & value,
-        //             value,
-        //             "attempting to deallocate blocks that are aren't allocated"
-        //         );
-
-        //         *byte ^= value;
-        //         block_index += total_bits;
-        //     }
-    }
-
     pub fn grow(&self, required_blocks: usize) {
-        if let Some(addressor) = self.addressor.lock().get_mut() {
+        self.with_addressor(|addressor| {
             let map_read = self.map.upgradeable_read();
             let new_map_len = usize::next_power_of_two(
                 (map_read.len() * BlockPage::BLOCKS_COUNT) + required_blocks,
@@ -504,9 +572,7 @@ impl BlockAllocator {
 
             map_read.upgrade().resize(new_map_len, BlockPage::empty());
             trace!("Successfully grew allocator map.");
-        } else {
-            panic!("addressor has not been configured.");
-        }
+        });
     }
 }
 

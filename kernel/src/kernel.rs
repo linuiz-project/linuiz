@@ -11,10 +11,7 @@ mod logging;
 mod timer;
 
 use core::ffi::c_void;
-use libkernel::{
-    memory::{paging::VirtualAddressor, UEFIMemoryDescriptor},
-    structures, BootInfo, ConfigTableEntry, VirtAddr,
-};
+use libkernel::{memory::UEFIMemoryDescriptor, structures, BootInfo, ConfigTableEntry};
 use structures::acpi::{Checksum, RDSPDescriptor2, SDTHeader};
 
 extern "C" {
@@ -54,22 +51,6 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor, ConfigT
 
     info!("Validating magic of BootInfo.");
     boot_info.validate_magic();
-
-    let entry = boot_info
-        .config_table()
-        .iter()
-        .find(|entry| entry.guid() == libkernel::structures::ACPI2_GUID)
-        .unwrap();
-    let rdsp: &RDSPDescriptor2 = unsafe { &*(entry.addr().as_u64() as *const _) };
-    info!("{:?}", rdsp.checksum());
-    let xsdt: &SDTHeader = unsafe { &*(rdsp.addr().as_u64() as *const _) };
-    info!(
-        "{} {} {}, {:?}",
-        xsdt.signature(),
-        xsdt.oem_id(),
-        xsdt.oem_table_id(),
-        xsdt.checksum()
-    );
 
     unsafe { libkernel::instructions::init_segment_registers(0x0) };
     debug!("Zeroed segment registers.");
