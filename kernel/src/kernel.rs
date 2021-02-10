@@ -61,9 +61,8 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor, ConfigT
     libkernel::structures::pic::init();
     info!("Successfully initialized PIC.");
 
-    let memory_map = boot_info.memory_map();
     info!("Initializing global memory (frame allocator, global allocator, et al).");
-    unsafe { libkernel::memory::init_global_allocator(memory_map) };
+    unsafe { libkernel::memory::init_global_allocator(boot_info.memory_map()) };
 
     libkernel::structures::idt::set_interrupt_handler(
         libkernel::structures::pic::InterruptOffset::Timer,

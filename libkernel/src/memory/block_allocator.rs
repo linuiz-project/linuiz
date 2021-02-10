@@ -230,7 +230,7 @@ impl BlockAllocator {
         let global_memory_frames = unsafe { crate::memory::init_global_memory(memory_map) };
 
         unsafe {
-            self.init_addressor();
+            self.new_addressor();
             self.init_map();
         }
 
@@ -286,10 +286,10 @@ impl BlockAllocator {
             })
             .for_each(|frame| self.identity_map(&frame));
 
-        self.init_stack(stack_descriptor);
+        self.alloc_stack_mapping(stack_descriptor);
     }
 
-    unsafe fn init_addressor(&self) {
+    unsafe fn new_addressor(&self) {
         if self
             .addressor
             .lock()
@@ -308,7 +308,7 @@ impl BlockAllocator {
         );
     }
 
-    fn init_stack(&self, stack_descriptor: &crate::memory::UEFIMemoryDescriptor) {
+    fn alloc_stack_mapping(&self, stack_descriptor: &crate::memory::UEFIMemoryDescriptor) {
         stack_descriptor
             .frame_iter()
             .for_each(|frame| self.identity_map(&frame));

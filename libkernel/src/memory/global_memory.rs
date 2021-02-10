@@ -13,7 +13,7 @@ impl<'global> GlobalMemory<'global> {
     }
 
     fn set_allocator(&self, frame_allocator: FrameAllocator<'global>) {
-        if let Err(_) = self.frame_allocator.set(frame_allocator) {
+        if self.frame_allocator.set(frame_allocator).is_err() {
             panic!("global memory has already been configured");
         }
     }
