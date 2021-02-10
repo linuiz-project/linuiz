@@ -23,7 +23,7 @@ unsafe impl Sync for GlobalMemory<'_> {}
 
 static GLOBAL_MEMORY: GlobalMemory<'static> = GlobalMemory::new();
 
-pub unsafe fn init_global_memory(
+pub(crate) unsafe fn init_global_memory(
     memory_map: &[crate::memory::UEFIMemoryDescriptor],
 ) -> FrameIterator {
     let (used_frames_iter, allocator) = FrameAllocator::from_mmap(memory_map);

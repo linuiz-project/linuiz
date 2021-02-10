@@ -2,6 +2,7 @@ mod block_allocator;
 mod frame;
 mod frame_allocator;
 mod global_memory;
+mod linked_allocator;
 mod page;
 mod uefi;
 
@@ -26,11 +27,14 @@ pub const fn to_mibibytes(value: usize) -> usize {
 
 #[cfg(feature = "kernel_impls")]
 #[global_allocator]
-static GLOBAL_ALLOCATOR: BlockAllocator= BlockAllocator::new(Page::from_addr(unsafe {
-    x86_64::VirtAddr::new_unsafe(0x7A12000)
-}));
+static GLOBAL_ALLOCATOR: BlockAllocator = BlockAllocator::new();
 
 #[cfg(feature = "kernel_impls")]
-pub unsafe fn set_global_addressor(virtual_addressor: paging::VirtualAddressor) {
-    GLOBAL_ALLOCATOR.set_addressor(virtual_addressor);
+pub unsafe fn init_global_allocator(memory_map: &[UEFIMemoryDescriptor]) {
+    GLOBAL_ALLOCATOR.init(memory_map);
+}
+
+#[cfg(feature = "kernel_impls")]
+pub unsafe fn identity_map(frame: &Frame) {
+    GLOBAL_ALLOCATOR.identity_map(frame);
 }

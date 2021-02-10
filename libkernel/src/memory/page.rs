@@ -46,13 +46,13 @@ impl Page {
     }
 
     #[inline]
-    pub const fn ptr(&self) -> *const core::ffi::c_void {
-        self.0 as *const core::ffi::c_void
+    pub const fn ptr<T>(&self) -> *const T {
+        (self.0 * 0x1000) as *const T
     }
 
     #[inline]
-    pub const fn mut_ptr(&self) -> *mut core::ffi::c_void {
-        self.0 as *mut core::ffi::c_void
+    pub const fn mut_ptr<T>(&self) -> *mut T {
+        (self.0 * 0x1000) as *mut T
     }
 
     #[inline]

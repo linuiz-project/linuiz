@@ -47,7 +47,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 #[cfg(feature = "kernel_impls")]
 #[alloc_error_handler]
 fn alloc_error(error: core::alloc::Layout) -> ! {
-    error!("{:#?}", error);
+    error!("KERNEL ALLOCATOR PANIC: {:?}", error);
 
     loop {}
 }
@@ -96,6 +96,10 @@ pub fn align_up(value: usize, alignment: usize) -> usize {
     } else {
         (value | alignment_mask) + 1
     }
+}
+
+const fn align_up_div(value: usize, alignment: usize) -> usize {
+    (value + (alignment - 1)) / alignment
 }
 
 pub fn align_down(value: usize, alignment: usize) -> usize {

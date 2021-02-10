@@ -51,6 +51,12 @@ pub struct FrameIterator {
     end: Frame,
 }
 
+impl FrameIterator {
+    pub const fn remaining(&self) -> usize {
+        self.end.index() - self.current.index()
+    }
+}
+
 impl Iterator for FrameIterator {
     type Item = Frame;
 
