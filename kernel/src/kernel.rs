@@ -12,7 +12,6 @@ mod timer;
 
 use core::ffi::c_void;
 use libkernel::{memory::UEFIMemoryDescriptor, structures, BootInfo, ConfigTableEntry};
-use structures::acpi::{Checksum, RDSPDescriptor2, SDTHeader};
 
 extern "C" {
     static _text_start: c_void;
@@ -30,7 +29,7 @@ extern "C" {
 
 #[cfg(debug_assertions)]
 fn get_log_level() -> log::LevelFilter {
-    log::LevelFilter::Trace
+    log::LevelFilter::Debug
 }
 
 #[cfg(not(debug_assertions))]
@@ -64,11 +63,6 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor, ConfigT
 
     let memory_map = boot_info.memory_map();
     info!("Initializing global memory (frame allocator, global allocator, et al).");
-    // let frame_map_frames = unsafe { libkernel::memory::init_global_memory(memory_map) };
-    // let mut global_addressor = init_global_addressor(memory_map);
-    // frame_map_frames.for_each(|frame| global_addressor.identity_map(&frame));
-    // debug!("Setting global addressor (`alloc::*` will be usable after this point).");
-    // unsafe { libkernel::memory::set_global_addressor(global_addressor) };
     unsafe { libkernel::memory::init_global_allocator(memory_map) };
 
     libkernel::structures::idt::set_interrupt_handler(
@@ -76,15 +70,6 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor, ConfigT
         crate::timer::tick_handler,
     );
     libkernel::instructions::interrupts::enable();
-
-    let mut slice = alloc::vec::Vec::<u8>::new();
-    let mut slice2 = alloc::vec::Vec::<u8>::new();
-    for index in 0..50 {
-        slice.push(index);
-        slice2.push(index);
-    }
-
-    info!("{:?}\n{:?}", slice, slice2);
 
     info!("Kernel has reached safe shutdown state.");
     unsafe { libkernel::instructions::pwm::qemu_shutdown() }

@@ -14,15 +14,19 @@ struct BlockPage {
 }
 
 impl BlockPage {
+    /// Number of sections (primitive used to track blocks with its bits).
     const SECTIONS_COUNT: usize = 4;
+    /// Number of blocks each block page contains.
     const BLOCKS_COUNT: usize = Self::SECTIONS_COUNT * 64;
 
+    /// An empty block page (all blocks zeroed).
     const fn empty() -> Self {
         Self {
             blocks: [0u64; Self::SECTIONS_COUNT],
         }
     }
 
+    /// Whether the block page is empty.
     pub const fn is_empty(&self) -> bool {
         (self.blocks[0] == 0)
             && (self.blocks[1] == 0)
@@ -30,6 +34,7 @@ impl BlockPage {
             && (self.blocks[3] == 0)
     }
 
+    /// Whether the block page is full.
     pub const fn is_full(&self) -> bool {
         (self.blocks[0] == u64::MAX)
             && (self.blocks[1] == u64::MAX)
@@ -37,6 +42,7 @@ impl BlockPage {
             && (self.blocks[3] == u64::MAX)
     }
 
+    /// Unset all of the block page's blocks.
     pub const fn set_empty(&mut self) {
         self.blocks[0] = 0;
         self.blocks[1] = 0;
@@ -44,6 +50,7 @@ impl BlockPage {
         self.blocks[3] = 0;
     }
 
+    /// Set all of the block page's blocks.
     pub const fn set_full(&mut self) {
         self.blocks[0] = u64::MAX;
         self.blocks[1] = u64::MAX;
@@ -51,15 +58,20 @@ impl BlockPage {
         self.blocks[3] = u64::MAX;
     }
 
+    /// Underlying section iterator.
     fn iter(&self) -> core::slice::Iter<u64> {
         self.blocks.iter()
     }
 
+    /// Underlying mutable section iterator.
     fn iter_mut(&mut self) -> core::slice::IterMut<u64> {
         self.blocks.iter_mut()
     }
 }
 
+/// Allows tracking the state of the current block page's section
+///  in a loop, so a block page's underlying global memory can be
+///  allocated or deallocated accordingly.
 #[derive(Debug, Clone, Copy)]
 struct SectionState {
     had_bits: bool,
@@ -67,6 +79,7 @@ struct SectionState {
 }
 
 impl SectionState {
+    /// An empty section state.
     const fn empty() -> Self {
         Self {
             had_bits: false,
