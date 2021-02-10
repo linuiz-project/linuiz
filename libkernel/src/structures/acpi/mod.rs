@@ -1,28 +1,33 @@
+mod madt;
 mod rdsp;
+mod xsdt;
 
+pub use madt::*;
 pub use rdsp::*;
+pub use xsdt::*;
 
 pub trait Checksum: Sized {
-    fn checksum(&self) -> Option<()> {
+    fn bytes_len(&self) -> usize {
+        core::mem::size_of::<Self>()
+    }
+
+    fn checksum(&self) -> bool {
         let mut sum: u8 = 0;
 
         unsafe {
             &*core::ptr::slice_from_raw_parts(
                 core::mem::transmute::<&Self, *const u8>(self),
-                core::mem::size_of::<Self>(),
+                self.bytes_len(),
             )
         }
         .iter()
         .for_each(|byte| sum = sum.wrapping_add(*byte));
 
-        match sum {
-            0 => Some(()),
-            _ => None,
-        }
+        sum == 0
     }
 }
 
-#[repr(C, packed)]
+#[repr(C)]
 pub struct SDTHeader {
     signature: [u8; 4],
     len: u32,
@@ -40,6 +45,14 @@ impl SDTHeader {
         core::str::from_utf8(&self.signature).expect("invalid ascii sequence for signature")
     }
 
+    pub const fn len(&self) -> u32 {
+        self.len
+    }
+
+    pub const fn revision(&self) -> u8 {
+        self.revision
+    }
+
     pub fn oem_id(&self) -> &str {
         core::str::from_utf8(&self.oem_id).expect("invalid ascii sequence for OEM ID")
     }
@@ -50,3 +63,14 @@ impl SDTHeader {
 }
 
 impl Checksum for SDTHeader {}
+
+impl core::fmt::Debug for SDTHeader {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("System Description Table Header")
+            .field("Signature", &self.signature())
+            .field("OEM ID", &self.oem_id())
+            .field("Revision", &self.revision())
+            .finish()
+    }
+}

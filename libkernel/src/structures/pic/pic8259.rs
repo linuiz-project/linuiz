@@ -67,7 +67,7 @@ impl ChainedPICs {
 
     /// Initializes the chained PICs. They're initialized together (at the same time) because
     /// I/O operations might not be intantaneous on older processors.
-    pub unsafe fn init(&mut self, mask: InterruptLines) {
+    pub unsafe fn init(&mut self, enabled: InterruptLines) {
         // We need to add a delay bettween writes to the PICs, especially on older motherboards.
         // This is because the PIC may not be fast enough to react to the previous command before
         // the next is sent.
@@ -103,9 +103,9 @@ impl ChainedPICs {
         io_wait();
 
         // Write masks to data port, specifying which interrupts are ignored.
-        self.pics[0].data.write(!mask.low());
+        self.pics[0].data.write(!enabled.low());
         io_wait();
-        self.pics[1].data.write(!mask.high());
+        self.pics[1].data.write(!enabled.high());
     }
 
     /// Indicates whether any of the chained PICs handle the given interrupt.

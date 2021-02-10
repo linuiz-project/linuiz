@@ -84,3 +84,7 @@ pub fn end_of_interrupt(offset: InterruptOffset) {
 pub fn handles_interrupt(offset: InterruptOffset) -> bool {
     PICS.lock().handles_interrupt(offset as u8)
 }
+
+pub unsafe fn disable() {
+    PICS.lock().init(InterruptLines::empty())
+}

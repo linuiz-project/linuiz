@@ -1,4 +1,4 @@
-use crate::structures::acpi::Checksum;
+use crate::structures::acpi::{Checksum, XSDT};
 use x86_64::PhysAddr;
 
 #[repr(C, packed)]
@@ -40,8 +40,8 @@ impl RDSPDescriptor2 {
         self.base.oem_id()
     }
 
-    pub fn addr(&self) -> PhysAddr {
-        self.xsdt_addr
+    pub fn xsdt(&self) -> &XSDT {
+        unsafe { &*(self.xsdt_addr.as_u64() as *const XSDT) }
     }
 }
 
