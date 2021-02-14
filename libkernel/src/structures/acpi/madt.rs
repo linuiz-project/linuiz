@@ -1,4 +1,7 @@
-use crate::structures::acpi::{Checksum, SDTHeader};
+use crate::structures::{
+    acpi::{Checksum, SDTHeader},
+    apic::APIC,
+};
 use core::marker::PhantomData;
 use x86_64::PhysAddr;
 
@@ -23,9 +26,7 @@ impl MADT {
             }
         }
 
-        APIC {
-            base_addr: PhysAddr::new(self.apic_addr as u64),
-        }
+        unsafe { APIC::from_addr(PhysAddr::new(self.apic_addr as u64)) }
     }
 
     pub fn iter(&self) -> MADTIterator {
@@ -193,39 +194,6 @@ pub struct LocalAPICAddrOverride {
 
 impl LocalAPICAddrOverride {
     pub fn apic(&self) -> APIC {
-        APIC {
-            base_addr: self.local_apic_addr,
-        }
-    }
-}
-
-#[repr(u32)]
-pub enum APICRegister {
-    ID = 0x20,
-    Version = 0x30,
-    TaskPriority = 0x80,
-    EndOfInterrupt = 0xB0,
-    LDR = 0xD0,
-    DFR = 0xE0,
-    Spurious = 0xF0,
-}
-
-pub struct APIC {
-    base_addr: PhysAddr,
-}
-
-impl APIC {
-    pub fn addr(&self) -> PhysAddr {
-        self.base_addr
-    }
-}
-
-impl core::ops::Index<APICRegister> for APIC {
-    type Output = u128;
-
-    fn index(&self, register: APICRegister) -> &Self::Output {
-        let offset = register as u64;
-        let offset_addr = (self.base_addr + offset).as_u64() as *const u128;
-        unsafe { &*offset_addr }
+        unsafe { APIC::from_addr(self.local_apic_addr) }
     }
 }

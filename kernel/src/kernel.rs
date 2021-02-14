@@ -15,9 +15,12 @@ use libkernel::{
     instructions::{cpuid_features, CPUFeatures},
     memory::UEFIMemoryDescriptor,
     registers::MSR,
-    structures, BootInfo, ConfigTableEntry,
+    structures, BootInfo, ConfigTableEntry, PhysAddr,
 };
-use structures::acpi::{APICRegister, InterruptDevice, RDSPDescriptor2, XSDTEntry};
+use structures::{
+    acpi::{InterruptDevice, RDSPDescriptor2, XSDTEntry},
+    apic::{APICRegister, APIC},
+};
 
 extern "C" {
     static _text_start: c_void;
@@ -73,6 +76,16 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor, ConfigT
         unsafe {
             MSR::IA32_APIC_BASE.write(MSR::IA32_APIC_BASE.read() | (1 << 10));
         }
+    } else {
+        let apic = APIC::from_msr();
+
+        info!(
+            "APIC INFO {:?} {} {} {}",
+            apic.addr(),
+            apic[APICRegister::ID],
+            apic[APICRegister::Version],
+            apic[APICRegister::TaskPriority]
+        );
     }
 
     loop {}
