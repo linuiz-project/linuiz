@@ -1,6 +1,6 @@
-use x86_64::PhysAddr;
-
 use crate::structures::acpi::{Checksum, SDTHeader};
+use core::marker::PhantomData;
+use x86_64::PhysAddr;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -12,17 +12,29 @@ pub struct MADT {
 }
 
 impl MADT {
-    fn header_len(&self) -> usize {
+    fn body_len(&self) -> usize {
         (self.header.len() as usize) - core::mem::size_of::<SDTHeader>() - 8
     }
 
+    pub fn apic(&self) -> APIC {
+        for interrupt_device in self.iter() {
+            if let InterruptDevice::LocalAPICAddrOverride(lapicaddr) = interrupt_device {
+                return lapicaddr.apic();
+            }
+        }
+
+        APIC {
+            base_addr: PhysAddr::new(self.apic_addr as u64),
+        }
+    }
+
     pub fn iter(&self) -> MADTIterator {
-        let cur_entry_ptr = unsafe {
-            core::mem::transmute::<&InterruptDeviceHeader, *const u8>(&self.irq_entry_head)
-        };
+        let cur_entry_ptr = (&self.irq_entry_head) as *const _ as *const u8;
+
         MADTIterator {
             cur_header_ptr: cur_entry_ptr,
-            max_header_ptr: unsafe { cur_entry_ptr.offset(self.header_len() as isize) },
+            max_header_ptr: unsafe { cur_entry_ptr.offset(self.body_len() as isize) },
+            phantom: PhantomData,
         }
     }
 }
@@ -33,13 +45,14 @@ impl Checksum for MADT {
     }
 }
 
-pub struct MADTIterator {
+pub struct MADTIterator<'a> {
     cur_header_ptr: *const u8,
     max_header_ptr: *const u8,
+    phantom: PhantomData<&'a u8>,
 }
 
-impl Iterator for MADTIterator {
-    type Item = InterruptDevice;
+impl<'a> Iterator for MADTIterator<'a> {
+    type Item = InterruptDevice<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.cur_header_ptr < self.max_header_ptr {
@@ -50,17 +63,17 @@ impl Iterator for MADTIterator {
 
                 match header.ty {
                     0x0 => Some(InterruptDevice::LocalAPIC(
-                        *(header_ptr as *const LocalAPIC),
+                        &*(header_ptr as *const LocalAPIC),
                     )),
-                    0x1 => Some(InterruptDevice::IOAPIC(*(header_ptr as *const IOAPIC))),
+                    0x1 => Some(InterruptDevice::IOAPIC(&*(header_ptr as *const IOAPIC))),
                     0x2 => Some(InterruptDevice::IRQSrcOverride(
-                        *(header_ptr as *const IRQSrcOverride),
+                        &*(header_ptr as *const IRQSrcOverride),
                     )),
                     0x4 => Some(InterruptDevice::NonMaskableIRQ(
-                        *(header_ptr as *const NonMaskableIRQ),
+                        &*(header_ptr as *const NonMaskableIRQ),
                     )),
                     0x5 => Some(InterruptDevice::LocalAPICAddrOverride(
-                        *(header_ptr as *const LocalAPICAddrOverride),
+                        &*(header_ptr as *const LocalAPICAddrOverride),
                     )),
                     ty => panic!("invalid interrupt device type: {}", ty),
                 }
@@ -79,12 +92,12 @@ struct InterruptDeviceHeader {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum InterruptDevice {
-    LocalAPIC(LocalAPIC),
-    IOAPIC(IOAPIC),
-    IRQSrcOverride(IRQSrcOverride),
-    NonMaskableIRQ(NonMaskableIRQ),
-    LocalAPICAddrOverride(LocalAPICAddrOverride),
+pub enum InterruptDevice<'a> {
+    LocalAPIC(&'a LocalAPIC),
+    IOAPIC(&'a IOAPIC),
+    IRQSrcOverride(&'a IRQSrcOverride),
+    NonMaskableIRQ(&'a NonMaskableIRQ),
+    LocalAPICAddrOverride(&'a LocalAPICAddrOverride),
 }
 
 bitflags::bitflags! {
@@ -104,13 +117,51 @@ pub struct LocalAPIC {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct IOAPIC {
     header: InterruptDeviceHeader,
     id: u8,
     reserved: [u8; 1],
     addr: u32,
     global_sys_interrupt_base: u32,
+}
+
+impl IOAPIC {
+    pub fn id(&self) -> u8 {
+        self.id
+    }
+
+    pub fn register_base(&self) -> PhysAddr {
+        PhysAddr::new(self.addr as u64)
+    }
+
+    pub fn read(&self, register: u8) -> u32 {
+        unsafe {
+            let ioapic_ptr = self.register_base().as_u64() as *mut u32;
+
+            ioapic_ptr.write_volatile(register as u32);
+            ioapic_ptr.offset(4).read_volatile()
+        }
+    }
+
+    pub fn write(&self, register: u8, value: u32) {
+        unsafe {
+            let ioapic_ptr = self.register_base().as_u64() as *mut u32;
+
+            ioapic_ptr.write_volatile(register as u32);
+            ioapic_ptr.offset(4).write_volatile(value);
+        }
+    }
+}
+
+impl core::fmt::Debug for IOAPIC {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("IO APIC Device")
+            .field("ID", &self.id())
+            .field("Register Base", &self.register_base())
+            .finish()
+    }
 }
 
 #[repr(C)]
@@ -138,4 +189,43 @@ pub struct LocalAPICAddrOverride {
     header: InterruptDeviceHeader,
     reserved: [u8; 2],
     local_apic_addr: PhysAddr,
+}
+
+impl LocalAPICAddrOverride {
+    pub fn apic(&self) -> APIC {
+        APIC {
+            base_addr: self.local_apic_addr,
+        }
+    }
+}
+
+#[repr(u32)]
+pub enum APICRegister {
+    ID = 0x20,
+    Version = 0x30,
+    TaskPriority = 0x80,
+    EndOfInterrupt = 0xB0,
+    LDR = 0xD0,
+    DFR = 0xE0,
+    Spurious = 0xF0,
+}
+
+pub struct APIC {
+    base_addr: PhysAddr,
+}
+
+impl APIC {
+    pub fn addr(&self) -> PhysAddr {
+        self.base_addr
+    }
+}
+
+impl core::ops::Index<APICRegister> for APIC {
+    type Output = u128;
+
+    fn index(&self, register: APICRegister) -> &Self::Output {
+        let offset = register as u64;
+        let offset_addr = (self.base_addr + offset).as_u64() as *const u128;
+        unsafe { &*offset_addr }
+    }
 }

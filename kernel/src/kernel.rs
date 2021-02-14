@@ -10,9 +10,14 @@ mod drivers;
 mod logging;
 mod timer;
 
-use core::{ffi::c_void, str::from_utf8};
-use libkernel::{memory::UEFIMemoryDescriptor, structures, BootInfo, ConfigTableEntry, VirtAddr};
-use structures::acpi::{Checksum, InterruptDevice, RDSPDescriptor2, SDTHeader, MADT, XSDT};
+use core::ffi::c_void;
+use libkernel::{
+    instructions::{cpuid_features, CPUFeatures},
+    memory::UEFIMemoryDescriptor,
+    registers::MSR,
+    structures, BootInfo, ConfigTableEntry,
+};
+use structures::acpi::{APICRegister, InterruptDevice, RDSPDescriptor2, XSDTEntry};
 
 extern "C" {
     static _text_start: c_void;
@@ -62,24 +67,11 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor, ConfigT
     libkernel::structures::pic::init();
     info!("Successfully initialized PIC.");
 
-    let entry = boot_info
-        .config_table()
-        .iter()
-        .find(|entry| entry.guid() == libkernel::structures::ACPI2_GUID)
-        .unwrap();
-    let rdsp = unsafe { &*(entry.addr().as_u64() as *const RDSPDescriptor2) };
-    let xsdt = rdsp.xsdt();
+    if cpuid_features().contains(CPUFeatures::X2APIC) {
+        info!("Enabling X2APIC support in kernel.");
 
-    for (index, ptr) in xsdt.sdt_ptrs().iter().enumerate() {
-        let signature = core::str::from_utf8(unsafe { &*((*ptr) as *const [u8; 4]) }).unwrap();
-
-        if signature == "APIC" {
-            let madt = xsdt.index_as::<MADT>(index);
-            let madt_iter = madt.iter();
-
-            for (index, interrupt_device) in madt_iter.enumerate() {
-                info!("{:?}", interrupt_device);
-            }
+        unsafe {
+            MSR::IA32_APIC_BASE.write(MSR::IA32_APIC_BASE.read() | (1 << 10));
         }
     }
 

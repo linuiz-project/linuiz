@@ -6,10 +6,10 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-efi_boot = { path = "../efi_boot/" }
 libkernel = { path = "../libkernel", features = [ "kernel_impls" ] }
 log = { version = "*", default-features = false }
 lazy_static = "*"
+bit_field = "*"
 bitflags = "*"
 spin = "*"
 
@@ -17,3 +17,6 @@ spin = "*"
 [[bin]]
 name = "kernel"
 path = "src/kernel.rs"
+
+[profile.release]
+opt-level = 3

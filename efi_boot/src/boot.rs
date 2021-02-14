@@ -1,10 +1,6 @@
 #![no_std]
 #![no_main]
-#![feature(abi_efiapi)]
-#![feature(const_option)]
-#![feature(negative_impls)]
-#![feature(core_intrinsics)]
-#![feature(unsafe_cell_get_mut)]
+#![feature(abi_efiapi, const_option, negative_impls, core_intrinsics)]
 
 #[macro_use]
 extern crate log;
