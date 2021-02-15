@@ -21,7 +21,7 @@ pub enum InterruptOffset {
     COM1,
     LPT2,
     FloppyDisk,
-    LPT1,
+    SpuriousMaster,
     CMOSClock,
     Peripheral0,
     Peripheral1,
@@ -29,7 +29,7 @@ pub enum InterruptOffset {
     PS2Mouse,
     FPU,
     PrimaryATA,
-    SecondaryATA,
+    SpuriousSlave,
 }
 
 impl InterruptOffset {
@@ -44,7 +44,7 @@ impl InterruptOffset {
             4 => InterruptOffset::COM1,
             5 => InterruptOffset::LPT2,
             6 => InterruptOffset::FloppyDisk,
-            7 => InterruptOffset::LPT1,
+            7 => InterruptOffset::SpuriousMaster,
             8 => InterruptOffset::CMOSClock,
             9 => InterruptOffset::Peripheral0,
             10 => InterruptOffset::Peripheral1,
@@ -52,7 +52,7 @@ impl InterruptOffset {
             12 => InterruptOffset::PS2Mouse,
             13 => InterruptOffset::FPU,
             14 => InterruptOffset::PrimaryATA,
-            15 => InterruptOffset::SecondaryATA,
+            15 => InterruptOffset::SpuriousSlave,
             _ => panic!("invalid interrupt offset, must be 0..=15",),
         }
     }

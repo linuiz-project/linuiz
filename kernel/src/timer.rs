@@ -10,6 +10,33 @@ pub fn get_ticks() -> usize {
     TICKS.load(core::sync::atomic::Ordering::Acquire)
 }
 
+pub fn wait(ticks: usize) {
+    Timer::start(ticks);
+}
+
+pub struct Timer {
+    end_tick: usize,
+}
+
+impl Timer {
+    pub fn new(ticks: usize) -> Self {
+        Self {
+            end_tick: get_ticks() + ticks,
+        }
+    }
+
+    pub fn start(ticks: usize) {
+        let timer = Self::new(ticks);
+        timer.wait();
+    }
+
+    pub fn wait(&self) {
+        while get_ticks() < self.end_tick {
+            libkernel::instructions::hlt();
+        }
+    }
+}
+
 pub struct Stopwatch {
     start_tick: Option<usize>,
     stop_tick: Option<usize>,

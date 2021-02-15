@@ -4,6 +4,7 @@ use bitflags::bitflags;
 const CMD_INIT: u8 = 0x11;
 const CMD_END_OF_INTERRUPT: u8 = 0x20;
 const MODE_8806: u8 = 0x01;
+pub const PIC_8259_HZ: usize = 1193182;
 
 bitflags! {
     pub struct InterruptLines : u16 {

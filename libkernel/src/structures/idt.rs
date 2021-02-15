@@ -208,6 +208,19 @@ lazy_static! {
 
         // regular interrupts
         idt[InterruptOffset::Timer as usize].set_handler_fn(timer_interrupt);
+        idt[InterruptOffset::Keyboard as usize].set_handler_fn(timer_interrupt);
+        idt[InterruptOffset::Cascade as usize].set_handler_fn(timer_interrupt);
+        idt[InterruptOffset::COM2 as usize].set_handler_fn(timer_interrupt);
+        idt[InterruptOffset::COM1 as usize].set_handler_fn(timer_interrupt);
+        idt[InterruptOffset::LPT2 as usize].set_handler_fn(timer_interrupt);
+        idt[InterruptOffset::FloppyDisk as usize].set_handler_fn(timer_interrupt);
+        idt[InterruptOffset::CMOSClock as usize].set_handler_fn(timer_interrupt);
+        idt[InterruptOffset::Peripheral0 as usize].set_handler_fn(timer_interrupt);
+        idt[InterruptOffset::Peripheral1 as usize].set_handler_fn(timer_interrupt);
+        idt[InterruptOffset::Peripheral2 as usize].set_handler_fn(timer_interrupt);
+        idt[InterruptOffset::PS2Mouse as usize].set_handler_fn(timer_interrupt);
+        idt[InterruptOffset::FPU as usize].set_handler_fn(timer_interrupt);
+        idt[InterruptOffset::PrimaryATA as usize].set_handler_fn(timer_interrupt);
 
         idt
     };
