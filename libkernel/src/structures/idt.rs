@@ -1,4 +1,4 @@
-use crate::structures::pic::{InterruptOffset};
+use crate::structures::pic::InterruptOffset;
 use lazy_static::lazy_static;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
 
@@ -196,10 +196,10 @@ lazy_static! {
         // --- triple fault (can't handle)
 
         // regular interrupts
-        extern "x86-interrupt" fn timer_handler(_: &mut InterruptStackFrame) {(INTERRUPT_HANDLERS.read()[InterruptOffset::Timer.as_usize_no_base()])();}
-        idt[InterruptOffset::Timer.as_usize()].set_handler_fn(timer_handler                   );
-        extern "x86-interrupt" fn dummy_apic_handler(_: &mut InterruptStackFrame) {(INTERRUPT_HANDLERS.read()[InterruptOffset::DummyAPIC.as_usize_no_base()])();}
-        idt[InterruptOffset::DummyAPIC.as_usize()].set_handler_fn(dummy_apic_handler);
+        extern "x86-interrupt" fn timer_handler(_: &mut InterruptStackFrame) {
+            (INTERRUPT_HANDLERS.read()[InterruptOffset::Timer.as_usize_no_base()])();
+        }
+        idt[InterruptOffset::Timer.as_usize()].set_handler_fn(timer_handler);
 
         idt
     };

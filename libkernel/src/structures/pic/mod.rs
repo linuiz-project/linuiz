@@ -7,7 +7,7 @@ Information about the PIC can be found here: https://en.wikipedia.org/wiki/Intel
 
 pub mod pic8259;
 
-use lazy_static::lazy_static;
+use crate::io::port::WriteOnlyPort;
 use pic8259::{ChainedPICs, InterruptLines};
 use spin;
 
@@ -30,7 +30,6 @@ pub enum InterruptOffset {
     FPU,
     PrimaryATA,
     SpuriousSlave,
-    DummyAPIC = 192,
 }
 
 impl InterruptOffset {
@@ -49,29 +48,38 @@ impl InterruptOffset {
     }
 }
 
-lazy_static! {
-    static ref PICS: spin::Mutex<ChainedPICs> = spin::Mutex::new(unsafe {
-        ChainedPICs::new(InterruptOffset::BASE, InterruptOffset::BASE + 8)
-    });
-}
+pub const MAXIMUM_TICK_RATE: u32 = 1193182;
 
-pub fn init() {
+static CHAINED_PICS: spin::Mutex<ChainedPICs> =
+    spin::Mutex::new(unsafe { ChainedPICs::new(InterruptOffset::BASE, InterruptOffset::BASE + 8) });
+
+pub fn enable() {
     unsafe {
-        PICS.lock()
+        CHAINED_PICS
+            .lock()
             .init(InterruptLines::TIMER | InterruptLines::CASCADE);
     }
 }
 
 pub fn end_of_interrupt(offset: InterruptOffset) {
     unsafe {
-        PICS.lock().end_of_interrupt(offset as u8);
+        CHAINED_PICS.lock().end_of_interrupt(offset as u8);
     }
 }
 
-pub fn handles_interrupt(offset: InterruptOffset) -> bool {
-    PICS.lock().handles_interrupt(offset as u8)
+pub unsafe fn disable() {
+    CHAINED_PICS.lock().init(InterruptLines::empty())
 }
 
-pub unsafe fn disable() {
-    PICS.lock().init(InterruptLines::empty())
+pub fn set_timer_freq(hz: u32) {
+    const DATA0: u16 = 0x40;
+    const COMMAND: u16 = 0x43;
+
+    let mut command = unsafe { WriteOnlyPort::<u8>::new(COMMAND) };
+    let mut data0 = unsafe { WriteOnlyPort::<u8>::new(DATA0) };
+
+    let divisor = MAXIMUM_TICK_RATE / hz;
+    command.write(0x36);
+    data0.write((divisor & 0xFF) as u8);
+    data0.write((divisor >> 8) as u8);
 }
