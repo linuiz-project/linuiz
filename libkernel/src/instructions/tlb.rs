@@ -2,7 +2,7 @@ use crate::memory::Page;
 
 pub fn invalidate(page: &Page) {
     unsafe {
-        asm!("invlpg [{}]", in(reg) page.addr().as_u64(), options(nostack));
+        asm!("invlpg [{}]", in(reg) page.addr_u64(), options(nostack));
     }
 }
 

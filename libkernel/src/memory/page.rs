@@ -55,7 +55,12 @@ impl Page {
 
     #[inline]
     pub const fn addr(&self) -> VirtAddr {
-        VirtAddr::new_truncate((self.0 as u64) * 0x1000)
+        VirtAddr::new_truncate(self.addr_u64())
+    }
+
+    #[inline]
+    pub const fn addr_u64(&self) -> u64 {
+        (self.0 as u64) * 0x1000
     }
 
     #[inline]

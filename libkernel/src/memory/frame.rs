@@ -35,7 +35,12 @@ impl Frame {
 
     #[inline]
     pub const fn addr(&self) -> PhysAddr {
-        PhysAddr::new_truncate((self.0 as u64) * 0x1000)
+        PhysAddr::new_truncate(self.addr_u64())
+    }
+
+    #[inline]
+    pub const fn addr_u64(&self) -> u64 {
+        (self.0 as u64) * 0x1000
     }
 
     pub fn range_count(start_addr: PhysAddr, count: usize) -> FrameIterator {

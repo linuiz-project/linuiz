@@ -1,10 +1,55 @@
+/*
+Represents a wrapper around the hardware Programmable Interrupt Controller. This is an implementation
+based around the Intel 8259 PIC, which is still supported in favor of backwards compatibility.
+
+Information about the PIC can be found here: https://en.wikipedia.org/wiki/Intel_8259
+*/
+
 use crate::io::port::{ReadWritePort, WriteOnlyPort};
 use bitflags::bitflags;
+use spin::{self, Mutex};
 
 const CMD_INIT: u8 = 0x11;
 const CMD_END_OF_INTERRUPT: u8 = 0x20;
 const MODE_8806: u8 = 0x01;
 pub const PIC_8259_HZ: usize = 1193182;
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InterruptOffset {
+    Timer = Self::BASE,
+    Keyboard,
+    Cascade,
+    COM2,
+    COM1,
+    LPT2,
+    FloppyDisk,
+    SpuriousMaster,
+    CMOSClock,
+    Peripheral0,
+    Peripheral1,
+    Peripheral2,
+    PS2Mouse,
+    FPU,
+    PrimaryATA,
+    SpuriousSlave,
+}
+
+impl InterruptOffset {
+    pub const BASE: u8 = 32;
+
+    pub fn from_u8(value: u8) -> Self {
+        unsafe { core::mem::transmute(value) }
+    }
+
+    pub const fn as_usize(self) -> usize {
+        self as usize
+    }
+
+    pub const fn as_usize_no_base(self) -> usize {
+        (self as usize) - (Self::BASE as usize)
+    }
+}
 
 bitflags! {
     pub struct InterruptLines : u16 {
@@ -43,13 +88,13 @@ impl PIC {
 /// A pair of chained PIC controllers.
 ///
 /// Remark: This is the standard setup on x86.
-pub struct ChainedPICs {
+struct PIC8259 {
     pics: [PIC; 2],
 }
 
-impl ChainedPICs {
+impl PIC8259 {
     /// Create a new interface for the standard PIC1 and PIC2 controllers, specifying the desired interrupt offsets.
-    pub const unsafe fn new(offset1: u8, offset2: u8) -> Self {
+    const unsafe fn new(offset1: u8, offset2: u8) -> Self {
         Self {
             pics: [
                 PIC {
@@ -68,7 +113,7 @@ impl ChainedPICs {
 
     /// Initializes the chained PICs. They're initialized together (at the same time) because
     /// I/O operations might not be intantaneous on older processors.
-    pub unsafe fn init(&mut self, enabled: InterruptLines) {
+    unsafe fn init(&mut self, enabled: InterruptLines) {
         // We need to add a delay bettween writes to the PICs, especially on older motherboards.
         // This is because the PIC may not be fast enough to react to the previous command before
         // the next is sent.
@@ -110,7 +155,7 @@ impl ChainedPICs {
     }
 
     /// Indicates whether any of the chained PICs handle the given interrupt.
-    pub fn handles_interrupt(&self, interrupt_id: u8) -> bool {
+    fn handles_interrupt(&self, interrupt_id: u8) -> bool {
         self.pics
             .iter()
             .any(|pic| pic.handles_interrupt(interrupt_id))
@@ -118,7 +163,7 @@ impl ChainedPICs {
 
     /// Signals to the chained PICs to send the EOI command.
     /// SAFETY: This function is unsafe because an invalid interrupt ID can be specified.
-    pub unsafe fn end_of_interrupt(&mut self, interrupt_id: u8) {
+    unsafe fn end_of_interrupt(&mut self, interrupt_id: u8) {
         if self.handles_interrupt(interrupt_id) {
             // If the interrupt belongs to the slave PIC, we send the EOI command to it.
             if self.pics[1].handles_interrupt(interrupt_id) {
@@ -136,4 +181,39 @@ impl ChainedPICs {
             trace!("Invalid EOI request: {}", interrupt_id);
         }
     }
+}
+
+static PIC8259: spin::Mutex<PIC8259> =
+    spin::Mutex::new(unsafe { PIC8259::new(InterruptOffset::BASE, InterruptOffset::BASE + 8) });
+
+pub fn enable() {
+    unsafe {
+        PIC8259
+            .lock()
+            .init(InterruptLines::TIMER | InterruptLines::CASCADE);
+    }
+}
+
+pub fn end_of_interrupt(offset: InterruptOffset) {
+    unsafe {
+        PIC8259.lock().end_of_interrupt(offset as u8);
+    }
+}
+
+pub unsafe fn disable() {
+    PIC8259.lock().init(InterruptLines::empty())
+}
+
+pub fn set_timer_freq(hz: u32) {
+    const MAXIMUM_TICK_RATE: u32 = 1193182;
+    const DATA0: u16 = 0x40;
+    const COMMAND: u16 = 0x43;
+
+    let mut command = unsafe { WriteOnlyPort::<u8>::new(COMMAND) };
+    let mut data0 = unsafe { WriteOnlyPort::<u8>::new(DATA0) };
+
+    let divisor = MAXIMUM_TICK_RATE / hz;
+    command.write(0x36);
+    data0.write((divisor & 0xFF) as u8);
+    data0.write((divisor >> 8) as u8);
 }

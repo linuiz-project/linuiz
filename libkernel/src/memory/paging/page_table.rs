@@ -83,7 +83,7 @@ where
         let entry = self.get_entry(index);
         match entry.frame() {
             Some(frame) => {
-                let mapped_physical_addr = offset + frame.addr().as_u64();
+                let mapped_physical_addr = offset + frame.addr_u64();
                 Some(&*mapped_physical_addr.as_ptr())
             }
             None => None,
@@ -103,7 +103,7 @@ where
         let entry = self.get_entry_mut(index);
         match entry.frame() {
             Some(frame) => {
-                let mapped_physical_addr = offset + frame.addr().as_u64();
+                let mapped_physical_addr = offset + frame.addr_u64();
                 Some(&mut *mapped_physical_addr.as_mut_ptr())
             }
             None => None,
@@ -121,7 +121,7 @@ where
             offset
         );
         let entry = self.get_entry_mut(index);
-        let mapped_physical_addr = offset + entry.frame_create().addr().as_u64();
+        let mapped_physical_addr = offset + entry.frame_create().addr_u64();
         &mut *mapped_physical_addr.as_mut_ptr()
     }
 }

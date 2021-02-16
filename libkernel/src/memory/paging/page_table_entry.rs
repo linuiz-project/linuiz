@@ -57,7 +57,7 @@ impl PageTableEntry {
     }
 
     pub fn set(&mut self, frame: &Frame, attribs: PageAttributes) {
-        self.0 = frame.addr().as_u64() | attribs.bits();
+        self.0 = frame.addr_u64() | attribs.bits();
     }
 
     pub fn is_present(&self) -> bool {

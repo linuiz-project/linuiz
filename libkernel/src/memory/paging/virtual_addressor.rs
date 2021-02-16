@@ -48,7 +48,7 @@ impl VirtualAddressor {
 
     fn get_page_entry(&self, page: &Page) -> Option<&PageTableEntry> {
         let offset = self.mapped_page.addr();
-        let addr = (page.addr().as_u64() >> 12) as usize;
+        let addr = (page.addr_u64() >> 12) as usize;
 
         unsafe {
             self.pml4()
@@ -61,7 +61,7 @@ impl VirtualAddressor {
 
     fn get_page_entry_mut(&mut self, page: &Page) -> Option<&mut PageTableEntry> {
         let offset = self.mapped_page.addr();
-        let addr = (page.addr().as_u64() >> 12) as usize;
+        let addr = (page.addr_u64() >> 12) as usize;
 
         unsafe {
             self.pml4_mut()
@@ -74,7 +74,7 @@ impl VirtualAddressor {
 
     fn get_page_entry_create(&mut self, page: &Page) -> &mut PageTableEntry {
         let offset = self.mapped_page.addr();
-        let addr = (page.addr().as_u64() >> 12) as usize;
+        let addr = (page.addr_u64() >> 12) as usize;
 
         unsafe {
             self.pml4_mut()
@@ -105,7 +105,7 @@ impl VirtualAddressor {
 
     pub fn identity_map(&mut self, frame: &Frame) {
         self.map(
-            &Page::from_addr(VirtAddr::new(frame.addr().as_u64())),
+            &Page::from_addr(VirtAddr::new(frame.addr_u64())),
             frame,
         );
     }

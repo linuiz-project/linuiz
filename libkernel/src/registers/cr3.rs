@@ -15,7 +15,7 @@ pub struct CR3;
 impl CR3 {
     #[inline(always)]
     pub unsafe fn write(frame: &Frame, flags: CR3Flags) {
-        asm!("mov cr3, {}", in(reg) frame.addr().as_u64() | flags.bits(), options(nostack));
+        asm!("mov cr3, {}", in(reg) frame.addr_u64() | flags.bits(), options(nostack));
     }
 
     #[inline(always)]

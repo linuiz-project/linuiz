@@ -97,9 +97,9 @@ impl APIC {
     const LVT_ERROR: u16 = 0x370;
 
     // The `mask` bit for an LVT entry.
-    pub const DISABLE: u128 = 0x10000;
-    pub const SW_ENABLE: u128 = 0x100;
-    pub const CPU_FOCUS: u128 = 0x200;
+    pub const DISABLE: u32 = 0x10000;
+    pub const SW_ENABLE: u32 = 0x100;
+    pub const CPU_FOCUS: u32 = 0x200;
 
     pub fn from_ptr<T>(ptr: *mut T) -> Self {
         if crate::instructions::cpuid_features().contains(crate::instructions::CPUFeatures::APIC) {
@@ -116,20 +116,25 @@ impl APIC {
     }
 
     #[inline]
-    fn get_register(&self, offset: u16) -> &u128 {
-        unsafe { &*self.base_ptr.offset((offset as isize) >> 4) }
+    fn get_register(&self, offset: u16) -> &u32 {
+        unsafe { &*(self.base_ptr.offset((offset as isize) >> 4) as *const u32) }
     }
 
     #[inline]
-    fn get_register_mut(&mut self, offset: u16) -> &mut u128 {
-        unsafe { &mut *self.base_ptr.offset((offset as isize) >> 4) }
+    fn get_register_mut(&mut self, offset: u16) -> &mut u32 {
+        unsafe { &mut *(self.base_ptr.offset((offset as isize) >> 4) as *mut u32) }
+    }
+
+    pub fn get_register_copy(&self, offset: u16) -> u32 {
+        *self.get_register(offset)
     }
 
     #[inline]
-    pub fn signal_eoi(&self) {
-        const EOI_REGISTER: usize = 0xB0;
+    pub fn signal_eoi(&mut self) {
+        const EOI_REGISTER: u16 = 0xB0;
+
         debug!(".");
-        unsafe { *self.base_ptr.offset((EOI_REGISTER >> 4) as isize) = 0 };
+        *self.get_register_mut(EOI_REGISTER) = 0;
     }
 
     #[inline]
@@ -169,7 +174,7 @@ impl APIC {
 }
 
 impl core::ops::Index<InvariantAPICRegister> for APIC {
-    type Output = u128;
+    type Output = u32;
 
     #[inline]
     fn index(&self, register: InvariantAPICRegister) -> &Self::Output {
@@ -202,13 +207,13 @@ use bit_field::BitField;
 
 #[repr(transparent)]
 pub struct APICRegister<'val, T: APICRegisterVariant + ?Sized> {
-    value: &'val mut u128,
+    value: &'val mut u32,
     phantom: PhantomData<T>,
 }
 
 impl<'val, T: APICRegisterVariant> APICRegister<'val, T> {
     #[inline]
-    fn new(value: &'val mut u128) -> Self {
+    fn new(value: &'val mut u32) -> Self {
         Self {
             value,
             phantom: PhantomData,
@@ -237,20 +242,20 @@ impl<'val, T: APICRegisterVariant> APICRegister<'val, T> {
 
     #[inline]
     pub fn set_vector(&mut self, vector: u8) {
-        self.value.set_bits(0..8, vector as u128);
+        self.value.set_bits(0..8, vector as u32);
     }
 }
 
 impl APICRegister<'_, Timer> {
     #[inline]
     pub fn set_mode(&mut self, mode: APICTimerMode) {
-        self.value.set_bits(17..19, mode as u128);
+        self.value.set_bits(17..19, mode as u32);
     }
 }
 
 impl APICRegister<'_, Generic> {
     #[inline]
     pub fn set_delivery_mode(&mut self, mode: APICDeliveryMode) {
-        self.value.set_bits(8..11, mode as u128);
+        self.value.set_bits(8..11, mode as u32);
     }
 }
