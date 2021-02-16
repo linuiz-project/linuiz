@@ -20,7 +20,7 @@ pub const ACPI2_GUID: GUID = GUID::new(
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
-pub enum InvariantAPICRegister {
+pub enum APICRegister {
     ID = 0x20,
     Version = 0x30,
     TaskPriority = 0x80,
@@ -66,9 +66,9 @@ pub enum APICTimerDivisor {
 #[allow(non_camel_case_types)]
 pub enum APICDeliveryMode {
     Fixed = 0b000,
-    SMI = 0b010,
-    NMI = 0b100,
-    ExtINT = 0b111,
+    SystemManagement = 0b010,
+    NonMaskable = 0b100,
+    External = 0b111,
     INIT = 0b101,
 }
 
@@ -138,80 +138,80 @@ impl APIC {
     }
 
     #[inline]
-    pub fn cmci(&mut self) -> APICRegister<Generic> {
-        APICRegister::new(self.get_register_mut(Self::LVT_CMCI))
+    pub fn cmci(&mut self) -> LVTRegister<Generic> {
+        LVTRegister::new(self.get_register_mut(Self::LVT_CMCI))
     }
 
     #[inline]
-    pub fn timer(&mut self) -> APICRegister<Timer> {
-        APICRegister::new(self.get_register_mut(Self::LVT_TIMER))
+    pub fn timer(&mut self) -> LVTRegister<Timer> {
+        LVTRegister::new(self.get_register_mut(Self::LVT_TIMER))
     }
 
     #[inline]
-    pub fn lint0(&mut self) -> APICRegister<LINT> {
-        APICRegister::new(self.get_register_mut(Self::LVT_LINT0))
+    pub fn lint0(&mut self) -> LVTRegister<LINT> {
+        LVTRegister::new(self.get_register_mut(Self::LVT_LINT0))
     }
 
     #[inline]
-    pub fn lint1(&mut self) -> APICRegister<LINT> {
-        APICRegister::new(self.get_register_mut(Self::LVT_LINT1))
+    pub fn lint1(&mut self) -> LVTRegister<LINT> {
+        LVTRegister::new(self.get_register_mut(Self::LVT_LINT1))
     }
 
     #[inline]
-    pub fn error(&mut self) -> APICRegister<Error> {
-        APICRegister::new(self.get_register_mut(Self::LVT_ERROR))
+    pub fn error(&mut self) -> LVTRegister<Error> {
+        LVTRegister::new(self.get_register_mut(Self::LVT_ERROR))
     }
 
     #[inline]
-    pub fn performance(&mut self) -> APICRegister<Generic> {
-        APICRegister::new(self.get_register_mut(Self::LVT_PERFORMANCE))
+    pub fn performance(&mut self) -> LVTRegister<Generic> {
+        LVTRegister::new(self.get_register_mut(Self::LVT_PERFORMANCE))
     }
 
     #[inline]
-    pub fn thermal_sensor(&mut self) -> APICRegister<Generic> {
-        APICRegister::new(self.get_register_mut(Self::LVT_THERMAL_SENSOR))
+    pub fn thermal_sensor(&mut self) -> LVTRegister<Generic> {
+        LVTRegister::new(self.get_register_mut(Self::LVT_THERMAL_SENSOR))
     }
 }
 
-impl core::ops::Index<InvariantAPICRegister> for APIC {
+impl core::ops::Index<APICRegister> for APIC {
     type Output = u32;
 
     #[inline]
-    fn index(&self, register: InvariantAPICRegister) -> &Self::Output {
+    fn index(&self, register: APICRegister) -> &Self::Output {
         self.get_register(register as u16)
     }
 }
 
-impl core::ops::IndexMut<InvariantAPICRegister> for APIC {
+impl core::ops::IndexMut<APICRegister> for APIC {
     #[inline]
-    fn index_mut(&mut self, register: InvariantAPICRegister) -> &mut Self::Output {
+    fn index_mut(&mut self, register: APICRegister) -> &mut Self::Output {
         self.get_register_mut(register as u16)
     }
 }
 
-pub trait APICRegisterVariant {}
+pub trait LVTRegisterVariant {}
 
 pub enum Timer {}
-impl APICRegisterVariant for Timer {}
+impl LVTRegisterVariant for Timer {}
 
 pub enum Generic {}
-impl APICRegisterVariant for Generic {}
+impl LVTRegisterVariant for Generic {}
 
 pub enum LINT {}
-impl APICRegisterVariant for LINT {}
+impl LVTRegisterVariant for LINT {}
 
 pub enum Error {}
-impl APICRegisterVariant for Error {}
+impl LVTRegisterVariant for Error {}
 
 use bit_field::BitField;
 
 #[repr(transparent)]
-pub struct APICRegister<'val, T: APICRegisterVariant + ?Sized> {
+pub struct LVTRegister<'val, T: LVTRegisterVariant + ?Sized> {
     value: &'val mut u32,
     phantom: PhantomData<T>,
 }
 
-impl<'val, T: APICRegisterVariant> APICRegister<'val, T> {
+impl<'val, T: LVTRegisterVariant> LVTRegister<'val, T> {
     #[inline]
     fn new(value: &'val mut u32) -> Self {
         Self {
@@ -246,14 +246,14 @@ impl<'val, T: APICRegisterVariant> APICRegister<'val, T> {
     }
 }
 
-impl APICRegister<'_, Timer> {
+impl LVTRegister<'_, Timer> {
     #[inline]
     pub fn set_mode(&mut self, mode: APICTimerMode) {
         self.value.set_bits(17..19, mode as u32);
     }
 }
 
-impl APICRegister<'_, Generic> {
+impl LVTRegister<'_, Generic> {
     #[inline]
     pub fn set_delivery_mode(&mut self, mode: APICDeliveryMode) {
         self.value.set_bits(8..11, mode as u32);

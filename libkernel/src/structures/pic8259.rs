@@ -6,8 +6,6 @@ Information about the PIC can be found here: https://en.wikipedia.org/wiki/Intel
 */
 
 use crate::io::port::{ReadWritePort, WriteOnlyPort};
-use bitflags::bitflags;
-use spin::{self, Mutex};
 
 const CMD_INIT: u8 = 0x11;
 const CMD_END_OF_INTERRUPT: u8 = 0x20;
@@ -51,7 +49,7 @@ impl InterruptOffset {
     }
 }
 
-bitflags! {
+bitflags::bitflags! {
     pub struct InterruptLines : u16 {
         const TIMER = 1 << 0;
         const KEYBOARD = 1 << 1;
