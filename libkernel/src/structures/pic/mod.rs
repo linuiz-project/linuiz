@@ -30,11 +30,23 @@ pub enum InterruptOffset {
     FPU,
     PrimaryATA,
     SpuriousSlave,
-    DummyAPIC,
+    DummyAPIC = 192,
 }
 
 impl InterruptOffset {
     pub const BASE: u8 = 32;
+
+    pub fn from_u8(value: u8) -> Self {
+        unsafe { core::mem::transmute(value) }
+    }
+
+    pub const fn as_usize(self) -> usize {
+        self as usize
+    }
+
+    pub const fn as_usize_no_base(self) -> usize {
+        (self as usize) - (Self::BASE as usize)
+    }
 }
 
 lazy_static! {

@@ -12,10 +12,8 @@ mod timer;
 
 use core::ffi::c_void;
 use libkernel::{
-    memory::UEFIMemoryDescriptor,
-    registers::MSR,
-    structures::{apic::APIC, idt::InterruptStackFrame, pic::InterruptOffset},
-    BootInfo, ConfigTableEntry,
+    memory::UEFIMemoryDescriptor, registers::MSR, structures::apic::APIC, BootInfo,
+    ConfigTableEntry,
 };
 
 extern "C" {
@@ -85,8 +83,9 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor, ConfigT
 
 fn init_apic_timer() {
     use bit_field::BitField;
-    use libkernel::structures::apic::{
-        APICDeliveryMode, APICTimerDivisor, APICTimerMode, InvariantAPICRegister,
+    use libkernel::structures::{
+        apic::{APICDeliveryMode, APICTimerDivisor, APICTimerMode, InvariantAPICRegister},
+        pic::InterruptOffset,
     };
     use timer::Timer;
 
@@ -132,11 +131,11 @@ fn init_apic_timer() {
 
     // Map APIC timer to an interrupt, and by that enable it in one-shot mode (APICTimerMode = 0x0)
     debug!("Configuring APIC timer interrupt.");
-    extern "x86-interrupt" fn dummy_apic_handler(_: &mut InterruptStackFrame) {
+    fn dummy_apic_handler() {
         APIC::from_ptr(unsafe { APIC_PTR }).signal_eoi()
     }
     libkernel::structures::idt::set_interrupt_handler(
-        libkernel::structures::pic::InterruptOffset::DummyAPIC,
+        InterruptOffset::DummyAPIC,
         dummy_apic_handler,
     );
     apic.timer().set_vector(InterruptOffset::DummyAPIC as u8);

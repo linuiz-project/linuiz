@@ -7,10 +7,12 @@ static TICKS: AtomicUsize = AtomicUsize::new(0);
 // Frequency of timer, or ticks per second.
 pub const TIMER_FREQUENCY: usize = 1000;
 
-pub extern "x86-interrupt" fn tick_handler(
-    _: &mut libkernel::structures::idt::InterruptStackFrame,
-) {
+pub fn tick_handler() {
     TICKS.fetch_add(1, core::sync::atomic::Ordering::Release);
+
+    libkernel::structures::pic::end_of_interrupt(
+        libkernel::structures::pic::InterruptOffset::Timer,
+    );
 }
 
 pub fn get_ticks() -> usize {
