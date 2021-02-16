@@ -102,8 +102,12 @@ impl APIC {
     pub const CPU_FOCUS: u128 = 0x200;
 
     pub fn from_ptr<T>(ptr: *mut T) -> Self {
-        Self {
-            base_ptr: ptr as *mut _,
+        if crate::instructions::cpuid_features().contains(crate::instructions::CPUFeatures::APIC) {
+            Self {
+                base_ptr: ptr as *mut _,
+            }
+        } else {
+            panic!("local APIC is not supported on this machine")
         }
     }
 

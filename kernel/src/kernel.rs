@@ -54,6 +54,11 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor, ConfigT
     info!("Validating magic of BootInfo.");
     boot_info.validate_magic();
 
+    debug!(
+        "Detected CPU features: {:?}",
+        libkernel::instructions::cpuid_features()
+    );
+
     unsafe { libkernel::instructions::init_segment_registers(0x0) };
     debug!("Zeroed segment registers.");
 
@@ -132,6 +137,7 @@ fn init_apic_timer() {
     // Map APIC timer to an interrupt, and by that enable it in one-shot mode (APICTimerMode = 0x0)
     debug!("Configuring APIC timer interrupt.");
     fn dummy_apic_handler() {
+        info!(".");
         APIC::from_ptr(unsafe { APIC_PTR }).signal_eoi()
     }
     libkernel::structures::idt::set_interrupt_handler(
