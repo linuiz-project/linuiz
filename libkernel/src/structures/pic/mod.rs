@@ -30,36 +30,11 @@ pub enum InterruptOffset {
     FPU,
     PrimaryATA,
     SpuriousSlave,
+    DummyAPIC,
 }
 
 impl InterruptOffset {
     pub const BASE: u8 = 32;
-
-    pub const fn base_offset(offset: u8) -> Self {
-        match offset {
-            0 => InterruptOffset::Timer,
-            1 => InterruptOffset::Keyboard,
-            2 => InterruptOffset::Cascade,
-            3 => InterruptOffset::COM2,
-            4 => InterruptOffset::COM1,
-            5 => InterruptOffset::LPT2,
-            6 => InterruptOffset::FloppyDisk,
-            7 => InterruptOffset::SpuriousMaster,
-            8 => InterruptOffset::CMOSClock,
-            9 => InterruptOffset::Peripheral0,
-            10 => InterruptOffset::Peripheral1,
-            11 => InterruptOffset::Peripheral2,
-            12 => InterruptOffset::PS2Mouse,
-            13 => InterruptOffset::FPU,
-            14 => InterruptOffset::PrimaryATA,
-            15 => InterruptOffset::SpuriousSlave,
-            _ => panic!("invalid interrupt offset, must be 0..=15",),
-        }
-    }
-
-    pub const fn without_base(self) -> u8 {
-        (self as u8) - Self::BASE
-    }
 }
 
 lazy_static! {

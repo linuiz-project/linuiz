@@ -1,8 +1,5 @@
 use crate::memory::paging::PageTableEntry;
-use core::{
-    marker::PhantomData,
-    ops::{Index, IndexMut},
-};
+use core::marker::PhantomData;
 use x86_64::VirtAddr;
 
 pub trait TableLevel {}

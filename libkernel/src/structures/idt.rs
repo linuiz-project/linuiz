@@ -1,6 +1,8 @@
-use crate::structures::pic::{end_of_interrupt, InterruptOffset};
-use lazy_static::lazy_static;
-use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
+use crate::structures::pic::InterruptOffset;
+use core::lazy::OnceCell;
+use spin::Mutex;
+use x86_64::structures::idt::InterruptDescriptorTable;
+pub use x86_64::structures::idt::InterruptStackFrame;
 
 /* FAULT INTERRUPT HANDLERS */
 extern "x86-interrupt" fn divide_error_handler(stack_frame: &mut InterruptStackFrame) {
@@ -11,7 +13,9 @@ extern "x86-interrupt" fn debug_handler(stack_frame: &mut InterruptStackFrame) {
     panic!("CPU EXCEPTION: DEBUG\n{:#?}", stack_frame);
 }
 
-// --- non-maskable interrupt (defined below, atop interrupt handlers)
+extern "x86-interrupt" fn non_maskable_interrupt_handler(stack_frame: &mut InterruptStackFrame) {
+    panic!("CPU EXCEPTION: NON-MASKABLE INTERRUPT\n{:#?}", stack_frame);
+}
 
 extern "x86-interrupt" fn breakpoint_handler(_stack_frame: &mut InterruptStackFrame) {
     // serialln!("CPU EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
@@ -159,79 +163,74 @@ extern "x86-interrupt" fn security_exception_handler(
 
 // --- triple fault (can't handle)
 
-/* REGULAR INTERRUPT HANDLERS */
-extern "x86-interrupt" fn non_maskable_interrupt_handler(stack_frame: &mut InterruptStackFrame) {
-    panic!("CPU EXCEPTION: NON-MASKABLE INTERRUPT\n{:#?}", stack_frame);
-}
-
-extern "x86-interrupt" fn timer_interrupt(_: &mut InterruptStackFrame) {
-    (INTERRUPT_HANDLERS.read()[InterruptOffset::Timer.without_base() as usize])();
-    crate::structures::pic::end_of_interrupt(InterruptOffset::Timer);
-}
-
-static INTERRUPT_HANDLERS: spin::RwLock<[fn(); 2]> = spin::RwLock::new([
-    || end_of_interrupt(InterruptOffset::Timer),
-    || end_of_interrupt(InterruptOffset::Keyboard),
-]);
-
 /* IDT */
-lazy_static! {
-    static ref IDT: InterruptDescriptorTable = {
-        let mut idt = InterruptDescriptorTable::new();
-
-        // fault interrupts
-        idt.divide_error.set_handler_fn(divide_error_handler);
-        idt.debug.set_handler_fn(debug_handler);
-        idt.non_maskable_interrupt.set_handler_fn(non_maskable_interrupt_handler);
-        idt.breakpoint.set_handler_fn(breakpoint_handler);
-        idt.overflow.set_handler_fn(overflow_handler);
-        idt.bound_range_exceeded.set_handler_fn(bound_range_exceeded_handler);
-        idt.invalid_opcode.set_handler_fn(invalid_opcode_handler);
-        idt.device_not_available.set_handler_fn(device_not_available_handler);
-        unsafe {
-            idt.double_fault.set_handler_fn(double_fault_handler).set_stack_index(crate::structures::gdt::DOUBLE_FAULT_IST_INDEX);
-        }
-        idt.invalid_tss.set_handler_fn(invalid_tss_handler);
-        idt.segment_not_present.set_handler_fn(segment_not_present_handler);
-        idt.stack_segment_fault.set_handler_fn(stack_segment_handler);
-        idt.general_protection_fault.set_handler_fn(general_protection_fault_handler);
-        idt.page_fault.set_handler_fn(page_fault_handler);
-        // --- reserved 15
-        idt.x87_floating_point.set_handler_fn(x87_floating_point_handler);
-        idt.alignment_check.set_handler_fn(alignment_check_handler);
-        // --- machine check (platform specific, not required)
-        idt.simd_floating_point.set_handler_fn(simd_floating_point_handler);
-        idt.virtualization.set_handler_fn(virtualization_handler);
-        // --- reserved 21-29
-        idt.security_exception.set_handler_fn(security_exception_handler);
-        // --- triple fault (can't handle)
-
-        // regular interrupts
-        idt[InterruptOffset::Timer as usize].set_handler_fn(timer_interrupt);
-        idt[InterruptOffset::Keyboard as usize].set_handler_fn(timer_interrupt);
-        idt[InterruptOffset::Cascade as usize].set_handler_fn(timer_interrupt);
-        idt[InterruptOffset::COM2 as usize].set_handler_fn(timer_interrupt);
-        idt[InterruptOffset::COM1 as usize].set_handler_fn(timer_interrupt);
-        idt[InterruptOffset::LPT2 as usize].set_handler_fn(timer_interrupt);
-        idt[InterruptOffset::FloppyDisk as usize].set_handler_fn(timer_interrupt);
-        idt[InterruptOffset::CMOSClock as usize].set_handler_fn(timer_interrupt);
-        idt[InterruptOffset::Peripheral0 as usize].set_handler_fn(timer_interrupt);
-        idt[InterruptOffset::Peripheral1 as usize].set_handler_fn(timer_interrupt);
-        idt[InterruptOffset::Peripheral2 as usize].set_handler_fn(timer_interrupt);
-        idt[InterruptOffset::PS2Mouse as usize].set_handler_fn(timer_interrupt);
-        idt[InterruptOffset::FPU as usize].set_handler_fn(timer_interrupt);
-        idt[InterruptOffset::PrimaryATA as usize].set_handler_fn(timer_interrupt);
-
-        idt
-    };
-}
+static IDT: Mutex<OnceCell<InterruptDescriptorTable>> = Mutex::new(OnceCell::new());
 
 pub fn init() {
-    IDT.load();
+    let mut idt_cell = IDT.lock();
+
+    if let Err(_) = idt_cell.set(InterruptDescriptorTable::new()) {
+        panic!("IDT has already been configured");
+    }
+
+    if let Some(idt) = idt_cell.get_mut() {
+        idt.divide_error.set_handler_fn(divide_error_handler);
+        idt.debug.set_handler_fn(debug_handler);
+        idt.non_maskable_interrupt
+            .set_handler_fn(non_maskable_interrupt_handler);
+        idt.breakpoint.set_handler_fn(breakpoint_handler);
+        idt.overflow.set_handler_fn(overflow_handler);
+        idt.bound_range_exceeded
+            .set_handler_fn(bound_range_exceeded_handler);
+        idt.invalid_opcode.set_handler_fn(invalid_opcode_handler);
+        idt.device_not_available
+            .set_handler_fn(device_not_available_handler);
+        unsafe {
+            idt.double_fault
+                .set_handler_fn(double_fault_handler)
+                .set_stack_index(crate::structures::gdt::DOUBLE_FAULT_IST_INDEX);
+        }
+        idt.invalid_tss.set_handler_fn(invalid_tss_handler);
+        idt.segment_not_present
+            .set_handler_fn(segment_not_present_handler);
+        idt.stack_segment_fault
+            .set_handler_fn(stack_segment_handler);
+        idt.general_protection_fault
+            .set_handler_fn(general_protection_fault_handler);
+        idt.page_fault.set_handler_fn(page_fault_handler);
+        // --- reserved 15
+        idt.x87_floating_point
+            .set_handler_fn(x87_floating_point_handler);
+        idt.alignment_check.set_handler_fn(alignment_check_handler);
+        // --- machine check (platform specific, not required)
+        idt.simd_floating_point
+            .set_handler_fn(simd_floating_point_handler);
+        idt.virtualization.set_handler_fn(virtualization_handler);
+        // --- reserved 21-29
+        idt.security_exception
+            .set_handler_fn(security_exception_handler);
+        // --- triple fault (can't handle)
+
+        // This is a sin.
+        fn make_static<'a, T>(input: &'a T) -> &'static T {
+            fn helper<'a, 'b, T>(_: &'a &'b (), v: &'b T) -> &'a T {
+                v
+            }
+
+            let f: fn(_, &'a T) -> &'static T = helper;
+            f(&&(), input)
+        }
+
+        make_static(idt).load();
+    }
 }
 
-pub fn set_interrupt_handler(offset: InterruptOffset, handler: fn()) {
+pub fn set_interrupt_handler(
+    offset: InterruptOffset,
+    handler: extern "x86-interrupt" fn(&mut InterruptStackFrame),
+) {
     crate::instructions::interrupts::without_interrupts(|| {
-        INTERRUPT_HANDLERS.write()[offset.without_base() as usize] = handler;
+        IDT.lock().get_mut().expect("IDT has not been initialized")[offset as usize]
+            .set_handler_fn(handler);
     });
 }

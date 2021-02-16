@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use core::sync::atomic::AtomicUsize;
 
 static TICKS: AtomicUsize = AtomicUsize::new(0);
@@ -5,7 +7,9 @@ static TICKS: AtomicUsize = AtomicUsize::new(0);
 // Frequency of timer, or ticks per second.
 pub const TIMER_FREQUENCY: usize = 1000;
 
-pub fn tick_handler() {
+pub extern "x86-interrupt" fn tick_handler(
+    _: &mut libkernel::structures::idt::InterruptStackFrame,
+) {
     TICKS.fetch_add(1, core::sync::atomic::Ordering::Release);
 }
 

@@ -1,7 +1,4 @@
-use crate::structures::{
-    acpi::{Checksum, SDTHeader},
-    apic::APIC,
-};
+use crate::structures::acpi::{Checksum, SDTHeader};
 use core::marker::PhantomData;
 use x86_64::PhysAddr;
 
@@ -17,16 +14,6 @@ pub struct MADT {
 impl MADT {
     fn body_len(&self) -> usize {
         (self.header.len() as usize) - core::mem::size_of::<SDTHeader>() - 8
-    }
-
-    pub fn apic(&self) -> APIC {
-        for interrupt_device in self.iter() {
-            if let InterruptDevice::LocalAPICAddrOverride(lapicaddr) = interrupt_device {
-                return lapicaddr.apic();
-            }
-        }
-
-        unsafe { APIC::from_ptr(self.apic_addr as *mut u128) }
     }
 
     pub fn iter(&self) -> MADTIterator {
@@ -190,10 +177,4 @@ pub struct LocalAPICAddrOverride {
     header: InterruptDeviceHeader,
     reserved: [u8; 2],
     local_apic_addr: PhysAddr,
-}
-
-impl LocalAPICAddrOverride {
-    pub fn apic(&self) -> APIC {
-        unsafe { APIC::from_ptr(self.local_apic_addr.as_u64() as *mut u128) }
-    }
 }

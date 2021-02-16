@@ -31,23 +31,41 @@ impl MSR {
         (high << 32) | low
     }
 
+    pub unsafe fn write_bit(self, bit: usize, set: bool) {
+        use bit_field::BitField;
+        self.write(*self.read().set_bit(bit, set));
+
+        debug_assert_eq!(self.read().get_bit(bit), set);
+    }
+
+    #[cfg(debug_assertions)]
+    pub unsafe fn write_bits(self, range: core::ops::Range<usize>, value: u64) {
+        use bit_field::BitField;
+        self.write(*self.read().set_bits(range.clone(), value));
+
+        debug_assert_eq!(self.read().get_bits(range), value);
+    }
+
+    #[cfg(not(debug_assertions))]
+    pub unsafe fn write_bits(self, range: core::ops::Range<usize>, value: u64) {
+        use bit_field::BitField;
+        self.write(*self.read().set_bits(range, value));
+    }
+
     pub unsafe fn write(self, value: u64) {
-        if !crate::instructions::cpuid_features().contains(crate::instructions::CPUFeatures::MSR) {
+        if crate::instructions::cpuid_features().contains(crate::instructions::CPUFeatures::MSR) {
+            asm!(
+                "mov ecx, {:e}",
+                "mov eax, {:e}",
+                "mov edx, {:e}",
+                "wrmsr",
+                in(reg) self as u32,
+                in(reg) value as u32,
+                in(reg) (value >> 32) as u32,
+                options(nomem)
+            );
+        } else {
             panic!("CPU does not support use of model-specific registers");
         }
-
-        let low = value as u32;
-        let high = (value >> 32) as u32;
-
-        asm!(
-            "mov ecx, {:e}",
-            "mov {:e}, eax",
-            "mov {:e}, edx",
-            "wrmsr",
-            in(reg) self as u32,
-            in(reg) low,
-            in(reg) high,
-            options(nomem)
-        );
     }
 }

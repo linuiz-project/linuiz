@@ -1,7 +1,5 @@
+use crate::structures::GUID;
 use core::marker::PhantomData;
-
-use crate::{registers::MSR, structures::GUID};
-use x86_64::VirtAddr;
 
 pub const ACPI_GUID: GUID = GUID::new(
     0xeb9d2d30,
@@ -28,6 +26,7 @@ pub enum InvariantAPICRegister {
     TaskPriority = 0x80,
     LDR = 0xD0,
     DFR = 0xE0,
+    Spurious = 0xF0,
     ESR = 0x280,
     ICRL = 0x300,
     ICRH = 0x310,
@@ -97,20 +96,14 @@ impl APIC {
     const LVT_LINT1: u16 = 0x360;
     const LVT_ERROR: u16 = 0x370;
 
+    // The `mask` bit for an LVT entry.
     pub const DISABLE: u128 = 0x10000;
-    pub const NMI: u128 = 4 << 8;
     pub const SW_ENABLE: u128 = 0x100;
     pub const CPU_FOCUS: u128 = 0x200;
 
-    pub unsafe fn from_addr(base_addr: VirtAddr) -> Self {
+    pub fn from_ptr<T>(ptr: *mut T) -> Self {
         Self {
-            base_ptr: base_addr.as_mut_ptr(),
-        }
-    }
-
-    pub unsafe fn from_ptr<T>(ptr: *mut T) -> Self {
-        Self {
-            base_ptr: ptr as *mut u128,
+            base_ptr: ptr as *mut _,
         }
     }
 
@@ -129,8 +122,10 @@ impl APIC {
     }
 
     #[inline]
-    pub fn signal_eoi(&mut self) {
-        *self.get_register_mut(0xB0) = 0;
+    pub fn signal_eoi(&self) {
+        const EOI_REGISTER: usize = 0xB0;
+        debug!(".");
+        unsafe { *self.base_ptr.offset((EOI_REGISTER >> 4) as isize) = 0 };
     }
 
     #[inline]
@@ -166,11 +161,6 @@ impl APIC {
     #[inline]
     pub fn thermal_sensor(&mut self) -> APICRegister<Generic> {
         APICRegister::new(self.get_register_mut(Self::LVT_THERMAL_SENSOR))
-    }
-
-    #[inline]
-    pub fn set_spurious(&mut self, vector: u8) {
-        *self.get_register_mut(0xF0) = vector as u128;
     }
 }
 
