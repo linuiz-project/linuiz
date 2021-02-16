@@ -238,15 +238,8 @@ impl BlockAllocator {
             .expect("failed to find stack memory region");
 
         self.with_addressor(|addressor| {
+            debug!("Identity mapping global memory journal frames.");
             global_memory_frames.for_each(|frame| addressor.identity_map(&frame));
-
-            debug!("Temporary identity mapping stack frames.");
-            for frame in stack_descriptor.frame_iter() {
-                // This is a temporary identity mapping, purely
-                //  so `rsp` isn't invalid after we swap the PML4.
-                addressor.identity_map(&frame);
-                unsafe { crate::memory::global_reserve(&frame) };
-            }
 
             debug!("Identity mapping all reserved memory blocks.");
             for frame in memory_map
@@ -257,6 +250,14 @@ impl BlockAllocator {
                 })
             {
                 addressor.identity_map(&frame);
+            }
+
+            debug!("Temporary identity mapping stack frames.");
+            for frame in stack_descriptor.frame_iter() {
+                // This is a temporary identity mapping, purely
+                //  so `rsp` isn't invalid after we swap the PML4.
+                addressor.identity_map(&frame);
+                unsafe { crate::memory::global_reserve(&frame) };
             }
 
             // Since we're using physical offset mapping for our page table modification
@@ -272,9 +273,13 @@ impl BlockAllocator {
             }
         });
 
+
         // 'Allocate' the null page
         trace!("Allocating null frame.");
         self.identity_map(&Frame::null());
+
+        debug!("Allocating global memory journaling frames.");
+        global_memory_frames.for_each(|frame| self.identity_map(&frame));
 
         // 'Allocate' reserved memory
         trace!("Allocating reserved frames.");
@@ -335,10 +340,18 @@ impl BlockAllocator {
 
     /* ALLOC & DEALLOC */
 
-    fn raw_alloc(&self, size: usize) -> *mut u8 {
-        trace!("Allocation requested: {} bytes", size);
+    fn raw_alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
+        if (layout.align() & 0xF) > 0 {
+            panic!("allocator does not support alignments below 16");
+        }
 
-        let size_in_blocks = (size + (Self::BLOCK_SIZE - 1)) / Self::BLOCK_SIZE;
+        trace!(
+            "Allocation requested: {} bytes, aligned by {}",
+            layout.size(),
+            layout.align()
+        );
+
+        let size_in_blocks = (layout.size() + (Self::BLOCK_SIZE - 1)) / Self::BLOCK_SIZE;
         let (mut block_index, mut current_run);
 
         while {
@@ -358,7 +371,9 @@ impl BlockAllocator {
                             for bit in (0..64).map(|shift| (block_section & (1 << shift)) > 0) {
                                 if bit {
                                     current_run = 0;
-                                } else {
+                                } else if current_run > 0
+                                    || (current_run == 0 && (block_index % layout.align()) == 0)
+                                {
                                     current_run += 1;
                                 }
 
@@ -423,6 +438,8 @@ impl BlockAllocator {
             }
 
             if SectionState::should_alloc(&page_state) {
+                trace!("Allocating frame for previously unused block page.");
+
                 // 'has bits', but not 'had bits'
                 self.with_addressor(|addressor| {
                     addressor.map(&Page::from_index(map_index), unsafe {
@@ -587,11 +604,15 @@ impl BlockAllocator {
             trace!("Successfully grew allocator map.");
         });
     }
+
+    pub fn translate_page(&self, page: &Page) -> Option<Frame> {
+        self.with_addressor(|addressor| addressor.translate_page(page))
+    }
 }
 
 unsafe impl core::alloc::GlobalAlloc for BlockAllocator {
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
-        self.raw_alloc(layout.size())
+        self.raw_alloc(layout)
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {

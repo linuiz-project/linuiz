@@ -4,6 +4,7 @@ use crate::{
 };
 use spin::RwLock;
 
+#[repr(usize)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameType {
     Unallocated = 0,
@@ -27,15 +28,11 @@ impl BitValue for FrameType {
     }
 
     fn as_usize(&self) -> usize {
-        match self {
-            FrameType::Unallocated => 0,
-            FrameType::Allocated => 1,
-            FrameType::Reserved => 2,
-            FrameType::Corrupted => 3,
-        }
+        *self as usize
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameAllocationError {
     NotAllocated,
     NotUnallocated,
@@ -73,12 +70,10 @@ impl<'arr> FrameAllocator<'arr> {
         let element_count = total_memory / 0x1000;
         let memory_size = (element_count * FrameType::BIT_WIDTH) / 8;
         let memory_pages = crate::align_up(memory_size, 0x1000) / 0x1000;
-        debug!("Searching for memory descriptor which meets criteria:\n Pages (Memory): {}\n Bytes (Memory): >= {}\n Pages (Represented): >= {}", memory_pages, memory_size, element_count);
         let descriptor = uefi_memory_map
             .iter()
             .find(|descriptor| descriptor.page_count >= (memory_pages as u64))
             .expect("failed to find viable memory descriptor for memory map.");
-        debug!("Located usable memory descriptor:\n{:#?}", descriptor);
 
         let mut this = Self {
             memory_map: RwBitArray::from_slice(unsafe {
@@ -94,22 +89,23 @@ impl<'arr> FrameAllocator<'arr> {
                 reserved_memory: 0,
             }),
         };
+        let bitarray_frames = Frame::range_count(descriptor.phys_start, memory_pages);
 
         unsafe {
             // reserve null frame
-            this.reserve_frame(&Frame::null()).ok();
+            this.reserve_frame(&Frame::null()).unwrap();
             // reserve bitarray frames
-            this.reserve_frames(Frame::range_count(descriptor.phys_start, memory_pages));
+            this.reserve_frames(bitarray_frames);
             // reserve system & kernel frames
-            for descriptor in uefi_memory_map
+            uefi_memory_map
                 .iter()
                 .filter(|descriptor| is_uefi_reserved_memory_type(descriptor.ty))
-            {
-                this.reserve_frames(Frame::range_count(
-                    descriptor.phys_start,
-                    descriptor.page_count as usize,
-                ));
-            }
+                .for_each(|descriptor| {
+                    this.reserve_frames(Frame::range_count(
+                        descriptor.phys_start,
+                        descriptor.page_count as usize,
+                    ))
+                });
         }
 
         info!(
@@ -117,10 +113,7 @@ impl<'arr> FrameAllocator<'arr> {
             crate::memory::to_kibibytes(this.memory.read().reserved_memory)
         );
 
-        (
-            Frame::range_count(descriptor.phys_start, memory_pages),
-            this,
-        )
+        (bitarray_frames, this)
     }
 
     pub fn total_memory(&self) -> usize {
@@ -149,6 +142,7 @@ impl<'arr> FrameAllocator<'arr> {
             memory.free_memory += 0x1000;
             memory.locked_memory -= 0x1000;
 
+            trace!("Freed frame: {:?}", frame);
             Ok(())
         } else {
             Err(FrameAllocationError::NotAllocated)
@@ -164,6 +158,7 @@ impl<'arr> FrameAllocator<'arr> {
             memory.free_memory -= 0x1000;
             memory.locked_memory += 0x1000;
 
+            trace!("Locked frame: {:?}", frame);
             Ok(())
         } else {
             Err(FrameAllocationError::NotUnallocated)
@@ -190,6 +185,7 @@ impl<'arr> FrameAllocator<'arr> {
             memory.free_memory -= 0x1000;
             memory.reserved_memory += 0x1000;
 
+            trace!("Reserved frame: {:?}", frame);
             Ok(())
         } else {
             Err(FrameAllocationError::NotUnallocated)
@@ -198,19 +194,19 @@ impl<'arr> FrameAllocator<'arr> {
     /* MANY OPS */
     pub unsafe fn free_frames(&self, frames: FrameIterator) {
         for frame in frames {
-            self.free_frame(&frame).ok();
+            self.free_frame(&frame).expect("failed to free frame");
         }
     }
 
     pub unsafe fn lock_frames(&self, frames: FrameIterator) {
         for frame in frames {
-            self.lock_frame(&frame).ok();
+            self.lock_frame(&frame).expect("failed to lock frame");
         }
     }
 
     pub(crate) unsafe fn reserve_frames(&mut self, frames: FrameIterator) {
         for frame in frames {
-            self.reserve_frame(&frame).ok();
+            self.reserve_frame(&frame).expect("failed to reserve frame");
         }
     }
 }

@@ -17,7 +17,7 @@ where
     phantom: PhantomData<BV>,
 }
 
-impl<'arr, BV: BitValue + Eq> RwBitArray<'arr, BV> {
+impl<'arr, BV: BitValue + Eq + core::fmt::Debug> RwBitArray<'arr, BV> {
     const SECTION_SIZE: usize = core::mem::size_of::<usize>() * 8;
 
     pub const fn length_hint(element_count: usize) -> usize {
@@ -34,14 +34,14 @@ impl<'arr, BV: BitValue + Eq> RwBitArray<'arr, BV> {
     }
 
     pub fn len(&self) -> usize {
-        self.array.read().len() * (Self::SECTION_SIZE * BV::BIT_WIDTH)
+        (self.array.read().len() * Self::SECTION_SIZE) / BV::BIT_WIDTH
     }
 
     pub fn get(&self, index: usize) -> BV {
         if index < self.len() {
-            let element_index = index * BV::BIT_WIDTH;
-            let section_index = element_index / Self::SECTION_SIZE;
-            let section_offset = element_index - (section_index * Self::SECTION_SIZE);
+            let bit_index = index * BV::BIT_WIDTH;
+            let section_index = bit_index / Self::SECTION_SIZE;
+            let section_offset = bit_index % Self::SECTION_SIZE;
             let section_value = self.array.read()[section_index];
 
             BV::from_usize((section_value >> section_offset) & BV::MASK)
@@ -56,9 +56,9 @@ impl<'arr, BV: BitValue + Eq> RwBitArray<'arr, BV> {
 
     pub fn set(&self, index: usize, mem_type: BV) {
         if index < self.len() {
-            let element_index = index * BV::BIT_WIDTH;
-            let section_index = element_index / Self::SECTION_SIZE;
-            let section_offset = element_index - (section_index * Self::SECTION_SIZE);
+            let bit_index = index * BV::BIT_WIDTH;
+            let section_index = bit_index / Self::SECTION_SIZE;
+            let section_offset = bit_index % Self::SECTION_SIZE;
 
             let sections_read = self.array.upgradeable_read();
             let section_value = sections_read[section_index];
@@ -78,9 +78,9 @@ impl<'arr, BV: BitValue + Eq> RwBitArray<'arr, BV> {
 
     pub fn set_eq(&self, index: usize, mem_type: BV, eq_type: BV) -> bool {
         if index < self.len() {
-            let element_index = index * BV::BIT_WIDTH;
-            let section_index = element_index / Self::SECTION_SIZE;
-            let section_offset = element_index - (section_index * Self::SECTION_SIZE);
+            let bit_index = index * BV::BIT_WIDTH;
+            let section_index = bit_index / Self::SECTION_SIZE;
+            let section_offset = bit_index % Self::SECTION_SIZE;
 
             let sections_read = self.array.upgradeable_read();
             let section_value = sections_read[section_index];
@@ -103,6 +103,17 @@ impl<'arr, BV: BitValue + Eq> RwBitArray<'arr, BV> {
             );
         }
 
+        debug_assert_eq!(self.get(index), mem_type, "failed to set memory at index");
+
         true
+    }
+
+    #[cfg(debug_assertions)]
+    pub fn debug_log_elements(&self) {
+        for section in self.array.read().iter().map(|section| *section) {
+            for offset in (0..(core::mem::size_of::<usize>() * 8)).step_by(BV::BIT_WIDTH) {
+                debug!("{:?}", BV::from_usize((section >> offset) & BV::MASK));
+            }
+        }
     }
 }

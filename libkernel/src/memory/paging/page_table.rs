@@ -59,6 +59,14 @@ where
     pub fn iter_mut(&mut self) -> core::slice::IterMut<PageTableEntry> {
         self.entries.iter_mut()
     }
+
+    pub fn get_entry(&self, index: usize) -> &PageTableEntry {
+        &self.entries[index]
+    }
+
+    pub fn get_entry_mut(&mut self, index: usize) -> &mut PageTableEntry {
+        &mut self.entries[index]
+    }
 }
 
 impl<L> PageTable<L>
@@ -75,7 +83,7 @@ where
             index,
             offset
         );
-        let entry = &self[index];
+        let entry = self.get_entry(index);
         match entry.frame() {
             Some(frame) => {
                 let mapped_physical_addr = offset + frame.addr().as_u64();
@@ -95,7 +103,7 @@ where
             index,
             offset
         );
-        let entry = &mut self[index];
+        let entry = self.get_entry_mut(index);
         match entry.frame() {
             Some(frame) => {
                 let mapped_physical_addr = offset + frame.addr().as_u64();
@@ -115,21 +123,8 @@ where
             index,
             offset
         );
-        let entry = &mut self[index];
+        let entry = self.get_entry_mut(index);
         let mapped_physical_addr = offset + entry.frame_create().addr().as_u64();
         &mut *mapped_physical_addr.as_mut_ptr()
-    }
-}
-
-impl<L: TableLevel> Index<usize> for PageTable<L> {
-    type Output = PageTableEntry;
-    fn index(&self, index: usize) -> &Self::Output {
-        &self.entries[index]
-    }
-}
-
-impl<L: TableLevel> IndexMut<usize> for PageTable<L> {
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        &mut self.entries[index]
     }
 }

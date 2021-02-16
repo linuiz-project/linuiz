@@ -26,7 +26,7 @@ impl MADT {
             }
         }
 
-        unsafe { APIC::from_addr(PhysAddr::new(self.apic_addr as u64)) }
+        unsafe { APIC::from_ptr(self.apic_addr as *mut u128) }
     }
 
     pub fn iter(&self) -> MADTIterator {
@@ -194,6 +194,6 @@ pub struct LocalAPICAddrOverride {
 
 impl LocalAPICAddrOverride {
     pub fn apic(&self) -> APIC {
-        unsafe { APIC::from_addr(self.local_apic_addr) }
+        unsafe { APIC::from_ptr(self.local_apic_addr.as_u64() as *mut u128) }
     }
 }

@@ -55,7 +55,7 @@ impl VirtualAddressor {
                 .sub_table((addr >> 27) & 0x1FF, offset)
                 .and_then(|p3| p3.sub_table((addr >> 18) & 0x1FF, offset))
                 .and_then(|p2| p2.sub_table((addr >> 9) & 0x1FF, offset))
-                .and_then(|p1| Some(&p1[(addr >> 0) & 0x1FF]))
+                .and_then(|p1| Some(p1.get_entry((addr >> 0) & 0x1FF)))
         }
     }
 
@@ -68,7 +68,7 @@ impl VirtualAddressor {
                 .sub_table_mut((addr >> 27) & 0x1FF, offset)
                 .and_then(|p3| p3.sub_table_mut((addr >> 18) & 0x1FF, offset))
                 .and_then(|p2| p2.sub_table_mut((addr >> 9) & 0x1FF, offset))
-                .and_then(|p1| Some(&mut p1[(addr >> 0) & 0x1FF]))
+                .and_then(|p1| Some(p1.get_entry_mut((addr >> 0) & 0x1FF)))
         }
     }
 
@@ -77,11 +77,11 @@ impl VirtualAddressor {
         let addr = (page.addr().as_u64() >> 12) as usize;
 
         unsafe {
-            &mut self
-                .pml4_mut()
+            self.pml4_mut()
                 .sub_table_create((addr >> 27) & 0x1FF, offset)
                 .sub_table_create((addr >> 18) & 0x1FF, offset)
-                .sub_table_create((addr >> 9) & 0x1FF, offset)[(addr >> 0) & 0x1FF]
+                .sub_table_create((addr >> 9) & 0x1FF, offset)
+                .get_entry_mut((addr >> 0) & 0x1FF)
         }
     }
 

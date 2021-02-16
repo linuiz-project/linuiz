@@ -6,7 +6,12 @@ bitflags::bitflags! {
     }
 }
 
-static TRACE_ENABLED_PATHS: [&str; 1] = ["libkernel::memory::block_allocator"];
+static TRACE_ENABLED_PATHS: [&str; 4] = [
+    "libkernel::memory::block_allocator",
+    "libkernel::memory::paging::virtual_addressor",
+    "libkernel::memory::frame_allocator",
+    "libkernel::bitarray",
+];
 
 fn trace_enabled(record: &log::Record) -> bool {
     record.level() < log::Level::Trace || TRACE_ENABLED_PATHS.contains(&record.metadata().target())
@@ -44,7 +49,7 @@ pub fn init_logger(
 ) -> Result<(), log::SetLoggerError> {
     unsafe {
         if LOGGER.is_some() {
-            panic!("logger can only be configured once");
+            panic!("logger can only be configured once")
         } else {
             LOGGER = Some(KernelLogger { modes });
 

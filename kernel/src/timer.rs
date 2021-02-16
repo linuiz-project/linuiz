@@ -2,6 +2,9 @@ use core::sync::atomic::AtomicUsize;
 
 static TICKS: AtomicUsize = AtomicUsize::new(0);
 
+// Frequency of timer, or ticks per second.
+pub const TIMER_FREQUENCY: usize = 1000;
+
 pub fn tick_handler() {
     TICKS.fetch_add(1, core::sync::atomic::Ordering::Release);
 }
@@ -31,9 +34,7 @@ impl Timer {
     }
 
     pub fn wait(&self) {
-        while get_ticks() < self.end_tick {
-            libkernel::instructions::hlt();
-        }
+        while get_ticks() < self.end_tick {}
     }
 }
 

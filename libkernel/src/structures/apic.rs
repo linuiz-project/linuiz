@@ -1,7 +1,7 @@
 use core::marker::PhantomData;
 
 use crate::{registers::MSR, structures::GUID};
-use x86_64::PhysAddr;
+use x86_64::VirtAddr;
 
 pub const ACPI_GUID: GUID = GUID::new(
     0xeb9d2d30,
@@ -36,15 +36,16 @@ pub enum InvariantAPICRegister {
     TimerDivisor = 0x3E0,
     Last = 0x38F,
     TimerBaseDivisor = 1 << 20,
+    LVT_TIMER = 0x320,
 }
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
 pub enum APICTimerMode {
-    OneShot = 0,
-    Periodic = 1 << 17,
-    TSC_Deadline = 1 << 18,
+    OneShot = 0b00,
+    Periodic = 0b01,
+    TSC_Deadline = 0b10,
 }
 
 #[repr(u32)]
@@ -84,7 +85,7 @@ pub enum APICInterruptRegister {
 }
 
 pub struct APIC {
-    base_addr: PhysAddr,
+    base_ptr: *mut u128,
 }
 
 impl APIC {
@@ -96,30 +97,35 @@ impl APIC {
     const LVT_LINT1: u16 = 0x360;
     const LVT_ERROR: u16 = 0x370;
 
-    pub const LVT_INT_MASKED: u128 = 1 << 16;
     pub const DISABLE: u128 = 0x10000;
     pub const NMI: u128 = 4 << 8;
     pub const SW_ENABLE: u128 = 0x100;
     pub const CPU_FOCUS: u128 = 0x200;
 
-    pub fn from_msr() -> Self {
+    pub unsafe fn from_addr(base_addr: VirtAddr) -> Self {
         Self {
-            base_addr: PhysAddr::new(MSR::IA32_APIC_BASE.read() & !(0xFFF)),
+            base_ptr: base_addr.as_mut_ptr(),
         }
     }
 
-    pub unsafe fn from_addr(base_addr: PhysAddr) -> Self {
-        Self { base_addr }
+    pub unsafe fn from_ptr<T>(ptr: *mut T) -> Self {
+        Self {
+            base_ptr: ptr as *mut u128,
+        }
+    }
+
+    pub fn ptr(&self) -> *const u128 {
+        self.base_ptr
     }
 
     #[inline]
     fn get_register(&self, offset: u16) -> &u128 {
-        unsafe { &*((self.base_addr + (offset as u64)).as_u64() as *const u128) }
+        unsafe { &*self.base_ptr.offset((offset as isize) >> 4) }
     }
 
     #[inline]
     fn get_register_mut(&mut self, offset: u16) -> &mut u128 {
-        unsafe { &mut *((self.base_addr + (offset as u64)).as_u64() as *mut u128) }
+        unsafe { &mut *self.base_ptr.offset((offset as isize) >> 4) }
     }
 
     #[inline]
@@ -168,6 +174,22 @@ impl APIC {
     }
 }
 
+impl core::ops::Index<InvariantAPICRegister> for APIC {
+    type Output = u128;
+
+    #[inline]
+    fn index(&self, register: InvariantAPICRegister) -> &Self::Output {
+        self.get_register(register as u16)
+    }
+}
+
+impl core::ops::IndexMut<InvariantAPICRegister> for APIC {
+    #[inline]
+    fn index_mut(&mut self, register: InvariantAPICRegister) -> &mut Self::Output {
+        self.get_register_mut(register as u16)
+    }
+}
+
 pub trait APICRegisterVariant {}
 
 pub enum Timer {}
@@ -206,12 +228,12 @@ impl<'val, T: APICRegisterVariant> APICRegister<'val, T> {
 
     #[inline]
     pub fn is_masked(&self) -> bool {
-        self.value.get_bit(12)
+        self.value.get_bit(16)
     }
 
     #[inline]
     pub fn set_masked(&mut self, masked: bool) {
-        self.value.set_bit(12, masked);
+        self.value.set_bit(16, masked);
     }
 
     #[inline]
@@ -236,21 +258,5 @@ impl APICRegister<'_, Generic> {
     #[inline]
     pub fn set_delivery_mode(&mut self, mode: APICDeliveryMode) {
         self.value.set_bits(8..11, mode as u128);
-    }
-}
-
-impl core::ops::Index<InvariantAPICRegister> for APIC {
-    type Output = u128;
-
-    #[inline]
-    fn index(&self, register: InvariantAPICRegister) -> &Self::Output {
-        self.get_register(register as u16)
-    }
-}
-
-impl core::ops::IndexMut<InvariantAPICRegister> for APIC {
-    #[inline]
-    fn index_mut(&mut self, register: InvariantAPICRegister) -> &mut Self::Output {
-        self.get_register_mut(register as u16)
     }
 }

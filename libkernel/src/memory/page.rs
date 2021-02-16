@@ -29,6 +29,19 @@ impl Page {
     }
 
     #[inline]
+    pub const fn from_ptr<T>(ptr: *const T) -> Self {
+        let ptr_usize = unsafe { ptr as usize };
+
+        if (ptr_usize % 0x1000) != 0 {
+            panic!("page address is not page-aligned")
+        } else {
+            Self {
+                0: ptr_usize / 0x1000,
+            }
+        }
+    }
+
+    #[inline]
     pub const fn containing_addr(virt_addr: VirtAddr) -> Self {
         Self {
             0: (virt_addr.as_u64() as usize) / 0x1000,

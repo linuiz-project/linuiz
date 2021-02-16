@@ -45,3 +45,8 @@ pub unsafe fn init_global_allocator(memory_map: &[UEFIMemoryDescriptor]) {
 pub unsafe fn identity_map(frame: &Frame) {
     GLOBAL_ALLOCATOR.identity_map(frame);
 }
+
+#[cfg(feature = "kernel_impls")]
+pub unsafe fn translate_page(page: &Page) -> Option<Frame> {
+    GLOBAL_ALLOCATOR.translate_page(page)
+}
