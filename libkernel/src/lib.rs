@@ -20,6 +20,7 @@ extern crate alloc;
 mod bitarray;
 mod boot_info;
 
+pub mod acpi;
 pub mod elf;
 pub mod instructions;
 pub mod io;

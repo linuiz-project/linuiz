@@ -47,6 +47,8 @@ impl<MM, CTE> BootInfo<MM, CTE> {
             panic!("boot_info is unaligned, or magic is otherwise corrupted");
         }
     }
+
+    pub fn unwrap(self) {}
 }
 
 #[repr(C)]

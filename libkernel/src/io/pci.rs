@@ -59,7 +59,7 @@ impl ConfigAddressPacket {
         self.0.get_bits(0..8) as u8
     }
 
-    pub fn raw(&self) -> u32 {
+    fn raw(&self) -> u32 {
         self.0
     }
 }

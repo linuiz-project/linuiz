@@ -1,4 +1,4 @@
-use crate::structures::acpi::{Checksum, SDTHeader, MADT};
+use crate::acpi::{Checksum, SDTHeader, MADT};
 
 #[repr(C, packed)]
 pub struct XSDT {

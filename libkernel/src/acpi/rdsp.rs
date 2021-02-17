@@ -1,4 +1,4 @@
-use crate::structures::acpi::{Checksum, XSDT};
+use crate::acpi::{Checksum, XSDT};
 use x86_64::PhysAddr;
 
 #[repr(C, packed)]
