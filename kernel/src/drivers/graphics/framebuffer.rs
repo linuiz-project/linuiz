@@ -1,102 +1,80 @@
 #![allow(dead_code)]
 
-///! Graphics driver utilizing the EFI_GRAPHICS_OUTPUT_PROTOCOL to write to framebuffer.
 use crate::drivers::graphics::color::{Color8i, Colors};
-use core::mem::size_of;
 use libkernel::Size;
+use spin::RwLock;
 
 #[repr(C)]
-#[derive(Copy, Clone, Eq, PartialEq)]
-pub struct FramebufferDriver {
-    // TODO(?) lock on these fields
-    framebuffer: *mut Color8i,
-    backbuffer: *mut Color8i,
+pub struct FramebufferDriver<'fbuf, 'bbuf> {
+    framebuffer: RwLock<&'fbuf mut [Color8i]>,
+    backbuffer: RwLock<&'bbuf mut [Color8i]>,
     dimensions: Size,
 }
 
-impl FramebufferDriver {
-    pub fn new(framebuffer: *mut Color8i, backbuffer: *mut Color8i, dimensions: Size) -> Self {
-        FramebufferDriver {
-            framebuffer,
-            backbuffer,
+impl<'fbuf, 'bbuf> FramebufferDriver<'fbuf, 'bbuf> {
+    pub fn init(buffer_addr: libkernel::PhysAddr, dimensions: Size) -> Self {
+        let pixel_len = dimensions.width * dimensions.height;
+        let byte_len = pixel_len * core::mem::size_of::<Color8i>();
+
+        let framebuffer = unsafe {
+            let frame_iter =
+                libkernel::memory::Frame::range_count(buffer_addr, (byte_len + 0xFFF) / 0x1000);
+            let alloc_to_ptr = libkernel::memory::alloc_to(frame_iter) as *mut Color8i;
+
+            core::slice::from_raw_parts_mut(alloc_to_ptr, pixel_len)
+        };
+
+        let backbuffer = unsafe {
+            core::slice::from_raw_parts_mut(
+                alloc::alloc::alloc(core::alloc::Layout::from_size_align(byte_len, 16).unwrap())
+                    as *mut Color8i,
+                pixel_len,
+            )
+        };
+
+        Self {
+            framebuffer: RwLock::new(framebuffer),
+            backbuffer: RwLock::new(backbuffer),
             dimensions,
         }
     }
 
     pub fn write_pixel(&self, xy: (usize, usize), color: Color8i) {
         let dimensions = self.dimensions();
-        if xy.0 >= dimensions.width || xy.1 >= dimensions.height {
-            panic!("given coordinates are outside framebuffer");
+
+        if xy.0 < dimensions.width && xy.1 < dimensions.height {
+            self.backbuffer.write()[xy.0 + (xy.1 * dimensions.width)] = color;
         } else {
-            unsafe {
-                let index = (xy.0 + (xy.1 * dimensions.width)) as isize;
-                self.backbuffer().offset(index).write_volatile(color);
-            }
+            panic!("given coordinates are outside framebuffer");
         }
     }
 
-    pub fn clear(&mut self, color: Color8i, flush: bool) {
-        let length = self.length();
-        let backbuffer = self.backbuffer();
-        unsafe {
-            for index in 0..length {
-                backbuffer.offset(index as isize).write_volatile(color);
-            }
-        }
-
-        if flush {
-            self.flush_pixels();
-        }
+    pub fn clear(&mut self, color: Color8i) {
+        self.backbuffer.write().fill(color);
     }
 
-    /// copy backbuffer to frontbuffer and zero backbuffer
+    /// Copy backbuffer to frontbuffer and zero backbuffer
     pub fn flush_pixels(&mut self) {
-        if self.has_backbuffer() {
-            let length = self.length();
-            let backbuffer = self.backbuffer;
-            let framebuffer = self.framebuffer;
+        {
+            let mut framebuffer = self.framebuffer.write();
+            let backbuffer = self.backbuffer.read();
 
-            unsafe {
-                core::ptr::copy_nonoverlapping(backbuffer, framebuffer, length);
-            }
-
-            // clear the backbuffer
-            self.clear(Colors::Black.into(), false)
+            framebuffer.copy_from_slice(*backbuffer);
         }
+
+        self.clear(Colors::Black.into());
     }
 
     pub fn dimensions(&self) -> Size {
         self.dimensions
     }
 
-    pub fn length(&self) -> usize {
+    pub fn pixel_len(&self) -> usize {
         let dimensions = self.dimensions();
         dimensions.width * dimensions.height
     }
 
-    pub fn byte_length(&self) -> usize {
-        self.length() * size_of::<Color8i>()
-    }
-
-    fn backbuffer(&self) -> *mut Color8i {
-        if self.has_backbuffer() {
-            self.backbuffer
-        } else {
-            self.framebuffer
-        }
-    }
-
-    fn has_backbuffer(&self) -> bool {
-        self.backbuffer != core::ptr::null_mut::<Color8i>()
-    }
-}
-
-impl core::fmt::Debug for FramebufferDriver {
-    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter
-            .debug_struct("ProtocolGraphics")
-            .field("Framebuffer", &self.framebuffer)
-            .field("Backbuffer", &self.backbuffer)
-            .finish()
+    pub fn byte_len(&self) -> usize {
+        self.pixel_len() * core::mem::size_of::<Color8i>()
     }
 }

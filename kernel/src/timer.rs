@@ -12,9 +12,7 @@ pub extern "x86-interrupt" fn tick_handler(
 ) {
     TICKS.fetch_add(1, core::sync::atomic::Ordering::Release);
 
-    libkernel::structures::pic8259::end_of_interrupt(
-        libkernel::structures::pic8259::InterruptOffset::Timer,
-    );
+    crate::pic8259::end_of_interrupt(crate::pic8259::InterruptOffset::Timer);
 }
 
 pub fn get_ticks() -> usize {

@@ -8,6 +8,7 @@ extern crate alloc;
 
 mod drivers;
 mod logging;
+mod pic8259;
 mod timer;
 
 use core::ffi::c_void;
@@ -66,19 +67,32 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor, ConfigT
     info!("Successfully initialized GDT.");
     libkernel::structures::idt::init();
     info!("Successfully initialized IDT.");
-    libkernel::structures::pic8259::enable();
+    crate::pic8259::enable();
     info!("Successfully initialized PIC.");
     info!("Configuring PIT frequency to 1000Hz.");
-    libkernel::structures::pic8259::set_timer_freq(crate::timer::TIMER_FREQUENCY as u32);
+    crate::pic8259::set_timer_freq(crate::timer::TIMER_FREQUENCY as u32);
 
     // `boot_info` will not be usable after initalizing the global allocator,
     //  due to the stack being moved in virtual memory.
+    let framebuffer_pointer = boot_info.framebuffer_pointer().unwrap().clone();
     info!("Initializing global memory (frame allocator, global allocator, et al).");
     unsafe { libkernel::memory::init_global_allocator(boot_info.memory_map()) };
 
-    debug!("Enabling interrupts and temporarily configuring the PIT.");
+    debug!("Enabling interrupts.");
     libkernel::structures::idt::set_interrupt_handler(32, crate::timer::tick_handler);
     libkernel::instructions::interrupts::enable();
+
+    let framebuffer_driver = drivers::graphics::framebuffer::FramebufferDriver::init(
+        libkernel::PhysAddr::new(framebuffer_pointer.pointer as u64),
+        framebuffer_pointer.size,
+    );
+
+    for x in 0..300 {
+        for y in 0..300 {
+            framebuffer_driver
+                .write_pixel((x, y), drivers::graphics::color::Color8i::new(156, 10, 100));
+        }
+    }
 
     info!("Kernel has reached safe shutdown state.");
     unsafe { libkernel::instructions::pwm::qemu_shutdown() }

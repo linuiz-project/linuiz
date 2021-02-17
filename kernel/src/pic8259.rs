@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 /*
 Represents a wrapper around the hardware Programmable Interrupt Controller. This is an implementation
 based around the Intel 8259 PIC, which is still supported in favor of backwards compatibility.
@@ -5,7 +6,7 @@ based around the Intel 8259 PIC, which is still supported in favor of backwards 
 Information about the PIC can be found here: https://en.wikipedia.org/wiki/Intel_8259
 */
 
-use crate::io::port::{ReadWritePort, WriteOnlyPort};
+use libkernel::io::port::{ReadWritePort, WriteOnlyPort};
 
 const CMD_INIT: u8 = 0x11;
 const CMD_END_OF_INTERRUPT: u8 = 0x20;

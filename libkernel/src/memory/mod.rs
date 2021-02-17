@@ -47,6 +47,11 @@ pub unsafe fn identity_map(frame: &Frame) {
 }
 
 #[cfg(feature = "kernel_impls")]
+pub unsafe fn alloc_to(frames: FrameIterator) -> *mut u8 {
+    GLOBAL_ALLOCATOR.alloc_to(frames)
+}
+
+#[cfg(feature = "kernel_impls")]
 pub unsafe fn translate_page(page: &Page) -> Option<Frame> {
     GLOBAL_ALLOCATOR.translate_page(page)
 }

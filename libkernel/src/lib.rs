@@ -85,12 +85,7 @@ impl<T> Into<Option<T>> for FFIOption<T> {
 
 pub type KernelMain<MM, CTE> = extern "efiapi" fn(crate::BootInfo<MM, CTE>) -> !;
 
-pub fn align_up(value: usize, alignment: usize) -> usize {
-    assert!(
-        alignment.is_power_of_two(),
-        "`alignment` must be a power of two"
-    );
-
+pub const fn align_up(value: usize, alignment: usize) -> usize {
     let alignment_mask = alignment - 1;
     if value & alignment_mask == 0 {
         value
@@ -99,15 +94,14 @@ pub fn align_up(value: usize, alignment: usize) -> usize {
     }
 }
 
-const fn align_up_div(value: usize, alignment: usize) -> usize {
+pub const fn align_up_div(value: usize, alignment: usize) -> usize {
     (value + (alignment - 1)) / alignment
 }
 
-pub fn align_down(value: usize, alignment: usize) -> usize {
-    assert!(
-        alignment.is_power_of_two(),
-        "alignment must be a power of two"
-    );
-
+pub const fn align_down(value: usize, alignment: usize) -> usize {
     value & !(alignment - 1)
+}
+
+pub fn align_down_div(value: usize, alignment: usize) -> usize {
+    align_down(value, alignment) / alignment
 }
