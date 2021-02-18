@@ -1,5 +1,6 @@
-use crate::structures::GUID;
+use crate::{memory::Frame, registers::MSR, structures::GUID};
 use core::marker::PhantomData;
+use x86_64::PhysAddr;
 
 pub const ACPI_GUID: GUID = GUID::new(
     0xeb9d2d30,
@@ -84,92 +85,80 @@ pub enum APICInterruptRegister {
 }
 
 pub struct APIC {
-    base_ptr: *mut u128,
+    mmio: crate::memory::MMIO,
 }
 
 impl APIC {
-    const LVT_CMCI: u16 = 0x2F0;
-    const LVT_TIMER: u16 = 0x320;
-    const LVT_THERMAL_SENSOR: u16 = 0x330;
-    const LVT_PERFORMANCE: u16 = 0x340;
-    const LVT_LINT0: u16 = 0x350;
-    const LVT_LINT1: u16 = 0x360;
-    const LVT_ERROR: u16 = 0x370;
+    const LVT_CMCI: usize = 0x2F0;
+    const LVT_TIMER: usize = 0x320;
+    const LVT_THERMAL_SENSOR: usize = 0x330;
+    const LVT_PERFORMANCE: usize = 0x340;
+    const LVT_LINT0: usize = 0x350;
+    const LVT_LINT1: usize = 0x360;
+    const LVT_ERROR: usize = 0x370;
 
     // The `mask` bit for an LVT entry.
     pub const DISABLE: u32 = 0x10000;
     pub const SW_ENABLE: u32 = 0x100;
     pub const CPU_FOCUS: u32 = 0x200;
 
-    pub fn from_ptr<T>(ptr: *mut T) -> Self {
-        if crate::instructions::cpuid_features().contains(crate::instructions::CPUFeatures::APIC) {
-            Self {
-                base_ptr: ptr as *mut _,
-            }
-        } else {
-            panic!("local APIC is not supported on this machine")
+    pub fn mmio_addr() -> PhysAddr {
+        PhysAddr::new(MSR::IA32_APIC_BASE.read() & !0xFFF)
+    }
+
+    pub fn mmio_frames() -> crate::memory::FrameIterator {
+        Frame::range_count(Self::mmio_addr(), 1)
+    }
+
+    pub fn from_msr(mapped_addr: x86_64::VirtAddr) -> Self {
+        Self {
+            mmio: unsafe {
+                crate::memory::MMIO::new(Self::mmio_addr(), mapped_addr, 0x1000).unwrap()
+            },
         }
-    }
-
-    pub fn ptr(&self) -> *const u128 {
-        self.base_ptr
-    }
-
-    #[inline]
-    fn get_register(&self, offset: u16) -> &u32 {
-        unsafe { &*(self.base_ptr.offset((offset as isize) >> 4) as *const u32) }
-    }
-
-    #[inline]
-    fn get_register_mut(&mut self, offset: u16) -> &mut u32 {
-        unsafe { &mut *(self.base_ptr.offset((offset as isize) >> 4) as *mut u32) }
-    }
-
-    pub fn get_register_copy(&self, offset: u16) -> u32 {
-        *self.get_register(offset)
     }
 
     #[inline]
     pub fn signal_eoi(&mut self) {
-        const EOI_REGISTER: u16 = 0xB0;
+        const EOI_REGISTER: usize = 0xB0;
 
         debug!(".");
-        *self.get_register_mut(EOI_REGISTER) = 0;
+        self.mmio.write(EOI_REGISTER, 0);
     }
 
     #[inline]
     pub fn cmci(&mut self) -> LVTRegister<Generic> {
-        LVTRegister::new(self.get_register_mut(Self::LVT_CMCI))
+        LVTRegister::new(self.mmio.read_mut(Self::LVT_CMCI).unwrap())
     }
 
     #[inline]
     pub fn timer(&mut self) -> LVTRegister<Timer> {
-        LVTRegister::new(self.get_register_mut(Self::LVT_TIMER))
+        LVTRegister::new(self.mmio.read_mut(Self::LVT_TIMER).unwrap())
     }
 
     #[inline]
     pub fn lint0(&mut self) -> LVTRegister<LINT> {
-        LVTRegister::new(self.get_register_mut(Self::LVT_LINT0))
+        LVTRegister::new(self.mmio.read_mut(Self::LVT_LINT0).unwrap())
     }
 
     #[inline]
     pub fn lint1(&mut self) -> LVTRegister<LINT> {
-        LVTRegister::new(self.get_register_mut(Self::LVT_LINT1))
+        LVTRegister::new(self.mmio.read_mut(Self::LVT_LINT1).unwrap())
     }
 
     #[inline]
     pub fn error(&mut self) -> LVTRegister<Error> {
-        LVTRegister::new(self.get_register_mut(Self::LVT_ERROR))
+        LVTRegister::new(self.mmio.read_mut(Self::LVT_ERROR).unwrap())
     }
 
     #[inline]
     pub fn performance(&mut self) -> LVTRegister<Generic> {
-        LVTRegister::new(self.get_register_mut(Self::LVT_PERFORMANCE))
+        LVTRegister::new(self.mmio.read_mut(Self::LVT_PERFORMANCE).unwrap())
     }
 
     #[inline]
     pub fn thermal_sensor(&mut self) -> LVTRegister<Generic> {
-        LVTRegister::new(self.get_register_mut(Self::LVT_THERMAL_SENSOR))
+        LVTRegister::new(self.mmio.read_mut(Self::LVT_THERMAL_SENSOR).unwrap())
     }
 }
 
@@ -178,14 +167,14 @@ impl core::ops::Index<APICRegister> for APIC {
 
     #[inline]
     fn index(&self, register: APICRegister) -> &Self::Output {
-        self.get_register(register as u16)
+        self.mmio.read(register as usize).unwrap()
     }
 }
 
 impl core::ops::IndexMut<APICRegister> for APIC {
     #[inline]
     fn index_mut(&mut self, register: APICRegister) -> &mut Self::Output {
-        self.get_register_mut(register as u16)
+        self.mmio.read_mut(register as usize).unwrap()
     }
 }
 

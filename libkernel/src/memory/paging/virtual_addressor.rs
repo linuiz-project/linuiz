@@ -86,28 +86,33 @@ impl VirtualAddressor {
     }
 
     pub fn map(&mut self, page: &Page, frame: &Frame) {
-        let entry = self.get_page_entry_create(page);
-        if entry.is_present() {
-            crate::instructions::tlb::invalidate(page);
-        }
-        entry.set(&frame, PageAttributes::PRESENT | PageAttributes::WRITABLE);
+        {
+            let entry = self.get_page_entry_create(page);
+            if entry.is_present() {
+                crate::instructions::tlb::invalidate(page);
+            }
 
-        trace!("Mapped {:?}: {:?}", page, entry);
+            entry.set(&frame, PageAttributes::PRESENT | PageAttributes::WRITABLE);
+            trace!("Mapped {:?}: {:?}", page, entry);
+        }
+
+        debug_assert!(self.is_mapped_to(page, frame));
     }
 
     pub fn unmap(&mut self, page: &Page) {
-        let entry = self.get_page_entry_create(page);
-        entry.set_nonpresent();
-        crate::instructions::tlb::invalidate(page);
+        {
+            let entry = self.get_page_entry_create(page);
+            crate::instructions::tlb::invalidate(page);
 
-        trace!("Unmapped {:?}: {:?}", page, entry);
+            entry.set_nonpresent();
+            trace!("Unmapped {:?}: {:?}", page, entry);
+        }
+
+        debug_assert!(!self.is_mapped(page.addr()));
     }
 
     pub fn identity_map(&mut self, frame: &Frame) {
-        self.map(
-            &Page::from_addr(VirtAddr::new(frame.addr_u64())),
-            frame,
-        );
+        self.map(&Page::from_addr(VirtAddr::new(frame.addr_u64())), frame);
     }
 
     pub fn is_mapped(&self, virt_addr: VirtAddr) -> bool {

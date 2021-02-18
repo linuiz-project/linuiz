@@ -10,63 +10,63 @@ use spin::{Mutex, RwLock};
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 struct BlockPage {
-    blocks: [u64; 4],
+    sections: [u64; 4],
 }
 
 impl BlockPage {
     /// Number of sections (primitive used to track blocks with its bits).
     const SECTION_COUNT: usize = 4;
-    const SECTION_SIZE: usize = core::mem::size_of::<usize>() * 8;
+    const SECTION_SIZE: usize = core::mem::size_of::<u64>() * 8;
     /// Number of blocks each block page contains.
     const BLOCK_COUNT: usize = Self::SECTION_COUNT * Self::SECTION_SIZE;
 
     /// An empty block page (all blocks zeroed).
     const fn empty() -> Self {
         Self {
-            blocks: [0u64; Self::SECTION_COUNT],
+            sections: [0u64; Self::SECTION_COUNT],
         }
     }
 
     /// Whether the block page is empty.
     pub const fn is_empty(&self) -> bool {
-        (self.blocks[0] == 0)
-            && (self.blocks[1] == 0)
-            && (self.blocks[2] == 0)
-            && (self.blocks[3] == 0)
+        (self.sections[0] == 0)
+            && (self.sections[1] == 0)
+            && (self.sections[2] == 0)
+            && (self.sections[3] == 0)
     }
 
     /// Whether the block page is full.
     pub const fn is_full(&self) -> bool {
-        (self.blocks[0] == u64::MAX)
-            && (self.blocks[1] == u64::MAX)
-            && (self.blocks[2] == u64::MAX)
-            && (self.blocks[3] == u64::MAX)
+        (self.sections[0] == u64::MAX)
+            && (self.sections[1] == u64::MAX)
+            && (self.sections[2] == u64::MAX)
+            && (self.sections[3] == u64::MAX)
     }
 
     /// Unset all of the block page's blocks.
     pub const fn set_empty(&mut self) {
-        self.blocks[0] = 0;
-        self.blocks[1] = 0;
-        self.blocks[2] = 0;
-        self.blocks[3] = 0;
+        self.sections[0] = 0;
+        self.sections[1] = 0;
+        self.sections[2] = 0;
+        self.sections[3] = 0;
     }
 
     /// Set all of the block page's blocks.
     pub const fn set_full(&mut self) {
-        self.blocks[0] = u64::MAX;
-        self.blocks[1] = u64::MAX;
-        self.blocks[2] = u64::MAX;
-        self.blocks[3] = u64::MAX;
+        self.sections[0] = u64::MAX;
+        self.sections[1] = u64::MAX;
+        self.sections[2] = u64::MAX;
+        self.sections[3] = u64::MAX;
     }
 
     /// Underlying section iterator.
     fn iter(&self) -> core::slice::Iter<u64> {
-        self.blocks.iter()
+        self.sections.iter()
     }
 
     /// Underlying mutable section iterator.
     fn iter_mut(&mut self) -> core::slice::IterMut<u64> {
-        self.blocks.iter_mut()
+        self.sections.iter_mut()
     }
 }
 
@@ -402,11 +402,6 @@ impl BlockAllocator {
             end_block_index
         );
 
-        info!(
-            "start map index {} / {}",
-            start_block_index,
-            BlockPage::BLOCK_COUNT
-        );
         let start_map_index = start_block_index / BlockPage::BLOCK_COUNT;
         let mut initial_section_skip = crate::align_down_div(block_index, BlockPage::SECTION_SIZE)
             - (start_map_index * BlockPage::SECTION_COUNT);
@@ -418,25 +413,22 @@ impl BlockAllocator {
             .skip(start_map_index)
             .take(align_up_div(end_block_index, BlockPage::BLOCK_COUNT) - start_map_index)
         {
-            let mut page_state: [SectionState; 4] = [SectionState::empty(); 4];
+            let mut page_state: [SectionState; BlockPage::SECTION_COUNT] =
+                [SectionState::empty(); BlockPage::SECTION_COUNT];
 
             for (section_index, section) in block_page.iter_mut().enumerate() {
                 page_state[section_index].had_bits = *section > 0;
 
                 if initial_section_skip > 0 {
                     initial_section_skip -= 1;
-                    block_index += BlockPage::SECTION_SIZE;
                 } else if block_index < end_block_index {
-                    info!("{} => {}", start_map_index, map_index);
                     let traversed_blocks = (map_index * BlockPage::BLOCK_COUNT)
                         + (section_index * BlockPage::SECTION_SIZE);
-                    info!("start byte bits {} - {}", block_index, traversed_blocks);
                     let start_byte_bits = block_index - traversed_blocks;
-                    info!("selected {} - {}", end_block_index, traversed_blocks);
-                    let selected_bits = core::cmp::min(64, end_block_index - traversed_blocks);
-                    info!("masked {} - {}", selected_bits, start_byte_bits);
-                    let masked_bits = selected_bits - start_byte_bits;
-                    let bits_mask = Self::MASK_MAP[masked_bits - 1] << start_byte_bits;
+                    let selected_bits =
+                        core::cmp::min(BlockPage::SECTION_SIZE, end_block_index - traversed_blocks)
+                            - start_byte_bits;
+                    let bits_mask = Self::MASK_MAP[selected_bits - 1] << start_byte_bits;
 
                     debug_assert_eq!(
                         *section & bits_mask,
@@ -452,7 +444,7 @@ impl BlockAllocator {
             }
 
             if SectionState::should_alloc(&page_state) {
-                trace!("Allocating frame for previously unused block page.");
+                info!("Allocating frame for previously unused block page.");
 
                 // 'has bits', but not 'had bits'
                 self.with_addressor(|addressor| {
@@ -552,6 +544,8 @@ impl BlockAllocator {
         );
 
         let start_map_index = start_block_index / BlockPage::BLOCK_COUNT;
+        let mut initial_section_skip = crate::align_down_div(block_index, BlockPage::SECTION_SIZE)
+            - (start_map_index * BlockPage::SECTION_COUNT);
         for (map_index, block_page) in self
             .map
             .write()
@@ -565,7 +559,9 @@ impl BlockAllocator {
             for (section_index, section) in block_page.iter_mut().enumerate() {
                 page_state[section_index].had_bits = *section > 0;
 
-                if block_index < end_block_index {
+                if initial_section_skip > 0 {
+                    initial_section_skip -= 1;
+                } else if block_index < end_block_index {
                     let traversed_blocks =
                         (map_index * BlockPage::BLOCK_COUNT) + (section_index * 64);
                     let start_byte_bits = block_index - traversed_blocks;
@@ -609,9 +605,14 @@ impl BlockAllocator {
             let new_frame_usage = ((new_map_len * size_of::<BlockPage>()) + 0xFFF) / 0x1000;
             trace!("Growth frame usage: {} -> {}", frame_usage, new_frame_usage);
             for offset in frame_usage..new_frame_usage {
-                addressor.map(&Self::ALLOCATOR_BASE.offset(offset), unsafe {
+                let offset_page = Self::ALLOCATOR_BASE.offset(offset);
+                addressor.map(&offset_page, unsafe {
                     &crate::memory::global_lock_next().unwrap()
                 });
+
+                if !addressor.is_mapped(offset_page.addr()) {
+                    panic!("failed to map properly");
+                }
             }
 
             map_read.upgrade().resize(new_map_len, BlockPage::empty());
