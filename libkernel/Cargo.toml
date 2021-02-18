@@ -16,3 +16,6 @@ spin = "*"
 
 [features]
 kernel_impls = []
+
+[profile.release]
+opt-level = 3

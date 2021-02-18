@@ -79,14 +79,40 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor, ConfigT
     libkernel::structures::idt::set_interrupt_handler(32, crate::timer::tick_handler);
     libkernel::instructions::interrupts::enable();
 
-    init_apic_timer();
+    libkernel::structures::apic::local::load();
+    let lapic = libkernel::structures::apic::local::local_apic_mut().unwrap();
 
+    unsafe {
+        debug!("Resetting and enabling local APIC (it may have already been enabled).");
+        lapic.reset();
+        lapic.enable();
+        let timer = timer::Timer::new(crate::timer::TIMER_FREQUENCY / 1000);
+        lapic.configure_timer(|| timer.wait())
+    }
+
+    debug!("Disabling 8259 emulated PIC.");
+    unsafe { crate::pic8259::disable() };
+    debug!("Updating IDT timer interrupt entry to local APIC-enabled function.");
+    libkernel::structures::idt::set_interrupt_handler(48, timer::apic_timer_handler);
+    debug!("Unmasking local APIC timer interrupt (it will fire now!).");
+    lapic.lint0().set_masked(true);
+    lapic.timer().set_masked(false);
+
+    info!("Core-local APIC configured and enabled (8259 PIC disabled).");
+    loop {}
     // info!("Initializing framebuffer driver.");
-    // let framebuffer_driver = drivers::graphics::framebuffer::FramebufferDriver::init(
+    // let mut framebuffer_driver = drivers::graphics::framebuffer::FramebufferDriver::init(
     //     libkernel::PhysAddr::new(framebuffer_pointer.pointer as u64),
     //     framebuffer_pointer.size,
     // );
-    //
+
+    // let mut vecc = alloc::vec![0usize; 50];
+    // for (idx, a) in vecc.iter_mut().enumerate() {
+    //     info!("setting {}", idx);
+    //     *a = idx;
+    // }
+    // info!("{:?}", vecc);
+
     // info!("Testing framebuffer driver.");
     // for x in 0..300 {
     //     for y in 0..300 {
@@ -95,64 +121,8 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor, ConfigT
     //     }
     // }
 
+    // framebuffer_driver.flush_pixels();
+
     info!("Kernel has reached safe shutdown state.");
     unsafe { libkernel::instructions::pwm::qemu_shutdown() }
-}
-
-fn init_apic_timer() {
-    use libkernel::structures::apic::local::{
-        local_apic_mut, LocalAPICRegister, LocalAPICTimerDivisor, LocalAPICTimerMode,
-    };
-
-    libkernel::structures::apic::local::load();
-    libkernel::structures::apic::local::reset();
-    loop {}
-    local_apic_mut(|lapic_option| {
-        let lapic = match lapic_option {
-            Some(lapic) => lapic,
-            None => panic!("local APIC not loaded"),
-        };
-
-        debug!("Enabling APIC (it may have already been enabled).");
-        // unsafe { lapic.enable() };
-
-        debug!("Setting spurious interrupt to dummy ISR.");
-        lapic.configure_spurious(255, true);
-        debug!("Configuring APIC timer interrupt.");
-        lapic.timer().set_vector(192);
-        lapic.timer().set_mode(LocalAPICTimerMode::OneShot);
-        lapic.timer().set_masked(false);
-
-        // Tell the APIC timer to use a divisor of 16
-        lapic[LocalAPICRegister::TimerDivisor] = LocalAPICTimerDivisor::Div16 as u32;
-        debug!("Determining APIC timer frequency using PIT windowing.");
-        lapic[LocalAPICRegister::TimerInitialCount] = 0xFFFFFFFF;
-    });
-
-    timer::Timer::wait_new(crate::timer::TIMER_FREQUENCY / 1000);
-    loop {}
-    local_apic_mut(|lapic_option| {
-        let lapic = match lapic_option {
-            Some(lapic) => lapic,
-            None => panic!("local APIC not loaded"),
-        };
-
-        // mask timer and then configure
-        lapic.timer().set_masked(true);
-        let window_ticks = 0xFFFFFFFF - lapic[LocalAPICRegister::TimeCurrentCount];
-        debug!(
-            "Determined a total of {} APIC timer ticks per {}ms.",
-            window_ticks,
-            crate::timer::TIMER_FREQUENCY / 1000
-        );
-        lapic[LocalAPICRegister::TimerInitialCount] = window_ticks as u32;
-        lapic[LocalAPICRegister::TimerDivisor] = LocalAPICTimerDivisor::Div16 as u32;
-        lapic.timer().set_mode(LocalAPICTimerMode::Periodic);
-        lapic.timer().set_vector(32);
-
-        debug!("Disabling 8259 emulated PIC.");
-        unsafe { crate::pic8259::disable() };
-        debug!("Unmasking APIC timer interrupt (it will fire now!).");
-        lapic.timer().set_masked(false);
-    });
 }

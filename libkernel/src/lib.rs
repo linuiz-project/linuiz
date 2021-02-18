@@ -17,7 +17,7 @@
 extern crate log;
 extern crate alloc;
 
-mod bitarray;
+mod rwbitarray;
 mod boot_info;
 
 pub mod acpi;
@@ -27,7 +27,7 @@ pub mod io;
 pub mod memory;
 pub mod registers;
 pub mod structures;
-pub use bitarray::*;
+pub use rwbitarray::*;
 pub use boot_info::*;
 pub use x86_64::{PhysAddr, VirtAddr};
 

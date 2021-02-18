@@ -121,7 +121,6 @@ where
             offset
         );
         let entry = self.get_entry_mut(index);
-        let mapped_physical_addr = offset + entry.frame_create().addr_u64();
-        &mut *mapped_physical_addr.as_mut_ptr()
+        &mut *(offset + entry.frame_create().addr_u64()).as_mut_ptr()
     }
 }

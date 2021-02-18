@@ -160,7 +160,6 @@ extern "x86-interrupt" fn security_exception_handler(
 
 // --- triple fault (can't handle)
 
-
 /* IDT */
 static IDT: spin::Mutex<InterruptDescriptorTable> =
     spin::Mutex::new(InterruptDescriptorTable::new());
@@ -215,9 +214,10 @@ pub fn set_interrupt_handler(
 ) {
     crate::instructions::interrupts::without_interrupts(|| {
         if index >= 32 {
+            trace!("Modifying IDT handler at index: {}", index);
             IDT.lock()[index as usize].set_handler_fn(handler);
         } else {
-            panic!("interrupt handler index must be >=32 (0..32 are reserved)1");
+            panic!("interrupt handler index must be >=32 (0..32 are reserved)");
         }
     });
 }

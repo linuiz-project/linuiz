@@ -43,7 +43,9 @@ impl<'fbuf, 'bbuf> FramebufferDriver<'fbuf, 'bbuf> {
         let dimensions = self.dimensions();
 
         if xy.0 < dimensions.width && xy.1 < dimensions.height {
-            self.backbuffer.write()[xy.0 + (xy.1 * dimensions.width)] = color;
+            let index = xy.0 + (xy.1 * dimensions.width);
+            info!("INDEX: {}", index);
+            self.backbuffer.write()[index] = color;
         } else {
             panic!("given coordinates are outside framebuffer");
         }

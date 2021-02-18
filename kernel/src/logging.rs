@@ -6,12 +6,7 @@ bitflags::bitflags! {
     }
 }
 
-static TRACE_ENABLED_PATHS: [&str; 4] = [
-    "libkernel::memory::block_allocator",
-    "libkernel::memory::paging::virtual_addressor",
-    "libkernel::memory::frame_allocator",
-    "libkernel::bitarray",
-];
+static TRACE_ENABLED_PATHS: [&str; 1] = ["libkernel::structures::idt"];
 
 fn trace_enabled(record: &log::Record) -> bool {
     record.level() < log::Level::Trace || TRACE_ENABLED_PATHS.contains(&record.metadata().target())

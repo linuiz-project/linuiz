@@ -10,15 +10,25 @@ pub const TIMER_FREQUENCY: usize = 1000;
 pub extern "x86-interrupt" fn tick_handler(
     _: &mut libkernel::structures::idt::InterruptStackFrame,
 ) {
-    info!(
-        "{}",
-        TICKS.fetch_add(1, core::sync::atomic::Ordering::Release)
-    );
+    TICKS.fetch_add(1, core::sync::atomic::Ordering::Release);
     crate::pic8259::end_of_interrupt(crate::pic8259::InterruptOffset::Timer);
+}
+
+pub extern "x86-interrupt" fn apic_timer_handler(
+    _: &mut libkernel::structures::idt::InterruptStackFrame,
+) {
+    TICKS.fetch_add(1, core::sync::atomic::Ordering::Release);
+    libkernel::structures::apic::local::local_apic_mut()
+        .unwrap()
+        .end_of_interrupt();
 }
 
 pub fn get_ticks() -> usize {
     TICKS.load(core::sync::atomic::Ordering::Acquire)
+}
+
+pub fn get_ticks_unordered() -> usize {
+    TICKS.load(core::sync::atomic::Ordering::Relaxed)
 }
 
 pub fn wait(ticks: usize) {
@@ -26,14 +36,13 @@ pub fn wait(ticks: usize) {
 }
 
 pub struct Timer {
+    ticks: usize,
     end_tick: usize,
 }
 
 impl Timer {
     pub fn new(ticks: usize) -> Self {
-        Self {
-            end_tick: get_ticks() + ticks,
-        }
+        Self { ticks, end_tick: 0 }
     }
 
     pub fn wait_new(ticks: usize) {
@@ -42,7 +51,8 @@ impl Timer {
     }
 
     pub fn wait(&self) {
-        while get_ticks() < self.end_tick {}
+        let end_tick = self.ticks + get_ticks();
+        while get_ticks_unordered() < end_tick {}
     }
 }
 

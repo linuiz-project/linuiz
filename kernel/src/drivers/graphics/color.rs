@@ -51,9 +51,9 @@ pub enum Colors {
     Pink,
 }
 
-impl Into<Color8i> for Colors {
-    fn into(self) -> Color8i {
-        match self {
+impl From<Colors> for Color8i {
+    fn from(value: Colors) -> Color8i {
+        match value {
             Colors::Black => Color8i::new(0, 0, 0),
             Colors::White => Color8i::new(255, 255, 255),
             Colors::Blue => Color8i::new(0, 0, 255),
