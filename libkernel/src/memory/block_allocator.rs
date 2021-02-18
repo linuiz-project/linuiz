@@ -4,6 +4,7 @@ use crate::{
     SYSTEM_SLICE_SIZE,
 };
 use alloc::vec::Vec;
+use core::mem::size_of;
 use spin::{Mutex, RwLock};
 
 /// Represents one page worth of memory blocks (i.e. 4096 bytes in blocks).
@@ -16,7 +17,7 @@ struct BlockPage {
 impl BlockPage {
     /// Number of sections (primitive used to track blocks with its bits).
     const SECTION_COUNT: usize = 4;
-    const SECTION_SIZE: usize = core::mem::size_of::<u64>() * 8;
+    const SECTION_SIZE: usize = size_of::<u64>() * 8;
     /// Number of blocks each block page contains.
     const BLOCK_COUNT: usize = Self::SECTION_COUNT * Self::SECTION_SIZE;
 
@@ -309,7 +310,7 @@ impl BlockAllocator {
         *self.map.write() = Vec::from_raw_parts(
             Self::ALLOCATOR_BASE.mut_ptr(),
             0,
-            SYSTEM_SLICE_SIZE / core::mem::size_of::<BlockPage>(),
+            SYSTEM_SLICE_SIZE / size_of::<BlockPage>(),
         );
     }
 
@@ -341,14 +342,23 @@ impl BlockAllocator {
     /* ALLOC & DEALLOC */
 
     fn raw_alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
-        if (layout.align() & 0xF) > 0 {
-            panic!("allocator does not support alignments below 16");
-        }
+        const MINIMUM_ALIGNMENT: usize = 16;
+
+        let alignment = if layout.align().is_power_of_two()
+            && (layout.align() & (MINIMUM_ALIGNMENT - 1)) == 0
+        {
+            layout.align()
+        } else {
+            warn!("Unsupported allocator alignment: {}", layout.align());
+            warn!("Defaulting to alignment: 16");
+
+            MINIMUM_ALIGNMENT
+        };
 
         trace!(
             "Allocation requested: {} bytes, aligned by {}",
             layout.size(),
-            layout.align()
+            alignment
         );
 
         let size_in_blocks = (layout.size() + (Self::BLOCK_SIZE - 1)) / Self::BLOCK_SIZE;
@@ -372,7 +382,7 @@ impl BlockAllocator {
                                 if bit {
                                     current_run = 0;
                                 } else if current_run > 0
-                                    || (current_run == 0 && (block_index % layout.align()) == 0)
+                                    || (current_run == 0 && (block_index % alignment) == 0)
                                 {
                                     current_run += 1;
                                 }
@@ -518,7 +528,7 @@ impl BlockAllocator {
 
         let map_len = self.map.read().len();
         if map_len <= frame.index() {
-            self.grow((frame.index() - map_len) * BlockPage::BLOCK_COUNT)
+            self.grow(((frame.index() - map_len) + 1) * 0x8000);
         }
 
         self.with_addressor(|addressor| {
@@ -594,30 +604,46 @@ impl BlockAllocator {
     }
 
     pub fn grow(&self, required_blocks: usize) {
-        self.with_addressor(|addressor| {
-            let map_read = self.map.upgradeable_read();
-            let new_map_len = usize::next_power_of_two(
-                (map_read.len() * BlockPage::BLOCK_COUNT) + required_blocks,
-            );
+        assert!(required_blocks > 0, "calls to grow much be nonzero");
 
-            use core::mem::size_of;
-            let frame_usage = ((map_read.len() * size_of::<BlockPage>()) + 0xFFF) / 0x1000;
-            let new_frame_usage = ((new_map_len * size_of::<BlockPage>()) + 0xFFF) / 0x1000;
-            trace!("Growth frame usage: {} -> {}", frame_usage, new_frame_usage);
-            for offset in frame_usage..new_frame_usage {
+        self.with_addressor(|addressor| {
+            trace!("Growing map to faciliate {} blocks.", required_blocks);
+            let map_read = self.map.upgradeable_read();
+            let cur_map_blocks = map_read.len() * BlockPage::BLOCK_COUNT;
+            let new_map_blocks = cur_map_blocks + crate::align_up(required_blocks, 0x8000);
+            let cur_page_offset = cur_map_blocks / 0x8000;
+            let new_page_offset = new_map_blocks / 0x8000;
+
+            debug!(
+                "Growing map: {}..{} pages",
+                cur_page_offset, new_page_offset
+            );
+            for offset in cur_page_offset..new_page_offset {
                 let offset_page = Self::ALLOCATOR_BASE.offset(offset);
                 addressor.map(&offset_page, unsafe {
                     &crate::memory::global_lock_next().unwrap()
                 });
 
-                if !addressor.is_mapped(offset_page.addr()) {
-                    panic!("failed to map properly");
-                }
+                debug_assert!(
+                    addressor.is_mapped(offset_page.addr()),
+                    "failed to map properly",
+                );
             }
 
+            const BLOCK_PAGES_PER_FRAME: usize = 0x1000 / size_of::<BlockPage>();
+            let new_map_len = new_page_offset * BLOCK_PAGES_PER_FRAME;
+            debug_assert_eq!(
+                new_map_len % BLOCK_PAGES_PER_FRAME,
+                0,
+                "map must be page-aligned"
+            );
+
+            debug!("Grew map (new size: {} block pages).", new_map_len);
             map_read.upgrade().resize(new_map_len, BlockPage::empty());
-            trace!("Successfully grew allocator map.");
+            trace!("Successfully grew allocator map.",);
         });
+
+        log::set_max_level(log::LevelFilter::Debug);
     }
 
     pub fn translate_page(&self, page: &Page) -> Option<Frame> {
