@@ -1,15 +1,17 @@
-#[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CPUIDType {
-    VendorString = 0,
-    Features,
-    TLB,
-    Serial,
-    IntelExtended = 0x80000000,
-    IntelFeatures,
-    IntelBrandString,
-    IntelBrandStringMore,
-    IntelBrandStringEnd,
+pub fn cpuid(leaf: u32, subleaf: u32) -> (u32, u32, u32, u32) {
+    let (eax, ebx, ecx, edx);
+
+    unsafe {
+        asm!(
+            "cpuid",
+            inout("eax") leaf => eax,
+            inout("ecx") subleaf => ecx,
+            lateout("ebx") ebx,
+            lateout("edx") edx,
+        )
+    }
+
+    (eax, ebx, ecx, edx)
 }
 
 bitflags::bitflags! {
@@ -73,21 +75,7 @@ bitflags::bitflags! {
     }
 }
 
-pub fn cpuid_features() -> CPUFeatures {
-    let low: u32;
-    let high: u32;
-
-    unsafe {
-        asm!(
-            "mov eax, {:e}",
-            "cpuid",
-            "mov {:e}, ecx",
-            "mov {:e}, edx",
-            in(reg) CPUIDType::Features as u32,
-            out(reg) low,
-            out(reg) high
-        );
-    }
-
-    CPUFeatures::from_bits_truncate(((high as u64) << 32) | (low as u64))
+pub fn cpu_features() -> CPUFeatures {
+    let values = cpuid(0x1, 0x0);
+    CPUFeatures::from_bits_truncate(((values.1 as u64) << 32) | (values.0 as u64))
 }

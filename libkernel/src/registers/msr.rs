@@ -8,7 +8,7 @@ pub enum MSR {
 
 impl MSR {
     pub fn read(self) -> u64 {
-        if !crate::instructions::cpuid_features().contains(crate::instructions::CPUFeatures::MSR) {
+        if !crate::instructions::cpu_features().contains(crate::instructions::CPUFeatures::MSR) {
             panic!("CPU does not support use of model-specific registers");
         }
 
@@ -53,7 +53,7 @@ impl MSR {
     }
 
     pub unsafe fn write(self, value: u64) {
-        if crate::instructions::cpuid_features().contains(crate::instructions::CPUFeatures::MSR) {
+        if crate::instructions::cpu_features().contains(crate::instructions::CPUFeatures::MSR) {
             asm!(
                 "mov ecx, {:e}",
                 "mov eax, {:e}",

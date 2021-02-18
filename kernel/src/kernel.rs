@@ -12,10 +12,7 @@ mod pic8259;
 mod timer;
 
 use core::ffi::c_void;
-use libkernel::{
-    memory::UEFIMemoryDescriptor, registers::MSR, structures::apic::APIC, BootInfo,
-    ConfigTableEntry,
-};
+use libkernel::{memory::UEFIMemoryDescriptor, BootInfo, ConfigTableEntry};
 
 extern "C" {
     static _text_start: c_void;
@@ -57,7 +54,7 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor, ConfigT
 
     debug!(
         "Detected CPU features: {:?}",
-        libkernel::instructions::cpuid_features()
+        libkernel::instructions::cpu_features()
     );
 
     unsafe { libkernel::instructions::init_segment_registers(0x0) };
@@ -103,85 +100,59 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor, ConfigT
 }
 
 fn init_apic_timer() {
-    use bit_field::BitField;
-    use libkernel::structures::apic::{
-        APICDeliveryMode, APICRegister, APICTimerDivisor, APICTimerMode,
-    };
-    use timer::Timer;
-
-    extern "x86-interrupt" fn dummy_apic_handler(
-        _: &mut libkernel::structures::idt::InterruptStackFrame,
-    ) {
-        info!("..");
-        APIC::from_ptr(unsafe { APIC_PTR }).signal_eoi();
-    }
-
-    debug!("Mapping APIC table.");
-    let apic = unsafe {
-        let mapped_addr =
-            libkernel::VirtAddr::from_ptr(libkernel::memory::alloc_to(APIC::mmio_frames()));
-        debug!("Allocated APIC table virtual address: {:?}", mapped_addr);
-
-        &mut APIC::from_msr(mapped_addr)
+    use libkernel::structures::apic::local::{
+        local_apic_mut, LocalAPICRegister, LocalAPICTimerDivisor, LocalAPICTimerMode,
     };
 
-    // Initialize to known state
-    debug!("Initializing APIC to known state.");
-    apic[APICRegister::DFR] = 0xFFFFFFFF;
-    let mut ldr = apic[APICRegister::LDR];
-    ldr &= 0xFFFFFF;
-    ldr = (ldr & !0xFF) | ((ldr & 0xFF) | 1);
-    apic[APICRegister::LDR] = ldr;
+    libkernel::structures::apic::local::load();
+    libkernel::structures::apic::local::reset();
+    loop {}
+    local_apic_mut(|lapic_option| {
+        let lapic = match lapic_option {
+            Some(lapic) => lapic,
+            None => panic!("local APIC not loaded"),
+        };
 
-    debug!("Masking all LVT interrupts.");
-    libkernel::structures::idt::set_interrupt_handler(192, dummy_apic_handler);
-    apic.timer().set_vector(192);
-    apic.timer().set_mode(APICTimerMode::OneShot);
-    apic.timer().set_masked(true);
-    apic.performance()
-        .set_delivery_mode(APICDeliveryMode::NonMaskable);
-    apic.lint0().set_masked(true);
-    apic.lint1().set_masked(true);
-    apic[APICRegister::TaskPriority] = 0;
+        debug!("Enabling APIC (it may have already been enabled).");
+        // unsafe { lapic.enable() };
 
-    // Enable APIC
-    debug!("Enabling APIC (it may have already been enabled).");
-    unsafe { MSR::IA32_APIC_BASE.write_bit(11, true) };
+        debug!("Setting spurious interrupt to dummy ISR.");
+        lapic.configure_spurious(255, true);
+        debug!("Configuring APIC timer interrupt.");
+        lapic.timer().set_vector(192);
+        lapic.timer().set_mode(LocalAPICTimerMode::OneShot);
+        lapic.timer().set_masked(false);
 
-    // Map spurious to dummy ISR
-    debug!("Setting spurious interrupt to dummy ISR.");
-    apic[APICRegister::Spurious].set_bits(0..=8, 255 | APIC::SW_ENABLE);
+        // Tell the APIC timer to use a divisor of 16
+        lapic[LocalAPICRegister::TimerDivisor] = LocalAPICTimerDivisor::Div16 as u32;
+        debug!("Determining APIC timer frequency using PIT windowing.");
+        lapic[LocalAPICRegister::TimerInitialCount] = 0xFFFFFFFF;
+    });
 
-    // Map APIC timer to an interrupt and unmask it in one-shot mode
-    debug!("Configuring APIC timer interrupt.");
-    apic.timer().set_masked(false);
+    timer::Timer::wait_new(crate::timer::TIMER_FREQUENCY / 1000);
+    loop {}
+    local_apic_mut(|lapic_option| {
+        let lapic = match lapic_option {
+            Some(lapic) => lapic,
+            None => panic!("local APIC not loaded"),
+        };
 
-    // Tell the APIC timer to use a divisor of 16
-    apic[APICRegister::TimerDivisor] = APICTimerDivisor::Div16 as u32;
+        // mask timer and then configure
+        lapic.timer().set_masked(true);
+        let window_ticks = 0xFFFFFFFF - lapic[LocalAPICRegister::TimeCurrentCount];
+        debug!(
+            "Determined a total of {} APIC timer ticks per {}ms.",
+            window_ticks,
+            crate::timer::TIMER_FREQUENCY / 1000
+        );
+        lapic[LocalAPICRegister::TimerInitialCount] = window_ticks as u32;
+        lapic[LocalAPICRegister::TimerDivisor] = LocalAPICTimerDivisor::Div16 as u32;
+        lapic.timer().set_mode(LocalAPICTimerMode::Periodic);
+        lapic.timer().set_vector(32);
 
-    let waiter = Timer::new(crate::timer::TIMER_FREQUENCY / 1000);
-    debug!("Determining APIC timer frequency using PIT windowing.");
-
-    // Set APIC init counter to -1
-    apic[APICRegister::TimerInitialCount] = 0xFFFFFFFF;
-
-    waiter.wait();
-
-    // mask timer and then configure
-    apic.timer().set_masked(true);
-    let window_ticks = 0xFFFFFFFF - apic[APICRegister::TimeCurrentCount];
-    debug!(
-        "Determined a total of {} APIC timer ticks per {}ms.",
-        window_ticks,
-        crate::timer::TIMER_FREQUENCY / 1000
-    );
-    apic[APICRegister::TimerInitialCount] = window_ticks as u32;
-    apic[APICRegister::TimerDivisor] = APICTimerDivisor::Div16 as u32;
-    apic.timer().set_mode(APICTimerMode::Periodic);
-    apic.timer().set_vector(32);
-
-    debug!("Disabling 8259 emulated PIC.");
-    unsafe { crate::pic8259::disable() };
-    debug!("Unmasking APIC timer interrupt (it will fire now!).");
-    apic.timer().set_masked(false);
+        debug!("Disabling 8259 emulated PIC.");
+        unsafe { crate::pic8259::disable() };
+        debug!("Unmasking APIC timer interrupt (it will fire now!).");
+        lapic.timer().set_masked(false);
+    });
 }
