@@ -166,14 +166,17 @@ impl<'arr> FrameAllocator<'arr> {
     }
 
     pub fn lock_next(&self) -> Option<Frame> {
-        for frame in (0..self.memory_map.len()).map(|index| Frame::from_index(index)) {
-            if let Ok(()) = unsafe { self.lock_frame(&frame) } {
-                trace!("Locking next free frame: {:?}", frame);
-                return Some(frame);
-            }
-        }
+        self.memory_map
+            .set_eq_next(FrameType::Allocated, FrameType::Unallocated)
+            .map_or(None, |index| {
+                let frame = Frame::from_index(index);
+                let mut memory = self.memory.write();
+                memory.free_memory -= 0x1000;
+                memory.locked_memory += 0x1000;
 
-        None
+                trace!("Locked next free frame: {:?}", frame);
+                Some(frame)
+            })
     }
 
     pub(crate) unsafe fn reserve_frame(&self, frame: &Frame) -> Result<(), FrameAllocationError> {
