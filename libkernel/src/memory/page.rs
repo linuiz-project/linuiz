@@ -82,7 +82,11 @@ impl Page {
     }
 
     pub unsafe fn clear(&mut self) {
-        core::ptr::write_bytes(self.addr().as_mut_ptr::<u8>(), 0x0, 0x1000);
+        core::ptr::write_bytes::<usize>(
+            self.mut_ptr(),
+            0x0,
+            0x1000 / core::mem::size_of::<usize>(),
+        );
     }
 
     pub fn range_count(start_addr: VirtAddr, count: usize) -> PageIterator {

@@ -115,43 +115,45 @@ impl LocalAPIC {
     pub fn end_of_interrupt(&mut self) {
         const EOI_REGISTER: usize = 0xB0;
 
-        self.mmio.write(EOI_REGISTER, 0);
+        unsafe { self.mmio.write(EOI_REGISTER, 0).unwrap() };
     }
 
     pub fn cmci(&mut self) -> LVTRegister<Generic> {
-        LVTRegister::new(self.mmio.read_mut(Self::LVT_CMCI).unwrap())
+        LVTRegister::new(unsafe { self.mmio.read_mut(Self::LVT_CMCI).unwrap() })
     }
 
     pub fn timer(&mut self) -> LVTRegister<Timer> {
-        LVTRegister::new(self.mmio.read_mut(Self::LVT_TIMER).unwrap())
+        LVTRegister::new(unsafe { self.mmio.read_mut(Self::LVT_TIMER).unwrap() })
     }
 
     pub fn lint0(&mut self) -> LVTRegister<LINT> {
-        LVTRegister::new(self.mmio.read_mut(Self::LVT_LINT0).unwrap())
+        LVTRegister::new(unsafe { self.mmio.read_mut(Self::LVT_LINT0).unwrap() })
     }
 
     pub fn lint1(&mut self) -> LVTRegister<LINT> {
-        LVTRegister::new(self.mmio.read_mut(Self::LVT_LINT1).unwrap())
+        LVTRegister::new(unsafe { self.mmio.read_mut(Self::LVT_LINT1).unwrap() })
     }
 
     pub fn error(&mut self) -> LVTRegister<Error> {
-        LVTRegister::new(self.mmio.read_mut(Self::LVT_ERROR).unwrap())
+        LVTRegister::new(unsafe { self.mmio.read_mut(Self::LVT_ERROR).unwrap() })
     }
 
     pub fn performance(&mut self) -> LVTRegister<Generic> {
-        LVTRegister::new(self.mmio.read_mut(Self::LVT_PERFORMANCE).unwrap())
+        LVTRegister::new(unsafe { self.mmio.read_mut(Self::LVT_PERFORMANCE).unwrap() })
     }
 
     pub fn thermal_sensor(&mut self) -> LVTRegister<Generic> {
-        LVTRegister::new(self.mmio.read_mut(Self::LVT_THERMAL_SENSOR).unwrap())
+        LVTRegister::new(unsafe { self.mmio.read_mut(Self::LVT_THERMAL_SENSOR).unwrap() })
     }
 
     pub fn configure_spurious(&mut self, vector: u8, enabled: bool) {
         const LVT_SPURIOUS: usize = 0xF0;
 
-        let spurious = self.mmio.read_mut::<u32>(LVT_SPURIOUS).unwrap();
-        spurious.set_bits(0..8, vector as u32);
-        spurious.set_bit(8, enabled);
+        unsafe {
+            self.mmio
+                .write(LVT_SPURIOUS, (vector as u32) | ((enabled as u32) << 7))
+                .unwrap()
+        };
     }
 
     pub unsafe fn reset(&mut self) {
@@ -169,21 +171,20 @@ impl LocalAPIC {
         self[LocalAPICRegister::TimerInitialCount] = 0;
     }
 
-    pub unsafe fn configure_timer<F>(&mut self, interval_wait: F)
+    pub unsafe fn configure_timer<F>(&mut self, vector: u8, interval_wait: F)
     where
         F: FnOnce(),
     {
         {
             debug!("Configuring APIC timer interrupt.");
             let mut timer = self.timer();
-            timer.set_vector(48);
+            timer.set_vector(vector);
             timer.set_mode(LocalAPICTimerMode::OneShot);
             timer.set_masked(false);
         }
 
-        self[LocalAPICRegister::TimerDivisor] = LocalAPICTimerDivisor::Div16 as u32;
-
         debug!("Determining APIC timer frequency using PIT windowing.");
+        self[LocalAPICRegister::TimerDivisor] = LocalAPICTimerDivisor::Div16 as u32;
         self[LocalAPICRegister::TimerInitialCount] = 0xFFFFFFFF;
 
         interval_wait();
@@ -205,13 +206,13 @@ impl core::ops::Index<LocalAPICRegister> for LocalAPIC {
     type Output = u32;
 
     fn index(&self, register: LocalAPICRegister) -> &Self::Output {
-        self.mmio.read(register as usize).unwrap()
+        unsafe { self.mmio.read(register as usize).unwrap() }
     }
 }
 
 impl core::ops::IndexMut<LocalAPICRegister> for LocalAPIC {
     fn index_mut(&mut self, register: LocalAPICRegister) -> &mut Self::Output {
-        self.mmio.read_mut(register as usize).unwrap()
+        unsafe { self.mmio.read_mut(register as usize).unwrap() }
     }
 }
 

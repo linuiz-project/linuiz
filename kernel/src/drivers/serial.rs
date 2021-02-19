@@ -1,7 +1,5 @@
 #![allow(dead_code)]
 
-use bitflags::bitflags;
-use lazy_static::lazy_static;
 use libkernel::io::port::{ReadOnlyPort, ReadWritePort, WriteOnlyPort};
 use spin::{Mutex, MutexGuard};
 
@@ -35,7 +33,7 @@ pub const MODEM_STATUS: u16 = 0x6;
 /// Address offset of the scratch port.
 pub const SCRATCH: u16 = 0x7;
 
-bitflags! {
+bitflags::bitflags! {
     pub struct LineStatus : u8 {
         const DATA_RECEIVED = 1 << 0;
         const OVERRUN_ERROR = 1 << 1;
@@ -48,7 +46,7 @@ bitflags! {
     }
 }
 
-bitflags! {
+bitflags::bitflags! {
     pub struct LineControlFlags : u8 {
         const DATA_0 = 1 << 0;
         const DATA_1 = 1 << 1;
@@ -65,7 +63,6 @@ bitflags! {
 
 /// Serial port speed, measured in bauds.
 #[repr(u16)]
-#[allow(dead_code)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum SerialSpeed {
     S115200 = 1,
@@ -73,7 +70,6 @@ pub enum SerialSpeed {
     S38400 = 3,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Serial {
     data: ReadWritePort<u8>,
     irq_control: WriteOnlyPort<u8>,
@@ -153,25 +149,14 @@ impl Serial {
         self.data.write(byte);
     }
 
-    pub fn write_buffer(&mut self, buffer: &[u8]) {
-        for byte in buffer {
-            self.write(*byte);
-        }
-    }
-
     pub fn write_string(&mut self, string: &str) {
         for byte in string.bytes() {
             self.write(byte);
         }
     }
 
-    /// Reads the immediate value in the specified port.
-    pub fn read_immediate(&mut self) -> u8 {
-        self.data.read()
-    }
-
     /// Waits for data to be ready on the data port, and then reads it.
-    pub fn read_wait(&mut self) -> u8 {
+    pub fn read(&mut self) -> u8 {
         while !self.line_status(LineStatus::DATA_RECEIVED) {}
 
         self.data.read()
@@ -185,7 +170,7 @@ impl core::fmt::Write for Serial {
     }
 }
 
-lazy_static! {
+lazy_static::lazy_static! {
     static ref SERIAL: Mutex<Serial> =
         Mutex::new(unsafe { Serial::init(COM1, SerialSpeed::S115200) });
 }

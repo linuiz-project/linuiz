@@ -1,3 +1,10 @@
+/// Initiates a breakpoint exception.
+pub fn breakpoint() {
+    unsafe {
+        asm!("int 3");
+    }
+}
+
 /// Enables interrupts via `sti`.
 pub fn enable() {
     unsafe {

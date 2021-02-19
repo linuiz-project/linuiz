@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use crate::drivers::graphics::color::{Color8i, Colors};
-use libkernel::Size;
+use libkernel::{Size, VirtAddr};
 use spin::RwLock;
 
 #[repr(C)]
@@ -24,18 +24,23 @@ impl<'fbuf, 'bbuf> FramebufferDriver<'fbuf, 'bbuf> {
             core::slice::from_raw_parts_mut(alloc_to_ptr, pixel_len)
         };
 
-        let backbuffer = unsafe {
-            core::slice::from_raw_parts_mut(
+        unsafe {
+            let ptr =
                 alloc::alloc::alloc(core::alloc::Layout::from_size_align(byte_len, 16).unwrap())
-                    as *mut Color8i,
-                pixel_len,
-            )
-        };
+                    as *mut Color8i;
+            let backbuffer = unsafe { core::slice::from_raw_parts_mut(ptr, pixel_len) };
 
-        Self {
-            framebuffer: RwLock::new(framebuffer),
-            backbuffer: RwLock::new(backbuffer),
-            dimensions,
+            info!(
+                "BACKBUFFER {:?}: {}",
+                ptr,
+                libkernel::memory::is_mapped(VirtAddr::from_ptr(ptr))
+            );
+
+            Self {
+                framebuffer: RwLock::new(framebuffer),
+                backbuffer: RwLock::new(backbuffer),
+                dimensions,
+            }
         }
     }
 
@@ -44,7 +49,6 @@ impl<'fbuf, 'bbuf> FramebufferDriver<'fbuf, 'bbuf> {
 
         if xy.0 < dimensions.width && xy.1 < dimensions.height {
             let index = xy.0 + (xy.1 * dimensions.width);
-            info!("INDEX: {}", index);
             self.backbuffer.write()[index] = color;
         } else {
             panic!("given coordinates are outside framebuffer");

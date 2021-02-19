@@ -80,14 +80,9 @@ where
             index,
             offset
         );
-        let entry = self.get_entry(index);
-        match entry.frame() {
-            Some(frame) => {
-                let mapped_physical_addr = offset + frame.addr_u64();
-                Some(&*mapped_physical_addr.as_ptr())
-            }
-            None => None,
-        }
+        self.get_entry(index)
+            .frame()
+            .map(|frame| &*(offset + frame.addr_u64()).as_ptr())
     }
 
     pub unsafe fn sub_table_mut(
@@ -100,14 +95,9 @@ where
             index,
             offset
         );
-        let entry = self.get_entry_mut(index);
-        match entry.frame() {
-            Some(frame) => {
-                let mapped_physical_addr = offset + frame.addr_u64();
-                Some(&mut *mapped_physical_addr.as_mut_ptr())
-            }
-            None => None,
-        }
+        self.get_entry_mut(index)
+            .frame()
+            .map(|frame| &mut *(offset + frame.addr_u64()).as_mut_ptr())
     }
 
     pub unsafe fn sub_table_create(
@@ -121,6 +111,30 @@ where
             offset
         );
         let entry = self.get_entry_mut(index);
-        &mut *(offset + entry.frame_create().addr_u64()).as_mut_ptr()
+        let (frame, created) = match entry.frame() {
+            Some(frame) => (frame, false),
+            None => {
+                trace!("Allocating frame for previously nonpresent entry.");
+                let alloc_frame = crate::memory::global_lock_next()
+                    .expect("failed to allocate a frame for new page table");
+
+                entry.set(
+                    &alloc_frame,
+                    crate::memory::paging::PageAttributes::PRESENT
+                        | crate::memory::paging::PageAttributes::WRITABLE,
+                );
+
+                (alloc_frame, true)
+            }
+        };
+
+        let table_ptr: &mut PageTable<L::NextLevel> =
+            &mut *(offset + frame.addr_u64()).as_mut_ptr();
+
+        if created {
+            table_ptr.clear()
+        }
+
+        table_ptr
     }
 }

@@ -16,3 +16,7 @@ pub unsafe fn alloc_to(frames: crate::memory::FrameIterator) -> *mut u8 {
 pub unsafe fn translate_page(page: &crate::memory::Page) -> Option<crate::memory::Frame> {
     GLOBAL_ALLOCATOR.translate_page(page)
 }
+
+pub fn is_mapped(virt_addr: x86_64::VirtAddr) -> bool {
+    GLOBAL_ALLOCATOR.is_mapped(virt_addr)
+}

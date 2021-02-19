@@ -87,7 +87,8 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor, ConfigT
         lapic.reset();
         lapic.enable();
         let timer = timer::Timer::new(crate::timer::TIMER_FREQUENCY / 1000);
-        lapic.configure_timer(|| timer.wait())
+        lapic.configure_spurious(u8::MAX, true);
+        lapic.configure_timer(48, || timer.wait())
     }
 
     debug!("Disabling 8259 emulated PIC.");
@@ -95,33 +96,31 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor, ConfigT
     debug!("Updating IDT timer interrupt entry to local APIC-enabled function.");
     libkernel::structures::idt::set_interrupt_handler(48, timer::apic_timer_handler);
     debug!("Unmasking local APIC timer interrupt (it will fire now!).");
-    lapic.lint0().set_masked(true);
     lapic.timer().set_masked(false);
 
     info!("Core-local APIC configured and enabled (8259 PIC disabled).");
-    loop {}
-    // info!("Initializing framebuffer driver.");
-    // let mut framebuffer_driver = drivers::graphics::framebuffer::FramebufferDriver::init(
-    //     libkernel::PhysAddr::new(framebuffer_pointer.pointer as u64),
-    //     framebuffer_pointer.size,
-    // );
 
-    // let mut vecc = alloc::vec![0usize; 50];
-    // for (idx, a) in vecc.iter_mut().enumerate() {
-    //     info!("setting {}", idx);
-    //     *a = idx;
-    // }
-    // info!("{:?}", vecc);
+    info!("Initializing framebuffer driver.");
+    let mut framebuffer_driver = drivers::graphics::framebuffer::FramebufferDriver::init(
+        libkernel::PhysAddr::new(framebuffer_pointer.pointer as u64),
+        framebuffer_pointer.size,
+    );
 
-    // info!("Testing framebuffer driver.");
-    // for x in 0..300 {
-    //     for y in 0..300 {
-    //         framebuffer_driver
-    //             .write_pixel((x, y), drivers::graphics::color::Color8i::new(156, 10, 100));
-    //     }
-    // }
+    let mut vecc = alloc::vec![0usize; 50];
+    for (idx, a) in vecc.iter_mut().enumerate() {
+        *a = idx;
+    }
+    info!("{:?}", vecc);
 
-    // framebuffer_driver.flush_pixels();
+    info!("Testing framebuffer driver.");
+    for x in 0..300 {
+        for y in 0..300 {
+            framebuffer_driver
+                .write_pixel((x, y), drivers::graphics::color::Color8i::new(156, 10, 100));
+        }
+    }
+
+    framebuffer_driver.flush_pixels();
 
     info!("Kernel has reached safe shutdown state.");
     unsafe { libkernel::instructions::pwm::qemu_shutdown() }

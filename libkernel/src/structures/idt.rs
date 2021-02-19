@@ -14,8 +14,8 @@ extern "x86-interrupt" fn non_maskable_interrupt_handler(stack_frame: &mut Inter
     panic!("CPU EXCEPTION: NON-MASKABLE INTERRUPT\n{:#?}", stack_frame);
 }
 
-extern "x86-interrupt" fn breakpoint_handler(_stack_frame: &mut InterruptStackFrame) {
-    // serialln!("CPU EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
+extern "x86-interrupt" fn breakpoint_handler(stack_frame: &mut InterruptStackFrame) {
+    panic!("CPU EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
 }
 
 extern "x86-interrupt" fn overflow_handler(stack_frame: &mut InterruptStackFrame) {
@@ -161,6 +161,7 @@ extern "x86-interrupt" fn security_exception_handler(
 // --- triple fault (can't handle)
 
 /* IDT */
+
 static IDT: spin::Mutex<InterruptDescriptorTable> =
     spin::Mutex::new(InterruptDescriptorTable::new());
 
@@ -214,7 +215,7 @@ pub fn set_interrupt_handler(
 ) {
     crate::instructions::interrupts::without_interrupts(|| {
         if index >= 32 {
-            trace!("Modifying IDT handler at index: {}", index);
+            debug!("Modifying IDT handler at index: {}", index);
             IDT.lock()[index as usize].set_handler_fn(handler);
         } else {
             panic!("interrupt handler index must be >=32 (0..32 are reserved)");

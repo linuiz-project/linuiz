@@ -168,14 +168,14 @@ impl<'arr> FrameAllocator<'arr> {
     pub fn lock_next(&self) -> Option<Frame> {
         self.memory_map
             .set_eq_next(FrameType::Allocated, FrameType::Unallocated)
-            .map_or(None, |index| {
+            .map(|index| {
                 let frame = Frame::from_index(index);
                 let mut memory = self.memory.write();
                 memory.free_memory -= 0x1000;
                 memory.locked_memory += 0x1000;
 
                 trace!("Locked next free frame: {:?}", frame);
-                Some(frame)
+                frame
             })
     }
 

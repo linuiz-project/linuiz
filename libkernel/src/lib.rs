@@ -17,8 +17,9 @@
 extern crate log;
 extern crate alloc;
 
-mod rwbitarray;
 mod boot_info;
+mod rwbitarray;
+mod volatile_cell;
 
 pub mod acpi;
 pub mod elf;
@@ -27,8 +28,9 @@ pub mod io;
 pub mod memory;
 pub mod registers;
 pub mod structures;
-pub use rwbitarray::*;
 pub use boot_info::*;
+pub use rwbitarray::*;
+pub use volatile_cell::*;
 pub use x86_64::{PhysAddr, VirtAddr};
 
 pub const SYSTEM_SLICE_SIZE: usize = 0x10000000000;

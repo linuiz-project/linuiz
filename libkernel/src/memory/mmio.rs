@@ -33,49 +33,43 @@ impl MMIO {
         self.base_addr
     }
 
-    fn mapped_offset<T>(&self, offset: usize) -> Result<*const T, MMIOError> {
+    unsafe fn mapped_offset<T>(&self, offset: usize) -> Result<*const T, MMIOError> {
         if offset < self.size {
-            Ok(unsafe { self.mapped_addr.as_ptr::<u8>().offset(offset as isize) as *const T })
+            Ok((self.mapped_addr + (offset as u64)).as_ptr())
         } else {
             Err(MMIOError::OffsetOverrun)
         }
     }
 
-    fn mapped_offset_mut<T>(&mut self, offset: usize) -> Result<*mut T, MMIOError> {
+    unsafe fn mapped_offset_mut<T>(&mut self, offset: usize) -> Result<*mut T, MMIOError> {
         if offset < self.size {
-            Ok(unsafe { self.mapped_addr.as_mut_ptr::<u8>().offset(offset as isize) as *mut T })
+            Ok((self.mapped_addr + (offset as u64)).as_mut_ptr())
         } else {
             Err(MMIOError::OffsetOverrun)
         }
     }
 
-    pub fn write<T>(&mut self, offset: usize, value: T) -> Option<MMIOError> {
-        unsafe {
-            match self.mapped_offset_mut::<T>(offset) {
-                Ok(ptr) => {
-                    ptr.write(value);
-                    None
-                }
-                Err(mmio_err) => Some(mmio_err),
+    pub unsafe fn write<T>(&mut self, offset: usize, value: T) -> Result<(), MMIOError> {
+        match self.mapped_offset_mut::<T>(offset) {
+            Ok(ptr) => {
+                ptr.write(value);
+                Ok(())
             }
+            Err(mmio_err) => Err(mmio_err),
         }
     }
 
-    pub fn read<T>(&self, offset: usize) -> Result<&T, MMIOError> {
-        unsafe {
-            match self.mapped_offset::<T>(offset) {
-                Ok(ptr) => Ok(&*ptr),
-                Err(mmio_err) => Err(mmio_err),
-            }
+    pub unsafe fn read<T>(&self, offset: usize) -> Result<&T, MMIOError> {
+        match self.mapped_offset::<T>(offset) {
+            Ok(ptr) => Ok(&*ptr),
+            Err(mmio_err) => Err(mmio_err),
         }
     }
 
-    pub fn read_mut<T>(&mut self, offset: usize) -> Result<&mut T, MMIOError> {
-        unsafe {
-            match self.mapped_offset_mut::<T>(offset) {
-                Ok(ptr) => Ok(&mut *ptr),
-                Err(mmio_err) => Err(mmio_err),
-            }
+    pub unsafe fn read_mut<T>(&mut self, offset: usize) -> Result<&mut T, MMIOError> {
+        match self.mapped_offset_mut::<T>(offset) {
+            Ok(ptr) => Ok(&mut *ptr),
+            Err(mmio_err) => Err(mmio_err),
         }
     }
 }
