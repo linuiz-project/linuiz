@@ -11,7 +11,7 @@ use spin::{Mutex, RwLock};
 #[repr(C)]
 #[derive(Debug, Clone)]
 struct BlockPage {
-    sections: [VolatileCell<u64>; 4],
+    sections: [u64; 4],
 }
 
 impl BlockPage {
@@ -24,50 +24,64 @@ impl BlockPage {
     /// An empty block page (all blocks zeroed).
     const fn empty() -> Self {
         Self {
-            sections: [VolatileCell::new(0); Self::SECTION_COUNT],
+            sections: [0; Self::SECTION_COUNT],
         }
     }
 
     /// Whether the block page is empty.
     pub fn is_empty(&self) -> bool {
-        (*self.sections[0] == 0)
-            && (*self.sections[1] == 0)
-            && (*self.sections[2] == 0)
-            && (*self.sections[3] == 0)
+        self.sections[0] == 0
+            && self.sections[1] == 0
+            && self.sections[2] == 0
+            && self.sections[3] == 0
     }
 
     /// Whether the block page is full.
     pub fn is_full(&self) -> bool {
-        (*self.sections[0] == u64::MAX)
-            && (*self.sections[1] == u64::MAX)
-            && (*self.sections[2] == u64::MAX)
-            && (*self.sections[3] == u64::MAX)
+        self.sections[0] == u64::MAX
+            && self.sections[1] == u64::MAX
+            && self.sections[2] == u64::MAX
+            && self.sections[3] == u64::MAX
     }
 
     /// Unset all of the block page's blocks.
     pub fn set_empty(&mut self) {
-        self.sections[0].write(0);
-        self.sections[1].write(0);
-        self.sections[2].write(0);
-        self.sections[3].write(0);
+        self.sections[0] = 0;
+        self.sections[1] = 0;
+        self.sections[2] = 0;
+        self.sections[3] = 0;
     }
 
     /// Set all of the block page's blocks.
     pub fn set_full(&mut self) {
-        self.sections[0].write(u64::MAX);
-        self.sections[1].write(u64::MAX);
-        self.sections[2].write(u64::MAX);
-        self.sections[3].write(u64::MAX);
+        self.sections[0] = u64::MAX;
+        self.sections[1] = u64::MAX;
+        self.sections[2] = u64::MAX;
+        self.sections[3] = u64::MAX;
     }
 
     /// Underlying section iterator.
-    fn iter(&self) -> core::slice::Iter<VolatileCell<u64>> {
+    fn iter(&self) -> core::slice::Iter<u64> {
         self.sections.iter()
     }
 
     /// Underlying mutable section iterator.
-    fn iter_mut(&mut self) -> core::slice::IterMut<VolatileCell<u64>> {
+    fn iter_mut(&mut self) -> core::slice::IterMut<u64> {
         self.sections.iter_mut()
+    }
+}
+
+impl core::ops::Index<usize> for BlockPage {
+    type Output = u64;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.sections[index]
+    }
+}
+
+impl core::ops::IndexMut<usize> for BlockPage {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.sections[index]
     }
 }
 
@@ -384,7 +398,7 @@ impl BlockAllocator {
                     block_index += BlockPage::BLOCK_COUNT;
                 } else {
                     for block_section in block_page.iter() {
-                        let section_ro = block_section.read();
+                        let section_ro = *block_section;
 
                         if section_ro == u64::MAX {
                             current_run = 0;
@@ -440,7 +454,7 @@ impl BlockAllocator {
                 [SectionState::empty(); BlockPage::SECTION_COUNT];
 
             for (section_index, section) in block_page.iter_mut().enumerate() {
-                page_state[section_index].had_bits = section.read() > 0;
+                page_state[section_index].had_bits = *section > 0;
 
                 if initial_section_skip > 0 {
                     initial_section_skip -= 1;
@@ -454,18 +468,18 @@ impl BlockAllocator {
                     let bit_mask = Self::MASK_MAP[bit_count - 1] << bit_offset;
 
                     assert_eq!(
-                        section.read() & bit_mask,
+                        *section & bit_mask,
                         0,
                         "attempting to allocate blocks that are already allocated"
                     );
 
-                    info!("{} |= {}", section.read(), bit_mask);
-                    section.update(|section_ro| *section_ro |= bit_mask);
-                    info!("== {}", section.read());
+                    info!("{} |= {}", *section, bit_mask);
+                    unsafe { core::ptr::write_volatile(section, bit_mask) };
+                    info!("== {}", unsafe { core::ptr::read_volatile(section) });
                     block_index += bit_count;
                 }
 
-                page_state[section_index].has_bits = section.read() > 0;
+                page_state[section_index].has_bits = *section > 0;
             }
 
             if SectionState::should_alloc(&page_state) {
@@ -584,7 +598,7 @@ impl BlockAllocator {
                 [SectionState::empty(); BlockPage::SECTION_COUNT];
 
             for (section_index, section) in block_page.iter_mut().enumerate() {
-                page_state[section_index].had_bits = section.read() > 0;
+                page_state[section_index].had_bits = *section > 0;
 
                 if initial_section_skip > 0 {
                     initial_section_skip -= 1;
@@ -598,16 +612,16 @@ impl BlockAllocator {
                     let bit_mask = Self::MASK_MAP[bit_count - 1] << bit_offset;
 
                     debug_assert_eq!(
-                        section.read() & bit_mask,
+                        *section & bit_mask,
                         bit_mask,
                         "attempting to allocate blocks that are already allocated"
                     );
 
-                    section.update(|section_ro| *section_ro ^= bit_mask);
+                    *section ^= bit_mask;
                     block_index += bit_count;
                 }
 
-                page_state[section_index].has_bits = section.read() > 0;
+                page_state[section_index].has_bits = *section > 0;
             }
 
             if SectionState::should_dealloc(&page_state) {

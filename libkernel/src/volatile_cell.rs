@@ -9,14 +9,19 @@ impl<T: Copy> VolatileCell<T> {
         Self { value }
     }
 
+    /// Performs a volatile read on the contained value.
     pub fn read(&self) -> T {
         unsafe { core::ptr::read_volatile(&self.value) }
     }
 
+    /// Performs a volatile write on the contained value.
     pub fn write(&mut self, new_value: T) {
         unsafe { core::ptr::write_volatile(&mut self.value, new_value) };
     }
 
+    /// Performs a volatile read on the contained value, and passes
+    /// the contained value to an update function, then performing
+    /// a volatile write with the updated value.
     pub fn update<F>(&mut self, update_fn: F)
     where
         F: FnOnce(&mut T),

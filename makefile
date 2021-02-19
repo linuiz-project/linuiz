@@ -34,5 +34,6 @@ $(kernel): $(uefi-deps) $(libkernel_deps) $(kernel_deps)
 	echo $(PROFILE)
 	cd /media/carl/GitHub/gsai/kernel/;\
 		rustfmt **/*.rs;\
+		rustfmt ../libkernel/**/*.rs;\
 		cargo build --profile $(PROFILE) -Z unstable-options
 		
