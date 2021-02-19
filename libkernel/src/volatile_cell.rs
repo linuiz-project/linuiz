@@ -9,22 +9,21 @@ impl<T: Copy> VolatileCell<T> {
         Self { value }
     }
 
-    #[inline]
-    pub fn write(&mut self, new_value: T) {
-        unsafe { core::ptr::write_volatile(&mut self.value, new_value) };
-    }
-
-    #[inline]
     pub fn read(&self) -> T {
         unsafe { core::ptr::read_volatile(&self.value) }
     }
 
-    #[inline]
+    pub fn write(&mut self, new_value: T) {
+        unsafe { core::ptr::write_volatile(&mut self.value, new_value) };
+    }
+
     pub fn update<F>(&mut self, update_fn: F)
     where
-        F: FnOnce(T) -> T,
+        F: FnOnce(&mut T),
     {
-        self.write(update_fn(self.read()))
+        let mut value = self.read();
+        update_fn(&mut value);
+        self.write(value);
     }
 }
 
@@ -42,8 +41,11 @@ impl<T: Copy> core::ops::DerefMut for VolatileCell<T> {
     }
 }
 
-impl<T: Copy> core::fmt::Debug for VolatileCell<T> {
+impl<T: Copy + core::fmt::Debug> core::fmt::Debug for VolatileCell<T> {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter.debug_tuple("VolatileCell").field(&*self).finish()
+        formatter
+            .debug_tuple("VolatileCell")
+            .field(&self.value)
+            .finish()
     }
 }
