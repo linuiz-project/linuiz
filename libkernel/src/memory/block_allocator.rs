@@ -4,19 +4,15 @@ use crate::{
     SYSTEM_SLICE_SIZE,
 };
 use alloc::vec::Vec;
-use core::{
-    mem::size_of,
-    sync::atomic::{AtomicU64, Ordering},
-};
+use core::mem::size_of;
 use spin::{Mutex, RwLock};
 
 /// Represents one page worth of memory blocks (i.e. 4096 bytes in blocks).
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct BlockPage {
-    sections: [AtomicU64; 4],
+    sections: [u64; 4],
 }
-const ATOMIC_U64_ZERO: AtomicU64 = AtomicU64::new(0);
 
 impl BlockPage {
     /// Number of sections (primitive used to track blocks with its bits).
@@ -28,68 +24,43 @@ impl BlockPage {
     /// An empty block page (all blocks zeroed).
     const fn empty() -> Self {
         Self {
-            sections: [ATOMIC_U64_ZERO; Self::SECTION_COUNT],
+            sections: [0; Self::SECTION_COUNT],
         }
     }
 
     /// Whether the block page is empty.
     pub fn is_empty(&self) -> bool {
-        self.sections[0].load(Ordering::Acquire) == 0
-            && self.sections[1].load(Ordering::Acquire) == 0
-            && self.sections[2].load(Ordering::Acquire) == 0
-            && self.sections[3].load(Ordering::Acquire) == 0
+        self.sections.iter().all(|section| *section == 0)
     }
 
     /// Whether the block page is full.
     pub fn is_full(&self) -> bool {
-        self.sections[0].load(Ordering::Acquire) == u64::MAX
-            && self.sections[1].load(Ordering::Acquire) == u64::MAX
-            && self.sections[2].load(Ordering::Acquire) == u64::MAX
-            && self.sections[3].load(Ordering::Acquire) == u64::MAX
+        self.sections.iter().all(|section| *section == u64::MAX)
     }
 
     /// Unset all of the block page's blocks.
     pub fn set_empty(&mut self) {
-        self.sections[0].store(0, Ordering::Release);
-        self.sections[1].store(0, Ordering::Release);
-        self.sections[2].store(0, Ordering::Release);
-        self.sections[3].store(0, Ordering::Release);
+        self.sections.fill(0);
     }
 
     /// Set all of the block page's blocks.
     pub fn set_full(&mut self) {
-        self.sections[0].store(u64::MAX, Ordering::Release);
-        self.sections[1].store(u64::MAX, Ordering::Release);
-        self.sections[2].store(u64::MAX, Ordering::Release);
-        self.sections[3].store(u64::MAX, Ordering::Release);
+        self.sections.fill(u64::MAX);
     }
 
     /// Underlying section iterator.
-    fn iter(&self) -> core::slice::Iter<AtomicU64> {
+    fn iter(&self) -> core::slice::Iter<u64> {
         self.sections.iter()
     }
 
     /// Underlying mutable section iterator.
-    fn iter_mut(&mut self) -> core::slice::IterMut<AtomicU64> {
+    fn iter_mut(&mut self) -> core::slice::IterMut<u64> {
         self.sections.iter_mut()
     }
 }
 
-impl Clone for BlockPage {
-    fn clone(&self) -> Self {
-        Self {
-            sections: [
-                AtomicU64::new(self.sections[0].load(Ordering::Acquire)),
-                AtomicU64::new(self.sections[1].load(Ordering::Acquire)),
-                AtomicU64::new(self.sections[2].load(Ordering::Acquire)),
-                AtomicU64::new(self.sections[3].load(Ordering::Acquire)),
-            ],
-        }
-    }
-}
-
 impl core::ops::Index<usize> for BlockPage {
-    type Output = AtomicU64;
+    type Output = u64;
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.sections[index]
@@ -171,7 +142,7 @@ pub struct BlockAllocator {
 
 impl BlockAllocator {
     /// The size of an allocator block.
-    const BLOCK_SIZE: usize = 16;
+    pub const BLOCK_SIZE: usize = 16;
 
     /// Base page the allocator uses to store the internal block page map.
     const ALLOCATOR_BASE: Page = Page::from_addr(x86_64::VirtAddr::new_truncate(
@@ -414,10 +385,7 @@ impl BlockAllocator {
                     current_run = 0;
                     block_index += BlockPage::BLOCK_COUNT;
                 } else {
-                    for section in block_page
-                        .iter()
-                        .map(|section| section.load(Ordering::Acquire))
-                    {
+                    for section in block_page.iter().map(|section| *section) {
                         if section == u64::MAX {
                             current_run = 0;
                             block_index += 64;
@@ -472,34 +440,38 @@ impl BlockAllocator {
                 [SectionState::empty(); BlockPage::SECTION_COUNT];
 
             for (section_index, section) in block_page.iter_mut().enumerate() {
-                page_state[section_index].had_bits = section.load(Ordering::Acquire) > 0;
+                page_state[section_index].had_bits = *section > 0;
 
                 if initial_section_skip > 0 {
                     initial_section_skip -= 1;
                 } else if block_index < end_block_index {
                     let traversed_blocks = (map_index * BlockPage::BLOCK_COUNT)
                         + (section_index * BlockPage::SECTION_LEN);
+                    let remaining_blocks = end_block_index - traversed_blocks;
+                    // Each block is one bit in our map, so we calculate the offset into
+                    //  the current section, at which our current index (`block_index`) lies.
                     let bit_offset = block_index - traversed_blocks;
                     let bit_count =
-                        core::cmp::min(BlockPage::SECTION_LEN, end_block_index - traversed_blocks)
-                            - bit_offset;
+                        core::cmp::min(BlockPage::SECTION_LEN, remaining_blocks) - bit_offset;
+                    // Finally, we acquire the respective bitmask to flip all relevant bits in
+                    //  our current section.
                     let bit_mask = Self::MASK_MAP[bit_count - 1] << bit_offset;
 
                     assert_eq!(
-                        section.load(Ordering::Acquire) & bit_mask,
+                        *section & bit_mask,
                         0,
                         "attempting to allocate blocks that are already allocated"
                     );
 
-                    unsafe { asm!("mov r11, cr3", "mov cr3, r11") };
-                    info!("{} |= {}", section.load(Ordering::Acquire), bit_mask);
-                    unsafe { asm!("mov r10, cr3", "mov cr3, r10") };
-                    section.fetch_or(bit_mask, Ordering::AcqRel);
-                    info!("== {}", section.load(Ordering::Acquire));
+                    // unsafe { asm!("mov r11, cr3", "mov cr3, r11") };
+                    info!("{} |= {}", section, bit_mask);
+                    // unsafe { asm!("mov r10, cr3", "mov cr3, r10") };
+                    *section |= bit_mask;
+                    info!("== {}", section);
                     block_index += bit_count;
                 }
 
-                page_state[section_index].has_bits = section.load(Ordering::Acquire) > 0;
+                page_state[section_index].has_bits = *section > 0;
             }
 
             if SectionState::should_alloc(&page_state) {
@@ -512,6 +484,8 @@ impl BlockAllocator {
                     unsafe { page.clear() };
                 });
             }
+
+            debug_assert!(self.is_mapped(x86_64::VirtAddr::from_ptr(block_page as *mut _)));
         }
 
         (start_block_index * Self::BLOCK_SIZE) as *mut u8
@@ -618,7 +592,7 @@ impl BlockAllocator {
                 [SectionState::empty(); BlockPage::SECTION_COUNT];
 
             for (section_index, section) in block_page.iter_mut().enumerate() {
-                page_state[section_index].had_bits = section.load(Ordering::Acquire) > 0;
+                page_state[section_index].had_bits = *section > 0;
 
                 if initial_section_skip > 0 {
                     initial_section_skip -= 1;
@@ -632,16 +606,16 @@ impl BlockAllocator {
                     let bit_mask = Self::MASK_MAP[bit_count - 1] << bit_offset;
 
                     debug_assert_eq!(
-                        section.load(Ordering::Acquire) & bit_mask,
+                        *section & bit_mask,
                         bit_mask,
                         "attempting to allocate blocks that are already allocated"
                     );
 
-                    section.fetch_xor(bit_mask, Ordering::AcqRel);
+                    *section ^= bit_mask;
                     block_index += bit_count;
                 }
 
-                page_state[section_index].has_bits = section.load(Ordering::Acquire) > 0;
+                page_state[section_index].has_bits = *section > 0;
             }
 
             if SectionState::should_dealloc(&page_state) {
@@ -671,10 +645,12 @@ impl BlockAllocator {
                 cur_page_offset, new_page_offset
             );
             for offset in cur_page_offset..new_page_offset {
-                let page = &mut Self::ALLOCATOR_BASE.offset(offset);
-                addressor.map(page, unsafe { &crate::memory::global_lock_next().unwrap() });
+                let map_page = &mut Self::ALLOCATOR_BASE.offset(offset);
+                addressor.map(map_page, unsafe {
+                    &crate::memory::global_lock_next().unwrap()
+                });
 
-                assert!(addressor.is_mapped(page.addr()), "failed to map growth",);
+                assert!(addressor.is_mapped(map_page.addr()), "failed to map growth",);
             }
 
             const BLOCK_PAGES_PER_FRAME: usize = 0x1000 / size_of::<BlockPage>();

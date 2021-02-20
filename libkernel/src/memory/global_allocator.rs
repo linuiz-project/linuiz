@@ -20,3 +20,13 @@ pub unsafe fn translate_page(page: &crate::memory::Page) -> Option<crate::memory
 pub fn is_mapped(virt_addr: x86_64::VirtAddr) -> bool {
     GLOBAL_ALLOCATOR.is_mapped(virt_addr)
 }
+
+#[macro_export]
+macro_rules! alloc {
+    ($size:expr) => {
+        $crate::alloc!($size, $crate::memory::BlockAllocator::BLOCK_SIZE)
+    };
+    ($size:expr, $align:expr) => {
+        alloc::alloc::alloc(core::alloc::Layout::from_size_align($size, $align).unwrap())
+    };
+}

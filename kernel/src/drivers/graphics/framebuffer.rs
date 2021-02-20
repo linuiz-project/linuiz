@@ -25,9 +25,7 @@ impl<'fbuf, 'bbuf> FramebufferDriver<'fbuf, 'bbuf> {
         };
 
         unsafe {
-            let ptr =
-                alloc::alloc::alloc(core::alloc::Layout::from_size_align(byte_len, 16).unwrap())
-                    as *mut Color8i;
+            let ptr = libkernel::alloc!(byte_len) as *mut Color8i;
             let backbuffer = unsafe { core::slice::from_raw_parts_mut(ptr, pixel_len) };
 
             info!(
