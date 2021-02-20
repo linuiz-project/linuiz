@@ -457,16 +457,16 @@ impl BlockAllocator {
         );
 
         let start_map_index = start_block_index / BlockPage::BLOCK_COUNT;
-        let end_map_index = align_up_div(end_block_index, BlockPage::BLOCK_COUNT) - start_map_index;
         let mut initial_section_skip = crate::align_down_div(block_index, BlockPage::SECTION_LEN)
             - (start_map_index * BlockPage::SECTION_COUNT);
+
         for (map_index, block_page) in self
             .map
             .write()
             .iter_mut()
             .enumerate()
             .skip(start_map_index)
-            .take(end_map_index)
+            .take(align_up_div(end_block_index, BlockPage::BLOCK_COUNT) - start_map_index)
         {
             let mut page_state: [SectionState; BlockPage::SECTION_COUNT] =
                 [SectionState::empty(); BlockPage::SECTION_COUNT];
@@ -491,7 +491,9 @@ impl BlockAllocator {
                         "attempting to allocate blocks that are already allocated"
                     );
 
+                    unsafe { asm!("mov r11, cr3", "mov cr3, r11") };
                     info!("{} |= {}", section.load(Ordering::Acquire), bit_mask);
+                    unsafe { asm!("mov r10, cr3", "mov cr3, r10") };
                     section.fetch_or(bit_mask, Ordering::AcqRel);
                     info!("== {}", section.load(Ordering::Acquire));
                     block_index += bit_count;
