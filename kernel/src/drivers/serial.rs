@@ -114,9 +114,12 @@ impl Serial {
         // set in loopbkack mode and test serial
         modem_control.write(0x1E);
         data.write(0xAE);
-        if data.read() != 0xAE {
-            panic!("serial driver is in faulty state (data test failed)");
-        }
+
+        assert_eq!(
+            data.read(),
+            0xAE,
+            "serial driver is in faulty state (data test failed)"
+        );
 
         // if not faulty, set in normal operation mode
         // (not-loopback with IRQs enabled and OUT#1 and OUT#2 bits enabled)

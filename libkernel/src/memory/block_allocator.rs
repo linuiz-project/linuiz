@@ -274,14 +274,13 @@ impl BlockAllocator {
         use crate::memory::{global_memory, FrameType};
 
         unsafe {
-            if self
-                .addressor
-                .lock()
-                .set(VirtualAddressor::new(Page::null()))
-                .is_err()
-            {
-                panic!("addressor has already been set for allocator");
-            }
+            assert!(
+                self.addressor
+                    .lock()
+                    .set(VirtualAddressor::new(Page::null()))
+                    .is_ok(),
+                "addressor has already been set for allocator"
+            );
 
             *self.map.write() = Vec::from_raw_parts(
                 Self::ALLOCATOR_BASE.mut_ptr(),
@@ -294,9 +293,6 @@ impl BlockAllocator {
         self.with_addressor(|addressor| {
             global_memory().iter_callback(|index, frame_type| match frame_type {
                 FrameType::Reserved | FrameType::Stack => {
-                    if frame_type == FrameType::Stack {
-                        info!("MAPPING STACK {:?}", index);
-                    }
                     addressor.identity_map(&Frame::from_index(index));
                 }
                 _ => {}
@@ -336,7 +332,6 @@ impl BlockAllocator {
 
         self.with_addressor(|addressor| {
             for frame in stack_descriptor.frame_iter() {
-                info!("stack frame: {:?}", frame);
                 addressor.unmap(&Page::from_index(frame.index()));
             }
         });
@@ -635,32 +630,31 @@ impl BlockAllocator {
         }
 
         let block_page = &mut self.map.write()[frame.index()];
-        if block_page.is_empty() {
-            block_page.set_full();
 
-            if map {
-                self.with_addressor(|addressor| addressor.identity_map(frame));
-            }
-        } else {
-            panic!("attempting to identity map page with previously allocated blocks");
+        assert!(
+            block_page.is_empty(),
+            "attempting to identity map page with previously allocated blocks"
+        );
+        block_page.set_full();
+
+        if map {
+            self.with_addressor(|addressor| addressor.identity_map(frame));
         }
     }
 
     pub fn grow(&self, required_blocks: usize) {
-        const BLOCKS_PER_MAP_PAGE: usize = 8 /* bits per byte */ * 0x1000;
-
         assert!(required_blocks > 0, "calls to grow much be nonzero");
 
         trace!("Growing map to faciliate {} blocks.", required_blocks);
-        let map_read = self.map.upgradeable_read();
+        const BLOCKS_PER_MAP_PAGE: usize = 8 /* bits per byte */ * 0x1000;
+        let mut map_read = self.map.write();
         let cur_page_offset = (map_read.len() * BlockPage::BLOCK_COUNT) / BLOCKS_PER_MAP_PAGE;
         let new_page_offset =
             cur_page_offset + crate::align_up_div(required_blocks, BLOCKS_PER_MAP_PAGE);
 
-        trace!(
+        debug!(
             "Growing map: {}..{} pages",
-            cur_page_offset,
-            new_page_offset
+            cur_page_offset, new_page_offset
         );
 
         self.with_addressor(|addressor| {
@@ -671,7 +665,23 @@ impl BlockAllocator {
                     &crate::memory::global_memory().lock_next().unwrap(),
                 );
 
-                assert!(addressor.is_mapped(map_page.addr()), "failed to map growth",);
+                assert!(
+                    addressor.is_mapped(map_page.addr()),
+                    "mapping allocator base offset page failed (offset {})",
+                    offset
+                );
+            }
+
+            if map_read.len() > 5786 {
+                let block_page = &mut map_read[5786];
+
+                let ptr = block_page as *mut _ as *mut usize;
+
+                unsafe {
+                    core::ptr::write_bytes(ptr, 176, 10000);
+                }
+
+                loop {}
             }
 
             const BLOCK_PAGES_PER_FRAME: usize = 0x1000 / size_of::<BlockPage>();
@@ -683,8 +693,11 @@ impl BlockAllocator {
                 "map must be page-aligned"
             );
 
-            trace!("Grew map (new size: {} block pages).", new_map_len);
-            map_read.upgrade().resize(new_map_len, BlockPage::empty());
+            debug!(
+                "Grew map: {} pages, {} block pages.",
+                new_page_offset, new_map_len
+            );
+            map_read.resize(new_map_len, BlockPage::empty());
             trace!("Successfully grew allocator map.");
         });
     }

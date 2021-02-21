@@ -300,13 +300,14 @@ pub fn load() {
         mapped_addr
     );
 
-    if unsafe {
-        LOCAL_APIC
-            .local_apic
-            .set(LocalAPIC::from_msr(mapped_addr))
-            .is_err()
-    } {
-        panic!("local APIC has already been loaded")
+    unsafe {
+        assert!(
+            LOCAL_APIC
+                .local_apic
+                .set(LocalAPIC::from_msr(mapped_addr))
+                .is_ok(),
+            "local APIC has already been loaded"
+        );
     }
 }
 

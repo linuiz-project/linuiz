@@ -87,31 +87,35 @@ impl VirtualAddressor {
     }
 
     pub fn map(&mut self, page: &Page, frame: &Frame) {
-        if !self.is_mapped(page.addr()) {
-            let entry = self.get_page_entry_create(page);
-            if entry.is_present() {
-                crate::instructions::tlb::invalidate(page);
-            }
+        assert!(
+            !self.is_mapped(page.addr()),
+            "attempted to map already mapped page: {:?}",
+            page
+        );
 
-            entry.set(&frame, PageAttributes::PRESENT | PageAttributes::WRITABLE);
-            trace!("Mapped {:?}: {:?}", page, entry);
-        } else {
-            panic!("attempted to map already mapped page: {:?}", page);
+        let entry = self.get_page_entry_create(page);
+        if entry.is_present() {
+            crate::instructions::tlb::invalidate(page);
         }
+
+        entry.set(&frame, PageAttributes::PRESENT | PageAttributes::WRITABLE);
+        trace!("Mapped {:?}: {:?}", page, entry);
 
         debug_assert!(self.is_mapped_to(page, frame));
     }
 
     pub fn unmap(&mut self, page: &Page) {
-        if self.is_mapped(page.addr()) {
-            let entry = self.get_page_entry_create(page);
-            crate::instructions::tlb::invalidate(page);
+        assert!(
+            self.is_mapped(page.addr()),
+            "attempted to unmap already unmapped page: {:?}",
+            page
+        );
 
-            entry.set_nonpresent();
-            trace!("Unmapped {:?}: {:?}", page, entry);
-        } else {
-            panic!("attempted to unmap already unmapped page: {:?}", page);
-        }
+        let entry = self.get_page_entry_create(page);
+        crate::instructions::tlb::invalidate(page);
+
+        entry.set_nonpresent();
+        trace!("Unmapped {:?}: {:?}", page, entry);
 
         debug_assert!(!self.is_mapped(page.addr()));
     }

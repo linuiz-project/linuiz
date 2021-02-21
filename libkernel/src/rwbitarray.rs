@@ -38,70 +38,61 @@ impl<'arr, BV: BitValue + Eq + core::fmt::Debug> RwBitArray<'arr, BV> {
     }
 
     pub fn get(&self, index: usize) -> BV {
-        if index < self.len() {
-            let bit_index = index * BV::BIT_WIDTH;
-            let section_index = bit_index / Self::SECTION_SIZE;
-            let section_offset = bit_index % Self::SECTION_SIZE;
-            let section_value = self.array.read()[section_index];
+        assert!(
+            index < self.len(),
+            "index must be less than the size of the collection",
+        );
 
-            BV::from_usize((section_value >> section_offset) & BV::MASK)
-        } else {
-            panic!(
-                "index must be less than the size of the collection !({} < {})",
-                index,
-                self.len()
-            );
-        }
+        let bit_index = index * BV::BIT_WIDTH;
+        let section_index = bit_index / Self::SECTION_SIZE;
+        let section_offset = bit_index % Self::SECTION_SIZE;
+        let section_value = self.array.read()[section_index];
+
+        BV::from_usize((section_value >> section_offset) & BV::MASK)
     }
 
     pub fn set(&self, index: usize, new_type: BV) {
-        if index < self.len() {
-            let bit_index = index * BV::BIT_WIDTH;
-            let section_index = bit_index / Self::SECTION_SIZE;
-            let section_offset = bit_index % Self::SECTION_SIZE;
+        assert!(
+            index < self.len(),
+            "index must be less than the size of the collection",
+        );
 
-            let sections_read = self.array.upgradeable_read();
-            let section_value = sections_read[section_index];
-            let section_bits_set = new_type.as_usize() << section_offset;
-            let section_bits_nonset = section_value & !(BV::MASK << section_offset);
+        let bit_index = index * BV::BIT_WIDTH;
+        let section_index = bit_index / Self::SECTION_SIZE;
+        let section_offset = bit_index % Self::SECTION_SIZE;
 
-            let mut sections_write = sections_read.upgrade();
-            sections_write[section_index] = section_bits_set | section_bits_nonset;
-        } else {
-            panic!(
-                "index must be less than the size of the collection !({} < {})",
-                index,
-                self.len()
-            );
-        }
+        let sections_read = self.array.upgradeable_read();
+        let section_value = sections_read[section_index];
+        let section_bits_set = new_type.as_usize() << section_offset;
+        let section_bits_nonset = section_value & !(BV::MASK << section_offset);
+
+        let mut sections_write = sections_read.upgrade();
+        sections_write[section_index] = section_bits_set | section_bits_nonset;
     }
 
     pub fn set_eq(&self, index: usize, new_type: BV, eq_type: BV) -> bool {
-        if index < self.len() {
-            let bit_index = index * BV::BIT_WIDTH;
-            let section_index = bit_index / Self::SECTION_SIZE;
-            let section_offset = bit_index % Self::SECTION_SIZE;
+        assert!(
+            index < self.len(),
+            "index must be less than the size of the collection",
+        );
 
-            let sections_read = self.array.upgradeable_read();
-            let section_value = sections_read[section_index];
-            let type_actual = BV::from_usize((section_value >> section_offset) & BV::MASK);
+        let bit_index = index * BV::BIT_WIDTH;
+        let section_index = bit_index / Self::SECTION_SIZE;
+        let section_offset = bit_index % Self::SECTION_SIZE;
 
-            if type_actual != eq_type {
-                return false;
-            }
+        let sections_read = self.array.upgradeable_read();
+        let section_value = sections_read[section_index];
+        let type_actual = BV::from_usize((section_value >> section_offset) & BV::MASK);
 
-            let section_bits_set = new_type.as_usize() << section_offset;
-            let section_bits_nonset = section_value & !(BV::MASK << section_offset);
-
-            let mut sections_write = sections_read.upgrade();
-            sections_write[section_index] = section_bits_set | section_bits_nonset;
-        } else {
-            panic!(
-                "index must be less than the size of the collection !({} < {})",
-                index,
-                self.len()
-            );
+        if type_actual != eq_type {
+            return false;
         }
+
+        let section_bits_set = new_type.as_usize() << section_offset;
+        let section_bits_nonset = section_value & !(BV::MASK << section_offset);
+
+        let mut sections_write = sections_read.upgrade();
+        sections_write[section_index] = section_bits_set | section_bits_nonset;
 
         debug_assert_eq!(self.get(index), new_type, "failed to set memory at index");
 

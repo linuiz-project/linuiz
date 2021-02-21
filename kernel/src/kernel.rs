@@ -77,6 +77,7 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor, ConfigT
 
         libkernel::memory::init_global_memory(memory_map);
 
+        info!("{:?}", boot_info.framebuffer_pointer());
         debug!("Reserving frames from relevant UEFI memory descriptors.");
         memory_map
             .iter()

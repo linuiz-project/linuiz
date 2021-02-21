@@ -43,9 +43,10 @@ impl<MM, CTE> BootInfo<MM, CTE> {
     }
 
     pub fn validate_magic(&self) {
-        if self.magic != 0xAABB11FF {
-            panic!("boot_info is unaligned, or magic is otherwise corrupted");
-        }
+        assert_eq!(
+            self.magic, 0xAABB11FF,
+            "boot_info is unaligned, or magic is otherwise corrupted"
+        );
     }
 
     pub fn unwrap(self) {}
