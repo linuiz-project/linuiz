@@ -36,7 +36,7 @@ fn get_log_level() -> log::LevelFilter {
 
 #[cfg(not(debug_assertions))]
 fn get_log_level() -> log::LevelFilter {
-    log::LevelFilter::Info
+    log::LevelFilter::Debug
 }
 
 #[no_mangle]
@@ -70,11 +70,30 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor, ConfigT
     info!("Configuring PIT frequency to 1000Hz.");
     crate::pic8259::set_timer_freq(crate::timer::TIMER_FREQUENCY as u32);
 
-    // `boot_info` will not be usable after initalizing the global allocator,
-    //  due to the stack being moved in virtual memory.
     let framebuffer_pointer = boot_info.framebuffer_pointer().unwrap().clone();
     info!("Initializing global memory (frame allocator, global allocator, et al).");
-    unsafe { libkernel::memory::init_global_allocator(boot_info.memory_map()) };
+    unsafe {
+        let memory_map = boot_info.memory_map();
+
+        libkernel::memory::init_global_memory(memory_map);
+
+        debug!("Reserving frames from relevant UEFI memory descriptors.");
+        memory_map
+            .iter()
+            .filter(|descriptor| descriptor.should_reserve())
+            .for_each(|descriptor| {
+                libkernel::memory::global_memory().reserve_frames(descriptor.frame_iter())
+            });
+
+        // `boot_info` will not be usable after initalizing the global allocator,
+        //  due to the stack being moved in virtual memory.
+        libkernel::memory::init_global_allocator(
+            memory_map
+                .iter()
+                .find(|descriptor| descriptor.is_stack_descriptor())
+                .expect("memory map contains no stack descriptor"),
+        );
+    }
 
     debug!("Enabling interrupts.");
     libkernel::structures::idt::set_interrupt_handler(32, crate::timer::tick_handler);

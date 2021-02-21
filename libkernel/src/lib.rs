@@ -6,7 +6,7 @@
     abi_efiapi,
     const_panic,
     const_mut_refs,
-    integer_atomics,
+    //integer_atomics,
     core_intrinsics,
     abi_x86_interrupt,
     panic_info_message,

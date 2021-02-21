@@ -102,6 +102,12 @@ impl Page {
     }
 }
 
+impl core::fmt::Debug for Page {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter.debug_tuple("Page").field(&self.index()).finish()
+    }
+}
+
 pub struct PageIterator {
     current: Page,
     end: Page,
@@ -118,11 +124,5 @@ impl Iterator for PageIterator {
         } else {
             None
         }
-    }
-}
-
-impl core::fmt::Debug for Page {
-    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter.debug_tuple("Page").field(&self.addr()).finish()
     }
 }

@@ -89,7 +89,7 @@ impl LocalAPIC {
     }
 
     pub fn mmio_frames() -> crate::memory::FrameIterator {
-        Frame::range_count(Self::mmio_addr(), 1)
+        Frame::range_count(Frame::from_addr(Self::mmio_addr()), 1)
     }
 
     pub fn from_msr(mapped_addr: x86_64::VirtAddr) -> Self {

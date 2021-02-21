@@ -18,7 +18,7 @@ impl MMIO {
         mapped_addr: VirtAddr,
         size: usize,
     ) -> Result<Self, MMIOError> {
-        if (base_addr.as_u64() as usize) >= crate::memory::global_total() {
+        if (base_addr.as_u64() as usize) >= crate::memory::global_memory().total_memory() {
             Ok(Self {
                 base_addr,
                 mapped_addr,

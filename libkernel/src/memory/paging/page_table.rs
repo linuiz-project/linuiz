@@ -115,7 +115,8 @@ where
             Some(frame) => (frame, false),
             None => {
                 trace!("Allocating frame for previously nonpresent entry.");
-                let alloc_frame = crate::memory::global_lock_next()
+                let alloc_frame = crate::memory::global_memory()
+                    .lock_next()
                     .expect("failed to allocate a frame for new page table");
 
                 entry.set(

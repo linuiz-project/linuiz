@@ -43,17 +43,17 @@ impl Frame {
         (self.0 as u64) * 0x1000
     }
 
-    pub fn range_count(start_addr: PhysAddr, count: usize) -> FrameIterator {
+    pub fn range_count(start: Frame, count: usize) -> FrameIterator {
         FrameIterator {
-            current: Frame::from_addr(start_addr),
-            end: Frame::from_addr(start_addr + ((count * 0x1000) as u64)),
+            current: start,
+            end: Frame::from_index(start.index() + count),
         }
     }
 }
 
 impl core::fmt::Debug for Frame {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter.debug_tuple("Frame").field(&self.addr()).finish()
+        formatter.debug_tuple("Frame").field(&self.index()).finish()
     }
 }
 

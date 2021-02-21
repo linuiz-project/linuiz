@@ -1,5 +1,5 @@
 use crate::{
-    memory::{is_uefi_reserved_memory_type, Frame, FrameIterator},
+    memory::{Frame, FrameIterator},
     BitValue, RwBitArray,
 };
 use spin::RwLock;
@@ -10,7 +10,7 @@ pub enum FrameType {
     Unallocated = 0,
     Allocated,
     Reserved,
-    Corrupted,
+    Stack,
 }
 
 impl BitValue for FrameType {
@@ -22,7 +22,7 @@ impl BitValue for FrameType {
             0 => FrameType::Unallocated,
             1 => FrameType::Allocated,
             2 => FrameType::Reserved,
-            3 => FrameType::Corrupted,
+            3 => FrameType::Stack,
             _ => panic!("invalid value, must be 0..=3"),
         }
     }
@@ -51,37 +51,39 @@ pub struct FrameAllocator<'arr> {
 }
 
 impl<'arr> FrameAllocator<'arr> {
-    pub(super) fn from_mmap(
-        uefi_memory_map: &[crate::memory::UEFIMemoryDescriptor],
-    ) -> (FrameIterator, Self) {
-        let last_descriptor = uefi_memory_map
-            .iter()
-            .max_by_key(|descriptor| descriptor.phys_start)
-            .expect("no descriptor with max value");
-        let total_memory =
-            (last_descriptor.phys_start.as_u64() + (last_descriptor.page_count * 0x1000)) as usize;
-        debug!(
-            "Page frame allocator will represent {} MB ({} bytes) of system memory.",
-            crate::memory::to_mibibytes(total_memory),
-            total_memory
+    pub fn frame_count_hint(total_memory: usize) -> usize {
+        assert_eq!(
+            total_memory % 0x1000,
+            0,
+            "system memory should be page-aligned"
         );
 
-        // allocate the memory map
-        let element_count = total_memory / 0x1000;
-        let memory_size = (element_count * FrameType::BIT_WIDTH) / 8;
-        let memory_pages = crate::align_up(memory_size, 0x1000) / 0x1000;
-        let descriptor = uefi_memory_map
-            .iter()
-            .find(|descriptor| descriptor.page_count >= (memory_pages as u64))
-            .expect("failed to find viable memory descriptor for memory map.");
+        let frame_count = total_memory / 0x1000;
+        crate::align_up_div(
+            // each index of a RwBitArray is a `usize`, so multiply the index count with the `size_of` a `usize`
+            RwBitArray::<FrameType>::length_hint(frame_count) * core::mem::size_of::<usize>(),
+            // divide total RwBitArray memory size by frame size to get total frame count
+            0x1000,
+        )
+    }
 
-        let mut this = Self {
-            memory_map: RwBitArray::from_slice(unsafe {
-                &mut *core::ptr::slice_from_raw_parts_mut(
-                    descriptor.phys_start.as_u64() as *mut _,
-                    RwBitArray::<FrameType>::length_hint(element_count),
-                )
-            }),
+    pub unsafe fn from_ptr(base_ptr: *mut usize, total_memory: usize) -> Self {
+        assert_eq!(
+            base_ptr.align_offset(0x1000),
+            0,
+            "frame allocator base pointer must be frame-aligned"
+        );
+        assert_eq!(
+            total_memory % 0x1000,
+            0,
+            "system memory should be page-aligned"
+        );
+
+        let this = Self {
+            memory_map: RwBitArray::from_slice(&mut *core::ptr::slice_from_raw_parts_mut(
+                base_ptr,
+                RwBitArray::<FrameType>::length_hint(total_memory / 0x1000),
+            )),
             memory: RwLock::new(FrameAllocatorMemory {
                 total_memory,
                 free_memory: total_memory,
@@ -89,31 +91,16 @@ impl<'arr> FrameAllocator<'arr> {
                 reserved_memory: 0,
             }),
         };
-        let bitarray_frames = Frame::range_count(descriptor.phys_start, memory_pages);
 
-        unsafe {
-            // reserve null frame
-            this.reserve_frame(&Frame::null()).unwrap();
-            // reserve bitarray frames
-            this.reserve_frames(bitarray_frames);
-            // reserve system & kernel frames
-            uefi_memory_map
-                .iter()
-                .filter(|descriptor| is_uefi_reserved_memory_type(descriptor.ty))
-                .for_each(|descriptor| {
-                    this.reserve_frames(Frame::range_count(
-                        descriptor.phys_start,
-                        descriptor.page_count as usize,
-                    ))
-                });
-        }
+        let base_frame = Frame::from_addr(x86_64::PhysAddr::new(base_ptr as u64));
+        let bitarray_frames = Frame::range_count(base_frame, Self::frame_count_hint(total_memory));
 
-        info!(
-            "{} KB of memory has been reserved by the system.",
-            crate::memory::to_kibibytes(this.memory.read().reserved_memory)
-        );
+        // reserve null frame
+        this.reserve_frame(&Frame::null()).unwrap();
+        // reserve bitarray frames
+        this.reserve_frames(bitarray_frames);
 
-        (bitarray_frames, this)
+        this
     }
 
     pub fn total_memory(&self) -> usize {
@@ -179,7 +166,7 @@ impl<'arr> FrameAllocator<'arr> {
             })
     }
 
-    pub(crate) unsafe fn reserve_frame(&self, frame: &Frame) -> Result<(), FrameAllocationError> {
+    pub unsafe fn reserve_frame(&self, frame: &Frame) -> Result<(), FrameAllocationError> {
         if self
             .memory_map
             .set_eq(frame.index(), FrameType::Reserved, FrameType::Unallocated)
@@ -194,6 +181,26 @@ impl<'arr> FrameAllocator<'arr> {
             Err(FrameAllocationError::NotUnallocated)
         }
     }
+
+    pub unsafe fn reserve_stack(&self, frames: FrameIterator) -> Result<(), FrameAllocationError> {
+        for frame in frames {
+            if self
+                .memory_map
+                .set_eq(frame.index(), FrameType::Stack, FrameType::Unallocated)
+            {
+                let mut memory = self.memory.write();
+                memory.free_memory -= 0x1000;
+                memory.reserved_memory += 0x1000;
+
+                trace!("Reserved frame: {:?}", frame);
+            } else {
+                return Err(FrameAllocationError::NotUnallocated);
+            }
+        }
+
+        Ok(())
+    }
+
     /* MANY OPS */
     pub unsafe fn free_frames(&self, frames: FrameIterator) {
         for frame in frames {
@@ -207,9 +214,18 @@ impl<'arr> FrameAllocator<'arr> {
         }
     }
 
-    pub(crate) unsafe fn reserve_frames(&mut self, frames: FrameIterator) {
+    pub unsafe fn reserve_frames(&self, frames: FrameIterator) {
         for frame in frames {
             self.reserve_frame(&frame).expect("failed to reserve frame");
+        }
+    }
+
+    pub fn iter_callback<F>(&self, callback: F)
+    where
+        F: Fn(usize, FrameType),
+    {
+        for index in 0..self.memory_map.len() {
+            callback(index, self.memory_map.get(index));
         }
     }
 }

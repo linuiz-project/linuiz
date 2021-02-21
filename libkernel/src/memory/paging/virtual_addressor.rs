@@ -1,5 +1,5 @@
 use crate::memory::{
-    global_lock_next, global_total,
+    global_memory,
     paging::{Level4, PageAttributes, PageTable, PageTableEntry},
     Frame, Page,
 };
@@ -21,7 +21,8 @@ impl VirtualAddressor {
             // we don't know where physical memory is mapped at this point,
             // so rely on what the caller specifies for us
             mapped_page,
-            pml4_frame: global_lock_next()
+            pml4_frame: global_memory()
+                .lock_next()
                 .expect("failed to lock frame for PML4 of VirtualAddressor"),
         }
     }
@@ -86,7 +87,7 @@ impl VirtualAddressor {
     }
 
     pub fn map(&mut self, page: &Page, frame: &Frame) {
-        {
+        if !self.is_mapped(page.addr()) {
             let entry = self.get_page_entry_create(page);
             if entry.is_present() {
                 crate::instructions::tlb::invalidate(page);
@@ -94,18 +95,22 @@ impl VirtualAddressor {
 
             entry.set(&frame, PageAttributes::PRESENT | PageAttributes::WRITABLE);
             trace!("Mapped {:?}: {:?}", page, entry);
+        } else {
+            panic!("attempted to map already mapped page: {:?}", page);
         }
 
         debug_assert!(self.is_mapped_to(page, frame));
     }
 
     pub fn unmap(&mut self, page: &Page) {
-        {
+        if !self.is_mapped(page.addr()) {
             let entry = self.get_page_entry_create(page);
             crate::instructions::tlb::invalidate(page);
 
             entry.set_nonpresent();
             trace!("Unmapped {:?}: {:?}", page, entry);
+        } else {
+            panic!("attempted to unmap already unmapped page: {:?}", page);
         }
 
         debug_assert!(!self.is_mapped(page.addr()));
@@ -134,9 +139,11 @@ impl VirtualAddressor {
     }
 
     pub fn modify_mapped_page(&mut self, page: Page) {
-        let total_memory_pages = global_total() / 0x1000;
+        let total_memory_pages = global_memory().total_memory() / 0x1000;
         for index in 0..total_memory_pages {
-            self.map(&page.offset(index), &Frame::from_index(index));
+            let offset_page = page.offset(index);
+            info!("Mapping index: {:?}", offset_page);
+            self.map(&offset_page, &Frame::from_index(index));
         }
 
         self.mapped_page = page;

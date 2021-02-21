@@ -4,14 +4,16 @@ use crate::{
     SYSTEM_SLICE_SIZE,
 };
 use alloc::vec::Vec;
-use core::mem::size_of;
+use core::{
+    mem::size_of,
+    sync::atomic::{AtomicU64, Ordering},
+};
 use spin::{Mutex, RwLock};
 
 /// Represents one page worth of memory blocks (i.e. 4096 bytes in blocks).
 #[repr(C)]
-#[derive(Debug, Clone)]
 struct BlockPage {
-    sections: [u64; 4],
+    sections: [AtomicU64; Self::SECTION_COUNT],
 }
 
 impl BlockPage {
@@ -23,44 +25,50 @@ impl BlockPage {
 
     /// An empty block page (all blocks zeroed).
     const fn empty() -> Self {
+        const ATOMIC_U64_ZERO: AtomicU64 = AtomicU64::new(0);
+
         Self {
-            sections: [0; Self::SECTION_COUNT],
+            sections: [ATOMIC_U64_ZERO; Self::SECTION_COUNT],
         }
     }
 
     /// Whether the block page is empty.
     pub fn is_empty(&self) -> bool {
-        self.sections.iter().all(|section| *section == 0)
+        self.iter()
+            .all(|section| section.load(Ordering::Acquire) == 0)
     }
 
     /// Whether the block page is full.
     pub fn is_full(&self) -> bool {
-        self.sections.iter().all(|section| *section == u64::MAX)
+        self.iter()
+            .all(|section| section.load(Ordering::Acquire) == u64::MAX)
     }
 
     /// Unset all of the block page's blocks.
     pub fn set_empty(&mut self) {
-        self.sections.fill(0);
+        self.iter_mut()
+            .for_each(|section| section.store(0, Ordering::Release));
     }
 
     /// Set all of the block page's blocks.
     pub fn set_full(&mut self) {
-        self.sections.fill(u64::MAX);
+        self.iter_mut()
+            .for_each(|section| section.store(u64::MAX, Ordering::Release));
     }
 
     /// Underlying section iterator.
-    fn iter(&self) -> core::slice::Iter<u64> {
+    fn iter(&self) -> core::slice::Iter<AtomicU64> {
         self.sections.iter()
     }
 
     /// Underlying mutable section iterator.
-    fn iter_mut(&mut self) -> core::slice::IterMut<u64> {
+    fn iter_mut(&mut self) -> core::slice::IterMut<AtomicU64> {
         self.sections.iter_mut()
     }
 }
 
 impl core::ops::Index<usize> for BlockPage {
-    type Output = u64;
+    type Output = AtomicU64;
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.sections[index]
@@ -70,6 +78,30 @@ impl core::ops::Index<usize> for BlockPage {
 impl core::ops::IndexMut<usize> for BlockPage {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self.sections[index]
+    }
+}
+
+impl Clone for BlockPage {
+    fn clone(&self) -> Self {
+        let clone = Self::empty();
+
+        for index in 0..BlockPage::SECTION_COUNT {
+            clone[index].store(self[index].load(Ordering::Acquire), Ordering::Release);
+        }
+
+        clone
+    }
+}
+
+impl core::fmt::Debug for BlockPage {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut debug_tuple = formatter.debug_tuple("BlockPage");
+
+        self.iter().for_each(|section| {
+            debug_tuple.field(&section.load(Ordering::Acquire));
+        });
+
+        debug_tuple.finish()
     }
 }
 
@@ -219,6 +251,7 @@ impl BlockAllocator {
 
     pub const fn new() -> Self {
         Self {
+            // TODO make addressor use a RwLock
             addressor: Mutex::new(core::lazy::OnceCell::new()),
             map: RwLock::new(Vec::new()),
         }
@@ -237,42 +270,37 @@ impl BlockAllocator {
 
     /* INITIALIZATION */
 
-    pub fn init(&self, memory_map: &[crate::memory::UEFIMemoryDescriptor]) {
+    pub fn init(&self, stack_descriptor: &crate::memory::UEFIMemoryDescriptor) {
+        use crate::memory::{global_memory, FrameType};
+
         debug!("Initializing global memory and mapping all frame allocator frames.");
         // TODO do this global memory init in a static / global context
         //  (allocators can't be considered global from the system's perspective)
-        let global_memory_frames = unsafe { crate::memory::init_global_memory(memory_map) };
 
         unsafe {
-            self.new_addressor();
-            self.init_map();
+            if self
+                .addressor
+                .lock()
+                .set(VirtualAddressor::new(Page::null()))
+                .is_err()
+            {
+                panic!("addressor has already been set for allocator");
+            }
+
+            *self.map.write() = Vec::from_raw_parts(
+                Self::ALLOCATOR_BASE.mut_ptr(),
+                0,
+                SYSTEM_SLICE_SIZE / size_of::<BlockPage>(),
+            );
         }
 
-        let stack_descriptor = crate::memory::find_stack_descriptor(memory_map)
-            .expect("failed to find stack memory region");
-
         self.with_addressor(|addressor| {
-            debug!("Identity mapping global memory journal frames.");
-            global_memory_frames.for_each(|frame| addressor.identity_map(&frame));
-
-            debug!("Identity mapping all reserved memory blocks.");
-            for frame in memory_map
-                .iter()
-                .filter(|descriptor| crate::memory::is_uefi_reserved_memory_type(descriptor.ty))
-                .flat_map(|descriptor| {
-                    Frame::range_count(descriptor.phys_start, descriptor.page_count as usize)
-                })
-            {
-                addressor.identity_map(&frame);
-            }
-
-            debug!("Temporary identity mapping stack frames.");
-            for frame in stack_descriptor.frame_iter() {
-                // This is a temporary identity mapping, purely
-                //  so `rsp` isn't invalid after we swap the PML4.
-                addressor.identity_map(&frame);
-                unsafe { crate::memory::global_reserve(&frame) };
-            }
+            global_memory().iter_callback(|index, frame_type| match frame_type {
+                FrameType::Reserved | FrameType::Stack => {
+                    self.identity_map(&Frame::from_index(index), false);
+                }
+                _ => {}
+            });
 
             // Since we're using physical offset mapping for our page table modification
             //  strategy, the memory needs to be identity mapped at the correct offset.
@@ -287,51 +315,14 @@ impl BlockAllocator {
             }
         });
 
-        // 'Allocate' the null page
-        trace!("Allocating null frame.");
-        self.identity_map(&Frame::null());
+        global_memory().iter_callback(|index, frame_type| match frame_type {
+            FrameType::Reserved => {
+                self.identity_map(&Frame::from_index(index), false);
+            }
+            _ => {}
+        });
 
-        debug!("Allocating global memory journaling frames.");
-        global_memory_frames.for_each(|frame| self.identity_map(&frame));
-
-        // 'Allocate' reserved memory
-        trace!("Allocating reserved frames.");
-        memory_map
-            .iter()
-            .filter(|descriptor| crate::memory::is_uefi_reserved_memory_type(descriptor.ty))
-            .flat_map(|descriptor| {
-                Frame::range_count(descriptor.phys_start, descriptor.page_count as usize)
-            })
-            .for_each(|frame| self.identity_map(&frame));
-
-        self.alloc_stack_mapping(stack_descriptor);
-    }
-
-    unsafe fn new_addressor(&self) {
-        if self
-            .addressor
-            .lock()
-            .set(VirtualAddressor::new(Page::null()))
-            .is_err()
-        {
-            panic!("addressor has already been set for allocator");
-        }
-    }
-
-    unsafe fn init_map(&self) {
-        *self.map.write() = Vec::from_raw_parts(
-            Self::ALLOCATOR_BASE.mut_ptr(),
-            0,
-            SYSTEM_SLICE_SIZE / size_of::<BlockPage>(),
-        );
-    }
-
-    fn alloc_stack_mapping(&self, stack_descriptor: &crate::memory::UEFIMemoryDescriptor) {
-        stack_descriptor
-            .frame_iter()
-            .for_each(|frame| self.identity_map(&frame));
-
-        // adjust the stack pointer to our new stack
+        debug!("Allocating stack mappings.");
         unsafe {
             let cur_stack_base = stack_descriptor.phys_start.as_u64();
             let stack_ptr = self.alloc_to(stack_descriptor.frame_iter()) as u64;
@@ -343,11 +334,10 @@ impl BlockAllocator {
             }
         }
 
-        // unmap the old stack mappings
         self.with_addressor(|addressor| {
-            stack_descriptor
-                .frame_iter()
-                .for_each(|frame| addressor.unmap(&Page::from_index(frame.index())))
+            for frame in stack_descriptor.frame_iter() {
+                addressor.unmap(&Page::from_index(frame.index()));
+            }
         });
     }
 
@@ -385,7 +375,10 @@ impl BlockAllocator {
                     current_run = 0;
                     block_index += BlockPage::BLOCK_COUNT;
                 } else {
-                    for section in block_page.iter().map(|section| *section) {
+                    for section in block_page
+                        .iter()
+                        .map(|section| section.load(Ordering::Acquire))
+                    {
                         if section == u64::MAX {
                             current_run = 0;
                             block_index += 64;
@@ -440,39 +433,32 @@ impl BlockAllocator {
                 [SectionState::empty(); BlockPage::SECTION_COUNT];
 
             for (section_index, section) in block_page.iter_mut().enumerate() {
-                page_state[section_index].had_bits = *section > 0;
+                page_state[section_index].had_bits = section.load(Ordering::Acquire) > 0;
 
                 if initial_section_skip > 0 {
                     initial_section_skip -= 1;
                 } else if block_index < end_block_index {
-                    let traversed_blocks = (map_index * BlockPage::BLOCK_COUNT)
-                        + (section_index * BlockPage::SECTION_LEN);
-                    let remaining_blocks = end_block_index - traversed_blocks;
-                    // Each block is one bit in our map, so we calculate the offset into
-                    //  the current section, at which our current index (`block_index`) lies.
-                    let bit_offset = block_index - traversed_blocks;
-                    let bit_count =
-                        core::cmp::min(BlockPage::SECTION_LEN, remaining_blocks) - bit_offset;
-                    // Finally, we acquire the respective bitmask to flip all relevant bits in
-                    //  our current section.
-                    let bit_mask = Self::MASK_MAP[bit_count - 1] << bit_offset;
+                    let (bit_count, bit_mask) = Self::calculate_bit_fields(
+                        map_index,
+                        section_index,
+                        end_block_index,
+                        block_index,
+                    );
 
                     assert_eq!(
-                        *section & bit_mask,
+                        section.load(Ordering::Acquire) & bit_mask,
                         0,
                         "attempting to allocate blocks that are already allocated"
                     );
 
-                    // unsafe { asm!("mov r11, cr3", "mov cr3, r11") };
-                    info!("{} |= {}", section, bit_mask);
-                    // unsafe { asm!("mov r10, cr3", "mov cr3, r10") };
-                    *section |= bit_mask;
-                    info!("== {}", section);
+                    section.fetch_or(bit_mask, Ordering::AcqRel);
                     block_index += bit_count;
                 }
 
-                page_state[section_index].has_bits = *section > 0;
+                page_state[section_index].has_bits = section.load(Ordering::Acquire) > 0;
             }
+
+            info!("INDEX {}: {:?}", map_index, block_page);
 
             if SectionState::should_alloc(&page_state) {
                 trace!("Allocating frame for previously unused block page.");
@@ -480,15 +466,108 @@ impl BlockAllocator {
                 // 'has bits', but not 'had bits'
                 self.with_addressor(|addressor| {
                     let page = &mut Page::from_index(map_index);
-                    addressor.map(page, unsafe { &crate::memory::global_lock_next().unwrap() });
+                    addressor.map(page, &crate::memory::global_memory().lock_next().unwrap());
                     unsafe { page.clear() };
                 });
             }
 
-            debug_assert!(self.is_mapped(x86_64::VirtAddr::from_ptr(block_page as *mut _)));
+            // sanity check to ensure we're allocating block pages
+            // assert!(
+            //     self.is_mapped(Page::from_index(map_index).addr()),
+            //     "previously iterated block page is unallocated at end of allocation step"
+            // );
+        }
+
+        for (map_index, block_page) in self.map.write().iter().enumerate().skip(start_map_index) {
+            info!("INDEX {}: {:?}", map_index, block_page);
         }
 
         (start_block_index * Self::BLOCK_SIZE) as *mut u8
+    }
+
+    fn raw_dealloc(&self, ptr: *mut u8, size: usize) {
+        let start_block_index = (ptr as usize) / Self::BLOCK_SIZE;
+        let end_block_index = start_block_index + align_up_div(size, Self::BLOCK_SIZE);
+        let mut block_index = start_block_index;
+        trace!(
+            "Deallocating requested: {}..{}",
+            start_block_index,
+            end_block_index
+        );
+
+        let start_map_index = start_block_index / BlockPage::BLOCK_COUNT;
+        let end_map_index = align_up_div(end_block_index, BlockPage::BLOCK_COUNT) - start_map_index;
+        let mut initial_section_skip = crate::align_down_div(block_index, BlockPage::SECTION_LEN)
+            - (start_map_index * BlockPage::SECTION_COUNT);
+        for (map_index, block_page) in self
+            .map
+            .write()
+            .iter_mut()
+            .enumerate()
+            .skip(start_map_index)
+            .take(end_map_index)
+        {
+            let mut page_state: [SectionState; BlockPage::SECTION_COUNT] =
+                [SectionState::empty(); BlockPage::SECTION_COUNT];
+
+            for (section_index, section) in block_page.iter_mut().enumerate() {
+                page_state[section_index].had_bits = section.load(Ordering::Acquire) > 0;
+
+                if initial_section_skip > 0 {
+                    initial_section_skip -= 1;
+                } else if block_index < end_block_index {
+                    let (bit_count, bit_mask) = Self::calculate_bit_fields(
+                        map_index,
+                        section_index,
+                        end_block_index,
+                        block_index,
+                    );
+
+                    assert_eq!(
+                        section.load(Ordering::Acquire) & bit_mask,
+                        bit_mask,
+                        "attempting to deallocate blocks that are already deallocated"
+                    );
+
+                    section.fetch_xor(bit_mask, Ordering::AcqRel);
+                    block_index += bit_count;
+                }
+
+                page_state[section_index].has_bits = section.load(Ordering::Acquire) > 0;
+            }
+
+            if SectionState::should_dealloc(&page_state) {
+                // 'has bits', but not 'had bits'
+                self.with_addressor(|addressor| {
+                    let page = &Page::from_index(map_index);
+                    unsafe {
+                        crate::memory::global_memory()
+                            .free_frame(&addressor.translate_page(page).unwrap())
+                            .unwrap()
+                    };
+                    addressor.unmap(page);
+                });
+            }
+        }
+    }
+
+    /// Calculates the bit count and mask for a given set of block page parameters.
+    fn calculate_bit_fields(
+        map_index: usize,
+        section_index: usize,
+        end_block_index: usize,
+        block_index: usize,
+    ) -> (usize, u64) {
+        let traversed_blocks =
+            (map_index * BlockPage::BLOCK_COUNT) + (section_index * BlockPage::SECTION_LEN);
+        let remaining_blocks = end_block_index - traversed_blocks;
+        // Each block is one bit in our map, so we calculate the offset into
+        //  the current section, at which our current index (`block_index`) lies.
+        let bit_offset = block_index - traversed_blocks;
+        let bit_count = core::cmp::min(BlockPage::SECTION_LEN, remaining_blocks) - bit_offset;
+        // Finally, we acquire the respective bitmask to flip all relevant bits in
+        //  our current section.
+        (bit_count, Self::MASK_MAP[bit_count - 1] << bit_offset)
     }
 
     pub fn alloc_to(&self, mut frames: FrameIterator) -> *mut u8 {
@@ -546,7 +625,7 @@ impl BlockAllocator {
         (start_index * 0x1000) as *mut u8
     }
 
-    pub fn identity_map(&self, frame: &Frame) {
+    pub fn identity_map(&self, frame: &Frame, map: bool) {
         trace!("Identity mapping requested: {:?}", frame);
 
         let map_len = self.map.read().len();
@@ -554,107 +633,48 @@ impl BlockAllocator {
             self.grow(((frame.index() - map_len) + 1) * 0x8000);
         }
 
-        self.with_addressor(|addressor| {
-            let block_page = &mut self.map.write()[frame.index()];
+        let block_page = &mut self.map.write()[frame.index()];
+        if block_page.is_empty() {
+            block_page.set_full();
 
-            if block_page.is_empty() {
-                block_page.set_full();
-                addressor.identity_map(frame);
-            } else {
-                panic!("attempting to identity map page with previously allocated blocks");
+            if map {
+                self.with_addressor(|addressor| addressor.identity_map(frame));
             }
-        });
-    }
-
-    fn raw_dealloc(&self, ptr: *mut u8, size: usize) {
-        let start_block_index = (ptr as usize) / Self::BLOCK_SIZE;
-        let end_block_index = start_block_index + align_up_div(size, Self::BLOCK_SIZE);
-        let mut block_index = start_block_index;
-        trace!(
-            "Deallocating requested: {}..{}",
-            start_block_index,
-            end_block_index
-        );
-
-        let start_map_index = start_block_index / BlockPage::BLOCK_COUNT;
-        let end_map_index = align_up_div(end_block_index, BlockPage::BLOCK_COUNT) - start_map_index;
-        let mut initial_section_skip = crate::align_down_div(block_index, BlockPage::SECTION_LEN)
-            - (start_map_index * BlockPage::SECTION_COUNT);
-        for (map_index, block_page) in self
-            .map
-            .write()
-            .iter_mut()
-            .enumerate()
-            .skip(start_map_index)
-            .take(end_map_index)
-        {
-            let mut page_state: [SectionState; BlockPage::SECTION_COUNT] =
-                [SectionState::empty(); BlockPage::SECTION_COUNT];
-
-            for (section_index, section) in block_page.iter_mut().enumerate() {
-                page_state[section_index].had_bits = *section > 0;
-
-                if initial_section_skip > 0 {
-                    initial_section_skip -= 1;
-                } else if block_index < end_block_index {
-                    let traversed_blocks = (map_index * BlockPage::BLOCK_COUNT)
-                        + (section_index * BlockPage::SECTION_LEN);
-                    let bit_offset = block_index - traversed_blocks;
-                    let bit_count =
-                        core::cmp::min(BlockPage::SECTION_LEN, end_block_index - traversed_blocks)
-                            - bit_offset;
-                    let bit_mask = Self::MASK_MAP[bit_count - 1] << bit_offset;
-
-                    debug_assert_eq!(
-                        *section & bit_mask,
-                        bit_mask,
-                        "attempting to allocate blocks that are already allocated"
-                    );
-
-                    *section ^= bit_mask;
-                    block_index += bit_count;
-                }
-
-                page_state[section_index].has_bits = *section > 0;
-            }
-
-            if SectionState::should_dealloc(&page_state) {
-                // 'has bits', but not 'had bits'
-                self.with_addressor(|addressor| {
-                    let page = &Page::from_index(map_index);
-                    unsafe { crate::memory::global_free(&addressor.translate_page(page).unwrap()) };
-                    addressor.unmap(page);
-                });
-            }
+        } else {
+            panic!("attempting to identity map page with previously allocated blocks");
         }
     }
 
     pub fn grow(&self, required_blocks: usize) {
+        const BLOCKS_PER_MAP_PAGE: usize = 8 /* bits per byte */ * 0x1000;
+
         assert!(required_blocks > 0, "calls to grow much be nonzero");
 
-        self.with_addressor(|addressor| {
-            trace!("Growing map to faciliate {} blocks.", required_blocks);
-            let map_read = self.map.upgradeable_read();
-            let cur_map_blocks = map_read.len() * BlockPage::BLOCK_COUNT;
-            let new_map_blocks = cur_map_blocks + crate::align_up(required_blocks, 0x8000);
-            let cur_page_offset = cur_map_blocks / 0x8000;
-            let new_page_offset = new_map_blocks / 0x8000;
+        trace!("Growing map to faciliate {} blocks.", required_blocks);
+        let map_read = self.map.upgradeable_read();
+        let cur_page_offset = (map_read.len() * BlockPage::BLOCK_COUNT) / BLOCKS_PER_MAP_PAGE;
+        let new_page_offset =
+            cur_page_offset + crate::align_up_div(required_blocks, BLOCKS_PER_MAP_PAGE);
 
-            debug!(
-                "Growing map: {}..{} pages",
-                cur_page_offset, new_page_offset
-            );
+        debug!(
+            "Growing map: {}..{} pages",
+            cur_page_offset, new_page_offset
+        );
+
+        self.with_addressor(|addressor| {
             for offset in cur_page_offset..new_page_offset {
                 let map_page = &mut Self::ALLOCATOR_BASE.offset(offset);
-                addressor.map(map_page, unsafe {
-                    &crate::memory::global_lock_next().unwrap()
-                });
+                addressor.map(
+                    map_page,
+                    &crate::memory::global_memory().lock_next().unwrap(),
+                );
 
                 assert!(addressor.is_mapped(map_page.addr()), "failed to map growth",);
             }
 
             const BLOCK_PAGES_PER_FRAME: usize = 0x1000 / size_of::<BlockPage>();
             let new_map_len = new_page_offset * BLOCK_PAGES_PER_FRAME;
+
             debug_assert_eq!(
                 new_map_len % BLOCK_PAGES_PER_FRAME,
                 0,
@@ -662,9 +682,8 @@ impl BlockAllocator {
             );
 
             debug!("Grew map (new size: {} block pages).", new_map_len);
-            let mut map_write = map_read.upgrade();
-            map_write.resize(new_map_len, BlockPage::empty());
-            trace!("Successfully grew allocator map: {:#?}.", map_write);
+            map_read.upgrade().resize(new_map_len, BlockPage::empty());
+            trace!("Successfully grew allocator map.");
         });
     }
 

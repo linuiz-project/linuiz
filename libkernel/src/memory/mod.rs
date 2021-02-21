@@ -31,11 +31,3 @@ pub const fn to_kibibytes(value: usize) -> usize {
 pub const fn to_mibibytes(value: usize) -> usize {
     value / MIBIBYTE
 }
-
-pub fn find_stack_descriptor(memory_map: &[UEFIMemoryDescriptor]) -> Option<&UEFIMemoryDescriptor> {
-    memory_map.iter().find(|descriptor| {
-        descriptor
-            .range()
-            .contains(&crate::registers::stack::RSP::read().as_u64())
-    })
-}
