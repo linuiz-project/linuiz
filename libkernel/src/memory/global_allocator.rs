@@ -1,7 +1,7 @@
 #[global_allocator]
 static GLOBAL_ALLOCATOR: crate::memory::BlockAllocator = crate::memory::BlockAllocator::new();
 
-pub unsafe fn init_global_allocator(stack_descriptor: &crate::memory::uefi::UEFIMemoryDescriptor) {
+pub unsafe fn init_global_allocator(stack_descriptor: crate::memory::uefi::UEFIMemoryDescriptor) {
     GLOBAL_ALLOCATOR.init(stack_descriptor);
 }
 

@@ -56,7 +56,10 @@ pub unsafe fn init_global_memory(memory_map: &[crate::memory::UEFIMemoryDescript
         .map(|descriptor| descriptor.phys_start.as_u64() as *mut _)
         .expect("failed to find viable memory descriptor for memory map.");
 
-    GLOBAL_MEMORY.set_allocator(FrameAllocator::from_ptr(frame_alloc_ptr, total_memory));
+    debug!("Configuring global memory instance.");
+    let global_memory = FrameAllocator::from_ptr(frame_alloc_ptr, total_memory);
+    debug!("Assigning fully configured global memory.");
+    GLOBAL_MEMORY.set_allocator(global_memory);
 }
 
 pub fn global_memory() -> &'static FrameAllocator<'static> {

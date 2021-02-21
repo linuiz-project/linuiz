@@ -270,7 +270,7 @@ impl BlockAllocator {
 
     /* INITIALIZATION */
 
-    pub fn init(&self, stack_descriptor: &crate::memory::UEFIMemoryDescriptor) {
+    pub fn init(&self, stack_descriptor: crate::memory::UEFIMemoryDescriptor) {
         use crate::memory::{global_memory, FrameType};
 
         unsafe {

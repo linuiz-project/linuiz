@@ -93,10 +93,12 @@ impl<'arr> FrameAllocator<'arr> {
         };
 
         let base_frame = Frame::from_addr(x86_64::PhysAddr::new(base_ptr as u64));
-        this.reserve_frames(Frame::range_count(
-            base_frame,
-            Self::frame_count_hint(total_memory),
-        ));
+        let frame_iterator = Frame::range_count(base_frame, Self::frame_count_hint(total_memory));
+        debug!(
+            "Frame allocator defined with iterator: {:?}",
+            frame_iterator
+        );
+        this.reserve_frames(frame_iterator);
 
         this
     }
@@ -154,6 +156,12 @@ impl<'arr> FrameAllocator<'arr> {
         self.memory_map
             .set_eq_next(FrameType::Allocated, FrameType::Unallocated)
             .map(|index| {
+                debug_assert_eq!(
+                    self.memory_map.get(index),
+                    FrameType::Allocated,
+                    "failed to allocate next frame"
+                );
+
                 let frame = Frame::from_index(index);
                 let mut memory = self.memory.write();
                 memory.free_memory -= 0x1000;

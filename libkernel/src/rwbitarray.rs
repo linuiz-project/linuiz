@@ -66,8 +66,7 @@ impl<'arr, BV: BitValue + core::fmt::Debug> RwBitArray<'arr, BV> {
         let section_bits_set = new_type.as_usize() << section_offset;
         let section_bits_nonset = section_value & !(BV::MASK << section_offset);
 
-        let mut sections_write = sections_read.upgrade();
-        sections_write[section_index] = section_bits_set | section_bits_nonset;
+        sections_read.upgrade()[section_index] = section_bits_set | section_bits_nonset;
     }
 
     pub fn set_eq(&self, index: usize, new_type: BV, eq_type: BV) -> bool {
@@ -80,19 +79,20 @@ impl<'arr, BV: BitValue + core::fmt::Debug> RwBitArray<'arr, BV> {
         let section_index = bit_index / Self::SECTION_LEN;
         let section_offset = bit_index % Self::SECTION_LEN;
 
-        let sections_read = self.array.upgradeable_read();
-        let section_value = sections_read[section_index];
-        let type_actual = BV::from_usize((section_value >> section_offset) & BV::MASK);
+        {
+            let sections_read = self.array.upgradeable_read();
+            let section_value = sections_read[section_index];
+            let type_actual = BV::from_usize((section_value >> section_offset) & BV::MASK);
 
-        if type_actual != eq_type {
-            return false;
+            if type_actual != eq_type {
+                return false;
+            }
+
+            let section_bits_set = new_type.as_usize() << section_offset;
+            let section_bits_nonset = section_value & !(BV::MASK << section_offset);
+
+            sections_read.upgrade()[section_index] = section_bits_set | section_bits_nonset;
         }
-
-        let section_bits_set = new_type.as_usize() << section_offset;
-        let section_bits_nonset = section_value & !(BV::MASK << section_offset);
-
-        let mut sections_write = sections_read.upgrade();
-        sections_write[section_index] = section_bits_set | section_bits_nonset;
 
         debug_assert_eq!(self.get(index), new_type, "failed to set memory at index");
 

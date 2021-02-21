@@ -99,9 +99,13 @@ impl VirtualAddressor {
         }
 
         entry.set(&frame, PageAttributes::PRESENT | PageAttributes::WRITABLE);
-        trace!("Mapped {:?}: {:?}", page, entry);
+        debug!("Mapped {:?}: {:?}", page, entry);
 
-        debug_assert!(self.is_mapped_to(page, frame));
+        assert!(
+            self.is_mapped_to(page, frame),
+            "failed to properly map entry: {:?}",
+            self.get_page_entry(page)
+        );
     }
 
     pub fn unmap(&mut self, page: &Page) {
@@ -117,11 +121,15 @@ impl VirtualAddressor {
         entry.set_nonpresent();
         trace!("Unmapped {:?}: {:?}", page, entry);
 
-        debug_assert!(!self.is_mapped(page.addr()));
+        assert!(
+            !self.is_mapped(page.addr()),
+            "failed to unmap entry: {:?}",
+            self.get_page_entry(page)
+        );
     }
 
     pub fn identity_map(&mut self, frame: &Frame) {
-        self.map(&Page::from_addr(VirtAddr::new(frame.addr_u64())), frame);
+        self.map(&Page::from_index(frame.index()), frame);
     }
 
     pub fn is_mapped(&self, virt_addr: VirtAddr) -> bool {
@@ -133,7 +141,7 @@ impl VirtualAddressor {
 
     pub fn is_mapped_to(&self, page: &Page, frame: &Frame) -> bool {
         match self.get_page_entry(page).and_then(|entry| entry.frame()) {
-            Some(entry_frame) => frame.addr() == entry_frame.addr(),
+            Some(entry_frame) => frame == &entry_frame,
             None => false,
         }
     }
@@ -145,8 +153,7 @@ impl VirtualAddressor {
     pub fn modify_mapped_page(&mut self, page: Page) {
         let total_memory_pages = global_memory().total_memory() / 0x1000;
         for index in 0..total_memory_pages {
-            let offset_page = page.offset(index);
-            self.map(&offset_page, &Frame::from_index(index));
+            self.map(&page.offset(index), &Frame::from_index(index));
         }
 
         self.mapped_page = page;

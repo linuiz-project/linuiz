@@ -1,7 +1,7 @@
 use x86_64::PhysAddr;
 
 #[repr(transparent)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Frame(usize);
 
 impl Frame {
@@ -57,7 +57,7 @@ impl core::fmt::Debug for Frame {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct FrameIterator {
     current: Frame,
     end: Frame,
@@ -80,5 +80,15 @@ impl Iterator for FrameIterator {
         } else {
             None
         }
+    }
+}
+
+impl core::fmt::Debug for FrameIterator {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("FrameIterator")
+            .field("Current", &self.current)
+            .field("End", &self.end)
+            .finish()
     }
 }

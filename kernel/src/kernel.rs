@@ -1,6 +1,6 @@
 #![no_std]
 #![no_main]
-#![feature(asm, abi_efiapi, abi_x86_interrupt)]
+#![feature(asm, abi_efiapi, abi_x86_interrupt, once_cell)]
 
 #[macro_use]
 extern crate log;
@@ -78,6 +78,8 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor, ConfigT
         libkernel::memory::init_global_memory(memory_map);
 
         debug!("Reserving frames from relevant UEFI memory descriptors.");
+        let stack_descriptor: core::lazy::OnceCell<UEFIMemoryDescriptor> =
+            core::lazy::OnceCell::new();
         memory_map
             .iter()
             .filter(|descriptor| descriptor.should_reserve())
@@ -86,6 +88,10 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor, ConfigT
                     libkernel::memory::global_memory()
                         .reserve_stack(descriptor.frame_iter())
                         .unwrap();
+
+                    stack_descriptor
+                        .set(descriptor.clone())
+                        .expect("multiple stack descriptors found");
                 } else {
                     libkernel::memory::global_memory().reserve_frames(descriptor.frame_iter());
                 }
@@ -97,10 +103,7 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor, ConfigT
         // `boot_info` will not be usable after initalizing the global allocator,
         //  due to the stack being moved in virtual memory.
         libkernel::memory::init_global_allocator(
-            memory_map
-                .iter()
-                .find(|descriptor| descriptor.is_stack_descriptor())
-                .expect("memory map contains no stack descriptor"),
+            *stack_descriptor.get().expect("no stack descriptor found"),
         );
     }
 

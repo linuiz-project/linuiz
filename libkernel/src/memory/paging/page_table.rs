@@ -44,11 +44,6 @@ where
         }
     }
 
-    pub fn clear(&mut self) {
-        self.iter_mut()
-            .for_each(|descriptor| descriptor.set_nonpresent());
-    }
-
     pub fn iter(&self) -> core::slice::Iter<PageTableEntry> {
         self.entries.iter()
     }
@@ -76,10 +71,11 @@ where
         phys_mapped_addr: VirtAddr,
     ) -> Option<&PageTable<L::NextLevel>> {
         trace!(
-            "Accessing sub-table (ref): index {}, offset {:?}",
+            "Accessing sub-table (ref): index {}, phys_mapped_addr {:?}",
             index,
             phys_mapped_addr
         );
+
         self.get_entry(index)
             .frame()
             .map(|frame| &*(phys_mapped_addr + frame.addr_u64()).as_ptr())
@@ -91,10 +87,11 @@ where
         phys_mapped_addr: VirtAddr,
     ) -> Option<&mut PageTable<L::NextLevel>> {
         trace!(
-            "Accessing sub-table (mut): index {}, offset {:?}",
+            "Accessing sub-table (mut): index {}, phys_mapped_addr {:?}",
             index,
             phys_mapped_addr
         );
+
         self.get_entry_mut(index)
             .frame()
             .map(|frame| &mut *(phys_mapped_addr + frame.addr_u64()).as_mut_ptr())
@@ -106,36 +103,27 @@ where
         phys_mapped_addr: VirtAddr,
     ) -> &mut PageTable<L::NextLevel> {
         trace!(
-            "Accessing sub-table (create): index {}, offset {:?}",
+            "Accessing sub-table (create): index {}, phys_mapped_addr {:?}",
             index,
             phys_mapped_addr
         );
+
         let entry = self.get_entry_mut(index);
-        let (frame, created) = match entry.frame() {
-            Some(frame) => (frame, false),
-            None => {
-                trace!("Allocating frame for previously nonpresent entry.");
-                let alloc_frame = crate::memory::global_memory()
-                    .lock_next()
-                    .expect("failed to allocate a frame for new page table");
+        let frame = entry.frame().unwrap_or({
+            trace!("Allocating frame for previously nonpresent entry.");
+            let alloc_frame = crate::memory::global_memory()
+                .lock_next()
+                .expect("failed to allocate a frame for new page table");
 
-                entry.set(
-                    &alloc_frame,
-                    crate::memory::paging::PageAttributes::PRESENT
-                        | crate::memory::paging::PageAttributes::WRITABLE,
-                );
+            entry.set(
+                &alloc_frame,
+                crate::memory::paging::PageAttributes::PRESENT
+                    | crate::memory::paging::PageAttributes::WRITABLE,
+            );
 
-                (alloc_frame, true)
-            }
-        };
+            alloc_frame
+        });
 
-        let sub_table: &mut PageTable<L::NextLevel> =
-            &mut *(phys_mapped_addr + frame.addr_u64()).as_mut_ptr();
-
-        if created {
-            sub_table.clear()
-        }
-
-        sub_table
+        &mut *(phys_mapped_addr + frame.addr_u64()).as_mut_ptr()
     }
 }
