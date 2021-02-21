@@ -71,10 +71,10 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor, ConfigT
     crate::pic8259::set_timer_freq(crate::timer::TIMER_FREQUENCY as u32);
 
     let framebuffer_pointer = boot_info.framebuffer_pointer().unwrap().clone();
-    info!("Initializing global memory (frame allocator, global allocator, et al).");
     unsafe {
         let memory_map = boot_info.memory_map();
 
+        info!("Initializing global memory.");
         libkernel::memory::init_global_memory(memory_map);
 
         debug!("Reserving frames from relevant UEFI memory descriptors.");

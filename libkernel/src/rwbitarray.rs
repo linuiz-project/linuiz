@@ -63,9 +63,9 @@ impl<'arr, BV: BitValue + core::fmt::Debug> RwBitArray<'arr, BV> {
 
         let sections_read = self.array.upgradeable_read();
         let section_value = sections_read[section_index];
+
         let section_bits_set = new_type.as_usize() << section_offset;
         let section_bits_nonset = section_value & !(BV::MASK << section_offset);
-
         sections_read.upgrade()[section_index] = section_bits_set | section_bits_nonset;
     }
 
@@ -90,7 +90,6 @@ impl<'arr, BV: BitValue + core::fmt::Debug> RwBitArray<'arr, BV> {
 
             let section_bits_set = new_type.as_usize() << section_offset;
             let section_bits_nonset = section_value & !(BV::MASK << section_offset);
-
             sections_read.upgrade()[section_index] = section_bits_set | section_bits_nonset;
         }
 

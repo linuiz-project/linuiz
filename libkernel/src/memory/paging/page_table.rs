@@ -44,20 +44,20 @@ where
         }
     }
 
-    pub fn iter(&self) -> core::slice::Iter<PageTableEntry> {
-        self.entries.iter()
-    }
-
-    pub fn iter_mut(&mut self) -> core::slice::IterMut<PageTableEntry> {
-        self.entries.iter_mut()
-    }
-
     pub fn get_entry(&self, index: usize) -> &PageTableEntry {
         &self.entries[index]
     }
 
     pub fn get_entry_mut(&mut self, index: usize) -> &mut PageTableEntry {
         &mut self.entries[index]
+    }
+
+    pub fn iter(&self) -> core::slice::Iter<PageTableEntry> {
+        self.entries.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> core::slice::IterMut<PageTableEntry> {
+        self.entries.iter_mut()
     }
 }
 
@@ -109,11 +109,11 @@ where
         );
 
         let entry = self.get_entry_mut(index);
-        let frame = entry.frame().unwrap_or({
-            trace!("Allocating frame for previously nonpresent entry.");
+        let frame = entry.frame().unwrap_or_else(|| {
             let alloc_frame = crate::memory::global_memory()
                 .lock_next()
                 .expect("failed to allocate a frame for new page table");
+            trace!("Allocated frame for nonpresent entry: {:?}", alloc_frame);
 
             entry.set(
                 &alloc_frame,

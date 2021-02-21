@@ -33,7 +33,7 @@ impl PageTableEntry {
 
     pub fn frame(&self) -> Option<Frame> {
         if self.is_present() {
-            Some(Frame::from_addr(PhysAddr::new_truncate(
+            Some(Frame::from_addr(PhysAddr::new(
                 self.0 & 0x000FFFFF_FFFFF000,
             )))
         } else {

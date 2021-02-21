@@ -48,8 +48,8 @@ impl VirtualAddressor {
     }
 
     fn get_page_entry(&self, page: &Page) -> Option<&PageTableEntry> {
-        let offset = self.mapped_page.addr();
         let addr = (page.addr_u64() >> 12) as usize;
+        let offset = self.mapped_page.addr();
 
         unsafe {
             self.pml4()
@@ -61,8 +61,8 @@ impl VirtualAddressor {
     }
 
     fn get_page_entry_mut(&mut self, page: &Page) -> Option<&mut PageTableEntry> {
-        let offset = self.mapped_page.addr();
         let addr = (page.addr_u64() >> 12) as usize;
+        let offset = self.mapped_page.addr();
 
         unsafe {
             self.pml4_mut()
@@ -74,8 +74,8 @@ impl VirtualAddressor {
     }
 
     fn get_page_entry_create(&mut self, page: &Page) -> &mut PageTableEntry {
-        let offset = self.mapped_page.addr();
         let addr = (page.addr_u64() >> 12) as usize;
+        let offset = self.mapped_page.addr();
 
         unsafe {
             self.pml4_mut()
@@ -92,18 +92,19 @@ impl VirtualAddressor {
             "attempted to map already mapped page: {:?}",
             page
         );
+        {
+            let entry = self.get_page_entry_create(page);
+            if entry.is_present() {
+                crate::instructions::tlb::invalidate(page);
+            }
 
-        let entry = self.get_page_entry_create(page);
-        if entry.is_present() {
-            crate::instructions::tlb::invalidate(page);
+            entry.set(&frame, PageAttributes::PRESENT | PageAttributes::WRITABLE);
+            trace!("Mapped {:?}: {:?}", page, entry);
         }
-
-        entry.set(&frame, PageAttributes::PRESENT | PageAttributes::WRITABLE);
-        debug!("Mapped {:?}: {:?}", page, entry);
 
         assert!(
             self.is_mapped_to(page, frame),
-            "failed to properly map entry: {:?}",
+            "failed to map page: {:?}",
             self.get_page_entry(page)
         );
     }
@@ -123,7 +124,7 @@ impl VirtualAddressor {
 
         assert!(
             !self.is_mapped(page.addr()),
-            "failed to unmap entry: {:?}",
+            "failed to unmap: {:?}",
             self.get_page_entry(page)
         );
     }
@@ -141,7 +142,7 @@ impl VirtualAddressor {
 
     pub fn is_mapped_to(&self, page: &Page, frame: &Frame) -> bool {
         match self.get_page_entry(page).and_then(|entry| entry.frame()) {
-            Some(entry_frame) => frame == &entry_frame,
+            Some(entry_frame) => frame.index() == entry_frame.index(),
             None => false,
         }
     }
@@ -162,5 +163,33 @@ impl VirtualAddressor {
     #[inline(always)]
     pub unsafe fn swap_into(&self) {
         crate::registers::CR3::write(&self.pml4_frame, crate::registers::CR3Flags::empty());
+    }
+
+    #[cfg(debug_assertions)]
+    pub unsafe fn pretty_log(&self) {
+        let offset = self.mapped_page.addr();
+        let pml4 = self.pml4();
+
+        info!("PML4");
+        for (p4_index, p4_entry) in pml4.iter().enumerate().filter(|tuple| tuple.1.is_present()) {
+            info!("4 {:?}", p4_entry);
+
+            let p3 = pml4.sub_table(p4_index, offset).unwrap();
+            for (p3_index, p3_entry) in p3.iter().enumerate().filter(|tuple| tuple.1.is_present()) {
+                info!("  3 {:?}", p3_entry);
+
+                let p2 = p3.sub_table(p3_index, offset).unwrap();
+                for (p2_index, p2_entry) in
+                    p2.iter().enumerate().filter(|tuple| tuple.1.is_present())
+                {
+                    info!("    2 {:?}", p2_entry);
+
+                    let p1 = p2.sub_table(p2_index, offset).unwrap();
+                    for p1_entry in p1.iter().filter(|entry| entry.is_present()) {
+                        info!("      1 {:?}", p1_entry);
+                    }
+                }
+            }
+        }
     }
 }
