@@ -630,16 +630,17 @@ impl BlockAllocator {
 
         let map_len = self.map.read().len();
         if map_len <= frame.index() {
-            self.grow(((frame.index() - map_len) + 1) * 0x8000);
+            self.grow(((frame.index() - map_len) + 1) * BlockPage::BLOCK_COUNT);
         }
 
         let block_page = &mut self.map.write()[frame.index()];
 
         assert!(
             block_page.is_empty(),
-            "attempting to identity map page with previously allocated blocks: {:?} (map? {})",
+            "attempting to identity map page with previously allocated blocks: {:?} (map? {})\n {:?}",
             frame,
-            map
+            map,
+            block_page
         );
         block_page.set_full();
 
@@ -677,13 +678,6 @@ impl BlockAllocator {
                     offset
                 );
             }
-
-            // if map_read.len() > 5786 {
-            //     for index in 5786..9875 {
-            //         map_read[index].set_full();
-            //     }
-            //     loop {}
-            // }
 
             const BLOCK_PAGES_PER_FRAME: usize = 0x1000 / size_of::<BlockPage>();
             let new_map_len = new_page_offset * BLOCK_PAGES_PER_FRAME;

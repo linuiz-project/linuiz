@@ -1,7 +1,7 @@
 use core::marker::PhantomData;
 use spin::RwLock;
 
-pub trait BitValue {
+pub trait BitValue: Eq {
     const BIT_WIDTH: usize;
     const MASK: usize;
 
@@ -11,21 +11,21 @@ pub trait BitValue {
 
 pub struct RwBitArray<'arr, BV>
 where
-    BV: BitValue + Eq,
+    BV: BitValue,
 {
     array: RwLock<&'arr mut [usize]>,
     phantom: PhantomData<BV>,
 }
 
-impl<'arr, BV: BitValue + Eq + core::fmt::Debug> RwBitArray<'arr, BV> {
-    const SECTION_SIZE: usize = core::mem::size_of::<usize>() * 8;
+impl<'arr, BV: BitValue + core::fmt::Debug> RwBitArray<'arr, BV> {
+    const SECTION_LEN: usize = core::mem::size_of::<usize>() * 8;
 
     pub const fn length_hint(element_count: usize) -> usize {
-        (element_count * BV::BIT_WIDTH) / Self::SECTION_SIZE
+        (element_count * BV::BIT_WIDTH) / Self::SECTION_LEN
     }
 
     pub fn from_slice(slice: &'arr mut [usize]) -> Self {
-        slice.iter_mut().for_each(|section| *section = 0);
+        slice.fill(0);
 
         Self {
             array: RwLock::new(slice),
@@ -34,7 +34,7 @@ impl<'arr, BV: BitValue + Eq + core::fmt::Debug> RwBitArray<'arr, BV> {
     }
 
     pub fn len(&self) -> usize {
-        (self.array.read().len() * Self::SECTION_SIZE) / BV::BIT_WIDTH
+        self.array.read().len() * (Self::SECTION_LEN / BV::BIT_WIDTH)
     }
 
     pub fn get(&self, index: usize) -> BV {
@@ -44,8 +44,8 @@ impl<'arr, BV: BitValue + Eq + core::fmt::Debug> RwBitArray<'arr, BV> {
         );
 
         let bit_index = index * BV::BIT_WIDTH;
-        let section_index = bit_index / Self::SECTION_SIZE;
-        let section_offset = bit_index % Self::SECTION_SIZE;
+        let section_index = bit_index / Self::SECTION_LEN;
+        let section_offset = bit_index % Self::SECTION_LEN;
         let section_value = self.array.read()[section_index];
 
         BV::from_usize((section_value >> section_offset) & BV::MASK)
@@ -58,8 +58,8 @@ impl<'arr, BV: BitValue + Eq + core::fmt::Debug> RwBitArray<'arr, BV> {
         );
 
         let bit_index = index * BV::BIT_WIDTH;
-        let section_index = bit_index / Self::SECTION_SIZE;
-        let section_offset = bit_index % Self::SECTION_SIZE;
+        let section_index = bit_index / Self::SECTION_LEN;
+        let section_offset = bit_index % Self::SECTION_LEN;
 
         let sections_read = self.array.upgradeable_read();
         let section_value = sections_read[section_index];
@@ -77,8 +77,8 @@ impl<'arr, BV: BitValue + Eq + core::fmt::Debug> RwBitArray<'arr, BV> {
         );
 
         let bit_index = index * BV::BIT_WIDTH;
-        let section_index = bit_index / Self::SECTION_SIZE;
-        let section_offset = bit_index % Self::SECTION_SIZE;
+        let section_index = bit_index / Self::SECTION_LEN;
+        let section_offset = bit_index % Self::SECTION_LEN;
 
         let sections_read = self.array.upgradeable_read();
         let section_value = sections_read[section_index];
@@ -100,13 +100,13 @@ impl<'arr, BV: BitValue + Eq + core::fmt::Debug> RwBitArray<'arr, BV> {
     }
 
     pub fn set_eq_next(&self, new_type: BV, eq_type: BV) -> Option<usize> {
-        let elements_per_section = (core::mem::size_of::<usize>() * 8) / BV::BIT_WIDTH;
+        let elements_per_section = Self::SECTION_LEN / BV::BIT_WIDTH;
 
         for (index, section) in self.array.write().iter_mut().enumerate() {
             for inner_index in 0..elements_per_section {
                 let offset = inner_index * BV::BIT_WIDTH;
-
                 let section_deref = *section;
+
                 if BV::from_usize((section_deref >> offset) & BV::MASK) == eq_type {
                     let section_bits_set = new_type.as_usize() << offset;
                     let section_bits_nonset = section_deref & !(BV::MASK << offset);
@@ -120,11 +120,21 @@ impl<'arr, BV: BitValue + Eq + core::fmt::Debug> RwBitArray<'arr, BV> {
         None
     }
 
-    #[cfg(debug_assertions)]
+    // #[cfg(debug_assertions)]
     pub fn debug_log_elements(&self) {
+        let mut run = 0;
+        let mut last_value = BV::from_usize(0);
         for section in self.array.read().iter().map(|section| *section) {
             for offset in (0..(core::mem::size_of::<usize>() * 8)).step_by(BV::BIT_WIDTH) {
-                debug!("{:?}", BV::from_usize((section >> offset) & BV::MASK));
+                let value = BV::from_usize((section >> offset) & BV::MASK);
+
+                if value == last_value {
+                    run += 1;
+                } else {
+                    debug!("{:?}: {}", last_value, run);
+                    last_value = value;
+                    run = 0;
+                }
             }
         }
     }

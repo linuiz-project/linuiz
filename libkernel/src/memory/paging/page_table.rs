@@ -73,42 +73,42 @@ where
     pub unsafe fn sub_table(
         &self,
         index: usize,
-        offset: VirtAddr,
+        phys_mapped_addr: VirtAddr,
     ) -> Option<&PageTable<L::NextLevel>> {
         trace!(
             "Accessing sub-table (ref): index {}, offset {:?}",
             index,
-            offset
+            phys_mapped_addr
         );
         self.get_entry(index)
             .frame()
-            .map(|frame| &*(offset + frame.addr_u64()).as_ptr())
+            .map(|frame| &*(phys_mapped_addr + frame.addr_u64()).as_ptr())
     }
 
     pub unsafe fn sub_table_mut(
         &mut self,
         index: usize,
-        offset: VirtAddr,
+        phys_mapped_addr: VirtAddr,
     ) -> Option<&mut PageTable<L::NextLevel>> {
         trace!(
             "Accessing sub-table (mut): index {}, offset {:?}",
             index,
-            offset
+            phys_mapped_addr
         );
         self.get_entry_mut(index)
             .frame()
-            .map(|frame| &mut *(offset + frame.addr_u64()).as_mut_ptr())
+            .map(|frame| &mut *(phys_mapped_addr + frame.addr_u64()).as_mut_ptr())
     }
 
     pub unsafe fn sub_table_create(
         &mut self,
         index: usize,
-        offset: VirtAddr,
+        phys_mapped_addr: VirtAddr,
     ) -> &mut PageTable<L::NextLevel> {
         trace!(
             "Accessing sub-table (create): index {}, offset {:?}",
             index,
-            offset
+            phys_mapped_addr
         );
         let entry = self.get_entry_mut(index);
         let (frame, created) = match entry.frame() {
@@ -129,13 +129,13 @@ where
             }
         };
 
-        let table_ptr: &mut PageTable<L::NextLevel> =
-            &mut *(offset + frame.addr_u64()).as_mut_ptr();
+        let sub_table: &mut PageTable<L::NextLevel> =
+            &mut *(phys_mapped_addr + frame.addr_u64()).as_mut_ptr();
 
         if created {
-            table_ptr.clear()
+            sub_table.clear()
         }
 
-        table_ptr
+        sub_table
     }
 }

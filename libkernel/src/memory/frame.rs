@@ -19,7 +19,7 @@ impl Frame {
     pub fn from_addr(phys_addr: PhysAddr) -> Self {
         let addr_usize = phys_addr.as_u64() as usize;
 
-        if (addr_usize & !0x000FFFFF_FFFFF000) > 0 {
+        if (addr_usize & 0xFFF) > 0 {
             panic!("frame address format is invalid: {:?}", phys_addr)
         }
 

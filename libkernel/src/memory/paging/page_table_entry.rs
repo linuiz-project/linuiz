@@ -33,28 +33,12 @@ impl PageTableEntry {
 
     pub fn frame(&self) -> Option<Frame> {
         if self.is_present() {
-            Some(Frame::from_addr(PhysAddr::new(
+            Some(Frame::from_addr(PhysAddr::new_truncate(
                 self.0 & 0x000FFFFF_FFFFF000,
             )))
         } else {
             None
         }
-    }
-
-    pub fn frame_create(&mut self) -> Frame {
-        self.frame().unwrap_or_else(|| {
-            trace!("Allocating frame for previously nonpresent entry.");
-            let alloc_frame = crate::memory::global_memory()
-                .lock_next()
-                .expect("failed to allocate a frame for new page table");
-
-            self.set(
-                &alloc_frame,
-                PageAttributes::PRESENT | PageAttributes::WRITABLE,
-            );
-
-            alloc_frame
-        })
     }
 
     pub fn set(&mut self, frame: &Frame, attribs: PageAttributes) {
@@ -66,7 +50,7 @@ impl PageTableEntry {
     }
 
     pub fn set_nonpresent(&mut self) {
-        self.0 &= !PageAttributes::PRESENT.bits();
+        self.0 ^= PageAttributes::PRESENT.bits();
     }
 }
 

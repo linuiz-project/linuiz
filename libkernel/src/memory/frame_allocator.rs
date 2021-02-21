@@ -227,4 +227,9 @@ impl<'arr> FrameAllocator<'arr> {
             callback(index, self.memory_map.get(index));
         }
     }
+
+    // #[cfg(debug_assertions)]
+    pub fn debug_log_elements(&self) {
+        self.memory_map.debug_log_elements();
+    }
 }
