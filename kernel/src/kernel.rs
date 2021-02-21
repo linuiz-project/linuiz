@@ -82,7 +82,13 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor, ConfigT
             .iter()
             .filter(|descriptor| descriptor.should_reserve())
             .for_each(|descriptor| {
-                libkernel::memory::global_memory().reserve_frames(descriptor.frame_iter())
+                if descriptor.is_stack_descriptor() {
+                    libkernel::memory::global_memory()
+                        .reserve_stack(descriptor.frame_iter())
+                        .unwrap();
+                } else {
+                    libkernel::memory::global_memory().reserve_frames(descriptor.frame_iter());
+                }
             });
 
         // `boot_info` will not be usable after initalizing the global allocator,

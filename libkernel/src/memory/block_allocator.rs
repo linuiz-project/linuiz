@@ -273,10 +273,6 @@ impl BlockAllocator {
     pub fn init(&self, stack_descriptor: &crate::memory::UEFIMemoryDescriptor) {
         use crate::memory::{global_memory, FrameType};
 
-        debug!("Initializing global memory and mapping all frame allocator frames.");
-        // TODO do this global memory init in a static / global context
-        //  (allocators can't be considered global from the system's perspective)
-
         unsafe {
             if self
                 .addressor
@@ -294,10 +290,14 @@ impl BlockAllocator {
             );
         }
 
+        debug!("Identity mapping all reserved global memory frames.");
         self.with_addressor(|addressor| {
             global_memory().iter_callback(|index, frame_type| match frame_type {
                 FrameType::Reserved | FrameType::Stack => {
-                    self.identity_map(&Frame::from_index(index), false);
+                    if frame_type == FrameType::Stack {
+                        info!("MAPPING STACK {:?}", index);
+                    }
+                    addressor.identity_map(&Frame::from_index(index));
                 }
                 _ => {}
             });
@@ -322,7 +322,7 @@ impl BlockAllocator {
             _ => {}
         });
 
-        debug!("Allocating stack mappings.");
+        debug!("Allocating space for moving stack.");
         unsafe {
             let cur_stack_base = stack_descriptor.phys_start.as_u64();
             let stack_ptr = self.alloc_to(stack_descriptor.frame_iter()) as u64;
@@ -336,6 +336,7 @@ impl BlockAllocator {
 
         self.with_addressor(|addressor| {
             for frame in stack_descriptor.frame_iter() {
+                info!("stack frame: {:?}", frame);
                 addressor.unmap(&Page::from_index(frame.index()));
             }
         });
@@ -656,9 +657,10 @@ impl BlockAllocator {
         let new_page_offset =
             cur_page_offset + crate::align_up_div(required_blocks, BLOCKS_PER_MAP_PAGE);
 
-        debug!(
+        trace!(
             "Growing map: {}..{} pages",
-            cur_page_offset, new_page_offset
+            cur_page_offset,
+            new_page_offset
         );
 
         self.with_addressor(|addressor| {
@@ -681,7 +683,7 @@ impl BlockAllocator {
                 "map must be page-aligned"
             );
 
-            debug!("Grew map (new size: {} block pages).", new_map_len);
+            trace!("Grew map (new size: {} block pages).", new_map_len);
             map_read.upgrade().resize(new_map_len, BlockPage::empty());
             trace!("Successfully grew allocator map.");
         });

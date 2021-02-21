@@ -103,7 +103,7 @@ impl VirtualAddressor {
     }
 
     pub fn unmap(&mut self, page: &Page) {
-        if !self.is_mapped(page.addr()) {
+        if self.is_mapped(page.addr()) {
             let entry = self.get_page_entry_create(page);
             crate::instructions::tlb::invalidate(page);
 
@@ -142,7 +142,6 @@ impl VirtualAddressor {
         let total_memory_pages = global_memory().total_memory() / 0x1000;
         for index in 0..total_memory_pages {
             let offset_page = page.offset(index);
-            info!("Mapping index: {:?}", offset_page);
             self.map(&offset_page, &Frame::from_index(index));
         }
 

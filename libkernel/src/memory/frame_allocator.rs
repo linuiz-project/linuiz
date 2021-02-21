@@ -192,7 +192,7 @@ impl<'arr> FrameAllocator<'arr> {
                 memory.free_memory -= 0x1000;
                 memory.reserved_memory += 0x1000;
 
-                trace!("Reserved frame: {:?}", frame);
+                trace!("Reserved stack frame: {:?}", frame);
             } else {
                 return Err(FrameAllocationError::NotUnallocated);
             }
@@ -214,15 +214,16 @@ impl<'arr> FrameAllocator<'arr> {
         }
     }
 
+    // TODO return result on all frameas
     pub unsafe fn reserve_frames(&self, frames: FrameIterator) {
         for frame in frames {
             self.reserve_frame(&frame).expect("failed to reserve frame");
         }
     }
 
-    pub fn iter_callback<F>(&self, callback: F)
+    pub fn iter_callback<F>(&self, mut callback: F)
     where
-        F: Fn(usize, FrameType),
+        F: FnMut(usize, FrameType),
     {
         for index in 0..self.memory_map.len() {
             callback(index, self.memory_map.get(index));
