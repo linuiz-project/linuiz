@@ -3,7 +3,6 @@ use crate::{
     memory::{paging::VirtualAddressor, Frame, FrameIterator, Page},
     SYSTEM_SLICE_SIZE,
 };
-use alloc::vec::Vec;
 use core::{
     mem::size_of,
     sync::atomic::{AtomicU64, Ordering},
@@ -167,12 +166,12 @@ impl core::fmt::Debug for SectionState {
 
 /// Allocator utilizing blocks of memory, in size of 16 bytes per block, to
 ///  easily and efficiently allocate.
-pub struct BlockAllocator {
+pub struct BlockAllocator<'map> {
     addressor: Mutex<core::lazy::OnceCell<VirtualAddressor>>,
-    map: RwLock<Vec<BlockPage>>,
+    map: RwLock<&'map mut [BlockPage]>,
 }
 
-impl BlockAllocator {
+impl BlockAllocator<'_> {
     /// The size of an allocator block.
     pub const BLOCK_SIZE: usize = 16;
 
@@ -249,11 +248,14 @@ impl BlockAllocator {
         0xFFFFFFFFFFFFFFFF,
     ];
 
+    #[allow(const_item_mutation)]
     pub const fn new() -> Self {
+        const EMPTY: [BlockPage; 0] = [];
+
         Self {
             // TODO make addressor use a RwLock
             addressor: Mutex::new(core::lazy::OnceCell::new()),
-            map: RwLock::new(Vec::new()),
+            map: RwLock::new(&mut EMPTY),
         }
     }
 
@@ -280,12 +282,6 @@ impl BlockAllocator {
                     .set(VirtualAddressor::new(Page::null()))
                     .is_ok(),
                 "addressor has already been set for allocator"
-            );
-
-            *self.map.write() = Vec::from_raw_parts(
-                Self::ALLOCATOR_BASE.mut_ptr(),
-                0,
-                SYSTEM_SLICE_SIZE / size_of::<BlockPage>(),
             );
         }
 
@@ -634,7 +630,7 @@ impl BlockAllocator {
         }
 
         let block_page = &mut self.map.write()[frame.index()];
-
+        block_page.set_empty();
         assert!(
             block_page.is_empty(),
             "attempting to identity map page with previously allocated blocks: {:?} (map? {})\n {:?}",
@@ -650,12 +646,13 @@ impl BlockAllocator {
     }
 
     pub fn grow(&self, required_blocks: usize) {
-        assert!(required_blocks > 0, "calls to grow much be nonzero");
+        assert!(required_blocks > 0, "calls to grow must be nonzero");
 
         trace!("Growing map to faciliate {} blocks.", required_blocks);
         const BLOCKS_PER_MAP_PAGE: usize = 8 /* bits per byte */ * 0x1000;
         let map_read = self.map.upgradeable_read();
-        let cur_page_offset = (map_read.len() * BlockPage::BLOCK_COUNT) / BLOCKS_PER_MAP_PAGE;
+        let cur_map_len = map_read.len();
+        let cur_page_offset = (cur_map_len * BlockPage::BLOCK_COUNT) / BLOCKS_PER_MAP_PAGE;
         let new_page_offset =
             cur_page_offset + crate::align_up_div(required_blocks, BLOCKS_PER_MAP_PAGE);
 
@@ -672,7 +669,7 @@ impl BlockAllocator {
                     &crate::memory::global_memory().lock_next().unwrap(),
                 );
 
-                assert!(
+                debug_assert!(
                     addressor.is_mapped(map_page.addr()),
                     "mapping allocator base offset page failed (offset {})",
                     offset
@@ -688,12 +685,19 @@ impl BlockAllocator {
                 "map must be page-aligned"
             );
 
+            let mut map_write = map_read.upgrade();
+            *map_write = unsafe {
+                &mut *core::ptr::slice_from_raw_parts_mut(
+                    Self::ALLOCATOR_BASE.mut_ptr(),
+                    new_map_len,
+                )
+            };
+            map_write[cur_map_len..].fill(BlockPage::empty());
+
             debug!(
                 "Grew map: {} pages, {} block pages.",
                 new_page_offset, new_map_len
             );
-            map_read.upgrade().resize(new_map_len, BlockPage::empty());
-            trace!("Successfully grew allocator map.");
         });
     }
 
@@ -706,7 +710,7 @@ impl BlockAllocator {
     }
 }
 
-unsafe impl core::alloc::GlobalAlloc for BlockAllocator {
+unsafe impl core::alloc::GlobalAlloc for BlockAllocator<'_> {
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
         self.raw_alloc(layout)
     }

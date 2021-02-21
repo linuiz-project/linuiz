@@ -119,7 +119,7 @@ impl<'arr, BV: BitValue + core::fmt::Debug> RwBitArray<'arr, BV> {
         None
     }
 
-    // #[cfg(debug_assertions)]
+    #[cfg(debug_assertions)]
     pub fn debug_log_elements(&self) {
         let mut run = 0;
         let mut last_value = BV::from_usize(0);

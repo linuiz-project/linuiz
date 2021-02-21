@@ -97,8 +97,6 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor, ConfigT
                 }
             });
 
-        libkernel::memory::global_memory().debug_log_elements();
-
         info!("Initializing global allocator.");
         // `boot_info` will not be usable after initalizing the global allocator,
         //  due to the stack being moved in virtual memory.

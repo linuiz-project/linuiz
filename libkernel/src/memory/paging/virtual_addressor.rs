@@ -87,7 +87,7 @@ impl VirtualAddressor {
     }
 
     pub fn map(&mut self, page: &Page, frame: &Frame) {
-        assert!(
+        debug_assert!(
             !self.is_mapped(page.addr()),
             "attempted to map already mapped page: {:?}",
             page
@@ -102,7 +102,7 @@ impl VirtualAddressor {
             trace!("Mapped {:?}: {:?}", page, entry);
         }
 
-        assert!(
+        debug_assert!(
             self.is_mapped_to(page, frame),
             "failed to map page: {:?}",
             self.get_page_entry(page)
@@ -110,7 +110,7 @@ impl VirtualAddressor {
     }
 
     pub fn unmap(&mut self, page: &Page) {
-        assert!(
+        debug_assert!(
             self.is_mapped(page.addr()),
             "attempted to unmap already unmapped page: {:?}",
             page
@@ -122,7 +122,7 @@ impl VirtualAddressor {
         entry.set_nonpresent();
         trace!("Unmapped {:?}: {:?}", page, entry);
 
-        assert!(
+        debug_assert!(
             !self.is_mapped(page.addr()),
             "failed to unmap: {:?}",
             self.get_page_entry(page)

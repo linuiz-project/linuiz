@@ -236,7 +236,7 @@ impl<'arr> FrameAllocator<'arr> {
         }
     }
 
-    // #[cfg(debug_assertions)]
+    #[cfg(debug_assertions)]
     pub fn debug_log_elements(&self) {
         self.memory_map.debug_log_elements();
     }
