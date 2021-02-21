@@ -25,17 +25,17 @@ impl BlockPage {
 
     /// An empty block page (all blocks zeroed).
     const fn empty() -> Self {
-        const ATOMIC_U64_ZERO: AtomicU64 = AtomicU64::new(0);
+        const ATOMIC_U64_MIN: AtomicU64 = AtomicU64::new(u64::MIN);
 
         Self {
-            sections: [ATOMIC_U64_ZERO; Self::SECTION_COUNT],
+            sections: [ATOMIC_U64_MIN; Self::SECTION_COUNT],
         }
     }
 
     /// Whether the block page is empty.
     pub fn is_empty(&self) -> bool {
         self.iter()
-            .all(|section| section.load(Ordering::Acquire) == 0)
+            .all(|section| section.load(Ordering::Acquire) == u64::MIN)
     }
 
     /// Whether the block page is full.
@@ -47,7 +47,7 @@ impl BlockPage {
     /// Unset all of the block page's blocks.
     pub fn set_empty(&mut self) {
         self.iter_mut()
-            .for_each(|section| section.store(0, Ordering::Release));
+            .for_each(|section| section.store(u64::MIN, Ordering::Release));
     }
 
     /// Set all of the block page's blocks.
@@ -353,7 +353,7 @@ impl BlockAllocator {
             MINIMUM_ALIGNMENT
         };
 
-        trace!(
+        debug!(
             "Allocation requested: {} bytes, aligned by {}",
             layout.size(),
             alignment
@@ -566,8 +566,12 @@ impl BlockAllocator {
         (bit_count, Self::MASK_MAP[bit_count - 1] << bit_offset)
     }
 
+    /// Allocates a region of memory pointing to the frame region indicated by
+    ///  given the iterator.
+    ///
+    /// This function assumed the frames are already locked or otherwise valid.
     pub fn alloc_to(&self, mut frames: FrameIterator) -> *mut u8 {
-        trace!("Allocation requested to: {} frames", frames.remaining());
+        debug!("Allocation requested to: {} frames", frames.remaining());
         let size_in_frames = frames.remaining();
         let (mut map_index, mut current_run);
 
@@ -622,7 +626,7 @@ impl BlockAllocator {
     }
 
     pub fn identity_map(&self, frame: &Frame, map: bool) {
-        trace!("Identity mapping requested: {:?}", frame);
+        debug!("Identity mapping requested: {:?}", frame);
 
         let map_len = self.map.read().len();
         if map_len <= frame.index() {
@@ -633,7 +637,9 @@ impl BlockAllocator {
 
         assert!(
             block_page.is_empty(),
-            "attempting to identity map page with previously allocated blocks"
+            "attempting to identity map page with previously allocated blocks: {:?} (map? {})",
+            frame,
+            map
         );
         block_page.set_full();
 
@@ -647,7 +653,7 @@ impl BlockAllocator {
 
         trace!("Growing map to faciliate {} blocks.", required_blocks);
         const BLOCKS_PER_MAP_PAGE: usize = 8 /* bits per byte */ * 0x1000;
-        let mut map_read = self.map.write();
+        let map_read = self.map.upgradeable_read();
         let cur_page_offset = (map_read.len() * BlockPage::BLOCK_COUNT) / BLOCKS_PER_MAP_PAGE;
         let new_page_offset =
             cur_page_offset + crate::align_up_div(required_blocks, BLOCKS_PER_MAP_PAGE);
@@ -672,17 +678,12 @@ impl BlockAllocator {
                 );
             }
 
-            if map_read.len() > 5786 {
-                let block_page = &mut map_read[5786];
-
-                let ptr = block_page as *mut _ as *mut usize;
-
-                unsafe {
-                    core::ptr::write_bytes(ptr, 176, 10000);
-                }
-
-                loop {}
-            }
+            // if map_read.len() > 5786 {
+            //     for index in 5786..9875 {
+            //         map_read[index].set_full();
+            //     }
+            //     loop {}
+            // }
 
             const BLOCK_PAGES_PER_FRAME: usize = 0x1000 / size_of::<BlockPage>();
             let new_map_len = new_page_offset * BLOCK_PAGES_PER_FRAME;
@@ -697,7 +698,7 @@ impl BlockAllocator {
                 "Grew map: {} pages, {} block pages.",
                 new_page_offset, new_map_len
             );
-            map_read.resize(new_map_len, BlockPage::empty());
+            map_read.upgrade().resize(new_map_len, BlockPage::empty());
             trace!("Successfully grew allocator map.");
         });
     }

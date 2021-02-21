@@ -51,6 +51,7 @@ pub unsafe fn init_global_memory(memory_map: &[crate::memory::UEFIMemoryDescript
     let frame_alloc_frame_count = FrameAllocator::frame_count_hint(total_memory);
     let frame_alloc_ptr = memory_map
         .iter()
+        .filter(|descriptor| descriptor.ty == crate::memory::UEFIMemoryType::CONVENTIONAL)
         .find(|descriptor| descriptor.page_count >= (frame_alloc_frame_count as u64))
         .map(|descriptor| descriptor.phys_start.as_u64() as *mut _)
         .expect("failed to find viable memory descriptor for memory map.");

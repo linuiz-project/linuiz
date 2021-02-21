@@ -34,8 +34,8 @@ impl BitValue for FrameType {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameAllocationError {
-    NotAllocated,
-    NotUnallocated,
+    NotAllocated(usize),
+    NotUnallocated(usize),
 }
 
 struct FrameAllocatorMemory {
@@ -61,7 +61,7 @@ impl<'arr> FrameAllocator<'arr> {
         let frame_count = total_memory / 0x1000;
         crate::align_up_div(
             // each index of a RwBitArray is a `usize`, so multiply the index count with the `size_of` a `usize`
-            RwBitArray::<FrameType>::length_hint(frame_count) * core::mem::size_of::<usize>(),
+            (frame_count * FrameType::BIT_WIDTH) / 8, /* 8 bits per byte */
             // divide total RwBitArray memory size by frame size to get total frame count
             0x1000,
         )
@@ -93,12 +93,10 @@ impl<'arr> FrameAllocator<'arr> {
         };
 
         let base_frame = Frame::from_addr(x86_64::PhysAddr::new(base_ptr as u64));
-        let bitarray_frames = Frame::range_count(base_frame, Self::frame_count_hint(total_memory));
-
-        // reserve null frame
-        this.reserve_frame(&Frame::null()).unwrap();
-        // reserve bitarray frames
-        this.reserve_frames(bitarray_frames);
+        this.reserve_frames(Frame::range_count(
+            base_frame,
+            Self::frame_count_hint(total_memory),
+        ));
 
         this
     }
@@ -132,7 +130,7 @@ impl<'arr> FrameAllocator<'arr> {
             trace!("Freed frame: {:?}", frame);
             Ok(())
         } else {
-            Err(FrameAllocationError::NotAllocated)
+            Err(FrameAllocationError::NotAllocated(frame.index()))
         }
     }
 
@@ -148,7 +146,7 @@ impl<'arr> FrameAllocator<'arr> {
             trace!("Locked frame: {:?}", frame);
             Ok(())
         } else {
-            Err(FrameAllocationError::NotUnallocated)
+            Err(FrameAllocationError::NotUnallocated(frame.index()))
         }
     }
 
@@ -178,7 +176,7 @@ impl<'arr> FrameAllocator<'arr> {
             trace!("Reserved frame: {:?}", frame);
             Ok(())
         } else {
-            Err(FrameAllocationError::NotUnallocated)
+            Err(FrameAllocationError::NotUnallocated(frame.index()))
         }
     }
 
@@ -194,7 +192,7 @@ impl<'arr> FrameAllocator<'arr> {
 
                 trace!("Reserved stack frame: {:?}", frame);
             } else {
-                return Err(FrameAllocationError::NotUnallocated);
+                return Err(FrameAllocationError::NotUnallocated(frame.index()));
             }
         }
 

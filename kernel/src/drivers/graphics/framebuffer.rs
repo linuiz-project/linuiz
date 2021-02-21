@@ -13,7 +13,7 @@ pub struct FramebufferDriver<'fbuf, 'bbuf> {
 
 impl<'fbuf, 'bbuf> FramebufferDriver<'fbuf, 'bbuf> {
     pub fn init(buffer_addr: libkernel::PhysAddr, dimensions: Size) -> Self {
-        let pixel_len = dimensions.width * dimensions.height;
+        let pixel_len = dimensions.len();
         let byte_len = pixel_len * core::mem::size_of::<Color8i>();
 
         let framebuffer = unsafe {
@@ -47,8 +47,8 @@ impl<'fbuf, 'bbuf> FramebufferDriver<'fbuf, 'bbuf> {
     pub fn write_pixel(&self, xy: (usize, usize), color: Color8i) {
         let dimensions = self.dimensions();
 
-        if xy.0 < dimensions.width && xy.1 < dimensions.height {
-            let index = xy.0 + (xy.1 * dimensions.width);
+        if xy.0 < dimensions.width() && xy.1 < dimensions.height() {
+            let index = xy.0 + (xy.1 * dimensions.width());
             self.backbuffer.write()[index] = color;
         } else {
             panic!("given coordinates are outside framebuffer");
@@ -76,8 +76,7 @@ impl<'fbuf, 'bbuf> FramebufferDriver<'fbuf, 'bbuf> {
     }
 
     pub fn pixel_len(&self) -> usize {
-        let dimensions = self.dimensions();
-        dimensions.width * dimensions.height
+        self.dimensions().len()
     }
 
     pub fn byte_len(&self) -> usize {

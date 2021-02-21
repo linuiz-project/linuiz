@@ -57,17 +57,49 @@ fn alloc_error(error: core::alloc::Layout) -> ! {
 }
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy)]
 pub struct FramebufferPointer {
-    pub pointer: *mut u8,
-    pub size: Size,
+    ptr: *mut u8,
+    size: Size,
+}
+
+impl FramebufferPointer {
+    pub fn new(ptr: *mut u8, size: Size) -> Self {
+        Self { ptr, size }
+    }
+
+    pub const fn addr(&self) -> PhysAddr {
+        PhysAddr::new_truncate(unsafe { self.ptr as u64 })
+    }
+
+    pub const fn size(&self) -> Size {
+        self.size
+    }
 }
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Size {
-    pub width: usize,
-    pub height: usize,
+    width: usize,
+    height: usize,
+}
+
+impl Size {
+    pub fn new(width: usize, height: usize) -> Self {
+        Self { width, height }
+    }
+
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
+    pub fn height(&self) -> usize {
+        self.height
+    }
+
+    pub fn len(&self) -> usize {
+        self.width() * self.height()
+    }
 }
 
 #[repr(C)]

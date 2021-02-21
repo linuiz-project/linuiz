@@ -77,7 +77,6 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor, ConfigT
 
         libkernel::memory::init_global_memory(memory_map);
 
-        info!("{:?}", boot_info.framebuffer_pointer());
         debug!("Reserving frames from relevant UEFI memory descriptors.");
         memory_map
             .iter()
@@ -129,8 +128,8 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor, ConfigT
 
     info!("Initializing framebuffer driver.");
     let mut framebuffer_driver = drivers::graphics::framebuffer::FramebufferDriver::init(
-        libkernel::PhysAddr::new(framebuffer_pointer.pointer as u64),
-        framebuffer_pointer.size,
+        framebuffer_pointer.addr(),
+        framebuffer_pointer.size(),
     );
 
     let mut vecc = alloc::vec![0usize; 50];
