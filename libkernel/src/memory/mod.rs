@@ -2,21 +2,20 @@ mod block_allocator;
 mod frame;
 mod frame_allocator;
 mod global_memory;
-mod mmio;
 mod page;
 mod uefi;
 
 #[cfg(feature = "kernel_impls")]
 mod global_allocator;
 
-pub mod paging;
 pub use block_allocator::*;
 pub use frame::*;
 pub use frame_allocator::*;
 pub use global_memory::*;
-pub use mmio::*;
 pub use page::*;
 pub use uefi::*;
+pub mod mmio;
+pub mod paging;
 
 #[cfg(feature = "kernel_impls")]
 pub use global_allocator::*;

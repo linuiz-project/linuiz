@@ -16,6 +16,7 @@ pub enum FrameState {
     Reserved,
     Stack,
     NonUsable,
+    MMIO,
 }
 
 impl BitValue for FrameState {

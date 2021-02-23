@@ -1,4 +1,7 @@
-use crate::registers::MSR;
+use crate::{
+    memory::mmio::{Mapped, MMIO},
+    registers::MSR,
+};
 use core::marker::PhantomData;
 
 #[repr(u32)]
@@ -67,7 +70,7 @@ pub enum LocalAPICInterruptRegister {
 }
 
 pub struct LocalAPIC {
-    mmio: crate::memory::MMIO,
+    mmio: MMIO<Mapped>,
 }
 
 impl LocalAPIC {
@@ -88,15 +91,12 @@ impl LocalAPIC {
         x86_64::PhysAddr::new(MSR::IA32_APIC_BASE.read().get_bits(12..35) << 12)
     }
 
-    pub fn mmio_frames() -> core::ops::RangeInclusive<usize> {
-        let start_index = Self::mmio_addr().as_u64() as usize;
-        start_index..=(start_index + 1)
-    }
-
     pub fn from_msr(mapped_addr: x86_64::VirtAddr) -> Self {
         Self {
             mmio: unsafe {
-                crate::memory::MMIO::new(Self::mmio_addr(), mapped_addr, 0x1000).unwrap()
+                crate::memory::mmio::unmapped_mmio(Self::mmio_addr(), 0x1000)
+                    .unwrap()
+                    .map(mapped_addr)
             },
         }
     }
@@ -294,8 +294,14 @@ static mut LOCAL_APIC: LocalAPICCell = LocalAPICCell {
 #[cfg(feature = "kernel_impls")]
 pub fn load() {
     debug!("Loading local APIC table.");
-    let mapped_addr =
-        x86_64::VirtAddr::from_ptr(unsafe { crate::memory::alloc_to(LocalAPIC::mmio_frames()) });
+    let start_index = LocalAPIC::mmio_addr().as_u64() as usize;
+    let mapped_addr = x86_64::VirtAddr::from_ptr(unsafe {
+        crate::memory::alloc_to(
+            crate::memory::global_memory()
+                .acquire_frames(start_index..=start_index, crate::memory::FrameState::MMIO)
+                .unwrap(),
+        )
+    });
     debug!(
         "Allocated local APIC table virtual address: {:?}",
         mapped_addr

@@ -623,7 +623,7 @@ impl BlockAllocator<'_> {
     }
 
     pub fn identity_map(&self, frame: &Frame, map: bool) {
-        debug!("Identity mapping requested: {:?}", frame);
+        trace!("Identity mapping requested: {:?}", frame);
 
         let map_len = self.map.read().len();
         if map_len <= frame.index() {

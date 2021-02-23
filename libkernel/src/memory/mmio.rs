@@ -1,41 +1,58 @@
-use x86_64::{PhysAddr, VirtAddr};
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MMIOError {
     InsideSystemRAM,
     OffsetOverrun,
 }
 
-pub struct MMIO {
-    base_addr: PhysAddr,
-    mapped_addr: VirtAddr,
+pub trait MMIOState {}
+pub enum Unmapped {}
+impl MMIOState for Unmapped {}
+pub enum Mapped {}
+impl MMIOState for Mapped {}
+
+pub struct MMIO<S: MMIOState> {
+    addr: usize,
     size: usize,
+    phantom: core::marker::PhantomData<S>,
 }
 
-impl MMIO {
-    pub unsafe fn new(
-        base_addr: PhysAddr,
-        mapped_addr: VirtAddr,
-        size: usize,
-    ) -> Result<Self, MMIOError> {
-        if (base_addr.as_u64() as usize) >= crate::memory::global_memory().total_memory(None) {
-            Ok(Self {
-                base_addr,
-                mapped_addr,
-                size,
-            })
-        } else {
-            Err(MMIOError::InsideSystemRAM)
+pub fn unmapped_mmio(
+    phys_addr: x86_64::PhysAddr,
+    size: usize,
+) -> Result<MMIO<Unmapped>, MMIOError> {
+    let addr_usize = phys_addr.as_u64() as usize;
+
+    if addr_usize >= crate::memory::global_memory().total_memory(None) {
+        Ok(MMIO::<Unmapped> {
+            addr: addr_usize,
+            size,
+            phantom: core::marker::PhantomData,
+        })
+    } else {
+        Err(MMIOError::InsideSystemRAM)
+    }
+}
+
+impl<S: MMIOState> MMIO<S> {
+    pub fn size(&self) -> usize {
+        self.size
+    }
+}
+
+impl MMIO<Unmapped> {
+    pub unsafe fn map(self, mapped_addr: x86_64::VirtAddr) -> MMIO<Mapped> {
+        MMIO::<Mapped> {
+            addr: mapped_addr.as_u64() as usize,
+            size: self.size,
+            phantom: core::marker::PhantomData,
         }
     }
+}
 
-    pub fn base_addr(&self) -> PhysAddr {
-        self.base_addr
-    }
-
+impl MMIO<Mapped> {
     unsafe fn mapped_offset<T>(&self, offset: usize) -> Result<*const T, MMIOError> {
         if offset < self.size {
-            Ok((self.mapped_addr + (offset as u64)).as_ptr())
+            Ok((self.addr + offset) as *const T)
         } else {
             Err(MMIOError::OffsetOverrun)
         }
@@ -43,7 +60,7 @@ impl MMIO {
 
     unsafe fn mapped_offset_mut<T>(&mut self, offset: usize) -> Result<*mut T, MMIOError> {
         if offset < self.size {
-            Ok((self.mapped_addr + (offset as u64)).as_mut_ptr())
+            Ok((self.addr + offset) as *mut T)
         } else {
             Err(MMIOError::OffsetOverrun)
         }

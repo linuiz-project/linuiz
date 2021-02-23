@@ -17,11 +17,15 @@ impl<'fbuf, 'bbuf> FramebufferDriver<'fbuf, 'bbuf> {
         let byte_len = pixel_len * core::mem::size_of::<Color8i>();
 
         let framebuffer = unsafe {
-            use libkernel::memory::Frame;
-
-            let frame_iter =
-                Frame::range_count(Frame::from_addr(buffer_addr), (byte_len + 0xFFF) / 0x1000);
-            let alloc_to_ptr = libkernel::memory::alloc_to(frame_iter) as *mut Color8i;
+            let start_frame_index = (buffer_addr.as_u64() / 0x1000) as usize;
+            let end_frame_index = start_frame_index + ((byte_len + 0xFFF) / 0x1000);
+            let mmio_frames = libkernel::memory::global_memory()
+                .acquire_frames(
+                    start_frame_index..end_frame_index,
+                    libkernel::memory::FrameState::MMIO,
+                )
+                .unwrap();
+            let alloc_to_ptr = libkernel::memory::alloc_to(mmio_frames) as *mut Color8i;
 
             core::slice::from_raw_parts_mut(alloc_to_ptr, pixel_len)
         };

@@ -8,13 +8,7 @@ use spin::RwLock;
 pub enum FrameAllocatorError {
     ExpectedFrameType(usize, FrameState),
     FreeWithAcquire,
-}
-
-struct FrameAllocatorMemory {
-    total_memory: usize,
-    free_memory: usize,
-    locked_memory: usize,
-    reserved_memory: usize,
+    MMIOWithinRAM,
 }
 
 pub struct FrameAllocator<'arr> {
@@ -53,12 +47,16 @@ impl<'arr> FrameAllocator<'arr> {
             "system memory should be page-aligned"
         );
 
+        let mut memory_counters = [0; FrameState::MASK + 1];
+        memory_counters[FrameState::Free.as_usize()] = total_memory;
+        memory_counters[FrameState::MASK] = total_memory;
+
         let this = Self {
             memory_map: RwBitArray::from_slice(&mut *core::ptr::slice_from_raw_parts_mut(
                 base_ptr,
                 RwBitArray::<FrameState>::length_hint(total_memory / 0x1000),
             )),
-            memory: RwLock::new([0; FrameState::MASK + 1]),
+            memory: RwLock::new(memory_counters),
         };
 
         let base_frame_index = (base_ptr as usize) / 0x1000;
@@ -113,26 +111,33 @@ impl<'arr> FrameAllocator<'arr> {
         index: usize,
         acq_type: FrameState,
     ) -> Result<Frame, FrameAllocatorError> {
-        if acq_type == FrameState::Free {
-            Err(FrameAllocatorError::FreeWithAcquire)
-        } else if self.memory_map.set_eq(index, acq_type, FrameState::Free) {
-            let mut mem_write = self.memory.write();
-            mem_write[FrameState::Free.as_usize()] -= 0x1000;
-            mem_write[acq_type.as_usize()] += 0x1000;
+        match acq_type {
+            FrameState::Free => Err(FrameAllocatorError::FreeWithAcquire),
+            FrameState::MMIO => {
+                if (index * 0x1000) < self.total_memory(None) {
+                    Ok(Frame::from_index(index))
+                } else {
+                    Err(FrameAllocatorError::MMIOWithinRAM)
+                }
+            }
+            _ if self.memory_map.set_eq(index, acq_type, FrameState::Free) => {
+                let mut mem_write = self.memory.write();
+                mem_write[FrameState::Free.as_usize()] -= 0x1000;
+                mem_write[acq_type.as_usize()] += 0x1000;
 
-            trace!(
-                "Acquired frame {}: {:?} -> {:?}",
+                trace!(
+                    "Acquired frame {}: {:?} -> {:?}",
+                    index,
+                    FrameState::Free,
+                    acq_type,
+                );
+
+                Ok(Frame::from_index(index))
+            }
+            _ => Err(FrameAllocatorError::ExpectedFrameType(
                 index,
                 FrameState::Free,
-                acq_type,
-            );
-
-            Ok(Frame::from_index(index))
-        } else {
-            Err(FrameAllocatorError::ExpectedFrameType(
-                index,
-                FrameState::Free,
-            ))
+            )),
         }
     }
 
@@ -157,12 +162,6 @@ impl<'arr> FrameAllocator<'arr> {
         frame_indexes: impl FrameIndexIterator,
         acq_type: FrameState,
     ) -> Result<core::ops::Range<Frame>, FrameAllocatorError> {
-        for index in frame_indexes {
-            if let Err(error) = self.acquire_frame(index, acq_type) {
-                return Err(error);
-            }
-        }
-
         let start_frame = Frame::from_index(match frame_indexes.start_bound() {
             core::ops::Bound::Included(start) => *start,
             core::ops::Bound::Excluded(start) => *start + 1,
@@ -174,6 +173,12 @@ impl<'arr> FrameAllocator<'arr> {
             core::ops::Bound::Excluded(end) => *end + 1,
             _ => panic!("failed to calculate start bound for frame range"),
         });
+
+        for index in frame_indexes {
+            if let Err(error) = self.acquire_frame(index, acq_type) {
+                return Err(error);
+            }
+        }
 
         Ok(start_frame..end_frame)
     }
