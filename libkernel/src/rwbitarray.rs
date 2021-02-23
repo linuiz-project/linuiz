@@ -37,16 +37,25 @@ impl<'arr, BV: BitValue + core::fmt::Debug> RwBitArray<'arr, BV> {
         self.array.read().len() * (Self::SECTION_LEN / BV::BIT_WIDTH)
     }
 
+    fn get_index_and_offset(index: usize) -> (usize, usize) {
+        let bit_index = index * BV::BIT_WIDTH;
+
+        (
+            // section index
+            bit_index / Self::SECTION_LEN,
+            // section offset
+            bit_index % Self::SECTION_LEN,
+        )
+    }
+
     pub fn get(&self, index: usize) -> BV {
         assert!(
             index < self.len(),
             "index must be less than the size of the collection",
         );
 
-        let bit_index = index * BV::BIT_WIDTH;
-        let section_index = bit_index / Self::SECTION_LEN;
-        let section_offset = bit_index % Self::SECTION_LEN;
-        let section_value = self.array.read()[section_index];
+        let (section_index, section_offset) = Self::get_index_and_offset(index);
+        let section_value = self.array.read()[(section_index)];
 
         BV::from_usize((section_value >> section_offset) & BV::MASK)
     }
@@ -57,10 +66,7 @@ impl<'arr, BV: BitValue + core::fmt::Debug> RwBitArray<'arr, BV> {
             "index must be less than the size of the collection",
         );
 
-        let bit_index = index * BV::BIT_WIDTH;
-        let section_index = bit_index / Self::SECTION_LEN;
-        let section_offset = bit_index % Self::SECTION_LEN;
-
+        let (section_index, section_offset) = Self::get_index_and_offset(index);
         let sections_read = self.array.upgradeable_read();
         let section_value = sections_read[section_index];
 
@@ -75,11 +81,8 @@ impl<'arr, BV: BitValue + core::fmt::Debug> RwBitArray<'arr, BV> {
             "index must be less than the size of the collection",
         );
 
-        let bit_index = index * BV::BIT_WIDTH;
-        let section_index = bit_index / Self::SECTION_LEN;
-        let section_offset = bit_index % Self::SECTION_LEN;
-
         {
+            let (section_index, section_offset) = Self::get_index_and_offset(index);
             let sections_read = self.array.upgradeable_read();
             let section_value = sections_read[section_index];
             let type_actual = BV::from_usize((section_value >> section_offset) & BV::MASK);

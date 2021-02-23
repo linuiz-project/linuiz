@@ -58,6 +58,22 @@ pub unsafe fn init_global_memory(memory_map: &[crate::memory::UEFIMemoryDescript
 
     debug!("Configuring global memory instance.");
     let global_memory = FrameAllocator::from_ptr(frame_alloc_ptr, total_memory);
+
+    use x86_64::PhysAddr;
+    let mut last_end_phys_addr = PhysAddr::zero();
+    for descriptor in memory_map.iter() {
+        let phys_diff = descriptor.phys_start - last_end_phys_addr;
+
+        if phys_diff != 0 {
+            info!(
+                "found memory hole: {:?} of size {}",
+                last_end_phys_addr, phys_diff
+            );
+        }
+
+        last_end_phys_addr = descriptor.phys_start + (descriptor.page_count * 0x1000);
+    }
+
     debug!("Assigning fully configured global memory.");
     GLOBAL_MEMORY.set_allocator(global_memory);
 }

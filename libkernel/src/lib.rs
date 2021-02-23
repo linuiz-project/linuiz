@@ -3,6 +3,8 @@
     asm,
     const_fn,
     once_cell,
+    step_trait,
+    step_trait_ext,
     abi_efiapi,
     const_panic,
     const_mut_refs,

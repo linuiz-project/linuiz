@@ -1,7 +1,7 @@
 use x86_64::PhysAddr;
 
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Frame(usize);
 
 impl Frame {
@@ -51,44 +51,44 @@ impl Frame {
     }
 }
 
-impl core::fmt::Debug for Frame {
-    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter.debug_tuple("Frame").field(&self.index()).finish()
+unsafe impl core::iter::Step for Frame {
+    fn forward(start: Self, count: usize) -> Self {
+        Self::from_index(start.index() + count)
     }
-}
 
-#[derive(Clone, Copy)]
-pub struct FrameIterator {
-    current: Frame,
-    end: Frame,
-}
-
-impl FrameIterator {
-    pub const fn remaining(&self) -> usize {
-        self.end.index() - self.current.index()
+    fn forward_checked(start: Self, count: usize) -> Option<Self> {
+        let new_index = start.index() + count;
+        if new_index >= start.index() {
+            Some(Frame::from_index(new_index))
+        } else {
+            None
+        }
     }
-}
 
-impl Iterator for FrameIterator {
-    type Item = Frame;
+    fn backward(start: Self, count: usize) -> Self {
+        Self::from_index(start.index() - count)
+    }
 
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.current.0 < self.end.0 {
-            let frame = self.current.clone();
-            self.current.0 += 1;
-            Some(frame)
+    fn backward_checked(start: Self, count: usize) -> Option<Self> {
+        let new_index = start.index() - count;
+        if new_index <= start.index() {
+            Some(Frame::from_index(new_index))
+        } else {
+            None
+        }
+    }
+
+    fn steps_between(start: &Self, end: &Self) -> Option<usize> {
+        if start.index() <= end.index() {
+            Some(end.index() - start.index())
         } else {
             None
         }
     }
 }
 
-impl core::fmt::Debug for FrameIterator {
+impl core::fmt::Debug for Frame {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter
-            .debug_struct("FrameIterator")
-            .field("Current", &self.current)
-            .field("End", &self.end)
-            .finish()
+        formatter.debug_tuple("Frame").field(&self.index()).finish()
     }
 }
