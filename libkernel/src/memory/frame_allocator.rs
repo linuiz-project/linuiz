@@ -2,7 +2,6 @@ use crate::{
     memory::{Frame, FrameIndexIterator, FrameState},
     BitValue, RwBitArray,
 };
-use num_enum::TryFromPrimitive;
 use spin::RwLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

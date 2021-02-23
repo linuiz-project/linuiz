@@ -272,7 +272,7 @@ impl BlockAllocator<'_> {
 
     /* INITIALIZATION */
 
-    pub fn init(&self, stack_frames: impl crate::memory::FrameIterator) {
+    pub fn init(&self, stack_frames: impl crate::memory::FrameIterator + Clone) {
         use crate::memory::{global_memory, FrameState};
 
         unsafe {
@@ -316,8 +316,8 @@ impl BlockAllocator<'_> {
 
         debug!("Allocating space for moving stack.");
         unsafe {
-            let cur_stack_base = (stack_frames.clone()..start.index() * 0x1000) as u64;
-            let stack_ptr = self.alloc_to(stack_frames) as u64;
+            let cur_stack_base = (stack_frames.clone().next().unwrap().index() * 0x1000) as u64;
+            let stack_ptr = self.alloc_to(stack_frames.clone()) as u64;
 
             if cur_stack_base > stack_ptr {
                 crate::registers::stack::RSP::sub(cur_stack_base - stack_ptr);

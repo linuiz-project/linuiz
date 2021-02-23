@@ -1,5 +1,5 @@
 use crate::BitValue;
-use core::marker::PhantomData;
+use num_enum::TryFromPrimitive;
 use x86_64::PhysAddr;
 
 pub trait FrameIterator: core::ops::RangeBounds<Frame> + Iterator<Item = Frame> {}
@@ -17,9 +17,6 @@ pub enum FrameState {
     Stack,
     NonUsable,
 }
-
-trait FrameStateImpl {}
-impl FrameStateImpl for FrameState {}
 
 impl BitValue for FrameState {
     const BIT_WIDTH: usize = 0x4;
@@ -41,26 +38,19 @@ impl BitValue for FrameState {
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Frame<T: FrameStateImpl> {
+pub struct Frame {
     index: usize,
-    phantom: PhantomData<T>,
 }
 
-impl<T: FrameStateImpl> Frame<T> {
+impl Frame {
     #[inline]
     pub const fn null() -> Self {
-        Self {
-            index: 0,
-            phantom: PhantomData,
-        }
+        Self { index: 0 }
     }
 
     #[inline]
     pub const fn from_index(index: usize) -> Self {
-        Self {
-            index,
-            phantom: PhantomData,
-        }
+        Self { index }
     }
 
     #[inline]
@@ -73,13 +63,12 @@ impl<T: FrameStateImpl> Frame<T> {
 
         Self {
             index: addr_usize / 0x1000,
-            phantom: PhantomData,
         }
     }
 
     #[inline]
     pub const fn index(&self) -> usize {
-        self.0
+        self.index
     }
 
     #[inline]
@@ -89,11 +78,11 @@ impl<T: FrameStateImpl> Frame<T> {
 
     #[inline]
     pub const fn addr_u64(&self) -> u64 {
-        (self.0 as u64) * 0x1000
+        (self.index as u64) * 0x1000
     }
 }
 
-unsafe impl<T> core::iter::Step for Frame<T> {
+unsafe impl core::iter::Step for Frame {
     fn forward(start: Self, count: usize) -> Self {
         Self::from_index(start.index() + count)
     }
@@ -129,7 +118,7 @@ unsafe impl<T> core::iter::Step for Frame<T> {
     }
 }
 
-impl<T> core::fmt::Debug for Frame<T> {
+impl core::fmt::Debug for Frame {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter.debug_tuple("Frame").field(&self.index()).finish()
     }
