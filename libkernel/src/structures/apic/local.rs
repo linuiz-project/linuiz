@@ -1,4 +1,4 @@
-use crate::{memory::Frame, registers::MSR};
+use crate::registers::MSR;
 use core::marker::PhantomData;
 
 #[repr(u32)]
@@ -88,8 +88,9 @@ impl LocalAPIC {
         x86_64::PhysAddr::new(MSR::IA32_APIC_BASE.read().get_bits(12..35) << 12)
     }
 
-    pub fn mmio_frames() -> crate::memory::FrameIterator {
-        Frame::range_count(Frame::from_addr(Self::mmio_addr()), 1)
+    pub fn mmio_frames() -> core::ops::RangeInclusive<usize> {
+        let start_index = Self::mmio_addr().as_u64() as usize;
+        start_index..=(start_index + 1)
     }
 
     pub fn from_msr(mapped_addr: x86_64::VirtAddr) -> Self {

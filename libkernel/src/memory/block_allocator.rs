@@ -272,8 +272,8 @@ impl BlockAllocator<'_> {
 
     /* INITIALIZATION */
 
-    pub fn init(&self, stack_descriptor: crate::memory::UEFIMemoryDescriptor) {
-        use crate::memory::{global_memory, FrameType};
+    pub fn init(&self, stack_frames: impl crate::memory::FrameIterator) {
+        use crate::memory::{global_memory, FrameState};
 
         unsafe {
             assert!(
@@ -288,7 +288,7 @@ impl BlockAllocator<'_> {
         debug!("Identity mapping all reserved global memory frames.");
         self.with_addressor(|addressor| {
             global_memory().iter_callback(|index, frame_type| match frame_type {
-                FrameType::Reserved | FrameType::Stack => {
+                FrameState::Reserved | FrameState::Stack => {
                     addressor.identity_map(&Frame::from_index(index));
                 }
                 _ => {}
@@ -308,7 +308,7 @@ impl BlockAllocator<'_> {
         });
 
         global_memory().iter_callback(|index, frame_type| match frame_type {
-            FrameType::Reserved => {
+            FrameState::Reserved => {
                 self.identity_map(&Frame::from_index(index), false);
             }
             _ => {}
@@ -316,8 +316,8 @@ impl BlockAllocator<'_> {
 
         debug!("Allocating space for moving stack.");
         unsafe {
-            let cur_stack_base = stack_descriptor.phys_start.as_u64();
-            let stack_ptr = self.alloc_to(stack_descriptor.frame_iter()) as u64;
+            let cur_stack_base = (stack_frames.clone()..start.index() * 0x1000) as u64;
+            let stack_ptr = self.alloc_to(stack_frames) as u64;
 
             if cur_stack_base > stack_ptr {
                 crate::registers::stack::RSP::sub(cur_stack_base - stack_ptr);
@@ -327,7 +327,7 @@ impl BlockAllocator<'_> {
         }
 
         self.with_addressor(|addressor| {
-            for frame in stack_descriptor.frame_iter() {
+            for frame in stack_frames {
                 addressor.unmap(&Page::from_index(frame.index()));
             }
         });
@@ -532,11 +532,12 @@ impl BlockAllocator<'_> {
                 // 'has bits', but not 'had bits'
                 self.with_addressor(|addressor| {
                     let page = &Page::from_index(map_index);
-                    unsafe {
-                        crate::memory::global_memory()
-                            .free_frame(&addressor.translate_page(page).unwrap())
-                            .unwrap()
-                    };
+                    // todo FIX THIS
+                    //     unsafe {
+                    //     crate::memory::global_memory()
+                    //         .free_frame(&addressor.translate_page(page).unwrap())
+                    //         .unwrap()
+                    // };
                     addressor.unmap(page);
                 });
             }
@@ -566,9 +567,9 @@ impl BlockAllocator<'_> {
     ///  given the iterator.
     ///
     /// This function assumed the frames are already locked or otherwise valid.
-    pub fn alloc_to(&self, mut frames: FrameIterator) -> *mut u8 {
-        debug!("Allocation requested to: {} frames", frames.remaining());
-        let size_in_frames = frames.remaining();
+    pub fn alloc_to(&self, mut frames: impl FrameIterator + Clone) -> *mut u8 {
+        let size_in_frames = frames.clone().count();
+        debug!("Allocation requested to: {} frames", size_in_frames);
         let (mut map_index, mut current_run);
 
         while {

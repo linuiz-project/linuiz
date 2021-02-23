@@ -87,7 +87,7 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor, ConfigT
         {
             if descriptor.is_stack_descriptor() {
                 libkernel::memory::global_memory()
-                    .reserve_stack(descriptor.frame_iter())
+                    .reserve_stack(descriptor.frame_range())
                     .unwrap();
 
                 stack_descriptor
@@ -95,7 +95,7 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor, ConfigT
                     .expect("multiple stack descriptors found");
             } else {
                 libkernel::memory::global_memory()
-                    .reserve_frames(descriptor.frame_iter())
+                    .reserve_frames(descriptor.frame_range())
                     .unwrap();
             }
         }
@@ -103,9 +103,7 @@ extern "efiapi" fn kernel_main(boot_info: BootInfo<UEFIMemoryDescriptor, ConfigT
         info!("Initializing global allocator.");
         // `boot_info` will not be usable after initalizing the global allocator,
         //  due to the stack being moved in virtual memory.
-        libkernel::memory::init_global_allocator(
-            *stack_descriptor.get().expect("no stack descriptor found"),
-        );
+        libkernel::memory::init(*stack_descriptor.get().expect("no stack descriptor found"));
     }
 
     debug!("Enabling interrupts.");

@@ -1,38 +1,13 @@
-use crate::{memory::Frame, BitValue, RwBitArray};
+use crate::{
+    memory::{Frame, FrameIndexIterator, FrameState},
+    BitValue, RwBitArray,
+};
 use num_enum::TryFromPrimitive;
 use spin::RwLock;
 
-#[repr(usize)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
-pub enum FrameType {
-    Free = 0,
-    Locked,
-    Reserved,
-    Stack,
-    NonUsable,
-}
-
-impl BitValue for FrameType {
-    const BIT_WIDTH: usize = 0x4;
-    const MASK: usize = 0xF;
-
-    fn from_usize(value: usize) -> Self {
-        use core::convert::TryFrom;
-
-        match FrameType::try_from(value) {
-            Ok(frame_type) => frame_type,
-            Err(err) => panic!("invalid value for frame type: {:?}", err),
-        }
-    }
-
-    fn as_usize(&self) -> usize {
-        *self as usize
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameAllocatorError {
-    ExpectedFrameType(usize, FrameType),
+    ExpectedFrameType(usize, FrameState),
     FreeWithAcquire,
 }
 
@@ -44,8 +19,8 @@ struct FrameAllocatorMemory {
 }
 
 pub struct FrameAllocator<'arr> {
-    memory_map: RwBitArray<'arr, FrameType>,
-    memory: RwLock<[usize; FrameType::MASK + 1]>,
+    memory_map: RwBitArray<'arr, FrameState>,
+    memory: RwLock<[usize; FrameState::MASK + 1]>,
 }
 
 impl<'arr> FrameAllocator<'arr> {
@@ -61,7 +36,7 @@ impl<'arr> FrameAllocator<'arr> {
         let frame_count = total_memory / 0x1000;
         crate::align_up_div(
             // each index of a RwBitArray is a `usize`, so multiply the index count with the `size_of` a `usize`
-            (frame_count * FrameType::BIT_WIDTH) / 8, /* 8 bits per byte */
+            (frame_count * FrameState::BIT_WIDTH) / 8, /* 8 bits per byte */
             // divide total RwBitArray memory size by frame size to get total frame count
             0x1000,
         )
@@ -82,18 +57,16 @@ impl<'arr> FrameAllocator<'arr> {
         let this = Self {
             memory_map: RwBitArray::from_slice(&mut *core::ptr::slice_from_raw_parts_mut(
                 base_ptr,
-                RwBitArray::<FrameType>::length_hint(total_memory / 0x1000),
+                RwBitArray::<FrameState>::length_hint(total_memory / 0x1000),
             )),
-            memory: RwLock::new([0; FrameType::MASK + 1]),
+            memory: RwLock::new([0; FrameState::MASK + 1]),
         };
 
-        let base_frame = Frame::from_addr(x86_64::PhysAddr::new(base_ptr as u64));
-        let frame_iterator = Frame::range_count(base_frame, Self::frame_count_hint(total_memory));
-        debug!(
-            "Frame allocator defined with iterator: {:?}",
-            frame_iterator
-        );
-        this.reserve_frames(frame_iterator)
+        let base_frame_index = (base_ptr as usize) / 0x1000;
+        let end_frame_index = base_frame_index + Self::frame_count_hint(total_memory);
+        let frame_range = base_frame_index..=end_frame_index;
+        debug!("Frame allocator defined with iterator: {:?}", frame_range);
+        this.acquire_frames(frame_range, FrameState::Reserved)
             .expect("unexpectedly failed to reserve frame allocator frames");
 
         this
@@ -101,11 +74,11 @@ impl<'arr> FrameAllocator<'arr> {
 
     /// Total memory of a given type represented by frame allocator. If `None` is
     ///  provided for type, the total of all memory types is returned instead.
-    pub fn total_memory(&self, of_type: Option<FrameType>) -> usize {
+    pub fn total_memory(&self, of_type: Option<FrameState>) -> usize {
         let mem_read = self.memory.read();
         match of_type {
             Some(frame_type) => mem_read[frame_type.as_usize()],
-            None => mem_read.last().unwrap(),
+            None => *mem_read.last().unwrap(),
         }
     }
 
@@ -115,23 +88,23 @@ impl<'arr> FrameAllocator<'arr> {
     pub unsafe fn free_frame(&self, frame: Frame) -> Result<(), FrameAllocatorError> {
         if self
             .memory_map
-            .set_eq(frame.index(), FrameType::Free, FrameType::Locked)
+            .set_eq(frame.index(), FrameState::Free, FrameState::Locked)
         {
             let mut mem_write = self.memory.write();
-            mem_write[FrameType::Free.as_usize()] += 0x1000;
-            mem_write[FrameType::Locked.as_usize()] -= 0x1000;
+            mem_write[FrameState::Free.as_usize()] += 0x1000;
+            mem_write[FrameState::Locked.as_usize()] -= 0x1000;
 
             trace!(
                 "Freed frame {}: {:?} -> {:?}",
                 frame.index(),
-                FrameType::Locked,
-                FrameType::Free
+                FrameState::Locked,
+                FrameState::Free
             );
             Ok(())
         } else {
             Err(FrameAllocatorError::ExpectedFrameType(
                 frame.index(),
-                FrameType::Locked,
+                FrameState::Locked,
             ))
         }
     }
@@ -139,19 +112,19 @@ impl<'arr> FrameAllocator<'arr> {
     pub unsafe fn acquire_frame(
         &self,
         index: usize,
-        acq_type: FrameType,
+        acq_type: FrameState,
     ) -> Result<Frame, FrameAllocatorError> {
-        if acq_type == FrameType::Free {
+        if acq_type == FrameState::Free {
             Err(FrameAllocatorError::FreeWithAcquire)
-        } else if self.memory_map.set_eq(index, acq_type, FrameType::Free) {
+        } else if self.memory_map.set_eq(index, acq_type, FrameState::Free) {
             let mut mem_write = self.memory.write();
-            mem_write[FrameType::Free.as_usize()] -= 0x1000;
+            mem_write[FrameState::Free.as_usize()] -= 0x1000;
             mem_write[acq_type.as_usize()] += 0x1000;
 
             trace!(
                 "Acquired frame {}: {:?} -> {:?}",
                 index,
-                FrameType::Free,
+                FrameState::Free,
                 acq_type,
             );
 
@@ -159,7 +132,7 @@ impl<'arr> FrameAllocator<'arr> {
         } else {
             Err(FrameAllocatorError::ExpectedFrameType(
                 index,
-                FrameType::Free,
+                FrameState::Free,
             ))
         }
     }
@@ -169,7 +142,7 @@ impl<'arr> FrameAllocator<'arr> {
     /// Attempts to free many frames from an iterator.
     pub unsafe fn free_frames(
         &self,
-        frames: core::ops::Range<Frame>,
+        frames: impl Iterator<Item = Frame>,
     ) -> Result<(), FrameAllocatorError> {
         for frame in frames {
             if let Err(error) = self.free_frame(frame) {
@@ -182,8 +155,8 @@ impl<'arr> FrameAllocator<'arr> {
 
     pub unsafe fn acquire_frames(
         &self,
-        frame_indexes: core::ops::Range<usize>,
-        acq_type: FrameType,
+        frame_indexes: impl FrameIndexIterator,
+        acq_type: FrameState,
     ) -> Result<core::ops::Range<Frame>, FrameAllocatorError> {
         for index in frame_indexes {
             if let Err(error) = self.acquire_frame(index, acq_type) {
@@ -191,23 +164,35 @@ impl<'arr> FrameAllocator<'arr> {
             }
         }
 
-        Ok(Frame::from_index(frame_indexes.start)..Frame::from_index(frame_indexes.end - 1))
+        let start_frame = Frame::from_index(match frame_indexes.start_bound() {
+            core::ops::Bound::Included(start) => *start,
+            core::ops::Bound::Excluded(start) => *start + 1,
+            _ => panic!("failed to calculate start bound for frame range"),
+        });
+
+        let end_frame = Frame::from_index(match frame_indexes.start_bound() {
+            core::ops::Bound::Included(end) => *end,
+            core::ops::Bound::Excluded(end) => *end + 1,
+            _ => panic!("failed to calculate start bound for frame range"),
+        });
+
+        Ok(start_frame..end_frame)
     }
 
     /// Attempts to iterate the allocator's frames, and returns the first unallocated frame.
     pub fn lock_next(&self) -> Option<Frame> {
         self.memory_map
-            .set_eq_next(FrameType::Locked, FrameType::Free)
+            .set_eq_next(FrameState::Locked, FrameState::Free)
             .map(|index| {
                 debug_assert_eq!(
                     self.memory_map.get(index),
-                    FrameType::Locked,
+                    FrameState::Locked,
                     "failed to allocate next frame"
                 );
 
                 let mut mem_write = self.memory.write();
-                mem_write[FrameType::Free.as_usize()] -= 0x1000;
-                mem_write[FrameType::Locked.as_usize()] += 0x1000;
+                mem_write[FrameState::Free.as_usize()] -= 0x1000;
+                mem_write[FrameState::Locked.as_usize()] += 0x1000;
 
                 let frame = Frame::from_index(index);
                 trace!("Locked next free frame: {:?}", frame);
@@ -219,7 +204,7 @@ impl<'arr> FrameAllocator<'arr> {
     ///  allocator represents.
     pub fn iter_callback<F>(&self, mut callback: F)
     where
-        F: FnMut(usize, FrameType),
+        F: FnMut(usize, FrameState),
     {
         for index in 0..self.memory_map.len() {
             callback(index, self.memory_map.get(index));

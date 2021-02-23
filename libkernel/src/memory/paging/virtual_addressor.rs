@@ -152,7 +152,7 @@ impl VirtualAddressor {
     }
 
     pub fn modify_mapped_page(&mut self, page: Page) {
-        let total_memory_pages = global_memory().total_memory() / 0x1000;
+        let total_memory_pages = global_memory().total_memory(None) / 0x1000;
         for index in 0..total_memory_pages {
             self.map(&page.offset(index), &Frame::from_index(index));
         }

@@ -1,4 +1,3 @@
-use crate::memory::{Frame, FrameIterator};
 use x86_64::{PhysAddr, VirtAddr};
 
 #[repr(u32)]
@@ -58,8 +57,9 @@ impl UEFIMemoryDescriptor {
         addr_u64..(addr_u64 + (self.page_count * 0x1000))
     }
 
-    pub fn frame_iter(&self) -> FrameIterator {
-        Frame::range_count(Frame::from_addr(self.phys_start), self.page_count as usize)
+    pub fn frame_range(&self) -> core::ops::RangeInclusive<usize> {
+        let start_index = (self.phys_start.as_u64() / 0x1000) as usize;
+        start_index..=(start_index + (self.page_count as usize))
     }
 
     pub fn is_stack_descriptor(&self) -> bool {

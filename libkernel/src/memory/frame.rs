@@ -1,18 +1,66 @@
+use crate::BitValue;
+use core::marker::PhantomData;
 use x86_64::PhysAddr;
+
+pub trait FrameIterator: core::ops::RangeBounds<Frame> + Iterator<Item = Frame> {}
+impl<T> FrameIterator for T where T: core::ops::RangeBounds<Frame> + Iterator<Item = Frame> {}
+
+pub trait FrameIndexIterator: core::ops::RangeBounds<usize> + Iterator<Item = usize> {}
+impl<T> FrameIndexIterator for T where T: core::ops::RangeBounds<usize> + Iterator<Item = usize> {}
+
+#[repr(usize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
+pub enum FrameState {
+    Free = 0,
+    Locked,
+    Reserved,
+    Stack,
+    NonUsable,
+}
+
+trait FrameStateImpl {}
+impl FrameStateImpl for FrameState {}
+
+impl BitValue for FrameState {
+    const BIT_WIDTH: usize = 0x4;
+    const MASK: usize = 0xF;
+
+    fn from_usize(value: usize) -> Self {
+        use core::convert::TryFrom;
+
+        match FrameState::try_from(value) {
+            Ok(frame_type) => frame_type,
+            Err(err) => panic!("invalid value for frame type: {:?}", err),
+        }
+    }
+
+    fn as_usize(&self) -> usize {
+        *self as usize
+    }
+}
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Frame(usize);
+pub struct Frame<T: FrameStateImpl> {
+    index: usize,
+    phantom: PhantomData<T>,
+}
 
-impl Frame {
+impl<T: FrameStateImpl> Frame<T> {
     #[inline]
     pub const fn null() -> Self {
-        Self { 0: 0 }
+        Self {
+            index: 0,
+            phantom: PhantomData,
+        }
     }
 
     #[inline]
     pub const fn from_index(index: usize) -> Self {
-        Self { 0: index }
+        Self {
+            index,
+            phantom: PhantomData,
+        }
     }
 
     #[inline]
@@ -24,7 +72,8 @@ impl Frame {
         }
 
         Self {
-            0: addr_usize / 0x1000,
+            index: addr_usize / 0x1000,
+            phantom: PhantomData,
         }
     }
 
@@ -42,16 +91,9 @@ impl Frame {
     pub const fn addr_u64(&self) -> u64 {
         (self.0 as u64) * 0x1000
     }
-
-    pub fn range_count(start: Frame, count: usize) -> FrameIterator {
-        FrameIterator {
-            current: start,
-            end: Frame::from_index(start.index() + count),
-        }
-    }
 }
 
-unsafe impl core::iter::Step for Frame {
+unsafe impl<T> core::iter::Step for Frame<T> {
     fn forward(start: Self, count: usize) -> Self {
         Self::from_index(start.index() + count)
     }
@@ -87,7 +129,7 @@ unsafe impl core::iter::Step for Frame {
     }
 }
 
-impl core::fmt::Debug for Frame {
+impl<T> core::fmt::Debug for Frame<T> {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter.debug_tuple("Frame").field(&self.index()).finish()
     }

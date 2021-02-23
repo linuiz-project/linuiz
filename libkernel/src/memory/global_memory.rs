@@ -86,5 +86,5 @@ pub fn global_memory() -> &'static FrameAllocator<'static> {
 }
 
 pub fn global_top_offset() -> x86_64::VirtAddr {
-    x86_64::VirtAddr::new((0x1000000000000 - global_memory().total_memory()) as u64)
+    x86_64::VirtAddr::new((0x1000000000000 - global_memory().total_memory(None)) as u64)
 }
