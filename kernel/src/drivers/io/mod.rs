@@ -1,30 +1,35 @@
-pub mod emuout;
-pub mod serial;
+mod qemu_e9;
+mod serial;
+
+pub use qemu_e9::*;
+pub use serial::*;
 
 use core::fmt::Write;
-use core::lazy::OnceCell;
 
-struct StdOutCell<'stdout> {
-    stdout: Option<&'stdout mut dyn Write>,
+struct StdOutCell<'write> {
+    stdout: Option<&'write mut dyn Write>,
 }
 
 unsafe impl Sync for StdOutCell<'_> {}
+unsafe impl Send for StdOutCell<'_> {}
 
-impl<'stdout> StdOutCell<'stdout> {
+impl<'write> StdOutCell<'write> {
     fn new() -> Self {
         Self { stdout: None }
     }
 
-    fn set(&mut self, stdout: &'stdout mut dyn Write) {
+    fn set(&mut self, stdout: &'write mut dyn Write) {
         self.stdout = Some(stdout);
     }
 
-    fn get_mut(&mut self) -> Option<&'stdout mut dyn Write> {
-        self.stdout
+    fn get_mut(&mut self) -> Option<&mut &'write mut dyn Write> {
+        self.stdout.as_mut()
     }
 }
 
-static STDOUT: spin::Mutex<StdOutCell> = spin::Mutex::new(StdOutCell::new());
+lazy_static::lazy_static! {
+    static ref STDOUT: spin::Mutex<StdOutCell<'static>> = spin::Mutex::new(StdOutCell::new());
+}
 
 pub fn set_stdout(stdout: &'static mut dyn Write) {
     STDOUT.lock().set(stdout);
@@ -36,7 +41,7 @@ pub fn __std_out(args: core::fmt::Arguments) {
         let stdout_guard = &mut STDOUT.lock();
 
         if let Some(stdout) = stdout_guard.get_mut() {
-            stdout.write_fmt(args);
+            stdout.write_fmt(args).unwrap();
         } else {
             panic!("sttdout has not been configured");
         }
@@ -45,7 +50,7 @@ pub fn __std_out(args: core::fmt::Arguments) {
 
 #[macro_export]
 macro_rules! print {
-    ($($arg:tt)*) => ($crate::drivers::io::serial::__std_out(format_args!($($arg)*)));
+    ($($arg:tt)*) => ($crate::drivers::io::__std_out(format_args!($($arg)*)));
 }
 
 #[macro_export]

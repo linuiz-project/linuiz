@@ -1,7 +1,7 @@
 bitflags::bitflags! {
     pub struct LoggingModes : u8 {
         const NONE = 0;
-        const SERIAL = 1 << 0;
+        const STDOUT = 1 << 0;
         const GRAPHIC = 1 << 1;
     }
 }
@@ -24,13 +24,8 @@ impl log::Log for KernelLogger {
     fn log(&self, record: &log::Record) {
         let metadata = record.metadata();
         if self.enabled(metadata) && trace_enabled(record) {
-            if self.modes.contains(LoggingModes::SERIAL) {
-                crate::serialln!(
-                    "[{}] <{}> {}",
-                    record.level(),
-                    metadata.target(),
-                    record.args()
-                );
+            if self.modes.contains(LoggingModes::STDOUT) {
+                crate::println!("[{}] {}", record.level(), record.args());
             }
 
             if self.modes.contains(LoggingModes::GRAPHIC) {

@@ -13,6 +13,7 @@ mod pic8259;
 mod timer;
 
 use core::ffi::c_void;
+use drivers::io::QEMUE9;
 use libkernel::{BootInfo, ConfigTableEntry};
 
 extern "C" {
@@ -31,7 +32,7 @@ extern "C" {
 
 #[cfg(debug_assertions)]
 fn get_log_level() -> log::LevelFilter {
-    log::LevelFilter::Debug
+    log::LevelFilter::Trace
 }
 
 #[cfg(not(debug_assertions))]
@@ -39,12 +40,16 @@ fn get_log_level() -> log::LevelFilter {
     log::LevelFilter::Info
 }
 
+static mut EMULATOR_OUT: QEMUE9 = QEMUE9::new();
+
 #[no_mangle]
 #[export_name = "_start"]
 extern "efiapi" fn kernel_main(
     boot_info: BootInfo<libkernel::memory::UEFIMemoryDescriptor, ConfigTableEntry>,
 ) -> ! {
-    match crate::logging::init_logger(crate::logging::LoggingModes::SERIAL, get_log_level()) {
+    crate::drivers::io::set_stdout(unsafe { &mut EMULATOR_OUT });
+
+    match crate::logging::init_logger(crate::logging::LoggingModes::STDOUT, get_log_level()) {
         Ok(()) => {
             info!("Successfully loaded into kernel, with logging enabled.");
             debug!("Minimum logging level configured as: {:?}", get_log_level());

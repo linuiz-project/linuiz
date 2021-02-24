@@ -81,62 +81,58 @@ pub struct Serial {
 }
 
 impl Serial {
-    pub unsafe fn init(base: u16, speed: SerialSpeed) -> Self {
-        let mut data = ReadWritePort::<u8>::new(base + DATA);
-        let mut irq_control = WriteOnlyPort::<u8>::new(base + IRQ_CONTROL);
-        let mut fifo_control = WriteOnlyPort::<u8>::new(base + FIFO_CONTROL);
-        let mut line_control = WriteOnlyPort::<u8>::new(base + LINE_CONTROL);
-        let mut modem_control = WriteOnlyPort::<u8>::new(base + MODEM_CONTROL);
-        let line_status = ReadOnlyPort::<u8>::new(base + LINE_STATUS);
-        let modem_status = ReadOnlyPort::<u8>::new(base + MODEM_STATUS);
-        let scratch = ReadWritePort::<u8>::new(base + SCRATCH);
+    pub const fn new(base: u16) -> Self {
+        unsafe {
+            Self {
+                data: ReadWritePort::<u8>::new(base + DATA),
+                irq_control: WriteOnlyPort::<u8>::new(base + IRQ_CONTROL),
+                fifo_control: WriteOnlyPort::<u8>::new(base + FIFO_CONTROL),
+                line_control: WriteOnlyPort::<u8>::new(base + LINE_CONTROL),
+                modem_control: WriteOnlyPort::<u8>::new(base + MODEM_CONTROL),
+                line_status: ReadOnlyPort::<u8>::new(base + LINE_STATUS),
+                modem_status: ReadOnlyPort::<u8>::new(base + MODEM_STATUS),
+                scratch: ReadWritePort::<u8>::new(base + SCRATCH),
+            }
+        }
+    }
 
+    pub unsafe fn init(&mut self, speed: SerialSpeed) {
         // disable irqs
-        irq_control.write(0x0);
+        self.irq_control.write(0x0);
 
         // enable DLAB
-        line_control.write(LineControlFlags::ENABLE_DLAB.bits());
+        self.line_control
+            .write(LineControlFlags::ENABLE_DLAB.bits());
 
         // set port speed
-        data.write((((speed as u16) >> 8) * 0xFF) as u8);
-        data.write(((speed as u16) & 0xFF) as u8);
+        self.data.write((((speed as u16) >> 8) * 0xFF) as u8);
+        self.data.write(((speed as u16) & 0xFF) as u8);
 
         // disable DLAB and set data word length to 8 bits, one stop bit
-        line_control.write(LineControlFlags::COMMON.bits());
+        self.line_control.write(LineControlFlags::COMMON.bits());
 
         // enable FIFO, clear queue, with 14b threshold
-        fifo_control.write(0xC7);
+        self.fifo_control.write(0xC7);
 
         // IRQs enabled, RTS/DSR set
-        modem_control.write(0x0B);
+        self.modem_control.write(0x0B);
 
         // set in loopbkack mode and test serial
-        modem_control.write(0x1E);
-        data.write(0xAE);
+        self.modem_control.write(0x1E);
+        self.data.write(0xAE);
 
         assert_eq!(
-            data.read(),
+            self.data.read(),
             0xAE,
             "serial driver is in faulty state (data test failed)"
         );
 
         // if not faulty, set in normal operation mode
         // (not-loopback with IRQs enabled and OUT#1 and OUT#2 bits enabled)
-        modem_control.write(0x0F);
+        self.modem_control.write(0x0F);
 
         // enable IRQs
-        irq_control.write(0x1);
-
-        Serial {
-            data,
-            irq_control,
-            fifo_control,
-            line_control,
-            modem_control,
-            line_status,
-            modem_status,
-            scratch,
-        }
+        self.irq_control.write(0x1);
     }
 
     /// Checks whether the given LineStatus bit is present.
@@ -170,42 +166,4 @@ impl core::fmt::Write for Serial {
         self.write_str(string);
         Ok(())
     }
-}
-
-lazy_static::lazy_static! {
-    static ref SERIAL: spin::Mutex<Serial> =
-    spin::Mutex::new(unsafe { Serial::init(COM1, SerialSpeed::S115200) });
-}
-
-pub fn serial_line<F>(callback: F)
-where
-    F: Fn(&mut Serial),
-{
-    // this allows us to semantically lock the serial driver
-    //
-    // for instance, in case we would like to avoid writing while
-    // an interrupt is in progress
-    libkernel::instructions::interrupts::without_interrupts(|| {
-        let mut serial_guard = SERIAL.lock();
-        callback(&mut *serial_guard);
-    });
-}
-
-#[doc(hidden)]
-pub fn __serial_out(args: core::fmt::Arguments) {
-    serial_line(|serial| {
-        use core::fmt::Write;
-        serial.write_fmt(args).unwrap();
-    });
-}
-
-#[macro_export]
-macro_rules! serial {
-    ($($arg:tt)*) => ($crate::drivers::io::serial::__serial_out(format_args!($($arg)*)));
-}
-
-#[macro_export]
-macro_rules! serialln {
-    () => ($crate::serial!("\n"));
-    ($($arg:tt)*) => ($crate::serial!("{}\n", format_args!($($arg)*)));
 }
