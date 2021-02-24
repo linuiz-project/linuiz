@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 
 use libkernel::io::port::{ReadOnlyPort, ReadWritePort, WriteOnlyPort};
-use spin::{Mutex, MutexGuard};
 
 /// Address of the first COM port.
 /// This port is VERY likely to be at this address.
@@ -152,7 +151,7 @@ impl Serial {
         self.data.write(byte);
     }
 
-    pub fn write_string(&mut self, string: &str) {
+    pub fn write_str(&mut self, string: &str) {
         for byte in string.bytes() {
             self.write(byte);
         }
@@ -168,26 +167,27 @@ impl Serial {
 
 impl core::fmt::Write for Serial {
     fn write_str(&mut self, string: &str) -> core::fmt::Result {
-        self.write_string(string);
+        self.write_str(string);
         Ok(())
     }
 }
 
 lazy_static::lazy_static! {
-    static ref SERIAL: Mutex<Serial> =
-        Mutex::new(unsafe { Serial::init(COM1, SerialSpeed::S115200) });
+    static ref SERIAL: spin::Mutex<Serial> =
+    spin::Mutex::new(unsafe { Serial::init(COM1, SerialSpeed::S115200) });
 }
 
 pub fn serial_line<F>(callback: F)
 where
-    F: Fn(&mut MutexGuard<Serial>),
+    F: Fn(&mut Serial),
 {
     // this allows us to semantically lock the serial driver
     //
     // for instance, in case we would like to avoid writing while
     // an interrupt is in progress
     libkernel::instructions::interrupts::without_interrupts(|| {
-        callback(&mut SERIAL.lock());
+        let mut serial_guard = SERIAL.lock();
+        callback(&mut *serial_guard);
     });
 }
 
@@ -201,7 +201,7 @@ pub fn __serial_out(args: core::fmt::Arguments) {
 
 #[macro_export]
 macro_rules! serial {
-    ($($arg:tt)*) => ($crate::drivers::serial::__serial_out(format_args!($($arg)*)));
+    ($($arg:tt)*) => ($crate::drivers::io::serial::__serial_out(format_args!($($arg)*)));
 }
 
 #[macro_export]
