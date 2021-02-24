@@ -1,4 +1,5 @@
 use crate::{
+    cell::SyncCell,
     memory::mmio::{Mapped, MMIO},
     registers::MSR,
 };
@@ -281,47 +282,33 @@ impl LVTRegister<'_, Generic> {
     }
 }
 
-struct LocalAPICCell {
-    local_apic: core::lazy::OnceCell<LocalAPIC>,
-}
-
-unsafe impl Sync for LocalAPICCell {}
-
-static mut LOCAL_APIC: LocalAPICCell = LocalAPICCell {
-    local_apic: core::lazy::OnceCell::new(),
-};
+static mut LOCAL_APIC: SyncCell<LocalAPIC> = SyncCell::new();
 
 #[cfg(feature = "kernel_impls")]
 pub fn load() {
-    debug!("Loading local APIC table.");
-    let start_index = LocalAPIC::mmio_addr().as_u64() as usize;
-    let mapped_addr = x86_64::VirtAddr::from_ptr(unsafe {
-        crate::memory::alloc_to(
+    if unsafe { LOCAL_APIC.get().is_some() } {
+        panic!("Local APIC has already been configured");
+    } else {
+        debug!("Loading local APIC table.");
+        let start_index = (LocalAPIC::mmio_addr().as_u64() as usize) / 0x1000;
+        debug!("APIC MMIO mapping at frame: {}", start_index);
+        let mmio_frames = unsafe {
             crate::memory::global_memory()
                 .acquire_frames(start_index..=start_index, crate::memory::FrameState::MMIO)
-                .unwrap(),
-        )
-    });
-    debug!(
-        "Allocated local APIC table virtual address: {:?}",
-        mapped_addr
-    );
+                .unwrap()
+        };
+        let mapped_addr =
+            x86_64::VirtAddr::from_ptr(unsafe { crate::memory::alloc_to(mmio_frames) });
+        debug!("Allocated local APIC table to: {:?}", mapped_addr);
 
-    unsafe {
-        assert!(
-            LOCAL_APIC
-                .local_apic
-                .set(LocalAPIC::from_msr(mapped_addr))
-                .is_ok(),
-            "local APIC has already been loaded"
-        );
+        unsafe { LOCAL_APIC.set(LocalAPIC::from_msr(mapped_addr)) };
     }
 }
 
 pub fn local_apic() -> Option<&'static LocalAPIC> {
-    unsafe { LOCAL_APIC.local_apic.get() }
+    unsafe { LOCAL_APIC.get() }
 }
 
 pub fn local_apic_mut() -> Option<&'static mut LocalAPIC> {
-    unsafe { LOCAL_APIC.local_apic.get_mut() }
+    unsafe { LOCAL_APIC.get_mut() }
 }

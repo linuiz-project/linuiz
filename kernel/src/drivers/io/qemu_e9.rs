@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use libkernel::io::port::WriteOnlyPort;
 
 const QEMU_PORT_E9: u16 = 0xE9;

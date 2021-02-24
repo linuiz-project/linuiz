@@ -114,7 +114,7 @@ impl<'arr> FrameAllocator<'arr> {
         match acq_type {
             FrameState::Free => Err(FrameAllocatorError::FreeWithAcquire),
             FrameState::MMIO => {
-                if (index * 0x1000) < self.total_memory(None) {
+                if (index * 0x1000) > self.total_memory(None) {
                     Ok(Frame::from_index(index))
                 } else {
                     Err(FrameAllocatorError::MMIOWithinRAM)

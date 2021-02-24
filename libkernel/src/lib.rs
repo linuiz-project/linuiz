@@ -25,6 +25,7 @@ mod rwbitarray;
 mod volatile_cell;
 
 pub mod acpi;
+pub mod cell;
 pub mod elf;
 pub mod instructions;
 pub mod io;

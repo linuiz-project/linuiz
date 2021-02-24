@@ -13,7 +13,7 @@ mod pic8259;
 mod timer;
 
 use core::ffi::c_void;
-use drivers::io::QEMUE9;
+use drivers::io::Serial;
 use libkernel::{BootInfo, ConfigTableEntry};
 
 extern "C" {
@@ -32,7 +32,7 @@ extern "C" {
 
 #[cfg(debug_assertions)]
 fn get_log_level() -> log::LevelFilter {
-    log::LevelFilter::Trace
+    log::LevelFilter::Debug
 }
 
 #[cfg(not(debug_assertions))]
@@ -40,14 +40,17 @@ fn get_log_level() -> log::LevelFilter {
     log::LevelFilter::Info
 }
 
-static mut EMULATOR_OUT: QEMUE9 = QEMUE9::new();
+static mut SERIAL_OUT: Serial = Serial::new(drivers::io::COM1);
 
 #[no_mangle]
 #[export_name = "_start"]
 extern "efiapi" fn kernel_main(
     boot_info: BootInfo<libkernel::memory::UEFIMemoryDescriptor, ConfigTableEntry>,
 ) -> ! {
-    crate::drivers::io::set_stdout(unsafe { &mut EMULATOR_OUT });
+    unsafe {
+        SERIAL_OUT.init(drivers::io::SerialSpeed::S115200);
+        crate::drivers::io::set_stdout(&mut SERIAL_OUT);
+    }
 
     match crate::logging::init_logger(crate::logging::LoggingModes::STDOUT, get_log_level()) {
         Ok(()) => {
@@ -72,10 +75,6 @@ extern "efiapi" fn kernel_main(
     info!("Successfully initialized GDT.");
     libkernel::structures::idt::init();
     info!("Successfully initialized IDT.");
-    crate::pic8259::enable();
-    info!("Successfully initialized PIC.");
-    info!("Configuring PIT frequency to 1000Hz.");
-    crate::pic8259::set_timer_freq(crate::timer::TIMER_FREQUENCY as u32);
 
     let framebuffer_pointer = boot_info.framebuffer_pointer().unwrap().clone();
     init_memory(boot_info);
@@ -172,7 +171,12 @@ fn init_memory(boot_info: BootInfo<libkernel::memory::UEFIMemoryDescriptor, Conf
 }
 
 fn init_apic() {
-    debug!("Enabling interrupts.");
+    crate::pic8259::enable();
+    info!("Successfully initialized PIC.");
+    info!("Configuring PIT frequency to 1000Hz.");
+    crate::pic8259::set_timer_freq(crate::timer::TIMER_FREQUENCY as u32);
+
+    debug!("Setting timer interrupt handler and enabling interrupts.");
     libkernel::structures::idt::set_interrupt_handler(32, crate::timer::tick_handler);
     libkernel::instructions::interrupts::enable();
 
