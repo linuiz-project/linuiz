@@ -1,7 +1,7 @@
 #[global_allocator]
 static GLOBAL_ALLOCATOR: crate::memory::BlockAllocator = crate::memory::BlockAllocator::new();
 
-pub unsafe fn init(stack_frames: impl crate::memory::FrameIterator + Clone) {
+pub unsafe fn init(stack_frames: impl crate::memory::FrameIterator + Clone + core::fmt::Debug) {
     GLOBAL_ALLOCATOR.init(stack_frames);
 }
 

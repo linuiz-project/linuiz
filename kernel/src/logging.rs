@@ -6,7 +6,7 @@ bitflags::bitflags! {
     }
 }
 
-static TRACE_ENABLED_PATHS: [&str; 1] = ["libkernel::memory::paging::virtual_addressor"];
+static TRACE_ENABLED_PATHS: [&str; 1] = ["libkernel::memory::block_allocator"];
 
 fn trace_enabled(record: &log::Record) -> bool {
     record.level() < log::Level::Trace || TRACE_ENABLED_PATHS.contains(&record.metadata().target())
@@ -22,9 +22,15 @@ impl log::Log for KernelLogger {
     }
 
     fn log(&self, record: &log::Record) {
-        if self.enabled(record.metadata()) && trace_enabled(record) {
+        let metadata = record.metadata();
+        if self.enabled(metadata) && trace_enabled(record) {
             if self.modes.contains(LoggingModes::SERIAL) {
-                crate::serialln!("[{}] {}", record.level(), record.args());
+                crate::serialln!(
+                    "[{}] <{}> {}",
+                    record.level(),
+                    metadata.target(),
+                    record.args()
+                );
             }
 
             if self.modes.contains(LoggingModes::GRAPHIC) {

@@ -272,7 +272,7 @@ impl BlockAllocator<'_> {
 
     /* INITIALIZATION */
 
-    pub fn init(&self, stack_frames: impl crate::memory::FrameIterator + Clone) {
+    pub fn init(&self, stack_frames: impl crate::memory::FrameIterator + Clone + core::fmt::Debug) {
         use crate::memory::{global_memory, FrameState};
 
         unsafe {
@@ -285,7 +285,7 @@ impl BlockAllocator<'_> {
             );
         }
 
-        debug!("Identity mapping all reserved global memory frames.");
+        trace!("Identity mapping all reserved global memory frames.");
         self.with_addressor(|addressor| {
             global_memory().iter_callback(|index, frame_type| match frame_type {
                 FrameState::Reserved | FrameState::Stack => {
@@ -297,12 +297,12 @@ impl BlockAllocator<'_> {
             // Since we're using physical offset mapping for our page table modification
             //  strategy, the memory needs to be identity mapped at the correct offset.
             let phys_mapping_addr = crate::memory::global_top_offset();
-            debug!("Mapping physical memory at offset: {:?}", phys_mapping_addr);
+            trace!("Mapping physical memory at offset: {:?}", phys_mapping_addr);
             addressor.modify_mapped_page(Page::from_addr(phys_mapping_addr));
 
             unsafe {
                 // Swap the PML4 into CR3
-                debug!("Writing kernel addressor's PML4 to the CR3 register.");
+                trace!("Writing kernel addressor's PML4 to the CR3 register.");
                 addressor.swap_into();
             }
         });
@@ -314,23 +314,38 @@ impl BlockAllocator<'_> {
             _ => {}
         });
 
-        debug!("Allocating space for moving stack.");
         unsafe {
-            let cur_stack_base = (stack_frames.clone().next().unwrap().index() * 0x1000) as u64;
-            let stack_ptr = self.alloc_to(stack_frames.clone()) as u64;
+            if let Some(frame) = stack_frames.clone().next() {
+                trace!("Allocating space for moving stack.");
+                let alloc_to_base = self.alloc_to(stack_frames.clone()) as u64;
+                let cur_stack_base = frame.addr_u64();
 
-            if cur_stack_base > stack_ptr {
-                crate::registers::stack::RSP::sub(cur_stack_base - stack_ptr);
+                trace!("Modifying stack pointer to virtually allocated address space.");
+                if cur_stack_base > alloc_to_base {
+                    let base_difference = cur_stack_base - alloc_to_base;
+                    trace!("Decrementing stack pointer by: {:?}", base_difference);
+                    crate::registers::stack::RSP::sub(base_difference);
+                } else if cur_stack_base < alloc_to_base {
+                    let base_difference = alloc_to_base - cur_stack_base;
+                    trace!("Incrementing stack pointer by: {:?}", base_difference);
+                    crate::registers::stack::RSP::add(alloc_to_base - cur_stack_base);
+                } else {
+                    trace!("Stack has been incidentally identity mapped in virtual memory.");
+                    trace!("    (NOTE: the stack pointer will be unaffected.)");
+                }
             } else {
-                crate::registers::stack::RSP::add(stack_ptr - cur_stack_base);
+                panic!("provided stack frames are invalid: {:?}", stack_frames);
             }
         }
 
+        trace!("Unampping temporarily identity mapped stack frames.");
         self.with_addressor(|addressor| {
             for frame in stack_frames {
                 addressor.unmap(&Page::from_index(frame.index()));
             }
         });
+
+        trace!("Finished block allocator initialization.");
     }
 
     /* ALLOC & DEALLOC */
@@ -619,7 +634,15 @@ impl BlockAllocator<'_> {
             }
         });
 
-        (start_index * 0x1000) as *mut u8
+        let alloc_to_ptr = (start_index * 0x1000) as *mut u8;
+        trace!(
+            "Allocation fulfilled: pages {}..{} @ {:?}",
+            start_index,
+            start_index + size_in_frames,
+            alloc_to_ptr
+        );
+
+        alloc_to_ptr
     }
 
     pub fn identity_map(&self, frame: &Frame, map: bool) {
@@ -654,12 +677,14 @@ impl BlockAllocator<'_> {
         let map_read = self.map.upgradeable_read();
         let cur_map_len = map_read.len();
         let cur_page_offset = (cur_map_len * BlockPage::BLOCK_COUNT) / BLOCKS_PER_MAP_PAGE;
-        let new_page_offset =
-            cur_page_offset + crate::align_up_div(required_blocks, BLOCKS_PER_MAP_PAGE);
+        let new_page_offset = (cur_page_offset
+            + crate::align_up_div(required_blocks, BLOCKS_PER_MAP_PAGE))
+        .next_power_of_two();
 
-        debug!(
+        trace!(
             "Growing map: {}..{} pages",
-            cur_page_offset, new_page_offset
+            cur_page_offset,
+            new_page_offset
         );
 
         self.with_addressor(|addressor| {
@@ -695,9 +720,10 @@ impl BlockAllocator<'_> {
             };
             map_write[cur_map_len..].fill(BlockPage::empty());
 
-            debug!(
+            trace!(
                 "Grew map: {} pages, {} block pages.",
-                new_page_offset, new_map_len
+                new_page_offset,
+                new_map_len
             );
         });
     }
