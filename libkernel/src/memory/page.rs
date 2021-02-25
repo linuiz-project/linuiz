@@ -64,12 +64,12 @@ impl Page {
     }
 
     #[inline]
-    pub const fn ptr<T>(&self) -> *const T {
+    pub const fn as_ptr<T>(&self) -> *const T {
         (self.0 * 0x1000) as *const T
     }
 
     #[inline]
-    pub const fn mut_ptr<T>(&self) -> *mut T {
+    pub const fn as_mut_ptr<T>(&self) -> *mut T {
         (self.0 * 0x1000) as *mut T
     }
 
@@ -83,7 +83,7 @@ impl Page {
 
     pub unsafe fn clear(&mut self) {
         core::ptr::write_bytes::<usize>(
-            self.mut_ptr(),
+            self.as_mut_ptr(),
             0x0,
             0x1000 / core::mem::size_of::<usize>(),
         );

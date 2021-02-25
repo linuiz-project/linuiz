@@ -70,12 +70,6 @@ where
         index: usize,
         phys_mapped_addr: VirtAddr,
     ) -> Option<&PageTable<L::NextLevel>> {
-        trace!(
-            "Accessing sub-table (ref): index {}, phys_mapped_addr {:?}",
-            index,
-            phys_mapped_addr
-        );
-
         self.get_entry(index)
             .frame()
             .map(|frame| &*(phys_mapped_addr + frame.addr_u64()).as_ptr())
@@ -86,12 +80,6 @@ where
         index: usize,
         phys_mapped_addr: VirtAddr,
     ) -> Option<&mut PageTable<L::NextLevel>> {
-        trace!(
-            "Accessing sub-table (mut): index {}, phys_mapped_addr {:?}",
-            index,
-            phys_mapped_addr
-        );
-
         self.get_entry_mut(index)
             .frame()
             .map(|frame| &mut *(phys_mapped_addr + frame.addr_u64()).as_mut_ptr())
@@ -102,12 +90,6 @@ where
         index: usize,
         phys_mapped_addr: VirtAddr,
     ) -> &mut PageTable<L::NextLevel> {
-        trace!(
-            "Accessing sub-table (create): index {}, phys_mapped_addr {:?}",
-            index,
-            phys_mapped_addr
-        );
-
         let entry = self.get_entry_mut(index);
         let frame = entry.frame().unwrap_or_else(|| {
             let alloc_frame = crate::memory::global_memory()

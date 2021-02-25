@@ -13,7 +13,6 @@ mod pic8259;
 mod timer;
 
 use core::ffi::c_void;
-use drivers::io::Serial;
 use libkernel::{BootInfo, ConfigTableEntry};
 
 extern "C" {
@@ -40,7 +39,7 @@ fn get_log_level() -> log::LevelFilter {
     log::LevelFilter::Info
 }
 
-static mut SERIAL_OUT: Serial = Serial::new(drivers::io::COM1);
+static mut SERIAL_OUT: drivers::io::Serial = drivers::io::Serial::new(drivers::io::COM1);
 
 #[no_mangle]
 #[export_name = "_start"]
@@ -49,7 +48,7 @@ extern "efiapi" fn kernel_main(
 ) -> ! {
     unsafe {
         SERIAL_OUT.init(drivers::io::SerialSpeed::S115200);
-        crate::drivers::io::set_stdout(&mut SERIAL_OUT);
+        drivers::io::set_stdout(&mut SERIAL_OUT);
     }
 
     match crate::logging::init_logger(crate::logging::LoggingModes::STDOUT, get_log_level()) {
@@ -82,26 +81,26 @@ extern "efiapi" fn kernel_main(
     init_apic();
 
     info!("Initializing framebuffer driver.");
-    let mut framebuffer_driver = drivers::graphics::framebuffer::FramebufferDriver::init(
-        framebuffer_pointer.addr(),
-        framebuffer_pointer.size(),
-    );
+    // let mut framebuffer_driver = drivers::graphics::framebuffer::FramebufferDriver::init(
+    //     framebuffer_pointer.addr(),
+    //     framebuffer_pointer.size(),
+    // );
 
-    let mut vecc = alloc::vec![0usize; 50];
-    for (idx, a) in vecc.iter_mut().enumerate() {
-        *a = idx;
-    }
-    info!("{:?}", vecc);
+    // let mut vecc = alloc::vec![0usize; 50];
+    // for (idx, a) in vecc.iter_mut().enumerate() {
+    //     *a = idx;
+    // }
+    // info!("{:?}", vecc);
 
-    info!("Testing framebuffer driver.");
-    for x in 0..300 {
-        for y in 0..300 {
-            framebuffer_driver
-                .write_pixel((x, y), drivers::graphics::color::Color8i::new(156, 10, 100));
-        }
-    }
+    // info!("Testing framebuffer driver.");
+    // for x in 0..300 {
+    //     for y in 0..300 {
+    //         framebuffer_driver
+    //             .write_pixel((x, y), drivers::graphics::color::Color8i::new(156, 10, 100));
+    //     }
+    // }
 
-    framebuffer_driver.flush_pixels();
+    // framebuffer_driver.flush_pixels();
 
     info!("Kernel has reached safe shutdown state.");
     unsafe { libkernel::instructions::pwm::qemu_shutdown() }

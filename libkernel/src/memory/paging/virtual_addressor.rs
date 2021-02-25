@@ -3,11 +3,13 @@ use crate::memory::{
     paging::{Level4, PageAttributes, PageTable, PageTableEntry},
     Frame, Page,
 };
+use spin::RwLock;
 use x86_64::VirtAddr;
 
 pub struct VirtualAddressor {
     mapped_page: Page,
     pml4_frame: Frame,
+    rw_lock: RwLock<u8>,
 }
 
 impl VirtualAddressor {
@@ -17,34 +19,31 @@ impl VirtualAddressor {
     /// Safety: this method is unsafe because `mapped_page` can be any value; that is, not necessarily
     /// a valid address in which physical memory is already mapped.
     pub unsafe fn new(mapped_page: Page) -> Self {
+        let pml4_frame = global_memory()
+            .lock_next()
+            .expect("failed to lock frame for PML4 of VirtualAddressor");
+
         Self {
             // we don't know where physical memory is mapped at this point,
             // so rely on what the caller specifies for us
             mapped_page,
-            pml4_frame: global_memory()
-                .lock_next()
-                .expect("failed to lock frame for PML4 of VirtualAddressor"),
+            pml4_frame,
+            rw_lock: RwLock::new(0),
         }
+    }
+
+    /* ACQUIRE STATE */
+
+    fn pml4_page(&self) -> Page {
+        self.mapped_page.offset(self.pml4_frame.index())
     }
 
     fn pml4(&self) -> &PageTable<Level4> {
-        unsafe {
-            &*self
-                .mapped_page
-                .offset(self.pml4_frame.index())
-                .addr()
-                .as_ptr()
-        }
+        unsafe { &*self.pml4_page().as_ptr() }
     }
 
-    fn pml4_mut(&mut self) -> &mut PageTable<Level4> {
-        unsafe {
-            &mut *self
-                .mapped_page
-                .offset(self.pml4_frame.index())
-                .addr()
-                .as_mut_ptr()
-        }
+    fn pml4_mut(&self) -> &mut PageTable<Level4> {
+        unsafe { &mut *self.pml4_page().as_mut_ptr() }
     }
 
     fn get_page_entry(&self, page: &Page) -> Option<&PageTableEntry> {
@@ -60,7 +59,7 @@ impl VirtualAddressor {
         }
     }
 
-    fn get_page_entry_mut(&mut self, page: &Page) -> Option<&mut PageTableEntry> {
+    fn get_page_entry_mut(&self, page: &Page) -> Option<&mut PageTableEntry> {
         let addr = (page.addr_u64() >> 12) as usize;
         let offset = self.mapped_page.addr();
 
@@ -73,7 +72,7 @@ impl VirtualAddressor {
         }
     }
 
-    fn get_page_entry_create(&mut self, page: &Page) -> &mut PageTableEntry {
+    fn get_page_entry_create(&self, page: &Page) -> &mut PageTableEntry {
         let addr = (page.addr_u64() >> 12) as usize;
         let offset = self.mapped_page.addr();
 
@@ -86,54 +85,48 @@ impl VirtualAddressor {
         }
     }
 
-    pub fn map(&mut self, page: &Page, frame: &Frame) {
-        debug_assert!(
-            !self.is_mapped(page.addr()),
-            "attempted to map already mapped page: {:?}",
-            page
-        );
-        {
-            let entry = self.get_page_entry_create(page);
-            if entry.is_present() {
-                crate::instructions::tlb::invalidate(page);
-            }
+    /* MAP / UNMAP */
 
-            entry.set(&frame, PageAttributes::PRESENT | PageAttributes::WRITABLE);
-            trace!("Mapped {:?}: {:?}", page, entry);
+    pub fn map(&self, page: &Page, frame: &Frame) {
+        assert!(!self.is_mapped(page.addr()), "page already mapped");
+
+        {
+            let _write_lock = self.rw_lock.write();
+
+            self.get_page_entry_create(page)
+                .set(&frame, PageAttributes::PRESENT | PageAttributes::WRITABLE);
+            crate::instructions::tlb::invalidate(page);
+
+            trace!("Mapped {:?} -> {:?}", page, frame);
         }
 
-        debug_assert!(
-            self.is_mapped_to(page, frame),
-            "failed to map page: {:?}",
-            self.get_page_entry(page)
-        );
+        assert!(self.is_mapped_to(page, frame), "failed to map page",);
     }
 
-    pub fn unmap(&mut self, page: &Page) {
-        debug_assert!(
-            self.is_mapped(page.addr()),
-            "attempted to unmap already unmapped page: {:?}",
-            page
-        );
+    pub fn unmap(&self, page: &Page) {
+        assert!(self.is_mapped(page.addr()), "page already unmapped");
 
-        let entry = self.get_page_entry_create(page);
-        crate::instructions::tlb::invalidate(page);
+        {
+            let _write_lock = self.rw_lock.write();
 
-        entry.set_nonpresent();
-        trace!("Unmapped {:?}: {:?}", page, entry);
+            self.get_page_entry_mut(page).unwrap().set_nonpresent();
+            crate::instructions::tlb::invalidate(page);
 
-        debug_assert!(
-            !self.is_mapped(page.addr()),
-            "failed to unmap: {:?}",
-            self.get_page_entry(page)
-        );
+            trace!("Unmapped {:?}", page);
+        }
+
+        assert!(!self.is_mapped(page.addr()), "failed to unmap page",);
     }
 
     pub fn identity_map(&mut self, frame: &Frame) {
         self.map(&Page::from_index(frame.index()), frame);
     }
 
+    /* STATE QUERYING */
+
     pub fn is_mapped(&self, virt_addr: VirtAddr) -> bool {
+        let _read_lock = self.rw_lock.read();
+
         match self.get_page_entry(&Page::containing_addr(virt_addr)) {
             Some(entry) => entry.is_present(),
             None => false,
@@ -141,6 +134,8 @@ impl VirtualAddressor {
     }
 
     pub fn is_mapped_to(&self, page: &Page, frame: &Frame) -> bool {
+        let _read_lock = self.rw_lock.read();
+
         match self.get_page_entry(page).and_then(|entry| entry.frame()) {
             Some(entry_frame) => frame.index() == entry_frame.index(),
             None => false,
@@ -148,10 +143,14 @@ impl VirtualAddressor {
     }
 
     pub fn translate_page(&self, page: &Page) -> Option<Frame> {
+        let _read_lock = self.rw_lock.read();
+
         self.get_page_entry(page).and_then(|entry| entry.frame())
     }
 
-    pub fn modify_mapped_page(&mut self, page: Page) {
+    /* STATE CHANGING */
+
+    pub unsafe fn modify_mapped_page(&mut self, page: Page) {
         let total_memory_pages = global_memory().total_memory(None) / 0x1000;
         for index in 0..total_memory_pages {
             self.map(&page.offset(index), &Frame::from_index(index));
@@ -160,7 +159,6 @@ impl VirtualAddressor {
         self.mapped_page = page;
     }
 
-    #[inline(always)]
     pub unsafe fn swap_into(&self) {
         crate::registers::CR3::write(&self.pml4_frame, crate::registers::CR3Flags::empty());
     }

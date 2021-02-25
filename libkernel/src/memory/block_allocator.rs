@@ -272,7 +272,10 @@ impl BlockAllocator<'_> {
 
     /* INITIALIZATION */
 
-    pub fn init(&self, stack_frames: impl crate::memory::FrameIterator + Clone + core::fmt::Debug) {
+    pub fn init(
+        &self,
+        ident_stack_frames: impl crate::memory::FrameIterator + Clone + core::fmt::Debug,
+    ) {
         use crate::memory::{global_memory, FrameState};
 
         unsafe {
@@ -294,13 +297,13 @@ impl BlockAllocator<'_> {
                 _ => {}
             });
 
-            // Since we're using physical offset mapping for our page table modification
-            //  strategy, the memory needs to be identity mapped at the correct offset.
-            let phys_mapping_addr = crate::memory::global_top_offset();
-            trace!("Mapping physical memory at offset: {:?}", phys_mapping_addr);
-            addressor.modify_mapped_page(Page::from_addr(phys_mapping_addr));
-
             unsafe {
+                // Since we're using physical offset mapping for our page table modification
+                //  strategy, the memory needs to be identity mapped at the correct offset.
+                let phys_mapping_addr = crate::memory::global_top_offset();
+                trace!("Mapping physical memory at offset: {:?}", phys_mapping_addr);
+                addressor.modify_mapped_page(Page::from_addr(phys_mapping_addr));
+
                 // Swap the PML4 into CR3
                 trace!("Writing kernel addressor's PML4 to the CR3 register.");
                 addressor.swap_into();
@@ -315,9 +318,9 @@ impl BlockAllocator<'_> {
         });
 
         unsafe {
-            if let Some(frame) = stack_frames.clone().next() {
+            if let Some(frame) = ident_stack_frames.clone().next() {
                 trace!("Allocating space for moving stack.");
-                let alloc_to_base = self.alloc_to(stack_frames.clone()) as u64;
+                let alloc_to_base = self.alloc_to(ident_stack_frames.clone()) as u64;
                 let cur_stack_base = frame.addr_u64();
 
                 trace!("Modifying stack pointer to virtually allocated address space.");
@@ -334,13 +337,16 @@ impl BlockAllocator<'_> {
                     trace!("    (NOTE: the stack pointer will be unaffected.)");
                 }
             } else {
-                panic!("provided stack frames are invalid: {:?}", stack_frames);
+                panic!(
+                    "provided stack frames are invalid: {:?}",
+                    ident_stack_frames
+                );
             }
         }
 
         trace!("Unampping temporarily identity mapped stack frames.");
         self.with_addressor(|addressor| {
-            for frame in stack_frames {
+            for frame in ident_stack_frames {
                 addressor.unmap(&Page::from_index(frame.index()));
             }
         });
@@ -584,7 +590,7 @@ impl BlockAllocator<'_> {
     /// This function assumed the frames are already locked or otherwise valid.
     pub fn alloc_to(&self, mut frames: impl FrameIterator + Clone) -> *mut u8 {
         let size_in_frames = frames.clone().count();
-        debug!("Allocation requested to: {} frames", size_in_frames);
+        trace!("Allocation requested to: {} frames", size_in_frames);
         let (mut map_index, mut current_run);
 
         while {
@@ -714,7 +720,7 @@ impl BlockAllocator<'_> {
             let mut map_write = map_read.upgrade();
             *map_write = unsafe {
                 &mut *core::ptr::slice_from_raw_parts_mut(
-                    Self::ALLOCATOR_BASE.mut_ptr(),
+                    Self::ALLOCATOR_BASE.as_mut_ptr(),
                     new_map_len,
                 )
             };
