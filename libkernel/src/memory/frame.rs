@@ -1,5 +1,3 @@
-use crate::BitValue;
-use num_enum::TryFromPrimitive;
 use x86_64::PhysAddr;
 
 pub trait FrameIterator: core::ops::RangeBounds<Frame> + Iterator<Item = Frame> {}
@@ -7,35 +5,6 @@ impl<T> FrameIterator for T where T: core::ops::RangeBounds<Frame> + Iterator<It
 
 pub trait FrameIndexIterator: core::ops::RangeBounds<usize> + Iterator<Item = usize> {}
 impl<T> FrameIndexIterator for T where T: core::ops::RangeBounds<usize> + Iterator<Item = usize> {}
-
-#[repr(usize)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
-pub enum FrameState {
-    Free = 0,
-    Locked,
-    Reserved,
-    Stack,
-    NonUsable,
-    MMIO,
-}
-
-impl BitValue for FrameState {
-    const BIT_WIDTH: usize = 0x4;
-    const MASK: usize = 0xF;
-
-    fn from_usize(value: usize) -> Self {
-        use core::convert::TryFrom;
-
-        match FrameState::try_from(value) {
-            Ok(frame_type) => frame_type,
-            Err(err) => panic!("invalid value for frame type: {:?}", err),
-        }
-    }
-
-    fn as_usize(&self) -> usize {
-        *self as usize
-    }
-}
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

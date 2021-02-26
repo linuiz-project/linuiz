@@ -1,8 +1,38 @@
 use crate::{
-    memory::{Frame, FrameIndexIterator, FrameState},
+    memory::{Frame, FrameIndexIterator},
     BitValue, RwBitArray,
 };
+use num_enum::TryFromPrimitive;
 use spin::RwLock;
+
+#[repr(usize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
+pub enum FrameState {
+    Free = 0,
+    Locked,
+    Reserved,
+    Stack,
+    NonUsable,
+    MMIO,
+}
+
+impl BitValue for FrameState {
+    const BIT_WIDTH: usize = 0x4;
+    const MASK: usize = 0xF;
+
+    fn from_usize(value: usize) -> Self {
+        use core::convert::TryFrom;
+
+        match FrameState::try_from(value) {
+            Ok(frame_type) => frame_type,
+            Err(err) => panic!("invalid value for frame type: {:?}", err),
+        }
+    }
+
+    fn as_usize(&self) -> usize {
+        *self as usize
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameAllocatorError {
@@ -104,6 +134,22 @@ impl<'arr> FrameAllocator<'arr> {
                 FrameState::Locked,
             ))
         }
+    }
+
+    pub unsafe fn coerce_frame(&self, frame: Frame, new_state: FrameState) {
+        let old_state = self.memory_map.get(frame.index());
+        self.memory_map.set(frame.index(), new_state);
+
+        let mut mem_write = self.memory.write();
+        mem_write[old_state.as_usize()] -= 0x1000;
+        mem_write[new_state.as_usize()] += 0x1000;
+
+        debug!(
+            "Forcibly freed frame {}: {:?} -> {:?}",
+            frame.index(),
+            old_state,
+            new_state
+        );
     }
 
     pub unsafe fn acquire_frame(

@@ -167,6 +167,7 @@ impl core::fmt::Debug for SectionState {
 /// Allocator utilizing blocks of memory, in size of 16 bytes per block, to
 ///  easily and efficiently allocate.
 pub struct BlockAllocator<'map> {
+    // todo remove addressor from this struct
     addressor: Mutex<core::lazy::OnceCell<VirtualAddressor>>,
     map: RwLock<&'map mut [BlockPage]>,
 }
@@ -272,10 +273,7 @@ impl BlockAllocator<'_> {
 
     /* INITIALIZATION */
 
-    pub fn init(
-        &self,
-        ident_stack_frames: impl crate::memory::FrameIterator + Clone + core::fmt::Debug,
-    ) {
+    pub fn init(&self, stack_frames: impl crate::memory::FrameIterator + Clone) {
         use crate::memory::{global_memory, FrameState};
 
         unsafe {
@@ -310,6 +308,7 @@ impl BlockAllocator<'_> {
             }
         });
 
+        info!("Allocating reserved global memory frames.");
         global_memory().iter_callback(|index, frame_type| match frame_type {
             FrameState::Reserved => {
                 self.identity_map(&Frame::from_index(index), false);
@@ -318,35 +317,43 @@ impl BlockAllocator<'_> {
         });
 
         unsafe {
-            if let Some(frame) = ident_stack_frames.clone().next() {
-                trace!("Allocating space for moving stack.");
-                let alloc_to_base = self.alloc_to(ident_stack_frames.clone()) as u64;
-                let cur_stack_base = frame.addr_u64();
+            const STACK_SIZE: usize = 256 * 0x1000; /* 1MB in pages */
 
-                trace!("Modifying stack pointer to virtually allocated address space.");
-                if cur_stack_base > alloc_to_base {
-                    let base_difference = cur_stack_base - alloc_to_base;
-                    trace!("Decrementing stack pointer by: {:?}", base_difference);
-                    crate::registers::stack::RSP::sub(base_difference);
-                } else if cur_stack_base < alloc_to_base {
-                    let base_difference = alloc_to_base - cur_stack_base;
-                    trace!("Incrementing stack pointer by: {:?}", base_difference);
-                    crate::registers::stack::RSP::add(alloc_to_base - cur_stack_base);
-                } else {
-                    trace!("Stack has been incidentally identity mapped in virtual memory.");
-                    trace!("    (NOTE: the stack pointer will be unaffected.)");
-                }
+            trace!("Allocating new stack: {} bytes", STACK_SIZE);
+            let new_stack_base = crate::alloc!(STACK_SIZE);
+            let stack_base_cell = core::lazy::OnceCell::<*mut u8>::new();
+
+            trace!("Copying data from bootloader-allocated stack.");
+            for (index, frame) in stack_frames.clone().enumerate() {
+                let cur_offset = new_stack_base.add(index * 0x1000);
+                let frame_ptr = frame.addr_u64() as *mut u8;
+                stack_base_cell.set(frame_ptr).ok();
+
+                core::ptr::copy_nonoverlapping(frame_ptr, cur_offset, 0x1000);
+            }
+
+            let base_offset = stack_base_cell
+                .get()
+                .expect("failed to acquire current stack base pointer")
+                .offset_from(new_stack_base);
+            trace!("New stack is 0x{:x} offset from old stack.", base_offset);
+
+            trace!("Modifying `rsp` by the calculated base offset.");
+            use crate::registers::stack::RSP;
+            if base_offset.is_positive() {
+                let offset = base_offset.abs() as u64;
+                debug!("OFFSET {:x} ---- {:x}", base_offset, offset);
+                RSP::add(offset);
             } else {
-                panic!(
-                    "provided stack frames are invalid: {:?}",
-                    ident_stack_frames
-                );
+                let offset = base_offset.abs() as u64;
+                debug!("OFFSET {:x} ---- {:x}", base_offset, offset);
+                RSP::sub(offset);
             }
         }
 
-        trace!("Unampping temporarily identity mapped stack frames.");
+        debug!("Unmapping bootloader-provided stack frames.");
         self.with_addressor(|addressor| {
-            for frame in ident_stack_frames {
+            for frame in stack_frames {
                 addressor.unmap(&Page::from_index(frame.index()));
             }
         });
@@ -471,11 +478,7 @@ impl BlockAllocator<'_> {
                 page_state[section_index].has_bits = section.load(Ordering::Acquire) > 0;
             }
 
-            info!("INDEX {}: {:?}", map_index, block_page);
-
             if SectionState::should_alloc(&page_state) {
-                trace!("Allocating frame for previously unused block page.");
-
                 // 'has bits', but not 'had bits'
                 self.with_addressor(|addressor| {
                     let page = &mut Page::from_index(map_index);
@@ -485,14 +488,10 @@ impl BlockAllocator<'_> {
             }
 
             // sanity check to ensure we're allocating block pages
-            // assert!(
-            //     self.is_mapped(Page::from_index(map_index).addr()),
-            //     "previously iterated block page is unallocated at end of allocation step"
-            // );
-        }
-
-        for (map_index, block_page) in self.map.write().iter().enumerate().skip(start_map_index) {
-            info!("INDEX {}: {:?}", map_index, block_page);
+            assert!(
+                self.is_mapped(Page::from_index(map_index).addr()),
+                "previously iterated block page is unallocated at end of allocation step"
+            );
         }
 
         (start_block_index * Self::BLOCK_SIZE) as *mut u8

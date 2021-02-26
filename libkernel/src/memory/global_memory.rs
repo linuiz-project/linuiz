@@ -64,10 +64,11 @@ pub unsafe fn init_global_memory(memory_map: &[crate::memory::UEFIMemoryDescript
     for descriptor in memory_map.iter() {
         let phys_diff = descriptor.phys_start - last_end_phys_addr;
 
-        if phys_diff != 0 {
-            info!(
-                "found memory hole: {:?} of size {}",
-                last_end_phys_addr, phys_diff
+        if phys_diff > 0 {
+            trace!(
+                "Kernel identified memory void: {:?}..{:?}",
+                last_end_phys_addr,
+                descriptor.phys_start
             );
         }
 

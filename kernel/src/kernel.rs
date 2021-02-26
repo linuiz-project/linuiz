@@ -31,7 +31,7 @@ extern "C" {
 
 #[cfg(debug_assertions)]
 fn get_log_level() -> log::LevelFilter {
-    log::LevelFilter::Debug
+    log::LevelFilter::Trace
 }
 
 #[cfg(not(debug_assertions))]
@@ -164,7 +164,8 @@ fn init_memory(boot_info: BootInfo<libkernel::memory::UEFIMemoryDescriptor, Conf
     info!("Initializing global allocator.");
     // `boot_info` will not be usable after initalizing the global allocator,
     //  due to the stack being moved in virtual memory.
-    unsafe { libkernel::memory::init(stack_frames.take().expect("no stack descriptor found")) };
+    let stack_frames = stack_frames.take().expect("no stack descriptor found");
+    libkernel::memory::GLOBAL_ALLOCATOR.init(stack_frames);
 
     info!("Global memory & the kernel global allocator have been initialized.");
 }
