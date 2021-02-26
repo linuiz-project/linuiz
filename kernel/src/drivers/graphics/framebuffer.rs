@@ -37,7 +37,9 @@ impl<'fbuf, 'bbuf> FramebufferDriver<'fbuf, 'bbuf> {
             info!(
                 "BACKBUFFER {:?}: {}",
                 ptr,
-                GLOBAL_ALLOCATOR.is_mapped(VirtAddr::from_ptr(ptr))
+                GLOBAL_ALLOCATOR
+                    .get_addressor()
+                    .is_mapped(VirtAddr::from_ptr(ptr))
             );
 
             Self {

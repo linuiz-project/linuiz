@@ -1,6 +1,6 @@
 use crate::{
     memory::{Frame, FrameIndexIterator},
-    BitValue, RwBitArray,
+    BitValue, RwBitArray, RwBitArrayIterator,
 };
 use num_enum::TryFromPrimitive;
 use spin::RwLock;
@@ -11,7 +11,6 @@ pub enum FrameState {
     Free = 0,
     Locked,
     Reserved,
-    Stack,
     NonUsable,
     MMIO,
 }
@@ -81,11 +80,15 @@ impl<'arr> FrameAllocator<'arr> {
         memory_counters[FrameState::Free.as_usize()] = total_memory;
         memory_counters[FrameState::MASK] = total_memory;
 
+        let total_frames = total_memory / 0x1000;
         let this = Self {
-            memory_map: RwBitArray::from_slice(&mut *core::ptr::slice_from_raw_parts_mut(
-                base_ptr,
-                RwBitArray::<FrameState>::length_hint(total_memory / 0x1000),
-            )),
+            memory_map: RwBitArray::from_slice(
+                &mut *core::ptr::slice_from_raw_parts_mut(
+                    base_ptr,
+                    RwBitArray::<FrameState>::length_hint(total_frames),
+                ),
+                total_frames,
+            ),
             memory: RwLock::new(memory_counters),
         };
 
@@ -134,22 +137,6 @@ impl<'arr> FrameAllocator<'arr> {
                 FrameState::Locked,
             ))
         }
-    }
-
-    pub unsafe fn coerce_frame(&self, frame: Frame, new_state: FrameState) {
-        let old_state = self.memory_map.get(frame.index());
-        self.memory_map.set(frame.index(), new_state);
-
-        let mut mem_write = self.memory.write();
-        mem_write[old_state.as_usize()] -= 0x1000;
-        mem_write[new_state.as_usize()] += 0x1000;
-
-        debug!(
-            "Forcibly freed frame {}: {:?} -> {:?}",
-            frame.index(),
-            old_state,
-            new_state
-        );
     }
 
     pub unsafe fn acquire_frame(
@@ -252,13 +239,8 @@ impl<'arr> FrameAllocator<'arr> {
 
     /// Executes a given callback function, passing frame data from each frame the
     ///  allocator represents.
-    pub fn iter_callback<F>(&self, mut callback: F)
-    where
-        F: FnMut(usize, FrameState),
-    {
-        for index in 0..self.memory_map.len() {
-            callback(index, self.memory_map.get(index));
-        }
+    pub fn frame_state_iter<'outer>(&'arr self) -> RwBitArrayIterator<'outer, 'arr, FrameState> {
+        self.memory_map.iter()
     }
 
     #[cfg(debug_assertions)]

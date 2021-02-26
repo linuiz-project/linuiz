@@ -7,7 +7,7 @@ use core::{
     mem::size_of,
     sync::atomic::{AtomicU64, Ordering},
 };
-use spin::{Mutex, RwLock};
+use spin::RwLock;
 
 /// Represents one page worth of memory blocks (i.e. 4096 bytes in blocks).
 #[repr(C)]
@@ -168,7 +168,7 @@ impl core::fmt::Debug for SectionState {
 ///  easily and efficiently allocate.
 pub struct BlockAllocator<'map> {
     // todo remove addressor from this struct
-    addressor: Mutex<core::lazy::OnceCell<VirtualAddressor>>,
+    addressor: RwLock<VirtualAddressor>,
     map: RwLock<&'map mut [BlockPage]>,
 }
 
@@ -255,115 +255,97 @@ impl BlockAllocator<'_> {
 
         Self {
             // TODO make addressor use a RwLock
-            addressor: Mutex::new(core::lazy::OnceCell::new()),
+            addressor: RwLock::new(VirtualAddressor::null()),
             map: RwLock::new(&mut EMPTY),
         }
     }
 
-    fn with_addressor<F, R>(&self, closure: F) -> R
-    where
-        F: FnOnce(&mut VirtualAddressor) -> R,
-    {
-        if let Some(addressor) = self.addressor.lock().get_mut() {
-            closure(addressor)
-        } else {
-            panic!("addressor has not been set")
-        }
+    pub fn get_addressor(&self) -> spin::RwLockReadGuard<VirtualAddressor> {
+        self.addressor.read()
+    }
+
+    pub unsafe fn get_addressor_mut(&self) -> spin::RwLockWriteGuard<VirtualAddressor> {
+        self.addressor.write()
     }
 
     /* INITIALIZATION */
 
-    pub fn init(&self, stack_frames: impl crate::memory::FrameIterator + Clone) {
+    pub unsafe fn init(&self, stack_frames: impl crate::memory::FrameIterator + Clone) {
         use crate::memory::{global_memory, FrameState};
 
-        unsafe {
-            assert!(
-                self.addressor
-                    .lock()
-                    .set(VirtualAddressor::new(Page::null()))
-                    .is_ok(),
-                "addressor has already been set for allocator"
-            );
+        {
+            trace!("Initializing allocator's virtual addressor.");
+            let mut addressor_mut = self.get_addressor_mut();
+            *addressor_mut = VirtualAddressor::new(Page::null());
+
+            trace!("Identity mapping all reserved global memory frames.");
+            global_memory()
+                .frame_state_iter()
+                .enumerate()
+                .filter(|(_, frame_state)| *frame_state == FrameState::Reserved)
+                .for_each(|(index, _)| addressor_mut.identity_map(&Frame::from_index(index)));
+
+            // Since we're using physical offset mapping for our page table modification
+            //  strategy, the memory needs to be identity mapped at the correct offset.
+            let phys_mapping_addr = crate::memory::global_top_offset();
+            trace!("Mapping physical memory at offset: {:?}", phys_mapping_addr);
+            addressor_mut.modify_mapped_page(Page::from_addr(phys_mapping_addr));
+
+            // Swap the PML4 into CR3
+            trace!("Writing kernel addressor's PML4 to the CR3 register.");
+            addressor_mut.swap_into();
         }
-
-        trace!("Identity mapping all reserved global memory frames.");
-        self.with_addressor(|addressor| {
-            global_memory().iter_callback(|index, frame_type| match frame_type {
-                FrameState::Reserved | FrameState::Stack => {
-                    addressor.identity_map(&Frame::from_index(index));
-                }
-                _ => {}
-            });
-
-            unsafe {
-                // Since we're using physical offset mapping for our page table modification
-                //  strategy, the memory needs to be identity mapped at the correct offset.
-                let phys_mapping_addr = crate::memory::global_top_offset();
-                trace!("Mapping physical memory at offset: {:?}", phys_mapping_addr);
-                addressor.modify_mapped_page(Page::from_addr(phys_mapping_addr));
-
-                // Swap the PML4 into CR3
-                trace!("Writing kernel addressor's PML4 to the CR3 register.");
-                addressor.swap_into();
-            }
-        });
 
         info!("Allocating reserved global memory frames.");
-        global_memory().iter_callback(|index, frame_type| match frame_type {
-            FrameState::Reserved => {
-                self.identity_map(&Frame::from_index(index), false);
-            }
-            _ => {}
-        });
+        global_memory()
+            .frame_state_iter()
+            .enumerate()
+            .filter(|(_, frame_state)| *frame_state == FrameState::Reserved)
+            .for_each(|(index, _)| self.identity_map(&Frame::from_index(index), false));
 
-        unsafe {
-            const STACK_SIZE: usize = 256 * 0x1000; /* 1MB in pages */
+        const STACK_SIZE: usize = 256 * 0x1000; /* 1MB in pages */
 
-            trace!("Allocating new stack: {} bytes", STACK_SIZE);
-            let new_stack_base = crate::alloc!(STACK_SIZE);
-            let stack_base_cell = core::lazy::OnceCell::<*mut u8>::new();
+        trace!("Allocating new stack: {} bytes", STACK_SIZE);
+        let new_stack_base = crate::alloc!(STACK_SIZE);
+        let stack_base_cell = core::lazy::OnceCell::<*mut u8>::new();
 
-            trace!("Copying data from bootloader-allocated stack.");
-            for (index, frame) in stack_frames.clone().enumerate() {
-                let cur_offset = new_stack_base.add(index * 0x1000);
-                let frame_ptr = frame.addr_u64() as *mut u8;
-                stack_base_cell.set(frame_ptr).ok();
+        trace!("Copying data from bootloader-allocated stack.");
+        for (index, frame) in stack_frames.clone().enumerate() {
+            let cur_offset = new_stack_base.add(index * 0x1000);
+            let frame_ptr = frame.addr_u64() as *mut u8;
+            stack_base_cell.set(frame_ptr).ok();
 
-                core::ptr::copy_nonoverlapping(frame_ptr, cur_offset, 0x1000);
-            }
-
-            let base_offset = stack_base_cell
-                .get()
-                .expect("failed to acquire current stack base pointer")
-                .offset_from(new_stack_base);
-            trace!("New stack is 0x{:x} offset from old stack.", base_offset);
-
-            trace!("Modifying `rsp` by the calculated base offset.");
-            use crate::registers::stack::RSP;
-            if base_offset.is_positive() {
-                let offset = base_offset.abs() as u64;
-                debug!("OFFSET {:x} ---- {:x}", base_offset, offset);
-                RSP::add(offset);
-            } else {
-                let offset = base_offset.abs() as u64;
-                debug!("OFFSET {:x} ---- {:x}", base_offset, offset);
-                RSP::sub(offset);
-            }
+            trace!("Copying stack: {:?} => {:?}", frame_ptr, cur_offset);
+            core::ptr::copy_nonoverlapping(frame_ptr, cur_offset, 0x1000);
+            // TODO also zero all antecedent stack frames
         }
 
-        debug!("Unmapping bootloader-provided stack frames.");
-        self.with_addressor(|addressor| {
-            for frame in stack_frames {
-                addressor.unmap(&Page::from_index(frame.index()));
-            }
-        });
+        if let Some(stack_base) = stack_base_cell.get() {
+            let base_offset = stack_base.offset_from(new_stack_base);
 
-        trace!("Finished block allocator initialization.");
+            debug!("Modifying `rsp` by base offset: 0x{:x}.", base_offset);
+            use crate::registers::stack::RSP;
+            if base_offset.is_positive() {
+                RSP::sub(base_offset.abs() as u64);
+            } else {
+                RSP::add(base_offset.abs() as u64);
+            }
+        } else {
+            panic!("failed to acquire current stack base pointer")
+        }
+
+        {
+            debug!("Unmapping bootloader-provided stack frames.");
+            let mut addressor_mut = self.get_addressor_mut();
+            stack_frames.for_each(|frame| addressor_mut.unmap(&Page::from_index(frame.index())));
+        }
+
+        debug!("Finished block allocator initialization.");
     }
 
     /* ALLOC & DEALLOC */
 
-    fn raw_alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
+    fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
         const MINIMUM_ALIGNMENT: usize = 16;
 
         let alignment = if layout.align().is_power_of_two()
@@ -480,24 +462,21 @@ impl BlockAllocator<'_> {
 
             if SectionState::should_alloc(&page_state) {
                 // 'has bits', but not 'had bits'
-                self.with_addressor(|addressor| {
-                    let page = &mut Page::from_index(map_index);
-                    addressor.map(page, &crate::memory::global_memory().lock_next().unwrap());
-                    unsafe { page.clear() };
-                });
-            }
 
-            // sanity check to ensure we're allocating block pages
-            assert!(
-                self.is_mapped(Page::from_index(map_index).addr()),
-                "previously iterated block page is unallocated at end of allocation step"
-            );
+                let page = &mut Page::from_index(map_index);
+
+                unsafe {
+                    self.get_addressor_mut()
+                        .map(page, &crate::memory::global_memory().lock_next().unwrap());
+                    page.clear();
+                }
+            }
         }
 
         (start_block_index * Self::BLOCK_SIZE) as *mut u8
     }
 
-    fn raw_dealloc(&self, ptr: *mut u8, size: usize) {
+    fn dealloc(&self, ptr: *mut u8, size: usize) {
         let start_block_index = (ptr as usize) / Self::BLOCK_SIZE;
         let end_block_index = start_block_index + align_up_div(size, Self::BLOCK_SIZE);
         let mut block_index = start_block_index;
@@ -550,16 +529,15 @@ impl BlockAllocator<'_> {
 
             if SectionState::should_dealloc(&page_state) {
                 // 'has bits', but not 'had bits'
-                self.with_addressor(|addressor| {
-                    let page = &Page::from_index(map_index);
-                    // todo FIX THIS
-                    //     unsafe {
-                    //     crate::memory::global_memory()
-                    //         .free_frame(&addressor.translate_page(page).unwrap())
-                    //         .unwrap()
-                    // };
-                    addressor.unmap(page);
-                });
+                let mut addressor_mut = unsafe { self.get_addressor_mut() };
+                let page = &Page::from_index(map_index);
+                // todo FIX THIS (uncomment & build for error)
+                //     unsafe {
+                //     crate::memory::global_memory()
+                //         .free_frame(&addressor.translate_page(page).unwrap())
+                //         .unwrap()
+                // };
+                addressor_mut.unmap(page);
             }
         }
     }
@@ -622,7 +600,8 @@ impl BlockAllocator<'_> {
             start_index + size_in_frames
         );
 
-        self.with_addressor(|addressor| {
+        {
+            let mut addressor_mut = unsafe { self.get_addressor_mut() };
             for (map_index, block_page) in self
                 .map
                 .write()
@@ -632,22 +611,14 @@ impl BlockAllocator<'_> {
                 .take(size_in_frames)
             {
                 block_page.set_full();
-                addressor.map(
+                addressor_mut.map(
                     &Page::from_index(map_index),
                     &frames.next().expect("invalid end of frame iterator"),
                 );
             }
-        });
+        }
 
-        let alloc_to_ptr = (start_index * 0x1000) as *mut u8;
-        trace!(
-            "Allocation fulfilled: pages {}..{} @ {:?}",
-            start_index,
-            start_index + size_in_frames,
-            alloc_to_ptr
-        );
-
-        alloc_to_ptr
+        (start_index * 0x1000) as *mut u8
     }
 
     pub fn identity_map(&self, frame: &Frame, map: bool) {
@@ -670,7 +641,7 @@ impl BlockAllocator<'_> {
         block_page.set_full();
 
         if map {
-            self.with_addressor(|addressor| addressor.identity_map(frame));
+            unsafe { self.get_addressor_mut() }.identity_map(frame);
         }
     }
 
@@ -692,62 +663,41 @@ impl BlockAllocator<'_> {
             new_page_offset
         );
 
-        self.with_addressor(|addressor| {
+        {
+            let mut addressor_mut = unsafe { self.get_addressor_mut() };
             for offset in cur_page_offset..new_page_offset {
                 let map_page = &mut Self::ALLOCATOR_BASE.offset(offset);
-                addressor.map(
+                addressor_mut.map(
                     map_page,
                     &crate::memory::global_memory().lock_next().unwrap(),
                 );
-
-                debug_assert!(
-                    addressor.is_mapped(map_page.addr()),
-                    "mapping allocator base offset page failed (offset {})",
-                    offset
-                );
             }
+        }
 
-            const BLOCK_PAGES_PER_FRAME: usize = 0x1000 / size_of::<BlockPage>();
-            let new_map_len = new_page_offset * BLOCK_PAGES_PER_FRAME;
+        let new_map_len = new_page_offset * (0x1000 / size_of::<BlockPage>());
+        let mut map_write = map_read.upgrade();
+        *map_write = unsafe {
+            &mut *core::ptr::slice_from_raw_parts_mut(
+                Self::ALLOCATOR_BASE.as_mut_ptr(),
+                new_map_len,
+            )
+        };
+        map_write[cur_map_len..].fill(BlockPage::empty());
 
-            debug_assert_eq!(
-                new_map_len % BLOCK_PAGES_PER_FRAME,
-                0,
-                "map must be page-aligned"
-            );
-
-            let mut map_write = map_read.upgrade();
-            *map_write = unsafe {
-                &mut *core::ptr::slice_from_raw_parts_mut(
-                    Self::ALLOCATOR_BASE.as_mut_ptr(),
-                    new_map_len,
-                )
-            };
-            map_write[cur_map_len..].fill(BlockPage::empty());
-
-            trace!(
-                "Grew map: {} pages, {} block pages.",
-                new_page_offset,
-                new_map_len
-            );
-        });
-    }
-
-    pub fn translate_page(&self, page: &Page) -> Option<Frame> {
-        self.with_addressor(|addressor| addressor.translate_page(page))
-    }
-
-    pub fn is_mapped(&self, virt_addr: x86_64::VirtAddr) -> bool {
-        self.with_addressor(|addressor| addressor.is_mapped(virt_addr))
+        trace!(
+            "Grew map: {} pages, {} block pages.",
+            new_page_offset,
+            new_map_len
+        );
     }
 }
 
 unsafe impl core::alloc::GlobalAlloc for BlockAllocator<'_> {
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
-        self.raw_alloc(layout)
+        self.alloc(layout)
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
-        self.raw_dealloc(ptr, layout.size());
+        self.dealloc(ptr, layout.size());
     }
 }

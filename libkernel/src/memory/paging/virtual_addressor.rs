@@ -3,16 +3,21 @@ use crate::memory::{
     paging::{Level4, PageAttributes, PageTable, PageTableEntry},
     Frame, Page,
 };
-use spin::RwLock;
 use x86_64::VirtAddr;
 
 pub struct VirtualAddressor {
     mapped_page: Page,
     pml4_frame: Frame,
-    rw_lock: RwLock<u8>,
 }
 
 impl VirtualAddressor {
+    pub const fn null() -> Self {
+        Self {
+            mapped_page: Page::null(),
+            pml4_frame: Frame::null(),
+        }
+    }
+
     /// Attempts to create a new VirtualAddressor, with `current_mapped_addr` specifying the current virtual
     /// address where the entirety of the system physical memory is mapped.
     ///
@@ -28,7 +33,6 @@ impl VirtualAddressor {
             // so rely on what the caller specifies for us
             mapped_page,
             pml4_frame,
-            rw_lock: RwLock::new(0),
         }
     }
 
@@ -42,7 +46,7 @@ impl VirtualAddressor {
         unsafe { &*self.pml4_page().as_ptr() }
     }
 
-    fn pml4_mut(&self) -> &mut PageTable<Level4> {
+    fn pml4_mut(&mut self) -> &mut PageTable<Level4> {
         unsafe { &mut *self.pml4_page().as_mut_ptr() }
     }
 
@@ -59,7 +63,7 @@ impl VirtualAddressor {
         }
     }
 
-    fn get_page_entry_mut(&self, page: &Page) -> Option<&mut PageTableEntry> {
+    fn get_page_entry_mut(&mut self, page: &Page) -> Option<&mut PageTableEntry> {
         let addr = (page.addr_u64() >> 12) as usize;
         let offset = self.mapped_page.addr();
 
@@ -72,7 +76,7 @@ impl VirtualAddressor {
         }
     }
 
-    fn get_page_entry_create(&self, page: &Page) -> &mut PageTableEntry {
+    fn get_page_entry_create(&mut self, page: &Page) -> &mut PageTableEntry {
         let addr = (page.addr_u64() >> 12) as usize;
         let offset = self.mapped_page.addr();
 
@@ -87,33 +91,23 @@ impl VirtualAddressor {
 
     /* MAP / UNMAP */
 
-    pub fn map(&self, page: &Page, frame: &Frame) {
+    pub fn map(&mut self, page: &Page, frame: &Frame) {
         assert!(!self.is_mapped(page.addr()), "page already mapped");
 
-        {
-            let _write_lock = self.rw_lock.write();
-
-            self.get_page_entry_create(page)
-                .set(&frame, PageAttributes::PRESENT | PageAttributes::WRITABLE);
-            crate::instructions::tlb::invalidate(page);
-
-            trace!("Mapped {:?} -> {:?}", page, frame);
-        }
+        self.get_page_entry_create(page)
+            .set(&frame, PageAttributes::PRESENT | PageAttributes::WRITABLE);
+        crate::instructions::tlb::invalidate(page);
+        trace!("Mapped {:?} -> {:?}", page, frame);
 
         assert!(self.is_mapped_to(page, frame), "failed to map page",);
     }
 
-    pub fn unmap(&self, page: &Page) {
+    pub fn unmap(&mut self, page: &Page) {
         assert!(self.is_mapped(page.addr()), "page already unmapped");
 
-        {
-            let _write_lock = self.rw_lock.write();
-
-            self.get_page_entry_mut(page).unwrap().set_nonpresent();
-            crate::instructions::tlb::invalidate(page);
-
-            trace!("Unmapped {:?}", page);
-        }
+        self.get_page_entry_mut(page).unwrap().set_nonpresent();
+        crate::instructions::tlb::invalidate(page);
+        trace!("Unmapped {:?}", page);
 
         assert!(!self.is_mapped(page.addr()), "failed to unmap page",);
     }
@@ -125,8 +119,6 @@ impl VirtualAddressor {
     /* STATE QUERYING */
 
     pub fn is_mapped(&self, virt_addr: VirtAddr) -> bool {
-        let _read_lock = self.rw_lock.read();
-
         match self.get_page_entry(&Page::containing_addr(virt_addr)) {
             Some(entry) => entry.is_present(),
             None => false,
@@ -134,8 +126,6 @@ impl VirtualAddressor {
     }
 
     pub fn is_mapped_to(&self, page: &Page, frame: &Frame) -> bool {
-        let _read_lock = self.rw_lock.read();
-
         match self.get_page_entry(page).and_then(|entry| entry.frame()) {
             Some(entry_frame) => frame.index() == entry_frame.index(),
             None => false,
@@ -143,8 +133,6 @@ impl VirtualAddressor {
     }
 
     pub fn translate_page(&self, page: &Page) -> Option<Frame> {
-        let _read_lock = self.rw_lock.read();
-
         self.get_page_entry(page).and_then(|entry| entry.frame())
     }
 
@@ -162,6 +150,8 @@ impl VirtualAddressor {
     pub unsafe fn swap_into(&self) {
         crate::registers::CR3::write(&self.pml4_frame, crate::registers::CR3Flags::empty());
     }
+
+    /* MISC */
 
     #[cfg(debug_assertions)]
     pub unsafe fn pretty_log(&self) {

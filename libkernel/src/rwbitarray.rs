@@ -14,27 +14,29 @@ where
     BV: BitValue,
 {
     array: RwLock<&'arr mut [usize]>,
+    bit_len: usize,
     phantom: PhantomData<BV>,
 }
 
-impl<'arr, BV: BitValue + core::fmt::Debug> RwBitArray<'arr, BV> {
+impl<'arr, BV: BitValue> RwBitArray<'arr, BV> {
     const SECTION_LEN: usize = core::mem::size_of::<usize>() * 8;
 
     pub const fn length_hint(element_count: usize) -> usize {
         (element_count * BV::BIT_WIDTH) / Self::SECTION_LEN
     }
 
-    pub fn from_slice(slice: &'arr mut [usize]) -> Self {
+    pub fn from_slice(slice: &'arr mut [usize], bit_len: usize) -> Self {
         slice.fill(0);
 
         Self {
             array: RwLock::new(slice),
+            bit_len,
             phantom: PhantomData,
         }
     }
 
     pub fn len(&self) -> usize {
-        self.array.read().len() * (Self::SECTION_LEN / BV::BIT_WIDTH)
+        self.bit_len
     }
 
     fn get_index_and_offset(index: usize) -> (usize, usize) {
@@ -55,7 +57,7 @@ impl<'arr, BV: BitValue + core::fmt::Debug> RwBitArray<'arr, BV> {
         );
 
         let (section_index, section_offset) = Self::get_index_and_offset(index);
-        let section_value = self.array.read()[(section_index)];
+        let section_value = self.array.read()[section_index];
 
         BV::from_usize((section_value >> section_offset) & BV::MASK)
     }
@@ -96,8 +98,6 @@ impl<'arr, BV: BitValue + core::fmt::Debug> RwBitArray<'arr, BV> {
             sections_read.upgrade()[section_index] = section_bits_set | section_bits_nonset;
         }
 
-        debug_assert_eq!(self.get(index), new_type, "failed to set memory at index");
-
         true
     }
 
@@ -122,22 +122,62 @@ impl<'arr, BV: BitValue + core::fmt::Debug> RwBitArray<'arr, BV> {
         None
     }
 
-    #[cfg(debug_assertions)]
+    pub fn iter<'outer>(&'outer self) -> RwBitArrayIterator<'outer, 'arr, BV> {
+        RwBitArrayIterator {
+            array: &self.array,
+            section_index: 0,
+            section_offset: 0,
+            cur_len: 0,
+            max_len: self.len(),
+            phantom: PhantomData,
+        }
+    }
+}
+
+#[cfg(debug_assertions)]
+impl<'arr, BV: BitValue + core::fmt::Debug> RwBitArray<'arr, BV> {
     pub fn debug_log_elements(&self) {
         let mut run = 0;
-        let mut last_value = BV::from_usize(0);
-        for section in self.array.read().iter().map(|section| *section) {
-            for offset in (0..(core::mem::size_of::<usize>() * 8)).step_by(BV::BIT_WIDTH) {
-                let value = BV::from_usize((section >> offset) & BV::MASK);
-
-                if value == last_value {
-                    run += 1;
-                } else {
-                    debug!("{:?}: {}", last_value, run);
-                    last_value = value;
-                    run = 0;
-                }
+        let mut last_bv = BV::from_usize(0);
+        for bv in self.iter() {
+            if bv == last_bv {
+                run += 1;
+            } else {
+                debug!("{:?}: {}", last_bv, run);
+                last_bv = bv;
+                run = 0;
             }
+        }
+    }
+}
+
+pub struct RwBitArrayIterator<'lock, 'arr, BV: BitValue> {
+    array: &'lock RwLock<&'arr mut [usize]>,
+    section_index: usize,
+    section_offset: usize,
+    cur_len: usize,
+    max_len: usize,
+    phantom: PhantomData<BV>,
+}
+
+impl<'lock, 'arr, BV: BitValue> Iterator for RwBitArrayIterator<'lock, 'arr, BV> {
+    type Item = BV;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.cur_len < self.max_len {
+            let section_value = self.array.read()[self.section_index];
+            let cur_offset = self.section_offset;
+
+            self.cur_len += 1;
+            self.section_offset += BV::BIT_WIDTH;
+            if self.section_offset >= RwBitArray::<BV>::SECTION_LEN {
+                self.section_offset = 0;
+                self.section_index += 1;
+            }
+
+            Some(BV::from_usize((section_value >> cur_offset) & BV::MASK))
+        } else {
+            None
         }
     }
 }

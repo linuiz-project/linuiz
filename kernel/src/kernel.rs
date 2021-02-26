@@ -75,6 +75,8 @@ extern "efiapi" fn kernel_main(
     libkernel::structures::idt::init();
     info!("Successfully initialized IDT.");
 
+    // `boot_info` will not be usable after initalizing the global allocator,
+    //   due to the stack being moved in virtual memory.
     let framebuffer_pointer = boot_info.framebuffer_pointer().unwrap().clone();
     init_memory(boot_info);
 
@@ -115,20 +117,15 @@ fn init_memory(boot_info: BootInfo<libkernel::memory::UEFIMemoryDescriptor, Conf
     debug!("Reserving frames from relevant UEFI memory descriptors.");
 
     use core::{lazy::OnceCell, ops::Range};
-    let stack_frames = &mut OnceCell::<Range<libkernel::memory::Frame>>::new();
+    let stack_frames = OnceCell::<Range<libkernel::memory::Frame>>::new();
 
     let mut last_frame_end = 0;
     for descriptor in boot_info.memory_map() {
         let cur_frame_start = (descriptor.phys_start.as_u64() / 0x1000) as usize;
         let new_frame_end = cur_frame_start + (descriptor.page_count as usize);
 
-        // checks for 'holes' in system memory which we shouldn't try to allocate to
+        // Checks for 'holes' in system memory which we shouldn't try to allocate to.
         if last_frame_end < cur_frame_start {
-            debug!(
-                "Non-usable memory frames detected: {}..{}",
-                last_frame_end, cur_frame_start
-            );
-
             unsafe {
                 global_memory()
                     .acquire_frames(last_frame_end..cur_frame_start, FrameState::NonUsable)
@@ -136,36 +133,37 @@ fn init_memory(boot_info: BootInfo<libkernel::memory::UEFIMemoryDescriptor, Conf
             };
         }
 
-        // reserve descriptor properly, and acquire stack frames if applicable
+        // Reserve descriptor properly, and acquire stack frames if applicable.
         if descriptor.should_reserve() {
             let frame_range = cur_frame_start..new_frame_end;
 
-            unsafe {
-                if descriptor.is_stack_descriptor() {
-                    debug!("Identified stack frames: {:?}", frame_range);
-                    let descriptor_stack_frames = global_memory()
-                        .acquire_frames(frame_range, FrameState::Stack)
-                        .unwrap();
-
-                    stack_frames
-                        .set(descriptor_stack_frames)
-                        .expect("multiple stack descriptors found");
-                } else {
+            if descriptor.is_stack_descriptor() {
+                debug!("Identified stack frames: {:?}", frame_range);
+                let descriptor_stack_frames = unsafe {
                     global_memory()
                         .acquire_frames(frame_range, FrameState::Reserved)
-                        .unwrap();
-                }
+                        .unwrap()
+                };
+
+                stack_frames
+                    .set(descriptor_stack_frames)
+                    .expect("multiple stack descriptors found");
+            } else {
+                unsafe {
+                    global_memory()
+                        .acquire_frames(frame_range, FrameState::Reserved)
+                        .unwrap()
+                };
             }
         }
 
         last_frame_end = new_frame_end;
     }
 
+    global_memory().debug_log_elements();
+
     info!("Initializing global allocator.");
-    // `boot_info` will not be usable after initalizing the global allocator,
-    //  due to the stack being moved in virtual memory.
-    let stack_frames = stack_frames.take().expect("no stack descriptor found");
-    libkernel::memory::GLOBAL_ALLOCATOR.init(stack_frames);
+    unsafe { libkernel::memory::GLOBAL_ALLOCATOR.init(stack_frames.get().unwrap().clone()) };
 
     info!("Global memory & the kernel global allocator have been initialized.");
 }
