@@ -92,7 +92,11 @@ impl VirtualAddressor {
     /* MAP / UNMAP */
 
     pub fn map(&mut self, page: &Page, frame: &Frame) {
-        assert!(!self.is_mapped(page.addr()), "page already mapped");
+        assert!(
+            !self.is_mapped(page.addr()),
+            "page already mapped: {:?}",
+            page
+        );
 
         self.get_page_entry_create(page)
             .set(&frame, PageAttributes::PRESENT | PageAttributes::WRITABLE);
@@ -120,7 +124,14 @@ impl VirtualAddressor {
 
     pub fn is_mapped(&self, virt_addr: VirtAddr) -> bool {
         match self.get_page_entry(&Page::containing_addr(virt_addr)) {
-            Some(entry) => entry.is_present(),
+            Some(entry) => {
+                let present = entry.is_present();
+                if present {
+                    info!("{:?}", entry);
+                }
+
+                present
+            }
             None => false,
         }
     }

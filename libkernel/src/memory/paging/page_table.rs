@@ -33,15 +33,16 @@ pub struct PageTable<L: TableLevel> {
     level: PhantomData<L>,
 }
 
-impl<L> PageTable<L>
-where
-    L: TableLevel,
-{
+impl<L: TableLevel> PageTable<L> {
     pub const fn new() -> Self {
         Self {
             entries: [PageTableEntry::unused(); 512],
             level: PhantomData,
         }
+    }
+
+    pub unsafe fn clear(&mut self) {
+        self.entries.iter_mut().for_each(|entry| entry.set_unused());
     }
 
     pub fn get_entry(&self, index: usize) -> &PageTableEntry {
@@ -61,10 +62,7 @@ where
     }
 }
 
-impl<L> PageTable<L>
-where
-    L: HeirarchicalLevel,
-{
+impl<L: HeirarchicalLevel> PageTable<L> {
     pub unsafe fn sub_table(
         &self,
         index: usize,
@@ -91,21 +89,31 @@ where
         phys_mapped_addr: VirtAddr,
     ) -> &mut PageTable<L::NextLevel> {
         let entry = self.get_entry_mut(index);
-        let frame = entry.frame().unwrap_or_else(|| {
-            let alloc_frame = crate::memory::global_memory()
-                .lock_next()
-                .expect("failed to allocate a frame for new page table");
-            trace!("Allocated frame for nonpresent entry: {:?}", alloc_frame);
+        let (frame, created) = match entry.frame() {
+            Some(frame) => (frame, false),
+            None => {
+                let alloc_frame = crate::memory::global_memory()
+                    .lock_next()
+                    .expect("failed to allocate a frame for new page table");
+                trace!("Allocated frame for nonpresent entry: {:?}", alloc_frame);
 
-            entry.set(
-                &alloc_frame,
-                crate::memory::paging::PageAttributes::PRESENT
-                    | crate::memory::paging::PageAttributes::WRITABLE,
-            );
+                entry.set(
+                    &alloc_frame,
+                    crate::memory::paging::PageAttributes::PRESENT
+                        | crate::memory::paging::PageAttributes::WRITABLE,
+                );
 
-            alloc_frame
-        });
+                (alloc_frame, true)
+            }
+        };
 
-        &mut *(phys_mapped_addr + frame.addr_u64()).as_mut_ptr()
+        let sub_table: &mut PageTable<L::NextLevel> =
+            &mut *(phys_mapped_addr + frame.addr_u64()).as_mut_ptr();
+
+        if created {
+            sub_table.clear();
+        }
+
+        sub_table
     }
 }

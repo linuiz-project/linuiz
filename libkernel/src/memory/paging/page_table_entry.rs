@@ -27,6 +27,10 @@ impl PageTableEntry {
         Self { 0: 0 }
     }
 
+    pub const unsafe fn set_unused(&mut self) {
+        self.0 = 0
+    }
+
     pub fn attribs(&self) -> PageAttributes {
         PageAttributes::from_bits_truncate(self.0)
     }
