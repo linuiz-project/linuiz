@@ -289,7 +289,7 @@ impl BlockAllocator<'_> {
         const STACK_SIZE: usize = 256 * 0x1000; /* 1MB in pages */
 
         trace!("Allocating new stack: {} bytes", STACK_SIZE);
-        let new_stack_base = crate::alloc!(STACK_SIZE);
+        let new_stack_base: *mut u8 = crate::alloc!(STACK_SIZE);
         let stack_base_cell = core::lazy::OnceCell::<*mut u8>::new();
 
         trace!("Copying data from bootloader-allocated stack.");
@@ -327,7 +327,7 @@ impl BlockAllocator<'_> {
 
     /* ALLOC & DEALLOC */
 
-    fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
+    pub fn alloc<T>(&self, layout: core::alloc::Layout) -> *mut T {
         const MINIMUM_ALIGNMENT: usize = 16;
 
         let size_in_blocks = (layout.size() + (Self::BLOCK_SIZE - 1)) / Self::BLOCK_SIZE;
@@ -450,10 +450,10 @@ impl BlockAllocator<'_> {
             }
         }
 
-        (start_block_index * Self::BLOCK_SIZE) as *mut u8
+        (start_block_index * Self::BLOCK_SIZE) as *mut T
     }
 
-    fn dealloc(&self, ptr: *mut u8, size: usize) {
+    pub fn dealloc<T>(&self, ptr: *mut T, size: usize) {
         let start_block_index = (ptr as usize) / Self::BLOCK_SIZE;
         let end_block_index = start_block_index + align_up_div(size, Self::BLOCK_SIZE);
         let mut block_index = start_block_index;
@@ -542,7 +542,7 @@ impl BlockAllocator<'_> {
     ///  given the iterator.
     ///
     /// This function assumed the frames are already locked or otherwise valid.
-    pub fn alloc_to(&self, mut frames: impl FrameIterator + Clone) -> *mut u8 {
+    pub fn alloc_to<T>(&self, mut frames: impl FrameIterator + Clone) -> *mut T {
         let size_in_frames = frames.clone().count();
         trace!("Allocation requested to: {} frames", size_in_frames);
         let (mut map_index, mut current_run);
@@ -595,7 +595,7 @@ impl BlockAllocator<'_> {
             }
         }
 
-        (start_index * 0x1000) as *mut u8
+        (start_index * 0x1000) as *mut T
     }
 
     pub fn identity_map(&self, frame: &Frame, map: bool) {

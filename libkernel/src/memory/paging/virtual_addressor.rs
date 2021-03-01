@@ -123,17 +123,9 @@ impl VirtualAddressor {
     /* STATE QUERYING */
 
     pub fn is_mapped(&self, virt_addr: VirtAddr) -> bool {
-        match self.get_page_entry(&Page::containing_addr(virt_addr)) {
-            Some(entry) => {
-                let present = entry.is_present();
-                if present {
-                    info!("{:?}", entry);
-                }
-
-                present
-            }
-            None => false,
-        }
+        self.get_page_entry(&Page::containing_addr(virt_addr))
+            .and_then(|entry| entry.frame())
+            .is_some()
     }
 
     pub fn is_mapped_to(&self, page: &Page, frame: &Frame) -> bool {

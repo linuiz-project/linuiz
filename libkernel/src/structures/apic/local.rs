@@ -297,8 +297,7 @@ pub fn load() {
                 .acquire_frames(start_index..=start_index, crate::memory::FrameState::MMIO)
                 .unwrap()
         };
-        let mapped_addr =
-            x86_64::VirtAddr::from_ptr(crate::memory::GLOBAL_ALLOCATOR.alloc_to(mmio_frames));
+        let mapped_addr = x86_64::VirtAddr::from_ptr::<u8>(crate::alloc_to!(mmio_frames));
         debug!("Allocated local APIC table to: {:?}", mapped_addr);
 
         unsafe { LOCAL_APIC.set(LocalAPIC::from_msr(mapped_addr)) };

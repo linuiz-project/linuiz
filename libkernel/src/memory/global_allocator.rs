@@ -7,6 +7,14 @@ macro_rules! alloc {
         $crate::alloc!($size, $crate::memory::BlockAllocator::BLOCK_SIZE)
     };
     ($size:expr, $align:expr) => {
-        alloc::alloc::alloc(core::alloc::Layout::from_size_align($size, $align).unwrap())
+        $crate::memory::GLOBAL_ALLOCATOR
+            .alloc(core::alloc::Layout::from_size_align($size, $align).unwrap())
+    };
+}
+
+#[macro_export]
+macro_rules! alloc_to {
+    ($frames:expr) => {
+        $crate::memory::GLOBAL_ALLOCATOR.alloc_to($frames)
     };
 }

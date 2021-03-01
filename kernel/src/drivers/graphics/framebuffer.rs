@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use crate::drivers::graphics::color::{Color8i, Colors};
-use libkernel::{memory::GLOBAL_ALLOCATOR, Size, VirtAddr};
+use libkernel::Size;
 use spin::RwLock;
 
 #[repr(C)]
@@ -25,28 +25,16 @@ impl<'fbuf, 'bbuf> FramebufferDriver<'fbuf, 'bbuf> {
                     libkernel::memory::FrameState::MMIO,
                 )
                 .unwrap();
-            let alloc_to_ptr = GLOBAL_ALLOCATOR.alloc_to(mmio_frames) as *mut Color8i;
 
-            core::slice::from_raw_parts_mut(alloc_to_ptr, pixel_len)
+            core::slice::from_raw_parts_mut(libkernel::alloc_to!(mmio_frames), pixel_len)
         };
 
-        unsafe {
-            let ptr = libkernel::alloc!(byte_len) as *mut Color8i;
-            let backbuffer = unsafe { core::slice::from_raw_parts_mut(ptr, pixel_len) };
-
-            info!(
-                "BACKBUFFER {:?}: {}",
-                ptr,
-                GLOBAL_ALLOCATOR
-                    .get_addressor()
-                    .is_mapped(VirtAddr::from_ptr(ptr))
-            );
-
-            Self {
-                framebuffer: RwLock::new(framebuffer),
-                backbuffer: RwLock::new(backbuffer),
-                dimensions,
-            }
+        Self {
+            framebuffer: RwLock::new(framebuffer),
+            backbuffer: RwLock::new(unsafe {
+                core::slice::from_raw_parts_mut(libkernel::alloc!(byte_len), pixel_len)
+            }),
+            dimensions,
         }
     }
 
