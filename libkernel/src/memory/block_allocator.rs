@@ -3,16 +3,14 @@ use crate::{
     memory::{paging::VirtualAddressor, Frame, FrameIterator, Page},
     SYSTEM_SLICE_SIZE,
 };
-use core::{
-    mem::size_of,
-    sync::atomic::{AtomicU64, Ordering},
-};
+use core::mem::size_of;
 use spin::RwLock;
 
 /// Represents one page worth of memory blocks (i.e. 4096 bytes in blocks).
 #[repr(C)]
+#[derive(Clone)]
 struct BlockPage {
-    sections: [AtomicU64; Self::SECTION_COUNT],
+    sections: [u64; Self::SECTION_COUNT],
 }
 
 impl BlockPage {
@@ -24,50 +22,44 @@ impl BlockPage {
 
     /// An empty block page (all blocks zeroed).
     const fn empty() -> Self {
-        const ATOMIC_U64_MIN: AtomicU64 = AtomicU64::new(u64::MIN);
-
         Self {
-            sections: [ATOMIC_U64_MIN; Self::SECTION_COUNT],
+            sections: [0; Self::SECTION_COUNT],
         }
     }
 
     /// Whether the block page is empty.
     pub fn is_empty(&self) -> bool {
-        self.iter()
-            .all(|section| section.load(Ordering::Acquire) == u64::MIN)
+        self.iter().all(|section| *section == u64::MIN)
     }
 
     /// Whether the block page is full.
     pub fn is_full(&self) -> bool {
-        self.iter()
-            .all(|section| section.load(Ordering::Acquire) == u64::MAX)
+        self.iter().all(|section| *section == u64::MAX)
     }
 
     /// Unset all of the block page's blocks.
     pub fn set_empty(&mut self) {
-        self.iter_mut()
-            .for_each(|section| section.store(u64::MIN, Ordering::Release));
+        self.iter_mut().for_each(|section| *section = u64::MIN);
     }
 
     /// Set all of the block page's blocks.
     pub fn set_full(&mut self) {
-        self.iter_mut()
-            .for_each(|section| section.store(u64::MAX, Ordering::Release));
+        self.iter_mut().for_each(|section| *section = u64::MAX);
     }
 
     /// Underlying section iterator.
-    fn iter(&self) -> core::slice::Iter<AtomicU64> {
+    fn iter(&self) -> core::slice::Iter<u64> {
         self.sections.iter()
     }
 
     /// Underlying mutable section iterator.
-    fn iter_mut(&mut self) -> core::slice::IterMut<AtomicU64> {
+    fn iter_mut(&mut self) -> core::slice::IterMut<u64> {
         self.sections.iter_mut()
     }
 }
 
 impl core::ops::Index<usize> for BlockPage {
-    type Output = AtomicU64;
+    type Output = u64;
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.sections[index]
@@ -80,24 +72,12 @@ impl core::ops::IndexMut<usize> for BlockPage {
     }
 }
 
-impl Clone for BlockPage {
-    fn clone(&self) -> Self {
-        let clone = Self::empty();
-
-        for index in 0..BlockPage::SECTION_COUNT {
-            clone[index].store(self[index].load(Ordering::Acquire), Ordering::Release);
-        }
-
-        clone
-    }
-}
-
 impl core::fmt::Debug for BlockPage {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let mut debug_tuple = formatter.debug_tuple("BlockPage");
 
         self.iter().for_each(|section| {
-            debug_tuple.field(&section.load(Ordering::Acquire));
+            debug_tuple.field(section);
         });
 
         debug_tuple.finish()
@@ -299,7 +279,7 @@ impl BlockAllocator<'_> {
             addressor_mut.swap_into();
         }
 
-        info!("Allocating reserved global memory frames.");
+        debug!("Allocating reserved global memory frames.");
         global_memory()
             .frame_state_iter()
             .enumerate()
@@ -313,14 +293,11 @@ impl BlockAllocator<'_> {
         let stack_base_cell = core::lazy::OnceCell::<*mut u8>::new();
 
         trace!("Copying data from bootloader-allocated stack.");
-        let sf_clone = stack_frames.clone();
-        info!("{:?}", sf_clone);
-        for (index, frame) in sf_clone.enumerate() {
+        for (index, frame) in stack_frames.clone().enumerate() {
             let cur_offset = new_stack_base.add(index * 0x1000);
             let frame_ptr = frame.addr_u64() as *mut u8;
             stack_base_cell.set(frame_ptr).ok();
 
-            trace!("Copying stack offset: {:?} -> {:?}", frame_ptr, cur_offset);
             core::ptr::copy_nonoverlapping(frame_ptr, cur_offset, 0x1000);
             // TODO also zero all antecedent stack frames
         }
@@ -353,9 +330,8 @@ impl BlockAllocator<'_> {
     fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
         const MINIMUM_ALIGNMENT: usize = 16;
 
-        let alignment = if layout.align().is_power_of_two()
-            && (layout.align() & (MINIMUM_ALIGNMENT - 1)) == 0
-        {
+        let size_in_blocks = (layout.size() + (Self::BLOCK_SIZE - 1)) / Self::BLOCK_SIZE;
+        let alignment = if (layout.align() & (MINIMUM_ALIGNMENT - 1)) == 0 {
             layout.align()
         } else {
             warn!("Unsupported allocator alignment: {}", layout.align());
@@ -365,14 +341,13 @@ impl BlockAllocator<'_> {
         };
 
         debug!(
-            "Allocation requested: {} bytes, aligned by {}",
+            "Allocation requested: {}{{by {}}} bytes ({} blocks)",
             layout.size(),
-            alignment
+            alignment,
+            size_in_blocks
         );
 
-        let size_in_blocks = (layout.size() + (Self::BLOCK_SIZE - 1)) / Self::BLOCK_SIZE;
         let (mut block_index, mut current_run);
-
         while {
             block_index = 0;
             current_run = 0;
@@ -382,10 +357,7 @@ impl BlockAllocator<'_> {
                     current_run = 0;
                     block_index += BlockPage::BLOCK_COUNT;
                 } else {
-                    for section in block_page
-                        .iter()
-                        .map(|section| section.load(Ordering::Acquire))
-                    {
+                    for section in block_page.iter().map(|section| *section) {
                         if section == u64::MAX {
                             current_run = 0;
                             block_index += 64;
@@ -440,7 +412,7 @@ impl BlockAllocator<'_> {
                 [SectionState::empty(); BlockPage::SECTION_COUNT];
 
             for (section_index, section) in block_page.iter_mut().enumerate() {
-                page_state[section_index].had_bits = section.load(Ordering::Acquire) > 0;
+                page_state[section_index].had_bits = *section > 0;
 
                 if initial_section_skip > 0 {
                     initial_section_skip -= 1;
@@ -453,16 +425,16 @@ impl BlockAllocator<'_> {
                     );
 
                     assert_eq!(
-                        section.load(Ordering::Acquire) & bit_mask,
+                        *section & bit_mask,
                         0,
                         "attempting to allocate blocks that are already allocated"
                     );
 
-                    section.fetch_or(bit_mask, Ordering::AcqRel);
+                    *section |= bit_mask;
                     block_index += bit_count;
                 }
 
-                page_state[section_index].has_bits = section.load(Ordering::Acquire) > 0;
+                page_state[section_index].has_bits = *section > 0;
             }
 
             if SectionState::should_alloc(&page_state) {
@@ -507,7 +479,7 @@ impl BlockAllocator<'_> {
                 [SectionState::empty(); BlockPage::SECTION_COUNT];
 
             for (section_index, section) in block_page.iter_mut().enumerate() {
-                page_state[section_index].had_bits = section.load(Ordering::Acquire) > 0;
+                page_state[section_index].had_bits = *section > 0;
 
                 if initial_section_skip > 0 {
                     initial_section_skip -= 1;
@@ -520,16 +492,16 @@ impl BlockAllocator<'_> {
                     );
 
                     assert_eq!(
-                        section.load(Ordering::Acquire) & bit_mask,
+                        *section & bit_mask,
                         bit_mask,
                         "attempting to deallocate blocks that are already deallocated"
                     );
 
-                    section.fetch_xor(bit_mask, Ordering::AcqRel);
+                    *section ^= bit_mask;
                     block_index += bit_count;
                 }
 
-                page_state[section_index].has_bits = section.load(Ordering::Acquire) > 0;
+                page_state[section_index].has_bits = *section > 0;
             }
 
             if SectionState::should_dealloc(&page_state) {
@@ -690,9 +662,10 @@ impl BlockAllocator<'_> {
         map_write[cur_map_len..].fill(BlockPage::empty());
 
         trace!(
-            "Grew map: {} pages, {} block pages.",
+            "Grew map: {} pages, {} block pages, {} blocks.",
             new_page_offset,
-            new_map_len
+            new_map_len,
+            new_map_len * BLOCKS_PER_MAP_PAGE
         );
     }
 }
