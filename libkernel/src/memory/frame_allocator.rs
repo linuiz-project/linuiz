@@ -197,13 +197,13 @@ impl<'arr> FrameAllocator<'arr> {
     ) -> Result<core::ops::Range<Frame>, FrameAllocatorError> {
         let start_frame = Frame::from_index(match frame_indexes.start_bound() {
             core::ops::Bound::Included(start) => *start,
-            core::ops::Bound::Excluded(start) => *start - 1,
+            core::ops::Bound::Excluded(start) => *start + 1,
             _ => panic!("failed to calculate start bound for frame range"),
         });
 
         let end_frame = Frame::from_index(match frame_indexes.end_bound() {
-            core::ops::Bound::Included(end) => *end,
-            core::ops::Bound::Excluded(end) => *end - 1,
+            core::ops::Bound::Included(end) => *end + 1,
+            core::ops::Bound::Excluded(end) => *end,
             _ => panic!("failed to calculate start bound for frame range"),
         });
 

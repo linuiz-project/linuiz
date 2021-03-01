@@ -270,7 +270,10 @@ impl BlockAllocator<'_> {
 
     /* INITIALIZATION */
 
-    pub unsafe fn init(&self, stack_frames: impl crate::memory::FrameIterator + Clone) {
+    pub unsafe fn init(
+        &self,
+        stack_frames: impl crate::memory::FrameIterator + Clone + core::fmt::Debug,
+    ) {
         use crate::memory::{global_memory, FrameState};
 
         {
@@ -310,12 +313,14 @@ impl BlockAllocator<'_> {
         let stack_base_cell = core::lazy::OnceCell::<*mut u8>::new();
 
         trace!("Copying data from bootloader-allocated stack.");
-        for (index, frame) in stack_frames.clone().enumerate() {
+        let sf_clone = stack_frames.clone();
+        info!("{:?}", sf_clone);
+        for (index, frame) in sf_clone.enumerate() {
             let cur_offset = new_stack_base.add(index * 0x1000);
             let frame_ptr = frame.addr_u64() as *mut u8;
             stack_base_cell.set(frame_ptr).ok();
 
-            trace!("Copying stack: {:?} => {:?}", frame_ptr, cur_offset);
+            trace!("Copying stack offset: {:?} -> {:?}", frame_ptr, cur_offset);
             core::ptr::copy_nonoverlapping(frame_ptr, cur_offset, 0x1000);
             // TODO also zero all antecedent stack frames
         }
@@ -622,7 +627,7 @@ impl BlockAllocator<'_> {
     }
 
     pub fn identity_map(&self, frame: &Frame, map: bool) {
-        trace!("Identity mapping requested: {:?}", frame);
+        // trace!("Identity mapping requested: {:?}", frame);
 
         let map_len = self.map.read().len();
         if map_len <= frame.index() {
