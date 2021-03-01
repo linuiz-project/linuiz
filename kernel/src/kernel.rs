@@ -83,26 +83,26 @@ extern "efiapi" fn kernel_main(
     init_apic();
 
     info!("Initializing framebuffer driver.");
-    // let mut framebuffer_driver = drivers::graphics::framebuffer::FramebufferDriver::init(
-    //     framebuffer_pointer.addr(),
-    //     framebuffer_pointer.size(),
-    // );
+    let mut framebuffer_driver = drivers::graphics::framebuffer::FramebufferDriver::init(
+        framebuffer_pointer.addr(),
+        framebuffer_pointer.size(),
+    );
 
-    // let mut vecc = alloc::vec![0usize; 50];
-    // for (idx, a) in vecc.iter_mut().enumerate() {
-    //     *a = idx;
-    // }
-    // info!("{:?}", vecc);
+    let mut vecc = alloc::vec![0usize; 50];
+    for (idx, a) in vecc.iter_mut().enumerate() {
+        *a = idx;
+    }
+    info!("{:?}", vecc);
 
-    // info!("Testing framebuffer driver.");
-    // for x in 0..300 {
-    //     for y in 0..300 {
-    //         framebuffer_driver
-    //             .write_pixel((x, y), drivers::graphics::color::Color8i::new(156, 10, 100));
-    //     }
-    // }
+    info!("Testing framebuffer driver.");
+    for x in 0..300 {
+        for y in 0..300 {
+            framebuffer_driver
+                .write_pixel((x, y), drivers::graphics::color::Color8i::new(156, 10, 100));
+        }
+    }
 
-    // framebuffer_driver.flush_pixels();
+    framebuffer_driver.flush_pixels();
 
     info!("Kernel has reached safe shutdown state.");
     unsafe { libkernel::instructions::pwm::qemu_shutdown() }
@@ -160,8 +160,6 @@ fn init_memory(boot_info: BootInfo<libkernel::memory::UEFIMemoryDescriptor, Conf
         last_frame_end = new_frame_end;
     }
 
-    global_memory().debug_log_elements();
-
     info!("Initializing global allocator.");
     unsafe { libkernel::memory::GLOBAL_ALLOCATOR.init(stack_frames.get().unwrap().clone()) };
 
@@ -191,7 +189,9 @@ fn init_apic() {
     }
 
     debug!("Disabling 8259 emulated PIC.");
-    unsafe { crate::pic8259::disable() };
+    libkernel::instructions::interrupts::without_interrupts(|| unsafe {
+        crate::pic8259::disable()
+    });
     debug!("Updating IDT timer interrupt entry to local APIC-enabled function.");
     libkernel::structures::idt::set_interrupt_handler(48, timer::apic_timer_handler);
     debug!("Unmasking local APIC timer interrupt (it will fire now!).");
