@@ -29,6 +29,17 @@ impl From<u32> for Color8i {
     }
 }
 
+impl core::fmt::Debug for Color8i {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_tuple("Color8i")
+            .field(&self.r)
+            .field(&self.g)
+            .field(&self.b)
+            .finish()
+    }
+}
+
 #[repr(u8)]
 #[allow(dead_code)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]

@@ -39,18 +39,11 @@ impl MSR {
         debug_assert_eq!(self.read().get_bit(bit), set);
     }
 
-    #[cfg(debug_assertions)]
     pub unsafe fn write_bits(self, range: core::ops::Range<usize>, value: u64) {
         use bit_field::BitField;
+
         self.write(*self.read().set_bits(range.clone(), value));
-
         debug_assert_eq!(self.read().get_bits(range), value);
-    }
-
-    #[cfg(not(debug_assertions))]
-    pub unsafe fn write_bits(self, range: core::ops::Range<usize>, value: u64) {
-        use bit_field::BitField;
-        self.write(*self.read().set_bits(range, value));
     }
 
     pub unsafe fn write(self, value: u64) {

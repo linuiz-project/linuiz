@@ -88,19 +88,15 @@ extern "efiapi" fn kernel_main(
         framebuffer_pointer.size(),
     );
 
-    let mut vecc = alloc::vec![0usize; 50];
-    for (idx, a) in vecc.iter_mut().enumerate() {
-        *a = idx;
-    }
-    info!("{:?}", vecc);
-
     info!("Testing framebuffer driver.");
-    for x in 0..300 {
-        for y in 0..300 {
+    for x in 0..10 {
+        for y in 0..10 {
             framebuffer_driver
                 .write_pixel((x, y), drivers::graphics::color::Color8i::new(156, 10, 100));
         }
     }
+
+    framebuffer_driver.LOG();
 
     framebuffer_driver.flush_pixels();
 

@@ -289,7 +289,9 @@ impl BlockAllocator<'_> {
         const STACK_SIZE: usize = 256 * 0x1000; /* 1MB in pages */
 
         trace!("Allocating new stack: {} bytes", STACK_SIZE);
-        let new_stack_base: *mut u8 = crate::alloc!(STACK_SIZE);
+        let new_stack_base = self.alloc::<u8>(
+            core::alloc::Layout::from_size_align(STACK_SIZE, Self::BLOCK_SIZE).unwrap(),
+        );
         let stack_base_cell = core::lazy::OnceCell::<*mut u8>::new();
 
         trace!("Copying data from bootloader-allocated stack.");

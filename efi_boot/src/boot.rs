@@ -180,18 +180,15 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
     // acquire graphics output to ensure a gout device
     let framebuffer = match locate_protocol::<GraphicsOutput>(boot_services) {
         Some(graphics_output) => {
-            let pointer = graphics_output.frame_buffer().as_mut_ptr() as *mut u8;
+            let ptr = graphics_output.frame_buffer().as_mut_ptr() as *mut u8;
             let mode = select_graphics_mode(graphics_output);
             let mode_info = mode.info();
             info!("Selected graphics mode: {:?}", mode_info);
             let resolution = mode_info.resolution();
-            let size = libkernel::Size {
-                width: resolution.0,
-                height: resolution.1,
-            };
+            let size = libkernel::Size::new(resolution.0, resolution.1);
             info!("Acquired and configured graphics output protocol.");
 
-            Some(FramebufferPointer { pointer, size })
+            Some(FramebufferPointer::new(ptr, size))
         }
         None => {
             warn!("No graphics output found. Kernel will default to using serial output.");

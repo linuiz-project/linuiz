@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+use core::fmt::Write;
+
 use crate::drivers::graphics::color::{Color8i, Colors};
 use libkernel::Size;
 use spin::RwLock;
@@ -39,14 +41,7 @@ impl<'fbuf, 'bbuf> FramebufferDriver<'fbuf, 'bbuf> {
     }
 
     pub fn write_pixel(&self, xy: (usize, usize), color: Color8i) {
-        let dimensions = self.dimensions();
-
-        if xy.0 < dimensions.width() && xy.1 < dimensions.height() {
-            let index = xy.0 + (xy.1 * dimensions.width());
-            self.backbuffer.write()[index] = color;
-        } else {
-            panic!("given coordinates are outside framebuffer");
-        }
+        self.backbuffer.write()[self.point_to_index(xy)] = color;
     }
 
     pub fn clear(&mut self, color: Color8i) {
@@ -75,5 +70,24 @@ impl<'fbuf, 'bbuf> FramebufferDriver<'fbuf, 'bbuf> {
 
     pub fn byte_len(&self) -> usize {
         self.pixel_len() * core::mem::size_of::<Color8i>()
+    }
+
+    fn point_to_index(&self, point: (usize, usize)) -> usize {
+        (point.1 * self.dimensions().width()) + point.0
+    }
+
+    pub fn LOG(&self) {
+        let so = unsafe { &mut crate::SERIAL_OUT };
+        for color_x in 0..20 {
+            for color_y in 0..20 {
+                so.write_fmt(format_args!(
+                    "{:?}",
+                    self.backbuffer.read()[self.point_to_index((color_x, color_y))],
+                ))
+                .unwrap();
+            }
+
+            so.write_char('\n').unwrap();
+        }
     }
 }
