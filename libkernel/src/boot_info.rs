@@ -1,4 +1,4 @@
-use crate::{structures::GUID, FFIOption, FramebufferPointer};
+use crate::{structures::GUID, FFIOption, FramebufferInfo};
 use x86_64::PhysAddr;
 
 #[repr(C)]
@@ -8,14 +8,14 @@ pub struct BootInfo<MM, CTE> {
     config_table_ptr: *const CTE,
     config_table_len: usize,
     magic: u32,
-    framebuffer: FFIOption<FramebufferPointer>,
+    framebuffer: FFIOption<FramebufferInfo>,
 }
 
 impl<MM, CTE> BootInfo<MM, CTE> {
     pub fn new(
         memory_map: &[MM],
         config_table: &[CTE],
-        framebuffer: Option<FramebufferPointer>,
+        framebuffer: Option<FramebufferInfo>,
     ) -> Self {
         Self {
             memory_map_ptr: memory_map.as_ptr(),
@@ -38,7 +38,7 @@ impl<MM, CTE> BootInfo<MM, CTE> {
         unsafe { &*core::ptr::slice_from_raw_parts(self.config_table_ptr, self.config_table_len) }
     }
 
-    pub fn framebuffer_pointer(&self) -> Option<FramebufferPointer> {
+    pub fn framebuffer_pointer(&self) -> Option<FramebufferInfo> {
         self.framebuffer.into()
     }
 

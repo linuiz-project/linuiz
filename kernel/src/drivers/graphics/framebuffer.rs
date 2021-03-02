@@ -1,20 +1,19 @@
 #![allow(dead_code)]
 
-use core::fmt::Write;
-
 use crate::drivers::graphics::color::{Color8i, Colors};
 use libkernel::Size;
-use spin::RwLock;
+use spin::{Mutex, RwLock};
 
 #[repr(C)]
-pub struct FramebufferDriver<'fbuf, 'bbuf> {
-    framebuffer: RwLock<&'fbuf mut [Color8i]>,
-    backbuffer: RwLock<&'bbuf mut [Color8i]>,
+pub struct FramebufferDriver {
+    framebuffer: Mutex<*mut Color8i>,
+    backbuffer: RwLock<*mut Color8i>,
     dimensions: Size,
+    stride: usize,
 }
 
-impl<'fbuf, 'bbuf> FramebufferDriver<'fbuf, 'bbuf> {
-    pub fn init(buffer_addr: libkernel::PhysAddr, dimensions: Size) -> Self {
+impl FramebufferDriver {
+    pub fn init(buffer_addr: libkernel::PhysAddr, dimensions: Size, stride: usize) -> Self {
         let pixel_len = dimensions.len();
         let byte_len = pixel_len * core::mem::size_of::<Color8i>();
 
@@ -28,66 +27,67 @@ impl<'fbuf, 'bbuf> FramebufferDriver<'fbuf, 'bbuf> {
                 )
                 .unwrap();
 
-            core::slice::from_raw_parts_mut(libkernel::alloc_to!(mmio_frames), pixel_len)
+            libkernel::alloc_to!(mmio_frames)
         };
 
+        info!("{:?} {}", dimensions, stride);
+
         Self {
-            framebuffer: RwLock::new(framebuffer),
-            backbuffer: RwLock::new(unsafe {
-                core::slice::from_raw_parts_mut(libkernel::alloc!(byte_len), pixel_len)
-            }),
+            framebuffer: Mutex::new(framebuffer),
+            backbuffer: RwLock::new(libkernel::alloc!(byte_len)),
             dimensions,
+            stride,
         }
     }
 
     pub fn write_pixel(&self, xy: (usize, usize), color: Color8i) {
-        self.backbuffer.write()[self.point_to_index(xy)] = color;
+        if self.contains_point(xy) {
+            unsafe {
+                self.backbuffer
+                    .write()
+                    .add(self.point_to_offset(xy))
+                    .write_volatile(color)
+            };
+        } else {
+            panic!("point lies without framebuffer");
+        }
     }
 
     pub fn clear(&mut self, color: Color8i) {
-        self.backbuffer.write().fill(color);
+        let backbuffer = self.backbuffer.write();
+        for y in 0..self.dimensions().height() {
+            for x in 0..self.dimensions().width() {
+                unsafe {
+                    backbuffer
+                        .add(self.point_to_offset((x, y)))
+                        .write_volatile(color)
+                }
+            }
+        }
     }
 
     /// Copy backbuffer to frontbuffer and zero backbuffer
     pub fn flush_pixels(&mut self) {
-        {
-            let mut framebuffer = self.framebuffer.write();
-            let backbuffer = self.backbuffer.read();
-
-            framebuffer.copy_from_slice(*backbuffer);
-        }
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                *self.backbuffer.read(),
+                *self.framebuffer.lock(),
+                self.dimensions().len(),
+            )
+        };
 
         self.clear(Colors::Black.into());
     }
 
-    pub fn dimensions(&self) -> Size {
+    pub const fn dimensions(&self) -> Size {
         self.dimensions
     }
 
-    pub fn pixel_len(&self) -> usize {
-        self.dimensions().len()
-    }
-
-    pub fn byte_len(&self) -> usize {
-        self.pixel_len() * core::mem::size_of::<Color8i>()
-    }
-
-    fn point_to_index(&self, point: (usize, usize)) -> usize {
+    const fn point_to_offset(&self, point: (usize, usize)) -> usize {
         (point.1 * self.dimensions().width()) + point.0
     }
 
-    pub fn LOG(&self) {
-        let so = unsafe { &mut crate::SERIAL_OUT };
-        for color_x in 0..20 {
-            for color_y in 0..20 {
-                so.write_fmt(format_args!(
-                    "{:?}",
-                    self.backbuffer.read()[self.point_to_index((color_x, color_y))],
-                ))
-                .unwrap();
-            }
-
-            so.write_char('\n').unwrap();
-        }
+    const fn contains_point(&self, point: (usize, usize)) -> bool {
+        point.0 < self.dimensions().width() && point.1 < self.dimensions().height()
     }
 }

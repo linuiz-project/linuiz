@@ -60,14 +60,15 @@ fn alloc_error(error: core::alloc::Layout) -> ! {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
-pub struct FramebufferPointer {
+pub struct FramebufferInfo {
     ptr: *mut u8,
     size: Size,
+    stride: usize,
 }
 
-impl FramebufferPointer {
-    pub fn new(ptr: *mut u8, size: Size) -> Self {
-        Self { ptr, size }
+impl FramebufferInfo {
+    pub const fn new(ptr: *mut u8, size: Size, stride: usize) -> Self {
+        Self { ptr, size, stride }
     }
 
     pub const fn addr(&self) -> PhysAddr {
@@ -76,6 +77,10 @@ impl FramebufferPointer {
 
     pub const fn size(&self) -> Size {
         self.size
+    }
+
+    pub const fn stride(&self) -> usize {
+        self.stride
     }
 }
 
@@ -87,19 +92,19 @@ pub struct Size {
 }
 
 impl Size {
-    pub fn new(width: usize, height: usize) -> Self {
+    pub const fn new(width: usize, height: usize) -> Self {
         Self { width, height }
     }
 
-    pub fn width(&self) -> usize {
+    pub const fn width(&self) -> usize {
         self.width
     }
 
-    pub fn height(&self) -> usize {
+    pub const fn height(&self) -> usize {
         self.height
     }
 
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.width() * self.height()
     }
 }

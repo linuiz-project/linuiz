@@ -86,17 +86,19 @@ extern "efiapi" fn kernel_main(
     let mut framebuffer_driver = drivers::graphics::framebuffer::FramebufferDriver::init(
         framebuffer_pointer.addr(),
         framebuffer_pointer.size(),
+        framebuffer_pointer.stride(),
     );
 
     info!("Testing framebuffer driver.");
-    for x in 0..10 {
-        for y in 0..10 {
-            framebuffer_driver
-                .write_pixel((x, y), drivers::graphics::color::Color8i::new(156, 10, 100));
-        }
+    for x in 0..640 {
+        framebuffer_driver.write_pixel((x, 1), drivers::graphics::color::Color8i::new(20, 190, 20));
     }
 
-    framebuffer_driver.LOG();
+    for x in 0..640 {
+        framebuffer_driver.write_pixel((x, 2), drivers::graphics::color::Color8i::new(20, 190, 20));
+    }
+
+    // framebuffer_driver.LOG();
 
     framebuffer_driver.flush_pixels();
 

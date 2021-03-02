@@ -14,7 +14,7 @@ use core::{
 };
 use libkernel::{
     elf::{ELFHeader64, ProgramHeader, ProgramHeaderType},
-    FramebufferPointer,
+    FramebufferInfo,
 };
 use uefi::{
     prelude::BootServices,
@@ -188,7 +188,7 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
             let size = libkernel::Size::new(resolution.0, resolution.1);
             info!("Acquired and configured graphics output protocol.");
 
-            Some(FramebufferPointer::new(ptr, size))
+            Some(FramebufferInfo::new(ptr, size, mode_info.stride()))
         }
         None => {
             warn!("No graphics output found. Kernel will default to using serial output.");
@@ -252,7 +252,7 @@ fn select_graphics_mode(graphics_output: &mut GraphicsOutput) -> Mode {
     let graphics_mode = graphics_output
         .modes()
         .map(|mode| mode.expect("warning encountered while querying mode"))
-        .last()
+        .next()
         .unwrap();
 
     graphics_output
@@ -383,7 +383,7 @@ fn kernel_transfer(
     image_handle: Handle,
     system_table: SystemTable<Boot>,
     kernel_entry_point: usize,
-    framebuffer: Option<FramebufferPointer>,
+    framebuffer: Option<FramebufferInfo>,
 ) -> ! {
     info!("Preparing to exit boot services environment.");
     // Retrieve a raw allocation pointer & size for the system memory map.

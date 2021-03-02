@@ -318,11 +318,9 @@ impl BlockAllocator<'_> {
             panic!("failed to acquire current stack base pointer")
         }
 
-        {
-            debug!("Unmapping bootloader-provided stack frames.");
-            let mut addressor_mut = self.get_addressor_mut();
-            stack_frames.for_each(|frame| addressor_mut.unmap(&Page::from_index(frame.index())));
-        }
+        debug!("Unmapping bootloader-provided stack frames.");
+        let mut addressor_mut = self.get_addressor_mut();
+        stack_frames.for_each(|frame| addressor_mut.unmap(&Page::from_index(frame.index())));
 
         debug!("Finished block allocator initialization.");
     }
@@ -362,14 +360,12 @@ impl BlockAllocator<'_> {
                     for section in block_page.iter().map(|section| *section) {
                         if section == u64::MAX {
                             current_run = 0;
-                            block_index += 64;
+                            block_index += BlockPage::SECTION_LEN;
                         } else {
                             for bit in (0..64).map(|shift| (section & (1 << shift)) > 0) {
                                 if bit {
                                     current_run = 0;
-                                } else if current_run > 0
-                                    || (current_run == 0 && (block_index % alignment) == 0)
-                                {
+                                } else if current_run > 0 || (block_index % alignment) == 0 {
                                     current_run += 1;
                                 }
 
@@ -601,7 +597,7 @@ impl BlockAllocator<'_> {
     }
 
     pub fn identity_map(&self, frame: &Frame, map: bool) {
-        // trace!("Identity mapping requested: {:?}", frame);
+        trace!("Identity mapping requested: {:?}", frame);
 
         let map_len = self.map.read().len();
         if map_len <= frame.index() {
