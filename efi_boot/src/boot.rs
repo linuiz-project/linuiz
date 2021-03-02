@@ -177,25 +177,6 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
     // test to see how much memory we're working with
     ensure_enough_memory(boot_services);
 
-    // acquire graphics output to ensure a gout device
-    let framebuffer = match locate_protocol::<GraphicsOutput>(boot_services) {
-        Some(graphics_output) => {
-            let ptr = graphics_output.frame_buffer().as_mut_ptr() as *mut u8;
-            let mode = select_graphics_mode(graphics_output);
-            let mode_info = mode.info();
-            info!("Selected graphics mode: {:?}", mode_info);
-            let resolution = mode_info.resolution();
-            let size = libkernel::Size::new(resolution.0, resolution.1);
-            info!("Acquired and configured graphics output protocol.");
-
-            Some(FramebufferInfo::new(ptr, size, mode_info.stride()))
-        }
-        None => {
-            warn!("No graphics output found. Kernel will default to using serial output.");
-            None
-        }
-    };
-
     // prepare required environment data
     let image = get_protocol::<LoadedImage>(boot_services, image_handle)
         .expect("failed to acquire boot image");
@@ -214,6 +195,25 @@ fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
         .open_volume()
         .expect_success("failed to open boot file system root directory");
     info!("Loaded boot file system root directory.");
+
+    // acquire graphics output to ensure a gout device
+    let framebuffer = match locate_protocol::<GraphicsOutput>(boot_services) {
+        Some(graphics_output) => {
+            let ptr = graphics_output.frame_buffer().as_mut_ptr() as *mut u8;
+            let mode = select_graphics_mode(graphics_output);
+            let mode_info = mode.info();
+            info!("Selected graphics mode: {:?}", mode_info);
+            let resolution = mode_info.resolution();
+            let size = libkernel::Size::new(resolution.0, resolution.1);
+            info!("Acquired and configured graphics output protocol.");
+
+            Some(FramebufferInfo::new(ptr, size, mode_info.stride()))
+        }
+        None => {
+            warn!("No graphics output found.");
+            None
+        }
+    };
 
     // load kernel
     let kernel_file = acquire_kernel_file(root_directory);

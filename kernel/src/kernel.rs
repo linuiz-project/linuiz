@@ -95,12 +95,14 @@ extern "efiapi" fn kernel_main(
     }
 
     for x in 0..640 {
-        framebuffer_driver.write_pixel((x, 2), drivers::graphics::color::Color8i::new(20, 190, 20));
+        framebuffer_driver.write_pixel((x, 3), drivers::graphics::color::Color8i::new(20, 190, 20));
     }
 
     // framebuffer_driver.LOG();
 
     framebuffer_driver.flush_pixels();
+    //framebuffer_driver.clear(drivers::graphics::color::Color8i::new(190, 20, 20));
+    //framebuffer_driver.flush_pixels();
 
     info!("Kernel has reached safe shutdown state.");
     unsafe { libkernel::instructions::pwm::qemu_shutdown() }

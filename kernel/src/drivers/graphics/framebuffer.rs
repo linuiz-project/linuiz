@@ -9,12 +9,12 @@ pub struct FramebufferDriver {
     framebuffer: Mutex<*mut Color8i>,
     backbuffer: RwLock<*mut Color8i>,
     dimensions: Size,
-    stride: usize,
+    scanline_width: usize,
 }
 
 impl FramebufferDriver {
-    pub fn init(buffer_addr: libkernel::PhysAddr, dimensions: Size, stride: usize) -> Self {
-        let pixel_len = dimensions.len();
+    pub fn init(buffer_addr: libkernel::PhysAddr, dimensions: Size, scanline_width: usize) -> Self {
+        let pixel_len = scanline_width * dimensions.height();
         let byte_len = pixel_len * core::mem::size_of::<Color8i>();
 
         let framebuffer = unsafe {
@@ -30,13 +30,13 @@ impl FramebufferDriver {
             libkernel::alloc_to!(mmio_frames)
         };
 
-        info!("{:?} {}", dimensions, stride);
+        info!("{:?} {}", dimensions, scanline_width);
 
         Self {
             framebuffer: Mutex::new(framebuffer),
             backbuffer: RwLock::new(libkernel::alloc!(byte_len)),
             dimensions,
-            stride,
+            scanline_width,
         }
     }
 
@@ -84,7 +84,7 @@ impl FramebufferDriver {
     }
 
     const fn point_to_offset(&self, point: (usize, usize)) -> usize {
-        (point.1 * self.dimensions().width()) + point.0
+        (point.1 * self.scanline_width) + point.0
     }
 
     const fn contains_point(&self, point: (usize, usize)) -> bool {
