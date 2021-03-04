@@ -13,7 +13,10 @@ mod pic8259;
 mod timer;
 
 use core::ffi::c_void;
-use libkernel::{BootInfo, ConfigTableEntry};
+use libkernel::{
+    structures::{self, acpi::RDSPDescriptor2},
+    BootInfo, ConfigTableEntry,
+};
 
 extern "C" {
     static _text_start: c_void;
@@ -31,7 +34,7 @@ extern "C" {
 
 #[cfg(debug_assertions)]
 fn get_log_level() -> log::LevelFilter {
-    log::LevelFilter::Trace
+    log::LevelFilter::Debug
 }
 
 #[cfg(not(debug_assertions))]
@@ -59,6 +62,37 @@ extern "efiapi" fn kernel_main(
         Err(error) => panic!("{}", error),
     }
 
+    let rdsp: &mut RDSPDescriptor2 = unsafe {
+        boot_info
+            .config_table()
+            .iter()
+            .find(|entry| entry.guid() == libkernel::structures::acpi::ACPI2_GUID)
+            .unwrap()
+            .as_mut_ref()
+    };
+
+    let xsdt = rdsp.xsdt();
+
+    for s in xsdt.iter() {
+        match s {
+            structures::acpi::XSDTEntry::APIC(_) => info!("APIC"),
+            structures::acpi::XSDTEntry::NotSupported(string) => info!("{}", string),
+        }
+    }
+
+    pre_init(&boot_info);
+
+    // `boot_info` will not be usable after initalizing the global allocator,
+    //   due to the stack being moved in virtual memory.
+    init_memory(boot_info);
+
+    init_apic();
+
+    info!("Kernel has reached safe shutdown state.");
+    unsafe { libkernel::instructions::pwm::qemu_shutdown() }
+}
+
+fn pre_init(boot_info: &BootInfo<libkernel::memory::UEFIMemoryDescriptor, ConfigTableEntry>) {
     info!("Validating magic of BootInfo.");
     boot_info.validate_magic();
 
@@ -74,38 +108,6 @@ extern "efiapi" fn kernel_main(
     info!("Successfully initialized GDT.");
     libkernel::structures::idt::init();
     info!("Successfully initialized IDT.");
-
-    // `boot_info` will not be usable after initalizing the global allocator,
-    //   due to the stack being moved in virtual memory.
-    let framebuffer_pointer = boot_info.framebuffer_pointer().unwrap().clone();
-    init_memory(boot_info);
-
-    init_apic();
-
-    info!("Initializing framebuffer driver.");
-    let mut framebuffer_driver = drivers::graphics::framebuffer::FramebufferDriver::init(
-        framebuffer_pointer.addr(),
-        framebuffer_pointer.size(),
-        framebuffer_pointer.stride(),
-    );
-
-    info!("Testing framebuffer driver.");
-    for x in 0..640 {
-        framebuffer_driver.write_pixel((x, 1), drivers::graphics::color::Color8i::new(20, 190, 20));
-    }
-
-    for x in 0..640 {
-        framebuffer_driver.write_pixel((x, 3), drivers::graphics::color::Color8i::new(20, 190, 20));
-    }
-
-    // framebuffer_driver.LOG();
-
-    framebuffer_driver.flush_pixels();
-    //framebuffer_driver.clear(drivers::graphics::color::Color8i::new(190, 20, 20));
-    //framebuffer_driver.flush_pixels();
-
-    info!("Kernel has reached safe shutdown state.");
-    unsafe { libkernel::instructions::pwm::qemu_shutdown() }
 }
 
 fn init_memory(boot_info: BootInfo<libkernel::memory::UEFIMemoryDescriptor, ConfigTableEntry>) {
@@ -183,6 +185,7 @@ fn init_apic() {
         debug!("Resetting and enabling local APIC (it may have already been enabled).");
         lapic.reset();
         lapic.enable();
+        // timer for 1ms window
         let timer = timer::Timer::new(crate::timer::TIMER_FREQUENCY / 1000);
         lapic.configure_spurious(u8::MAX, true);
         lapic.configure_timer(48, || timer.wait())

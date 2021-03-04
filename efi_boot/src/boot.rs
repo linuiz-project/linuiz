@@ -249,6 +249,10 @@ fn ensure_enough_memory(boot_services: &BootServices) {
 }
 
 fn select_graphics_mode(graphics_output: &mut GraphicsOutput) -> Mode {
+    graphics_output
+        .modes()
+        .for_each(|mode| debug!("Available graphics mode: {:?}", mode.unwrap().info()));
+
     let graphics_mode = graphics_output
         .modes()
         .map(|mode| mode.expect("warning encountered while querying mode"))

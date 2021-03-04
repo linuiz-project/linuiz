@@ -67,4 +67,11 @@ impl ConfigTableEntry {
     pub fn addr(&self) -> PhysAddr {
         self.addr
     }
+
+    pub unsafe fn as_ref<T>(&self) -> &T {
+        &*(self.addr().as_u64() as *mut T)
+    }
+    pub unsafe fn as_mut_ref<T>(&self) -> &mut T {
+        &mut *(self.addr().as_u64() as *mut T)
+    }
 }
