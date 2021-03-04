@@ -37,7 +37,6 @@ impl BitValue for FrameState {
 pub enum FrameAllocatorError {
     ExpectedFrameType(usize, FrameState),
     FreeWithAcquire,
-    MMIOWithinRAM,
 }
 
 pub struct FrameAllocator<'arr> {
@@ -146,13 +145,7 @@ impl<'arr> FrameAllocator<'arr> {
     ) -> Result<Frame, FrameAllocatorError> {
         match acq_type {
             FrameState::Free => Err(FrameAllocatorError::FreeWithAcquire),
-            FrameState::MMIO => {
-                if (index * 0x1000) > self.total_memory(None) {
-                    Ok(Frame::from_index(index))
-                } else {
-                    Err(FrameAllocatorError::MMIOWithinRAM)
-                }
-            }
+            FrameState::MMIO => Ok(Frame::from_index(index)),
             _ if self.memory_map.set_eq(index, acq_type, FrameState::Free) => {
                 let mut mem_write = self.memory.write();
                 mem_write[FrameState::Free.as_usize()] -= 0x1000;

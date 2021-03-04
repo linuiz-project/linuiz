@@ -1,6 +1,5 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MMIOError {
-    InsideSystemRAM,
     OffsetOverrun,
 }
 
@@ -20,17 +19,11 @@ pub fn unmapped_mmio(
     phys_addr: x86_64::PhysAddr,
     size: usize,
 ) -> Result<MMIO<Unmapped>, MMIOError> {
-    let addr_usize = phys_addr.as_u64() as usize;
-
-    if addr_usize >= crate::memory::global_memory().total_memory(None) {
-        Ok(MMIO::<Unmapped> {
-            addr: addr_usize,
-            size,
-            phantom: core::marker::PhantomData,
-        })
-    } else {
-        Err(MMIOError::InsideSystemRAM)
-    }
+    Ok(MMIO::<Unmapped> {
+        addr: phys_addr.as_u64() as usize,
+        size,
+        phantom: core::marker::PhantomData,
+    })
 }
 
 impl<S: MMIOState> MMIO<S> {
