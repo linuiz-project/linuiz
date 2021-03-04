@@ -1,4 +1,4 @@
-use crate::acpi::{Checksum, SDTHeader};
+use crate::structures::acpi::{Checksum, SDTHeader};
 use core::marker::PhantomData;
 use x86_64::PhysAddr;
 

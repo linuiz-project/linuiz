@@ -1,4 +1,4 @@
-use crate::acpi::{Checksum, SDTHeader, MADT};
+use crate::structures::acpi::{Checksum, SDTHeader, MADT};
 
 #[repr(C, packed)]
 pub struct XSDT {
@@ -46,7 +46,7 @@ impl<'entries> Iterator for XSDTEntryIterator<'entries> {
 
                 match core::str::from_utf8(&*(entry_ptr as *const [u8; 4])).unwrap() {
                     "APIC" => Some(XSDTEntry::APIC(&*(entry_ptr as *const MADT))),
-                    _ => Some(XSDTEntry::NotSupported),
+                    ident => Some(XSDTEntry::NotSupported(ident)),
                 }
             }
         } else {
@@ -57,5 +57,5 @@ impl<'entries> Iterator for XSDTEntryIterator<'entries> {
 
 pub enum XSDTEntry<'a> {
     APIC(&'a MADT),
-    NotSupported,
+    NotSupported(&'a str),
 }
