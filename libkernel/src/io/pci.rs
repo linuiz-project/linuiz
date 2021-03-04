@@ -1,9 +1,9 @@
-use crate::io::port::{ReadOnlyPort, WriteOnlyPort};
+use crate::io::port::ParallelPort;
 use bit_field::BitField;
 use spin::Mutex;
 
-static PCI_PORTS: Mutex<(WriteOnlyPort<u32>, ReadOnlyPort<u32>)> =
-    Mutex::new(unsafe { (WriteOnlyPort::new(0xCF8), ReadOnlyPort::new(0xCFC)) });
+static PCI_BRIDGE: Mutex<ParallelPort<u32>> =
+    Mutex::new(unsafe { ParallelPort::new(0xCF8, 0xCFC) });
 
 /// Reads a the configuration for a given PCI address.
 ///
@@ -12,10 +12,10 @@ static PCI_PORTS: Mutex<(WriteOnlyPort<u32>, ReadOnlyPort<u32>)> =
 /// the vendor is 0xFFFF, i.e. a non-existent vendor (and therefore, a
 /// non-existent device).
 pub fn config_read(config_addr: ConfigAddressPacket) -> Option<(u16, u16)> {
-    let mut pci = PCI_PORTS.lock();
+    let mut pci = PCI_BRIDGE.lock();
 
-    pci.0.write(config_addr.raw());
-    let port_value = pci.1.read();
+    pci.write(config_addr.raw());
+    let port_value = pci.read();
 
     let vendor = port_value as u16;
     let device = (port_value >> 16) as u16;
