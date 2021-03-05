@@ -3,15 +3,15 @@
     asm,
     const_fn,
     once_cell,
+    raw_ref_op,
     step_trait,
     step_trait_ext,
     abi_efiapi,
-    const_panic,
-    const_mut_refs,
-    core_intrinsics,
     abi_x86_interrupt,
     panic_info_message,
     alloc_error_handler,
+    const_panic,
+    const_mut_refs,
     const_raw_ptr_to_usize_cast
 )]
 

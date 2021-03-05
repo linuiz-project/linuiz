@@ -7,6 +7,5 @@ pub fn invalidate(page: &Page) {
 }
 
 pub fn invalidate_all() {
-    let (frame, flags) = crate::registers::CR3::read();
-    unsafe { crate::registers::CR3::write(&frame, flags) };
+    crate::registers::CR3::refresh();
 }
