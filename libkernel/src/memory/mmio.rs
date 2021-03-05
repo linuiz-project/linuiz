@@ -7,8 +7,10 @@ pub enum MMIOError {
 }
 
 pub trait MMIOState {}
+
 pub enum Unmapped {}
 impl MMIOState for Unmapped {}
+
 pub enum Mapped {}
 impl MMIOState for Mapped {}
 
@@ -18,17 +20,19 @@ pub struct MMIO<S: MMIOState> {
     phantom: core::marker::PhantomData<S>,
 }
 
-pub fn unmapped_mmio(frames: FrameIterator) -> Result<MMIO<Unmapped>, MMIOError> {
-    Ok(MMIO::<Unmapped> {
-        frames,
-        mapped_addr: VirtAddr::zero(),
-        phantom: core::marker::PhantomData,
-    })
-}
-
 impl<S: MMIOState> MMIO<S> {
     pub fn frames(&self) -> &FrameIterator {
         &self.frames
+    }
+}
+
+impl<S: MMIOState> core::fmt::Debug for MMIO<S> {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("MMIO")
+            .field("Frames", &self.frames)
+            .field("Mapped Address", &self.mapped_addr)
+            .finish()
     }
 }
 
@@ -100,4 +104,12 @@ impl MMIO<Mapped> {
             Err(mmio_err) => Err(mmio_err),
         }
     }
+}
+
+pub fn unmapped_mmio(frames: FrameIterator) -> Result<MMIO<Unmapped>, MMIOError> {
+    Ok(MMIO::<Unmapped> {
+        frames,
+        mapped_addr: VirtAddr::zero(),
+        phantom: core::marker::PhantomData,
+    })
 }

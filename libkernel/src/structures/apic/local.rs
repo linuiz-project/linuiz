@@ -92,7 +92,7 @@ impl LocalAPIC {
         x86_64::PhysAddr::new(MSR::IA32_APIC_BASE.read().get_bits(12..35) << 12)
     }
 
-    pub fn new(mmio: MMIO<Mapped>) -> Self {
+    pub unsafe fn new(mmio: MMIO<Mapped>) -> Self {
         Self { mmio }
     }
 
