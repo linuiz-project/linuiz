@@ -32,7 +32,8 @@ impl BitValue for FrameState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameAllocatorError {
-    ExpectedFrameType(usize, FrameState),
+    ExpectedFrameState(usize, FrameState),
+    NonMMIOFrameSatate(usize, FrameState),
     FreeWithAcquire,
 }
 
@@ -142,7 +143,7 @@ impl<'arr> FrameAllocator<'arr> {
             );
             Ok(())
         } else {
-            Err(FrameAllocatorError::ExpectedFrameType(
+            Err(FrameAllocatorError::ExpectedFrameState(
                 frame.index(),
                 FrameState::Locked,
             ))
@@ -152,26 +153,32 @@ impl<'arr> FrameAllocator<'arr> {
     pub unsafe fn acquire_frame(
         &self,
         index: usize,
-        acq_type: FrameState,
+        acq_state: FrameState,
     ) -> Result<Frame, FrameAllocatorError> {
-        match acq_type {
+        match acq_state {
             FrameState::Free => Err(FrameAllocatorError::FreeWithAcquire),
-            FrameState::MMIO => Ok(Frame::from_index(index)),
-            _ if self.memory_map.set_eq(index, acq_type, FrameState::Free) => {
+            FrameState::MMIO => match self.memory_map.get(index) {
+                cur_state
+                    if cur_state == FrameState::Free || cur_state == FrameState::NonUsable =>
+                {
+                    self.memory_map.set(index, acq_state);
+
+                    let mut mem_write = self.memory.write();
+                    mem_write[cur_state.as_usize()] -= 0x1000;
+                    mem_write[acq_state.as_usize()] += 0x1000;
+
+                    Ok(Frame::from_index(index))
+                }
+                cur_state => Err(FrameAllocatorError::NonMMIOFrameSatate(index, cur_state)),
+            },
+            _ if self.memory_map.set_eq(index, acq_state, FrameState::Free) => {
                 let mut mem_write = self.memory.write();
                 mem_write[FrameState::Free.as_usize()] -= 0x1000;
-                mem_write[acq_type.as_usize()] += 0x1000;
-
-                trace!(
-                    "Acquired frame {}: {:?} -> {:?}",
-                    index,
-                    FrameState::Free,
-                    acq_type,
-                );
+                mem_write[acq_state.as_usize()] += 0x1000;
 
                 Ok(Frame::from_index(index))
             }
-            _ => Err(FrameAllocatorError::ExpectedFrameType(
+            _ => Err(FrameAllocatorError::ExpectedFrameState(
                 index,
                 FrameState::Free,
             )),

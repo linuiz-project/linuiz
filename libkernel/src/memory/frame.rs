@@ -57,6 +57,15 @@ impl Frame {
     pub const fn addr_u64(&self) -> u64 {
         (self.index as u64) * 0x1000
     }
+
+    pub fn as_iter(self) -> FrameIterator {
+        FrameIterator::new(
+            self,
+            Self {
+                index: self.index() + 1,
+            },
+        )
+    }
 }
 
 impl PartialEq for Frame {
