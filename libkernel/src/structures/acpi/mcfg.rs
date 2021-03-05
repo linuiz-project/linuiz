@@ -54,12 +54,20 @@ pub struct MCFGEntry {
 }
 
 impl MCFGEntry {
-    // pub fn iter_busses(&self) {
-    //     for bus_index in self.start_pci_bus..self.end_pci_bus {
-    //         use crate::memory::mmio::{unmapped_mmio, MMIO};
-    //         let offset_addr = base_addr + (bus_index << 20);
-    //         let mmio = unmapped_mmio(offset_addr, 0x1000).unwrap();
-    //         mmio.unsafe_map()
-    //     }
-    // }
+    pub fn iter_busses(&self) {
+        for bus_index in self.start_pci_bus..self.end_pci_bus {
+            let offset_addr = self.base_addr + ((bus_index as u64) << 20);
+            let frame_index = (offset_addr.as_u64() / 0x1000) as usize;
+            let mmio_frames = unsafe {
+                crate::memory::global_memory()
+                    .acquire_frame(frame_index, crate::memory::FrameState::MMIO)
+                    .unwrap()
+            };
+
+            let mmio = crate::memory::mmio::unmapped_mmio(mmio_frames.as_iter())
+                .unwrap()
+                .map();
+            info!("{:?}", mmio);
+        }
+    }
 }
