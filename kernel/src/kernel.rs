@@ -13,10 +13,7 @@ mod pic8259;
 mod timer;
 
 use core::ffi::c_void;
-use libkernel::{
-    structures::{self, acpi::RDSPDescriptor2},
-    BootInfo, ConfigTableEntry,
-};
+use libkernel::{structures::acpi::RDSPDescriptor2, BootInfo, ConfigTableEntry};
 
 extern "C" {
     static _text_start: c_void;
@@ -39,7 +36,7 @@ fn get_log_level() -> log::LevelFilter {
 
 #[cfg(not(debug_assertions))]
 fn get_log_level() -> log::LevelFilter {
-    log::LevelFilter::Info
+    log::LevelFilter::Debug
 }
 
 static mut SERIAL_OUT: drivers::io::Serial = drivers::io::Serial::new(drivers::io::COM1);
@@ -71,14 +68,22 @@ extern "efiapi" fn kernel_main(
             .as_mut_ref()
     };
 
-    let xsdt = rdsp.xsdt();
+    // let xsdt = rdsp.xsdt();
 
-    for s in xsdt.iter() {
-        match s {
-            structures::acpi::XSDTEntry::APIC(_) => info!("APIC"),
-            structures::acpi::XSDTEntry::NotSupported(string) => info!("{}", string),
-        }
-    }
+    // use libkernel::structures::acpi::XSDTEntry;
+    // for entry in xsdt.iter() {
+    //     if let XSDTEntry::MCFG(mcfg) = entry {
+    //         info!("MCFG FOUND");
+    //         for mcfg_entry in mcfg.iter() {
+    //             info!("{:?}", mcfg_entry);
+    //         }
+    //     } else if let XSDTEntry::APIC(madt) = entry {
+    //         info!("MADT FOUND");
+    //         for madt_entry in madt.iter() {
+    //             info!("{:?}", madt_entry);
+    //         }
+    //     }
+    // }
 
     pre_init(&boot_info);
 
@@ -118,9 +123,7 @@ fn init_memory(boot_info: BootInfo<libkernel::memory::UEFIMemoryDescriptor, Conf
 
     debug!("Reserving frames from relevant UEFI memory descriptors.");
 
-    use core::{lazy::OnceCell, ops::Range};
-    let stack_frames = OnceCell::<Range<libkernel::memory::Frame>>::new();
-
+    let mut stack_frames = core::lazy::OnceCell::new();
     let mut last_frame_end = 0;
     for descriptor in boot_info.memory_map() {
         let cur_frame_start = (descriptor.phys_start.as_u64() / 0x1000) as usize;
@@ -163,7 +166,7 @@ fn init_memory(boot_info: BootInfo<libkernel::memory::UEFIMemoryDescriptor, Conf
     }
 
     info!("Initializing global allocator.");
-    unsafe { libkernel::memory::GLOBAL_ALLOCATOR.init(stack_frames.get().unwrap().clone()) };
+    unsafe { libkernel::memory::GLOBAL_ALLOCATOR.init(stack_frames.get_mut().unwrap()) };
 
     info!("Global memory & the kernel global allocator have been initialized.");
 }

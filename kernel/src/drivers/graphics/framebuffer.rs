@@ -13,7 +13,7 @@ pub struct FramebufferDriver {
 }
 
 impl FramebufferDriver {
-    pub fn init(buffer_addr: libkernel::PhysAddr, dimensions: Size, scanline_width: usize) -> Self {
+    pub fn new(buffer_addr: libkernel::PhysAddr, dimensions: Size, scanline_width: usize) -> Self {
         let pixel_len = scanline_width * dimensions.height();
         let byte_len = pixel_len * core::mem::size_of::<Color8i>();
 
@@ -27,7 +27,7 @@ impl FramebufferDriver {
                 )
                 .unwrap();
 
-            libkernel::alloc_to!(mmio_frames)
+            libkernel::alloc_to!(&mmio_frames)
         };
 
         info!("{:?} {}", dimensions, scanline_width);

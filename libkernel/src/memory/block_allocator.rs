@@ -250,18 +250,15 @@ impl BlockAllocator<'_> {
 
     /* INITIALIZATION */
 
-    pub unsafe fn init(
-        &self,
-        stack_frames: impl crate::memory::FrameIterator + Clone + core::fmt::Debug,
-    ) {
+    pub unsafe fn init(&self, stack_frames: &mut crate::memory::FrameIterator) {
         use crate::memory::{global_memory, FrameState};
 
         {
-            trace!("Initializing allocator's virtual addressor.");
+            debug!("Initializing allocator's virtual addressor.");
             let mut addressor_mut = self.get_addressor_mut();
             *addressor_mut = VirtualAddressor::new(Page::null());
 
-            trace!("Identity mapping all reserved global memory frames.");
+            debug!("Identity mapping all reserved global memory frames.");
             global_memory()
                 .frame_state_iter()
                 .enumerate()
@@ -271,11 +268,11 @@ impl BlockAllocator<'_> {
             // Since we're using physical offset mapping for our page table modification
             //  strategy, the memory needs to be identity mapped at the correct offset.
             let phys_mapping_addr = crate::memory::global_top_offset();
-            trace!("Mapping physical memory at offset: {:?}", phys_mapping_addr);
+            debug!("Mapping physical memory at offset: {:?}", phys_mapping_addr);
             addressor_mut.modify_mapped_page(Page::from_addr(phys_mapping_addr));
 
             // Swap the PML4 into CR3
-            trace!("Writing kernel addressor's PML4 to the CR3 register.");
+            debug!("Writing kernel addressor's PML4 to the CR3 register.");
             addressor_mut.swap_into();
         }
 
@@ -288,14 +285,14 @@ impl BlockAllocator<'_> {
 
         const STACK_SIZE: usize = 256 * 0x1000; /* 1MB in pages */
 
-        trace!("Allocating new stack: {} bytes", STACK_SIZE);
+        debug!("Allocating new stack: {} bytes", STACK_SIZE);
         let new_stack_base = self.alloc::<u8>(
             core::alloc::Layout::from_size_align(STACK_SIZE, Self::BLOCK_SIZE).unwrap(),
         );
         let stack_base_cell = core::lazy::OnceCell::<*mut u8>::new();
 
-        trace!("Copying data from bootloader-allocated stack.");
-        for (index, frame) in stack_frames.clone().enumerate() {
+        debug!("Copying data from bootloader-allocated stack.");
+        for (index, frame) in stack_frames.enumerate() {
             let cur_offset = new_stack_base.add(index * 0x1000);
             let frame_ptr = frame.addr_u64() as *mut u8;
             stack_base_cell.set(frame_ptr).ok();
@@ -320,7 +317,21 @@ impl BlockAllocator<'_> {
 
         debug!("Unmapping bootloader-provided stack frames.");
         let mut addressor_mut = self.get_addressor_mut();
-        stack_frames.for_each(|frame| addressor_mut.unmap(&Page::from_index(frame.index())));
+        stack_frames.reset();
+
+        // `stack_frames` is invalid as we iterate and unmap the pages it exists on.
+        {
+            use core::mem::transmute;
+            type FrameIteratorBytes = [u8; size_of::<FrameIterator>()];
+
+            let temp = &mut [0u8; size_of::<FrameIterator>()];
+            temp.copy_from_slice(transmute::<&mut FrameIterator, &mut FrameIteratorBytes>(
+                stack_frames,
+            ));
+
+            transmute::<&mut FrameIteratorBytes, &mut FrameIterator>(temp)
+        }
+        .for_each(|frame| addressor_mut.unmap(&Page::from_index(frame.index())));
 
         debug!("Finished block allocator initialization.");
     }
@@ -388,10 +399,9 @@ impl BlockAllocator<'_> {
         let start_block_index = block_index - current_run;
         let end_block_index = block_index;
         block_index = start_block_index;
-        trace!(
+        info!(
             "Allocating fulfilling: {}..{}",
-            start_block_index,
-            end_block_index
+            start_block_index, end_block_index
         );
 
         let start_map_index = start_block_index / BlockPage::BLOCK_COUNT;
@@ -455,10 +465,9 @@ impl BlockAllocator<'_> {
         let start_block_index = (ptr as usize) / Self::BLOCK_SIZE;
         let end_block_index = start_block_index + align_up_div(size, Self::BLOCK_SIZE);
         let mut block_index = start_block_index;
-        trace!(
+        info!(
             "Deallocating requested: {}..{}",
-            start_block_index,
-            end_block_index
+            start_block_index, end_block_index
         );
 
         let start_map_index = start_block_index / BlockPage::BLOCK_COUNT;
@@ -507,11 +516,11 @@ impl BlockAllocator<'_> {
                 let mut addressor_mut = unsafe { self.get_addressor_mut() };
                 let page = &Page::from_index(map_index);
                 // todo FIX THIS (uncomment & build for error)
-                //     unsafe {
-                //     crate::memory::global_memory()
-                //         .free_frame(&addressor.translate_page(page).unwrap())
-                //         .unwrap()
-                // };
+                unsafe {
+                    crate::memory::global_memory()
+                        .free_frame(addressor_mut.translate_page(page).unwrap())
+                        .unwrap()
+                };
                 addressor_mut.unmap(page);
             }
         }
@@ -540,8 +549,8 @@ impl BlockAllocator<'_> {
     ///  given the iterator.
     ///
     /// This function assumed the frames are already locked or otherwise valid.
-    pub fn alloc_to<T>(&self, mut frames: impl FrameIterator + Clone) -> *mut T {
-        let size_in_frames = frames.clone().count();
+    pub fn alloc_to<T>(&self, frames: &FrameIterator) -> *mut T {
+        let size_in_frames = frames.len();
         trace!("Allocation requested to: {} frames", size_in_frames);
         let (mut map_index, mut current_run);
 
@@ -586,10 +595,7 @@ impl BlockAllocator<'_> {
                 .take(size_in_frames)
             {
                 block_page.set_full();
-                addressor_mut.map(
-                    &Page::from_index(map_index),
-                    &frames.next().expect("invalid end of frame iterator"),
-                );
+                addressor_mut.map(&Page::from_index(map_index), &frames.start());
             }
         }
 

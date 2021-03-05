@@ -1,7 +1,4 @@
-use crate::{
-    memory::{Frame, FrameIndexIterator},
-    BitValue, RwBitArray, RwBitArrayIterator,
-};
+use crate::{memory::Frame, BitValue, RwBitArray, RwBitArrayIterator};
 use num_enum::TryFromPrimitive;
 use spin::RwLock;
 
@@ -39,6 +36,20 @@ pub enum FrameAllocatorError {
     FreeWithAcquire,
 }
 
+/// Structure for deterministically reserving, locking, and freeing RAM frames.
+///
+/// Deterministic Frame Lifetimes
+/// -----------------------------
+/// Deterministic frame lifetimes is the concept that a frame's lifetime should be
+/// carefully controlled to ensure its behaviour matches how its used in hardware.
+///
+/// As an example, a page table entry locks a frame to create a sub-table. Conceptually,
+/// the sub-table's entry in the page table owns the frame that sub-table exists on. It
+/// follows that that entry should control the lifetime of that frame.
+///
+/// This example encapsulates the core idea, that the `Frame` struct shouldn't be instantiated
+/// out of thin air. Its creation should be carefully controlled, to ensure each individual frame's
+/// lifetime matches up with how it is used or consumed in hardware and software.
 pub struct FrameAllocator<'arr> {
     memory_map: RwBitArray<'arr, FrameState>,
     memory: RwLock<[usize; FrameState::MASK + 1]>,
@@ -185,9 +196,9 @@ impl<'arr> FrameAllocator<'arr> {
 
     pub unsafe fn acquire_frames(
         &self,
-        frame_indexes: impl FrameIndexIterator,
+        frame_indexes: impl crate::memory::FrameIndexIterator,
         acq_type: FrameState,
-    ) -> Result<core::ops::Range<Frame>, FrameAllocatorError> {
+    ) -> Result<crate::memory::FrameIterator, FrameAllocatorError> {
         let start_frame = Frame::from_index(match frame_indexes.start_bound() {
             core::ops::Bound::Included(start) => *start,
             core::ops::Bound::Excluded(start) => *start + 1,
@@ -206,7 +217,7 @@ impl<'arr> FrameAllocator<'arr> {
             }
         }
 
-        Ok(start_frame..end_frame)
+        Ok(crate::memory::FrameIterator::new(start_frame, end_frame))
     }
 
     /// Attempts to iterate the allocator's frames, and returns the first unallocated frame.
@@ -224,7 +235,7 @@ impl<'arr> FrameAllocator<'arr> {
                 mem_write[FrameState::Free.as_usize()] -= 0x1000;
                 mem_write[FrameState::Locked.as_usize()] += 0x1000;
 
-                let frame = Frame::from_index(index);
+                let frame = unsafe { Frame::from_index(index) };
                 trace!("Locked next free frame: {:?}", frame);
                 frame
             })

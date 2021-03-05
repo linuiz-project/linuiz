@@ -92,14 +92,8 @@ impl LocalAPIC {
         x86_64::PhysAddr::new(MSR::IA32_APIC_BASE.read().get_bits(12..35) << 12)
     }
 
-    pub fn from_msr(mapped_addr: x86_64::VirtAddr) -> Self {
-        Self {
-            mmio: unsafe {
-                crate::memory::mmio::unmapped_mmio(Self::mmio_addr(), 0x1000)
-                    .unwrap()
-                    .map(mapped_addr)
-            },
-        }
+    pub fn new(mmio: MMIO<Mapped>) -> Self {
+        Self { mmio }
     }
 
     pub fn is_enabled(&self) -> bool {
@@ -198,7 +192,7 @@ impl LocalAPIC {
         }
 
         let window_ticks = 0xFFFFFFFF - self[LocalAPICRegister::TimeCurrentCount];
-        debug!("Local APIC timer frequency: {}MHz.", window_ticks / 1000);
+        info!("Local APIC timer frequency: {}MHz.", window_ticks / 1000);
         self[LocalAPICRegister::TimerInitialCount] = window_ticks as u32;
         self[LocalAPICRegister::TimerDivisor] = LocalAPICTimerDivisor::Div1 as u32;
     }
@@ -292,15 +286,16 @@ pub fn load() {
         debug!("Loading local APIC table.");
         let start_index = (LocalAPIC::mmio_addr().as_u64() as usize) / 0x1000;
         debug!("APIC MMIO mapping at frame: {}", start_index);
-        let mmio_frames = unsafe {
+
+        let mmio = crate::memory::mmio::unmapped_mmio(unsafe {
             crate::memory::global_memory()
                 .acquire_frames(start_index..=start_index, crate::memory::FrameState::MMIO)
                 .unwrap()
-        };
-        let mapped_addr = x86_64::VirtAddr::from_ptr::<u8>(crate::alloc_to!(mmio_frames));
-        debug!("Allocated local APIC table to: {:?}", mapped_addr);
+        })
+        .unwrap()
+        .map();
 
-        unsafe { LOCAL_APIC.set(LocalAPIC::from_msr(mapped_addr)) };
+        unsafe { LOCAL_APIC.set(LocalAPIC::new(mmio)) };
     }
 }
 
