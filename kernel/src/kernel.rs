@@ -13,7 +13,10 @@ mod pic8259;
 mod timer;
 
 use core::ffi::c_void;
-use libkernel::{structures::acpi::RDSPDescriptor2, BootInfo, ConfigTableEntry};
+use libkernel::{
+    structures::{acpi::RDSPDescriptor2, SystemConfigTableEntry},
+    BootInfo,
+};
 
 extern "C" {
     static _text_start: c_void;
@@ -44,7 +47,7 @@ static mut SERIAL_OUT: drivers::io::Serial = drivers::io::Serial::new(drivers::i
 #[no_mangle]
 #[export_name = "_start"]
 extern "efiapi" fn kernel_main(
-    boot_info: BootInfo<libkernel::memory::UEFIMemoryDescriptor, ConfigTableEntry>,
+    boot_info: BootInfo<libkernel::memory::UEFIMemoryDescriptor, SystemConfigTableEntry>,
 ) -> ! {
     unsafe {
         SERIAL_OUT.init(drivers::io::SerialSpeed::S115200);
@@ -59,45 +62,51 @@ extern "efiapi" fn kernel_main(
         Err(error) => panic!("{}", error),
     }
 
-    let rdsp: &mut RDSPDescriptor2 = unsafe {
-        boot_info
-            .config_table()
-            .iter()
-            .find(|entry| entry.guid() == libkernel::structures::acpi::ACPI2_GUID)
-            .unwrap()
-            .as_mut_ref()
-    };
-
-    // let xsdt = rdsp.xsdt();
-
-    // use libkernel::structures::acpi::XSDTEntry;
-    // for entry in xsdt.iter() {
-    //     if let XSDTEntry::MCFG(mcfg) = entry {
-    //         info!("MCFG FOUND");
-    //         for mcfg_entry in mcfg.iter() {
-    //             info!("{:?}", mcfg_entry);
-    //         }
-    //     } else if let XSDTEntry::APIC(madt) = entry {
-    //         info!("MADT FOUND");
-    //         for madt_entry in madt.iter() {
-    //             info!("{:?}", madt_entry);
-    //         }
-    //     }
-    // }
+    unsafe {
+        let config_table = boot_info.config_table();
+        info!("Initializing system configuration table.");
+        libkernel::structures::init_system_config_table(config_table.as_ptr(), config_table.len());
+    }
 
     pre_init(&boot_info);
-
     // `boot_info` will not be usable after initalizing the global allocator,
     //   due to the stack being moved in virtual memory.
     init_memory(boot_info);
-
     init_apic();
+
+    let rdsp: &RDSPDescriptor2 = unsafe {
+        libkernel::structures::system_config_table()
+            .iter()
+            .find(|entry| entry.guid() == libkernel::structures::acpi::ACPI2_GUID)
+            .unwrap()
+            .as_ref()
+    };
+
+    let xsdt = rdsp.xsdt();
+
+    for entry in xsdt.iter() {
+        use libkernel::structures::acpi::XSDTEntry;
+
+        if let XSDTEntry::MCFG(mcfg) = entry {
+            info!("MCFG FOUND");
+            for mcfg_entry in mcfg.iter() {
+                info!("{:?}", mcfg_entry);
+
+                mcfg_entry.iter_busses();
+            }
+        } else if let XSDTEntry::APIC(madt) = entry {
+            info!("MADT FOUND");
+            for madt_entry in madt.iter() {
+                info!("{:?}", madt_entry);
+            }
+        }
+    }
 
     info!("Kernel has reached safe shutdown state.");
     unsafe { libkernel::instructions::pwm::qemu_shutdown() }
 }
 
-fn pre_init(boot_info: &BootInfo<libkernel::memory::UEFIMemoryDescriptor, ConfigTableEntry>) {
+fn pre_init(boot_info: &BootInfo<libkernel::memory::UEFIMemoryDescriptor, SystemConfigTableEntry>) {
     info!("Validating magic of BootInfo.");
     boot_info.validate_magic();
 
@@ -115,7 +124,9 @@ fn pre_init(boot_info: &BootInfo<libkernel::memory::UEFIMemoryDescriptor, Config
     info!("Successfully initialized IDT.");
 }
 
-fn init_memory(boot_info: BootInfo<libkernel::memory::UEFIMemoryDescriptor, ConfigTableEntry>) {
+fn init_memory(
+    boot_info: BootInfo<libkernel::memory::UEFIMemoryDescriptor, SystemConfigTableEntry>,
+) {
     use libkernel::memory::{global_memory, FrameState};
 
     info!("Initializing global memory.");

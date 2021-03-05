@@ -1,5 +1,4 @@
-use crate::{structures::GUID, FFIOption, FramebufferInfo};
-use x86_64::PhysAddr;
+use crate::{FFIOption, FramebufferInfo};
 
 #[repr(C)]
 pub struct BootInfo<MM, CTE> {
@@ -47,31 +46,5 @@ impl<MM, CTE> BootInfo<MM, CTE> {
             self.magic, 0xAABB11FF,
             "boot_info is unaligned, or magic is otherwise corrupted"
         );
-    }
-
-    pub fn unwrap(self) {}
-}
-
-#[repr(C)]
-#[derive(Debug)]
-pub struct ConfigTableEntry {
-    guid: GUID,
-    addr: PhysAddr,
-}
-
-impl ConfigTableEntry {
-    pub fn guid(&self) -> GUID {
-        self.guid.clone()
-    }
-
-    pub fn addr(&self) -> PhysAddr {
-        self.addr
-    }
-
-    pub unsafe fn as_ref<T>(&self) -> &T {
-        &*(self.addr().as_u64() as *mut T)
-    }
-    pub unsafe fn as_mut_ref<T>(&self) -> &mut T {
-        &mut *(self.addr().as_u64() as *mut T)
     }
 }
