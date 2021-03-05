@@ -1,8 +1,10 @@
 mod madt;
+mod mcfg;
 mod rdsp;
 mod xsdt;
 
 pub use madt::*;
+pub use mcfg::*;
 pub use rdsp::*;
 pub use xsdt::*;
 
@@ -23,6 +25,27 @@ pub const ACPI2_GUID: GUID = GUID::new(
     0xbc22,
     [0x00, 0x80, 0xc7, 0x3c, 0x88, 0x81],
 );
+
+pub(crate) trait ACPITable {
+    fn body_len(&self) -> usize;
+}
+
+pub(crate) trait SizedACPITable<H, E>: ACPITable {
+    fn entries(&self) -> &[E] {
+        unsafe {
+            &*core::ptr::slice_from_raw_parts(
+                (self as *const _ as *const u8).add(core::mem::size_of::<H>()) as *const E,
+                self.body_len() / core::mem::size_of::<E>(),
+            )
+        }
+    }
+}
+
+pub(crate) trait UnsizedACPITable<H, E> {
+    fn first_entry_ptr(&self) -> *const E {
+        unsafe { (self as *const _ as *const u8).add(core::mem::size_of::<H>()) as *const E }
+    }
+}
 
 pub trait Checksum: Sized {
     fn bytes_len(&self) -> usize {
@@ -46,6 +69,7 @@ pub trait Checksum: Sized {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct SDTHeader {
     signature: [u8; 4],
     len: u32,
@@ -63,7 +87,7 @@ impl SDTHeader {
         core::str::from_utf8(&self.signature).expect("invalid ascii sequence for signature")
     }
 
-    pub const fn len(&self) -> u32 {
+    pub const fn table_len(&self) -> u32 {
         self.len
     }
 

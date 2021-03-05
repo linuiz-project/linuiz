@@ -1,35 +1,47 @@
-use crate::structures::acpi::{Checksum, SDTHeader};
+use crate::structures::acpi::{ACPITable, Checksum, SDTHeader, UnsizedACPITable};
 use core::marker::PhantomData;
 use x86_64::PhysAddr;
 
-#[repr(C)]
-#[derive(Debug)]
-pub struct MADT {
-    header: SDTHeader,
-    apic_addr: u32,
-    flags: u32,
-    irq_entry_head: InterruptDeviceHeader,
+bitflags::bitflags! {
+    pub struct MADTFlags: u32 {
+        const PCAT_COMPAT = 1 << 0;
+    }
 }
 
-impl MADT {
-    fn body_len(&self) -> usize {
-        (self.header.len() as usize) - core::mem::size_of::<SDTHeader>() - 8
-    }
+#[repr(C)]
+pub struct MADTHeader {
+    sdt_header: SDTHeader,
+    apic_addr: u32,
+    flags: MADTFlags,
+}
 
-    pub fn iter(&self) -> MADTIterator {
-        let cur_entry_ptr = (&self.irq_entry_head) as *const _ as *const u8;
-
-        MADTIterator {
-            cur_header_ptr: cur_entry_ptr,
-            max_header_ptr: unsafe { cur_entry_ptr.offset(self.body_len() as isize) },
-            phantom: PhantomData,
-        }
-    }
+#[repr(C)]
+pub struct MADT {
+    header: MADTHeader,
 }
 
 impl Checksum for MADT {
     fn bytes_len(&self) -> usize {
-        self.header.len() as usize
+        self.header.sdt_header.table_len() as usize
+    }
+}
+
+impl ACPITable for MADT {
+    fn body_len(&self) -> usize {
+        (self.header.sdt_header.table_len() as usize) - core::mem::size_of::<MADTHeader>()
+    }
+}
+
+impl UnsizedACPITable<MADTHeader, u8> for MADT {}
+
+impl MADT {
+    pub fn iter(&self) -> MADTIterator {
+        let first_entry_ptr = self.first_entry_ptr();
+        MADTIterator {
+            cur_header_ptr: first_entry_ptr,
+            max_header_ptr: unsafe { first_entry_ptr.add(self.body_len()) },
+            phantom: PhantomData,
+        }
     }
 }
 
@@ -47,7 +59,7 @@ impl<'a> Iterator for MADTIterator<'a> {
             unsafe {
                 let header_ptr = self.cur_header_ptr as *const InterruptDeviceHeader;
                 let header = &*header_ptr;
-                self.cur_header_ptr = self.cur_header_ptr.offset(header.len as isize);
+                self.cur_header_ptr = self.cur_header_ptr.add(header.len as usize);
 
                 match header.ty {
                     0x0 => Some(InterruptDevice::LocalAPIC(
@@ -63,7 +75,10 @@ impl<'a> Iterator for MADTIterator<'a> {
                     0x5 => Some(InterruptDevice::LocalAPICAddrOverride(
                         &*(header_ptr as *const LocalAPICAddrOverride),
                     )),
-                    ty => panic!("invalid interrupt device type: {}", ty),
+                    /* 0xF..0x7F | 0x80..0xFF | */
+                    ty => {
+                        panic!("invalid interrupt device type: 0x{:X}", ty)
+                    }
                 }
             }
         } else {
