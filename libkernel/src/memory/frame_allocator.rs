@@ -158,9 +158,7 @@ impl<'arr> FrameAllocator<'arr> {
         match acq_state {
             FrameState::Free => Err(FrameAllocatorError::FreeWithAcquire),
             FrameState::MMIO => match self.memory_map.get(index) {
-                cur_state
-                    if cur_state == FrameState::Free || cur_state == FrameState::NonUsable =>
-                {
+                cur_state if matches!(cur_state, FrameState::Free | FrameState::NonUsable) => {
                     self.memory_map.set(index, acq_state);
 
                     let mut mem_write = self.memory.write();

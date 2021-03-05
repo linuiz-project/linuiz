@@ -46,7 +46,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
         info.message().unwrap()
     );
 
-    loop {}
+    crate::instructions::hlt_indefinite()
 }
 
 #[cfg(feature = "kernel_impls")]
@@ -54,7 +54,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 fn alloc_error(error: core::alloc::Layout) -> ! {
     error!("KERNEL ALLOCATOR PANIC: {:?}", error);
 
-    loop {}
+    crate::instructions::hlt_indefinite()
 }
 
 #[repr(C)]
