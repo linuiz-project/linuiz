@@ -33,7 +33,7 @@ impl BitValue for FrameState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameAllocatorError {
     ExpectedFrameState(usize, FrameState),
-    NonMMIOFrameSatate(usize, FrameState),
+    NonMMIOFrameState(usize, FrameState),
     FreeWithAcquire,
 }
 
@@ -158,7 +158,7 @@ impl<'arr> FrameAllocator<'arr> {
         match acq_state {
             FrameState::Free => Err(FrameAllocatorError::FreeWithAcquire),
             FrameState::MMIO => match self.memory_map.get(index) {
-                cur_state if matches!(cur_state, FrameState::Free | FrameState::NonUsable) => {
+                cur_state if matches!(cur_state, FrameState::Reserved | FrameState::NonUsable) => {
                     self.memory_map.set(index, acq_state);
 
                     let mut mem_write = self.memory.write();
@@ -167,7 +167,7 @@ impl<'arr> FrameAllocator<'arr> {
 
                     Ok(Frame::from_index(index))
                 }
-                cur_state => Err(FrameAllocatorError::NonMMIOFrameSatate(index, cur_state)),
+                cur_state => Err(FrameAllocatorError::NonMMIOFrameState(index, cur_state)),
             },
             _ if self.memory_map.set_eq(index, acq_state, FrameState::Free) => {
                 let mut mem_write = self.memory.write();
