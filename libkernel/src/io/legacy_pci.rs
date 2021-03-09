@@ -2,7 +2,7 @@ use crate::io::port::ParallelPort;
 use bit_field::BitField;
 use spin::Mutex;
 
-static PCI_BRIDGE: Mutex<ParallelPort<u32>> =
+static LEGACY_PCI_PORTS: Mutex<ParallelPort<u32>> =
     Mutex::new(unsafe { ParallelPort::new(0xCF8, 0xCFC) });
 
 /// Reads a the configuration for a given PCI address.
@@ -12,7 +12,7 @@ static PCI_BRIDGE: Mutex<ParallelPort<u32>> =
 /// the vendor is 0xFFFF, i.e. a non-existent vendor (and therefore, a
 /// non-existent device).
 pub fn config_read(config_addr: ConfigAddressPacket) -> Option<(u16, u16)> {
-    let mut pci = PCI_BRIDGE.lock();
+    let mut pci = LEGACY_PCI_PORTS.lock();
 
     pci.write(config_addr.raw());
     let port_value = pci.read();

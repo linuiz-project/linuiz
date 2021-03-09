@@ -58,7 +58,7 @@ impl Frame {
         (self.index as u64) * 0x1000
     }
 
-    pub fn as_iter(self) -> FrameIterator {
+    pub fn into_iter(self) -> FrameIterator {
         FrameIterator::new(
             self,
             Self {

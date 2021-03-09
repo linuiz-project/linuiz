@@ -63,12 +63,18 @@ impl MCFGEntry {
                 crate::memory::global_memory()
                     .acquire_frame(frame_index, crate::memory::FrameState::MMIO)
                     .unwrap()
+                    .into_iter()
             };
 
-            let mmio = crate::memory::mmio::unmapped_mmio(mmio_frames.as_iter())
+            let mmio = crate::memory::mmio::unmapped_mmio(mmio_frames)
                 .unwrap()
                 .map();
-            info!("{:?}", mmio);
+            info!("{:?}", unsafe {
+                &*mmio
+                    .mapped_addr()
+                    .as_ptr::<crate::io::pcie::PCIEDeviceHeader>()
+            });
         }
     }
 }
+

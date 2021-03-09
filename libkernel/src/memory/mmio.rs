@@ -104,6 +104,10 @@ impl MMIO<Mapped> {
             Err(mmio_err) => Err(mmio_err),
         }
     }
+
+    pub fn mapped_addr(&self) -> VirtAddr {
+        self.mapped_addr
+    }
 }
 
 pub fn unmapped_mmio(frames: FrameIterator) -> Result<MMIO<Unmapped>, MMIOError> {
