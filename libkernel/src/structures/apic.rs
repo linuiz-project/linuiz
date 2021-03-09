@@ -8,7 +8,7 @@ use core::marker::PhantomData;
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
-pub enum LocalAPICRegister {
+pub enum APICRegister {
     ID = 0x20,
     Version = 0x30,
     TaskPriority = 0x80,
@@ -28,7 +28,7 @@ pub enum LocalAPICRegister {
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
-pub enum LocalAPICTimerMode {
+pub enum APICTimerMode {
     OneShot = 0b00,
     Periodic = 0b01,
     TSC_Deadline = 0b10,
@@ -37,7 +37,7 @@ pub enum LocalAPICTimerMode {
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
-pub enum LocalAPICTimerDivisor {
+pub enum APICTimerDivisor {
     Div2 = 0b0000,
     Div4 = 0b0001,
     Div8 = 0b0010,
@@ -51,7 +51,7 @@ pub enum LocalAPICTimerDivisor {
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
-pub enum LocalAPICDeliveryMode {
+pub enum APICDeliveryMode {
     Fixed = 0b000,
     SystemManagement = 0b010,
     NonMaskable = 0b100,
@@ -59,22 +59,11 @@ pub enum LocalAPICDeliveryMode {
     INIT = 0b101,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LocalAPICInterruptRegister {
-    CMCI,
-    Timer,
-    ThermalSensor,
-    PerformanceCounter,
-    LINT0,
-    LINT1,
-    Error,
-}
-
-pub struct LocalAPIC {
+pub struct APIC {
     mmio: MMIO<Mapped>,
 }
 
-impl LocalAPIC {
+impl APIC {
     const LVT_CMCI: usize = 0x2F0;
     const LVT_TIMER: usize = 0x320;
     const LVT_THERMAL_SENSOR: usize = 0x330;
@@ -142,72 +131,42 @@ impl LocalAPIC {
         LVTRegister::new(unsafe { self.mmio.read_mut(Self::LVT_THERMAL_SENSOR).unwrap() })
     }
 
-    pub fn configure_spurious(&mut self, vector: u8, enabled: bool) {
+    pub fn write_spurious(&mut self, vector: u8, enabled: bool) {
         const LVT_SPURIOUS: usize = 0xF0;
 
         unsafe {
             self.mmio
-                .write(LVT_SPURIOUS, (vector as u32) | ((enabled as u32) << 7))
+                .write(LVT_SPURIOUS, (vector as u32) | ((enabled as u32) << 8))
                 .unwrap()
         };
     }
 
     pub unsafe fn reset(&mut self) {
-        self[LocalAPICRegister::DFR] = 0xFFFFFFFF;
-        let mut ldr = self[LocalAPICRegister::LDR];
+        self[APICRegister::DFR] = 0xFFFFFFFF;
+        let mut ldr = self[APICRegister::LDR];
         ldr &= 0xFFFFFF;
         ldr = (ldr & !0xFF) | ((ldr & 0xFF) | 1);
-        self[LocalAPICRegister::LDR] = ldr;
+        self[APICRegister::LDR] = ldr;
         self.timer().set_masked(true);
         self.performance()
-            .set_delivery_mode(LocalAPICDeliveryMode::NonMaskable);
+            .set_delivery_mode(APICDeliveryMode::NonMaskable);
         // self.lint0().set_masked(true);
         self.lint1().set_masked(true);
-        self[LocalAPICRegister::TaskPriority] = 0;
-        self[LocalAPICRegister::TimerInitialCount] = 0;
-    }
-
-    pub unsafe fn configure_timer<F>(&mut self, vector: u8, interval_wait: F)
-    where
-        F: FnOnce(),
-    {
-        {
-            debug!("Configuring APIC timer interrupt.");
-            let mut timer = self.timer();
-            timer.set_vector(vector);
-            timer.set_mode(LocalAPICTimerMode::OneShot);
-            timer.set_masked(false);
-        }
-
-        debug!("Determining APIC timer frequency using PIT windowing.");
-        self[LocalAPICRegister::TimerDivisor] = LocalAPICTimerDivisor::Div16 as u32;
-        self[LocalAPICRegister::TimerInitialCount] = 0xFFFFFFFF;
-
-        interval_wait();
-
-        {
-            let mut timer = self.timer();
-            timer.set_masked(true);
-            timer.set_mode(LocalAPICTimerMode::Periodic);
-        }
-
-        let window_ticks = 0xFFFFFFFF - self[LocalAPICRegister::TimeCurrentCount];
-        info!("Local APIC timer frequency: {}MHz.", window_ticks / 1000);
-        self[LocalAPICRegister::TimerInitialCount] = window_ticks as u32;
-        self[LocalAPICRegister::TimerDivisor] = LocalAPICTimerDivisor::Div1 as u32;
+        self[APICRegister::TaskPriority] = 0;
+        self[APICRegister::TimerInitialCount] = 0;
     }
 }
 
-impl core::ops::Index<LocalAPICRegister> for LocalAPIC {
+impl core::ops::Index<APICRegister> for APIC {
     type Output = u32;
 
-    fn index(&self, register: LocalAPICRegister) -> &Self::Output {
+    fn index(&self, register: APICRegister) -> &Self::Output {
         unsafe { self.mmio.read(register as usize).unwrap() }
     }
 }
 
-impl core::ops::IndexMut<LocalAPICRegister> for LocalAPIC {
-    fn index_mut(&mut self, register: LocalAPICRegister) -> &mut Self::Output {
+impl core::ops::IndexMut<APICRegister> for APIC {
+    fn index_mut(&mut self, register: APICRegister) -> &mut Self::Output {
         unsafe { self.mmio.read_mut(register as usize).unwrap() }
     }
 }
@@ -229,54 +188,83 @@ impl LVTRegisterVariant for Error {}
 use bit_field::BitField;
 
 #[repr(transparent)]
-pub struct LVTRegister<'val, T: LVTRegisterVariant + ?Sized> {
-    value: &'val mut u32,
-    phantom: PhantomData<T>,
+pub struct LVTRegister<'val, T: LVTRegisterVariant> {
+    value: *mut u32,
+    phantom_lifetime: PhantomData<&'val core::ffi::c_void>,
+    phantom_generic: PhantomData<T>,
 }
 
 impl<'val, T: LVTRegisterVariant> LVTRegister<'val, T> {
+    const INTERRUPTED_OFFSET: u32 = 12;
+    const INTERRUPTED_BIT: u32 = 1 << Self::INTERRUPTED_OFFSET;
+    const MASKED_OFFSET: u32 = 16;
+    const MASKED_BIT: u32 = 1 << Self::MASKED_OFFSET;
+    const VECTOR_MASK: u32 = 0xFF;
+
     fn new(value: &'val mut u32) -> Self {
         Self {
-            value,
-            phantom: PhantomData,
+            value: value as *mut _,
+            phantom_lifetime: PhantomData,
+            phantom_generic: PhantomData,
         }
     }
 
     pub fn is_interrupted(&self) -> bool {
-        self.value.get_bit(12)
+        unsafe { (self.value.read_volatile() & Self::INTERRUPTED_BIT) > 0 }
     }
 
     pub fn is_masked(&self) -> bool {
-        self.value.get_bit(16)
+        unsafe { (self.value.read_volatile() & Self::MASKED_BIT) > 0 }
     }
 
     pub fn set_masked(&mut self, masked: bool) {
-        self.value.set_bit(16, masked);
+        unsafe {
+            self.value.write_volatile(
+                (self.value.read_volatile() & !Self::MASKED_BIT)
+                    | ((masked as u32) << Self::MASKED_OFFSET),
+            );
+        }
     }
 
     pub fn get_vector(&self) -> u8 {
-        self.value.get_bits(0..8) as u8
+        unsafe { (self.value.read_volatile() & Self::VECTOR_MASK) as u8 }
     }
 
     pub fn set_vector(&mut self, vector: u8) {
-        self.value.set_bits(0..8, vector as u32);
+        unsafe {
+            self.value
+                .write_volatile((self.value.read_volatile() & !Self::VECTOR_MASK) | vector as u32);
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    pub fn read_raw(&self) -> u32 {
+        unsafe { self.value.read_volatile() }
     }
 }
 
 impl LVTRegister<'_, Timer> {
-    pub fn set_mode(&mut self, mode: LocalAPICTimerMode) {
-        self.value.set_bits(17..19, mode as u32);
+    pub fn set_mode(&mut self, mode: APICTimerMode) {
+        unsafe {
+            self.value.write_volatile(
+                (self.value.read_volatile() & !(0b11 << 17)) | ((mode as u32) << 17),
+            );
+        }
     }
 }
 
 impl LVTRegister<'_, Generic> {
     #[inline]
-    pub fn set_delivery_mode(&mut self, mode: LocalAPICDeliveryMode) {
-        self.value.set_bits(8..11, mode as u32);
+    pub fn set_delivery_mode(&mut self, mode: APICDeliveryMode) {
+        unsafe {
+            self.value.write_volatile(
+                (self.value.read_volatile() & !(0x111 << 8)) | ((mode as u32) << 8),
+            );
+        }
     }
 }
 
-static mut LOCAL_APIC: SyncCell<LocalAPIC> = SyncCell::new();
+static mut LOCAL_APIC: SyncCell<APIC> = SyncCell::new();
 
 #[cfg(feature = "kernel_impls")]
 pub fn load() {
@@ -284,7 +272,7 @@ pub fn load() {
         panic!("Local APIC has already been configured");
     } else {
         debug!("Loading local APIC table.");
-        let start_index = (LocalAPIC::mmio_addr().as_u64() as usize) / 0x1000;
+        let start_index = (APIC::mmio_addr().as_u64() as usize) / 0x1000;
         debug!("APIC MMIO mapping at frame: {}", start_index);
 
         let mmio = crate::memory::mmio::unmapped_mmio(unsafe {
@@ -295,14 +283,14 @@ pub fn load() {
         .unwrap()
         .map();
 
-        unsafe { LOCAL_APIC.set(LocalAPIC::new(mmio)) };
+        unsafe { LOCAL_APIC.set(APIC::new(mmio)) };
     }
 }
 
-pub fn local_apic() -> Option<&'static LocalAPIC> {
+pub fn local_apic() -> Option<&'static APIC> {
     unsafe { LOCAL_APIC.get() }
 }
 
-pub fn local_apic_mut() -> Option<&'static mut LocalAPIC> {
+pub fn local_apic_mut() -> Option<&'static mut APIC> {
     unsafe { LOCAL_APIC.get_mut() }
 }
