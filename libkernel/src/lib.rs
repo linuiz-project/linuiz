@@ -19,6 +19,7 @@
 extern crate log;
 extern crate alloc;
 
+mod addr;
 mod boot_info;
 mod rwbitarray;
 mod volatile_cell;
@@ -30,6 +31,7 @@ pub mod io;
 pub mod memory;
 pub mod registers;
 pub mod structures;
+pub use addr::*;
 pub use boot_info::*;
 pub use rwbitarray::*;
 pub use volatile_cell::*;
