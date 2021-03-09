@@ -54,7 +54,8 @@ pub struct MCFGEntry {
 }
 
 impl MCFGEntry {
-    pub fn iter_busses(&self) {
+    #[cfg(feature = "kernel_impls")]
+    pub fn iter(&self) {
         for bus_index in self.start_pci_bus..self.end_pci_bus {
             let offset_addr = self.base_addr + ((bus_index as u64) << 20);
             let frame_index = (offset_addr.as_u64() / 0x1000) as usize;

@@ -17,9 +17,8 @@ pub extern "x86-interrupt" fn tick_handler(
 pub extern "x86-interrupt" fn apic_timer_handler(
     _: &mut libkernel::structures::idt::InterruptStackFrame,
 ) {
-    info!(".");
     TICKS.fetch_add(1, core::sync::atomic::Ordering::Release);
-    libkernel::structures::apic::local::local_apic_mut()
+    libkernel::structures::apic::local_apic_mut()
         .unwrap()
         .end_of_interrupt();
 }
@@ -53,7 +52,7 @@ impl Timer {
 
     pub fn wait(&self) {
         let end_tick = self.ticks + get_ticks();
-        while get_ticks_unordered() < end_tick {}
+        while get_ticks() < end_tick {}
     }
 }
 

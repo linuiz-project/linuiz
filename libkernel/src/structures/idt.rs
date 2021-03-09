@@ -214,11 +214,7 @@ pub fn set_interrupt_handler(
     handler: extern "x86-interrupt" fn(&mut InterruptStackFrame),
 ) {
     crate::instructions::interrupts::without_interrupts(|| {
-        if index >= 32 {
-            debug!("Modifying IDT handler at index: {}", index);
-            IDT.lock()[index as usize].set_handler_fn(handler);
-        } else {
-            panic!("interrupt handler index must be >=32 (0..32 are reserved)");
-        }
+        debug!("Modifying IDT handler at index: {}", index);
+        IDT.lock()[index as usize].set_handler_fn(handler);
     });
 }

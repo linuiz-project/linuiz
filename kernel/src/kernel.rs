@@ -68,7 +68,22 @@ extern "efiapi" fn kernel_main(
         libkernel::structures::init_system_config_table(config_table.as_ptr(), config_table.len());
     }
 
-    pre_init(&boot_info);
+    info!("Validating magic of BootInfo.");
+    boot_info.validate_magic();
+
+    debug!(
+        "Detected CPU features: {:?}",
+        libkernel::instructions::cpu_features()
+    );
+
+    unsafe { libkernel::instructions::init_segment_registers(0x0) };
+    debug!("Zeroed segment registers.");
+
+    libkernel::structures::gdt::init();
+    info!("Successfully initialized GDT.");
+    libkernel::structures::idt::init();
+    info!("Successfully initialized IDT.");
+
     // `boot_info` will not be usable after initalizing the global allocator,
     //   due to the stack being moved in virtual memory.
     init_memory(boot_info);
@@ -92,7 +107,7 @@ extern "efiapi" fn kernel_main(
             for mcfg_entry in mcfg.iter() {
                 info!("{:?}", mcfg_entry);
 
-                mcfg_entry.iter_busses();
+                mcfg_entry.iter();
             }
         } else if let XSDTEntry::APIC(madt) = entry {
             info!("MADT FOUND");
@@ -104,24 +119,6 @@ extern "efiapi" fn kernel_main(
 
     info!("Kernel has reached safe shutdown state.");
     unsafe { libkernel::instructions::pwm::qemu_shutdown() }
-}
-
-fn pre_init(boot_info: &BootInfo<libkernel::memory::UEFIMemoryDescriptor, SystemConfigTableEntry>) {
-    info!("Validating magic of BootInfo.");
-    boot_info.validate_magic();
-
-    debug!(
-        "Detected CPU features: {:?}",
-        libkernel::instructions::cpu_features()
-    );
-
-    unsafe { libkernel::instructions::init_segment_registers(0x0) };
-    debug!("Zeroed segment registers.");
-
-    libkernel::structures::gdt::init();
-    info!("Successfully initialized GDT.");
-    libkernel::structures::idt::init();
-    info!("Successfully initialized IDT.");
 }
 
 fn init_memory(
@@ -183,36 +180,59 @@ fn init_memory(
 }
 
 fn init_apic() {
+    use libkernel::structures::{
+        apic::{APICRegister, APICTimerDivisor, APICTimerMode},
+        idt,
+    };
+
+    const APIC_TIMER_IVT: u8 = 48;
+
     crate::pic8259::enable();
     info!("Successfully initialized PIC.");
     info!("Configuring PIT frequency to 1000Hz.");
     crate::pic8259::set_timer_freq(crate::timer::TIMER_FREQUENCY as u32);
-
     debug!("Setting timer interrupt handler and enabling interrupts.");
-    libkernel::structures::idt::set_interrupt_handler(32, crate::timer::tick_handler);
+    idt::set_interrupt_handler(32, crate::timer::tick_handler);
     libkernel::instructions::interrupts::enable();
 
-    libkernel::structures::apic::local::load();
-    let lapic = libkernel::structures::apic::local::local_apic_mut().unwrap();
+    libkernel::structures::apic::load();
+    let apic = libkernel::structures::apic::local_apic_mut().unwrap();
 
     unsafe {
         debug!("Resetting and enabling local APIC (it may have already been enabled).");
-        lapic.reset();
-        lapic.enable();
-        // timer for 1ms window
-        let timer = timer::Timer::new(crate::timer::TIMER_FREQUENCY / 1000);
-        lapic.configure_spurious(u8::MAX, true);
-        lapic.configure_timer(48, || timer.wait())
+        apic.reset();
+        apic.enable();
+        apic.write_spurious(u8::MAX, true);
     }
+
+    let timer = timer::Timer::new(crate::timer::TIMER_FREQUENCY / 1000);
+    debug!("Configuring APIC timer state.");
+    apic.timer().set_vector(APIC_TIMER_IVT);
+    apic.timer().set_mode(APICTimerMode::OneShot);
+    apic.timer().set_masked(false);
+
+    debug!("Determining APIC timer frequency using PIT windowing.");
+    apic[APICRegister::TimerDivisor] = APICTimerDivisor::Div1 as u32;
+    apic[APICRegister::TimerInitialCount] = u32::MAX;
+
+    timer.wait();
+
+    apic.timer().set_masked(true);
+    apic[APICRegister::TimerInitialCount] = u32::MAX - apic[APICRegister::TimeCurrentCount];
+    apic[APICRegister::TimerDivisor] = APICTimerDivisor::Div1 as u32;
 
     debug!("Disabling 8259 emulated PIC.");
     libkernel::instructions::interrupts::without_interrupts(|| unsafe {
         crate::pic8259::disable()
     });
     debug!("Updating IDT timer interrupt entry to local APIC-enabled function.");
-    libkernel::structures::idt::set_interrupt_handler(48, timer::apic_timer_handler);
+    idt::set_interrupt_handler(APIC_TIMER_IVT, timer::apic_timer_handler);
     debug!("Unmasking local APIC timer interrupt (it will fire now!).");
-    lapic.timer().set_masked(false);
+    apic.timer().set_mode(APICTimerMode::Periodic);
+    apic.timer().set_masked(false);
 
-    info!("Core-local APIC configured and enabled (8259 PIC disabled).");
+    info!(
+        "Core-local APIC configured and enabled (freq {}MHz).",
+        apic[APICRegister::TimerInitialCount] / 1000
+    );
 }
