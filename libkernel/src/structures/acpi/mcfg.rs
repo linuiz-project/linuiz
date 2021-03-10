@@ -53,28 +53,12 @@ pub struct MCFGEntry {
 }
 
 impl MCFGEntry {
-    #[cfg(feature = "kernel_impls")]
-    pub fn iter(&self) {
-        for bus_index in self.start_pci_bus..self.end_pci_bus {
-            let offset_addr = self.base_addr + ((bus_index as usize) << 20);
-            let mmio_frames = unsafe {
-                crate::memory::global_memory()
-                    .acquire_frame(
-                        offset_addr.as_usize() / 0x1000,
-                        crate::memory::FrameState::MMIO,
-                    )
-                    .unwrap()
-                    .into_iter()
-            };
-
-            let mmio = crate::memory::mmio::unmapped_mmio(mmio_frames)
-                .unwrap()
-                .map();
-            info!("{:?}", unsafe {
-                &*mmio
-                    .mapped_addr()
-                    .as_ptr::<crate::io::pcie::PCIEDeviceHeader>()
-            });
-        }
+    // TODO this shouldn't be made multiple times, since it instantiates a new MMIO allocation each time
+    pub fn iter(&self) -> crate::io::pcie::PCIEDeviceIterator {
+        crate::io::pcie::PCIEDeviceIterator::new(
+            self.base_addr,
+            self.start_pci_bus,
+            self.end_pci_bus,
+        )
     }
 }

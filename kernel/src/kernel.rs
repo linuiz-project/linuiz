@@ -43,6 +43,8 @@ fn get_log_level() -> log::LevelFilter {
 }
 
 static mut SERIAL_OUT: drivers::io::Serial = drivers::io::Serial::new(drivers::io::COM1);
+static mut KERNEL_ALLOCATOR: libkernel::memory::BlockAllocator =
+    libkernel::memory::BlockAllocator::new();
 
 #[no_mangle]
 #[export_name = "_start"]
@@ -89,33 +91,35 @@ extern "efiapi" fn kernel_main(
     init_memory(boot_info);
     init_apic();
 
-    // let rdsp: &RDSPDescriptor2 = unsafe {
-    //     libkernel::structures::system_config_table()
-    //         .iter()
-    //         .find(|entry| entry.guid() == libkernel::structures::acpi::ACPI2_GUID)
-    //         .unwrap()
-    //         .as_ref()
-    // };
+    let rdsp: &RDSPDescriptor2 = unsafe {
+        libkernel::structures::system_config_table()
+            .iter()
+            .find(|entry| entry.guid() == libkernel::structures::acpi::ACPI2_GUID)
+            .unwrap()
+            .as_ref()
+    };
 
-    // let xsdt = rdsp.xsdt();
+    let xsdt = rdsp.xsdt();
 
-    // for entry in xsdt.iter() {
-    //     use libkernel::structures::acpi::XSDTEntry;
+    for entry in xsdt.iter() {
+        use libkernel::structures::acpi::XSDTEntry;
 
-    //     if let XSDTEntry::MCFG(mcfg) = entry {
-    //         info!("MCFG FOUND");
-    //         for mcfg_entry in mcfg.iter() {
-    //             info!("{:?}", mcfg_entry);
+        if let XSDTEntry::MCFG(mcfg) = entry {
+            info!("MCFG FOUND");
 
-    //             mcfg_entry.iter();
-    //         }
-    //     } else if let XSDTEntry::APIC(madt) = entry {
-    //         info!("MADT FOUND");
-    //         for madt_entry in madt.iter() {
-    //             info!("{:?}", madt_entry);
-    //         }
-    //     }
-    // }
+            for mcfg_entry in mcfg.iter() {
+                info!("{:?}", mcfg_entry);
+
+                for pci_bus in mcfg_entry.iter() {}
+            }
+        } else if let XSDTEntry::APIC(madt) = entry {
+            info!("MADT FOUND");
+
+            for madt_entry in madt.iter() {
+                info!("{:?}", madt_entry);
+            }
+        }
+    }
 
     info!("Kernel has reached safe shutdown state.");
     unsafe { libkernel::instructions::pwm::qemu_shutdown() }
@@ -173,8 +177,11 @@ fn init_memory(
         last_frame_end = new_frame_end;
     }
 
-    info!("Initializing global allocator.");
-    unsafe { libkernel::memory::GLOBAL_ALLOCATOR.init(stack_frames.get_mut().unwrap()) };
+    info!("Initializing kernel default allocator.");
+    unsafe {
+        KERNEL_ALLOCATOR.init(stack_frames.get_mut().unwrap());
+        libkernel::memory::set_default_allocator(&mut KERNEL_ALLOCATOR);
+    }
 
     info!("Global memory & the kernel global allocator have been initialized.");
 }

@@ -673,12 +673,20 @@ impl BlockAllocator<'_> {
     }
 }
 
-unsafe impl core::alloc::GlobalAlloc for BlockAllocator<'_> {
-    unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
+impl crate::memory::MemoryAllocator for BlockAllocator<'_> {
+    fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
         self.alloc(layout)
     }
 
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
+    fn alloc_to(&self, frames: &FrameIterator) -> *mut u8 {
+        self.alloc_to(frames)
+    }
+
+    fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
         self.dealloc(ptr, layout.size());
+    }
+
+    fn minimum_alignment(&self) -> usize {
+        Self::BLOCK_SIZE
     }
 }

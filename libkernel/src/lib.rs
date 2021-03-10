@@ -38,7 +38,7 @@ pub use volatile_cell::*;
 
 pub const SYSTEM_SLICE_SIZE: usize = 0x10000000000;
 
-#[cfg(feature = "kernel_impls")]
+#[cfg(feature = "panic_handler")]
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     error!(
@@ -50,7 +50,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     crate::instructions::hlt_indefinite()
 }
 
-#[cfg(feature = "kernel_impls")]
+#[cfg(feature = "alloc_error_handler")]
 #[alloc_error_handler]
 fn alloc_error(error: core::alloc::Layout) -> ! {
     error!("KERNEL ALLOCATOR PANIC: {:?}", error);

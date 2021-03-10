@@ -36,18 +36,6 @@ impl<S: MMIOState> core::fmt::Debug for MMIO<S> {
 }
 
 impl MMIO<Unmapped> {
-    /// Internally maps the MMIO to the given virtual address.
-    ///
-    /// Safety: This function assumes the given mapped address is a valid page table mapping.
-    pub unsafe fn unsafe_map(self, mapped_addr: Address<Virtual>) -> MMIO<Mapped> {
-        MMIO::<Mapped> {
-            frames: self.frames,
-            mapped_addr,
-            phantom: core::marker::PhantomData,
-        }
-    }
-
-    #[cfg(feature = "kernel_impls")]
     pub fn map(self) -> MMIO<Mapped> {
         let mapped_addr = Address::from_ptr::<u8>(crate::alloc_to!(&self.frames));
 

@@ -16,4 +16,7 @@ x86_64 = "*"
 spin = "*"
 
 [features]
-kernel_impls = []
+default = ["panic_handler", "alloc_error_handler"]
+panic_handler = []
+alloc_error_handler = []
+global_allocator = []

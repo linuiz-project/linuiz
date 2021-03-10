@@ -266,7 +266,6 @@ impl LVTRegister<'_, Generic> {
 
 static mut LOCAL_APIC: SyncCell<APIC> = SyncCell::new();
 
-#[cfg(feature = "kernel_impls")]
 pub fn load() {
     if unsafe { LOCAL_APIC.get().is_some() } {
         panic!("Local APIC has already been configured");

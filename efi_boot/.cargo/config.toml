@@ -3,4 +3,4 @@ build-std = ["core", "compiler_builtins", "alloc"]
 
 [build]
 target = "x86_64-unknown-uefi"
-out-dir = "../image/EFI/BOOT/"
+out-dir = "../hdd/image/EFI/BOOT/"

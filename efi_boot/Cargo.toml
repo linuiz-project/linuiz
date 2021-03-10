@@ -11,7 +11,7 @@ uefi-services = { version = "*", features = ["qemu"] }
 uefi-macros = "*"
 log = { version = "*", default-features = false }
 rlibc = "*"
-libkernel = { path = "../libkernel" }
+libkernel = { path = "../libkernel", default-features = false }
 
 [[bin]]
 name = "BOOTX64"

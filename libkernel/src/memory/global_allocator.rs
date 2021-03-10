@@ -1,20 +1,20 @@
+struct DefaultAllocatorProxy;
+
+impl DefaultAllocatorProxy {
+    pub const fn new() -> Self {
+        Self {}
+    }
+}
+
+unsafe impl core::alloc::GlobalAlloc for DefaultAllocatorProxy {
+    unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
+        crate::memory::default_allocator().alloc(layout)
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
+        crate::memory::default_allocator().dealloc(ptr, layout);
+    }
+}
+
 #[global_allocator]
-pub static GLOBAL_ALLOCATOR: crate::memory::BlockAllocator = crate::memory::BlockAllocator::new();
-
-#[macro_export]
-macro_rules! alloc {
-    ($size:expr) => {
-        $crate::alloc!($size, $crate::memory::BlockAllocator::BLOCK_SIZE)
-    };
-    ($size:expr, $align:expr) => {
-        $crate::memory::GLOBAL_ALLOCATOR
-            .alloc(core::alloc::Layout::from_size_align($size, $align).unwrap())
-    };
-}
-
-#[macro_export]
-macro_rules! alloc_to {
-    ($frames:expr) => {
-        $crate::memory::GLOBAL_ALLOCATOR.alloc_to($frames)
-    };
-}
+static GLOBAL_ALLOCATOR: DefaultAllocatorProxy = DefaultAllocatorProxy::new();
