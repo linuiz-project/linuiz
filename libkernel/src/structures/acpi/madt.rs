@@ -1,6 +1,9 @@
-use crate::structures::acpi::{ACPITable, Checksum, SDTHeader, UnsizedACPITable};
+use crate::{
+    addr_ty::Physical,
+    structures::acpi::{ACPITable, Checksum, SDTHeader, UnsizedACPITable},
+    Address,
+};
 use core::marker::PhantomData;
-use x86_64::PhysAddr;
 
 bitflags::bitflags! {
     pub struct MADTFlags: u32 {
@@ -134,13 +137,13 @@ impl IOAPIC {
         self.id
     }
 
-    pub fn register_base(&self) -> PhysAddr {
-        PhysAddr::new(self.addr as u64)
+    pub fn register_base(&self) -> Address<Physical> {
+        Address::<Physical>::new(self.addr as usize)
     }
 
     pub fn read(&self, register: u8) -> u32 {
         unsafe {
-            let ioapic_ptr = self.register_base().as_u64() as *mut u32;
+            let ioapic_ptr = self.register_base().as_usize() as *mut u32;
 
             ioapic_ptr.write_volatile(register as u32);
             ioapic_ptr.offset(4).read_volatile()
@@ -149,7 +152,7 @@ impl IOAPIC {
 
     pub fn write(&self, register: u8, value: u32) {
         unsafe {
-            let ioapic_ptr = self.register_base().as_u64() as *mut u32;
+            let ioapic_ptr = self.register_base().as_usize() as *mut u32;
 
             ioapic_ptr.write_volatile(register as u32);
             ioapic_ptr.offset(4).write_volatile(value);
@@ -191,5 +194,5 @@ pub struct NonMaskableIRQ {
 pub struct LocalAPICAddrOverride {
     header: InterruptDeviceHeader,
     reserved: [u8; 2],
-    local_apic_addr: PhysAddr,
+    local_apic_addr: Address<Physical>,
 }

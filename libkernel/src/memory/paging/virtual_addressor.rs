@@ -1,9 +1,12 @@
-use crate::memory::{
-    global_memory,
-    paging::{Level4, PageAttributes, PageTable, PageTableEntry},
-    Frame, Page,
+use crate::{
+    addr_ty::Virtual,
+    memory::{
+        global_memory,
+        paging::{Level4, PageAttributes, PageTable, PageTableEntry},
+        Frame, Page,
+    },
+    Address,
 };
-use x86_64::VirtAddr;
 
 pub struct VirtualAddressor {
     mapped_page: Page,
@@ -51,41 +54,41 @@ impl VirtualAddressor {
     }
 
     fn get_page_entry(&self, page: &Page) -> Option<&PageTableEntry> {
-        let addr = (page.addr_u64() >> 12) as usize;
         let offset = self.mapped_page.addr();
+        let addr = page.addr();
 
         unsafe {
             self.pml4()
-                .sub_table((addr >> 27) & 0x1FF, offset)
-                .and_then(|p3| p3.sub_table((addr >> 18) & 0x1FF, offset))
-                .and_then(|p2| p2.sub_table((addr >> 9) & 0x1FF, offset))
-                .and_then(|p1| Some(p1.get_entry((addr >> 0) & 0x1FF)))
+                .sub_table(addr.p4_index(), offset)
+                .and_then(|p3| p3.sub_table(addr.p3_index(), offset))
+                .and_then(|p2| p2.sub_table(addr.p2_index(), offset))
+                .and_then(|p1| Some(p1.get_entry(addr.p1_index())))
         }
     }
 
     fn get_page_entry_mut(&mut self, page: &Page) -> Option<&mut PageTableEntry> {
-        let addr = (page.addr_u64() >> 12) as usize;
         let offset = self.mapped_page.addr();
+        let addr = page.addr();
 
         unsafe {
             self.pml4_mut()
-                .sub_table_mut((addr >> 27) & 0x1FF, offset)
-                .and_then(|p3| p3.sub_table_mut((addr >> 18) & 0x1FF, offset))
-                .and_then(|p2| p2.sub_table_mut((addr >> 9) & 0x1FF, offset))
-                .and_then(|p1| Some(p1.get_entry_mut((addr >> 0) & 0x1FF)))
+                .sub_table_mut(addr.p4_index(), offset)
+                .and_then(|p3| p3.sub_table_mut(addr.p3_index(), offset))
+                .and_then(|p2| p2.sub_table_mut(addr.p2_index(), offset))
+                .and_then(|p1| Some(p1.get_entry_mut(addr.p1_index())))
         }
     }
 
     fn get_page_entry_create(&mut self, page: &Page) -> &mut PageTableEntry {
-        let addr = (page.addr_u64() >> 12) as usize;
         let offset = self.mapped_page.addr();
+        let addr = page.addr();
 
         unsafe {
             self.pml4_mut()
-                .sub_table_create((addr >> 27) & 0x1FF, offset)
-                .sub_table_create((addr >> 18) & 0x1FF, offset)
-                .sub_table_create((addr >> 9) & 0x1FF, offset)
-                .get_entry_mut((addr >> 0) & 0x1FF)
+                .sub_table_create(addr.p4_index(), offset)
+                .sub_table_create(addr.p3_index(), offset)
+                .sub_table_create(addr.p2_index(), offset)
+                .get_entry_mut(addr.p1_index())
         }
     }
 
@@ -122,7 +125,7 @@ impl VirtualAddressor {
 
     /* STATE QUERYING */
 
-    pub fn is_mapped(&self, virt_addr: VirtAddr) -> bool {
+    pub fn is_mapped(&self, virt_addr: Address<Virtual>) -> bool {
         self.get_page_entry(&Page::containing_addr(virt_addr))
             .and_then(|entry| entry.frame())
             .is_some()

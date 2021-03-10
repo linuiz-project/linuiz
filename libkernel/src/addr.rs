@@ -1,12 +1,15 @@
+pub mod addr_ty {
+    pub trait AddressType {}
+
+    pub enum Physical {}
+    impl AddressType for Physical {}
+
+    pub enum Virtual {}
+    impl AddressType for Virtual {}
+}
+
+use crate::addr_ty::*;
 use core::marker::PhantomData;
-
-pub trait AddressType {}
-
-pub enum Physical {}
-impl AddressType for Physical {}
-
-pub enum Virtual {}
-impl AddressType for Virtual {}
 
 #[repr(transparent)]
 pub struct Address<T: AddressType> {
@@ -22,7 +25,14 @@ impl<T: AddressType> Address<T> {
         }
     }
 
-    pub const fn as_size(&self) -> usize {
+    pub const unsafe fn new_unsafe(addr: usize) -> Self {
+        Self {
+            value: addr,
+            phantom: PhantomData,
+        }
+    }
+
+    pub const fn as_usize(&self) -> usize {
         self.value
     }
 
@@ -43,6 +53,10 @@ impl<T: AddressType> Address<T> {
             phantom: PhantomData,
         }
     }
+
+    pub const fn is_aligned(&self, alignment: usize) -> bool {
+        crate::align_down(self.value, alignment) == self.value
+    }
 }
 
 impl<T: AddressType> Copy for Address<T> {}
@@ -59,6 +73,26 @@ impl<T: AddressType> Eq for Address<T> {}
 impl<T: AddressType> PartialEq for Address<T> {
     fn eq(&self, other: &Self) -> bool {
         self.value == other.value
+    }
+}
+
+impl<T: AddressType> Ord for Address<T> {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        use core::cmp::Ordering;
+
+        if self.value < other.value {
+            Ordering::Less
+        } else if self.value > other.value {
+            Ordering::Greater
+        } else {
+            Ordering::Equal
+        }
+    }
+}
+
+impl<T: AddressType> PartialOrd for Address<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -81,11 +115,19 @@ impl Address<Physical> {
     }
 }
 
+impl core::ops::Add<Address<Physical>> for Address<Physical> {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self::new(self.value.checked_add(rhs.value).unwrap())
+    }
+}
+
 impl core::ops::Add<usize> for Address<Physical> {
     type Output = Self;
 
     fn add(self, rhs: usize) -> Self::Output {
-        Self::new(self.value + rhs)
+        Self::new(self.value.checked_add(rhs).unwrap())
     }
 }
 
@@ -95,11 +137,19 @@ impl core::ops::AddAssign<usize> for Address<Physical> {
     }
 }
 
+impl core::ops::Sub<Address<Physical>> for Address<Physical> {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self::new(self.value.checked_sub(rhs.value).unwrap())
+    }
+}
+
 impl core::ops::Sub<usize> for Address<Physical> {
     type Output = Self;
 
     fn sub(self, rhs: usize) -> Self::Output {
-        Self::new(self.value - rhs)
+        Self::new(self.value.checked_sub(rhs).unwrap())
     }
 }
 
@@ -179,6 +229,14 @@ impl core::fmt::Debug for Address<Virtual> {
     }
 }
 
+impl core::ops::Add<Address<Virtual>> for Address<Virtual> {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self::new(self.value.checked_add(rhs.value).unwrap())
+    }
+}
+
 impl core::ops::Add<usize> for Address<Virtual> {
     type Output = Self;
 
@@ -190,6 +248,14 @@ impl core::ops::Add<usize> for Address<Virtual> {
 impl core::ops::AddAssign<usize> for Address<Virtual> {
     fn add_assign(&mut self, rhs: usize) {
         *self = *self + rhs
+    }
+}
+
+impl core::ops::Sub<Address<Virtual>> for Address<Virtual> {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self::new(self.value.checked_sub(rhs.value).unwrap())
     }
 }
 

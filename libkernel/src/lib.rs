@@ -35,7 +35,6 @@ pub use addr::*;
 pub use boot_info::*;
 pub use rwbitarray::*;
 pub use volatile_cell::*;
-pub use x86_64::{PhysAddr, VirtAddr};
 
 pub const SYSTEM_SLICE_SIZE: usize = 0x10000000000;
 
@@ -72,8 +71,8 @@ impl FramebufferInfo {
         Self { ptr, size, stride }
     }
 
-    pub const fn addr(&self) -> PhysAddr {
-        PhysAddr::new_truncate(unsafe { self.ptr as u64 })
+    pub const fn addr(&self) -> Address<addr_ty::Physical> {
+        Address::<addr_ty::Physical>::new(unsafe { self.ptr as usize })
     }
 
     pub const fn size(&self) -> Size {
@@ -145,6 +144,6 @@ pub const fn align_down(value: usize, alignment: usize) -> usize {
     value & !(alignment - 1)
 }
 
-pub fn align_down_div(value: usize, alignment: usize) -> usize {
+pub const fn align_down_div(value: usize, alignment: usize) -> usize {
     align_down(value, alignment) / alignment
 }

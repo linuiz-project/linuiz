@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use crate::drivers::graphics::color::{Color8i, Colors};
-use libkernel::Size;
+use libkernel::{addr_ty::Physical, Address, Size};
 use spin::{Mutex, RwLock};
 
 #[repr(C)]
@@ -13,12 +13,12 @@ pub struct FramebufferDriver {
 }
 
 impl FramebufferDriver {
-    pub fn new(buffer_addr: libkernel::PhysAddr, dimensions: Size, scanline_width: usize) -> Self {
+    pub fn new(buffer_addr: Address<Physical>, dimensions: Size, scanline_width: usize) -> Self {
         let pixel_len = scanline_width * dimensions.height();
         let byte_len = pixel_len * core::mem::size_of::<Color8i>();
 
         let framebuffer = unsafe {
-            let start_frame_index = (buffer_addr.as_u64() / 0x1000) as usize;
+            let start_frame_index = buffer_addr.as_usize() / 0x1000;
             let end_frame_index = start_frame_index + ((byte_len + 0xFFF) / 0x1000);
             let mmio_frames = libkernel::memory::global_memory()
                 .acquire_frames(

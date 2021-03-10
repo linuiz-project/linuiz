@@ -1,7 +1,7 @@
 use crate::{
     align_up_div,
     memory::{paging::VirtualAddressor, Frame, FrameIterator, Page},
-    SYSTEM_SLICE_SIZE,
+    Address, SYSTEM_SLICE_SIZE,
 };
 use core::mem::size_of;
 use spin::RwLock;
@@ -157,9 +157,8 @@ impl BlockAllocator<'_> {
     pub const BLOCK_SIZE: usize = 16;
 
     /// Base page the allocator uses to store the internal block page map.
-    const ALLOCATOR_BASE: Page = Page::from_addr(x86_64::VirtAddr::new_truncate(
-        (SYSTEM_SLICE_SIZE as u64) * 0xA,
-    ));
+    const ALLOCATOR_BASE: Page =
+        Page::from_addr(unsafe { Address::new_unsafe(SYSTEM_SLICE_SIZE * 0xA) });
 
     /// Provides a simple mechanism in which the mask of a u64 can be acquired by bit count.
     const MASK_MAP: [u64; 64] = [
@@ -294,7 +293,7 @@ impl BlockAllocator<'_> {
         debug!("Copying data from bootloader-allocated stack.");
         for (index, frame) in stack_frames.enumerate() {
             let cur_offset = new_stack_base.add(index * 0x1000);
-            let frame_ptr = frame.addr_u64() as *mut u8;
+            let frame_ptr = frame.addr().as_usize() as *mut u8;
             stack_base_cell.set(frame_ptr).ok();
 
             core::ptr::copy_nonoverlapping(frame_ptr, cur_offset, 0x1000);

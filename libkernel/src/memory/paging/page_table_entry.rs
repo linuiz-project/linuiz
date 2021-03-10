@@ -1,9 +1,8 @@
 use crate::memory::Frame;
 use bitflags::bitflags;
-use x86_64::PhysAddr;
 
 bitflags! {
-    pub struct PageAttributes : u64 {
+    pub struct PageAttributes : usize {
         const PRESENT = 1 << 0;
         const WRITABLE = 1 << 1;
         const USER_ACCESSIBLE = 1 << 2;
@@ -20,7 +19,7 @@ bitflags! {
 
 #[repr(transparent)]
 #[derive(Clone, Copy)]
-pub struct PageTableEntry(u64);
+pub struct PageTableEntry(usize);
 
 impl PageTableEntry {
     pub const fn unused() -> Self {
@@ -37,14 +36,18 @@ impl PageTableEntry {
 
     pub fn frame(&self) -> Option<Frame> {
         if self.is_present() {
-            Some(unsafe { Frame::from_addr(PhysAddr::new(self.0 & 0x000FFFFF_FFFFF000)) })
+            Some(unsafe {
+                Frame::from_addr(crate::Address::<crate::addr_ty::Physical>::new(
+                    self.0 & 0x000FFFFF_FFFFF000,
+                ))
+            })
         } else {
             None
         }
     }
 
     pub fn set(&mut self, frame: &Frame, attribs: PageAttributes) {
-        self.0 = frame.addr_u64() | attribs.bits();
+        self.0 = frame.addr().as_usize() | attribs.bits();
     }
 
     pub fn is_present(&self) -> bool {

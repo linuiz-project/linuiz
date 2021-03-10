@@ -1,4 +1,4 @@
-use x86_64::PhysAddr;
+use crate::{addr_ty::Physical, Address};
 
 pub trait FrameIndexIterator: core::ops::RangeBounds<usize> + Iterator<Item = usize> {}
 impl<T> FrameIndexIterator for T where T: core::ops::RangeBounds<usize> + Iterator<Item = usize> {}
@@ -10,7 +10,6 @@ pub struct Frame {
 }
 
 impl Frame {
-    #[inline]
     pub const fn null() -> Self {
         Self { index: 0 }
     }
@@ -25,37 +24,26 @@ impl Frame {
     ///
     /// Safety: Frame creation should be deterministic. This concept is explained
     ///     in the `FrameAllocator` documentation.
-    #[inline]
     pub const unsafe fn from_index(index: usize) -> Self {
         Self { index }
     }
 
-    #[inline]
-    pub unsafe fn from_addr(phys_addr: PhysAddr) -> Self {
-        let addr_usize = phys_addr.as_u64() as usize;
-
-        if (addr_usize & 0xFFF) > 0 {
-            panic!("frame address format is invalid: {:?}", phys_addr)
-        }
-
-        Self {
-            index: addr_usize / 0x1000,
+    pub const unsafe fn from_addr(addr: Address<Physical>) -> Self {
+        if addr.is_aligned(0x1000) {
+            Self {
+                index: addr.as_usize() / 0x1000,
+            }
+        } else {
+            panic!("frame address format is invalid")
         }
     }
 
-    #[inline]
     pub const fn index(&self) -> usize {
         self.index
     }
 
-    #[inline]
-    pub const fn addr(&self) -> PhysAddr {
-        PhysAddr::new_truncate(self.addr_u64())
-    }
-
-    #[inline]
-    pub const fn addr_u64(&self) -> u64 {
-        (self.index as u64) * 0x1000
+    pub const fn addr(&self) -> Address<Physical> {
+        unsafe { Address::<Physical>::new_unsafe(self.index * 0x1000) }
     }
 
     pub fn into_iter(self) -> FrameIterator {

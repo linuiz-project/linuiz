@@ -16,32 +16,32 @@ pub struct PCIEDeviceHeader {
     bist: u8,
 }
 
-pub struct PCIEDeviceIterator {
-    base_addr: x86_64::PhysAddr,
-    start_bus: u8,
-    end_bus: u8,
-    cur_bus: u8
-}
+// pub struct PCIEDeviceIterator {
+//     base_addr: x86_64::PhysAddr,
+//     start_bus: u8,
+//     end_bus: u8,
+//     cur_bus: u8,
+// }
 
-impl Iterator for PCIEDeviceIterator {
-    type Item = PCIEBus;
+// impl Iterator for PCIEDeviceIterator {
+//     type Item = PCIEBus;
 
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.cur_bus < self.end_bus {
-            let offset_addr = self.base_addr + ((bus_index as u64) << 20);
-            let frame_index = (offset_addr.as_u64() / 0x1000) as usize;
-            let mmio_frames = unsafe {
-                crate::memory::global_memory()
-                    .acquire_frame(frame_index, crate::memory::FrameState::MMIO)
-                    .unwrap()
-                    .into_iter()
-            };
+//     fn next(&mut self) -> Option<Self::Item> {
+//         if self.cur_bus < self.end_bus {
+//             let offset_addr = self.base_addr + ((bus_index as u64) << 20);
+//             let frame_index = (offset_addr.as_u64() / 0x1000) as usize;
+//             let mmio_frames = unsafe {
+//                 crate::memory::global_memory()
+//                     .acquire_frame(frame_index, crate::memory::FrameState::MMIO)
+//                     .unwrap()
+//                     .into_iter()
+//             };
 
-            let mmio = crate::memory::mmio::unmapped_mmio(mmio_frames)
-                .unwrap()
-                .map();
-        } else {
-            None
-        }
-    }
-}
+//             let mmio = crate::memory::mmio::unmapped_mmio(mmio_frames)
+//                 .unwrap()
+//                 .map();
+//         } else {
+//             None
+//         }
+//     }
+// }

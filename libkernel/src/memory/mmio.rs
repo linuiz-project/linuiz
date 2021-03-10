@@ -1,5 +1,4 @@
-use crate::memory::FrameIterator;
-use x86_64::VirtAddr;
+use crate::{addr_ty::Virtual, memory::FrameIterator, Address};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MMIOError {
@@ -16,7 +15,7 @@ impl MMIOState for Mapped {}
 
 pub struct MMIO<S: MMIOState> {
     frames: FrameIterator,
-    mapped_addr: VirtAddr,
+    mapped_addr: Address<Virtual>,
     phantom: core::marker::PhantomData<S>,
 }
 
@@ -40,7 +39,7 @@ impl MMIO<Unmapped> {
     /// Internally maps the MMIO to the given virtual address.
     ///
     /// Safety: This function assumes the given mapped address is a valid page table mapping.
-    pub unsafe fn unsafe_map(self, mapped_addr: x86_64::VirtAddr) -> MMIO<Mapped> {
+    pub unsafe fn unsafe_map(self, mapped_addr: Address<Virtual>) -> MMIO<Mapped> {
         MMIO::<Mapped> {
             frames: self.frames,
             mapped_addr,
@@ -50,7 +49,7 @@ impl MMIO<Unmapped> {
 
     #[cfg(feature = "kernel_impls")]
     pub fn map(self) -> MMIO<Mapped> {
-        let mapped_addr = VirtAddr::from_ptr::<u8>(crate::alloc_to!(&self.frames));
+        let mapped_addr = Address::from_ptr::<u8>(crate::alloc_to!(&self.frames));
 
         MMIO::<Mapped> {
             frames: self.frames,
@@ -105,7 +104,7 @@ impl MMIO<Mapped> {
         }
     }
 
-    pub fn mapped_addr(&self) -> VirtAddr {
+    pub fn mapped_addr(&self) -> Address<Virtual> {
         self.mapped_addr
     }
 }
@@ -113,7 +112,7 @@ impl MMIO<Mapped> {
 pub fn unmapped_mmio(frames: FrameIterator) -> Result<MMIO<Unmapped>, MMIOError> {
     Ok(MMIO::<Unmapped> {
         frames,
-        mapped_addr: VirtAddr::zero(),
+        mapped_addr: Address::zero(),
         phantom: core::marker::PhantomData,
     })
 }

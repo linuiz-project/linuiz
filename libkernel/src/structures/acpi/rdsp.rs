@@ -1,6 +1,3 @@
-use crate::structures::acpi::{Checksum, XSDT};
-use x86_64::PhysAddr;
-
 #[repr(C, packed)]
 pub struct RDSPDescriptor {
     signature: [u8; 8],
@@ -20,13 +17,13 @@ impl RDSPDescriptor {
     }
 }
 
-impl Checksum for RDSPDescriptor {}
+impl crate::structures::acpi::Checksum for RDSPDescriptor {}
 
 #[repr(C, packed)]
 pub struct RDSPDescriptor2 {
     base: RDSPDescriptor,
     len: u32,
-    xsdt_addr: PhysAddr,
+    xsdt_addr: crate::Address<crate::addr_ty::Physical>,
     ext_checksum: u8,
     reserved: [u8; 3],
 }
@@ -40,9 +37,9 @@ impl RDSPDescriptor2 {
         self.base.oem_id()
     }
 
-    pub fn xsdt(&self) -> &XSDT {
-        unsafe { &*(self.xsdt_addr.as_u64() as *const XSDT) }
+    pub fn xsdt(&self) -> &crate::structures::acpi::XSDT {
+        unsafe { &*(self.xsdt_addr.as_usize() as *const crate::structures::acpi::XSDT) }
     }
 }
 
-impl Checksum for RDSPDescriptor2 {}
+impl crate::structures::acpi::Checksum for RDSPDescriptor2 {}

@@ -89,33 +89,33 @@ extern "efiapi" fn kernel_main(
     init_memory(boot_info);
     init_apic();
 
-    let rdsp: &RDSPDescriptor2 = unsafe {
-        libkernel::structures::system_config_table()
-            .iter()
-            .find(|entry| entry.guid() == libkernel::structures::acpi::ACPI2_GUID)
-            .unwrap()
-            .as_ref()
-    };
+    // let rdsp: &RDSPDescriptor2 = unsafe {
+    //     libkernel::structures::system_config_table()
+    //         .iter()
+    //         .find(|entry| entry.guid() == libkernel::structures::acpi::ACPI2_GUID)
+    //         .unwrap()
+    //         .as_ref()
+    // };
 
-    let xsdt = rdsp.xsdt();
+    // let xsdt = rdsp.xsdt();
 
-    for entry in xsdt.iter() {
-        use libkernel::structures::acpi::XSDTEntry;
+    // for entry in xsdt.iter() {
+    //     use libkernel::structures::acpi::XSDTEntry;
 
-        if let XSDTEntry::MCFG(mcfg) = entry {
-            info!("MCFG FOUND");
-            for mcfg_entry in mcfg.iter() {
-                info!("{:?}", mcfg_entry);
+    //     if let XSDTEntry::MCFG(mcfg) = entry {
+    //         info!("MCFG FOUND");
+    //         for mcfg_entry in mcfg.iter() {
+    //             info!("{:?}", mcfg_entry);
 
-                mcfg_entry.iter();
-            }
-        } else if let XSDTEntry::APIC(madt) = entry {
-            info!("MADT FOUND");
-            for madt_entry in madt.iter() {
-                info!("{:?}", madt_entry);
-            }
-        }
-    }
+    //             mcfg_entry.iter();
+    //         }
+    //     } else if let XSDTEntry::APIC(madt) = entry {
+    //         info!("MADT FOUND");
+    //         for madt_entry in madt.iter() {
+    //             info!("{:?}", madt_entry);
+    //         }
+    //     }
+    // }
 
     info!("Kernel has reached safe shutdown state.");
     unsafe { libkernel::instructions::pwm::qemu_shutdown() }
@@ -134,7 +134,7 @@ fn init_memory(
     let mut stack_frames = core::lazy::OnceCell::new();
     let mut last_frame_end = 0;
     for descriptor in boot_info.memory_map() {
-        let cur_frame_start = (descriptor.phys_start.as_u64() / 0x1000) as usize;
+        let cur_frame_start = descriptor.phys_start.as_usize() / 0x1000;
         let new_frame_end = cur_frame_start + (descriptor.page_count as usize);
 
         // Checks for 'holes' in system memory which we shouldn't try to allocate to.

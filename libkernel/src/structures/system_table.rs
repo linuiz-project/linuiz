@@ -1,6 +1,5 @@
-use crate::structures::GUID;
+use crate::{addr_ty::Physical, structures::GUID, Address};
 use core::lazy::OnceCell;
-use x86_64::PhysAddr;
 
 pub struct SystemConfigTableCell {
     table: OnceCell<SystemConfigTable>,
@@ -67,7 +66,7 @@ impl SystemConfigTable {
 #[derive(Debug)]
 pub struct SystemConfigTableEntry {
     guid: GUID,
-    addr: PhysAddr,
+    addr: Address<Physical>,
 }
 
 impl SystemConfigTableEntry {
@@ -75,14 +74,14 @@ impl SystemConfigTableEntry {
         self.guid.clone()
     }
 
-    pub fn addr(&self) -> PhysAddr {
+    pub fn addr(&self) -> Address<Physical> {
         self.addr
     }
 
     pub unsafe fn as_ref<T>(&self) -> &T {
-        &*(self.addr().as_u64() as *mut T)
+        &*(self.addr().as_usize() as *mut T)
     }
     pub unsafe fn as_mut_ref<T>(&self) -> &mut T {
-        &mut *(self.addr().as_u64() as *mut T)
+        &mut *(self.addr().as_usize() as *mut T)
     }
 }

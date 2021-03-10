@@ -1,11 +1,11 @@
-use x86_64::VirtAddr;
+use crate::{addr_ty::Virtual, Address};
 
 pub struct RSP;
 
 impl RSP {
     #[inline(always)]
-    pub unsafe fn write(value: VirtAddr) {
-        asm!("mov rsp, {}", in(reg) value.as_u64(), options(nomem, nostack));
+    pub unsafe fn write(value: Address<Virtual>) {
+        asm!("mov rsp, {}", in(reg) value.as_usize(), options(nomem, nostack));
     }
 
     #[inline(always)]
@@ -19,11 +19,11 @@ impl RSP {
     }
 
     #[inline(always)]
-    pub fn read() -> VirtAddr {
+    pub fn read() -> Address<Virtual> {
         let addr: u64;
         unsafe {
             asm!("mov {}, rsp", out(reg) addr, options(nomem, nostack));
-            VirtAddr::new_unsafe(addr)
+            Address::new_unsafe(addr as usize)
         }
     }
 }

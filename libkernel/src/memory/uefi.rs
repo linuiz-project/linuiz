@@ -1,4 +1,4 @@
-use x86_64::{PhysAddr, VirtAddr};
+use crate::Address;
 
 #[repr(u32)]
 #[allow(non_camel_case_types)]
@@ -45,26 +45,26 @@ bitflags::bitflags! {
 pub struct UEFIMemoryDescriptor {
     pub ty: UEFIMemoryType,
     padding: u32,
-    pub phys_start: PhysAddr,
-    pub virt_start: VirtAddr,
+    pub phys_start: Address<crate::addr_ty::Physical>,
+    pub virt_start: Address<crate::addr_ty::Virtual>,
     pub page_count: u64,
     pub att: UEFIMemoryAttribute,
 }
 
 impl UEFIMemoryDescriptor {
     pub fn range(&self) -> core::ops::Range<u64> {
-        let addr_u64 = self.phys_start.as_u64();
+        let addr_u64 = self.phys_start.as_usize() as u64;
         addr_u64..(addr_u64 + (self.page_count * 0x1000))
     }
 
     pub fn frame_range(&self) -> core::ops::RangeInclusive<usize> {
-        let start_index = (self.phys_start.as_u64() / 0x1000) as usize;
+        let start_index = self.phys_start.as_usize() / 0x1000;
         start_index..=(start_index + (self.page_count as usize))
     }
 
     pub fn is_stack_descriptor(&self) -> bool {
         self.range()
-            .contains(&crate::registers::stack::RSP::read().as_u64())
+            .contains(&(crate::registers::stack::RSP::read().as_usize() as u64))
     }
 
     pub fn should_reserve(&self) -> bool {

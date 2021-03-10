@@ -1,6 +1,5 @@
-use crate::memory::paging::PageTableEntry;
+use crate::{addr_ty::Virtual, memory::paging::PageTableEntry, Address};
 use core::marker::PhantomData;
-use x86_64::VirtAddr;
 
 pub trait TableLevel {}
 
@@ -66,27 +65,27 @@ impl<L: HeirarchicalLevel> PageTable<L> {
     pub unsafe fn sub_table(
         &self,
         index: usize,
-        phys_mapped_addr: VirtAddr,
+        phys_mapped_addr: Address<Virtual>,
     ) -> Option<&PageTable<L::NextLevel>> {
         self.get_entry(index)
             .frame()
-            .map(|frame| &*(phys_mapped_addr + frame.addr_u64()).as_ptr())
+            .map(|frame| &*(phys_mapped_addr + frame.addr().as_usize()).as_ptr())
     }
 
     pub unsafe fn sub_table_mut(
         &mut self,
         index: usize,
-        phys_mapped_addr: VirtAddr,
+        phys_mapped_addr: Address<Virtual>,
     ) -> Option<&mut PageTable<L::NextLevel>> {
         self.get_entry_mut(index)
             .frame()
-            .map(|frame| &mut *(phys_mapped_addr + frame.addr_u64()).as_mut_ptr())
+            .map(|frame| &mut *(phys_mapped_addr + frame.addr().as_usize()).as_mut_ptr())
     }
 
     pub unsafe fn sub_table_create(
         &mut self,
         index: usize,
-        phys_mapped_addr: VirtAddr,
+        phys_mapped_addr: Address<Virtual>,
     ) -> &mut PageTable<L::NextLevel> {
         let entry = self.get_entry_mut(index);
         let (frame, created) = match entry.frame() {
@@ -108,7 +107,7 @@ impl<L: HeirarchicalLevel> PageTable<L> {
         };
 
         let sub_table: &mut PageTable<L::NextLevel> =
-            &mut *(phys_mapped_addr + frame.addr_u64()).as_mut_ptr();
+            &mut *(phys_mapped_addr + frame.addr().as_usize()).as_mut_ptr();
 
         if created {
             sub_table.clear();

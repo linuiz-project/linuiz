@@ -1,5 +1,4 @@
 use crate::structures::acpi::{ACPITable, Checksum, SDTHeader, SizedACPITable};
-use x86_64::PhysAddr;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -46,7 +45,7 @@ impl MCFG {
 #[repr(C)]
 #[derive(Debug)]
 pub struct MCFGEntry {
-    base_addr: PhysAddr,
+    base_addr: crate::Address<crate::addr_ty::Physical>,
     seg_group_num: u16,
     start_pci_bus: u8,
     end_pci_bus: u8,
@@ -57,11 +56,13 @@ impl MCFGEntry {
     #[cfg(feature = "kernel_impls")]
     pub fn iter(&self) {
         for bus_index in self.start_pci_bus..self.end_pci_bus {
-            let offset_addr = self.base_addr + ((bus_index as u64) << 20);
-            let frame_index = (offset_addr.as_u64() / 0x1000) as usize;
+            let offset_addr = self.base_addr + ((bus_index as usize) << 20);
             let mmio_frames = unsafe {
                 crate::memory::global_memory()
-                    .acquire_frame(frame_index, crate::memory::FrameState::MMIO)
+                    .acquire_frame(
+                        offset_addr.as_usize() / 0x1000,
+                        crate::memory::FrameState::MMIO,
+                    )
                     .unwrap()
                     .into_iter()
             };
@@ -77,4 +78,3 @@ impl MCFGEntry {
         }
     }
 }
-

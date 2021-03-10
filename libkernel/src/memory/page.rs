@@ -1,34 +1,30 @@
-use x86_64::VirtAddr;
+use crate::{addr_ty::Virtual, Address};
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub struct Page(usize);
+pub struct Page {
+    index: usize,
+}
 
 impl Page {
-    #[inline]
     pub const fn null() -> Self {
-        Self { 0: 0 }
+        Self { index: 0 }
     }
 
-    #[inline]
     pub const fn from_index(index: usize) -> Self {
-        Self { 0: index }
+        Self { index }
     }
 
-    #[inline]
-    pub const fn from_addr(virt_addr: VirtAddr) -> Self {
-        let addr_usize = virt_addr.as_u64() as usize;
-
-        if (addr_usize % 0x1000) != 0 {
-            panic!("page address is not page-aligned")
-        } else {
+    pub const fn from_addr(addr: Address<Virtual>) -> Self {
+        if addr.is_aligned(0x1000) {
             Self {
-                0: addr_usize / 0x1000,
+                index: addr.as_usize() / 0x1000,
             }
+        } else {
+            panic!("page address is not page-aligned")
         }
     }
 
-    #[inline]
     pub const fn from_ptr<T>(ptr: *const T) -> Self {
         let ptr_usize = unsafe { ptr as usize };
 
@@ -36,47 +32,36 @@ impl Page {
             panic!("page address is not page-aligned")
         } else {
             Self {
-                0: ptr_usize / 0x1000,
+                index: ptr_usize / 0x1000,
             }
         }
     }
 
-    #[inline]
-    pub const fn containing_addr(virt_addr: VirtAddr) -> Self {
+    pub const fn containing_addr(virt_addr: Address<Virtual>) -> Self {
         Self {
-            0: (virt_addr.as_u64() as usize) / 0x1000,
+            index: virt_addr.as_usize() / 0x1000,
         }
     }
 
-    #[inline]
     pub const fn index(&self) -> usize {
-        self.0
+        self.index
     }
 
-    #[inline]
-    pub const fn addr(&self) -> VirtAddr {
-        VirtAddr::new_truncate(self.addr_u64())
+    pub const fn addr(&self) -> Address<Virtual> {
+        unsafe { Address::new_unsafe(self.index * 0x1000) }
     }
 
-    #[inline]
-    pub const fn addr_u64(&self) -> u64 {
-        (self.0 as u64) * 0x1000
-    }
-
-    #[inline]
     pub const fn as_ptr<T>(&self) -> *const T {
-        (self.0 * 0x1000) as *const T
+        (self.index * 0x1000) as *const T
     }
 
-    #[inline]
     pub const fn as_mut_ptr<T>(&self) -> *mut T {
-        (self.0 * 0x1000) as *mut T
+        (self.index * 0x1000) as *mut T
     }
 
-    #[inline]
     pub const fn iter_count(&self, count: usize) -> PageIterator {
         PageIterator {
-            current: Page::from_index(self.0),
+            current: Page::from_index(self.index),
             end: self.offset(count),
         }
     }
@@ -89,16 +74,17 @@ impl Page {
         );
     }
 
-    pub fn range_count(start_addr: VirtAddr, count: usize) -> PageIterator {
+    pub fn range_count(start_addr: Address<Virtual>, count: usize) -> PageIterator {
         PageIterator {
             current: Page::from_addr(start_addr),
-            end: Page::from_addr(start_addr + ((count * 0x1000) as u64)),
+            end: Page::from_addr(start_addr + (count * 0x1000)),
         }
     }
 
-    #[inline]
     pub const fn offset(&self, count: usize) -> Self {
-        Self { 0: self.0 + count }
+        Self {
+            index: self.index + count,
+        }
     }
 }
 
@@ -117,9 +103,9 @@ impl Iterator for PageIterator {
     type Item = Page;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.current.0 < self.end.0 {
+        if self.current.index < self.end.index {
             let page = self.current.clone();
-            self.current.0 += 1;
+            self.current.index += 1;
             Some(page)
         } else {
             None
