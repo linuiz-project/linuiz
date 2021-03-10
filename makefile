@@ -3,8 +3,8 @@ boot_deps = $(shell find ./efi_boot/src/ -type f -name '*.rs')
 kernel_deps = $(shell find ./kernel/ -type f -name '*.rs')
 libkernel_deps = $(shell find ./libkernel/ -type f -name '*.rs')
 
-bootloader = image/EFI/BOOT/BOOTX64.efi
-kernel = image/EFI/gsai/kernel.elf
+bootloader = ./hdd/image/EFI/BOOT/BOOTX64.efi
+kernel = ./hdd/image/EFI/gsai/kernel.elf
 
 PROFILE=release
 
