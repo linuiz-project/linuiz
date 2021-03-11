@@ -1,41 +1,11 @@
-use libkernel::{memory::Frame, BitValue, RwBitArray, RwBitArrayIterator};
-use num_enum::TryFromPrimitive;
+use libkernel::{
+    memory::{
+        falloc::{FrameAllocatorError, FrameState},
+        Frame,
+    },
+    BitValue, RwBitArray, RwBitArrayIterator,
+};
 use spin::RwLock;
-
-#[repr(usize)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
-pub enum FrameState {
-    Free = 0,
-    Locked,
-    Reserved,
-    NonUsable,
-    MMIO,
-}
-
-impl BitValue for FrameState {
-    const BIT_WIDTH: usize = 0x4;
-    const MASK: usize = 0xF;
-
-    fn from_usize(value: usize) -> Self {
-        use core::convert::TryFrom;
-
-        match FrameState::try_from(value) {
-            Ok(frame_type) => frame_type,
-            Err(err) => panic!("invalid value for frame type: {:?}", err),
-        }
-    }
-
-    fn as_usize(&self) -> usize {
-        *self as usize
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FrameAllocatorError {
-    ExpectedFrameState(usize, FrameState),
-    NonMMIOFrameState(usize, FrameState),
-    FreeWithAcquire,
-}
 
 /// Structure for deterministically reserving, locking, and freeing RAM frames.
 ///
@@ -51,12 +21,12 @@ pub enum FrameAllocatorError {
 /// This example encapsulates the core idea, that the `Frame` struct shouldn't be instantiated
 /// out of thin air. Its creation should be carefully controlled, to ensure each individual frame's
 /// lifetime matches up with how it is used or consumed in hardware and software.
-pub struct FrameAllocator<'arr> {
+pub struct LinearFrameAllocator<'arr> {
     memory_map: RwBitArray<'arr, FrameState>,
     memory: RwLock<[usize; FrameState::MASK + 1]>,
 }
 
-impl<'arr> FrameAllocator<'arr> {
+impl<'arr> LinearFrameAllocator<'arr> {
     /// Provides a hint as to the total memory usage (in frames, i.e. 0x1000 aligned)
     ///  a frame allocator will use given a specified total amount of memory.
     pub fn frame_count_hint(total_memory: usize) -> usize {
@@ -67,7 +37,7 @@ impl<'arr> FrameAllocator<'arr> {
         );
 
         let frame_count = total_memory / 0x1000;
-        crate::align_up_div(
+        libkernel::align_up_div(
             // each index of a RwBitArray is a `usize`, so multiply the index count with the `size_of` a `usize`
             (frame_count * FrameState::BIT_WIDTH) / 8, /* 8 bits per byte */
             // divide total RwBitArray memory size by frame size to get total frame count
@@ -103,24 +73,14 @@ impl<'arr> FrameAllocator<'arr> {
             memory: RwLock::new(memory_counters),
         };
 
-        let base_frame_index = (base_ptr as usize) / 0x1000;
-        let end_frame_index = base_frame_index + Self::frame_count_hint(total_memory);
-        let frame_range = base_frame_index..=end_frame_index;
-        debug!("Frame allocator defined with iterator: {:?}", frame_range);
-        this.acquire_frames(frame_range, FrameState::Reserved)
-            .expect("unexpectedly failed to reserve frame allocator frames");
+        this.acquire_frames(
+            (base_ptr as usize) / 0x1000,
+            Self::frame_count_hint(total_memory),
+            FrameState::Reserved,
+        )
+        .expect("unexpectedly failed to reserve frame allocator frames");
 
         this
-    }
-
-    /// Total memory of a given type represented by frame allocator. If `None` is
-    ///  provided for type, the total of all memory types is returned instead.
-    pub fn total_memory(&self, of_type: Option<FrameState>) -> usize {
-        let mem_read = self.memory.read();
-        match of_type {
-            Some(frame_type) => mem_read[frame_type.as_usize()],
-            None => *mem_read.last().unwrap(),
-        }
     }
 
     /* FREE / LOCK / RESERVE / STACK - SINGLE */
@@ -201,28 +161,23 @@ impl<'arr> FrameAllocator<'arr> {
 
     pub unsafe fn acquire_frames(
         &self,
-        frame_indexes: impl crate::memory::FrameIndexIterator,
-        acq_type: FrameState,
-    ) -> Result<crate::memory::FrameIterator, FrameAllocatorError> {
-        let start_frame = Frame::from_index(match frame_indexes.start_bound() {
-            core::ops::Bound::Included(start) => *start,
-            core::ops::Bound::Excluded(start) => *start + 1,
-            _ => panic!("failed to calculate start bound for frame range"),
-        });
+        index: usize,
+        count: usize,
+        acq_state: FrameState,
+    ) -> Result<libkernel::memory::FrameIterator, FrameAllocatorError> {
+        let start_index = index;
+        let end_index = index + count;
 
-        let end_frame = Frame::from_index(match frame_indexes.end_bound() {
-            core::ops::Bound::Included(end) => *end + 1,
-            core::ops::Bound::Excluded(end) => *end,
-            _ => panic!("failed to calculate start bound for frame range"),
-        });
-
-        for index in frame_indexes {
-            if let Err(error) = self.acquire_frame(index, acq_type) {
+        for frame_index in start_index..end_index {
+            if let Err(error) = self.acquire_frame(frame_index, acq_state) {
                 return Err(error);
             }
         }
 
-        Ok(crate::memory::FrameIterator::new(start_frame, end_frame))
+        Ok(libkernel::memory::FrameIterator::new(
+            Frame::from_index(start_index),
+            Frame::from_index(end_index),
+        ))
     }
 
     /// Attempts to iterate the allocator's frames, and returns the first unallocated frame.
@@ -246,14 +201,65 @@ impl<'arr> FrameAllocator<'arr> {
             })
     }
 
-    /// Executes a given callback function, passing frame data from each frame the
-    ///  allocator represents.
-    pub fn frame_state_iter<'outer>(&'arr self) -> RwBitArrayIterator<'outer, 'arr, FrameState> {
+    /// Total memory of a given type represented by frame allocator. If `None` is
+    ///  provided for type, the total of all memory types is returned instead.
+    pub fn total_memory(&self, of_type: Option<FrameState>) -> usize {
+        let mem_read = self.memory.read();
+        match of_type {
+            Some(frame_type) => mem_read[frame_type.as_usize()],
+            None => *mem_read.last().unwrap(),
+        }
+    }
+
+    pub fn iter<'outer>(&'arr self) -> RwBitArrayIterator<'outer, 'arr, FrameState> {
         self.memory_map.iter()
     }
 
     #[cfg(debug_assertions)]
     pub fn debug_log_elements(&self) {
         self.memory_map.debug_log_elements();
+    }
+}
+
+impl libkernel::memory::falloc::FrameAllocator for LinearFrameAllocator<'_> {
+    unsafe fn acquire_frame(
+        &self,
+        index: usize,
+        acq_state: FrameState,
+    ) -> Result<Frame, FrameAllocatorError> {
+        self.acquire_frame(index, acq_state)
+    }
+
+    unsafe fn free_frame(&self, frame: Frame) -> Result<(), FrameAllocatorError> {
+        self.free_frame(frame)
+    }
+
+    unsafe fn acquire_frames(
+        &self,
+        index: usize,
+        count: usize,
+        acq_state: FrameState,
+    ) -> Result<libkernel::memory::FrameIterator, FrameAllocatorError> {
+        self.acquire_frames(index, count, acq_state)
+    }
+
+    unsafe fn free_frames(
+        &self,
+        frames: libkernel::memory::FrameIterator,
+    ) -> Result<(), FrameAllocatorError> {
+        self.free_frames(frames)
+    }
+
+    fn lock_next(&self) -> Option<Frame> {
+        self.lock_next()
+    }
+
+    fn total_memory(&self, mem_state: Option<FrameState>) -> usize {
+        self.total_memory(mem_state)
+    }
+
+    fn iter(&self) -> libkernel::memory::falloc::FrameStateIterator {
+        let mut rwbitarray_iter = self.memory_map.iter();
+        libkernel::memory::falloc::FrameStateIterator::new(&mut rwbitarray_iter)
     }
 }

@@ -18,12 +18,13 @@ impl FramebufferDriver {
         let byte_len = pixel_len * core::mem::size_of::<Color8i>();
 
         let framebuffer = unsafe {
-            let start_frame_index = buffer_addr.as_usize() / 0x1000;
-            let end_frame_index = start_frame_index + ((byte_len + 0xFFF) / 0x1000);
-            let mmio_frames = libkernel::memory::global_memory()
+            let frame_index = buffer_addr.as_usize() / 0x1000;
+            let frame_count = frame_index + ((byte_len + 0xFFF) / 0x1000);
+            let mmio_frames = libkernel::memory::falloc::get()
                 .acquire_frames(
-                    start_frame_index..end_frame_index,
-                    libkernel::memory::FrameState::MMIO,
+                    frame_index,
+                    frame_count,
+                    libkernel::memory::falloc::FrameState::MMIO,
                 )
                 .unwrap();
 

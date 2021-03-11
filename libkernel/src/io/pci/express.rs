@@ -39,10 +39,10 @@ impl Iterator for PCIEDeviceIterator {
             let offset_addr = self.base_addr + ((self.cur_bus as usize) << 20);
             self.cur_bus += 1;
             let mmio_frames = unsafe {
-                crate::memory::global_memory()
+                crate::memory::falloc::get()
                     .acquire_frame(
                         offset_addr.as_usize() / 0x1000,
-                        crate::memory::FrameState::MMIO,
+                        crate::memory::falloc::FrameState::MMIO,
                     )
                     .unwrap()
                     .into_iter()

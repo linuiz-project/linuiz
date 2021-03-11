@@ -11,6 +11,8 @@ pub mod addr_ty {
 use crate::addr_ty::*;
 use core::marker::PhantomData;
 
+pub const VADDR_HW_MAX: usize = 0x1000000000000;
+
 #[repr(transparent)]
 pub struct Address<T: AddressType> {
     value: usize,

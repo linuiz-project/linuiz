@@ -277,8 +277,8 @@ pub fn load() {
         debug!("APIC MMIO mapping at frame: {}", start_index);
 
         let mmio = crate::memory::mmio::unmapped_mmio(unsafe {
-            crate::memory::global_memory()
-                .acquire_frames(start_index..=start_index, crate::memory::FrameState::MMIO)
+            crate::memory::falloc::get()
+                .acquire_frames(start_index, 1, crate::memory::falloc::FrameState::MMIO)
                 .unwrap()
         })
         .unwrap()

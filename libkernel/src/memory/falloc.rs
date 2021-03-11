@@ -1,4 +1,4 @@
-use crate::cell::SyncRefCell;
+use crate::{addr_ty::Virtual, cell::SyncRefCell, memory::Frame, Address};
 use num_enum::TryFromPrimitive;
 
 #[repr(usize)]
@@ -29,14 +29,54 @@ impl crate::BitValue for FrameState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrameAllocatorError {
+    ExpectedFrameState(usize, FrameState),
+    NonMMIOFrameState(usize, FrameState),
+    FreeWithAcquire,
+}
+
+pub struct FrameStateIterator<'iter> {
+    iterator: &'iter mut dyn Iterator<Item = FrameState>,
+}
+
+impl<'iter> FrameStateIterator<'iter> {
+    pub fn new(iterator: &'iter mut impl Iterator<Item = FrameState>) -> Self {
+        Self { iterator }
+    }
+}
+
+impl Iterator for FrameStateIterator<'_> {
+    type Item = FrameState;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iterator.next()
+    }
+}
+
 pub trait FrameAllocator {
-    fn acquire_frame(&self, index: usize, acq_state: FrameState);
-    fn free_frame(&self, index: usize);
+    unsafe fn acquire_frame(
+        &self,
+        index: usize,
+        acq_state: FrameState,
+    ) -> Result<Frame, FrameAllocatorError>;
+    unsafe fn free_frame(&self, frame: Frame) -> Result<(), FrameAllocatorError>;
 
-    fn acquire_frames(&self, index: usize, count: usize);
-    fn free_frames(&self, frames: crate::memory::FrameIterator);
+    unsafe fn acquire_frames(
+        &self,
+        index: usize,
+        count: usize,
+        acq_state: FrameState,
+    ) -> Result<crate::memory::FrameIterator, FrameAllocatorError>;
+    unsafe fn free_frames(
+        &self,
+        frames: crate::memory::FrameIterator,
+    ) -> Result<(), FrameAllocatorError>;
+    fn lock_next(&self) -> Option<Frame>;
 
-    fn total_memory(&self, mem_state: FrameState) -> usize;
+    fn total_memory(&self, mem_state: Option<FrameState>) -> usize;
+
+    fn iter(&self) -> FrameStateIterator;
 }
 
 static DEFAULT_FALLOCATOR: SyncRefCell<&'static dyn FrameAllocator> = SyncRefCell::new();
@@ -49,4 +89,8 @@ pub fn get() -> &'static dyn FrameAllocator {
     DEFAULT_FALLOCATOR
         .get()
         .expect("frame allocator has not been set")
+}
+
+pub fn virtual_map_offset() -> Address<Virtual> {
+    Address::<Virtual>::new(crate::VADDR_HW_MAX - get().total_memory(None))
 }

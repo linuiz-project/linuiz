@@ -1,19 +1,23 @@
 #![no_std]
 #![no_main]
-#![feature(asm, abi_efiapi, abi_x86_interrupt, once_cell)]
+#![feature(asm, abi_efiapi, abi_x86_interrupt, once_cell, const_mut_refs)]
 
 #[macro_use]
 extern crate log;
 extern crate alloc;
 extern crate libkernel;
 
+mod block_malloc;
 mod drivers;
+mod linear_falloc;
 mod logging;
 mod pic8259;
 mod timer;
 
+use crate::linear_falloc::LinearFrameAllocator;
 use core::ffi::c_void;
 use libkernel::{
+    cell::SyncRefCell,
     structures::{acpi::RDSPDescriptor2, SystemConfigTableEntry},
     BootInfo,
 };
@@ -43,8 +47,8 @@ fn get_log_level() -> log::LevelFilter {
 }
 
 static mut SERIAL_OUT: drivers::io::Serial = drivers::io::Serial::new(drivers::io::COM1);
-static KERNEL_ALLOCATOR: libkernel::memory::BlockAllocator =
-    libkernel::memory::BlockAllocator::new();
+static KERNEL_MALLOC: block_malloc::BlockAllocator = block_malloc::BlockAllocator::new();
+static KERNEL_FALLOC: SyncRefCell<LinearFrameAllocator> = SyncRefCell::new();
 
 #[no_mangle]
 #[export_name = "_start"]
@@ -88,7 +92,17 @@ extern "efiapi" fn kernel_main(
 
     // `boot_info` will not be usable after initalizing the global allocator,
     //   due to the stack being moved in virtual memory.
-    init_memory(boot_info);
+    unsafe {
+        let memory_map = boot_info.memory_map();
+        init_kernel_falloc(memory_map);
+
+        let mut stack_frames = reserve_kernel_stack(memory_map);
+
+        info!("Initializing kernel default allocator.");
+        KERNEL_MALLOC.init(&mut stack_frames);
+        libkernel::memory::malloc::set(&KERNEL_MALLOC);
+    }
+
     init_apic();
 
     let rdsp: &RDSPDescriptor2 = unsafe {
@@ -125,65 +139,53 @@ extern "efiapi" fn kernel_main(
     unsafe { libkernel::instructions::pwm::qemu_shutdown() }
 }
 
-fn init_memory(
-    boot_info: BootInfo<libkernel::memory::UEFIMemoryDescriptor, SystemConfigTableEntry>,
-) {
-    use libkernel::memory::{global_memory, FrameState};
+fn reserve_kernel_stack(
+    memory_map: &[libkernel::memory::UEFIMemoryDescriptor],
+) -> libkernel::memory::FrameIterator {
+    debug!("Allocating frames according to BIOS memory map.");
 
-    info!("Initializing global memory.");
-    unsafe { libkernel::memory::init_global_memory(boot_info.memory_map()) };
-
-    debug!("Reserving frames from relevant UEFI memory descriptors.");
-
-    let mut stack_frames = core::lazy::OnceCell::new();
+    let mut stack_frames = core::lazy::OnceCell::<libkernel::memory::FrameIterator>::new();
     let mut last_frame_end = 0;
-    for descriptor in boot_info.memory_map() {
-        let cur_frame_start = descriptor.phys_start.as_usize() / 0x1000;
-        let new_frame_end = cur_frame_start + (descriptor.page_count as usize);
+    for descriptor in memory_map {
+        use libkernel::memory::falloc;
+
+        let frame_start = descriptor.phys_start.as_usize() / 0x1000;
+        let frame_count = descriptor.page_count as usize;
 
         // Checks for 'holes' in system memory which we shouldn't try to allocate to.
-        if last_frame_end < cur_frame_start {
+        if last_frame_end < frame_start {
             unsafe {
-                global_memory()
-                    .acquire_frames(last_frame_end..cur_frame_start, FrameState::NonUsable)
+                falloc::get()
+                    .acquire_frames(
+                        last_frame_end,
+                        last_frame_end - frame_start,
+                        falloc::FrameState::NonUsable,
+                    )
                     .unwrap()
             };
         }
 
         // Reserve descriptor properly, and acquire stack frames if applicable.
         if descriptor.should_reserve() {
-            let frame_range = cur_frame_start..new_frame_end;
+            let descriptor_stack_frames = unsafe {
+                falloc::get()
+                    .acquire_frames(frame_start, frame_count, falloc::FrameState::Reserved)
+                    .unwrap()
+            };
 
             if descriptor.is_stack_descriptor() {
-                debug!("Identified stack frames: {:?}", frame_range);
-                let descriptor_stack_frames = unsafe {
-                    global_memory()
-                        .acquire_frames(frame_range, FrameState::Reserved)
-                        .unwrap()
-                };
+                debug!("Identified stack frames: {}:{}", frame_start, frame_count);
 
                 stack_frames
                     .set(descriptor_stack_frames)
                     .expect("multiple stack descriptors found");
-            } else {
-                unsafe {
-                    global_memory()
-                        .acquire_frames(frame_range, FrameState::Reserved)
-                        .unwrap()
-                };
             }
         }
 
-        last_frame_end = new_frame_end;
+        last_frame_end = frame_start + frame_count;
     }
 
-    info!("Initializing kernel default allocator.");
-    unsafe {
-        KERNEL_ALLOCATOR.init(stack_frames.get_mut().unwrap());
-        libkernel::memory::malloc::set(&KERNEL_ALLOCATOR);
-    }
-
-    info!("Global memory & the kernel global allocator have been initialized.");
+    stack_frames.take().unwrap()
 }
 
 fn init_apic() {
@@ -244,11 +246,8 @@ fn init_apic() {
     );
 }
 
-pub unsafe fn init_global_memory(memory_map: &[crate::memory::UEFIMemoryDescriptor]) {
-    assert!(
-        !GLOBAL_MEMORY.has_allocator(),
-        "global memory has already been initialized"
-    );
+pub unsafe fn init_kernel_falloc(memory_map: &[libkernel::memory::UEFIMemoryDescriptor]) {
+    info!("Initializing kernel frame allocator.");
 
     // calculates total system memory
     let total_memory = memory_map
@@ -260,19 +259,23 @@ pub unsafe fn init_global_memory(memory_map: &[crate::memory::UEFIMemoryDescript
         .expect("no descriptor with max value");
 
     info!(
-        "Global memory will represent {} MB ({} bytes) of system memory.",
-        crate::memory::to_mibibytes(total_memory),
+        "Kernel frame allocator will represent {} MB ({} bytes) of system memory.",
+        libkernel::memory::to_mibibytes(total_memory),
         total_memory
     );
 
-    let frame_alloc_frame_count = FrameAllocator::frame_count_hint(total_memory);
+    let frame_alloc_frame_count = LinearFrameAllocator::frame_count_hint(total_memory) as u64;
     let frame_alloc_ptr = memory_map
         .iter()
-        .filter(|descriptor| descriptor.ty == crate::memory::UEFIMemoryType::CONVENTIONAL)
-        .find(|descriptor| descriptor.page_count >= (frame_alloc_frame_count as u64))
+        .filter(|descriptor| descriptor.ty == libkernel::memory::UEFIMemoryType::CONVENTIONAL)
+        .find(|descriptor| descriptor.page_count >= frame_alloc_frame_count)
         .map(|descriptor| descriptor.phys_start.as_usize() as *mut _)
-        .expect("failed to find viable memory descriptor for memory map.");
+        .expect("failed to find viable memory descriptor for memory map");
 
-    debug!("Configuring and assigning global memory instance.");
-    libkernel::memory::falloc::set(FrameAllocator::from_ptr(frame_alloc_ptr, total_memory));
+    KERNEL_FALLOC.set(LinearFrameAllocator::from_ptr(
+        frame_alloc_ptr,
+        total_memory,
+    ));
+
+    debug!("Kernel frame allocator initialized.");
 }

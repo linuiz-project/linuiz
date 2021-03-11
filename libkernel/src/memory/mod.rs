@@ -1,5 +1,4 @@
 mod frame;
-mod global_memory;
 mod page;
 mod uefi;
 
@@ -7,7 +6,6 @@ mod uefi;
 mod galloc;
 
 pub use frame::*;
-pub use global_memory::*;
 pub use page::*;
 pub use uefi::*;
 pub mod falloc;

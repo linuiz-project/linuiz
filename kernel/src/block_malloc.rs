@@ -1,7 +1,7 @@
 use core::mem::size_of;
 use libkernel::{
     align_up_div,
-    memory::{paging::VirtualAddressor, Frame, FrameIterator, Page},
+    memory::{falloc, paging::VirtualAddressor, Frame, FrameIterator, Page},
     Address, SYSTEM_SLICE_SIZE,
 };
 use spin::RwLock;
@@ -181,24 +181,26 @@ impl BlockAllocator<'_> {
 
     /* INITIALIZATION */
 
-    pub unsafe fn init(&self, stack_frames: &mut crate::memory::FrameIterator) {
-        use crate::memory::{global_memory, FrameState};
-
+    pub unsafe fn init(&self, stack_frames: &mut libkernel::memory::FrameIterator) {
         {
             debug!("Initializing allocator's virtual addressor.");
             let mut addressor_mut = self.get_addressor_mut();
             *addressor_mut = VirtualAddressor::new(Page::null());
 
             debug!("Identity mapping all reserved global memory frames.");
-            global_memory()
-                .frame_state_iter()
-                .enumerate()
-                .filter(|(_, frame_state)| *frame_state == FrameState::Reserved)
-                .for_each(|(index, _)| addressor_mut.identity_map(&Frame::from_index(index)));
+
+            let mut enumeration = 0;
+            for frame_state in falloc::get().iter() {
+                enumeration += 1;
+
+                if frame_state == falloc::FrameState::Reserved {
+                    addressor_mut.identity_map(&Frame::from_index(enumeration))
+                }
+            }
 
             // Since we're using physical offset mapping for our page table modification
             //  strategy, the memory needs to be identity mapped at the correct offset.
-            let phys_mapping_addr = crate::memory::global_top_offset();
+            let phys_mapping_addr = falloc::virtual_map_offset();
             debug!("Mapping physical memory at offset: {:?}", phys_mapping_addr);
             addressor_mut.modify_mapped_page(Page::from_addr(phys_mapping_addr));
 
@@ -208,11 +210,14 @@ impl BlockAllocator<'_> {
         }
 
         debug!("Allocating reserved global memory frames.");
-        global_memory()
-            .frame_state_iter()
-            .enumerate()
-            .filter(|(_, frame_state)| *frame_state == FrameState::Reserved)
-            .for_each(|(index, _)| self.identity_map(&Frame::from_index(index), false));
+        let mut enumeration = 0;
+        for frame_state in falloc::get().iter() {
+            enumeration += 1;
+
+            if frame_state == falloc::FrameState::Reserved {
+                self.identity_map(&Frame::from_index(enumeration), false);
+            }
+        }
 
         const STACK_SIZE: usize = 256 * 0x1000; /* 1MB in pages */
 
@@ -236,7 +241,7 @@ impl BlockAllocator<'_> {
             let base_offset = stack_base.offset_from(new_stack_base);
 
             debug!("Modifying `rsp` by base offset: 0x{:x}.", base_offset);
-            use crate::registers::stack::RSP;
+            use libkernel::registers::stack::RSP;
             if base_offset.is_positive() {
                 RSP::sub(base_offset.abs() as u64);
             } else {
@@ -336,8 +341,9 @@ impl BlockAllocator<'_> {
         );
 
         let start_map_index = start_block_index / BlockPage::BLOCK_COUNT;
-        let mut initial_section_skip = crate::align_down_div(block_index, BlockPage::SECTION_LEN)
-            - (start_map_index * BlockPage::SECTION_COUNT);
+        let mut initial_section_skip =
+            libkernel::align_down_div(block_index, BlockPage::SECTION_LEN)
+                - (start_map_index * BlockPage::SECTION_COUNT);
 
         for (map_index, block_page) in self
             .map
@@ -383,7 +389,7 @@ impl BlockAllocator<'_> {
 
                 unsafe {
                     self.get_addressor_mut()
-                        .map(page, &crate::memory::global_memory().lock_next().unwrap());
+                        .map(page, &falloc::get().lock_next().unwrap());
                     page.clear();
                 }
             }
@@ -403,8 +409,9 @@ impl BlockAllocator<'_> {
 
         let start_map_index = start_block_index / BlockPage::BLOCK_COUNT;
         let end_map_index = align_up_div(end_block_index, BlockPage::BLOCK_COUNT) - start_map_index;
-        let mut initial_section_skip = crate::align_down_div(block_index, BlockPage::SECTION_LEN)
-            - (start_map_index * BlockPage::SECTION_COUNT);
+        let mut initial_section_skip =
+            libkernel::align_down_div(block_index, BlockPage::SECTION_LEN)
+                - (start_map_index * BlockPage::SECTION_COUNT);
         for (map_index, block_page) in self
             .map
             .write()
@@ -448,7 +455,7 @@ impl BlockAllocator<'_> {
                 let page = &Page::from_index(map_index);
                 // todo FIX THIS (uncomment & build for error)
                 unsafe {
-                    crate::memory::global_memory()
+                    falloc::get()
                         .free_frame(addressor_mut.translate_page(page).unwrap())
                         .unwrap()
                 };
@@ -473,7 +480,10 @@ impl BlockAllocator<'_> {
         let bit_count = core::cmp::min(BlockPage::SECTION_LEN, remaining_blocks) - bit_offset;
         // Finally, we acquire the respective bitmask to flip all relevant bits in
         //  our current section.
-        (bit_count, crate::U64_BIT_MASKS[bit_count - 1] << bit_offset)
+        (
+            bit_count,
+            libkernel::U64_BIT_MASKS[bit_count - 1] << bit_offset,
+        )
     }
 
     /// Allocates a region of memory pointing to the frame region indicated by
@@ -566,7 +576,7 @@ impl BlockAllocator<'_> {
         let cur_map_len = map_read.len();
         let cur_page_offset = (cur_map_len * BlockPage::BLOCK_COUNT) / BLOCKS_PER_MAP_PAGE;
         let new_page_offset = (cur_page_offset
-            + crate::align_up_div(required_blocks, BLOCKS_PER_MAP_PAGE))
+            + libkernel::align_up_div(required_blocks, BLOCKS_PER_MAP_PAGE))
         .next_power_of_two();
 
         trace!(
@@ -579,10 +589,7 @@ impl BlockAllocator<'_> {
             let mut addressor_mut = unsafe { self.get_addressor_mut() };
             for offset in cur_page_offset..new_page_offset {
                 let map_page = &mut Self::ALLOCATOR_BASE.offset(offset);
-                addressor_mut.map(
-                    map_page,
-                    &crate::memory::global_memory().lock_next().unwrap(),
-                );
+                addressor_mut.map(map_page, &falloc::get().lock_next().unwrap());
             }
         }
 
@@ -605,7 +612,7 @@ impl BlockAllocator<'_> {
     }
 }
 
-impl crate::memory::malloc::MemoryAllocator for BlockAllocator<'_> {
+impl libkernel::memory::malloc::MemoryAllocator for BlockAllocator<'_> {
     fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
         self.alloc(layout)
     }

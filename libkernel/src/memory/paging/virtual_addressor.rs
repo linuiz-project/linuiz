@@ -1,7 +1,6 @@
 use crate::{
     addr_ty::Virtual,
     memory::{
-        global_memory,
         paging::{Level4, PageAttributes, PageTable, PageTableEntry},
         Frame, Page,
     },
@@ -27,7 +26,7 @@ impl VirtualAddressor {
     /// Safety: this method is unsafe because `mapped_page` can be any value; that is, not necessarily
     /// a valid address in which physical memory is already mapped.
     pub unsafe fn new(mapped_page: Page) -> Self {
-        let pml4_frame = global_memory()
+        let pml4_frame = crate::memory::falloc::get()
             .lock_next()
             .expect("failed to lock frame for PML4 of VirtualAddressor");
 
@@ -145,7 +144,7 @@ impl VirtualAddressor {
     /* STATE CHANGING */
 
     pub unsafe fn modify_mapped_page(&mut self, page: Page) {
-        let total_memory_pages = global_memory().total_memory(None) / 0x1000;
+        let total_memory_pages = crate::memory::falloc::get().total_memory(None) / 0x1000;
         for index in 0..total_memory_pages {
             self.map(&page.offset(index), &Frame::from_index(index));
         }

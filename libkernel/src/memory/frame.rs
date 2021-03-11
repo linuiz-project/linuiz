@@ -1,8 +1,5 @@
 use crate::{addr_ty::Physical, Address};
 
-pub trait FrameIndexIterator: core::ops::RangeBounds<usize> + Iterator<Item = usize> {}
-impl<T> FrameIndexIterator for T where T: core::ops::RangeBounds<usize> + Iterator<Item = usize> {}
-
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct Frame {
@@ -47,12 +44,14 @@ impl Frame {
     }
 
     pub fn into_iter(self) -> FrameIterator {
-        FrameIterator::new(
-            self,
-            Self {
-                index: self.index() + 1,
-            },
-        )
+        unsafe {
+            FrameIterator::new(
+                self,
+                Self {
+                    index: self.index() + 1,
+                },
+            )
+        }
     }
 }
 
@@ -101,7 +100,7 @@ pub struct FrameIterator {
 }
 
 impl FrameIterator {
-    pub(in crate::memory) const fn new(start: Frame, end: Frame) -> Self {
+    pub const unsafe fn new(start: Frame, end: Frame) -> Self {
         Self {
             start,
             current: start,
