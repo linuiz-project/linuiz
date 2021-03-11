@@ -1,7 +1,9 @@
 use crate::{
+    addr_ty::Physical,
     cell::SyncCell,
     memory::mmio::{Mapped, MMIO},
     registers::MSR,
+    Address,
 };
 use core::marker::PhantomData;
 
@@ -77,8 +79,8 @@ impl APIC {
     pub const SW_ENABLE: u32 = 0x100;
     pub const CPU_FOCUS: u32 = 0x200;
 
-    pub fn mmio_addr() -> x86_64::PhysAddr {
-        x86_64::PhysAddr::new(MSR::IA32_APIC_BASE.read().get_bits(12..35) << 12)
+    pub fn mmio_addr() -> Address<Physical> {
+        Address::<Physical>::new((MSR::IA32_APIC_BASE.read().get_bits(12..35) << 12) as usize)
     }
 
     pub unsafe fn new(mmio: MMIO<Mapped>) -> Self {
@@ -271,7 +273,7 @@ pub fn load() {
         panic!("Local APIC has already been configured");
     } else {
         debug!("Loading local APIC table.");
-        let start_index = (APIC::mmio_addr().as_u64() as usize) / 0x1000;
+        let start_index = APIC::mmio_addr().as_usize() / 0x1000;
         debug!("APIC MMIO mapping at frame: {}", start_index);
 
         let mmio = crate::memory::mmio::unmapped_mmio(unsafe {

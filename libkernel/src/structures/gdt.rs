@@ -1,10 +1,7 @@
 use lazy_static::lazy_static;
-use x86_64::{
-    structures::{
-        gdt::{Descriptor, GlobalDescriptorTable, SegmentSelector},
-        tss::TaskStateSegment,
-    },
-    VirtAddr,
+use x86_64::structures::{
+    gdt::{Descriptor, GlobalDescriptorTable, SegmentSelector},
+    tss::TaskStateSegment,
 };
 
 pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
@@ -21,7 +18,7 @@ lazy_static! {
             const STACK_SIZE: usize = 4096 * 5;
             static STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
 
-            let stack_start = VirtAddr::from_ptr(&STACK);
+            let stack_start = x86_64::VirtAddr::from_ptr(&STACK);
             let stack_end = stack_start + STACK_SIZE;
             stack_end
         };
