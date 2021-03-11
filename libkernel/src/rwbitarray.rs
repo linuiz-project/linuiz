@@ -14,29 +14,33 @@ where
     BV: BitValue,
 {
     array: RwLock<&'arr mut [usize]>,
-    bit_len: usize,
+    element_count: usize,
     phantom: PhantomData<BV>,
 }
 
 impl<'arr, BV: BitValue> RwBitArray<'arr, BV> {
     const SECTION_LEN: usize = core::mem::size_of::<usize>() * 8;
 
-    pub const fn length_hint(element_count: usize) -> usize {
-        (element_count * BV::BIT_WIDTH) / Self::SECTION_LEN
+    pub const fn element_bit_length_hint(element_count: usize) -> usize {
+        element_count * BV::BIT_WIDTH
     }
 
-    pub fn from_slice(slice: &'arr mut [usize], bit_len: usize) -> Self {
+    pub const fn section_length_hint(element_count: usize) -> usize {
+        Self::element_bit_length_hint(element_count) / Self::SECTION_LEN
+    }
+
+    pub fn from_slice(slice: &'arr mut [usize], element_count: usize) -> Self {
         slice.fill(0);
 
         Self {
             array: RwLock::new(slice),
-            bit_len,
+            element_count,
             phantom: PhantomData,
         }
     }
 
     pub fn len(&self) -> usize {
-        self.bit_len
+        self.element_count
     }
 
     fn get_index_and_offset(index: usize) -> (usize, usize) {
@@ -53,7 +57,9 @@ impl<'arr, BV: BitValue> RwBitArray<'arr, BV> {
     pub fn get(&self, index: usize) -> BV {
         assert!(
             index < self.len(),
-            "index must be less than the size of the collection",
+            "index must be less than the size of the collection ({} >= {})",
+            index,
+            self.len()
         );
 
         let (section_index, section_offset) = Self::get_index_and_offset(index);
@@ -65,7 +71,9 @@ impl<'arr, BV: BitValue> RwBitArray<'arr, BV> {
     pub fn set(&self, index: usize, new_type: BV) {
         assert!(
             index < self.len(),
-            "index must be less than the size of the collection",
+            "index must be less than the size of the collection ({} >= {})",
+            index,
+            self.len()
         );
 
         let (section_index, section_offset) = Self::get_index_and_offset(index);
@@ -80,7 +88,9 @@ impl<'arr, BV: BitValue> RwBitArray<'arr, BV> {
     pub fn set_eq(&self, index: usize, new_type: BV, eq_type: BV) -> bool {
         assert!(
             index < self.len(),
-            "index must be less than the size of the collection",
+            "index must be less than the size of the collection ({} >= {})",
+            index,
+            self.len()
         );
 
         {

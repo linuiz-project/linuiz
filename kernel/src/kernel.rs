@@ -9,15 +9,12 @@ extern crate libkernel;
 
 mod block_malloc;
 mod drivers;
-mod linear_falloc;
 mod logging;
 mod pic8259;
 mod timer;
 
-use crate::linear_falloc::LinearFrameAllocator;
 use core::ffi::c_void;
 use libkernel::{
-    cell::SyncRefCell,
     structures::{acpi::RDSPDescriptor2, SystemConfigTableEntry},
     BootInfo,
 };
@@ -48,7 +45,6 @@ fn get_log_level() -> log::LevelFilter {
 
 static mut SERIAL_OUT: drivers::io::Serial = drivers::io::Serial::new(drivers::io::COM1);
 static KERNEL_MALLOC: block_malloc::BlockAllocator = block_malloc::BlockAllocator::new();
-static KERNEL_FALLOC: SyncRefCell<LinearFrameAllocator> = SyncRefCell::new();
 
 #[no_mangle]
 #[export_name = "_start"]
@@ -94,7 +90,7 @@ extern "efiapi" fn kernel_main(
     //   due to the stack being moved in virtual memory.
     unsafe {
         let memory_map = boot_info.memory_map();
-        init_kernel_falloc(memory_map);
+        init_falloc(memory_map);
 
         let mut stack_frames = reserve_kernel_stack(memory_map);
 
@@ -158,7 +154,7 @@ fn reserve_kernel_stack(
                 falloc::get()
                     .acquire_frames(
                         last_frame_end,
-                        last_frame_end - frame_start,
+                        frame_start - last_frame_end,
                         falloc::FrameState::NonUsable,
                     )
                     .unwrap()
@@ -186,6 +182,37 @@ fn reserve_kernel_stack(
     }
 
     stack_frames.take().unwrap()
+}
+
+pub unsafe fn init_falloc(memory_map: &[libkernel::memory::UEFIMemoryDescriptor]) {
+    info!("Initializing kernel frame allocator.");
+
+    // calculates total system memory
+    let total_memory = memory_map
+        .iter()
+        .max_by_key(|descriptor| descriptor.phys_start)
+        .map(|descriptor| {
+            (descriptor.phys_start + ((descriptor.page_count as usize) * 0x1000)).as_usize()
+        })
+        .expect("no descriptor with max value");
+
+    info!(
+        "Kernel frame allocator will represent {} MB ({} bytes) of system memory.",
+        libkernel::memory::to_mibibytes(total_memory),
+        total_memory
+    );
+
+    let frame_alloc_frame_count =
+        libkernel::memory::falloc::FrameAllocator::frame_count_hint(total_memory) as u64;
+    let frame_alloc_ptr = memory_map
+        .iter()
+        .filter(|descriptor| descriptor.ty == libkernel::memory::UEFIMemoryType::CONVENTIONAL)
+        .find(|descriptor| descriptor.page_count >= frame_alloc_frame_count)
+        .map(|descriptor| descriptor.phys_start.as_usize() as *mut _)
+        .expect("failed to find viable memory descriptor for memory map");
+
+    libkernel::memory::falloc::load(frame_alloc_ptr, total_memory);
+    debug!("Kernel frame allocator initialized.");
 }
 
 fn init_apic() {
@@ -241,41 +268,12 @@ fn init_apic() {
     apic.timer().set_masked(false);
 
     info!(
+        "CUR {}, INIT {}",
+        apic[APICRegister::TimeCurrentCount],
+        apic[APICRegister::TimerInitialCount]
+    );
+    info!(
         "Core-local APIC configured and enabled (freq {}MHz).",
         apic[APICRegister::TimerInitialCount] / 1000
     );
-}
-
-pub unsafe fn init_kernel_falloc(memory_map: &[libkernel::memory::UEFIMemoryDescriptor]) {
-    info!("Initializing kernel frame allocator.");
-
-    // calculates total system memory
-    let total_memory = memory_map
-        .iter()
-        .max_by_key(|descriptor| descriptor.phys_start)
-        .map(|descriptor| {
-            (descriptor.phys_start + ((descriptor.page_count as usize) * 0x1000)).as_usize()
-        })
-        .expect("no descriptor with max value");
-
-    info!(
-        "Kernel frame allocator will represent {} MB ({} bytes) of system memory.",
-        libkernel::memory::to_mibibytes(total_memory),
-        total_memory
-    );
-
-    let frame_alloc_frame_count = LinearFrameAllocator::frame_count_hint(total_memory) as u64;
-    let frame_alloc_ptr = memory_map
-        .iter()
-        .filter(|descriptor| descriptor.ty == libkernel::memory::UEFIMemoryType::CONVENTIONAL)
-        .find(|descriptor| descriptor.page_count >= frame_alloc_frame_count)
-        .map(|descriptor| descriptor.phys_start.as_usize() as *mut _)
-        .expect("failed to find viable memory descriptor for memory map");
-
-    KERNEL_FALLOC.set(LinearFrameAllocator::from_ptr(
-        frame_alloc_ptr,
-        total_memory,
-    ));
-
-    debug!("Kernel frame allocator initialized.");
 }

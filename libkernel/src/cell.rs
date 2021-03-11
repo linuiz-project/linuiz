@@ -51,3 +51,30 @@ impl<T> SyncRefCell<T> {
         unsafe { &mut *self.inner_cell.get() }
     }
 }
+
+pub struct SyncOnceCell<T> {
+    inner_cell: core::lazy::OnceCell<T>,
+}
+
+unsafe impl<T> Send for SyncOnceCell<T> {}
+unsafe impl<T> Sync for SyncOnceCell<T> {}
+
+impl<T> SyncOnceCell<T> {
+    pub const fn new() -> Self {
+        Self {
+            inner_cell: core::lazy::OnceCell::new(),
+        }
+    }
+
+    pub fn set(&self, obj: T) -> Result<(), T> {
+        self.inner_cell.set(obj)
+    }
+
+    pub fn get(&self) -> Option<&T> {
+        self.inner_cell.get()
+    }
+
+    pub fn get_mut(&mut self) -> Option<&mut T> {
+        self.inner_cell.get_mut()
+    }
+}

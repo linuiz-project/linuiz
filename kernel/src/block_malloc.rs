@@ -189,14 +189,13 @@ impl BlockAllocator<'_> {
 
             debug!("Identity mapping all reserved global memory frames.");
 
-            let mut enumeration = 0;
-            for frame_state in falloc::get().iter() {
-                enumeration += 1;
-
-                if frame_state == falloc::FrameState::Reserved {
-                    addressor_mut.identity_map(&Frame::from_index(enumeration))
-                }
-            }
+            falloc::get()
+                .iter()
+                .enumerate()
+                .filter(|(_, frame_state)| *frame_state == falloc::FrameState::Reserved)
+                .for_each(|(frame_index, _)| {
+                    addressor_mut.identity_map(&Frame::from_index(frame_index))
+                });
 
             // Since we're using physical offset mapping for our page table modification
             //  strategy, the memory needs to be identity mapped at the correct offset.
@@ -210,14 +209,11 @@ impl BlockAllocator<'_> {
         }
 
         debug!("Allocating reserved global memory frames.");
-        let mut enumeration = 0;
-        for frame_state in falloc::get().iter() {
-            enumeration += 1;
-
-            if frame_state == falloc::FrameState::Reserved {
-                self.identity_map(&Frame::from_index(enumeration), false);
-            }
-        }
+        falloc::get()
+            .iter()
+            .enumerate()
+            .filter(|(_, frame_state)| *frame_state == falloc::FrameState::Reserved)
+            .for_each(|(frame_index, _)| self.identity_map(&Frame::from_index(frame_index), false));
 
         const STACK_SIZE: usize = 256 * 0x1000; /* 1MB in pages */
 
