@@ -243,3 +243,36 @@ fn init_apic() {
         apic[APICRegister::TimerInitialCount] / 1000
     );
 }
+
+pub unsafe fn init_global_memory(memory_map: &[crate::memory::UEFIMemoryDescriptor]) {
+    assert!(
+        !GLOBAL_MEMORY.has_allocator(),
+        "global memory has already been initialized"
+    );
+
+    // calculates total system memory
+    let total_memory = memory_map
+        .iter()
+        .max_by_key(|descriptor| descriptor.phys_start)
+        .map(|descriptor| {
+            (descriptor.phys_start + ((descriptor.page_count as usize) * 0x1000)).as_usize()
+        })
+        .expect("no descriptor with max value");
+
+    info!(
+        "Global memory will represent {} MB ({} bytes) of system memory.",
+        crate::memory::to_mibibytes(total_memory),
+        total_memory
+    );
+
+    let frame_alloc_frame_count = FrameAllocator::frame_count_hint(total_memory);
+    let frame_alloc_ptr = memory_map
+        .iter()
+        .filter(|descriptor| descriptor.ty == crate::memory::UEFIMemoryType::CONVENTIONAL)
+        .find(|descriptor| descriptor.page_count >= (frame_alloc_frame_count as u64))
+        .map(|descriptor| descriptor.phys_start.as_usize() as *mut _)
+        .expect("failed to find viable memory descriptor for memory map.");
+
+    debug!("Configuring and assigning global memory instance.");
+    libkernel::memory::falloc::set(FrameAllocator::from_ptr(frame_alloc_ptr, total_memory));
+}

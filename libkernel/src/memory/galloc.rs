@@ -1,3 +1,5 @@
+///! Used to repalce Rust's default global allocator with the kernel default mallocator.
+
 struct DefaultAllocatorProxy;
 
 impl DefaultAllocatorProxy {

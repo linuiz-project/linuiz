@@ -1,4 +1,4 @@
-use crate::{memory::Frame, BitValue, RwBitArray, RwBitArrayIterator};
+use libkernel::{memory::Frame, BitValue, RwBitArray, RwBitArrayIterator};
 use num_enum::TryFromPrimitive;
 use spin::RwLock;
 

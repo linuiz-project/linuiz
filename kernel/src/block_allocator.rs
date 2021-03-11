@@ -1,9 +1,9 @@
-use crate::{
+use core::mem::size_of;
+use libkernel::{
     align_up_div,
     memory::{paging::VirtualAddressor, Frame, FrameIterator, Page},
     Address, SYSTEM_SLICE_SIZE,
 };
-use core::mem::size_of;
 use spin::RwLock;
 
 /// Represents one page worth of memory blocks (i.e. 4096 bytes in blocks).

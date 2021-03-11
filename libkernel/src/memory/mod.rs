@@ -1,16 +1,12 @@
-mod block_allocator;
 mod frame;
-mod frame_allocator;
 mod global_memory;
 mod page;
 mod uefi;
 
 #[cfg(feature = "global_allocator")]
-mod global_allocator;
+mod galloc;
 
-pub use block_allocator::*;
 pub use frame::*;
-pub use frame_allocator::*;
 pub use global_memory::*;
 pub use page::*;
 pub use uefi::*;
