@@ -33,17 +33,28 @@ impl MSR {
     }
 
     pub unsafe fn write_bit(self, bit: usize, set: bool) {
-        use bit_field::BitField;
-        self.write(*self.read().set_bit(bit, set));
+        assert!(bit <= 64, "bit must be within u64");
 
-        debug_assert_eq!(self.read().get_bit(bit), set);
+        let bit_mask = 1 << bit;
+        let set_bit = (set as u64) << bit;
+
+        self.write((self.read() & bit_mask) | set_bit);
+
+        debug_assert_eq!(self.read() & bit_mask, set_bit);
     }
 
     pub unsafe fn write_bits(self, range: core::ops::Range<usize>, value: u64) {
-        use bit_field::BitField;
+        assert!(range.end <= 64, "range must be within u64 bits");
 
-        self.write(*self.read().set_bits(range.clone(), value));
-        debug_assert_eq!(self.read().get_bits(range), value);
+        let mask = crate::U64_BIT_MASKS[range.end - range.start];
+        assert_eq!(value & !mask, 0, "value must exist within range");
+
+        let shifted_mask = mask << range.start;
+        let shifted_value = value << range.start;
+
+        self.write((self.read() & !shifted_mask) | shifted_value);
+
+        debug_assert_eq!(self.read() & shifted_mask, shifted_value);
     }
 
     pub unsafe fn write(self, value: u64) {
