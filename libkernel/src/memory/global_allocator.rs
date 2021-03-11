@@ -8,11 +8,11 @@ impl DefaultAllocatorProxy {
 
 unsafe impl core::alloc::GlobalAlloc for DefaultAllocatorProxy {
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
-        crate::memory::default_allocator().alloc(layout)
+        crate::memory::malloc::get().alloc(layout)
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
-        crate::memory::default_allocator().dealloc(ptr, layout);
+        crate::memory::malloc::get().dealloc(ptr, layout);
     }
 }
 

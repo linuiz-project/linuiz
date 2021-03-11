@@ -54,8 +54,8 @@ pub struct MCFGEntry {
 
 impl MCFGEntry {
     // TODO this shouldn't be made multiple times, since it instantiates a new MMIO allocation each time
-    pub fn iter(&self) -> crate::io::pcie::PCIEDeviceIterator {
-        crate::io::pcie::PCIEDeviceIterator::new(
+    pub fn iter(&self) -> crate::io::pci::express::PCIEDeviceIterator {
+        crate::io::pci::express::PCIEDeviceIterator::new(
             self.base_addr,
             self.start_pci_bus,
             self.end_pci_bus,

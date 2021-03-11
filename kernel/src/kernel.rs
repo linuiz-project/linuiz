@@ -43,7 +43,7 @@ fn get_log_level() -> log::LevelFilter {
 }
 
 static mut SERIAL_OUT: drivers::io::Serial = drivers::io::Serial::new(drivers::io::COM1);
-static mut KERNEL_ALLOCATOR: libkernel::memory::BlockAllocator =
+static KERNEL_ALLOCATOR: libkernel::memory::BlockAllocator =
     libkernel::memory::BlockAllocator::new();
 
 #[no_mangle]
@@ -180,7 +180,7 @@ fn init_memory(
     info!("Initializing kernel default allocator.");
     unsafe {
         KERNEL_ALLOCATOR.init(stack_frames.get_mut().unwrap());
-        libkernel::memory::set_default_allocator(&mut KERNEL_ALLOCATOR);
+        libkernel::memory::malloc::set(&KERNEL_ALLOCATOR);
     }
 
     info!("Global memory & the kernel global allocator have been initialized.");
