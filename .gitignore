@@ -11,7 +11,7 @@ Cargo.lock
 **/*.rs.bk
 *.img
 
-image/*
+hdd/*
 references/*
 kernel.out
 qemu_debug.log
