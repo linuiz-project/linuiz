@@ -160,74 +160,6 @@ impl BlockAllocator<'_> {
     const ALLOCATOR_BASE: Page =
         Page::from_addr(unsafe { Address::new_unsafe(SYSTEM_SLICE_SIZE * 0xA) });
 
-    /// Provides a simple mechanism in which the mask of a u64 can be acquired by bit count.
-    const MASK_MAP: [u64; 64] = [
-        0x1,
-        0x3,
-        0x7,
-        0xF,
-        0x1F,
-        0x3F,
-        0x7F,
-        0xFF,
-        0x1FF,
-        0x3FF,
-        0x7FF,
-        0xFFF,
-        0x1FFF,
-        0x3FFF,
-        0x7FFF,
-        0xFFFF,
-        0x1FFFF,
-        0x3FFFF,
-        0x7FFFF,
-        0xFFFFF,
-        0x1FFFFF,
-        0x3FFFFF,
-        0x7FFFFF,
-        0xFFFFFF,
-        0x1FFFFFF,
-        0x3FFFFFF,
-        0x7FFFFFF,
-        0xFFFFFFF,
-        0x1FFFFFFF,
-        0x3FFFFFFF,
-        0x7FFFFFFF,
-        0xFFFFFFFF,
-        0x1FFFFFFFF,
-        0x3FFFFFFFF,
-        0x7FFFFFFFF,
-        0xFFFFFFFFF,
-        0x1FFFFFFFFF,
-        0x3FFFFFFFFF,
-        0x7FFFFFFFFF,
-        0xFFFFFFFFFF,
-        0x1FFFFFFFFFF,
-        0x3FFFFFFFFFF,
-        0x7FFFFFFFFFF,
-        0xFFFFFFFFFFF,
-        0x1FFFFFFFFFFF,
-        0x3FFFFFFFFFFF,
-        0x7FFFFFFFFFFF,
-        0xFFFFFFFFFFFF,
-        0x1FFFFFFFFFFFF,
-        0x3FFFFFFFFFFFF,
-        0x7FFFFFFFFFFFF,
-        0xFFFFFFFFFFFFF,
-        0x1FFFFFFFFFFFFF,
-        0x3FFFFFFFFFFFFF,
-        0x7FFFFFFFFFFFFF,
-        0xFFFFFFFFFFFFFF,
-        0x1FFFFFFFFFFFFFF,
-        0x3FFFFFFFFFFFFFF,
-        0x7FFFFFFFFFFFFFF,
-        0xFFFFFFFFFFFFFFF,
-        0x1FFFFFFFFFFFFFFF,
-        0x3FFFFFFFFFFFFFFF,
-        0x7FFFFFFFFFFFFFFF,
-        0xFFFFFFFFFFFFFFFF,
-    ];
-
     #[allow(const_item_mutation)]
     pub const fn new() -> Self {
         const EMPTY: [BlockPage; 0] = [];
@@ -541,7 +473,7 @@ impl BlockAllocator<'_> {
         let bit_count = core::cmp::min(BlockPage::SECTION_LEN, remaining_blocks) - bit_offset;
         // Finally, we acquire the respective bitmask to flip all relevant bits in
         //  our current section.
-        (bit_count, Self::MASK_MAP[bit_count - 1] << bit_offset)
+        (bit_count, crate::U64_BIT_MASKS[bit_count - 1] << bit_offset)
     }
 
     /// Allocates a region of memory pointing to the frame region indicated by
@@ -673,7 +605,7 @@ impl BlockAllocator<'_> {
     }
 }
 
-impl crate::memory::MemoryAllocator for BlockAllocator<'_> {
+impl crate::memory::malloc::MemoryAllocator for BlockAllocator<'_> {
     fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
         self.alloc(layout)
     }
