@@ -7,7 +7,7 @@ bitflags! {
         ///
         /// If this flag is modifiable, the CPU supports CPUID.
         const ID = 1 << 21;
-        ///Indicates that an external, maskable interrupt is pending.
+        /// Indicates that an external, maskable interrupt is pending.
         ///
         /// Used when virtual-8086 mode extensions (CR4.VME) or protected-mode virtual
         /// interrupts (CR4.PVI) are activated.
@@ -22,14 +22,14 @@ bitflags! {
         const ALIGNMENT_CHECK = 1 << 18;
         /// Enable the virtual-8086 mode.
         const VIRTUAL_8086_MODE = 1 << 17;
-        /// Allows to retsrat an instruction following an instruction breakpoint.
+        /// Allows restarting an instruction following an instruction breakpoint.
         const RESUME_FLAG = 1 << 16;
         /// Used by `iret` in hardware task switch mode to determine if current task is nested.
         const NESTED_TASK = 1 << 14;
         /// The high bit of the I/O Privilege Level field.
         ///
         /// Specifies the privelege level required for executing I/O address-space instructions.
-        const IOPL_HIGH = 1<< 13;
+        const IOPL_HIGH = 1 << 13;
         /// The low bit of the I/O Privilege Level field.
         ///
         /// Specifies the privilege level required for executing the I/O address-space instructions.
@@ -37,7 +37,7 @@ bitflags! {
         /// Set by hardware to indicate that the sign bit of the result of the last signed integer
         /// operation differs from the source operands.
         const OVERFLOW_FLAG = 1 << 11;
-        /// Determines the order in which strings are processes.
+        /// Determines the order in which strings are processed.
         const DIRECTION_FLAG = 1 << 10;
         /// Enable interrupts.
         const INTERRUPT_FLAG = 1 << 9;
