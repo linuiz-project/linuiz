@@ -2,11 +2,10 @@ use crate::{
     addr_ty::Virtual, cell::SyncOnceCell, memory::Frame, Address, BitValue, RwBitArray,
     RwBitArrayIterator,
 };
-use num_enum::TryFromPrimitive;
 use spin::RwLock;
 
 #[repr(usize)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameState {
     Free = 0,
     Locked,
@@ -20,11 +19,13 @@ impl crate::BitValue for FrameState {
     const MASK: usize = 0xF;
 
     fn from_usize(value: usize) -> Self {
-        use core::convert::TryFrom;
-
-        match FrameState::try_from(value) {
-            Ok(frame_type) => frame_type,
-            Err(err) => panic!("invalid value for frame type: {:?}", err),
+        match value {
+            0 => FrameState::Free,
+            1 => FrameState::Locked,
+            2 => FrameState::Reserved,
+            3 => FrameState::NonUsable,
+            4 => FrameState::MMIO,
+            _ => panic!("invalid value for frame type: {:?}", value),
         }
     }
 

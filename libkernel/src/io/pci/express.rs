@@ -1,5 +1,6 @@
 use crate::{
     addr_ty::Physical,
+    io::pci::PCIDeviceHeader,
     memory::mmio::{Mapped, MMIO},
     Address,
 };
@@ -12,6 +13,19 @@ pub struct PCIEBus {
 impl PCIEBus {
     const fn new(mmio: MMIO<Mapped>) -> Self {
         Self { mmio }
+    }
+
+    pub fn header(&self) -> &PCIDeviceHeader {
+        unsafe { self.mmio.read(0).unwrap() }
+    }
+}
+
+impl core::fmt::Debug for PCIEBus {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("PCIe Bus")
+            .field("Header", self.header())
+            .finish()
     }
 }
 
@@ -32,7 +46,7 @@ impl PCIEDeviceIterator {
 }
 
 impl Iterator for PCIEDeviceIterator {
-    type Item = PCIEBus;
+    type Item = Option<PCIEBus>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.cur_bus < self.end_bus {
@@ -48,10 +62,17 @@ impl Iterator for PCIEDeviceIterator {
                     .into_iter()
             };
 
-            let mmio = crate::memory::mmio::unmapped_mmio(mmio_frames)
-                .unwrap()
-                .map();
-            Some(PCIEBus::new(mmio))
+            let pci_bus = PCIEBus::new(
+                crate::memory::mmio::unmapped_mmio(mmio_frames)
+                    .unwrap()
+                    .map(),
+            );
+
+            Some(if !pci_bus.header().is_invalid() {
+                Some(pci_bus)
+            } else {
+                None
+            })
         } else {
             None
         }

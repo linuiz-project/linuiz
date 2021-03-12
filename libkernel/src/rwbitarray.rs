@@ -111,20 +111,21 @@ impl<'arr, BV: BitValue> RwBitArray<'arr, BV> {
         true
     }
 
+    const ELEMENTS_PER_SECTION: usize = Self::SECTION_LEN / BV::BIT_WIDTH;
     pub fn set_eq_next(&self, new_type: BV, eq_type: BV) -> Option<usize> {
-        let elements_per_section = Self::SECTION_LEN / BV::BIT_WIDTH;
+        let new_type_usize = new_type.as_usize();
 
         for (index, section) in self.array.write().iter_mut().enumerate() {
-            for inner_index in 0..elements_per_section {
-                let offset = inner_index * BV::BIT_WIDTH;
-                let section_deref = *section;
+            let section_deref = *section;
 
-                if BV::from_usize((section_deref >> offset) & BV::MASK) == eq_type {
-                    let section_bits_set = new_type.as_usize() << offset;
-                    let section_bits_nonset = section_deref & !(BV::MASK << offset);
+            for offset in (0..64).step_by(BV::BIT_WIDTH) {
+                let offset_bits = section_deref & (BV::MASK << offset);
+                if BV::from_usize(offset_bits >> offset) == eq_type {
+                    let section_bits_set = new_type_usize << offset;
+                    let section_bits_nonset = section_deref ^ offset_bits;
 
                     *section = section_bits_set | section_bits_nonset;
-                    return Some((index * elements_per_section) + inner_index);
+                    return Some((index * Self::ELEMENTS_PER_SECTION) + (offset / BV::BIT_WIDTH));
                 }
             }
         }

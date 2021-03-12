@@ -120,7 +120,9 @@ extern "efiapi" fn kernel_main(
             for mcfg_entry in mcfg.iter() {
                 info!("{:?}", mcfg_entry);
 
-                for pci_bus in mcfg_entry.iter() {}
+                for pci_bus in mcfg_entry.iter().filter(|device| device.is_some()) {
+                    info!("{:?}", pci_bus);
+                }
             }
         } else if let XSDTEntry::APIC(madt) = entry {
             info!("MADT FOUND");
