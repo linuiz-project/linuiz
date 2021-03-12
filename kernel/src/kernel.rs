@@ -221,8 +221,6 @@ fn init_apic() {
         idt,
     };
 
-    const APIC_TIMER_IVT: u8 = 48;
-
     crate::pic8259::enable();
     info!("Successfully initialized PIC.");
     info!("Configuring PIT frequency to 1000Hz.");
@@ -232,7 +230,7 @@ fn init_apic() {
     libkernel::instructions::interrupts::enable();
 
     libkernel::structures::apic::load();
-    let apic = libkernel::structures::apic::local_apic_mut().unwrap();
+    let apic = libkernel::structures::apic::local_apic_mut();
 
     unsafe {
         debug!("Resetting and enabling local APIC (it may have already been enabled).");
@@ -243,7 +241,6 @@ fn init_apic() {
 
     let timer = timer::Timer::new(crate::timer::TIMER_FREQUENCY / 1000);
     debug!("Configuring APIC timer state.");
-    apic.timer().set_vector(APIC_TIMER_IVT);
     apic.timer().set_mode(APICTimerMode::OneShot);
     apic.timer().set_masked(false);
 
@@ -254,26 +251,36 @@ fn init_apic() {
     timer.wait();
 
     apic.timer().set_masked(true);
-    apic[APICRegister::TimerInitialCount] = u32::MAX - apic[APICRegister::TimeCurrentCount];
+    apic[APICRegister::TimerInitialCount] = u32::MAX - apic[APICRegister::TimerCurrentCount];
     apic[APICRegister::TimerDivisor] = APICTimerDivisor::Div1 as u32;
 
     debug!("Disabling 8259 emulated PIC.");
     libkernel::instructions::interrupts::without_interrupts(|| unsafe {
         crate::pic8259::disable()
     });
-    debug!("Updating IDT timer interrupt entry to local APIC-enabled function.");
-    idt::set_interrupt_handler(APIC_TIMER_IVT, timer::apic_timer_handler);
-    debug!("Unmasking local APIC timer interrupt (it will fire now!).");
+
+    debug!("Updating APIC register vectors and respective IDT entires.");
+    apic.timer().set_vector(48);
+    idt::set_interrupt_handler(48, timer::apic_timer_handler);
+    apic.error().set_vector(58);
+    idt::set_interrupt_handler(58, apic_error_handler);
+
+    debug!("Unmasking APIC timer interrupt (it will fire now!).");
     apic.timer().set_mode(APICTimerMode::Periodic);
     apic.timer().set_masked(false);
 
-    info!(
-        "CUR {}, INIT {}",
-        apic[APICRegister::TimeCurrentCount],
-        apic[APICRegister::TimerInitialCount]
-    );
-    info!(
-        "Core-local APIC configured and enabled (freq {}MHz).",
-        apic[APICRegister::TimerInitialCount] / 1000
-    );
+    info!("Core-local APIC configured and enabled.");
+}
+
+extern "x86-interrupt" fn apic_error_handler(
+    _: &mut libkernel::structures::idt::InterruptStackFrame,
+) {
+    let apic = libkernel::structures::apic::local_apic_mut();
+
+    error!("APIC ERROR INTERRUPT");
+    error!("--------------------");
+    error!("DUMPING APIC ERROR REGISTER:");
+    error!("  {:?}", apic.error_status());
+
+    apic.end_of_interrupt();
 }

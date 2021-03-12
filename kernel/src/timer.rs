@@ -18,9 +18,7 @@ pub extern "x86-interrupt" fn apic_timer_handler(
     _: &mut libkernel::structures::idt::InterruptStackFrame,
 ) {
     TICKS.fetch_add(1, core::sync::atomic::Ordering::Release);
-    libkernel::structures::apic::local_apic_mut()
-        .unwrap()
-        .end_of_interrupt();
+    libkernel::structures::apic::local_apic_mut().end_of_interrupt();
 }
 
 pub fn get_ticks() -> usize {

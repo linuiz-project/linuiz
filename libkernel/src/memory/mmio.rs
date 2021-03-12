@@ -54,7 +54,7 @@ impl MMIO<Mapped> {
 
     unsafe fn mapped_offset<T>(&self, offset: usize) -> Result<*const T, MMIOError> {
         if offset < self.max_offset() {
-            Ok((self.mapped_addr + offset).as_ptr())
+            Ok((self.mapped_addr() + offset).as_ptr())
         } else {
             Err(MMIOError::OffsetOverrun)
         }
@@ -62,7 +62,7 @@ impl MMIO<Mapped> {
 
     unsafe fn mapped_offset_mut<T>(&mut self, offset: usize) -> Result<*mut T, MMIOError> {
         if offset < self.max_offset() {
-            Ok((self.mapped_addr + offset).as_mut_ptr())
+            Ok((self.mapped_addr() + offset).as_mut_ptr())
         } else {
             Err(MMIOError::OffsetOverrun)
         }
@@ -79,17 +79,11 @@ impl MMIO<Mapped> {
     }
 
     pub unsafe fn read<T>(&self, offset: usize) -> Result<&T, MMIOError> {
-        match self.mapped_offset::<T>(offset) {
-            Ok(ptr) => Ok(&*ptr),
-            Err(mmio_err) => Err(mmio_err),
-        }
+        self.mapped_offset::<T>(offset).map(|ptr| &*ptr)
     }
 
     pub unsafe fn read_mut<T>(&mut self, offset: usize) -> Result<&mut T, MMIOError> {
-        match self.mapped_offset_mut::<T>(offset) {
-            Ok(ptr) => Ok(&mut *ptr),
-            Err(mmio_err) => Err(mmio_err),
-        }
+        self.mapped_offset_mut::<T>(offset).map(|ptr| &mut *ptr)
     }
 
     pub fn mapped_addr(&self) -> Address<Virtual> {

@@ -1,11 +1,11 @@
 use crate::{
     addr_ty::Physical,
-    cell::SyncCell,
+    cell::SyncOnceCell,
     memory::mmio::{Mapped, MMIO},
     registers::MSR,
     Address,
 };
-use core::marker::PhantomData;
+use core::{intrinsics::transmute, marker::PhantomData};
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,15 +16,12 @@ pub enum APICRegister {
     TaskPriority = 0x80,
     LDR = 0xD0,
     DFR = 0xE0,
-    ESR = 0x280,
     ICRL = 0x300,
     ICRH = 0x310,
     TimerInitialCount = 0x380,
-    TimeCurrentCount = 0x390,
+    TimerCurrentCount = 0x390,
     TimerDivisor = 0x3E0,
     Last = 0x38F,
-    TimerBaseDivisor = 1 << 20,
-    LVT_TIMER = 0x320,
 }
 
 #[repr(u32)]
@@ -61,19 +58,24 @@ pub enum APICDeliveryMode {
     INIT = 0b101,
 }
 
+bitflags::bitflags! {
+    pub struct APICErrorStatusFlags: u8 {
+        const SEND_CHECKSUM_ERROR = 1 << 0;
+        const RECEIVE_CHECKSUM_ERROR = 1 << 1;
+        const SEND_ACCEPT_ERROR = 1 << 2;
+        const RECEIVE_ACCEPT_ERROR = 1 << 3;
+        const REDIRECTABLE_IPI = 1 << 4;
+        const SENT_ILLEGAL_VECTOR = 1 << 5;
+        const RECEIVED_ILLEGAL_VECTOR = 1 << 6;
+        const ILLEGAL_REGISTER_ADDRESS = 1 << 7;
+    }
+}
+
 pub struct APIC {
     mmio: MMIO<Mapped>,
 }
 
 impl APIC {
-    const LVT_CMCI: usize = 0x2F0;
-    const LVT_TIMER: usize = 0x320;
-    const LVT_THERMAL_SENSOR: usize = 0x330;
-    const LVT_PERFORMANCE: usize = 0x340;
-    const LVT_LINT0: usize = 0x350;
-    const LVT_LINT1: usize = 0x360;
-    const LVT_ERROR: usize = 0x370;
-
     // The `mask` bit for an LVT entry.
     pub const DISABLE: u32 = 0x10000;
     pub const SW_ENABLE: u32 = 0x100;
@@ -100,47 +102,47 @@ impl APIC {
     }
 
     pub fn end_of_interrupt(&mut self) {
-        const EOI_REGISTER: usize = 0xB0;
-
-        unsafe { self.mmio.write(EOI_REGISTER, 0).unwrap() };
+        unsafe { self.mmio.write(0xB0, 0).unwrap() };
     }
 
-    pub fn cmci(&mut self) -> LVTRegister<Generic> {
-        LVTRegister::new(unsafe { self.mmio.read_mut(Self::LVT_CMCI).unwrap() })
+    pub fn cmci(&mut self) -> &mut LVTRegister<Generic> {
+        unsafe { transmute(self.mmio.read_mut::<u32>(0x2F0).unwrap()) }
     }
 
-    pub fn timer(&mut self) -> LVTRegister<Timer> {
-        LVTRegister::new(unsafe { self.mmio.read_mut(Self::LVT_TIMER).unwrap() })
+    pub fn timer(&mut self) -> &mut LVTRegister<Timer> {
+        unsafe { transmute(self.mmio.read_mut::<u32>(0x320).unwrap()) }
     }
 
-    pub fn lint0(&mut self) -> LVTRegister<LINT> {
-        LVTRegister::new(unsafe { self.mmio.read_mut(Self::LVT_LINT0).unwrap() })
+    pub fn thermal_sensor(&mut self) -> &mut LVTRegister<Generic> {
+        unsafe { transmute(self.mmio.read_mut::<u32>(0x330).unwrap()) }
     }
 
-    pub fn lint1(&mut self) -> LVTRegister<LINT> {
-        LVTRegister::new(unsafe { self.mmio.read_mut(Self::LVT_LINT1).unwrap() })
+    pub fn performance(&mut self) -> &mut LVTRegister<Generic> {
+        unsafe { transmute(self.mmio.read_mut::<u32>(0x340).unwrap()) }
     }
 
-    pub fn error(&mut self) -> LVTRegister<Error> {
-        LVTRegister::new(unsafe { self.mmio.read_mut(Self::LVT_ERROR).unwrap() })
+    pub fn lint0(&mut self) -> &mut LVTRegister<LINT> {
+        unsafe { transmute(self.mmio.read_mut::<u32>(0x350).unwrap()) }
     }
 
-    pub fn performance(&mut self) -> LVTRegister<Generic> {
-        LVTRegister::new(unsafe { self.mmio.read_mut(Self::LVT_PERFORMANCE).unwrap() })
+    pub fn lint1(&mut self) -> &mut LVTRegister<LINT> {
+        unsafe { transmute(self.mmio.read_mut::<u32>(0x360).unwrap()) }
     }
 
-    pub fn thermal_sensor(&mut self) -> LVTRegister<Generic> {
-        LVTRegister::new(unsafe { self.mmio.read_mut(Self::LVT_THERMAL_SENSOR).unwrap() })
+    pub fn error(&mut self) -> &mut LVTRegister<Error> {
+        unsafe { transmute(self.mmio.read_mut::<u32>(0x370).unwrap()) }
     }
 
     pub fn write_spurious(&mut self, vector: u8, enabled: bool) {
-        const LVT_SPURIOUS: usize = 0xF0;
-
         unsafe {
             self.mmio
-                .write(LVT_SPURIOUS, (vector as u32) | ((enabled as u32) << 8))
+                .write(0xF0, (vector as u32) | ((enabled as u32) << 8))
                 .unwrap()
         };
+    }
+
+    pub fn error_status(&self) -> APICErrorStatusFlags {
+        APICErrorStatusFlags::from_bits_truncate(unsafe { *self.mmio.read(0x280).unwrap() })
     }
 
     pub unsafe fn reset(&mut self) {
@@ -190,83 +192,83 @@ impl LVTRegisterVariant for Error {}
 use bit_field::BitField;
 
 #[repr(transparent)]
-pub struct LVTRegister<'val, T: LVTRegisterVariant> {
-    value: *mut u32,
-    phantom_lifetime: PhantomData<&'val core::ffi::c_void>,
+pub struct LVTRegister<T: LVTRegisterVariant> {
+    value: u32,
     phantom_generic: PhantomData<T>,
 }
 
-impl<'val, T: LVTRegisterVariant> LVTRegister<'val, T> {
+impl<T: LVTRegisterVariant> LVTRegister<T> {
     const INTERRUPTED_OFFSET: u32 = 12;
     const INTERRUPTED_BIT: u32 = 1 << Self::INTERRUPTED_OFFSET;
     const MASKED_OFFSET: u32 = 16;
     const MASKED_BIT: u32 = 1 << Self::MASKED_OFFSET;
     const VECTOR_MASK: u32 = 0xFF;
 
-    fn new(value: &'val mut u32) -> Self {
-        Self {
-            value: value as *mut _,
-            phantom_lifetime: PhantomData,
-            phantom_generic: PhantomData,
-        }
+    fn value_ptr(&self) -> *const u32 {
+        (&self.value) as *const u32
+    }
+
+    fn value_mut_ptr(&mut self) -> *mut u32 {
+        (&mut self.value) as *mut u32
     }
 
     pub fn is_interrupted(&self) -> bool {
-        unsafe { (self.value.read_volatile() & Self::INTERRUPTED_BIT) > 0 }
+        unsafe { (self.value_ptr().read_volatile() & Self::INTERRUPTED_BIT) > 0 }
     }
 
     pub fn is_masked(&self) -> bool {
-        unsafe { (self.value.read_volatile() & Self::MASKED_BIT) > 0 }
+        unsafe { (self.value_ptr().read_volatile() & Self::MASKED_BIT) > 0 }
     }
 
     pub fn set_masked(&mut self, masked: bool) {
         unsafe {
-            self.value.write_volatile(
-                (self.value.read_volatile() & !Self::MASKED_BIT)
+            self.value_mut_ptr().write_volatile(
+                (self.value_ptr().read_volatile() & !Self::MASKED_BIT)
                     | ((masked as u32) << Self::MASKED_OFFSET),
             );
         }
     }
 
     pub fn get_vector(&self) -> u8 {
-        unsafe { (self.value.read_volatile() & Self::VECTOR_MASK) as u8 }
+        unsafe { (self.value_ptr().read_volatile() & Self::VECTOR_MASK) as u8 }
     }
 
     pub fn set_vector(&mut self, vector: u8) {
         unsafe {
-            self.value
-                .write_volatile((self.value.read_volatile() & !Self::VECTOR_MASK) | vector as u32);
+            self.value_mut_ptr().write_volatile(
+                (self.value_ptr().read_volatile() & !Self::VECTOR_MASK) | vector as u32,
+            );
         }
     }
 
     #[cfg(debug_assertions)]
     pub fn read_raw(&self) -> u32 {
-        unsafe { self.value.read_volatile() }
+        unsafe { self.value_ptr().read_volatile() }
     }
 }
 
-impl LVTRegister<'_, Timer> {
+impl LVTRegister<Timer> {
     pub fn set_mode(&mut self, mode: APICTimerMode) {
         unsafe {
-            self.value.write_volatile(
-                (self.value.read_volatile() & !(0b11 << 17)) | ((mode as u32) << 17),
+            self.value_mut_ptr().write_volatile(
+                (self.value_ptr().read_volatile() & !(0b11 << 17)) | ((mode as u32) << 17),
             );
         }
     }
 }
 
-impl LVTRegister<'_, Generic> {
+impl LVTRegister<Generic> {
     #[inline]
     pub fn set_delivery_mode(&mut self, mode: APICDeliveryMode) {
         unsafe {
-            self.value.write_volatile(
-                (self.value.read_volatile() & !(0x111 << 8)) | ((mode as u32) << 8),
+            self.value_mut_ptr().write_volatile(
+                (self.value_ptr().read_volatile() & !(0x111 << 8)) | ((mode as u32) << 8),
             );
         }
     }
 }
 
-static mut LOCAL_APIC: SyncCell<APIC> = SyncCell::new();
+static mut LOCAL_APIC: SyncOnceCell<APIC> = SyncOnceCell::new();
 
 pub fn load() {
     if unsafe { LOCAL_APIC.get().is_some() } {
@@ -284,14 +286,14 @@ pub fn load() {
         .unwrap()
         .map();
 
-        unsafe { LOCAL_APIC.set(APIC::new(mmio)) };
+        unsafe { LOCAL_APIC.set(APIC::new(mmio)).ok() };
     }
 }
 
-pub fn local_apic() -> Option<&'static APIC> {
-    unsafe { LOCAL_APIC.get() }
+pub fn local_apic() -> &'static APIC {
+    unsafe { LOCAL_APIC.get().expect("APIC has not been configured") }
 }
 
-pub fn local_apic_mut() -> Option<&'static mut APIC> {
-    unsafe { LOCAL_APIC.get_mut() }
+pub fn local_apic_mut() -> &'static mut APIC {
+    unsafe { LOCAL_APIC.get_mut().expect("APIC has not been configured") }
 }
