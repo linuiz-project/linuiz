@@ -115,6 +115,10 @@ impl Address<Physical> {
             phantom: PhantomData,
         }
     }
+
+    pub const fn frame_index(&self) -> usize {
+        self.as_usize() / 0x1000
+    }
 }
 
 impl core::ops::Add<Address<Physical>> for Address<Physical> {
@@ -191,6 +195,10 @@ impl Address<Virtual> {
 
     pub const fn from_ptr<T>(ptr: *const T) -> Self {
         Self::new(unsafe { ptr as usize })
+    }
+
+    pub const fn page_index(&self) -> usize {
+        self.as_usize() / 0x1000
     }
 
     pub const fn as_ptr<T>(&self) -> *const T {

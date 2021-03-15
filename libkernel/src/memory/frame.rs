@@ -28,7 +28,7 @@ impl Frame {
     pub const unsafe fn from_addr(addr: Address<Physical>) -> Self {
         if addr.is_aligned(0x1000) {
             Self {
-                index: addr.as_usize() / 0x1000,
+                index: addr.frame_index(),
             }
         } else {
             panic!("frame address format is invalid")

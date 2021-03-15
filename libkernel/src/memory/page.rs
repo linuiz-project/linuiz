@@ -18,7 +18,7 @@ impl Page {
     pub const fn from_addr(addr: Address<Virtual>) -> Self {
         if addr.is_aligned(0x1000) {
             Self {
-                index: addr.as_usize() / 0x1000,
+                index: addr.page_index(),
             }
         } else {
             panic!("page address is not page-aligned")
@@ -37,9 +37,9 @@ impl Page {
         }
     }
 
-    pub const fn containing_addr(virt_addr: Address<Virtual>) -> Self {
+    pub const fn containing_addr(addr: Address<Virtual>) -> Self {
         Self {
-            index: virt_addr.as_usize() / 0x1000,
+            index: addr.page_index(),
         }
     }
 
