@@ -58,7 +58,7 @@ impl UEFIMemoryDescriptor {
     }
 
     pub fn frame_range(&self) -> core::ops::RangeInclusive<usize> {
-        let start_index = self.phys_start.as_usize() / 0x1000;
+        let start_index = self.phys_start.frame_index();
         start_index..=(start_index + (self.page_count as usize))
     }
 

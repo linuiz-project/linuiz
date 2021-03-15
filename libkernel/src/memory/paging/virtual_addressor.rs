@@ -38,6 +38,10 @@ impl VirtualAddressor {
         }
     }
 
+    pub fn mapped_page(&self) -> Page {
+        self.mapped_page
+    }
+
     /* ACQUIRE STATE */
 
     fn pml4_page(&self) -> Page {

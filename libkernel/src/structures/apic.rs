@@ -275,7 +275,7 @@ pub fn load() {
         panic!("Local APIC has already been configured");
     } else {
         debug!("Loading local APIC table.");
-        let start_index = APIC::mmio_addr().as_usize() / 0x1000;
+        let start_index = APIC::mmio_addr().frame_index();
         debug!("APIC MMIO mapping at frame: {}", start_index);
 
         let mmio = crate::memory::mmio::unmapped_mmio(unsafe {

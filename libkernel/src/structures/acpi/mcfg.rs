@@ -1,4 +1,10 @@
-use crate::structures::acpi::{ACPITable, Checksum, SDTHeader, SizedACPITable};
+use crate::{
+    addr_ty::Physical,
+    io::pci::express::PCIEBus,
+    structures::acpi::{ACPITable, Checksum, SDTHeader, SizedACPITable},
+    Address,
+};
+use alloc::vec::Vec;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -45,20 +51,61 @@ impl MCFG {
 #[repr(C)]
 #[derive(Debug)]
 pub struct MCFGEntry {
-    base_addr: crate::Address<crate::addr_ty::Physical>,
+    base_addr: Address<Physical>,
     seg_group_num: u16,
     start_pci_bus: u8,
     end_pci_bus: u8,
     reserved: [u8; 4],
 }
 
+static mut MCFG_ENTRY_BUSSES: Vec<(Address<Physical>, Vec<PCIEBus>)> = Vec::new();
+
+fn get_mcfg_entry_busses_vec<'a>(base_addr: Address<Physical>) -> Option<&'a Vec<PCIEBus>> {
+    unsafe { &MCFG_ENTRY_BUSSES }
+        .iter()
+        .find(|(addr, _)| *addr == base_addr)
+        .map(|(_, busses)| busses)
+}
+
 impl MCFGEntry {
-    // TODO this shouldn't be made multiple times, since it instantiates a new MMIO allocation each time
-    pub fn iter(&self) -> crate::io::pci::express::PCIEDeviceIterator {
-        crate::io::pci::express::PCIEDeviceIterator::new(
-            self.base_addr,
-            self.start_pci_bus,
-            self.end_pci_bus,
-        )
+    pub fn iter(&self) -> core::slice::Iter<PCIEBus> {
+        if get_mcfg_entry_busses_vec(self.base_addr).is_none() {
+            debug!("No PCI busses entry found for MCFG entry; creating.");
+
+            let busses = (self.start_pci_bus..self.end_pci_bus)
+                .filter_map(|bus_index| {
+                    let offset_addr = self.base_addr + ((bus_index as usize) << 20);
+                    let header = unsafe {
+                        &*crate::memory::malloc::get()
+                            .physical_memory(offset_addr)
+                            .as_ptr::<crate::io::pci::PCIDeviceHeader>()
+                    };
+
+                    if !header.is_invalid() {
+                        let mmio_frames = unsafe {
+                            crate::memory::falloc::get()
+                                .acquire_frame(
+                                    offset_addr.frame_index(),
+                                    crate::memory::falloc::FrameState::MMIO,
+                                )
+                                .unwrap()
+                                .into_iter()
+                        };
+
+                        Some(PCIEBus::new(
+                            crate::memory::mmio::unmapped_mmio(mmio_frames)
+                                .unwrap()
+                                .map(),
+                        ))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            unsafe { MCFG_ENTRY_BUSSES.push((self.base_addr.clone(), busses)) };
+        }
+
+        get_mcfg_entry_busses_vec(self.base_addr).unwrap().iter()
     }
 }

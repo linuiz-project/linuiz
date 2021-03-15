@@ -86,7 +86,6 @@ extern "efiapi" fn kernel_main(
     unsafe {
         let memory_map = boot_info.memory_map();
         init_falloc(memory_map);
-
         init_system_config_table(boot_info.config_table());
         let mut stack_frames = reserve_kernel_stack(memory_map);
 
@@ -123,7 +122,7 @@ extern "efiapi" fn kernel_main(
             for mcfg_entry in mcfg.iter() {
                 info!("{:?}", mcfg_entry);
 
-                for pci_bus in mcfg_entry.iter().filter(|device| device.is_some()) {
+                for pci_bus in mcfg_entry.iter() {
                     info!("{:?}", pci_bus);
                 }
             }
@@ -176,7 +175,7 @@ fn reserve_kernel_stack(memory_map: &[UEFIMemoryDescriptor]) -> libkernel::memor
     let mut stack_frames = core::lazy::OnceCell::<libkernel::memory::FrameIterator>::new();
     let mut last_frame_end = 0;
     for descriptor in memory_map {
-        let frame_start = descriptor.phys_start.as_usize() / 0x1000;
+        let frame_start = descriptor.phys_start.frame_index();
         let frame_count = descriptor.page_count as usize;
 
         // Checks for 'holes' in system memory which we shouldn't try to allocate to.
