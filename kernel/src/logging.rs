@@ -8,24 +8,24 @@ bitflags::bitflags! {
 
 static TRACE_ENABLED_PATHS: [&str; 1] = ["libkernel::memory::block_allocator"];
 
-fn trace_enabled(record: &log::Record) -> bool {
-    record.level() < log::Level::Trace || TRACE_ENABLED_PATHS.contains(&record.metadata().target())
-}
-
 pub struct KernelLogger {
     modes: LoggingModes,
 }
 
 impl log::Log for KernelLogger {
-    fn enabled(&self, _: &log::Metadata) -> bool {
-        true
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() < log::Level::Trace || TRACE_ENABLED_PATHS.contains(&metadata.target())
     }
 
     fn log(&self, record: &log::Record) {
-        let metadata = record.metadata();
-        if self.enabled(metadata) && trace_enabled(record) {
+        if self.enabled(record.metadata()) {
             if self.modes.contains(LoggingModes::STDOUT) {
-                crate::println!("[{}] {}", record.level(), record.args());
+                crate::println!(
+                    "[{} {}] {}",
+                    record.level(),
+                    record.module_path().unwrap_or("None"),
+                    record.args()
+                );
             }
 
             if self.modes.contains(LoggingModes::GRAPHIC) {

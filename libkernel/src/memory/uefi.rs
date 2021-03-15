@@ -69,7 +69,9 @@ impl UEFIMemoryDescriptor {
 
     pub fn should_reserve(&self) -> bool {
         match self.ty {
-            UEFIMemoryType::LOADER_CODE
+            UEFIMemoryType::BOOT_SERVICES_CODE
+            | UEFIMemoryType::BOOT_SERVICES_DATA
+            | UEFIMemoryType::LOADER_CODE
             | UEFIMemoryType::LOADER_DATA
             | UEFIMemoryType::CONVENTIONAL => {
                 // If this is a stack descriptor, it should be reserved.
