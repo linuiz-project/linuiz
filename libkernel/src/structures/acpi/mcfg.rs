@@ -4,7 +4,7 @@ use crate::{
     structures::acpi::{ACPITable, Checksum, SDTHeader, SizedACPITable},
     Address,
 };
-use alloc::vec::Vec;
+use alloc::{collections::BTreeMap, vec::Vec};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -58,13 +58,12 @@ pub struct MCFGEntry {
     reserved: [u8; 4],
 }
 
-static mut MCFG_ENTRY_BUSSES: Vec<(Address<Physical>, Vec<PCIeBus>)> = Vec::new();
+// TODO this solution doesn't really feel very permanent, so I'd like to use a more
+//      idiomatic approach.
+static mut MCFG_ENTRY_BUSSES: BTreeMap<Address<Physical>, Vec<PCIeBus>> = BTreeMap::new();
 
 fn get_mcfg_entry_busses_vec<'a>(base_addr: Address<Physical>) -> Option<&'a Vec<PCIeBus>> {
-    unsafe { &MCFG_ENTRY_BUSSES }
-        .iter()
-        .find(|(addr, _)| *addr == base_addr)
-        .map(|(_, busses)| busses)
+    unsafe { MCFG_ENTRY_BUSSES.get(&base_addr) }
 }
 
 impl MCFGEntry {
@@ -103,7 +102,7 @@ impl MCFGEntry {
                 })
                 .collect();
 
-            unsafe { MCFG_ENTRY_BUSSES.push((self.base_addr.clone(), busses)) };
+            unsafe { MCFG_ENTRY_BUSSES.insert(self.base_addr, busses) };
         }
 
         get_mcfg_entry_busses_vec(self.base_addr).unwrap().iter()

@@ -13,7 +13,8 @@
     const_panic,
     const_mut_refs,
     const_raw_ptr_to_usize_cast,
-    exclusive_range_pattern
+    exclusive_range_pattern,
+    const_btree_new
 )]
 
 #[macro_use]
