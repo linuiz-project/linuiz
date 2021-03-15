@@ -123,7 +123,7 @@ extern "efiapi" fn kernel_main(
                 info!("{:?}", mcfg_entry);
 
                 for pci_bus in mcfg_entry.iter() {
-                    info!("{:?}", pci_bus);
+                    info!("{:#?}", pci_bus);
                 }
             }
         } else if let XSDTEntry::APIC(madt) = entry {

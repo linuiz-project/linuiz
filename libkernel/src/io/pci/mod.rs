@@ -1,7 +1,10 @@
 pub mod express;
 pub mod legacy;
 
-bitflags::bitflags! {
+use bitflags::bitflags;
+use core::fmt::Debug;
+
+bitflags! {
     pub struct PCIDeviceStatus: u16 {
         const CAPABILITIES = 1 << 4;
         const CAPABILITITY_66MHZ = 1 << 5;
@@ -15,7 +18,7 @@ bitflags::bitflags! {
     }
 }
 
-bitflags::bitflags! {
+bitflags! {
     pub struct PCIDeviceSELTiming: u16 {
         const FAST = 0;
         const MEDIUM = 1;
@@ -56,7 +59,48 @@ pub enum PCIDeviceClass {
     Unassigned = 0xFF,
 }
 
-pub struct PCIDeviceHeader {
+#[repr(transparent)]
+pub struct PCIBISTRegister {
+    data: u8,
+}
+
+impl PCIBISTRegister {
+    pub fn capable(&self) -> bool {
+        (self.data & (1 << 7)) > 0
+    }
+
+    pub fn start(&self) -> bool {
+        (self.data & (1 << 6)) > 0
+    }
+
+    pub fn completion_code(&self) -> u8 {
+        self.data & 0b111
+    }
+}
+
+impl core::fmt::Debug for PCIBISTRegister {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("BIST")
+            .field("Capable", &self.capable())
+            .field("Start", &self.start())
+            .field("Completion Code", &self.completion_code())
+            .finish()
+    }
+}
+
+pub trait PCIDeviceHeaderType {}
+
+pub enum Standard {}
+impl PCIDeviceHeaderType for Standard {}
+
+pub enum PCI2PCI {}
+impl PCIDeviceHeaderType for PCI2PCI {}
+
+pub enum PCI2CardBus {}
+impl PCIDeviceHeaderType for PCI2CardBus {}
+
+pub struct PCIDeviceHeader<T: PCIDeviceHeaderType> {
     vendor_id: u16,
     device_id: u16,
     command: u16,
@@ -72,10 +116,11 @@ pub struct PCIDeviceHeader {
     cache_line_size: u8,
     latency_timer: u8,
     header_type: u8,
-    bist: u8,
+    bist: PCIBISTRegister,
+    phantom: core::marker::PhantomData<T>,
 }
 
-impl PCIDeviceHeader {
+impl<T: PCIDeviceHeaderType> PCIDeviceHeader<T> {
     pub fn is_invalid(&self) -> bool {
         self.vendor_id() == u16::MAX
     }
@@ -99,6 +144,14 @@ impl PCIDeviceHeader {
     pub fn subclass(&self) -> u8 {
         self.subclass
     }
+
+    pub fn header_type(&self) -> u8 {
+        self.header_type
+    }
+
+    pub fn bist(&self) -> &PCIBISTRegister {
+        &self.bist
+    }
 }
 
 impl core::fmt::Debug for PCIDeviceHeader {
@@ -110,6 +163,8 @@ impl core::fmt::Debug for PCIDeviceHeader {
             .field("Class", &self.class())
             .field("Subclass", &self.subclass())
             .field("Status", &self.status())
+            .field("Header Type", &self.header_type())
+            .field("BIST", self.bist())
             .finish()
     }
 }

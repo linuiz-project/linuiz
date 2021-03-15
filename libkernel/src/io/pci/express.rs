@@ -1,16 +1,13 @@
 use crate::{
-    addr_ty::Physical,
     io::pci::PCIDeviceHeader,
     memory::mmio::{Mapped, MMIO},
-    Address,
 };
-use core::u8;
 
-pub struct PCIEBus {
+pub struct PCIeBus {
     mmio: MMIO<Mapped>,
 }
 
-impl PCIEBus {
+impl PCIeBus {
     pub const fn new(mmio: MMIO<Mapped>) -> Self {
         Self { mmio }
     }
@@ -20,7 +17,7 @@ impl PCIEBus {
     }
 }
 
-impl core::fmt::Debug for PCIEBus {
+impl core::fmt::Debug for PCIeBus {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
             .debug_struct("PCIe Bus")

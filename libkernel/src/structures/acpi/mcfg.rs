@@ -1,6 +1,6 @@
 use crate::{
     addr_ty::Physical,
-    io::pci::express::PCIEBus,
+    io::pci::express::PCIeBus,
     structures::acpi::{ACPITable, Checksum, SDTHeader, SizedACPITable},
     Address,
 };
@@ -58,9 +58,9 @@ pub struct MCFGEntry {
     reserved: [u8; 4],
 }
 
-static mut MCFG_ENTRY_BUSSES: Vec<(Address<Physical>, Vec<PCIEBus>)> = Vec::new();
+static mut MCFG_ENTRY_BUSSES: Vec<(Address<Physical>, Vec<PCIeBus>)> = Vec::new();
 
-fn get_mcfg_entry_busses_vec<'a>(base_addr: Address<Physical>) -> Option<&'a Vec<PCIEBus>> {
+fn get_mcfg_entry_busses_vec<'a>(base_addr: Address<Physical>) -> Option<&'a Vec<PCIeBus>> {
     unsafe { &MCFG_ENTRY_BUSSES }
         .iter()
         .find(|(addr, _)| *addr == base_addr)
@@ -68,7 +68,7 @@ fn get_mcfg_entry_busses_vec<'a>(base_addr: Address<Physical>) -> Option<&'a Vec
 }
 
 impl MCFGEntry {
-    pub fn iter(&self) -> core::slice::Iter<PCIEBus> {
+    pub fn iter(&self) -> core::slice::Iter<PCIeBus> {
         if get_mcfg_entry_busses_vec(self.base_addr).is_none() {
             debug!("No PCI busses entry found for MCFG entry; creating.");
 
@@ -92,7 +92,7 @@ impl MCFGEntry {
                                 .into_iter()
                         };
 
-                        Some(PCIEBus::new(
+                        Some(PCIeBus::new(
                             crate::memory::mmio::unmapped_mmio(mmio_frames)
                                 .unwrap()
                                 .map(),
