@@ -29,8 +29,19 @@ pub fn get_ticks_unordered() -> usize {
     TICKS.load(core::sync::atomic::Ordering::Relaxed)
 }
 
-pub fn wait(ticks: usize) {
-    Timer::wait_new(ticks);
+pub fn sleep_msec(milliseconds: usize) {
+    tick_wait(get_ticks() + milliseconds);
+}
+
+pub fn sleep_sec(seconds: usize) {
+    tick_wait(get_ticks() + (seconds * 1000))
+}
+
+#[inline(always)]
+fn tick_wait(target_ticks: usize) {
+    while get_ticks() < target_ticks {
+        libkernel::instructions::hlt();
+    }
 }
 
 pub struct Timer {
