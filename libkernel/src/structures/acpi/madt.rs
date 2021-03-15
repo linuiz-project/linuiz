@@ -65,23 +65,15 @@ impl<'a> Iterator for MADTIterator<'a> {
                 self.cur_header_ptr = self.cur_header_ptr.add(header.len as usize);
 
                 match header.ty {
-                    0x0 => Some(InterruptDevice::LocalAPIC(
-                        &*(header_ptr as *const LocalAPIC),
-                    )),
-                    0x1 => Some(InterruptDevice::IOAPIC(&*(header_ptr as *const IOAPIC))),
-                    0x2 => Some(InterruptDevice::IRQSrcOverride(
-                        &*(header_ptr as *const IRQSrcOverride),
-                    )),
-                    0x4 => Some(InterruptDevice::NonMaskableIRQ(
-                        &*(header_ptr as *const NonMaskableIRQ),
-                    )),
+                    0x0 => Some(InterruptDevice::LocalAPIC(&*(header_ptr as *const _))),
+                    0x1 => Some(InterruptDevice::IOAPIC(&*(header_ptr as *const _))),
+                    0x2 => Some(InterruptDevice::IRQSrcOverride(&*(header_ptr as *const _))),
+                    0x4 => Some(InterruptDevice::NonMaskableIRQ(&*(header_ptr as *const _))),
                     0x5 => Some(InterruptDevice::LocalAPICAddrOverride(
-                        &*(header_ptr as *const LocalAPICAddrOverride),
+                        &*(header_ptr as *const _),
                     )),
-                    /* 0xF..0x7F | 0x80..0xFF | */
-                    ty => {
-                        panic!("invalid interrupt device type: 0x{:X}", ty)
-                    }
+                    0xF..0x7F | 0x80..0xFF => Some(InterruptDevice::Reserved),
+                    ty => panic!("invalid interrupt device type: 0x{:X}", ty),
                 }
             }
         } else {
@@ -97,13 +89,30 @@ struct InterruptDeviceHeader {
     len: u8,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub enum InterruptDevice<'a> {
     LocalAPIC(&'a LocalAPIC),
     IOAPIC(&'a IOAPIC),
     IRQSrcOverride(&'a IRQSrcOverride),
     NonMaskableIRQ(&'a NonMaskableIRQ),
     LocalAPICAddrOverride(&'a LocalAPICAddrOverride),
+    Reserved,
+}
+
+impl core::fmt::Debug for InterruptDevice<'_> {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_tuple("InterruptDevice")
+            .field(match self {
+                InterruptDevice::LocalAPIC(_) => &"Local APIC",
+                InterruptDevice::IOAPIC(_) => &"IO APIC",
+                InterruptDevice::IRQSrcOverride(_) => &"IRQ Source Override",
+                InterruptDevice::NonMaskableIRQ(_) => &"Non-Maskable IRQ",
+                InterruptDevice::LocalAPICAddrOverride(_) => &"Local APIC Address Override",
+                InterruptDevice::Reserved => &"Unhandled",
+            })
+            .finish()
+    }
 }
 
 bitflags::bitflags! {

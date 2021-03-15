@@ -21,7 +21,11 @@ impl log::Log for KernelLogger {
         if self.enabled(record.metadata()) {
             if self.modes.contains(LoggingModes::STDOUT) {
                 crate::println!(
-                    "[{} {}] {}",
+                    "{}[{} {}] {}",
+                    match record.level() {
+                        log::Level::Error => &"\n\n",
+                        _ => &"",
+                    },
                     record.level(),
                     record.module_path().unwrap_or("None"),
                     record.args()

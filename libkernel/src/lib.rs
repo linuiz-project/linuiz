@@ -12,7 +12,8 @@
     alloc_error_handler,
     const_panic,
     const_mut_refs,
-    const_raw_ptr_to_usize_cast
+    const_raw_ptr_to_usize_cast,
+    exclusive_range_pattern
 )]
 
 #[macro_use]
