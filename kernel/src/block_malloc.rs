@@ -1,5 +1,6 @@
 use core::mem::size_of;
 use libkernel::{
+    addr_ty::{Physical, Virtual},
     align_up_div,
     memory::{falloc, paging::VirtualAddressor, Frame, FrameIterator, Page},
     Address, SYSTEM_SLICE_SIZE,
@@ -606,6 +607,10 @@ impl BlockAllocator<'_> {
             new_map_len * BLOCKS_PER_MAP_PAGE
         );
     }
+
+    pub unsafe fn physical_memory(&self, addr: Address<Physical>) -> Address<Virtual> {
+        self.get_addressor().mapped_page().addr() + addr.as_usize()
+    }
 }
 
 impl libkernel::memory::malloc::MemoryAllocator for BlockAllocator<'_> {
@@ -623,5 +628,9 @@ impl libkernel::memory::malloc::MemoryAllocator for BlockAllocator<'_> {
 
     fn minimum_alignment(&self) -> usize {
         Self::BLOCK_SIZE
+    }
+
+    unsafe fn physical_memory(&self, addr: Address<Physical>) -> Address<Virtual> {
+        self.physical_memory(addr)
     }
 }
