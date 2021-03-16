@@ -7,7 +7,22 @@ use bitflags::bitflags;
 use core::fmt;
 
 bitflags! {
-    pub struct PCIDeviceStatus: u16 {
+    pub struct PCICommandRegister: u16 {
+        const IO_SPACE = 1 << 0;
+        const MEMORY_SPACE = 1 << 1;
+        const BUS_MASTER = 1 << 2;
+        const SPECIAL_CYCLES = 1 << 3;
+        const MEMORY_W_AND_I_ENABLE = 1 << 4;
+        const VGA_PALETTE_SNOOP = 1 << 5;
+        const PARITY_ERROR_RESPONSE = 1 << 6;
+        const SERR_ENABLE = 1 << 8;
+        const FAST_B2B_ENABLE = 1 << 9;
+        const INTERRUPT_DISABLE = 1 << 10;
+    }
+}
+
+bitflags! {
+    pub struct PCIStatusRegister: u16 {
         const CAPABILITIES = 1 << 4;
         const CAPABILITITY_66MHZ = 1 << 5;
         const FAST_BACK2BACK_CAPABLE = 1 << 7;
@@ -28,7 +43,7 @@ bitflags! {
     }
 }
 
-impl PCIDeviceStatus {
+impl PCIStatusRegister {
     pub fn devsel_timing(&self) -> PCIDeviceSELTiming {
         PCIDeviceSELTiming::from_bits_truncate((self.bits() >> 9) & 0b11)
     }
@@ -95,8 +110,8 @@ impl core::fmt::Debug for PCIBISTRegister {
 pub struct PCIDeviceHeader {
     vendor_id: u16,
     device_id: u16,
-    command: u16,
-    status: u16,
+    command: PCICommandRegister,
+    status: PCIStatusRegister,
     revision_id: u8,
     prog_interface: u8,
     /// Subclass of the PCI device class.
@@ -113,7 +128,7 @@ pub struct PCIDeviceHeader {
 
 impl PCIDeviceHeader {
     pub fn is_invalid(&self) -> bool {
-        self.vendor_id() == u16::MAX
+        self.vendor_id() == u16::MAX || self.device_id() == u16::MAX
     }
 
     pub fn vendor_id(&self) -> u16 {
@@ -133,16 +148,36 @@ impl PCIDeviceHeader {
         self.device_id
     }
 
-    pub fn status(&self) -> PCIDeviceStatus {
-        PCIDeviceStatus::from_bits_truncate(self.status)
+    pub fn command(&self) -> PCICommandRegister {
+        self.command
+    }
+
+    pub fn status(&self) -> PCIStatusRegister {
+        self.status
+    }
+
+    pub fn revision_id(&self) -> u8 {
+        self.revision_id
+    }
+
+    pub fn program_interface(&self) -> u8 {
+        self.prog_interface
+    }
+
+    pub fn subclass(&self) -> u8 {
+        self.subclass
     }
 
     pub fn class(&self) -> PCIDeviceClass {
         self.class
     }
 
-    pub fn subclass(&self) -> u8 {
-        self.subclass
+    pub fn cache_line_size(&self) -> u8 {
+        self.cache_line_size
+    }
+
+    pub fn latency_timer(&self) -> u8 {
+        self.latency_timer
     }
 
     pub fn header_type(&self) -> u8 {
@@ -164,9 +199,14 @@ impl fmt::Debug for PCIDeviceHeader {
             .debug_struct("PCIDeviceHeader")
             .field("Vendor", &self.vendor())
             .field("Device ID", &self.device_id())
-            .field("Class", &self.class())
-            .field("Subclass", &self.subclass())
+            .field("Command", &self.command())
             .field("Status", &self.status())
+            .field("Revision ID", &self.revision_id())
+            .field("Program Interface", &self.program_interface())
+            .field("Subclass", &self.subclass())
+            .field("Class", &self.class())
+            .field("Cache Line Size", &self.cache_line_size())
+            .field("Latency Timer", &self.latency_timer())
             .field("Multi-Function", &self.multi_function())
             .field("Header Type", &self.header_type())
             .field("BIST", self.bist())
@@ -248,29 +288,29 @@ impl fmt::Debug for BaseAddressRegister<IOSpace> {
     }
 }
 
-pub trait ExtPCIDeviceVariant {}
+pub trait PCIeDeviceVariant {}
 
 pub enum Standard {}
-impl ExtPCIDeviceVariant for Standard {}
+impl PCIeDeviceVariant for Standard {}
 
 pub enum PCI2PCI {}
-impl ExtPCIDeviceVariant for PCI2PCI {}
+impl PCIeDeviceVariant for PCI2PCI {}
 
 pub enum PCI2CardBus {}
-impl ExtPCIDeviceVariant for PCI2CardBus {}
+impl PCIeDeviceVariant for PCI2CardBus {}
 
 #[derive(Debug)]
-pub enum ExtPCIDeviceType<'a> {
-    Standard(&'a ExtPCIDeviceHeader<Standard>),
-    PCI2PCI(&'a ExtPCIDeviceHeader<PCI2PCI>),
-    PCI2CardBus(&'a ExtPCIDeviceHeader<PCI2CardBus>),
+pub enum PCIeDeviceType<'a> {
+    Standard(&'a PCIeDeviceHeader<Standard>),
+    PCI2PCI(&'a PCIeDeviceHeader<PCI2PCI>),
+    PCI2CardBus(&'a PCIeDeviceHeader<PCI2CardBus>),
 }
 
-pub struct ExtPCIDeviceHeader<T: ExtPCIDeviceVariant> {
+pub struct PCIeDeviceHeader<T: PCIeDeviceVariant> {
     phantom: core::marker::PhantomData<T>,
 }
 
-impl ExtPCIDeviceHeader<Standard> {
+impl PCIeDeviceHeader<Standard> {
     unsafe fn offset<T: Copy>(&self, offset: usize) -> &T {
         &*((self as *const _ as *const u8).add(offset) as *const T)
     }
@@ -355,7 +395,7 @@ impl ExtPCIDeviceHeader<Standard> {
     }
 }
 
-impl fmt::Debug for ExtPCIDeviceHeader<Standard> {
+impl fmt::Debug for PCIeDeviceHeader<Standard> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("Extended PCI Device Header")
@@ -381,12 +421,12 @@ impl fmt::Debug for ExtPCIDeviceHeader<Standard> {
     }
 }
 
-impl fmt::Debug for ExtPCIDeviceHeader<PCI2PCI> {
+impl fmt::Debug for PCIeDeviceHeader<PCI2PCI> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("ss").finish()
     }
 }
-impl fmt::Debug for ExtPCIDeviceHeader<PCI2CardBus> {
+impl fmt::Debug for PCIeDeviceHeader<PCI2CardBus> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("ss").finish()
     }

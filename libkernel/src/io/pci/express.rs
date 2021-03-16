@@ -1,5 +1,5 @@
 use crate::{
-    io::pci::{ExtPCIDeviceType, PCIDeviceHeader},
+    io::pci::{PCIDeviceHeader, PCIeDeviceType},
     memory::mmio::{Mapped, MMIO},
 };
 
@@ -16,11 +16,11 @@ impl PCIeBus {
         unsafe { self.mmio.read(0).unwrap() }
     }
 
-    pub fn ext_header(&self) -> ExtPCIDeviceType {
+    pub fn ext_header(&self) -> PCIeDeviceType {
         match self.base_header().header_type() {
-            0x0 => ExtPCIDeviceType::Standard(unsafe { self.mmio.read(0).unwrap() }),
-            0x1 => ExtPCIDeviceType::PCI2PCI(unsafe { self.mmio.read(0).unwrap() }),
-            0x2 => ExtPCIDeviceType::PCI2CardBus(unsafe { self.mmio.read(0).unwrap() }),
+            0x0 => PCIeDeviceType::Standard(unsafe { self.mmio.read(0).unwrap() }),
+            0x1 => PCIeDeviceType::PCI2PCI(unsafe { self.mmio.read(0).unwrap() }),
+            0x2 => PCIeDeviceType::PCI2CardBus(unsafe { self.mmio.read(0).unwrap() }),
             header_type => panic!("invalid header type: 0x{:X}", header_type),
         }
     }
