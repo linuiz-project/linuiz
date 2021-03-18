@@ -6,7 +6,7 @@ use crate::{
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct MCFGHeader {
+struct MCFGHeader {
     sdt_header: SDTHeader,
     _reserved: [u8; 8],
 }
@@ -24,15 +24,11 @@ pub struct MCFG {
 
 impl Checksum for MCFG {
     fn bytes_len(&self) -> usize {
-        self.header().sdt_header().table_len() as usize
+        self.header.sdt_header().table_len() as usize
     }
 }
 
 impl MCFG {
-    pub fn header(&self) -> MCFGHeader {
-        self.header
-    }
-
     pub fn init_pcie(&self) {
         self.checksum_panic();
 
@@ -41,7 +37,7 @@ impl MCFG {
 
             &*core::ptr::slice_from_raw_parts(
                 (self as *const _ as *const u8).add(size_of::<MCFGHeader>()) as *const MCFGEntry,
-                ((self.header().sdt_header().table_len() as usize) - size_of::<MCFGHeader>())
+                ((self.header.sdt_header().table_len() as usize) - size_of::<MCFGHeader>())
                     / size_of::<MCFGEntry>(),
             )
         }
