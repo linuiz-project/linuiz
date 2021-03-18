@@ -1,6 +1,6 @@
 use crate::{
     addr_ty::Physical,
-    io::pci::express::PCIeBus,
+    io::pci::express::PCIeDevice,
     structures::acpi::{ACPITable, Checksum, SDTHeader, SizedACPITable},
     Address,
 };
@@ -60,20 +60,22 @@ pub struct MCFGEntry {
 
 // TODO this solution doesn't really feel very permanent, so I'd like to use a more
 //      idiomatic approach.
-static mut MCFG_ENTRY_BUSSES: BTreeMap<Address<Physical>, Vec<PCIeBus>> = BTreeMap::new();
+static mut MCFG_ENTRY_BUSSES: BTreeMap<Address<Physical>, Vec<PCIeDevice>> = BTreeMap::new();
 
-fn get_mcfg_entry_busses_vec<'a>(base_addr: Address<Physical>) -> Option<&'a Vec<PCIeBus>> {
+fn get_mcfg_entry_busses_vec<'a>(base_addr: Address<Physical>) -> Option<&'a Vec<PCIeDevice>> {
     unsafe { MCFG_ENTRY_BUSSES.get(&base_addr) }
 }
 
 impl MCFGEntry {
-    pub fn iter(&self) -> core::slice::Iter<PCIeBus> {
+    pub fn iter(&self) -> core::slice::Iter<PCIeDevice> {
         if get_mcfg_entry_busses_vec(self.base_addr).is_none() {
             debug!("No PCI busses entry found for MCFG entry; creating.");
 
             let busses = (self.start_pci_bus..self.end_pci_bus)
-                .filter_map(|bus_index| {
-                    let offset_addr = self.base_addr + ((bus_index as usize) << 20);
+                .flat_map(|bus_index| (0..32).map(move |device_index| (bus_index, device_index)))
+                .filter_map(|(bus_index, device_index)| {
+                    let offset_addr =
+                        self.base_addr + (((bus_index as usize) << 20) | (device_index << 15));
                     let header = unsafe {
                         &*crate::memory::malloc::get()
                             .physical_memory(offset_addr)
@@ -81,6 +83,8 @@ impl MCFGEntry {
                     };
 
                     if !header.is_invalid() {
+                        debug!("Non-invalid header: {:?}", header);
+
                         let mmio_frames = unsafe {
                             crate::memory::falloc::get()
                                 .acquire_frame(
@@ -91,7 +95,7 @@ impl MCFGEntry {
                                 .into_iter()
                         };
 
-                        Some(PCIeBus::new(
+                        Some(PCIeDevice::new(
                             crate::memory::mmio::unmapped_mmio(mmio_frames)
                                 .unwrap()
                                 .map(),
