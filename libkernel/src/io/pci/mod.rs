@@ -127,8 +127,8 @@ pub struct PCIDeviceHeader {
 }
 
 impl PCIDeviceHeader {
-    pub fn is_invalid(&self) -> bool {
-        self.vendor_id() == u16::MAX || self.device_id() == u16::MAX
+    pub fn is_valid(&self) -> bool {
+        self.vendor_id() != u16::MAX
     }
 
     pub fn vendor_id(&self) -> u16 {

@@ -119,13 +119,7 @@ extern "efiapi" fn kernel_main(
         if let XSDTEntry::MCFG(mcfg) = entry {
             info!("MCFG FOUND");
 
-            for mcfg_entry in mcfg.iter() {
-                info!("{:?}", mcfg_entry);
-
-                for pci_bus in mcfg_entry.iter() {
-                    info!("{:#?}", pci_bus);
-                }
-            }
+            mcfg.init_pcie();
         } else if let XSDTEntry::APIC(madt) = entry {
             info!("MADT FOUND");
 

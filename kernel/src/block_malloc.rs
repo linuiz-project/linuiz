@@ -271,6 +271,8 @@ impl BlockAllocator<'_> {
 
     /* ALLOC & DEALLOC */
 
+    // TODO consider returning a slice from this function rather than a raw pointer
+    //      reasoning: possibly a more idiomatic way to return a sized chunk of memory
     pub fn alloc<T>(&self, layout: core::alloc::Layout) -> *mut T {
         const MINIMUM_ALIGNMENT: usize = 16;
 
@@ -278,13 +280,16 @@ impl BlockAllocator<'_> {
         let alignment = if (layout.align() & (MINIMUM_ALIGNMENT - 1)) == 0 {
             layout.align()
         } else {
-            warn!("Unsupported allocator alignment: {}", layout.align());
-            warn!("Defaulting to alignment: 16");
+            trace!(
+                "Unsupported allocator alignment: {}, defaulting to {}",
+                layout.align(),
+                Self::BLOCK_SIZE
+            );
 
             MINIMUM_ALIGNMENT
         };
 
-        debug!(
+        trace!(
             "Allocation requested: {}{{by {}}} bytes ({} blocks)",
             layout.size(),
             alignment,
@@ -332,9 +337,10 @@ impl BlockAllocator<'_> {
         let start_block_index = block_index - current_run;
         let end_block_index = block_index;
         block_index = start_block_index;
-        info!(
-            "Allocating fulfilling: {}..{}",
-            start_block_index, end_block_index
+        trace!(
+            "Allocation fulfilling: {}..{}",
+            start_block_index,
+            end_block_index
         );
 
         let start_map_index = start_block_index / BlockPage::BLOCK_COUNT;
@@ -399,9 +405,10 @@ impl BlockAllocator<'_> {
         let start_block_index = (ptr as usize) / Self::BLOCK_SIZE;
         let end_block_index = start_block_index + align_up_div(size, Self::BLOCK_SIZE);
         let mut block_index = start_block_index;
-        info!(
-            "Deallocating requested: {}..{}",
-            start_block_index, end_block_index
+        trace!(
+            "Deallocation requested: {}..{}",
+            start_block_index,
+            end_block_index
         );
 
         let start_map_index = start_block_index / BlockPage::BLOCK_COUNT;
