@@ -4,7 +4,7 @@ static SYSTEM_CONFIG_TABLE: SyncOnceCell<SystemConfigTable> = SyncOnceCell::new(
 
 pub unsafe fn init_system_config_table(ptr: *const SystemConfigTableEntry, len: usize) {
     SYSTEM_CONFIG_TABLE
-        .set(SystemConfigTable::new(ptr, len))
+        .set(SystemConfigTable::from_ptr(ptr, len))
         .expect("global ACPI config table has already been set");
 }
 
@@ -21,7 +21,7 @@ pub struct SystemConfigTable {
 }
 
 impl SystemConfigTable {
-    unsafe fn new(ptr: *const SystemConfigTableEntry, len: usize) -> Self {
+    unsafe fn from_ptr(ptr: *const SystemConfigTableEntry, len: usize) -> Self {
         Self { ptr, len }
     }
 
