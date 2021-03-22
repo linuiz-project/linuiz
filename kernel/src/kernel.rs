@@ -16,7 +16,7 @@ mod timer;
 use core::ffi::c_void;
 use libkernel::{
     memory::{falloc, UEFIMemoryDescriptor},
-    structures::{acpi::RDSPDescriptor2, SystemConfigTableEntry},
+    structures::SystemConfigTableEntry,
     BootInfo,
 };
 
@@ -103,31 +103,10 @@ extern "efiapi" fn kernel_main(
 
     init_apic();
 
-    let rdsp: &RDSPDescriptor2 = unsafe {
-        libkernel::structures::system_config_table()
-            .iter()
-            .find(|entry| entry.guid() == libkernel::structures::acpi::ACPI2_GUID)
-            .unwrap()
-            .as_ref()
-    };
-
-    let xsdt = rdsp.xsdt();
-
-    for entry in xsdt.iter() {
-        use libkernel::structures::acpi::XSDTEntry;
-
-        if let XSDTEntry::MCFG(mcfg) = entry {
-            info!("MCFG FOUND");
-
-            mcfg.init_pcie();
-        } else if let XSDTEntry::APIC(madt) = entry {
-            info!("MADT FOUND");
-
-            for madt_entry in madt.iter() {
-                info!("{:?}", madt_entry);
-            }
-        }
-    }
+    use libkernel::structures::acpi::xsdt::MCFG;
+    libkernel::structures::acpi::xsdt::get_entry::<MCFG>()
+        .unwrap()
+        .init_pcie();
 
     info!("Kernel has reached safe shutdown state.");
     unsafe { libkernel::instructions::pwm::qemu_shutdown() }
@@ -248,7 +227,7 @@ fn init_apic() {
     libkernel::instructions::interrupts::enable();
 
     libkernel::structures::apic::load();
-    let apic = libkernel::structures::apic::local_apic_mut();
+    let apic = libkernel::structures::apic::local_apic_mut().unwrap();
 
     unsafe {
         debug!("Resetting and enabling local APIC (it may have already been enabled).");
@@ -293,7 +272,7 @@ fn init_apic() {
 extern "x86-interrupt" fn apic_error_handler(
     _: &mut libkernel::structures::idt::InterruptStackFrame,
 ) {
-    let apic = libkernel::structures::apic::local_apic_mut();
+    let apic = libkernel::structures::apic::local_apic_mut().unwrap();
 
     error!("APIC ERROR INTERRUPT");
     error!("--------------------");
