@@ -1,6 +1,10 @@
+mod madt;
+mod mcfg;
 mod rdsp;
 
 pub mod xsdt;
+pub use madt::*;
+pub use mcfg::*;
 pub use rdsp::*;
 
 use crate::structures::GUID;

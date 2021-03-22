@@ -103,7 +103,7 @@ extern "efiapi" fn kernel_main(
 
     init_apic();
 
-    use libkernel::structures::acpi::xsdt::MCFG;
+    use libkernel::structures::acpi::MCFG;
     libkernel::structures::acpi::xsdt::get_entry::<MCFG>()
         .unwrap()
         .init_pcie();

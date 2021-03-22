@@ -1,9 +1,3 @@
-mod madt_entry;
-mod mcfg_entry;
-
-pub use madt_entry::*;
-pub use mcfg_entry::*;
-
 use crate::structures::acpi::{ACPITable, Checksum, SDTHeader, SizedACPITable};
 
 #[repr(C)]
@@ -59,8 +53,18 @@ impl<T: XSDTEntryType> ACPITable for XSDTEntry<T> {
 
 #[derive(Debug)]
 pub enum XSDTError {
-    NotInitialized,
+    NoXSDT,
     NoEntry,
+}
+
+lazy_static::lazy_static! {
+    static ref G_XSDT: Option<&'static XSDT> = unsafe {
+        crate::structures::acpi::G_RDSP2.map(|rdsp2| {
+            let xsdt = &*(rdsp2.xsdt_addr().as_usize() as *const XSDT);
+            xsdt.checksum_panic();
+            xsdt
+        })
+    };
 }
 
 pub fn get_entry<T: XSDTEntryType>() -> Result<&'static XSDTEntry<T>, XSDTError> {
@@ -68,23 +72,15 @@ pub fn get_entry<T: XSDTEntryType>() -> Result<&'static XSDTEntry<T>, XSDTError>
         for entry_ptr in G_XSDT.unwrap().entries().iter().map(|entry_ptr| *entry_ptr) {
             unsafe {
                 if (&*(entry_ptr as *const _ as *const SDTHeader)).signature() == T::SIGNATURE {
-                    return Ok(&*(entry_ptr as *const _ as *const _));
+                    let entry: &XSDTEntry<T> = &*(entry_ptr as *const _ as *const _);
+                    entry.checksum_panic();
+                    return Ok(entry);
                 }
             }
         }
 
         Err(XSDTError::NoEntry)
     } else {
-        Err(XSDTError::NotInitialized)
+        Err(XSDTError::NoXSDT)
     }
 }
-
-lazy_static::lazy_static! {
-    static ref G_XSDT: Option<&'static XSDT> = unsafe {
-        crate::structures::acpi::G_RDSP2.map(|rdsp2| &*(rdsp2.xsdt_addr().as_usize() as *const XSDT))
-    };
-}
-
-// TODO xsdt subtables should be derived from a base struct, with T variants deriving them
-//      this will allow returning arbitrary tables from a function, where T is the variant
-//      (..... ideally)
