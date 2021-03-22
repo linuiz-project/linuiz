@@ -1,3 +1,5 @@
+use crate::{addr_ty::Physical, Address};
+
 #[repr(C, packed)]
 pub struct RDSPDescriptor {
     signature: [u8; 8],
@@ -23,7 +25,7 @@ impl crate::structures::acpi::Checksum for RDSPDescriptor {}
 pub struct RDSPDescriptor2 {
     base: RDSPDescriptor,
     len: u32,
-    xsdt_addr: crate::Address<crate::addr_ty::Physical>,
+    xsdt_addr: Address<Physical>,
     ext_checksum: u8,
     reserved: [u8; 3],
 }
@@ -37,9 +39,19 @@ impl RDSPDescriptor2 {
         self.base.oem_id()
     }
 
-    pub fn xsdt(&self) -> &crate::structures::acpi::XSDT {
-        unsafe { &*(self.xsdt_addr.as_usize() as *const crate::structures::acpi::XSDT) }
+    pub fn xsdt_addr(&self) -> Address<Physical> {
+        self.xsdt_addr
     }
 }
 
 impl crate::structures::acpi::Checksum for RDSPDescriptor2 {}
+
+lazy_static::lazy_static! {
+    pub static ref G_RDSP2: Option<&'static RDSPDescriptor2> = unsafe {
+        if let Some(entry) = crate::structures::get_system_config_table_entry(crate::structures::acpi::ACPI2_GUID) {
+            Some(entry.as_ref())
+        } else {
+            None
+        }
+    };
+}

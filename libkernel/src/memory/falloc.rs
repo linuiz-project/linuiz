@@ -4,6 +4,28 @@ use crate::{
 };
 use spin::RwLock;
 
+static DEFAULT_FALLOCATOR: SyncOnceCell<FrameAllocator> = SyncOnceCell::new();
+
+pub unsafe fn load(ptr: *mut usize, total_memory: usize) {
+    if !DEFAULT_FALLOCATOR.get().is_some() {
+        DEFAULT_FALLOCATOR
+            .set(FrameAllocator::from_ptr(ptr, total_memory))
+            .ok();
+    } else {
+        panic!("frame allocator has already been configured")
+    }
+}
+
+pub fn get() -> &'static FrameAllocator<'static> {
+    DEFAULT_FALLOCATOR
+        .get()
+        .expect("frame allocator has not been configured")
+}
+
+pub fn virtual_map_offset() -> Address<Virtual> {
+    Address::<Virtual>::new(crate::VADDR_HW_MAX - get().total_memory(None))
+}
+
 #[repr(usize)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameState {
@@ -252,26 +274,4 @@ impl<'arr> FrameAllocator<'arr> {
     pub fn debug_log_elements(&self) {
         self.memory_map.debug_log_elements();
     }
-}
-
-static DEFAULT_FALLOCATOR: SyncOnceCell<FrameAllocator> = SyncOnceCell::new();
-
-pub unsafe fn load(ptr: *mut usize, total_memory: usize) {
-    if !DEFAULT_FALLOCATOR.get().is_some() {
-        DEFAULT_FALLOCATOR
-            .set(FrameAllocator::from_ptr(ptr, total_memory))
-            .ok();
-    } else {
-        panic!("frame allocator has already been configured")
-    }
-}
-
-pub fn get() -> &'static FrameAllocator<'static> {
-    DEFAULT_FALLOCATOR
-        .get()
-        .expect("frame allocator has not been configured")
-}
-
-pub fn virtual_map_offset() -> Address<Virtual> {
-    Address::<Virtual>::new(crate::VADDR_HW_MAX - get().total_memory(None))
 }

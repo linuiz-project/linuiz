@@ -2,6 +2,13 @@ use crate::{addr_ty::Physical, io::pci::express::PCIeDevice, Address};
 use alloc::vec::Vec;
 use spin::Mutex;
 
+const NULL_BUS: Mutex<PCIeBus> = Mutex::new(PCIeBus { devices: None });
+static PCIE_BUSSES: [Mutex<PCIeBus>; 256] = [NULL_BUS; 256];
+
+pub fn get_bus(bus_index: u8) -> spin::MutexGuard<'static, PCIeBus> {
+    PCIE_BUSSES[bus_index as usize].lock()
+}
+
 pub struct PCIeBus {
     devices: Option<Vec<PCIeDevice>>,
 }
@@ -71,11 +78,4 @@ impl core::fmt::Debug for PCIeBus {
             .field("Devices", &self.devices)
             .finish()
     }
-}
-
-const NULL_BUS: Mutex<PCIeBus> = Mutex::new(PCIeBus { devices: None });
-static PCIE_BUSSES: [Mutex<PCIeBus>; 256] = [NULL_BUS; 256];
-
-pub fn get_bus(bus_index: u8) -> spin::MutexGuard<'static, PCIeBus> {
-    PCIE_BUSSES[bus_index as usize].lock()
 }

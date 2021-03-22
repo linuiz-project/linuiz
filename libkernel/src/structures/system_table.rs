@@ -8,10 +8,12 @@ pub unsafe fn init_system_config_table(ptr: *const SystemConfigTableEntry, len: 
         .expect("global ACPI config table has already been set");
 }
 
-pub fn system_config_table() -> &'static SystemConfigTable {
+pub fn get_system_config_table_entry(guid: GUID) -> Option<&'static SystemConfigTableEntry> {
     SYSTEM_CONFIG_TABLE
         .get()
         .expect("global ACPI configration table has not been set")
+        .iter()
+        .find(|entry| entry.guid() == guid)
 }
 
 #[derive(Debug)]

@@ -1,12 +1,7 @@
-mod madt;
-mod mcfg;
 mod rdsp;
-mod xsdt;
 
-pub use madt::*;
-pub use mcfg::*;
+pub mod xsdt;
 pub use rdsp::*;
-pub use xsdt::*;
 
 use crate::structures::GUID;
 
@@ -73,7 +68,6 @@ pub trait Checksum: Sized {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy)]
 pub struct SDTHeader {
     signature: [u8; 4],
     len: u32,

@@ -1,9 +1,11 @@
 use crate::{
     addr_ty::Physical,
-    structures::acpi::{ACPITable, Checksum, SDTHeader, UnsizedACPITable},
+    structures::acpi::{
+        xsdt::{XSDTEntry, XSDTEntryType},
+        ACPITable, SDTHeader, UnsizedACPITable,
+    },
     Address,
 };
-use core::marker::PhantomData;
 
 bitflags::bitflags! {
     pub struct MADTFlags: u32 {
@@ -18,40 +20,40 @@ pub struct MADTHeader {
     flags: MADTFlags,
 }
 
-#[repr(C)]
-pub struct MADT {
-    header: MADTHeader,
+pub enum MADT {}
+impl XSDTEntryType for MADT {
+    const SIGNATURE: &'static str = &"APIC";
 }
 
-impl Checksum for MADT {
-    fn bytes_len(&self) -> usize {
-        self.header.sdt_header.table_len() as usize
+impl XSDTEntry<MADT> {
+    fn madt_header(&self) -> &MADTHeader {
+        unsafe { &*(self as *const _ as *const _) }
     }
-}
 
-impl ACPITable for MADT {
-    fn body_len(&self) -> usize {
-        (self.header.sdt_header.table_len() as usize) - core::mem::size_of::<MADTHeader>()
+    pub fn apic_addr(&self) -> Address<Physical> {
+        Address::<Physical>::new(self.madt_header().apic_addr as usize)
     }
-}
 
-impl UnsizedACPITable<MADTHeader, u8> for MADT {}
+    pub fn flags(&self) -> &MADTFlags {
+        &self.madt_header().flags
+    }
 
-impl MADT {
     pub fn iter(&self) -> MADTIterator {
         let first_entry_ptr = self.first_entry_ptr();
         MADTIterator {
             cur_header_ptr: first_entry_ptr,
             max_header_ptr: unsafe { first_entry_ptr.add(self.body_len()) },
-            phantom: PhantomData,
+            phantom: core::marker::PhantomData,
         }
     }
 }
 
+impl UnsizedACPITable<MADTHeader, u8> for XSDTEntry<MADT> {}
+
 pub struct MADTIterator<'a> {
     cur_header_ptr: *const u8,
     max_header_ptr: *const u8,
-    phantom: PhantomData<&'a u8>,
+    phantom: core::marker::PhantomData<&'a u8>,
 }
 
 impl<'a> Iterator for MADTIterator<'a> {

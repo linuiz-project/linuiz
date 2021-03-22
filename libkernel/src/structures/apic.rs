@@ -7,6 +7,36 @@ use crate::{
 };
 use core::{intrinsics::transmute, marker::PhantomData};
 
+static mut LOCAL_APIC: SyncOnceCell<APIC> = SyncOnceCell::new();
+
+pub fn load() {
+    if unsafe { LOCAL_APIC.get().is_some() } {
+        panic!("Local APIC has already been configured");
+    } else {
+        debug!("Loading local APIC table.");
+        let start_index = APIC::mmio_addr().frame_index();
+        debug!("APIC MMIO mapping at frame: {}", start_index);
+
+        let mmio = crate::memory::mmio::unmapped_mmio(unsafe {
+            crate::memory::falloc::get()
+                .acquire_frames(start_index, 1, crate::memory::falloc::FrameState::MMIO)
+                .unwrap()
+        })
+        .unwrap()
+        .map();
+
+        unsafe { LOCAL_APIC.set(APIC::new(mmio)).ok() };
+    }
+}
+
+pub fn local_apic() -> Option<&'static APIC> {
+    unsafe { LOCAL_APIC.get() }
+}
+
+pub fn local_apic_mut() -> Option<&'static mut APIC> {
+    unsafe { LOCAL_APIC.get_mut() }
+}
+
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
@@ -266,34 +296,4 @@ impl LVTRegister<Generic> {
             );
         }
     }
-}
-
-static mut LOCAL_APIC: SyncOnceCell<APIC> = SyncOnceCell::new();
-
-pub fn load() {
-    if unsafe { LOCAL_APIC.get().is_some() } {
-        panic!("Local APIC has already been configured");
-    } else {
-        debug!("Loading local APIC table.");
-        let start_index = APIC::mmio_addr().frame_index();
-        debug!("APIC MMIO mapping at frame: {}", start_index);
-
-        let mmio = crate::memory::mmio::unmapped_mmio(unsafe {
-            crate::memory::falloc::get()
-                .acquire_frames(start_index, 1, crate::memory::falloc::FrameState::MMIO)
-                .unwrap()
-        })
-        .unwrap()
-        .map();
-
-        unsafe { LOCAL_APIC.set(APIC::new(mmio)).ok() };
-    }
-}
-
-pub fn local_apic() -> &'static APIC {
-    unsafe { LOCAL_APIC.get().expect("APIC has not been configured") }
-}
-
-pub fn local_apic_mut() -> &'static mut APIC {
-    unsafe { LOCAL_APIC.get_mut().expect("APIC has not been configured") }
 }

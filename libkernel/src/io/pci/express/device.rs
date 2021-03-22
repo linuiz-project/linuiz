@@ -244,6 +244,10 @@ impl PCIeDevice {
             header_type => panic!("invalid header type: 0x{:X}", header_type),
         }
     }
+
+    pub fn consume_mmio(self) -> MMIO<Mapped> {
+        self.mmio
+    }
 }
 
 impl core::fmt::Debug for PCIeDevice {
