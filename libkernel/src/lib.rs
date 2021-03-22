@@ -24,7 +24,6 @@ extern crate alloc;
 mod addr;
 mod boot_info;
 mod rwbitarray;
-mod volatile_cell;
 
 pub mod cell;
 pub mod elf;
@@ -36,7 +35,6 @@ pub mod structures;
 pub use addr::*;
 pub use boot_info::*;
 pub use rwbitarray::*;
-pub use volatile_cell::*;
 
 pub const SYSTEM_SLICE_SIZE: usize = 0x10000000000;
 
