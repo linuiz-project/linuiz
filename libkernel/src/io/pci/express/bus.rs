@@ -1,15 +1,29 @@
-use crate::{addr_ty::Physical, cell::SyncRefCell, io::pci::express::PCIeDevice, Address};
+use crate::{addr_ty::Physical, io::pci::express::PCIeDevice, Address};
 use alloc::vec::Vec;
 
-const NULL_BUS: PCIeBus = PCIeBus { devices: None };
-static PCIE_BUSSES: SyncRefCell<[PCIeBus; 256]> = SyncRefCell::new([NULL_BUS; 256]);
-
-pub fn iter_busses() -> core::slice::Iter<'static, PCIeBus> {
-    PCIE_BUSSES.borrow().unwrap().iter()
+#[derive(Debug)]
+pub enum PCIeBusError {
+    BusConfigured,
+    InvalidBaseAddress,
 }
 
-pub fn iter_busses_mut() -> core::slice::IterMut<'static, PCIeBus> {
-    PCIE_BUSSES.borrow_mut().unwrap().iter_mut()
+const NULL_BUS: PCIeBus = PCIeBus { devices: None };
+static mut PCIE_BUSSES: [PCIeBus; 256] = [NULL_BUS; 256];
+
+pub fn configure_bus(bus_index: u8, base_addr: Address<Physical>) -> Result<(), PCIeBusError> {
+    if unsafe { &mut PCIE_BUSSES[bus_index as usize] }.is_valid() {
+        Err(PCIeBusError::BusConfigured)
+    } else if base_addr == Address::zero() {
+        Err(PCIeBusError::InvalidBaseAddress)
+    } else {
+        unsafe { PCIE_BUSSES[bus_index as usize] = PCIeBus::new(base_addr) };
+
+        Ok(())
+    }
+}
+
+pub fn iter_busses() -> core::slice::Iter<'static, PCIeBus> {
+    unsafe { PCIE_BUSSES.iter() }
 }
 
 pub struct PCIeBus {

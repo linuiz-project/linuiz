@@ -54,15 +54,13 @@ extern "efiapi" fn kernel_main(
 ) -> ! {
     unsafe {
         SERIAL_OUT.init(drivers::io::SerialSpeed::S115200);
-        drivers::io::set_stdout(&mut SERIAL_OUT);
-    }
 
-    match crate::logging::init_logger(crate::logging::LoggingModes::STDOUT, get_log_level()) {
-        Ok(()) => {
-            info!("Successfully loaded into kernel, with logging enabled.");
-            debug!("Minimum logging level configured as: {:?}", get_log_level());
+        match drivers::io::set_stdout(&mut SERIAL_OUT, get_log_level()) {
+            Ok(()) => {
+                info!("Successfully loaded into kernel, with logging enabled.");
+            }
+            Err(_) => loop {},
         }
-        Err(error) => panic!("{}", error),
     }
 
     info!("Validating magic of BootInfo.");
@@ -103,18 +101,37 @@ extern "efiapi" fn kernel_main(
 
     init_apic();
 
-    use libkernel::{acpi::rdsp::xsdt::mcfg::MCFG, io::pci::PCIDeviceClass};
-    libkernel::acpi::rdsp::xsdt::LAZY_XSDT
+    let mcfg = libkernel::acpi::rdsp::xsdt::LAZY_XSDT
         .expect("xsdt does not exist")
-        .get_entry::<MCFG>()
-        .unwrap()
-        .init_pcie();
-    loop {}
+        .get_entry::<libkernel::acpi::rdsp::xsdt::mcfg::MCFG>()
+        .unwrap();
+
+    for entry in mcfg.iter() {
+        let bus_range = entry.start_pci_bus()..=entry.end_pci_bus();
+        debug!("Configuring busses: {:?}", bus_range);
+        info!("{:?}", entry);
+        for bus_index in bus_range {
+            debug!("Configuring PCIe bus {}/255.", bus_index);
+
+            let offset_addr = entry.base_addr() + ((bus_index as usize) << 20);
+            libkernel::io::pci::express::configure_bus(bus_index, offset_addr)
+                .expect("failed to configure bus");
+        }
+    }
+
     for device in libkernel::io::pci::express::iter_busses()
         .filter(|bus| bus.is_valid())
         .flat_map(|bus| bus.iter())
     {
-        info!("{:?}", device.base_header());
+        use libkernel::io::pci::PCIDeviceClass;
+        let header = device.base_header();
+
+        if header.class() == PCIDeviceClass::MassStorageController
+            && header.subclass() == 0x06
+            && header.program_interface() == 0x1
+        {
+            crate::println!("{:?}", header);
+        }
     }
 
     info!("Kernel has reached safe shutdown state.");

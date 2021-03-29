@@ -20,7 +20,7 @@ struct MCFGHeader {
 
 #[repr(C)]
 #[derive(Debug)]
-struct MCFGEntry {
+pub struct MCFGEntry {
     base_addr: Address<Physical>,
     seg_group_num: u16,
     start_pci_bus: u8,
@@ -29,35 +29,27 @@ struct MCFGEntry {
 }
 
 impl MCFGEntry {
-    pub fn configure_busses(&self) {
-        debug!(
-            "Configuring busses: {}..{}",
-            self.start_pci_bus, self.end_pci_bus
-        );
-        
-        for (index, bus) in crate::io::pci::express::iter_busses_mut()
-            .enumerate()
-            .skip(self.start_pci_bus as usize)
-            .take((self.end_pci_bus - self.start_pci_bus) as usize)
-        {
-            if !bus.is_valid() {
-                info!("Configuring PCIe bus {}/255.", index);
-                unsafe {
-                    *bus = crate::io::pci::express::PCIeBus::new(
-                        self.base_addr + ((index as usize) << 20),
-                    );
-                }
-            }
-        }
+    pub fn base_addr(&self) -> Address<Physical> {
+        self.base_addr
+    }
+
+    pub fn seg_group_num(&self) -> u16 {
+        self.seg_group_num
+    }
+
+    pub fn start_pci_bus(&self) -> u8 {
+        self.start_pci_bus
+    }
+
+    pub fn end_pci_bus(&self) -> u8 {
+        self.end_pci_bus
     }
 }
 
 impl XSDTEntry<MCFG> {
-    pub fn init_pcie(&self) {
+    pub fn iter(&self) -> core::slice::Iter<MCFGEntry> {
         self.checksum_panic();
-        self.entries()
-            .iter()
-            .for_each(|entry| entry.configure_busses());
+        self.entries().iter()
     }
 }
 

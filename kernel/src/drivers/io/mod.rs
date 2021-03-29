@@ -9,8 +9,13 @@ use libkernel::cell::SyncRefCell;
 
 static STDOUT: SyncRefCell<&'static mut dyn Write> = SyncRefCell::empty();
 
-pub fn set_stdout(stdout: &'static mut dyn Write) {
+pub fn set_stdout(
+    stdout: &'static mut dyn Write,
+    minimum_level: log::LevelFilter,
+) -> Result<(), log::SetLoggerError> {
     STDOUT.set(stdout);
+
+    crate::logging::init_logger(crate::logging::LoggingModes::STDOUT, minimum_level)
 }
 
 #[doc(hidden)]
