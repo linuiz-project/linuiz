@@ -254,7 +254,7 @@ impl PCIeDevice {
 impl core::fmt::Debug for PCIeDevice {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
-            .debug_struct("PCIe Bus")
+            .debug_struct("PCIe Device")
             .field("Header", self.base_header())
             .field("Extended Header", &self.ext_header())
             .finish()

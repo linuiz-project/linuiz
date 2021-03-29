@@ -119,6 +119,10 @@ impl Address<Physical> {
     pub const fn frame_index(&self) -> usize {
         self.as_usize() / 0x1000
     }
+
+    pub const fn is_canonical(&self) -> bool {
+        (self.value >> 52) == 0
+    }
 }
 
 impl core::ops::Add<Address<Physical>> for Address<Physical> {

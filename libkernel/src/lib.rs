@@ -14,7 +14,9 @@
     const_mut_refs,
     const_raw_ptr_to_usize_cast,
     exclusive_range_pattern,
-    const_btree_new
+    const_btree_new,
+    option_expect_none,
+    option_unwrap_none
 )]
 
 #[macro_use]

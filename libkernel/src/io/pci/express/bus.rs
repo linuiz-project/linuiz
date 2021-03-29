@@ -32,7 +32,7 @@ pub struct PCIeBus {
 
 impl PCIeBus {
     pub unsafe fn new(base_addr: Address<Physical>) -> Self {
-        let devices = (0..32)
+        let devices: Vec<PCIeDevice> = (0..32)
             .filter_map(|device_index| {
                 let offset_addr = base_addr + (device_index << 15);
                 let header = &*crate::memory::malloc::get()
@@ -68,7 +68,13 @@ impl PCIeBus {
             .collect();
 
         Self {
-            devices: Some(devices),
+            devices: {
+                if devices.len() > 0 {
+                    Some(devices)
+                } else {
+                    None
+                }
+            },
         }
     }
 

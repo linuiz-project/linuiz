@@ -107,16 +107,7 @@ extern "efiapi" fn kernel_main(
         .unwrap();
 
     for entry in mcfg.iter() {
-        let bus_range = entry.start_pci_bus()..=entry.end_pci_bus();
-        debug!("Configuring busses: {:?}", bus_range);
-        info!("{:?}", entry);
-        for bus_index in bus_range {
-            debug!("Configuring PCIe bus {}/255.", bus_index);
-
-            let offset_addr = entry.base_addr() + ((bus_index as usize) << 20);
-            libkernel::io::pci::express::configure_bus(bus_index, offset_addr)
-                .expect("failed to configure bus");
-        }
+        libkernel::io::pci::express::configure_host_bridge(entry).unwrap();
     }
 
     for device in libkernel::io::pci::express::iter_busses()
