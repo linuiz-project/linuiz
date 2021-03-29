@@ -1,31 +1,6 @@
 use crate::{addr_ty::Physical, io::pci::express::PCIeDevice, Address};
 use alloc::vec::Vec;
 
-#[derive(Debug)]
-pub enum PCIeBusError {
-    BusConfigured,
-    InvalidBaseAddress,
-}
-
-const NULL_BUS: PCIeBus = PCIeBus { devices: None };
-static mut PCIE_BUSSES: [PCIeBus; 256] = [NULL_BUS; 256];
-
-pub fn configure_bus(bus_index: u8, base_addr: Address<Physical>) -> Result<(), PCIeBusError> {
-    if unsafe { &mut PCIE_BUSSES[bus_index as usize] }.is_valid() {
-        Err(PCIeBusError::BusConfigured)
-    } else if base_addr == Address::zero() {
-        Err(PCIeBusError::InvalidBaseAddress)
-    } else {
-        unsafe { PCIE_BUSSES[bus_index as usize] = PCIeBus::new(base_addr) };
-
-        Ok(())
-    }
-}
-
-pub fn iter_busses() -> core::slice::Iter<'static, PCIeBus> {
-    unsafe { PCIE_BUSSES.iter() }
-}
-
 pub struct PCIeBus {
     devices: Option<Vec<PCIeDevice>>,
 }
@@ -82,7 +57,7 @@ impl PCIeBus {
         self.devices.is_some()
     }
 
-    pub fn iter(&self) -> core::slice::Iter<PCIeDevice> {
+    pub fn iter_devices(&self) -> core::slice::Iter<PCIeDevice> {
         self.devices.as_ref().expect("bus not configured").iter()
     }
 

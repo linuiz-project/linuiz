@@ -40,6 +40,10 @@ impl PCIeHostBridge {
     pub fn get_bus(&self, bus_index: u8) -> Option<&PCIeBus> {
         self.busses.get(&bus_index)
     }
+
+    pub fn iter_busses(&self) -> alloc::collections::btree_map::Iter<u8, PCIeBus> {
+        self.busses.iter()
+    }
 }
 
 static mut PCIE_HOST_BRIDGES: BTreeMap<u16, PCIeHostBridge> = BTreeMap::new();
@@ -54,7 +58,12 @@ pub fn configure_host_bridge(
     } else {
         let mut bridge = PCIeHostBridge::empty();
         let bus_range = entry.start_pci_bus()..=entry.end_pci_bus();
-        debug!("Configuring express host bridge:\n Base Address: {:?}\n Segment Group: {}\n Bus Range: {:?}",entry.base_addr(),entry.seg_group_num(),bus_range);
+        debug!(
+            "Configuring express host bridge:\n Base Address: {:?}\n Segment Group: {}\n Bus Range: {:?}",
+            entry.base_addr(),
+            entry.seg_group_num(),
+            bus_range
+        );
 
         bus_range.for_each(|bus_index| {
             bridge
@@ -62,7 +71,11 @@ pub fn configure_host_bridge(
                 .ok();
         });
 
-        debug!("PCIe Host Bridge Busses:\n {:#?}", bridge.busses);
+        debug!(
+            "Configured PCIe host bridge group {} with {} valid busses.",
+            entry.seg_group_num(),
+            bridge.busses.len()
+        );
 
         unsafe {
             PCIE_HOST_BRIDGES
@@ -72,4 +85,8 @@ pub fn configure_host_bridge(
 
         Ok(())
     }
+}
+
+pub fn iter_host_bridges() -> alloc::collections::btree_map::Iter<'static, u16, PCIeHostBridge> {
+    unsafe { PCIE_HOST_BRIDGES.iter() }
 }

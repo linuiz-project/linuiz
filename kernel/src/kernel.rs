@@ -107,12 +107,13 @@ extern "efiapi" fn kernel_main(
         .unwrap();
 
     for entry in mcfg.iter() {
-        libkernel::io::pci::express::configure_host_bridge(entry).unwrap();
+        libkernel::io::pci::express::configure_host_bridge(entry).ok();
     }
 
-    for device in libkernel::io::pci::express::iter_busses()
-        .filter(|bus| bus.is_valid())
-        .flat_map(|bus| bus.iter())
+    for device in libkernel::io::pci::express::iter_host_bridges()
+        .flat_map(|(_, host_bridge)| host_bridge.iter_busses())
+        .filter(|(_, bus)| bus.is_valid())
+        .flat_map(|(_, bus)| bus.iter_devices())
     {
         use libkernel::io::pci::PCIDeviceClass;
         let header = device.base_header();
