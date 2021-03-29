@@ -1,9 +1,9 @@
 use crate::{
-    addr_ty::Physical,
-    structures::acpi::{
-        xsdt::{XSDTEntry, XSDTEntryType},
+    acpi::{
+        rdsp::xsdt::{XSDTEntry, XSDTEntryType},
         ACPITable, SDTHeader, UnsizedACPITable,
     },
+    addr_ty::Physical,
     Address,
 };
 

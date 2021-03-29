@@ -15,8 +15,8 @@ mod timer;
 
 use core::ffi::c_void;
 use libkernel::{
+    acpi::SystemConfigTableEntry,
     memory::{falloc, UEFIMemoryDescriptor},
-    structures::SystemConfigTableEntry,
     BootInfo,
 };
 
@@ -103,10 +103,19 @@ extern "efiapi" fn kernel_main(
 
     init_apic();
 
-    use libkernel::structures::acpi::MCFG;
-    libkernel::structures::acpi::xsdt::get_entry::<MCFG>()
+    use libkernel::{acpi::rdsp::xsdt::mcfg::MCFG, io::pci::PCIDeviceClass};
+    libkernel::acpi::rdsp::xsdt::LAZY_XSDT
+        .expect("xsdt does not exist")
+        .get_entry::<MCFG>()
         .unwrap()
         .init_pcie();
+    loop {}
+    for device in libkernel::io::pci::express::iter_busses()
+        .filter(|bus| bus.is_valid())
+        .flat_map(|bus| bus.iter())
+    {
+        info!("{:?}", device.base_header());
+    }
 
     info!("Kernel has reached safe shutdown state.");
     unsafe { libkernel::instructions::pwm::qemu_shutdown() }
@@ -193,13 +202,12 @@ fn init_system_config_table(config_table: &[SystemConfigTableEntry]) {
     let config_table_entry_len = config_table.len();
 
     let frame_index = (config_table_ptr as usize) / 0x1000;
-    let frame_count = (config_table_entry_len
-        * core::mem::size_of::<libkernel::structures::SystemConfigTableEntry>())
-        / 0x1000;
+    let frame_count =
+        (config_table_entry_len * core::mem::size_of::<SystemConfigTableEntry>()) / 0x1000;
 
     unsafe {
         // Assign system configuration table prior to reserving frames to ensure one doesn't already exist.
-        libkernel::structures::init_system_config_table(config_table_ptr, config_table_entry_len);
+        libkernel::acpi::init_system_config_table(config_table_ptr, config_table_entry_len);
 
         let frame_range = frame_index..(frame_index + frame_count);
         debug!("System configuration table: {:?}", frame_range);

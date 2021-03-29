@@ -6,8 +6,12 @@ unsafe impl<T> Send for SyncCell<T> {}
 unsafe impl<T> Sync for SyncCell<T> {}
 
 impl<T> SyncCell<T> {
-    pub const fn new() -> Self {
+    pub const fn empty() -> Self {
         Self { obj: None }
+    }
+
+    pub const fn new(obj: T) -> Self {
+        Self { obj: Some(obj) }
     }
 
     pub fn set(&mut self, obj: T) {
@@ -24,29 +28,35 @@ impl<T> SyncCell<T> {
 }
 
 pub struct SyncRefCell<T> {
-    inner_cell: core::cell::UnsafeCell<Option<T>>,
+    obj: Option<T>,
 }
 
 unsafe impl<T> Send for SyncRefCell<T> {}
 unsafe impl<T> Sync for SyncRefCell<T> {}
 
 impl<T> SyncRefCell<T> {
-    pub const fn new() -> Self {
-        Self {
-            inner_cell: core::cell::UnsafeCell::new(None),
-        }
+    pub const fn empty() -> Self {
+        Self { obj: None }
+    }
+
+    pub const fn new(obj: T) -> Self {
+        Self { obj: Some(obj) }
+    }
+
+    unsafe fn obj_ptr(&self) -> *mut Option<T> {
+        (&self.obj) as *const _ as *mut _
     }
 
     pub fn set(&self, obj: T) {
-        unsafe { *self.inner_cell.get() = Some(obj) }
+        unsafe { *self.obj_ptr() = Some(obj) }
     }
 
-    pub fn get(&self) -> &Option<T> {
-        unsafe { &*self.inner_cell.get() }
+    pub fn borrow<'a>(&'a self) -> Option<&'a T> {
+        unsafe { (&*self.obj_ptr()).as_ref() }
     }
 
-    pub fn get_mut(&self) -> &mut Option<T> {
-        unsafe { &mut *self.inner_cell.get() }
+    pub fn borrow_mut<'a>(&'a self) -> Option<&'a mut T> {
+        unsafe { (&mut *self.obj_ptr()).as_mut() }
     }
 }
 

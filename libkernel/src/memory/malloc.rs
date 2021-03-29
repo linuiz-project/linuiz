@@ -13,12 +13,12 @@ pub trait MemoryAllocator {
     unsafe fn physical_memory(&self, addr: Address<Physical>) -> Address<Virtual>;
 }
 
-static DEFAULT_MALLOCATOR: SyncRefCell<&'static dyn MemoryAllocator> = SyncRefCell::new();
+static DEFAULT_MALLOCATOR: SyncRefCell<&'static dyn MemoryAllocator> = SyncRefCell::empty();
 
 pub fn set(allocator: &'static dyn MemoryAllocator) {
     DEFAULT_MALLOCATOR.set(allocator);
 }
 
 pub fn get() -> &'static dyn MemoryAllocator {
-    DEFAULT_MALLOCATOR.get().expect("no default allocator")
+    *DEFAULT_MALLOCATOR.borrow().expect("no default allocator")
 }

@@ -7,7 +7,7 @@ pub use serial::*;
 use core::fmt::Write;
 use libkernel::cell::SyncRefCell;
 
-static STDOUT: SyncRefCell<&'static mut dyn Write> = SyncRefCell::new();
+static STDOUT: SyncRefCell<&'static mut dyn Write> = SyncRefCell::empty();
 
 pub fn set_stdout(stdout: &'static mut dyn Write) {
     STDOUT.set(stdout);
@@ -17,7 +17,7 @@ pub fn set_stdout(stdout: &'static mut dyn Write) {
 pub fn __std_out(args: core::fmt::Arguments) {
     // let stdout_guard = &mut STDOUT.lock();
 
-    if let Some(stdout) = STDOUT.get_mut() {
+    if let Some(stdout) = STDOUT.borrow_mut() {
         stdout.write_fmt(args).unwrap();
     } else {
         panic!("stdout has not been configured");

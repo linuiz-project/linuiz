@@ -245,6 +245,7 @@ impl PCIeDevice {
         }
     }
 
+    // TODO remove this
     pub fn consume_mmio(self) -> MMIO<Mapped> {
         self.mmio
     }

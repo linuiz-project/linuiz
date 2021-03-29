@@ -1,13 +1,6 @@
-mod madt;
-mod mcfg;
-mod rdsp;
+pub mod rdsp;
 
-pub mod xsdt;
-pub use madt::*;
-pub use mcfg::*;
-pub use rdsp::*;
-
-use crate::structures::GUID;
+use crate::{addr_ty::Physical, cell::SyncOnceCell, structures::GUID, Address};
 
 pub const ACPI_GUID: GUID = GUID::new(
     0xeb9d2d30,
@@ -116,5 +109,61 @@ impl core::fmt::Debug for SDTHeader {
             .field("OEM ID", &self.oem_id())
             .field("Revision", &self.revision())
             .finish()
+    }
+}
+
+static SYSTEM_CONFIG_TABLE: SyncOnceCell<SystemConfigTable> = SyncOnceCell::new();
+
+pub unsafe fn init_system_config_table(ptr: *const SystemConfigTableEntry, len: usize) {
+    SYSTEM_CONFIG_TABLE
+        .set(SystemConfigTable::from_ptr(ptr, len))
+        .expect("global ACPI config table has already been set");
+}
+
+pub fn get_system_config_table_entry(guid: GUID) -> Option<&'static SystemConfigTableEntry> {
+    SYSTEM_CONFIG_TABLE
+        .get()
+        .expect("global ACPI configration table has not been set")
+        .iter()
+        .find(|entry| entry.guid() == guid)
+}
+
+#[derive(Debug)]
+pub struct SystemConfigTable {
+    ptr: *const SystemConfigTableEntry,
+    len: usize,
+}
+
+impl SystemConfigTable {
+    unsafe fn from_ptr(ptr: *const SystemConfigTableEntry, len: usize) -> Self {
+        Self { ptr, len }
+    }
+
+    pub fn iter(&self) -> core::slice::Iter<SystemConfigTableEntry> {
+        unsafe { &*core::ptr::slice_from_raw_parts(self.ptr, self.len) }.iter()
+    }
+}
+
+#[repr(C)]
+#[derive(Debug)]
+pub struct SystemConfigTableEntry {
+    guid: GUID,
+    addr: Address<Physical>,
+}
+
+impl SystemConfigTableEntry {
+    pub fn guid(&self) -> GUID {
+        self.guid.clone()
+    }
+
+    pub fn addr(&self) -> Address<Physical> {
+        self.addr
+    }
+
+    pub unsafe fn as_ref<T>(&self) -> &T {
+        &*(self.addr().as_usize() as *mut T)
+    }
+    pub unsafe fn as_mut_ref<T>(&self) -> &mut T {
+        &mut *(self.addr().as_usize() as *mut T)
     }
 }

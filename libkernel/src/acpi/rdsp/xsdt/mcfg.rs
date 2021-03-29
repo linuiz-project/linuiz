@@ -1,9 +1,9 @@
 use crate::{
-    addr_ty::Physical,
-    structures::acpi::{
-        xsdt::{XSDTEntry, XSDTEntryType},
+    acpi::{
+        rdsp::xsdt::{XSDTEntry, XSDTEntryType},
         Checksum, SDTHeader, SizedACPITable,
     },
+    addr_ty::Physical,
     Address,
 };
 
@@ -30,15 +30,23 @@ struct MCFGEntry {
 
 impl MCFGEntry {
     pub fn configure_busses(&self) {
-        for bus_index in self.start_pci_bus..=self.end_pci_bus {
-            let mut bus = crate::io::pci::express::get_bus(bus_index);
+        debug!(
+            "Configuring busses: {}..{}",
+            self.start_pci_bus, self.end_pci_bus
+        );
+        
+        for (index, bus) in crate::io::pci::express::iter_busses_mut()
+            .enumerate()
+            .skip(self.start_pci_bus as usize)
+            .take((self.end_pci_bus - self.start_pci_bus) as usize)
+        {
             if !bus.is_valid() {
-                trace!("Configuring PCIe bus {}/255.", bus_index);
-                *bus = unsafe {
-                    crate::io::pci::express::PCIeBus::new(
-                        self.base_addr + ((bus_index as usize) << 20),
-                    )
-                };
+                info!("Configuring PCIe bus {}/255.", index);
+                unsafe {
+                    *bus = crate::io::pci::express::PCIeBus::new(
+                        self.base_addr + ((index as usize) << 20),
+                    );
+                }
             }
         }
     }

@@ -1,4 +1,6 @@
-use crate::{addr_ty::Physical, Address};
+pub mod xsdt;
+
+use crate::{acpi::Checksum, addr_ty::Physical, Address};
 
 #[repr(C, packed)]
 pub struct RDSPDescriptor {
@@ -19,7 +21,7 @@ impl RDSPDescriptor {
     }
 }
 
-impl crate::structures::acpi::Checksum for RDSPDescriptor {}
+impl Checksum for RDSPDescriptor {}
 
 #[repr(C, packed)]
 pub struct RDSPDescriptor2 {
@@ -44,11 +46,11 @@ impl RDSPDescriptor2 {
     }
 }
 
-impl crate::structures::acpi::Checksum for RDSPDescriptor2 {}
+impl Checksum for RDSPDescriptor2 {}
 
 lazy_static::lazy_static! {
-    pub static ref G_RDSP2: Option<&'static RDSPDescriptor2> = unsafe {
-        if let Some(entry) = crate::structures::get_system_config_table_entry(crate::structures::acpi::ACPI2_GUID) {
+    pub static ref LAZY_RDSP2: Option<&'static RDSPDescriptor2> = unsafe {
+        if let Some(entry) = crate::acpi::get_system_config_table_entry(crate::acpi::ACPI2_GUID) {
             Some(entry.as_ref())
         } else {
             None

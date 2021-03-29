@@ -222,7 +222,7 @@ impl fmt::Debug for PCIDeviceHeader {
             .field("Latency Timer", &self.latency_timer())
             .field("Multi-Function", &self.multi_function())
             .field("Header Type", &self.header_type())
-            .field("BIST", self.bist())
+            .field("BIST", &self.bist())
             .finish()
     }
 }

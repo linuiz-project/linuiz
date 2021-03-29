@@ -25,6 +25,7 @@ mod addr;
 mod boot_info;
 mod rwbitarray;
 
+pub mod acpi;
 pub mod cell;
 pub mod elf;
 pub mod instructions;
