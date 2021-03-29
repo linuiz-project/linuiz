@@ -1,3 +1,5 @@
+use core::cell::UnsafeCell;
+
 pub struct SyncCell<T> {
     obj: Option<T>,
 }
@@ -28,7 +30,7 @@ impl<T> SyncCell<T> {
 }
 
 pub struct SyncRefCell<T> {
-    obj: Option<T>,
+    cell: UnsafeCell<Option<T>>,
 }
 
 unsafe impl<T> Send for SyncRefCell<T> {}
@@ -36,27 +38,27 @@ unsafe impl<T> Sync for SyncRefCell<T> {}
 
 impl<T> SyncRefCell<T> {
     pub const fn empty() -> Self {
-        Self { obj: None }
+        Self {
+            cell: UnsafeCell::new(None),
+        }
     }
 
     pub const fn new(obj: T) -> Self {
-        Self { obj: Some(obj) }
-    }
-
-    unsafe fn obj_ptr(&self) -> *mut Option<T> {
-        (&self.obj) as *const _ as *mut _
+        Self {
+            cell: UnsafeCell::new(Some(obj)),
+        }
     }
 
     pub fn set(&self, obj: T) {
-        unsafe { *self.obj_ptr() = Some(obj) }
+        unsafe { *self.cell.get() = Some(obj) }
     }
 
     pub fn borrow<'a>(&'a self) -> Option<&'a T> {
-        unsafe { (&*self.obj_ptr()).as_ref() }
+        unsafe { (&*self.cell.get()).as_ref() }
     }
 
     pub fn borrow_mut<'a>(&'a self) -> Option<&'a mut T> {
-        unsafe { (&mut *self.obj_ptr()).as_mut() }
+        unsafe { (&mut *self.cell.get()).as_mut() }
     }
 }
 
