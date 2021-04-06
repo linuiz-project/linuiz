@@ -57,7 +57,7 @@ impl PCIeBus {
         self.devices.is_some()
     }
 
-    pub fn iter_devices(&self) -> core::slice::Iter<PCIeDevice> {
+    pub fn iter(&self) -> core::slice::Iter<PCIeDevice> {
         self.devices.as_ref().expect("bus not configured").iter()
     }
 

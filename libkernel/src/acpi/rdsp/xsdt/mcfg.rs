@@ -1,6 +1,6 @@
 use crate::{
     acpi::{
-        rdsp::xsdt::{XSDTEntry, XSDTEntryType},
+        rdsp::xsdt::{XSDTSubTable, XSDTSubTableType},
         Checksum, SDTHeader, SizedACPITable,
     },
     addr_ty::Physical,
@@ -8,7 +8,7 @@ use crate::{
 };
 
 pub enum MCFG {}
-impl XSDTEntryType for MCFG {
+impl XSDTSubTableType for MCFG {
     const SIGNATURE: &'static str = &"MCFG";
 }
 
@@ -46,11 +46,11 @@ impl MCFGEntry {
     }
 }
 
-impl XSDTEntry<MCFG> {
+impl XSDTSubTable<MCFG> {
     pub fn iter(&self) -> core::slice::Iter<MCFGEntry> {
         self.checksum_panic();
         self.entries().iter()
     }
 }
 
-impl SizedACPITable<MCFGHeader, MCFGEntry> for XSDTEntry<MCFG> {}
+impl SizedACPITable<MCFGHeader, MCFGEntry> for XSDTSubTable<MCFG> {}

@@ -1,6 +1,6 @@
 use crate::{
     acpi::{
-        rdsp::xsdt::{XSDTEntry, XSDTEntryType},
+        rdsp::xsdt::{XSDTSubTable, XSDTSubTableType},
         ACPITable, SDTHeader, UnsizedACPITable,
     },
     addr_ty::Physical,
@@ -21,11 +21,11 @@ pub struct MADTHeader {
 }
 
 pub enum MADT {}
-impl XSDTEntryType for MADT {
+impl XSDTSubTableType for MADT {
     const SIGNATURE: &'static str = &"APIC";
 }
 
-impl XSDTEntry<MADT> {
+impl XSDTSubTable<MADT> {
     fn madt_header(&self) -> &MADTHeader {
         unsafe { &*(self as *const _ as *const _) }
     }
@@ -48,7 +48,7 @@ impl XSDTEntry<MADT> {
     }
 }
 
-impl UnsizedACPITable<MADTHeader, u8> for XSDTEntry<MADT> {}
+impl UnsizedACPITable<MADTHeader, u8> for XSDTSubTable<MADT> {}
 
 pub struct MADTIterator<'a> {
     cur_header_ptr: *const u8,

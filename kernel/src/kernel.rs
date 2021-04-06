@@ -101,16 +101,17 @@ extern "efiapi" fn kernel_main(
 
     init_apic();
 
-    let mcfg = libkernel::acpi::rdsp::xsdt::LAZY_XSDT
+    libkernel::acpi::rdsp::xsdt::LAZY_XSDT
         .expect("xsdt does not exist")
-        .get_entry::<libkernel::acpi::rdsp::xsdt::mcfg::MCFG>()
-        .unwrap();
+        .find_sub_table::<libkernel::acpi::rdsp::xsdt::mcfg::MCFG>()
+        .unwrap()
+        .iter()
+        .for_each(|entry| {
+            libkernel::io::pci::express::configure_host_bridge(entry).ok();
+        });
 
-    for entry in mcfg.iter() {
-        libkernel::io::pci::express::configure_host_bridge(entry).ok();
-    }
-
-    for device in libkernel::io::pci::express::iter_host_bridges()
+    for device in libkernel::io::pci::express::host_bridges()
+        .iter()
         .flat_map(|(_, host_bridge)| host_bridge.iter_busses())
         .filter(|(_, bus)| bus.is_valid())
         .flat_map(|(_, bus)| bus.iter_devices())

@@ -41,19 +41,19 @@ impl PCIeHostBridge {
         self.busses.get(&bus_index)
     }
 
-    pub fn iter_busses(&self) -> alloc::collections::btree_map::Iter<u8, PCIeBus> {
+    pub fn iter(&self) -> alloc::collections::btree_map::Iter<u8, PCIeBus> {
         self.busses.iter()
     }
 }
 
-static mut PCIE_HOST_BRIDGES: BTreeMap<u16, PCIeHostBridge> = BTreeMap::new();
+static mut HOST_BRIDGES: BTreeMap<u16, PCIeHostBridge> = BTreeMap::new();
 
 pub fn configure_host_bridge(
     entry: &crate::acpi::rdsp::xsdt::mcfg::MCFGEntry,
 ) -> Result<(), PCIeHostBridgeError> {
     if !entry.base_addr().is_canonical() {
         Err(PCIeHostBridgeError::InvalidBaseAddress(entry.base_addr()))
-    } else if unsafe { PCIE_HOST_BRIDGES.get(&entry.seg_group_num()).is_some() } {
+    } else if unsafe { HOST_BRIDGES.get(&entry.seg_group_num()).is_some() } {
         Err(PCIeHostBridgeError::BridgeConfigured(entry.seg_group_num()))
     } else {
         let mut bridge = PCIeHostBridge::empty();
@@ -65,11 +65,11 @@ pub fn configure_host_bridge(
             bus_range
         );
 
-        bus_range.for_each(|bus_index| {
+        for bus_index in bus_range {
             bridge
                 .configure_bus(bus_index, entry.base_addr() + ((bus_index as usize) << 20))
                 .ok();
-        });
+        }
 
         debug!(
             "Configured PCIe host bridge group {} with {} valid busses.",
@@ -78,7 +78,7 @@ pub fn configure_host_bridge(
         );
 
         unsafe {
-            PCIE_HOST_BRIDGES
+            HOST_BRIDGES
                 .insert(entry.seg_group_num(), bridge)
                 .unwrap_none()
         };
@@ -87,6 +87,6 @@ pub fn configure_host_bridge(
     }
 }
 
-pub fn iter_host_bridges() -> alloc::collections::btree_map::Iter<'static, u16, PCIeHostBridge> {
-    unsafe { PCIE_HOST_BRIDGES.iter() }
+pub fn host_bridges() -> &'static BTreeMap<u16, PCIeHostBridge> {
+    unsafe { &HOST_BRIDGES }
 }

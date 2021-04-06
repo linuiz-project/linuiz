@@ -78,25 +78,25 @@ impl fmt::Debug for BaseAddressRegister<IOSpace> {
     }
 }
 
-pub trait PCIeDeviceVariant {}
+pub trait PCIeDeviceType {}
 
 pub enum Standard {}
-impl PCIeDeviceVariant for Standard {}
+impl PCIeDeviceType for Standard {}
 
 pub enum PCI2PCI {}
-impl PCIeDeviceVariant for PCI2PCI {}
+impl PCIeDeviceType for PCI2PCI {}
 
 pub enum PCI2CardBus {}
-impl PCIeDeviceVariant for PCI2CardBus {}
+impl PCIeDeviceType for PCI2CardBus {}
 
 #[derive(Debug)]
-pub enum PCIeDeviceType<'a> {
+pub enum PCIeDeviceVariant<'a> {
     Standard(&'a PCIeDeviceHeader<Standard>),
     PCI2PCI(&'a PCIeDeviceHeader<PCI2PCI>),
     PCI2CardBus(&'a PCIeDeviceHeader<PCI2CardBus>),
 }
 
-pub struct PCIeDeviceHeader<T: PCIeDeviceVariant> {
+pub struct PCIeDeviceHeader<T: PCIeDeviceType> {
     phantom: core::marker::PhantomData<T>,
 }
 
@@ -236,11 +236,11 @@ impl PCIeDevice {
         unsafe { self.mmio.read(0).unwrap() }
     }
 
-    pub fn ext_header(&self) -> PCIeDeviceType {
+    pub fn ext_header(&self) -> PCIeDeviceVariant {
         match self.base_header().header_type() {
-            0x0 => PCIeDeviceType::Standard(unsafe { self.mmio.read(0).unwrap() }),
-            0x1 => PCIeDeviceType::PCI2PCI(unsafe { self.mmio.read(0).unwrap() }),
-            0x2 => PCIeDeviceType::PCI2CardBus(unsafe { self.mmio.read(0).unwrap() }),
+            0x0 => PCIeDeviceVariant::Standard(unsafe { self.mmio.read(0).unwrap() }),
+            0x1 => PCIeDeviceVariant::PCI2PCI(unsafe { self.mmio.read(0).unwrap() }),
+            0x2 => PCIeDeviceVariant::PCI2CardBus(unsafe { self.mmio.read(0).unwrap() }),
             header_type => panic!("invalid header type: 0x{:X}", header_type),
         }
     }
