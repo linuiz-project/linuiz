@@ -1,27 +1,21 @@
-use crate::{addr_ty::Physical, io::pci::express::PCIeDevice, Address};
+use crate::{addr_ty::Physical, io::pci::PCIeDeviceVariant, Address};
 use alloc::vec::Vec;
 
 pub struct PCIeBus {
-    devices: Option<Vec<PCIeDevice>>,
+    devices: Option<Vec<PCIeDeviceVariant>>,
 }
 
 impl PCIeBus {
     pub unsafe fn new(base_addr: Address<Physical>) -> Self {
-        let devices: Vec<PCIeDevice> = (0..32)
+        let devices: Vec<PCIeDeviceVariant> = (0..32)
             .filter_map(|device_index| {
                 let offset_addr = base_addr + (device_index << 15);
-                let header = &*crate::memory::malloc::get()
+                let vendor_id = *crate::memory::malloc::get()
                     .physical_memory(offset_addr)
-                    .as_ptr::<crate::io::pci::PCIDeviceHeader>();
+                    .as_ptr::<u16>();
 
-                if header.is_valid() {
-                    debug!(
-                        "Found PCIe device: {} {} [0x{:X}:0x{:X}]",
-                        header.vendor_str(),
-                        header.device_str(),
-                        header.vendor_id(),
-                        header.device_id()
-                    );
+                if vendor_id != u16::MAX {
+                    debug!("Found PCIe device at {:?}", offset_addr);
 
                     let mmio_frames = crate::memory::falloc::get()
                         .acquire_frame(
@@ -31,7 +25,7 @@ impl PCIeBus {
                         .unwrap()
                         .into_iter();
 
-                    Some(PCIeDevice::new(
+                    Some(crate::io::pci::new_device(
                         crate::memory::mmio::unmapped_mmio(mmio_frames)
                             .unwrap()
                             .map(),
@@ -53,15 +47,15 @@ impl PCIeBus {
         }
     }
 
-    pub const fn is_valid(&self) -> bool {
+    pub const fn has_devices(&self) -> bool {
         self.devices.is_some()
     }
 
-    pub fn iter(&self) -> core::slice::Iter<PCIeDevice> {
+    pub fn iter(&self) -> core::slice::Iter<PCIeDeviceVariant> {
         self.devices.as_ref().expect("bus not configured").iter()
     }
 
-    pub fn iter_mut(&mut self) -> core::slice::IterMut<PCIeDevice> {
+    pub fn iter_mut(&mut self) -> core::slice::IterMut<PCIeDeviceVariant> {
         self.devices
             .as_mut()
             .expect("but not configured")

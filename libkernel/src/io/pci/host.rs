@@ -1,4 +1,4 @@
-use crate::{addr_ty::Physical, io::pci::express::PCIeBus, Address};
+use crate::{addr_ty::Physical, io::pci::PCIeBus, Address};
 use alloc::collections::BTreeMap;
 
 #[derive(Debug)]
@@ -28,7 +28,7 @@ impl PCIeHostBridge {
     ) -> Result<(), PCIeHostBridgeError> {
         let bus = unsafe { PCIeBus::new(offset_addr) };
 
-        if !bus.is_valid() {
+        if !bus.has_devices() {
             Err(PCIeHostBridgeError::BusInvalid(bus_index))
         } else {
             self.busses.insert(bus_index, bus).map_or(Ok(()), |_| {

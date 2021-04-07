@@ -1,7 +1,4 @@
-use crate::{
-    io::pci::PCIDeviceHeader,
-    memory::mmio::{Mapped, MMIO},
-};
+use crate::io::pci::{PCIeDevice, Standard};
 use core::fmt;
 
 pub trait BARLayoutVariant {}
@@ -78,42 +75,16 @@ impl fmt::Debug for BaseAddressRegister<IOSpace> {
     }
 }
 
-pub trait PCIeDeviceType {}
-
-pub enum Standard {}
-impl PCIeDeviceType for Standard {}
-
-pub enum PCI2PCI {}
-impl PCIeDeviceType for PCI2PCI {}
-
-pub enum PCI2CardBus {}
-impl PCIeDeviceType for PCI2CardBus {}
-
-#[derive(Debug)]
-pub enum PCIeDeviceVariant<'a> {
-    Standard(&'a PCIeDeviceHeader<Standard>),
-    PCI2PCI(&'a PCIeDeviceHeader<PCI2PCI>),
-    PCI2CardBus(&'a PCIeDeviceHeader<PCI2CardBus>),
-}
-
-pub struct PCIeDeviceHeader<T: PCIeDeviceType> {
-    phantom: core::marker::PhantomData<T>,
-}
-
-impl PCIeDeviceHeader<Standard> {
-    unsafe fn offset<T: Copy>(&self, offset: usize) -> &T {
-        &*((self as *const _ as *const u8).add(offset) as *const T)
-    }
-
+impl PCIeDevice<Standard> {
     unsafe fn base_addr_register(&self, offset: usize) -> BaseAddressRegisterType {
-        let register = (self as *const _ as *const u8).add(offset) as *const u32;
+        let register = self.mmio.read::<u32>(offset).unwrap();
 
         match (*register & 0b1) > 0 {
             false => BaseAddressRegisterType::MemorySpace(
-                &*(register as *const BaseAddressRegister<MemorySpace>),
+                &*(register as *const _ as *const BaseAddressRegister<MemorySpace>),
             ),
             true => BaseAddressRegisterType::IOSpace(
-                &*(register as *const BaseAddressRegister<IOSpace>),
+                &*(register as *const _ as *const BaseAddressRegister<IOSpace>),
             ),
         }
     }
@@ -142,53 +113,53 @@ impl PCIeDeviceHeader<Standard> {
         unsafe { self.base_addr_register(0x24) }
     }
 
-    pub fn cardbus_cis_ptr(&self) -> u32 {
-        unsafe { *self.offset(0x28) }
+    pub fn cardbus_cis_ptr(&self) -> &u32 {
+        unsafe { *self.mmio.read(0x28).unwrap() }
     }
 
     pub fn subsystem_vendor_id(&self) -> u16 {
-        unsafe { *self.offset(0x2C) }
+        unsafe { *self.mmio.read(0x2C).unwrap() }
     }
 
     pub fn subsystem_id(&self) -> u16 {
-        unsafe { *self.offset(0x2E) }
+        unsafe { *self.mmio.read(0x2E).unwrap() }
     }
 
     pub fn expansion_rom_base_addr(&self) -> u32 {
-        unsafe { *self.offset(0x30) }
+        unsafe { *self.mmio.read(0x30).unwrap() }
     }
 
     pub fn capabilities_ptr(&self) -> u8 {
-        unsafe { *self.offset::<u8>(0x34) & !0b11 }
+        unsafe { *self.mmio.read::<u8>(0x34).unwrap() & !0b11 }
     }
 
     pub fn interrupt_line(&self) -> Option<u8> {
-        match unsafe { self.offset(0x3C) } {
+        match unsafe { *self.mmio.read(0x3C).unwrap() } {
             0xFF => None,
-            value => Some(*value),
+            value => Some(value),
         }
     }
 
     pub fn interrupt_pin(&self) -> Option<u8> {
-        match unsafe { self.offset(0x3D) } {
+        match unsafe { *self.mmio.read(0x3D).unwrap() } {
             0x0 => None,
-            value => Some(*value),
+            value => Some(value),
         }
     }
 
     pub fn min_grant(&self) -> u8 {
-        unsafe { *self.offset(0x3E) }
+        unsafe { *self.mmio.read(0x3E).unwrap() }
     }
 
     pub fn max_latency(&self) -> u8 {
-        unsafe { *self.offset(0x3F) }
+        unsafe { *self.mmio.read(0x3F).unwrap() }
     }
 }
 
-impl fmt::Debug for PCIeDeviceHeader<Standard> {
+impl fmt::Debug for PCIeDevice<Standard> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("Extended PCI Device Header")
+            .debug_struct("PCIe Device (Standard)")
             .field("Base Address Register 0", &self.bar_0())
             .field("Base Address Register 1", &self.bar_1())
             .field("Base Address Register 2", &self.bar_2())
@@ -207,56 +178,6 @@ impl fmt::Debug for PCIeDeviceHeader<Standard> {
             .field("Interrupt Pin", &self.interrupt_pin())
             .field("Min Grant", &self.min_grant())
             .field("Max Latency", &self.max_latency())
-            .finish()
-    }
-}
-
-impl fmt::Debug for PCIeDeviceHeader<PCI2PCI> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("ss").finish()
-    }
-}
-
-impl fmt::Debug for PCIeDeviceHeader<PCI2CardBus> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("ss").finish()
-    }
-}
-
-pub struct PCIeDevice {
-    mmio: MMIO<Mapped>,
-}
-
-impl PCIeDevice {
-    pub const fn new(mmio: MMIO<Mapped>) -> Self {
-        Self { mmio }
-    }
-
-    pub fn base_header(&self) -> &PCIDeviceHeader {
-        unsafe { self.mmio.read(0).unwrap() }
-    }
-
-    pub fn ext_header(&self) -> PCIeDeviceVariant {
-        match self.base_header().header_type() {
-            0x0 => PCIeDeviceVariant::Standard(unsafe { self.mmio.read(0).unwrap() }),
-            0x1 => PCIeDeviceVariant::PCI2PCI(unsafe { self.mmio.read(0).unwrap() }),
-            0x2 => PCIeDeviceVariant::PCI2CardBus(unsafe { self.mmio.read(0).unwrap() }),
-            header_type => panic!("invalid header type: 0x{:X}", header_type),
-        }
-    }
-
-    // TODO remove this
-    pub fn consume_mmio(self) -> MMIO<Mapped> {
-        self.mmio
-    }
-}
-
-impl core::fmt::Debug for PCIeDevice {
-    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter
-            .debug_struct("PCIe Device")
-            .field("Header", self.base_header())
-            .field("Extended Header", &self.ext_header())
             .finish()
     }
 }

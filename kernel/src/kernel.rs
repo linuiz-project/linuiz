@@ -107,23 +107,24 @@ extern "efiapi" fn kernel_main(
         .unwrap()
         .iter()
         .for_each(|entry| {
-            libkernel::io::pci::express::configure_host_bridge(entry).ok();
+            libkernel::io::pci::configure_host_bridge(entry).ok();
         });
 
-    for device in libkernel::io::pci::express::host_bridges()
+    for device_variant in libkernel::io::pci::host_bridges()
         .iter()
-        .flat_map(|(_, host_bridge)| host_bridge.iter_busses())
-        .filter(|(_, bus)| bus.is_valid())
-        .flat_map(|(_, bus)| bus.iter_devices())
+        .flat_map(|(_, host_bridge)| host_bridge.iter())
+        .filter(|(_, bus)| bus.has_devices())
+        .flat_map(|(_, bus)| bus.iter())
     {
-        use libkernel::io::pci::PCIDeviceClass;
-        let header = device.base_header();
+        use libkernel::io::pci::{PCIeDeviceClass, PCIeDeviceVariant};
 
-        if header.class() == PCIDeviceClass::MassStorageController
-            && header.subclass() == 0x06
-            && header.program_interface() == 0x1
-        {
-            crate::println!("{:?}", header);
+        if let PCIeDeviceVariant::Standard(device) = device_variant {
+            if device.class() == PCIeDeviceClass::MassStorageController
+                && device.subclass() == 0x06
+                && device.program_interface() == 0x1
+            {
+                crate::println!("{:?}", device.vendor_id());
+            }
         }
     }
 
