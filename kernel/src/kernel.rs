@@ -123,7 +123,8 @@ extern "efiapi" fn kernel_main(
                 && device.subclass() == 0x06
                 && device.program_interface() == 0x1
             {
-                crate::println!("{:?}", device.vendor_id());
+                let ahci = drivers::ahci::AHCI::from_pcie_device(&device);
+                info!("{:#?}", ahci.hba_memory());
             }
         }
     }

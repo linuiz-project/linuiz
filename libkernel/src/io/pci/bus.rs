@@ -28,7 +28,7 @@ impl PCIeBus {
                     Some(crate::io::pci::new_device(
                         crate::memory::mmio::unmapped_mmio(mmio_frames)
                             .unwrap()
-                            .map(),
+                            .automap(),
                     ))
                 } else {
                     None

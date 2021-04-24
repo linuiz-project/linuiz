@@ -21,12 +21,12 @@ impl PCIeHostBridge {
         }
     }
 
-    fn configure_bus(
+    unsafe fn configure_bus(
         &mut self,
         bus_index: u8,
         offset_addr: Address<Physical>,
     ) -> Result<(), PCIeHostBridgeError> {
-        let bus = unsafe { PCIeBus::new(offset_addr) };
+        let bus = PCIeBus::new(offset_addr);
 
         if !bus.has_devices() {
             Err(PCIeHostBridgeError::BusInvalid(bus_index))
@@ -66,9 +66,10 @@ pub fn configure_host_bridge(
         );
 
         for bus_index in bus_range {
-            bridge
-                .configure_bus(bus_index, entry.base_addr() + ((bus_index as usize) << 20))
-                .ok();
+            unsafe {
+                let offet_addr = entry.base_addr() + ((bus_index as usize) << 20);
+                bridge.configure_bus(bus_index, offet_addr).ok();
+            }
         }
 
         debug!(
@@ -80,7 +81,7 @@ pub fn configure_host_bridge(
         unsafe {
             HOST_BRIDGES
                 .insert(entry.seg_group_num(), bridge)
-                .unwrap_none()
+                .expect_none("attempted to insert PCI bridge for existent segment group")
         };
 
         Ok(())

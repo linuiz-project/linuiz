@@ -4,7 +4,7 @@ pub use standard::*;
 
 use crate::memory::mmio::{Mapped, MMIO};
 use bitflags::bitflags;
-use core::{fmt, marker::PhantomData};
+use core::{fmt, lazy::OnceCell, marker::PhantomData};
 
 bitflags! {
     pub struct PCIeCommandRegister: u16 {
@@ -127,21 +127,27 @@ pub enum PCIeDeviceVariant {
 
 pub struct PCIeDevice<T: PCIeDeviceType> {
     mmio: MMIO<Mapped>,
+    bar_mmios: [OnceCell<MMIO<Mapped>>; 10],
     phantom: PhantomData<T>,
 }
 
 pub fn new_device(mmio: MMIO<Mapped>) -> PCIeDeviceVariant {
+    const ONCE_CELL_EMPTY: OnceCell<MMIO<Mapped>> = OnceCell::new();
+
     match unsafe { *mmio.read::<u8>(0xD).unwrap() & 0x7F } {
         0x0 => PCIeDeviceVariant::Standard(PCIeDevice::<Standard> {
             mmio,
+            bar_mmios: [ONCE_CELL_EMPTY; 10],
             phantom: PhantomData,
         }),
-        0x1 => PCIeDeviceVariant::PCI2PCI(PCIeDevice::<PCI2PCI> {
+        0x1 => PCIeDeviceVariant::PCI2PCI(PCIeDevice {
             mmio,
+            bar_mmios: [ONCE_CELL_EMPTY; 10],
             phantom: PhantomData,
         }),
         0x2 => PCIeDeviceVariant::PCI2CardBus(PCIeDevice::<PCI2CardBus> {
             mmio,
+            bar_mmios: [ONCE_CELL_EMPTY; 10],
             phantom: PhantomData,
         }),
         invalid_type => panic!("header type is invalid (must be 0..=2): {}", invalid_type),

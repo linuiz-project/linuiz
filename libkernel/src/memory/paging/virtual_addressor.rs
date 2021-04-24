@@ -156,6 +156,13 @@ impl VirtualAddressor {
         self.mapped_page = page;
     }
 
+    pub unsafe fn modify_page_attributes(&mut self, page: &Page, attributes: PageAttributes) {
+        match self.get_page_entry_mut(page) {
+            Some(entry) => entry.set(&entry.frame().unwrap(), attributes),
+            None => panic!("given page is not mapped: {:?}", page),
+        }
+    }
+
     pub unsafe fn swap_into(&self) {
         crate::registers::CR3::write(&self.pml4_frame, crate::registers::CR3Flags::empty());
     }

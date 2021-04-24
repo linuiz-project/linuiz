@@ -1,16 +1,30 @@
-use crate::io::pci::{PCIeDevice, Standard};
+use crate::{
+    addr_ty::Virtual,
+    io::pci::{PCIeDevice, Standard},
+    Address,
+};
 use core::fmt;
 
-pub trait BARLayoutVariant {}
+pub trait BaseAddressRegisterType {
+    fn base_address<T>(raw: u32) -> *const T;
+}
 
 pub enum MemorySpace {}
-impl BARLayoutVariant for MemorySpace {}
+impl BaseAddressRegisterType for MemorySpace {
+    fn base_address<T>(raw: u32) -> *const T {
+        (raw & !0b1111) as *const _
+    }
+}
 
 pub enum IOSpace {}
-impl BARLayoutVariant for IOSpace {}
+impl BaseAddressRegisterType for IOSpace {
+    fn base_address<T>(raw: u32) -> *const T {
+        (raw & !0b11) as *const _
+    }
+}
 
 #[derive(Debug)]
-pub enum BaseAddressRegisterType<'a> {
+pub enum BaseAddressRegisterVariant<'a> {
     MemorySpace(&'a BaseAddressRegister<MemorySpace>),
     IOSpace(&'a BaseAddressRegister<IOSpace>),
 }
@@ -25,16 +39,18 @@ pub enum MemorySpaceAddressType {
 }
 
 #[repr(transparent)]
-pub struct BaseAddressRegister<T: BARLayoutVariant> {
+pub struct BaseAddressRegister<V: BaseAddressRegisterType> {
     value: u32,
-    phantom: core::marker::PhantomData<T>,
+    phantom: core::marker::PhantomData<V>,
+}
+
+impl<V: BaseAddressRegisterType> BaseAddressRegister<V> {
+    pub fn base_address(&self) -> Address<Virtual> {
+        Address::<Virtual>::from_ptr(V::base_address::<u8>(self.value))
+    }
 }
 
 impl BaseAddressRegister<MemorySpace> {
-    pub fn base_address<T>(&self) -> *const T {
-        (self.value & !0b1111) as *const _
-    }
-
     pub fn prefetchable(&self) -> bool {
         (self.value & (1 << 3)) > 0
     }
@@ -49,17 +65,11 @@ impl BaseAddressRegister<MemorySpace> {
     }
 }
 
-impl BaseAddressRegister<IOSpace> {
-    pub fn base_address<T>(&self) -> *const T {
-        (self.value & !0b11) as *const _
-    }
-}
-
 impl fmt::Debug for BaseAddressRegister<MemorySpace> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("BaseAddressRegister<MemorySpace>")
-            .field("Base Address", &self.base_address::<u8>())
+            .field("Base Address", &self.base_address())
             .field("Prefetchable", &self.prefetchable())
             .field("Type", &self.address_type())
             .finish()
@@ -70,46 +80,58 @@ impl fmt::Debug for BaseAddressRegister<IOSpace> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_tuple("BaseAddressRegister<IOSpace>")
-            .field(&self.base_address::<u8>())
+            .field(&self.base_address())
             .finish()
     }
 }
 
 impl PCIeDevice<Standard> {
-    unsafe fn base_addr_register(&self, offset: usize) -> BaseAddressRegisterType {
-        let register = self.mmio.read::<u32>(offset).unwrap();
+    unsafe fn base_addr_register(&self, offset: usize) -> Option<BaseAddressRegisterVariant> {
+        const REGISTER_BASE: u32 = 0x10;
+        const REGISTER_OFFSET: u32 = 0x4;
 
-        match (*register & 0b1) > 0 {
-            false => BaseAddressRegisterType::MemorySpace(
-                &*(register as *const _ as *const BaseAddressRegister<MemorySpace>),
-            ),
-            true => BaseAddressRegisterType::IOSpace(
-                &*(register as *const _ as *const BaseAddressRegister<IOSpace>),
-            ),
+        let raw = self.mmio.read::<u32>(offset).unwrap();
+
+        if (*raw & 0b1) == 0 {
+            let register = &*(raw as *const _ as *const BaseAddressRegister<MemorySpace>);
+
+            if register.base_address() != Address::zero() {
+                Some(BaseAddressRegisterVariant::MemorySpace(register))
+            } else {
+                None
+            }
+        } else {
+            let register = &*(raw as *const _ as *const BaseAddressRegister<IOSpace>);
+
+            if register.base_address() != Address::zero() {
+                Some(BaseAddressRegisterVariant::IOSpace(register))
+            } else {
+                None
+            }
         }
     }
 
-    pub fn bar_0(&self) -> BaseAddressRegisterType {
+    pub fn register0(&self) -> Option<BaseAddressRegisterVariant> {
         unsafe { self.base_addr_register(0x10) }
     }
 
-    pub fn bar_1(&self) -> BaseAddressRegisterType {
+    pub fn register1(&self) -> Option<BaseAddressRegisterVariant> {
         unsafe { self.base_addr_register(0x14) }
     }
 
-    pub fn bar_2(&self) -> BaseAddressRegisterType {
+    pub fn register2(&self) -> Option<BaseAddressRegisterVariant> {
         unsafe { self.base_addr_register(0x18) }
     }
 
-    pub fn bar_3(&self) -> BaseAddressRegisterType {
+    pub fn register3(&self) -> Option<BaseAddressRegisterVariant> {
         unsafe { self.base_addr_register(0x1C) }
     }
 
-    pub fn bar_4(&self) -> BaseAddressRegisterType {
+    pub fn register4(&self) -> Option<BaseAddressRegisterVariant> {
         unsafe { self.base_addr_register(0x20) }
     }
 
-    pub fn bar_5(&self) -> BaseAddressRegisterType {
+    pub fn register5(&self) -> Option<BaseAddressRegisterVariant> {
         unsafe { self.base_addr_register(0x24) }
     }
 
@@ -160,12 +182,12 @@ impl fmt::Debug for PCIeDevice<Standard> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("PCIe Device (Standard)")
-            .field("Base Address Register 0", &self.bar_0())
-            .field("Base Address Register 1", &self.bar_1())
-            .field("Base Address Register 2", &self.bar_2())
-            .field("Base Address Register 3", &self.bar_3())
-            .field("Base Address Register 4", &self.bar_4())
-            .field("Base Address Register 5", &self.bar_5())
+            .field("Base Address Register 0", &self.register0())
+            .field("Base Address Register 1", &self.register1())
+            .field("Base Address Register 2", &self.register2())
+            .field("Base Address Register 3", &self.register3())
+            .field("Base Address Register 4", &self.register4())
+            .field("Base Address Register 5", &self.register5())
             .field("Cardbus CIS Pointer", &self.cardbus_cis_ptr())
             .field("Subsystem Vendor ID", &self.subsystem_vendor_id())
             .field("Subsystem ID", &self.subsystem_id())

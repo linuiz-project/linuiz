@@ -621,6 +621,14 @@ impl BlockAllocator<'_> {
 }
 
 impl libkernel::memory::malloc::MemoryAllocator for BlockAllocator<'_> {
+    fn minimum_alignment(&self) -> usize {
+        Self::BLOCK_SIZE
+    }
+
+    unsafe fn physical_memory(&self, addr: Address<Physical>) -> Address<Virtual> {
+        self.physical_memory(addr)
+    }
+
     fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
         self.alloc(layout)
     }
@@ -633,11 +641,8 @@ impl libkernel::memory::malloc::MemoryAllocator for BlockAllocator<'_> {
         self.dealloc(ptr, layout.size());
     }
 
-    fn minimum_alignment(&self) -> usize {
-        Self::BLOCK_SIZE
-    }
-
-    unsafe fn physical_memory(&self, addr: Address<Physical>) -> Address<Virtual> {
-        self.physical_memory(addr)
+    unsafe fn modify_page_attributes(&self, page: &Page, attributes: PageAttributes) {
+        let addressor = self.get_addressor_mut();
+        addressor.m
     }
 }

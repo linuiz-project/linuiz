@@ -23,7 +23,7 @@ pub fn load() {
                 .unwrap()
         })
         .unwrap()
-        .map();
+        .automap();
 
         unsafe { LOCAL_APIC.set(APIC::new(mmio)).ok() };
     }

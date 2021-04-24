@@ -1,4 +1,8 @@
-use crate::{addr_ty::Virtual, memory::FrameIterator, Address};
+use crate::{
+    addr_ty::{Physical, Virtual},
+    memory::FrameIterator,
+    Address,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MMIOError {
@@ -36,9 +40,15 @@ impl<S: MMIOState> core::fmt::Debug for MMIO<S> {
 }
 
 impl MMIO<Unmapped> {
-    pub fn map(self) -> MMIO<Mapped> {
-        let mapped_addr = Address::from_ptr::<u8>(crate::alloc_to!(&self.frames));
+    pub fn automap(self) -> MMIO<Mapped> {
+        MMIO::<Mapped> {
+            frames: self.frames,
+            mapped_addr: Address::from_ptr::<u8>(crate::alloc_to!(&self.frames)),
+            phantom: core::marker::PhantomData,
+        }
+    }
 
+    pub unsafe fn map(self, mapped_addr: Address<Virtual>) -> MMIO<Mapped> {
         MMIO::<Mapped> {
             frames: self.frames,
             mapped_addr,
@@ -84,6 +94,10 @@ impl MMIO<Mapped> {
 
     pub unsafe fn read_mut<T>(&mut self, offset: usize) -> Result<&mut T, MMIOError> {
         self.mapped_offset_mut::<T>(offset).map(|ptr| &mut *ptr)
+    }
+
+    pub fn physical_addr(&self) -> Address<Physical> {
+        self.frames.nth(0).unwrap().addr()
     }
 
     pub fn mapped_addr(&self) -> Address<Virtual> {
