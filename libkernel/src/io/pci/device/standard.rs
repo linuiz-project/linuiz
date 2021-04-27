@@ -1,6 +1,7 @@
 use crate::{
-    addr_ty::Virtual,
+    addr_ty::{Physical, Virtual},
     io::pci::{PCIeDevice, Standard},
+    memory::mmio::{Mapped, MMIO},
     Address,
 };
 use core::fmt;
@@ -86,53 +87,94 @@ impl fmt::Debug for BaseAddressRegister<IOSpace> {
 }
 
 impl PCIeDevice<Standard> {
-    unsafe fn base_addr_register(&self, offset: usize) -> Option<BaseAddressRegisterVariant> {
-        const REGISTER_BASE: u32 = 0x10;
-        const REGISTER_OFFSET: u32 = 0x4;
+    pub unsafe fn new(mmio: MMIO<Mapped>) -> Self {
+        const ONCE_CELL_EMPTY: core::lazy::OnceCell<MMIO<Mapped>> = core::lazy::OnceCell::new();
 
-        let raw = self.mmio.read::<u32>(offset).unwrap();
+        assert_eq!(
+            *mmio
+                .read::<u32>(crate::io::pci::PCIHeaderOffset::HeaderType.into())
+                .unwrap(),
+            0,
+            "incorrect header type for standard specification PCI device"
+        );
 
-        if (*raw & 0b1) == 0 {
-            let register = &*(raw as *const _ as *const BaseAddressRegister<MemorySpace>);
+        let this = Self {
+            mmio,
+            bar_mmios: [ONCE_CELL_EMPTY; 10],
+            phantom: core::marker::PhantomData,
+        };
 
-            if register.base_address() != Address::zero() {
-                Some(BaseAddressRegisterVariant::MemorySpace(register))
+        for register in 0..=5 {
+            let register_raw = *this
+                .mmio
+                .read::<u32>(0x10 + (register * core::mem::size_of::<u32>()))
+                .unwrap();
+
+            if register_raw == 0x0 {
+                continue;
             } else {
-                None
-            }
-        } else {
-            let register = &*(raw as *const _ as *const BaseAddressRegister<IOSpace>);
+                let is_memory_space = (register_raw & 0b1) == 0;
 
-            if register.base_address() != Address::zero() {
-                Some(BaseAddressRegisterVariant::IOSpace(register))
-            } else {
-                None
+                let addr = Address::<Physical>::new({
+                    if is_memory_space {
+                        register_raw & !0b1111
+                    } else {
+                        register_raw & 0b11
+                    }
+                } as usize);
+
+                let mmio_frames = crate::memory::falloc::get()
+                    .acquire_frames(
+                        addr.frame_index(),
+                        1,
+                        crate::memory::falloc::FrameState::MMIO,
+                    )
+                    .expect("frames are not MMIO");
+                let register_mmio = crate::memory::mmio::unmapped_mmio(mmio_frames)
+                    .expect("failed to create MMIO object")
+                    .automap();
+
+                if is_memory_space && ((register_raw & 0b1000) > 0) {
+                    use crate::memory::paging::{PageAttributeModifyMode, PageAttributes};
+
+                    crate::memory::malloc::get().modify_page_attributes(
+                        &crate::memory::Page::from_addr(register_mmio.mapped_addr()),
+                        PageAttributes::WRITE_THROUGH,
+                        PageAttributeModifyMode::Insert,
+                    )
+                }
+
+                this.bar_mmios[register]
+                    .set(register_mmio)
+                    .expect("already configured MMIO register");
             }
         }
+
+        this
     }
 
-    pub fn register0(&self) -> Option<BaseAddressRegisterVariant> {
-        unsafe { self.base_addr_register(0x10) }
+    pub fn register0(&'mmio self) -> Option<&'mmio mut MMIO<Mapped>> {
+        self.bar_mmios[0].get_mut()
     }
 
-    pub fn register1(&self) -> Option<BaseAddressRegisterVariant> {
-        unsafe { self.base_addr_register(0x14) }
+    pub fn register1(&'mmio self) -> Option<&'mmio mut MMIO<Mapped>> {
+        self.bar_mmios[1].get_mut()
     }
 
-    pub fn register2(&self) -> Option<BaseAddressRegisterVariant> {
-        unsafe { self.base_addr_register(0x18) }
+    pub fn register2(&'mmio self) -> Option<&'mmio mut MMIO<Mapped>> {
+        self.bar_mmios[2].get_mut()
     }
 
-    pub fn register3(&self) -> Option<BaseAddressRegisterVariant> {
-        unsafe { self.base_addr_register(0x1C) }
+    pub fn register3(&'mmio self) -> Option<&'mmio mut MMIO<Mapped>> {
+        self.bar_mmios[3].get_mut()
     }
 
-    pub fn register4(&self) -> Option<BaseAddressRegisterVariant> {
-        unsafe { self.base_addr_register(0x20) }
+    pub fn register4(&'mmio self) -> Option<&'mmio mut MMIO<Mapped>> {
+        self.bar_mmios[4].get_mut()
     }
 
-    pub fn register5(&self) -> Option<BaseAddressRegisterVariant> {
-        unsafe { self.base_addr_register(0x24) }
+    pub fn register5(&'mmio self) -> Option<&'mmio mut MMIO<Mapped>> {
+        self.bar_mmios[5].get_mut()
     }
 
     pub fn cardbus_cis_ptr(&self) -> &u32 {

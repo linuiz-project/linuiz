@@ -51,14 +51,15 @@ impl<'dev> AHCI<'dev> {
     pub fn from_pcie_device(device: &'dev PCIeDevice<Standard>) -> Self {
         trace!("Using PCIe device for AHCI driver:\n{:#?}", device);
 
-        info!("{:?}", device.bar0());
-        info!("{:?}", device.bar1());
-        info!("{:?}", device.bar2());
-        info!("{:?}", device.bar3());
-        info!("{:?}", device.bar4());
-        info!("{:?}", device.bar5());
+        info!("{:?}", device.register0());
+        info!("{:?}", device.register1());
+        info!("{:?}", device.register2());
+        info!("{:?}", device.register3());
+        info!("{:?}", device.register4());
+        info!("{:?}", device.register5());
 
-        if let Some(BaseAddressRegisterVariant::MemorySpace(base_address_register)) = device.bar5()
+        if let Some(BaseAddressRegisterVariant::MemorySpace(base_address_register)) =
+            device.register5()
         {
             info!(
                 "{:?}",

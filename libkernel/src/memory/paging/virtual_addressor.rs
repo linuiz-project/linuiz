@@ -1,7 +1,7 @@
 use crate::{
     addr_ty::Virtual,
     memory::{
-        paging::{Level4, PageAttributes, PageTable, PageTableEntry},
+        paging::{Level4, PageAttributeModifyMode, PageAttributes, PageTable, PageTableEntry},
         Frame, Page,
     },
     Address,
@@ -156,10 +156,24 @@ impl VirtualAddressor {
         self.mapped_page = page;
     }
 
-    pub unsafe fn modify_page_attributes(&mut self, page: &Page, attributes: PageAttributes) {
+    pub unsafe fn modify_page_attributes(
+        &mut self,
+        page: &Page,
+        attributes: PageAttributes,
+        mode: PageAttributeModifyMode,
+    ) {
         // TODO return a Result<,> here
         match self.get_page_entry_mut(page) {
-            Some(entry) => entry.set(&entry.frame().unwrap(), attributes),
+            Some(entry) => {
+                let mut entry_attributes = entry.attribs();
+                match mode {
+                    PageAttributeModifyMode::Set => entry_attributes = attributes,
+                    PageAttributeModifyMode::Insert => entry_attributes.insert(attributes),
+                    PageAttributeModifyMode::Toggle => entry_attributes.toggle(attributes),
+                }
+
+                entry.set_attributes(entry_attributes);
+            }
             None => panic!("given page is not mapped: {:?}", page),
         }
     }

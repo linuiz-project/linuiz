@@ -17,6 +17,13 @@ bitflags! {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum PageAttributeModifyMode {
+    Set,
+    Insert,
+    Toggle,
+}
+
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct PageTableEntry(usize);

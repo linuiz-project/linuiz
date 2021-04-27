@@ -6,6 +6,35 @@ use crate::memory::mmio::{Mapped, MMIO};
 use bitflags::bitflags;
 use core::{fmt, lazy::OnceCell, marker::PhantomData};
 
+#[repr(u32)]
+#[derive(Debug, Clone, Copy)]
+pub enum PCIHeaderOffset {
+    VendorID = 0x0,
+    DeviceID = 0x2,
+    Command = 0x4,
+    Status = 0x6,
+    RevisionID = 0x8,
+    ProgramInterface = 0x9,
+    Subclass = 0xA,
+    Class = 0xB,
+    CacheLineSize = 0xC,
+    LatencyTimer = 0xD,
+    HeaderType = 0xE,
+    BuiltInSelfTest = 0xF,
+}
+
+impl Into<u32> for PCIHeaderOffset {
+    fn into(self) -> u32 {
+        self as u32
+    }
+}
+
+impl Into<usize> for PCIHeaderOffset {
+    fn into(self) -> usize {
+        self as usize
+    }
+}
+
 bitflags! {
     pub struct PCIeCommandRegister: u16 {
         const IO_SPACE = 1 << 0;
@@ -134,7 +163,7 @@ pub struct PCIeDevice<T: PCIeDeviceType> {
 pub fn new_device(mmio: MMIO<Mapped>) -> PCIeDeviceVariant {
     const ONCE_CELL_EMPTY: OnceCell<MMIO<Mapped>> = OnceCell::new();
 
-    match unsafe { *mmio.read::<u8>(0xD).unwrap() & 0x7F } {
+    match unsafe { *mmio.read::<u8>(PCIHeaderOffset::HeaderType.into()).unwrap() & 0x7F } {
         0x0 => PCIeDeviceVariant::Standard(PCIeDevice::<Standard> {
             mmio,
             bar_mmios: [ONCE_CELL_EMPTY; 10],
@@ -156,51 +185,78 @@ pub fn new_device(mmio: MMIO<Mapped>) -> PCIeDeviceVariant {
 
 impl<T: PCIeDeviceType> PCIeDevice<T> {
     pub fn vendor_id(&self) -> u16 {
-        unsafe { *self.mmio.read(0x0).unwrap() }
+        unsafe { *self.mmio.read(PCIHeaderOffset::VendorID.into()).unwrap() }
     }
 
     pub fn device_id(&self) -> u16 {
-        unsafe { *self.mmio.read(0x2).unwrap() }
+        unsafe { *self.mmio.read(PCIHeaderOffset::DeviceID.into()).unwrap() }
     }
 
     pub fn command(&self) -> PCIeCommandRegister {
-        unsafe { *self.mmio.read(0x4).unwrap() }
+        unsafe { *self.mmio.read(PCIHeaderOffset::Command.into()).unwrap() }
     }
 
     pub fn status(&self) -> u16 {
-        unsafe { *self.mmio.read(0x6).unwrap() }
+        unsafe { *self.mmio.read(PCIHeaderOffset::Status.into()).unwrap() }
     }
 
     pub fn revision_id(&self) -> u8 {
-        unsafe { *self.mmio.read(0x8).unwrap() }
+        unsafe { *self.mmio.read(PCIHeaderOffset::RevisionID.into()).unwrap() }
     }
 
     pub fn program_interface(&self) -> u8 {
-        unsafe { *self.mmio.read(0x9).unwrap() }
+        unsafe {
+            *self
+                .mmio
+                .read(PCIHeaderOffset::ProgramInterface.into())
+                .unwrap()
+        }
     }
 
     pub fn subclass(&self) -> u8 {
-        unsafe { *self.mmio.read(0xA).unwrap() }
+        unsafe { *self.mmio.read(PCIHeaderOffset::Subclass.into()).unwrap() }
     }
 
     pub fn class(&self) -> PCIeDeviceClass {
-        unsafe { *self.mmio.read(0xB).unwrap() }
+        unsafe { *self.mmio.read(PCIHeaderOffset::Class.into()).unwrap() }
     }
 
     pub fn cache_line_size(&self) -> u8 {
-        unsafe { *self.mmio.read(0xC).unwrap() }
+        unsafe {
+            *self
+                .mmio
+                .read(PCIHeaderOffset::CacheLineSize.into())
+                .unwrap()
+        }
     }
 
     pub fn latency_timer(&self) -> u8 {
-        unsafe { *self.mmio.read(0xD).unwrap() }
+        unsafe {
+            *self
+                .mmio
+                .read(PCIHeaderOffset::LatencyTimer.into())
+                .unwrap()
+        }
     }
 
     pub fn multi_function(&self) -> bool {
-        unsafe { (*self.mmio.read::<u8>(0xE).unwrap() & (1 << 7)) > 0 }
+        unsafe {
+            (*self
+                .mmio
+                .read::<u8>(PCIHeaderOffset::BuiltInSelfTest.into())
+                .unwrap()
+                & (1 << 7))
+                > 0
+        }
     }
 
     pub fn builtin_self_test(&self) -> PCIeBuiltinSelfTest {
-        unsafe { *self.mmio.read(0xE).unwrap() }
+        unsafe {
+            *self
+                .mmio
+                .read(PCIHeaderOffset::BuiltInSelfTest.into())
+                .unwrap()
+        }
     }
 }
 

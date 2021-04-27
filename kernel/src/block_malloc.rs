@@ -641,8 +641,13 @@ impl libkernel::memory::malloc::MemoryAllocator for BlockAllocator<'_> {
         self.dealloc(ptr, layout.size());
     }
 
-    unsafe fn modify_page_attributes(&self, page: &Page, attributes: PageAttributes) {
+    unsafe fn modify_page_attributes(
+        &self,
+        page: &Page,
+        attributes: libkernel::memory::paging::PageAttributes,
+        mode: libkernel::memory::paging::PageAttributeModifyMode,
+    ) {
         self.get_addressor_mut()
-            .modify_page_attributes(page, attributes);
+            .modify_page_attributes(page, attributes, mode);
     }
 }
