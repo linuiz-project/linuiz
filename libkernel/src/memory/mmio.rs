@@ -41,9 +41,11 @@ impl<S: MMIOState> core::fmt::Debug for MMIO<S> {
 
 impl MMIO<Unmapped> {
     pub fn automap(self) -> MMIO<Mapped> {
+        let mapped_addr = Address::from_ptr::<u8>(crate::alloc_to!(&self.frames));
+
         MMIO::<Mapped> {
             frames: self.frames,
-            mapped_addr: Address::from_ptr::<u8>(crate::alloc_to!(&self.frames)),
+            mapped_addr,
             phantom: core::marker::PhantomData,
         }
     }
@@ -97,7 +99,7 @@ impl MMIO<Mapped> {
     }
 
     pub fn physical_addr(&self) -> Address<Physical> {
-        self.frames.nth(0).unwrap().addr()
+        self.frames.start().addr()
     }
 
     pub fn mapped_addr(&self) -> Address<Virtual> {

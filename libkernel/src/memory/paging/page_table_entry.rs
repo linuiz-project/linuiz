@@ -46,8 +46,16 @@ impl PageTableEntry {
         }
     }
 
-    pub fn set(&mut self, frame: &Frame, attribs: PageAttributes) {
-        self.0 = frame.addr().as_usize() | attribs.bits();
+    pub fn set(&mut self, frame: &Frame, attributes: PageAttributes) {
+        self.0 = frame.addr().as_usize() | attributes.bits();
+    }
+
+    pub fn set_frame(&mut self, frame: &Frame) {
+        self.0 = (self.0 & PageAttributes::all().bits()) | frame.addr().as_usize()
+    }
+
+    pub fn set_attributes(&mut self, attributes: PageAttributes) {
+        self.0 = (self.0 & !PageAttributes::all().bits()) | attributes.bits();
     }
 
     pub fn is_present(&self) -> bool {

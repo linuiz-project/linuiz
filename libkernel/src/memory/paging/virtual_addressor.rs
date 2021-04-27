@@ -157,6 +157,7 @@ impl VirtualAddressor {
     }
 
     pub unsafe fn modify_page_attributes(&mut self, page: &Page, attributes: PageAttributes) {
+        // TODO return a Result<,> here
         match self.get_page_entry_mut(page) {
             Some(entry) => entry.set(&entry.frame().unwrap(), attributes),
             None => panic!("given page is not mapped: {:?}", page),

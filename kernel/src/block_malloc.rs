@@ -642,7 +642,7 @@ impl libkernel::memory::malloc::MemoryAllocator for BlockAllocator<'_> {
     }
 
     unsafe fn modify_page_attributes(&self, page: &Page, attributes: PageAttributes) {
-        let addressor = self.get_addressor_mut();
-        addressor.m
+        self.get_addressor_mut()
+            .modify_page_attributes(page, attributes);
     }
 }
