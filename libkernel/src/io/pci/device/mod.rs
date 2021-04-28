@@ -1,5 +1,6 @@
 mod standard;
 
+use spin::Mutex;
 pub use standard::*;
 
 use crate::memory::mmio::{Mapped, MMIO};
@@ -156,27 +157,23 @@ pub enum PCIeDeviceVariant {
 
 pub struct PCIeDevice<T: PCIeDeviceType> {
     mmio: MMIO<Mapped>,
-    bar_mmios: [OnceCell<MMIO<Mapped>>; 10],
+    bar_mmios: [OnceCell<Mutex<MMIO<Mapped>>>; 10],
     phantom: PhantomData<T>,
 }
 
 pub fn new_device(mmio: MMIO<Mapped>) -> PCIeDeviceVariant {
-    const ONCE_CELL_EMPTY: OnceCell<MMIO<Mapped>> = OnceCell::new();
+    const BAR_EMPTY: core::lazy::OnceCell<Mutex<MMIO<Mapped>>> = core::lazy::OnceCell::new();
 
-    match unsafe { *mmio.read::<u8>(PCIHeaderOffset::HeaderType.into()).unwrap() & 0x7F } {
-        0x0 => PCIeDeviceVariant::Standard(PCIeDevice::<Standard> {
-            mmio,
-            bar_mmios: [ONCE_CELL_EMPTY; 10],
-            phantom: PhantomData,
-        }),
+    match unsafe { *mmio.read::<u8>(PCIHeaderOffset::HeaderType.into()).unwrap() } {
+        0x0 => PCIeDeviceVariant::Standard(unsafe { PCIeDevice::<Standard>::new(mmio) }),
         0x1 => PCIeDeviceVariant::PCI2PCI(PCIeDevice {
             mmio,
-            bar_mmios: [ONCE_CELL_EMPTY; 10],
+            bar_mmios: [BAR_EMPTY; 10],
             phantom: PhantomData,
         }),
         0x2 => PCIeDeviceVariant::PCI2CardBus(PCIeDevice::<PCI2CardBus> {
             mmio,
-            bar_mmios: [ONCE_CELL_EMPTY; 10],
+            bar_mmios: [BAR_EMPTY; 10],
             phantom: PhantomData,
         }),
         invalid_type => panic!("header type is invalid (must be 0..=2): {}", invalid_type),
@@ -184,6 +181,8 @@ pub fn new_device(mmio: MMIO<Mapped>) -> PCIeDeviceVariant {
 }
 
 impl<T: PCIeDeviceType> PCIeDevice<T> {
+    const EMPTY_REG: OnceCell<Mutex<MMIO<Mapped>>> = OnceCell::new();
+
     pub fn vendor_id(&self) -> u16 {
         unsafe { *self.mmio.read(PCIHeaderOffset::VendorID.into()).unwrap() }
     }

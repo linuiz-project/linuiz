@@ -1,3 +1,5 @@
+use spin::MutexGuard;
+
 use crate::{
     addr_ty::{Physical, Virtual},
     io::pci::{PCIeDevice, Standard},
@@ -88,11 +90,9 @@ impl fmt::Debug for BaseAddressRegister<IOSpace> {
 
 impl PCIeDevice<Standard> {
     pub unsafe fn new(mmio: MMIO<Mapped>) -> Self {
-        const ONCE_CELL_EMPTY: core::lazy::OnceCell<MMIO<Mapped>> = core::lazy::OnceCell::new();
-
         assert_eq!(
             *mmio
-                .read::<u32>(crate::io::pci::PCIHeaderOffset::HeaderType.into())
+                .read::<u8>(crate::io::pci::PCIHeaderOffset::HeaderType.into())
                 .unwrap(),
             0,
             "incorrect header type for standard specification PCI device"
@@ -100,7 +100,7 @@ impl PCIeDevice<Standard> {
 
         let this = Self {
             mmio,
-            bar_mmios: [ONCE_CELL_EMPTY; 10],
+            bar_mmios: [PCIeDevice::<Standard>::EMPTY_REG; 10],
             phantom: core::marker::PhantomData,
         };
 
@@ -110,18 +110,23 @@ impl PCIeDevice<Standard> {
                 .read::<u32>(0x10 + (register * core::mem::size_of::<u32>()))
                 .unwrap();
 
-            if register_raw == 0x0 {
-                continue;
-            } else {
-                let is_memory_space = (register_raw & 0b1) == 0;
+            if register_raw > 0x0 {
+                debug!(
+                    "PCIe device register {} raw value: 0b{:b}",
+                    register, register_raw
+                );
+
+                let is_memory_space = (register_raw & 0b1) > 0;
 
                 let addr = Address::<Physical>::new({
                     if is_memory_space {
                         register_raw & !0b1111
                     } else {
-                        register_raw & 0b11
+                        register_raw & !0b11
                     }
                 } as usize);
+
+                debug!("PCIe device register {} address: {:?}", register, addr);
 
                 let mmio_frames = crate::memory::falloc::get()
                     .acquire_frames(
@@ -145,7 +150,7 @@ impl PCIeDevice<Standard> {
                 }
 
                 this.bar_mmios[register]
-                    .set(register_mmio)
+                    .set(spin::Mutex::new(register_mmio))
                     .expect("already configured MMIO register");
             }
         }
@@ -153,28 +158,28 @@ impl PCIeDevice<Standard> {
         this
     }
 
-    pub fn register0(&'mmio self) -> Option<&'mmio mut MMIO<Mapped>> {
-        self.bar_mmios[0].get_mut()
+    pub fn reg0(&self) -> Option<MutexGuard<MMIO<Mapped>>> {
+        self.bar_mmios[0].get().map(|mutex| mutex.lock())
     }
 
-    pub fn register1(&'mmio self) -> Option<&'mmio mut MMIO<Mapped>> {
-        self.bar_mmios[1].get_mut()
+    pub fn reg1(&self) -> Option<MutexGuard<MMIO<Mapped>>> {
+        self.bar_mmios[1].get().map(|mutex| mutex.lock())
     }
 
-    pub fn register2(&'mmio self) -> Option<&'mmio mut MMIO<Mapped>> {
-        self.bar_mmios[2].get_mut()
+    pub fn reg2(&self) -> Option<MutexGuard<MMIO<Mapped>>> {
+        self.bar_mmios[2].get().map(|mutex| mutex.lock())
     }
 
-    pub fn register3(&'mmio self) -> Option<&'mmio mut MMIO<Mapped>> {
-        self.bar_mmios[3].get_mut()
+    pub fn reg3(&self) -> Option<MutexGuard<MMIO<Mapped>>> {
+        self.bar_mmios[3].get().map(|mutex| mutex.lock())
     }
 
-    pub fn register4(&'mmio self) -> Option<&'mmio mut MMIO<Mapped>> {
-        self.bar_mmios[4].get_mut()
+    pub fn reg4(&self) -> Option<MutexGuard<MMIO<Mapped>>> {
+        self.bar_mmios[4].get().map(|mutex| mutex.lock())
     }
 
-    pub fn register5(&'mmio self) -> Option<&'mmio mut MMIO<Mapped>> {
-        self.bar_mmios[5].get_mut()
+    pub fn reg5(&self) -> Option<MutexGuard<MMIO<Mapped>>> {
+        self.bar_mmios[5].get().map(|mutex| mutex.lock())
     }
 
     pub fn cardbus_cis_ptr(&self) -> &u32 {
@@ -224,12 +229,12 @@ impl fmt::Debug for PCIeDevice<Standard> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("PCIe Device (Standard)")
-            .field("Base Address Register 0", &self.register0())
-            .field("Base Address Register 1", &self.register1())
-            .field("Base Address Register 2", &self.register2())
-            .field("Base Address Register 3", &self.register3())
-            .field("Base Address Register 4", &self.register4())
-            .field("Base Address Register 5", &self.register5())
+            .field("Base Address Register 0", &self.reg0())
+            .field("Base Address Register 1", &self.reg1())
+            .field("Base Address Register 2", &self.reg2())
+            .field("Base Address Register 3", &self.reg3())
+            .field("Base Address Register 4", &self.reg4())
+            .field("Base Address Register 5", &self.reg5())
             .field("Cardbus CIS Pointer", &self.cardbus_cis_ptr())
             .field("Subsystem Vendor ID", &self.subsystem_vendor_id())
             .field("Subsystem ID", &self.subsystem_id())
