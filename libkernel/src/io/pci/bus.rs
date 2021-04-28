@@ -14,7 +14,9 @@ impl PCIeBus {
                     .physical_memory(offset_addr)
                     .as_ptr::<u16>();
 
-                if vendor_id != u16::MAX {
+                if vendor_id == u16::MAX {
+                    None
+                } else {
                     debug!("Found PCIe device at {:?}", offset_addr);
 
                     let mmio_frames = crate::memory::falloc::get()
@@ -30,8 +32,6 @@ impl PCIeBus {
                             .unwrap()
                             .automap(),
                     ))
-                } else {
-                    None
                 }
             })
             .collect();

@@ -8,86 +8,6 @@ use crate::{
 };
 use core::fmt;
 
-pub trait BaseAddressRegisterType {
-    fn base_address<T>(raw: u32) -> *const T;
-}
-
-pub enum MemorySpace {}
-impl BaseAddressRegisterType for MemorySpace {
-    fn base_address<T>(raw: u32) -> *const T {
-        (raw & !0b1111) as *const _
-    }
-}
-
-pub enum IOSpace {}
-impl BaseAddressRegisterType for IOSpace {
-    fn base_address<T>(raw: u32) -> *const T {
-        (raw & !0b11) as *const _
-    }
-}
-
-#[derive(Debug)]
-pub enum BaseAddressRegisterVariant<'a> {
-    MemorySpace(&'a BaseAddressRegister<MemorySpace>),
-    IOSpace(&'a BaseAddressRegister<IOSpace>),
-}
-
-#[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MemorySpaceAddressType {
-    Bit32 = 0b00,
-    Bit64 = 0b10,
-    Reserved = 0b01,
-    Invalid = 0b11,
-}
-
-#[repr(transparent)]
-pub struct BaseAddressRegister<V: BaseAddressRegisterType> {
-    value: u32,
-    phantom: core::marker::PhantomData<V>,
-}
-
-impl<V: BaseAddressRegisterType> BaseAddressRegister<V> {
-    pub fn base_address(&self) -> Address<Virtual> {
-        Address::<Virtual>::from_ptr(V::base_address::<u8>(self.value))
-    }
-}
-
-impl BaseAddressRegister<MemorySpace> {
-    pub fn prefetchable(&self) -> bool {
-        (self.value & (1 << 3)) > 0
-    }
-
-    pub fn address_type(&self) -> MemorySpaceAddressType {
-        match (self.value >> 1) & 0b11 {
-            0 => MemorySpaceAddressType::Bit32,
-            1 => MemorySpaceAddressType::Reserved,
-            2 => MemorySpaceAddressType::Bit64,
-            _ => MemorySpaceAddressType::Invalid,
-        }
-    }
-}
-
-impl fmt::Debug for BaseAddressRegister<MemorySpace> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("BaseAddressRegister<MemorySpace>")
-            .field("Base Address", &self.base_address())
-            .field("Prefetchable", &self.prefetchable())
-            .field("Type", &self.address_type())
-            .finish()
-    }
-}
-
-impl fmt::Debug for BaseAddressRegister<IOSpace> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_tuple("BaseAddressRegister<IOSpace>")
-            .field(&self.base_address())
-            .finish()
-    }
-}
-
 impl PCIeDevice<Standard> {
     pub unsafe fn new(mmio: MMIO<Mapped>) -> Self {
         assert_eq!(
@@ -98,15 +18,10 @@ impl PCIeDevice<Standard> {
             "incorrect header type for standard specification PCI device"
         );
 
-        let this = Self {
-            mmio,
-            bar_mmios: [PCIeDevice::<Standard>::EMPTY_REG; 10],
-            phantom: core::marker::PhantomData,
-        };
+        let bar_mmios = [PCIeDevice::<Standard>::EMPTY_REG; 10];
 
         for register in 0..=5 {
-            let register_raw = *this
-                .mmio
+            let register_raw = *mmio
                 .read::<u32>(0x10 + (register * core::mem::size_of::<u32>()))
                 .unwrap();
 
@@ -149,13 +64,17 @@ impl PCIeDevice<Standard> {
                     )
                 }
 
-                this.bar_mmios[register]
+                bar_mmios[register]
                     .set(spin::Mutex::new(register_mmio))
                     .expect("already configured MMIO register");
             }
         }
 
-        this
+        Self {
+            mmio,
+            bar_mmios,
+            phantom: core::marker::PhantomData,
+        }
     }
 
     pub fn reg0(&self) -> Option<MutexGuard<MMIO<Mapped>>> {

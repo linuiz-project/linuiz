@@ -162,18 +162,16 @@ pub struct PCIeDevice<T: PCIeDeviceType> {
 }
 
 pub fn new_device(mmio: MMIO<Mapped>) -> PCIeDeviceVariant {
-    const BAR_EMPTY: core::lazy::OnceCell<Mutex<MMIO<Mapped>>> = core::lazy::OnceCell::new();
-
     match unsafe { *mmio.read::<u8>(PCIHeaderOffset::HeaderType.into()).unwrap() } {
         0x0 => PCIeDeviceVariant::Standard(unsafe { PCIeDevice::<Standard>::new(mmio) }),
         0x1 => PCIeDeviceVariant::PCI2PCI(PCIeDevice {
             mmio,
-            bar_mmios: [BAR_EMPTY; 10],
+            bar_mmios: [PCIeDevice::<PCI2PCI>::EMPTY_REG; 10],
             phantom: PhantomData,
         }),
         0x2 => PCIeDeviceVariant::PCI2CardBus(PCIeDevice::<PCI2CardBus> {
             mmio,
-            bar_mmios: [BAR_EMPTY; 10],
+            bar_mmios: [PCIeDevice::<PCI2CardBus>::EMPTY_REG; 10],
             phantom: PhantomData,
         }),
         invalid_type => panic!("header type is invalid (must be 0..=2): {}", invalid_type),

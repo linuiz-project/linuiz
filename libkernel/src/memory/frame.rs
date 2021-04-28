@@ -1,7 +1,6 @@
 use crate::{addr_ty::Physical, Address};
 
 #[repr(transparent)]
-#[derive(Clone, Copy)]
 pub struct Frame {
     index: usize,
 }
@@ -44,14 +43,9 @@ impl Frame {
     }
 
     pub fn into_iter(self) -> FrameIterator {
-        unsafe {
-            FrameIterator::new(
-                self,
-                Self {
-                    index: self.index() + 1,
-                },
-            )
-        }
+        let index = self.index() + 1;
+
+        unsafe { FrameIterator::new(self, Self { index }) }
     }
 }
 
@@ -101,9 +95,11 @@ pub struct FrameIterator {
 
 impl FrameIterator {
     pub const unsafe fn new(start: Frame, end: Frame) -> Self {
+        let index = start.index();
+
         Self {
             start,
-            current: start,
+            current: Frame::from_index(index),
             end,
         }
     }
@@ -121,7 +117,7 @@ impl FrameIterator {
     }
 
     pub fn reset(&mut self) {
-        self.current = self.start;
+        self.current = unsafe { Frame::from_index(self.start.index()) };
     }
 }
 
