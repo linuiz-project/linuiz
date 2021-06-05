@@ -174,7 +174,11 @@ pub fn new_device(mmio: MMIO<Mapped>) -> PCIeDeviceVariant {
             bar_mmios: [PCIeDevice::<PCI2CardBus>::EMPTY_REG; 10],
             phantom: PhantomData,
         }),
-        invalid_type => panic!("header type is invalid (must be 0..=2): {}", invalid_type),
+        invalid_type => panic!(
+            "header type is invalid (must be 0..=2): {}, mmio addr: {:?}",
+            invalid_type,
+            mmio.physical_addr()
+        ),
     }
 }
 

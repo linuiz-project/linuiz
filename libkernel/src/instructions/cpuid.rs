@@ -3,10 +3,12 @@ pub fn cpuid(leaf: u32, subleaf: u32) -> (u32, u32, u32, u32) {
 
     unsafe {
         asm!(
+            "xchg rsi, rbx",
             "cpuid",
+            "xchg rsi, rbx",
             inout("eax") leaf => eax,
             inout("ecx") subleaf => ecx,
-            lateout("ebx") ebx,
+            lateout("esi") ebx,
             lateout("edx") edx,
         )
     }

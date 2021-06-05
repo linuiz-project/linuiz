@@ -1,5 +1,5 @@
 use libkernel::{
-    io::pci::{BaseAddressRegisterVariant, PCIeDevice, Standard},
+    io::pci::{PCIeDevice, Standard},
     memory::mmio::{Mapped, MMIO},
 };
 use spin::MutexGuard;

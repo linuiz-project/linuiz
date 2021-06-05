@@ -1,11 +1,9 @@
 #![no_std]
 #![feature(
     asm,
-    const_fn,
     once_cell,
     raw_ref_op,
     step_trait,
-    step_trait_ext,
     abi_efiapi,
     abi_x86_interrupt,
     panic_info_message,
@@ -13,10 +11,9 @@
     const_panic,
     const_mut_refs,
     const_raw_ptr_to_usize_cast,
+    const_fn_trait_bound,
     exclusive_range_pattern,
-    const_btree_new,
-    option_expect_none,
-    option_unwrap_none
+    const_btree_new
 )]
 
 #[macro_use]

@@ -79,9 +79,9 @@ pub fn configure_host_bridge(
         );
 
         unsafe {
-            HOST_BRIDGES
-                .insert(entry.seg_group_num(), bridge)
-                .expect_none("attempted to insert PCI bridge for existent segment group")
+            if let None = HOST_BRIDGES.insert(entry.seg_group_num(), bridge) {
+                panic!("attempted to insert PCI bridge for existent segment group")
+            }
         };
 
         Ok(())

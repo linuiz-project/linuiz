@@ -2,49 +2,46 @@ use x86_64::structures::idt::InterruptDescriptorTable;
 pub use x86_64::structures::idt::InterruptStackFrame;
 
 /* FAULT INTERRUPT HANDLERS */
-extern "x86-interrupt" fn divide_error_handler(stack_frame: &mut InterruptStackFrame) {
+extern "x86-interrupt" fn divide_error_handler(stack_frame: InterruptStackFrame) {
     panic!("CPU EXCEPTION: SEGMENT NOT PRESENT\n{:#?}", stack_frame);
 }
 
-extern "x86-interrupt" fn debug_handler(stack_frame: &mut InterruptStackFrame) {
+extern "x86-interrupt" fn debug_handler(stack_frame: InterruptStackFrame) {
     panic!("CPU EXCEPTION: DEBUG\n{:#?}", stack_frame);
 }
 
-extern "x86-interrupt" fn non_maskable_interrupt_handler(stack_frame: &mut InterruptStackFrame) {
+extern "x86-interrupt" fn non_maskable_interrupt_handler(stack_frame: InterruptStackFrame) {
     panic!("CPU EXCEPTION: NON-MASKABLE INTERRUPT\n{:#?}", stack_frame);
 }
 
-extern "x86-interrupt" fn breakpoint_handler(stack_frame: &mut InterruptStackFrame) {
+extern "x86-interrupt" fn breakpoint_handler(stack_frame: InterruptStackFrame) {
     panic!("CPU EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
 }
 
-extern "x86-interrupt" fn overflow_handler(stack_frame: &mut InterruptStackFrame) {
+extern "x86-interrupt" fn overflow_handler(stack_frame: InterruptStackFrame) {
     panic!("CPU EXCEPTION: OVERFLOW\n{:#?}", stack_frame);
 }
 
-extern "x86-interrupt" fn bound_range_exceeded_handler(stack_frame: &mut InterruptStackFrame) {
+extern "x86-interrupt" fn bound_range_exceeded_handler(stack_frame: InterruptStackFrame) {
     panic!("CPU EXCEPTION: BOUND RANGE EXCEEDED\n{:#?}", stack_frame);
 }
 
-extern "x86-interrupt" fn invalid_opcode_handler(stack_frame: &mut InterruptStackFrame) {
+extern "x86-interrupt" fn invalid_opcode_handler(stack_frame: InterruptStackFrame) {
     panic!("CPU EXCEPTION: INVALID OPCODE\n{:#?}", stack_frame);
 }
 
-extern "x86-interrupt" fn device_not_available_handler(stack_frame: &mut InterruptStackFrame) {
+extern "x86-interrupt" fn device_not_available_handler(stack_frame: InterruptStackFrame) {
     panic!("CPU EXCEPTION: DEVICE NOT AVAILABLE\n{:#?}", stack_frame);
 }
 
 extern "x86-interrupt" fn double_fault_handler(
-    stack_frame: &mut InterruptStackFrame,
+    stack_frame: InterruptStackFrame,
     _error_code: u64,
 ) -> ! {
     panic!("CPU EXCEPTION: DOUBLE FAULT\n{:#?}", stack_frame);
 }
 
-extern "x86-interrupt" fn invalid_tss_handler(
-    stack_frame: &mut InterruptStackFrame,
-    error_code: u64,
-) {
+extern "x86-interrupt" fn invalid_tss_handler(stack_frame: InterruptStackFrame, error_code: u64) {
     panic!(
         "CPU EXCEPTION: INVALID TSS: {}\n{:#?}",
         error_code, stack_frame
@@ -52,7 +49,7 @@ extern "x86-interrupt" fn invalid_tss_handler(
 }
 
 extern "x86-interrupt" fn segment_not_present_handler(
-    stack_frame: &mut InterruptStackFrame,
+    stack_frame: InterruptStackFrame,
     error_code: u64,
 ) {
     panic!(
@@ -61,10 +58,7 @@ extern "x86-interrupt" fn segment_not_present_handler(
     );
 }
 
-extern "x86-interrupt" fn stack_segment_handler(
-    stack_frame: &mut InterruptStackFrame,
-    error_code: u64,
-) {
+extern "x86-interrupt" fn stack_segment_handler(stack_frame: InterruptStackFrame, error_code: u64) {
     panic!(
         "CPU EXCEPTION: STACK-SEGMENT FAULT: {}\n{:#?}",
         error_code, stack_frame
@@ -72,7 +66,7 @@ extern "x86-interrupt" fn stack_segment_handler(
 }
 
 extern "x86-interrupt" fn general_protection_fault_handler(
-    stack_frame: &mut InterruptStackFrame,
+    stack_frame: InterruptStackFrame,
     error_code: u64,
 ) {
     #[repr(u8)]
@@ -107,7 +101,7 @@ extern "x86-interrupt" fn general_protection_fault_handler(
 }
 
 extern "x86-interrupt" fn page_fault_handler(
-    stack_frame: &mut InterruptStackFrame,
+    stack_frame: InterruptStackFrame,
     error_code: x86_64::structures::idt::PageFaultErrorCode,
 ) {
     panic!(
@@ -120,12 +114,12 @@ extern "x86-interrupt" fn page_fault_handler(
 
 // --- reserved 15
 
-extern "x86-interrupt" fn x87_floating_point_handler(stack_frame: &mut InterruptStackFrame) {
+extern "x86-interrupt" fn x87_floating_point_handler(stack_frame: InterruptStackFrame) {
     panic!("CPU EXCEPTION: x87 FLOATING POINT\n{:#?}", stack_frame);
 }
 
 extern "x86-interrupt" fn alignment_check_handler(
-    stack_frame: &mut InterruptStackFrame,
+    stack_frame: InterruptStackFrame,
     error_code: u64,
 ) {
     panic!(
@@ -136,18 +130,18 @@ extern "x86-interrupt" fn alignment_check_handler(
 
 // --- machine check (platform-specific, not required)
 
-extern "x86-interrupt" fn simd_floating_point_handler(stack_frame: &mut InterruptStackFrame) {
+extern "x86-interrupt" fn simd_floating_point_handler(stack_frame: InterruptStackFrame) {
     panic!("CPU EXCEPTION: SIMD FLOATING POINT\n{:#?}", stack_frame);
 }
 
-extern "x86-interrupt" fn virtualization_handler(stack_frame: &mut InterruptStackFrame) {
+extern "x86-interrupt" fn virtualization_handler(stack_frame: InterruptStackFrame) {
     panic!("CPU EXCEPTION: VIRTUALIZATION\n{:#?}", stack_frame);
 }
 
 // --- reserved 21-29
 
 extern "x86-interrupt" fn security_exception_handler(
-    stack_frame: &mut InterruptStackFrame,
+    stack_frame: InterruptStackFrame,
     error_code: u64,
 ) {
     panic!(
@@ -209,10 +203,7 @@ pub fn init() {
     unsafe { idt.load_unsafe() };
 }
 
-pub fn set_interrupt_handler(
-    index: u8,
-    handler: extern "x86-interrupt" fn(&mut InterruptStackFrame),
-) {
+pub fn set_interrupt_handler(index: u8, handler: extern "x86-interrupt" fn(InterruptStackFrame)) {
     crate::instructions::interrupts::without_interrupts(|| {
         debug!("Modifying IDT handler at index: {}", index);
         IDT.lock()[index as usize].set_handler_fn(handler);

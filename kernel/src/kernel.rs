@@ -278,7 +278,7 @@ fn init_apic() {
 
     debug!("Updating APIC register vectors and respective IDT entires.");
     apic.timer().set_vector(48);
-    idt::set_interrupt_handler(48, timer::apic_timer_handler);
+    idt::set_interrupt_handler(48, timer::apic_tick_handler);
     apic.error().set_vector(58);
     idt::set_interrupt_handler(58, apic_error_handler);
 
@@ -289,9 +289,7 @@ fn init_apic() {
     info!("Core-local APIC configured and enabled.");
 }
 
-extern "x86-interrupt" fn apic_error_handler(
-    _: &mut libkernel::structures::idt::InterruptStackFrame,
-) {
+extern "x86-interrupt" fn apic_error_handler(_: libkernel::structures::idt::InterruptStackFrame) {
     let apic = libkernel::structures::apic::local_apic_mut().unwrap();
 
     error!("APIC ERROR INTERRUPT");
