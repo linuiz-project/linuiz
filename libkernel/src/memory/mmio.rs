@@ -6,7 +6,7 @@ use crate::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MMIOError {
-    OffsetOverrun,
+    OffsetOverrun(usize, usize),
 }
 
 pub trait MMIOState {}
@@ -68,7 +68,7 @@ impl MMIO<Mapped> {
         if offset < self.max_offset() {
             Ok((self.mapped_addr() + offset).as_ptr())
         } else {
-            Err(MMIOError::OffsetOverrun)
+            Err(MMIOError::OffsetOverrun(offset, self.max_offset()))
         }
     }
 
@@ -76,7 +76,7 @@ impl MMIO<Mapped> {
         if offset < self.max_offset() {
             Ok((self.mapped_addr() + offset).as_mut_ptr())
         } else {
-            Err(MMIOError::OffsetOverrun)
+            Err(MMIOError::OffsetOverrun(offset, self.max_offset()))
         }
     }
 

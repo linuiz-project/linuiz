@@ -13,9 +13,11 @@ mod logging;
 mod pic8259;
 mod timer;
 
+use alloc::vec::Vec;
 use core::ffi::c_void;
 use libkernel::{
     acpi::SystemConfigTableEntry,
+    io::pci::PCIeHostBridge,
     memory::{falloc, UEFIMemoryDescriptor},
     BootInfo,
 };
@@ -101,20 +103,19 @@ extern "efiapi" fn kernel_main(
 
     init_apic();
 
-    libkernel::acpi::rdsp::xsdt::LAZY_XSDT
+    let bridges: Vec<PCIeHostBridge> = libkernel::acpi::rdsp::xsdt::LAZY_XSDT
         .expect("xsdt does not exist")
         .find_sub_table::<libkernel::acpi::rdsp::xsdt::mcfg::MCFG>()
         .unwrap()
         .iter()
-        .for_each(|entry| {
-            libkernel::io::pci::configure_host_bridge(entry).ok();
-        });
+        .map(|entry| libkernel::io::pci::configure_host_bridge(entry).unwrap())
+        .collect();
 
-    for device_variant in libkernel::io::pci::host_bridges()
+    for device_variant in bridges
         .iter()
-        .flat_map(|(_, host_bridge)| host_bridge.iter())
-        .filter(|(_, bus)| bus.has_devices())
-        .flat_map(|(_, bus)| bus.iter())
+        .flat_map(|host_bridge| host_bridge.iter())
+        .filter(|bus| bus.has_devices())
+        .flat_map(|bus| bus.iter())
     {
         use libkernel::io::pci::{PCIeDeviceClass, PCIeDeviceVariant};
 

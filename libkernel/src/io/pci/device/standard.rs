@@ -11,9 +11,10 @@ use core::fmt;
 impl PCIeDevice<Standard> {
     pub unsafe fn new(mmio: MMIO<Mapped>) -> Self {
         assert_eq!(
-            *mmio
+            (*mmio
                 .read::<u8>(crate::io::pci::PCIHeaderOffset::HeaderType.into())
-                .unwrap(),
+                .unwrap())
+                & !(1 << 7),
             0,
             "incorrect header type for standard specification PCI device"
         );
@@ -146,8 +147,10 @@ impl PCIeDevice<Standard> {
 
 impl fmt::Debug for PCIeDevice<Standard> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("PCIe Device (Standard)")
+        let debug_struct = &mut formatter.debug_struct("PCIe Device (Standard)");
+
+        self.generic_debut_fmt(debug_struct);
+        debug_struct
             .field("Base Address Register 0", &self.reg0())
             .field("Base Address Register 1", &self.reg1())
             .field("Base Address Register 2", &self.reg2())

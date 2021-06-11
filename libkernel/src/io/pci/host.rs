@@ -1,62 +1,65 @@
+use core::ops::RangeInclusive;
+
 use crate::{addr_ty::Physical, io::pci::PCIeBus, Address};
-use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
 
 #[derive(Debug)]
 pub enum PCIeHostBridgeError {
     InvalidBaseAddress(Address<Physical>),
-    BridgeConfigured(u16),
     BusConfigured(u8),
     BusInvalid(u8),
 }
 
 #[derive(Debug)]
 pub struct PCIeHostBridge {
-    busses: BTreeMap<u8, PCIeBus>,
+    seg_group: u16,
+    min_bus: u8,
+    busses: Vec<PCIeBus>,
 }
 
 impl PCIeHostBridge {
-    fn empty() -> Self {
+    pub fn new(
+        seg_group: u16,
+        base_addr: Address<Physical>,
+        bus_range: RangeInclusive<u8>,
+    ) -> Self {
         Self {
-            busses: BTreeMap::new(),
+            seg_group,
+            min_bus: *bus_range.start(),
+            busses: bus_range
+                .filter_map(|bus_index| {
+                    let bus = unsafe { PCIeBus::new(base_addr + ((bus_index as usize) << 20)) };
+
+                    if !bus.has_devices() {
+                        warn!(
+                            "PCIe segment group {}, bus {}, is invalid (has no devices). Skipping.",
+                            seg_group, bus_index
+                        );
+
+                        None
+                    } else {
+                        Some(bus)
+                    }
+                })
+                .collect(),
         }
     }
 
-    unsafe fn configure_bus(
-        &mut self,
-        bus_index: u8,
-        offset_addr: Address<Physical>,
-    ) -> Result<(), PCIeHostBridgeError> {
-        let bus = PCIeBus::new(offset_addr);
-
-        if !bus.has_devices() {
-            Err(PCIeHostBridgeError::BusInvalid(bus_index))
-        } else {
-            self.busses.insert(bus_index, bus).map_or(Ok(()), |_| {
-                Err(PCIeHostBridgeError::BusConfigured(bus_index))
-            })
-        }
+    pub const fn segment_group(&self) -> u16 {
+        self.seg_group
     }
 
-    pub fn get_bus(&self, bus_index: u8) -> Option<&PCIeBus> {
-        self.busses.get(&bus_index)
-    }
-
-    pub fn iter(&self) -> alloc::collections::btree_map::Iter<u8, PCIeBus> {
+    pub fn iter(&self) -> core::slice::Iter<PCIeBus> {
         self.busses.iter()
     }
 }
 
-static mut HOST_BRIDGES: BTreeMap<u16, PCIeHostBridge> = BTreeMap::new();
-
 pub fn configure_host_bridge(
     entry: &crate::acpi::rdsp::xsdt::mcfg::MCFGEntry,
-) -> Result<(), PCIeHostBridgeError> {
+) -> Result<PCIeHostBridge, PCIeHostBridgeError> {
     if !entry.base_addr().is_canonical() {
         Err(PCIeHostBridgeError::InvalidBaseAddress(entry.base_addr()))
-    } else if unsafe { HOST_BRIDGES.get(&entry.seg_group_num()).is_some() } {
-        Err(PCIeHostBridgeError::BridgeConfigured(entry.seg_group_num()))
     } else {
-        let mut bridge = PCIeHostBridge::empty();
         let bus_range = entry.start_pci_bus()..=entry.end_pci_bus();
         debug!(
             "Configuring express host bridge:\n Base Address: {:?}\n Segment Group: {}\n Bus Range: {:?}",
@@ -65,12 +68,7 @@ pub fn configure_host_bridge(
             bus_range
         );
 
-        for bus_index in bus_range {
-            unsafe {
-                let offet_addr = entry.base_addr() + ((bus_index as usize) << 20);
-                bridge.configure_bus(bus_index, offet_addr).ok();
-            }
-        }
+        let bridge = PCIeHostBridge::new(entry.seg_group_num(), entry.base_addr(), bus_range);
 
         debug!(
             "Configured PCIe host bridge group {} with {} valid busses.",
@@ -78,16 +76,6 @@ pub fn configure_host_bridge(
             bridge.busses.len()
         );
 
-        unsafe {
-            if let None = HOST_BRIDGES.insert(entry.seg_group_num(), bridge) {
-                panic!("attempted to insert PCI bridge for existent segment group")
-            }
-        };
-
-        Ok(())
+        Ok(bridge)
     }
-}
-
-pub fn host_bridges() -> &'static BTreeMap<u16, PCIeHostBridge> {
-    unsafe { &HOST_BRIDGES }
 }

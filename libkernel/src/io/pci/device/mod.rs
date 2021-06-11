@@ -38,25 +38,43 @@ impl Into<usize> for PCIHeaderOffset {
 
 bitflags! {
     pub struct PCIeCommandRegister: u16 {
+        // * Read-Only
         const IO_SPACE = 1 << 0;
+        // * Read-Only
         const MEMORY_SPACE = 1 << 1;
+        // * Read-Write
         const BUS_MASTER = 1 << 2;
-        const SPECIAL_CYCLES = 1 << 3;
-        const MEMORY_W_AND_I_ENABLE = 1 << 4;
+        // * Read-Only
+        const SPECIAL_CYCLE = 1 << 3;
+        // * Read-Only
+        const MEMORY_W_AND_I = 1 << 4;
+        // * Read-Only
         const VGA_PALETTE_SNOOP = 1 << 5;
+        // * Read-Write
         const PARITY_ERROR_RESPONSE = 1 << 6;
-        const SERR_ENABLE = 1 << 8;
-        const FAST_B2B_ENABLE = 1 << 9;
+        // * Read-Only
+        const IDSEL = 1 << 7;
+        // * Read-Write
+        const SERR_NUM = 1 << 8;
+        // * Read-Only
+        const FAST_B2B_TRANSACTIONS = 1 << 9;
+        // * Read-Write
         const INTERRUPT_DISABLE = 1 << 10;
+
     }
 }
 
 bitflags! {
     pub struct PCIeStatusRegister: u16 {
+        const INTERRUPT_STATUS = 1 << 3;
         const CAPABILITIES = 1 << 4;
+        // * Not applicable to PCIe.
         const CAPABILITITY_66MHZ = 1 << 5;
+        // * Not applicable to PCIe.
         const FAST_BACK2BACK_CAPABLE = 1 << 7;
         const MASTER_DATA_PARITY_ERROR = 1 << 8;
+        // * Not applicable to PCIe.
+        const DEVSEL_TIMING = 3 << 9;
         const SIGNALED_TARGET_ABORT = 1 << 11;
         const RECEIVED_TARGET_ABORT = 1 << 12;
         const RECEIVED_MASTER_ABORT =  1 << 13;
@@ -162,7 +180,10 @@ pub struct PCIeDevice<T: PCIeDeviceType> {
 }
 
 pub fn new_device(mmio: MMIO<Mapped>) -> PCIeDeviceVariant {
-    match unsafe { *mmio.read::<u8>(PCIHeaderOffset::HeaderType.into()).unwrap() } {
+    let ty_mf = unsafe { *mmio.read::<u8>(PCIHeaderOffset::HeaderType.into()).unwrap() };
+
+    // mask off the multifunction bit
+    match ty_mf & !(1 << 7) {
         0x0 => PCIeDeviceVariant::Standard(unsafe { PCIeDevice::<Standard>::new(mmio) }),
         0x1 => PCIeDeviceVariant::PCI2PCI(PCIeDevice {
             mmio,
@@ -174,11 +195,13 @@ pub fn new_device(mmio: MMIO<Mapped>) -> PCIeDeviceVariant {
             bar_mmios: [PCIeDevice::<PCI2CardBus>::EMPTY_REG; 10],
             phantom: PhantomData,
         }),
-        invalid_type => panic!(
-            "header type is invalid (must be 0..=2): {}, mmio addr: {:?}",
-            invalid_type,
-            mmio.physical_addr()
-        ),
+        invalid_type => {
+            panic!(
+                "header type is invalid (must be 0..=2): {}, mmio addr: {:?}",
+                invalid_type,
+                mmio.physical_addr()
+            )
+        }
     }
 }
 
@@ -240,6 +263,16 @@ impl<T: PCIeDeviceType> PCIeDevice<T> {
         }
     }
 
+    pub fn header_type(&self) -> u8 {
+        unsafe {
+            (*self
+                .mmio
+                .read::<u8>(PCIHeaderOffset::HeaderType.into())
+                .unwrap())
+                & !(1 << 7)
+        }
+    }
+
     pub fn multi_function(&self) -> bool {
         unsafe {
             (*self
@@ -258,6 +291,20 @@ impl<T: PCIeDeviceType> PCIeDevice<T> {
                 .read(PCIHeaderOffset::BuiltInSelfTest.into())
                 .unwrap()
         }
+    }
+
+    pub fn generic_debut_fmt(&self, debug_struct: &mut fmt::DebugStruct) {
+        debug_struct
+            .field("Vendor ID", &self.vendor_id())
+            .field("Device ID", &self.device_id())
+            .field("Command", &self.command())
+            .field("Status", &self.status())
+            .field("Revision ID", &self.revision_id())
+            .field("Class Code", &self.class())
+            .field("Cache Line Size", &self.cache_line_size())
+            .field("Master Latency Timer", &self.latency_timer())
+            .field("Header Type", &self.header_type())
+            .field("Built-In Self Test", &self.builtin_self_test());
     }
 }
 

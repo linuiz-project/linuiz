@@ -6,7 +6,7 @@ pub struct PCIeBus {
 }
 
 impl PCIeBus {
-    pub unsafe fn new(base_addr: Address<Physical>) -> Self {
+    pub unsafe fn  new(base_addr: Address<Physical>) -> Self {
         let devices: Vec<PCIeDeviceVariant> = (0..32)
             .filter_map(|device_index| {
                 let offset_addr = base_addr + (device_index << 15);
@@ -14,7 +14,7 @@ impl PCIeBus {
                     .physical_memory(offset_addr)
                     .as_ptr::<u16>();
 
-                if vendor_id == u16::MAX {
+                if vendor_id == u16::MAX || vendor_id == u16::MIN {
                     None
                 } else {
                     debug!("Found PCIe device at {:?}", offset_addr);

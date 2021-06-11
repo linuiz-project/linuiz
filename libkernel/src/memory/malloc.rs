@@ -11,6 +11,8 @@ use core::alloc::Layout;
 
 pub trait MemoryAllocator {
     fn minimum_alignment(&self) -> usize;
+
+    // Returns the direct-mapped virtual address for the given physical address.
     unsafe fn physical_memory(&self, addr: Address<Physical>) -> Address<Virtual>;
 
     fn alloc(&self, layout: Layout) -> *mut u8;
