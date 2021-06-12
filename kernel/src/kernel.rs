@@ -127,7 +127,10 @@ extern "efiapi" fn kernel_main(
                 && device.program_interface() == 0x1
             {
                 let ahci = drivers::ahci::AHCI::from_pcie_device(&device);
-                info!("{:#?}", ahci.hba_memory());
+                for port in ahci.hba_memory().ports() {
+                    info!("{:?}", port.class())
+                }
+                //info!("{:#?}", ahci.hba_memory());
             }
         }
     }
