@@ -130,7 +130,6 @@ extern "efiapi" fn kernel_main(
                 for port in ahci.hba_memory().ports() {
                     info!("{:?}", port.class())
                 }
-                //info!("{:#?}", ahci.hba_memory());
             }
         }
     }
