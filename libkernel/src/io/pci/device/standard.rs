@@ -21,19 +21,13 @@ impl PCIeDevice<Standard> {
 
         let bar_mmios = [PCIeDevice::<Standard>::EMPTY_REG; 10];
 
-        for register in 0..=5 {
+        for register_num in 0..=5 {
             let register_raw = *mmio
-                .read::<u32>(0x10 + (register * core::mem::size_of::<u32>()))
+                .read::<u32>(0x10 + (register_num * core::mem::size_of::<u32>()))
                 .unwrap();
 
             if register_raw > 0x0 {
-                debug!(
-                    "PCIe device register {} raw value: 0b{:b}",
-                    register, register_raw
-                );
-
                 let is_memory_space = (register_raw & 0b1) > 0;
-
                 let addr = Address::<Physical>::new({
                     if is_memory_space {
                         register_raw & !0b1111
@@ -42,7 +36,12 @@ impl PCIeDevice<Standard> {
                     }
                 } as usize);
 
-                debug!("PCIe device register {} address: {:?}", register, addr);
+                trace!(
+                    "Device Register {}:\n Raw 0b{:b}\n Canonical: {:?}",
+                    register_num,
+                    register_raw,
+                    addr
+                );
 
                 let mmio_frames = crate::memory::falloc::get()
                     .acquire_frames(
@@ -58,6 +57,7 @@ impl PCIeDevice<Standard> {
                 if is_memory_space && ((register_raw & 0b1000) > 0) {
                     use crate::memory::paging::{PageAttributeModifyMode, PageAttributes};
 
+                    // optimize page attributes to enable write-through if it wasn't previously enabled
                     crate::memory::malloc::get().modify_page_attributes(
                         &crate::memory::Page::from_addr(register_mmio.mapped_addr()),
                         PageAttributes::WRITE_THROUGH,
@@ -65,7 +65,7 @@ impl PCIeDevice<Standard> {
                     )
                 }
 
-                bar_mmios[register]
+                bar_mmios[register_num]
                     .set(spin::Mutex::new(register_mmio))
                     .expect("already configured MMIO register");
             }

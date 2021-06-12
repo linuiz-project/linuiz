@@ -19,7 +19,6 @@ struct MCFGHeader {
 }
 
 #[repr(C)]
-#[derive(Debug)]
 pub struct MCFGEntry {
     base_addr: Address<Physical>,
     seg_group_num: u16,
@@ -43,6 +42,17 @@ impl MCFGEntry {
 
     pub fn end_pci_bus(&self) -> u8 {
         self.end_pci_bus
+    }
+}
+
+impl core::fmt::Debug for MCFGEntry {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("MCFG Entry")
+            .field("Base Address", &self.base_addr())
+            .field("Segment Group", &self.seg_group_num())
+            .field("Bus Range", &(self.start_pci_bus()..=self.end_pci_bus()))
+            .finish()
     }
 }
 

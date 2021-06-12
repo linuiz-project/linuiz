@@ -108,7 +108,9 @@ extern "efiapi" fn kernel_main(
         .find_sub_table::<libkernel::acpi::rdsp::xsdt::mcfg::MCFG>()
         .unwrap()
         .iter()
-        .map(|entry| libkernel::io::pci::configure_host_bridge(entry).unwrap())
+        .filter_map(|entry| {
+            libkernel::io::pci::configure_host_bridge(entry).map_or(None, |bridge| Some(bridge))
+        })
         .collect();
 
     for device_variant in bridges

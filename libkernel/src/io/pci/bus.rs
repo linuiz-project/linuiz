@@ -2,11 +2,11 @@ use crate::{addr_ty::Physical, io::pci::PCIeDeviceVariant, Address};
 use alloc::vec::Vec;
 
 pub struct PCIeBus {
-    devices: Option<Vec<PCIeDeviceVariant>>,
+    devices: Vec<PCIeDeviceVariant>,
 }
 
 impl PCIeBus {
-    pub unsafe fn  new(base_addr: Address<Physical>) -> Self {
+    pub unsafe fn new(base_addr: Address<Physical>) -> Self {
         let devices: Vec<PCIeDeviceVariant> = (0..32)
             .filter_map(|device_index| {
                 let offset_addr = base_addr + (device_index << 15);
@@ -17,7 +17,7 @@ impl PCIeBus {
                 if vendor_id == u16::MAX || vendor_id == u16::MIN {
                     None
                 } else {
-                    debug!("Found PCIe device at {:?}", offset_addr);
+                    debug!("Configuring PCIe device at {:?}", offset_addr);
 
                     let mmio_frames = crate::memory::falloc::get()
                         .acquire_frame(
@@ -36,30 +36,19 @@ impl PCIeBus {
             })
             .collect();
 
-        Self {
-            devices: {
-                if devices.len() > 0 {
-                    Some(devices)
-                } else {
-                    None
-                }
-            },
-        }
+        Self { devices }
     }
 
-    pub const fn has_devices(&self) -> bool {
-        self.devices.is_some()
+    pub fn has_devices(&self) -> bool {
+        self.devices.len() > 0
     }
 
     pub fn iter(&self) -> core::slice::Iter<PCIeDeviceVariant> {
-        self.devices.as_ref().expect("bus not configured").iter()
+        self.devices.iter()
     }
 
     pub fn iter_mut(&mut self) -> core::slice::IterMut<PCIeDeviceVariant> {
-        self.devices
-            .as_mut()
-            .expect("but not configured")
-            .iter_mut()
+        self.devices.iter_mut()
     }
 }
 
