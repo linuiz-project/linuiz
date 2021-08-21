@@ -92,8 +92,14 @@ pub struct HostBusAdapterPort {
 }
 
 impl HostBusAdapterPort {
-    pub fn signature(&self) -> u32 {
-        self.signature
+    pub fn signature(&self) -> Result<HostBusAdapterPortClass, u32> {
+        match self.signature {
+            0x00000101 => Ok(HostBusAdapterPortClass::SATA),
+            0xC33C0101 => Ok(HostBusAdapterPortClass::SEMB),
+            0x96690101 => Ok(HostBusAdapterPortClass::PM),
+            0xEB140101 => Ok(HostBusAdapterPortClass::SATAPI),
+            signature => Err(signature),
+        }
     }
 
     pub fn sata_status(&self) -> &SATAStatus {
@@ -112,18 +118,7 @@ impl HostBusAdapterPort {
             HostBusAdapterPortClass::None
         } else {
             // Finally, determine port type from its signature.
-            match self.signature() {
-                // ATAPI
-                0xEB140101 => HostBusAdapterPortClass::SATAPI,
-                // ATA
-                0x00000101 => HostBusAdapterPortClass::SATA,
-                // SEMB
-                0xC33C0101 => HostBusAdapterPortClass::SEMB,
-                // PM
-                0x96690101 => HostBusAdapterPortClass::PM,
-                // fail state
-                signature => panic!("invalid port signature: 0x{:X}", signature),
-            }
+            self.signature().expect("invalid port signature")
         }
     }
 }

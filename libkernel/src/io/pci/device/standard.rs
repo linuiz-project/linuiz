@@ -1,7 +1,7 @@
 use spin::MutexGuard;
 
 use crate::{
-    addr_ty::{Physical, Virtual},
+    addr_ty::Physical,
     io::pci::{PCIeDevice, Standard},
     memory::mmio::{Mapped, MMIO},
     Address,

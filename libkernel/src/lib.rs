@@ -10,7 +10,6 @@
     alloc_error_handler,
     const_panic,
     const_mut_refs,
-    const_raw_ptr_to_usize_cast,
     const_fn_trait_bound,
     exclusive_range_pattern,
     const_btree_new
@@ -139,16 +138,16 @@ impl FramebufferInfo {
         Self { ptr, size, stride }
     }
 
-    pub const fn addr(&self) -> Address<addr_ty::Physical> {
-        Address::<addr_ty::Physical>::new(unsafe { self.ptr as usize })
-    }
-
     pub const fn size(&self) -> Size {
         self.size
     }
 
     pub const fn stride(&self) -> usize {
         self.stride
+    }
+
+    pub fn addr(&self) -> Address<addr_ty::Physical> {
+        Address::<addr_ty::Physical>::new(self.ptr as usize)
     }
 }
 

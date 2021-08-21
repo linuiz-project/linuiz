@@ -25,8 +25,8 @@ impl Page {
         }
     }
 
-    pub const fn from_ptr<T>(ptr: *const T) -> Self {
-        let ptr_usize = unsafe { ptr as usize };
+    pub fn from_ptr<T>(ptr: *const T) -> Self {
+        let ptr_usize = ptr as usize;
 
         if (ptr_usize % 0x1000) != 0 {
             panic!("page address is not page-aligned")

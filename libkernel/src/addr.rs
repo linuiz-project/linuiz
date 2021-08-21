@@ -197,8 +197,8 @@ impl Address<Virtual> {
         }
     }
 
-    pub const fn from_ptr<T>(ptr: *const T) -> Self {
-        Self::new(unsafe { ptr as usize })
+    pub fn from_ptr<T>(ptr: *const T) -> Self {
+        Self::new(ptr as usize)
     }
 
     pub const fn page_index(&self) -> usize {
