@@ -1,6 +1,6 @@
-mod port;
+pub mod port;
 
-pub use port::*;
+use port::HostBusAdapterPort;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -22,7 +22,26 @@ pub struct HostBustAdapterMemory {
 }
 
 impl HostBustAdapterMemory {
-    pub fn ports(&self) -> HostBusAdapterPortIterator {
-        HostBusAdapterPortIterator::new(&self.ports, self.ports_implemented)
+    #[inline(always)]
+    const fn ports_implemented(&self) -> usize {
+        let mut bits = 0;
+        let mut bit = 1;
+
+        while (self.ports_implemented & bit) > 0 {
+            bits += 1;
+            bit <<= 1;
+        }
+
+        bits
+    }
+
+    pub fn ports(&self) -> &[HostBusAdapterPort] {
+        let len = self.ports_implemented();
+        &self.ports[0..len]
+    }
+
+    pub fn ports_mut(&mut self) -> &mut [HostBusAdapterPort] {
+        let len = self.ports_implemented();
+        &mut self.ports[0..len]
     }
 }

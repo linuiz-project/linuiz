@@ -1,77 +1,81 @@
 pub mod hba;
 
 use alloc::vec::Vec;
-use hba::{HostBusAdapterPort, HostBusAdapterPortClass, HostBustAdapterMemory};
-use libkernel::{
-    io::pci::{PCIeDevice, Standard},
-    memory::mmio::{Mapped, MMIO},
+use hba::{
+    port::{HostBusAdapterPort, HostBusAdapterPortClass},
+    HostBustAdapterMemory,
 };
-use spin::{MutexGuard, RwLock};
+use libkernel::io::pci::{PCIeDevice, Standard, StandardRegister};
 
 #[derive(Debug)]
 pub struct AHCIPort<'hba> {
     port_num: u8,
-    hba_port: &'hba HostBusAdapterPort,
+    hba_port: &'hba mut HostBusAdapterPort,
     buffer: [u8; 2048],
 }
 
 impl<'hba> AHCIPort<'hba> {
-    fn new(port_num: u8, hba_port: &'hba HostBusAdapterPort) -> Self {
+    fn new(port_num: u8, hba_port: &'hba mut HostBusAdapterPort) -> Self {
         Self {
             port_num,
             hba_port,
             buffer: [0u8; 2048],
         }
     }
+
+    pub fn hba(&mut self) -> &mut HostBusAdapterPort {
+        self.hba_port
+    }
+
+    pub fn configure() {}
+
+    pub fn start_cmd(&self) {}
+
+    pub fn stop_cmd(&self) {}
 }
 
-pub struct AHCI<'dev, 'port> {
-    device: &'dev PCIeDevice<Standard>,
-    hba_memory: MutexGuard<'dev, MMIO<Mapped>>,
-    ports: RwLock<Vec<AHCIPort<'port>>>,
+pub struct AHCI<'ahci> {
+    ports: Vec<AHCIPort<'ahci>>,
 }
 
-impl<'dev, 'port> AHCI<'dev, 'port> {
-    pub fn from_pcie_device(device: &'dev PCIeDevice<Standard>) -> Self {
+impl<'ahci> AHCI<'ahci> {
+    pub fn from_pcie_device(device: &'ahci PCIeDevice<Standard>) -> Self {
         trace!("Using PCIe device for AHCI driver:\n{:#?}", device);
 
-        if let Some(reg_mmio) = device.reg5() {
-            Self {
-                device,
-                hba_memory: reg_mmio,
-                ports: RwLock::new(Vec::new()),
-            }
+        if let Some(mut hba_register) = device.get_register_locked(StandardRegister::Reg5) {
+            // Allows this context to 'own' and move around values derived from HBA memory.
+            let own_hba_memory = hba_register
+                .mapped_addr()
+                .as_mut_ptr::<HostBustAdapterMemory>();
+
+            let ports = unsafe { hba_register.read_mut::<HostBustAdapterMemory>(0).unwrap() }
+                .ports()
+                .iter()
+                .enumerate()
+                .filter_map(|(port_num, port)| match port.class() {
+                    HostBusAdapterPortClass::SATA | HostBusAdapterPortClass::SATAPI => {
+                        debug!("Configuring AHCI port #{}: {:?}", port_num, port.class());
+
+                        // This is very unsafe, but it elides the borrow checker, a la allowing us to point to MMIO that's
+                        //  TECHNICALLY owned by the `device`.
+                        let own_port = unsafe { &mut ((*own_hba_memory).ports_mut()[port_num]) };
+                        Some(AHCIPort::new(port_num as u8, own_port))
+                    }
+                    _port_type => None,
+                })
+                .collect();
+
+            Self { ports }
         } else {
             panic!("device's host bust adapter is an incorrect register type")
         }
     }
 
-    pub fn hba_memory(&'dev self) -> &'dev HostBustAdapterMemory {
-        unsafe { self.hba_memory.read(0).unwrap() }
+    pub fn iter(&'ahci self) -> core::slice::Iter<AHCIPort<'ahci>> {
+        self.ports.iter()
     }
 
-    pub fn configure_ports(&'port self) {
-        let mut ports = self.ports.write();
-
-        if ports.len() > 0 {
-            warn!("AHCI driver is re-enumerating ports (this should only be done once)!");
-        } else {
-            ports.clear();
-            ports.extend(
-                unsafe { self.hba_memory.read::<HostBustAdapterMemory>(0).unwrap() }
-                    .ports()
-                    .enumerate()
-                    .filter_map(|(port_num, port)| match port.class() {
-                        HostBusAdapterPortClass::SATA | HostBusAdapterPortClass::SATAPI => {
-                            Some(AHCIPort::new(port_num as u8, port))
-                        }
-                        _port_type => None,
-                    }),
-            )
-        }
-    }
-
-    pub fn ports(&self) -> spin::RwLockReadGuard<Vec<AHCIPort<'port>>> {
-        self.ports.read()
+    pub fn iter_mut(&'ahci mut self) -> core::slice::IterMut<AHCIPort<'ahci>> {
+        self.ports.iter_mut()
     }
 }

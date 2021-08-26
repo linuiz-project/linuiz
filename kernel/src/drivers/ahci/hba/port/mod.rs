@@ -1,5 +1,9 @@
+mod command_status;
+
 use core::convert::TryFrom;
 use num_enum::TryFromPrimitive;
+
+pub use command_status::*;
 
 #[derive(Debug)]
 pub enum HostBusAdapterPortClass {
@@ -68,6 +72,37 @@ impl core::fmt::Debug for SATAStatus {
     }
 }
 
+#[repr(u32)]
+#[derive(TryFromPrimitive)]
+pub enum DeviceDetectionInitialization {
+    None = 0,
+    FullReinit = 1,
+    DisbaleSATA = 4,
+}
+
+#[repr(u32)]
+#[derive(TryFromPrimitive)]
+pub enum SpeedAllowed {
+    NoRestriction = 0,
+    Gen1 = 1,
+    Gen2 = 2,
+    Gen3 = 3,
+}
+
+// IPWM = Interface Power Management
+#[repr(u32)]
+#[derive(TryFromPrimitive)]
+pub enum IPWMTransitionsAllowed {
+    NoRestriction = 0,
+    PartialStateDisabled = 1,
+    SlumberStateDisabled = 2,
+    PartialAndSlumberStateDisabled = 3,
+    DevSleepPWMStateDisabled = 4,
+    PartialAndDevSleepPWNDisabled = 5,
+    SlumberAndDevSleepPWMDisabled = 6,
+    AllDisabled = 7,
+}
+
 #[repr(C)]
 #[derive(Debug)]
 pub struct HostBusAdapterPort {
@@ -76,7 +111,7 @@ pub struct HostBusAdapterPort {
     fis_base_address: u64,
     interrupt_status: u32,
     interrupt_enable: u32,
-    command_status: u32,
+    command_status: CommandStatus,
     _reserved0: [u8; 0x4],
     task_file_data: u32,
     signature: u32,
@@ -106,6 +141,10 @@ impl HostBusAdapterPort {
         &self.sata_status
     }
 
+    pub fn command_status(&mut self) -> &mut CommandStatus {
+        &mut self.command_status
+    }
+
     pub fn class(&self) -> HostBusAdapterPortClass {
         // Ensures port is in a valid state (deteced & powered).
         if !matches!(
@@ -119,37 +158,6 @@ impl HostBusAdapterPort {
         } else {
             // Finally, determine port type from its signature.
             self.signature().expect("invalid port signature")
-        }
-    }
-}
-
-pub struct HostBusAdapterPortIterator<'hba> {
-    ports: &'hba [HostBusAdapterPort; 32],
-    ports_implemented: u32,
-    cur_index: usize,
-}
-
-impl<'hba> HostBusAdapterPortIterator<'hba> {
-    pub(super) fn new(ports: &'hba [HostBusAdapterPort; 32], ports_implemented: u32) -> Self {
-        Self {
-            ports,
-            ports_implemented,
-            cur_index: 0,
-        }
-    }
-}
-
-impl<'hba> Iterator for HostBusAdapterPortIterator<'hba> {
-    type Item = &'hba HostBusAdapterPort;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if (self.ports_implemented & (1 << self.cur_index)) > 0 {
-            let port = &self.ports[self.cur_index];
-            self.cur_index += 1;
-
-            Some(port)
-        } else {
-            None
         }
     }
 }

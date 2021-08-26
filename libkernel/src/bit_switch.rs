@@ -8,7 +8,7 @@ impl BitSwitchMode for ReadOnly {}
 pub enum ReadWrite {}
 impl BitSwitchMode for ReadWrite {}
 
-struct BitSwitch32<'val, M: BitSwitchMode> {
+pub struct BitSwitch32<'val, M: BitSwitchMode> {
     val: &'val mut u32,
     bit_index: u8,
     phantom: core::marker::PhantomData<M>,
@@ -30,6 +30,15 @@ impl<'val> BitSwitch32<'val, ReadOnly> {
     }
 }
 
+impl core::fmt::Debug for BitSwitch32<'_, ReadOnly> {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_tuple("BitSwitch<ReadOnly>")
+            .field(&self.get())
+            .finish()
+    }
+}
+
 impl<'val> BitSwitch32<'val, ReadWrite> {
     pub fn new(val: &'val mut u32, bit_index: u8) -> Self {
         Self {
@@ -41,5 +50,14 @@ impl<'val> BitSwitch32<'val, ReadWrite> {
 
     pub fn set(&mut self, set: bool) {
         self.val.set_bit(self.bit_index as usize, set);
+    }
+}
+
+impl core::fmt::Debug for BitSwitch32<'_, ReadWrite> {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_tuple("BitSwitch<ReadWrite>")
+            .field(&self.get())
+            .finish()
     }
 }

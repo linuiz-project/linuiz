@@ -8,6 +8,16 @@ use crate::{
 };
 use core::fmt;
 
+#[repr(usize)]
+pub enum StandardRegister {
+    Reg0 = 0,
+    Reg1 = 1,
+    Reg2 = 2,
+    Reg3 = 3,
+    Reg4 = 4,
+    Reg5 = 5,
+}
+
 impl PCIeDevice<Standard> {
     pub unsafe fn new(mmio: MMIO<Mapped>) -> Self {
         assert_eq!(
@@ -78,28 +88,27 @@ impl PCIeDevice<Standard> {
         }
     }
 
-    pub fn reg0(&self) -> Option<MutexGuard<MMIO<Mapped>>> {
-        self.bar_mmios[0].get().map(|mutex| mutex.lock())
+    // Gets the MMIO covering a specified device register.
+    //
+    // The outer Option<'_> indicates whether the register exists, and the inner Option<'_>
+    //  indicates whether the register lock was successfully acquired.
+
+    pub fn get_register(
+        &self,
+        register: StandardRegister,
+    ) -> Option<Option<MutexGuard<MMIO<Mapped>>>> {
+        self.bar_mmios[register as usize]
+            .get()
+            .map(|mutex| mutex.try_lock())
     }
 
-    pub fn reg1(&self) -> Option<MutexGuard<MMIO<Mapped>>> {
-        self.bar_mmios[1].get().map(|mutex| mutex.lock())
-    }
-
-    pub fn reg2(&self) -> Option<MutexGuard<MMIO<Mapped>>> {
-        self.bar_mmios[2].get().map(|mutex| mutex.lock())
-    }
-
-    pub fn reg3(&self) -> Option<MutexGuard<MMIO<Mapped>>> {
-        self.bar_mmios[3].get().map(|mutex| mutex.lock())
-    }
-
-    pub fn reg4(&self) -> Option<MutexGuard<MMIO<Mapped>>> {
-        self.bar_mmios[4].get().map(|mutex| mutex.lock())
-    }
-
-    pub fn reg5(&self) -> Option<MutexGuard<MMIO<Mapped>>> {
-        self.bar_mmios[5].get().map(|mutex| mutex.lock())
+    pub fn get_register_locked(
+        &self,
+        register: StandardRegister,
+    ) -> Option<MutexGuard<MMIO<Mapped>>> {
+        self.bar_mmios[register as usize]
+            .get()
+            .map(|mutex| mutex.lock())
     }
 
     pub fn cardbus_cis_ptr(&self) -> &u32 {
@@ -151,12 +160,30 @@ impl fmt::Debug for PCIeDevice<Standard> {
 
         self.generic_debut_fmt(debug_struct);
         debug_struct
-            .field("Base Address Register 0", &self.reg0())
-            .field("Base Address Register 1", &self.reg1())
-            .field("Base Address Register 2", &self.reg2())
-            .field("Base Address Register 3", &self.reg3())
-            .field("Base Address Register 4", &self.reg4())
-            .field("Base Address Register 5", &self.reg5())
+            .field(
+                "Base Address Register 0",
+                &self.get_register(StandardRegister::Reg0),
+            )
+            .field(
+                "Base Address Register 1",
+                &self.get_register(StandardRegister::Reg1),
+            )
+            .field(
+                "Base Address Register 2",
+                &self.get_register(StandardRegister::Reg2),
+            )
+            .field(
+                "Base Address Register 3",
+                &self.get_register(StandardRegister::Reg3),
+            )
+            .field(
+                "Base Address Register 4",
+                &self.get_register(StandardRegister::Reg4),
+            )
+            .field(
+                "Base Address Register 5",
+                &self.get_register(StandardRegister::Reg5),
+            )
             .field("Cardbus CIS Pointer", &self.cardbus_cis_ptr())
             .field("Subsystem Vendor ID", &self.subsystem_vendor_id())
             .field("Subsystem ID", &self.subsystem_id())
