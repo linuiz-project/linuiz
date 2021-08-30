@@ -1,6 +1,7 @@
 mod command_status;
 
 use core::convert::TryFrom;
+use libkernel::{addr_ty::Virtual, Address};
 use num_enum::TryFromPrimitive;
 
 pub use command_status::*;
@@ -104,11 +105,32 @@ pub enum IPWMTransitionsAllowed {
 }
 
 #[repr(C)]
+pub struct HostBusAdapterCommandHeader {
+    misc: u16,
+    prdt_length: u16,
+    prdb_count: u32,
+    // NOTE: This field is two u32s in the spec.
+    command_table_base_addr: u64,
+    reserved1: [u8; 4],
+}
+
+impl HostBusAdapterCommandHeader {
+    libkernel::bitfield_getter!(misc, u16, fis_len, 0..5);
+    libkernel::bitfield_getter!(misc, atapi, 5);
+    libkernel::bitfield_getter!(misc, write, 6);
+    libkernel::bitfield_getter!(misc, prefetchable, 7);
+    libkernel::bitfield_getter!(misc, reset, 8);
+    libkernel::bitfield_getter!(misc, bist, 9);
+    libkernel::bitfield_getter!(misc, clear_busy_on_rok, 10);
+    libkernel::bitfield_getter!(misc, u16, port_multiplier, 12..16);
+}
+
+#[repr(C)]
 #[derive(Debug)]
 pub struct HostBusAdapterPort {
     /// Note: In the specificaiton, this is two 32-bit values
-    command_list_base: u64,
-    fis_base_address: u64,
+    command_list_base: *mut HostBusAdapterCommandHeader,
+    fis_base_address: *mut u8,
     interrupt_status: u32,
     interrupt_enable: u32,
     command_status: CommandStatus,
@@ -137,6 +159,14 @@ impl HostBusAdapterPort {
         }
     }
 
+    pub unsafe fn set_command_list_base(&mut self, base: Address<Virtual>) {
+        self.command_list_base = base.as_mut_ptr();
+    }
+
+    pub unsafe fn set_fis_base(&mut self, base: Address<Virtual>) {
+        self.fis_base_address = base.as_mut_ptr();
+    }
+
     pub fn sata_status(&self) -> &SATAStatus {
         &self.sata_status
     }
@@ -158,6 +188,14 @@ impl HostBusAdapterPort {
         } else {
             // Finally, determine port type from its signature.
             self.signature().expect("invalid port signature")
+        }
+    }
+
+    pub fn command_list(&mut self) -> Option<&[HostBusAdapterCommandHeader]> {
+        if !self.command_list_base.is_null() {
+            Some(unsafe { core::slice::from_raw_parts_mut(self.command_list_base, 32) })
+        } else {
+            None
         }
     }
 }

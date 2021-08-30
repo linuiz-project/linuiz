@@ -13,7 +13,7 @@ bit_field = "*"
 bitflags = "*"
 num_enum = { version = "*", default-features = false }
 spin = "*"
-
+paste = "*"
 
 [[bin]]
 name = "kernel"

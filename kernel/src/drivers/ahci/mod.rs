@@ -27,11 +27,43 @@ impl<'hba> AHCIPort<'hba> {
         self.hba_port
     }
 
-    pub fn configure() {}
+    pub fn configure(&mut self) {
+        self.stop_cmd();
 
-    pub fn start_cmd(&self) {}
+        let cmd_base: *mut u8 = libkernel::alloc!(4096, 128);
+        let fis_base: *mut u8 = libkernel::alloc!(1024, 128);
 
-    pub fn stop_cmd(&self) {}
+        unsafe {
+            core::ptr::write_bytes(cmd_base, 0, 4096);
+            core::ptr::write_bytes(fis_base, 0, 1024);
+
+            use libkernel::{addr_ty::Virtual, Address};
+            self.hba_port
+                .set_command_list_base(Address::<Virtual>::from_ptr(cmd_base));
+            self.hba_port
+                .set_fis_base(Address::<Virtual>::from_ptr(fis_base));
+        }
+
+        self.start_cmd();
+    }
+
+    pub fn start_cmd(&mut self) {
+        let cmd = self.hba_port.command_status();
+
+        while cmd.cr().get() {}
+
+        cmd.fre().set(true);
+        cmd.st().set(true);
+    }
+
+    pub fn stop_cmd(&mut self) {
+        let cmd = self.hba_port.command_status();
+
+        cmd.st().set(false);
+        cmd.fre().set(false);
+
+        while cmd.fr().get() | cmd.cr().get() {}
+    }
 }
 
 pub struct AHCI<'ahci> {
@@ -56,7 +88,7 @@ impl<'ahci> AHCI<'ahci> {
                     HostBusAdapterPortClass::SATA | HostBusAdapterPortClass::SATAPI => {
                         debug!("Configuring AHCI port #{}: {:?}", port_num, port.class());
 
-                        // This is very unsafe, but it elides the borrow checker, a la allowing us to point to MMIO that's
+                        // This is very unsafe, but it elides the borrow checker, thus allowing us to point to MMIO that's
                         //  TECHNICALLY owned by the `device`.
                         let own_port = unsafe { &mut ((*own_hba_memory).ports_mut()[port_num]) };
                         Some(AHCIPort::new(port_num as u8, own_port))

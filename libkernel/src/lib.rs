@@ -215,3 +215,38 @@ pub const fn align_down(value: usize, alignment: usize) -> usize {
 pub const fn align_down_div(value: usize, alignment: usize) -> usize {
     align_down(value, alignment) / alignment
 }
+
+#[macro_export]
+macro_rules! bitfield_getter {
+    ($field:ident, $getter_name:ident, $bit_index:literal) => {
+        paste::paste! {
+            pub fn [<get_ $getter_name>](&self) -> bool {
+                use bit_field::BitField;
+
+                self.$field.get_bit($bit_index)
+            }
+
+            pub fn [<set_ $getter_name>](&mut self, value: bool) {
+                use bit_field::BitField;
+
+                self.$field.set_bit($bit_index, value);
+            }
+        }
+    };
+
+    ($field:ident, $field_ty:ty, $getter_name:ident, $bit_range:expr) => {
+        paste::paste! {
+            pub fn [<get_ $getter_name>](&self) -> $field_ty {
+                use bit_field::BitField;
+
+                self.$field.get_bits($bit_range)
+            }
+
+            pub fn [<set_ $getter_name>](&mut self, value: $field_ty) {
+                use bit_field::BitField;
+
+                self.$field.set_bits($bit_range, value);
+            }
+        }
+    };
+}
