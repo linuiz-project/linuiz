@@ -106,7 +106,7 @@ pub enum IPWMTransitionsAllowed {
 
 #[repr(C)]
 pub struct HostBusAdapterCommandHeader {
-    misc: u16,
+    bits1: u16,
     prdt_length: u16,
     prdb_count: u32,
     // NOTE: This field is two u32s in the spec.
@@ -115,14 +115,14 @@ pub struct HostBusAdapterCommandHeader {
 }
 
 impl HostBusAdapterCommandHeader {
-    libkernel::bitfield_getter!(misc, u16, fis_len, 0..5);
-    libkernel::bitfield_getter!(misc, atapi, 5);
-    libkernel::bitfield_getter!(misc, write, 6);
-    libkernel::bitfield_getter!(misc, prefetchable, 7);
-    libkernel::bitfield_getter!(misc, reset, 8);
-    libkernel::bitfield_getter!(misc, bist, 9);
-    libkernel::bitfield_getter!(misc, clear_busy_on_rok, 10);
-    libkernel::bitfield_getter!(misc, u16, port_multiplier, 12..16);
+    libkernel::bitfield_getter!(bits1, u16, fis_len, 0..5);
+    libkernel::bitfield_getter!(bits1, atapi, 5);
+    libkernel::bitfield_getter!(bits1, write, 6);
+    libkernel::bitfield_getter!(bits1, prefetchable, 7);
+    libkernel::bitfield_getter!(bits1, reset, 8);
+    libkernel::bitfield_getter!(bits1, bist, 9);
+    libkernel::bitfield_getter!(bits1, clear_busy_on_rok, 10);
+    libkernel::bitfield_getter!(bits1, u16, port_multiplier, 12..16);
 
     pub fn set_prdt_len(&mut self, value: u16) {
         self.prdt_length = value;
@@ -215,5 +215,10 @@ impl HostBusAdapterPort {
         } else {
             None
         }
+    }
+
+    pub fn clear_interrupts(&mut self) {
+        // TODO: make sense of this status register
+        self.interrupt_status = -1;
     }
 }

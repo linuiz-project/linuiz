@@ -7,6 +7,32 @@ use hba::{
 };
 use libkernel::io::pci::{PCIeDevice, Standard, StandardRegister};
 
+#[repr(C)]
+pub struct FIS_REG_H2D {
+    fis_type: u8,
+    bits1: u8,
+    command: u8,
+    feature_low: u8,
+    lba0: u8,
+    lba1: u8,
+    lba2: u8,
+    device_register: u8,
+    lba3: u8,
+    lba4: u8,
+    lba5: u8,
+    feature_high: u8,
+    // NOTE: This is two u8's in the spec
+    count: u16,
+    iso_cmd_completion: u8,
+    control: u8,
+    rsvd0: [u8; 4]
+}
+
+impl FIS_REG_H2D {
+    libkernel::bitfield_getter!(bits1, u8, port_multiplier, 0..4);
+    libkernel::bitfield_getter!(bits1, command_control, 7);
+}
+
 #[derive(Debug)]
 pub struct AHCIPort<'hba> {
     port_num: u8,
@@ -25,6 +51,28 @@ impl<'hba> AHCIPort<'hba> {
 
     pub fn hba(&mut self) -> &mut HostBusAdapterPort {
         self.hba_port
+    }
+
+    pub fn start_cmd(&mut self) {
+        debug!("AHCI PORT #{}: START_CMD", self.port_num);
+
+        let cmd = self.hba_port.command_status();
+
+        while cmd.cr().get() {}
+
+        cmd.fre().set(true);
+        cmd.st().set(true);
+    }
+
+    pub fn stop_cmd(&mut self) {
+        debug!("AHCI PORT #{}: STOP_CMD", self.port_num);
+
+        let cmd = self.hba_port.command_status();
+
+        cmd.st().set(false);
+        cmd.fre().set(false);
+
+        while cmd.fr().get() | cmd.cr().get() {}
     }
 
     pub fn configure(&mut self) {
@@ -81,26 +129,15 @@ impl<'hba> AHCIPort<'hba> {
         debug!("AHCI PORT #{}: CONFIGURED.", self.port_num);
     }
 
-    pub fn start_cmd(&mut self) {
-        debug!("AHCI PORT #{}: START_CMD", self.port_num);
+    pub fn read(&mut self, sectors: Range<usize>) -> Vec<u8> {
+        self.hba_port.clear_interrupts();
+        let cmd_headers = self.hba_port.command_list_mut().expect("AHCI port's HBA has not yet been configured");
+        let cmd_header = &mut cmd_headers[1];
+        cmd_header.set_fis_len(core::mem::size_of::<FIS_REG_H2D>() / u32);
+        cmd_header.set_write(false);
+        cmd_header.set_prdt_len(1);
 
-        let cmd = self.hba_port.command_status();
-
-        while cmd.cr().get() {}
-
-        cmd.fre().set(true);
-        cmd.st().set(true);
-    }
-
-    pub fn stop_cmd(&mut self) {
-        debug!("AHCI PORT #{}: STOP_CMD", self.port_num);
-
-        let cmd = self.hba_port.command_status();
-
-        cmd.st().set(false);
-        cmd.fre().set(false);
-
-        while cmd.fr().get() | cmd.cr().get() {}
+        
     }
 }
 
