@@ -129,7 +129,8 @@ extern "efiapi" fn kernel_main(
                 let mut ahci = drivers::ahci::AHCI::from_pcie_device(&device);
                 // ahci.configure_ports();
                 for port in ahci.iter_mut() {
-                    info!("{:#?}", port.hba())
+                    info!("{:#?}", port.hba());
+                    port.configure();
                 }
             }
         }

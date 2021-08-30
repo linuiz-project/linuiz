@@ -110,7 +110,7 @@ pub struct HostBusAdapterCommandHeader {
     prdt_length: u16,
     prdb_count: u32,
     // NOTE: This field is two u32s in the spec.
-    command_table_base_addr: u64,
+    command_table_base_addr: *mut u8,
     reserved1: [u8; 4],
 }
 
@@ -123,6 +123,14 @@ impl HostBusAdapterCommandHeader {
     libkernel::bitfield_getter!(misc, bist, 9);
     libkernel::bitfield_getter!(misc, clear_busy_on_rok, 10);
     libkernel::bitfield_getter!(misc, u16, port_multiplier, 12..16);
+
+    pub fn set_prdt_len(&mut self, value: u16) {
+        self.prdt_length = value;
+    }
+
+    pub unsafe fn set_command_table_base_addr(&mut self, addr: Address<Virtual>) {
+        self.command_table_base_addr = addr.as_mut_ptr();
+    }
 }
 
 #[repr(C)]
@@ -160,6 +168,8 @@ impl HostBusAdapterPort {
     }
 
     pub unsafe fn set_command_list_base(&mut self, base: Address<Virtual>) {
+        info!("{:?}", self.command_list_base);
+
         self.command_list_base = base.as_mut_ptr();
     }
 
@@ -191,7 +201,15 @@ impl HostBusAdapterPort {
         }
     }
 
-    pub fn command_list(&mut self) -> Option<&[HostBusAdapterCommandHeader]> {
+    pub fn command_list(&self) -> Option<&[HostBusAdapterCommandHeader]> {
+        if !self.command_list_base.is_null() {
+            Some(unsafe { core::slice::from_raw_parts(self.command_list_base, 32) })
+        } else {
+            None
+        }
+    }
+
+    pub fn command_list_mut(&mut self) -> Option<&mut [HostBusAdapterCommandHeader]> {
         if !self.command_list_base.is_null() {
             Some(unsafe { core::slice::from_raw_parts_mut(self.command_list_base, 32) })
         } else {

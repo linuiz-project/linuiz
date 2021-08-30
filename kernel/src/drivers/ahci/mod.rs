@@ -28,12 +28,18 @@ impl<'hba> AHCIPort<'hba> {
     }
 
     pub fn configure(&mut self) {
+        debug!("AHCI PORT #{}: CONFIGURING.", self.port_num);
+
         self.stop_cmd();
+
+        debug!("Allocting command and FIS lists.");
 
         let cmd_base: *mut u8 = libkernel::alloc!(4096, 128);
         let fis_base: *mut u8 = libkernel::alloc!(1024, 128);
 
         unsafe {
+            debug!("Clearing command and FIS lists, and updating port metadata.");
+
             core::ptr::write_bytes(cmd_base, 0, 4096);
             core::ptr::write_bytes(fis_base, 0, 1024);
 
@@ -44,10 +50,40 @@ impl<'hba> AHCIPort<'hba> {
                 .set_fis_base(Address::<Virtual>::from_ptr(fis_base));
         }
 
+        debug!("Configuring individual command headers.");
+
+        for (index, cmd_header) in self
+            .hba_port
+            .command_list_mut()
+            .unwrap()
+            .iter_mut()
+            .enumerate()
+        {
+            cmd_header.set_prdt_len(8);
+
+            unsafe {
+                let cmd_table_addr: *mut u8 = libkernel::alloc!(4096, 128);
+                core::ptr::write_bytes(cmd_table_addr, 0, 4096);
+
+                debug!(
+                    "Configured command header #{} with table address {:?}",
+                    index, cmd_table_addr
+                );
+
+                cmd_header.set_command_table_base_addr(libkernel::Address::<
+                    libkernel::addr_ty::Virtual,
+                >::from_ptr(cmd_table_addr))
+            };
+        }
+
         self.start_cmd();
+
+        debug!("AHCI PORT #{}: CONFIGURED.", self.port_num);
     }
 
     pub fn start_cmd(&mut self) {
+        debug!("AHCI PORT #{}: START_CMD", self.port_num);
+
         let cmd = self.hba_port.command_status();
 
         while cmd.cr().get() {}
@@ -57,6 +93,8 @@ impl<'hba> AHCIPort<'hba> {
     }
 
     pub fn stop_cmd(&mut self) {
+        debug!("AHCI PORT #{}: STOP_CMD", self.port_num);
+
         let cmd = self.hba_port.command_status();
 
         cmd.st().set(false);
