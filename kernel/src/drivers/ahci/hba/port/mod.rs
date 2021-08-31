@@ -6,6 +6,117 @@ use num_enum::TryFromPrimitive;
 
 pub use command_status::*;
 
+#[repr(C)]
+pub struct HBAPRDTEntry {
+    db_addr_lower: u32,
+    db_addr_upper: u32,
+    rsvd0: u32,
+    bits1: u32,
+}
+
+impl HBAPRDTEntry {
+    libkernel::bitfield_getter!(bits1, u32, byte_count, 0..22);
+    libkernel::bitfield_getter!(bits1, interrupt_on_completion, 31);
+
+    pub fn set_db_addr(&mut self, addr: libkernel::Address<libkernel::addr_ty::Virtual>) {
+        let addr_usize = addr.as_usize();
+
+        self.db_addr_lower = addr_usize as u32;
+        self.db_addr_upper = (addr_usize >> 32) as u32;
+    }
+
+    pub fn set_sector_count(&mut self, sector_count: u32) {
+        self.set_byte_count(
+            (sector_count << 9) - 1, /* 512-byte alignment per sector */
+        );
+    }
+
+    pub fn clear(&mut self) {
+        self.db_addr_lower = 0;
+        self.db_addr_upper = 0;
+        self.bits1 = 0;
+    }
+}
+
+pub trait CommandFIS {}
+
+#[repr(C)]
+pub struct HBACommandTable {
+    command_fis: [u8; 64],
+    atapi_command: [u8; 16],
+    rsvd0: [u8; 48],
+    prdt: core::ffi::c_void,
+}
+
+impl HBACommandTable {
+    pub fn prdt_entries(&mut self, entry_count: u16) -> &mut [HBAPRDTEntry] {
+        unsafe {
+            core::slice::from_raw_parts_mut(
+                (&mut self.prdt) as *mut _ as *mut HBAPRDTEntry,
+                entry_count as usize,
+            )
+        }
+    }
+
+    pub fn clear(&mut self, prdt_entry_count: u16) {
+        self.command_fis.fill(0);
+        self.atapi_command.fill(0);
+        self.prdt_entries(prdt_entry_count)
+            .iter_mut()
+            .for_each(|entry| entry.clear());
+    }
+
+    pub fn command_fis<T: CommandFIS>(&mut self) -> &mut T {
+        unsafe { &mut *(self.command_fis.as_mut_ptr() as *mut _) }
+    }
+}
+
+#[repr(C)]
+pub struct HBACommandHeader {
+    bits1: u16,
+    prdt_len: u16,
+    prdb_count: u32,
+    cmd_tbl_addr_lower: u32,
+    cmd_tbl_addr_upper: u32,
+    reserved1: [u8; 4],
+}
+
+impl HBACommandHeader {
+    libkernel::bitfield_getter!(bits1, u16, fis_len, 0..5);
+    libkernel::bitfield_getter!(bits1, atapi, 5);
+    libkernel::bitfield_getter!(bits1, write, 6);
+    libkernel::bitfield_getter!(bits1, prefetchable, 7);
+    libkernel::bitfield_getter!(bits1, reset, 8);
+    libkernel::bitfield_getter!(bits1, bist, 9);
+    libkernel::bitfield_getter!(bits1, clear_busy_on_rok, 10);
+    libkernel::bitfield_getter!(bits1, u16, port_multiplier, 12..16);
+
+    pub fn prdt_len(&mut self) -> &mut u16 {
+        &mut self.prdt_len
+    }
+
+    pub unsafe fn set_command_table_base_addr(&mut self, addr: Address<Virtual>) {
+        let addr_usize = addr.as_usize();
+
+        self.cmd_tbl_addr_lower = addr_usize as u32;
+        self.cmd_tbl_addr_upper = (addr_usize >> 32) as u32;
+    }
+
+    pub fn command_tables(&mut self) -> Option<&mut [HBACommandTable]> {
+        if self.cmd_tbl_addr_lower > 0 || self.cmd_tbl_addr_upper > 0 {
+            Some(unsafe {
+                core::slice::from_raw_parts_mut(
+                    ((self.cmd_tbl_addr_lower as usize)
+                        | ((self.cmd_tbl_addr_upper as usize) << 32)) as *mut _,
+                    32,
+                )
+            })
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum HostBusAdapterPortClass {
     None,
@@ -105,40 +216,12 @@ pub enum IPWMTransitionsAllowed {
 }
 
 #[repr(C)]
-pub struct HostBusAdapterCommandHeader {
-    bits1: u16,
-    prdt_length: u16,
-    prdb_count: u32,
-    // NOTE: This field is two u32s in the spec.
-    command_table_base_addr: *mut u8,
-    reserved1: [u8; 4],
-}
-
-impl HostBusAdapterCommandHeader {
-    libkernel::bitfield_getter!(bits1, u16, fis_len, 0..5);
-    libkernel::bitfield_getter!(bits1, atapi, 5);
-    libkernel::bitfield_getter!(bits1, write, 6);
-    libkernel::bitfield_getter!(bits1, prefetchable, 7);
-    libkernel::bitfield_getter!(bits1, reset, 8);
-    libkernel::bitfield_getter!(bits1, bist, 9);
-    libkernel::bitfield_getter!(bits1, clear_busy_on_rok, 10);
-    libkernel::bitfield_getter!(bits1, u16, port_multiplier, 12..16);
-
-    pub fn set_prdt_len(&mut self, value: u16) {
-        self.prdt_length = value;
-    }
-
-    pub unsafe fn set_command_table_base_addr(&mut self, addr: Address<Virtual>) {
-        self.command_table_base_addr = addr.as_mut_ptr();
-    }
-}
-
-#[repr(C)]
 #[derive(Debug)]
-pub struct HostBusAdapterPort {
-    /// Note: In the specificaiton, this is two 32-bit values
-    command_list_base: *mut HostBusAdapterCommandHeader,
-    fis_base_address: *mut u8,
+pub struct HBAPort {
+    cmd_list_addr_lower: u32,
+    cmd_list_addr_upper: u32,
+    fis_addr_lower: u32,
+    fis_addr_upper: u32,
     interrupt_status: u32,
     interrupt_enable: u32,
     command_status: CommandStatus,
@@ -156,7 +239,7 @@ pub struct HostBusAdapterPort {
     _vendor0: [u8; 0x4],
 }
 
-impl HostBusAdapterPort {
+impl HBAPort {
     pub fn signature(&self) -> Result<HostBusAdapterPortClass, u32> {
         match self.signature {
             0x00000101 => Ok(HostBusAdapterPortClass::SATA),
@@ -167,14 +250,18 @@ impl HostBusAdapterPort {
         }
     }
 
-    pub unsafe fn set_command_list_base(&mut self, base: Address<Virtual>) {
-        info!("{:?}", self.command_list_base);
+    pub unsafe fn set_command_list_addr(&mut self, addr: Address<Virtual>) {
+        let addr_usize = addr.as_usize();
 
-        self.command_list_base = base.as_mut_ptr();
+        self.cmd_list_addr_lower = addr_usize as u32;
+        self.cmd_list_addr_upper = (addr_usize >> 32) as u32;
     }
 
-    pub unsafe fn set_fis_base(&mut self, base: Address<Virtual>) {
-        self.fis_base_address = base.as_mut_ptr();
+    pub unsafe fn set_fis_addr(&mut self, addr: Address<Virtual>) {
+        let addr_usize = addr.as_usize();
+
+        self.fis_addr_lower = addr_usize as u32;
+        self.fis_addr_upper = (addr_usize >> 32) as u32;
     }
 
     pub fn sata_status(&self) -> &SATAStatus {
@@ -201,24 +288,31 @@ impl HostBusAdapterPort {
         }
     }
 
-    pub fn command_list(&self) -> Option<&[HostBusAdapterCommandHeader]> {
-        if !self.command_list_base.is_null() {
-            Some(unsafe { core::slice::from_raw_parts(self.command_list_base, 32) })
+    pub fn task_file_data(&self) -> u32 {
+        self.task_file_data
+    }
+
+    pub fn command_list(&mut self) -> Option<&mut [HBACommandHeader]> {
+        if self.cmd_list_addr_lower > 0 || self.cmd_list_addr_upper > 0 {
+            Some(unsafe {
+                core::slice::from_raw_parts_mut(
+                    ((self.cmd_list_addr_lower as usize)
+                        | ((self.cmd_list_addr_upper as usize) << 32))
+                        as *mut _,
+                    32,
+                )
+            })
         } else {
             None
         }
     }
 
-    pub fn command_list_mut(&mut self) -> Option<&mut [HostBusAdapterCommandHeader]> {
-        if !self.command_list_base.is_null() {
-            Some(unsafe { core::slice::from_raw_parts_mut(self.command_list_base, 32) })
-        } else {
-            None
-        }
+    pub fn interrupt_status(&mut self) -> &mut u32 {
+        // todo make sense of this register
+        &mut self.interrupt_status
     }
 
-    pub fn clear_interrupts(&mut self) {
-        // TODO: make sense of this status register
-        self.interrupt_status = -1;
+    pub fn command_issue(&mut self) -> &mut u32 {
+        &mut self.command_issue
     }
 }

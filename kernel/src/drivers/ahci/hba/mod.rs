@@ -1,10 +1,10 @@
 pub mod port;
 
-use port::HostBusAdapterPort;
+use port::HBAPort;
 
 #[repr(C)]
 #[derive(Debug)]
-pub struct HostBustAdapterMemory {
+pub struct HBAMemory {
     host_capability: u32,
     global_host_control: u32,
     interrupt_status: u32,
@@ -18,10 +18,10 @@ pub struct HostBustAdapterMemory {
     bios_handoff_control_status: u32,
     _reserved0: [u8; 0x74],
     _vendor0: [u8; 0x60],
-    ports: [HostBusAdapterPort; 32],
+    ports: [HBAPort; 32],
 }
 
-impl HostBustAdapterMemory {
+impl HBAMemory {
     #[inline(always)]
     const fn ports_implemented(&self) -> usize {
         let mut bits = 0;
@@ -35,15 +35,13 @@ impl HostBustAdapterMemory {
         bits
     }
 
-    pub fn ports(&self) -> &[HostBusAdapterPort] {
+    pub fn ports(&self) -> &[HBAPort] {
         let len = self.ports_implemented();
         &self.ports[0..len]
     }
 
-    pub fn ports_mut(&mut self) -> &mut [HostBusAdapterPort] {
+    pub fn ports_mut(&mut self) -> &mut [HBAPort] {
         let len = self.ports_implemented();
         &mut self.ports[0..len]
     }
 }
-
-

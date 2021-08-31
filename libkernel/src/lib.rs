@@ -217,7 +217,7 @@ pub const fn align_down_div(value: usize, alignment: usize) -> usize {
 }
 
 #[macro_export]
-macro_rules! bitfield_getter {
+macro_rules! bitfield_getter_ro {
     ($field:ident, $getter_name:ident, $bit_index:literal) => {
         paste::paste! {
             pub fn [<get_ $getter_name>](&self) -> bool {
@@ -225,8 +225,27 @@ macro_rules! bitfield_getter {
 
                 self.$field.get_bit($bit_index)
             }
+        }
+    };
 
-            pub fn [<set_ $getter_name>](&mut self, value: bool) {
+    ($field:ident, $field_ty:ty, $var_name:ident, $bit_range:expr) => {
+        paste::paste! {
+            pub fn [<get_ $var_name>](&self) -> $field_ty {
+                use bit_field::BitField;
+
+                self.$field.get_bits($bit_range)
+            }
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! bitfield_getter {
+    ($field:ident, $var_name:ident, $bit_index:literal) => {
+        paste::paste! {
+            libkernel::bitfield_getter_ro!($field, $var_name, $bit_index);
+
+            pub fn [<set_ $var_name>](&mut self, value: bool) {
                 use bit_field::BitField;
 
                 self.$field.set_bit($bit_index, value);
@@ -234,15 +253,11 @@ macro_rules! bitfield_getter {
         }
     };
 
-    ($field:ident, $field_ty:ty, $getter_name:ident, $bit_range:expr) => {
+    ($field:ident, $field_ty:ty, $var_name:ident, $bit_range:expr) => {
         paste::paste! {
-            pub fn [<get_ $getter_name>](&self) -> $field_ty {
-                use bit_field::BitField;
+            libkernel::bitfield_getter_ro!($field, $field_ty, $var_name, $bit_range);
 
-                self.$field.get_bits($bit_range)
-            }
-
-            pub fn [<set_ $getter_name>](&mut self, value: $field_ty) {
+            pub fn [<set_ $var_name>](&mut self, value: $field_ty) {
                 use bit_field::BitField;
 
                 self.$field.set_bits($bit_range, value);

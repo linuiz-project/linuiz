@@ -131,6 +131,8 @@ extern "efiapi" fn kernel_main(
                 for port in ahci.iter_mut() {
                     info!("{:#?}", port.hba());
                     port.configure();
+                    let buffer = port.read(0, 4);
+                    info!("{:?}", buffer);
                 }
             }
         }
