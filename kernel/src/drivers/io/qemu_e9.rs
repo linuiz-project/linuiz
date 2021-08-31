@@ -15,6 +15,16 @@ impl QEMUE9 {
         }
     }
 
+    pub fn write_byte(&mut self, byte: u8) {
+        self.out.write(byte)
+    }
+
+    pub fn write_bytes(&mut self, bytes: core::str::Bytes) {
+        for byte in bytes {
+            self.write_byte(byte)
+        }
+    }
+
     pub fn write_str(&mut self, string: &str) {
         for byte in string.bytes() {
             self.out.write(byte);

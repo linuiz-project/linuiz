@@ -314,20 +314,14 @@ impl HBAPort {
     }
 
     pub fn issue_command_slot(&mut self, cmd_index: usize) {
-        assert!(
-            (0..32).contains(&cmd_index),
-            "Command index must be between 0..32"
-        );
+        assert!(cmd_index < 32, "Command index must be between 0..32");
 
         use bit_field::BitField;
         self.command_issue.set_bit(cmd_index, true);
     }
 
     pub fn check_command_slot(&mut self, cmd_index: usize) -> bool {
-        assert!(
-            (0..32).contains(&cmd_index),
-            "Command index must be between 0..32"
-        );
+        assert!(cmd_index < 32, "Command index must be between 0..32");
 
         use bit_field::BitField;
         self.command_issue.get_bit(cmd_index)
