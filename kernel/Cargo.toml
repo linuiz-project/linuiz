@@ -8,7 +8,6 @@ edition = "2018"
 [dependencies]
 libkernel = { path = "../libkernel", features = [ "global_allocator" ] }
 log = { version = "*", default-features = false }
-lazy_static = "*"
 bit_field = "*"
 bitflags = "*"
 num_enum = { version = "*", default-features = false }

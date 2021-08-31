@@ -179,7 +179,7 @@ impl<'hba> AHCIPort<'hba> {
         }
 
         //debug!("AHCI PORT #{}: READ: CLR INT STATUS", self.port_num);
-        *self.hba_port.interrupt_status() = u32::MIN; // clear interrupts
+        self.hba_port.interrupt_status().clear(); // clear interrupts
 
         let cmd_headers = self
             .hba_port
@@ -217,14 +217,14 @@ impl<'hba> AHCIPort<'hba> {
         command_fis.set_sector_count(sector_count);
 
         //debug!("AHCI PORT #{}: READ: ISSUING COMMAND", self.port_num);
-        *self.hba_port.command_issue() = 1;
+        self.hba_port.issue_command_slot(0);
 
         // debug!(
         //     "AHCI PORT #{}: READ: READ EXECUTING: BUSY WAIT",
         //     self.port_num
         // );
-        while *self.hba_port.command_issue() != 0 {
-            if self.hba_port.interrupt_status().get_bit(30) {
+        while self.hba_port.check_command_slot(0) {
+            if self.hba_port.interrupt_status().get_tfes() {
                 panic!("read failed (HBA PxIS TFES")
 
                 // TODO interrupt status register

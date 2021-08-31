@@ -1,10 +1,12 @@
 mod command_status;
+mod interrupt_status;
 
 use core::convert::TryFrom;
-use libkernel::{addr_ty::Virtual, Address};
+use libkernel::{addr_ty::Virtual, bitfield_getter, Address};
 use num_enum::TryFromPrimitive;
 
 pub use command_status::*;
+pub use interrupt_status::*;
 
 #[repr(C)]
 pub struct HBAPRDTEntry {
@@ -82,14 +84,14 @@ pub struct HBACommandHeader {
 }
 
 impl HBACommandHeader {
-    libkernel::bitfield_getter!(bits1, u16, fis_len, 0..5);
-    libkernel::bitfield_getter!(bits1, atapi, 5);
-    libkernel::bitfield_getter!(bits1, write, 6);
-    libkernel::bitfield_getter!(bits1, prefetchable, 7);
-    libkernel::bitfield_getter!(bits1, reset, 8);
-    libkernel::bitfield_getter!(bits1, bist, 9);
-    libkernel::bitfield_getter!(bits1, clear_busy_on_rok, 10);
-    libkernel::bitfield_getter!(bits1, u16, port_multiplier, 12..16);
+    bitfield_getter!(bits1, u16, fis_len, 0..5);
+    bitfield_getter!(bits1, atapi, 5);
+    bitfield_getter!(bits1, write, 6);
+    bitfield_getter!(bits1, prefetchable, 7);
+    bitfield_getter!(bits1, reset, 8);
+    bitfield_getter!(bits1, bist, 9);
+    bitfield_getter!(bits1, clear_busy_on_rok, 10);
+    bitfield_getter!(bits1, u16, port_multiplier, 12..16);
 
     pub fn prdt_len(&mut self) -> &mut u16 {
         &mut self.prdt_len
@@ -222,7 +224,7 @@ pub struct HBAPort {
     cmd_list_addr_upper: u32,
     fis_addr_lower: u32,
     fis_addr_upper: u32,
-    interrupt_status: u32,
+    interrupt_status: InterruptStatus,
     interrupt_enable: u32,
     command_status: CommandStatus,
     _reserved0: [u8; 0x4],
@@ -307,12 +309,27 @@ impl HBAPort {
         }
     }
 
-    pub fn interrupt_status(&mut self) -> &mut u32 {
-        // todo make sense of this register
+    pub fn interrupt_status(&mut self) -> &mut InterruptStatus {
         &mut self.interrupt_status
     }
 
-    pub fn command_issue(&mut self) -> &mut u32 {
-        &mut self.command_issue
+    pub fn issue_command_slot(&mut self, cmd_index: usize) {
+        assert!(
+            (0..32).contains(&cmd_index),
+            "Command index must be between 0..32"
+        );
+
+        use bit_field::BitField;
+        self.command_issue.set_bit(cmd_index, true);
+    }
+
+    pub fn check_command_slot(&mut self, cmd_index: usize) -> bool {
+        assert!(
+            (0..32).contains(&cmd_index),
+            "Command index must be between 0..32"
+        );
+
+        use bit_field::BitField;
+        self.command_issue.get_bit(cmd_index)
     }
 }
