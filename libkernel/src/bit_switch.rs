@@ -1,11 +1,8 @@
+use crate::{ReadOnly, ReadWrite};
 use bit_field::BitField;
 
 pub trait BitSwitchMode {}
-
-pub enum ReadOnly {}
 impl BitSwitchMode for ReadOnly {}
-
-pub enum ReadWrite {}
 impl BitSwitchMode for ReadWrite {}
 
 pub struct BitSwitch32<'val, M: BitSwitchMode> {

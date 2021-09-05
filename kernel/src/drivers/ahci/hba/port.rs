@@ -1,163 +1,10 @@
-mod status;
-
+use bit_field::BitField;
+use core::convert::TryFrom;
 use libkernel::{
-    addr_ty::Virtual, bitfield_getter, volatile::VolatileCell, volatile_bitfield_getter, Address,
-    ReadOnly, ReadWrite,
+    volatile::{VolatileCell, VolatileSplitPtr},
+    volatile_bitfield_getter, volatile_bitfield_getter_ro, Address, ReadOnly, ReadWrite,
 };
 use num_enum::TryFromPrimitive;
-
-pub use status::*;
-
-#[repr(C)]
-pub struct HBAPRDTEntry {
-    db_addr_lower: VolatileCell<u32, ReadWrite>,
-    db_addr_upper: VolatileCell<u32, ReadWrite>,
-    rsvd0: u32,
-    bits: VolatileCell<u32, ReadWrite>,
-}
-
-impl HBAPRDTEntry {
-    volatile_bitfield_getter!(bits, u32, byte_count, 0..22);
-    volatile_bitfield_getter!(bits, interrupt_on_completion, 31);
-
-    pub fn set_db_addr(&mut self, addr: libkernel::Address<libkernel::addr_ty::Virtual>) {
-        let addr_usize = addr.as_usize();
-
-        self.db_addr_lower.write(addr_usize as u32);
-        self.db_addr_upper.write((addr_usize >> 32) as u32);
-    }
-
-    pub fn set_sector_count(&mut self, sector_count: u32) {
-        self.set_byte_count(
-            (sector_count << 9) - 1, /* 512-byte alignment per sector */
-        );
-    }
-
-    pub fn clear(&mut self) {
-        self.db_addr_lower.write(0);
-        self.db_addr_upper.write(0);
-        self.bits.write(0);
-    }
-}
-
-pub trait CommandFIS {}
-
-#[repr(C)]
-pub struct HBACommandTable {
-    command_fis: [u8; 64],
-    atapi_command: [u8; 16],
-    rsvd0: [u8; 48],
-    prdt: core::ffi::c_void,
-}
-
-impl HBACommandTable {
-    pub fn prdt_entries(&mut self, entry_count: u16) -> &mut [HBAPRDTEntry] {
-        unsafe {
-            core::slice::from_raw_parts_mut(
-                (&mut self.prdt) as *mut _ as *mut HBAPRDTEntry,
-                entry_count as usize,
-            )
-        }
-    }
-
-    pub fn clear(&mut self, prdt_entry_count: u16) {
-        self.command_fis.fill(0);
-        self.atapi_command.fill(0);
-        self.prdt_entries(prdt_entry_count)
-            .iter_mut()
-            .for_each(|entry| entry.clear());
-    }
-
-    pub fn command_fis<T: CommandFIS>(&mut self) -> &mut T {
-        unsafe { &mut *(self.command_fis.as_mut_ptr() as *mut _) }
-    }
-}
-
-#[repr(C)]
-pub struct HBACommandHeader {
-    bits: u16,
-    prdt_len: u16,
-    prdb_count: u32,
-    cmd_tbl_addr_lower: u32,
-    cmd_tbl_addr_upper: u32,
-    reserved1: [u8; 4],
-}
-
-impl HBACommandHeader {
-    bitfield_getter!(bits, u16, fis_len, 0..5);
-    bitfield_getter!(bits, atapi, 5);
-    bitfield_getter!(bits, write, 6);
-    bitfield_getter!(bits, prefetchable, 7);
-    bitfield_getter!(bits, reset, 8);
-    bitfield_getter!(bits, bist, 9);
-    bitfield_getter!(bits, clear_busy_on_rok, 10);
-    bitfield_getter!(bits, u16, port_multiplier, 12..16);
-
-    pub fn prdt_len(&mut self) -> &mut u16 {
-        &mut self.prdt_len
-    }
-
-    pub unsafe fn set_command_table_base_addr(&mut self, addr: Address<Virtual>) {
-        let addr_usize = addr.as_usize();
-
-        self.cmd_tbl_addr_lower = addr_usize as u32;
-        self.cmd_tbl_addr_upper = (addr_usize >> 32) as u32;
-    }
-
-    pub fn command_table(&mut self) -> Option<&mut HBACommandTable> {
-        if self.cmd_tbl_addr_lower > 0 || self.cmd_tbl_addr_upper > 0 {
-            Some(unsafe {
-                let lower = self.cmd_tbl_addr_lower as usize;
-                let upper = (self.cmd_tbl_addr_upper as usize) << 32;
-
-                &mut *((lower | upper) as *mut _)
-            })
-        } else {
-            None
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum HostBusAdapterPortClass {
-    None,
-    SATA,
-    SEMB,
-    PM,
-    SATAPI,
-}
-
-#[repr(u32)]
-#[derive(TryFromPrimitive)]
-pub enum DeviceDetectionInitialization {
-    None = 0,
-    FullReinit = 1,
-    DisbaleSATA = 4,
-}
-
-#[repr(u32)]
-#[derive(TryFromPrimitive)]
-pub enum SpeedAllowed {
-    NoRestriction = 0,
-    Gen1 = 1,
-    Gen2 = 2,
-    Gen3 = 3,
-}
-
-// IPWM = Interface Power Management
-#[repr(u32)]
-#[derive(TryFromPrimitive)]
-pub enum IPWMTransitionsAllowed {
-    NoRestriction = 0,
-    PartialStateDisabled = 1,
-    SlumberStateDisabled = 2,
-    PartialAndSlumberStateDisabled = 3,
-    DevSleepPWMStateDisabled = 4,
-    PartialAndDevSleepPWNDisabled = 5,
-    SlumberAndDevSleepPWMDisabled = 6,
-    AllDisabled = 7,
-}
-
 
 // INVARIANT: All memory accesses through this struct are volatile.
 #[repr(transparent)]
@@ -284,7 +131,7 @@ impl core::fmt::Debug for HBAPortInterruptStatus {
 }
 
 #[repr(u32)]
-#[derive(Debug, TryFromPrimitive)]
+#[derive(Debug, PartialEq, Eq, TryFromPrimitive)]
 pub enum InterfacePowerManagement {
     NonCommunicate = 0,
     Active = 1,
@@ -294,7 +141,7 @@ pub enum InterfacePowerManagement {
 }
 
 #[repr(u32)]
-#[derive(Debug, TryFromPrimitive)]
+#[derive(Debug, PartialEq, Eq, TryFromPrimitive)]
 pub enum InterfaceSpeed {
     NonCommunicate = 0,
     Gen1 = 1,
@@ -303,7 +150,7 @@ pub enum InterfaceSpeed {
 }
 
 #[repr(u32)]
-#[derive(Debug, TryFromPrimitive)]
+#[derive(Debug, PartialEq, Eq, TryFromPrimitive)]
 pub enum DeviceDetection {
     NonCommunicate = 0,
     DetectedNoPhy = 1,
@@ -342,20 +189,27 @@ impl core::fmt::Debug for HBAPortSATAStatus {
     }
 }
 
+#[repr(u32)]
+#[derive(Debug, PartialEq, Eq)]
+pub enum HBAPortClass {
+    None = 0x0,
+    SATA = 0x00000101,
+    SEMB = 0xC33C0101,
+    PM = 0x96690101,
+    SATAPI = 0xEB140101,
+}
 
 // INVARIANT: All memory accesses through this struct are volatile.
 #[repr(C)]
 pub struct HBAPort {
-    pub cmd_list_addr_lower: VolatileCell<u32, ReadWrite>,
-    cmd_list_addr_upper: VolatileCell<u32, ReadWrite>,
-    fis_addr_lower: VolatileCell<u32, ReadWrite>,
-    fis_addr_upper: VolatileCell<u32, ReadWrite>,
+    cmd_list: VolatileSplitPtr<super::HBACommand>,
+    fis_addr: VolatileSplitPtr<u8>,
     interrupt_status: HBAPortInterruptStatus,
     interrupt_enable: VolatileCell<u32, ReadOnly>,
     command_status: HBAPortCommandStatus,
     _reserved0: [u8; 4],
     task_file_data: VolatileCell<u32, ReadOnly>,
-    signature: VolatileCell<u32, ReadOnly>,
+    signature: VolatileCell<HBAPortClass, ReadOnly>,
     sata_status: HBAPortSATAStatus,
     sata_control: VolatileCell<u32, ReadOnly>,
     sata_error: VolatileCell<u32, ReadOnly>,
@@ -368,54 +222,16 @@ pub struct HBAPort {
 }
 
 impl HBAPort {
-    pub fn class(&self) -> HostBusAdapterPortClass {
+    pub fn class(&self) -> HBAPortClass {
         // Ensures port is in a valid state (deteced & powered).
-        if !matches!(
-            self.sata_status().device_detection(),
-            DeviceDetection::DetectedAndPhy
-        ) || !matches!(
-            self.sata_status().interface_pwm(),
-            InterfacePowerManagement::Active
-        ) {
-            HostBusAdapterPortClass::None
+        if self.sata_status().device_detection() == DeviceDetection::DetectedAndPhy
+            && self.sata_status().interface_pwm() == InterfacePowerManagement::Active
+        {
+            self.signature.read()
         } else {
             // Finally, determine port type from its signature.
-            match self.signature.read() {
-                0x00000101 => HostBusAdapterPortClass::SATA,
-                0xC33C0101 => HostBusAdapterPortClass::SEMB,
-                0x96690101 => HostBusAdapterPortClass::PM,
-                0xEB140101 => HostBusAdapterPortClass::SATAPI,
-                signature => panic!("invalid signature: {}", signature),
-            }
+            HBAPortClass::None
         }
-    }
-
-    pub unsafe fn set_command_list_addr(&mut self, addr: Address<Virtual>) {
-        let addr_usize = addr.as_usize();
-        let lower = addr_usize as u32;
-        let upper = (addr_usize >> 32) as u32;
-
-        debug!(
-            "SET CMD LIST ADDR: {:?}\n\tUPPER {}\n\tLOWER {}",
-            addr, upper, lower
-        );
-
-        self.cmd_list_addr_upper.write(upper);
-        self.cmd_list_addr_lower.write(lower);
-    }
-
-    pub unsafe fn set_fis_addr(&mut self, addr: Address<Virtual>) {
-        let addr_usize = addr.as_usize();
-        let lower = addr_usize as u32;
-        let upper = (addr_usize >> 32) as u32;
-
-        debug!(
-            "SET FIS ADDR: {:?}\n\tUPPER {}\n\tLOWER {}",
-            addr, upper, lower
-        );
-
-        self.fis_addr_upper.write(upper);
-        self.fis_addr_lower.write(lower);
     }
 
     pub fn sata_status(&self) -> &HBAPortSATAStatus {
@@ -430,17 +246,8 @@ impl HBAPort {
         self.task_file_data.read()
     }
 
-    pub fn command_list(&mut self) -> Option<&mut [HBACommandHeader]> {
-        if self.cmd_list_addr_lower.read() > 0 || self.cmd_list_addr_upper.read() > 0 {
-            Some(unsafe {
-                let lower = self.cmd_list_addr_lower.read() as usize;
-                let upper = (self.cmd_list_addr_upper.read() as usize) << 32;
-
-                core::slice::from_raw_parts_mut((upper | lower) as *mut _, 32)
-            })
-        } else {
-            None
-        }
+    pub fn command_list(&mut self) -> &mut [super::HBACommand] {
+        unsafe { &mut *core::slice::from_raw_parts_mut(self.cmd_list.get_mut_ptr(), 32) }
     }
 
     pub fn interrupt_status(&mut self) -> &mut HBAPortInterruptStatus {
@@ -461,7 +268,6 @@ impl HBAPort {
     pub fn check_command_slot(&mut self, cmd_index: usize) -> bool {
         assert!(cmd_index < 32, "Command index must be between 0..32");
 
-        use bit_field::BitField;
         self.command_issue.read().get_bit(cmd_index)
     }
 
@@ -493,39 +299,25 @@ impl HBAPort {
 
         debug!("Allocting command and FIS lists.");
 
-        let cmd_base: *mut u8 = libkernel::alloc!(4096, 128);
-        debug!("\tCommand list base address: {:?}", cmd_base);
-        let fis_base: *mut u8 = libkernel::alloc!(1024, 128);
-        debug!("\tFIS base address: {:?}", fis_base);
+        let cmd_list_byte_len = core::mem::size_of::<super::HBACommand>() * 32;
+        let cmd_list_ptr: *mut u8 = libkernel::alloc!(cmd_list_byte_len, 128);
+        debug!(
+            "\tCommand list base address: {:?}:{}",
+            cmd_list_ptr, cmd_list_byte_len
+        );
+
+        let fis_byte_len = 1024;
+        let fis_base: *mut u8 = libkernel::alloc!(fis_byte_len, 128);
+        debug!("\tFIS base address: {:?}:{}", fis_base, fis_byte_len);
 
         unsafe {
             debug!("Clearing command and FIS lists, and updating port metadata.");
 
-            core::ptr::write_bytes(cmd_base, 0, 4096);
+            core::ptr::write_bytes(cmd_list_ptr, 0, cmd_list_byte_len);
             core::ptr::write_bytes(fis_base, 0, 1024);
 
-            self.set_command_list_addr(Address::from_ptr(cmd_base));
-            self.set_fis_addr(Address::from_ptr(fis_base));
-        }
-
-        debug!("Configuring individual command headers.");
-
-        for (index, cmd_header) in self.command_list().unwrap().iter_mut().enumerate() {
-            *cmd_header.prdt_len() = 8;
-
-            unsafe {
-                let cmd_table_addr: *mut u8 = libkernel::alloc!(4096, 128);
-                core::ptr::write_bytes(cmd_table_addr, 0, 4096);
-
-                debug!(
-                    "Configured command header #{} with table address {:?}",
-                    index, cmd_table_addr
-                );
-
-                cmd_header.set_command_table_base_addr(libkernel::Address::<
-                    libkernel::addr_ty::Virtual,
-                >::from_ptr(cmd_table_addr))
-            };
+            self.cmd_list.set_ptr(cmd_list_ptr as *mut _);
+            self.fis_addr.set_ptr(fis_base as *mut _);
         }
 
         debug!("AHCI PORT: CONFIGURED");
@@ -555,36 +347,25 @@ impl HBAPort {
         debug!("AHCI PORT: READ: CLR INT STATUS");
         self.interrupt_status().clear(); // clear interrupts
 
-        let cmd_headers = self
-            .command_list()
-            .expect("AHCI port's HBA has not yet been configured");
+        debug!("AHCI PORT: READ: CFG COMMAND FIS (DIS_REG_H2D)");
+        let mut fis = FIS_REG_H2D::default();
+        fis.fis_type = FISType::H2D;
+        fis.set_command_control(true); // is command
+        fis.command = ATA_CMD_READ_DMA_EX;
+        fis.set_sector_base(sector_base);
+        fis.device_register = 1 << 6; // LBA mode
+        fis.set_sector_count(sector_count);
 
-        debug!("AHCI PORT: READ: CFG COMMAND HEADER");
-        let cmd_header = &mut cmd_headers[0];
-        cmd_header.set_fis_len(
-            (core::mem::size_of::<FIS_REG_H2D>() / core::mem::size_of::<u32>()) as u16,
-        );
-        cmd_header.set_write(false);
-        *cmd_header.prdt_len() = 1;
-
-        debug!("AHCI PORT: READ: CFG COMMAND TABLE");
-        let command_table = &mut cmd_header.command_tables().unwrap()[0];
-        command_table.clear(1);
+        debug!("AHCI PORT: READ: CFG COMMAND");
+        let command = &mut self.command_list()[0];
+        command.reset(1, fis);
+        command.set_write(false);
 
         debug!("AHCI PORT: READ: CFG PRDT ENTRY");
-        let prdt_entry = &mut command_table.prdt_entries(1)[0];
+        let prdt_entry = &mut command.prdt_entries()[0];
         let buffer: alloc::vec::Vec<u8> = alloc::vec![0; (sector_count as usize) << 9];
         prdt_entry.set_db_addr(Address::from_ptr(buffer.as_ptr()));
         prdt_entry.set_sector_count(sector_count as u32);
-
-        debug!("AHCI PORT: READ: CFG COMMAND FIS (DIS_REG_H2D)");
-        let command_fis = command_table.command_fis::<FIS_REG_H2D>();
-        command_fis.fis_type = FISType::H2D;
-        command_fis.set_command_control(true); // is command
-        command_fis.command = ATA_CMD_READ_DMA_EX;
-        command_fis.set_sector_base(sector_base);
-        command_fis.device_register = 1 << 6; // LBA mode
-        command_fis.set_sector_count(sector_count);
 
         debug!("AHCI PORT: READ: ISSUING COMMAND",);
         self.issue_command_slot(0);

@@ -88,3 +88,26 @@ impl<T> VolatileCell<T, ReadWrite> {
         &mut self.obj
     }
 }
+
+#[repr(C)]
+pub struct VolatileSplitPtr<T: Sized> {
+    low: VolatileCell<u32, ReadWrite>,
+    high: VolatileCell<u32, ReadWrite>,
+    phantom: core::marker::PhantomData<T>,
+}
+
+impl<T: Sized> VolatileSplitPtr<T> {
+    pub fn set_ptr(&mut self, ptr: *mut T) {
+        let ptr_usize = ptr as usize;
+        self.low.write(ptr_usize as u32);
+        self.high.write((ptr_usize >> 32) as u32);
+    }
+
+    pub fn get_ptr(&self) -> *const T {
+        ((self.low.read() as u64) | ((self.high.read() as u64) << 32)) as *const T
+    }
+
+    pub fn get_mut_ptr(&mut self) -> *mut T {
+        ((self.low.read() as u64) | ((self.high.read() as u64) << 32)) as *mut T
+    }
+}

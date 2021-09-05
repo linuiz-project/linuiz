@@ -21,6 +21,7 @@ extern crate alloc;
 
 mod addr;
 mod boot_info;
+mod macros;
 mod rwbitarray;
 
 pub mod acpi;
@@ -32,6 +33,8 @@ pub mod io;
 pub mod memory;
 pub mod registers;
 pub mod structures;
+pub mod volatile;
+
 pub use addr::*;
 pub use boot_info::*;
 pub use rwbitarray::*;
@@ -126,6 +129,9 @@ pub const U64_BIT_MASKS: [u64; 64] = [
     0xFFFFFFFFFFFFFFFF,
 ];
 
+pub enum ReadOnly {}
+pub enum ReadWrite {}
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct FramebufferInfo {
@@ -214,54 +220,4 @@ pub const fn align_down(value: usize, alignment: usize) -> usize {
 
 pub const fn align_down_div(value: usize, alignment: usize) -> usize {
     align_down(value, alignment) / alignment
-}
-
-#[macro_export]
-macro_rules! bitfield_getter_ro {
-    ($field:ident, $getter_name:ident, $bit_index:literal) => {
-        paste::paste! {
-            pub fn [<get_ $getter_name>](&self) -> bool {
-                use bit_field::BitField;
-
-                self.$field.get_bit($bit_index)
-            }
-        }
-    };
-
-    ($field:ident, $field_ty:ty, $var_name:ident, $bit_range:expr) => {
-        paste::paste! {
-            pub fn [<get_ $var_name>](&self) -> $field_ty {
-                use bit_field::BitField;
-
-                self.$field.get_bits($bit_range)
-            }
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! bitfield_getter {
-    ($field:ident, $var_name:ident, $bit_index:literal) => {
-        paste::paste! {
-            libkernel::bitfield_getter_ro!($field, $var_name, $bit_index);
-
-            pub fn [<set_ $var_name>](&mut self, value: bool) {
-                use bit_field::BitField;
-
-                self.$field.set_bit($bit_index, value);
-            }
-        }
-    };
-
-    ($field:ident, $field_ty:ty, $var_name:ident, $bit_range:expr) => {
-        paste::paste! {
-            libkernel::bitfield_getter_ro!($field, $field_ty, $var_name, $bit_range);
-
-            pub fn [<set_ $var_name>](&mut self, value: $field_ty) {
-                use bit_field::BitField;
-
-                self.$field.set_bits($bit_range, value);
-            }
-        }
-    };
 }

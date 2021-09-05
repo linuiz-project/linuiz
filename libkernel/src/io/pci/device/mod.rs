@@ -1,11 +1,10 @@
 mod standard;
 
-use spin::Mutex;
-pub use standard::*;
-
 use crate::memory::mmio::{Mapped, MMIO};
 use bitflags::bitflags;
-use core::{fmt, lazy::OnceCell, marker::PhantomData};
+use core::{cell::RefCell, fmt, marker::PhantomData};
+
+pub use standard::*;
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy)]
@@ -175,24 +174,28 @@ pub enum PCIeDeviceVariant {
 
 pub struct PCIeDevice<T: PCIeDeviceType> {
     mmio: MMIO<Mapped>,
-    bar_mmios: [OnceCell<Mutex<MMIO<Mapped>>>; 10],
+    bar_mmios: [Option<RefCell<MMIO<Mapped>>>; 10],
     phantom: PhantomData<T>,
 }
 
 pub fn new_device(mmio: MMIO<Mapped>) -> PCIeDeviceVariant {
-    let ty_mf = unsafe { *mmio.read::<u8>(PCIHeaderOffset::HeaderType.into()).unwrap() };
+    let type_malfunc = unsafe {
+        mmio.read::<u8>(PCIHeaderOffset::HeaderType.into())
+            .unwrap()
+            .read()
+    };
 
     // mask off the multifunction bit
-    match ty_mf & !(1 << 7) {
+    match type_malfunc & !(1 << 7) {
         0x0 => PCIeDeviceVariant::Standard(unsafe { PCIeDevice::<Standard>::new(mmio) }),
         0x1 => PCIeDeviceVariant::PCI2PCI(PCIeDevice {
             mmio,
-            bar_mmios: [PCIeDevice::<PCI2PCI>::EMPTY_REG; 10],
+            bar_mmios: [None, None, None, None, None, None, None, None, None, None],
             phantom: PhantomData,
         }),
         0x2 => PCIeDeviceVariant::PCI2CardBus(PCIeDevice::<PCI2CardBus> {
             mmio,
-            bar_mmios: [PCIeDevice::<PCI2CardBus>::EMPTY_REG; 10],
+            bar_mmios: [None, None, None, None, None, None, None, None, None, None],
             phantom: PhantomData,
         }),
         invalid_type => {
@@ -206,79 +209,114 @@ pub fn new_device(mmio: MMIO<Mapped>) -> PCIeDeviceVariant {
 }
 
 impl<T: PCIeDeviceType> PCIeDevice<T> {
-    const EMPTY_REG: OnceCell<Mutex<MMIO<Mapped>>> = OnceCell::new();
-
     pub fn vendor_id(&self) -> u16 {
-        unsafe { *self.mmio.read(PCIHeaderOffset::VendorID.into()).unwrap() }
+        unsafe {
+            self.mmio
+                .read(PCIHeaderOffset::VendorID.into())
+                .unwrap()
+                .read()
+        }
     }
 
     pub fn device_id(&self) -> u16 {
-        unsafe { *self.mmio.read(PCIHeaderOffset::DeviceID.into()).unwrap() }
+        unsafe {
+            self.mmio
+                .read(PCIHeaderOffset::DeviceID.into())
+                .unwrap()
+                .read()
+        }
     }
 
     pub fn command(&self) -> PCIeCommandRegister {
-        unsafe { *self.mmio.read(PCIHeaderOffset::Command.into()).unwrap() }
+        unsafe {
+            self.mmio
+                .read(PCIHeaderOffset::Command.into())
+                .unwrap()
+                .read()
+        }
     }
 
     pub fn status(&self) -> u16 {
-        unsafe { *self.mmio.read(PCIHeaderOffset::Status.into()).unwrap() }
+        unsafe {
+            self.mmio
+                .read(PCIHeaderOffset::Status.into())
+                .unwrap()
+                .read()
+        }
     }
 
     pub fn revision_id(&self) -> u8 {
-        unsafe { *self.mmio.read(PCIHeaderOffset::RevisionID.into()).unwrap() }
+        unsafe {
+            self.mmio
+                .read(PCIHeaderOffset::RevisionID.into())
+                .unwrap()
+                .read()
+        }
     }
 
     pub fn program_interface(&self) -> u8 {
         unsafe {
-            *self
-                .mmio
+            self.mmio
                 .read(PCIHeaderOffset::ProgramInterface.into())
                 .unwrap()
+                .read()
         }
     }
 
     pub fn subclass(&self) -> u8 {
-        unsafe { *self.mmio.read(PCIHeaderOffset::Subclass.into()).unwrap() }
+        unsafe {
+            self.mmio
+                .read(PCIHeaderOffset::Subclass.into())
+                .unwrap()
+                .read()
+        }
     }
 
     pub fn class(&self) -> PCIeDeviceClass {
-        unsafe { *self.mmio.read(PCIHeaderOffset::Class.into()).unwrap() }
+        unsafe {
+            self.mmio
+                .read(PCIHeaderOffset::Class.into())
+                .unwrap()
+                .read()
+        }
     }
 
     pub fn cache_line_size(&self) -> u8 {
         unsafe {
-            *self
-                .mmio
+            self.mmio
                 .read(PCIHeaderOffset::CacheLineSize.into())
                 .unwrap()
+                .read()
         }
     }
 
     pub fn latency_timer(&self) -> u8 {
         unsafe {
-            *self
-                .mmio
+            self.mmio
                 .read(PCIHeaderOffset::LatencyTimer.into())
                 .unwrap()
+                .read()
         }
     }
 
     pub fn header_type(&self) -> u8 {
         unsafe {
-            (*self
+            (self
                 .mmio
                 .read::<u8>(PCIHeaderOffset::HeaderType.into())
-                .unwrap())
+                .unwrap()
+                .read())
                 & !(1 << 7)
         }
     }
 
     pub fn multi_function(&self) -> bool {
         unsafe {
-            (*self
+            (self
                 .mmio
                 .read::<u8>(PCIHeaderOffset::BuiltInSelfTest.into())
                 .unwrap()
+                .read()
                 & (1 << 7))
                 > 0
         }
@@ -286,10 +324,10 @@ impl<T: PCIeDeviceType> PCIeDevice<T> {
 
     pub fn builtin_self_test(&self) -> PCIeBuiltinSelfTest {
         unsafe {
-            *self
-                .mmio
+            self.mmio
                 .read(PCIHeaderOffset::BuiltInSelfTest.into())
                 .unwrap()
+                .read()
         }
     }
 

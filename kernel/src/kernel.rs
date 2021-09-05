@@ -46,7 +46,8 @@ fn get_log_level() -> log::LevelFilter {
     log::LevelFilter::Debug
 }
 
-static mut SERIAL_OUT: drivers::io::Serial = drivers::io::Serial::new(drivers::io::COM1);
+static mut CON_OUT: drivers::io::Serial = drivers::io::Serial::new(drivers::io::COM1);
+// static mut CON_OUT: drivers::io::QEMUE9 = drivers::io::QEMUE9::new();
 static KERNEL_MALLOC: block_malloc::BlockAllocator = block_malloc::BlockAllocator::new();
 
 #[no_mangle]
@@ -55,9 +56,9 @@ extern "efiapi" fn kernel_main(
     boot_info: BootInfo<UEFIMemoryDescriptor, SystemConfigTableEntry>,
 ) -> ! {
     unsafe {
-        SERIAL_OUT.init(drivers::io::SerialSpeed::S115200);
+        CON_OUT.init(drivers::io::SerialSpeed::S115200);
 
-        match drivers::io::set_stdout(&mut SERIAL_OUT, get_log_level()) {
+        match drivers::io::set_stdout(&mut CON_OUT, get_log_level()) {
             Ok(()) => {
                 info!("Successfully loaded into kernel, with logging enabled.");
             }
@@ -127,9 +128,8 @@ extern "efiapi" fn kernel_main(
                 && device.program_interface() == 0x1
             {
                 let mut ahci = drivers::ahci::AHCI::from_pcie_device(&device);
-                // ahci.configure_ports();
-                for port in ahci.iter_mut() {
-                    info!("{:#?}", port.hba());
+
+                for port in ahci.sata_ports() {
                     port.configure();
                     let buffer = port.read(0, 4);
                     info!("{:?}", buffer);
@@ -271,14 +271,18 @@ fn init_apic() {
     apic.timer().set_masked(false);
 
     debug!("Determining APIC timer frequency using PIT windowing.");
-    apic[APICRegister::TimerDivisor] = APICTimerDivisor::Div1 as u32;
-    apic[APICRegister::TimerInitialCount] = u32::MAX;
+    apic.reg_mut(APICRegister::TimerDivisor)
+        .write(APICTimerDivisor::Div1 as u32);
+    apic.reg_mut(APICRegister::TimerInitialCount)
+        .write(u32::MAX);
 
     timer.wait();
 
     apic.timer().set_masked(true);
-    apic[APICRegister::TimerInitialCount] = u32::MAX - apic[APICRegister::TimerCurrentCount];
-    apic[APICRegister::TimerDivisor] = APICTimerDivisor::Div1 as u32;
+    apic.reg_mut(APICRegister::TimerInitialCount)
+        .write(u32::MAX - apic.reg(APICRegister::TimerCurrentCount).read());
+    apic.reg_mut(APICRegister::TimerDivisor)
+        .write(APICTimerDivisor::Div1 as u32);
 
     debug!("Disabling 8259 emulated PIC.");
     libkernel::instructions::interrupts::without_interrupts(|| unsafe {

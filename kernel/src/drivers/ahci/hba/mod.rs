@@ -1,7 +1,10 @@
-pub mod port;
+mod command;
+mod port;
+
+pub use command::*;
+pub use port::*;
 
 use libkernel::{volatile::VolatileCell, ReadOnly};
-use port::HBAPort;
 
 #[repr(C)]
 pub struct HBAMemory {

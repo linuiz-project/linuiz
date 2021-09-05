@@ -1,7 +1,8 @@
 use crate::{
     addr_ty::{Physical, Virtual},
     memory::FrameIterator,
-    Address,
+    volatile::Volatile,
+    Address, ReadOnly, ReadWrite,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,19 +84,24 @@ impl MMIO<Mapped> {
     pub unsafe fn write<T>(&mut self, offset: usize, value: T) -> Result<(), MMIOError> {
         match self.mapped_offset_mut::<T>(offset) {
             Ok(ptr) => {
-                ptr.write(value);
+                ptr.write_volatile(value);
                 Ok(())
             }
             Err(mmio_err) => Err(mmio_err),
         }
     }
 
-    pub unsafe fn read<T>(&self, offset: usize) -> Result<&T, MMIOError> {
-        self.mapped_offset::<T>(offset).map(|ptr| &*ptr)
+    pub unsafe fn read<T>(&self, offset: usize) -> Result<Volatile<T, ReadOnly>, MMIOError> {
+        self.mapped_offset::<T>(offset)
+            .map(|ptr| Volatile::<T, ReadOnly>::new(ptr))
     }
 
-    pub unsafe fn read_mut<T>(&mut self, offset: usize) -> Result<&mut T, MMIOError> {
-        self.mapped_offset_mut::<T>(offset).map(|ptr| &mut *ptr)
+    pub unsafe fn read_mut<T>(
+        &mut self,
+        offset: usize,
+    ) -> Result<Volatile<T, ReadWrite>, MMIOError> {
+        self.mapped_offset_mut::<T>(offset)
+            .map(|ptr| Volatile::<T, ReadWrite>::new(ptr))
     }
 
     pub fn physical_addr(&self) -> Address<Physical> {

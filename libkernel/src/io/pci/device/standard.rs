@@ -1,5 +1,3 @@
-use spin::MutexGuard;
-
 use crate::{
     addr_ty::Physical,
     io::pci::{PCIeDevice, Standard},
@@ -21,20 +19,22 @@ pub enum StandardRegister {
 impl PCIeDevice<Standard> {
     pub unsafe fn new(mmio: MMIO<Mapped>) -> Self {
         assert_eq!(
-            (*mmio
+            (mmio
                 .read::<u8>(crate::io::pci::PCIHeaderOffset::HeaderType.into())
-                .unwrap())
+                .unwrap()
+                .read())
                 & !(1 << 7),
             0,
             "incorrect header type for standard specification PCI device"
         );
 
-        let bar_mmios = [PCIeDevice::<Standard>::EMPTY_REG; 10];
+        let mut bar_mmios = [None, None, None, None, None, None, None, None, None, None];
 
         for register_num in 0..=5 {
-            let register_raw = *mmio
+            let register_raw = mmio
                 .read::<u32>(0x10 + (register_num * core::mem::size_of::<u32>()))
-                .unwrap();
+                .unwrap()
+                .read();
 
             if register_raw > 0x0 {
                 let is_memory_space = (register_raw & 0b1) > 0;
@@ -75,9 +75,7 @@ impl PCIeDevice<Standard> {
                     )
                 }
 
-                bar_mmios[register_num]
-                    .set(spin::Mutex::new(register_mmio))
-                    .expect("already configured MMIO register");
+                bar_mmios[register_num].insert(core::cell::RefCell::new(register_mmio));
             }
         }
 
@@ -88,69 +86,55 @@ impl PCIeDevice<Standard> {
         }
     }
 
-    // Gets the MMIO covering a specified device register.
-    //
-    // The outer Option<'_> indicates whether the register exists, and the inner Option<'_>
-    //  indicates whether the register lock was successfully acquired.
-
     pub fn get_register(
         &self,
         register: StandardRegister,
-    ) -> Option<Option<MutexGuard<MMIO<Mapped>>>> {
+    ) -> Option<core::cell::RefMut<MMIO<Mapped>>> {
         self.bar_mmios[register as usize]
-            .get()
-            .map(|mutex| mutex.try_lock())
+            .as_ref()
+            .map(|cell| cell.borrow_mut())
     }
 
-    pub fn get_register_locked(
-        &self,
-        register: StandardRegister,
-    ) -> Option<MutexGuard<MMIO<Mapped>>> {
-        self.bar_mmios[register as usize]
-            .get()
-            .map(|mutex| mutex.lock())
-    }
-
-    pub fn cardbus_cis_ptr(&self) -> &u32 {
-        unsafe { *self.mmio.read(0x28).unwrap() }
+    pub fn cardbus_cis_ptr(&self) -> u32 {
+        unsafe { self.mmio.read(0x28).unwrap().read() }
     }
 
     pub fn subsystem_vendor_id(&self) -> u16 {
-        unsafe { *self.mmio.read(0x2C).unwrap() }
+        unsafe { self.mmio.read(0x2C).unwrap().read() }
     }
 
     pub fn subsystem_id(&self) -> u16 {
-        unsafe { *self.mmio.read(0x2E).unwrap() }
+        unsafe { self.mmio.read(0x2E).unwrap().read() }
     }
 
     pub fn expansion_rom_base_addr(&self) -> u32 {
-        unsafe { *self.mmio.read(0x30).unwrap() }
+        unsafe { self.mmio.read(0x30).unwrap().read() }
     }
 
     pub fn capabilities_ptr(&self) -> u8 {
-        unsafe { *self.mmio.read::<u8>(0x34).unwrap() & !0b11 }
+        unsafe { self.mmio.read::<u8>(0x34).unwrap().read() & !0b11 }
     }
 
     pub fn interrupt_line(&self) -> Option<u8> {
-        match unsafe { *self.mmio.read(0x3C).unwrap() } {
+        match unsafe { self.mmio.read(0x3C).unwrap().read() } {
             0xFF => None,
             value => Some(value),
         }
     }
 
     pub fn interrupt_pin(&self) -> Option<u8> {
-        match unsafe { *self.mmio.read(0x3D).unwrap() } {
+        match unsafe { self.mmio.read(0x3D).unwrap().read() } {
             0x0 => None,
             value => Some(value),
         }
     }
 
     pub fn min_grant(&self) -> u8 {
-        unsafe { *self.mmio.read(0x3E).unwrap() }
+        unsafe { self.mmio.read(0x3E).unwrap().read() }
     }
 
     pub fn max_latency(&self) -> u8 {
-        unsafe { *self.mmio.read(0x3F).unwrap() }
+        unsafe { self.mmio.read(0x3F).unwrap().read() }
     }
 }
 
