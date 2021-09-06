@@ -38,18 +38,18 @@ extern "C" {
 
 #[cfg(debug_assertions)]
 fn get_log_level() -> log::LevelFilter {
-    log::LevelFilter::Trace
+    log::LevelFilter::Debug
 }
 
 #[cfg(not(debug_assertions))]
 fn get_log_level() -> log::LevelFilter {
-    log::LevelFilter::Trace
+    log::LevelFilter::Debug
 }
 
 static mut CON_OUT: drivers::io::Serial = drivers::io::Serial::new(drivers::io::COM1);
 // static mut CON_OUT: drivers::io::QEMUE9 = drivers::io::QEMUE9::new();
 static KERNEL_MALLOC: block_malloc::BlockAllocator = block_malloc::BlockAllocator::new();
-static TRACE_ENABLED_PATHS: [&str; 1] = ["kernel::drivers::ahci"];
+static TRACE_ENABLED_PATHS: [&str; 2] = ["kernel::drivers::ahci", "kernel::block_malloc"];
 
 #[no_mangle]
 #[export_name = "_start"]
