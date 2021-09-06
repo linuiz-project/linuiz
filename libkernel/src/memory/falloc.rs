@@ -60,6 +60,8 @@ impl crate::BitValue for FrameState {
 pub enum FrameAllocatorError {
     ExpectedFrameState(usize, FrameState),
     NonMMIOFrameState(usize, FrameState),
+    OutOfBoundsMMIOExists(usize),
+    OutOfBoundsMMIONoMalloc(usize),
     FreeWithAcquire,
 }
 
@@ -80,6 +82,7 @@ pub enum FrameAllocatorError {
 pub struct FrameAllocator<'arr> {
     memory_map: RwBitArray<'arr, FrameState>,
     memory: RwLock<[usize; FrameState::MASK + 1]>,
+    mmio_oob: core::cell::RefCell<alloc::vec::Vec<usize>>,
 }
 
 impl<'arr> FrameAllocator<'arr> {
@@ -127,6 +130,7 @@ impl<'arr> FrameAllocator<'arr> {
                 total_frames,
             ),
             memory: RwLock::new(memory_counters),
+            mmio_oob: core::cell::RefCell::new(alloc::vec::Vec::<usize>::new()),
         };
 
         this.acquire_frames(
@@ -173,7 +177,7 @@ impl<'arr> FrameAllocator<'arr> {
     ) -> Result<Frame, FrameAllocatorError> {
         match acq_state {
             FrameState::Free => Err(FrameAllocatorError::FreeWithAcquire),
-            FrameState::MMIO => match self.memory_map.get(index) {
+            FrameState::MMIO if index < self.memory_map.len() => match self.memory_map.get(index) {
                 cur_state if matches!(cur_state, FrameState::Reserved | FrameState::NonUsable) => {
                     self.memory_map.set(index, acq_state);
 
@@ -185,6 +189,23 @@ impl<'arr> FrameAllocator<'arr> {
                 }
                 cur_state => Err(FrameAllocatorError::NonMMIOFrameState(index, cur_state)),
             },
+            FrameState::MMIO => {
+                if let Some(malloc) = super::malloc::try_get() {
+                    let mut mmio_oob = self.mmio_oob.borrow_mut();
+
+                    if !mmio_oob.contains(&index) {
+                        mmio_oob.push(index);
+
+                        let frame = Frame::from_index(index);
+                        malloc.identity_map(&frame, true);
+                        Ok(frame)
+                    } else {
+                        Err(FrameAllocatorError::OutOfBoundsMMIOExists(index))
+                    }
+                } else {
+                    Err(FrameAllocatorError::OutOfBoundsMMIONoMalloc(index))
+                }
+            }
             _ if self.memory_map.set_eq(index, acq_state, FrameState::Free) => {
                 let mut mem_write = self.memory.write();
                 mem_write[FrameState::Free.as_usize()] -= 0x1000;

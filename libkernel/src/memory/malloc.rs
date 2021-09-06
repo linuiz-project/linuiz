@@ -15,6 +15,7 @@ pub trait MemoryAllocator {
     // Returns the direct-mapped virtual address for the given physical address.
     unsafe fn physical_memory(&self, addr: Address<Physical>) -> Address<Virtual>;
 
+    fn identity_map(&self, frame: &crate::memory::Frame, virtual_map: bool);
     fn alloc(&self, layout: Layout) -> *mut u8;
     fn alloc_to(&self, frames: &crate::memory::FrameIterator) -> *mut u8;
     fn dealloc(&self, ptr: *mut u8, layout: Layout);
@@ -34,4 +35,8 @@ pub fn set(allocator: &'static dyn MemoryAllocator) {
 
 pub fn get() -> &'static dyn MemoryAllocator {
     *DEFAULT_MALLOCATOR.borrow().expect("no default allocator")
+}
+
+pub fn try_get() -> Option<&'static dyn MemoryAllocator> {
+    DEFAULT_MALLOCATOR.borrow().map(|malloc| *malloc)
 }

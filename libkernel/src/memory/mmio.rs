@@ -81,8 +81,8 @@ impl MMIO<Mapped> {
         }
     }
 
-    pub unsafe fn write<T>(&mut self, offset: usize, value: T) -> Result<(), MMIOError> {
-        match self.mapped_offset_mut::<T>(offset) {
+    pub unsafe fn write<T>(&mut self, add_offset: usize, value: T) -> Result<(), MMIOError> {
+        match self.mapped_offset_mut::<T>(add_offset) {
             Ok(ptr) => {
                 ptr.write_volatile(value);
                 Ok(())
@@ -91,8 +91,8 @@ impl MMIO<Mapped> {
         }
     }
 
-    pub unsafe fn read<T>(&self, offset: usize) -> Result<Volatile<T, ReadOnly>, MMIOError> {
-        self.mapped_offset::<T>(offset)
+    pub unsafe fn read<T>(&self, add_offset: usize) -> Result<Volatile<T, ReadOnly>, MMIOError> {
+        self.mapped_offset::<T>(add_offset)
             .map(|ptr| Volatile::<T, ReadOnly>::new(ptr))
     }
 

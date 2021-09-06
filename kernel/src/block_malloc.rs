@@ -16,10 +16,12 @@ struct BlockPage {
 
 impl BlockPage {
     /// Number of sections (primitive used to track blocks with its bits).
+    const BLOCK_SIZE: usize = 64;
     const SECTION_COUNT: usize = 4;
-    const SECTION_LEN: usize = size_of::<u64>() * 8;
+    /// How many bits/block indexes in section primitive.
+    const BLOCKS_PER_SECTION: usize = size_of::<u64>() * 8 ;
     /// Number of blocks each block page contains.
-    const BLOCK_COUNT: usize = Self::SECTION_COUNT * Self::SECTION_LEN;
+    const BLOCK_COUNT: usize = Self::SECTION_COUNT * Self::BLOCKS_PER_SECTION;
 
     /// An empty block page (all blocks zeroed).
     const fn empty() -> Self {
@@ -309,7 +311,7 @@ impl BlockAllocator<'_> {
                     for section in block_page.iter().map(|section| *section) {
                         if section == u64::MAX {
                             current_run = 0;
-                            block_index += BlockPage::SECTION_LEN;
+                            block_index += BlockPage::BLOCKS_PER_SECTION;
                         } else {
                             for bit in (0..64).map(|shift| (section & (1 << shift)) > 0) {
                                 if bit {
@@ -345,7 +347,7 @@ impl BlockAllocator<'_> {
 
         let start_map_index = start_block_index / BlockPage::BLOCK_COUNT;
         let mut initial_section_skip =
-            libkernel::align_down_div(block_index, BlockPage::SECTION_LEN)
+            libkernel::align_down_div(block_index, BlockPage::BLOCKS_PER_SECTION)
                 - (start_map_index * BlockPage::SECTION_COUNT);
 
         for (map_index, block_page) in self
@@ -414,7 +416,7 @@ impl BlockAllocator<'_> {
         let start_map_index = start_block_index / BlockPage::BLOCK_COUNT;
         let end_map_index = align_up_div(end_block_index, BlockPage::BLOCK_COUNT) - start_map_index;
         let mut initial_section_skip =
-            libkernel::align_down_div(block_index, BlockPage::SECTION_LEN)
+            libkernel::align_down_div(block_index, BlockPage::BLOCKS_PER_SECTION)
                 - (start_map_index * BlockPage::SECTION_COUNT);
         for (map_index, block_page) in self
             .map
@@ -476,12 +478,12 @@ impl BlockAllocator<'_> {
         block_index: usize,
     ) -> (usize, u64) {
         let traversed_blocks =
-            (map_index * BlockPage::BLOCK_COUNT) + (section_index * BlockPage::SECTION_LEN);
+            (map_index * BlockPage::BLOCK_COUNT) + (section_index * BlockPage::BLOCKS_PER_SECTION);
         let remaining_blocks = end_block_index - traversed_blocks;
         // Each block is one bit in our map, so we calculate the offset into
         //  the current section, at which our current index (`block_index`) lies.
         let bit_offset = block_index - traversed_blocks;
-        let bit_count = core::cmp::min(BlockPage::SECTION_LEN, remaining_blocks) - bit_offset;
+        let bit_count = core::cmp::min(BlockPage::BLOCKS_PER_SECTION, remaining_blocks) - bit_offset;
         // Finally, we acquire the respective bitmask to flip all relevant bits in
         //  our current section.
         (
@@ -547,7 +549,7 @@ impl BlockAllocator<'_> {
         (start_index * 0x1000) as *mut T
     }
 
-    pub fn identity_map(&self, frame: &Frame, map: bool) {
+    pub fn identity_map(&self, frame: &Frame, virtual_map: bool) {
         trace!("Identity mapping requested: {:?}", frame);
 
         let map_len = self.map.read().len();
@@ -561,12 +563,12 @@ impl BlockAllocator<'_> {
             block_page.is_empty(),
             "attempting to identity map page with previously allocated blocks: {:?} (map? {})\n {:?}",
             frame,
-            map,
+            virtual_map,
             block_page
         );
         block_page.set_full();
 
-        if map {
+        if virtual_map {
             unsafe { self.get_addressor_mut() }.identity_map(frame);
         }
     }
@@ -593,7 +595,7 @@ impl BlockAllocator<'_> {
             let mut addressor_mut = unsafe { self.get_addressor_mut() };
             for offset in cur_page_offset..new_page_offset {
                 let map_page = &mut Self::ALLOCATOR_BASE.offset(offset);
-                addressor_mut.map(map_page, &falloc::get().lock_next().unwrap());
+                addressor_mut.map(map_page, &falloc::get().lock_next().expect("out of memory"));
             }
         }
 
@@ -627,6 +629,10 @@ impl libkernel::memory::malloc::MemoryAllocator for BlockAllocator<'_> {
 
     unsafe fn physical_memory(&self, addr: Address<Physical>) -> Address<Virtual> {
         self.physical_memory(addr)
+    }
+
+    fn identity_map(&self, frame: &libkernel::memory::Frame, virtual_map: bool) {
+        self.identity_map(frame, virtual_map)
     }
 
     fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
