@@ -38,17 +38,18 @@ extern "C" {
 
 #[cfg(debug_assertions)]
 fn get_log_level() -> log::LevelFilter {
-    log::LevelFilter::Debug
+    log::LevelFilter::Trace
 }
 
 #[cfg(not(debug_assertions))]
 fn get_log_level() -> log::LevelFilter {
-    log::LevelFilter::Debug
+    log::LevelFilter::Trace
 }
 
 static mut CON_OUT: drivers::io::Serial = drivers::io::Serial::new(drivers::io::COM1);
 // static mut CON_OUT: drivers::io::QEMUE9 = drivers::io::QEMUE9::new();
 static KERNEL_MALLOC: block_malloc::BlockAllocator = block_malloc::BlockAllocator::new();
+static TRACE_ENABLED_PATHS: [&str; 1] = ["kernel::drivers::ahci"];
 
 #[no_mangle]
 #[export_name = "_start"]
@@ -58,7 +59,7 @@ extern "efiapi" fn kernel_main(
     unsafe {
         CON_OUT.init(drivers::io::SerialSpeed::S115200);
 
-        match drivers::io::set_stdout(&mut CON_OUT, get_log_level()) {
+        match drivers::io::set_stdout(&mut CON_OUT, get_log_level(), &TRACE_ENABLED_PATHS) {
             Ok(()) => {
                 info!("Successfully loaded into kernel, with logging enabled.");
             }
@@ -114,6 +115,7 @@ extern "efiapi" fn kernel_main(
         })
         .collect();
 
+    debug!("Configuring PCIe devices.");
     for device_variant in bridges
         .iter()
         .flat_map(|host_bridge| host_bridge.iter())
@@ -127,8 +129,11 @@ extern "efiapi" fn kernel_main(
                 && device.subclass() == 0x06
                 && device.program_interface() == 0x1
             {
+                debug!("Configuring AHCI driver.");
+
                 let mut ahci = drivers::ahci::AHCI::from_pcie_device(&device);
 
+                debug!("Configuring AHCI SATA ports.");
                 for port in ahci.sata_ports() {
                     port.configure();
                     let buffer = port.read(0, 4);
