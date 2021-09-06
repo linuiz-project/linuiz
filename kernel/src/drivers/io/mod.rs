@@ -12,10 +12,15 @@ static STDOUT: SyncRefCell<&'static mut dyn Write> = SyncRefCell::empty();
 pub fn set_stdout(
     stdout: &'static mut dyn Write,
     minimum_level: log::LevelFilter,
+    trace_enabled_paths: &'static [&'static str],
 ) -> Result<(), log::SetLoggerError> {
     STDOUT.set(stdout);
 
-    crate::logging::init_logger(crate::logging::LoggingModes::STDOUT, minimum_level)
+    crate::logging::init_logger(
+        crate::logging::LoggingModes::STDOUT,
+        minimum_level,
+        trace_enabled_paths,
+    )
 }
 
 #[doc(hidden)]

@@ -2,7 +2,7 @@ mod standard;
 
 use crate::memory::mmio::{Mapped, MMIO};
 use bitflags::bitflags;
-use core::{cell::RefCell, fmt, marker::PhantomData};
+use core::{fmt, marker::PhantomData};
 
 pub use standard::*;
 
@@ -154,16 +154,24 @@ impl fmt::Debug for PCIeBuiltinSelfTest {
     }
 }
 
-pub trait PCIeDeviceType {}
+pub trait PCIeDeviceType {
+    const REGISTER_COUNT: usize;
+}
 
 pub enum Standard {}
-impl PCIeDeviceType for Standard {}
+impl PCIeDeviceType for Standard {
+    const REGISTER_COUNT: usize = 5;
+}
 
 pub enum PCI2PCI {}
-impl PCIeDeviceType for PCI2PCI {}
+impl PCIeDeviceType for PCI2PCI {
+    const REGISTER_COUNT: usize = 2;
+}
 
 pub enum PCI2CardBus {}
-impl PCIeDeviceType for PCI2CardBus {}
+impl PCIeDeviceType for PCI2CardBus {
+    const REGISTER_COUNT: usize = 8;
+}
 
 #[derive(Debug)]
 pub enum PCIeDeviceVariant {
@@ -174,7 +182,6 @@ pub enum PCIeDeviceVariant {
 
 pub struct PCIeDevice<T: PCIeDeviceType> {
     mmio: MMIO<Mapped>,
-    bar_mmios: [Option<RefCell<MMIO<Mapped>>>; 10],
     phantom: PhantomData<T>,
 }
 
@@ -190,12 +197,10 @@ pub fn new_device(mmio: MMIO<Mapped>) -> PCIeDeviceVariant {
         0x0 => PCIeDeviceVariant::Standard(unsafe { PCIeDevice::<Standard>::new(mmio) }),
         0x1 => PCIeDeviceVariant::PCI2PCI(PCIeDevice {
             mmio,
-            bar_mmios: [None, None, None, None, None, None, None, None, None, None],
             phantom: PhantomData,
         }),
         0x2 => PCIeDeviceVariant::PCI2CardBus(PCIeDevice::<PCI2CardBus> {
             mmio,
-            bar_mmios: [None, None, None, None, None, None, None, None, None, None],
             phantom: PhantomData,
         }),
         invalid_type => {
@@ -331,6 +336,13 @@ impl<T: PCIeDeviceType> PCIeDevice<T> {
         }
     }
 
+    pub fn iter_registers(&self) -> PCIeDeviceRegisterIterator {
+        PCIeDeviceRegisterIterator::new(
+            unsafe { self.mmio.mapped_addr().as_ptr::<u32>().add(0x4) },
+            T::REGISTER_COUNT,
+        )
+    }
+
     pub fn generic_debut_fmt(&self, debug_struct: &mut fmt::DebugStruct) {
         debug_struct
             .field("Vendor ID", &self.vendor_id())
@@ -343,6 +355,87 @@ impl<T: PCIeDeviceType> PCIeDevice<T> {
             .field("Master Latency Timer", &self.latency_timer())
             .field("Header Type", &self.header_type())
             .field("Built-In Self Test", &self.builtin_self_test());
+    }
+}
+
+#[derive(Debug)]
+pub enum PCIeDeviceRegister {
+    MemorySpace32(u32),
+    MemorySpace64(u64),
+    IOSpace(u32),
+    None,
+}
+
+impl PCIeDeviceRegister {
+    pub fn as_addr(&self) -> crate::Address<crate::addr_ty::Virtual> {
+        use crate::{addr_ty::Virtual, Address};
+
+        Address::<Virtual>::new(match self {
+            PCIeDeviceRegister::MemorySpace32(value) => (value & !0b1111) as usize,
+            PCIeDeviceRegister::MemorySpace64(value) => (value & !0b1111) as usize,
+            PCIeDeviceRegister::IOSpace(value) => (value & !0b11) as usize,
+            PCIeDeviceRegister::None => 0,
+        })
+    }
+}
+
+pub struct PCIeDeviceRegisterIterator {
+    base: *const u32,
+    max_base: *const u32,
+}
+
+impl PCIeDeviceRegisterIterator {
+    fn new(base: *const u32, register_count: usize) -> Self {
+        Self {
+            base,
+            max_base: unsafe { base.add(register_count) },
+        }
+    }
+}
+
+impl Iterator for PCIeDeviceRegisterIterator {
+    type Item = PCIeDeviceRegister;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.base <= self.max_base {
+            unsafe {
+                let register_raw = self.base.read_volatile();
+
+                let register = {
+                    if register_raw == 0 {
+                        PCIeDeviceRegister::None
+                    } else if (register_raw & 0b1) == 0 {
+                        use bit_field::BitField;
+
+                        match register_raw.get_bits(1..3) {
+                            0b00 => PCIeDeviceRegister::MemorySpace32(register_raw as u32),
+                            0b10 => {
+                                let lower = self.base.read_volatile();
+                                let upper = self.base.add(1).read_volatile();
+
+                                debug!("Creating PCIeDeviceRegister::MemorySpace64:\n\tUpper: {:b}\n\tLower: {:b}", upper, lower );
+                                PCIeDeviceRegister::MemorySpace64(
+                                    ((upper as u64) << 32) | (lower as u64),
+                                )
+                            }
+                            _ => panic!("invalid register type: 0b{:b}", register_raw),
+                        }
+                    } else {
+                        PCIeDeviceRegister::IOSpace(register_raw as u32)
+                    }
+                };
+
+                if let PCIeDeviceRegister::MemorySpace64(_) = register {
+                    self.base = self.base.add(2);
+                } else {
+                    self.base = self.base.add(1);
+                }
+
+                Some(register)
+            }
+        } else {
+            None
+        }
     }
 }
 

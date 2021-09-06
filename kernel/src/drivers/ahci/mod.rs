@@ -2,7 +2,9 @@ pub mod hba;
 
 use alloc::vec::Vec;
 use bit_field::BitField;
-use libkernel::io::pci::{PCIeDevice, Standard, StandardRegister};
+use libkernel::io::pci::{PCIeDevice, Standard};
+
+use crate::drivers::ahci::hba::HBAPort;
 
 pub const ATA_DEV_BUSY: u8 = 0x80;
 pub const ATA_DEV_DRQ: u8 = 0x08;
@@ -100,12 +102,21 @@ impl<'ahci> AHCI<'ahci> {
     pub fn from_pcie_device(device: &'ahci PCIeDevice<Standard>) -> Self {
         trace!("Using PCIe device for AHCI driver:\n{:#?}", device);
 
-        if let Some(mut hba_register) = device.get_register(StandardRegister::Reg5) {
+        if let Some(hba_register) = device.iter_registers().last() {
             use hba::HBAPortClass;
 
-            let sata_ports = unsafe { hba_register.read_mut::<hba::HBAMemory>(0) }
-                .unwrap()
-                .borrow_mut()
+            trace!("PCIe register for HBA memory: {:?}", hba_register);
+            let hba_register_addr = hba_register.as_addr();
+
+            trace!("Reading HBA memory from address: {:?}", hba_register_addr);
+            let mut hba_memory = unsafe {
+                hba_register_addr
+                    .as_mut_ptr::<hba::HBAMemory>()
+                    .read_volatile()
+            };
+
+            trace!("Parsing valid SATA ports from HBA memory ports.");
+            let sata_ports: Vec<&mut HBAPort> = hba_memory
                 .ports_mut()
                 .filter_map(|port| match port.class() {
                     HBAPortClass::SATA | HBAPortClass::SATAPI => {
@@ -113,12 +124,14 @@ impl<'ahci> AHCI<'ahci> {
 
                         Some(unsafe {
                             // Elide borrow checker by casting to a pointer & back.
-                            &mut *(port as *mut _)
+                            core::mem::transmute(port)
                         })
                     }
                     _port_type => None,
                 })
                 .collect();
+
+            debug!("Found SATA ports: {}", sata_ports.len());
 
             Self { device, sata_ports }
         } else {

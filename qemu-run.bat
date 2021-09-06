@@ -1,5 +1,5 @@
 qemu-system-x86_64^
-    -m 256M^
+    -m 512M^
     -serial stdio^
     -machine q35^
     -cpu qemu64^
@@ -9,4 +9,6 @@ qemu-system-x86_64^
     -drive id=disk,if=none,file=./hdd/rootfs.img^
     -device ahci,id=ahci^
     -device ide-hd,drive=disk,bus=ahci.0^
+    -drive file=./hdd/nvme.img,if=none,id=nvm^
+    -device nvme,drive=nvm,serial=deadbeef^
     -net none^
