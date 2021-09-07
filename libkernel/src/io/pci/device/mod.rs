@@ -1,6 +1,7 @@
 mod standard;
 
 use crate::memory::mmio::{Mapped, MMIO};
+use alloc::vec::Vec;
 use bitflags::bitflags;
 use core::{fmt, marker::PhantomData};
 
@@ -182,6 +183,7 @@ pub enum PCIeDeviceVariant {
 
 pub struct PCIeDevice<T: PCIeDeviceType> {
     mmio: MMIO<Mapped>,
+    registers: Vec<Option<MMIO<Mapped>>>,
     phantom: PhantomData<T>,
 }
 
@@ -197,10 +199,12 @@ pub fn new_device(mmio: MMIO<Mapped>) -> PCIeDeviceVariant {
         0x0 => PCIeDeviceVariant::Standard(unsafe { PCIeDevice::<Standard>::new(mmio) }),
         0x1 => PCIeDeviceVariant::PCI2PCI(PCIeDevice {
             mmio,
+            registers: Vec::new(),
             phantom: PhantomData,
         }),
         0x2 => PCIeDeviceVariant::PCI2CardBus(PCIeDevice::<PCI2CardBus> {
             mmio,
+            registers: Vec::new(),
             phantom: PhantomData,
         }),
         invalid_type => {
@@ -336,13 +340,6 @@ impl<T: PCIeDeviceType> PCIeDevice<T> {
         }
     }
 
-    pub fn iter_registers(&self) -> PCIeDeviceRegisterIterator {
-        PCIeDeviceRegisterIterator::new(
-            unsafe { self.mmio.mapped_addr().as_ptr::<u32>().add(0x4) },
-            T::REGISTER_COUNT,
-        )
-    }
-
     pub fn generic_debut_fmt(&self, debug_struct: &mut fmt::DebugStruct) {
         debug_struct
             .field("Vendor ID", &self.vendor_id())
@@ -351,6 +348,7 @@ impl<T: PCIeDeviceType> PCIeDevice<T> {
             .field("Status", &self.status())
             .field("Revision ID", &self.revision_id())
             .field("Class Code", &self.class())
+            .field("Sub Class", &self.subclass())
             .field("Cache Line Size", &self.cache_line_size())
             .field("Master Latency Timer", &self.latency_timer())
             .field("Header Type", &self.header_type())
@@ -360,35 +358,55 @@ impl<T: PCIeDeviceType> PCIeDevice<T> {
 
 #[derive(Debug)]
 pub enum PCIeDeviceRegister {
-    MemorySpace32(u32),
-    MemorySpace64(u64),
-    IOSpace(u32),
+    MemorySpace32(u32, usize),
+    MemorySpace64(u64, usize),
+    IOSpace(u32, usize),
     None,
 }
 
 impl PCIeDeviceRegister {
+    pub fn is_unused(&self) -> bool {
+        use bit_field::BitField;
+
+        match self {
+            PCIeDeviceRegister::MemorySpace32(value, _) => (value.get_bits(4..32) & !0xFFF) == 0,
+            PCIeDeviceRegister::MemorySpace64(value, _) => (value.get_bits(4..64) & !0xFFF) == 0,
+            PCIeDeviceRegister::IOSpace(value, _) => (value.get_bits(2..32) & !0xFFF) == 0,
+            PCIeDeviceRegister::None => true,
+        }
+    }
+
     pub fn as_addr(&self) -> crate::Address<crate::addr_ty::Virtual> {
         use crate::{addr_ty::Virtual, Address};
 
         Address::<Virtual>::new(match self {
-            PCIeDeviceRegister::MemorySpace32(value) => (value & !0b1111) as usize,
-            PCIeDeviceRegister::MemorySpace64(value) => (value & !0b1111) as usize,
-            PCIeDeviceRegister::IOSpace(value) => (value & !0b11) as usize,
+            PCIeDeviceRegister::MemorySpace32(value, _) => (value & !0b1111) as usize,
+            PCIeDeviceRegister::MemorySpace64(value, _) => (value & !0b1111) as usize,
+            PCIeDeviceRegister::IOSpace(value, _) => (value & !0b11) as usize,
             PCIeDeviceRegister::None => 0,
         })
+    }
+
+    pub fn memory_usage(&self) -> usize {
+        match self {
+            PCIeDeviceRegister::MemorySpace32(_, mem_usage) => *mem_usage,
+            PCIeDeviceRegister::MemorySpace64(_, mem_usage) => *mem_usage,
+            PCIeDeviceRegister::IOSpace(_, mem_usage) => *mem_usage,
+            PCIeDeviceRegister::None => 0,
+        }
     }
 }
 
 pub struct PCIeDeviceRegisterIterator {
-    base: *const u32,
-    max_base: *const u32,
+    base: *mut u32,
+    max_base: *mut u32,
 }
 
 impl PCIeDeviceRegisterIterator {
-    fn new(base: *const u32, register_count: usize) -> Self {
+    unsafe fn new(base: *mut u32, register_count: usize) -> Self {
         Self {
             base,
-            max_base: unsafe { base.add(register_count) },
+            max_base: base.add(register_count),
         }
     }
 }
@@ -402,34 +420,71 @@ impl Iterator for PCIeDeviceRegisterIterator {
                 let register_raw = self.base.read_volatile();
 
                 let register = {
+                    use bit_field::BitField;
+
                     if register_raw == 0 {
                         PCIeDeviceRegister::None
-                    } else if (register_raw & 0b1) == 0 {
-                        use bit_field::BitField;
+                    } else if register_raw.get_bit(0) {
+                        self.base.write_volatile(u32::MAX);
+                        let mem_usage = (self.base.read_volatile() & !0b11);
+                        self.base.write_volatile(register_raw);
 
+                        PCIeDeviceRegister::IOSpace(register_raw, 1)
+                    } else {
                         match register_raw.get_bits(1..3) {
-                            0b00 => PCIeDeviceRegister::MemorySpace32(register_raw as u32),
-                            0b10 => {
-                                let lower = self.base.read_volatile();
-                                let upper = self.base.add(1).read_volatile();
+                            // REMARK:
+                            //  This little dance with the reads & writes is just fucking magic?
+                            //  Who comes up with this shit?
+                            0b00 => {
+                                // Write all 1's to register.
+                                self.base.write_volatile(u32::MAX);
+                                // Record memory usage by masking address bits, NOT'ing, and adding one.
+                                let m1 = self.base.read_volatile() & !0b1111;
+                                let mem_usage = !(m1) + 1;
+                                info!("{:b} {:b}", m1, mem_usage);
+                                // Write original value back into register.
+                                self.base.write_volatile(register_raw);
 
-                                debug!("Creating PCIeDeviceRegister::MemorySpace64:\n\tUpper: {:b}\n\tLower: {:b}", upper, lower );
+                                PCIeDeviceRegister::MemorySpace32(register_raw, mem_usage as usize)
+                            }
+                            // And because of MMIO volatility, it's even dumber for 64-bit registers
+                            0b10 => {
+                                let base_next = self.base.add(1);
+                                // Record value of next register to restore later.
+                                let register_raw_next = base_next.read_volatile();
+
+                                // Write all 1's into double-wide register.
+                                self.base.write(u32::MAX);
+                                base_next.write(u32::MAX);
+
+                                // Record raw values of double-wide register.
+                                let register_raw_u64 = (self.base.read_volatile() as u64)
+                                    | ((base_next.read_volatile() as u64) << 32);
+
+                                // Record memory usage of double-wide register.
+                                let mem_usage = !(register_raw_u64 & !0b1111) + 1;
+
+                                // Write old raw values back into double-wide register.
+                                self.base.write_volatile(register_raw);
+                                base_next.write_volatile(register_raw_next);
+
                                 PCIeDeviceRegister::MemorySpace64(
-                                    ((upper as u64) << 32) | (lower as u64),
+                                    (register_raw as u64) | ((register_raw_next as u64) << 32),
+                                    mem_usage as usize,
                                 )
                             }
                             _ => panic!("invalid register type: 0b{:b}", register_raw),
                         }
-                    } else {
-                        PCIeDeviceRegister::IOSpace(register_raw as u32)
                     }
                 };
 
-                if let PCIeDeviceRegister::MemorySpace64(_) = register {
+                if let PCIeDeviceRegister::MemorySpace64(_, _) = register {
                     self.base = self.base.add(2);
                 } else {
                     self.base = self.base.add(1);
                 }
+
+                info!("{:?}", register);
 
                 Some(register)
             }

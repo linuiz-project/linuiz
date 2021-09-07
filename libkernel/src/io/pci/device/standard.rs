@@ -6,6 +6,16 @@ use crate::{
 };
 use core::fmt;
 
+#[repr(usize)]
+#[derive(Debug)]
+pub enum StandardRegister {
+    Register1 = 0,
+    Register2 = 1,
+    Register3 = 2,
+    Register4 = 3,
+    Register5 = 4,
+}
+
 impl PCIeDevice<Standard> {
     pub unsafe fn new(mmio: MMIO<Mapped>) -> Self {
         assert_eq!(
@@ -18,52 +28,71 @@ impl PCIeDevice<Standard> {
             "incorrect header type for standard specification PCI device"
         );
 
-        for (register_num, register_value) in PCIeDeviceRegisterIterator::new(
-            mmio.mapped_addr().as_ptr::<u32>().add(0x4),
+        let mut registers = alloc::vec![None, None, None, None, None];
+
+        for (register_num, register) in PCIeDeviceRegisterIterator::new(
+            mmio.mapped_addr().as_mut_ptr::<u32>().add(0x4),
             Standard::REGISTER_COUNT,
         )
+        .filter(|register| !register.is_unused())
         .enumerate()
         {
-            let addr = register_value.as_addr();
-            if !addr.is_null() {
-                debug!("Device Register {}: {:?}", register_num, register_value);
+            debug!("Device Register {}: {:?}", register_num, register);
 
-                // The address is MMIO, so is memory-mapped—thus,
-                //  the page index and frame index will match.
-                let frame_index = addr.page_index();
-                debug!(
-                    "\tAcquiring register destination frame as MMIO: {}",
-                    frame_index
-                );
-                let mmio_frames = crate::memory::falloc::get()
-                    .acquire_frames(frame_index, 1, crate::memory::falloc::FrameState::MMIO)
-                    .expect("frames are not MMIO");
-                debug!("\tAuto-mapping register destination frame.");
-                let register_mmio = crate::memory::mmio::unmapped_mmio(mmio_frames)
-                    .expect("failed to create MMIO object")
-                    .automap();
+            // The address is MMIO, so is memory-mapped—thus,
+            //  the page index and frame index will match.
+            let frame_index = register.as_addr().page_index();
+            let frame_usage = crate::align_up_div(register.memory_usage(), 0x1000);
+            debug!(
+                "\tAcquiring register destination frame as MMIO: {}:{}",
+                frame_index, frame_usage
+            );
+            let mmio_frames = crate::memory::falloc::get()
+                .acquire_frames(
+                    frame_index,
+                    frame_usage,
+                    crate::memory::falloc::FrameState::MMIO,
+                )
+                .expect("frames are not MMIO");
+            debug!("\tAuto-mapping register destination frame.");
+            let register_mmio = crate::memory::mmio::unmapped_mmio(mmio_frames)
+                .expect("failed to create MMIO object")
+                .automap();
 
-                debug!("\tDetermining register prefetchability.");
-                if match register_value {
-                    PCIeDeviceRegister::MemorySpace32(value) => (value & 0b1000) > 0,
-                    PCIeDeviceRegister::MemorySpace64(value) => (value & 0b1000) > 0,
-                    _ => false,
-                } {
-                    use crate::memory::paging::{PageAttributeModifyMode, PageAttributes};
+            debug!("\tDetermining register prefetchability.");
+            if match register {
+                PCIeDeviceRegister::MemorySpace32(value, _) => (value & 0b1000) > 0,
+                PCIeDeviceRegister::MemorySpace64(value, _) => (value & 0b1000) > 0,
+                _ => false,
+            } {
+                debug!("\tRegister is prefetchable, so enabling WRITE_THROUGH bit on page.");
+                // Optimize page attributes to enable write-through if it wasn't previously enabled.
+                for page in register_mmio.pages() {
+                    use crate::memory::{
+                        malloc::get,
+                        paging::{PageAttributeModifyMode, PageAttributes},
+                    };
 
-                    debug!("\tRegister is prefetchable, so enabling WRITE_THROUGH bit on page.");
-                    // optimize page attributes to enable write-through if it wasn't previously enabled
-                    crate::memory::malloc::get().modify_page_attributes(
-                        &crate::memory::Page::from_addr(register_mmio.mapped_addr()),
+                    get().modify_page_attributes(
+                        &page,
                         PageAttributes::WRITE_THROUGH,
                         PageAttributeModifyMode::Insert,
-                    )
+                    );
+
+                    get().modify_page_attributes(
+                        &page,
+                        PageAttributes::UNCACHEABLE,
+                        PageAttributeModifyMode::Remove,
+                    );
                 }
             }
+
+            registers[register_num] = Some(register_mmio);
         }
 
         Self {
             mmio,
+            registers,
             phantom: core::marker::PhantomData,
         }
     }
@@ -108,6 +137,18 @@ impl PCIeDevice<Standard> {
 
     pub fn max_latency(&self) -> u8 {
         unsafe { self.mmio.read(0x3F).unwrap().read() }
+    }
+
+    pub fn iter_registers(&self) -> core::slice::Iter<Option<MMIO<Mapped>>> {
+        self.registers.iter()
+    }
+}
+
+impl core::ops::Index<StandardRegister> for PCIeDevice<Standard> {
+    type Output = Option<MMIO<Mapped>>;
+
+    fn index(&self, index: StandardRegister) -> &Self::Output {
+        &self.registers[index as usize]
     }
 }
 

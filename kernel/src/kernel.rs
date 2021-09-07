@@ -49,7 +49,7 @@ fn get_log_level() -> log::LevelFilter {
 static mut CON_OUT: drivers::io::Serial = drivers::io::Serial::new(drivers::io::COM1);
 // static mut CON_OUT: drivers::io::QEMUE9 = drivers::io::QEMUE9::new();
 static KERNEL_MALLOC: block_malloc::BlockAllocator = block_malloc::BlockAllocator::new();
-static TRACE_ENABLED_PATHS: [&str; 2] = ["kernel::drivers::ahci", "kernel::block_malloc"];
+static TRACE_ENABLED_PATHS: [&str; 2] = ["kernel::drivers::ahci", "libkernel::memory::falloc"];
 
 #[no_mangle]
 #[export_name = "_start"]
@@ -125,19 +125,27 @@ extern "efiapi" fn kernel_main(
         use libkernel::io::pci::{PCIeDeviceClass, PCIeDeviceVariant};
 
         if let PCIeDeviceVariant::Standard(device) = device_variant {
-            if device.class() == PCIeDeviceClass::MassStorageController
-                && device.subclass() == 0x06
-                && device.program_interface() == 0x1
-            {
-                debug!("Configuring AHCI driver.");
+            if device.class() == PCIeDeviceClass::MassStorageController {
+                // if device.subclass() == 0x06 && device.program_interface() == 0x1 {
+                //     debug!("Configuring AHCI driver.");
 
-                let mut ahci = drivers::ahci::AHCI::from_pcie_device(&device);
+                //     let mut ahci = drivers::ahci::AHCI::from_pcie_device(&device);
 
-                debug!("Configuring AHCI SATA ports.");
-                for port in ahci.sata_ports() {
-                    port.configure();
-                    let buffer = port.read(0, 4);
-                    info!("{:?}", buffer);
+                //     debug!("Configuring AHCI SATA ports.");
+                //     for port in ahci.sata_ports() {
+                //         port.configure();
+                //         let buffer = port.read(0, 4);
+                //         info!("{:?}", buffer);
+                //     }
+                // } else
+                if device.subclass() == 0x08 {
+                    info!("{:#?}", device.iter_registers().enumerate());
+                    for register in device.iter_registers().filter_map(|a| a.as_ref()) {
+                        unsafe {
+                            let val = register.read::<u32>(0x8).unwrap().read();
+                            info!("{} {:b}", device.header_type(), val);
+                        }
+                    }
                 }
             }
         }

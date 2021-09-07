@@ -2,7 +2,7 @@ pub mod hba;
 
 use alloc::vec::Vec;
 use bit_field::BitField;
-use libkernel::io::pci::{PCIeDevice, Standard};
+use libkernel::io::pci::{PCIeDevice, Standard, StandardRegister};
 
 use crate::drivers::ahci::hba::HBAPort;
 
@@ -94,36 +94,29 @@ impl Default for FIS_REG_H2D {
 impl hba::HBACommandFIS for FIS_REG_H2D {}
 
 pub struct AHCI<'ahci> {
+    // TODO devise some system of renting out the PCIe devices to drivers
     device: &'ahci PCIeDevice<Standard>,
     sata_ports: Vec<&'ahci mut self::hba::HBAPort>,
 }
 
 impl<'ahci> AHCI<'ahci> {
     pub fn from_pcie_device(device: &'ahci PCIeDevice<Standard>) -> Self {
-        trace!("Using PCIe device for AHCI driver:\n{:#?}", device);
+        debug!("Using PCIe device for AHCI driver:\n{:#?}", device);
 
-        if let Some(hba_register) = device.iter_registers().last() {
+        if let Some(hba_mmio) = &device[StandardRegister::Register5] {
             use hba::HBAPortClass;
 
-            trace!("PCIe register for HBA memory: {:?}", hba_register);
-            let hba_register_addr = hba_register.as_addr();
-
-            trace!("Reading HBA memory from address: {:?}", hba_register_addr);
-            let mut hba_memory = unsafe {
-                hba_register_addr
-                    .as_mut_ptr::<hba::HBAMemory>()
-                    .read_volatile()
-            };
-
-            trace!("Parsing valid SATA ports from HBA memory ports.");
-            let sata_ports: Vec<&mut HBAPort> = hba_memory
+            debug!("Parsing valid SATA ports from HBA memory ports.");
+            let sata_ports: Vec<&mut HBAPort> = unsafe { hba_mmio.read_mut::<hba::HBAMemory>(0x0) }
+                .unwrap()
+                .borrow_mut()
                 .ports_mut()
                 .filter_map(|port| match port.class() {
                     HBAPortClass::SATA | HBAPortClass::SATAPI => {
                         debug!("Configuring AHCI port: {:?}", port.class());
 
                         Some(unsafe {
-                            // Elide borrow checker by casting to a pointer & back.
+                            // Elide borrow checker.
                             core::mem::transmute(port)
                         })
                     }
