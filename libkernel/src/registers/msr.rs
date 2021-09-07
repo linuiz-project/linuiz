@@ -39,8 +39,6 @@ impl MSR {
         let set_bit = (set as u64) << bit;
 
         self.write((self.read() & bit_mask) | set_bit);
-
-        debug_assert_eq!(self.read() & bit_mask, set_bit);
     }
 
     pub unsafe fn write_bits(self, range: core::ops::Range<usize>, value: u64) {
@@ -53,8 +51,6 @@ impl MSR {
         let shifted_value = value << range.start;
 
         self.write((self.read() & !shifted_mask) | shifted_value);
-
-        debug_assert_eq!(self.read() & shifted_mask, shifted_value);
     }
 
     pub unsafe fn write(self, value: u64) {

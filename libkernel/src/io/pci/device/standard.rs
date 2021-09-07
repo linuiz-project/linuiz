@@ -6,14 +6,107 @@ use crate::{
 };
 use core::fmt;
 
+/// An exaplanation of the acronyms used here can be inferred from:
+///  https://lekensteyn.nl/files/docs/PCI_SPEV_V3_0.pdf table H-1
+#[derive(Debug)]
+pub enum PCICapablities {
+    /// PCI Power Management Interface
+    PWMI,
+    /// Accelerated Graphics Port
+    AGP,
+    /// Vital Product Data
+    VPD,
+    /// Slot Identification
+    SIDENT,
+    /// Message Signaled Interrupts
+    MSI,
+    /// CompactPCI Hot Swap
+    CPCIHS,
+    /// PCI-X
+    PCIX,
+    /// HyperTransport
+    HYTPT,
+    /// Vendor Specific
+    VENDOR,
+    /// Debug Port
+    DEBUG,
+    /// CompactPCI Central Resource Control
+    CPCICPC,
+    /// PCI Hot-Plug
+    HOTPLG,
+    /// PCI Bridge Subsystem Vendor ID
+    SSYSVENDID,
+    /// AGP 8x
+    AGP8X,
+    /// Secure Device
+    SECURE,
+    /// PCI Express
+    PCIE,
+    /// Message Signaled Interrupt Extension
+    MSIX,
+    Reserved,
+    NotImplemented,
+}
+
+pub struct PCICapablitiesIterator<'mmio> {
+    mmio: &'mmio MMIO<Mapped>,
+    offset: u8,
+}
+
+impl<'mmio> PCICapablitiesIterator<'mmio> {
+    fn new(mmio: &'mmio MMIO<Mapped>, offset: u8) -> Self {
+        Self { mmio, offset }
+    }
+}
+
+impl Iterator for PCICapablitiesIterator<'_> {
+    type Item = PCICapablities;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.offset > 0 {
+            unsafe {
+                use bit_field::BitField;
+
+                let cap_reg_00 = self.mmio.read::<u32>(self.offset as usize).unwrap().read();
+                self.offset = cap_reg_00.get_bits(8..16) as u8;
+
+                Some(match cap_reg_00.get_bits(0..8) {
+                    0x1 => PCICapablities::PWMI,
+                    0x2 => PCICapablities::AGP,
+                    0x3 => PCICapablities::VPD,
+                    0x4 => PCICapablities::SIDENT,
+                    0x5 => PCICapablities::MSI,
+                    0x6 => PCICapablities::CPCIHS,
+                    0x7 => PCICapablities::PCIX,
+                    0x8 => PCICapablities::HYTPT,
+                    0x9 => PCICapablities::VENDOR,
+                    0xA => PCICapablities::DEBUG,
+                    0xB => PCICapablities::CPCICPC,
+                    0xC => PCICapablities::HOTPLG,
+                    0xD => PCICapablities::SSYSVENDID,
+                    0xE => PCICapablities::AGP8X,
+                    0xF => PCICapablities::SECURE,
+                    0x10 => PCICapablities::PCIE,
+                    0x11 => PCICapablities::MSIX,
+                    0x0 | 0x12..0xFF => PCICapablities::Reserved,
+                    _ => PCICapablities::NotImplemented,
+                })
+            }
+        } else {
+            None
+        }
+    }
+}
+
 #[repr(usize)]
 #[derive(Debug)]
 pub enum StandardRegister {
-    Register1 = 0,
-    Register2 = 1,
-    Register3 = 2,
-    Register4 = 3,
-    Register5 = 4,
+    Register0 = 0,
+    Register1 = 1,
+    Register2 = 2,
+    Register3 = 3,
+    Register4 = 4,
+    Register5 = 5,
 }
 
 impl PCIeDevice<Standard> {
@@ -59,7 +152,6 @@ impl PCIeDevice<Standard> {
                 .expect("failed to create MMIO object")
                 .automap();
 
-            debug!("\tDetermining register prefetchability.");
             if match register {
                 PCIeDeviceRegister::MemorySpace32(value, _) => (value & 0b1000) > 0,
                 PCIeDeviceRegister::MemorySpace64(value, _) => (value & 0b1000) > 0,
@@ -113,8 +205,10 @@ impl PCIeDevice<Standard> {
         unsafe { self.mmio.read(0x30).unwrap().read() }
     }
 
-    pub fn capabilities_ptr(&self) -> u8 {
-        unsafe { self.mmio.read::<u8>(0x34).unwrap().read() & !0b11 }
+    pub fn capabilities(&self) -> PCICapablitiesIterator {
+        PCICapablitiesIterator::new(&self.mmio, unsafe {
+            self.mmio.read::<u8>(0x34).unwrap().read() & !0b11
+        })
     }
 
     pub fn interrupt_line(&self) -> Option<u8> {
@@ -165,7 +259,6 @@ impl fmt::Debug for PCIeDevice<Standard> {
                 "Expansion ROM Base Address",
                 &self.expansion_rom_base_addr(),
             )
-            .field("Capabilities Pointer", &self.capabilities_ptr())
             .field("Interrupt Line", &self.interrupt_line())
             .field("Interrupt Pin", &self.interrupt_pin())
             .field("Min Grant", &self.min_grant())

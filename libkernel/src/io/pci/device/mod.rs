@@ -354,6 +354,11 @@ impl<T: PCIeDeviceType> PCIeDevice<T> {
             .field("Header Type", &self.header_type())
             .field("Built-In Self Test", &self.builtin_self_test());
     }
+
+    #[cfg(debug_assertions)]
+    pub fn mem_addr(&self) -> crate::Address<crate::addr_ty::Physical> {
+        self.mmio.physical_addr()
+    }
 }
 
 #[derive(Debug)]
@@ -426,10 +431,10 @@ impl Iterator for PCIeDeviceRegisterIterator {
                         PCIeDeviceRegister::None
                     } else if register_raw.get_bit(0) {
                         self.base.write_volatile(u32::MAX);
-                        let mem_usage = (self.base.read_volatile() & !0b11);
+                        let mem_usage = !(self.base.read_volatile() & !0b11) + 1;
                         self.base.write_volatile(register_raw);
 
-                        PCIeDeviceRegister::IOSpace(register_raw, 1)
+                        PCIeDeviceRegister::IOSpace(register_raw, mem_usage as usize)
                     } else {
                         match register_raw.get_bits(1..3) {
                             // REMARK:
@@ -439,9 +444,7 @@ impl Iterator for PCIeDeviceRegisterIterator {
                                 // Write all 1's to register.
                                 self.base.write_volatile(u32::MAX);
                                 // Record memory usage by masking address bits, NOT'ing, and adding one.
-                                let m1 = self.base.read_volatile() & !0b1111;
-                                let mem_usage = !(m1) + 1;
-                                info!("{:b} {:b}", m1, mem_usage);
+                                let mem_usage = !(self.base.read_volatile() & !0b1111) + 1;
                                 // Write original value back into register.
                                 self.base.write_volatile(register_raw);
 
@@ -483,8 +486,6 @@ impl Iterator for PCIeDeviceRegisterIterator {
                 } else {
                     self.base = self.base.add(1);
                 }
-
-                info!("{:?}", register);
 
                 Some(register)
             }

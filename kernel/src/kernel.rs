@@ -139,13 +139,11 @@ extern "efiapi" fn kernel_main(
                 //     }
                 // } else
                 if device.subclass() == 0x08 {
-                    info!("{:#?}", device.iter_registers().enumerate());
-                    for register in device.iter_registers().filter_map(|a| a.as_ref()) {
-                        unsafe {
-                            let val = register.read::<u32>(0x8).unwrap().read();
-                            info!("{} {:b}", device.header_type(), val);
-                        }
-                    }
+                    use libkernel::io::pci::StandardRegister;
+                }
+
+                for i in device.capabilities() {
+                    info!("{:?}", i);
                 }
             }
         }

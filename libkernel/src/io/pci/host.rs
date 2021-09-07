@@ -43,8 +43,8 @@ pub fn configure_host_bridge(
     entry: &crate::acpi::rdsp::xsdt::mcfg::MCFGEntry,
 ) -> Result<PCIeHostBridge, PCIeHostBridgeError> {
     debug!(
-        "Attempting to configure a PCIe host bridge with MCFG entry:\n{:#?}",
-        entry
+        "Configuring PCIe host bridge for bus range: {:?}",
+        entry.start_pci_bus()..=entry.end_pci_bus()
     );
 
     if !entry.base_addr().is_canonical() {
@@ -60,7 +60,7 @@ pub fn configure_host_bridge(
         );
 
         debug!(
-            "Successfully configured PCIe host bridge ({} live busses).",
+            "Successfully configured PCIe host bridge: {} live busses",
             bridge.busses.len()
         );
 
