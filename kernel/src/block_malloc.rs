@@ -564,10 +564,6 @@ impl libkernel::memory::malloc::MemoryAllocator for BlockAllocator<'_> {
         self.physical_memory(addr)
     }
 
-    fn identity_map(&self, frame: &libkernel::memory::Frame, virtual_map: bool) {
-        self.identity_map(frame, virtual_map)
-    }
-
     fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
         self.alloc(layout)
     }

@@ -209,7 +209,7 @@ impl Address<Virtual> {
         self.value as *const T
     }
 
-    pub const fn as_mut_ptr<T>(&self) -> *mut T {
+    pub const fn as_mut_ptr<T>(&mut self) -> *mut T {
         self.value as *mut T
     }
 

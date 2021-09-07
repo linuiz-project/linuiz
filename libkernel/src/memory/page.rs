@@ -59,13 +59,6 @@ impl Page {
         (self.index * 0x1000) as *mut T
     }
 
-    pub const fn iter_count(&self, count: usize) -> PageIterator {
-        PageIterator {
-            current: Page::from_index(self.index),
-            end: self.offset(count),
-        }
-    }
-
     pub unsafe fn clear(&mut self) {
         core::ptr::write_bytes::<usize>(
             self.as_mut_ptr(),
@@ -75,10 +68,10 @@ impl Page {
     }
 
     pub fn range_count(start_addr: Address<Virtual>, count: usize) -> PageIterator {
-        PageIterator {
-            current: Page::from_addr(start_addr),
-            end: Page::from_addr(start_addr + (count * 0x1000)),
-        }
+        PageIterator::new(
+            &Page::from_addr(start_addr),
+            &Page::from_addr(start_addr + (count * 0x1000)),
+        )
     }
 
     pub const fn offset(&self, count: usize) -> Self {
@@ -95,8 +88,39 @@ impl core::fmt::Debug for Page {
 }
 
 pub struct PageIterator {
+    start: Page,
     current: Page,
     end: Page,
+}
+
+impl PageIterator {
+    pub fn new(start: &Page, end: &Page) -> Self {
+        Self {
+            start: *start,
+            current: *start,
+            end: *end,
+        }
+    }
+
+    pub fn start(&self) -> &Page {
+        &self.start
+    }
+
+    pub fn current(&self) -> &Page {
+        &self.current
+    }
+
+    pub fn end(&self) -> &Page {
+        &self.end
+    }
+
+    pub fn captured_len(&self) -> usize {
+        self.end().index() - self.start().index()
+    }
+
+    pub fn reset(&mut self) {
+        self.current = *self.start();
+    }
 }
 
 impl Iterator for PageIterator {
@@ -110,5 +134,11 @@ impl Iterator for PageIterator {
         } else {
             None
         }
+    }
+}
+
+impl ExactSizeIterator for PageIterator {
+    fn len(&self) -> usize {
+        self.end().index() - self.start().index()
     }
 }

@@ -5,6 +5,8 @@ use crate::{
     Address, ReadOnly, ReadWrite,
 };
 
+use super::Page;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MMIOError {
     OffsetOverrun(usize, usize),
@@ -65,24 +67,16 @@ impl MMIO<Mapped> {
         self.frames.len() * 0x1000
     }
 
-    unsafe fn mapped_offset<T>(&self, offset: usize) -> Result<*const T, MMIOError> {
+    unsafe fn mapped_offset<T>(&self, offset: usize) -> Result<*mut T, MMIOError> {
         if offset < self.max_offset() {
-            Ok((self.mapped_addr() + offset).as_ptr())
+            Ok((self.mapped_addr() + offset).as_ptr::<T>() as *mut T)
         } else {
             Err(MMIOError::OffsetOverrun(offset, self.max_offset()))
         }
     }
 
-    unsafe fn mapped_offset_mut<T>(&mut self, offset: usize) -> Result<*mut T, MMIOError> {
-        if offset < self.max_offset() {
-            Ok((self.mapped_addr() + offset).as_mut_ptr())
-        } else {
-            Err(MMIOError::OffsetOverrun(offset, self.max_offset()))
-        }
-    }
-
-    pub unsafe fn write<T>(&mut self, add_offset: usize, value: T) -> Result<(), MMIOError> {
-        match self.mapped_offset_mut::<T>(add_offset) {
+    pub unsafe fn write<T>(&self, add_offset: usize, value: T) -> Result<(), MMIOError> {
+        match self.mapped_offset::<T>(add_offset) {
             Ok(ptr) => {
                 ptr.write_volatile(value);
                 Ok(())
@@ -96,11 +90,8 @@ impl MMIO<Mapped> {
             .map(|ptr| Volatile::<T, ReadOnly>::new(ptr))
     }
 
-    pub unsafe fn read_mut<T>(
-        &mut self,
-        offset: usize,
-    ) -> Result<Volatile<T, ReadWrite>, MMIOError> {
-        self.mapped_offset_mut::<T>(offset)
+    pub unsafe fn read_mut<T>(&self, offset: usize) -> Result<Volatile<T, ReadWrite>, MMIOError> {
+        self.mapped_offset::<T>(offset)
             .map(|ptr| Volatile::<T, ReadWrite>::new(ptr))
     }
 
@@ -110,6 +101,11 @@ impl MMIO<Mapped> {
 
     pub fn mapped_addr(&self) -> Address<Virtual> {
         self.mapped_addr
+    }
+
+    pub fn pages(&self) -> super::PageIterator {
+        let base_page = Page::from_addr(self.mapped_addr());
+        super::PageIterator::new(&base_page, &base_page.offset(self.frames.captured_len()))
     }
 }
 

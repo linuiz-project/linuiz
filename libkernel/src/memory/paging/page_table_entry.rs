@@ -7,7 +7,7 @@ bitflags! {
         const WRITABLE = 1 << 1;
         const USER_ACCESSIBLE = 1 << 2;
         const WRITE_THROUGH = 1 << 3;
-        const DISABLE_CACHE = 1 << 4;
+        const UNCACHEABLE = 1 << 4;
         const ACCESSED = 1 << 5;
         const DIRTY = 1 << 6;
         const HUGE_PAGE = 1 << 7;
@@ -21,6 +21,7 @@ bitflags! {
 pub enum PageAttributeModifyMode {
     Set,
     Insert,
+    Remove,
     Toggle,
 }
 

@@ -116,6 +116,10 @@ impl FrameIterator {
         &self.end
     }
 
+    pub fn captured_len(&self) -> usize {
+        self.end().index() - self.start().index()
+    }
+
     pub fn reset(&mut self) {
         self.current = unsafe { Frame::from_index(self.start.index()) };
     }
@@ -126,25 +130,25 @@ impl Iterator for FrameIterator {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.current < self.end {
-            let next = Frame {
+            let frame = Frame {
                 index: self.current.index(),
             };
             self.current.index += 1;
 
-            Some(next)
+            Some(frame)
         } else {
             None
         }
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.start().index(), Some(self.end().index()))
+        (self.current().index(), Some(self.end().index()))
     }
 }
 
 impl ExactSizeIterator for FrameIterator {
     fn len(&self) -> usize {
-        self.end().index() - self.start().index()
+        self.end().index() - self.current().index()
     }
 }
 

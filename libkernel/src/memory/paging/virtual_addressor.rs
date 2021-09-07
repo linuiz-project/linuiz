@@ -169,6 +169,7 @@ impl VirtualAddressor {
                 match mode {
                     PageAttributeModifyMode::Set => entry_attributes = attributes,
                     PageAttributeModifyMode::Insert => entry_attributes.insert(attributes),
+                    PageAttributeModifyMode::Remove => entry_attributes.remove(attributes),
                     PageAttributeModifyMode::Toggle => entry_attributes.toggle(attributes),
                 }
 
