@@ -9,7 +9,7 @@ pub struct CR3;
 
 impl CR3 {
     pub unsafe fn write(frame: &crate::memory::Frame, flags: CR3Flags) {
-        asm!("mov cr3, {}", in(reg) frame.addr().as_usize() | flags.bits(), options(nostack));
+        asm!("mov cr3, {}", in(reg) frame.base_addr().as_usize() | flags.bits(), options(nostack));
     }
 
     pub fn read() -> CR3Flags {

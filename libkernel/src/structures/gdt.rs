@@ -1,7 +1,10 @@
 use lazy_static::lazy_static;
-use x86_64::structures::{
-    gdt::{Descriptor, GlobalDescriptorTable, SegmentSelector},
-    tss::TaskStateSegment,
+use x86_64::{
+    instructions::segmentation::Segment,
+    structures::{
+        gdt::{Descriptor, GlobalDescriptorTable, SegmentSelector},
+        tss::TaskStateSegment,
+    },
 };
 
 pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
@@ -48,7 +51,7 @@ pub fn init() {
 
     unsafe {
         // load the code and tss segments
-        x86_64::instructions::segmentation::set_cs(GDT.1.code_selector);
+        x86_64::instructions::segmentation::CS::set_reg(GDT.1.code_selector);
         x86_64::instructions::tables::load_tss(GDT.1.tss_selector);
     }
 }
