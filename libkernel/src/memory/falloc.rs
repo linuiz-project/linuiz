@@ -31,22 +31,21 @@ pub fn virtual_map_offset() -> Address<Virtual> {
 pub enum FrameState {
     Free = 0,
     Locked,
-    Reserved,
+    /// Indicates a frame should never be used by software (except for MMIO).
+    /// REMARK: Acquiring this will _NEVER_ fail, and so is extremely unsafe to do.
+    ///     Use with caution.
     NonUsable,
-    MMIO,
 }
 
 impl crate::BitValue for FrameState {
-    const BIT_WIDTH: usize = 0x4;
-    const MASK: usize = 0xF;
+    const BIT_WIDTH: usize = 0x2;
+    const MASK: usize = 0b11;
 
     fn from_usize(value: usize) -> Self {
         match value {
             0 => FrameState::Free,
             1 => FrameState::Locked,
-            2 => FrameState::Reserved,
-            3 => FrameState::NonUsable,
-            4 => FrameState::MMIO,
+            2 => FrameState::NonUsable,
             _ => panic!("invalid value for frame type: {:?}", value),
         }
     }
@@ -58,10 +57,14 @@ impl crate::BitValue for FrameState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameAllocatorError {
-    ExpectedFrameState(usize, FrameState),
-    NonMMIOFrameState(usize, FrameState),
-    OutOfBoundsMMIOExists(usize),
     FreeWithAcquire,
+    /// Frame allocator encoutered an unexpected frame state.
+    /// Field 0 (usize): frame index
+    /// Field 1 (FrameState): expected state
+    /// Field 2 (FrameState): actual state
+    ExpectedFrameState(usize, FrameState, FrameState),
+    OutOfBoundsExists(usize),
+    OutOfBoundsLock,
 }
 
 /// Structure for deterministically reserving, locking, and freeing RAM frames.
@@ -81,7 +84,7 @@ pub enum FrameAllocatorError {
 pub struct FrameAllocator<'arr> {
     memory_map: RwBitArray<'arr, FrameState>,
     memory: RwLock<[usize; FrameState::MASK + 1]>,
-    mmio_oob: core::cell::RefCell<alloc::vec::Vec<usize>>,
+    non_usable_oob: core::cell::RefCell<alloc::collections::BTreeSet<usize>>,
 }
 
 impl<'arr> FrameAllocator<'arr> {
@@ -129,13 +132,13 @@ impl<'arr> FrameAllocator<'arr> {
                 total_frames,
             ),
             memory: RwLock::new(memory_counters),
-            mmio_oob: core::cell::RefCell::new(alloc::vec::Vec::<usize>::new()),
+            non_usable_oob: core::cell::RefCell::new(alloc::collections::BTreeSet::<usize>::new()),
         };
 
         this.acquire_frames(
             (base_ptr as usize) / 0x1000,
             Self::frame_count_hint(total_memory),
-            FrameState::Reserved,
+            FrameState::NonUsable,
         )
         .expect("unexpectedly failed to reserve frame allocator frames");
 
@@ -148,7 +151,7 @@ impl<'arr> FrameAllocator<'arr> {
     pub unsafe fn free_frame(&self, frame: Frame) -> Result<(), FrameAllocatorError> {
         if self
             .memory_map
-            .set_eq(frame.index(), FrameState::Free, FrameState::Locked)
+            .insert_eq(frame.index(), FrameState::Free, FrameState::Locked)
         {
             let mut mem_write = self.memory.write();
             mem_write[FrameState::Free.as_usize()] += 0x1000;
@@ -165,6 +168,7 @@ impl<'arr> FrameAllocator<'arr> {
             Err(FrameAllocatorError::ExpectedFrameState(
                 frame.index(),
                 FrameState::Locked,
+                self.memory_map.get(frame.index()),
             ))
         }
     }
@@ -174,42 +178,51 @@ impl<'arr> FrameAllocator<'arr> {
         index: usize,
         acq_state: FrameState,
     ) -> Result<Frame, FrameAllocatorError> {
+        let is_index_out_of_bounds = index >= self.memory_map.len();
         match acq_state {
+            // Illegal to free with acquisition.
             FrameState::Free => Err(FrameAllocatorError::FreeWithAcquire),
-            // Out of bounds MMIO reservation
-            FrameState::MMIO if index >= self.memory_map.len() => {
-                let mut mmio_oob = self.mmio_oob.borrow_mut();
-
-                if !mmio_oob.contains(&index) {
-                    mmio_oob.push(index);
-                    Ok(Frame::from_index(index))
-                } else {
-                    Err(FrameAllocatorError::OutOfBoundsMMIOExists(index))
-                }
+            // Cannot acquire as locked an out-of-bounds frame.
+            FrameState::Locked if is_index_out_of_bounds => {
+                Err(FrameAllocatorError::OutOfBoundsLock)
             }
-            FrameState::MMIO => match self.memory_map.get(index) {
-                cur_state if matches!(cur_state, FrameState::Reserved | FrameState::NonUsable) => {
-                    self.memory_map.set(index, acq_state);
-
-                    let mut mem_write = self.memory.write();
-                    mem_write[cur_state.as_usize()] -= 0x1000;
-                    mem_write[acq_state.as_usize()] += 0x1000;
-
-                    Ok(Frame::from_index(index))
-                }
-                cur_state => Err(FrameAllocatorError::NonMMIOFrameState(index, cur_state)),
-            },
-            _ if self.memory_map.set_eq(index, acq_state, FrameState::Free) => {
+            // Acquire frame as locked if it is already free.
+            FrameState::Locked
+                if self
+                    .memory_map
+                    .insert_eq(index, acq_state, FrameState::Free) =>
+            {
                 let mut mem_write = self.memory.write();
                 mem_write[FrameState::Free.as_usize()] -= 0x1000;
                 mem_write[acq_state.as_usize()] += 0x1000;
 
                 Ok(Frame::from_index(index))
             }
-            _ => Err(FrameAllocatorError::ExpectedFrameState(
+            // Failed to acquire frame as locked (incorrect existing frame type).
+            FrameState::Locked => Err(FrameAllocatorError::ExpectedFrameState(
                 index,
                 FrameState::Free,
+                FrameState::Locked,
             )),
+            // Track out-of-bounds NonUsable frame.
+            FrameState::NonUsable if is_index_out_of_bounds => {
+                let mut non_usable_oob = self.non_usable_oob.borrow_mut();
+
+                if non_usable_oob.insert(index) {
+                    Ok(Frame::from_index(index))
+                } else {
+                    Err(FrameAllocatorError::OutOfBoundsExists(index))
+                }
+            }
+            // Acquire specific frame as non-usable (this will NEVER fail).
+            FrameState::NonUsable => {
+                let old_state = self.memory_map.insert(index, FrameState::NonUsable);
+                if old_state != FrameState::NonUsable {
+                    self.memory.write()[old_state.as_usize()] -= 0x1000;
+                }
+
+                Ok(Frame::from_index(index))
+            }
         }
     }
 
