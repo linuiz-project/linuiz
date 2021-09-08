@@ -56,66 +56,6 @@ impl core::fmt::Debug for BlockPage {
     }
 }
 
-/// Allows tracking the state of the current block page's section
-///  in a loop, so a block page's underlying global memory can be
-///  allocated or deallocated accordingly.
-#[derive(Clone, Copy)]
-struct SectionState {
-    had_bits: bool,
-    has_bits: bool,
-}
-
-impl SectionState {
-    /// An empty section state.
-    const fn empty() -> Self {
-        Self {
-            had_bits: false,
-            has_bits: false,
-        }
-    }
-
-    /// Whether the section state indicates an empty section.
-    const fn is_empty(&self) -> bool {
-        !self.had_bits && !self.has_bits
-    }
-
-    /// Whether the section states indicates a section that should be allocated.
-    const fn is_alloc(&self) -> bool {
-        !self.had_bits && self.has_bits
-    }
-
-    /// Whether the section states indicates a section that should be deallocated.
-    const fn is_dealloc(&self) -> bool {
-        self.had_bits && !self.has_bits
-    }
-
-    /// Whether the given block page section states indicate an allocation.
-    fn should_alloc(page_state: &[SectionState]) -> bool {
-        page_state.iter().any(|state| state.is_alloc())
-            && page_state
-                .iter()
-                .all(|state| state.is_alloc() || state.is_empty())
-    }
-
-    /// Whether the given block page section states indicate an deallocation.
-    fn should_dealloc(page_state: &[SectionState]) -> bool {
-        page_state.iter().any(|state| state.is_dealloc())
-            && page_state
-                .iter()
-                .all(|state| state.is_dealloc() || state.is_empty())
-    }
-}
-
-impl core::fmt::Debug for SectionState {
-    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter
-            .debug_tuple("SectionState")
-            .field(&self.had_bits)
-            .field(&self.has_bits)
-            .finish()
-    }
-}
-
 /// Allocator utilizing blocks of memory, in size of 16 bytes per block, to
 ///  easily and efficiently allocate.
 pub struct BlockAllocator<'map> {
