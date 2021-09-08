@@ -1,7 +1,7 @@
 use crate::{
     addr_ty::{Physical, Virtual},
     memory::FrameIterator,
-    volatile::Volatile,
+    volatile::VolatileCell,
     Address, ReadOnly, ReadWrite,
 };
 
@@ -85,14 +85,20 @@ impl MMIO<Mapped> {
         }
     }
 
-    pub unsafe fn read<T>(&self, add_offset: usize) -> Result<Volatile<T, ReadOnly>, MMIOError> {
+    pub unsafe fn read<T>(
+        &self,
+        add_offset: usize,
+    ) -> Result<&VolatileCell<T, ReadOnly>, MMIOError> {
         self.mapped_offset::<T>(add_offset)
-            .map(|ptr| Volatile::<T, ReadOnly>::new(ptr))
+            .map(|ptr| &*(ptr as *const _))
     }
 
-    pub unsafe fn read_mut<T>(&self, offset: usize) -> Result<Volatile<T, ReadWrite>, MMIOError> {
+    pub unsafe fn read_mut<T>(
+        &self,
+        offset: usize,
+    ) -> Result<&mut VolatileCell<T, ReadWrite>, MMIOError> {
         self.mapped_offset::<T>(offset)
-            .map(|ptr| Volatile::<T, ReadWrite>::new(ptr))
+            .map(|ptr| &mut *(ptr as *mut _))
     }
 
     pub fn physical_addr(&self) -> Address<Physical> {

@@ -132,15 +132,20 @@ extern "efiapi" fn kernel_main(
                 // } else
                 if device.subclass() == 0x08 {
                     unsafe {
-                        use libkernel::io::pci::StandardRegister;
+                        // use crate::drivers::nvme::NVMECapabilities;
+                        use libkernel::io::pci::standard::StandardRegister;
 
                         let reg_0_mmio = device[StandardRegister::Register0].as_ref().unwrap();
-                        let cap_off = reg_0_mmio.read::<u64>(0).unwrap().read();
+                        // let cap = reg_0_mmio.read::<NVMECapabilities>(0).unwrap().read();
                     }
                 }
 
-                for i in device.capabilities() {
-                    info!("{:?}", i);
+                use libkernel::io::pci::standard::PCICapablities;
+                for capability in device.capabilities() {
+                    if let PCICapablities::MSIX(msix) = capability {
+                        info!("{:#?}", msix);
+                        info!("{:#?}", msix.get_message_table(device))
+                    }
                 }
             }
         }
@@ -288,8 +293,9 @@ fn init_apic() {
     timer.wait();
 
     apic.timer().set_masked(true);
+    let timer_count = apic.reg(APICRegister::TimerCurrentCount).read();
     apic.reg_mut(APICRegister::TimerInitialCount)
-        .write(u32::MAX - apic.reg(APICRegister::TimerCurrentCount).read());
+        .write(u32::MAX - timer_count);
     apic.reg_mut(APICRegister::TimerDivisor)
         .write(APICTimerDivisor::Div1 as u32);
 

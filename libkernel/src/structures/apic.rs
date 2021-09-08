@@ -3,7 +3,7 @@ use crate::{
     cell::SyncOnceCell,
     memory::mmio::{Mapped, MMIO},
     registers::MSR,
-    volatile::Volatile,
+    volatile::VolatileCell,
     Address,
 };
 use core::marker::PhantomData;
@@ -211,11 +211,11 @@ impl APIC {
         APICErrorStatusFlags::from_bits_truncate(unsafe { self.mmio.read(0x280).unwrap().read() })
     }
 
-    pub fn reg(&self, register: APICRegister) -> Volatile<u32, crate::ReadOnly> {
+    pub fn reg(&self, register: APICRegister) -> &VolatileCell<u32, crate::ReadOnly> {
         unsafe { self.mmio.read(register as usize).unwrap() }
     }
 
-    pub fn reg_mut(&mut self, register: APICRegister) -> Volatile<u32, crate::ReadWrite> {
+    pub fn reg_mut(&mut self, register: APICRegister) -> &mut VolatileCell<u32, crate::ReadWrite> {
         unsafe { self.mmio.read_mut(register as usize).unwrap() }
     }
 
@@ -252,12 +252,12 @@ impl LVTRegisterVariant for Error {}
 use bit_field::BitField;
 
 #[repr(transparent)]
-pub struct LVTRegister<T: LVTRegisterVariant> {
-    obj: crate::volatile::Volatile<u32, crate::ReadWrite>,
+pub struct LVTRegister<'reg, T: LVTRegisterVariant> {
+    obj: &'reg mut crate::volatile::VolatileCell<u32, crate::ReadWrite>,
     phantom: PhantomData<T>,
 }
 
-impl<T: LVTRegisterVariant> LVTRegister<T> {
+impl<T: LVTRegisterVariant> LVTRegister<'_, T> {
     const INTERRUPTED_OFFSET: usize = 12;
     const MASKED_OFFSET: usize = 16;
     const VECTOR_MASK: u32 = 0xFF;
@@ -290,14 +290,14 @@ impl<T: LVTRegisterVariant> LVTRegister<T> {
     }
 }
 
-impl LVTRegister<Timer> {
+impl LVTRegister<'_, Timer> {
     pub fn set_mode(&mut self, mode: APICTimerMode) {
         self.obj
             .write(*self.obj.read().set_bits(17..19, mode as u32));
     }
 }
 
-impl LVTRegister<Generic> {
+impl LVTRegister<'_, Generic> {
     pub fn set_delivery_mode(&mut self, mode: APICDeliveryMode) {
         self.obj
             .write(*self.obj.read().set_bits(8..11, mode as u32));

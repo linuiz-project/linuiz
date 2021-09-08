@@ -1,11 +1,9 @@
-mod standard;
+pub mod standard;
 
 use crate::memory::mmio::{Mapped, MMIO};
 use alloc::vec::Vec;
 use bitflags::bitflags;
 use core::{fmt, marker::PhantomData};
-
-pub use standard::*;
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy)]
@@ -374,9 +372,9 @@ impl PCIeDeviceRegister {
         use bit_field::BitField;
 
         match self {
-            PCIeDeviceRegister::MemorySpace32(value, _) => (value.get_bits(4..32) & !0xFFF) == 0,
-            PCIeDeviceRegister::MemorySpace64(value, _) => (value.get_bits(4..64) & !0xFFF) == 0,
-            PCIeDeviceRegister::IOSpace(value, _) => (value.get_bits(2..32) & !0xFFF) == 0,
+            PCIeDeviceRegister::MemorySpace32(value, _) => value.get_bits(4..32) == 0,
+            PCIeDeviceRegister::MemorySpace64(value, _) => value.get_bits(4..64) == 0,
+            PCIeDeviceRegister::IOSpace(value, _) => value.get_bits(2..32) == 0,
             PCIeDeviceRegister::None => true,
         }
     }

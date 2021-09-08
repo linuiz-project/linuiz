@@ -41,7 +41,7 @@ impl<T> Volatile<T, ReadWrite> {
         unsafe { self.ptr.write_volatile(value) };
     }
 
-    pub fn borrow_mut(&self) -> &mut T {
+    pub fn borrow_mut(&mut self) -> &mut T {
         unsafe { &mut *self.ptr }
     }
 }

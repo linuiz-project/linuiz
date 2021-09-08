@@ -25,7 +25,7 @@ macro_rules! bitfield_getter_ro {
 macro_rules! bitfield_getter {
     ($field:ident, $var_name:ident, $bit_index:literal) => {
         paste::paste! {
-            libkernel::bitfield_getter_ro!($field, $var_name, $bit_index);
+            $crate::bitfield_getter_ro!($field, $var_name, $bit_index);
 
             pub fn [<set_ $var_name>](&mut self, value: bool) {
                 use bit_field::BitField;
@@ -37,7 +37,7 @@ macro_rules! bitfield_getter {
 
     ($field:ident, $field_ty:ty, $var_name:ident, $bit_range:expr) => {
         paste::paste! {
-            libkernel::bitfield_getter_ro!($field, $field_ty, $var_name, $bit_range);
+            $crate::bitfield_getter_ro!($field, $field_ty, $var_name, $bit_range);
 
             pub fn [<set_ $var_name>](&mut self, value: $field_ty) {
                 use bit_field::BitField;
@@ -74,7 +74,7 @@ macro_rules! atomic_bitfield_getter_ro {
 #[macro_export]
 macro_rules! atomic_bitfield_getter {
     ($field:ident, $var_name:ident, $bit_index:literal) => {
-        libkernel::atomic_bitfield_getter_ro!($field, $var_name, $bit_index);
+        $crate::atomic_bitfield_getter_ro!($field, $var_name, $bit_index);
 
         paste::paste! {
             pub fn [<set_ $var_name>](&mut self, set: bool) {
@@ -126,7 +126,7 @@ macro_rules! volatile_bitfield_getter_ro {
 #[macro_export]
 macro_rules! volatile_bitfield_getter {
     ($field:ident, $var_name:ident, $bit_index:literal) => {
-        libkernel::volatile_bitfield_getter_ro!($field, $var_name, $bit_index);
+        $crate::volatile_bitfield_getter_ro!($field, $var_name, $bit_index);
 
         paste::paste! {
             pub fn [<set_ $var_name>](&mut self, set: bool) {
@@ -139,7 +139,7 @@ macro_rules! volatile_bitfield_getter {
 
     ($field:ident, $field_ty:ty, $var_name:ident, $bit_range:expr) => {
         paste::paste! {
-            libkernel::volatile_bitfield_getter_ro!($field, $field_ty, $var_name, $bit_range);
+            $crate::volatile_bitfield_getter_ro!($field, $field_ty, $var_name, $bit_range);
 
             pub fn [<set_ $var_name>](&mut self, value: $field_ty) {
                 use bit_field::BitField;

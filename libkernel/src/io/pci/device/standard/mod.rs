@@ -1,3 +1,6 @@
+mod capabilities;
+pub use capabilities::*;
+
 use crate::{
     io::pci::{
         PCIeDevice, PCIeDeviceRegister, PCIeDeviceRegisterIterator, PCIeDeviceType, Standard,
@@ -5,101 +8,10 @@ use crate::{
     memory::mmio::{Mapped, MMIO},
 };
 use core::fmt;
-
-/// An exaplanation of the acronyms used here can be inferred from:
-///  https://lekensteyn.nl/files/docs/PCI_SPEV_V3_0.pdf table H-1
-#[derive(Debug)]
-pub enum PCICapablities {
-    /// PCI Power Management Interface
-    PWMI,
-    /// Accelerated Graphics Port
-    AGP,
-    /// Vital Product Data
-    VPD,
-    /// Slot Identification
-    SIDENT,
-    /// Message Signaled Interrupts
-    MSI,
-    /// CompactPCI Hot Swap
-    CPCIHS,
-    /// PCI-X
-    PCIX,
-    /// HyperTransport
-    HYTPT,
-    /// Vendor Specific
-    VENDOR,
-    /// Debug Port
-    DEBUG,
-    /// CompactPCI Central Resource Control
-    CPCICPC,
-    /// PCI Hot-Plug
-    HOTPLG,
-    /// PCI Bridge Subsystem Vendor ID
-    SSYSVENDID,
-    /// AGP 8x
-    AGP8X,
-    /// Secure Device
-    SECURE,
-    /// PCI Express
-    PCIE,
-    /// Message Signaled Interrupt Extension
-    MSIX,
-    Reserved,
-    NotImplemented,
-}
-
-pub struct PCICapablitiesIterator<'mmio> {
-    mmio: &'mmio MMIO<Mapped>,
-    offset: u8,
-}
-
-impl<'mmio> PCICapablitiesIterator<'mmio> {
-    fn new(mmio: &'mmio MMIO<Mapped>, offset: u8) -> Self {
-        Self { mmio, offset }
-    }
-}
-
-impl Iterator for PCICapablitiesIterator<'_> {
-    type Item = PCICapablities;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.offset > 0 {
-            unsafe {
-                use bit_field::BitField;
-
-                let cap_reg_00 = self.mmio.read::<u32>(self.offset as usize).unwrap().read();
-                self.offset = cap_reg_00.get_bits(8..16) as u8;
-
-                Some(match cap_reg_00.get_bits(0..8) {
-                    0x1 => PCICapablities::PWMI,
-                    0x2 => PCICapablities::AGP,
-                    0x3 => PCICapablities::VPD,
-                    0x4 => PCICapablities::SIDENT,
-                    0x5 => PCICapablities::MSI,
-                    0x6 => PCICapablities::CPCIHS,
-                    0x7 => PCICapablities::PCIX,
-                    0x8 => PCICapablities::HYTPT,
-                    0x9 => PCICapablities::VENDOR,
-                    0xA => PCICapablities::DEBUG,
-                    0xB => PCICapablities::CPCICPC,
-                    0xC => PCICapablities::HOTPLG,
-                    0xD => PCICapablities::SSYSVENDID,
-                    0xE => PCICapablities::AGP8X,
-                    0xF => PCICapablities::SECURE,
-                    0x10 => PCICapablities::PCIE,
-                    0x11 => PCICapablities::MSIX,
-                    0x0 | 0x12..0xFF => PCICapablities::Reserved,
-                    _ => PCICapablities::NotImplemented,
-                })
-            }
-        } else {
-            None
-        }
-    }
-}
+use num_enum::TryFromPrimitive;
 
 #[repr(usize)]
-#[derive(Debug)]
+#[derive(Debug, TryFromPrimitive)]
 pub enum StandardRegister {
     Register0 = 0,
     Register1 = 1,
@@ -121,14 +33,13 @@ impl PCIeDevice<Standard> {
             "incorrect header type for standard specification PCI device"
         );
 
-        let mut registers = alloc::vec![None, None, None, None, None];
-
+        let mut registers = alloc::vec![None, None, None, None, None, None];
         for (register_num, register) in PCIeDeviceRegisterIterator::new(
             mmio.mapped_addr().as_mut_ptr::<u32>().add(0x4),
             Standard::REGISTER_COUNT,
         )
-        .filter(|register| !register.is_unused())
         .enumerate()
+        .filter(|(_, register)| !register.is_unused())
         {
             debug!("Device Register {}: {:?}", register_num, register);
 

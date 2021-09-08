@@ -2,7 +2,7 @@ pub mod hba;
 
 use alloc::vec::Vec;
 use bit_field::BitField;
-use libkernel::io::pci::{PCIeDevice, Standard, StandardRegister};
+use libkernel::io::pci::{standard::StandardRegister, PCIeDevice, Standard};
 
 use crate::drivers::ahci::hba::HBAPort;
 
