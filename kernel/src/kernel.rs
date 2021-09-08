@@ -93,13 +93,6 @@ extern "efiapi" fn kernel_main(
         info!("Initializing kernel default allocator.");
         KERNEL_MALLOC.init(reserve_kernel_stack(memory_map));
         libkernel::memory::malloc::set(&KERNEL_MALLOC);
-
-        debug!(
-            "System reserved memory: {:?} MB",
-            libkernel::memory::to_mibibytes(
-                falloc::get().total_memory(Some(falloc::FrameState::NonUsable))
-            )
-        );
     }
 
     init_apic();
@@ -143,8 +136,6 @@ extern "efiapi" fn kernel_main(
 
                         let reg_0_mmio = device[StandardRegister::Register0].as_ref().unwrap();
                         let cap_off = reg_0_mmio.read::<u64>(0).unwrap().read();
-
-                        info!("CAP OFF 0x{:X} with val 0x{:X}", cap_off, val);
                     }
                 }
 
@@ -165,6 +156,7 @@ pub unsafe fn init_falloc(memory_map: &[UEFIMemoryDescriptor]) {
     // calculates total system memory
     let total_memory = memory_map
         .iter()
+        .filter(|descriptor| !descriptor.should_reserve())
         .max_by_key(|descriptor| descriptor.phys_start)
         .map(|descriptor| {
             (descriptor.phys_start + ((descriptor.page_count as usize) * 0x1000)).as_usize()

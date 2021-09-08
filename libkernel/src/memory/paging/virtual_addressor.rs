@@ -117,7 +117,6 @@ impl VirtualAddressor {
 
         self.get_page_entry_mut(page).unwrap().set_nonpresent();
         crate::instructions::tlb::invalidate(page);
-        debug!("Unmapped {:?}", page);
 
         assert!(!self.is_mapped(page.base_addr()), "failed to unmap page",);
     }
