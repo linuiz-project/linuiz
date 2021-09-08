@@ -96,7 +96,7 @@ impl MMIO<Mapped> {
     }
 
     pub fn physical_addr(&self) -> Address<Physical> {
-        self.frames.start().addr()
+        self.frames.start().base_addr()
     }
 
     pub fn mapped_addr(&self) -> Address<Virtual> {

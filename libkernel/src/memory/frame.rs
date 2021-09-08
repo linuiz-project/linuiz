@@ -38,7 +38,7 @@ impl Frame {
         self.index
     }
 
-    pub const fn addr(&self) -> Address<Physical> {
+    pub const fn base_addr(&self) -> Address<Physical> {
         unsafe { Address::<Physical>::new_unsafe(self.index * 0x1000) }
     }
 

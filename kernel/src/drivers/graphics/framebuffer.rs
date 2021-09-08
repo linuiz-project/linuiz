@@ -24,7 +24,7 @@ impl FramebufferDriver {
                 .acquire_frames(
                     frame_index,
                     frame_count,
-                    libkernel::memory::falloc::FrameState::MMIO,
+                    libkernel::memory::falloc::FrameState::NonUsable,
                 )
                 .unwrap();
 

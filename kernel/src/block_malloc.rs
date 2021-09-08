@@ -1,4 +1,4 @@
-use core::mem::size_of;
+use core::{alloc::Layout, mem::size_of};
 use libkernel::{
     addr_ty::{Physical, Virtual},
     align_up_div,
@@ -153,7 +153,7 @@ impl BlockAllocator<'_> {
 
     /* INITIALIZATION */
 
-    pub unsafe fn init(&self, stack_frames: &mut libkernel::memory::FrameIterator) {
+    pub unsafe fn init(&self, mut stack_frames: libkernel::memory::FrameIterator) {
         {
             debug!("Initializing allocator's virtual addressor.");
             let mut addressor_mut = self.get_addressor_mut();
@@ -164,7 +164,7 @@ impl BlockAllocator<'_> {
             falloc::get()
                 .iter()
                 .enumerate()
-                .filter(|(_, frame_state)| *frame_state == falloc::FrameState::Reserved)
+                .filter(|(_, frame_state)| *frame_state == falloc::FrameState::NonUsable)
                 .for_each(|(frame_index, _)| {
                     addressor_mut.identity_map(&Frame::from_index(frame_index))
                 });
@@ -184,65 +184,42 @@ impl BlockAllocator<'_> {
         falloc::get()
             .iter()
             .enumerate()
-            .filter(|(_, frame_state)| *frame_state == falloc::FrameState::Reserved)
+            .filter(|(_, frame_state)| *frame_state == falloc::FrameState::NonUsable)
             .for_each(|(frame_index, _)| self.identity_map(&Frame::from_index(frame_index), false));
 
-        const STACK_SIZE: usize = 256 * 0x1000; /* 1MB in pages */
+        let stack_frame_count = stack_frames.len();
+        let new_stack_size = stack_frame_count * 0x1000;
+        debug!("Allocating new stack: {} bytes", new_stack_size);
+        let old_stack_base = stack_frames.start().base_addr().as_usize() as *const u8;
+        let new_stack_base = self.alloc::<u8>(Layout::from_size_align_unchecked(new_stack_size, 1));
 
-        debug!("Allocating new stack: {} bytes", STACK_SIZE);
-        let new_stack_base = self.alloc::<u8>(
-            core::alloc::Layout::from_size_align(STACK_SIZE, Self::BLOCK_SIZE).unwrap(),
+        debug!(
+            "Copying data from bootloader-allocated stack:\n\t{:?}:{} -> {:?}",
+            old_stack_base, stack_frame_count, new_stack_base
         );
-        let stack_base_cell = core::lazy::OnceCell::<*mut u8>::new();
+        core::ptr::copy_nonoverlapping(old_stack_base, new_stack_base, new_stack_size);
+        // TODO also zero all antecedent stack frames ?
 
-        debug!("Copying data from bootloader-allocated stack.");
-        for (index, frame) in stack_frames.enumerate() {
-            let cur_offset = new_stack_base.add(index * 0x1000);
-            let frame_ptr = frame.addr().as_usize() as *mut u8;
-            trace!(
-                "{}: {:?}: {:?} -> {:?}",
-                index,
-                frame,
-                cur_offset,
-                frame_ptr
-            );
-            stack_base_cell.set(frame_ptr).ok();
-
-            core::ptr::copy_nonoverlapping(frame_ptr, cur_offset, 0x1000);
-            // TODO also zero all antecedent stack frames
-        }
-
-        if let Some(stack_base) = stack_base_cell.get() {
-            let base_offset = stack_base.offset_from(new_stack_base);
-
-            debug!("Modifying `rsp` by base offset: 0x{:x}.", base_offset);
-            use libkernel::registers::stack::RSP;
-            if base_offset.is_positive() {
-                RSP::sub(base_offset.abs() as u64);
-            } else {
-                RSP::add(base_offset.abs() as u64);
-            }
+        // Determine offset between the two stacks, to properly move RSP.
+        let base_offset = old_stack_base.offset_from(new_stack_base);
+        debug!("Modifying `rsp` by base offset: 0x{:x}.", base_offset);
+        use libkernel::registers::stack::RSP;
+        if base_offset.is_positive() {
+            RSP::sub(base_offset.abs() as u64);
         } else {
-            panic!("failed to acquire current stack base pointer")
+            RSP::add(base_offset.abs() as u64);
         }
 
         debug!("Unmapping bootloader-provided stack frames.");
         let mut addressor_mut = self.get_addressor_mut();
-        stack_frames.reset();
+        // We must copy the old stack frames iterator to our new stack; it will become unmapped
+        //  as we unmap the old stack (which it exists on).
+        let mut fresh_stack_frames = ((&mut stack_frames) as *mut FrameIterator).read_volatile();
+        fresh_stack_frames.reset();
 
-        // `stack_frames` is invalid as we iterate and unmap the pages it exists on.
-        {
-            use core::mem::transmute;
-            type FrameIteratorBytes = [u8; size_of::<FrameIterator>()];
-
-            let temp = &mut [0u8; size_of::<FrameIterator>()];
-            temp.copy_from_slice(transmute::<&mut FrameIterator, &mut FrameIteratorBytes>(
-                stack_frames,
-            ));
-
-            transmute::<&mut FrameIteratorBytes, &mut FrameIterator>(temp)
+        for frame in fresh_stack_frames {
+            addressor_mut.unmap(&Page::from_index(frame.index()));
         }
-        .for_each(|frame| addressor_mut.unmap(&Page::from_index(frame.index())));
 
         debug!("Finished block allocator initialization.");
     }
@@ -251,7 +228,7 @@ impl BlockAllocator<'_> {
 
     // TODO consider returning a slice from this function rather than a raw pointer
     //      reasoning: possibly a more idiomatic way to return a sized chunk of memory
-    pub fn alloc<T>(&self, layout: core::alloc::Layout) -> *mut T {
+    pub fn alloc<T>(&self, layout: Layout) -> *mut T {
         const MINIMUM_ALIGNMENT: usize = 16;
 
         let size_in_blocks = (layout.size() + (Self::BLOCK_SIZE - 1)) / Self::BLOCK_SIZE;
@@ -551,7 +528,7 @@ impl BlockAllocator<'_> {
     }
 
     pub unsafe fn physical_memory(&self, addr: Address<Physical>) -> Address<Virtual> {
-        self.get_addressor().mapped_page().addr() + addr.as_usize()
+        self.get_addressor().mapped_page().base_addr() + addr.as_usize()
     }
 }
 
@@ -564,7 +541,7 @@ impl libkernel::memory::malloc::MemoryAllocator for BlockAllocator<'_> {
         self.physical_memory(addr)
     }
 
-    fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
+    fn alloc(&self, layout: Layout) -> *mut u8 {
         self.alloc(layout)
     }
 
@@ -572,7 +549,7 @@ impl libkernel::memory::malloc::MemoryAllocator for BlockAllocator<'_> {
         self.alloc_to(frames)
     }
 
-    fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
+    fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         self.dealloc(ptr, layout.size());
     }
 

@@ -57,8 +57,8 @@ impl VirtualAddressor {
     }
 
     fn get_page_entry(&self, page: &Page) -> Option<&PageTableEntry> {
-        let offset = self.mapped_page.addr();
-        let addr = page.addr();
+        let offset = self.mapped_page.base_addr();
+        let addr = page.base_addr();
 
         unsafe {
             self.pml4()
@@ -70,8 +70,8 @@ impl VirtualAddressor {
     }
 
     fn get_page_entry_mut(&mut self, page: &Page) -> Option<&mut PageTableEntry> {
-        let offset = self.mapped_page.addr();
-        let addr = page.addr();
+        let offset = self.mapped_page.base_addr();
+        let addr = page.base_addr();
 
         unsafe {
             self.pml4_mut()
@@ -83,8 +83,8 @@ impl VirtualAddressor {
     }
 
     fn get_page_entry_create(&mut self, page: &Page) -> &mut PageTableEntry {
-        let offset = self.mapped_page.addr();
-        let addr = page.addr();
+        let offset = self.mapped_page.base_addr();
+        let addr = page.base_addr();
 
         unsafe {
             self.pml4_mut()
@@ -99,7 +99,7 @@ impl VirtualAddressor {
 
     pub fn map(&mut self, page: &Page, frame: &Frame) {
         assert!(
-            !self.is_mapped(page.addr()),
+            !self.is_mapped(page.base_addr()),
             "page already mapped: {:?}",
             page
         );
@@ -113,13 +113,13 @@ impl VirtualAddressor {
     }
 
     pub fn unmap(&mut self, page: &Page) {
-        assert!(self.is_mapped(page.addr()), "page already unmapped");
+        assert!(self.is_mapped(page.base_addr()), "page already unmapped");
 
         self.get_page_entry_mut(page).unwrap().set_nonpresent();
         crate::instructions::tlb::invalidate(page);
-        trace!("Unmapped {:?}", page);
+        debug!("Unmapped {:?}", page);
 
-        assert!(!self.is_mapped(page.addr()), "failed to unmap page",);
+        assert!(!self.is_mapped(page.base_addr()), "failed to unmap page",);
     }
 
     pub fn identity_map(&mut self, frame: &Frame) {
@@ -187,7 +187,7 @@ impl VirtualAddressor {
 
     #[cfg(debug_assertions)]
     pub unsafe fn pretty_log(&self) {
-        let offset = self.mapped_page.addr();
+        let offset = self.mapped_page.base_addr();
         let pml4 = self.pml4();
 
         info!("PML4");

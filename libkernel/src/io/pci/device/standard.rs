@@ -144,7 +144,7 @@ impl PCIeDevice<Standard> {
                 .acquire_frames(
                     frame_index,
                     frame_usage,
-                    crate::memory::falloc::FrameState::MMIO,
+                    crate::memory::falloc::FrameState::NonUsable,
                 )
                 .expect("frames are not MMIO");
             debug!("\tAuto-mapping register destination frame.");

@@ -1,5 +1,5 @@
 qemu-system-x86_64^
-    -m 512M^
+    -m 4G^
     -serial stdio^
     -machine q35^
     -cpu qemu64^

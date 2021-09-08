@@ -47,7 +47,7 @@ impl Page {
         self.index
     }
 
-    pub const fn addr(&self) -> Address<Virtual> {
+    pub const fn base_addr(&self) -> Address<Virtual> {
         unsafe { Address::new_unsafe(self.index * 0x1000) }
     }
 

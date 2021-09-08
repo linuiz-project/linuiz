@@ -69,7 +69,7 @@ impl<L: HeirarchicalLevel> PageTable<L> {
     ) -> Option<&PageTable<L::NextLevel>> {
         self.get_entry(index)
             .frame()
-            .map(|frame| &*(phys_mapped_addr + frame.addr().as_usize()).as_ptr())
+            .map(|frame| &*(phys_mapped_addr + frame.base_addr().as_usize()).as_ptr())
     }
 
     pub unsafe fn sub_table_mut(
@@ -79,7 +79,7 @@ impl<L: HeirarchicalLevel> PageTable<L> {
     ) -> Option<&mut PageTable<L::NextLevel>> {
         self.get_entry_mut(index)
             .frame()
-            .map(|frame| &mut *(phys_mapped_addr + frame.addr().as_usize()).as_mut_ptr())
+            .map(|frame| &mut *(phys_mapped_addr + frame.base_addr().as_usize()).as_mut_ptr())
     }
 
     pub unsafe fn sub_table_create(
@@ -107,7 +107,7 @@ impl<L: HeirarchicalLevel> PageTable<L> {
         };
 
         let sub_table: &mut PageTable<L::NextLevel> =
-            &mut *(phys_mapped_addr + frame.addr().as_usize()).as_mut_ptr();
+            &mut *(phys_mapped_addr + frame.base_addr().as_usize()).as_mut_ptr();
 
         if created {
             sub_table.clear();

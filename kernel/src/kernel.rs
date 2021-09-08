@@ -89,16 +89,15 @@ extern "efiapi" fn kernel_main(
         let memory_map = boot_info.memory_map();
         init_falloc(memory_map);
         init_system_config_table(boot_info.config_table());
-        let mut stack_frames = reserve_kernel_stack(memory_map);
 
         info!("Initializing kernel default allocator.");
-        KERNEL_MALLOC.init(&mut stack_frames);
+        KERNEL_MALLOC.init(reserve_kernel_stack(memory_map));
         libkernel::memory::malloc::set(&KERNEL_MALLOC);
 
         debug!(
             "System reserved memory: {:?} MB",
             libkernel::memory::to_mibibytes(
-                falloc::get().total_memory(Some(falloc::FrameState::Reserved))
+                falloc::get().total_memory(Some(falloc::FrameState::NonUsable))
             )
         );
     }
@@ -139,7 +138,14 @@ extern "efiapi" fn kernel_main(
                 //     }
                 // } else
                 if device.subclass() == 0x08 {
-                    use libkernel::io::pci::StandardRegister;
+                    unsafe {
+                        use libkernel::io::pci::StandardRegister;
+
+                        let reg_0_mmio = device[StandardRegister::Register0].as_ref().unwrap();
+                        let cap_off = reg_0_mmio.read::<u64>(0).unwrap().read();
+
+                        info!("CAP OFF 0x{:X} with val 0x{:X}", cap_off, val);
+                    }
                 }
 
                 for i in device.capabilities() {
@@ -186,8 +192,8 @@ pub unsafe fn init_falloc(memory_map: &[UEFIMemoryDescriptor]) {
 fn reserve_kernel_stack(memory_map: &[UEFIMemoryDescriptor]) -> libkernel::memory::FrameIterator {
     debug!("Allocating frames according to BIOS memory map.");
 
-    let mut stack_frames = core::lazy::OnceCell::<libkernel::memory::FrameIterator>::new();
     let mut last_frame_end = 0;
+    let mut stack_frames = core::lazy::OnceCell::<libkernel::memory::FrameIterator>::new();
     for descriptor in memory_map {
         let frame_start = descriptor.phys_start.frame_index();
         let frame_count = descriptor.page_count as usize;
@@ -209,7 +215,7 @@ fn reserve_kernel_stack(memory_map: &[UEFIMemoryDescriptor]) -> libkernel::memor
         if descriptor.should_reserve() {
             let descriptor_stack_frames = unsafe {
                 falloc::get()
-                    .acquire_frames(frame_start, frame_count, falloc::FrameState::Reserved)
+                    .acquire_frames(frame_start, frame_count, falloc::FrameState::NonUsable)
                     .unwrap()
             };
 
@@ -246,7 +252,7 @@ fn init_system_config_table(config_table: &[SystemConfigTableEntry]) {
         let frame_allocator = falloc::get();
         for index in frame_range {
             frame_allocator
-                .acquire_frame(index, falloc::FrameState::Reserved)
+                .acquire_frame(index, falloc::FrameState::NonUsable)
                 .unwrap();
         }
     }

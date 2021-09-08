@@ -20,7 +20,7 @@ pub fn load() {
 
         let mmio = crate::memory::mmio::unmapped_mmio(unsafe {
             crate::memory::falloc::get()
-                .acquire_frames(start_index, 1, crate::memory::falloc::FrameState::MMIO)
+                .acquire_frames(start_index, 1, crate::memory::falloc::FrameState::NonUsable)
                 .unwrap()
         })
         .unwrap()

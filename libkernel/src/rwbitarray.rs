@@ -68,7 +68,7 @@ impl<'arr, BV: BitValue> RwBitArray<'arr, BV> {
         BV::from_usize((section_value >> section_offset) & BV::MASK)
     }
 
-    pub fn set(&self, index: usize, new_type: BV) {
+    pub fn insert(&self, index: usize, new_type: BV) -> BV {
         assert!(
             index < self.len(),
             "index must be less than the size of the collection ({} >= {})",
@@ -83,9 +83,11 @@ impl<'arr, BV: BitValue> RwBitArray<'arr, BV> {
         let section_bits_set = new_type.as_usize() << section_offset;
         let section_bits_nonset = section_value & !(BV::MASK << section_offset);
         sections_read.upgrade()[section_index] = section_bits_set | section_bits_nonset;
+
+        BV::from_usize((section_value >> section_offset) & BV::MASK)
     }
 
-    pub fn set_eq(&self, index: usize, new_type: BV, eq_type: BV) -> bool {
+    pub fn insert_eq(&self, index: usize, new_type: BV, eq_type: BV) -> bool {
         assert!(
             index < self.len(),
             "index must be less than the size of the collection ({} >= {})",

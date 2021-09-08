@@ -20,7 +20,8 @@ use uefi::{
     prelude::BootServices,
     proto::{
         console::gop::{GraphicsOutput, Mode},
-        loaded_image::{DevicePath, LoadedImage},
+        device_path::DevicePath,
+        loaded_image::LoadedImage,
         media::{
             file::{Directory, File, FileAttribute, FileMode, RegularFile},
             fs::SimpleFileSystem,
@@ -161,8 +162,8 @@ pub fn read_file(file: &mut RegularFile, position: u64, buffer: &mut [u8]) {
 }
 
 #[entry]
-fn efi_main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
-    uefi_services::init(&system_table).expect_success("failed to unwrap UEFI services");
+fn efi_main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
+    uefi_services::init(&mut system_table).expect_success("failed to unwrap UEFI services");
     info!("Loaded Gsai UEFI bootloader v{}.", VERSION);
 
     configure_log_level();
@@ -385,7 +386,7 @@ fn allocate_segments(
 
 fn kernel_transfer(
     image_handle: Handle,
-    system_table: SystemTable<Boot>,
+    mut system_table: SystemTable<Boot>,
     kernel_entry_point: usize,
     framebuffer: Option<FramebufferInfo>,
 ) -> ! {
