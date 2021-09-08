@@ -118,33 +118,16 @@ extern "efiapi" fn kernel_main(
 
         if let PCIeDeviceVariant::Standard(device) = device_variant {
             if device.class() == PCIeDeviceClass::MassStorageController {
-                // if device.subclass() == 0x06 && device.program_interface() == 0x1 {
-                //     debug!("Configuring AHCI driver.");
+                if device.subclass() == 0x06 && device.program_interface() == 0x1 {
+                    debug!("Configuring AHCI driver.");
 
-                //     let mut ahci = drivers::ahci::AHCI::from_pcie_device(&device);
+                    let mut ahci = drivers::ahci::AHCI::from_pcie_device(&device);
 
-                //     debug!("Configuring AHCI SATA ports.");
-                //     for port in ahci.sata_ports() {
-                //         port.configure();
-                //         let buffer = port.read(0, 4);
-                //         info!("{:?}", buffer);
-                //     }
-                // } else
-                if device.subclass() == 0x08 {
-                    unsafe {
-                        // use crate::drivers::nvme::NVMECapabilities;
-                        use libkernel::io::pci::standard::StandardRegister;
-
-                        let reg_0_mmio = device[StandardRegister::Register0].as_ref().unwrap();
-                        // let cap = reg_0_mmio.read::<NVMECapabilities>(0).unwrap().read();
-                    }
-                }
-
-                use libkernel::io::pci::standard::PCICapablities;
-                for capability in device.capabilities() {
-                    if let PCICapablities::MSIX(msix) = capability {
-                        info!("{:#?}", msix);
-                        info!("{:#?}", msix.get_message_table(device))
+                    debug!("Configuring AHCI SATA ports.");
+                    for port in ahci.sata_ports() {
+                        port.configure();
+                        let buffer = port.read(0, 4);
+                        info!("{:?}", buffer);
                     }
                 }
             }
