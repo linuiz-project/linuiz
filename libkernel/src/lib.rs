@@ -33,7 +33,6 @@ pub mod io;
 pub mod memory;
 pub mod registers;
 pub mod structures;
-pub mod volatile;
 
 pub use addr::*;
 pub use boot_info::*;

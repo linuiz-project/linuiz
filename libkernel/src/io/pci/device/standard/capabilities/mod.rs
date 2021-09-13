@@ -40,7 +40,7 @@ pub enum PCICapablities<'cap> {
     /// PCI Express
     PCIE,
     /// Message Signaled Interrupt Extension
-    MSIX(&'cap mut MSIX),
+    MSIX(&'cap MSIX),
     Reserved,
     NotImplemented,
 }
@@ -64,7 +64,7 @@ impl<'mmio> Iterator for PCICapablitiesIterator<'mmio> {
             unsafe {
                 use bit_field::BitField;
 
-                let cap_reg = self.mmio.read::<u32>(self.offset as usize).unwrap().read();
+                let cap_reg = self.mmio.read::<u32>(self.offset as usize).unwrap();
                 let old_offset = self.offset as usize;
                 self.offset = cap_reg.get_bits(8..16) as u8;
 
@@ -85,9 +85,7 @@ impl<'mmio> Iterator for PCICapablitiesIterator<'mmio> {
                     0xE => PCICapablities::AGP8X,
                     0xF => PCICapablities::SECURE,
                     0x10 => PCICapablities::PCIE,
-                    0x11 => PCICapablities::MSIX(
-                        self.mmio.read_mut::<MSIX>(old_offset).unwrap().borrow_mut(),
-                    ),
+                    0x11 => PCICapablities::MSIX(self.mmio.borrow(old_offset).unwrap()),
                     0x0 | 0x12..0xFF => PCICapablities::Reserved,
                     _ => PCICapablities::NotImplemented,
                 })

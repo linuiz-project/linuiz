@@ -1,8 +1,7 @@
 use crate::{
     addr_ty::{Physical, Virtual},
     memory::FrameIterator,
-    volatile::VolatileCell,
-    Address, ReadOnly, ReadWrite,
+    Address,
 };
 
 use super::Page;
@@ -67,40 +66,6 @@ impl MMIO<Mapped> {
         self.frames.len() * 0x1000
     }
 
-    unsafe fn mapped_offset<T>(&self, offset: usize) -> Result<*mut T, MMIOError> {
-        if offset < self.max_offset() {
-            Ok((self.mapped_addr() + offset).as_ptr::<T>() as *mut T)
-        } else {
-            Err(MMIOError::OffsetOverrun(offset, self.max_offset()))
-        }
-    }
-
-    pub unsafe fn write<T>(&self, add_offset: usize, value: T) -> Result<(), MMIOError> {
-        match self.mapped_offset::<T>(add_offset) {
-            Ok(ptr) => {
-                ptr.write_volatile(value);
-                Ok(())
-            }
-            Err(mmio_err) => Err(mmio_err),
-        }
-    }
-
-    pub unsafe fn read<T>(
-        &self,
-        add_offset: usize,
-    ) -> Result<&VolatileCell<T, ReadOnly>, MMIOError> {
-        self.mapped_offset::<T>(add_offset)
-            .map(|ptr| &*(ptr as *const _))
-    }
-
-    pub unsafe fn read_mut<T>(
-        &self,
-        offset: usize,
-    ) -> Result<&mut VolatileCell<T, ReadWrite>, MMIOError> {
-        self.mapped_offset::<T>(offset)
-            .map(|ptr| &mut *(ptr as *mut _))
-    }
-
     pub fn physical_addr(&self) -> Address<Physical> {
         self.frames.start().base_addr()
     }
@@ -109,9 +74,37 @@ impl MMIO<Mapped> {
         self.mapped_addr
     }
 
+    pub fn mapped_offset(&self, add_offset: usize) -> Result<Address<Virtual>, MMIOError> {
+        if add_offset < self.max_offset() {
+            Ok(self.mapped_addr() + add_offset)
+        } else {
+            Err(MMIOError::OffsetOverrun(add_offset, self.max_offset()))
+        }
+    }
+
     pub fn pages(&self) -> super::PageIterator {
         let base_page = Page::from_addr(self.mapped_addr());
         super::PageIterator::new(&base_page, &base_page.offset(self.frames.captured_len()))
+    }
+
+    pub unsafe fn read<T>(&self, add_offset: usize) -> Result<T, MMIOError> {
+        self.mapped_offset(add_offset)
+            .map(|addr| addr.as_ptr::<T>().read_volatile())
+    }
+
+    pub unsafe fn write<T>(&self, add_offset: usize, value: T) -> Result<(), MMIOError> {
+        self.mapped_offset(add_offset).map(|mut addr| {
+            addr.as_mut_ptr::<T>().write_volatile(value);
+
+            ()
+        })
+    }
+
+    pub unsafe fn borrow<T: super::volatile::Volatile>(
+        &self,
+        add_offset: usize,
+    ) -> Result<&T, MMIOError> {
+        self.mapped_offset(add_offset).map(|addr| &*addr.as_ptr())
     }
 }
 

@@ -1,7 +1,7 @@
 use bit_field::BitField;
 use core::convert::TryFrom;
 use libkernel::{
-    volatile::{VolatileCell, VolatileSplitPtr},
+    memory::volatile::{VolatileCell, VolatileSplitPtr},
     volatile_bitfield_getter, volatile_bitfield_getter_ro, Address, ReadOnly, ReadWrite,
 };
 use num_enum::TryFromPrimitive;

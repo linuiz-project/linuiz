@@ -103,26 +103,27 @@ impl<'ahci> AHCI<'ahci> {
     pub fn from_pcie_device(device: &'ahci PCIeDevice<Standard>) -> Self {
         debug!("Using PCIe device for AHCI driver:\n{:#?}", device);
 
-        if let Some(hba_mmio) = &device[StandardRegister::Register5] {
+        if let Some(hba_mmio) = device.get_reg(StandardRegister::Register5) {
             use hba::HBAPortClass;
 
             debug!("Parsing valid SATA ports from HBA memory ports.");
-            let sata_ports: Vec<&mut HBAPort> = unsafe { hba_mmio.read_mut::<hba::HBAMemory>(0x0) }
-                .unwrap()
-                .borrow_mut()
-                .ports_mut()
-                .filter_map(|port| match port.class() {
-                    HBAPortClass::SATA | HBAPortClass::SATAPI => {
-                        debug!("Configuring AHCI port: {:?}", port.class());
+            let sata_ports: Vec<&mut HBAPort> =
+                unsafe { hba_mmio.borrow::<hba::HBAMemory>(0x0).unwrap() }
+                    .ports()
+                    .filter_map(|port| match port.class() {
+                        HBAPortClass::SATA | HBAPortClass::SATAPI => {
+                            debug!("Configuring AHCI port: {:?}", port.class());
 
-                        Some(unsafe {
-                            // Elide borrow checker.
-                            core::mem::transmute(port)
-                        })
-                    }
-                    _port_type => None,
-                })
-                .collect();
+                            Some(unsafe {
+                                // Elide borrow checker.
+                                // TODO: port should be invariantly inner-volatile.
+                                //      Then we can just reutrn an immutable borrow.
+                                &mut *(port as *const _ as *mut _)
+                            })
+                        }
+                        _port_type => None,
+                    })
+                    .collect();
 
             debug!("Found SATA ports: {}", sata_ports.len());
 

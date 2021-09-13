@@ -26,8 +26,7 @@ impl PCIeDevice<Standard> {
         assert_eq!(
             (mmio
                 .read::<u8>(crate::io::pci::PCIHeaderOffset::HeaderType.into())
-                .unwrap()
-                .read())
+                .unwrap())
                 & !(1 << 7),
             0,
             "incorrect header type for standard specification PCI device"
@@ -35,7 +34,7 @@ impl PCIeDevice<Standard> {
 
         let mut registers = alloc::vec![None, None, None, None, None, None];
         for (register_num, register) in PCIeDeviceRegisterIterator::new(
-            mmio.mapped_addr().as_mut_ptr::<u32>().add(0x4),
+            (mmio.mapped_addr() + 0x10).as_mut_ptr::<u32>(),
             Standard::REGISTER_COUNT,
         )
         .enumerate()
@@ -101,59 +100,55 @@ impl PCIeDevice<Standard> {
     }
 
     pub fn cardbus_cis_ptr(&self) -> u32 {
-        unsafe { self.mmio.read(0x28).unwrap().read() }
+        unsafe { self.mmio.read(0x28).unwrap() }
     }
 
     pub fn subsystem_vendor_id(&self) -> u16 {
-        unsafe { self.mmio.read(0x2C).unwrap().read() }
+        unsafe { self.mmio.read(0x2C).unwrap() }
     }
 
     pub fn subsystem_id(&self) -> u16 {
-        unsafe { self.mmio.read(0x2E).unwrap().read() }
+        unsafe { self.mmio.read(0x2E).unwrap() }
     }
 
     pub fn expansion_rom_base_addr(&self) -> u32 {
-        unsafe { self.mmio.read(0x30).unwrap().read() }
+        unsafe { self.mmio.read(0x30).unwrap() }
     }
 
     pub fn capabilities(&self) -> PCICapablitiesIterator {
         PCICapablitiesIterator::new(&self.mmio, unsafe {
-            self.mmio.read::<u8>(0x34).unwrap().read() & !0b11
+            self.mmio.read::<u8>(0x34).unwrap() & !0b11
         })
     }
 
     pub fn interrupt_line(&self) -> Option<u8> {
-        match unsafe { self.mmio.read(0x3C).unwrap().read() } {
+        match unsafe { self.mmio.read(0x3C).unwrap() } {
             0xFF => None,
             value => Some(value),
         }
     }
 
     pub fn interrupt_pin(&self) -> Option<u8> {
-        match unsafe { self.mmio.read(0x3D).unwrap().read() } {
+        match unsafe { self.mmio.read(0x3D).unwrap() } {
             0x0 => None,
             value => Some(value),
         }
     }
 
     pub fn min_grant(&self) -> u8 {
-        unsafe { self.mmio.read(0x3E).unwrap().read() }
+        unsafe { self.mmio.read(0x3E).unwrap() }
     }
 
     pub fn max_latency(&self) -> u8 {
-        unsafe { self.mmio.read(0x3F).unwrap().read() }
+        unsafe { self.mmio.read(0x3F).unwrap() }
+    }
+
+    pub fn get_reg(&self, register: StandardRegister) -> Option<&MMIO<Mapped>> {
+        self.registers[register as usize].as_ref()
     }
 
     pub fn iter_registers(&self) -> core::slice::Iter<Option<MMIO<Mapped>>> {
         self.registers.iter()
-    }
-}
-
-impl core::ops::Index<StandardRegister> for PCIeDevice<Standard> {
-    type Output = Option<MMIO<Mapped>>;
-
-    fn index(&self, index: StandardRegister) -> &Self::Output {
-        &self.registers[index as usize]
     }
 }
 

@@ -4,7 +4,7 @@ mod port;
 pub use command::*;
 pub use port::*;
 
-use libkernel::{volatile::VolatileCell, ReadOnly};
+use libkernel::{memory::volatile::VolatileCell, ReadOnly};
 
 #[repr(C)]
 pub struct HBAMemory {
@@ -47,3 +47,5 @@ impl HBAMemory {
         self.ports[0..ports_implemented].iter_mut()
     }
 }
+
+impl libkernel::memory::volatile::Volatile for HBAMemory {}

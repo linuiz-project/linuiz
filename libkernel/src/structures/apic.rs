@@ -1,10 +1,12 @@
 use crate::{
     addr_ty::Physical,
     cell::SyncOnceCell,
-    memory::mmio::{Mapped, MMIO},
+    memory::{
+        mmio::{Mapped, MMIO},
+        volatile::VolatileCell,
+    },
     registers::MSR,
-    volatile::VolatileCell,
-    Address,
+    Address, ReadWrite,
 };
 use core::marker::PhantomData;
 
@@ -139,7 +141,10 @@ impl APIC {
     pub fn cmci(&mut self) -> LVTRegister<Generic> {
         unsafe {
             LVTRegister::<Generic> {
-                obj: self.mmio.read_mut::<u32>(0x2F0).unwrap(),
+                obj: self
+                    .mmio
+                    .borrow::<VolatileCell<u32, ReadWrite>>(0x2F0)
+                    .unwrap(),
                 phantom: PhantomData,
             }
         }
@@ -148,7 +153,10 @@ impl APIC {
     pub fn timer(&mut self) -> LVTRegister<Timer> {
         unsafe {
             LVTRegister::<Timer> {
-                obj: self.mmio.read_mut::<u32>(0x320).unwrap(),
+                obj: self
+                    .mmio
+                    .borrow::<VolatileCell<u32, ReadWrite>>(0x320)
+                    .unwrap(),
                 phantom: PhantomData,
             }
         }
@@ -157,7 +165,10 @@ impl APIC {
     pub fn thermal_sensor(&mut self) -> LVTRegister<Generic> {
         unsafe {
             LVTRegister::<Generic> {
-                obj: self.mmio.read_mut::<u32>(0x330).unwrap(),
+                obj: self
+                    .mmio
+                    .borrow::<VolatileCell<u32, ReadWrite>>(0x330)
+                    .unwrap(),
                 phantom: PhantomData,
             }
         }
@@ -166,7 +177,10 @@ impl APIC {
     pub fn performance(&mut self) -> LVTRegister<Generic> {
         unsafe {
             LVTRegister::<Generic> {
-                obj: self.mmio.read_mut::<u32>(0x340).unwrap(),
+                obj: self
+                    .mmio
+                    .borrow::<VolatileCell<u32, ReadWrite>>(0x340)
+                    .unwrap(),
                 phantom: PhantomData,
             }
         }
@@ -175,7 +189,10 @@ impl APIC {
     pub fn lint0(&mut self) -> LVTRegister<LINT> {
         unsafe {
             LVTRegister::<LINT> {
-                obj: self.mmio.read_mut::<u32>(0x350).unwrap(),
+                obj: self
+                    .mmio
+                    .borrow::<VolatileCell<u32, ReadWrite>>(0x350)
+                    .unwrap(),
                 phantom: PhantomData,
             }
         }
@@ -184,7 +201,10 @@ impl APIC {
     pub fn lint1(&mut self) -> LVTRegister<LINT> {
         unsafe {
             LVTRegister::<LINT> {
-                obj: self.mmio.read_mut::<u32>(0x360).unwrap(),
+                obj: self
+                    .mmio
+                    .borrow::<VolatileCell<u32, ReadWrite>>(0x360)
+                    .unwrap(),
                 phantom: PhantomData,
             }
         }
@@ -193,7 +213,10 @@ impl APIC {
     pub fn error(&mut self) -> LVTRegister<Error> {
         unsafe {
             LVTRegister::<Error> {
-                obj: self.mmio.read_mut::<u32>(0x370).unwrap(),
+                obj: self
+                    .mmio
+                    .borrow::<VolatileCell<u32, ReadWrite>>(0x370)
+                    .unwrap(),
                 phantom: PhantomData,
             }
         }
@@ -208,30 +231,30 @@ impl APIC {
     }
 
     pub fn error_status(&self) -> APICErrorStatusFlags {
-        APICErrorStatusFlags::from_bits_truncate(unsafe { self.mmio.read(0x280).unwrap().read() })
+        APICErrorStatusFlags::from_bits_truncate(unsafe { self.mmio.read(0x280).unwrap() })
     }
 
-    pub fn reg(&self, register: APICRegister) -> &VolatileCell<u32, crate::ReadOnly> {
+    pub fn read_register(&self, register: APICRegister) -> u32 {
         unsafe { self.mmio.read(register as usize).unwrap() }
     }
 
-    pub fn reg_mut(&mut self, register: APICRegister) -> &mut VolatileCell<u32, crate::ReadWrite> {
-        unsafe { self.mmio.read_mut(register as usize).unwrap() }
+    pub fn write_register(&mut self, register: APICRegister, value: u32) {
+        unsafe { self.mmio.write(register as usize, value).unwrap() }
     }
 
     pub unsafe fn reset(&mut self) {
-        self.reg_mut(APICRegister::DFR).write(0xFFFFFFFF);
-        let mut ldr = self.reg(APICRegister::LDR).read();
+        self.write_register(APICRegister::DFR, 0xFFFFFFFF);
+        let mut ldr = self.read_register(APICRegister::LDR);
         ldr &= 0xFFFFFF;
         ldr = (ldr & !0xFF) | ((ldr & 0xFF) | 1);
-        self.reg_mut(APICRegister::LDR).write(ldr);
+        self.write_register(APICRegister::LDR, ldr);
         self.timer().set_masked(true);
         self.performance()
             .set_delivery_mode(APICDeliveryMode::NonMaskable);
         // self.lint0().set_masked(true);
         self.lint1().set_masked(true);
-        self.reg_mut(APICRegister::TaskPriority).write(0);
-        self.reg_mut(APICRegister::TimerInitialCount).write(0);
+        self.write_register(APICRegister::TaskPriority, 0);
+        self.write_register(APICRegister::TimerInitialCount, 0);
     }
 }
 
@@ -253,7 +276,7 @@ use bit_field::BitField;
 
 #[repr(transparent)]
 pub struct LVTRegister<'reg, T: LVTRegisterVariant> {
-    obj: &'reg mut crate::volatile::VolatileCell<u32, crate::ReadWrite>,
+    obj: &'reg crate::memory::volatile::VolatileCell<u32, ReadWrite>,
     phantom: PhantomData<T>,
 }
 

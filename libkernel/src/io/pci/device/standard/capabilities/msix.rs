@@ -1,7 +1,10 @@
 use crate::{
-    addr_ty::Virtual, io::pci::standard::StandardRegister, volatile::VolatileCell,
+    addr_ty::Virtual,
+    io::pci::standard::StandardRegister,
+    memory::volatile::{Volatile, VolatileCell},
     volatile_bitfield_getter, Address, ReadOnly, ReadWrite,
 };
+use alloc::vec::Vec;
 use bit_field::BitField;
 use core::{convert::TryFrom, fmt};
 
@@ -77,11 +80,7 @@ pub struct MSIX {
 
 impl MSIX {
     pub fn message_control(&self) -> &MessageControl {
-        unsafe { core::mem::transmute(self.reg0.borrow()) }
-    }
-
-    pub fn message_control_mut(&mut self) -> &mut MessageControl {
-        unsafe { core::mem::transmute(self.reg0.borrow_mut()) }
+        unsafe { core::mem::transmute(&*(self.reg0.as_ptr() as *const _)) }
     }
 
     pub fn get_table_bir(&self) -> StandardRegister {
@@ -105,15 +104,26 @@ impl MSIX {
     pub fn get_message_table(
         &self,
         device: &crate::io::pci::PCIeDevice<crate::io::pci::Standard>,
-    ) -> Option<&[MessageTableEntry]> {
-        device[self.get_table_bir()].as_ref().map(|mmio| unsafe {
-            &*core::slice::from_raw_parts(
-                (mmio.mapped_addr() + self.get_table_offset()).as_ptr(),
-                self.message_control().get_table_len(),
-            )
+    ) -> Option<Vec<MessageTableEntry>> {
+        device.get_reg(self.get_table_bir()).map(|mmio| unsafe {
+            let table_ptr =
+                (mmio.mapped_addr() + self.get_table_offset()).as_ptr::<MessageTableEntry>();
+            let table_len = self.message_control().get_table_len();
+            let mut table = Vec::with_capacity(table_len);
+
+            info!("Message Table: {:?}:{} {:?}", table_ptr, table_len, table);
+            for entry_ptr in (0..table_len).map(|index| table_ptr.add(index)) {
+                let entry = entry_ptr.read_volatile();
+                info!("{:?}", entry);
+                table.push(entry)
+            }
+
+            table
         })
     }
 }
+
+impl Volatile for MSIX {}
 
 impl fmt::Debug for MSIX {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {

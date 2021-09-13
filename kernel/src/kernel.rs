@@ -1,6 +1,13 @@
 #![no_std]
 #![no_main]
-#![feature(asm, abi_efiapi, abi_x86_interrupt, once_cell, const_mut_refs)]
+#![feature(
+    asm,
+    abi_efiapi,
+    abi_x86_interrupt,
+    once_cell,
+    const_mut_refs,
+    raw_ref_op
+)]
 
 #[macro_use]
 extern crate log;
@@ -17,7 +24,7 @@ use alloc::vec::Vec;
 use core::ffi::c_void;
 use libkernel::{
     acpi::SystemConfigTableEntry,
-    io::pci::PCIeHostBridge,
+    io::pci::{standard::PCICapablities, PCIeHostBridge},
     memory::{falloc, UEFIMemoryDescriptor},
     BootInfo,
 };
@@ -117,18 +124,24 @@ extern "efiapi" fn kernel_main(
         use libkernel::io::pci::{PCIeDeviceClass, PCIeDeviceVariant};
 
         if let PCIeDeviceVariant::Standard(device) = device_variant {
-            if device.class() == PCIeDeviceClass::MassStorageController {
-                if device.subclass() == 0x06 && device.program_interface() == 0x1 {
-                    debug!("Configuring AHCI driver.");
+            for capability in device.capabilities() {
+                if let PCICapablities::MSIX(msix) = capability {
+                    info!("{:#?}", msix.get_message_table(device))
+                }
+            }
 
-                    let mut ahci = drivers::ahci::AHCI::from_pcie_device(&device);
+            if device.class() == PCIeDeviceClass::MassStorageController && device.subclass() == 0x08
+            {
+                unsafe {
+                    use crate::drivers::nvme::*;
+                    let mut nvme = NVMe::new(device);
+                    info!("{:#?}", nvme.capabilities());
 
-                    debug!("Configuring AHCI SATA ports.");
-                    for port in ahci.sata_ports() {
-                        port.configure();
-                        let buffer = port.read(0, 4);
-                        info!("{:?}", buffer);
-                    }
+                    let cmd = nvme.admin_sub.next_entry::<Abort>().unwrap();
+                    cmd.configure(1, 0);
+                    nvme.admin_sub.flush_entries();
+                    timer::sleep_sec(3);
+                    info!("{:#?}", nvme.admin_com);
                 }
             }
         }
@@ -268,19 +281,15 @@ fn init_apic() {
     apic.timer().set_masked(false);
 
     debug!("Determining APIC timer frequency using PIT windowing.");
-    apic.reg_mut(APICRegister::TimerDivisor)
-        .write(APICTimerDivisor::Div1 as u32);
-    apic.reg_mut(APICRegister::TimerInitialCount)
-        .write(u32::MAX);
+    apic.write_register(APICRegister::TimerDivisor, APICTimerDivisor::Div1 as u32);
+    apic.write_register(APICRegister::TimerInitialCount, u32::MAX);
 
     timer.wait();
 
     apic.timer().set_masked(true);
-    let timer_count = apic.reg(APICRegister::TimerCurrentCount).read();
-    apic.reg_mut(APICRegister::TimerInitialCount)
-        .write(u32::MAX - timer_count);
-    apic.reg_mut(APICRegister::TimerDivisor)
-        .write(APICTimerDivisor::Div1 as u32);
+    let timer_count = apic.read_register(APICRegister::TimerCurrentCount);
+    apic.write_register(APICRegister::TimerInitialCount, u32::MAX - timer_count);
+    apic.write_register(APICRegister::TimerDivisor, APICTimerDivisor::Div1 as u32);
 
     debug!("Disabling 8259 emulated PIC.");
     libkernel::instructions::interrupts::without_interrupts(|| unsafe {
