@@ -169,10 +169,8 @@ impl BlockAllocator<'_> {
     // TODO consider returning a slice from this function rather than a raw pointer
     //      reasoning: possibly a more idiomatic way to return a sized chunk of memory
     pub fn alloc<T>(&self, layout: Layout) -> *mut T {
-        const MINIMUM_ALIGNMENT: usize = 16;
-
         let size_in_blocks = (layout.size() + (Self::BLOCK_SIZE - 1)) / Self::BLOCK_SIZE;
-        let alignment = if (layout.align() & (MINIMUM_ALIGNMENT - 1)) == 0 {
+        let alignment = if (layout.align() & (Self::BLOCK_SIZE - 1)) == 0 {
             layout.align()
         } else {
             trace!(
@@ -181,7 +179,7 @@ impl BlockAllocator<'_> {
                 Self::BLOCK_SIZE
             );
 
-            MINIMUM_ALIGNMENT
+            Self::BLOCK_SIZE
         };
 
         trace!(
