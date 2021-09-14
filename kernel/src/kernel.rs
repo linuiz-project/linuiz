@@ -102,6 +102,10 @@ extern "efiapi" fn kernel_main(
         libkernel::memory::malloc::set(&KERNEL_MALLOC);
     }
 
+    kernel_post_mmap_stage()
+}
+
+fn kernel_post_mmap_stage() -> ! {
     init_apic();
 
     let bridges: Vec<PCIeHostBridge> = libkernel::acpi::rdsp::xsdt::LAZY_XSDT
@@ -126,7 +130,7 @@ extern "efiapi" fn kernel_main(
         if let PCIeDeviceVariant::Standard(device) = device_variant {
             for capability in device.capabilities() {
                 if let PCICapablities::MSIX(msix) = capability {
-                    info!("{:#?}", msix.get_message_table(device))
+                    info!("{:?}", msix.get_message_table(device));
                 }
             }
 
@@ -155,7 +159,7 @@ pub unsafe fn init_falloc(memory_map: &[UEFIMemoryDescriptor]) {
     info!("Initializing kernel frame allocator.");
 
     // calculates total system memory
-    let total_memory = memory_map
+    let total_falloc_memory = memory_map
         .iter()
         .filter(|descriptor| !descriptor.should_reserve())
         .max_by_key(|descriptor| descriptor.phys_start)
@@ -164,13 +168,19 @@ pub unsafe fn init_falloc(memory_map: &[UEFIMemoryDescriptor]) {
         })
         .expect("no descriptor with max value");
 
+    let total_phys_memory = memory_map
+        .iter()
+        .filter(|descriptor| !descriptor.should_reserve())
+        .map(|descriptor| (descriptor.page_count as usize) * 0x1000)
+        .sum::<usize>();
     info!(
         "Kernel frame allocator will represent {} MB ({} bytes) of system memory.",
-        libkernel::memory::to_mibibytes(total_memory),
-        total_memory
+        libkernel::memory::to_mibibytes(total_phys_memory),
+        total_phys_memory
     );
 
-    let frame_alloc_frame_count = falloc::FrameAllocator::frame_count_hint(total_memory) as u64;
+    let frame_alloc_frame_count =
+        falloc::FrameAllocator::frame_count_hint(total_falloc_memory) as u64;
     let frame_alloc_ptr = memory_map
         .iter()
         .filter(|descriptor| descriptor.ty == libkernel::memory::UEFIMemoryType::CONVENTIONAL)
@@ -178,7 +188,7 @@ pub unsafe fn init_falloc(memory_map: &[UEFIMemoryDescriptor]) {
         .map(|descriptor| descriptor.phys_start.as_usize() as *mut _)
         .expect("failed to find viable memory descriptor for memory map");
 
-    falloc::load(frame_alloc_ptr, total_memory);
+    falloc::load(frame_alloc_ptr, total_falloc_memory);
     debug!("Kernel frame allocator initialized.");
 }
 
@@ -198,7 +208,7 @@ fn reserve_kernel_stack(memory_map: &[UEFIMemoryDescriptor]) -> libkernel::memor
                     .acquire_frames(
                         last_frame_end,
                         frame_start - last_frame_end,
-                        falloc::FrameState::NonUsable,
+                        falloc::FrameState::Reserved,
                     )
                     .unwrap()
             };
@@ -206,9 +216,9 @@ fn reserve_kernel_stack(memory_map: &[UEFIMemoryDescriptor]) -> libkernel::memor
 
         // Reserve descriptor properly, and acquire stack frames if applicable.
         if descriptor.should_reserve() {
-            let descriptor_stack_frames = unsafe {
+            let descriptor_frames = unsafe {
                 falloc::get()
-                    .acquire_frames(frame_start, frame_count, falloc::FrameState::NonUsable)
+                    .acquire_frames(frame_start, frame_count, falloc::FrameState::Reserved)
                     .unwrap()
             };
 
@@ -216,7 +226,7 @@ fn reserve_kernel_stack(memory_map: &[UEFIMemoryDescriptor]) -> libkernel::memor
                 debug!("Identified stack frames: {}:{}", frame_start, frame_count);
 
                 stack_frames
-                    .set(descriptor_stack_frames)
+                    .set(descriptor_frames)
                     .expect("multiple stack descriptors found");
             }
         }
@@ -224,7 +234,7 @@ fn reserve_kernel_stack(memory_map: &[UEFIMemoryDescriptor]) -> libkernel::memor
         last_frame_end = frame_start + frame_count;
     }
 
-    stack_frames.take().unwrap()
+    stack_frames.take().expect("no stack frames found")
 }
 
 fn init_system_config_table(config_table: &[SystemConfigTableEntry]) {
@@ -245,7 +255,7 @@ fn init_system_config_table(config_table: &[SystemConfigTableEntry]) {
         let frame_allocator = falloc::get();
         for index in frame_range {
             frame_allocator
-                .acquire_frame(index, falloc::FrameState::NonUsable)
+                .acquire_frame(index, falloc::FrameState::Reserved)
                 .unwrap();
         }
     }
