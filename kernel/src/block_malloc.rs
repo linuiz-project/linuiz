@@ -104,9 +104,10 @@ impl BlockAllocator<'_> {
             falloc::get()
                 .iter()
                 .enumerate()
-                .filter(|(_, frame_state)| *frame_state == falloc::FrameState::NonUsable)
-                .for_each(|(frame_index, _)| {
-                    addressor_mut.identity_map(&Frame::from_index(frame_index))
+                .for_each(|(frame_index, frame_state)| {
+                    if let falloc::FrameState::Reserved = frame_state {
+                        addressor_mut.identity_map(&Frame::from_index(frame_index))
+                    }
                 });
 
             // Since we're using physical offset mapping for our page table modification
@@ -124,30 +125,45 @@ impl BlockAllocator<'_> {
         falloc::get()
             .iter()
             .enumerate()
-            .filter(|(_, frame_state)| *frame_state == falloc::FrameState::NonUsable)
-            .for_each(|(frame_index, _)| self.identity_map(&Frame::from_index(frame_index), false));
+            .for_each(|(frame_index, frame_state)| {
+                if let falloc::FrameState::Reserved = frame_state {
+                    self.identity_map(&Frame::from_index(frame_index), false)
+                }
+            });
 
-        let stack_frame_count = stack_frames.len();
-        let new_stack_size = stack_frame_count * 0x1000;
-        debug!("Allocating new stack: {} bytes", new_stack_size);
+        // Page-aligned 1MB (ish)
+        const STACK_SIZE: usize = (1000000 / 0x1000) * 0x1000;
+        const STACK_SIZE_LAYOUT: Layout =
+            unsafe { Layout::from_size_align_unchecked(STACK_SIZE, 1) };
+
+        let old_stack_size = stack_frames.len() * 0x1000;
+        debug!(
+            "Allocating new stack: {} -> {} bytes",
+            old_stack_size, STACK_SIZE
+        );
         let old_stack_base = stack_frames.start().base_addr().as_usize() as *const u8;
-        let new_stack_base = self.alloc::<u8>(Layout::from_size_align_unchecked(new_stack_size, 1));
+        let new_stack_base = self
+            .alloc::<u8>(STACK_SIZE_LAYOUT)
+            .add(STACK_SIZE - old_stack_size);
 
         debug!(
-            "Copying data from bootloader-allocated stack:\n\t{:?}:{} -> {:?}",
-            old_stack_base, stack_frame_count, new_stack_base
+            "Copying bootloader-allocated stack ({} pages): {:?} -> {:?}",
+            stack_frames.len(),
+            old_stack_base,
+            new_stack_base
         );
-        core::ptr::copy_nonoverlapping(old_stack_base, new_stack_base, new_stack_size);
-        // TODO also zero all antecedent stack frames ?
+        // Finally, copy the old identity-mapped stack.
+        core::ptr::copy_nonoverlapping(old_stack_base, new_stack_base, old_stack_size);
 
         // Determine offset between the two stacks, to properly move RSP.
-        let base_offset = old_stack_base.offset_from(new_stack_base);
-        debug!("Modifying `rsp` by base offset: 0x{:x}.", base_offset);
-        use libkernel::registers::stack::RSP;
-        if base_offset.is_positive() {
-            RSP::sub(base_offset.abs() as u64);
+        let stack_ptr_offset = old_stack_base.offset_from(new_stack_base);
+        debug!("Modifying `rsp` by ptr offset: 0x{:x}.", stack_ptr_offset);
+
+        use libkernel::registers::stack::{RBP, RSP};
+        if stack_ptr_offset.is_positive() {
+            RSP::sub(stack_ptr_offset.abs() as u64);
         } else {
-            RSP::add(base_offset.abs() as u64);
+            RSP::add(stack_ptr_offset.abs() as u64);
         }
 
         debug!("Unmapping bootloader-provided stack frames.");
