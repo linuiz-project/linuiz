@@ -306,11 +306,6 @@ impl<T: PCIeDeviceType> PCIeDevice<T> {
             .field("Header Type", &self.header_type())
             .field("Built-In Self Test", &self.builtin_self_test());
     }
-
-    #[cfg(debug_assertions)]
-    pub fn mem_addr(&self) -> crate::Address<crate::addr_ty::Physical> {
-        self.mmio.physical_addr()
-    }
 }
 
 #[derive(Debug)]
@@ -372,7 +367,7 @@ impl Iterator for PCIeDeviceRegisterIterator {
     type Item = PCIeDeviceRegister;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.base <= self.max_base {
+        if self.base < self.max_base {
             unsafe {
                 let register_raw = self.base.read_volatile();
 
@@ -433,10 +428,9 @@ impl Iterator for PCIeDeviceRegisterIterator {
                     }
                 };
 
-                if let PCIeDeviceRegister::MemorySpace64(_, _) = register {
-                    self.base = self.base.add(2);
-                } else {
-                    self.base = self.base.add(1);
+                match register {
+                    PCIeDeviceRegister::MemorySpace64(_, _) => self.base = self.base.add(2),
+                    _ => self.base = self.base.add(1),
                 }
 
                 Some(register)

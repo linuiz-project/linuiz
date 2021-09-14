@@ -4,9 +4,48 @@ use crate::{
     memory::volatile::{Volatile, VolatileCell},
     volatile_bitfield_getter, Address, ReadOnly, ReadWrite,
 };
-use alloc::vec::Vec;
 use bit_field::BitField;
 use core::{convert::TryFrom, fmt};
+
+#[repr(C)]
+pub struct MessageTableEntry {
+    msg_addr_low: VolatileCell<u32, ReadOnly>,
+    msg_addr_high: VolatileCell<u32, ReadOnly>,
+    msg_data: VolatileCell<u32, ReadWrite>,
+    mask: VolatileCell<u32, ReadWrite>,
+}
+
+impl MessageTableEntry {
+    pub fn get_addr(&self) -> Address<Virtual> {
+        let addr_low = (self.msg_addr_low.read() & !0b11111) as usize;
+        let addr_high = (self.msg_addr_high.read() as usize) << 32;
+
+        Address::<Virtual>::new(addr_high | addr_low)
+    }
+
+    pub fn get_message_data(&self) -> u32 {
+        self.msg_data.read()
+    }
+
+    pub fn set_message_data(&mut self, value: u32) {
+        self.msg_data.write(value);
+    }
+
+    volatile_bitfield_getter!(mask, masked, 0);
+}
+
+impl Volatile for MessageTableEntry {}
+
+impl fmt::Debug for MessageTableEntry {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_tuple("Message Table Entry")
+            .field(&self.get_masked())
+            .field(&self.get_addr())
+            .field(&self.get_message_data())
+            .finish()
+    }
+}
 
 #[repr(C)]
 pub struct MessageControl {
@@ -15,11 +54,11 @@ pub struct MessageControl {
 
 impl MessageControl {
     pub fn get_table_len(&self) -> usize {
-        self.reg0.read().get_bits(0..11) as usize
+        self.reg0.read().get_bits(16..27) as usize
     }
 
-    volatile_bitfield_getter!(reg0, force_mask, 14);
-    volatile_bitfield_getter!(reg0, enable, 15);
+    volatile_bitfield_getter!(reg0, force_mask, 30);
+    volatile_bitfield_getter!(reg0, enable, 31);
 }
 
 impl fmt::Debug for MessageControl {
@@ -34,53 +73,15 @@ impl fmt::Debug for MessageControl {
 }
 
 #[repr(C)]
-pub struct MessageTableEntry {
-    msg_addr_low: VolatileCell<u32, ReadOnly>,
-    msg_addr_high: VolatileCell<u32, ReadOnly>,
-    msg_data: VolatileCell<u32, ReadWrite>,
-    mask: VolatileCell<u32, ReadWrite>,
-}
-
-impl MessageTableEntry {
-    pub fn get_addr(&self) -> Address<Virtual> {
-        let addr_low = (self.msg_addr_low.read() & !0b11) as usize;
-        let addr_high = ((self.msg_addr_high.read() & !0b11) as usize) << 32;
-
-        Address::<Virtual>::new(addr_high | addr_low)
-    }
-
-    pub fn get_message_data(&self) -> u32 {
-        self.msg_data.read()
-    }
-
-    pub fn set_message_data(&mut self, value: u32) {
-        self.msg_data.write(value);
-    }
-
-    volatile_bitfield_getter!(mask, masked, 31);
-}
-
-impl fmt::Debug for MessageTableEntry {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_tuple("Message Table Entry")
-            .field(&self.get_masked())
-            .field(&self.get_addr())
-            .field(&self.get_message_data())
-            .finish()
-    }
-}
-
-#[repr(C)]
 pub struct MSIX {
-    reg0: VolatileCell<u32, ReadWrite>,
+    message_control: MessageControl,
     reg1: VolatileCell<u32, ReadOnly>,
     reg2: VolatileCell<u32, ReadOnly>,
 }
 
 impl MSIX {
     pub fn message_control(&self) -> &MessageControl {
-        unsafe { core::mem::transmute(&*(self.reg0.as_ptr() as *const _)) }
+        &self.message_control
     }
 
     pub fn get_table_bir(&self) -> StandardRegister {
@@ -101,25 +102,27 @@ impl MSIX {
         (self.reg2.read() & !0b111) as usize
     }
 
-    pub fn get_message_table(
+    pub fn get_message_table<'dev>(
         &self,
-        device: &crate::io::pci::PCIeDevice<crate::io::pci::Standard>,
-    ) -> Option<Vec<MessageTableEntry>> {
-        device.get_reg(self.get_table_bir()).map(|mmio| unsafe {
-            let table_ptr =
-                (mmio.mapped_addr() + self.get_table_offset()).as_ptr::<MessageTableEntry>();
-            let table_len = self.message_control().get_table_len();
-            let mut table = Vec::with_capacity(table_len);
+        device: &'dev crate::io::pci::PCIeDevice<crate::io::pci::Standard>,
+    ) -> Option<&[&'dev MessageTableEntry]> {
+        device
+            .get_register(self.get_table_bir())
+            .map(|mmio| unsafe {
+                let table_offset = self.get_table_offset();
+                let table =
+                    crate::slice_mut!(&MessageTableEntry, self.message_control().get_table_len());
 
-            info!("Message Table: {:?}:{} {:?}", table_ptr, table_len, table);
-            for entry_ptr in (0..table_len).map(|index| table_ptr.add(index)) {
-                let entry = entry_ptr.read_volatile();
-                info!("{:?}", entry);
-                table.push(entry)
-            }
+                table.iter_mut().enumerate().for_each(|(index, entry)| {
+                    *entry = mmio
+                        .borrow::<MessageTableEntry>(
+                            table_offset + (index * core::mem::size_of::<MessageTableEntry>()),
+                        )
+                        .unwrap()
+                });
 
-            table
-        })
+                &*table
+            })
     }
 }
 
