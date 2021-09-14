@@ -22,7 +22,7 @@ impl PCIeBus {
                     let mmio_frames = crate::memory::falloc::get()
                         .acquire_frame(
                             offset_addr.frame_index(),
-                            crate::memory::falloc::FrameState::NonUsable,
+                            crate::memory::falloc::FrameState::Reserved,
                         )
                         .unwrap()
                         .into_iter();

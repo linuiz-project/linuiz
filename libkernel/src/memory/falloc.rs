@@ -34,7 +34,7 @@ pub enum FrameState {
     /// Indicates a frame should never be used by software (except for MMIO).
     /// REMARK: Acquiring this will _NEVER_ fail, and so is extremely unsafe to do.
     ///     Use with caution.
-    NonUsable,
+    Reserved,
 }
 
 impl crate::BitValue for FrameState {
@@ -45,7 +45,7 @@ impl crate::BitValue for FrameState {
         match value {
             0 => FrameState::Free,
             1 => FrameState::Locked,
-            2 => FrameState::NonUsable,
+            2 => FrameState::Reserved,
             _ => panic!("invalid value for frame type: {:?}", value),
         }
     }
@@ -138,7 +138,7 @@ impl<'arr> FrameAllocator<'arr> {
         this.acquire_frames(
             (base_ptr as usize) / 0x1000,
             Self::frame_count_hint(total_memory),
-            FrameState::NonUsable,
+            FrameState::Reserved,
         )
         .expect("unexpectedly failed to reserve frame allocator frames");
 
@@ -204,8 +204,8 @@ impl<'arr> FrameAllocator<'arr> {
                 FrameState::Free,
                 FrameState::Locked,
             )),
-            // Track out-of-bounds NonUsable frame.
-            FrameState::NonUsable if is_index_out_of_bounds => {
+            // Track out-of-bounds Reserved frame.
+            FrameState::Reserved if is_index_out_of_bounds => {
                 let mut non_usable_oob = self.non_usable_oob.borrow_mut();
 
                 if non_usable_oob.insert(index) {
@@ -215,9 +215,9 @@ impl<'arr> FrameAllocator<'arr> {
                 }
             }
             // Acquire specific frame as non-usable (this will NEVER fail).
-            FrameState::NonUsable => {
-                let old_state = self.memory_map.insert(index, FrameState::NonUsable);
-                if old_state != FrameState::NonUsable {
+            FrameState::Reserved => {
+                let old_state = self.memory_map.insert(index, FrameState::Reserved);
+                if old_state != FrameState::Reserved {
                     self.memory.write()[old_state.as_usize()] -= 0x1000;
                 }
 

@@ -64,11 +64,11 @@ impl<'mmio> Iterator for PCICapablitiesIterator<'mmio> {
             unsafe {
                 use bit_field::BitField;
 
-                let cap_reg = self.mmio.read::<u32>(self.offset as usize).unwrap();
+                let capability_reg_0 = self.mmio.read::<u32>(self.offset as usize).unwrap();
                 let old_offset = self.offset as usize;
-                self.offset = cap_reg.get_bits(8..16) as u8;
+                self.offset = capability_reg_0.get_bits(8..16) as u8;
 
-                Some(match cap_reg.get_bits(0..8) {
+                Some(match capability_reg_0.get_bits(0..8) {
                     0x1 => PCICapablities::PWMI,
                     0x2 => PCICapablities::AGP,
                     0x3 => PCICapablities::VPD,

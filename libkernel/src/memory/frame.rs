@@ -155,10 +155,8 @@ impl ExactSizeIterator for FrameIterator {
 impl core::fmt::Debug for FrameIterator {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
-            .debug_struct("FrameIterator")
-            .field("Start", self.start())
-            .field("Current", self.current())
-            .field("End", self.end())
+            .debug_tuple("FrameIterator")
+            .field(&(self.start()..self.end()))
             .finish()
     }
 }

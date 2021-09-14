@@ -103,7 +103,7 @@ impl<'ahci> AHCI<'ahci> {
     pub fn from_pcie_device(device: &'ahci PCIeDevice<Standard>) -> Self {
         debug!("Using PCIe device for AHCI driver:\n{:#?}", device);
 
-        if let Some(hba_mmio) = device.get_reg(StandardRegister::Register5) {
+        if let Some(hba_mmio) = device.get_register(StandardRegister::Register5) {
             use hba::HBAPortClass;
 
             debug!("Parsing valid SATA ports from HBA memory ports.");

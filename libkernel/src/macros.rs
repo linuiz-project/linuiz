@@ -1,4 +1,18 @@
 #[macro_export]
+macro_rules! asm_marker {
+    ($marker:literal) => {
+        unsafe {
+            asm!(
+                "push r8",
+                concat!("mov r8, ", $marker),
+                "pop r8",
+                options(nostack, nomem)
+            );
+        }
+    };
+}
+
+#[macro_export]
 macro_rules! bitfield_getter_ro {
     ($field:ident, $getter_name:ident, $bit_index:literal) => {
         paste::paste! {
