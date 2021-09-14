@@ -42,3 +42,27 @@ macro_rules! alloc_to {
         $crate::memory::malloc::get().alloc_to($frames) as *mut _
     };
 }
+
+#[macro_export]
+macro_rules! slice {
+    ($slice_type:ty, $len:expr) => {
+        unsafe {
+            &*core::slice::from_raw_parts::<$slice_type>(
+                $crate::alloc!($len * core::mem::size_of::<$slice_type>()),
+                $len,
+            )
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! slice_mut {
+    ($slice_type:ty, $len:expr) => {
+        unsafe {
+            &mut *core::slice::from_raw_parts_mut::<$slice_type>(
+                $crate::alloc!($len * core::mem::size_of::<$slice_type>()),
+                $len,
+            )
+        }
+    };
+}
