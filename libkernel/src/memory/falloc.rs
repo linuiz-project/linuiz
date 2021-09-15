@@ -4,6 +4,8 @@ use crate::{
 };
 use spin::RwLock;
 
+use super::FrameIterator;
+
 static DEFAULT_FALLOCATOR: SyncOnceCell<FrameAllocator> = SyncOnceCell::new();
 
 pub unsafe fn load(ptr: *mut usize, total_memory: usize) {
@@ -263,7 +265,7 @@ impl<'arr> FrameAllocator<'arr> {
     }
 
     /// Attempts to iterate the allocator's frames, and returns the first unallocated frame.
-    pub fn lock_next(&self) -> Option<Frame> {
+    pub fn autolock(&self) -> Option<Frame> {
         self.memory_map
             .set_eq_next(FrameState::Locked, FrameState::Free)
             .map(|index| {
@@ -281,6 +283,31 @@ impl<'arr> FrameAllocator<'arr> {
                 trace!("Locked next free frame: {:?}", frame);
                 frame
             })
+    }
+
+    pub fn autolock_many(&self, count: usize) -> Option<FrameIterator> {
+        let mut base_index: usize = 0;
+
+        for (frame_index, frame_state) in self.memory_map.iter().enumerate() {
+            let run = frame_index - base_index;
+
+            if run == count {
+                break;
+            } else if matches!(frame_state, FrameState::Locked | FrameState::Reserved) {
+                base_index = frame_index;
+            }
+        }
+
+        if base_index < self.memory_map.len() {
+            Some(unsafe {
+                FrameIterator::new(
+                    Frame::from_index(base_index),
+                    Frame::from_index(base_index + count),
+                )
+            })
+        } else {
+            None
+        }
     }
 
     /// Total memory of a given type represented by frame allocator. If `None` is

@@ -27,7 +27,7 @@ impl MessageTableEntry {
         self.msg_data.read()
     }
 
-    pub fn set_message_data(&mut self, value: u32) {
+    pub fn set_message_data(&self, value: u32) {
         self.msg_data.write(value);
     }
 
@@ -105,7 +105,7 @@ impl MSIX {
     pub fn get_message_table<'dev>(
         &self,
         device: &'dev crate::io::pci::PCIeDevice<crate::io::pci::Standard>,
-    ) -> Option<&[&'dev MessageTableEntry]> {
+    ) -> Option<&mut [&'dev MessageTableEntry]> {
         device
             .get_register(self.get_table_bir())
             .map(|mmio| unsafe {
@@ -121,7 +121,7 @@ impl MSIX {
                         .unwrap()
                 });
 
-                &*table
+                table
             })
     }
 }

@@ -8,33 +8,37 @@ static TICKS: AtomicUsize = AtomicUsize::new(0);
 pub const TIMER_FREQUENCY: usize = 1000;
 
 pub extern "x86-interrupt" fn tick_handler(_: libkernel::structures::idt::InterruptStackFrame) {
-    TICKS.fetch_add(1, core::sync::atomic::Ordering::Release);
+    TICKS.fetch_add(1, core::sync::atomic::Ordering::AcqRel);
     crate::pic8259::end_of_interrupt(crate::pic8259::InterruptOffset::Timer);
 }
 
 pub extern "x86-interrupt" fn apic_tick_handler(
     _: libkernel::structures::idt::InterruptStackFrame,
 ) {
-    TICKS.fetch_add(1, core::sync::atomic::Ordering::Release);
+    TICKS.fetch_add(1, core::sync::atomic::Ordering::AcqRel);
     libkernel::structures::apic::local_apic_mut()
         .unwrap()
         .end_of_interrupt();
 }
 
+#[inline(always)]
 pub fn get_ticks() -> usize {
     TICKS.load(core::sync::atomic::Ordering::Acquire)
 }
 
+#[inline(always)]
 pub fn get_ticks_unordered() -> usize {
     TICKS.load(core::sync::atomic::Ordering::Relaxed)
 }
 
+#[inline(always)]
 pub fn sleep_msec(milliseconds: usize) {
     tick_wait(get_ticks() + milliseconds);
 }
 
+#[inline(always)]
 pub fn sleep_sec(seconds: usize) {
-    tick_wait(get_ticks() + (seconds * 1000))
+    sleep_msec(seconds * 1000);
 }
 
 #[inline(always)]
@@ -46,12 +50,11 @@ fn tick_wait(target_ticks: usize) {
 
 pub struct Timer {
     ticks: usize,
-    end_tick: usize,
 }
 
 impl Timer {
     pub fn new(ticks: usize) -> Self {
-        Self { ticks, end_tick: 0 }
+        Self { ticks }
     }
 
     pub fn wait_new(ticks: usize) {

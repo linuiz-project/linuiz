@@ -17,7 +17,7 @@ impl PCIeBus {
                 if vendor_id == u16::MAX || vendor_id == u16::MIN {
                     None
                 } else {
-                    debug!("Configuring PCIe device at {:?}", offset_addr);
+                    info!("Configuring PCIe device at {:?}", offset_addr);
 
                     let mmio_frames = crate::memory::falloc::get()
                         .acquire_frame(

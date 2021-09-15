@@ -1,10 +1,10 @@
 use alloc::vec::Vec;
 use bit_field::BitField;
-use core::{convert::TryFrom, marker::PhantomData, mem::size_of};
+use core::{convert::TryFrom, marker::PhantomData, mem::size_of, ops::Range};
 use libkernel::{
-    addr_ty::Physical,
+    addr_ty::{Physical, Virtual},
     io::pci::{standard::StandardRegister, PCIeDevice, Standard},
-    memory::volatile::{Volatile, VolatileCell},
+    memory::volatile::VolatileCell,
     volatile_bitfield_getter_ro, Address, ReadOnly, ReadWrite,
 };
 use num_enum::TryFromPrimitive;
@@ -82,10 +82,9 @@ impl core::fmt::Debug for NVMeCapabilities {
 pub struct NVMeQueue<'q> {
     entries: &'q mut [[u32; COMMAND_DWORDS]],
     doorbell_stride: usize,
-    cur_index: usize,
-    max_index: usize,
-    unsubmitted_entries: usize,
     doorbell: &'q VolatileCell<u32, ReadWrite>,
+    cur_index: usize,
+    unsubmitted_entries: usize,
 }
 
 impl<'q> NVMeQueue<'q> {
@@ -94,44 +93,38 @@ impl<'q> NVMeQueue<'q> {
         doorbell_stride: usize,
         doorbell: &'q VolatileCell<u32, ReadWrite>,
     ) -> Self {
-        let alloc_size = max_entries * size_of::<NVMeCommand<Abort>>();
-
         Self {
-            entries: unsafe {
-                &mut *core::slice::from_raw_parts_mut(libkernel::alloc!(alloc_size), max_entries)
-            },
+            entries: libkernel::slice_mut!([u32; COMMAND_DWORDS], max_entries),
             doorbell_stride,
-            cur_index: 0,
-            max_index: max_entries,
-            unsubmitted_entries: 0,
-
             doorbell,
+            cur_index: 0,
+            unsubmitted_entries: 0,
         }
     }
 
     fn increment_index(&mut self) {
-        if self.cur_index == self.max_index {
+        if self.cur_index >= self.entries.len() {
             self.cur_index = 0;
         } else {
-            self.cur_index += 1;
+            self.cur_index += self.doorbell_stride;
         }
     }
 
     pub fn next_entry<T: NVMeCommandType>(&mut self) -> Option<&mut NVMeCommand<T>> {
-        if self.unsubmitted_entries < self.max_index {
-            let cur_stride_index = self.cur_index * self.doorbell_stride;
+        if self.unsubmitted_entries < (self.entries.len() / self.doorbell_stride) {
+            let cached_index = self.cur_index;
             self.unsubmitted_entries += 1;
             self.increment_index();
 
             // transmute the &mut [u32] to an &mut NVMeCommand
-            unsafe { Some(core::mem::transmute(&mut self.entries[cur_stride_index])) }
+            unsafe { Some(core::mem::transmute(&mut self.entries[cached_index])) }
         } else {
             None
         }
     }
 
     pub fn flush_entries(&mut self) {
-        let new_tail = (&self.entries[self.cur_index * self.doorbell_stride]) as *const u32;
+        let new_tail = (&raw const self.entries[self.cur_index]) as *const u32;
         self.doorbell.write(new_tail as u32);
         self.unsubmitted_entries = 0;
     }
@@ -197,9 +190,42 @@ impl<'dev> NVMe<'dev> {
                 .unwrap()
         }
     }
+
+    /// The admin submission & completion queue sizes (in entries).
+    ///     - 1st `u16`: submission queue
+    ///     - 2nd `u16`: completion queue
+    pub fn admin_queue_attribs(&self) -> (u16, u16) {
+        let admin_queue_attribs = unsafe {
+            self.device
+                .get_register(StandardRegister::Register0)
+                .unwrap()
+                .read::<u32>(0x24)
+        }
+        .unwrap();
+
+        let submission_size = admin_queue_attribs.get_bits(0..12) as u16;
+        let completion_size = admin_queue_attribs.get_bits(16..28) as u16;
+
+        assert!(
+            (2..=4096).contains(&submission_size),
+            "maximum admin submission queue size is 2..=4096"
+        );
+        assert!(
+            (2..=4096).contains(&completion_size),
+            "maximum admin completion queue size is 2..=4096"
+        );
+
+        (submission_size, completion_size)
+    }
+
+    // pub fn get_admin_submission_queue_addr(&mut self) -> Address<Physical> {
+    //     let queue_phys_addr = self.device.get_register(StandardRegister::Register0).unwrap().read::<u64>()
+    //     Address::<Physical>::new()
+    // }
 }
 
 #[repr(u32)]
+#[derive(TryFromPrimitive)]
 pub enum NVMeFusedCommandInfo {
     Normal = 0b00,
     FusedFirst = 0b01,
@@ -207,29 +233,11 @@ pub enum NVMeFusedCommandInfo {
 }
 
 #[repr(u32)]
+#[derive(TryFromPrimitive)]
 pub enum NVMePSDT {
     PRP = 0b00,
     SGLBuffered = 0b01,
     SGLSegmented = 0b10,
-}
-
-#[repr(transparent)]
-pub struct NVMeCommandHeader(u32);
-
-impl NVMeCommandHeader {
-    pub fn new(
-        opcode: u8,
-        fuse_info: NVMeFusedCommandInfo,
-        psdt: NVMePSDT,
-        command_identifier: u16,
-    ) -> Self {
-        Self(
-            (opcode as u32)
-                | ((fuse_info as u32) << 8)
-                | ((psdt as u32) << 14)
-                | ((command_identifier as u32) << 16),
-        )
-    }
 }
 
 pub trait NVMeCommandType {
@@ -246,14 +254,19 @@ impl NVMeCommandType for CompletionCreate {
     const OPCODE: u8 = 0;
 }
 
+pub enum NVMeDataPointer {
+    PSDT(Address<Physical>, Address<Physical>),
+    SGL(u128),
+}
+
 #[repr(C)]
 pub struct NVMeCommand<T: NVMeCommandType> {
-    header: NVMeCommandHeader,
+    header: u32,
     namespace_id: u32,
     dword2: u32,
     dword3: u32,
     metadata_ptr: Address<Physical>,
-    data_ptr: (Address<Physical>, Address<Physical>),
+    data_ptr: u128,
     dword10: u32,
     dword11: u32,
     dword12: u32,
@@ -264,10 +277,62 @@ pub struct NVMeCommand<T: NVMeCommandType> {
 }
 
 impl<T: NVMeCommandType> NVMeCommand<T> {
+    const OPCODE: Range<usize> = 0..8;
+    const FUSED_INFO: Range<usize> = 8..10;
+    const COMMAND_ID: Range<usize> = 16..32;
+    const PSDT: Range<usize> = 14..16;
+    const PRP_ENTRY_1: Range<usize> = 0..64;
+    const PRP_ENTRY_2: Range<usize> = 64..128;
+
     pub fn clear(&mut self) {
         unsafe {
             *core::mem::transmute::<&mut Self, &mut [u32; COMMAND_DWORDS]>(self) =
                 [0u32; COMMAND_DWORDS];
+        }
+    }
+
+    pub fn get_opcode(&self) -> u16 {
+        self.header.get_bits(Self::OPCODE) as u16
+    }
+
+    pub fn set_opcode(&mut self, opcode: u16) {
+        self.header.set_bits(Self::OPCODE, opcode as u32);
+    }
+
+    pub fn get_fuse_info(&self) -> NVMeFusedCommandInfo {
+        NVMeFusedCommandInfo::try_from(self.header.get_bits(Self::FUSED_INFO)).unwrap()
+    }
+
+    pub fn set_fuse_info(&mut self, fuse_info: NVMeFusedCommandInfo) {
+        self.header.set_bits(Self::FUSED_INFO, fuse_info as u32);
+    }
+
+    pub fn get_command_id(&self) -> u16 {
+        self.header.get_bits(16..32) as u16
+    }
+
+    pub fn set_command_id(&mut self, command_id: u16) {
+        self.header.set_bits(16..32, command_id as u32);
+    }
+
+    pub fn set_metadata_ptr(&mut self, ptr: Address<Physical>) {
+        self.metadata_ptr = ptr;
+    }
+
+    pub fn set_data_ptr(&mut self, ptr: NVMeDataPointer) {
+        match ptr {
+            NVMeDataPointer::PSDT(prp_entry_1, prp_entry_2) => {
+                self.data_ptr
+                    .set_bits(Self::PRP_ENTRY_1, prp_entry_1.as_usize() as u128);
+                self.data_ptr
+                    .set_bits(Self::PRP_ENTRY_2, prp_entry_2.as_usize() as u128);
+                self.header.set_bits(Self::PSDT, 0b00);
+            }
+            NVMeDataPointer::SGL(sgl) => {
+                self.data_ptr = sgl;
+                // TODO segmented and buffered SGL
+                self.header.set_bits(Self::PSDT, 0b01);
+            }
         }
     }
 }
@@ -277,5 +342,33 @@ impl NVMeCommand<Abort> {
         self.clear();
 
         self.dword10 = (command_id as u32) | ((sub_queue_id as u32) << 16);
+    }
+}
+
+impl NVMeCommand<CompletionCreate> {
+    const QID: Range<usize> = 0..16;
+    const QSIZE: Range<usize> = 16..32;
+    const PC: usize = 0;
+    const IEN: usize = 1;
+    const IV: Range<usize> = 16..32;
+
+    pub fn configure(
+        &mut self,
+        queue_id: u16,
+        queue_size: u16,
+        prp_entry: Address<Physical>,
+        physically_contiguous: bool,
+        interrupts_enabled: bool,
+        interrupt_vector: u16,
+    ) {
+        self.set_data_ptr(NVMeDataPointer::PSDT(
+            prp_entry,
+            Address::<Physical>::zero(),
+        ));
+        self.dword10.set_bits(Self::QID, queue_id as u32);
+        self.dword10.set_bits(Self::QSIZE, queue_size as u32);
+        self.dword11.set_bit(Self::PC, physically_contiguous);
+        self.dword11.set_bit(Self::IEN, interrupts_enabled);
+        self.dword11.set_bits(Self::IV, interrupt_vector as u32);
     }
 }

@@ -11,6 +11,8 @@ pub struct BootInfo<MM, CTE> {
 }
 
 impl<MM, CTE> BootInfo<MM, CTE> {
+    const MAGIC: u32 = 0xAABB11FF;
+
     pub fn new(
         memory_map: &[MM],
         config_table: &[CTE],
@@ -21,7 +23,7 @@ impl<MM, CTE> BootInfo<MM, CTE> {
             memory_map_len: memory_map.len(),
             config_table_ptr: config_table.as_ptr(),
             config_table_len: config_table.len(),
-            magic: 0xAABB11FF,
+            magic: Self::MAGIC,
             framebuffer: match framebuffer {
                 Some(some) => FFIOption::Some(some),
                 None => FFIOption::None,
@@ -43,7 +45,8 @@ impl<MM, CTE> BootInfo<MM, CTE> {
 
     pub fn validate_magic(&self) {
         assert_eq!(
-            self.magic, 0xAABB11FF,
+            self.magic,
+            Self::MAGIC,
             "boot_info is unaligned, or magic is otherwise corrupted"
         );
     }

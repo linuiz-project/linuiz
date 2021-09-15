@@ -204,15 +204,16 @@ pub unsafe fn disable() {
 }
 
 pub fn set_timer_freq(hz: u32) {
-    const MAXIMUM_TICK_RATE: u32 = 1193182;
+    const MAXIMUM_TICK_RATE: u32 = 1193180;
     const DATA0: u16 = 0x40;
     const COMMAND: u16 = 0x43;
 
-    let mut command = unsafe { WriteOnlyPort::<u8>::new(COMMAND) };
-    let mut data0 = unsafe { WriteOnlyPort::<u8>::new(DATA0) };
+    unsafe { WriteOnlyPort::<u8>::new(COMMAND) }.write(0x36);
 
+    use bit_field::BitField;
+
+    let mut data0 = unsafe { WriteOnlyPort::<u8>::new(DATA0) };
     let divisor = MAXIMUM_TICK_RATE / hz;
-    command.write(0x36);
-    data0.write((divisor & 0xFF) as u8);
-    data0.write((divisor >> 8) as u8);
+    data0.write(divisor.get_bits(0..8) as u8);
+    data0.write(divisor.get_bits(8..16) as u8);
 }

@@ -27,7 +27,7 @@ impl VirtualAddressor {
     /// a valid address in which physical memory is already mapped.
     pub unsafe fn new(mapped_page: Page) -> Self {
         let pml4_frame = crate::memory::falloc::get()
-            .lock_next()
+            .autolock()
             .expect("failed to lock frame for PML4 of VirtualAddressor");
 
         Self {

@@ -143,7 +143,7 @@ macro_rules! volatile_bitfield_getter {
         $crate::volatile_bitfield_getter_ro!($field, $var_name, $bit_index);
 
         paste::paste! {
-            pub fn [<set_ $var_name>](&mut self, set: bool) {
+            pub fn [<set_ $var_name>](&self, set: bool) {
                 use bit_field::BitField;
 
                 self.$field.write(*self.$field.read().set_bit($bit_index, set));
@@ -155,7 +155,7 @@ macro_rules! volatile_bitfield_getter {
         paste::paste! {
             $crate::volatile_bitfield_getter_ro!($field, $field_ty, $var_name, $bit_range);
 
-            pub fn [<set_ $var_name>](&mut self, value: $field_ty) {
+            pub fn [<set_ $var_name>](&self, value: $field_ty) {
                 use bit_field::BitField;
 
                 self.$field.write(*self.$field.read().set_bits($bit_range, value));

@@ -92,7 +92,7 @@ impl<L: HeirarchicalLevel> PageTable<L> {
             Some(frame) => (frame, false),
             None => {
                 let alloc_frame = crate::memory::falloc::get()
-                    .lock_next()
+                    .autolock()
                     .expect("failed to allocate a frame for new page table");
                 trace!("Allocated frame for nonpresent entry: {:?}", alloc_frame);
 

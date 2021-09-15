@@ -117,7 +117,7 @@ impl BlockAllocator<'_> {
             addressor_mut.modify_mapped_page(Page::from_addr(phys_mapping_addr));
 
             // Swap the PML4 into CR3
-            debug!("Writing kernel addressor's PML4 to the CR3 register.");
+            info!("Writing kernel addressor's PML4 to the CR3 register.");
             addressor_mut.swap_into();
         }
 
@@ -177,13 +177,11 @@ impl BlockAllocator<'_> {
             addressor_mut.unmap(&Page::from_index(frame.index()));
         }
 
-        debug!("Finished block allocator initialization.");
+        info!("Finished block allocator initialization.");
     }
 
     /* ALLOC & DEALLOC */
 
-    // TODO consider returning a slice from this function rather than a raw pointer
-    //      reasoning: possibly a more idiomatic way to return a sized chunk of memory
     pub fn alloc<T>(&self, layout: Layout) -> *mut T {
         let size_in_blocks = (layout.size() + (Self::BLOCK_SIZE - 1)) / Self::BLOCK_SIZE;
         let alignment = if (layout.align() & (Self::BLOCK_SIZE - 1)) == 0 {
@@ -277,7 +275,7 @@ impl BlockAllocator<'_> {
 
                 unsafe {
                     self.get_addressor_mut()
-                        .map(page, &falloc::get().lock_next().unwrap());
+                        .map(page, &falloc::get().autolock().unwrap());
                     page.clear();
                 }
             }
@@ -356,10 +354,6 @@ impl BlockAllocator<'_> {
         )
     }
 
-    /// Allocates a region of memory pointing to the frame region indicated by
-    ///  given the iterator.
-    ///
-    /// This function assumed the frames are already locked or otherwise valid.
     pub fn alloc_to<T>(&self, frames: &FrameIterator) -> *mut T {
         let size_in_frames = frames.len();
         trace!("Allocation requested to: {} frames", size_in_frames);
@@ -459,7 +453,7 @@ impl BlockAllocator<'_> {
             let mut addressor_mut = unsafe { self.get_addressor_mut() };
             for offset in cur_page_offset..new_page_offset {
                 let map_page = &mut Self::ALLOCATOR_BASE.offset(offset);
-                addressor_mut.map(map_page, &falloc::get().lock_next().expect("out of memory"));
+                addressor_mut.map(map_page, &falloc::get().autolock().expect("out of memory"));
             }
         }
 
@@ -505,6 +499,17 @@ impl libkernel::memory::malloc::MemoryAllocator for BlockAllocator<'_> {
 
     fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         self.dealloc(ptr, layout.size());
+    }
+
+    fn identity_map(&self, frame: &Frame, virtual_map: bool) {
+        self.identity_map(frame, virtual_map)
+    }
+
+    fn page_state(&self, page_index: usize) -> Option<bool> {
+        self.map
+            .read()
+            .get(page_index)
+            .map(|block_page| !block_page.is_empty())
     }
 
     unsafe fn modify_page_attributes(

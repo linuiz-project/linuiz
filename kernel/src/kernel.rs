@@ -24,7 +24,10 @@ use alloc::vec::Vec;
 use core::ffi::c_void;
 use libkernel::{
     acpi::SystemConfigTableEntry,
-    io::pci::{standard::PCICapablities, PCIeHostBridge},
+    io::pci::{
+        standard::{PCICapablities, MSIX},
+        PCIeHostBridge,
+    },
     memory::{falloc, UEFIMemoryDescriptor},
     BootInfo,
 };
@@ -50,7 +53,7 @@ fn get_log_level() -> log::LevelFilter {
 
 #[cfg(not(debug_assertions))]
 fn get_log_level() -> log::LevelFilter {
-    log::LevelFilter::Debug
+    log::LevelFilter::Info
 }
 
 static mut CON_OUT: drivers::io::Serial = drivers::io::Serial::new(drivers::io::COM1);
@@ -130,22 +133,52 @@ fn kernel_post_mmap_stage() -> ! {
         if let PCIeDeviceVariant::Standard(device) = device_variant {
             for capability in device.capabilities() {
                 if let PCICapablities::MSIX(msix) = capability {
-                    info!("{:?}", msix.get_message_table(device));
-                }
-            }
+                    for message in msix.get_message_table(device).unwrap() {
+                        message.set_masked(false);
+                    }
 
-            if device.class() == PCIeDeviceClass::MassStorageController && device.subclass() == 0x08
-            {
-                unsafe {
-                    use crate::drivers::nvme::*;
-                    let mut nvme = NVMe::new(device);
-                    info!("{:#?}", nvme.capabilities());
+                    if device.class() == PCIeDeviceClass::MassStorageController
+                        && device.subclass() == 0x08
+                    {
+                        unsafe {
+                            use crate::drivers::nvme::*;
+                            let mut nvme = NVMe::new(device);
+                            info!("{:#?}", nvme.capabilities());
 
-                    let cmd = nvme.admin_sub.next_entry::<Abort>().unwrap();
-                    cmd.configure(1, 0);
-                    nvme.admin_sub.flush_entries();
-                    timer::sleep_sec(3);
-                    info!("{:#?}", nvme.admin_com);
+                            const QUEUE_PAGE_LEN: usize = 4;
+
+                            use libkernel::memory::{falloc, falloc::FrameState, malloc};
+
+                            let mut base_index = 0;
+                            for (frame_index, frame_state) in falloc::get().iter().enumerate() {
+                                let run = frame_index - base_index;
+
+                                if run == QUEUE_PAGE_LEN {
+                                    break;
+                                } else if frame_state != FrameState::Free
+                                    || malloc::get().page_state(frame_index).unwrap_or(true)
+                                {
+                                    base_index = frame_index + 1;
+                                }
+                            }
+
+                            let frames = falloc::get()
+                                .acquire_frames(base_index, QUEUE_PAGE_LEN, FrameState::Locked)
+                                .unwrap();
+                            debug!("Using frame range for NVMe completion queue: {:?}", frames);
+
+                            let base_addr = frames.start().base_addr();
+                            for frame in frames {
+                                malloc::get().identity_map(&frame, true);
+                            }
+
+                            let cmd = nvme.admin_sub.next_entry::<CompletionCreate>().unwrap();
+                            cmd.configure(0, 30, base_addr, true, false, 0);
+                            nvme.admin_sub.flush_entries();
+                            timer::sleep_sec(1);
+                            info!("{:?}", nvme.admin_com);
+                        }
+                    }
                 }
             }
         }
@@ -286,18 +319,23 @@ fn init_apic() {
     }
 
     let timer = timer::Timer::new(crate::timer::TIMER_FREQUENCY / 1000);
-    debug!("Configuring APIC timer state.");
-    apic.timer().set_mode(APICTimerMode::OneShot);
-    apic.timer().set_masked(false);
 
-    debug!("Determining APIC timer frequency using PIT windowing.");
+    debug!("Configuring APIC timer state.");
     apic.write_register(APICRegister::TimerDivisor, APICTimerDivisor::Div1 as u32);
     apic.write_register(APICRegister::TimerInitialCount, u32::MAX);
+    apic.timer().set_mode(APICTimerMode::OneShot);
+
+    debug!("Determining APIC timer frequency using PIT windowing.");
+    apic.timer().set_masked(false);
 
     timer.wait();
 
     apic.timer().set_masked(true);
     let timer_count = apic.read_register(APICRegister::TimerCurrentCount);
+    info!(
+        "Determined core crystal clock frequency: {}MHz",
+        timer_count / 1000000
+    );
     apic.write_register(APICRegister::TimerInitialCount, u32::MAX - timer_count);
     apic.write_register(APICRegister::TimerDivisor, APICTimerDivisor::Div1 as u32);
 
