@@ -1,3 +1,5 @@
+use core::ops::RangeBounds;
+
 use crate::{addr_ty::Physical, Address};
 
 #[repr(transparent)]
@@ -45,7 +47,7 @@ impl Frame {
     pub fn into_iter(self) -> FrameIterator {
         let index = self.index() + 1;
 
-        unsafe { FrameIterator::new(self, Self { index }) }
+        unsafe { FrameIterator::new(self.index..=self.index) }
     }
 }
 
@@ -94,13 +96,23 @@ pub struct FrameIterator {
 }
 
 impl FrameIterator {
-    pub const unsafe fn new(start: Frame, end: Frame) -> Self {
-        let index = start.index();
+    pub unsafe fn new<T: RangeBounds<usize>>(range: T) -> Self {
+        let start_index = match range.start_bound() {
+            core::ops::Bound::Included(index) => *index,
+            core::ops::Bound::Excluded(index) => *index + 1,
+            core::ops::Bound::Unbounded => panic!("Infinite frame bounds not supported."),
+        };
+
+        let end_index = match range.end_bound() {
+            core::ops::Bound::Included(index) => *index,
+            core::ops::Bound::Excluded(index) => *index - 1,
+            core::ops::Bound::Unbounded => panic!("Infinite frame bounds not supported."),
+        };
 
         Self {
-            start,
-            current: Frame::from_index(index),
-            end,
+            start: Frame::from_index(start_index),
+            current: Frame::from_index(start_index),
+            end: Frame::from_index(end_index),
         }
     }
 
@@ -117,11 +129,15 @@ impl FrameIterator {
     }
 
     pub fn captured_len(&self) -> usize {
-        self.end().index() - self.start().index()
+        self.oob_frame_index() - self.start().index()
     }
 
     pub fn reset(&mut self) {
         self.current = unsafe { Frame::from_index(self.start.index()) };
+    }
+
+    const fn oob_frame_index(&self) -> usize {
+        self.end.index() + 1
     }
 }
 
@@ -129,7 +145,7 @@ impl Iterator for FrameIterator {
     type Item = Frame;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.current < self.end {
+        if self.current <= self.end {
             let frame = Frame {
                 index: self.current.index(),
             };
@@ -142,21 +158,21 @@ impl Iterator for FrameIterator {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.current().index(), Some(self.end().index()))
+        (self.current().index(), Some(self.oob_frame_index()))
     }
 }
 
 impl ExactSizeIterator for FrameIterator {
     fn len(&self) -> usize {
-        self.end().index() - self.current().index()
+        self.oob_frame_index() - self.current().index()
     }
 }
 
 impl core::fmt::Debug for FrameIterator {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
-            .debug_tuple("FrameIterator")
-            .field(&(self.start()..self.end()))
+            .debug_tuple("Frames")
+            .field(&(self.start().index()..=self.end().index()))
             .finish()
     }
 }

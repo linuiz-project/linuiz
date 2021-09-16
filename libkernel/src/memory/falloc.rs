@@ -258,10 +258,7 @@ impl<'arr> FrameAllocator<'arr> {
             }
         }
 
-        Ok(crate::memory::FrameIterator::new(
-            Frame::from_index(start_index),
-            Frame::from_index(end_index),
-        ))
+        Ok(crate::memory::FrameIterator::new(start_index..end_index))
     }
 
     /// Attempts to iterate the allocator's frames, and returns the first unallocated frame.
@@ -299,12 +296,7 @@ impl<'arr> FrameAllocator<'arr> {
         }
 
         if base_index < self.memory_map.len() {
-            Some(unsafe {
-                FrameIterator::new(
-                    Frame::from_index(base_index),
-                    Frame::from_index(base_index + count),
-                )
-            })
+            Some(unsafe { FrameIterator::new(base_index..(base_index + count)) })
         } else {
             None
         }
