@@ -123,6 +123,10 @@ impl Address<Physical> {
     pub const fn is_canonical(&self) -> bool {
         (self.value >> 52) == 0
     }
+
+    pub const fn is_frame_aligned(&self) -> bool {
+        (self.value & 0xFFF) == 0
+    }
 }
 
 impl core::ops::Add<Address<Physical>> for Address<Physical> {
@@ -231,6 +235,10 @@ impl Address<Virtual> {
 
     pub const fn p4_index(&self) -> usize {
         (self.value >> 12 >> 9 >> 9 >> 9) & 0x1FF
+    }
+
+    pub const fn is_page_aligned(&self) -> bool {
+        (self.value & 0xFFF) == 0
     }
 }
 

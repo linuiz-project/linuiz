@@ -84,7 +84,7 @@ impl MMIO<Mapped> {
 
     pub fn pages(&self) -> super::PageIterator {
         let base_page = Page::from_addr(self.mapped_addr());
-        super::PageIterator::new(&base_page, &base_page.offset(self.frames.captured_len()))
+        super::PageIterator::new(&base_page, &base_page.offset(self.frames.total_len()))
     }
 
     pub unsafe fn read<T>(&self, add_offset: usize) -> Result<T, MMIOError> {

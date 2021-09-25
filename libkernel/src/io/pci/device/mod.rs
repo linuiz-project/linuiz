@@ -1,13 +1,20 @@
 pub mod standard;
 
-use crate::memory::mmio::{Mapped, MMIO};
+use crate::{
+    memory::{
+        mmio::{Mapped, MMIO},
+        volatile::{Volatile, VolatileCell},
+    },
+    volatile_bitfield_getter, volatile_bitfield_getter_ro, ReadWrite,
+};
 use alloc::vec::Vec;
 use bitflags::bitflags;
-use core::{fmt, marker::PhantomData};
+use core::{convert::TryFrom, fmt, marker::PhantomData};
+use num_enum::TryFromPrimitive;
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy)]
-pub enum PCIHeaderOffset {
+pub enum HeaderOffset {
     VendorID = 0x0,
     DeviceID = 0x2,
     Command = 0x4,
@@ -22,48 +29,73 @@ pub enum PCIHeaderOffset {
     BuiltInSelfTest = 0xF,
 }
 
-impl Into<u32> for PCIHeaderOffset {
+impl Into<u32> for HeaderOffset {
     fn into(self) -> u32 {
         self as u32
     }
 }
 
-impl Into<usize> for PCIHeaderOffset {
+impl Into<usize> for HeaderOffset {
     fn into(self) -> usize {
         self as usize
     }
 }
 
-bitflags! {
-    pub struct PCIeCommandRegister: u16 {
-        // * Read-Only
-        const IO_SPACE = 1 << 0;
-        // * Read-Only
-        const MEMORY_SPACE = 1 << 1;
-        // * Read-Write
-        const BUS_MASTER = 1 << 2;
-        // * Read-Only
-        const SPECIAL_CYCLE = 1 << 3;
-        // * Read-Only
-        const MEMORY_W_AND_I = 1 << 4;
-        // * Read-Only
-        const VGA_PALETTE_SNOOP = 1 << 5;
-        // * Read-Write
-        const PARITY_ERROR_RESPONSE = 1 << 6;
-        // * Read-Only
-        const IDSEL = 1 << 7;
-        // * Read-Write
-        const SERR_NUM = 1 << 8;
-        // * Read-Only
-        const FAST_B2B_TRANSACTIONS = 1 << 9;
-        // * Read-Write
-        const INTERRUPT_DISABLE = 1 << 10;
+pub struct CommandRegister {
+    reg: VolatileCell<u32, ReadWrite>,
+}
 
+impl CommandRegister {
+    volatile_bitfield_getter_ro!(reg, io_space, 0);
+    volatile_bitfield_getter_ro!(reg, memory_space, 1);
+    volatile_bitfield_getter!(reg, bus_master, 2);
+    volatile_bitfield_getter_ro!(reg, special_cycle, 3);
+    volatile_bitfield_getter_ro!(reg, memory_w_and_i, 4);
+    volatile_bitfield_getter_ro!(reg, vga_palette_snoop, 5);
+    volatile_bitfield_getter!(reg, parity_error, 6);
+    volatile_bitfield_getter_ro!(reg, idsel_stepwait_cycle_ctrl, 7);
+    volatile_bitfield_getter!(reg, serr_num, 8);
+    volatile_bitfield_getter_ro!(reg, fast_b2b_transactions, 9);
+    volatile_bitfield_getter!(reg, interrupt_disable, 10);
+}
+
+impl Volatile for CommandRegister {}
+
+impl fmt::Debug for CommandRegister {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Command Register")
+            .field("IO Space", &self.get_io_space())
+            .field("Memory Space", &self.get_memory_space())
+            .field("Bus Master", &self.get_bus_master())
+            .field("Special Cycle", &self.get_special_cycle())
+            .field("Memory Write & Invalidate", &self.get_memory_w_and_i())
+            .field("VGA Palette Snoop", &self.get_vga_palette_snoop())
+            .field("Parity Error", &self.get_parity_error())
+            .field(
+                "IDSEL Stepping/Wait Cycle Control",
+                &self.get_idsel_stepwait_cycle_ctrl(),
+            )
+            .field("SERR#", &self.get_serr_num())
+            .field(
+                "Fast Back-to-Back Transactions",
+                &self.get_fast_b2b_transactions(),
+            )
+            .field("Interrupt Disable", &self.get_interrupt_disable())
+            .finish()
     }
 }
 
+#[repr(u16)]
+#[derive(Debug, TryFromPrimitive)]
+pub enum DEVSELTiming {
+    Fast = 0b00,
+    Medium = 0b01,
+    Slow = 0b10,
+}
+
 bitflags! {
-    pub struct PCIeStatusRegister: u16 {
+    pub struct StatusRegister: u16 {
         const INTERRUPT_STATUS = 1 << 3;
         const CAPABILITIES = 1 << 4;
         // * Not applicable to PCIe.
@@ -81,23 +113,15 @@ bitflags! {
     }
 }
 
-bitflags! {
-    pub struct PCIeDeviceSELTiming: u16 {
-        const FAST = 0;
-        const MEDIUM = 1;
-        const SLOW = 1 << 1;
-    }
-}
-
-impl PCIeStatusRegister {
-    pub fn devsel_timing(&self) -> PCIeDeviceSELTiming {
-        PCIeDeviceSELTiming::from_bits_truncate((self.bits() >> 9) & 0b11)
+impl StatusRegister {
+    pub fn devsel_timing(&self) -> DEVSELTiming {
+        DEVSELTiming::try_from((self.bits() >> 9) & 0b11).unwrap()
     }
 }
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PCIeDeviceClass {
+pub enum DeviceClass {
     Unclassified = 0x0,
     MassStorageController = 0x1,
     NetworkController = 0x2,
@@ -124,11 +148,11 @@ pub enum PCIeDeviceClass {
 
 #[repr(transparent)]
 #[derive(Clone, Copy)]
-pub struct PCIeBuiltinSelfTest {
+pub struct BuiltinSelfTest {
     data: u8,
 }
 
-impl PCIeBuiltinSelfTest {
+impl BuiltinSelfTest {
     pub fn capable(&self) -> bool {
         (self.data & (1 << 7)) > 0
     }
@@ -142,7 +166,7 @@ impl PCIeBuiltinSelfTest {
     }
 }
 
-impl fmt::Debug for PCIeBuiltinSelfTest {
+impl fmt::Debug for BuiltinSelfTest {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("BIST")
@@ -153,50 +177,50 @@ impl fmt::Debug for PCIeBuiltinSelfTest {
     }
 }
 
-pub trait PCIeDeviceType {
+pub trait DeviceType {
     const REGISTER_COUNT: usize;
 }
 
 pub enum Standard {}
-impl PCIeDeviceType for Standard {
+impl DeviceType for Standard {
     const REGISTER_COUNT: usize = 6;
 }
 
 pub enum PCI2PCI {}
-impl PCIeDeviceType for PCI2PCI {
+impl DeviceType for PCI2PCI {
     const REGISTER_COUNT: usize = 2;
 }
 
 pub enum PCI2CardBus {}
-impl PCIeDeviceType for PCI2CardBus {
+impl DeviceType for PCI2CardBus {
     const REGISTER_COUNT: usize = 8;
 }
 
 #[derive(Debug)]
-pub enum PCIeDeviceVariant {
+pub enum DeviceVariant {
     Standard(PCIeDevice<Standard>),
     PCI2PCI(PCIeDevice<PCI2PCI>),
     PCI2CardBus(PCIeDevice<PCI2CardBus>),
 }
 
-pub struct PCIeDevice<T: PCIeDeviceType> {
+pub struct PCIeDevice<T: DeviceType> {
     mmio: MMIO<Mapped>,
     registers: Vec<Option<MMIO<Mapped>>>,
     phantom: PhantomData<T>,
 }
 
-pub fn new_device(mmio: MMIO<Mapped>) -> PCIeDeviceVariant {
-    let type_malfunc = unsafe { mmio.read::<u8>(PCIHeaderOffset::HeaderType.into()).unwrap() };
+pub fn new_device(mmio: MMIO<Mapped>) -> DeviceVariant {
+    let type_malfunc = unsafe { mmio.read::<u8>(HeaderOffset::HeaderType.into()).unwrap() };
 
     // mask off the multifunction bit
     match type_malfunc & !(1 << 7) {
-        0x0 => PCIeDeviceVariant::Standard(unsafe { PCIeDevice::<Standard>::new(mmio) }),
-        0x1 => PCIeDeviceVariant::PCI2PCI(PCIeDevice {
+        0x0 => DeviceVariant::Standard(unsafe { PCIeDevice::<Standard>::new(mmio) }),
+        0x1 => DeviceVariant::PCI2PCI(PCIeDevice {
             mmio,
             registers: Vec::new(),
             phantom: PhantomData,
         }),
-        0x2 => PCIeDeviceVariant::PCI2CardBus(PCIeDevice::<PCI2CardBus> {
+        0x2 => DeviceVariant::PCI2CardBus(PCIeDevice::<PCI2CardBus> {
             mmio,
             registers: Vec::new(),
             phantom: PhantomData,
@@ -211,63 +235,55 @@ pub fn new_device(mmio: MMIO<Mapped>) -> PCIeDeviceVariant {
     }
 }
 
-impl<T: PCIeDeviceType> PCIeDevice<T> {
+impl<T: DeviceType> PCIeDevice<T> {
     pub fn vendor_id(&self) -> u16 {
-        unsafe { self.mmio.read(PCIHeaderOffset::VendorID.into()).unwrap() }
+        unsafe { self.mmio.read(HeaderOffset::VendorID.into()).unwrap() }
     }
 
     pub fn device_id(&self) -> u16 {
-        unsafe { self.mmio.read(PCIHeaderOffset::DeviceID.into()).unwrap() }
+        unsafe { self.mmio.read(HeaderOffset::DeviceID.into()).unwrap() }
     }
 
-    pub fn command(&self) -> PCIeCommandRegister {
-        unsafe { self.mmio.read(PCIHeaderOffset::Command.into()).unwrap() }
+    pub fn command(&self) -> &CommandRegister {
+        unsafe { self.mmio.borrow(HeaderOffset::Command.into()).unwrap() }
     }
 
-    pub fn status(&self) -> u16 {
-        unsafe { self.mmio.read(PCIHeaderOffset::Status.into()).unwrap() }
+    pub fn status(&self) -> StatusRegister {
+        unsafe { self.mmio.read(HeaderOffset::Status.into()).unwrap() }
     }
 
     pub fn revision_id(&self) -> u8 {
-        unsafe { self.mmio.read(PCIHeaderOffset::RevisionID.into()).unwrap() }
+        unsafe { self.mmio.read(HeaderOffset::RevisionID.into()).unwrap() }
     }
 
     pub fn program_interface(&self) -> u8 {
         unsafe {
             self.mmio
-                .read(PCIHeaderOffset::ProgramInterface.into())
+                .read(HeaderOffset::ProgramInterface.into())
                 .unwrap()
         }
     }
 
     pub fn subclass(&self) -> u8 {
-        unsafe { self.mmio.read(PCIHeaderOffset::Subclass.into()).unwrap() }
+        unsafe { self.mmio.read(HeaderOffset::Subclass.into()).unwrap() }
     }
 
-    pub fn class(&self) -> PCIeDeviceClass {
-        unsafe { self.mmio.read(PCIHeaderOffset::Class.into()).unwrap() }
+    pub fn class(&self) -> DeviceClass {
+        unsafe { self.mmio.read(HeaderOffset::Class.into()).unwrap() }
     }
 
     pub fn cache_line_size(&self) -> u8 {
-        unsafe {
-            self.mmio
-                .read(PCIHeaderOffset::CacheLineSize.into())
-                .unwrap()
-        }
+        unsafe { self.mmio.read(HeaderOffset::CacheLineSize.into()).unwrap() }
     }
 
     pub fn latency_timer(&self) -> u8 {
-        unsafe {
-            self.mmio
-                .read(PCIHeaderOffset::LatencyTimer.into())
-                .unwrap()
-        }
+        unsafe { self.mmio.read(HeaderOffset::LatencyTimer.into()).unwrap() }
     }
 
     pub fn header_type(&self) -> u8 {
         unsafe {
             self.mmio
-                .read::<u8>(PCIHeaderOffset::HeaderType.into())
+                .read::<u8>(HeaderOffset::HeaderType.into())
                 .unwrap()
                 & !(1 << 7)
         }
@@ -277,17 +293,17 @@ impl<T: PCIeDeviceType> PCIeDevice<T> {
         unsafe {
             (self
                 .mmio
-                .read::<u8>(PCIHeaderOffset::BuiltInSelfTest.into())
+                .read::<u8>(HeaderOffset::BuiltInSelfTest.into())
                 .unwrap()
                 & (1 << 7))
                 > 0
         }
     }
 
-    pub fn builtin_self_test(&self) -> PCIeBuiltinSelfTest {
+    pub fn builtin_self_test(&self) -> BuiltinSelfTest {
         unsafe {
             self.mmio
-                .read(PCIHeaderOffset::BuiltInSelfTest.into())
+                .read(HeaderOffset::BuiltInSelfTest.into())
                 .unwrap()
         }
     }
@@ -309,22 +325,22 @@ impl<T: PCIeDeviceType> PCIeDevice<T> {
 }
 
 #[derive(Debug)]
-pub enum PCIeDeviceRegister {
+pub enum DeviceRegister {
     MemorySpace32(u32, usize),
     MemorySpace64(u64, usize),
     IOSpace(u32, usize),
     None,
 }
 
-impl PCIeDeviceRegister {
+impl DeviceRegister {
     pub fn is_unused(&self) -> bool {
         use bit_field::BitField;
 
         match self {
-            PCIeDeviceRegister::MemorySpace32(value, _) => value.get_bits(4..32) == 0,
-            PCIeDeviceRegister::MemorySpace64(value, _) => value.get_bits(4..64) == 0,
-            PCIeDeviceRegister::IOSpace(value, _) => value.get_bits(2..32) == 0,
-            PCIeDeviceRegister::None => true,
+            DeviceRegister::MemorySpace32(value, _) => value.get_bits(4..32) == 0,
+            DeviceRegister::MemorySpace64(value, _) => value.get_bits(4..64) == 0,
+            DeviceRegister::IOSpace(value, _) => value.get_bits(2..32) == 0,
+            DeviceRegister::None => true,
         }
     }
 
@@ -332,29 +348,29 @@ impl PCIeDeviceRegister {
         use crate::{addr_ty::Virtual, Address};
 
         Address::<Virtual>::new(match self {
-            PCIeDeviceRegister::MemorySpace32(value, _) => (value & !0b1111) as usize,
-            PCIeDeviceRegister::MemorySpace64(value, _) => (value & !0b1111) as usize,
-            PCIeDeviceRegister::IOSpace(value, _) => (value & !0b11) as usize,
-            PCIeDeviceRegister::None => 0,
+            DeviceRegister::MemorySpace32(value, _) => (value & !0b1111) as usize,
+            DeviceRegister::MemorySpace64(value, _) => (value & !0b1111) as usize,
+            DeviceRegister::IOSpace(value, _) => (value & !0b11) as usize,
+            DeviceRegister::None => 0,
         })
     }
 
     pub fn memory_usage(&self) -> usize {
         match self {
-            PCIeDeviceRegister::MemorySpace32(_, mem_usage) => *mem_usage,
-            PCIeDeviceRegister::MemorySpace64(_, mem_usage) => *mem_usage,
-            PCIeDeviceRegister::IOSpace(_, mem_usage) => *mem_usage,
-            PCIeDeviceRegister::None => 0,
+            DeviceRegister::MemorySpace32(_, mem_usage) => *mem_usage,
+            DeviceRegister::MemorySpace64(_, mem_usage) => *mem_usage,
+            DeviceRegister::IOSpace(_, mem_usage) => *mem_usage,
+            DeviceRegister::None => 0,
         }
     }
 }
 
-pub struct PCIeDeviceRegisterIterator {
+pub struct DeviceRegisterIterator {
     base: *mut u32,
     max_base: *mut u32,
 }
 
-impl PCIeDeviceRegisterIterator {
+impl DeviceRegisterIterator {
     unsafe fn new(base: *mut u32, register_count: usize) -> Self {
         Self {
             base,
@@ -363,8 +379,8 @@ impl PCIeDeviceRegisterIterator {
     }
 }
 
-impl Iterator for PCIeDeviceRegisterIterator {
-    type Item = PCIeDeviceRegister;
+impl Iterator for DeviceRegisterIterator {
+    type Item = DeviceRegister;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.base < self.max_base {
@@ -375,13 +391,13 @@ impl Iterator for PCIeDeviceRegisterIterator {
                     use bit_field::BitField;
 
                     if register_raw == 0 {
-                        PCIeDeviceRegister::None
+                        DeviceRegister::None
                     } else if register_raw.get_bit(0) {
                         self.base.write_volatile(u32::MAX);
                         let mem_usage = !(self.base.read_volatile() & !0b11) + 1;
                         self.base.write_volatile(register_raw);
 
-                        PCIeDeviceRegister::IOSpace(register_raw, mem_usage as usize)
+                        DeviceRegister::IOSpace(register_raw, mem_usage as usize)
                     } else {
                         match register_raw.get_bits(1..3) {
                             // REMARK:
@@ -395,7 +411,7 @@ impl Iterator for PCIeDeviceRegisterIterator {
                                 // Write original value back into register.
                                 self.base.write_volatile(register_raw);
 
-                                PCIeDeviceRegister::MemorySpace32(register_raw, mem_usage as usize)
+                                DeviceRegister::MemorySpace32(register_raw, mem_usage as usize)
                             }
                             // And because of MMIO volatility, it's even dumber for 64-bit registers
                             0b10 => {
@@ -418,7 +434,7 @@ impl Iterator for PCIeDeviceRegisterIterator {
                                 self.base.write_volatile(register_raw);
                                 base_next.write_volatile(register_raw_next);
 
-                                PCIeDeviceRegister::MemorySpace64(
+                                DeviceRegister::MemorySpace64(
                                     (register_raw as u64) | ((register_raw_next as u64) << 32),
                                     mem_usage as usize,
                                 )
@@ -429,7 +445,7 @@ impl Iterator for PCIeDeviceRegisterIterator {
                 };
 
                 match register {
-                    PCIeDeviceRegister::MemorySpace64(_, _) => self.base = self.base.add(2),
+                    DeviceRegister::MemorySpace64(_, _) => self.base = self.base.add(2),
                     _ => self.base = self.base.add(1),
                 }
 

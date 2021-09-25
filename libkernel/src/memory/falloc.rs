@@ -1,6 +1,6 @@
 use crate::{
-    addr_ty::Virtual, cell::SyncOnceCell, memory::Frame, Address, BitValue, RwBitArray,
-    RwBitArrayIterator,
+    addr_ty::Virtual, cell::SyncOnceCell, memory::Frame, Address, BitValue, BitValueArray,
+    BitValueArrayIterator,
 };
 use spin::RwLock;
 
@@ -84,7 +84,7 @@ pub enum FrameAllocatorError {
 /// out of thin air. Its creation should be carefully controlled, to ensure each individual frame's
 /// lifetime matches up with how it is used or consumed in hardware and software.
 pub struct FrameAllocator<'arr> {
-    memory_map: RwBitArray<'arr, FrameState>,
+    memory_map: BitValueArray<'arr, FrameState>,
     memory: RwLock<[usize; FrameState::MASK + 1]>,
     non_usable_oob: core::cell::RefCell<alloc::collections::BTreeSet<usize>>,
 }
@@ -126,10 +126,10 @@ impl<'arr> FrameAllocator<'arr> {
 
         let total_frames = total_memory / 0x1000;
         let this = Self {
-            memory_map: RwBitArray::from_slice(
+            memory_map: BitValueArray::from_slice(
                 &mut *core::ptr::slice_from_raw_parts_mut(
                     base_ptr,
-                    RwBitArray::<FrameState>::section_length_hint(total_frames),
+                    BitValueArray::<FrameState>::section_length_hint(total_frames),
                 ),
                 total_frames,
             ),
@@ -312,7 +312,7 @@ impl<'arr> FrameAllocator<'arr> {
         }
     }
 
-    pub fn iter<'outer>(&'arr self) -> RwBitArrayIterator<'outer, 'arr, FrameState> {
+    pub fn iter<'outer>(&'arr self) -> BitValueArrayIterator<'outer, 'arr, FrameState> {
         self.memory_map.iter()
     }
 

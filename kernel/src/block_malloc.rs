@@ -159,7 +159,7 @@ impl BlockAllocator<'_> {
         let stack_ptr_offset = old_stack_base.offset_from(new_stack_base);
         debug!("Modifying `rsp` by ptr offset: 0x{:x}.", stack_ptr_offset);
 
-        use libkernel::registers::stack::{RBP, RSP};
+        use libkernel::registers::stack::RSP;
         if stack_ptr_offset.is_positive() {
             RSP::sub(stack_ptr_offset.abs() as u64);
         } else {
@@ -355,8 +355,9 @@ impl BlockAllocator<'_> {
     }
 
     pub fn alloc_to<T>(&self, frames: &FrameIterator) -> *mut T {
-        let size_in_frames = frames.len();
-        trace!("Allocation requested to: {} frames", size_in_frames);
+        trace!("Allocation requested to: {:?}", frames);
+
+        let size_in_frames = frames.total_len();
         let (mut map_index, mut current_run);
 
         while {
@@ -390,17 +391,20 @@ impl BlockAllocator<'_> {
         );
 
         {
+            let frame_base_index = frames.start().index();
             let mut addressor_mut = unsafe { self.get_addressor_mut() };
-            for (map_index, block_page) in self
+            for (start_offset, block_page) in self
                 .map
                 .write()
                 .iter_mut()
-                .enumerate()
                 .skip(start_index)
                 .take(size_in_frames)
+                .enumerate()
             {
                 block_page.set_full();
-                addressor_mut.map(&Page::from_index(map_index), &frames.start());
+                addressor_mut.map(&Page::from_index(start_index + start_offset), unsafe {
+                    &Frame::from_index(frame_base_index + start_offset)
+                });
             }
         }
 

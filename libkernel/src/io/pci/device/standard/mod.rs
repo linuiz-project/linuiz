@@ -2,9 +2,7 @@ mod capabilities;
 pub use capabilities::*;
 
 use crate::{
-    io::pci::{
-        PCIeDevice, PCIeDeviceRegister, PCIeDeviceRegisterIterator, PCIeDeviceType, Standard,
-    },
+    io::pci::{DeviceRegister, DeviceRegisterIterator, DeviceType, PCIeDevice, Standard},
     memory::mmio::{Mapped, MMIO},
 };
 use core::fmt;
@@ -25,7 +23,7 @@ impl PCIeDevice<Standard> {
     pub unsafe fn new(mmio: MMIO<Mapped>) -> Self {
         assert_eq!(
             (mmio
-                .read::<u8>(crate::io::pci::PCIHeaderOffset::HeaderType.into())
+                .read::<u8>(crate::io::pci::HeaderOffset::HeaderType.into())
                 .unwrap())
                 & !(1 << 7),
             0,
@@ -34,15 +32,14 @@ impl PCIeDevice<Standard> {
 
         let mut register_num = 0;
         let mut registers = alloc::vec![None, None, None, None, None, None];
-        for register in PCIeDeviceRegisterIterator::new(
+        for register in DeviceRegisterIterator::new(
             (mmio.mapped_addr() + 0x10).as_mut_ptr::<u32>(),
             Standard::REGISTER_COUNT,
         ) {
             if !register.is_unused() {
                 debug!("Device Register {}: {:?}", register_num, register);
 
-                // The address is MMIO, so is memory-mapped—thus,
-                //  the page index and frame index will match.
+                // The address is MMIO, so is memory-mapped—thus, the page index and frame index will match.
                 let frame_index = register.as_addr().page_index();
                 let frame_usage = crate::align_up_div(register.memory_usage(), 0x1000);
                 debug!(
@@ -62,8 +59,8 @@ impl PCIeDevice<Standard> {
                     .automap();
 
                 if match register {
-                    PCIeDeviceRegister::MemorySpace32(value, _) => (value & 0b1000) > 0,
-                    PCIeDeviceRegister::MemorySpace64(value, _) => (value & 0b1000) > 0,
+                    DeviceRegister::MemorySpace32(value, _) => (value & 0b1000) > 0,
+                    DeviceRegister::MemorySpace64(value, _) => (value & 0b1000) > 0,
                     _ => false,
                 } {
                     debug!("\tRegister is prefetchable, so enabling WRITE_THROUGH bit on page.");
@@ -92,7 +89,7 @@ impl PCIeDevice<Standard> {
             }
 
             match register {
-                PCIeDeviceRegister::MemorySpace64(_, _) => register_num += 2,
+                DeviceRegister::MemorySpace64(_, _) => register_num += 2,
                 _ => register_num += 1,
             }
         }
@@ -120,8 +117,8 @@ impl PCIeDevice<Standard> {
         unsafe { self.mmio.read(0x30).unwrap() }
     }
 
-    pub fn capabilities(&self) -> PCICapablitiesIterator {
-        PCICapablitiesIterator::new(&self.mmio, unsafe {
+    pub fn capabilities(&self) -> CapablitiesIterator {
+        CapablitiesIterator::new(&self.mmio, unsafe {
             self.mmio.read::<u8>(0x34).unwrap() & !0b11
         })
     }

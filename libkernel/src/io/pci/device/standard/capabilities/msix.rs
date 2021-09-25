@@ -1,11 +1,37 @@
 use crate::{
     addr_ty::Virtual,
+    bit_array::BitSlice,
     io::pci::standard::StandardRegister,
     memory::volatile::{Volatile, VolatileCell},
-    volatile_bitfield_getter, Address, ReadOnly, ReadWrite,
+    volatile_bitfield_getter, Address, BitValueArray, ReadOnly, ReadWrite,
 };
 use bit_field::BitField;
 use core::{convert::TryFrom, fmt};
+
+#[repr(C)]
+pub struct MessageControl {
+    reg0: VolatileCell<u32, ReadWrite>,
+}
+
+impl MessageControl {
+    pub fn get_table_len(&self) -> usize {
+        self.reg0.read().get_bits(16..27) as usize
+    }
+
+    volatile_bitfield_getter!(reg0, force_mask, 30);
+    volatile_bitfield_getter!(reg0, enable, 31);
+}
+
+impl fmt::Debug for MessageControl {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Message Control")
+            .field("Enabled", &self.get_enable())
+            .field("Force Mask", &self.get_force_mask())
+            .field("Table Size", &self.get_table_len())
+            .finish()
+    }
+}
 
 #[repr(C)]
 pub struct MessageTableEntry {
@@ -47,28 +73,29 @@ impl fmt::Debug for MessageTableEntry {
     }
 }
 
-#[repr(C)]
-pub struct MessageControl {
-    reg0: VolatileCell<u32, ReadWrite>,
+#[derive(Debug, PartialEq, Eq)]
+pub enum PendingBit {
+    Unset,
+    Set,
 }
 
-impl MessageControl {
-    pub fn get_table_len(&self) -> usize {
-        self.reg0.read().get_bits(16..27) as usize
+impl crate::BitValue for PendingBit {
+    const BIT_WIDTH: usize = 0x1;
+    const MASK: usize = 0x1;
+
+    fn as_usize(&self) -> usize {
+        match self {
+            PendingBit::Unset => 0,
+            PendingBit::Set => 1,
+        }
     }
 
-    volatile_bitfield_getter!(reg0, force_mask, 30);
-    volatile_bitfield_getter!(reg0, enable, 31);
-}
-
-impl fmt::Debug for MessageControl {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("Message Control")
-            .field("Enabled", &self.get_enable())
-            .field("Force Mask", &self.get_force_mask())
-            .field("Table Size", &self.get_table_len())
-            .finish()
+    fn from_usize(value: usize) -> Self {
+        match value {
+            0 => Self::Unset,
+            1 => Self::Set,
+            value => panic!("Invalid pending bit value: {}", value),
+        }
     }
 }
 
@@ -122,6 +149,28 @@ impl MSIX {
                 });
 
                 table
+            })
+    }
+
+    pub fn get_pending_bits<'dev>(
+        &self,
+        device: &'dev crate::io::pci::PCIeDevice<crate::io::pci::Standard>,
+    ) -> Option<BitSlice<VolatileCell<u64, ReadWrite>>> {
+        device
+            .get_register(self.get_pending_bit_bir())
+            .map(|mmio| unsafe {
+                let table_offset = self.get_pending_bit_offset();
+                let table_len = self.message_control().get_table_len();
+
+                BitSlice::<VolatileCell<u64, ReadWrite>>::from_slice(
+                    unsafe {
+                        &mut *core::slice::from_raw_parts_mut(
+                            (mmio.mapped_addr() + table_offset).as_mut_ptr(),
+                            table_len,
+                        )
+                    },
+                    table_len,
+                )
             })
     }
 }

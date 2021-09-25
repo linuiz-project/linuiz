@@ -21,8 +21,8 @@ extern crate alloc;
 
 mod addr;
 mod boot_info;
+mod bv_array;
 mod macros;
-mod rwbitarray;
 
 pub mod acpi;
 pub mod bit_switch;
@@ -33,10 +33,11 @@ pub mod io;
 pub mod memory;
 pub mod registers;
 pub mod structures;
+pub use bv_array::*;
+pub mod bit_array;
 
 pub use addr::*;
 pub use boot_info::*;
-pub use rwbitarray::*;
 
 pub const SYSTEM_SLICE_SIZE: usize = 0x10000000000;
 
