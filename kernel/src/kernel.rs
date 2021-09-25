@@ -24,10 +24,7 @@ use alloc::vec::Vec;
 use core::ffi::c_void;
 use libkernel::{
     acpi::SystemConfigTableEntry,
-    io::pci::{
-        standard::{PCICapablities, MSIX},
-        PCIeHostBridge,
-    },
+    io::pci::PCIeHostBridge,
     memory::{falloc, UEFIMemoryDescriptor},
     BootInfo,
 };
@@ -48,12 +45,12 @@ extern "C" {
 
 #[cfg(debug_assertions)]
 fn get_log_level() -> log::LevelFilter {
-    log::LevelFilter::Debug
+    log::LevelFilter::Trace
 }
 
 #[cfg(not(debug_assertions))]
 fn get_log_level() -> log::LevelFilter {
-    log::LevelFilter::Info
+    log::LevelFilter::Debug
 }
 
 static mut CON_OUT: drivers::io::Serial = drivers::io::Serial::new(drivers::io::COM1);
@@ -128,26 +125,41 @@ fn kernel_post_mmap_stage() -> ! {
         .filter(|bus| bus.has_devices())
         .flat_map(|bus| bus.iter())
     {
-        use libkernel::io::pci::{PCIeDeviceClass, PCIeDeviceVariant};
+        use libkernel::io::pci;
 
-        if let PCIeDeviceVariant::Standard(device) = device_variant {
+        if let pci::DeviceVariant::Standard(device) = device_variant {
             for capability in device.capabilities() {
-                if let PCICapablities::MSIX(msix) = capability {
-                    for message in msix.get_message_table(device).unwrap() {
-                        message.set_masked(false);
-                    }
-
-                    if device.class() == PCIeDeviceClass::MassStorageController
+                if let pci::standard::Capablities::MSIX(msix) = capability {
+                    if device.class() == pci::DeviceClass::MassStorageController
                         && device.subclass() == 0x08
                     {
                         unsafe {
-                            use crate::drivers::nvme::*;
-                            let mut nvme = NVMe::new(device);
-                            info!("{:#?}", nvme.capabilities());
+                            use crate::drivers::nvme::{command::CompletionCreate, *};
+                            let mut nvme = Controller::from_device(device);
+                            let cc = nvme.controller_configuration();
+                            let csts = nvme.controller_status();
+                            info!("{:#?}", cc);
+                            info!("{:#?}", csts);
+                            break;
+
+                            cc.set_en(true);
+
+                            let max_wait = nvme.capabilities().get_to() * 500;
+                            let mut msec_waited = 0;
+                            while !csts.get_rdy() && msec_waited < max_wait {
+                                timer::sleep_msec(10);
+                                msec_waited += 10;
+                            }
+
+                            if msec_waited == max_wait {
+                                panic!("NVMe controller failed to initialize!")
+                            }
+
+                            info!("{:#?}", nvme);
 
                             const QUEUE_PAGE_LEN: usize = 4;
 
-                            use libkernel::memory::{falloc, falloc::FrameState, malloc};
+                            use libkernel::memory::{falloc::FrameState, malloc};
 
                             let mut base_index = 0;
                             for (frame_index, frame_state) in falloc::get().iter().enumerate() {
@@ -174,9 +186,12 @@ fn kernel_post_mmap_stage() -> ! {
 
                             let cmd = nvme.admin_sub.next_entry::<CompletionCreate>().unwrap();
                             cmd.configure(0, 30, base_addr, true, false, 0);
+                            let cmd1 = nvme.admin_sub.next_entry::<CompletionCreate>().unwrap();
+                            cmd1.configure(1, 30, base_addr, true, false, 0);
                             nvme.admin_sub.flush_entries();
                             timer::sleep_sec(1);
-                            info!("{:?}", nvme.admin_com);
+
+                            info!("{:?}", nvme.admin_com.next_entry());
                         }
                     }
                 }
