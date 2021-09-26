@@ -358,57 +358,54 @@ impl BlockAllocator<'_> {
         trace!("Allocation requested to: {:?}", frames);
 
         let size_in_frames = frames.total_len();
-        let (mut map_index, mut current_run);
+        let base_index = core::lazy::OnceCell::new();
 
-        while {
-            map_index = 0;
-            current_run = 0;
+        'grow: loop {
+            let mut current_run = 0;
 
-            for block_page in self.map.read().iter() {
+            for (map_index, block_page) in self.map.read().iter().enumerate() {
                 if block_page.is_empty() {
                     current_run += 1;
                 } else {
                     current_run = 0;
                 }
 
-                map_index += 1;
-
                 if current_run == size_in_frames {
-                    break;
+                    base_index.set((map_index + 1) - current_run).unwrap();
+                    break 'grow;
                 }
             }
 
-            current_run < size_in_frames
-        } {
             self.grow(size_in_frames * BlockPage::BLOCKS_PER);
         }
 
-        let start_index = map_index - current_run;
-        trace!(
-            "Allocation fulfilling: pages {}..{}",
-            start_index,
-            start_index + size_in_frames
-        );
+        if let Some(start_index) = base_index.get() {
+            trace!(
+                "Allocation fulfilling: pages {}..{}",
+                start_index,
+                start_index + size_in_frames
+            );
 
-        {
             let frame_base_index = frames.start().index();
             let mut addressor_mut = unsafe { self.get_addressor_mut() };
             for (start_offset, block_page) in self
                 .map
                 .write()
                 .iter_mut()
-                .skip(start_index)
+                .skip(*start_index)
                 .take(size_in_frames)
                 .enumerate()
             {
                 block_page.set_full();
-                addressor_mut.map(&Page::from_index(start_index + start_offset), unsafe {
+                addressor_mut.map(&Page::from_index(*start_index + start_offset), unsafe {
                     &Frame::from_index(frame_base_index + start_offset)
                 });
             }
-        }
 
-        (start_index * 0x1000) as *mut T
+            (start_index * 0x1000) as *mut T
+        } else {
+            panic!("Out of memory!")
+        }
     }
 
     pub fn identity_map(&self, frame: &Frame, virtual_map: bool) {

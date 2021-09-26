@@ -283,23 +283,30 @@ impl<'arr> FrameAllocator<'arr> {
     }
 
     pub fn autolock_many(&self, count: usize) -> Option<FrameIterator> {
-        let mut base_index: usize = 0;
+        let base_index = core::lazy::OnceCell::new();
+        let mut current_run = 0;
 
         for (frame_index, frame_state) in self.memory_map.iter().enumerate() {
-            let run = frame_index - base_index;
+            if frame_state == FrameState::Free {
+                current_run += 1;
+            } else {
+                current_run = 0;
+            }
 
-            if run == count {
+            if current_run == count {
+                // Count to next frame index to ensure we cover only the currently checked indexes.
+                base_index.set((frame_index + 1) - current_run).unwrap();
                 break;
-            } else if matches!(frame_state, FrameState::Locked | FrameState::Reserved) {
-                base_index = frame_index;
             }
         }
 
-        if base_index < self.memory_map.len() {
-            Some(unsafe { FrameIterator::new(base_index..(base_index + count)) })
-        } else {
-            None
-        }
+        base_index.get().map(|frame_index| {
+            for index in *frame_index..(*frame_index + count) {
+                self.memory_map.insert(index, FrameState::Locked);
+            }
+
+            unsafe { FrameIterator::new(*frame_index..(*frame_index + count)) }
+        })
     }
 
     /// Total memory of a given type represented by frame allocator. If `None` is
