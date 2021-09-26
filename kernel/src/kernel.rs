@@ -138,22 +138,7 @@ fn kernel_post_mmap_stage() -> ! {
                             let mut nvme = Controller::from_device(device);
                             let cc = nvme.controller_configuration();
                             let csts = nvme.controller_status();
-                            info!("{:#?}", cc);
-                            info!("{:#?}", csts);
-                            break;
-
-                            cc.set_en(true);
-
-                            let max_wait = nvme.capabilities().get_to() * 500;
-                            let mut msec_waited = 0;
-                            while !csts.get_rdy() && msec_waited < max_wait {
-                                timer::sleep_msec(10);
-                                msec_waited += 10;
-                            }
-
-                            if msec_waited == max_wait {
-                                panic!("NVMe controller failed to initialize!")
-                            }
+                            nvme.safe_init();
 
                             info!("{:#?}", nvme);
 
@@ -184,6 +169,9 @@ fn kernel_post_mmap_stage() -> ! {
                                 malloc::get().identity_map(&frame, true);
                             }
 
+                            nvme.admin_com.next_entry();
+                            nvme.admin_com.next_entry();
+
                             let cmd = nvme.admin_sub.next_entry::<CompletionCreate>().unwrap();
                             cmd.configure(0, 30, base_addr, true, false, 0);
                             let cmd1 = nvme.admin_sub.next_entry::<CompletionCreate>().unwrap();
@@ -191,6 +179,7 @@ fn kernel_post_mmap_stage() -> ! {
                             nvme.admin_sub.flush_entries();
                             timer::sleep_sec(1);
 
+                            info!("{:?}", nvme.admin_com.next_entry());
                             info!("{:?}", nvme.admin_com.next_entry());
                         }
                     }

@@ -13,11 +13,19 @@ use num_enum::TryFromPrimitive;
 
 #[repr(u64)]
 #[derive(Debug, TryFromPrimitive)]
-pub enum CPS {
+pub enum ControllerPowerScope {
     NotReported = 0b00,
     ControllerScope = 0b01,
     DomainScope = 0b10,
     NVMSubsystemScope = 0b11,
+}
+
+bitflags::bitflags! {
+    pub struct CommandSetsSupported: u8 {
+        const NVM = 1 << 0;
+        const IO = 1 << 6;
+        const ONLY_ADMIN = 1 << 7;
+    }
 }
 
 #[repr(transparent)]
@@ -37,11 +45,15 @@ impl Capabilities {
     volatile_bitfield_getter_ro!(value, u64, to, 24..32);
     volatile_bitfield_getter_ro!(value, u64, dstrd, 32..36);
     volatile_bitfield_getter_ro!(value, nssrs, 36);
-    volatile_bitfield_getter_ro!(value, u64, css, 37..45);
+
+    pub fn get_css(&self) -> CommandSetsSupported {
+        CommandSetsSupported::from_bits_truncate(self.value.read().get_bits(37..45) as u8)
+    }
+
     volatile_bitfield_getter_ro!(value, bps, 45);
 
-    pub fn get_cps(&self) -> CPS {
-        CPS::try_from(self.value.read().get_bits(46..48)).unwrap()
+    pub fn get_cps(&self) -> ControllerPowerScope {
+        ControllerPowerScope::try_from(self.value.read().get_bits(46..48)).unwrap()
     }
 
     volatile_bitfield_getter_ro!(value, u64, mpsmin, 48..52);
@@ -109,9 +121,9 @@ impl fmt::Debug for Version {
 
 #[repr(u32)]
 #[derive(Debug, TryFromPrimitive)]
-pub enum IOCommandSet {
+pub enum CommandSet {
     NVM = 0b000,
-    FullIO = 0b110,
+    IO = 0b110,
     Admin = 0b111,
 }
 
@@ -141,11 +153,11 @@ impl Volatile for ControllerConfiguration {}
 impl ControllerConfiguration {
     volatile_bitfield_getter!(value, en, 0);
 
-    pub fn get_css(&self) -> IOCommandSet {
-        IOCommandSet::try_from(self.value.read().get_bits(4..7)).expect("CSS is reserved value")
+    pub fn get_css(&self) -> CommandSet {
+        CommandSet::try_from(self.value.read().get_bits(4..7)).expect("CSS is reserved value")
     }
 
-    pub fn set_css(&self, command_set: IOCommandSet) {
+    pub fn set_css(&self, command_set: CommandSet) {
         self.value
             .write(*self.value.read().set_bits(4..7, command_set as u32))
     }
@@ -191,8 +203,18 @@ impl ControllerConfiguration {
         self.value.read().get_bits(16..20)
     }
 
+    pub fn set_iosqes(&self, iosqes: u32) {
+        self.value
+            .write(*self.value.read().set_bits(16..20, iosqes))
+    }
+
     pub fn get_iocqes(&self) -> u32 {
         self.value.read().get_bits(20..24)
+    }
+
+    pub fn set_iocqes(&self, iocqes: u32) {
+        self.value
+            .write(*self.value.read().set_bits(20..24, iocqes))
     }
 
     // TODO CC.CRIME
@@ -265,7 +287,7 @@ impl<'dev> Controller<'dev> {
     const CAP: usize = 0x0;
     const VER: usize = 0x8;
     const CC: usize = 0x14;
-    const CSTS: usize = 0x18;
+    const CSTS: usize = 0x1C;
     const AQA: usize = 0x24;
     const ASQ: usize = 0x28;
     const ACQ: usize = 0x30;
@@ -354,9 +376,9 @@ impl<'dev> Controller<'dev> {
     }
 
     /// The admin submission & completion queue sizes (in entries).
-    ///     - 1st `u16`: submission queue
-    ///     - 2nd `u16`: completion queue
-    pub fn admin_queue_attribs(&self) -> (u16, u16) {
+    ///     - 1st `u16`: submission queue length
+    ///     - 2nd `u16`: completion queue length
+    pub fn get_admin_queue_sizes(&self) -> (u16, u16) {
         let admin_queue_attribs = unsafe {
             self.device
                 .get_register(StandardRegister::Register0)
@@ -365,21 +387,33 @@ impl<'dev> Controller<'dev> {
         }
         .unwrap();
 
-        let submission_size = (admin_queue_attribs.get_bits(0..12) as u16) + 1;
-        let completion_size = (admin_queue_attribs.get_bits(16..28) as u16) + 1;
+        (
+            (admin_queue_attribs.get_bits(0..12) as u16) + 1,
+            (admin_queue_attribs.get_bits(16..28) as u16) + 1,
+        )
+    }
 
+    pub fn set_admin_queue_sizes(&self, sq_size: u16, cq_size: u16) {
         assert!(
-            (2..=4096).contains(&submission_size),
-            "Maximum admin submission queue size is 2..=4096 (is {}).",
-            submission_size
+            sq_size < 1 << 12,
+            "Maximum submission queue index is 12 bits."
         );
         assert!(
-            (2..=4096).contains(&completion_size),
-            "Maximum admin completion queue size is 2..=4096 (is {}).",
-            completion_size
+            cq_size < 1 << 12,
+            "Maximum completion queue index is 12 bits."
         );
 
-        (submission_size, completion_size)
+        unsafe {
+            let register = self
+                .device
+                .get_register(StandardRegister::Register0)
+                .unwrap();
+
+            let mut attribs = register.read::<u32>(Self::AQA).unwrap();
+            attribs.set_bits(0..12, sq_size as u32);
+            attribs.set_bits(16..28, cq_size as u32);
+            register.write(Self::AQA, attribs).unwrap();
+        }
     }
 
     pub fn get_admin_submission_queue_addr(&self) -> Address<Physical> {
@@ -415,6 +449,70 @@ impl<'dev> Controller<'dev> {
 
         queue_phys_addr
     }
+
+    pub fn rdy_wait(&self, rdy_state: bool) -> bool {
+        let csts = self.controller_status();
+        let max_wait = self.capabilities().get_to() * 500;
+        let mut msec_waited = 0;
+        while !csts.get_cfs() && csts.get_rdy() != rdy_state && msec_waited < max_wait {
+            crate::timer::sleep_msec(10);
+            msec_waited += 10;
+        }
+
+        !csts.get_cfs() && csts.get_rdy() == rdy_state
+    }
+
+    pub fn safe_init(&self) {
+        // This initialization/reset follows the steps described in section 3.5.1 of the
+        //  NVMe base specification, version 2.0a.
+
+        debug!("Performing safe initialization of NVMe controller.");
+        let cc = self.controller_configuration();
+        debug!("Resetting controller (disable & wait for unready).");
+        cc.set_en(false);
+        self.rdy_wait(false);
+
+        debug!("Configuring various device registers.");
+        cc.set_iosqes(6);
+        cc.set_iocqes(4);
+        cc.set_shn(ShutdownNotification::None);
+        cc.set_ams(ArbitrationMechanism::RoundRobin);
+        cc.set_mps(0); // 4KiB pages
+        let css = self.capabilities().get_css();
+        cc.set_css(if css.contains(CommandSetsSupported::ONLY_ADMIN) {
+            CommandSet::Admin
+        } else if css.contains(CommandSetsSupported::IO) {
+            CommandSet::IO
+        } else if css.contains(CommandSetsSupported::NVM) {
+            CommandSet::NVM
+        } else {
+            panic!("NVMe driver reports invalid CAP.CSS value: {:?}", css)
+        });
+
+        self.set_admin_queue_sizes(63, 63);
+
+        unsafe {
+            debug!("Acquiring new frames for admin submission & completion queues.");
+            let cq_frame = libkernel::memory::falloc::get().autolock().unwrap();
+            let sq_frame = libkernel::memory::falloc::get().autolock().unwrap();
+
+            self.device
+                .get_register(StandardRegister::Register0)
+                .unwrap()
+                .write(Self::ACQ, cq_frame.base_addr().as_usize() as u64)
+                .unwrap();
+
+            self.device
+                .get_register(StandardRegister::Register0)
+                .unwrap()
+                .write(Self::ASQ, sq_frame.base_addr().as_usize() as u64)
+                .unwrap();
+        }
+
+        debug!("Re-enabling NVMe controller & waiting for ready bit.");
+        cc.set_en(true);
+        self.rdy_wait(true);
+    }
 }
 
 impl fmt::Debug for Controller<'_> {
@@ -425,7 +523,7 @@ impl fmt::Debug for Controller<'_> {
             .field("Version", &self.version())
             .field("Controller Configuration", &self.controller_configuration())
             .field("Controller Status", &self.controller_status())
-            .field("Admin Queue Attributes", &self.admin_queue_attribs())
+            .field("Admin Queue Attributes", &self.get_admin_queue_sizes())
             .field(
                 "Admin Submission Queue Address",
                 &self.get_admin_submission_queue_addr(),

@@ -39,12 +39,12 @@ impl<'q> CompletionQueue<'q> {
             doorbell: &*doorbell_addr.as_ptr(),
 
             cur_index: 0,
-            phase_tag: true,
+            phase_tag: false,
         }
     }
 
     fn increment_index(&mut self) {
-        if (self.cur_index as usize) == self.entries.len() {
+        if (self.cur_index as usize) == (self.entries.len() - 1) {
             self.phase_tag = !self.phase_tag;
             self.cur_index = 0;
         } else {
@@ -56,13 +56,13 @@ impl<'q> CompletionQueue<'q> {
 
     pub fn next_entry(&mut self) -> Option<&super::command::Completion> {
         let completion = &self.entries[self.cur_index as usize];
-        info!("{:?}", completion);
-        if completion.phase_tag() == self.phase_tag {
-            self.increment_index();
-            Some(completion)
-        } else {
-            None
-        }
+
+        //if completion.phase_tag() == self.phase_tag {
+        self.increment_index();
+        Some(completion)
+        //} else {
+        //   None
+        //}
     }
 }
 
