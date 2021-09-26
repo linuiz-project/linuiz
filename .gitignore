@@ -14,5 +14,4 @@ Cargo.lock
 hdd/*
 references/*
 kernel.out
-qemu_debug.log
-qemu_debug.log
+qemu_error.log
