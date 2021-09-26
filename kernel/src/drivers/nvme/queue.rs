@@ -7,6 +7,7 @@ use libkernel::{
 use super::command::NVME_COMMAND;
 
 pub struct CompletionQueue<'q> {
+    frames: libkernel::memory::FrameIterator,
     entries: &'q [super::command::Completion],
     doorbell: &'q VolatileCell<u32, ReadWrite>,
     cur_index: u16,
@@ -14,33 +15,30 @@ pub struct CompletionQueue<'q> {
 }
 
 impl<'q> CompletionQueue<'q> {
-    pub unsafe fn from_addr(
-        doorbell_addr: Address<Virtual>,
-        queue_addr: Address<Physical>,
-        entry_count: u16,
-    ) -> Self {
-        debug!("Constructing NVMe completion queue from parameters:\n\tAddress: {:?}\n\tEntry Count: {:?}\n\tDoorbell: {:?}", queue_addr, entry_count, doorbell_addr);
+    pub fn new(doorbell_addr: Address<Virtual>, entry_count: u16, entry_size: usize) -> Self {
+        // TODO somehow validate entry size
 
-        let frames = falloc::get()
-            .acquire_frames(
-                queue_addr.frame_index(),
-                libkernel::align_up_div(entry_count as usize, 0x1000),
-                falloc::FrameState::Reserved,
-            )
-            .unwrap();
+        let size_in_bytes = (entry_count as usize) * entry_size;
+        let minimum_frame_count = libkernel::align_up_div(size_in_bytes, 0x1000);
+        let frames = falloc::get().autolock_many(minimum_frame_count).unwrap();
+        let alloc_addr = malloc::get().alloc_to(&frames) as *mut _;
 
-        debug!("Acquired frames for completion queue: {:?}", frames);
+        unsafe {
+            core::ptr::write_bytes(alloc_addr as *mut u8, 0, size_in_bytes);
+            let entries = &mut *core::slice::from_raw_parts_mut(alloc_addr, entry_count as usize);
 
-        Self {
-            entries: &mut *core::slice::from_raw_parts_mut(
-                malloc::get().alloc_to(&frames) as *mut _,
-                entry_count as usize,
-            ),
-            doorbell: &*doorbell_addr.as_ptr(),
-
-            cur_index: 0,
-            phase_tag: false,
+            Self {
+                frames,
+                doorbell: &*doorbell_addr.as_ptr(),
+                entries,
+                cur_index: 0,
+                phase_tag: true,
+            }
         }
+    }
+
+    pub fn base_phys_addr(&self) -> Address<Physical> {
+        self.frames.start().base_addr()
     }
 
     fn increment_index(&mut self) {
@@ -57,16 +55,17 @@ impl<'q> CompletionQueue<'q> {
     pub fn next_entry(&mut self) -> Option<&super::command::Completion> {
         let completion = &self.entries[self.cur_index as usize];
 
-        //if completion.phase_tag() == self.phase_tag {
-        self.increment_index();
-        Some(completion)
-        //} else {
-        //   None
-        //}
+        if completion.phase_tag() == self.phase_tag {
+            self.increment_index();
+            Some(completion)
+        } else {
+            None
+        }
     }
 }
 
 pub struct SubmissionQueue<'q> {
+    frames: libkernel::memory::FrameIterator,
     entries: &'q mut [NVME_COMMAND],
     doorbell: &'q VolatileCell<u32, ReadWrite>,
     cur_index: u16,
@@ -74,54 +73,30 @@ pub struct SubmissionQueue<'q> {
 }
 
 impl<'q> SubmissionQueue<'q> {
-    pub unsafe fn from_addr(
-        doorbell_addr: Address<Virtual>,
-        queue_addr: Address<Physical>,
-        entry_count: u16,
-    ) -> Self {
-        debug!("Constructing NVMe submission queue from parameters:\n\tAddress: {:?}\n\tEntry Count: {:?}\n\tDoorbell: {:?}", queue_addr, entry_count, doorbell_addr);
+    pub fn new(doorbell_addr: Address<Virtual>, entry_count: u16, entry_size: usize) -> Self {
+        // TODO somehow validate entry size
 
-        let frames = falloc::get()
-            .acquire_frames(
-                queue_addr.frame_index(),
-                libkernel::align_up_div(entry_count as usize, 0x1000),
-                falloc::FrameState::Reserved,
-            )
-            .unwrap();
+        let size_in_bytes = (entry_count as usize) * entry_size;
+        let minimum_frame_count = libkernel::align_up_div(size_in_bytes, 0x1000);
+        let frames = falloc::get().autolock_many(minimum_frame_count).unwrap();
+        let alloc_addr = malloc::get().alloc_to(&frames) as *mut _;
 
-        debug!("Acquired frames for submission queue: {:?}", frames);
+        unsafe {
+            core::ptr::write_bytes(alloc_addr as *mut u8, 0, size_in_bytes);
+            let entries = &mut *core::slice::from_raw_parts_mut(alloc_addr, entry_count as usize);
 
-        Self {
-            entries: &mut *core::slice::from_raw_parts_mut(
-                malloc::get().alloc_to(&frames) as *mut _,
-                entry_count as usize,
-            ),
-            doorbell: &*doorbell_addr.as_ptr(),
-
-            cur_index: 0,
-            unsubmitted_entries: 0,
+            Self {
+                frames,
+                doorbell: &*doorbell_addr.as_ptr(),
+                entries,
+                cur_index: 0,
+                unsubmitted_entries: 0,
+            }
         }
     }
 
-    pub fn from_slice(
-        entries: &'q mut [NVME_COMMAND],
-        doorbell: &'q VolatileCell<u32, ReadWrite>,
-    ) -> Self {
-        Self {
-            entries,
-            doorbell,
-            cur_index: 0,
-            unsubmitted_entries: 0,
-        }
-    }
-
-    pub fn new(max_entries: usize, doorbell: &'q VolatileCell<u32, ReadWrite>) -> Self {
-        Self {
-            entries: libkernel::slice_mut!(NVME_COMMAND, max_entries),
-            doorbell,
-            cur_index: 0,
-            unsubmitted_entries: 0,
-        }
+    pub fn base_phys_addr(&self) -> Address<Physical> {
+        self.frames.start().base_addr()
     }
 
     fn increment_index(&mut self) {
@@ -152,7 +127,7 @@ impl<'q> SubmissionQueue<'q> {
         }
     }
 
-    pub fn flush_entries(&mut self) {
+    pub fn flush_commands(&mut self) {
         self.doorbell.write(self.cur_index as u32);
         self.unsubmitted_entries = 0;
     }

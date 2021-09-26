@@ -65,10 +65,10 @@ impl Volatile for MessageTableEntry {}
 impl fmt::Debug for MessageTableEntry {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_tuple("Message Table Entry")
-            .field(&self.get_masked())
-            .field(&self.get_addr())
-            .field(&self.get_message_data())
+            .debug_struct("Message Table Entry")
+            .field("Masked", &self.get_masked())
+            .field("Address", &self.get_addr())
+            .field("Data", &self.get_message_data())
             .finish()
     }
 }

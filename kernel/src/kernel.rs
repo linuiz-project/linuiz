@@ -102,10 +102,10 @@ extern "efiapi" fn kernel_main(
         libkernel::memory::malloc::set(&KERNEL_MALLOC);
     }
 
-    kernel_post_mmap_stage()
+    kernel_main_post_mmap()
 }
 
-fn kernel_post_mmap_stage() -> ! {
+fn kernel_main_post_mmap() -> ! {
     init_apic();
 
     let bridges: Vec<PCIeHostBridge> = libkernel::acpi::rdsp::xsdt::LAZY_XSDT
@@ -128,32 +128,40 @@ fn kernel_post_mmap_stage() -> ! {
         use libkernel::io::pci;
 
         if let pci::DeviceVariant::Standard(device) = device_variant {
-            for capability in device.capabilities() {
-                if let pci::standard::Capablities::MSIX(msix) = capability {
-                    if device.class() == pci::DeviceClass::MassStorageController
-                        && device.subclass() == 0x08
-                    {
+            if device.class() == pci::DeviceClass::MassStorageController
+                && device.subclass() == 0x08
+            {
+                for capability in device.capabilities() {
+                    use libkernel::io::pci;
+
+                    if let pci::standard::Capablities::MSIX(msix) = capability {
+                        let message_table = msix.get_message_table(device).unwrap();
+                        for entry in message_table.iter() {
+                            entry.set_masked(false);
+                        }
+
                         unsafe {
                             use crate::drivers::nvme::{command::CompletionCreate, *};
                             let mut nvme = Controller::from_device(device);
-                            let cc = nvme.controller_configuration();
-                            let csts = nvme.controller_status();
-                            // nvme.safe_init();
-
-                            nvme.configure_admin_submission_queue(
-                                &falloc::get().autolock().unwrap().into_iter(),
-                                8,
-                            );
-
-                            nvme.configure_admin_completion_queue(
-                                &falloc::get().autolock().unwrap().into_iter(),
-                                8,
-                            );
-
+                            nvme.configure_admin_submission_queue(8);
+                            nvme.configure_admin_completion_queue(8);
                             nvme.safe_set_enable(true);
 
                             info!("{:#?}", nvme);
+
+                            use crate::drivers::nvme::command::Abort;
+                            let command = nvme
+                                .admin_sub
+                                .as_mut()
+                                .unwrap()
+                                .next_entry::<Abort>()
+                                .unwrap();
+                            command.configure(10, 1);
+                            nvme.admin_sub.as_mut().unwrap().flush_commands();
                         }
+
+                        info!("{:#?}", message_table);
+                        info!("{:?}", msix.get_pending_bits(device));
                     }
                 }
             }

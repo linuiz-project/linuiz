@@ -277,6 +277,30 @@ impl fmt::Debug for ControllerStatus {
     }
 }
 
+#[repr(C)]
+pub struct InterruptMask {
+    set: VolatileCell<u32, ReadWrite>,
+    clear: VolatileCell<u32, ReadWrite>,
+}
+
+impl InterruptMask {
+    pub fn mask_vector(&self, index: usize) {
+        assert!(index < 32, "Index must be 0..32.");
+
+        self.set.write(*self.set.read().set_bit(index, true));
+    }
+
+    pub fn unmask_vector(&self, index: usize) {
+        assert!(index < 32, "Index must be 0..32.");
+
+        self.clear.write(*self.clear.read().set_bit(index, true));
+    }
+
+    pub fn raw_bits_str(&self) -> alloc::string::String {
+        alloc::format!("{:b}", self.set.read())
+    }
+}
+
 pub struct Controller<'dev> {
     device: &'dev PCIeDevice<Standard>,
     pub admin_sub: Option<queue::SubmissionQueue<'dev>>,
@@ -286,6 +310,8 @@ pub struct Controller<'dev> {
 impl<'dev> Controller<'dev> {
     const CAP: usize = 0x0;
     const VER: usize = 0x8;
+    const INTMS: usize = 0xC;
+    const INTMC: usize = 0x10;
     const CC: usize = 0x14;
     const CSTS: usize = 0x1C;
     const AQA: usize = 0x24;
@@ -301,33 +327,6 @@ impl<'dev> Controller<'dev> {
     }
 
     pub fn from_device(device: &'dev PCIeDevice<Standard>) -> Self {
-        let reg0 = device.get_register(StandardRegister::Register0).unwrap();
-        let capabilities = unsafe { reg0.borrow::<Capabilities>(0).unwrap() };
-        let (sub_entry_cnt, com_entry_cnt) = {
-            let attribs = unsafe { reg0.read::<u32>(Self::AQA) }.unwrap();
-
-            (
-                (attribs.get_bits(0..12) as u16) + 1,
-                (attribs.get_bits(16..28) as u16) + 1,
-            )
-        };
-
-        let admin_sub = unsafe {
-            queue::SubmissionQueue::from_addr(
-                reg0.mapped_addr() + 0x1000,
-                reg0.read::<Address<Physical>>(Self::ASQ).unwrap(),
-                sub_entry_cnt,
-            )
-        };
-
-        let admin_com = unsafe {
-            queue::CompletionQueue::from_addr(
-                reg0.mapped_addr() + 0x1004,
-                reg0.read::<Address<Physical>>(Self::ACQ).unwrap(),
-                com_entry_cnt,
-            )
-        };
-
         let nvme = Self {
             device,
             admin_sub: None,
@@ -338,7 +337,7 @@ impl<'dev> Controller<'dev> {
         debug!("Resetting controller (disable & wait for unready).");
         unsafe { nvme.safe_set_enable(false) };
 
-        debug!("Configuring various device registers.");
+        debug!("Initializing controller to base values.");
         cc.set_iosqes(6);
         cc.set_iocqes(4);
         cc.set_shn(ShutdownNotification::None);
@@ -374,6 +373,16 @@ impl<'dev> Controller<'dev> {
                 .get_register(StandardRegister::Register0)
                 .unwrap()
                 .read(Self::VER)
+                .unwrap()
+        }
+    }
+
+    pub fn interrupt_mask(&self) -> &InterruptMask {
+        unsafe {
+            self.device
+                .get_register(StandardRegister::Register0)
+                .unwrap()
+                .read(Self::INTMS)
                 .unwrap()
         }
     }
@@ -417,6 +426,11 @@ impl<'dev> Controller<'dev> {
     }
 
     pub fn set_admin_queue_sizes(&self, sq_size: u16, cq_size: u16) {
+        assert!(
+            !self.controller_configuration().get_en(),
+            "Cannot configure controller when enabled."
+        );
+
         assert!(
             sq_size < 1 << 12,
             "Maximum submission queue index is 12 bits."
@@ -487,26 +501,11 @@ impl<'dev> Controller<'dev> {
         !csts.get_cfs() && csts.get_rdy() == enable
     }
 
-    pub fn configure_admin_submission_queue(
-        &mut self,
-        frames: &libkernel::memory::FrameIterator,
-        entry_count: u16,
-    ) {
+    pub fn configure_admin_submission_queue(&mut self, entry_count: u16) {
         assert!(
             !self.controller_configuration().get_en(),
             "Cannot configure controller when enabled."
         );
-
-        let entry_size = self.controller_configuration().get_iosqes() << 4;
-        let max_entry_count = ((frames.total_len() * 0x1000) / (entry_size as usize)) as u16;
-        assert!(
-            entry_count <= max_entry_count,
-            "Entry count exceeds range covered by provided frames: {} frames, {} <= {}.",
-            frames.total_len(),
-            entry_count,
-            max_entry_count
-        );
-
         unsafe {
             let reg0 = self
                 .device
@@ -524,34 +523,21 @@ impl<'dev> Controller<'dev> {
             .unwrap();
 
             // Configure queue address & queue abstraction.
-            let queue_addr = frames.start().base_addr();
-            reg0.write(Self::ASQ, queue_addr.as_usize() as u64).unwrap();
-            self.admin_sub = Some(queue::SubmissionQueue::from_addr(
+            let sub_queue = queue::SubmissionQueue::new(
                 reg0.mapped_addr() + 0x1000,
-                queue_addr,
                 entry_count,
-            ));
+                (self.controller_configuration().get_iosqes() << 4) as usize,
+            );
+            reg0.write(Self::ASQ, sub_queue.base_phys_addr().as_usize() as u64)
+                .unwrap();
+            self.admin_sub = Some(sub_queue);
         }
     }
 
-    pub fn configure_admin_completion_queue(
-        &mut self,
-        frames: &libkernel::memory::FrameIterator,
-        entry_count: u16,
-    ) {
+    pub fn configure_admin_completion_queue(&mut self, entry_count: u16) {
         assert!(
             !self.controller_configuration().get_en(),
             "Cannot configure controller when enabled."
-        );
-
-        let entry_size = self.controller_configuration().get_iocqes() << 4;
-        let max_entry_count = ((frames.total_len() * 0x1000) / (entry_size as usize)) as u16;
-        assert!(
-            entry_count <= max_entry_count,
-            "Entry count exceeds range covered by provided frames: {} frames, {} <= {}.",
-            frames.total_len(),
-            entry_count,
-            max_entry_count
         );
 
         unsafe {
@@ -571,13 +557,14 @@ impl<'dev> Controller<'dev> {
             .unwrap();
 
             // Configure queue address & queue abstraction.
-            let queue_addr = frames.start().base_addr();
-            reg0.write(Self::ACQ, queue_addr.as_usize() as u64).unwrap();
-            self.admin_com = Some(queue::CompletionQueue::from_addr(
+            let com_queue = queue::CompletionQueue::new(
                 reg0.mapped_addr() + 0x1000,
-                queue_addr,
                 entry_count,
-            ));
+                (self.controller_configuration().get_iocqes() << 4) as usize,
+            );
+            reg0.write(Self::ACQ, com_queue.base_phys_addr().as_usize() as u64)
+                .unwrap();
+            self.admin_com = Some(com_queue);
         }
     }
 }
@@ -588,6 +575,7 @@ impl fmt::Debug for Controller<'_> {
             .debug_struct("NVMe Device")
             .field("Capabilities", &self.capabilities())
             .field("Version", &self.version())
+            .field("Interrupt Mask", &self.interrupt_mask().raw_bits_str())
             .field("Controller Configuration", &self.controller_configuration())
             .field("Controller Status", &self.controller_status())
             .field("Admin Queue Attributes", &self.get_admin_queue_sizes())
