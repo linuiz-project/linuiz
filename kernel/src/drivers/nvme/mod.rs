@@ -279,8 +279,8 @@ impl fmt::Debug for ControllerStatus {
 
 pub struct Controller<'dev> {
     device: &'dev PCIeDevice<Standard>,
-    pub admin_sub: queue::SubmissionQueue<'dev>,
-    pub admin_com: queue::CompletionQueue<'dev>,
+    pub admin_sub: Option<queue::SubmissionQueue<'dev>>,
+    pub admin_com: Option<queue::CompletionQueue<'dev>>,
 }
 
 impl<'dev> Controller<'dev> {
@@ -328,11 +328,34 @@ impl<'dev> Controller<'dev> {
             )
         };
 
-        Self {
+        let nvme = Self {
             device,
-            admin_sub,
-            admin_com,
-        }
+            admin_sub: None,
+            admin_com: None,
+        };
+
+        let cc = nvme.controller_configuration();
+        debug!("Resetting controller (disable & wait for unready).");
+        unsafe { nvme.safe_set_enable(false) };
+
+        debug!("Configuring various device registers.");
+        cc.set_iosqes(6);
+        cc.set_iocqes(4);
+        cc.set_shn(ShutdownNotification::None);
+        cc.set_ams(ArbitrationMechanism::RoundRobin);
+        cc.set_mps(0); // 4KiB pages
+        let css = nvme.capabilities().get_css();
+        cc.set_css(if css.contains(CommandSetsSupported::ONLY_ADMIN) {
+            CommandSet::Admin
+        } else if css.contains(CommandSetsSupported::IO) {
+            CommandSet::IO
+        } else if css.contains(CommandSetsSupported::NVM) {
+            CommandSet::NVM
+        } else {
+            panic!("NVMe driver reports invalid CAP.CSS value: {:?}", css)
+        });
+
+        nvme
     }
 
     pub fn capabilities(&self) -> &Capabilities {
@@ -404,15 +427,15 @@ impl<'dev> Controller<'dev> {
         );
 
         unsafe {
-            let register = self
+            let reg0 = self
                 .device
                 .get_register(StandardRegister::Register0)
                 .unwrap();
 
-            let mut attribs = register.read::<u32>(Self::AQA).unwrap();
+            let mut attribs = reg0.read::<u32>(Self::AQA).unwrap();
             attribs.set_bits(0..12, sq_size as u32);
             attribs.set_bits(16..28, cq_size as u32);
-            register.write(Self::AQA, attribs).unwrap();
+            reg0.write(Self::AQA, attribs).unwrap();
         }
     }
 
@@ -450,68 +473,112 @@ impl<'dev> Controller<'dev> {
         queue_phys_addr
     }
 
-    pub fn rdy_wait(&self, rdy_state: bool) -> bool {
+    pub unsafe fn safe_set_enable(&self, enable: bool) -> bool {
+        self.controller_configuration().set_en(enable);
+
         let csts = self.controller_status();
         let max_wait = self.capabilities().get_to() * 500;
         let mut msec_waited = 0;
-        while !csts.get_cfs() && csts.get_rdy() != rdy_state && msec_waited < max_wait {
+        while !csts.get_cfs() && csts.get_rdy() != enable && msec_waited < max_wait {
             crate::timer::sleep_msec(10);
             msec_waited += 10;
         }
 
-        !csts.get_cfs() && csts.get_rdy() == rdy_state
+        !csts.get_cfs() && csts.get_rdy() == enable
     }
 
-    pub fn safe_init(&self) {
-        // This initialization/reset follows the steps described in section 3.5.1 of the
-        //  NVMe base specification, version 2.0a.
+    pub fn configure_admin_submission_queue(
+        &mut self,
+        frames: &libkernel::memory::FrameIterator,
+        entry_count: u16,
+    ) {
+        assert!(
+            !self.controller_configuration().get_en(),
+            "Cannot configure controller when enabled."
+        );
 
-        debug!("Performing safe initialization of NVMe controller.");
-        let cc = self.controller_configuration();
-        debug!("Resetting controller (disable & wait for unready).");
-        cc.set_en(false);
-        self.rdy_wait(false);
-
-        debug!("Configuring various device registers.");
-        cc.set_iosqes(6);
-        cc.set_iocqes(4);
-        cc.set_shn(ShutdownNotification::None);
-        cc.set_ams(ArbitrationMechanism::RoundRobin);
-        cc.set_mps(0); // 4KiB pages
-        let css = self.capabilities().get_css();
-        cc.set_css(if css.contains(CommandSetsSupported::ONLY_ADMIN) {
-            CommandSet::Admin
-        } else if css.contains(CommandSetsSupported::IO) {
-            CommandSet::IO
-        } else if css.contains(CommandSetsSupported::NVM) {
-            CommandSet::NVM
-        } else {
-            panic!("NVMe driver reports invalid CAP.CSS value: {:?}", css)
-        });
-
-        self.set_admin_queue_sizes(63, 63);
+        let entry_size = self.controller_configuration().get_iosqes() << 4;
+        let max_entry_count = ((frames.total_len() * 0x1000) / (entry_size as usize)) as u16;
+        assert!(
+            entry_count <= max_entry_count,
+            "Entry count exceeds range covered by provided frames: {} frames, {} <= {}.",
+            frames.total_len(),
+            entry_count,
+            max_entry_count
+        );
 
         unsafe {
-            debug!("Acquiring new frames for admin submission & completion queues.");
-            let cq_frame = libkernel::memory::falloc::get().autolock().unwrap();
-            let sq_frame = libkernel::memory::falloc::get().autolock().unwrap();
-
-            self.device
+            let reg0 = self
+                .device
                 .get_register(StandardRegister::Register0)
-                .unwrap()
-                .write(Self::ACQ, cq_frame.base_addr().as_usize() as u64)
                 .unwrap();
 
-            self.device
-                .get_register(StandardRegister::Register0)
-                .unwrap()
-                .write(Self::ASQ, sq_frame.base_addr().as_usize() as u64)
-                .unwrap();
+            // Configure queue size in hardware.
+            reg0.write(
+                Self::AQA,
+                *reg0
+                    .read::<u32>(Self::AQA)
+                    .unwrap()
+                    .set_bits(0..12, (entry_count - 1) as u32),
+            )
+            .unwrap();
+
+            // Configure queue address & queue abstraction.
+            let queue_addr = frames.start().base_addr();
+            reg0.write(Self::ASQ, queue_addr.as_usize() as u64).unwrap();
+            self.admin_sub = Some(queue::SubmissionQueue::from_addr(
+                reg0.mapped_addr() + 0x1000,
+                queue_addr,
+                entry_count,
+            ));
         }
+    }
 
-        debug!("Re-enabling NVMe controller & waiting for ready bit.");
-        cc.set_en(true);
-        self.rdy_wait(true);
+    pub fn configure_admin_completion_queue(
+        &mut self,
+        frames: &libkernel::memory::FrameIterator,
+        entry_count: u16,
+    ) {
+        assert!(
+            !self.controller_configuration().get_en(),
+            "Cannot configure controller when enabled."
+        );
+
+        let entry_size = self.controller_configuration().get_iocqes() << 4;
+        let max_entry_count = ((frames.total_len() * 0x1000) / (entry_size as usize)) as u16;
+        assert!(
+            entry_count <= max_entry_count,
+            "Entry count exceeds range covered by provided frames: {} frames, {} <= {}.",
+            frames.total_len(),
+            entry_count,
+            max_entry_count
+        );
+
+        unsafe {
+            let reg0 = self
+                .device
+                .get_register(StandardRegister::Register0)
+                .unwrap();
+
+            // Configure queue size in hardware.
+            reg0.write(
+                Self::AQA,
+                *reg0
+                    .read::<u32>(Self::AQA)
+                    .unwrap()
+                    .set_bits(16..28, (entry_count - 1) as u32),
+            )
+            .unwrap();
+
+            // Configure queue address & queue abstraction.
+            let queue_addr = frames.start().base_addr();
+            reg0.write(Self::ACQ, queue_addr.as_usize() as u64).unwrap();
+            self.admin_com = Some(queue::CompletionQueue::from_addr(
+                reg0.mapped_addr() + 0x1000,
+                queue_addr,
+                entry_count,
+            ));
+        }
     }
 }
 

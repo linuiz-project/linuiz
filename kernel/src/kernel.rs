@@ -138,49 +138,21 @@ fn kernel_post_mmap_stage() -> ! {
                             let mut nvme = Controller::from_device(device);
                             let cc = nvme.controller_configuration();
                             let csts = nvme.controller_status();
-                            nvme.safe_init();
+                            // nvme.safe_init();
+
+                            nvme.configure_admin_submission_queue(
+                                &falloc::get().autolock().unwrap().into_iter(),
+                                8,
+                            );
+
+                            nvme.configure_admin_completion_queue(
+                                &falloc::get().autolock().unwrap().into_iter(),
+                                8,
+                            );
+
+                            nvme.safe_set_enable(true);
 
                             info!("{:#?}", nvme);
-
-                            const QUEUE_PAGE_LEN: usize = 4;
-
-                            use libkernel::memory::{falloc::FrameState, malloc};
-
-                            let mut base_index = 0;
-                            for (frame_index, frame_state) in falloc::get().iter().enumerate() {
-                                let run = frame_index - base_index;
-
-                                if run == QUEUE_PAGE_LEN {
-                                    break;
-                                } else if frame_state != FrameState::Free
-                                    || malloc::get().page_state(frame_index).unwrap_or(true)
-                                {
-                                    base_index = frame_index + 1;
-                                }
-                            }
-
-                            let frames = falloc::get()
-                                .acquire_frames(base_index, QUEUE_PAGE_LEN, FrameState::Locked)
-                                .unwrap();
-                            debug!("Using frame range for NVMe completion queue: {:?}", frames);
-
-                            let base_addr = frames.start().base_addr();
-                            for frame in frames {
-                                malloc::get().identity_map(&frame, true);
-                            }
-
-                            nvme.admin_com.next_entry();
-                            nvme.admin_com.next_entry();
-
-                            let cmd = nvme.admin_sub.next_entry::<CompletionCreate>().unwrap();
-                            cmd.configure(0, 30, base_addr, true, false, 0);
-                            let cmd1 = nvme.admin_sub.next_entry::<CompletionCreate>().unwrap();
-                            cmd1.configure(1, 30, base_addr, true, false, 0);
-                            nvme.admin_sub.flush_entries();
-                            timer::sleep_sec(1);
-
-                            info!("{:?}", nvme.admin_com.next_entry());
-                            info!("{:?}", nvme.admin_com.next_entry());
                         }
                     }
                 }
