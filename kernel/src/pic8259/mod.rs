@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+
 /*
 Represents a wrapper around the hardware Programmable Interrupt Controller. This is an implementation
 based around the Intel 8259 PIC, which is still supported in favor of backwards compatibility.
@@ -6,7 +7,12 @@ based around the Intel 8259 PIC, which is still supported in favor of backwards 
 Information about the PIC can be found here: https://en.wikipedia.org/wiki/Intel_8259
 */
 
-use libkernel::io::port::{ReadWritePort, WriteOnlyPort};
+pub mod pit;
+
+use libkernel::{
+    bitfield_getter,
+    io::port::{ReadWritePort, WriteOnlyPort},
+};
 
 const CMD_INIT: u8 = 0x11;
 const CMD_END_OF_INTERRUPT: u8 = 0x20;
@@ -201,19 +207,4 @@ pub fn end_of_interrupt(offset: InterruptOffset) {
 
 pub unsafe fn disable() {
     PIC8259.lock().init(InterruptLines::empty())
-}
-
-pub fn set_timer_freq(hz: u32) {
-    const MAXIMUM_TICK_RATE: u32 = 1193180;
-    const DATA0: u16 = 0x40;
-    const COMMAND: u16 = 0x43;
-
-    unsafe { WriteOnlyPort::<u8>::new(COMMAND) }.write(0x36);
-
-    use bit_field::BitField;
-
-    let mut data0 = unsafe { WriteOnlyPort::<u8>::new(DATA0) };
-    let divisor = MAXIMUM_TICK_RATE / hz;
-    data0.write(divisor.get_bits(0..8) as u8);
-    data0.write(divisor.get_bits(8..16) as u8);
 }

@@ -22,12 +22,12 @@ impl<T: PortRead> ReadOnlyPort<T> {
         }
     }
 
-    pub fn port_num(&self) -> u16 {
+    pub const fn port_num(&self) -> u16 {
         self.port
     }
 
     pub fn read(&self) -> T {
-        unsafe { T::read(self.port) }
+        unsafe { T::read(self.port_num()) }
     }
 }
 
@@ -50,12 +50,12 @@ impl<T: PortWrite> WriteOnlyPort<T> {
         }
     }
 
-    pub fn port_num(&self) -> u16 {
+    pub const fn port_num(&self) -> u16 {
         self.port
     }
 
     pub fn write(&mut self, value: T) {
-        unsafe { T::write(self.port, value) }
+        unsafe { T::write(self.port_num(), value) }
     }
 }
 
@@ -78,16 +78,16 @@ impl<T: PortReadWrite> ReadWritePort<T> {
         }
     }
 
-    pub fn port_num(&self) -> u16 {
+    pub const fn port_num(&self) -> u16 {
         self.port
     }
 
     pub fn read(&self) -> T {
-        unsafe { T::read(self.port) }
+        unsafe { T::read(self.port_num()) }
     }
 
     pub fn write(&mut self, value: T) {
-        unsafe { T::write(self.port, value) }
+        unsafe { T::write(self.port_num(), value) }
     }
 }
 
