@@ -118,64 +118,57 @@ fn kernel_main_post_mmap() -> ! {
         })
         .collect();
 
-    // debug!("Configuring PCIe devices.");
-    // for device_variant in bridges
-    //     .iter()
-    //     .flat_map(|host_bridge| host_bridge.iter())
-    //     .filter(|bus| bus.has_devices())
-    //     .flat_map(|bus| bus.iter())
-    // {
-    //     use libkernel::io::pci;
+    debug!("Configuring PCIe devices.");
+    for device_variant in bridges
+        .iter()
+        .flat_map(|host_bridge| host_bridge.iter())
+        .filter(|bus| bus.has_devices())
+        .flat_map(|bus| bus.iter())
+    {
+        use libkernel::io::pci;
 
-    //     if let pci::DeviceVariant::Standard(device) = device_variant {
-    //         if device.class() == pci::DeviceClass::MassStorageController
-    //             && device.subclass() == 0x08
-    //         {
-    //             for capability in device.capabilities() {
-    //                 if let pci::standard::Capablities::MSIX(msix) = capability {
-    //                     let message_table = msix.get_message_table(device).unwrap();
-    //                     for entry in message_table.iter() {
-    //                         entry.set_masked(false);
-    //                     }
+        if let pci::DeviceVariant::Standard(device) = device_variant {
+            if device.class() == pci::DeviceClass::MassStorageController
+                && device.subclass() == 0x08
+            {
+                for capability in device.capabilities() {
+                    if let pci::standard::Capablities::MSIX(msix) = capability {
+                        let message_table = msix.get_message_table(device).unwrap();
+                        for entry in message_table.iter() {
+                            entry.set_masked(false);
+                        }
 
-    //                     unsafe {
-    //                         use crate::drivers::nvme::{command::*, *};
-    //                         let mut nvme = Controller::from_device(device);
-    //                         nvme.configure_admin_submission_queue(8);
-    //                         nvme.configure_admin_completion_queue(8);
-    //                         nvme.safe_set_enable(true);
+                        unsafe {
+                            use crate::drivers::nvme::{command::*, *};
+                            let mut nvme = Controller::from_device(device);
+                            nvme.configure_admin_submission_queue(8);
+                            nvme.configure_admin_completion_queue(8);
+                            nvme.safe_set_enable(true);
 
-    //                         info!("{:#?}", nvme);
+                            info!("{:#?}", nvme);
 
-    //                         let frame = falloc::get().autolock().unwrap();
+                            let frame = falloc::get().autolock().unwrap();
 
-    //                         {
-    //                             let admin_sub = nvme.admin_submission_queue();
-    //                             let command1 = admin_sub.next_entry::<DeviceSelfTest>().unwrap();
-    //                             command1.configure(34, DeviceSelfTestCode::Short);
-    //                             admin_sub.flush_commands();
-    //                         }
+                            {
+                                let admin_sub = nvme.admin_submission_queue();
+                                let command1 = admin_sub.next_entry::<DeviceSelfTest>().unwrap();
+                                command1.configure(34, DeviceSelfTestCode::Short);
+                                admin_sub.flush_commands();
+                            }
 
-    //                         timer::sleep_sec(3);
+                            {
+                                let admin_com = nvme.admin_completion_queue();
+                                info!("{:?}", admin_com.next_entry());
+                                info!("{:?}", msix.get_pending_bits(device).unwrap());
+                            }
+                        }
 
-    //                         {
-    //                             let admin_com = nvme.admin_completion_queue();
-    //                             info!("{:?}", admin_com.next_entry());
-    //                             info!("{:?}", msix.get_pending_bits(device).unwrap());
-    //                         }
-    //                     }
-
-    //                     // info!("{:#?}", message_table);
-    //                     // info!("{:?}", msix.get_pending_bits(device));
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
-
-    loop {
-        timer::sleep_sec(1);
-        print!(".");
+                        // info!("{:#?}", message_table);
+                        // info!("{:?}", msix.get_pending_bits(device));
+                    }
+                }
+            }
+        }
     }
 
     info!("Kernel has reached safe shutdown state.");
@@ -352,11 +345,6 @@ fn init_apic() {
     apic.timer().set_masked(false);
 
     info!("Core-local APIC configured and enabled.");
-
-    loop {
-        info!("{}", timer::get_ticks());
-        timer::sleep_sec(1);
-    }
 }
 
 extern "x86-interrupt" fn apic_error_handler(_: libkernel::structures::idt::InterruptStackFrame) {

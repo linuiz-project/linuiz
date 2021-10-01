@@ -2,7 +2,7 @@ pub mod command;
 pub mod queue;
 
 use bit_field::BitField;
-use core::{borrow::Borrow, convert::TryFrom, fmt};
+use core::{convert::TryFrom, fmt};
 use libkernel::{
     addr_ty::Physical,
     io::pci::{standard::StandardRegister, PCIeDevice, Standard},
@@ -303,8 +303,8 @@ impl InterruptMask {
 
 pub struct Controller<'dev> {
     device: &'dev PCIeDevice<Standard>,
-    pub admin_sub: Option<queue::SubmissionQueue<'dev>>,
-    pub admin_com: Option<queue::CompletionQueue<'dev>>,
+    admin_sub: Option<queue::SubmissionQueue<'dev, queue::Admin>>,
+    admin_com: Option<queue::CompletionQueue<'dev>>,
 }
 
 impl<'dev> Controller<'dev> {
@@ -566,6 +566,18 @@ impl<'dev> Controller<'dev> {
                 .unwrap();
             self.admin_com = Some(com_queue);
         }
+    }
+
+    pub fn admin_submission_queue(&self) -> &'dev queue::SubmissionQueue<'_, queue::Admin> {
+        self.admin_sub
+            .as_ref()
+            .expect("Admin submission queue hasn't been configured.")
+    }
+
+    pub fn admin_completion_queue(&mut self) -> &'dev mut queue::CompletionQueue<'_> {
+        self.admin_com
+            .as_mut()
+            .expect("Admin completion queue hasn't been configured.")
     }
 }
 

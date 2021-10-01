@@ -114,11 +114,11 @@ impl FrameIterator {
         }
     }
 
-    pub fn start(&self) -> &Frame {
+    pub const fn start(&self) -> &Frame {
         &self.start
     }
 
-    pub fn current(&self) -> &Frame {
+    pub const fn current(&self) -> &Frame {
         &self.current
     }
 
@@ -126,7 +126,7 @@ impl FrameIterator {
         &self.end
     }
 
-    pub fn total_len(&self) -> usize {
+    pub const fn total_len(&self) -> usize {
         self.terminating_index() - self.start().index()
     }
 
