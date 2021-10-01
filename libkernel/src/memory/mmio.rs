@@ -62,21 +62,21 @@ impl MMIO<Unmapped> {
 }
 
 impl MMIO<Mapped> {
-    fn max_offset(&self) -> usize {
-        self.frames.len() * 0x1000
+    const fn max_offset(&self) -> usize {
+        self.frames.total_len() * 0x1000
     }
 
     pub fn physical_addr(&self) -> Address<Physical> {
         self.frames.start().base_addr()
     }
 
-    pub fn mapped_addr(&self) -> Address<Virtual> {
+    pub const fn mapped_addr(&self) -> Address<Virtual> {
         self.mapped_addr
     }
 
-    pub fn mapped_offset(&self, add_offset: usize) -> Result<Address<Virtual>, MMIOError> {
+    pub const fn mapped_offset<T>(&self, add_offset: usize) -> Result<*mut T, MMIOError> {
         if add_offset < self.max_offset() {
-            Ok(self.mapped_addr() + add_offset)
+            Ok((self.mapped_addr().as_usize() + add_offset) as *mut T)
         } else {
             Err(MMIOError::OffsetOverrun(add_offset, self.max_offset()))
         }
@@ -87,24 +87,21 @@ impl MMIO<Mapped> {
         super::PageIterator::new(&base_page, &base_page.offset(self.frames.total_len()))
     }
 
-    pub unsafe fn read<T>(&self, add_offset: usize) -> Result<T, MMIOError> {
-        self.mapped_offset(add_offset)
-            .map(|addr| addr.as_ptr::<T>().read_volatile())
+    pub unsafe fn read<T>(&self, offset: usize) -> Result<T, MMIOError> {
+        self.mapped_offset(offset)
+            .map(|ptr| (ptr as *const T).read_volatile())
     }
 
-    pub unsafe fn write<T>(&self, add_offset: usize, value: T) -> Result<(), MMIOError> {
-        self.mapped_offset(add_offset).map(|mut addr| {
-            addr.as_mut_ptr::<T>().write_volatile(value);
-
-            ()
-        })
+    pub unsafe fn write<T>(&self, offset: usize, value: T) -> Result<(), MMIOError> {
+        self.mapped_offset(offset)
+            .map(|mut ptr| (ptr as *mut T).write_volatile(value))
     }
 
     pub unsafe fn borrow<T: super::volatile::Volatile>(
         &self,
         add_offset: usize,
     ) -> Result<&T, MMIOError> {
-        self.mapped_offset(add_offset).map(|addr| &*addr.as_ptr())
+        self.mapped_offset(add_offset).map(|ptr| &*ptr)
     }
 }
 
