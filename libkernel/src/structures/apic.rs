@@ -1,6 +1,5 @@
 use crate::{
     addr_ty::Physical,
-    cell::SyncOnceCell,
     memory::{
         mmio::{Mapped, MMIO},
         volatile::VolatileCell,
@@ -10,40 +9,27 @@ use crate::{
 };
 use core::marker::PhantomData;
 
-static mut LOCAL_APIC: SyncOnceCell<APIC> = SyncOnceCell::new();
+lazy_static::lazy_static! {
+    pub static ref LAPIC: APIC =unsafe  {
+        assert!(crate::memory::malloc::try_get().is_some(), "A memory allocator must be present for APIC to load.");
 
-pub fn load() {
-    if unsafe { LOCAL_APIC.get().is_some() } {
-        panic!("Local APIC has already been configured");
-    } else {
         debug!("Loading local APIC table.");
         let start_index = APIC::mmio_addr().frame_index();
         debug!("APIC MMIO mapping at frame: {}", start_index);
-
-        let mmio = crate::memory::mmio::unmapped_mmio(unsafe {
+        APIC::new(crate::memory::mmio::unmapped_mmio(
             crate::memory::falloc::get()
                 .acquire_frames(start_index, 1, crate::memory::falloc::FrameState::Reserved)
                 .unwrap()
-        })
+        )
         .unwrap()
-        .automap();
-
-        unsafe { LOCAL_APIC.set(APIC::new(mmio)).ok() };
-    }
-}
-
-pub fn local_apic() -> Option<&'static APIC> {
-    unsafe { LOCAL_APIC.get() }
-}
-
-pub fn local_apic_mut() -> Option<&'static mut APIC> {
-    unsafe { LOCAL_APIC.get_mut() }
+        .automap() )
+    };
 }
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
-pub enum APICRegister {
+pub enum Register {
     ID = 0x20,
     Version = 0x30,
     TaskPriority = 0x80,
@@ -60,7 +46,7 @@ pub enum APICRegister {
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
-pub enum APICTimerMode {
+pub enum TimerMode {
     OneShot = 0b00,
     Periodic = 0b01,
     TSC_Deadline = 0b10,
@@ -69,7 +55,7 @@ pub enum APICTimerMode {
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
-pub enum APICTimerDivisor {
+pub enum TimerDivisor {
     Div2 = 0b0000,
     Div4 = 0b0001,
     Div8 = 0b0010,
@@ -83,7 +69,7 @@ pub enum APICTimerDivisor {
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
-pub enum APICDeliveryMode {
+pub enum DeliveryMode {
     Fixed = 0b000,
     SystemManagement = 0b010,
     NonMaskable = 0b100,
@@ -92,7 +78,7 @@ pub enum APICDeliveryMode {
 }
 
 bitflags::bitflags! {
-    pub struct APICErrorStatusFlags: u8 {
+    pub struct ErrorStatusFlags: u8 {
         const SEND_CHECKSUM_ERROR = 1 << 0;
         const RECEIVE_CHECKSUM_ERROR = 1 << 1;
         const SEND_ACCEPT_ERROR = 1 << 2;
@@ -126,19 +112,19 @@ impl APIC {
         (MSR::IA32_APIC_BASE.read() & (1 << 11)) > 0
     }
 
-    pub unsafe fn enable(&mut self) {
+    pub unsafe fn enable(&self) {
         MSR::IA32_APIC_BASE.write_bit(11, true);
     }
 
-    pub unsafe fn disable(&mut self) {
+    pub unsafe fn disable(&self) {
         MSR::IA32_APIC_BASE.write_bit(11, false);
     }
 
-    pub fn end_of_interrupt(&mut self) {
+    pub fn end_of_interrupt(&self) {
         unsafe { self.mmio.write(0xB0, 0).unwrap() };
     }
 
-    pub fn cmci(&mut self) -> LVTRegister<Generic> {
+    pub fn cmci(&self) -> LVTRegister<Generic> {
         unsafe {
             LVTRegister::<Generic> {
                 obj: self
@@ -150,7 +136,7 @@ impl APIC {
         }
     }
 
-    pub fn timer(&mut self) -> LVTRegister<Timer> {
+    pub fn timer(&self) -> LVTRegister<Timer> {
         unsafe {
             LVTRegister::<Timer> {
                 obj: self
@@ -162,7 +148,7 @@ impl APIC {
         }
     }
 
-    pub fn thermal_sensor(&mut self) -> LVTRegister<Generic> {
+    pub fn thermal_sensor(&self) -> LVTRegister<Generic> {
         unsafe {
             LVTRegister::<Generic> {
                 obj: self
@@ -174,7 +160,7 @@ impl APIC {
         }
     }
 
-    pub fn performance(&mut self) -> LVTRegister<Generic> {
+    pub fn performance(&self) -> LVTRegister<Generic> {
         unsafe {
             LVTRegister::<Generic> {
                 obj: self
@@ -186,7 +172,7 @@ impl APIC {
         }
     }
 
-    pub fn lint0(&mut self) -> LVTRegister<LINT> {
+    pub fn lint0(&self) -> LVTRegister<LINT> {
         unsafe {
             LVTRegister::<LINT> {
                 obj: self
@@ -198,7 +184,7 @@ impl APIC {
         }
     }
 
-    pub fn lint1(&mut self) -> LVTRegister<LINT> {
+    pub fn lint1(&self) -> LVTRegister<LINT> {
         unsafe {
             LVTRegister::<LINT> {
                 obj: self
@@ -210,7 +196,7 @@ impl APIC {
         }
     }
 
-    pub fn error(&mut self) -> LVTRegister<Error> {
+    pub fn error(&self) -> LVTRegister<Error> {
         unsafe {
             LVTRegister::<Error> {
                 obj: self
@@ -222,7 +208,7 @@ impl APIC {
         }
     }
 
-    pub fn write_spurious(&mut self, vector: u8, enabled: bool) {
+    pub fn write_spurious(&self, vector: u8, enabled: bool) {
         unsafe {
             self.mmio
                 .write(0xF0, (vector as u32) | ((enabled as u32) << 8))
@@ -230,31 +216,31 @@ impl APIC {
         };
     }
 
-    pub fn error_status(&self) -> APICErrorStatusFlags {
-        APICErrorStatusFlags::from_bits_truncate(unsafe { self.mmio.read(0x280).unwrap() })
+    pub fn error_status(&self) -> ErrorStatusFlags {
+        ErrorStatusFlags::from_bits_truncate(unsafe { self.mmio.read(0x280).unwrap() })
     }
 
-    pub fn read_register(&self, register: APICRegister) -> u32 {
+    pub fn read_register(&self, register: Register) -> u32 {
         unsafe { self.mmio.read(register as usize).unwrap() }
     }
 
-    pub fn write_register(&mut self, register: APICRegister, value: u32) {
+    pub fn write_register(&self, register: Register, value: u32) {
         unsafe { self.mmio.write(register as usize, value).unwrap() }
     }
 
-    pub unsafe fn reset(&mut self) {
-        self.write_register(APICRegister::DFR, 0xFFFFFFFF);
-        let mut ldr = self.read_register(APICRegister::LDR);
+    pub unsafe fn reset(&self) {
+        self.write_register(Register::DFR, 0xFFFFFFFF);
+        let mut ldr = self.read_register(Register::LDR);
         ldr &= 0xFFFFFF;
         ldr = (ldr & !0xFF) | ((ldr & 0xFF) | 1);
-        self.write_register(APICRegister::LDR, ldr);
+        self.write_register(Register::LDR, ldr);
         self.timer().set_masked(true);
         self.performance()
-            .set_delivery_mode(APICDeliveryMode::NonMaskable);
+            .set_delivery_mode(DeliveryMode::NonMaskable);
         // self.lint0().set_masked(true);
         self.lint1().set_masked(true);
-        self.write_register(APICRegister::TaskPriority, 0);
-        self.write_register(APICRegister::TimerInitialCount, 0);
+        self.write_register(Register::TaskPriority, 0);
+        self.write_register(Register::TimerInitialCount, 0);
     }
 }
 
@@ -314,14 +300,14 @@ impl<T: LVTRegisterVariant> LVTRegister<'_, T> {
 }
 
 impl LVTRegister<'_, Timer> {
-    pub fn set_mode(&mut self, mode: APICTimerMode) {
+    pub fn set_mode(&mut self, mode: TimerMode) {
         self.obj
             .write(*self.obj.read().set_bits(17..19, mode as u32));
     }
 }
 
 impl LVTRegister<'_, Generic> {
-    pub fn set_delivery_mode(&mut self, mode: APICDeliveryMode) {
+    pub fn set_delivery_mode(&mut self, mode: DeliveryMode) {
         self.obj
             .write(*self.obj.read().set_bits(8..11, mode as u32));
     }
