@@ -8,11 +8,11 @@ use num_enum::TryFromPrimitive;
 
 // INVARIANT: All memory accesses through this struct are volatile.
 #[repr(transparent)]
-pub struct HBAPortCommandStatus {
+pub struct PortCommandStatus {
     bits: VolatileCell<u32, ReadWrite>,
 }
 
-impl HBAPortCommandStatus {
+impl PortCommandStatus {
     volatile_bitfield_getter!(bits, st, 0);
     // SUD - Check CAP.SSS is 1 or 0 for RW or RO
 
@@ -48,7 +48,7 @@ impl HBAPortCommandStatus {
     volatile_bitfield_getter!(bits, u32, icc, 28..32);
 }
 
-impl core::fmt::Debug for HBAPortCommandStatus {
+impl core::fmt::Debug for PortCommandStatus {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
             .debug_struct("Command Status Register")
@@ -78,11 +78,11 @@ impl core::fmt::Debug for HBAPortCommandStatus {
 
 // INVARIANT: All memory accesses through this struct are volatile.
 #[repr(transparent)]
-pub struct HBAPortInterruptStatus {
+pub struct PortInterruptStatus {
     bits: VolatileCell<u32, ReadWrite>,
 }
 
-impl HBAPortInterruptStatus {
+impl PortInterruptStatus {
     volatile_bitfield_getter!(bits, dhrs, 0);
     volatile_bitfield_getter!(bits, pss, 1);
     volatile_bitfield_getter!(bits, dss, 2);
@@ -106,7 +106,7 @@ impl HBAPortInterruptStatus {
     }
 }
 
-impl core::fmt::Debug for HBAPortInterruptStatus {
+impl core::fmt::Debug for PortInterruptStatus {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
             .debug_struct("Interrupt Status")
@@ -191,7 +191,7 @@ impl core::fmt::Debug for HBAPortSATAStatus {
 
 #[repr(u32)]
 #[derive(Debug, PartialEq, Eq)]
-pub enum HBAPortClass {
+pub enum PortClass {
     None = 0x0,
     SATA = 0x00000101,
     SEMB = 0xC33C0101,
@@ -201,15 +201,15 @@ pub enum HBAPortClass {
 
 // INVARIANT: All memory accesses through this struct are volatile.
 #[repr(C)]
-pub struct HBAPort {
-    cmd_list: VolatileSplitPtr<super::HBACommand>,
+pub struct Port {
+    cmd_list: VolatileSplitPtr<super::Command>,
     fis_addr: VolatileSplitPtr<u8>,
-    interrupt_status: HBAPortInterruptStatus,
+    interrupt_status: PortInterruptStatus,
     interrupt_enable: VolatileCell<u32, ReadOnly>,
-    command_status: HBAPortCommandStatus,
+    command_status: PortCommandStatus,
     _reserved0: [u8; 4],
     task_file_data: VolatileCell<u32, ReadOnly>,
-    signature: VolatileCell<HBAPortClass, ReadOnly>,
+    signature: VolatileCell<PortClass, ReadOnly>,
     sata_status: HBAPortSATAStatus,
     sata_control: VolatileCell<u32, ReadOnly>,
     sata_error: VolatileCell<u32, ReadOnly>,
@@ -221,8 +221,8 @@ pub struct HBAPort {
     _vendor0: [u8; 4],
 }
 
-impl HBAPort {
-    pub fn class(&self) -> HBAPortClass {
+impl Port {
+    pub fn class(&self) -> PortClass {
         // Ensures port is in a valid state (deteced & powered).
         if self.sata_status().device_detection() == DeviceDetection::DetectedAndPhy
             && self.sata_status().interface_pwm() == InterfacePowerManagement::Active
@@ -230,7 +230,7 @@ impl HBAPort {
             self.signature.read()
         } else {
             // Finally, determine port type from its signature.
-            HBAPortClass::None
+            PortClass::None
         }
     }
 
@@ -238,7 +238,7 @@ impl HBAPort {
         &self.sata_status
     }
 
-    pub fn command_status(&mut self) -> &mut HBAPortCommandStatus {
+    pub fn command_status(&mut self) -> &mut PortCommandStatus {
         &mut self.command_status
     }
 
@@ -246,11 +246,11 @@ impl HBAPort {
         self.task_file_data.read()
     }
 
-    pub fn command_list(&mut self) -> &mut [super::HBACommand] {
+    pub fn command_list(&mut self) -> &mut [super::Command] {
         unsafe { &mut *core::slice::from_raw_parts_mut(self.cmd_list.get_mut_ptr(), 32) }
     }
 
-    pub fn interrupt_status(&mut self) -> &mut HBAPortInterruptStatus {
+    pub fn interrupt_status(&mut self) -> &mut PortInterruptStatus {
         &mut self.interrupt_status
     }
 
@@ -299,7 +299,7 @@ impl HBAPort {
 
         debug!("Allocting command and FIS lists.");
 
-        let cmd_list_byte_len = core::mem::size_of::<super::HBACommand>() * 32;
+        let cmd_list_byte_len = core::mem::size_of::<super::Command>() * 32;
         let cmd_list_ptr: *mut u8 = libkernel::alloc!(cmd_list_byte_len, 128);
         debug!(
             "\tCommand list base address: {:?}:{}",

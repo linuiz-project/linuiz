@@ -7,7 +7,7 @@ pub use port::*;
 use libkernel::{memory::volatile::VolatileCell, ReadOnly};
 
 #[repr(C)]
-pub struct HBAMemory {
+pub struct Memory {
     host_capability: VolatileCell<u32, ReadOnly>,
     global_host_control: VolatileCell<u32, ReadOnly>,
     interrupt_status: VolatileCell<u32, ReadOnly>,
@@ -21,10 +21,10 @@ pub struct HBAMemory {
     bios_handoff_control_status: VolatileCell<u32, ReadOnly>,
     _reserved0: [u8; 0x74],
     _vendor0: [u8; 0x60],
-    ports: [HBAPort; 32],
+    ports: [Port; 32],
 }
 
-impl HBAMemory {
+impl Memory {
     fn ports_implemented(&self) -> usize {
         let mut bits = 0;
         let mut bit = 1;
@@ -38,14 +38,14 @@ impl HBAMemory {
         bits
     }
 
-    pub fn ports(&self) -> core::slice::Iter<HBAPort> {
+    pub fn ports(&self) -> core::slice::Iter<Port> {
         self.ports[0..self.ports_implemented()].iter()
     }
 
-    pub fn ports_mut(&mut self) -> core::slice::IterMut<HBAPort> {
+    pub fn ports_mut(&mut self) -> core::slice::IterMut<Port> {
         let ports_implemented = self.ports_implemented();
         self.ports[0..ports_implemented].iter_mut()
     }
 }
 
-impl libkernel::memory::volatile::Volatile for HBAMemory {}
+impl libkernel::memory::volatile::Volatile for Memory {}

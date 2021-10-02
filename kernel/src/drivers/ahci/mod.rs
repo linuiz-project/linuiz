@@ -4,8 +4,6 @@ use alloc::vec::Vec;
 use bit_field::BitField;
 use libkernel::io::pci::{standard::StandardRegister, PCIeDevice, Standard};
 
-use crate::drivers::ahci::hba::HBAPort;
-
 pub const ATA_DEV_BUSY: u8 = 0x80;
 pub const ATA_DEV_DRQ: u8 = 0x08;
 pub const ATA_CMD_READ_DMA_EX: u8 = 0x25;
@@ -91,12 +89,12 @@ impl Default for FIS_REG_H2D {
     }
 }
 
-impl hba::HBACommandFIS for FIS_REG_H2D {}
+impl hba::CommandFIS for FIS_REG_H2D {}
 
 pub struct AHCI<'ahci> {
     // TODO devise some system of renting out the PCIe devices to drivers
     device: &'ahci PCIeDevice<Standard>,
-    sata_ports: Vec<&'ahci mut self::hba::HBAPort>,
+    sata_ports: Vec<&'ahci mut hba::Port>,
 }
 
 impl<'ahci> AHCI<'ahci> {
@@ -104,22 +102,22 @@ impl<'ahci> AHCI<'ahci> {
         debug!("Using PCIe device for AHCI driver:\n{:#?}", device);
 
         if let Some(hba_mmio) = device.get_register(StandardRegister::Register5) {
-            use hba::HBAPortClass;
-
             debug!("Parsing valid SATA ports from HBA memory ports.");
-            let sata_ports: Vec<&mut HBAPort> =
-                unsafe { hba_mmio.borrow::<hba::HBAMemory>(0x0).unwrap() }
+            let sata_ports: Vec<&mut hba::Port> =
+                unsafe { hba_mmio.borrow::<hba::Memory>(0x0).unwrap() }
                     .ports()
                     .filter_map(|port| match port.class() {
-                        HBAPortClass::SATA | HBAPortClass::SATAPI => {
+                        hba::PortClass::SATA | hba::PortClass::SATAPI => {
                             debug!("Configuring AHCI port: {:?}", port.class());
-
-                            Some(unsafe {
+                            let port: &mut hba::Port = unsafe {
                                 // Elide borrow checker.
                                 // TODO: port should be invariantly inner-volatile.
                                 //      Then we can just reutrn an immutable borrow.
                                 &mut *(port as *const _ as *mut _)
-                            })
+                            };
+
+                            port.configure();
+                            Some(port)
                         }
                         _port_type => None,
                     })
@@ -133,7 +131,7 @@ impl<'ahci> AHCI<'ahci> {
         }
     }
 
-    pub fn sata_ports(&'ahci mut self) -> core::slice::IterMut<&'ahci mut self::hba::HBAPort> {
+    pub fn sata_ports(&'ahci mut self) -> core::slice::IterMut<&'ahci mut hba::Port> {
         self.sata_ports.iter_mut()
     }
 }

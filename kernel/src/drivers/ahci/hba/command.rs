@@ -32,10 +32,10 @@ impl PRDTEntry {
     }
 }
 
-pub trait HBACommandFIS {}
+pub trait CommandFIS {}
 
 #[repr(C)]
-pub struct HBACommand {
+pub struct Command {
     bits: u16,
     prdt_len: u16,
     prdb_count: u32,
@@ -44,7 +44,7 @@ pub struct HBACommand {
     rsvd0: [u8; 4],
 }
 
-impl HBACommand {
+impl Command {
     const COMMAND_FIS_OFFSET: usize = 0x0;
     const ATAPI_COMMAND_OFFSET: usize = 0x40;
     const PRDT_ENTRIES_OFFSET: usize = 0x80;
@@ -66,7 +66,7 @@ impl HBACommand {
         ((self.cmd_tbl_addr_lower as usize) | ((self.cmd_tbl_addr_upper as usize) << 32)) as *mut u8
     }
 
-    pub fn reset<F: HBACommandFIS + Sized>(&mut self, prdt_len: u16, fis: F) {
+    pub fn reset<F: CommandFIS + Sized>(&mut self, prdt_len: u16, fis: F) {
         let cmd_tbl_ptr = unsafe {
             alloc::alloc::alloc_zeroed(alloc::alloc::Layout::from_size_align_unchecked(
                 Self::total_command_alloc(prdt_len),
@@ -84,7 +84,7 @@ impl HBACommand {
         self.prdt_entries().iter_mut().for_each(|prdt| prdt.clear());
     }
 
-    pub fn command_fis<F: HBACommandFIS + Sized>(&mut self) -> &mut F {
+    pub fn command_fis<F: CommandFIS + Sized>(&mut self) -> &mut F {
         unsafe { &mut *(self.command_table_ptr_mut().add(Self::COMMAND_FIS_OFFSET) as *mut F) }
     }
 
@@ -98,7 +98,7 @@ impl HBACommand {
     }
 }
 
-impl Drop for HBACommand {
+impl Drop for Command {
     fn drop(&mut self) {
         unsafe {
             alloc::alloc::dealloc(
