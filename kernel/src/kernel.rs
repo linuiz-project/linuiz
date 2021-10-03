@@ -129,44 +129,10 @@ fn kernel_main_post_mmap() -> ! {
 
         if let pci::DeviceVariant::Standard(device) = device_variant {
             if device.class() == pci::DeviceClass::MassStorageController
-                && device.subclass() == 0x08
+                && device.subclass() == 0x06
             {
-                for capability in device.capabilities() {
-                    if let pci::standard::Capablities::MSIX(msix) = capability {
-                        let message_table = msix.get_message_table(device).unwrap();
-                        for entry in message_table.iter() {
-                            entry.set_masked(false);
-                        }
-
-                        unsafe {
-                            use crate::drivers::nvme::{command::*, *};
-                            let mut nvme = Controller::from_device(device);
-                            nvme.configure_admin_submission_queue(8);
-                            nvme.configure_admin_completion_queue(8);
-                            nvme.safe_set_enable(true);
-
-                            info!("{:#?}", nvme);
-
-                            let frame = falloc::get().autolock().unwrap();
-
-                            {
-                                let admin_sub = nvme.admin_submission_queue();
-                                let command1 = admin_sub.next_entry::<DeviceSelfTest>().unwrap();
-                                command1.configure(34, DeviceSelfTestCode::Short);
-                                admin_sub.flush_commands();
-                            }
-
-                            {
-                                let admin_com = nvme.admin_completion_queue();
-                                info!("{:?}", admin_com.next_entry());
-                                info!("{:?}", msix.get_pending_bits(device).unwrap());
-                            }
-                        }
-
-                        // info!("{:#?}", message_table);
-                        // info!("{:?}", msix.get_pending_bits(device));
-                    }
-                }
+                use crate::drivers::ahci;
+                let ahci = ahci::AHCI::from_pcie_device(device);
             }
         }
     }
@@ -282,10 +248,7 @@ fn init_system_config_table(config_table: &[SystemConfigTableEntry]) {
 }
 
 fn init_apic() {
-    use libkernel::structures::{
-        apic::{APICRegister, APICTimerDivisor, APICTimerMode},
-        idt,
-    };
+    use libkernel::structures::{apic, idt};
 
     crate::pic8259::enable();
     info!("Successfully initialized PIC.");
@@ -298,8 +261,7 @@ fn init_apic() {
     idt::set_interrupt_handler(32, crate::timer::tick_handler);
     libkernel::instructions::interrupts::enable();
 
-    libkernel::structures::apic::load();
-    let apic = libkernel::structures::apic::local_apic_mut().unwrap();
+    let apic = &apic::LAPIC;
 
     unsafe {
         debug!("Resetting and enabling local APIC (it may have already been enabled).");
@@ -311,9 +273,12 @@ fn init_apic() {
     let timer = timer::Timer::new(1);
 
     debug!("Configuring APIC timer state.");
-    apic.write_register(APICRegister::TimerDivisor, APICTimerDivisor::Div1 as u32);
-    apic.write_register(APICRegister::TimerInitialCount, u32::MAX);
-    apic.timer().set_mode(APICTimerMode::OneShot);
+    apic.write_register(
+        apic::Register::TimerDivisor,
+        apic::TimerDivisor::Div1 as u32,
+    );
+    apic.write_register(apic::Register::TimerInitialCount, u32::MAX);
+    apic.timer().set_mode(apic::TimerMode::OneShot);
 
     debug!("Determining APIC timer frequency using PIT windowing.");
     apic.timer().set_masked(false);
@@ -321,13 +286,16 @@ fn init_apic() {
     timer.wait();
 
     apic.timer().set_masked(true);
-    let timer_count = apic.read_register(APICRegister::TimerCurrentCount);
+    let timer_count = apic.read_register(apic::Register::TimerCurrentCount);
     info!(
         "Determined core crystal clock frequency: {}MHz",
         timer_count / 1000000
     );
-    apic.write_register(APICRegister::TimerInitialCount, u32::MAX - timer_count);
-    apic.write_register(APICRegister::TimerDivisor, APICTimerDivisor::Div1 as u32);
+    apic.write_register(apic::Register::TimerInitialCount, u32::MAX - timer_count);
+    apic.write_register(
+        apic::Register::TimerDivisor,
+        apic::TimerDivisor::Div1 as u32,
+    );
 
     debug!("Disabling 8259 emulated PIC.");
     libkernel::instructions::interrupts::without_interrupts(|| unsafe {
@@ -341,14 +309,14 @@ fn init_apic() {
     idt::set_interrupt_handler(58, apic_error_handler);
 
     debug!("Unmasking APIC timer interrupt (it will fire now!).");
-    apic.timer().set_mode(APICTimerMode::Periodic);
+    apic.timer().set_mode(apic::TimerMode::Periodic);
     apic.timer().set_masked(false);
 
     info!("Core-local APIC configured and enabled.");
 }
 
 extern "x86-interrupt" fn apic_error_handler(_: libkernel::structures::idt::InterruptStackFrame) {
-    let apic = libkernel::structures::apic::local_apic_mut().unwrap();
+    let apic = &libkernel::structures::apic::LAPIC;
 
     error!("APIC ERROR INTERRUPT");
     error!("--------------------");

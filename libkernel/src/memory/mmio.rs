@@ -88,13 +88,13 @@ impl MMIO<Mapped> {
     }
 
     pub unsafe fn read<T>(&self, offset: usize) -> Result<T, MMIOError> {
-        self.mapped_offset(offset)
-            .map(|ptr| (ptr as *const T).read_volatile())
+        self.mapped_offset::<T>(offset)
+            .map(|ptr| ptr.read_volatile())
     }
 
     pub unsafe fn write<T>(&self, offset: usize, value: T) -> Result<(), MMIOError> {
-        self.mapped_offset(offset)
-            .map(|mut ptr| (ptr as *mut T).write_volatile(value))
+        self.mapped_offset::<T>(offset)
+            .map(|ptr| ptr.write_volatile(value))
     }
 
     pub unsafe fn borrow<T: super::volatile::Volatile>(

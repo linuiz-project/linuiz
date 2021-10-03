@@ -324,7 +324,7 @@ impl Port {
         self.start_cmd();
     }
 
-    pub fn read(&mut self, sector_base: usize, sector_count: u16) -> alloc::vec::Vec<u8> {
+    pub fn read(&mut self, sector_base: usize, sector_count: u16) -> &mut [u8] {
         use crate::drivers::ahci::{
             FISType, ATA_CMD_READ_DMA_EX, ATA_DEV_BUSY, ATA_DEV_DRQ, FIS_REG_H2D,
         };
@@ -363,7 +363,7 @@ impl Port {
 
         debug!("AHCI PORT: READ: CFG PRDT ENTRY");
         let prdt_entry = &mut command.prdt_entries()[0];
-        let buffer: alloc::vec::Vec<u8> = alloc::vec![0; (sector_count as usize) << 9];
+        let buffer = libkernel::slice_mut!(u8, (sector_count as usize) << 9);
         prdt_entry.set_db_addr(Address::from_ptr(buffer.as_ptr()));
         prdt_entry.set_sector_count(sector_count as u32);
 
@@ -382,4 +382,6 @@ impl Port {
         debug!("AHCI PORT: READ: COMPLETE");
         buffer
     }
+
+    pub fn write(&mut self, sector_base: usize, data: &[u8]) {}
 }

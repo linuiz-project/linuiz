@@ -3,7 +3,7 @@ use crate::{
     bit_array::BitSlice,
     io::pci::standard::StandardRegister,
     memory::volatile::{Volatile, VolatileCell},
-    volatile_bitfield_getter, Address, BitValueArray, ReadOnly, ReadWrite,
+    volatile_bitfield_getter, Address, ReadOnly, ReadWrite,
 };
 use bit_field::BitField;
 use core::{convert::TryFrom, fmt};

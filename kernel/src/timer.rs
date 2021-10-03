@@ -16,9 +16,7 @@ pub extern "x86-interrupt" fn apic_tick_handler(
     _: libkernel::structures::idt::InterruptStackFrame,
 ) {
     TICKS.fetch_add(1, Ordering::AcqRel);
-    libkernel::structures::apic::local_apic_mut()
-        .unwrap()
-        .end_of_interrupt();
+    libkernel::structures::apic::LAPIC.end_of_interrupt();
 }
 
 #[inline(always)]

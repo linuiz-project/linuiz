@@ -92,19 +92,20 @@ impl fmt::Debug for Capabilities {
 }
 
 #[repr(transparent)]
-pub struct Version(u32);
+pub struct Version(VolatileCell<u32, ReadOnly>);
 
+impl Volatile for Version {}
 impl Version {
     pub fn major(&self) -> u16 {
-        self.0.get_bits(16..32) as u16
+        self.0.read().get_bits(16..32) as u16
     }
 
     pub fn minor(&self) -> u8 {
-        self.0.get_bits(8..16) as u8
+        self.0.read().get_bits(8..16) as u8
     }
 
     pub fn tertiary(&self) -> u8 {
-        self.0.get_bits(0..8) as u8
+        self.0.read().get_bits(0..8) as u8
     }
 }
 
@@ -283,6 +284,7 @@ pub struct InterruptMask {
     clear: VolatileCell<u32, ReadWrite>,
 }
 
+impl Volatile for InterruptMask {}
 impl InterruptMask {
     pub fn mask_vector(&self, index: usize) {
         assert!(index < 32, "Index must be 0..32.");
@@ -317,14 +319,6 @@ impl<'dev> Controller<'dev> {
     const AQA: usize = 0x24;
     const ASQ: usize = 0x28;
     const ACQ: usize = 0x30;
-
-    fn doorbell_offset(&self, queue_id: usize, is_start: bool, is_completion: bool) -> usize {
-        let base_offset = 0x1000;
-        let queue_offset = 2 * (queue_id + (is_completion as usize));
-        let doorbell_stride = 4 << self.capabilities().get_dstrd();
-
-        base_offset + (queue_offset * doorbell_stride)
-    }
 
     pub fn from_device(device: &'dev PCIeDevice<Standard>) -> Self {
         let nvme = Self {
@@ -367,12 +361,12 @@ impl<'dev> Controller<'dev> {
         }
     }
 
-    pub fn version(&self) -> Version {
+    pub fn version(&self) -> &Version {
         unsafe {
             self.device
                 .get_register(StandardRegister::Register0)
                 .unwrap()
-                .read(Self::VER)
+                .borrow(Self::VER)
                 .unwrap()
         }
     }
@@ -382,7 +376,7 @@ impl<'dev> Controller<'dev> {
             self.device
                 .get_register(StandardRegister::Register0)
                 .unwrap()
-                .read(Self::INTMS)
+                .borrow(Self::INTMS)
                 .unwrap()
         }
     }
