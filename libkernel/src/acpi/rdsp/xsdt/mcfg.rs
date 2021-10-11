@@ -1,25 +1,17 @@
 use crate::{
-    acpi::{
-        rdsp::xsdt::{XSDTSubTable, XSDTSubTableType},
-        Checksum, SDTHeader, SizedACPITable,
-    },
+    acpi::{rdsp::xsdt::SubTable, Checksum, SDTHeader, SizedACPITable},
     addr_ty::Physical,
     Address,
 };
 
-pub enum MCFG {}
-impl XSDTSubTableType for MCFG {
-    const SIGNATURE: &'static str = &"MCFG";
-}
-
 #[repr(C)]
-struct MCFGHeader {
+struct Header {
     sdt_header: SDTHeader,
     reserved: [u8; 8],
 }
 
 #[repr(C)]
-pub struct MCFGEntry {
+pub struct Entry {
     base_addr: Address<Physical>,
     seg_group_num: u16,
     start_pci_bus: u8,
@@ -27,7 +19,7 @@ pub struct MCFGEntry {
     reserved: [u8; 4],
 }
 
-impl MCFGEntry {
+impl Entry {
     pub fn base_addr(&self) -> Address<Physical> {
         self.base_addr
     }
@@ -45,7 +37,7 @@ impl MCFGEntry {
     }
 }
 
-impl core::fmt::Debug for MCFGEntry {
+impl core::fmt::Debug for Entry {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
             .debug_struct("MCFG Entry")
@@ -56,11 +48,17 @@ impl core::fmt::Debug for MCFGEntry {
     }
 }
 
-impl XSDTSubTable<MCFG> {
-    pub fn iter(&self) -> core::slice::Iter<MCFGEntry> {
-        self.checksum_panic();
+pub struct MCFG {}
+
+impl SubTable for MCFG {
+    const SIGNATURE: &'static str = &"MCFG";
+}
+
+impl MCFG {
+    pub fn iter(&self) -> core::slice::Iter<Entry> {
+        self.validate_checksum();
         self.entries().iter()
     }
 }
 
-impl SizedACPITable<MCFGHeader, MCFGEntry> for XSDTSubTable<MCFG> {}
+impl SizedACPITable<Header, Entry> for MCFG {}

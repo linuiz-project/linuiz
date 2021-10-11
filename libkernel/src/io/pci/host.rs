@@ -40,7 +40,7 @@ impl PCIeHostBridge {
 }
 
 pub fn configure_host_bridge(
-    entry: &crate::acpi::rdsp::xsdt::mcfg::MCFGEntry,
+    entry: &crate::acpi::rdsp::xsdt::mcfg::Entry,
 ) -> Result<PCIeHostBridge, PCIeHostBridgeError> {
     debug!(
         "Configuring PCIe host bridge for bus range: {:?}",

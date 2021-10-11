@@ -13,8 +13,9 @@ use core::{
     ptr::slice_from_raw_parts_mut,
 };
 use libkernel::{
-    elf::{ELFHeader64, ProgramHeader, ProgramHeaderType},
-    FramebufferInfo,
+    addr_ty::Virtual,
+    elf::{ELFHeader64, Rela64, SectionHeader, SectionType, SegmentHeader, SegmentType},
+    Address, FramebufferInfo,
 };
 use uefi::{
     prelude::BootServices,
@@ -82,17 +83,13 @@ pub fn allocate_pool(
     boot_services: &BootServices,
     memory_type: MemoryType,
     size: usize,
-) -> PointerBuffer {
+) -> &mut [u8] {
     let alloc_pointer = match boot_services.allocate_pool(memory_type, size) {
         Ok(completion) => completion.unwrap(),
         Err(error) => panic!("{:?}", error),
     };
-    let alloc_buffer = unsafe { &mut *slice_from_raw_parts_mut(alloc_pointer, size) };
 
-    PointerBuffer {
-        pointer: alloc_pointer,
-        buffer: alloc_buffer,
-    }
+    unsafe { &mut *slice_from_raw_parts_mut(alloc_pointer, size) }
 }
 
 #[allow(dead_code)]
@@ -101,7 +98,7 @@ pub fn allocate_pages(
     allocate_type: AllocateType,
     memory_type: MemoryType,
     pages_count: usize,
-) -> PointerBuffer {
+) -> &mut [u8] {
     if let AllocateType::MaxAddress(address) = allocate_type {
         if (address % PAGE_SIZE) != 0x0 {
             panic!("address is not page-aligned ({})", address)
@@ -114,26 +111,23 @@ pub fn allocate_pages(
         Err(error) => panic!("{:?}", error),
     };
 
-    let alloc_buffer =
-        unsafe { &mut *slice_from_raw_parts_mut(alloc_pointer, pages_count * PAGE_SIZE) };
-
-    PointerBuffer {
-        pointer: alloc_pointer,
-        buffer: alloc_buffer,
-    }
+    unsafe { &mut *slice_from_raw_parts_mut(alloc_pointer, pages_count * PAGE_SIZE) }
 }
 
 #[allow(dead_code)]
-pub fn free_pool(boot_services: &BootServices, buffer: PointerBuffer) {
-    match boot_services.free_pool(buffer.pointer) {
+pub fn free_pool(boot_services: &BootServices, buffer: &mut [u8]) {
+    match boot_services.free_pool(buffer.as_mut_ptr()) {
         Ok(completion) => completion.unwrap(),
         Err(error) => panic!("{:?}", error),
     }
 }
 
 #[allow(dead_code)]
-pub fn free_pages(boot_services: &BootServices, buffer: PointerBuffer, count: usize) {
-    match boot_services.free_pages(buffer.pointer as u64, count) {
+pub fn free_pages(boot_services: &BootServices, buffer: &mut [u8]) {
+    match boot_services.free_pages(
+        buffer.as_ptr() as u64,
+        libkernel::align_up_div(buffer.len(), 0x1000),
+    ) {
         Ok(completion) => completion.unwrap(),
         Err(error) => panic!("{:?}", error),
     }
@@ -227,7 +221,7 @@ fn efi_main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status
 fn ensure_enough_memory(boot_services: &BootServices) {
     let mmap_size_bytes = boot_services.memory_map_size() + (size_of::<MemoryDescriptor>() * 2);
     let mmap_buffer = allocate_pool(boot_services, MemoryType::LOADER_DATA, mmap_size_bytes);
-    let total_memory: usize = match boot_services.memory_map(mmap_buffer.buffer) {
+    let total_memory: usize = match boot_services.memory_map(mmap_buffer) {
         Ok(completion) => completion.unwrap().1,
         Err(error) => panic!("{:?}", error),
     }
@@ -306,63 +300,57 @@ fn allocate_segments(
     kernel_file: &mut RegularFile,
     kernel_header: &ELFHeader64,
 ) {
-    let segment_header_buffer = &mut [0u8; size_of::<ProgramHeader>()];
+    let mut segment_header_buffer = [0u8; size_of::<SegmentHeader>()];
     let mut segment_header_disk_offset = kernel_header.program_headers_offset();
 
     for index in 0..kernel_header.program_header_count() {
         read_file(
             kernel_file,
             segment_header_disk_offset as u64,
-            segment_header_buffer,
+            &mut segment_header_buffer,
         );
-        let segment_header = ProgramHeader::parse(segment_header_buffer)
-            .expect("failed to parse program header from buffer");
+        let segment_header = unsafe { &*(segment_header_buffer.as_ptr() as *const SegmentHeader) };
 
-        if segment_header.ph_type() == ProgramHeaderType::PT_LOAD {
+        if segment_header.ph_type == SegmentType::PT_LOAD {
             debug!(
                 "Identified loadable segment (index {}, disk offset {}):\n{:#?}",
                 index, segment_header_disk_offset, segment_header
             );
 
             // calculate required variables for correctly loading segment into memory
-            let aligned_address = libkernel::align_down(
-                segment_header.physical_address(),
-                segment_header.alignment(),
-            );
+            let aligned_address =
+                libkernel::align_down(segment_header.phys_addr, segment_header.align);
             // this is the offset within the page that the segment starts
-            let page_offset = wrapping_sub(segment_header.physical_address(), aligned_address);
+            let page_offset = wrapping_sub(segment_header.phys_addr, aligned_address);
             // size of the segment size + offset within the page
-            let aligned_size = page_offset + segment_header.memory_size();
-            let pages_count = aligned_slices(aligned_size, segment_header.alignment());
+            let aligned_size = page_offset + segment_header.mem_size;
+            let pages_count = aligned_slices(aligned_size, segment_header.align);
 
             debug!(
                     "Loading segment (index {}):\n Unaligned Address: {}\n Unaligned Size: {}\n Aligned Address: {}\n Aligned Size: {}\n End Address: {}\n Pages: {}",
-                    index, segment_header.physical_address(), segment_header.memory_size(), aligned_address, aligned_size, aligned_address + (pages_count * PAGE_SIZE), pages_count
+                    index, segment_header.phys_addr, segment_header.mem_size, aligned_address, aligned_size, aligned_address + (pages_count * PAGE_SIZE), pages_count
                 );
 
-            // allocate pages for header
-            let segment_page_buffer = allocate_pages(
+            // Allocate pages for segment data.
+            let segment_buffer = allocate_pages(
                 boot_services,
                 AllocateType::Address(aligned_address),
                 KERNEL_CODE,
                 pages_count,
-            )
-            // we won't ever explicitly deallocate this, so we only
-            // care about the buffer (pointer is used to deallocate, usually)
-            .buffer;
+            );
 
             // the segments might not always be aligned to pages, so take the slice of the buffer
             // that is equal to the program segment's lowaddr..highaddr
-            let slice_end_index = page_offset + segment_header.disk_size();
-            let segment_slice = &mut segment_page_buffer[page_offset..slice_end_index];
+            let slice_end_index = page_offset + segment_header.disk_size;
+            let segment_slice = &mut segment_buffer[page_offset..slice_end_index];
             // finally, read the program segment into memory
-            read_file(kernel_file, segment_header.offset() as u64, segment_slice);
+            read_file(kernel_file, segment_header.offset as u64, segment_slice);
 
             // sometimes a segment contains extra space for data, and must be zeroed out before any jumps
-            if segment_header.memory_size() > segment_header.disk_size() {
+            if segment_header.mem_size > segment_header.disk_size {
                 // in this case, we need to zero-out the remaining memory so the segment
                 // doesn't point to garbage data (since we won't be reading anything valid into it)
-                let memory_end_index = page_offset + segment_header.memory_size();
+                let memory_end_index = page_offset + segment_header.mem_size;
                 debug!(
                     "Zeroing segment section (index {}): from {} to {}, total {}",
                     index,
@@ -372,15 +360,83 @@ fn allocate_segments(
                 );
 
                 for index in slice_end_index..memory_end_index {
-                    segment_page_buffer[index] = 0x0;
+                    segment_buffer[index] = 0x0;
                 }
             }
+
+            // Process relocations
+            apply_relocations(
+                kernel_file,
+                kernel_header,
+                segment_header.virt_addr,
+                segment_header.mem_size,
+                segment_buffer,
+            );
 
             debug!("Segment loaded (index {}).", index);
         }
 
         // update the segment header offset so we can read next segment
         segment_header_disk_offset += kernel_header.program_header_size() as usize;
+    }
+}
+
+fn apply_relocations(
+    kernel_file: &mut RegularFile,
+    kernel_header: &ELFHeader64,
+    segment_virt_addr: Address<Virtual>,
+    segment_size: usize,
+    segment_buffer: &mut [u8],
+) {
+    let mut section_header_buffer = [0u8; size_of::<SectionHeader>()];
+    let mut section_header_disk_offset = kernel_header.section_headers_offset();
+
+    for index in 0..kernel_header.section_header_count() {
+        read_file(
+            kernel_file,
+            section_header_disk_offset as u64,
+            &mut section_header_buffer,
+        );
+        let section_header = unsafe { &*(section_header_buffer.as_ptr() as *const SectionHeader) };
+
+        match section_header.sh_type {
+            SectionType::RELA => {
+                if section_header.entry_size != size_of::<Rela64>() {
+                    warn!(
+                        "Unknown entry size for RELA section: {} (should be {})",
+                        section_header.entry_size,
+                        size_of::<Rela64>()
+                    );
+                }
+
+                for offset in (0..section_header.size).step_by(section_header.entry_size) {
+                    let mut rela_buffer = [0u8; size_of::<Rela64>()];
+                    read_file(kernel_file, section_header.offset as u64, &mut rela_buffer);
+                    let rela: &Rela64 = unsafe { &core::mem::transmute(rela_buffer) };
+
+                    match rela.info {
+                        libkernel::elf::X86_64_RELATIVE => {
+                            if (segment_virt_addr..=(segment_virt_addr + segment_size + 8))
+                                .contains(&rela.addr)
+                            {
+                                unsafe {
+                                    (segment_buffer
+                                        .as_ptr()
+                                        .sub(segment_virt_addr.as_usize())
+                                        .add(rela.addr.as_usize())
+                                        as *mut u64)
+                                        .write(rela.addend)
+                                }
+                            }
+                        }
+                        ty => warn!("Unknown RELA type: {}", ty),
+                    }
+                }
+            }
+            section_type => trace!("Unhandled section type: {:?}", section_type),
+        }
+
+        section_header_disk_offset += kernel_header.section_header_size() as usize;
     }
 }
 

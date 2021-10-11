@@ -59,7 +59,7 @@ pub trait Checksum: Sized {
         sum == 0
     }
 
-    fn checksum_panic(&self) {
+    fn validate_checksum(&self) {
         assert!(self.checksum(), "checksum invalid");
     }
 }

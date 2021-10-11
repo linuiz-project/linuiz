@@ -20,27 +20,30 @@ mod logging;
 mod pic8259;
 mod timer;
 
-use alloc::vec::Vec;
 use core::ffi::c_void;
 use libkernel::{
-    acpi::SystemConfigTableEntry,
+    acpi::{rdsp::xsdt::madt::MADT, SystemConfigTableEntry},
+    addr_ty::Physical,
     io::pci::PCIeHostBridge,
     memory::{falloc, UEFIMemoryDescriptor},
-    BootInfo,
+    Address, BootInfo,
 };
 
 extern "C" {
-    static _text_start: c_void;
-    static _text_end: c_void;
+    // static _trampoline_start: Address<Physical>;
+    // static _trampoline_end: Address<Physical>;
 
-    static _rodata_start: c_void;
-    static _rodata_end: c_void;
+    static _text_start: Address<Physical>;
+    static _text_end: Address<Physical>;
 
-    static _data_start: c_void;
-    static _data_end: c_void;
+    static _rodata_start: Address<Physical>;
+    static _rodata_end: Address<Physical>;
 
-    static _bss_start: c_void;
-    static _bss_end: c_void;
+    static _data_start: Address<Physical>;
+    static _data_end: Address<Physical>;
+
+    static _bss_start: Address<Physical>;
+    static _bss_end: Address<Physical>;
 }
 
 #[cfg(debug_assertions)]
@@ -71,6 +74,9 @@ extern "efiapi" fn kernel_main(
                 info!("Successfully loaded into kernel, with logging enabled.");
             }
             Err(_) => loop {},
+        }
+        unsafe {
+            info!("{:?}..{:?}", _text_start, _text_end);
         }
     }
 
@@ -105,37 +111,58 @@ extern "efiapi" fn kernel_main(
     kernel_main_post_mmap()
 }
 
+#[link_section = "trampoline"]
+extern "C" fn trampoline() {}
+
 fn kernel_main_post_mmap() -> ! {
     init_apic();
 
-    let bridges: Vec<PCIeHostBridge> = libkernel::acpi::rdsp::xsdt::LAZY_XSDT
-        .expect("xsdt does not exist")
-        .find_sub_table::<libkernel::acpi::rdsp::xsdt::mcfg::MCFG>()
-        .unwrap()
-        .iter()
-        .filter_map(|entry| {
-            libkernel::io::pci::configure_host_bridge(entry).map_or(None, |bridge| Some(bridge))
-        })
-        .collect();
+    use libkernel::{
+        acpi::rdsp::xsdt::{madt::*, LAZY_XSDT},
+        structures::apic::{icr::InterruptCommandRegister, LAPIC},
+    };
 
-    debug!("Configuring PCIe devices.");
-    for device_variant in bridges
-        .iter()
-        .flat_map(|host_bridge| host_bridge.iter())
-        .filter(|bus| bus.has_devices())
-        .flat_map(|bus| bus.iter())
-    {
-        use libkernel::io::pci;
-
-        if let pci::DeviceVariant::Standard(device) = device_variant {
-            if device.class() == pci::DeviceClass::MassStorageController
-                && device.subclass() == 0x06
-            {
-                use crate::drivers::ahci;
-                let ahci = ahci::AHCI::from_pcie_device(device);
+    info!("Searching for additional processor cores...");
+    if let Ok(madt) = LAZY_XSDT.find_sub_table::<MADT>() {
+        for interrupt_device in madt.iter() {
+            if let InterruptDevice::LocalAPIC(lapic) = interrupt_device {
+                if lapic.id() != LAPIC.id() {
+                    info!("Identified additional processor core: {}", lapic.id());
+                    LAPIC.write_icr(InterruptCommandRegister::init(lapic.id()));
+                    LAPIC.write_icr(InterruptCommandRegister::sipi(0, lapic.id()));
+                }
             }
         }
     }
+
+    // let bridges: Vec<PCIeHostBridge> = libkernel::acpi::rdsp::xsdt::LAZY_XSDT
+    //     .expect("xsdt does not exist")
+    //     .find_sub_table::<libkernel::acpi::rdsp::xsdt::mcfg::MCFG>()
+    //     .unwrap()
+    //     .iter()
+    //     .filter_map(|entry| {
+    //         libkernel::io::pci::configure_host_bridge(entry).map_or(None, |bridge| Some(bridge))
+    //     })
+    //     .collect();
+
+    // debug!("Configuring PCIe devices.");
+    // for device_variant in bridges
+    //     .iter()
+    //     .flat_map(|host_bridge| host_bridge.iter())
+    //     .filter(|bus| bus.has_devices())
+    //     .flat_map(|bus| bus.iter())
+    // {
+    //     use libkernel::io::pci;
+
+    //     if let pci::DeviceVariant::Standard(device) = device_variant {
+    //         if device.class() == pci::DeviceClass::MassStorageController
+    //             && device.subclass() == 0x06
+    //         {
+    //             use crate::drivers::ahci;
+    //             let ahci = ahci::AHCI::from_pcie_device(device);
+    //         }
+    //     }
+    // }
 
     info!("Kernel has reached safe shutdown state.");
     unsafe { libkernel::instructions::pwm::qemu_shutdown() }
@@ -250,24 +277,13 @@ fn init_system_config_table(config_table: &[SystemConfigTableEntry]) {
 fn init_apic() {
     use libkernel::structures::{apic, idt};
 
-    crate::pic8259::enable();
-    info!("Successfully initialized PIC.");
-    info!("Configuring PIT frequency to 1000Hz.");
-    crate::pic8259::pit::set_timer_freq(
-        crate::timer::FREQUENCY as u32,
-        crate::pic8259::pit::OperatingMode::RateGenerator,
-    );
-    debug!("Setting timer interrupt handler and enabling interrupts.");
-    idt::set_interrupt_handler(32, crate::timer::tick_handler);
-    libkernel::instructions::interrupts::enable();
-
     let apic = &apic::LAPIC;
 
     unsafe {
         debug!("Resetting and enabling local APIC (it may have already been enabled).");
         apic.reset();
-        apic.enable();
-        apic.write_spurious(u8::MAX, true);
+        apic.sw_enable();
+        apic.set_spurious_vector(u8::MAX);
     }
 
     let timer = timer::Timer::new(1);
@@ -279,6 +295,17 @@ fn init_apic() {
     );
     apic.write_register(apic::Register::TimerInitialCount, u32::MAX);
     apic.timer().set_mode(apic::TimerMode::OneShot);
+
+    crate::pic8259::enable();
+    info!("Successfully initialized PIC.");
+    info!("Configuring PIT frequency to 1000Hz.");
+    crate::pic8259::pit::set_timer_freq(
+        crate::timer::FREQUENCY as u32,
+        crate::pic8259::pit::OperatingMode::RateGenerator,
+    );
+    debug!("Setting timer interrupt handler and enabling interrupts.");
+    idt::set_interrupt_handler(32, crate::timer::tick_handler);
+    libkernel::instructions::interrupts::enable();
 
     debug!("Determining APIC timer frequency using PIT windowing.");
     apic.timer().set_masked(false);

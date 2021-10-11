@@ -1,32 +1,30 @@
 use crate::{
-    acpi::{
-        rdsp::xsdt::{XSDTSubTable, XSDTSubTableType},
-        ACPITable, SDTHeader, UnsizedACPITable,
-    },
+    acpi::{rdsp::xsdt, ACPITable, UnsizedACPITable},
     addr_ty::Physical,
     Address,
 };
 
 bitflags::bitflags! {
-    pub struct MADTFlags: u32 {
+    pub struct Flags: u32 {
         const PCAT_COMPAT = 1 << 0;
     }
 }
 
 #[repr(C)]
-pub struct MADTHeader {
-    sdt_header: SDTHeader,
+pub struct Header {
+    sdt_header: xsdt::SDTHeader,
     apic_addr: u32,
-    flags: MADTFlags,
+    flags: Flags,
 }
 
-pub enum MADT {}
-impl XSDTSubTableType for MADT {
+pub struct MADT {}
+
+impl xsdt::SubTable for MADT {
     const SIGNATURE: &'static str = &"APIC";
 }
 
-impl XSDTSubTable<MADT> {
-    fn madt_header(&self) -> &MADTHeader {
+impl MADT {
+    fn madt_header(&self) -> &Header {
         unsafe { &*(self as *const _ as *const _) }
     }
 
@@ -34,7 +32,7 @@ impl XSDTSubTable<MADT> {
         Address::<Physical>::new(self.madt_header().apic_addr as usize)
     }
 
-    pub fn flags(&self) -> &MADTFlags {
+    pub fn flags(&self) -> &Flags {
         &self.madt_header().flags
     }
 
@@ -48,7 +46,7 @@ impl XSDTSubTable<MADT> {
     }
 }
 
-impl UnsizedACPITable<MADTHeader, u8> for XSDTSubTable<MADT> {}
+impl UnsizedACPITable<Header, u8> for MADT {}
 
 pub struct MADTIterator<'a> {
     cur_header_ptr: *const u8,
@@ -125,12 +123,37 @@ bitflags::bitflags! {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct LocalAPIC {
     header: InterruptDeviceHeader,
     processor_id: u8,
     id: u8,
     flags: LocalAPICFlags,
+}
+
+impl LocalAPIC {
+    pub const fn processor_id(&self) -> u8 {
+        self.processor_id
+    }
+
+    pub const fn id(&self) -> u8 {
+        self.id
+    }
+
+    pub const fn flags(&self) -> LocalAPICFlags {
+        self.flags
+    }
+}
+
+impl core::fmt::Debug for LocalAPIC {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("Local APIC Descriptor")
+            .field("Processor ID", &self.processor_id())
+            .field("ID", &self.id())
+            .field("Flags", &self.flags())
+            .finish()
+    }
 }
 
 #[repr(C)]

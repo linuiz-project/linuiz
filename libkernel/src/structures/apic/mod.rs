@@ -1,3 +1,5 @@
+pub mod icr;
+
 use crate::{
     addr_ty::Physical,
     memory::{
@@ -35,6 +37,7 @@ pub enum Register {
     TaskPriority = 0x80,
     LDR = 0xD0,
     DFR = 0xE0,
+    SPR = 0xF0,
     ICRL = 0x300,
     ICRH = 0x310,
     TimerInitialCount = 0x380,
@@ -95,11 +98,6 @@ pub struct APIC {
 }
 
 impl APIC {
-    // The `mask` bit for an LVT entry.
-    pub const DISABLE: u32 = 0x10000;
-    pub const SW_ENABLE: u32 = 0x100;
-    pub const CPU_FOCUS: u32 = 0x200;
-
     pub fn mmio_addr() -> Address<Physical> {
         Address::<Physical>::new((MSR::IA32_APIC_BASE.read().get_bits(12..35) << 12) as usize)
     }
@@ -112,12 +110,30 @@ impl APIC {
         (MSR::IA32_APIC_BASE.read() & (1 << 11)) > 0
     }
 
-    pub unsafe fn enable(&self) {
+    pub unsafe fn hw_enable(&self) {
         MSR::IA32_APIC_BASE.write_bit(11, true);
     }
 
-    pub unsafe fn disable(&self) {
+    pub unsafe fn hw_disable(&self) {
         MSR::IA32_APIC_BASE.write_bit(11, false);
+    }
+
+    pub fn sw_enable(&self) {
+        self.write_register(
+            Register::SPR,
+            *self.read_register(Register::SPR).set_bit(9, true),
+        );
+    }
+
+    pub fn sw_disable(&self) {
+        self.write_register(
+            Register::SPR,
+            *self.read_register(Register::SPR).set_bit(9, false),
+        );
+    }
+
+    pub fn id(&self) -> u8 {
+        self.read_register(Register::ID) as u8
     }
 
     pub fn end_of_interrupt(&self) {
@@ -208,12 +224,20 @@ impl APIC {
         }
     }
 
-    pub fn write_spurious(&self, vector: u8, enabled: bool) {
+    pub fn set_spurious_vector(&self, vector: u8) {
         unsafe {
-            self.mmio
-                .write(0xF0, (vector as u32) | ((enabled as u32) << 8))
-                .unwrap()
+            self.write_register(
+                Register::SPR,
+                *self
+                    .read_register(Register::SPR)
+                    .set_bits(0..8, vector as u32),
+            );
         };
+    }
+
+    pub fn write_icr(&self, icr: icr::InterruptCommandRegister) {
+        self.write_register(Register::ICRH, icr.high_bits());
+        self.write_register(Register::ICRL, icr.low_bits());
     }
 
     pub fn error_status(&self) -> ErrorStatusFlags {
@@ -229,6 +253,7 @@ impl APIC {
     }
 
     pub unsafe fn reset(&self) {
+        self.sw_disable();
         self.write_register(Register::DFR, 0xFFFFFFFF);
         let mut ldr = self.read_register(Register::LDR);
         ldr &= 0xFFFFFF;

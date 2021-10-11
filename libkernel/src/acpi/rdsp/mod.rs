@@ -49,11 +49,11 @@ impl RDSPDescriptor2 {
 impl Checksum for RDSPDescriptor2 {}
 
 lazy_static::lazy_static! {
-    pub static ref LAZY_RDSP2: Option<&'static RDSPDescriptor2> = unsafe {
+    pub static ref LAZY_RDSP2: &'static RDSPDescriptor2 = unsafe {
         if let Some(entry) = crate::acpi::get_system_config_table_entry(crate::acpi::ACPI2_GUID) {
-            Some(entry.as_ref())
+            entry.as_ref()
         } else {
-            None
+            panic!("System configuration table not found. Could not configure RDSP.")
         }
     };
 }

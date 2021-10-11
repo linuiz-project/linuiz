@@ -9,27 +9,21 @@ pub enum XSDTError {
     TableNotFound,
 }
 
-pub trait XSDTSubTableType {
+pub trait SubTable {
     const SIGNATURE: &'static str;
-}
 
-pub struct XSDTSubTable<T: XSDTSubTableType> {
-    phantom: core::marker::PhantomData<T>,
-}
-
-impl<T: XSDTSubTableType> XSDTSubTable<T> {
-    pub fn sdt_header(&self) -> &SDTHeader {
+    fn sdt_header(&self) -> &SDTHeader {
         unsafe { &*(self as *const _ as *const _) }
     }
 }
 
-impl<T: XSDTSubTableType> Checksum for XSDTSubTable<T> {
+impl<T: SubTable> Checksum for T {
     fn bytes_len(&self) -> usize {
         self.sdt_header().table_len() as usize
     }
 }
 
-impl<T: XSDTSubTableType> ACPITable for XSDTSubTable<T> {
+impl<T: SubTable> ACPITable for T {
     fn body_len(&self) -> usize {
         self.sdt_header().table_len() as usize
     }
@@ -38,7 +32,7 @@ impl<T: XSDTSubTableType> ACPITable for XSDTSubTable<T> {
 #[repr(C)]
 pub struct XSDT<'entry> {
     header: SDTHeader,
-    phantom: core::marker::PhantomData<&'entry u8>,
+    phantom: core::marker::PhantomData<&'entry core::ffi::c_void>,
 }
 
 impl<'entry> XSDT<'entry> {
@@ -46,14 +40,12 @@ impl<'entry> XSDT<'entry> {
         &self.header
     }
 
-    pub fn find_sub_table<T: XSDTSubTableType>(
-        &self,
-    ) -> Result<&'entry XSDTSubTable<T>, XSDTError> {
-        for entry_ptr in self.entries().iter().map(|entry_ptr| *entry_ptr) {
+    pub fn find_sub_table<T: SubTable>(&self) -> Result<&'entry T, XSDTError> {
+        for entry_ptr in self.entries().iter() {
             unsafe {
-                if (&*(entry_ptr as *const _ as *const SDTHeader)).signature() == T::SIGNATURE {
-                    let table: &XSDTSubTable<T> = &*(entry_ptr as *const _ as *const _);
-                    table.checksum_panic();
+                if (**entry_ptr).signature() == T::SIGNATURE {
+                    let table: &T = &*(*entry_ptr as *const _);
+                    table.validate_checksum();
                     return Ok(table);
                 }
             }
@@ -63,13 +55,13 @@ impl<'entry> XSDT<'entry> {
     }
 }
 
+impl SizedACPITable<SDTHeader, *const SDTHeader> for XSDT<'_> {}
+
 impl ACPITable for XSDT<'_> {
     fn body_len(&self) -> usize {
         (self.header().table_len() as usize) - core::mem::size_of::<SDTHeader>()
     }
 }
-
-impl SizedACPITable<SDTHeader, *const u64> for XSDT<'_> {}
 
 impl Checksum for XSDT<'_> {
     fn bytes_len(&self) -> usize {
@@ -78,11 +70,9 @@ impl Checksum for XSDT<'_> {
 }
 
 lazy_static::lazy_static! {
-    pub static ref LAZY_XSDT: Option<&'static XSDT<'static>> = unsafe {
-        crate::acpi::rdsp::LAZY_RDSP2.map(|rdsp2| {
-            let xsdt = &*(rdsp2.xsdt_addr().as_usize() as *const XSDT<'static>);
-            xsdt.checksum_panic();
+    pub static ref LAZY_XSDT: &'static XSDT<'static> = unsafe {
+            let xsdt = &*(crate::acpi::rdsp::LAZY_RDSP2.xsdt_addr().as_usize() as *const XSDT<'static>);
+            xsdt.validate_checksum();
             xsdt
-        })
     };
 }

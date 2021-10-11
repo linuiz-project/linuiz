@@ -5,6 +5,15 @@ SECTIONS
 {
     . = 0x190000;
 
+    /* .trampoline : ALIGN(0x1000) {
+        _trampoline_start = .;
+
+        *(.trampoline.*)
+        *(.trampoline)
+
+        _trampoline_end = .;
+    } */
+
     .text : ALIGN(0x1000) {
         _text_start = .;
 
