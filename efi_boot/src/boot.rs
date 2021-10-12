@@ -319,15 +319,15 @@ fn allocate_segments(
 
             // calculate required variables for correctly loading segment into memory
             let aligned_address =
-                libkernel::align_down(segment_header.phys_addr, segment_header.align);
+                libkernel::align_down(segment_header.phys_addr.as_usize(), segment_header.align);
             // this is the offset within the page that the segment starts
-            let page_offset = wrapping_sub(segment_header.phys_addr, aligned_address);
+            let page_offset = wrapping_sub(segment_header.phys_addr.as_usize(), aligned_address);
             // size of the segment size + offset within the page
             let aligned_size = page_offset + segment_header.mem_size;
             let pages_count = aligned_slices(aligned_size, segment_header.align);
 
             debug!(
-                    "Loading segment (index {}):\n Unaligned Address: {}\n Unaligned Size: {}\n Aligned Address: {}\n Aligned Size: {}\n End Address: {}\n Pages: {}",
+                    "Loading segment (index {}):\n Unaligned Address: {:?}\n Unaligned Size: {}\n Aligned Address: {:?}\n Aligned Size: {}\n End Address: {:?}\n Pages: {}",
                     index, segment_header.phys_addr, segment_header.mem_size, aligned_address, aligned_size, aligned_address + (pages_count * PAGE_SIZE), pages_count
                 );
 
@@ -388,6 +388,7 @@ fn apply_relocations(
     segment_size: usize,
     segment_buffer: &mut [u8],
 ) {
+    debug!("Identifying relocations to apply.");
     let mut section_header_buffer = [0u8; size_of::<SectionHeader>()];
     let mut section_header_disk_offset = kernel_header.section_headers_offset();
 
@@ -398,6 +399,7 @@ fn apply_relocations(
             &mut section_header_buffer,
         );
         let section_header = unsafe { &*(section_header_buffer.as_ptr() as *const SectionHeader) };
+        info!("{:?}", section_header);
 
         match section_header.sh_type {
             SectionType::RELA => {
@@ -413,6 +415,8 @@ fn apply_relocations(
                     let mut rela_buffer = [0u8; size_of::<Rela64>()];
                     read_file(kernel_file, section_header.offset as u64, &mut rela_buffer);
                     let rela: &Rela64 = unsafe { &core::mem::transmute(rela_buffer) };
+
+                    debug!("Processing relocation: {:?}", rela);
 
                     match rela.info {
                         libkernel::elf::X86_64_RELATIVE => {
