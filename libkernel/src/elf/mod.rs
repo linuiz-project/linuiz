@@ -10,6 +10,7 @@ use crate::{addr_ty::Virtual, Address};
 
 pub const X86_64_RELATIVE: u64 = 0x00000008;
 
+#[derive(Debug)]
 pub struct Rela64 {
     pub addr: Address<Virtual>,
     pub info: u64,

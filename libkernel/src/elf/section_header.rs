@@ -39,6 +39,7 @@ bitflags::bitflags! {
 }
 
 #[repr(C)]
+#[derive(Debug)]
 pub struct SectionHeader {
     pub shstrtab_offset: u32,
     pub sh_type: SectionType,

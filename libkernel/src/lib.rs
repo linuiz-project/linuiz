@@ -13,7 +13,8 @@
     const_ptr_offset,
     const_fn_trait_bound,
     exclusive_range_pattern,
-    const_btree_new
+    const_btree_new,
+    extern_types
 )]
 
 #[macro_use]
@@ -221,4 +222,22 @@ pub const fn align_down(value: usize, alignment: usize) -> usize {
 
 pub const fn align_down_div(value: usize, alignment: usize) -> usize {
     align_down(value, alignment) / alignment
+}
+
+extern "C" {
+    pub type LinkerSymbol;
+}
+
+impl LinkerSymbol {
+    pub fn as_ptr(&'static self) -> *const u8 {
+        self as *const _ as *const _
+    }
+
+    pub fn as_mut_ptr(&'static self) -> *mut u8 {
+        self as *const _ as *mut _
+    }
+
+    pub fn as_usize(&'static self) -> usize {
+        self.as_ptr() as usize
+    }
 }

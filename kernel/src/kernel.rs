@@ -26,15 +26,15 @@ use libkernel::{
     addr_ty::Physical,
     io::pci::PCIeHostBridge,
     memory::{falloc, UEFIMemoryDescriptor},
-    Address, BootInfo,
+    Address, BootInfo, LinkerSymbol,
 };
 
 extern "C" {
-    // static _trampoline_start: Address<Physical>;
-    // static _trampoline_end: Address<Physical>;
+    static _trampoline_start: Address<Physical>;
+    static _trampoline_end: Address<Physical>;
 
-    static _text_start: Address<Physical>;
-    static _text_end: Address<Physical>;
+    static _text_start: LinkerSymbol;
+    static _text_end: LinkerSymbol;
 
     static _rodata_start: Address<Physical>;
     static _rodata_end: Address<Physical>;
@@ -75,9 +75,6 @@ extern "efiapi" fn kernel_main(
             }
             Err(_) => loop {},
         }
-        unsafe {
-            info!("{:?}..{:?}", _text_start, _text_end);
-        }
     }
 
     info!("Validating magic of BootInfo.");
@@ -111,8 +108,27 @@ extern "efiapi" fn kernel_main(
     kernel_main_post_mmap()
 }
 
+#[allow(named_asm_labels)]
 #[link_section = "trampoline"]
-extern "C" fn trampoline() {}
+unsafe extern "C" fn trampoline(gdt: usize) -> ! {
+    asm!(
+        "
+        cli             ; Clear Interrupts
+        lgdt [ax]       ; Load GDT register
+        mov ax, cr0
+        or al, 1        ; Set Protection Enable bit in CR0
+        mov cr0, eax
+
+        ; Perform far jump to clear pipeline
+        jmp 08h:protected
+
+        protected:      ; Begin protected mode
+            jmp $
+    ",
+        in("ax") gdt,
+        options(noreturn)
+    )
+}
 
 fn kernel_main_post_mmap() -> ! {
     init_apic();
@@ -123,13 +139,21 @@ fn kernel_main_post_mmap() -> ! {
     };
 
     info!("Searching for additional processor cores...");
+    let icr = LAPIC.interrupt_command_register();
     if let Ok(madt) = LAZY_XSDT.find_sub_table::<MADT>() {
         for interrupt_device in madt.iter() {
             if let InterruptDevice::LocalAPIC(lapic) = interrupt_device {
                 if lapic.id() != LAPIC.id() {
                     info!("Identified additional processor core: {}", lapic.id());
-                    LAPIC.write_icr(InterruptCommandRegister::init(lapic.id()));
-                    LAPIC.write_icr(InterruptCommandRegister::sipi(0, lapic.id()));
+                    icr.send_init(lapic.id());
+                    icr.wait_pending();
+
+                    icr.send_sipi(0, lapic.id());
+                    icr.wait_pending();
+                    icr.send_sipi(0, lapic.id());
+                    icr.wait_pending();
+
+                    loop {}
                 }
             }
         }

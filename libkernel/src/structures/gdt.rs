@@ -55,3 +55,7 @@ pub fn init() {
         x86_64::instructions::tables::load_tss(GDT.1.tss_selector);
     }
 }
+
+pub unsafe fn gdt() -> &'static GlobalDescriptorTable {
+    &GDT.0
+}

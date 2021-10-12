@@ -235,9 +235,8 @@ impl APIC {
         };
     }
 
-    pub fn write_icr(&self, icr: icr::InterruptCommandRegister) {
-        self.write_register(Register::ICRH, icr.high_bits());
-        self.write_register(Register::ICRL, icr.low_bits());
+    pub fn interrupt_command_register(&self) -> &icr::InterruptCommandRegister {
+        unsafe { self.mmio.borrow(Register::ICRL as usize).unwrap() }
     }
 
     pub fn error_status(&self) -> ErrorStatusFlags {
