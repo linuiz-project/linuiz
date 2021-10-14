@@ -37,14 +37,14 @@ pub struct SegmentHeader {
 impl core::fmt::Debug for SegmentHeader {
     fn fmt(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
         formatter
-            .debug_struct("Program Header")
+            .debug_struct("Segment Header")
             .field("Type", &self.ph_type)
             .field("Flags", &self.flags)
             .field("Offset", &self.offset)
-            .field("VAaddr", &self.virt_addr)
-            .field("PAddr", &self.phys_addr)
+            .field("Virtual Address", &self.virt_addr)
+            .field("Physical Address", &self.phys_addr)
             .field("Disk Size", &self.disk_size)
-            .field("Mem Size", &self.mem_size)
+            .field("Memory Size", &self.mem_size)
             .field("Alignment", &self.align)
             .finish()
     }

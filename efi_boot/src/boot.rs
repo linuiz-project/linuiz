@@ -4,6 +4,7 @@
 
 #[macro_use]
 extern crate log;
+extern crate alloc;
 extern crate rlibc;
 
 use core::{
@@ -12,11 +13,7 @@ use core::{
     mem::{size_of, transmute},
     ptr::slice_from_raw_parts_mut,
 };
-use libkernel::{
-    addr_ty::Virtual,
-    elf::{ELFHeader64, Rela64, SectionHeader, SectionType, SegmentHeader, SegmentType},
-    Address, FramebufferInfo,
-};
+use libkernel::{addr_ty::Virtual, elf::*, Address, FramebufferInfo};
 use uefi::{
     prelude::BootServices,
     proto::{
@@ -50,7 +47,7 @@ fn configure_log_level() {
 
 #[cfg(not(debug_assertions))]
 fn configure_log_level() {
-    log::set_max_level(log::LevelFilter::Info);
+    log::set_max_level(log::LevelFilter::Debug);
 }
 
 pub fn get_protocol<P: Protocol>(boot_services: &BootServices, handle: Handle) -> Option<&mut P> {
@@ -100,11 +97,15 @@ pub fn allocate_pages(
     pages_count: usize,
 ) -> &mut [u8] {
     if let AllocateType::MaxAddress(address) = allocate_type {
-        if (address % PAGE_SIZE) != 0x0 {
-            panic!("address is not page-aligned ({})", address)
-        }
+        assert_eq!(
+            address & 0xFFF,
+            0x0,
+            "Address is not page-aligned: 0x{:X}",
+            address
+        );
     }
 
+    debug!("Allocating pages: {:?}:{}", allocate_type, pages_count);
     let alloc_pointer = match boot_services.allocate_pages(allocate_type, memory_type, pages_count)
     {
         Ok(completion) => completion.unwrap() as *mut u8,
@@ -271,17 +272,6 @@ fn acquire_kernel_file(root_directory: &mut Directory) -> RegularFile {
 }
 
 pub fn load_kernel(boot_services: &BootServices, mut kernel_file: RegularFile) -> usize {
-    let kernel_header = acquire_kernel_header(&mut kernel_file);
-    info!("Kernel header read into memory.");
-    debug!("{:?}", kernel_header);
-
-    allocate_segments(boot_services, &mut kernel_file, &kernel_header);
-    info!("Kernel successfully read into memory.");
-
-    kernel_header.entry_address()
-}
-
-fn acquire_kernel_header(kernel_file: &mut RegularFile) -> ELFHeader64 {
     // allocate a block large enough to hold the header
     let mut kernel_header_buffer = [0u8; size_of::<ELFHeader64>()];
 
@@ -292,155 +282,124 @@ fn acquire_kernel_header(kernel_file: &mut RegularFile) -> ELFHeader64 {
     let kernel_header =
         ELFHeader64::parse(&kernel_header_buffer).expect("failed to parse header from buffer");
 
-    kernel_header
+    info!("Kernel header read into memory.");
+    debug!("{:#?}", kernel_header);
+
+    // allocate_segments(boot_services, &mut kernel_file, &kernel_header);
+    allocate_sections(boot_services, &mut kernel_file, &kernel_header);
+    info!("Kernel successfully read into memory.");
+
+    kernel_header.entry_address()
 }
 
-fn allocate_segments(
+const OFFSET: usize = 0x190000;
+
+pub struct SectionIterator<'k> {
+    file: &'k mut RegularFile,
+    header: &'k ELFHeader64,
+    section_index: u16,
+    section_buffer: [u8; size_of::<SectionHeader>()],
+    disk_offset: u64,
+}
+
+impl<'k> SectionIterator<'k> {
+    fn new(file: &'k mut RegularFile, header: &'k ELFHeader64) -> Self {
+        Self {
+            file,
+            header,
+            section_index: 0,
+            section_buffer: [0u8; size_of::<SectionHeader>()],
+            disk_offset: header.section_headers_offset() as u64,
+        }
+    }
+}
+
+impl<'k> Iterator for SectionIterator<'k> {
+    type Item = &'k SectionHeader;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.section_index < self.header.section_header_count() {
+            read_file(self.file, self.disk_offset, &mut self.section_buffer);
+            self.section_index += 1;
+            self.disk_offset += self.header.section_header_size() as u64;
+
+            Some(unsafe { &*(self.section_buffer.as_ptr() as *const _) })
+        } else {
+            None
+        }
+    }
+}
+
+fn allocate_sections(
     boot_services: &BootServices,
     kernel_file: &mut RegularFile,
     kernel_header: &ELFHeader64,
 ) {
-    let mut segment_header_buffer = [0u8; size_of::<SegmentHeader>()];
-    let mut segment_header_disk_offset = kernel_header.program_headers_offset();
+    let sections: alloc::vec::Vec<SectionHeader> = SectionIterator::new(kernel_file, kernel_header)
+        .map(|section| section.clone())
+        .collect();
 
-    for index in 0..kernel_header.program_header_count() {
-        read_file(
-            kernel_file,
-            segment_header_disk_offset as u64,
-            &mut segment_header_buffer,
-        );
-        let segment_header = unsafe { &*(segment_header_buffer.as_ptr() as *const SegmentHeader) };
-
-        if segment_header.ph_type == SegmentType::PT_LOAD {
-            debug!(
-                "Identified loadable segment (index {}, disk offset {}):\n{:#?}",
-                index, segment_header_disk_offset, segment_header
-            );
-
-            // calculate required variables for correctly loading segment into memory
-            let aligned_address =
-                libkernel::align_down(segment_header.phys_addr.as_usize(), segment_header.align);
-            // this is the offset within the page that the segment starts
-            let page_offset = wrapping_sub(segment_header.phys_addr.as_usize(), aligned_address);
-            // size of the segment size + offset within the page
-            let aligned_size = page_offset + segment_header.mem_size;
-            let pages_count = aligned_slices(aligned_size, segment_header.align);
-
-            debug!(
-                    "Loading segment (index {}):\n Unaligned Address: {:?}\n Unaligned Size: {}\n Aligned Address: {:?}\n Aligned Size: {}\n End Address: {:?}\n Pages: {}",
-                    index, segment_header.phys_addr, segment_header.mem_size, aligned_address, aligned_size, aligned_address + (pages_count * PAGE_SIZE), pages_count
-                );
-
-            // Allocate pages for segment data.
-            let segment_buffer = allocate_pages(
-                boot_services,
-                AllocateType::Address(aligned_address),
-                KERNEL_CODE,
-                pages_count,
-            );
-
-            // the segments might not always be aligned to pages, so take the slice of the buffer
-            // that is equal to the program segment's lowaddr..highaddr
-            let slice_end_index = page_offset + segment_header.disk_size;
-            let segment_slice = &mut segment_buffer[page_offset..slice_end_index];
-            // finally, read the program segment into memory
-            read_file(kernel_file, segment_header.offset as u64, segment_slice);
-
-            // sometimes a segment contains extra space for data, and must be zeroed out before any jumps
-            if segment_header.mem_size > segment_header.disk_size {
-                // in this case, we need to zero-out the remaining memory so the segment
-                // doesn't point to garbage data (since we won't be reading anything valid into it)
-                let memory_end_index = page_offset + segment_header.mem_size;
-                debug!(
-                    "Zeroing segment section (index {}): from {} to {}, total {}",
-                    index,
-                    slice_end_index,
-                    memory_end_index,
-                    memory_end_index - slice_end_index
-                );
-
-                for index in slice_end_index..memory_end_index {
-                    segment_buffer[index] = 0x0;
-                }
+    let total_memory_size = sections
+        .iter()
+        .filter_map(|section| {
+            if section.attribs.contains(SectionAttributes::ALLOC) {
+                Some(libkernel::align_up(section.size, section.addr_align))
+            } else {
+                None
             }
+        })
+        .sum::<usize>();
 
-            // Process relocations
-            apply_relocations(
+    let buffer = allocate_pages(
+        boot_services,
+        AllocateType::Address(OFFSET),
+        MemoryType::RESERVED,
+        libkernel::align_up_div(total_memory_size, 0x1000),
+    );
+    let buffer_base = buffer.as_ptr() as usize;
+
+    for section_header in sections.iter() {
+        match section_header.ty {
+            SectionType::PROGBITS => read_file(
                 kernel_file,
-                kernel_header,
-                segment_header.virt_addr,
-                segment_header.mem_size,
-                segment_buffer,
-            );
-
-            debug!("Segment loaded (index {}).", index);
-        }
-
-        // update the segment header offset so we can read next segment
-        segment_header_disk_offset += kernel_header.program_header_size() as usize;
-    }
-}
-
-fn apply_relocations(
-    kernel_file: &mut RegularFile,
-    kernel_header: &ELFHeader64,
-    segment_virt_addr: Address<Virtual>,
-    segment_size: usize,
-    segment_buffer: &mut [u8],
-) {
-    debug!("Identifying relocations to apply.");
-    let mut section_header_buffer = [0u8; size_of::<SectionHeader>()];
-    let mut section_header_disk_offset = kernel_header.section_headers_offset();
-
-    for index in 0..kernel_header.section_header_count() {
-        read_file(
-            kernel_file,
-            section_header_disk_offset as u64,
-            &mut section_header_buffer,
-        );
-        let section_header = unsafe { &*(section_header_buffer.as_ptr() as *const SectionHeader) };
-        info!("{:?}", section_header);
-
-        match section_header.sh_type {
+                section_header.offset as u64,
+                &mut buffer[(section_header.addr.as_usize())..],
+            ),
+            SectionType::NOBITS => {
+                let base = section_header.addr.as_usize();
+                buffer[base..(base + section_header.size)].fill(0)
+            }
             SectionType::RELA => {
-                if section_header.entry_size != size_of::<Rela64>() {
-                    warn!(
-                        "Unknown entry size for RELA section: {} (should be {})",
-                        section_header.entry_size,
-                        size_of::<Rela64>()
-                    );
-                }
+                assert_eq!(
+                    section_header.entry_size,
+                    size_of::<Rela64>(),
+                    "Unknown entry size for RELA section: {}",
+                    section_header.entry_size
+                );
 
+                let mut rela_buffer = [0u8; size_of::<Rela64>()];
                 for offset in (0..section_header.size).step_by(section_header.entry_size) {
-                    let mut rela_buffer = [0u8; size_of::<Rela64>()];
                     read_file(kernel_file, section_header.offset as u64, &mut rela_buffer);
                     let rela: &Rela64 = unsafe { &core::mem::transmute(rela_buffer) };
 
                     debug!("Processing relocation: {:?}", rela);
 
-                    match rela.info {
-                        libkernel::elf::X86_64_RELATIVE => {
-                            if (segment_virt_addr..=(segment_virt_addr + segment_size + 8))
-                                .contains(&rela.addr)
-                            {
-                                unsafe {
-                                    (segment_buffer
-                                        .as_ptr()
-                                        .sub(segment_virt_addr.as_usize())
-                                        .add(rela.addr.as_usize())
-                                        as *mut u64)
-                                        .write(rela.addend)
-                                }
-                            }
+                    if rela.info == libkernel::elf::X86_64_RELATIVE
+                        && (buffer_base..=(buffer_base + total_memory_size))
+                            .contains(&rela.addr.as_usize())
+                    {
+                        unsafe {
+                            buffer
+                                .as_mut_ptr()
+                                .add(rela.addr.as_usize())
+                                .cast::<u64>()
+                                .write(rela.addend)
                         }
-                        ty => warn!("Unknown RELA type: {}", ty),
                     }
                 }
             }
-            section_type => trace!("Unhandled section type: {:?}", section_type),
+            _ => {}
         }
-
-        section_header_disk_offset += kernel_header.section_header_size() as usize;
     }
 }
 
@@ -499,7 +458,7 @@ fn kernel_transfer(
 
     // Finally, drop into the kernel.
     let kernel_main: libkernel::KernelMain<MemoryDescriptor, uefi::table::cfg::ConfigTableEntry> =
-        unsafe { transmute(kernel_entry_point) };
+        unsafe { transmute(kernel_entry_point + OFFSET) };
     let boot_info = libkernel::BootInfo::new(
         unsafe { memory_map.align_to().1 },
         runtime_table.config_table(),

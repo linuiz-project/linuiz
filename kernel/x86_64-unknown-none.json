@@ -6,20 +6,19 @@
   "target-endian": "little",
   "target-pointer-width": "64",
   "target-c-int-width": "32",
-  
   "linker": "rust-lld",
   "linker-flavor": "ld.lld",
-  "linker-is-gnu": true,
+  "linker-is-gnu": false,
   "pre-link-args": {
-    "ld.lld": ["--script=x86_64-unknown-none.lds"]
+    "ld.lld": [
+      "--script=x86_64-unknown-none.lds"
+    ]
   },
-
   "panic-strategy": "abort",
   "disable-redzone": true,
-  "relocation-model": "static",
+  "relocation-model": "pie",
   "executables": true,
   "code-model": "small",
-
   "os": "none",
   "exe-suffix": ".elf"
 }

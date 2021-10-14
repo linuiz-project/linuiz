@@ -31,7 +31,7 @@ impl InterruptCommandRegister {
             DeliveryMode::INIT,
             false,
             true,
-            DestinationShorthand::AllExcludingSelf,
+            DestinationShorthand::None,
             apic_id,
         );
     }
@@ -42,7 +42,7 @@ impl InterruptCommandRegister {
             DeliveryMode::SIPI,
             false,
             false,
-            DestinationShorthand::AllExcludingSelf,
+            DestinationShorthand::None,
             apic_id,
         );
     }

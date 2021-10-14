@@ -1,52 +1,50 @@
-ENTRY(_start)
+ENTRY(_entry)
 OUTPUT_FORMAT(elf64-x86-64)
 
 SECTIONS
 {
-    . = 0x190000;
-
-    .trampoline : ALIGN(0x1000) {
-        _trampoline_start = .;
-
-        *(.trampoline.*)
-        *(.trampoline)
-
-        _trampoline_end = .;
-    }
-
     .text : ALIGN(0x1000) {
-        _text_start = .;
+        __text_start = .;
 
         *(.text.*)
         *(.text)
 
-        _text_end = .;
+        __text_end = .;
     }
 
     .rodata : ALIGN(0x1000) {
-        _rodata_start = .;
+        __rodata_start = .;
 
         *(.rodata.*)
         *(.rodata)
 
-        _rodata_end = .;
+        __rodata_end = .;
     }
 
     .data : ALIGN(0x1000) {
-        _data_start = .;
+        __data_start = .;
 
         *(.data.*)
         *(.data)
 
-        _data_end = .;
+        __data_end = .;
     }
 
     .bss : ALIGN(0x1000) {
-        _bss_start = .;
+        __bss_start = .;
 
         *(.bss.*)
         *(.bss)
 
-        _bss_end = .;
+        __bss_end = .;
+    }
+
+    .trampoline : ALIGN(0x1000) {
+        __trampoline_start = .;
+
+        *(.trampoline.*)
+        *(.trampoline)
+
+        __trampoline_end = .;
     }
 }

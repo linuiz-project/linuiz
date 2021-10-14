@@ -213,7 +213,7 @@ pub const fn align_up(value: usize, alignment: usize) -> usize {
 }
 
 pub const fn align_up_div(value: usize, alignment: usize) -> usize {
-    (value + (alignment - 1)) / alignment
+    ((value + alignment) - 1) / alignment
 }
 
 pub const fn align_down(value: usize, alignment: usize) -> usize {

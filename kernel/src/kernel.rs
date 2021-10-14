@@ -30,20 +30,20 @@ use libkernel::{
 };
 
 extern "C" {
-    static _trampoline_start: Address<Physical>;
-    static _trampoline_end: Address<Physical>;
+    static __trampoline_start: LinkerSymbol;
+    static __trampoline_end: LinkerSymbol;
 
-    static _text_start: LinkerSymbol;
-    static _text_end: LinkerSymbol;
+    static __text_start: LinkerSymbol;
+    static __text_end: LinkerSymbol;
 
-    static _rodata_start: Address<Physical>;
-    static _rodata_end: Address<Physical>;
+    static __rodata_start: LinkerSymbol;
+    static __rodata_end: LinkerSymbol;
 
-    static _data_start: Address<Physical>;
-    static _data_end: Address<Physical>;
+    static __data_start: LinkerSymbol;
+    static __data_end: LinkerSymbol;
 
-    static _bss_start: Address<Physical>;
-    static _bss_end: Address<Physical>;
+    static __bss_start: LinkerSymbol;
+    static __bss_end: LinkerSymbol;
 }
 
 #[cfg(debug_assertions)]
@@ -62,7 +62,7 @@ static KERNEL_MALLOC: block_malloc::BlockAllocator = block_malloc::BlockAllocato
 static TRACE_ENABLED_PATHS: [&str; 2] = ["kernel::drivers::ahci", "libkernel::memory::falloc"];
 
 #[no_mangle]
-#[export_name = "_start"]
+#[export_name = "_entry"]
 extern "efiapi" fn kernel_main(
     boot_info: BootInfo<UEFIMemoryDescriptor, SystemConfigTableEntry>,
 ) -> ! {
@@ -109,7 +109,7 @@ extern "efiapi" fn kernel_main(
 }
 
 #[allow(named_asm_labels)]
-#[link_section = "trampoline"]
+#[link_section = ".trampoline"]
 unsafe extern "C" fn trampoline(gdt: usize) -> ! {
     asm!(
         "
