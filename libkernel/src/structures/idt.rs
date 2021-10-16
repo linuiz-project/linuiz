@@ -209,3 +209,8 @@ pub fn set_interrupt_handler(index: u8, handler: extern "x86-interrupt" fn(Inter
         IDT.lock()[index as usize].set_handler_fn(handler);
     });
 }
+
+pub fn virt_addr() -> crate::Address<crate::addr_ty::Virtual> {
+    let idt = IDT.lock();
+    crate::Address::<crate::addr_ty::Virtual>::from_ptr(&raw const *idt)
+}

@@ -23,6 +23,7 @@ pub fn allocate_segments(
             &*(segment_header_buffer.as_ptr() as *const SegmentHeader)
         };
 
+        // TODO: Also process GNU_RELRO segments.
         // Ensure the segment needs to be loaded at all.
         if segment_header.ty == SegmentType::LOAD {
             debug!("Identified loadable segment:\n{:#?}", segment_header);
@@ -33,6 +34,8 @@ pub fn allocate_segments(
             //       far as I know.
             let segment_buffer =
                 if (segment_header.virt_addr.as_usize() % segment_header.align) == 0 {
+                    debug!("Segment is self-aligned. Allocating buffer & slicing.");
+
                     // Align the address of the segment to page boundaries.
                     let page_aligned_addr =
                         libkernel::align_down(segment_header.virt_addr.as_usize(), 0x1000);
@@ -47,11 +50,12 @@ pub fn allocate_segments(
                         libkernel::align_up_div(aligned_size, 0x1000),
                     );
 
-                    // Handle any internal page offsets (i.e. segment doesn't align to pages).
+                    // Handle any internal page offsets (i.e. segment has a non-page alignment).
                     &mut buffer[alignment_offset..(alignment_offset + segment_header.mem_size)]
                 } else {
-                    // If this segment does lie within another segment, simply create a slice covering
-                    //  that region in memory.
+                    debug!("Segment is not self-aligned. Slicing memory directly.");
+
+                    // If this segment's address doesn't align, simply create a slice over the region.
                     unsafe {
                         &mut *(core::slice::from_raw_parts_mut(
                             segment_header.virt_addr.as_ptr::<u8>() as *mut _,
@@ -65,7 +69,7 @@ pub fn allocate_segments(
 
             // Sometimes a segment contains extra space for data, and must be zeroed out.
             if segment_header.mem_size > segment_header.disk_size {
-                segment_buffer[segment_header.mem_size..].fill(0x0);
+                segment_buffer[segment_header.disk_size..].fill(0x0);
             }
         }
 

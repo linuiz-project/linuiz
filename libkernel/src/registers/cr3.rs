@@ -22,6 +22,16 @@ impl CR3 {
         CR3Flags::from_bits_truncate(value)
     }
 
+    pub fn read_raw() -> usize {
+        let value: usize;
+
+        unsafe {
+            asm!("mov {}, cr3", out(reg) value, options(nostack));
+        }
+
+        value
+    }
+
     pub fn refresh() {
         let value: usize;
 

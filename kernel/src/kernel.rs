@@ -42,8 +42,11 @@ extern "C" {
     static __bss_start: LinkerSymbol;
     static __bss_end: LinkerSymbol;
 
-    static __trampoline_start: LinkerSymbol;
-    static __trampoline_end: LinkerSymbol;
+    static __ap_trampoline_start: LinkerSymbol;
+    static __ap_trampoline_end: LinkerSymbol;
+
+    static __cpu_init_complete: LinkerSymbol;
+    static __kernel_pml4: LinkerSymbol;
 }
 
 #[cfg(debug_assertions)]
@@ -102,35 +105,27 @@ extern "efiapi" fn kernel_main(
 
         info!("Initializing kernel default allocator.");
         KERNEL_MALLOC.init(reserve_kernel_stack(memory_map));
+        // Move the current PML4 into the global processor reference.
+        *__kernel_pml4.as_mut_ptr() = libkernel::registers::CR3::read_raw();
         libkernel::memory::malloc::set(&KERNEL_MALLOC);
 
-        // for page in unsafe { __rodata_start.as_page()..__rodata_end.as_page() } {}
+        debug!("Ensuring relevant kernel sections are read-only.");
+        let malloc = libkernel::memory::malloc::get();
+        for page in unsafe {
+            (__text_start.as_page()..__text_end.as_page())
+                .chain(__rodata_start.as_page()..__rodata_end.as_page())
+        } {
+            malloc
+                .set_page_attributes(
+                    &page,
+                    libkernel::memory::paging::PageAttributes::WRITABLE,
+                    libkernel::memory::paging::PageAttributeModifyMode::Remove,
+                )
+                .expect("Kernel code page is unmapped.");
+        }
     }
-    loop {}
 
     kernel_main_post_mmap()
-}
-
-#[allow(named_asm_labels)]
-#[link_section = ".trampoline"]
-unsafe extern "C" fn trampoline(gdt: usize) -> ! {
-    asm!(
-        "
-        cli             ; Clear Interrupts
-        lgdt [ax]       ; Load GDT register
-        mov ax, cr0
-        or al, 1        ; Set Protection Enable bit in CR0
-        mov cr0, eax
-
-        ; Perform far jump to clear pipeline
-        jmp 08h:protected
-
-        protected:      ; Begin protected mode
-            jmp $
-    ",
-        in("ax") gdt,
-        options(noreturn)
-    )
 }
 
 fn kernel_main_post_mmap() -> ! {
@@ -138,7 +133,7 @@ fn kernel_main_post_mmap() -> ! {
 
     use libkernel::{
         acpi::rdsp::xsdt::{madt::*, LAZY_XSDT},
-        structures::apic::{icr::InterruptCommandRegister, LAPIC},
+        structures::apic::LAPIC,
     };
 
     info!("Searching for additional processor cores...");
@@ -148,12 +143,16 @@ fn kernel_main_post_mmap() -> ! {
             if let InterruptDevice::LocalAPIC(lapic) = interrupt_device {
                 if lapic.id() != LAPIC.id() {
                     info!("Identified additional processor core: {}", lapic.id());
+
+                    let ap_trampoline_page_index =
+                        unsafe { __ap_trampoline_start.as_page().index() } as u8;
+
                     icr.send_init(lapic.id());
                     icr.wait_pending();
 
-                    icr.send_sipi(0, lapic.id());
+                    icr.send_sipi(ap_trampoline_page_index, lapic.id());
                     icr.wait_pending();
-                    icr.send_sipi(0, lapic.id());
+                    icr.send_sipi(ap_trampoline_page_index, lapic.id());
                     icr.wait_pending();
 
                     loop {}
@@ -193,6 +192,11 @@ fn kernel_main_post_mmap() -> ! {
 
     info!("Kernel has reached safe shutdown state.");
     unsafe { libkernel::instructions::pwm::qemu_shutdown() }
+}
+
+#[no_mangle]
+extern "C" fn ap_startup() -> ! {
+    loop {}
 }
 
 pub unsafe fn init_falloc(memory_map: &[UEFIMemoryDescriptor]) {

@@ -2,11 +2,17 @@ use crate::{memory::volatile::VolatileCell, ReadWrite};
 
 #[repr(u32)]
 pub enum DeliveryMode {
-    Fixed = 0,
-    SMI = 2,
-    NMI = 4,
-    INIT = 5,
-    SIPI = 6,
+    Fixed = 0b000,
+    SMI = 0b010,
+    NMI = 0b100,
+    INIT = 0b101,
+    StartUp = 0b110,
+}
+
+#[repr(u32)]
+pub enum DestinationMode {
+    Physical = 0,
+    Logical = 1,
 }
 
 #[repr(u32)]
@@ -29,7 +35,7 @@ impl InterruptCommandRegister {
         self.send(
             0,
             DeliveryMode::INIT,
-            false,
+            DestinationMode::Physical,
             true,
             DestinationShorthand::None,
             apic_id,
@@ -39,9 +45,9 @@ impl InterruptCommandRegister {
     pub fn send_sipi(&self, vector: u8, apic_id: u8) {
         self.send(
             vector,
-            DeliveryMode::SIPI,
-            false,
-            false,
+            DeliveryMode::StartUp,
+            DestinationMode::Physical,
+            true,
             DestinationShorthand::None,
             apic_id,
         );
@@ -51,25 +57,29 @@ impl InterruptCommandRegister {
         &self,
         vector: u8,
         delivery_mode: DeliveryMode,
-        logical_mode: bool,
+        dest_mode: DestinationMode,
         deassert: bool,
         dest_shorthand: DestinationShorthand,
         apic_id: u8,
     ) {
+        assert!(apic_id < 0b10000, "APIC ID must be no more than 4 bits.");
         assert!(
             !self.is_pending(),
             "Cannot send command when command is already pending."
         );
 
-        self.high.write((apic_id as u32) << 24);
-        self.low.write(
-            (vector as u32)
-                | ((delivery_mode as u32) << 8)
-                | ((!logical_mode as u32) << 11)
-                | ((!deassert as u32) << 14)
-                | ((deassert as u32) << 15)
-                | ((dest_shorthand as u32) << 18),
-        );
+        let high = (apic_id as u32) << 24;
+        let low = (vector as u32)
+            | ((delivery_mode as u32) << 8)
+            | ((dest_mode as u32) << 11)
+            | ((deassert as u32) << 14)
+            | ((dest_shorthand as u32) << 18);
+
+        debug!("ICR: WRITE HIGH: 0x{:X}", high);
+        self.high.write(high);
+        debug!("ICR: WRITE LOW: 0x{:X}", low);
+        self.low.write(low);
+        debug!("ICR: WRITE COMPLETE");
     }
 
     pub fn is_pending(&self) -> bool {
@@ -78,6 +88,7 @@ impl InterruptCommandRegister {
     }
 
     pub fn wait_pending(&self) {
+        debug!("ICR: WAIT PENDING");
         while self.is_pending() {
             crate::instructions::hlt();
         }

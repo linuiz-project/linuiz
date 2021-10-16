@@ -319,7 +319,7 @@ fn kernel_transfer(
         (alloc_ptr, mmap_alloc_size)
     };
 
-    info!("Finalizing exit from boot services environment, then dropping into kernel_main (entrypoint {}).", kernel_entry_point);
+    info!("Finalizing exit from boot services environment, then dropping into kernel_main (entrypoint 0x{:X}).", kernel_entry_point);
     system_table
         .stdout()
         .reset(false)
