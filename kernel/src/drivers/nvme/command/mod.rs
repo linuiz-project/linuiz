@@ -149,9 +149,9 @@ pub enum GenericStatus {
 pub enum StatusCode {
     Generic(GenericStatus),
     CommandSpecific(u8),
-    MediaAndDataIntegrityErrors = 0x2,
-    PathRelatedStatus = 0x3,
-    VendorSpecific = 0x7,
+    MediaAndDataIntegrityErrors, // 0x2
+    PathRelatedStatus,           // 0x3
+    VendorSpecific,              // 0x7
 }
 
 #[repr(transparent)]

@@ -1,13 +1,12 @@
 use crate::{
     addr_ty::{Physical, Virtual},
     cell::SyncRefCell,
-    memory::{
-        paging::{PageAttributeModifyMode, PageAttributes},
-        Page,
-    },
+    memory::{paging::PageAttributes, Page},
     Address,
 };
 use core::alloc::Layout;
+
+use super::paging::PageAttributeModifyMode;
 
 pub trait MemoryAllocator {
     fn minimum_alignment(&self) -> usize;
@@ -34,17 +33,18 @@ pub trait MemoryAllocator {
     // `bool` is whether it is allocated to
     fn page_state(&self, page_index: usize) -> Option<bool>;
 
-    unsafe fn modify_page_attributes(
+    fn get_page_attributes(&self, page: &Page) -> Option<PageAttributes>;
+    unsafe fn set_page_attributes(
         &self,
         page: &Page,
         attributes: PageAttributes,
-        mode: PageAttributeModifyMode,
-    );
+        modify_mode: PageAttributeModifyMode,
+    ) -> Option<PageAttributes>;
 }
 
 static DEFAULT_MALLOCATOR: SyncRefCell<&'static dyn MemoryAllocator> = SyncRefCell::empty();
 
-pub fn set(allocator: &'static dyn MemoryAllocator) {
+pub unsafe fn set(allocator: &'static dyn MemoryAllocator) {
     DEFAULT_MALLOCATOR.set(allocator);
 }
 

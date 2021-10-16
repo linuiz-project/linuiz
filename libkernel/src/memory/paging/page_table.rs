@@ -35,7 +35,7 @@ pub struct PageTable<L: TableLevel> {
 impl<L: TableLevel> PageTable<L> {
     pub const fn new() -> Self {
         Self {
-            entries: [PageTableEntry::unused(); 512],
+            entries: [PageTableEntry::UNUSED; 512],
             level: PhantomData,
         }
     }
@@ -68,7 +68,7 @@ impl<L: HeirarchicalLevel> PageTable<L> {
         phys_mapped_addr: Address<Virtual>,
     ) -> Option<&PageTable<L::NextLevel>> {
         self.get_entry(index)
-            .frame()
+            .get_frame()
             .map(|frame| &*(phys_mapped_addr + frame.base_addr().as_usize()).as_ptr())
     }
 
@@ -78,7 +78,7 @@ impl<L: HeirarchicalLevel> PageTable<L> {
         phys_mapped_addr: Address<Virtual>,
     ) -> Option<&mut PageTable<L::NextLevel>> {
         self.get_entry_mut(index)
-            .frame()
+            .get_frame()
             .map(|frame| &mut *(phys_mapped_addr + frame.base_addr().as_usize()).as_mut_ptr())
     }
 
@@ -88,7 +88,7 @@ impl<L: HeirarchicalLevel> PageTable<L> {
         phys_mapped_addr: Address<Virtual>,
     ) -> &mut PageTable<L::NextLevel> {
         let entry = self.get_entry_mut(index);
-        let (frame, created) = match entry.frame() {
+        let (frame, created) = match entry.get_frame() {
             Some(frame) => (frame, false),
             None => {
                 let alloc_frame = crate::memory::falloc::get()

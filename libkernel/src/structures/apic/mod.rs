@@ -225,14 +225,12 @@ impl APIC {
     }
 
     pub fn set_spurious_vector(&self, vector: u8) {
-        unsafe {
-            self.write_register(
-                Register::SPR,
-                *self
-                    .read_register(Register::SPR)
-                    .set_bits(0..8, vector as u32),
-            );
-        };
+        self.write_register(
+            Register::SPR,
+            *self
+                .read_register(Register::SPR)
+                .set_bits(0..8, vector as u32),
+        );
     }
 
     pub fn interrupt_command_register(&self) -> &icr::InterruptCommandRegister {

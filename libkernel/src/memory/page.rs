@@ -67,27 +67,38 @@ impl Page {
         );
     }
 
-    pub fn range_count(start_addr: Address<Virtual>, count: usize) -> PageIterator {
-        PageIterator::new(
-            &Page::from_addr(start_addr),
-            &Page::from_addr(start_addr + (count * 0x1000)),
-        )
+    pub fn to(&self, count: usize) -> Option<PageIterator> {
+        self.forward(count).map(|end| PageIterator::new(self, &end))
     }
 
-    pub const fn offset(&self, count: isize) -> Self {
-        Self {
-            index: if count.is_negative() {
-                self.index + (count as usize)
-            } else {
-                self.index + (count.abs() as usize)
-            },
+    pub const fn forward(&self, count: usize) -> Option<Self> {
+        if self.index() <= (usize::MAX - count) {
+            Some(Page::from_index(self.index() + count))
+        } else {
+            None
+        }
+    }
+
+    pub const fn backward(&self, count: usize) -> Option<Self> {
+        if self.index() > (usize::MIN + count) {
+            Some(Page::from_index(self.index() - count))
+        } else {
+            None
         }
     }
 }
 
 impl core::iter::Step for Page {
-    fn forward(start: Self, count: usize) -> Self {
-        start.offset(count)
+    fn forward_checked(start: Self, count: usize) -> Option<Self> {
+        start.forward(count)
+    }
+
+    fn backward_checked(start: Self, count: usize) -> Option<Self> {
+        start.backward(count)
+    }
+
+    fn steps_between(start: &Self, end: &Self) -> Option<usize> {
+        Some(end.index() - start.index())
     }
 }
 

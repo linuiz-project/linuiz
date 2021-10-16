@@ -453,7 +453,7 @@ impl BlockAllocator<'_> {
         {
             let mut addressor_mut = unsafe { self.get_addressor_mut() };
             for offset in cur_page_offset..new_page_offset {
-                let map_page = &mut Self::ALLOCATOR_BASE.offset(offset);
+                let map_page = &mut Self::ALLOCATOR_BASE.forward(offset).unwrap();
                 addressor_mut.map(map_page, &falloc::get().autolock().expect("out of memory"));
             }
         }
@@ -513,13 +513,22 @@ impl libkernel::memory::malloc::MemoryAllocator for BlockAllocator<'_> {
             .map(|block_page| !block_page.is_empty())
     }
 
-    unsafe fn modify_page_attributes(
+    fn get_page_attributes(
+        &self,
+        page: &Page,
+    ) -> Option<libkernel::memory::paging::PageAttributes> {
+        unsafe { self.get_addressor().get_page_attributes(page) }
+    }
+
+    unsafe fn set_page_attributes(
         &self,
         page: &Page,
         attributes: libkernel::memory::paging::PageAttributes,
-        mode: libkernel::memory::paging::PageAttributeModifyMode,
-    ) {
-        self.get_addressor_mut()
-            .modify_page_attributes(page, attributes, mode);
+        modify_mode: libkernel::memory::paging::PageAttributeModifyMode,
+    ) -> Option<libkernel::memory::paging::PageAttributes> {
+        unsafe {
+            self.get_addressor_mut()
+                .set_page_attributes(page, attributes, modify_mode)
+        }
     }
 }

@@ -45,7 +45,7 @@ impl VirtualAddressor {
     /* ACQUIRE STATE */
 
     fn pml4_page(&self) -> Page {
-        self.mapped_page.offset(self.pml4_frame.index())
+        self.mapped_page.forward(self.pml4_frame.index()).unwrap()
     }
 
     fn pml4(&self) -> &PageTable<Level4> {
@@ -115,7 +115,9 @@ impl VirtualAddressor {
     pub fn unmap(&mut self, page: &Page) {
         assert!(self.is_mapped(page.base_addr()), "page already unmapped");
 
-        self.get_page_entry_mut(page).unwrap().set_nonpresent();
+        self.get_page_entry_mut(page)
+            .unwrap()
+            .set_attributes(PageAttributes::PRESENT, PageAttributeModifyMode::Remove);
         crate::instructions::tlb::invalidate(page);
 
         assert!(!self.is_mapped(page.base_addr()), "failed to unmap page",);
@@ -129,19 +131,23 @@ impl VirtualAddressor {
 
     pub fn is_mapped(&self, virt_addr: Address<Virtual>) -> bool {
         self.get_page_entry(&Page::containing_addr(virt_addr))
-            .and_then(|entry| entry.frame())
+            .and_then(|entry| entry.get_frame())
             .is_some()
     }
 
     pub fn is_mapped_to(&self, page: &Page, frame: &Frame) -> bool {
-        match self.get_page_entry(page).and_then(|entry| entry.frame()) {
+        match self
+            .get_page_entry(page)
+            .and_then(|entry| entry.get_frame())
+        {
             Some(entry_frame) => frame.index() == entry_frame.index(),
             None => false,
         }
     }
 
     pub fn translate_page(&self, page: &Page) -> Option<Frame> {
-        self.get_page_entry(page).and_then(|entry| entry.frame())
+        self.get_page_entry(page)
+            .and_then(|entry| entry.get_frame())
     }
 
     /* STATE CHANGING */
@@ -149,33 +155,25 @@ impl VirtualAddressor {
     pub unsafe fn modify_mapped_page(&mut self, page: Page) {
         let total_memory_pages = crate::memory::falloc::get().total_memory(None) / 0x1000;
         for index in 0..total_memory_pages {
-            self.map(&page.offset(index), &Frame::from_index(index));
+            self.map(&page.forward(index).unwrap(), &Frame::from_index(index));
         }
 
         self.mapped_page = page;
     }
 
-    pub unsafe fn modify_page_attributes(
+    pub unsafe fn get_page_attributes(&self, page: &Page) -> Option<PageAttributes> {
+        self.get_page_entry(page)
+            .map(|page_entry| page_entry.get_attributes())
+    }
+
+    pub unsafe fn set_page_attributes(
         &mut self,
         page: &Page,
         attributes: PageAttributes,
-        mode: PageAttributeModifyMode,
-    ) {
-        // TODO return a Result<,> here
-        match self.get_page_entry_mut(page) {
-            Some(entry) => {
-                let mut entry_attributes = entry.attribs();
-                match mode {
-                    PageAttributeModifyMode::Set => entry_attributes = attributes,
-                    PageAttributeModifyMode::Insert => entry_attributes.insert(attributes),
-                    PageAttributeModifyMode::Remove => entry_attributes.remove(attributes),
-                    PageAttributeModifyMode::Toggle => entry_attributes.toggle(attributes),
-                }
-
-                entry.set_attributes(entry_attributes);
-            }
-            None => panic!("given page is not mapped: {:?}", page),
-        }
+        modify_mode: PageAttributeModifyMode,
+    ) -> Option<PageAttributes> {
+        self.get_page_entry_mut(page)
+            .map(|page_entry| page_entry.set_attributes(attributes, modify_mode))
     }
 
     pub unsafe fn swap_into(&self) {
