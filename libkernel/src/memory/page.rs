@@ -1,7 +1,7 @@
 use crate::{addr_ty::Virtual, Address};
 
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Page {
     index: usize,
 }
@@ -74,10 +74,20 @@ impl Page {
         )
     }
 
-    pub const fn offset(&self, count: usize) -> Self {
+    pub const fn offset(&self, count: isize) -> Self {
         Self {
-            index: self.index + count,
+            index: if count.is_negative() {
+                self.index + (count as usize)
+            } else {
+                self.index + (count.abs() as usize)
+            },
         }
+    }
+}
+
+impl core::iter::Step for Page {
+    fn forward(start: Self, count: usize) -> Self {
+        start.offset(count)
     }
 }
 

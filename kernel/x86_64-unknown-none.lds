@@ -3,7 +3,7 @@ OUTPUT_FORMAT(elf64-x86-64)
 
 SECTIONS
 {
-    . = 200000; /* 2 MiB */
+    . = 0x200000; /* 2 MiB */
 
     .text : ALIGN(0x1000) {
         __text_start = .;

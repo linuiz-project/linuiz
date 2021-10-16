@@ -229,15 +229,19 @@ extern "C" {
 }
 
 impl LinkerSymbol {
-    pub fn as_ptr(&'static self) -> *const u8 {
+    pub const fn as_ptr(&'static self) -> *const u8 {
         self as *const _ as *const _
     }
 
-    pub fn as_mut_ptr(&'static self) -> *mut u8 {
+    pub const fn as_mut_ptr(&'static self) -> *mut u8 {
         self as *const _ as *mut _
     }
 
     pub fn as_usize(&'static self) -> usize {
         self.as_ptr() as usize
+    }
+
+    pub fn as_page(&'static self) -> memory::Page {
+        memory::Page::from_index(self.as_usize() / 0x1000)
     }
 }

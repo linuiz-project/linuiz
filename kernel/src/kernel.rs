@@ -30,9 +30,6 @@ use libkernel::{
 };
 
 extern "C" {
-    static __trampoline_start: LinkerSymbol;
-    static __trampoline_end: LinkerSymbol;
-
     static __text_start: LinkerSymbol;
     static __text_end: LinkerSymbol;
 
@@ -44,6 +41,9 @@ extern "C" {
 
     static __bss_start: LinkerSymbol;
     static __bss_end: LinkerSymbol;
+
+    static __trampoline_start: LinkerSymbol;
+    static __trampoline_end: LinkerSymbol;
 }
 
 #[cfg(debug_assertions)]
@@ -103,7 +103,10 @@ extern "efiapi" fn kernel_main(
         info!("Initializing kernel default allocator.");
         KERNEL_MALLOC.init(reserve_kernel_stack(memory_map));
         libkernel::memory::malloc::set(&KERNEL_MALLOC);
+
+        // for page in unsafe { __rodata_start.as_page()..__rodata_end.as_page() } {}
     }
+    loop {}
 
     kernel_main_post_mmap()
 }

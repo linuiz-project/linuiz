@@ -7,24 +7,24 @@ use crate::{
 #[allow(dead_code, non_camel_case_types)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum SegmentType {
-    PT_NULL = 0x0,
-    PT_LOAD = 0x1,
-    PT_DYNAMIC = 0x2,
-    PT_INTERP = 0x3,
-    PT_NOTE = 0x4,
-    PT_SHLIB = 0x5,
-    PT_PHDR = 0x6,
-    PT_TLS = 0x7,
-    PT_LOOS = 0x60000000,
-    PT_HIOS = 0x6FFFFFFF,
-    PT_LOPROC = 0x70000000,
-    PT_HIPROC = 0x7FFFFFFF,
+    NULL = 0x0,
+    LOAD = 0x1,
+    DYNAMIC = 0x2,
+    INTERP = 0x3,
+    NOTE = 0x4,
+    SHLIB = 0x5,
+    PHDR = 0x6,
+    TLS = 0x7,
+    LOOS = 0x60000000,
+    HIOS = 0x6FFFFFFF,
+    LOPROC = 0x70000000,
+    HIPROC = 0x7FFFFFFF,
 }
 
 #[repr(C)]
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct SegmentHeader {
-    pub ph_type: SegmentType,
+    pub ty: SegmentType,
     pub flags: u32,
     pub offset: usize,
     pub virt_addr: Address<Virtual>,
@@ -38,7 +38,7 @@ impl core::fmt::Debug for SegmentHeader {
     fn fmt(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
         formatter
             .debug_struct("Segment Header")
-            .field("Type", &self.ph_type)
+            .field("Type", &self.ty)
             .field("Flags", &self.flags)
             .field("Offset", &self.offset)
             .field("Virtual Address", &self.virt_addr)

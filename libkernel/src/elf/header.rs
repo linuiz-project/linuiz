@@ -132,15 +132,15 @@ impl ELFHeader64 {
         self.ehsize
     }
 
-    pub fn program_header_size(&self) -> u16 {
+    pub fn segment_header_size(&self) -> u16 {
         self.phentsize
     }
 
-    pub fn program_headers_offset(&self) -> usize {
+    pub fn segment_headers_offset(&self) -> usize {
         self.phoff
     }
 
-    pub fn program_header_count(&self) -> u16 {
+    pub fn segment_header_count(&self) -> u16 {
         self.phcnt
     }
 
