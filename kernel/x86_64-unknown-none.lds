@@ -3,6 +3,17 @@ OUTPUT_FORMAT(elf64-x86-64)
 
 SECTIONS
 {
+    . = 0x8000; /* 32 KiB */
+
+    .ap_trampoline : ALIGN(0x40) {
+        __ap_trampoline_start = .;
+
+        *(.ap_trampoline.*)
+        *(.ap_trampoline)
+
+        __ap_trampoline_end = .;
+    }
+
     . = 0x200000; /* 2 MiB */
 
     .text : ALIGN(0x1000) {
@@ -39,14 +50,5 @@ SECTIONS
         *(.bss)
 
         __bss_end = .;
-    }
-
-    .trampoline : ALIGN(0x1000) {
-        __trampoline_start = .;
-
-        *(.trampoline.*)
-        *(.trampoline)
-
-        __trampoline_end = .;
     }
 }

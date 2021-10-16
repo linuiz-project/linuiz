@@ -11,12 +11,13 @@
   "linker-is-gnu": false,
   "pre-link-args": {
     "ld.lld": [
-      "--script=x86_64-unknown-none.lds"
+      "--script=x86_64-unknown-none.lds",
+      "/media/carl/GitHub/gsai/kernel/ap_trampoline.o"
     ]
   },
   "panic-strategy": "abort",
   "disable-redzone": true,
-  "relocation-model": "pie",
+  "relocation-model": "static",
   "executables": true,
   "code-model": "small",
   "os": "none",

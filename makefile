@@ -35,5 +35,6 @@ $(kernel): $(uefi-deps) $(libkernel_deps) $(kernel_deps)
 	cd /media/carl/GitHub/gsai/kernel/;\
 		rustfmt **/*.rs;\
 		rustfmt ../libkernel/**/*.rs;\
-		cargo build --profile $(PROFILE) -Z unstable-options
-		
+		nasm -f elf64 -o ap_trampoline.o ./src/ap_trampoline.asm;\
+		cargo build --profile $(PROFILE) -Z unstable-options;\
+		rm -f ap_trampoline.o;\
