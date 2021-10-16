@@ -1,15 +1,16 @@
 qemu-system-x86_64^
+    -accel whpx^
     -m 4G^
     -serial stdio^
     -machine q35^
     -cpu qemu64^
     -smp 2^
+    -bios ./ovmf/OVMF-pure-efi.fd^
     -drive format=raw,file=fat:rw:./hdd/image/^
-    -drive if=pflash,format=raw,unit=0,file=./ovmf/OVMF_CODE-pure-efi.fd,readonly=on^
-    -drive if=pflash,format=raw,unit=1,file=./ovmf/OVMF_VARS-pure-efi.fd,readonly=on^
-    -drive id=disk,if=none,file=./hdd/rootfs.img^
+    -drive if=none,format=raw,id=disk,file=./hdd/rootfs.img^
     -device ahci,id=ahci^
     -device ide-hd,drive=disk,bus=ahci.0^
-    -drive file=./hdd/nvme.img,if=none,id=nvm^
+    -drive if=none,format=raw,id=nvm,file=./hdd/nvme.img^
     -device nvme,drive=nvm,serial=deadbeef^
     -net none^
+    -monitor stdio^
