@@ -47,7 +47,7 @@ impl InterruptCommandRegister {
             vector,
             DeliveryMode::StartUp,
             DestinationMode::Physical,
-            true,
+            false,
             DestinationShorthand::None,
             apic_id,
         );
