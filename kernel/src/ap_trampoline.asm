@@ -42,7 +42,7 @@ bits 64
 
 longmode:
     ; Clear segment registers
-    mov ax, GDT.data    
+    mov ax, GDT.data
     mov ds, ax
     mov es, ax
     mov fs, ax
@@ -56,21 +56,27 @@ longmode:
 
 GDT:
     .null: equ $ - GDT
-        dq 0           
+        dq 0
     .code: equ $ - GDT
-        dw 0            
-        dw 0xFFFF            
-        db 0            
-        db 1011010b    
-        db 1110111b    
-        db 0              
+        dw 0xFFFF       ; Limit (low)
+        dw 0            ; Base (low)
+        db 0            ; Base (mid)
+        ; Access: Present, CPL0, Non-TSS, Exec, DC 0, Non-Writable
+        db 1011010b
+        ; Limit (high)
+        ; Flags: Granularity 4KiB, 16bit (req by long mode), long-mode code 
+        db 1010111b
+        db 0            ; Base (high)
     .data: equ $ - GDT
-        dw 0            
-        dw 0xFFFF            
-        db 0            
-        db 1010010b    
-        db 1110111b     
-        db 0            
+        dw 0xFFFF       ; Limit (low)
+        dw 0            ; Base (low)
+        db 0            ; Base (mid)
+        ; Access: Present, CPL0, Non-TSS, Non-Exec, DC 0, Non-Writable
+        db 1010010b
+        ; Limit (high)
+        ; Flags: Granularity 4KiB, 16bit (req by long mode), long-mode code 
+        db 1010111b
+        db 0            ; Base (high)
     .tss: equ $ - GDT
         dd 0x00000068
         dd 0x00CF8900
