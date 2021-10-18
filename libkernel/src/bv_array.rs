@@ -115,18 +115,13 @@ impl<'arr, BV: BitValue> BitValueArray<'arr, BV> {
 
     const ELEMENTS_PER_SECTION: usize = Self::SECTION_LEN / BV::BIT_WIDTH;
     pub fn set_eq_next(&self, new_type: BV, eq_type: BV) -> Option<usize> {
-        let new_type_usize = new_type.as_usize();
-
         for (index, section) in self.array.write().iter_mut().enumerate() {
-            let section_deref = *section;
-
             for offset in (0..64).step_by(BV::BIT_WIDTH) {
-                let offset_bits = section_deref & (BV::MASK << offset);
-                if BV::from_usize(offset_bits >> offset) == eq_type {
-                    let section_bits_set = new_type_usize << offset;
-                    let section_bits_nonset = section_deref ^ offset_bits;
+                use bit_field::BitField;
 
-                    *section = section_bits_set | section_bits_nonset;
+                if section.get_bits(offset..(offset + BV::BIT_WIDTH)) == eq_type.as_usize() {
+                    section.set_bits(offset..(offset + BV::BIT_WIDTH), new_type.as_usize());
+                    trace!("set_eq_next {}:{}:0b{:b}", index, offset, section);
                     return Some((index * Self::ELEMENTS_PER_SECTION) + (offset / BV::BIT_WIDTH));
                 }
             }

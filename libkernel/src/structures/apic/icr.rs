@@ -107,5 +107,6 @@ impl<'v> InterruptCommandRegister<'v> {
         while self.is_pending() {
             crate::instructions::hlt();
         }
+        debug!("ICR: WAIT COMPLETE");
     }
 }

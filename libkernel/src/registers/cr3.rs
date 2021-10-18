@@ -1,3 +1,5 @@
+use crate::{addr_ty::Physical, Address};
+
 bitflags::bitflags! {
     pub struct CR3Flags : usize {
         const PAGE_LEVEL_WRITE_THROUGH = 1 << 3;
@@ -12,24 +14,17 @@ impl CR3 {
         asm!("mov cr3, {}", in(reg) frame.base_addr().as_usize() | flags.bits(), options(nostack));
     }
 
-    pub fn read() -> CR3Flags {
+    pub fn read() -> (Address<Physical>, CR3Flags) {
         let value: usize;
 
         unsafe {
             asm!("mov {}, cr3", out(reg) value, options(nostack));
         }
 
-        CR3Flags::from_bits_truncate(value)
-    }
-
-    pub fn read_raw() -> usize {
-        let value: usize;
-
-        unsafe {
-            asm!("mov {}, cr3", out(reg) value, options(nostack));
-        }
-
-        value
+        (
+            Address::<Physical>::new(value & !CR3Flags::all().bits()),
+            CR3Flags::from_bits_truncate(value),
+        )
     }
 
     pub fn refresh() {

@@ -1,5 +1,5 @@
 use crate::{
-    addr_ty::Virtual,
+    addr_ty::{Physical, Virtual},
     memory::{
         paging::{Level4, PageAttributeModifyMode, PageAttributes, PageTable, PageTableEntry},
         Frame, Page,
@@ -43,6 +43,14 @@ impl VirtualAddressor {
     }
 
     /* ACQUIRE STATE */
+
+    pub fn base_addr(&self) -> Address<Physical> {
+        self.pml4_frame.base_addr()
+    }
+
+    pub fn pml4_addr(&self) -> Address<Physical> {
+        self.pml4_frame.base_addr()
+    }
 
     fn pml4_page(&self) -> Page {
         self.mapped_page.forward(self.pml4_frame.index()).unwrap()
