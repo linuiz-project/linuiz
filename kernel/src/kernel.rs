@@ -45,8 +45,8 @@ extern "C" {
     static __ap_trampoline_start: LinkerSymbol;
     static __ap_trampoline_end: LinkerSymbol;
 
-    static __cpu_init_complete: LinkerSymbol;
     static __kernel_pml4: LinkerSymbol;
+    static __cpu_init_complete: LinkerSymbol;
 }
 
 #[cfg(debug_assertions)]
@@ -106,7 +106,14 @@ extern "efiapi" fn kernel_main(
         info!("Initializing kernel default allocator.");
         KERNEL_MALLOC.init(reserve_kernel_stack(memory_map));
         // Move the current PML4 into the global processor reference.
-        *__kernel_pml4.as_mut_ptr() = libkernel::registers::CR3::read_raw();
+        // TODO somehow ensure the PML4 frame is within the first 32KiB for the AP trampoline
+        unsafe {
+            let address_usize = libkernel::registers::CR3::read().0.as_usize();
+            __kernel_pml4
+                .as_mut_ptr::<u32>()
+                .write(address_usize as u32);
+        }
+
         libkernel::memory::malloc::set(&KERNEL_MALLOC);
 
         debug!("Ensuring relevant kernel sections are read-only.");
@@ -155,6 +162,7 @@ fn kernel_main_post_mmap() -> ! {
                     icr.send_sipi(ap_trampoline_page_index, lapic.id());
                     icr.wait_pending();
 
+                    unsafe { *__cpu_init_complete.as_mut_ptr::<u8>() = 1 };
                     loop {}
                 }
             }
@@ -196,6 +204,14 @@ fn kernel_main_post_mmap() -> ! {
 
 #[no_mangle]
 extern "C" fn _ap_startup() -> ! {
+    unsafe { libkernel::instructions::init_segment_registers(0x0) };
+    debug!("Zeroed segment registers.");
+
+    libkernel::structures::gdt::init();
+    info!("Successfully initialized GDT.");
+    libkernel::structures::idt::init();
+    info!("Successfully initialized IDT.");
+
     loop {}
 }
 

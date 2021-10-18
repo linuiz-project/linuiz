@@ -119,6 +119,7 @@ impl BlockAllocator<'_> {
             // Swap the PML4 into CR3
             info!("Writing kernel addressor's PML4 to the CR3 register.");
             addressor_mut.swap_into();
+            info!("{:?}", addressor_mut.pml4_addr());
         }
 
         debug!("Allocating reserved global memory frames.");
@@ -131,20 +132,18 @@ impl BlockAllocator<'_> {
                 }
             });
 
-        // Page-aligned 1MB (ish)
-        const STACK_SIZE: usize = (1000000 / 0x1000) * 0x1000;
-        const STACK_SIZE_LAYOUT: Layout =
-            unsafe { Layout::from_size_align_unchecked(STACK_SIZE, 1) };
-
-        let old_stack_size = stack_frames.len() * 0x1000;
+        // 2MiB
+        const STACK_SIZE: Layout = unsafe { Layout::from_size_align_unchecked(2000000, 1) };
+        let old_stack_size = stack_frames.total_len() * 0x1000;
         debug!(
             "Allocating new stack: {} -> {} bytes",
-            old_stack_size, STACK_SIZE
+            old_stack_size,
+            STACK_SIZE.size()
         );
         let old_stack_base = stack_frames.start().base_addr().as_usize() as *const u8;
         let new_stack_base = self
-            .alloc::<u8>(STACK_SIZE_LAYOUT)
-            .add(STACK_SIZE - old_stack_size);
+            .alloc::<u8>(STACK_SIZE)
+            .add(STACK_SIZE.size() - old_stack_size);
 
         debug!(
             "Copying bootloader-allocated stack ({} pages): {:?} -> {:?}",
