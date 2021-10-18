@@ -58,24 +58,22 @@ GDT:
     .null: equ $ - GDT
         dq 0
     .code: equ $ - GDT
-        dw 0xFFFF       ; Limit (low)
-        dw 0            ; Base (low)
+        dd 0            ; Limit & Base (low)
         db 0            ; Base (mid)
         ; Access: Present, CPL0, Non-TSS, Exec, DC 0, Non-Writable
-        db 1011010b
-        ; Limit (high)
-        ; Flags: Granularity 4KiB, 16bit (req by long mode), long-mode code 
-        db 1010111b
+        db 10011010b
+        ; Limit (high) — bits 0..=3
+        ; Flags: Granularity 4KiB, 16bit (req by long mode), long mode — bits 4..=7
+        db 10100000b
         db 0            ; Base (high)
     .data: equ $ - GDT
-        dw 0xFFFF       ; Limit (low)
-        dw 0            ; Base (low)
+        dd 0            ; Limit & Base (low)
         db 0            ; Base (mid)
-        ; Access: Present, CPL0, Non-TSS, Non-Exec, DC 0, Non-Writable
-        db 1010010b
+        ; Access: Present, CPL0, Non-TSS, Non-Exec, DC 0, Writable
+        db 10010110b
         ; Limit (high)
-        ; Flags: Granularity 4KiB, 16bit (req by long mode), long-mode code 
-        db 1010111b
+        ; Flags: Granularity 4KiB, 16bit (req by long mode), long mode
+        db 10100000b
         db 0            ; Base (high)
     .tss: equ $ - GDT
         dd 0x00000068

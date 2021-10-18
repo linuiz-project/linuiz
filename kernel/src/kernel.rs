@@ -204,9 +204,7 @@ fn kernel_main_post_mmap() -> ! {
 
 #[no_mangle]
 extern "C" fn _ap_startup() -> ! {
-    unsafe { libkernel::instructions::init_segment_registers(0x0) };
-    debug!("Zeroed segment registers.");
-
+    loop {}
     libkernel::structures::gdt::init();
     info!("Successfully initialized GDT.");
     libkernel::structures::idt::init();
