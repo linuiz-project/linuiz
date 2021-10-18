@@ -233,8 +233,13 @@ impl APIC {
         );
     }
 
-    pub fn interrupt_command_register(&self) -> &icr::InterruptCommandRegister {
-        unsafe { self.mmio.borrow(Register::ICRL as usize).unwrap() }
+    pub fn interrupt_command_register(&self) -> icr::InterruptCommandRegister {
+        unsafe {
+            icr::InterruptCommandRegister::new(
+                self.mmio.borrow(Register::ICRL as usize).unwrap(),
+                self.mmio.borrow(Register::ICRH as usize).unwrap(),
+            )
+        }
     }
 
     pub fn error_status(&self) -> ErrorStatusFlags {

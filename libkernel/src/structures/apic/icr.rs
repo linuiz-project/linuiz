@@ -23,14 +23,21 @@ pub enum DestinationShorthand {
 }
 
 #[repr(C)]
-pub struct InterruptCommandRegister {
-    low: VolatileCell<u32, ReadWrite>,
-    high: VolatileCell<u32, ReadWrite>,
+pub struct InterruptCommandRegister<'v> {
+    low: &'v VolatileCell<u32, ReadWrite>,
+    high: &'v VolatileCell<u32, ReadWrite>,
 }
 
-impl crate::memory::volatile::Volatile for InterruptCommandRegister {}
+impl crate::memory::volatile::Volatile for InterruptCommandRegister<'_> {}
 
-impl InterruptCommandRegister {
+impl<'v> InterruptCommandRegister<'v> {
+    pub(super) fn new(
+        low: &'v VolatileCell<u32, ReadWrite>,
+        high: &'v VolatileCell<u32, ReadWrite>,
+    ) -> Self {
+        Self { low, high }
+    }
+
     pub fn send_init(&self, apic_id: u8) {
         self.send(
             0,
@@ -47,7 +54,7 @@ impl InterruptCommandRegister {
             vector,
             DeliveryMode::StartUp,
             DestinationMode::Physical,
-            false,
+            true,
             DestinationShorthand::None,
             apic_id,
         );
@@ -78,6 +85,14 @@ impl InterruptCommandRegister {
         debug!("ICR: WRITE HIGH: 0x{:X}", high);
         self.high.write(high);
         debug!("ICR: WRITE LOW: 0x{:X}", low);
+        unsafe {
+            asm!(
+                "mov r9, r8",
+                "mov r8, 0x101010789",
+                "add r9, r8",
+                "mov r8, r9"
+            )
+        };
         self.low.write(low);
         debug!("ICR: WRITE COMPLETE");
     }

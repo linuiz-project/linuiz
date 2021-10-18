@@ -1,6 +1,6 @@
 uefi-deps = $(shell find ../uefi-rs/ -type f -name '*.rs')
 boot_deps = $(shell find ./efi_boot/src/ -type f -name '*.rs')
-kernel_deps = $(shell find ./kernel/ -type f -name '*.rs')
+kernel_deps = $(shell find ./kernel/ -type f -name '*.rs' -o -name '*.asm')
 libkernel_deps = $(shell find ./libkernel/ -type f -name '*.rs')
 
 bootloader = ./hdd/image/EFI/BOOT/BOOTX64.efi
