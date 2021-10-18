@@ -195,7 +195,7 @@ fn kernel_main_post_mmap() -> ! {
 }
 
 #[no_mangle]
-extern "C" fn ap_startup() -> ! {
+extern "C" fn _ap_startup() -> ! {
     loop {}
 }
 
