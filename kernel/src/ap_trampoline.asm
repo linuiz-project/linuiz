@@ -56,25 +56,20 @@ longmode:
 
 GDT:
     .null: equ $ - GDT
-        dw 0xFFFF       
-        dw 0            
-        dw 0            
-        db 0            
-        db 1            
-        db 0            
+        dq 0           
     .code: equ $ - GDT
         dw 0            
-        dw 0            
-        dw 0            
-        db 10011010b    
-        db 10101111b    
+        dw 0xFFFF            
+        db 0            
+        db 1011010b    
+        db 1110111b    
         db 0              
     .data: equ $ - GDT
         dw 0            
-        dw 0            
-        dw 0            
-        db 10010010b    
+        dw 0xFFFF            
         db 0            
+        db 1010010b    
+        db 1110111b     
         db 0            
     .tss: equ $ - GDT
         dd 0x00000068
