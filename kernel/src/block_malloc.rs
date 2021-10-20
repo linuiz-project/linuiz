@@ -1,4 +1,4 @@
-use core::{alloc::Layout, mem::size_of};
+use core::{alloc::Layout, hash::Hasher, mem::size_of};
 use libkernel::{
     addr_ty::{Physical, Virtual},
     align_up_div,
@@ -56,12 +56,15 @@ impl core::fmt::Debug for BlockPage {
     }
 }
 
+pub struct AllocatorMap<'map> {
+    addressor: VirtualAddressor,
+    pages: &'map mut [BlockPage],
+}
+
 /// Allocator utilizing blocks of memory, in size of 16 bytes per block, to
 ///  easily and efficiently allocate.
 pub struct BlockAllocator<'map> {
-    // todo remove addressor from this struct
-    addressor: RwLock<VirtualAddressor>,
-    map: RwLock<&'map mut [BlockPage]>,
+    map: RwLock<AllocatorMap<'map>>,
 }
 
 impl BlockAllocator<'_> {
@@ -78,17 +81,11 @@ impl BlockAllocator<'_> {
 
         Self {
             // TODO make addressor use a RwLock
-            addressor: RwLock::new(VirtualAddressor::null()),
-            map: RwLock::new(&mut EMPTY),
+            map: RwLock::new(AllocatorMap {
+                addressor: VirtualAddressor::null(),
+                pages: &mut EMPTY,
+            }),
         }
-    }
-
-    pub fn get_addressor(&self) -> spin::RwLockReadGuard<VirtualAddressor> {
-        self.addressor.read()
-    }
-
-    pub unsafe fn get_addressor_mut(&self) -> spin::RwLockWriteGuard<VirtualAddressor> {
-        self.addressor.write()
     }
 
     /* INITIALIZATION */
@@ -96,8 +93,8 @@ impl BlockAllocator<'_> {
     pub unsafe fn init(&self, mut stack_frames: libkernel::memory::FrameIterator) {
         {
             debug!("Initializing allocator's virtual addressor.");
-            let mut addressor_mut = self.get_addressor_mut();
-            *addressor_mut = VirtualAddressor::new(Page::null());
+            let mut map = self.map.write();
+            map.addressor = VirtualAddressor::new(Page::null());
 
             debug!("Identity mapping all reserved global memory frames.");
 
@@ -106,7 +103,7 @@ impl BlockAllocator<'_> {
                 .enumerate()
                 .for_each(|(frame_index, frame_state)| {
                     if let falloc::FrameState::Reserved = frame_state {
-                        addressor_mut.identity_map(&Frame::from_index(frame_index))
+                        map.addressor.identity_map(&Frame::from_index(frame_index))
                     }
                 });
 
@@ -114,12 +111,12 @@ impl BlockAllocator<'_> {
             //  strategy, the memory needs to be identity mapped at the correct offset.
             let phys_mapping_addr = falloc::virtual_map_offset();
             debug!("Mapping physical memory at offset: {:?}", phys_mapping_addr);
-            addressor_mut.modify_mapped_page(Page::from_addr(phys_mapping_addr));
+            map.addressor
+                .modify_mapped_page(Page::from_addr(phys_mapping_addr));
 
             // Swap the PML4 into CR3
             info!("Writing kernel addressor's PML4 to the CR3 register.");
-            addressor_mut.swap_into();
-            info!("{:?}", addressor_mut.pml4_addr());
+            map.addressor.swap_into();
         }
 
         debug!("Allocating reserved global memory frames.");
@@ -166,15 +163,18 @@ impl BlockAllocator<'_> {
         }
 
         debug!("Unmapping bootloader-provided stack frames.");
-        let mut addressor_mut = self.get_addressor_mut();
+        let mut map = self.map.write();
         // We must copy the old stack frames iterator to our new stack; it will become unmapped
         //  as we unmap the old stack (which it exists on).
         let mut fresh_stack_frames = ((&mut stack_frames) as *mut FrameIterator).read_volatile();
         fresh_stack_frames.reset();
 
         for frame in fresh_stack_frames {
-            addressor_mut.unmap(&Page::from_index(frame.index()));
+            map.addressor.unmap(&Page::from_index(frame.index()));
         }
+
+        // Reserve the null page.
+        map.pages[0].set_full();
 
         info!("Finished block allocator initialization.");
     }
@@ -182,18 +182,8 @@ impl BlockAllocator<'_> {
     /* ALLOC & DEALLOC */
 
     pub fn alloc<T>(&self, layout: Layout) -> *mut T {
-        let size_in_blocks = (layout.size() + (Self::BLOCK_SIZE - 1)) / Self::BLOCK_SIZE;
-        let alignment = if (layout.align() & (Self::BLOCK_SIZE - 1)) == 0 {
-            layout.align()
-        } else {
-            trace!(
-                "Unsupported allocator alignment: {}, defaulting to {}",
-                layout.align(),
-                Self::BLOCK_SIZE
-            );
-
-            Self::BLOCK_SIZE
-        };
+        let alignment = libkernel::align_up(layout.size(), Self::BLOCK_SIZE);
+        let size_in_blocks = alignment / Self::BLOCK_SIZE;
 
         trace!(
             "Allocation requested: {}{{by {}}} bytes ({} blocks)",
@@ -202,13 +192,13 @@ impl BlockAllocator<'_> {
             size_in_blocks
         );
 
+        let mut map = self.map.write();
         let (mut block_index, mut current_run);
-        let mut map_write = self.map.write();
         while {
             block_index = 0;
             current_run = 0;
 
-            'outer: for block_page in map_write.iter() {
+            'outer: for block_page in map.pages.iter() {
                 if block_page.is_full() {
                     current_run = 0;
                     block_index += BlockPage::BLOCKS_PER;
@@ -246,35 +236,33 @@ impl BlockAllocator<'_> {
         );
 
         let start_map_index = start_block_index / BlockPage::BLOCKS_PER;
+        let end_map_index = align_up_div(end_block_index, BlockPage::BLOCKS_PER);
+        for map_index in start_map_index..end_map_index {
+            let (had_bits, has_bits) = {
+                let block_page = &mut map.pages[map_index];
 
-        for (map_index, block_page) in map_write
-            .iter_mut()
-            .enumerate()
-            .skip(start_map_index)
-            .take(align_up_div(end_block_index, BlockPage::BLOCKS_PER) - start_map_index)
-        {
-            let had_bits = !block_page.is_empty();
+                let had_bits = !block_page.is_empty();
 
-            let (bit_count, bit_mask) =
-                Self::calculate_bit_fields(map_index, end_block_index, block_index);
-            assert_eq!(
-                *block_page.value() & bit_mask,
-                0,
-                "attempting to allocate blocks that are already allocated"
-            );
+                let (bit_count, bit_mask) =
+                    Self::calculate_bit_fields(map_index, end_block_index, block_index);
+                assert_eq!(
+                    *block_page.value() & bit_mask,
+                    0,
+                    "Attempting to allocate blocks that are already allocated."
+                );
 
-            *block_page.value_mut() |= bit_mask;
-            block_index += bit_count;
+                *block_page.value_mut() |= bit_mask;
+                block_index += bit_count;
 
-            let has_bits = !block_page.is_empty();
+                (had_bits, !block_page.is_empty())
+            };
 
             if !had_bits && has_bits {
                 let page = &mut Page::from_index(map_index);
 
                 unsafe {
-                    self.get_addressor_mut()
-                        .map(page, &falloc::get().autolock().unwrap());
-                    page.clear();
+                    map.addressor.map(page, &falloc::get().autolock().unwrap());
+                    page.mem_clear();
                 }
             }
         }
@@ -293,41 +281,37 @@ impl BlockAllocator<'_> {
         );
 
         let start_map_index = start_block_index / BlockPage::BLOCKS_PER;
-        let end_map_index = align_up_div(end_block_index, BlockPage::BLOCKS_PER) - start_map_index;
-        for (map_index, block_page) in self
-            .map
-            .write()
-            .iter_mut()
-            .enumerate()
-            .skip(start_map_index)
-            .take(end_map_index)
-        {
-            let had_bits = !block_page.is_empty();
+        let end_map_index = align_up_div(end_block_index, BlockPage::BLOCKS_PER);
+        let mut map = self.map.write();
+        for map_index in start_map_index..end_map_index {
+            let (had_bits, has_bits) = {
+                let block_page = &mut map.pages[map_index];
 
-            let (bit_count, bit_mask) =
-                Self::calculate_bit_fields(map_index, end_block_index, block_index);
+                let had_bits = !block_page.is_empty();
 
-            assert_eq!(
-                *block_page.value() & bit_mask,
-                bit_mask,
-                "attempting to deallocate blocks that are already deallocated"
-            );
+                let (bit_count, bit_mask) =
+                    Self::calculate_bit_fields(map_index, end_block_index, block_index);
+                assert_eq!(
+                    *block_page.value() & bit_mask,
+                    bit_mask,
+                    "attempting to deallocate blocks that are already deallocated"
+                );
 
-            *block_page.value_mut() ^= bit_mask;
-            block_index += bit_count;
+                *block_page.value_mut() ^= bit_mask;
+                block_index += bit_count;
 
-            let has_bits = !block_page.is_empty();
+                (had_bits, !block_page.is_empty())
+            };
 
             if had_bits && !has_bits {
-                let mut addressor_mut = unsafe { self.get_addressor_mut() };
                 let page = &Page::from_index(map_index);
-                // todo FIX THIS (uncomment & build for error)
+
                 unsafe {
                     falloc::get()
-                        .free_frame(addressor_mut.translate_page(page).unwrap())
+                        .free_frame(map.addressor.translate_page(page).unwrap())
                         .unwrap()
                 };
-                addressor_mut.unmap(page);
+                map.addressor.unmap(page);
             }
         }
     }
@@ -357,12 +341,12 @@ impl BlockAllocator<'_> {
 
         let size_in_frames = frames.total_len();
         let base_index = core::lazy::OnceCell::new();
-        let mut map_write = self.map.write();
+        let mut map = self.map.write();
 
         'grow: loop {
             let mut current_run = 0;
 
-            for (map_index, block_page) in map_write.iter().enumerate() {
+            for (map_index, block_page) in map.pages.iter().enumerate() {
                 if block_page.is_empty() {
                     current_run += 1;
                 } else {
@@ -386,17 +370,13 @@ impl BlockAllocator<'_> {
             );
 
             let frame_base_index = frames.start().index();
-            let mut addressor_mut = unsafe { self.get_addressor_mut() };
-            for (start_offset, block_page) in map_write
-                .iter_mut()
-                .skip(*start_index)
-                .take(size_in_frames)
-                .enumerate()
-            {
-                block_page.set_full();
-                addressor_mut.map(&Page::from_index(*start_index + start_offset), unsafe {
-                    &Frame::from_index(frame_base_index + start_offset)
-                });
+
+            for map_index in ((*start_index)..(*start_index + size_in_frames)) {
+                map.pages[map_index].set_full();
+                map.addressor
+                    .map(&Page::from_index(*start_index + map_index), unsafe {
+                        &Frame::from_index(frame_base_index + map_index)
+                    });
             }
 
             (start_index * 0x1000) as *mut T
@@ -408,24 +388,26 @@ impl BlockAllocator<'_> {
     pub fn identity_map(&self, frame: &Frame, virtual_map: bool) {
         trace!("Identity mapping requested: {:?}", frame);
 
-        let map = self.map.upgradeable_read();
-        if map.len() <= frame.index() {
-            self.grow(((frame.index() - map.len()) + 1) * BlockPage::BLOCKS_PER);
+        let map_len = self.map.read().pages.len();
+        if map_len <= frame.index() {
+            self.grow(((frame.index() - map_len) + 1) * BlockPage::BLOCKS_PER);
         }
 
-        let block_page = &mut map.upgrade()[frame.index()];
-        block_page.set_empty();
-        assert!(
-            block_page.is_empty(),
-            "attempting to identity map page with previously allocated blocks: {:?} (map? {})\n {:?}",
-            frame,
-            virtual_map,
-            block_page
-        );
-        block_page.set_full();
+        let mut map = self.map.write();
+        {
+            let block_page = &mut map.pages[frame.index()];
+            block_page.set_empty();
+            assert!(
+                block_page.is_empty(),
+                "Attempting to identity map page with previously allocated blocks: {:?} (map? {})",
+                frame,
+                virtual_map,
+            );
+            block_page.set_full();
+        }
 
         if virtual_map {
-            unsafe { self.get_addressor_mut() }.identity_map(frame);
+            map.addressor.identity_map(frame);
         }
     }
 
@@ -434,8 +416,8 @@ impl BlockAllocator<'_> {
 
         trace!("Growing map to faciliate {} blocks.", required_blocks);
         const BLOCKS_PER_MAP_PAGE: usize = 8 /* bits per byte */ * 0x1000;
-        let map_read = self.map.upgradeable_read();
-        let cur_map_len = map_read.len();
+        let mut map = self.map.write();
+        let cur_map_len = map.pages.len();
         let cur_page_offset = (cur_map_len * BlockPage::BLOCKS_PER) / BLOCKS_PER_MAP_PAGE;
         let new_page_offset = (cur_page_offset
             + libkernel::align_up_div(required_blocks, BLOCKS_PER_MAP_PAGE))
@@ -448,22 +430,21 @@ impl BlockAllocator<'_> {
         );
 
         {
-            let mut addressor_mut = unsafe { self.get_addressor_mut() };
             for offset in cur_page_offset..new_page_offset {
                 let map_page = &mut Self::ALLOCATOR_BASE.forward(offset).unwrap();
-                addressor_mut.map(map_page, &falloc::get().autolock().expect("out of memory"));
+                map.addressor
+                    .map(map_page, &falloc::get().autolock().expect("out of memory"));
             }
         }
 
         let new_map_len = new_page_offset * (0x1000 / size_of::<BlockPage>());
-        let mut map_write = map_read.upgrade();
-        *map_write = unsafe {
+        map.pages = unsafe {
             &mut *core::ptr::slice_from_raw_parts_mut(
                 Self::ALLOCATOR_BASE.as_mut_ptr(),
                 new_map_len,
             )
         };
-        map_write[cur_map_len..].fill(BlockPage::empty());
+        map.pages[cur_map_len..].fill(BlockPage::empty());
 
         trace!(
             "Grew map: {} pages, {} block pages, {} blocks.",
@@ -474,7 +455,7 @@ impl BlockAllocator<'_> {
     }
 
     pub unsafe fn physical_memory(&self, addr: Address<Physical>) -> Address<Virtual> {
-        self.get_addressor().mapped_page().base_addr() + addr.as_usize()
+        self.map.read().addressor.mapped_page().base_addr() + addr.as_usize()
     }
 }
 
@@ -506,6 +487,7 @@ impl libkernel::memory::malloc::MemoryAllocator for BlockAllocator<'_> {
     fn page_state(&self, page_index: usize) -> Option<bool> {
         self.map
             .read()
+            .pages
             .get(page_index)
             .map(|block_page| !block_page.is_empty())
     }
@@ -514,7 +496,7 @@ impl libkernel::memory::malloc::MemoryAllocator for BlockAllocator<'_> {
         &self,
         page: &Page,
     ) -> Option<libkernel::memory::paging::PageAttributes> {
-        unsafe { self.get_addressor().get_page_attributes(page) }
+        unsafe { self.map.read().addressor.get_page_attributes(page) }
     }
 
     unsafe fn set_page_attributes(
@@ -523,9 +505,6 @@ impl libkernel::memory::malloc::MemoryAllocator for BlockAllocator<'_> {
         attributes: libkernel::memory::paging::PageAttributes,
         modify_mode: libkernel::memory::paging::PageAttributeModifyMode,
     ) -> Option<libkernel::memory::paging::PageAttributes> {
-        unsafe {
-            self.get_addressor_mut()
-                .set_page_attributes(page, attributes, modify_mode)
-        }
+        self.map.write().addressor.get_page_attributes(page)
     }
 }
