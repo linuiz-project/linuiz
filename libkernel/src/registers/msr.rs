@@ -4,6 +4,9 @@
 pub enum MSR {
     IA32_APIC_BASE = 0x1B,
     IA32_X2APIC_APICID = 2050,
+    IA32_EFER = 0xC0000080,
+    IA32_FS = 0xC0000100,
+    IA32_GS = 0xC0000101,
 }
 
 impl MSR {

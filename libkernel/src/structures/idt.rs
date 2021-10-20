@@ -199,8 +199,10 @@ pub fn init() {
     idt.security_exception
         .set_handler_fn(security_exception_handler);
     // --- triple fault (can't handle)
+}
 
-    unsafe { idt.load_unsafe() };
+pub fn load() {
+    unsafe { IDT.lock().load_unsafe() };
 }
 
 pub fn set_interrupt_handler(index: u8, handler: extern "x86-interrupt" fn(InterruptStackFrame)) {

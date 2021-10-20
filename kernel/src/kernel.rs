@@ -94,6 +94,7 @@ extern "efiapi" fn kernel_main(
     libkernel::structures::gdt::init();
     info!("Successfully initialized GDT.");
     libkernel::structures::idt::init();
+    libkernel::structures::idt::load();
     info!("Successfully initialized IDT.");
 
     // `boot_info` will not be usable after initalizing the global allocator,
@@ -204,11 +205,10 @@ fn kernel_main_post_mmap() -> ! {
 
 #[no_mangle]
 extern "C" fn _ap_startup() -> ! {
-    loop {}
+    libkernel::structures::idt::load();
+    info!("Successfully initialized IDT.");
     libkernel::structures::gdt::init();
     info!("Successfully initialized GDT.");
-    libkernel::structures::idt::init();
-    info!("Successfully initialized IDT.");
 
     loop {}
 }

@@ -1,5 +1,4 @@
 qemu-system-x86_64^
-    -accel whpx^
     -m 4G^
     -serial stdio^
     -machine q35^
@@ -14,4 +13,4 @@ qemu-system-x86_64^
     -device nvme,drive=nvm,serial=deadbeef^
     -net none^
     -no-shutdown^
-    -monitor stdio^
+    -no-reboot^
