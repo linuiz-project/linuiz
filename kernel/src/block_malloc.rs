@@ -203,11 +203,12 @@ impl BlockAllocator<'_> {
         );
 
         let (mut block_index, mut current_run);
+        let mut map_write = self.map.write();
         while {
             block_index = 0;
             current_run = 0;
 
-            'outer: for block_page in self.map.read().iter() {
+            'outer: for block_page in map_write.iter() {
                 if block_page.is_full() {
                     current_run = 0;
                     block_index += BlockPage::BLOCKS_PER;
@@ -246,9 +247,7 @@ impl BlockAllocator<'_> {
 
         let start_map_index = start_block_index / BlockPage::BLOCKS_PER;
 
-        for (map_index, block_page) in self
-            .map
-            .write()
+        for (map_index, block_page) in map_write
             .iter_mut()
             .enumerate()
             .skip(start_map_index)
@@ -358,11 +357,12 @@ impl BlockAllocator<'_> {
 
         let size_in_frames = frames.total_len();
         let base_index = core::lazy::OnceCell::new();
+        let mut map_write = self.map.write();
 
         'grow: loop {
             let mut current_run = 0;
 
-            for (map_index, block_page) in self.map.read().iter().enumerate() {
+            for (map_index, block_page) in map_write.iter().enumerate() {
                 if block_page.is_empty() {
                     current_run += 1;
                 } else {
@@ -387,9 +387,7 @@ impl BlockAllocator<'_> {
 
             let frame_base_index = frames.start().index();
             let mut addressor_mut = unsafe { self.get_addressor_mut() };
-            for (start_offset, block_page) in self
-                .map
-                .write()
+            for (start_offset, block_page) in map_write
                 .iter_mut()
                 .skip(*start_index)
                 .take(size_in_frames)
@@ -410,12 +408,12 @@ impl BlockAllocator<'_> {
     pub fn identity_map(&self, frame: &Frame, virtual_map: bool) {
         trace!("Identity mapping requested: {:?}", frame);
 
-        let map_len = self.map.read().len();
-        if map_len <= frame.index() {
-            self.grow(((frame.index() - map_len) + 1) * BlockPage::BLOCKS_PER);
+        let map = self.map.upgradeable_read();
+        if map.len() <= frame.index() {
+            self.grow(((frame.index() - map.len()) + 1) * BlockPage::BLOCKS_PER);
         }
 
-        let block_page = &mut self.map.write()[frame.index()];
+        let block_page = &mut map.upgrade()[frame.index()];
         block_page.set_empty();
         assert!(
             block_page.is_empty(),
