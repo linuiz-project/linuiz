@@ -1,7 +1,13 @@
 
 common __cpu_init_complete 1:1
 common __kernel_pml4 4:4
-extern __ap_stack_top, _ap_startup 
+extern _ap_startup 
+
+; Reserve stack
+section .bss
+stack_bottom:
+    resb 0x4000
+stack_top:
 
 section .ap_trampoline
 
@@ -30,54 +36,61 @@ realmode:
     or eax, 1 << 31 | 1 << 0
     mov cr0, eax
 
-bits 32
-
-    ; Set GDT, prepare stack, long-jump to long mode
-    mov esp, [__ap_stack_top]
+    ; Set GDT & long-jump to long mode
     lgdt [GDT.pointer]
     jmp GDT.code:longmode
 
 
-bits 64
+; Access bits
+PRESENT        equ 1 << 7
+NOT_SYS        equ 1 << 4
+EXEC           equ 1 << 3
+DC             equ 1 << 2
+RW             equ 1 << 1
+ACCESSED       equ 1 << 0
 
-longmode:
-    ; Clear segment registers
-    mov ax, GDT.data
-    mov ds, ax
-    mov es, ax
-    mov fs, ax
-    mov gs, ax
-    mov ss, ax
-    mov ax, GDT.code
-    mov cs, ax
-
-    call _ap_startup
-
+; Flags bits
+GRAN_4K       equ 1 << 7
+SZ_32         equ 1 << 6
+LONG_MODE     equ 1 << 5
 
 GDT:
     .null: equ $ - GDT
         dq 0
     .code: equ $ - GDT
-        dd 0            ; Limit & Base (low)
-        db 0            ; Base (mid)
-        ; Access: Present, CPL0, Non-TSS, Exec, DC 0, Non-Writable
-        db 10011010b
-        ; Limit (high) — bits 0..=3
-        ; Flags: Granularity 4KiB, 16bit (req by long mode), long mode — bits 4..=7
-        db 10100000b
-        db 0            ; Base (high)
+        dd 0xFFFF                           ; Limit & Base (low)
+        db 0                                ; Base (mid)
+        db PRESENT | NOT_SYS | EXEC | RW    ; Access
+        db GRAN_4K | LONG_MODE | 0xF        ; Flags
+        db 0                                ; Base (high)
     .data: equ $ - GDT
-        dd 0            ; Limit & Base (low)
-        db 0            ; Base (mid)
-        ; Access: Present, CPL0, Non-TSS, Non-Exec, DC 0, Writable
-        db 10010110b
-        ; Limit (high)
-        ; Flags: Granularity 4KiB, 16bit (req by long mode), long mode
-        db 10100000b
-        db 0            ; Base (high)
+        dd 0xFFFF                           ; Limit & Base (low)
+        db 0                                ; Base (mid)
+        db PRESENT | NOT_SYS | RW           ; Access
+        db GRAN_4K | LONG_MODE | 0xF        ; Flags
+        db 0                                ; Base (high)
     .tss: equ $ - GDT
         dd 0x00000068
         dd 0x00CF8900
     .pointer:
         dw $ - GDT - 1
         dq GDT
+
+bits 64
+
+longmode:
+    cli
+
+    ; Update segment registers
+    mov ax, GDT.data
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    mov ss, ax
+
+    ; Configure temporary stack
+    mov rsp, stack_top
+
+    ; Jump to high-level code
+    call _ap_startup
