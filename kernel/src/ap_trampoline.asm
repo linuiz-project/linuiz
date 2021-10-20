@@ -37,8 +37,8 @@ realmode:
     mov cr0, eax
 
     ; Set GDT & long-jump to long mode
-    lgdt [GDT.pointer]
-    jmp GDT.code:longmode
+    lgdt [__gdt.pointer]
+    jmp __gdt.code:longmode
 
 
 ; Access bits
@@ -54,27 +54,29 @@ GRAN_4K       equ 1 << 7
 SZ_32         equ 1 << 6
 LONG_MODE     equ 1 << 5
 
-GDT:
-    .null: equ $ - GDT
+global __gdt:data, __gdt.code, __gdt.data, __gdt.tss, __gdt.pointer
+    
+__gdt:
+    .null: equ $ - __gdt
         dq 0
-    .code: equ $ - GDT
+    .code: equ $ - __gdt
         dd 0xFFFF                           ; Limit & Base (low)
         db 0                                ; Base (mid)
         db PRESENT | NOT_SYS | EXEC | RW    ; Access
         db GRAN_4K | LONG_MODE | 0xF        ; Flags
         db 0                                ; Base (high)
-    .data: equ $ - GDT
+    .data: equ $ - __gdt
         dd 0xFFFF                           ; Limit & Base (low)
         db 0                                ; Base (mid)
         db PRESENT | NOT_SYS | RW           ; Access
         db GRAN_4K | LONG_MODE | 0xF        ; Flags
         db 0                                ; Base (high)
-    .tss: equ $ - GDT
+    .tss: equ $ - __gdt
         dd 0x00000068
         dd 0x00CF8900
     .pointer:
-        dw $ - GDT - 1
-        dq GDT
+        dw $ - __gdt - 1
+        dq __gdt
 
 bits 64
 
@@ -82,7 +84,7 @@ longmode:
     cli
 
     ; Update segment registers
-    mov ax, GDT.data
+    mov ax, __gdt.data
     mov ds, ax
     mov es, ax
     mov fs, ax
