@@ -50,7 +50,7 @@ pub fn init() {
     GDT.0.load();
 
     unsafe {
-        // load the code and tss segments
+        // load the segments
         x86_64::instructions::segmentation::CS::set_reg(GDT.1.code_selector);
         x86_64::instructions::tables::load_tss(GDT.1.tss_selector);
     }

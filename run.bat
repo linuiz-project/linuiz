@@ -14,3 +14,4 @@ qemu-system-x86_64^
     -net none^
     -no-shutdown^
     -no-reboot^
+    -monitor stdio^

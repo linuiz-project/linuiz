@@ -69,8 +69,7 @@ impl MSR {
             "wrmsr",
             in(reg) self as u32,
             in(reg) value as u32,
-            in(reg) (value >> 32) as u32,
-            options(nomem)
+            in(reg) (value >> 32) as u32
         );
     }
 }

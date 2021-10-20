@@ -59,7 +59,7 @@ impl Page {
         (self.index * 0x1000) as *mut T
     }
 
-    pub unsafe fn clear(&mut self) {
+    pub unsafe fn mem_clear(&mut self) {
         core::ptr::write_bytes::<usize>(
             self.as_mut_ptr(),
             0x0,

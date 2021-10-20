@@ -11,23 +11,6 @@ use crate::{
 };
 use core::marker::PhantomData;
 
-lazy_static::lazy_static! {
-    pub static ref LAPIC: APIC =unsafe  {
-        assert!(crate::memory::malloc::try_get().is_some(), "A memory allocator must be present for APIC to load.");
-
-        debug!("Loading local APIC table.");
-        let start_index = APIC::mmio_addr().frame_index();
-        debug!("APIC MMIO mapping at frame: {}", start_index);
-        APIC::new(crate::memory::mmio::unmapped_mmio(
-            crate::memory::falloc::get()
-                .acquire_frames(start_index, 1, crate::memory::falloc::FrameState::Reserved)
-                .unwrap()
-        )
-        .unwrap()
-        .automap() )
-    };
-}
-
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
@@ -98,10 +81,6 @@ pub struct APIC {
 }
 
 impl APIC {
-    pub fn mmio_addr() -> Address<Physical> {
-        Address::<Physical>::new((MSR::IA32_APIC_BASE.read().get_bits(12..35) << 12) as usize)
-    }
-
     pub unsafe fn new(mmio: MMIO<Mapped>) -> Self {
         Self { mmio }
     }

@@ -47,6 +47,15 @@ extern "C" {
 
     static __kernel_pml4: LinkerSymbol;
     static __cpu_init_complete: LinkerSymbol;
+
+    #[link_name = "__gdt.code"]
+    static __gdt_code: LinkerSymbol;
+    #[link_name = "__gdt.data"]
+    static __gdt_data: LinkerSymbol;
+    #[link_name = "__gdt.tss"]
+    static __gdt_tss: LinkerSymbol;
+    #[link_name = "__gdt.pointer"]
+    static __gdt_pointer: LinkerSymbol;
 }
 
 #[cfg(debug_assertions)]
@@ -88,10 +97,23 @@ extern "efiapi" fn kernel_main(
         libkernel::instructions::cpu_features()
     );
 
-    unsafe { libkernel::instructions::init_segment_registers(0x0) };
-    debug!("Zeroed segment registers.");
+    // unsafe { libkernel::instructions::init_segment_registers(0x0) };
+    // debug!("Zeroed segment registers.");
 
-    libkernel::structures::gdt::init();
+    unsafe {
+        asm!("lgdt [{}]", in(reg) __gdt_pointer.as_usize(),  options(readonly, nostack, preserves_flags));
+        // asm!("ltr {0:x}", in(reg) , options(nomem, nostack, preserves_flags));
+        asm!(
+            "mov ds, ax",
+            "mov es, ax",
+            "mov gs, ax",
+            "mov fs, ax",
+            "mov ss, ax",
+            in("ax") __gdt_data.as_usize()
+        );
+    }
+
+    //libkernel::structures::gdt::init();
     info!("Successfully initialized GDT.");
     libkernel::structures::idt::init();
     libkernel::structures::idt::load();
@@ -137,30 +159,31 @@ extern "efiapi" fn kernel_main(
 }
 
 fn kernel_main_post_mmap() -> ! {
-    init_apic();
+    libkernel::cpu::auto_init_lpu();
 
     use libkernel::{
         acpi::rdsp::xsdt::{madt::*, LAZY_XSDT},
-        structures::apic::LAPIC,
+        structures::apic,
     };
-
+    loop {}
     info!("Searching for additional processor cores...");
-    let icr = LAPIC.interrupt_command_register();
+    let lapic = libkernel::cpu::lpu().apic();
+    let icr = lapic.interrupt_command_register();
     if let Ok(madt) = LAZY_XSDT.find_sub_table::<MADT>() {
         for interrupt_device in madt.iter() {
-            if let InterruptDevice::LocalAPIC(lapic) = interrupt_device {
-                if lapic.id() != LAPIC.id() {
-                    info!("Identified additional processor core: {}", lapic.id());
+            if let InterruptDevice::LocalAPIC(lapic_other) = interrupt_device {
+                if lapic.id() != lapic_other.id() {
+                    info!("Identified additional processor core: {}", lapic_other.id());
 
                     let ap_trampoline_page_index =
                         unsafe { __ap_trampoline_start.as_page().index() } as u8;
 
-                    icr.send_init(lapic.id());
+                    icr.send_init(lapic_other.id());
                     icr.wait_pending();
 
-                    icr.send_sipi(ap_trampoline_page_index, lapic.id());
+                    icr.send_sipi(ap_trampoline_page_index, lapic_other.id());
                     icr.wait_pending();
-                    icr.send_sipi(ap_trampoline_page_index, lapic.id());
+                    icr.send_sipi(ap_trampoline_page_index, lapic_other.id());
                     icr.wait_pending();
 
                     unsafe { *__cpu_init_complete.as_mut_ptr::<u8>() = 1 };
@@ -322,7 +345,7 @@ fn init_system_config_table(config_table: &[SystemConfigTableEntry]) {
 fn init_apic() {
     use libkernel::structures::{apic, idt};
 
-    let apic = &apic::LAPIC;
+    let apic = &libkernel::cpu::lpu().apic();
 
     unsafe {
         debug!("Resetting and enabling local APIC (it may have already been enabled).");
@@ -388,7 +411,7 @@ fn init_apic() {
 }
 
 extern "x86-interrupt" fn apic_error_handler(_: libkernel::structures::idt::InterruptStackFrame) {
-    let apic = &libkernel::structures::apic::LAPIC;
+    let apic = &libkernel::cpu::lpu().apic();
 
     error!("APIC ERROR INTERRUPT");
     error!("--------------------");

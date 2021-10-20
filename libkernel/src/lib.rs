@@ -37,6 +37,7 @@ pub mod registers;
 pub mod structures;
 pub use bv_array::*;
 pub mod bit_array;
+pub mod cpu;
 
 pub use addr::*;
 pub use boot_info::*;
