@@ -14,4 +14,5 @@ qemu-system-x86_64^
     -net none^
     -no-shutdown^
     -no-reboot^
-    -monitor stdio^
+    -D C:/Users/semiv/OneDrive/Desktop/qemu_debug.log^
+    -d int^

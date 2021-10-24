@@ -1,3 +1,4 @@
+#[inline]
 pub fn cpuid(leaf: u32, subleaf: u32) -> (u32, u32, u32, u32) {
     let (eax, ebx, ecx, edx);
 
@@ -77,6 +78,7 @@ bitflags::bitflags! {
     }
 }
 
+#[inline]
 pub fn cpu_features() -> CPUFeatures {
     let values = cpuid(0x1, 0x0);
     CPUFeatures::from_bits_truncate(((values.3 as u64) << 32) | (values.2 as u64))

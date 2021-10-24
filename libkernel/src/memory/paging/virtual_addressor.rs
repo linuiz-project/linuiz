@@ -185,6 +185,7 @@ impl VirtualAddressor {
     }
 
     pub unsafe fn swap_into(&self) {
+        trace!("Swapping {:?} into CR3.", self.pml4_frame.base_addr());
         crate::registers::CR3::write(&self.pml4_frame, crate::registers::CR3Flags::empty());
     }
 

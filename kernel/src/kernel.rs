@@ -28,6 +28,7 @@ use libkernel::{
     memory::{falloc, UEFIMemoryDescriptor},
     Address, BootInfo, LinkerSymbol,
 };
+use x86_64::instructions::segmentation::Segment;
 
 extern "C" {
     static __text_start: LinkerSymbol;
@@ -97,27 +98,56 @@ extern "efiapi" fn kernel_main(
         libkernel::instructions::cpu_features()
     );
 
-    // unsafe { libkernel::instructions::init_segment_registers(0x0) };
-    // debug!("Zeroed segment registers.");
-
     unsafe {
-        asm!("lgdt [{}]", in(reg) __gdt_pointer.as_usize(),  options(readonly, nostack, preserves_flags));
-        // asm!("ltr {0:x}", in(reg) , options(nomem, nostack, preserves_flags));
-        asm!(
-            "mov ds, ax",
-            "mov es, ax",
-            "mov gs, ax",
-            "mov fs, ax",
-            "mov ss, ax",
-            in("ax") __gdt_data.as_usize()
+        debug!(
+            "Configuring GDT:\tCode: 0x{:X}\tData: 0x{:X}\tTSS: 0x{:X}",
+            gdt::code(),
+            gdt::data(),
+            gdt::tss()
         );
+
+        use libkernel::structures::gdt;
+
+        info!("LOAD:");
+        for a in &*core::slice::from_raw_parts(gdt::gdt() as *const _ as *const u64, 8) {
+            crate::println!("0b{:b}", a);
+        }
+
+        gdt::gdt().load();
+
+        info!("STORE:");
+        let sgdt: [u64; 8] = [0u64; 8];
+        asm!("sgdt [{}]", in(reg) &sgdt);
+        for descriptor in sgdt {
+            crate::println!("0b{:b}", descriptor);
+        }
+        libkernel::instructions::init_segment_registers(gdt::data());
+        info!(".");
+        x86_64::instructions::segmentation::CS::set_reg(core::mem::transmute(gdt::code()));
+        // asm!(
+        //     "push {sel}",
+        //     "lea {tmp}, [1f + rip]",
+        //     "push {tmp}",
+        //     "retfq",
+        //     "1:",
+        //     sel = in(reg) gdt::code(),
+        //     tmp = lateout(reg) _,
+        //     options(preserves_flags)
+        // );
+        info!(".");
+        libkernel::instructions::segmentation::ltr(gdt::tss());
+        info!(".");
+
+        info!("Successfully loaded GDT & configured segment registers.");
     }
 
-    //libkernel::structures::gdt::init();
-    info!("Successfully initialized GDT.");
     libkernel::structures::idt::init();
     libkernel::structures::idt::load();
     info!("Successfully initialized IDT.");
+
+    unsafe {
+        (0x8000000000 as *mut u8).write_volatile(1);
+    }
 
     // `boot_info` will not be usable after initalizing the global allocator,
     //   due to the stack being moved in virtual memory.
@@ -130,12 +160,9 @@ extern "efiapi" fn kernel_main(
         KERNEL_MALLOC.init(reserve_kernel_stack(memory_map));
         // Move the current PML4 into the global processor reference.
         // TODO somehow ensure the PML4 frame is within the first 32KiB for the AP trampoline
-        unsafe {
-            let address_usize = libkernel::registers::CR3::read().0.as_usize();
-            __kernel_pml4
-                .as_mut_ptr::<u32>()
-                .write(address_usize as u32);
-        }
+        __kernel_pml4
+            .as_mut_ptr::<u32>()
+            .write(libkernel::registers::CR3::read().0.as_usize() as u32);
 
         libkernel::memory::malloc::set(&KERNEL_MALLOC);
 
@@ -230,7 +257,7 @@ fn kernel_main_post_mmap() -> ! {
 extern "C" fn _ap_startup() -> ! {
     libkernel::structures::idt::load();
     info!("Successfully initialized IDT.");
-    libkernel::structures::gdt::init();
+    //libkernel::structures::gdt::init();
     info!("Successfully initialized GDT.");
 
     loop {}

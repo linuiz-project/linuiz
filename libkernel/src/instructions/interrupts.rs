@@ -1,4 +1,5 @@
 /// Initiates a breakpoint exception.
+#[inline]
 pub fn breakpoint() {
     unsafe {
         asm!("int 3");
@@ -6,6 +7,7 @@ pub fn breakpoint() {
 }
 
 /// Enables interrupts via `sti`.
+#[inline]
 pub fn enable() {
     unsafe {
         asm!("sti", options(nostack, nomem));
@@ -13,6 +15,7 @@ pub fn enable() {
 }
 
 /// Disables interrupts via `cli`.
+#[inline]
 pub fn disable() {
     unsafe {
         asm!("cli", options(nostack, nomem));

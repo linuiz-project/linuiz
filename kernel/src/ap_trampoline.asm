@@ -51,6 +51,8 @@ ACCESSED       equ 1 << 0
 
 ; Flags bits
 GRAN_4K       equ 1 << 7
+; This flag should not be present with LONG_MODE flag.
+; They are mutually excuslive.
 SZ_32         equ 1 << 6
 LONG_MODE     equ 1 << 5
 
@@ -69,7 +71,7 @@ __gdt:
         dd 0xFFFF                           ; Limit & Base (low)
         db 0                                ; Base (mid)
         db PRESENT | NOT_SYS | RW           ; Access
-        db GRAN_4K | LONG_MODE | 0xF        ; Flags
+        db GRAN_4K | SZ_32 | 0xF            ; Flags
         db 0                                ; Base (high)
     .tss: equ $ - __gdt
         dd 0x00000068

@@ -1,13 +1,12 @@
 pub mod icr;
 
 use crate::{
-    addr_ty::Physical,
     memory::{
         mmio::{Mapped, MMIO},
         volatile::VolatileCell,
     },
     registers::MSR,
-    Address, ReadWrite,
+    ReadWrite,
 };
 use core::marker::PhantomData;
 

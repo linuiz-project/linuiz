@@ -19,10 +19,15 @@ pub fn auto_init_lpu() {
 
     unsafe {
         // Allocate space for LPU struct.
-        let ptr = crate::alloc!(core::mem::size_of::<CPU>()) as u64;
-        MSR::IA32_FS.write(ptr);
+        let ptr = crate::alloc!(core::mem::size_of::<CPU>(), 0x1000);
+        core::ptr::write_bytes(ptr, 0, 0x1000);
+        debug!(
+            "Allocating region for local CPU structure: {:?}:{}",
+            ptr, 0x1000
+        );
+        MSR::IA32_FS.write(ptr as u64);
 
-        let lpu = unsafe { &mut *(MSR::IA32_FS.read() as *mut CPU) };
+        let lpu = &mut *(MSR::IA32_FS.read() as *mut CPU);
         // Configure LPU's local APIC.
         lpu.lapic = {
             use crate::memory::falloc;

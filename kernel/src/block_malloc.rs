@@ -5,7 +5,7 @@ use libkernel::{
     memory::{falloc, paging::VirtualAddressor, Frame, FrameIterator, Page},
     Address, SYSTEM_SLICE_SIZE,
 };
-use spin::RwLock;
+use spin::{RwLock, RwLockWriteGuard};
 
 /// Represents one page worth of memory blocks (i.e. 4096 bytes in blocks).
 #[repr(transparent)]
@@ -223,7 +223,7 @@ impl BlockAllocator<'_> {
 
             current_run < size_in_blocks
         } {
-            self.grow(size_in_blocks);
+            self.grow(size_in_blocks, &mut map);
         }
 
         let start_block_index = block_index - current_run;
@@ -359,7 +359,7 @@ impl BlockAllocator<'_> {
                 }
             }
 
-            self.grow(size_in_frames * BlockPage::BLOCKS_PER);
+            self.grow(size_in_frames * BlockPage::BLOCKS_PER, &mut map);
         }
 
         if let Some(start_index) = base_index.get() {
@@ -388,12 +388,14 @@ impl BlockAllocator<'_> {
     pub fn identity_map(&self, frame: &Frame, virtual_map: bool) {
         trace!("Identity mapping requested: {:?}", frame);
 
-        let map_len = self.map.read().pages.len();
-        if map_len <= frame.index() {
-            self.grow(((frame.index() - map_len) + 1) * BlockPage::BLOCKS_PER);
+        let mut map = self.map.write();
+        if map.pages.len() <= frame.index() {
+            self.grow(
+                ((frame.index() - map.pages.len()) + 1) * BlockPage::BLOCKS_PER,
+                &mut map,
+            );
         }
 
-        let mut map = self.map.write();
         {
             let block_page = &mut map.pages[frame.index()];
             block_page.set_empty();
@@ -411,40 +413,39 @@ impl BlockAllocator<'_> {
         }
     }
 
-    pub fn grow(&self, required_blocks: usize) {
+    pub fn grow(&self, required_blocks: usize, map_write: &mut RwLockWriteGuard<AllocatorMap>) {
         assert!(required_blocks > 0, "calls to grow must be nonzero");
 
-        trace!("Growing map to faciliate {} blocks.", required_blocks);
+        debug!("Growing map to faciliate {} blocks.", required_blocks);
         const BLOCKS_PER_MAP_PAGE: usize = 8 /* bits per byte */ * 0x1000;
-        let mut map = self.map.write();
-        let cur_map_len = map.pages.len();
+        let cur_map_len = map_write.pages.len();
         let cur_page_offset = (cur_map_len * BlockPage::BLOCKS_PER) / BLOCKS_PER_MAP_PAGE;
         let new_page_offset = (cur_page_offset
             + libkernel::align_up_div(required_blocks, BLOCKS_PER_MAP_PAGE))
         .next_power_of_two();
 
-        trace!(
+        debug!(
             "Growing map: {}..{} pages",
-            cur_page_offset,
-            new_page_offset
+            cur_page_offset, new_page_offset
         );
 
         {
             for offset in cur_page_offset..new_page_offset {
                 let map_page = &mut Self::ALLOCATOR_BASE.forward(offset).unwrap();
-                map.addressor
+                map_write
+                    .addressor
                     .map(map_page, &falloc::get().autolock().expect("out of memory"));
             }
         }
 
         let new_map_len = new_page_offset * (0x1000 / size_of::<BlockPage>());
-        map.pages = unsafe {
+        map_write.pages = unsafe {
             &mut *core::ptr::slice_from_raw_parts_mut(
                 Self::ALLOCATOR_BASE.as_mut_ptr(),
                 new_map_len,
             )
         };
-        map.pages[cur_map_len..].fill(BlockPage::empty());
+        map_write.pages[cur_map_len..].fill(BlockPage::empty());
 
         trace!(
             "Grew map: {} pages, {} block pages, {} blocks.",
@@ -505,6 +506,9 @@ impl libkernel::memory::malloc::MemoryAllocator for BlockAllocator<'_> {
         attributes: libkernel::memory::paging::PageAttributes,
         modify_mode: libkernel::memory::paging::PageAttributeModifyMode,
     ) -> Option<libkernel::memory::paging::PageAttributes> {
-        self.map.write().addressor.get_page_attributes(page)
+        self.map
+            .write()
+            .addressor
+            .set_page_attributes(page, attributes, modify_mode)
     }
 }
