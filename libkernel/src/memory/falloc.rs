@@ -180,14 +180,23 @@ impl<'arr> FrameAllocator<'arr> {
         index: usize,
         acq_state: FrameState,
     ) -> Result<Frame, FrameAllocatorError> {
-        let is_index_out_of_bounds = index >= self.memory_map.len();
         match acq_state {
+            // Track out-of-bounds Reserved frames.
+            state if index >= self.memory_map.len() => {
+                if state == FrameState::Reserved {
+                    let mut non_usable_oob = self.non_usable_oob.borrow_mut();
+
+                    if non_usable_oob.insert(index) {
+                        Ok(Frame::from_index(index))
+                    } else {
+                        Err(FrameAllocatorError::OutOfBoundsExists(index))
+                    }
+                } else {
+                    Err(FrameAllocatorError::OutOfBoundsLock)
+                }
+            }
             // Illegal to free with acquisition.
             FrameState::Free => Err(FrameAllocatorError::FreeWithAcquire),
-            // Cannot acquire as locked an out-of-bounds frame.
-            FrameState::Locked if is_index_out_of_bounds => {
-                Err(FrameAllocatorError::OutOfBoundsLock)
-            }
             // Acquire frame as locked if it is already free.
             FrameState::Locked
                 if self
@@ -206,16 +215,6 @@ impl<'arr> FrameAllocator<'arr> {
                 FrameState::Free,
                 FrameState::Locked,
             )),
-            // Track out-of-bounds Reserved frame.
-            FrameState::Reserved if is_index_out_of_bounds => {
-                let mut non_usable_oob = self.non_usable_oob.borrow_mut();
-
-                if non_usable_oob.insert(index) {
-                    Ok(Frame::from_index(index))
-                } else {
-                    Err(FrameAllocatorError::OutOfBoundsExists(index))
-                }
-            }
             // Acquire specific frame as non-usable (this will NEVER fail).
             FrameState::Reserved => {
                 let old_state = self.memory_map.insert(index, FrameState::Reserved);
