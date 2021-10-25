@@ -1,7 +1,7 @@
 use crate::{
     addr_ty::{Physical, Virtual},
     memory::{
-        paging::{Level4, PageAttributeModifyMode, PageAttributes, PageTable, PageTableEntry},
+        paging::{AttributeModify, Level4, PageAttributes, PageTable, PageTableEntry},
         Frame, Page,
     },
     Address,
@@ -125,7 +125,7 @@ impl VirtualAddressor {
 
         self.get_page_entry_mut(page)
             .unwrap()
-            .set_attributes(PageAttributes::PRESENT, PageAttributeModifyMode::Remove);
+            .set_attributes(PageAttributes::PRESENT, AttributeModify::Remove);
         crate::instructions::tlb::invalidate(page);
 
         assert!(!self.is_mapped(page.base_addr()), "failed to unmap page",);
@@ -139,8 +139,9 @@ impl VirtualAddressor {
 
     pub fn is_mapped(&self, virt_addr: Address<Virtual>) -> bool {
         self.get_page_entry(&Page::containing_addr(virt_addr))
-            .and_then(|entry| entry.get_frame())
-            .is_some()
+            .map_or(false, |entry| {
+                entry.get_attributes().contains(PageAttributes::PRESENT)
+            })
     }
 
     pub fn is_mapped_to(&self, page: &Page, frame: &Frame) -> bool {
@@ -178,10 +179,10 @@ impl VirtualAddressor {
         &mut self,
         page: &Page,
         attributes: PageAttributes,
-        modify_mode: PageAttributeModifyMode,
-    ) -> Option<PageAttributes> {
+        modify_mode: AttributeModify,
+    ) {
         self.get_page_entry_mut(page)
-            .map(|page_entry| page_entry.set_attributes(attributes, modify_mode))
+            .map(|page_entry| page_entry.set_attributes(attributes, modify_mode));
     }
 
     pub unsafe fn swap_into(&self) {

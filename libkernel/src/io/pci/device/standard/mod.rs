@@ -66,15 +66,13 @@ impl PCIeDevice<Standard> {
                     debug!("\tRegister is prefetchable, so enabling WRITE_THROUGH bit on page.");
                     // Optimize page attributes to enable write-through if it wasn't previously enabled.
                     for page in register_mmio.pages() {
-                        use crate::memory::paging::{PageAttributeModifyMode, PageAttributes};
+                        use crate::memory::paging::{AttributeModify, PageAttributes};
 
-                        crate::memory::malloc::get()
-                            .set_page_attributes(
-                                &page,
-                                PageAttributes::WRITE_THROUGH | PageAttributes::UNCACHEABLE,
-                                PageAttributeModifyMode::Insert,
-                            )
-                            .unwrap();
+                        crate::memory::malloc::get().set_page_attributes(
+                            &page,
+                            PageAttributes::WRITE_THROUGH | PageAttributes::UNCACHEABLE,
+                            AttributeModify::Insert,
+                        );
                     }
                 }
 

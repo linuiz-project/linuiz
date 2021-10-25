@@ -16,8 +16,8 @@ bitflags::bitflags! {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum PageAttributeModifyMode {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttributeModify {
     Set,
     Insert,
     Remove,
@@ -50,25 +50,17 @@ impl PageTableEntry {
         PageAttributes::from_bits_truncate(self.0)
     }
 
-    pub fn set_attributes(
-        &mut self,
-        attributes: PageAttributes,
-        modify_mode: PageAttributeModifyMode,
-    ) -> PageAttributes {
-        // Reserve variable to hold new attributes.
-        let mut new_attributes = PageAttributes::from_bits_truncate(self.0);
+    pub fn set_attributes(&mut self, new_attributes: PageAttributes, modify_mode: AttributeModify) {
+        let mut attributes = PageAttributes::from_bits_truncate(self.0);
 
-        // Modify new attribute based on modification mode.
         match modify_mode {
-            PageAttributeModifyMode::Set => new_attributes = attributes,
-            PageAttributeModifyMode::Insert => new_attributes.insert(attributes),
-            PageAttributeModifyMode::Remove => new_attributes.remove(attributes),
-            PageAttributeModifyMode::Toggle => new_attributes.toggle(attributes),
+            AttributeModify::Set => attributes = new_attributes,
+            AttributeModify::Insert => attributes.insert(new_attributes),
+            AttributeModify::Remove => attributes.remove(new_attributes),
+            AttributeModify::Toggle => attributes.toggle(new_attributes),
         }
 
-        // Set attributes to new value, and return them.
-        self.0 = (self.0 & !PageAttributes::all().bits()) | new_attributes.bits();
-        new_attributes
+        self.0 = (self.0 & !PageAttributes::all().bits()) | attributes.bits();
     }
 
     pub unsafe fn set_unused(&mut self) {

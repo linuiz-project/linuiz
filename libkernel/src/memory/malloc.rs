@@ -6,7 +6,7 @@ use crate::{
 };
 use core::alloc::Layout;
 
-use super::paging::PageAttributeModifyMode;
+use super::paging::AttributeModify;
 
 pub trait MemoryAllocator {
     fn minimum_alignment(&self) -> usize;
@@ -38,8 +38,8 @@ pub trait MemoryAllocator {
         &self,
         page: &Page,
         attributes: PageAttributes,
-        modify_mode: PageAttributeModifyMode,
-    ) -> Option<PageAttributes>;
+        modify_mode: AttributeModify,
+    );
 }
 
 static DEFAULT_MALLOCATOR: SyncRefCell<&'static dyn MemoryAllocator> = SyncRefCell::empty();
