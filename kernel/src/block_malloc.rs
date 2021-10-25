@@ -339,7 +339,6 @@ impl BlockAllocator<'_> {
     pub fn alloc_to<T>(&self, frames: &FrameIterator) -> *mut T {
         trace!("Allocation requested to: {:?}", frames);
 
-        let size_in_frames = frames.total_len();
         let base_index = core::lazy::OnceCell::new();
         let mut map = self.map.write();
 
@@ -353,29 +352,28 @@ impl BlockAllocator<'_> {
                     current_run = 0;
                 }
 
-                if current_run == size_in_frames {
+                if current_run == frames.total_len() {
                     base_index.set((map_index + 1) - current_run).unwrap();
                     break 'grow;
                 }
             }
 
-            self.grow(size_in_frames * BlockPage::BLOCKS_PER, &mut map);
+            self.grow(frames.total_len() * BlockPage::BLOCKS_PER, &mut map);
         }
 
-        if let Some(start_index) = base_index.get() {
+        if let Some(start_index_borrow) = base_index.get() {
+            let start_index = *start_index_borrow;
             trace!(
                 "Allocation fulfilling: pages {}..{}",
                 start_index,
-                start_index + size_in_frames
+                start_index + frames.total_len()
             );
 
-            let frame_base_index = frames.start().index();
-
-            for map_index in ((*start_index)..(*start_index + size_in_frames)) {
+            for map_index in 0..frames.total_len() {
                 map.pages[map_index].set_full();
                 map.addressor
-                    .map(&Page::from_index(*start_index + map_index), unsafe {
-                        &Frame::from_index(frame_base_index + map_index)
+                    .map(&Page::from_index(start_index + map_index), unsafe {
+                        &Frame::from_index(frames.start().index() + map_index)
                     });
             }
 
@@ -504,8 +502,8 @@ impl libkernel::memory::malloc::MemoryAllocator for BlockAllocator<'_> {
         &self,
         page: &Page,
         attributes: libkernel::memory::paging::PageAttributes,
-        modify_mode: libkernel::memory::paging::PageAttributeModifyMode,
-    ) -> Option<libkernel::memory::paging::PageAttributes> {
+        modify_mode: libkernel::memory::paging::AttributeModify,
+    ) {
         self.map
             .write()
             .addressor
