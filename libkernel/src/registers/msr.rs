@@ -5,34 +5,34 @@ pub enum MSR {
     IA32_APIC_BASE = 0x1B,
     IA32_X2APIC_APICID = 2050,
     IA32_EFER = 0xC0000080,
-    IA32_FS = 0xC0000100,
-    IA32_GS = 0xC0000101,
+    IA32_FS_BASE = 0xC0000100,
+    IA32_GS_BASE = 0xC0000101,
 }
 
 impl MSR {
+    #[inline]
     pub fn read(self) -> u64 {
         assert!(
             crate::instructions::cpu_features().contains(crate::instructions::CPUFeatures::MSR),
             "CPU does not support use of model-specific registers"
         );
 
-        let low: u64;
-        let high: u64;
+        let value: u64;
 
         unsafe {
             asm!(
                 "mov ecx, {:e}",
                 "rdmsr",
-                "mov {}, rax",
-                "mov {}, rdx",
+                "mov r8, rdx",  // Move high value in
+                "shl r8, 32",   // Shift high value to high bits
+                "or r8, rax",   // Copy low value in
                 in(reg) self as u32,
-                out(reg) low,
-                out(reg) high,
-                options(nomem)
+                out("r8") value,
+                options(nostack, nomem)
             );
         }
 
-        (high << 32) | low
+        value
     }
 
     pub unsafe fn write_bit(self, bit: usize, set: bool) {
@@ -64,12 +64,13 @@ impl MSR {
 
         asm!(
             "mov ecx, {:e}",
-            "mov eax, {:e}",
-            "mov edx, {:e}",
+            "mov rax, r8",  // Move low value in
+            "mov rdx, r8",  // Move high value in
+            "shr rdx, 32",  // Shift high value to edx bits
             "wrmsr",
             in(reg) self as u32,
-            in(reg) value as u32,
-            in(reg) (value >> 32) as u32
+            in("r8") value,
+            options(nostack, nomem)
         );
     }
 }
