@@ -49,14 +49,10 @@ extern "C" {
     static __kernel_pml4: LinkerSymbol;
     static __cpu_init_complete: LinkerSymbol;
 
-    #[link_name = "__gdt.code"]
-    static __gdt_code: LinkerSymbol;
-    #[link_name = "__gdt.data"]
-    static __gdt_data: LinkerSymbol;
-    #[link_name = "__gdt.tss"]
-    static __gdt_tss: LinkerSymbol;
-    #[link_name = "__gdt.pointer"]
     static __gdt_pointer: LinkerSymbol;
+    static __gdt_code: LinkerSymbol;
+    static __gdt_data: LinkerSymbol;
+    static __gdt_tss: LinkerSymbol;
 }
 
 #[cfg(debug_assertions)]
@@ -108,46 +104,22 @@ extern "efiapi" fn kernel_main(
 
         use libkernel::structures::gdt;
 
-        info!("LOAD:");
-        for a in &*core::slice::from_raw_parts(gdt::gdt() as *const _ as *const u64, 8) {
-            crate::println!("0b{:b}", a);
-        }
-
-        gdt::gdt().load();
-
-        info!("STORE:");
-        let sgdt: [u64; 8] = [0u64; 8];
-        asm!("sgdt [{}]", in(reg) &sgdt);
-        for descriptor in sgdt {
-            crate::println!("0b{:b}", descriptor);
-        }
-        libkernel::instructions::init_segment_registers(gdt::data());
-        info!(".");
-        x86_64::instructions::segmentation::CS::set_reg(core::mem::transmute(gdt::code()));
-        // asm!(
-        //     "push {sel}",
-        //     "lea {tmp}, [1f + rip]",
-        //     "push {tmp}",
-        //     "retfq",
-        //     "1:",
-        //     sel = in(reg) gdt::code(),
-        //     tmp = lateout(reg) _,
-        //     options(preserves_flags)
-        // );
-        info!(".");
-        libkernel::instructions::segmentation::ltr(gdt::tss());
-        info!(".");
-
+        gdt::init();
         info!("Successfully loaded GDT & configured segment registers.");
+        debug!("Configuring global GDT labels.");
+        unsafe {
+            __gdt_pointer
+                .as_mut_ptr::<gdt::Pointer>()
+                .write(gdt::pointer());
+            __gdt_code.as_mut_ptr::<u16>().write(gdt::code());
+            __gdt_data.as_mut_ptr::<u16>().write(gdt::data());
+            __gdt_tss.as_mut_ptr::<u16>().write(gdt::tss());
+        }
     }
 
     libkernel::structures::idt::init();
     libkernel::structures::idt::load();
     info!("Successfully initialized IDT.");
-
-    unsafe {
-        (0x8000000000 as *mut u8).write_volatile(1);
-    }
 
     // `boot_info` will not be usable after initalizing the global allocator,
     //   due to the stack being moved in virtual memory.
@@ -255,10 +227,13 @@ fn kernel_main_post_mmap() -> ! {
 
 #[no_mangle]
 extern "C" fn _ap_startup() -> ! {
+    info!("APPLICATION PROCESSOR SUCCESSFULLY STARTED.");
+
+    libkernel::structures::gdt::init();
+    info!("Successfully initialized GDT.");
+
     libkernel::structures::idt::load();
     info!("Successfully initialized IDT.");
-    //libkernel::structures::gdt::init();
-    info!("Successfully initialized GDT.");
 
     loop {}
 }

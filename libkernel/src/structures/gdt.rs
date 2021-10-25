@@ -89,7 +89,7 @@ impl Entry {
     }
 }
 
-#[repr(C)]
+#[repr(C, packed)]
 pub struct Pointer {
     limit: u16,
     base: Address<Virtual>,
@@ -137,14 +137,7 @@ impl GlobalDescriptorTable {
 
     #[inline]
     pub fn load(&self) {
-        let pointer = self.pointer();
-        info!("LOAD:");
-        unsafe {
-            for descriptor in &*core::slice::from_raw_parts(pointer.base.as_ptr::<u64>(), 8) {
-                info!("0b{:b}", descriptor);
-            }
-        }
-        unsafe { crate::instructions::segmentation::lgdt(&pointer) }
+        unsafe { crate::instructions::segmentation::lgdt(&self.pointer()) }
     }
 
     fn pointer(&self) -> Pointer {
@@ -155,8 +148,18 @@ impl GlobalDescriptorTable {
     }
 }
 
-pub fn gdt() -> &'static GlobalDescriptorTable {
-    &GDT.0
+pub fn init() {
+    load();
+
+    unsafe {
+        crate::instructions::init_segment_registers(data());
+        x86_64::instructions::segmentation::CS::set_reg(core::mem::transmute(code()));
+        crate::instructions::segmentation::ltr(tss());
+    }
+}
+
+pub fn load() {
+    GDT.0.load()
 }
 
 pub fn code() -> u16 {
