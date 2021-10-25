@@ -144,13 +144,11 @@ extern "efiapi" fn kernel_main(
             (__text_start.as_page()..__text_end.as_page())
                 .chain(__rodata_start.as_page()..__rodata_end.as_page())
         } {
-            malloc
-                .set_page_attributes(
-                    &page,
-                    libkernel::memory::paging::PageAttributes::WRITABLE,
-                    libkernel::memory::paging::PageAttributeModifyMode::Remove,
-                )
-                .expect("Kernel code page is unmapped.");
+            malloc.set_page_attributes(
+                &page,
+                libkernel::memory::paging::PageAttributes::WRITABLE,
+                libkernel::memory::paging::AttributeModify::Remove,
+            );
         }
     }
 
