@@ -30,6 +30,18 @@ impl VirtualAddressor {
             .autolock()
             .expect("failed to lock frame for PML4 of VirtualAddressor");
 
+        debug!(
+            "Virtual addressor created:\n\tframe {:?}\tmapped {:?}",
+            pml4_frame, mapped_page
+        );
+
+        // Clear PML4 frame.
+        core::ptr::write_bytes(
+            (mapped_page.base_addr() + pml4_frame.base_addr().as_usize()).as_mut_ptr::<u8>(),
+            0,
+            0x1000,
+        );
+
         Self {
             // we don't know where physical memory is mapped at this point,
             // so rely on what the caller specifies for us
@@ -192,6 +204,82 @@ impl VirtualAddressor {
 
     /* MISC */
 
+    fn validate_entry(
+        index4: Option<usize>,
+        index3: Option<usize>,
+        index2: Option<usize>,
+        index1: Option<usize>,
+        entry: &PageTableEntry,
+    ) {
+        match entry.validate() {
+            Ok(()) => {}
+            Err(err) => match err {
+                super::ValidationError::ReservedBits(bits) => panic!(
+                    "{:?} > {:?} > {:?} > {:?} : 0b{:b}",
+                    index4, index3, index2, index1, bits
+                ),
+                super::ValidationError::NonCanonical(addr) => panic!(
+                    "{:?} > {:?} > {:?} > {:?} : {:?}",
+                    index4, index3, index2, index1, addr
+                ),
+            },
+        };
+    }
+    pub fn validate_page_tables(&self) {
+        debug!(
+            "VIRTUAL ADDRESSOR: FULL VALIDATION: STARTED\n\tMAPPED: {:?}\tPML4: {:?}",
+            self.mapped_page(),
+            self.pml4_page()
+        );
+
+        let mut validations: usize = 0;
+        unsafe {
+            let phys_mapped_addr = self.mapped_page().base_addr();
+            for (index4, entry4) in self.pml4().iter().enumerate() {
+                Self::validate_entry(Some(index4), None, None, None, entry4);
+                validations += 1;
+
+                if let Some(table3) = self.pml4().sub_table(index4, phys_mapped_addr) {
+                    for (index3, entry3) in table3.iter().enumerate() {
+                        Self::validate_entry(Some(index4), Some(index3), None, None, entry3);
+                        validations += 1;
+
+                        if let Some(table2) = table3.sub_table(index3, phys_mapped_addr) {
+                            for (index2, entry2) in table2.iter().enumerate() {
+                                Self::validate_entry(
+                                    Some(index4),
+                                    Some(index3),
+                                    Some(index2),
+                                    None,
+                                    entry2,
+                                );
+                                validations += 1;
+
+                                if let Some(table1) = table2.sub_table(index2, phys_mapped_addr) {
+                                    for (index1, entry1) in table1.iter().enumerate() {
+                                        Self::validate_entry(
+                                            Some(index4),
+                                            Some(index3),
+                                            Some(index2),
+                                            Some(index1),
+                                            entry1,
+                                        );
+                                        validations += 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        debug!(
+            "VIRTUAL ADDRESSOR: FULL VALIDATION: COMPLETED ({} TOTAL VALIDATIONS)",
+            validations
+        );
+    }
+
     #[cfg(debug_assertions)]
     pub unsafe fn pretty_log(&self) {
         let offset = self.mapped_page.base_addr();
@@ -218,5 +306,56 @@ impl VirtualAddressor {
                 }
             }
         }
+    }
+
+    pub fn validate_page_branch(&self, page: &Page) {
+        debug!(
+            "VIRTUAL ADDRESSOR: BRANCH VALIDATION: STARTED\n\tMAPPED: {:?}\tPML4: {:?}\n\tPAGE: {:?}",
+            self.mapped_page(),
+            self.pml4_page(),
+            page
+        );
+
+        let base_addr = page.base_addr();
+        let p4_index = base_addr.p4_index();
+        let p3_index = base_addr.p3_index();
+        let p2_index = base_addr.p2_index();
+        let p1_index = base_addr.p1_index();
+
+        let entry4 = self.pml4().get_entry(p4_index);
+        Self::validate_entry(Some(p4_index), None, None, None, entry4);
+
+        unsafe {
+            let phys_mapped_addr = self.mapped_page().base_addr();
+
+            if let Some(table3) = self.pml4().sub_table(p4_index, phys_mapped_addr) {
+                let entry3 = table3.get_entry(p3_index);
+                Self::validate_entry(Some(p4_index), Some(p3_index), None, None, entry3);
+
+                if let Some(table2) = table3.sub_table(p3_index, phys_mapped_addr) {
+                    let entry2 = table2.get_entry(p2_index);
+                    Self::validate_entry(
+                        Some(p4_index),
+                        Some(p3_index),
+                        Some(p2_index),
+                        None,
+                        entry2,
+                    );
+
+                    if let Some(table1) = table2.sub_table(p2_index, phys_mapped_addr) {
+                        let entry1 = table1.get_entry(p1_index);
+                        Self::validate_entry(
+                            Some(p4_index),
+                            Some(p3_index),
+                            Some(p2_index),
+                            Some(p1_index),
+                            entry1,
+                        );
+                    }
+                }
+            }
+        }
+
+        debug!("VIRTUAL ADDRESSOR: BRANCH VALIDATION: COMPLETED");
     }
 }

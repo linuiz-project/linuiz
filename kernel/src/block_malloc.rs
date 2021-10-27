@@ -509,4 +509,12 @@ impl libkernel::memory::malloc::MemoryAllocator for BlockAllocator<'_> {
             .addressor
             .set_page_attributes(page, attributes, modify_mode)
     }
+
+    fn validate_page_tables(&self) {
+        self.map.read().addressor.validate_page_tables();
+    }
+
+    fn validate_page_branch(&self, page: &Page) {
+        self.map.read().addressor.validate_page_branch(page);
+    }
 }

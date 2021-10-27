@@ -107,7 +107,7 @@ impl<L: HeirarchicalLevel> PageTable<L> {
         };
 
         let sub_table: &mut PageTable<L::NextLevel> =
-            &mut *(phys_mapped_addr + frame.base_addr().as_usize()).as_mut_ptr();
+            &mut *((phys_mapped_addr + frame.base_addr().as_usize()).as_mut_ptr());
 
         if created {
             sub_table.clear();

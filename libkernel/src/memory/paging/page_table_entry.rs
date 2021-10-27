@@ -1,4 +1,5 @@
 use crate::memory::Frame;
+use core::fmt;
 
 bitflags::bitflags! {
     pub struct PageAttributes : usize {
@@ -24,17 +25,22 @@ pub enum AttributeModify {
     Toggle,
 }
 
+pub enum ValidationError {
+    ReservedBits(usize),
+    NonCanonical(crate::Address<crate::addr_ty::Physical>),
+}
+
 #[repr(transparent)]
 pub struct PageTableEntry(usize);
 
 impl PageTableEntry {
     pub const UNUSED: Self = Self { 0: 0 };
 
-    pub fn set(&mut self, frame: &Frame, attributes: PageAttributes) {
+    pub const fn set(&mut self, frame: &Frame, attributes: PageAttributes) {
         self.0 = frame.base_addr().as_usize() | attributes.bits();
     }
 
-    pub fn get_frame(&self) -> Option<Frame> {
+    pub const fn get_frame(&self) -> Option<Frame> {
         if self.get_attributes().contains(PageAttributes::PRESENT) {
             Some(unsafe { Frame::from_index((self.0 & 0x000FFFFF_FFFFF000) >> 12) })
         } else {
@@ -42,11 +48,11 @@ impl PageTableEntry {
         }
     }
 
-    pub fn set_frame(&mut self, frame: &Frame) {
+    pub const fn set_frame(&mut self, frame: &Frame) {
         self.0 = (self.0 & PageAttributes::all().bits()) | frame.base_addr().as_usize();
     }
 
-    pub fn get_attributes(&self) -> PageAttributes {
+    pub const fn get_attributes(&self) -> PageAttributes {
         PageAttributes::from_bits_truncate(self.0)
     }
 
@@ -63,13 +69,28 @@ impl PageTableEntry {
         self.0 = (self.0 & !PageAttributes::all().bits()) | attributes.bits();
     }
 
-    pub unsafe fn set_unused(&mut self) {
+    pub const unsafe fn set_unused(&mut self) {
         self.0 = 0;
+    }
+
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        const RESERVED_BITS: usize = !(PageAttributes::all().bits() | 0x000FFFFF_FFFFF000);
+
+        match self.get_frame() {
+            _ if (self.0 & RESERVED_BITS) > 0 => {
+                Err(ValidationError::ReservedBits(self.0 & RESERVED_BITS))
+            }
+            Some(frame) if (frame.base_addr().as_usize() & !0x000FFFFF_FFFFF000) > 0 => {
+                Err(ValidationError::NonCanonical(frame.base_addr()))
+            }
+            Some(_) => Ok(()),
+            None => Ok(()),
+        }
     }
 }
 
-impl core::fmt::Debug for PageTableEntry {
-    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+impl fmt::Debug for PageTableEntry {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_tuple("Page Table Entry")
             .field(&self.get_frame())

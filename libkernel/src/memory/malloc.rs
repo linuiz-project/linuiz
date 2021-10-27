@@ -40,6 +40,9 @@ pub trait MemoryAllocator {
         attributes: PageAttributes,
         modify_mode: AttributeModify,
     );
+
+    fn validate_page_tables(&self);
+    fn validate_page_branch(&self, page: &Page);
 }
 
 static DEFAULT_MALLOCATOR: SyncRefCell<&'static dyn MemoryAllocator> = SyncRefCell::empty();

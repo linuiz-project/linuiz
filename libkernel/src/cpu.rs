@@ -62,6 +62,10 @@ pub fn auto_init_lpu() {
     info!(".");
     let apic = lpu().apic();
     info!(".");
+    crate::memory::malloc::get().validate_page_tables();
+    crate::memory::malloc::get().validate_page_branch(unsafe {
+        &crate::memory::Page::from_index(apic.mapped_addr().page_index())
+    });
     let id = apic.id();
     info!(".");
     debug!("Configured local procesing unit {}.", lpu().apic().id());

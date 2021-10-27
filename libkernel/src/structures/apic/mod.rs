@@ -1,12 +1,13 @@
 pub mod icr;
 
 use crate::{
+    addr_ty::Virtual,
     memory::{
         mmio::{Mapped, MMIO},
         volatile::VolatileCell,
     },
     registers::MSR,
-    ReadWrite,
+    Address, ReadWrite,
 };
 use core::marker::PhantomData;
 
@@ -82,6 +83,10 @@ pub struct APIC {
 impl APIC {
     pub unsafe fn new(mmio: MMIO<Mapped>) -> Self {
         Self { mmio }
+    }
+
+    pub unsafe fn mapped_addr(&self) -> Address<Virtual> {
+        self.mmio.mapped_addr()
     }
 
     pub fn is_enabled(&self) -> bool {
