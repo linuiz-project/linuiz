@@ -104,7 +104,10 @@ impl core::iter::Step for Page {
 
 impl core::fmt::Debug for Page {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter.debug_tuple("Page").field(&self.index()).finish()
+        formatter
+            .debug_tuple("Page")
+            .field(&format_args!("0x{:X}", self.index << 12))
+            .finish()
     }
 }
 

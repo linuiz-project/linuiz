@@ -41,7 +41,7 @@ impl Frame {
     }
 
     pub const fn base_addr(&self) -> Address<Physical> {
-        unsafe { Address::<Physical>::new_unsafe(self.index * 0x1000) }
+        unsafe { Address::<Physical>::new_unsafe(self.index << 12) }
     }
 
     pub fn into_iter(self) -> FrameIterator {

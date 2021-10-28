@@ -162,7 +162,7 @@ fn kernel_main_post_mmap() -> ! {
         acpi::rdsp::xsdt::{madt::*, LAZY_XSDT},
         structures::apic,
     };
-    loop {}
+
     info!("Searching for additional processor cores...");
     let lapic = libkernel::cpu::lpu().apic();
     let icr = lapic.interrupt_command_register();

@@ -36,39 +36,11 @@ pub fn auto_init_lpu() {
 
         let lpu = &mut *(MSR::IA32_FS_BASE.read() as *mut CPU);
 
-        let frames = {
-            use crate::memory::falloc;
-
-            falloc::get()
-                .acquire_frame(
-                    (MSR::IA32_APIC_BASE.read() & 0x3FFFFF000) as usize,
-                    falloc::FrameState::Reserved,
-                )
-                .unwrap()
-                .into_iter()
-        };
-        let mapped_mmio = crate::memory::mmio::unmapped_mmio(frames)
-            .unwrap()
-            .automap();
-
-        debug!(
-            "LPU's LAPIC mapped to virtual address: {:?}",
-            mapped_mmio.mapped_addr()
-        );
-
-        lpu.lapic = APIC::new(mapped_mmio);
+        lpu.lapic = APIC::from_ia32_apic_base();
     }
 
-    info!(".");
     let apic = lpu().apic();
-    info!(".");
-    crate::memory::malloc::get().validate_page_tables();
-    crate::memory::malloc::get().validate_page_branch(unsafe {
-        &crate::memory::Page::from_index(apic.mapped_addr().page_index())
-    });
     let id = apic.id();
-    info!(".");
-    debug!("Configured local procesing unit {}.", lpu().apic().id());
 }
 
 pub struct CPU {

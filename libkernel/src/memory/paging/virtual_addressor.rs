@@ -296,7 +296,10 @@ impl VirtualAddressor {
 
         let entry4 = self.pml4().get_entry(p4_index);
         Self::validate_entry(Some(p4_index), None, None, None, entry4);
-        debug!("VIRTUAL ADDRESSOR: BRANCH VALIDATION:\n\tPTE4: {:?}", entry4);
+        debug!(
+            "VIRTUAL ADDRESSOR: BRANCH VALIDATION:\n\tPTE4: {:?}",
+            entry4
+        );
 
         unsafe {
             let phys_mapped_addr = self.mapped_offset();
@@ -304,7 +307,10 @@ impl VirtualAddressor {
             if let Some(table3) = self.pml4().sub_table(p4_index, phys_mapped_addr) {
                 let entry3 = table3.get_entry(p3_index);
                 Self::validate_entry(Some(p4_index), Some(p3_index), None, None, entry3);
-                debug!("VIRTUAL ADDRESSOR: BRANCH VALIDATION:\n\tPTE3: {:?}", entry3);
+                debug!(
+                    "VIRTUAL ADDRESSOR: BRANCH VALIDATION:\n\tPTE3: {:?}",
+                    entry3
+                );
 
                 if let Some(table2) = table3.sub_table(p3_index, phys_mapped_addr) {
                     let entry2 = table2.get_entry(p2_index);
@@ -315,7 +321,10 @@ impl VirtualAddressor {
                         None,
                         entry2,
                     );
-                    debug!("VIRTUAL ADDRESSOR: BRANCH VALIDATION:\n\tPTE2: {:?}", entry2);
+                    debug!(
+                        "VIRTUAL ADDRESSOR: BRANCH VALIDATION:\n\tPTE2: {:?}",
+                        entry2
+                    );
 
                     if let Some(table1) = table2.sub_table(p2_index, phys_mapped_addr) {
                         let entry1 = table1.get_entry(p1_index);
@@ -326,7 +335,10 @@ impl VirtualAddressor {
                             Some(p1_index),
                             entry1,
                         );
-                        debug!("VIRTUAL ADDRESSOR: BRANCH VALIDATION:\n\tPTE1: {:?}", entry1);
+                        debug!(
+                            "VIRTUAL ADDRESSOR: BRANCH VALIDATION:\n\tPTE1: {:?}",
+                            entry1
+                        );
                     }
                 }
             }

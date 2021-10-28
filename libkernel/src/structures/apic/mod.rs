@@ -81,14 +81,45 @@ pub struct APIC {
 }
 
 impl APIC {
+    pub fn from_ia32_apic_base() -> Self {
+        let frames = unsafe {
+            use crate::memory::falloc;
+
+            falloc::get()
+                .acquire_frame(
+                    ((MSR::IA32_APIC_BASE.read() & 0x3FFFFF000) >> 12) as usize,
+                    falloc::FrameState::Reserved,
+                )
+                .unwrap()
+                .into_iter()
+        };
+        let mapped_mmio = crate::memory::mmio::unmapped_mmio(frames)
+            .unwrap()
+            .automap();
+
+        unsafe { Self::new(mapped_mmio) }
+    }
+
     pub unsafe fn new(mmio: MMIO<Mapped>) -> Self {
+        let assumed_base = (MSR::IA32_APIC_BASE.read() >> 12) as usize;
+        if assumed_base != mmio.frames().start().index() {
+            warn!(
+                "APIC MMIO BASE FRAME INDEX CHECK: IA32_APIC_BASE({:?}) != PROVIDED({:?})",
+                assumed_base,
+                mmio.frames().start().index()
+            );
+        }
+
+        let _self = Self { mmio };
+
         debug!(
-            "Creating APIC: {:?} -> {:?}",
-            mmio.mapped_addr(),
-            mmio.frames().start().base_addr()
+            "Created APIC {}: {:?} -> {:?}",
+            _self.id(),
+            _self.mmio.mapped_addr(),
+            _self.mmio.frames().start().base_addr()
         );
 
-        Self { mmio }
+        _self
     }
 
     pub unsafe fn mapped_addr(&self) -> Address<Virtual> {
