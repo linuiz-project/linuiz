@@ -45,6 +45,20 @@ impl MMIO<Unmapped> {
     pub fn automap(self) -> MMIO<Mapped> {
         let mapped_addr = Address::from_ptr::<u8>(crate::alloc_to!(&self.frames));
 
+        // Ensure we mark MMIO page table entries as UC
+        for page_index in
+            mapped_addr.page_index()..(mapped_addr.page_index() + self.frames.total_len())
+        {
+            unsafe {
+                use crate::memory::paging::{AttributeModify, PageAttributes};
+                crate::memory::malloc::get().set_page_attributes(
+                    &Page::from_index(page_index),
+                    PageAttributes::UNCACHEABLE,
+                    AttributeModify::Insert,
+                );
+            }
+        }
+
         MMIO::<Mapped> {
             frames: self.frames,
             mapped_addr,

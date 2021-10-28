@@ -70,7 +70,7 @@ impl PCIeDevice<Standard> {
 
                         crate::memory::malloc::get().set_page_attributes(
                             &page,
-                            PageAttributes::WRITE_THROUGH | PageAttributes::UNCACHEABLE,
+                            PageAttributes::WRITE_THROUGH,
                             AttributeModify::Insert,
                         );
                     }
