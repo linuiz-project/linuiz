@@ -177,7 +177,7 @@ impl core::fmt::Debug for Address<Physical> {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
             .debug_tuple("Address<Physical>")
-            .field(&(self.value as *mut core::ffi::c_void))
+            .field(&&format_args!("0x{:X}", self.value))
             .finish()
     }
 }
@@ -246,7 +246,7 @@ impl core::fmt::Debug for Address<Virtual> {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
             .debug_tuple("Address<Virtual>")
-            .field(&self.as_ptr::<core::ffi::c_void>())
+            .field(&format_args!("0x{:X}", self.value))
             .finish()
     }
 }

@@ -50,8 +50,8 @@ impl VirtualAddressor {
         }
     }
 
-    pub fn mapped_page(&self) -> Page {
-        self.mapped_page
+    pub fn mapped_offset(&self) -> Address<Virtual> {
+        self.mapped_page.base_addr()
     }
 
     /* ACQUIRE STATE */
@@ -90,7 +90,7 @@ impl VirtualAddressor {
     }
 
     fn get_page_entry_mut(&mut self, page: &Page) -> Option<&mut PageTableEntry> {
-        let offset = self.mapped_page.base_addr();
+        let offset = self.mapped_offset();
         let addr = page.base_addr();
 
         unsafe {
@@ -120,7 +120,7 @@ impl VirtualAddressor {
     pub fn map(&mut self, page: &Page, frame: &Frame) {
         assert!(
             !self.is_mapped(page.base_addr()),
-            "page already mapped: {:?}",
+            "Page is already mapped: {:?}",
             page
         );
 
@@ -228,13 +228,13 @@ impl VirtualAddressor {
     pub fn validate_page_tables(&self) {
         debug!(
             "VIRTUAL ADDRESSOR: FULL VALIDATION: STARTED\n\tMAPPED: {:?}\tPML4: {:?}",
-            self.mapped_page(),
+            self.mapped_offset(),
             self.pml4_page()
         );
 
         let mut validations: usize = 0;
         unsafe {
-            let phys_mapped_addr = self.mapped_page().base_addr();
+            let phys_mapped_addr = self.mapped_offset();
             for (index4, entry4) in self.pml4().iter().enumerate() {
                 Self::validate_entry(Some(index4), None, None, None, entry4);
                 validations += 1;
@@ -280,38 +280,10 @@ impl VirtualAddressor {
         );
     }
 
-    #[cfg(debug_assertions)]
-    pub unsafe fn pretty_log(&self) {
-        let offset = self.mapped_page.base_addr();
-        let pml4 = self.pml4();
-
-        info!("PML4");
-        for (p4_index, p4_entry) in pml4.iter().enumerate().filter(|tuple| tuple.1.is_present()) {
-            info!("4 {:?}", p4_entry);
-
-            let p3 = pml4.sub_table(p4_index, offset).unwrap();
-            for (p3_index, p3_entry) in p3.iter().enumerate().filter(|tuple| tuple.1.is_present()) {
-                info!("  3 {:?}", p3_entry);
-
-                let p2 = p3.sub_table(p3_index, offset).unwrap();
-                for (p2_index, p2_entry) in
-                    p2.iter().enumerate().filter(|tuple| tuple.1.is_present())
-                {
-                    info!("    2 {:?}", p2_entry);
-
-                    let p1 = p2.sub_table(p2_index, offset).unwrap();
-                    for p1_entry in p1.iter().filter(|entry| entry.is_present()) {
-                        info!("      1 {:?}", p1_entry);
-                    }
-                }
-            }
-        }
-    }
-
     pub fn validate_page_branch(&self, page: &Page) {
         debug!(
             "VIRTUAL ADDRESSOR: BRANCH VALIDATION: STARTED\n\tMAPPED: {:?}\tPML4: {:?}\n\tPAGE: {:?}",
-            self.mapped_page(),
+            self.mapped_offset(),
             self.pml4_page(),
             page
         );
@@ -324,13 +296,15 @@ impl VirtualAddressor {
 
         let entry4 = self.pml4().get_entry(p4_index);
         Self::validate_entry(Some(p4_index), None, None, None, entry4);
+        debug!("VIRTUAL ADDRESSOR: BRANCH VALIDATION:\n\tPTE4: {:?}", entry4);
 
         unsafe {
-            let phys_mapped_addr = self.mapped_page().base_addr();
+            let phys_mapped_addr = self.mapped_offset();
 
             if let Some(table3) = self.pml4().sub_table(p4_index, phys_mapped_addr) {
                 let entry3 = table3.get_entry(p3_index);
                 Self::validate_entry(Some(p4_index), Some(p3_index), None, None, entry3);
+                debug!("VIRTUAL ADDRESSOR: BRANCH VALIDATION:\n\tPTE3: {:?}", entry3);
 
                 if let Some(table2) = table3.sub_table(p3_index, phys_mapped_addr) {
                     let entry2 = table2.get_entry(p2_index);
@@ -341,6 +315,7 @@ impl VirtualAddressor {
                         None,
                         entry2,
                     );
+                    debug!("VIRTUAL ADDRESSOR: BRANCH VALIDATION:\n\tPTE2: {:?}", entry2);
 
                     if let Some(table1) = table2.sub_table(p2_index, phys_mapped_addr) {
                         let entry1 = table1.get_entry(p1_index);
@@ -351,11 +326,40 @@ impl VirtualAddressor {
                             Some(p1_index),
                             entry1,
                         );
+                        debug!("VIRTUAL ADDRESSOR: BRANCH VALIDATION:\n\tPTE1: {:?}", entry1);
                     }
                 }
             }
         }
 
         debug!("VIRTUAL ADDRESSOR: BRANCH VALIDATION: COMPLETED");
+    }
+
+    #[cfg(debug_assertions)]
+    pub unsafe fn pretty_log(&self) {
+        let offset = self.mapped_page.base_addr();
+        let pml4 = self.pml4();
+
+        info!("PML4");
+        for (p4_index, p4_entry) in pml4.iter().enumerate().filter(|tuple| tuple.1.is_present()) {
+            info!("4 {:?}", p4_entry);
+
+            let p3 = pml4.sub_table(p4_index, offset).unwrap();
+            for (p3_index, p3_entry) in p3.iter().enumerate().filter(|tuple| tuple.1.is_present()) {
+                info!("\t3 {:?}", p3_entry);
+
+                let p2 = p3.sub_table(p3_index, offset).unwrap();
+                for (p2_index, p2_entry) in
+                    p2.iter().enumerate().filter(|tuple| tuple.1.is_present())
+                {
+                    info!("\t\t2 {:?}", p2_entry);
+
+                    let p1 = p2.sub_table(p2_index, offset).unwrap();
+                    for p1_entry in p1.iter().filter(|entry| entry.is_present()) {
+                        info!("\t\t\t1 {:?}", p1_entry);
+                    }
+                }
+            }
+        }
     }
 }

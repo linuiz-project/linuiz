@@ -454,7 +454,7 @@ impl BlockAllocator<'_> {
     }
 
     pub unsafe fn physical_memory(&self, addr: Address<Physical>) -> Address<Virtual> {
-        self.map.read().addressor.mapped_page().base_addr() + addr.as_usize()
+        self.map.read().addressor.mapped_offset() + addr.as_usize()
     }
 }
 

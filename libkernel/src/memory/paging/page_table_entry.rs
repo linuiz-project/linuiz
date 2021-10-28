@@ -2,7 +2,7 @@ use crate::memory::Frame;
 use core::fmt;
 
 bitflags::bitflags! {
-    pub struct PageAttributes : usize {
+    pub struct PageAttributes: usize {
         const PRESENT = 1 << 0;
         const WRITABLE = 1 << 1;
         const USER_ACCESSIBLE = 1 << 2;
@@ -12,6 +12,7 @@ bitflags::bitflags! {
         const DIRTY = 1 << 6;
         const HUGE_PAGE = 1 << 7;
         const GLOBAL = 1 << 8;
+        const MAXIMUM_ADDRESS_BIT = 1 << 48;
         // 3 bits free for use by OS
         const NO_EXECUTE = 1 << 63;
     }
@@ -95,6 +96,7 @@ impl fmt::Debug for PageTableEntry {
             .debug_tuple("Page Table Entry")
             .field(&self.get_frame())
             .field(&self.get_attributes())
+            .field(&format_args!("0x{:X}", self.0))
             .finish()
     }
 }

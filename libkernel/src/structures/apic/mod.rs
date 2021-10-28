@@ -82,6 +82,12 @@ pub struct APIC {
 
 impl APIC {
     pub unsafe fn new(mmio: MMIO<Mapped>) -> Self {
+        debug!(
+            "Creating APIC: {:?} -> {:?}",
+            mmio.mapped_addr(),
+            mmio.frames().start().base_addr()
+        );
+
         Self { mmio }
     }
 
