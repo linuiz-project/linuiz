@@ -8,7 +8,6 @@
     abi_x86_interrupt,
     panic_info_message,
     alloc_error_handler,
-    const_panic,
     const_mut_refs,
     const_ptr_offset,
     const_fn_trait_bound,

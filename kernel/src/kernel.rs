@@ -20,18 +20,12 @@ mod logging;
 mod pic8259;
 mod timer;
 
-use core::{
-    ffi::c_void,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
-};
+use core::sync::atomic::{AtomicBool, Ordering};
 use libkernel::{
-    acpi::{rdsp::xsdt::madt::MADT, SystemConfigTableEntry},
-    addr_ty::Physical,
-    io::pci::PCIeHostBridge,
+    acpi::SystemConfigTableEntry,
     memory::{falloc, UEFIMemoryDescriptor},
-    Address, BootInfo, LinkerSymbol,
+    BootInfo, LinkerSymbol,
 };
-use x86_64::instructions::segmentation::Segment;
 
 extern "C" {
     static __text_start: LinkerSymbol;
@@ -71,9 +65,7 @@ static CPU_INIT: AtomicBool = AtomicBool::new(true);
 
 #[no_mangle]
 #[export_name = "_entry"]
-extern "efiapi" fn kernel_stage_zero(
-    boot_info: BootInfo<UEFIMemoryDescriptor, SystemConfigTableEntry>,
-) -> ! {
+extern "efiapi" fn _entry(boot_info: BootInfo<UEFIMemoryDescriptor, SystemConfigTableEntry>) -> ! {
     unsafe {
         CON_OUT.init(drivers::io::SerialSpeed::S115200);
 
@@ -112,10 +104,9 @@ extern "efiapi" fn kernel_stage_zero(
 
         debug!("Ensuring relevant kernel sections are read-only.");
         let malloc = libkernel::memory::malloc::get();
-        for page in unsafe {
-            (__text_start.as_page()..__text_end.as_page())
-                .chain(__rodata_start.as_page()..__rodata_end.as_page())
-        } {
+        for page in (__text_start.as_page()..__text_end.as_page())
+            .chain(__rodata_start.as_page()..__rodata_end.as_page())
+        {
             malloc.set_page_attributes(
                 &page,
                 libkernel::memory::paging::PageAttributes::WRITABLE,
@@ -126,30 +117,7 @@ extern "efiapi" fn kernel_stage_zero(
         debug!("Kernel memory intiialization complete.");
     }
 
-    // unsafe {
-    //     debug!(
-    //         "Configuring GDT:\tCode: 0x{:X}\tData: 0x{:X}\tTSS: 0x{:X}",
-    //         gdt::code(),
-    //         gdt::data(),
-    //         gdt::tss()
-    //     );
-
-    //     use libkernel::structures::gdt;
-
-    //     gdt::init();
-    //     info!("Successfully loaded GDT & configured segment registers.");
-    // }
-
-    // libkernel::structures::idt::init();
-    // libkernel::structures::idt::load();
-    // info!("Successfully initialized IDT.");
-
     _startup()
-}
-
-fn kernel_stage_one() -> ! {
-    info!("Kernel has reached safe shutdown state.");
-    unsafe { libkernel::instructions::pwm::qemu_shutdown() }
 }
 
 #[no_mangle]
@@ -157,7 +125,7 @@ extern "C" fn _startup() -> ! {
     let is_bsp = libkernel::cpu::LPU_COUNT.load(Ordering::Acquire) == 0;
 
     // Wait for CPU_INIT to be possible, and then allow BSP to continue.
-    while unsafe { !CPU_INIT.load(core::sync::atomic::Ordering::Acquire) } {}
+    while !CPU_INIT.load(core::sync::atomic::Ordering::Acquire) {}
     libkernel::structures::gdt::init();
     libkernel::structures::idt::load();
     libkernel::cpu::auto_init_lpu();
@@ -166,10 +134,7 @@ extern "C" fn _startup() -> ! {
 
     // If this is the BSP, wake other cores.
     if is_bsp {
-        use libkernel::{
-            acpi::rdsp::xsdt::{madt::*, LAZY_XSDT},
-            structures::apic,
-        };
+        use libkernel::acpi::rdsp::xsdt::{madt::*, LAZY_XSDT};
 
         // Initialize other CPUs
         info!("Searching for additional processor cores...");
@@ -194,7 +159,7 @@ extern "C" fn _startup() -> ! {
 
                         // Allow CPU to initialize, and then wait for its initialization to complete.
                         CPU_INIT.store(true, Ordering::Release);
-                        while unsafe { CPU_INIT.load(core::sync::atomic::Ordering::Acquire) } {}
+                        while CPU_INIT.load(core::sync::atomic::Ordering::Acquire) {}
                     }
                 }
             }
@@ -208,7 +173,10 @@ extern "C" fn _startup() -> ! {
 
     // TODO create function for automatigically creating a new stack
 
-    libkernel::instructions::hlt_indefinite()
+    libkernel::instructions::hlt_indefinite();
+
+    info!("Kernel has reached safe shutdown state.");
+    unsafe { libkernel::instructions::pwm::qemu_shutdown() }
 }
 
 pub unsafe fn init_falloc(memory_map: &[UEFIMemoryDescriptor]) {

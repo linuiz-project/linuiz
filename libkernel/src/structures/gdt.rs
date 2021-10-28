@@ -67,7 +67,6 @@ impl Entry {
     }
 }
 
-#[derive(Debug)]
 #[repr(C, packed)]
 pub struct Pointer {
     limit: u16,
@@ -168,6 +167,7 @@ pub fn init() {
     info!("Successfully initialized GDT.");
 }
 
+#[inline]
 pub fn load() {
     GDT.0.load()
 }
@@ -176,7 +176,6 @@ pub fn code() -> u16 {
     GDT.1.code_selector
 }
 
-#[inline]
 pub fn data() -> u16 {
     GDT.1.data_selector
 }

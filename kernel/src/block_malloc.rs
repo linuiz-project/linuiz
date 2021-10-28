@@ -1,4 +1,4 @@
-use core::{alloc::Layout, hash::Hasher, mem::size_of};
+use core::{alloc::Layout, mem::size_of};
 use libkernel::{
     addr_ty::{Physical, Virtual},
     align_up_div,
