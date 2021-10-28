@@ -1,4 +1,7 @@
 use crate::{registers::MSR, structures::apic::APIC};
+use core::sync::atomic::AtomicUsize;
+
+pub static LPU_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 pub fn lpu() -> &'static CPU {
     assert_ne!(
@@ -39,8 +42,7 @@ pub fn auto_init_lpu() {
         lpu.lapic = APIC::from_ia32_apic_base();
     }
 
-    let apic = lpu().apic();
-    let id = apic.id();
+    LPU_COUNT.fetch_add(1, core::sync::atomic::Ordering::AcqRel);
 }
 
 pub struct CPU {

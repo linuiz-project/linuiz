@@ -20,7 +20,10 @@ mod logging;
 mod pic8259;
 mod timer;
 
-use core::ffi::c_void;
+use core::{
+    ffi::c_void,
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+};
 use libkernel::{
     acpi::{rdsp::xsdt::madt::MADT, SystemConfigTableEntry},
     addr_ty::Physical,
@@ -47,12 +50,7 @@ extern "C" {
     static __ap_trampoline_end: LinkerSymbol;
 
     static __kernel_pml4: LinkerSymbol;
-    static __cpu_init_complete: LinkerSymbol;
-
-    static __gdt_pointer: LinkerSymbol;
-    static __gdt_code: LinkerSymbol;
-    static __gdt_data: LinkerSymbol;
-    static __gdt_tss: LinkerSymbol;
+    static __cpu_count: LinkerSymbol;
 }
 
 #[cfg(debug_assertions)]
@@ -69,10 +67,11 @@ static mut CON_OUT: drivers::io::Serial = drivers::io::Serial::new(drivers::io::
 // static mut CON_OUT: drivers::io::QEMUE9 = drivers::io::QEMUE9::new();
 static KERNEL_MALLOC: block_malloc::BlockAllocator = block_malloc::BlockAllocator::new();
 static TRACE_ENABLED_PATHS: [&str; 2] = ["kernel::drivers::ahci", "libkernel::memory::falloc"];
+static CPU_INIT: AtomicBool = AtomicBool::new(true);
 
 #[no_mangle]
 #[export_name = "_entry"]
-extern "efiapi" fn kernel_main(
+extern "efiapi" fn kernel_stage_zero(
     boot_info: BootInfo<UEFIMemoryDescriptor, SystemConfigTableEntry>,
 ) -> ! {
     unsafe {
@@ -93,33 +92,6 @@ extern "efiapi" fn kernel_main(
         "Detected CPU features: {:?}",
         libkernel::instructions::cpu_features()
     );
-
-    unsafe {
-        debug!(
-            "Configuring GDT:\tCode: 0x{:X}\tData: 0x{:X}\tTSS: 0x{:X}",
-            gdt::code(),
-            gdt::data(),
-            gdt::tss()
-        );
-
-        use libkernel::structures::gdt;
-
-        gdt::init();
-        info!("Successfully loaded GDT & configured segment registers.");
-        debug!("Configuring global GDT labels.");
-        unsafe {
-            __gdt_pointer
-                .as_mut_ptr::<gdt::Pointer>()
-                .write(gdt::pointer());
-            __gdt_code.as_mut_ptr::<u16>().write(gdt::code());
-            __gdt_data.as_mut_ptr::<u16>().write(gdt::data());
-            __gdt_tss.as_mut_ptr::<u16>().write(gdt::tss());
-        }
-    }
-
-    libkernel::structures::idt::init();
-    libkernel::structures::idt::load();
-    info!("Successfully initialized IDT.");
 
     // `boot_info` will not be usable after initalizing the global allocator,
     //   due to the stack being moved in virtual memory.
@@ -150,90 +122,93 @@ extern "efiapi" fn kernel_main(
                 libkernel::memory::paging::AttributeModify::Remove,
             );
         }
+
+        debug!("Kernel memory intiialization complete.");
     }
 
-    kernel_main_post_mmap()
-}
+    // unsafe {
+    //     debug!(
+    //         "Configuring GDT:\tCode: 0x{:X}\tData: 0x{:X}\tTSS: 0x{:X}",
+    //         gdt::code(),
+    //         gdt::data(),
+    //         gdt::tss()
+    //     );
 
-fn kernel_main_post_mmap() -> ! {
-    libkernel::cpu::auto_init_lpu();
+    //     use libkernel::structures::gdt;
 
-    use libkernel::{
-        acpi::rdsp::xsdt::{madt::*, LAZY_XSDT},
-        structures::apic,
-    };
-
-    info!("Searching for additional processor cores...");
-    let lapic = libkernel::cpu::lpu().apic();
-    let icr = lapic.interrupt_command_register();
-    if let Ok(madt) = LAZY_XSDT.find_sub_table::<MADT>() {
-        for interrupt_device in madt.iter() {
-            if let InterruptDevice::LocalAPIC(lapic_other) = interrupt_device {
-                if lapic.id() != lapic_other.id() {
-                    info!("Identified additional processor core: {}", lapic_other.id());
-
-                    let ap_trampoline_page_index =
-                        unsafe { __ap_trampoline_start.as_page().index() } as u8;
-
-                    icr.send_init(lapic_other.id());
-                    icr.wait_pending();
-
-                    icr.send_sipi(ap_trampoline_page_index, lapic_other.id());
-                    icr.wait_pending();
-                    icr.send_sipi(ap_trampoline_page_index, lapic_other.id());
-                    icr.wait_pending();
-
-                    unsafe { *__cpu_init_complete.as_mut_ptr::<u8>() = 1 };
-                    loop {}
-                }
-            }
-        }
-    }
-
-    // let bridges: Vec<PCIeHostBridge> = libkernel::acpi::rdsp::xsdt::LAZY_XSDT
-    //     .expect("xsdt does not exist")
-    //     .find_sub_table::<libkernel::acpi::rdsp::xsdt::mcfg::MCFG>()
-    //     .unwrap()
-    //     .iter()
-    //     .filter_map(|entry| {
-    //         libkernel::io::pci::configure_host_bridge(entry).map_or(None, |bridge| Some(bridge))
-    //     })
-    //     .collect();
-
-    // debug!("Configuring PCIe devices.");
-    // for device_variant in bridges
-    //     .iter()
-    //     .flat_map(|host_bridge| host_bridge.iter())
-    //     .filter(|bus| bus.has_devices())
-    //     .flat_map(|bus| bus.iter())
-    // {
-    //     use libkernel::io::pci;
-
-    //     if let pci::DeviceVariant::Standard(device) = device_variant {
-    //         if device.class() == pci::DeviceClass::MassStorageController
-    //             && device.subclass() == 0x06
-    //         {
-    //             use crate::drivers::ahci;
-    //             let ahci = ahci::AHCI::from_pcie_device(device);
-    //         }
-    //     }
+    //     gdt::init();
+    //     info!("Successfully loaded GDT & configured segment registers.");
     // }
 
+    // libkernel::structures::idt::init();
+    // libkernel::structures::idt::load();
+    // info!("Successfully initialized IDT.");
+
+    _startup()
+}
+
+fn kernel_stage_one() -> ! {
     info!("Kernel has reached safe shutdown state.");
     unsafe { libkernel::instructions::pwm::qemu_shutdown() }
 }
 
 #[no_mangle]
-extern "C" fn _ap_startup() -> ! {
-    info!("APPLICATION PROCESSOR SUCCESSFULLY STARTED.");
+extern "C" fn _startup() -> ! {
+    let is_bsp = libkernel::cpu::LPU_COUNT.load(Ordering::Acquire) == 0;
 
+    // Wait for CPU_INIT to be possible, and then allow BSP to continue.
+    while unsafe { !CPU_INIT.load(core::sync::atomic::Ordering::Acquire) } {}
     libkernel::structures::gdt::init();
-    info!("Successfully initialized GDT.");
-
     libkernel::structures::idt::load();
-    info!("Successfully initialized IDT.");
+    libkernel::cpu::auto_init_lpu();
+    init_apic();
+    CPU_INIT.store(false, Ordering::Release);
 
-    loop {}
+    // If this is the BSP, wake other cores.
+    if is_bsp {
+        use libkernel::{
+            acpi::rdsp::xsdt::{madt::*, LAZY_XSDT},
+            structures::apic,
+        };
+
+        // Initialize other CPUs
+        info!("Searching for additional processor cores...");
+        let lapic = libkernel::cpu::lpu().apic();
+        let icr = lapic.interrupt_command_register();
+        if let Ok(madt) = LAZY_XSDT.find_sub_table::<MADT>() {
+            for interrupt_device in madt.iter() {
+                if let InterruptDevice::LocalAPIC(lapic_other) = interrupt_device {
+                    if lapic.id() != lapic_other.id() {
+                        info!("Identified additional processor core: {}", lapic_other.id());
+
+                        let ap_trampoline_page_index =
+                            unsafe { __ap_trampoline_start.as_page().index() } as u8;
+
+                        icr.send_init(lapic_other.id());
+                        icr.wait_pending();
+
+                        icr.send_sipi(ap_trampoline_page_index, lapic_other.id());
+                        icr.wait_pending();
+                        icr.send_sipi(ap_trampoline_page_index, lapic_other.id());
+                        icr.wait_pending();
+
+                        // Allow CPU to initialize, and then wait for its initialization to complete.
+                        CPU_INIT.store(true, Ordering::Release);
+                        while unsafe { CPU_INIT.load(core::sync::atomic::Ordering::Acquire) } {}
+                    }
+                }
+            }
+        }
+    }
+
+    info!(
+        "CURRENT CPU COUNT: {}",
+        libkernel::cpu::LPU_COUNT.load(Ordering::Acquire)
+    );
+
+    // TODO create function for automatigically creating a new stack
+
+    libkernel::instructions::hlt_indefinite()
 }
 
 pub unsafe fn init_falloc(memory_map: &[UEFIMemoryDescriptor]) {
