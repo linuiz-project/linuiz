@@ -362,22 +362,22 @@ impl BlockAllocator<'_> {
         }
 
         if let Some(start_index_borrow) = base_index.get() {
-            let start_index = *start_index_borrow;
+            let start_map_index = *start_index_borrow;
             trace!(
                 "Allocation fulfilling: pages {}..{}",
-                start_index,
-                start_index + frames.total_len()
+                start_map_index,
+                start_map_index + frames.total_len()
             );
 
-            for map_index in 0..frames.total_len() {
-                map.pages[map_index].set_full();
+            for frame_offset in 0..frames.total_len() {
+                map.pages[start_map_index + frame_offset].set_full();
                 map.addressor
-                    .map(&Page::from_index(start_index + map_index), unsafe {
-                        &Frame::from_index(frames.start().index() + map_index)
+                    .map(&Page::from_index(start_map_index + frame_offset), unsafe {
+                        &Frame::from_index(frames.start().index() + frame_offset)
                     });
             }
 
-            (start_index * 0x1000) as *mut T
+            (start_map_index * 0x1000) as *mut T
         } else {
             panic!("Out of memory!")
         }
@@ -414,7 +414,7 @@ impl BlockAllocator<'_> {
     pub fn grow(&self, required_blocks: usize, map_write: &mut RwLockWriteGuard<AllocatorMap>) {
         assert!(required_blocks > 0, "calls to grow must be nonzero");
 
-        debug!("Growing map to faciliate {} blocks.", required_blocks);
+        trace!("Growing map to faciliate {} blocks.", required_blocks);
         const BLOCKS_PER_MAP_PAGE: usize = 8 /* bits per byte */ * 0x1000;
         let cur_map_len = map_write.pages.len();
         let cur_page_offset = (cur_map_len * BlockPage::BLOCKS_PER) / BLOCKS_PER_MAP_PAGE;
@@ -422,9 +422,10 @@ impl BlockAllocator<'_> {
             + libkernel::align_up_div(required_blocks, BLOCKS_PER_MAP_PAGE))
         .next_power_of_two();
 
-        debug!(
+        trace!(
             "Growing map: {}..{} pages",
-            cur_page_offset, new_page_offset
+            cur_page_offset,
+            new_page_offset
         );
 
         {
