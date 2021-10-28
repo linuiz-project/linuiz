@@ -1,19 +1,12 @@
 section .bss
 
-extern _ap_startup
-global __cpu_init_complete, __kernel_pml4, __stack
-__cpu_init_complete  resb 1
-__kernel_pml4        resd 1
-__stack              resb 4096
+extern _startup
 
 
 section .ap_trampoline
 
-global __gdt_code, __gdt_data, __gdt_tss, __gdt_pointer
-__gdt_code           resw 1
-__gdt_data           resw 1
-__gdt_tss            resw 1
-__gdt_pointer        resq 1
+global __kernel_pml4
+__kernel_pml4      resd 1
 
 bits 16
 realmode:
@@ -26,7 +19,8 @@ realmode:
     mov cr4, eax
 
     ; Set PML4 address
-    or eax, __kernel_pml4
+    mov eax, [__kernel_pml4]
+    mov cr3, eax
 
     ; Enable long mode
     mov ecx, 0xC0000080     ; Set correct MSR
@@ -38,17 +32,69 @@ realmode:
     mov eax, cr0
     or eax, 1 << 31 | 1 << 0
     mov cr0, eax
-
+    
     ; Set GDT & long-jump to long mode
-    lgdt [__gdt_pointer]
-    jmp __gdt_code:longmode
+    lgdt [__gdt.pointer]
+    jmp __gdt.code:longmode
+
+; Access bits
+PRESENT        equ 1 << 7
+NOT_SYS        equ 1 << 4
+EXEC           equ 1 << 3
+DC             equ 1 << 2
+RW             equ 1 << 1
+ACCESSED       equ 1 << 0
+
+; Flags bits
+GRAN_4K       equ 1 << 7
+; This flag should not be present with LONG_MODE flag.
+; They are mutually excuslive.
+SZ_32         equ 1 << 6
+LONG_MODE     equ 1 << 5
+
+global __gdt:data, __gdt.code, __gdt.data, __gdt.tss, __gdt.pointer
+    
+__gdt:
+    .null: equ $ - __gdt
+        dq 0
+    .code: equ $ - __gdt
+        dd 0xFFFF                           ; Limit & Base (low)
+        db 0                                ; Base (mid)
+        db PRESENT | NOT_SYS | EXEC | RW    ; Access
+        db GRAN_4K | LONG_MODE | 0xF        ; Flags
+        db 0                                ; Base (high)
+    .data: equ $ - __gdt
+        dd 0xFFFF                           ; Limit & Base (low)
+        db 0                                ; Base (mid)
+        db PRESENT | NOT_SYS | RW           ; Access
+        db GRAN_4K | SZ_32 | 0xF            ; Flags
+        db 0                                ; Base (high)
+    .tss: equ $ - __gdt
+        dd 0x00000068
+        dd 0x00CF8900
+    .pointer:
+        dw $ - __gdt - 1
+        dq __gdt
 
 bits 64
 longmode:
     cli
 
+    ; Update segment registers  
+    mov ax, __gdt.data
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    mov ss, ax
+
     ; Configure temporary stack
-    mov rsp, __stack
+    mov rsp, __stack_top
 
     ; Jump to high-level code
-    call _ap_startup
+    call _startup
+
+
+__stack_bottom:
+    resb 32 * 1024
+__stack_top:
