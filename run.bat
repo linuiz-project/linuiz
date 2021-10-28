@@ -3,7 +3,7 @@ qemu-system-x86_64^
     -serial stdio^
     -machine q35^
     -cpu qemu64^
-    -smp 2^
+    -smp 4^
     -bios ./ovmf/OVMF-pure-efi.fd^
     -drive format=raw,file=fat:rw:./hdd/image/^
     -drive if=none,format=raw,id=disk,file=./hdd/rootfs.img^

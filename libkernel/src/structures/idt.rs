@@ -203,6 +203,7 @@ pub fn init() {
 
 pub fn load() {
     unsafe { IDT.lock().load_unsafe() };
+    info!("Successfully loaded IDT.");
 }
 
 pub fn set_interrupt_handler(index: u8, handler: extern "x86-interrupt" fn(InterruptStackFrame)) {

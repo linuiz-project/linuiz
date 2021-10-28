@@ -19,29 +19,6 @@ lazy_static::lazy_static! {
     };
 }
 
-struct Selectors {
-    code_selector: u16,
-    data_selector: u16,
-    tss_selector: u16,
-}
-
-lazy_static::lazy_static! {
-    static ref GDT: (GlobalDescriptorTable, Selectors) = {
-    let mut gdt = GlobalDescriptorTable::new();
-    let code_selector = gdt.add_entry(Entry::User(Flags::KERNEL_CODE.bits()));
-    let data_selector = gdt.add_entry(Entry::User(Flags::KERNEL_DATA.bits()));
-    let tss_selector = gdt.add_entry(Entry::tss(&TSS));
-
-    (
-        gdt,
-        Selectors {
-            code_selector,
-            data_selector,
-            tss_selector,
-        },
-    )
-};}
-
 bitflags::bitflags! {
     pub struct Flags: u64 {
         const ACCESSED = 1 << 40;
@@ -62,6 +39,7 @@ impl Flags {
         Self::USER_SEGMENT.bits()
             | Self::PRESENT.bits()
             | Self::WRITABLE.bits()
+            | Self::GANULARITY.bits()
             | Self::MAX_LIMIT.bits(),
     );
     const KERNEL_CODE: Self = Self::from_bits_truncate(
@@ -89,6 +67,7 @@ impl Entry {
     }
 }
 
+#[derive(Debug)]
 #[repr(C, packed)]
 pub struct Pointer {
     limit: u16,
@@ -142,19 +121,51 @@ impl GlobalDescriptorTable {
 
     fn pointer(&self) -> Pointer {
         Pointer {
-            limit: (self.next_free * core::mem::size_of::<u64>() - 1) as u16,
+            limit: ((self.next_free * core::mem::size_of::<u64>()) - 1) as u16,
             base: Address::<Virtual>::from_ptr(self.table.as_ptr()),
         }
     }
 }
 
+struct Selectors {
+    code_selector: u16,
+    data_selector: u16,
+    tss_selector: u16,
+}
+
+lazy_static::lazy_static! {
+    static ref GDT: (GlobalDescriptorTable, Selectors) = {
+        let mut gdt = GlobalDescriptorTable::new();
+        let code_selector = gdt.add_entry(Entry::User(Flags::KERNEL_CODE.bits()));
+        let data_selector = gdt.add_entry(Entry::User(Flags::KERNEL_DATA.bits()));
+        let tss_selector = gdt.add_entry(Entry::tss(&TSS));
+
+        (
+            gdt,
+            Selectors {
+                code_selector,
+                data_selector,
+                tss_selector,
+            },
+        )
+    };
+}
+
 pub fn init() {
     load();
 
+    info!("Loaded kernel GDT.");
+
     unsafe {
         crate::instructions::init_segment_registers(data());
-        crate::instructions::segmentation::ltr(tss());
+        debug!("Initialized segment registers.");
+        x86_64::instructions::segmentation::CS::set_reg(core::mem::transmute(code()));
+        debug!("Jumped to new code segment.");
+        // crate::instructions::segmentation::ltr(tss());
+        // debug!("Loaded TSS.");
     }
+
+    info!("Successfully initialized GDT.");
 }
 
 pub fn load() {
