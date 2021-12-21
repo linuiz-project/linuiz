@@ -1,20 +1,21 @@
-mod qemu_e9;
+mod debug_out;
 mod serial;
 
-pub use qemu_e9::*;
+pub use debug_out::*;
 pub use serial::*;
+use spin::Mutex;
 
 use core::fmt::Write;
 use libkernel::cell::SyncRefCell;
 
-static STDOUT: SyncRefCell<&'static mut dyn Write> = SyncRefCell::empty();
+static STDOUT: SyncRefCell<Mutex<&'static mut dyn Write>> = SyncRefCell::empty();
 
 pub fn set_stdout(
     stdout: &'static mut dyn Write,
     minimum_level: log::LevelFilter,
     trace_enabled_paths: &'static [&'static str],
 ) -> Result<(), log::SetLoggerError> {
-    STDOUT.set(stdout);
+    STDOUT.set(Mutex::new(stdout));
 
     crate::logging::init_logger(
         crate::logging::LoggingModes::STDOUT,
@@ -25,10 +26,10 @@ pub fn set_stdout(
 
 #[doc(hidden)]
 pub fn __std_out(args: core::fmt::Arguments) {
-    // let stdout_guard = &mut STDOUT.lock();
+    if let Some(lock) = STDOUT.borrow() {
+        let mut std_out = lock.lock();
 
-    if let Some(stdout) = STDOUT.borrow_mut() {
-        stdout.write_fmt(args).unwrap();
+        std_out.write_fmt(args).unwrap();
     } else {
         panic!("stdout has not been configured");
     }
