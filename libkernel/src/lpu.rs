@@ -3,14 +3,14 @@ use core::sync::atomic::AtomicUsize;
 
 pub static LPU_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-pub fn lpu() -> &'static CPU {
+pub fn local_data() -> &'static LPU {
     assert_ne!(
         MSR::IA32_FS_BASE.read(),
         0,
         "IA32_FS MSR has not been configured."
     );
 
-    unsafe { &*(MSR::IA32_FS_BASE.read() as *const CPU) }
+    unsafe { &*(MSR::IA32_FS_BASE.read() as *const LPU) }
 }
 
 pub fn auto_init_lpu() {
@@ -21,7 +21,7 @@ pub fn auto_init_lpu() {
     );
 
     unsafe {
-        const LPU_STRUCTURE_SIZE: usize = 0x1000;
+        const LPU_STRUCTURE_SIZE: usize = crate::align_up(core::mem::size_of::<LPU>(), 0x1000);
 
         // Allocate space for LPU struct.
         let ptr = crate::alloc!(LPU_STRUCTURE_SIZE, 0x1000);
@@ -38,9 +38,12 @@ pub fn auto_init_lpu() {
             MSR::IA32_FS_BASE.read()
         );
 
-        let lpu = &mut *(MSR::IA32_FS_BASE.read() as *mut CPU);
+        let apic = APIC::from_msr();
 
-        lpu.lapic = APIC::from_msr();
+        *(MSR::IA32_FS_BASE.read() as *mut LPU) = LPU {
+            id: apic.id(),
+            apic,
+        };
     }
 
     LPU_COUNT.fetch_add(1, core::sync::atomic::Ordering::AcqRel);
@@ -51,12 +54,17 @@ pub fn is_bsp() -> bool {
     MSR::IA32_APIC_BASE.read().get_bit(8)
 }
 
-pub struct CPU {
-    lapic: APIC,
+pub struct LPU {
+    id: u8,
+    apic: APIC,
 }
 
-impl CPU {
+impl LPU {
+    pub fn id(&self) -> u8 {
+        self.id
+    }
+
     pub fn apic(&'static self) -> &'static APIC {
-        &self.lapic
+        &self.apic
     }
 }

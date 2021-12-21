@@ -124,16 +124,16 @@ extern "efiapi" fn _entry(boot_info: BootInfo<UEFIMemoryDescriptor, SystemConfig
 extern "C" fn _startup() -> ! {
     libkernel::structures::gdt::init();
     libkernel::structures::idt::load();
-    libkernel::cpu::auto_init_lpu();
+    libkernel::lpu::auto_init_lpu();
     init_apic();
 
     // If this is the BSP, wake other cores.
-    if libkernel::cpu::is_bsp() {
+    if libkernel::lpu::is_bsp() {
         use libkernel::acpi::rdsp::xsdt::{madt::*, LAZY_XSDT};
 
         // Initialize other CPUs
         info!("Searching for additional processor cores...");
-        let lapic = libkernel::cpu::lpu().apic();
+        let lapic = libkernel::lpu::local_data().apic();
         let icr = lapic.interrupt_command_register();
         if let Ok(madt) = LAZY_XSDT.find_sub_table::<MADT>() {
             for interrupt_device in madt.iter() {
@@ -278,7 +278,7 @@ fn init_system_config_table(config_table: &[SystemConfigTableEntry]) {
 fn init_apic() {
     use libkernel::structures::idt;
 
-    let apic = &libkernel::cpu::lpu().apic();
+    let apic = &libkernel::lpu::local_data().apic();
 
     apic.auto_configure_timer_frequency();
 
@@ -296,7 +296,7 @@ fn init_apic() {
 }
 
 extern "x86-interrupt" fn apic_error_handler(_: libkernel::structures::idt::InterruptStackFrame) {
-    let apic = &libkernel::cpu::lpu().apic();
+    let apic = &libkernel::lpu::local_data().apic();
 
     error!("APIC ERROR INTERRUPT");
     error!("--------------------");
