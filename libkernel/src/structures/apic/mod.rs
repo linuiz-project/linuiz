@@ -115,7 +115,7 @@ impl APIC {
 
         let _self = Self { mmio };
 
-        debug!(
+        trace!(
             "Created APIC ID {} Ver {}: {:?} -> {:?}",
             _self.id(),
             _self.read_register(Register::Version),

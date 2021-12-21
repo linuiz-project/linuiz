@@ -20,16 +20,22 @@ impl log::Log for KernelLogger {
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
             if self.modes.contains(LoggingModes::STDOUT) {
-                crate::println!(
-                    "{}[{} {}] {}",
-                    match record.level() {
-                        log::Level::Error => &"\n\n",
-                        _ => &"",
-                    },
-                    record.level(),
-                    record.module_path().unwrap_or("None"),
-                    record.args()
-                );
+                if let Some(lpu) = libkernel::lpu::get_local_data() {
+                    crate::println!(
+                        "[{}>{} {}] {}",
+                        lpu.id(),
+                        record.level(),
+                        record.module_path().unwrap_or("None"),
+                        record.args()
+                    );
+                } else {
+                    crate::println!(
+                        "[{} {}] {}",
+                        record.level(),
+                        record.module_path().unwrap_or("None"),
+                        record.args()
+                    );
+                }
             }
 
             if self.modes.contains(LoggingModes::GRAPHIC) {

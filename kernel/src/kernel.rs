@@ -133,13 +133,19 @@ extern "C" fn _startup() -> ! {
 
         // Initialize other CPUs
         info!("Searching for additional processor cores...");
-        let lapic = libkernel::lpu::local_data().apic();
-        let icr = lapic.interrupt_command_register();
+        let apic = libkernel::lpu::local_data().apic();
+        let icr = apic.interrupt_command_register();
         if let Ok(madt) = LAZY_XSDT.find_sub_table::<MADT>() {
             for interrupt_device in madt.iter() {
                 if let InterruptDevice::LocalAPIC(lapic_other) = interrupt_device {
-                    if lapic.id() != lapic_other.id() {
-                        info!("Identified processor: {:?}", lapic_other);
+                    use libkernel::acpi::rdsp::xsdt::madt::LocalAPICFlags;
+
+                    // Ensure the CPU core can actually be enabled.
+                    if lapic_other.flags().intersects(
+                        LocalAPICFlags::PROCESSOR_ENABLED | LocalAPICFlags::ONLINE_CAPABLE,
+                    ) && apic.id() != lapic_other.id()
+                    {
+                        debug!("Identified processor: {:?}", lapic_other);
 
                         const STACK_SIZE: usize = 1000000 /* 1 MiB */;
                         unsafe {
