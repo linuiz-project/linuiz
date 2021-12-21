@@ -26,23 +26,29 @@ pub fn auto_init_lpu() {
         // Allocate space for LPU struct.
         let ptr = crate::alloc!(LPU_STRUCTURE_SIZE, 0x1000);
         core::ptr::write_bytes(ptr, 0, LPU_STRUCTURE_SIZE);
-        debug!(
+        trace!(
             "Allocating region for local CPU structure: {:?}:{}",
-            ptr, LPU_STRUCTURE_SIZE
+            ptr,
+            LPU_STRUCTURE_SIZE
         );
 
         MSR::IA32_FS_BASE.write(ptr as u64);
-        debug!(
+        trace!(
             "IA32_FS successfully updated: 0x{:X}.",
             MSR::IA32_FS_BASE.read()
         );
 
         let lpu = &mut *(MSR::IA32_FS_BASE.read() as *mut CPU);
 
-        lpu.lapic = APIC::from_ia32_apic_base();
+        lpu.lapic = APIC::from_msr();
     }
 
     LPU_COUNT.fetch_add(1, core::sync::atomic::Ordering::AcqRel);
+}
+
+pub fn is_bsp() -> bool {
+    use bit_field::BitField;
+    MSR::IA32_APIC_BASE.read().get_bit(8)
 }
 
 pub struct CPU {

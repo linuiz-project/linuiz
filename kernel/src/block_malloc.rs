@@ -137,22 +137,22 @@ impl BlockAllocator<'_> {
             old_stack_size,
             STACK_SIZE.size()
         );
-        let old_stack_base = stack_frames.start().base_addr().as_usize() as *const u8;
-        let new_stack_base = self
+        let old_stack_top = stack_frames.start().base_addr().as_usize() as *const u8;
+        let new_stack_top = self
             .alloc::<u8>(STACK_SIZE)
             .add(STACK_SIZE.size() - old_stack_size);
 
         debug!(
             "Copying bootloader-allocated stack ({} pages): {:?} -> {:?}",
             stack_frames.len(),
-            old_stack_base,
-            new_stack_base
+            old_stack_top,
+            new_stack_top
         );
         // Finally, copy the old identity-mapped stack.
-        core::ptr::copy_nonoverlapping(old_stack_base, new_stack_base, old_stack_size);
+        core::ptr::copy_nonoverlapping(old_stack_top, new_stack_top, old_stack_size);
 
         // Determine offset between the two stacks, to properly move RSP.
-        let stack_ptr_offset = old_stack_base.offset_from(new_stack_base);
+        let stack_ptr_offset = old_stack_top.offset_from(new_stack_top);
         debug!("Modifying `rsp` by ptr offset: 0x{:x}.", stack_ptr_offset);
 
         use libkernel::registers::stack::RSP;

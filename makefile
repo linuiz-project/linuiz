@@ -30,8 +30,7 @@ $(bootloader): $(boot_deps)
 		cargo build --profile $(PROFILE) -Z unstable-options
 
 $(ap_trampoline): ./kernel/src/ap_trampoline.asm
-		rm -f $(ap_trampoline)
-		nasm -f elf64 -o $(ap_trampoline) ./kernel/src/ap_trampoline.asm;
+		nasm -f elf64 -o $(ap_trampoline) ./kernel/src/ap_trampoline.asm
 
 $(kernel): $(ap_trampoline) $(libkernel_deps) $(kernel_deps)
 	rm -f $(kernel)
@@ -41,4 +40,3 @@ $(kernel): $(ap_trampoline) $(libkernel_deps) $(kernel_deps)
 		rustfmt ../libkernel/**/*.rs;\
 		cargo build --profile $(PROFILE) -Z unstable-options;\
 		cd ..;\
-		rm -f $(ap_trampoline);\

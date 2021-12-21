@@ -1,5 +1,31 @@
+#[derive(Debug)]
+pub struct CPUIDResult {
+    eax: u32,
+    ebx: u32,
+    ecx: u32,
+    edx: u32,
+}
+
+impl CPUIDResult {
+    pub const fn eax(&self) -> u32 {
+        self.eax
+    }
+
+    pub const fn ebx(&self) -> u32 {
+        self.ebx
+    }
+
+    pub const fn ecx(&self) -> u32 {
+        self.ecx
+    }
+
+    pub const fn edx(&self) -> u32 {
+        self.edx
+    }
+}
+
 #[inline]
-pub fn cpuid(leaf: u32, subleaf: u32) -> (u32, u32, u32, u32) {
+pub fn cpuid(leaf: u32, subleaf: u32) -> Option<CPUIDResult> {
     let (eax, ebx, ecx, edx);
 
     unsafe {
@@ -14,7 +40,11 @@ pub fn cpuid(leaf: u32, subleaf: u32) -> (u32, u32, u32, u32) {
         )
     }
 
-    (eax, ebx, ecx, edx)
+    if eax >= leaf {
+        Some(CPUIDResult { eax, ebx, ecx, edx })
+    } else {
+        None
+    }
 }
 
 bitflags::bitflags! {
@@ -80,6 +110,6 @@ bitflags::bitflags! {
 
 #[inline]
 pub fn cpu_features() -> CPUFeatures {
-    let values = cpuid(0x1, 0x0);
-    CPUFeatures::from_bits_truncate(((values.3 as u64) << 32) | (values.2 as u64))
+    let features = cpuid(0x1, 0x0).unwrap();
+    CPUFeatures::from_bits_truncate(((features.edx() as u64) << 32) | (features.ecx() as u64))
 }

@@ -17,10 +17,8 @@ extern crate libkernel;
 mod block_malloc;
 mod drivers;
 mod logging;
-mod pic8259;
 mod timer;
 
-use core::sync::atomic::{AtomicBool, Ordering};
 use libkernel::{
     acpi::SystemConfigTableEntry,
     memory::{falloc, UEFIMemoryDescriptor},
@@ -28,6 +26,13 @@ use libkernel::{
 };
 
 extern "C" {
+    static __ap_trampoline_start: LinkerSymbol;
+    static __ap_trampoline_end: LinkerSymbol;
+    static __kernel_pml4: LinkerSymbol;
+
+    static __ap_stack_bottom: LinkerSymbol;
+    static __ap_stack_top: LinkerSymbol;
+
     static __text_start: LinkerSymbol;
     static __text_end: LinkerSymbol;
 
@@ -39,12 +44,6 @@ extern "C" {
 
     static __bss_start: LinkerSymbol;
     static __bss_end: LinkerSymbol;
-
-    static __ap_trampoline_start: LinkerSymbol;
-    static __ap_trampoline_end: LinkerSymbol;
-
-    static __kernel_pml4: LinkerSymbol;
-    static __cpu_count: LinkerSymbol;
 }
 
 #[cfg(debug_assertions)]
@@ -58,10 +57,11 @@ fn get_log_level() -> log::LevelFilter {
 }
 
 static mut CON_OUT: drivers::io::Serial = drivers::io::Serial::new(drivers::io::COM1);
-// static mut CON_OUT: drivers::io::QEMUE9 = drivers::io::QEMUE9::new();
 static KERNEL_MALLOC: block_malloc::BlockAllocator = block_malloc::BlockAllocator::new();
-static TRACE_ENABLED_PATHS: [&str; 2] = ["kernel::drivers::ahci", "libkernel::memory::falloc"];
-static CPU_INIT: AtomicBool = AtomicBool::new(true);
+static TRACE_ENABLED_PATHS: [&str; 1] = ["libkernel::structures::apic::icr"];
+
+#[export_name = "__ap_stack_pointers"]
+static mut AP_STACK_POINTERS: [usize; 256] = [0; 256];
 
 #[no_mangle]
 #[export_name = "_entry"]
@@ -114,7 +114,7 @@ extern "efiapi" fn _entry(boot_info: BootInfo<UEFIMemoryDescriptor, SystemConfig
             );
         }
 
-        debug!("Kernel memory intiialization complete.");
+        debug!("Kernel memory initialization complete.");
     }
 
     _startup()
@@ -122,18 +122,13 @@ extern "efiapi" fn _entry(boot_info: BootInfo<UEFIMemoryDescriptor, SystemConfig
 
 #[no_mangle]
 extern "C" fn _startup() -> ! {
-    let is_bsp = libkernel::cpu::LPU_COUNT.load(Ordering::Acquire) == 0;
-
-    // Wait for CPU_INIT to be possible, and then allow BSP to continue.
-    while !CPU_INIT.load(core::sync::atomic::Ordering::Acquire) {}
     libkernel::structures::gdt::init();
     libkernel::structures::idt::load();
     libkernel::cpu::auto_init_lpu();
     init_apic();
-    CPU_INIT.store(false, Ordering::Release);
 
     // If this is the BSP, wake other cores.
-    if is_bsp {
+    if libkernel::cpu::is_bsp() {
         use libkernel::acpi::rdsp::xsdt::{madt::*, LAZY_XSDT};
 
         // Initialize other CPUs
@@ -144,7 +139,13 @@ extern "C" fn _startup() -> ! {
             for interrupt_device in madt.iter() {
                 if let InterruptDevice::LocalAPIC(lapic_other) = interrupt_device {
                     if lapic.id() != lapic_other.id() {
-                        info!("Identified additional processor core: {}", lapic_other.id());
+                        info!("Identified processor: {:?}", lapic_other);
+
+                        const STACK_SIZE: usize = 1000000 /* 1 MiB */;
+                        unsafe {
+                            AP_STACK_POINTERS[lapic_other.id() as usize] =
+                                (libkernel::alloc!(STACK_SIZE) as *mut u8).add(STACK_SIZE) as usize;
+                        }
 
                         let ap_trampoline_page_index =
                             unsafe { __ap_trampoline_start.as_page().index() } as u8;
@@ -156,22 +157,11 @@ extern "C" fn _startup() -> ! {
                         icr.wait_pending();
                         icr.send_sipi(ap_trampoline_page_index, lapic_other.id());
                         icr.wait_pending();
-
-                        // Allow CPU to initialize, and then wait for its initialization to complete.
-                        CPU_INIT.store(true, Ordering::Release);
-                        while CPU_INIT.load(core::sync::atomic::Ordering::Acquire) {}
                     }
                 }
             }
         }
     }
-
-    info!(
-        "CURRENT CPU COUNT: {}",
-        libkernel::cpu::LPU_COUNT.load(Ordering::Acquire)
-    );
-
-    // TODO create function for automatigically creating a new stack
 
     libkernel::instructions::hlt_indefinite();
 
@@ -286,69 +276,21 @@ fn init_system_config_table(config_table: &[SystemConfigTableEntry]) {
 }
 
 fn init_apic() {
-    use libkernel::structures::{apic, idt};
+    use libkernel::structures::idt;
 
     let apic = &libkernel::cpu::lpu().apic();
 
-    unsafe {
-        debug!("Resetting and enabling local APIC (it may have already been enabled).");
-        apic.reset();
-        apic.sw_enable();
-        apic.set_spurious_vector(u8::MAX);
-    }
+    apic.auto_configure_timer_frequency();
 
-    let timer = timer::Timer::new(1);
-
-    debug!("Configuring APIC timer state.");
-    apic.write_register(
-        apic::Register::TimerDivisor,
-        apic::TimerDivisor::Div1 as u32,
-    );
-    apic.write_register(apic::Register::TimerInitialCount, u32::MAX);
-    apic.timer().set_mode(apic::TimerMode::OneShot);
-
-    crate::pic8259::enable();
-    info!("Successfully initialized PIC.");
-    info!("Configuring PIT frequency to 1000Hz.");
-    crate::pic8259::pit::set_timer_freq(
-        crate::timer::FREQUENCY as u32,
-        crate::pic8259::pit::OperatingMode::RateGenerator,
-    );
-    debug!("Setting timer interrupt handler and enabling interrupts.");
-    idt::set_interrupt_handler(32, crate::timer::tick_handler);
-    libkernel::instructions::interrupts::enable();
-
-    debug!("Determining APIC timer frequency using PIT windowing.");
-    apic.timer().set_masked(false);
-
-    timer.wait();
-
-    apic.timer().set_masked(true);
-    let timer_count = apic.read_register(apic::Register::TimerCurrentCount);
-    info!(
-        "Determined core crystal clock frequency: {}MHz",
-        timer_count / 1000000
-    );
-    apic.write_register(apic::Register::TimerInitialCount, u32::MAX - timer_count);
-    apic.write_register(
-        apic::Register::TimerDivisor,
-        apic::TimerDivisor::Div1 as u32,
-    );
-
-    debug!("Disabling 8259 emulated PIC.");
-    libkernel::instructions::interrupts::without_interrupts(|| unsafe {
-        crate::pic8259::disable()
-    });
-
-    debug!("Updating APIC register vectors and respective IDT entries.");
-    apic.timer().set_vector(32);
     idt::set_interrupt_handler(32, timer::apic_tick_handler);
-    apic.error().set_vector(58);
+    apic.timer().set_vector(32);
     idt::set_interrupt_handler(58, apic_error_handler);
+    apic.error().set_vector(58);
 
-    debug!("Unmasking APIC timer interrupt (it will fire now!).");
-    apic.timer().set_mode(apic::TimerMode::Periodic);
+    apic.timer()
+        .set_mode(libkernel::structures::apic::TimerMode::Periodic);
     apic.timer().set_masked(false);
+    apic.sw_enable();
 
     info!("Core-local APIC configured and enabled.");
 }

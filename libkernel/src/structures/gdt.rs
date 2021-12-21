@@ -153,23 +153,20 @@ lazy_static::lazy_static! {
 pub fn init() {
     load();
 
-    info!("Loaded kernel GDT.");
-
     unsafe {
         crate::instructions::init_segment_registers(data());
-        debug!("Initialized segment registers.");
         x86_64::instructions::segmentation::CS::set_reg(core::mem::transmute(code()));
-        debug!("Jumped to new code segment.");
         // crate::instructions::segmentation::ltr(tss());
         // debug!("Loaded TSS.");
     }
 
-    info!("Successfully initialized GDT.");
+    trace!("GDT initialized.");
 }
 
 #[inline]
 pub fn load() {
-    GDT.0.load()
+    GDT.0.load();
+    trace!("GDT loaded.");
 }
 
 pub fn code() -> u16 {

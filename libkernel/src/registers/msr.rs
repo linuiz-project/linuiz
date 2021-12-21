@@ -3,10 +3,13 @@
 #[allow(non_camel_case_types)]
 pub enum MSR {
     IA32_APIC_BASE = 0x1B,
-    IA32_X2APIC_APICID = 2050,
+    IA32_X2APIC_APICID = 0x2050,
+    I32_TSC_DEADLINE = 0x6E0,
     IA32_EFER = 0xC0000080,
     IA32_FS_BASE = 0xC0000100,
     IA32_GS_BASE = 0xC0000101,
+    PLATFORM_INFO = 0xCE,
+    FSB_FREQ = 0xCD,
 }
 
 impl MSR {

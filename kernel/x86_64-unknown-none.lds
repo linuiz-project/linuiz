@@ -14,7 +14,7 @@ SECTIONS
         __ap_trampoline_end = .;
     }
 
-    . = 0x200000;
+    . = 0x200000; /* 2 MiB */
 
     .text : ALIGN(0x1000) {
         __text_start = .;

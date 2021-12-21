@@ -1,5 +1,5 @@
+use crate::io::port::WriteOnlyPort;
 use bit_field::BitField;
-use libkernel::io::port::WriteOnlyPort;
 
 const fn data0() -> WriteOnlyPort<u8> {
     unsafe { WriteOnlyPort::<u8>::new(0x40) }
@@ -68,16 +68,25 @@ pub fn send_command(command: Command) {
 pub fn set_timer_freq(frequency: u32, operating_mode: OperatingMode) {
     const TICK_RATE: u32 = 1193181;
 
-    debug!("Configuring 8259 PIT tick frequency.");
+    if frequency > TICK_RATE {
+        panic!(
+            "PIT frequency cannot be greater than maximum tick rate ({}Hz)!",
+            TICK_RATE
+        );
+    }
+
+    trace!("Configuring 8259 PIT tick frequency.");
     send_command(Command::new(
         operating_mode,
         AccessMode::LowAndHighByte,
         Channel::Channel0,
     ));
     let divisor = TICK_RATE / frequency;
-    debug!(
-        "8259 PIT configuration: (Tick Rate {}Hz) / (Frequency {}Hz) = (Divisor {})",
-        TICK_RATE, frequency, divisor
+    trace!(
+        "8259 PIT configuration: (Rate {}Hz) / (Freq {}Hz) = (Div {})",
+        TICK_RATE,
+        frequency,
+        divisor
     );
 
     data0().write(divisor as u8);

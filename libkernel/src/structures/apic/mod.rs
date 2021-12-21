@@ -2,6 +2,7 @@ pub mod icr;
 
 use crate::{
     addr_ty::Virtual,
+    cell::SyncOnceCell,
     memory::{
         mmio::{Mapped, MMIO},
         volatile::VolatileCell,
@@ -76,18 +77,20 @@ bitflags::bitflags! {
     }
 }
 
+pub static TIMER_FREQUENCY: SyncOnceCell<u32> = SyncOnceCell::new();
+
 pub struct APIC {
     mmio: MMIO<Mapped>,
 }
 
 impl APIC {
-    pub fn from_ia32_apic_base() -> Self {
+    pub fn from_msr() -> Self {
         let frames = unsafe {
             use crate::memory::falloc;
 
             falloc::get()
                 .acquire_frame(
-                    ((MSR::IA32_APIC_BASE.read() & 0x3FFFFF000) >> 12) as usize,
+                    MSR::IA32_APIC_BASE.read().get_bits(12..36) as usize,
                     falloc::FrameState::Reserved,
                 )
                 .unwrap()
@@ -101,7 +104,7 @@ impl APIC {
     }
 
     pub unsafe fn new(mmio: MMIO<Mapped>) -> Self {
-        let assumed_base = (MSR::IA32_APIC_BASE.read() >> 12) as usize;
+        let assumed_base = MSR::IA32_APIC_BASE.read().get_bits(12..36) as usize;
         if assumed_base != mmio.frames().start().index() {
             warn!(
                 "APIC MMIO BASE FRAME INDEX CHECK: IA32_APIC_BASE({:?}) != PROVIDED({:?})",
@@ -113,8 +116,9 @@ impl APIC {
         let _self = Self { mmio };
 
         debug!(
-            "Created APIC {}: {:?} -> {:?}",
+            "Created APIC ID {} Ver {}: {:?} -> {:?}",
             _self.id(),
+            _self.read_register(Register::Version),
             _self.mmio.mapped_addr(),
             _self.mmio.frames().start().base_addr()
         );
@@ -153,7 +157,19 @@ impl APIC {
     }
 
     pub fn id(&self) -> u8 {
-        self.read_register(Register::ID) as u8
+        self.read_register(Register::ID).get_bits(24..) as u8
+    }
+
+    pub fn version(&self) -> u8 {
+        self.read_register(Register::Version).get_bits(0..8) as u8
+    }
+
+    pub fn max_lvt_entry(&self) -> u8 {
+        self.read_register(Register::Version).get_bits(16..24) as u8
+    }
+
+    pub fn eoi_broadcast_suppression(&self) -> bool {
+        self.read_register(Register::Version).get_bit(24)
     }
 
     pub fn end_of_interrupt(&self) {
@@ -288,6 +304,73 @@ impl APIC {
         self.lint1().set_masked(true);
         self.write_register(Register::TaskPriority, 0);
         self.write_register(Register::TimerInitialCount, 0);
+    }
+
+    pub fn auto_configure_timer_frequency(&self) {
+        if let None = TIMER_FREQUENCY.get() {
+            self.auto_determine_timer_frequency();
+        } else {
+            trace!("Global timer frequency already determined, skipping routine.");
+        }
+
+        self.write_register(
+            Register::TimerInitialCount,
+            u32::MAX - *TIMER_FREQUENCY.get().unwrap(),
+        );
+        self.write_register(Register::TimerDivisor, TimerDivisor::Div1 as u32);
+    }
+
+    fn auto_determine_timer_frequency(&self) {
+        assert!(
+            TIMER_FREQUENCY.get().is_none(),
+            "Timer frequency has already been determined."
+        );
+
+        debug!("Determining global APIC timer frequency.");
+
+        use crate::structures::{idt, pic8259};
+        use core::sync::atomic::{AtomicU32, Ordering};
+
+        static mut ELAPSED_TICKS: AtomicU32 = AtomicU32::new(0);
+        extern "x86-interrupt" fn pit_tick_handler(isf: idt::InterruptStackFrame) {
+            unsafe { ELAPSED_TICKS.fetch_add(1, Ordering::Release) };
+            pic8259::end_of_interrupt(pic8259::InterruptOffset::Timer);
+        }
+
+        unsafe {
+            trace!("Resetting and enabling local APIC (it may have already been enabled).");
+            self.reset();
+            self.sw_enable();
+            self.set_spurious_vector(u8::MAX);
+        }
+
+        trace!("Configuring APIC timer state.");
+        self.write_register(Register::TimerDivisor, TimerDivisor::Div1 as u32);
+        self.write_register(Register::TimerInitialCount, u32::MAX);
+        self.timer().set_mode(TimerMode::OneShot);
+
+        pic8259::enable();
+        pic8259::pit::set_timer_freq(1000, pic8259::pit::OperatingMode::RateGenerator);
+        trace!("Successfully initialized PIC with 1000Hz frequency.");
+
+        idt::set_interrupt_handler(32, pit_tick_handler);
+        crate::instructions::interrupts::enable();
+
+        trace!("Determining APIC timer frequency using PIT windowing.");
+        self.timer().set_masked(false);
+
+        unsafe { while ELAPSED_TICKS.load(Ordering::Acquire) < 1000 {} }
+
+        self.timer().set_masked(true);
+        self.sw_disable();
+        let apic_freq = self.read_register(Register::TimerCurrentCount);
+
+        trace!("Disabling 8259 emulated PIC.");
+        crate::instructions::interrupts::without_interrupts(|| unsafe { pic8259::disable() });
+
+        info!("APIC timer frequency: {}Hz", apic_freq);
+        TIMER_FREQUENCY.set(apic_freq).unwrap();
+        trace!("It's possible the BSP core's measured nominal clock does not match the other cores; in this case, scheduling accuracy will be impacted.");
     }
 }
 

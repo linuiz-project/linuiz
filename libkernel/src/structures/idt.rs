@@ -203,12 +203,12 @@ pub fn init() {
 
 pub fn load() {
     unsafe { IDT.lock().load_unsafe() };
-    info!("Successfully loaded IDT.");
+    trace!("Loaded IDT.");
 }
 
 pub fn set_interrupt_handler(index: u8, handler: extern "x86-interrupt" fn(InterruptStackFrame)) {
     crate::instructions::interrupts::without_interrupts(|| {
-        debug!("Modifying IDT handler at index: {}", index);
+        trace!("Modifying IDT handler at index: {}", index);
         IDT.lock()[index as usize].set_handler_fn(handler);
     });
 }

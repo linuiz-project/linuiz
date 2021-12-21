@@ -15,3 +15,5 @@ hdd/*
 references/*
 kernel.out
 debug/
+
+kernel/ap_trampoline.o

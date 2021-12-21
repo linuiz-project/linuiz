@@ -9,7 +9,7 @@ Information about the PIC can be found here: https://en.wikipedia.org/wiki/Intel
 
 pub mod pit;
 
-use libkernel::io::port::{ReadWritePort, WriteOnlyPort};
+use crate::io::port::{ReadWritePort, WriteOnlyPort};
 
 const CMD_INIT: u8 = 0x11;
 const CMD_END_OF_INTERRUPT: u8 = 0x20;

@@ -4,11 +4,11 @@ use libkernel::io::port::WriteOnlyPort;
 
 const QEMU_PORT_E9: u16 = 0xE9;
 
-pub struct QEMUE9 {
+pub struct DebugOut {
     out: WriteOnlyPort<u8>,
 }
 
-impl QEMUE9 {
+impl DebugOut {
     pub const fn new() -> Self {
         Self {
             out: unsafe { WriteOnlyPort::new(QEMU_PORT_E9) },
@@ -32,7 +32,7 @@ impl QEMUE9 {
     }
 }
 
-impl core::fmt::Write for QEMUE9 {
+impl core::fmt::Write for DebugOut {
     fn write_str(&mut self, string: &str) -> core::fmt::Result {
         self.write_str(string);
         Ok(())

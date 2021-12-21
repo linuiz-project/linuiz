@@ -1,12 +1,21 @@
+STACK_SIZE equ 0x1000
+extern _startup, __ap_stack_pointers
+
 section .bss
 
-extern _startup
+global __ap_stack_bottom, __ap_stack_top
+align 0x1000
+__ap_stack_bottom:
+    resb 512 * STACK_SIZE
+__ap_stack_top:
 
 
 section .ap_trampoline
 
+ap_stack_index dw 250
+
 global __kernel_pml4
-__kernel_pml4      resd 1
+__kernel_pml4 dd 0
 
 bits 16
 realmode:
@@ -52,7 +61,7 @@ GRAN_4K       equ 1 << 7
 SZ_32         equ 1 << 6
 LONG_MODE     equ 1 << 5
 
-global __gdt:data, __gdt.code, __gdt.data, __gdt.tss, __gdt.pointer
+global __gdt.code, __gdt.data, __gdt.tss, __gdt.pointer
     
 __gdt:
     .null: equ $ - __gdt
@@ -89,12 +98,16 @@ longmode:
     mov ss, ax
 
     ; Configure temporary stack
-    mov rsp, __stack_top
+
+    ; Get LAPIC ID (this acts as an __ap_stack_pointers index)
+    mov eax, 0x1
+    cpuid                           ; The LAPIC ID is in bits 24..32 (exclusive range)
+    shr ebx, 24
+    and ebx, 0xFF                   ; `ebx` or `bl` now contains the LAPIC ID
+    mov eax, 0x8                    ; Native integer width
+    mul ebx                         ; `eax` now contains byte offset of LAPIC ID
+    add eax, __ap_stack_pointers    ; `eax` now contains the absolute offset of the AP stack pointer
+    mov rsp, [eax]
 
     ; Jump to high-level code
     call _startup
-
-
-__stack_bottom:
-    resb 32 * 1024
-__stack_top:

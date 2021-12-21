@@ -82,9 +82,9 @@ impl<'v> InterruptCommandRegister<'v> {
             | ((deassert as u32) << 14)
             | ((dest_shorthand as u32) << 18);
 
-        debug!("ICR: WRITE HIGH: 0x{:X}", high);
+        trace!("ICR: WRITE HIGH: 0x{:X}", high);
         self.high.write(high);
-        debug!("ICR: WRITE LOW: 0x{:X}", low);
+        trace!("ICR: WRITE LOW: 0x{:X}", low);
         unsafe {
             asm!(
                 "mov r9, r8",
@@ -94,7 +94,7 @@ impl<'v> InterruptCommandRegister<'v> {
             )
         };
         self.low.write(low);
-        debug!("ICR: WRITE COMPLETE");
+        trace!("ICR: WRITE COMPLETE");
     }
 
     pub fn is_pending(&self) -> bool {
@@ -103,10 +103,10 @@ impl<'v> InterruptCommandRegister<'v> {
     }
 
     pub fn wait_pending(&self) {
-        debug!("ICR: WAIT PENDING");
+        trace!("ICR: WAIT PENDING");
         while self.is_pending() {
             crate::instructions::hlt();
         }
-        debug!("ICR: WAIT COMPLETE");
+        trace!("ICR: WAIT COMPLETE");
     }
 }
