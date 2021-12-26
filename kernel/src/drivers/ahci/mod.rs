@@ -2,7 +2,7 @@ pub mod hba;
 
 use alloc::vec::Vec;
 use bit_field::BitField;
-use libkernel::io::pci::{standard::StandardRegister, PCIeDevice, Standard};
+use libstd::io::pci::{standard::StandardRegister, PCIeDevice, Standard};
 
 pub const ATA_DEV_BUSY: u8 = 0x80;
 pub const ATA_DEV_DRQ: u8 = 0x08;
@@ -45,8 +45,8 @@ pub struct FIS_REG_H2D {
 }
 
 impl FIS_REG_H2D {
-    libkernel::bitfield_getter!(bits1, u8, port_multiplier, 0..4);
-    libkernel::bitfield_getter!(bits1, command_control, 7);
+    libstd::bitfield_getter!(bits1, u8, port_multiplier, 0..4);
+    libstd::bitfield_getter!(bits1, command_control, 7);
 
     pub fn set_sector_base(&mut self, sector: usize) {
         assert_eq!(sector & 0xFFFFFFFFFFFF, 0, "sector is 48 bits");

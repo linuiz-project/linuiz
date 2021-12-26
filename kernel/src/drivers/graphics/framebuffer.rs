@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use crate::drivers::graphics::color::{Color8i, Colors};
-use libkernel::{addr_ty::Physical, Address, Size};
+use libstd::{addr_ty::Physical, Address, Size};
 use spin::{Mutex, RwLock};
 
 #[repr(C)]
@@ -20,22 +20,22 @@ impl FramebufferDriver {
         let framebuffer = unsafe {
             let frame_index = buffer_addr.frame_index();
             let frame_count = frame_index + ((byte_len + 0xFFF) / 0x1000);
-            let mmio_frames = libkernel::memory::falloc::get()
+            let mmio_frames = libstd::memory::falloc::get()
                 .acquire_frames(
                     frame_index,
                     frame_count,
-                    libkernel::memory::falloc::FrameState::Reserved,
+                    libstd::memory::falloc::FrameState::Reserved,
                 )
                 .unwrap();
 
-            libkernel::alloc_to!(&mmio_frames)
+            libstd::alloc_to!(&mmio_frames)
         };
 
         info!("{:?} {}", dimensions, scanline_width);
 
         Self {
             framebuffer: Mutex::new(framebuffer),
-            backbuffer: RwLock::new(libkernel::alloc!(byte_len)),
+            backbuffer: RwLock::new(libstd::alloc!(byte_len)),
             dimensions,
             scanline_width,
         }

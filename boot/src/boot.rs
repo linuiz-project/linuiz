@@ -15,7 +15,7 @@ use core::{
     mem::{size_of, transmute},
     ptr::slice_from_raw_parts_mut,
 };
-use libkernel::{elf::*, FramebufferInfo};
+use libstd::{elf::*, FramebufferInfo};
 use uefi::{
     prelude::BootServices,
     proto::{
@@ -129,7 +129,7 @@ pub fn free_pool(boot_services: &BootServices, buffer: &mut [u8]) {
 pub fn free_pages(boot_services: &BootServices, buffer: &mut [u8]) {
     match boot_services.free_pages(
         buffer.as_ptr() as u64,
-        libkernel::align_up_div(buffer.len(), 0x1000),
+        libstd::align_up_div(buffer.len(), 0x1000),
     ) {
         Ok(completion) => completion.unwrap(),
         Err(error) => panic!("{:?}", error),
@@ -202,7 +202,7 @@ fn efi_main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status
             let mode_info = mode.info();
             info!("Selected graphics mode: {:?}", mode_info);
             let resolution = mode_info.resolution();
-            let size = libkernel::Size::new(resolution.0, resolution.1);
+            let size = libstd::Size::new(resolution.0, resolution.1);
             info!("Acquired and configured graphics output protocol.");
 
             Some(FramebufferInfo::new(ptr, size, mode_info.stride()))
@@ -347,9 +347,9 @@ fn kernel_transfer(
     }
 
     // Finally, drop into the kernel.
-    let kernel_main: libkernel::KernelMain<MemoryDescriptor, uefi::table::cfg::ConfigTableEntry> =
+    let kernel_main: libstd::KernelMain<MemoryDescriptor, uefi::table::cfg::ConfigTableEntry> =
         unsafe { transmute(kernel_entry_point) };
-    let boot_info = libkernel::BootInfo::new(
+    let boot_info = libstd::BootInfo::new(
         unsafe { memory_map.align_to().1 },
         runtime_table.config_table(),
         framebuffer,

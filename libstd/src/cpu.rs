@@ -1,15 +1,15 @@
 use crate::{registers::MSR, structures::apic::APIC};
 use core::sync::atomic::AtomicUsize;
 
-pub static LPU_COUNT: AtomicUsize = AtomicUsize::new(0);
+pub static CPU_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-pub fn try_get() -> Option<&'static LPU> {
+pub fn try_get() -> Option<&'static CPU> {
     match MSR::IA32_FS_BASE.read() {
         0 => None,
         ptr => {
-            let lpu = unsafe { &*(ptr as *const LPU) };
+            let lpu = unsafe { &*(ptr as *const CPU) };
 
-            if lpu.magic == LPU::MAGIC {
+            if lpu.magic == CPU::MAGIC {
                 Some(lpu)
             } else {
                 None
@@ -18,17 +18,17 @@ pub fn try_get() -> Option<&'static LPU> {
     }
 }
 
-pub fn get() -> &'static LPU {
+pub fn get() -> &'static CPU {
     assert_ne!(
         MSR::IA32_FS_BASE.read(),
         0,
         "IA32_FS MSR has not been configured."
     );
 
-    unsafe { &*(MSR::IA32_FS_BASE.read() as *const LPU) }
+    unsafe { &*(MSR::IA32_FS_BASE.read() as *const CPU) }
 }
 
-pub fn auto_init_lpu() {
+pub fn init() {
     assert_eq!(
         MSR::IA32_FS_BASE.read(),
         0,
@@ -36,7 +36,7 @@ pub fn auto_init_lpu() {
     );
 
     unsafe {
-        const LPU_STRUCTURE_SIZE: usize = crate::align_up(core::mem::size_of::<LPU>(), 0x1000);
+        const LPU_STRUCTURE_SIZE: usize = crate::align_up(core::mem::size_of::<CPU>(), 0x1000);
 
         // Allocate space for LPU struct.
         let ptr = crate::alloc!(LPU_STRUCTURE_SIZE, 0x1000);
@@ -55,14 +55,14 @@ pub fn auto_init_lpu() {
 
         let apic = APIC::from_msr();
 
-        *(MSR::IA32_FS_BASE.read() as *mut LPU) = LPU {
-            magic: LPU::MAGIC,
+        *(MSR::IA32_FS_BASE.read() as *mut CPU) = CPU {
+            magic: CPU::MAGIC,
             id: apic.id(),
             apic,
         };
     }
 
-    LPU_COUNT.fetch_add(1, core::sync::atomic::Ordering::AcqRel);
+    CPU_COUNT.fetch_add(1, core::sync::atomic::Ordering::AcqRel);
 }
 
 pub fn is_bsp() -> bool {
@@ -70,13 +70,13 @@ pub fn is_bsp() -> bool {
     MSR::IA32_APIC_BASE.read().get_bit(8)
 }
 
-pub struct LPU {
+pub struct CPU {
     magic: usize,
     id: u8,
     apic: APIC,
 }
 
-impl LPU {
+impl CPU {
     const MAGIC: usize = 0x132FFD5454544444;
 
     pub fn id(&self) -> u8 {

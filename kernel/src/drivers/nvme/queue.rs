@@ -1,6 +1,6 @@
 use super::command::NVME_COMMAND;
 use core::sync::atomic::{AtomicU16, Ordering};
-use libkernel::{
+use libstd::{
     addr_ty::{Physical, Virtual},
     memory::{falloc, malloc, volatile::VolatileCell},
     Address, ReadWrite,
@@ -13,7 +13,7 @@ pub enum IO {}
 impl QueueDomain for IO {}
 
 pub struct CompletionQueue<'q> {
-    frames: libkernel::memory::FrameIterator,
+    frames: libstd::memory::FrameIterator,
     entries: &'q [super::command::Completion],
     doorbell: &'q VolatileCell<u32, ReadWrite>,
     cur_index: u16,
@@ -25,7 +25,7 @@ impl<'q> CompletionQueue<'q> {
         // TODO somehow validate entry size
 
         let size_in_bytes = (entry_count as usize) * entry_size;
-        let minimum_frame_count = libkernel::align_up_div(size_in_bytes, 0x1000);
+        let minimum_frame_count = libstd::align_up_div(size_in_bytes, 0x1000);
         let frames = falloc::get().autolock_many(minimum_frame_count).unwrap();
         let alloc_addr = malloc::get().alloc_to(&frames) as *mut _;
 
@@ -72,7 +72,7 @@ impl<'q> CompletionQueue<'q> {
 
 // TODO make this thread-safe
 pub struct SubmissionQueue<'q, Q: QueueDomain> {
-    frames: libkernel::memory::FrameIterator,
+    frames: libstd::memory::FrameIterator,
     entries: *mut NVME_COMMAND,
     entry_count: u16,
     doorbell: &'q VolatileCell<u32, ReadWrite>,
@@ -86,7 +86,7 @@ impl<'q, Q: QueueDomain> SubmissionQueue<'q, Q> {
         // TODO somehow validate entry size
 
         let size_in_bytes = (entry_count as usize) * entry_size;
-        let minimum_frame_count = libkernel::align_up_div(size_in_bytes, 0x1000);
+        let minimum_frame_count = libstd::align_up_div(size_in_bytes, 0x1000);
         let frames = falloc::get().autolock_many(minimum_frame_count).unwrap();
         let alloc_addr = malloc::get().alloc_to(&frames) as *mut _;
 
@@ -150,7 +150,7 @@ impl<'q, Q: QueueDomain> SubmissionQueue<'q, Q> {
 // impl Drop for SubmissionQueue<'_> {
 //     fn drop(&mut self) {
 //         unsafe {
-//             libkernel::memory::malloc::get().dealloc(
+//             libstd::memory::malloc::get().dealloc(
 //                 self.entries.as_mut_ptr() as *mut u8,
 //                 core::alloc::Layout::from_size_align_unchecked(
 //                     self.entries.len() * core::mem::size_of::<[u32; COMMAND_DWORDS]>(),

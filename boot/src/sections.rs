@@ -2,7 +2,7 @@
 
 use core::mem::size_of;
 
-use libkernel::elf::{ELFHeader64, Rela64, SectionAttributes, SectionHeader, SectionType};
+use libstd::elf::{ELFHeader64, Rela64, SectionAttributes, SectionHeader, SectionType};
 use uefi::proto::media::file::RegularFile;
 
 struct SectionIterator<'k> {
@@ -55,7 +55,7 @@ fn allocate_sections(
         .iter()
         .filter_map(|section| {
             if section.attribs.contains(SectionAttributes::ALLOC) {
-                Some(libkernel::align_up(section.size, section.addr_align))
+                Some(libstd::align_up(section.size, section.addr_align))
             } else {
                 None
             }
@@ -66,7 +66,7 @@ fn allocate_sections(
         boot_services,
         uefi::table::boot::AllocateType::Address(0x0),
         uefi::table::boot::MemoryType::RESERVED,
-        libkernel::align_up_div(total_memory_size, 0x1000),
+        libstd::align_up_div(total_memory_size, 0x1000),
     );
     let buffer_base = buffer.as_ptr() as usize;
 
@@ -96,7 +96,7 @@ fn allocate_sections(
 
                     debug!("Processing relocation: {:?}", rela);
 
-                    if rela.info == libkernel::elf::X86_64_RELATIVE
+                    if rela.info == libstd::elf::X86_64_RELATIVE
                         && (buffer_base..=(buffer_base + total_memory_size))
                             .contains(&rela.addr.as_usize())
                     {

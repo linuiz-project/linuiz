@@ -7,18 +7,16 @@ static TICKS: AtomicUsize = AtomicUsize::new(0);
 // Frequency of timer, or ticks per second.
 pub const FREQUENCY: usize = 1000;
 
-pub extern "x86-interrupt" fn tick_handler(_: libkernel::structures::idt::InterruptStackFrame) {
+pub extern "x86-interrupt" fn tick_handler(_: libstd::structures::idt::InterruptStackFrame) {
     TICKS.fetch_add(1, Ordering::AcqRel);
 
-    use libkernel::structures::pic8259;
+    use libstd::structures::pic8259;
     pic8259::end_of_interrupt(pic8259::InterruptOffset::Timer);
 }
 
-pub extern "x86-interrupt" fn apic_tick_handler(
-    _: libkernel::structures::idt::InterruptStackFrame,
-) {
+pub extern "x86-interrupt" fn apic_tick_handler(_: libstd::structures::idt::InterruptStackFrame) {
     TICKS.fetch_add(1, Ordering::AcqRel);
-    libkernel::lpu::get().apic().end_of_interrupt();
+    libstd::cpu::get().apic().end_of_interrupt();
 }
 
 #[inline(always)]
@@ -44,7 +42,7 @@ pub fn sleep_sec(seconds: usize) {
 #[inline(always)]
 fn tick_wait(target_ticks: usize) {
     while get_ticks() < target_ticks {
-        libkernel::instructions::hlt();
+        libstd::instructions::hlt();
     }
 }
 

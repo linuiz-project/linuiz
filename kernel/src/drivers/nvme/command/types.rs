@@ -4,7 +4,7 @@ use crate::drivers::nvme::{
 };
 use bit_field::BitField;
 use core::ops::Range;
-use libkernel::{addr_ty::Physical, volatile_bitfield_getter, Address};
+use libstd::{addr_ty::Physical, volatile_bitfield_getter, Address};
 
 pub trait CommandType<Q: QueueDomain + ?Sized> {
     const OPCODE: u8;

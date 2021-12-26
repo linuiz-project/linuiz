@@ -1,5 +1,5 @@
 use core::{alloc::Layout, mem::size_of};
-use libkernel::{
+use libstd::{
     addr_ty::{Physical, Virtual},
     align_up_div,
     memory::{falloc, paging::VirtualAddressor, Frame, FrameIterator, Page},
@@ -90,7 +90,7 @@ impl BlockAllocator<'_> {
 
     /* INITIALIZATION */
 
-    pub unsafe fn init(&self, mut stack_frames: libkernel::memory::FrameIterator) {
+    pub unsafe fn init(&self, mut stack_frames: libstd::memory::FrameIterator) {
         {
             debug!("Initializing allocator's virtual addressor.");
             let mut map = self.map.write();
@@ -155,7 +155,7 @@ impl BlockAllocator<'_> {
         let stack_ptr_offset = old_stack_top.offset_from(new_stack_top);
         debug!("Modifying `rsp` by ptr offset: 0x{:x}.", stack_ptr_offset);
 
-        use libkernel::registers::stack::RSP;
+        use libstd::registers::stack::RSP;
         if stack_ptr_offset.is_positive() {
             RSP::sub(stack_ptr_offset.abs() as u64);
         } else {
@@ -182,7 +182,7 @@ impl BlockAllocator<'_> {
     /* ALLOC & DEALLOC */
 
     pub fn alloc<T>(&self, layout: Layout) -> *mut T {
-        let alignment = libkernel::align_up(layout.size(), Self::BLOCK_SIZE);
+        let alignment = libstd::align_up(layout.size(), Self::BLOCK_SIZE);
         let size_in_blocks = alignment / Self::BLOCK_SIZE;
 
         trace!(
@@ -332,7 +332,7 @@ impl BlockAllocator<'_> {
         //  our current section.
         (
             bit_count,
-            libkernel::U64_BIT_MASKS[bit_count - 1] << bit_offset,
+            libstd::U64_BIT_MASKS[bit_count - 1] << bit_offset,
         )
     }
 
@@ -419,7 +419,7 @@ impl BlockAllocator<'_> {
         let cur_map_len = map_write.pages.len();
         let cur_page_offset = (cur_map_len * BlockPage::BLOCKS_PER) / BLOCKS_PER_MAP_PAGE;
         let new_page_offset = (cur_page_offset
-            + libkernel::align_up_div(required_blocks, BLOCKS_PER_MAP_PAGE))
+            + libstd::align_up_div(required_blocks, BLOCKS_PER_MAP_PAGE))
         .next_power_of_two();
 
         trace!(
@@ -459,7 +459,7 @@ impl BlockAllocator<'_> {
     }
 }
 
-impl libkernel::memory::malloc::MemoryAllocator for BlockAllocator<'_> {
+impl libstd::memory::malloc::MemoryAllocator for BlockAllocator<'_> {
     fn minimum_alignment(&self) -> usize {
         Self::BLOCK_SIZE
     }
@@ -492,18 +492,15 @@ impl libkernel::memory::malloc::MemoryAllocator for BlockAllocator<'_> {
             .map(|block_page| !block_page.is_empty())
     }
 
-    fn get_page_attributes(
-        &self,
-        page: &Page,
-    ) -> Option<libkernel::memory::paging::PageAttributes> {
+    fn get_page_attributes(&self, page: &Page) -> Option<libstd::memory::paging::PageAttributes> {
         unsafe { self.map.read().addressor.get_page_attributes(page) }
     }
 
     unsafe fn set_page_attributes(
         &self,
         page: &Page,
-        attributes: libkernel::memory::paging::PageAttributes,
-        modify_mode: libkernel::memory::paging::AttributeModify,
+        attributes: libstd::memory::paging::PageAttributes,
+        modify_mode: libstd::memory::paging::AttributeModify,
     ) {
         self.map
             .write()

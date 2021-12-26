@@ -1,5 +1,5 @@
 [package]
-name = "libkernel"
+name = "libstd"
 version = "0.1.0"
 authors = ["semiviral"]
 edition = "2021"

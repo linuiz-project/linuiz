@@ -1,6 +1,6 @@
 use bit_field::BitField;
 use core::convert::TryFrom;
-use libkernel::{
+use libstd::{
     memory::volatile::{VolatileCell, VolatileSplitPtr},
     volatile_bitfield_getter, volatile_bitfield_getter_ro, Address, ReadOnly, ReadWrite,
 };
@@ -300,14 +300,14 @@ impl Port {
         debug!("Allocting command and FIS lists.");
 
         let cmd_list_byte_len = core::mem::size_of::<super::Command>() * 32;
-        let cmd_list_ptr: *mut u8 = libkernel::alloc!(cmd_list_byte_len, 128);
+        let cmd_list_ptr: *mut u8 = libstd::alloc!(cmd_list_byte_len, 128);
         debug!(
             "\tCommand list base address: {:?}:{}",
             cmd_list_ptr, cmd_list_byte_len
         );
 
         let fis_byte_len = 1024;
-        let fis_base: *mut u8 = libkernel::alloc!(fis_byte_len, 128);
+        let fis_base: *mut u8 = libstd::alloc!(fis_byte_len, 128);
         debug!("\tFIS base address: {:?}:{}", fis_base, fis_byte_len);
 
         unsafe {
@@ -363,7 +363,7 @@ impl Port {
 
         debug!("AHCI PORT: READ: CFG PRDT ENTRY");
         let prdt_entry = &mut command.prdt_entries()[0];
-        let buffer = libkernel::slice_mut!(u8, (sector_count as usize) << 9);
+        let buffer = libstd::slice_mut!(u8, (sector_count as usize) << 9);
         prdt_entry.set_db_addr(Address::from_ptr(buffer.as_ptr()));
         prdt_entry.set_sector_count(sector_count as u32);
 

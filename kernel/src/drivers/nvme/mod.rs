@@ -3,7 +3,7 @@ pub mod queue;
 
 use bit_field::BitField;
 use core::{convert::TryFrom, fmt};
-use libkernel::{
+use libstd::{
     addr_ty::Physical,
     io::pci::{standard::StandardRegister, PCIeDevice, Standard},
     memory::volatile::{Volatile, VolatileCell},

@@ -6,7 +6,7 @@ pub use serial::*;
 use spin::Mutex;
 
 use core::fmt::Write;
-use libkernel::cell::SyncRefCell;
+use libstd::cell::SyncRefCell;
 
 static STDOUT: SyncRefCell<Mutex<&'static mut dyn Write>> = SyncRefCell::empty();
 

@@ -1,18 +1,6 @@
-STACK_SIZE equ 0x1000
 extern _startup, __ap_stack_pointers
 
-section .bss
-
-global __ap_stack_bottom, __ap_stack_top
-align 0x1000
-__ap_stack_bottom:
-    resb 512 * STACK_SIZE
-__ap_stack_top:
-
-
 section .ap_trampoline
-
-ap_stack_index dw 250
 
 global __kernel_pml4
 __kernel_pml4 dd 0
@@ -99,13 +87,13 @@ longmode:
 
     ; Configure temporary stack
 
-    ; Get LAPIC ID (this acts as an __ap_stack_pointers index)
+    ; Get APIC ID (this acts as an __ap_stack_pointers index)
     mov eax, 0x1
-    cpuid                           ; The LAPIC ID is in bits 24..32 (exclusive range)
+    cpuid                           ; The APIC ID is in bits 24..32 (exclusive range)
     shr ebx, 24
-    and ebx, 0xFF                   ; `ebx` or `bl` now contains the LAPIC ID
+    and ebx, 0xFF                   ; `ebx` or `bl` now contains the APIC ID
     mov eax, 0x8                    ; Native integer width
-    mul ebx                         ; `eax` now contains byte offset of LAPIC ID
+    mul ebx                         ; `eax` now contains byte offset of APIC ID
     add eax, __ap_stack_pointers    ; `eax` now contains the absolute offset of the AP stack pointer
     mov rsp, [eax]
 

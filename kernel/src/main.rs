@@ -12,14 +12,14 @@
 #[macro_use]
 extern crate log;
 extern crate alloc;
-extern crate libkernel;
+extern crate libstd;
 
 mod block_malloc;
 mod drivers;
 mod logging;
 mod timer;
 
-use libkernel::{
+use libstd::{
     acpi::SystemConfigTableEntry,
     memory::{falloc, UEFIMemoryDescriptor},
     BootInfo, LinkerSymbol,
@@ -46,6 +46,9 @@ extern "C" {
     static __bss_end: LinkerSymbol;
 }
 
+#[export_name = "__ap_stack_pointers"]
+static mut AP_STACK_POINTERS: [usize; 256] = [0; 256];
+
 #[cfg(debug_assertions)]
 fn get_log_level() -> log::LevelFilter {
     log::LevelFilter::Trace
@@ -58,14 +61,13 @@ fn get_log_level() -> log::LevelFilter {
 
 static mut CON_OUT: drivers::io::Serial = drivers::io::Serial::new(drivers::io::COM1);
 static KERNEL_MALLOC: block_malloc::BlockAllocator = block_malloc::BlockAllocator::new();
-static TRACE_ENABLED_PATHS: [&str; 1] = ["libkernel::structures::apic::icr"];
-
-#[export_name = "__ap_stack_pointers"]
-static mut AP_STACK_POINTERS: [usize; 256] = [0; 256];
+static TRACE_ENABLED_PATHS: [&str; 1] = ["libstd::structures::apic::icr"];
 
 #[no_mangle]
 #[export_name = "_entry"]
-extern "efiapi" fn _entry(boot_info: BootInfo<UEFIMemoryDescriptor, SystemConfigTableEntry>) -> ! {
+extern "efiapi" fn kernel_main(
+    boot_info: BootInfo<UEFIMemoryDescriptor, SystemConfigTableEntry>,
+) -> ! {
     unsafe {
         CON_OUT.init(drivers::io::SerialSpeed::S115200);
 
@@ -77,16 +79,17 @@ extern "efiapi" fn _entry(boot_info: BootInfo<UEFIMemoryDescriptor, SystemConfig
         }
     }
 
-    info!("Validating magic of BootInfo.");
+    info!("Validating BootInfo struct.");
     boot_info.validate_magic();
 
     debug!(
         "Detected CPU features: {:?}",
-        libkernel::instructions::cpu_features()
+        libstd::instructions::cpu_features()
     );
 
     // `boot_info` will not be usable after initalizing the global allocator,
-    //   due to the stack being moved in virtual memory.
+    //   due to the stack being moved in virtual memory, thus invalidating
+    //   the stack pointer to the struct.
     unsafe {
         let memory_map = boot_info.memory_map();
         init_falloc(memory_map);
@@ -98,23 +101,23 @@ extern "efiapi" fn _entry(boot_info: BootInfo<UEFIMemoryDescriptor, SystemConfig
         // TODO somehow ensure the PML4 frame is within the first 32KiB for the AP trampoline
         __kernel_pml4
             .as_mut_ptr::<u32>()
-            .write(libkernel::registers::CR3::read().0.as_usize() as u32);
+            .write(libstd::registers::CR3::read().0.as_usize() as u32);
 
-        libkernel::memory::malloc::set(&KERNEL_MALLOC);
+        libstd::memory::malloc::set(&KERNEL_MALLOC);
 
-        debug!("Ensuring relevant kernel sections are read-only.");
-        let malloc = libkernel::memory::malloc::get();
+        debug!("Flagging `text` and `rodata` kernel sections as read-only.");
+        let malloc = libstd::memory::malloc::get();
         for page in (__text_start.as_page()..__text_end.as_page())
             .chain(__rodata_start.as_page()..__rodata_end.as_page())
         {
             malloc.set_page_attributes(
                 &page,
-                libkernel::memory::paging::PageAttributes::WRITABLE,
-                libkernel::memory::paging::AttributeModify::Remove,
+                libstd::memory::paging::PageAttributes::WRITABLE,
+                libstd::memory::paging::AttributeModify::Remove,
             );
         }
 
-        debug!("Kernel memory initialization complete.");
+        debug!("Memory initialization complete.");
     }
 
     _startup()
@@ -122,38 +125,36 @@ extern "efiapi" fn _entry(boot_info: BootInfo<UEFIMemoryDescriptor, SystemConfig
 
 #[no_mangle]
 extern "C" fn _startup() -> ! {
-    libkernel::structures::gdt::init();
-    libkernel::structures::idt::load();
-    libkernel::lpu::auto_init_lpu();
+    libstd::structures::gdt::init();
+    libstd::structures::idt::load();
+    libstd::cpu::init();
     init_apic();
 
     // If this is the BSP, wake other cores.
-    if libkernel::lpu::is_bsp() {
-        use libkernel::acpi::rdsp::xsdt::{
+    if libstd::cpu::is_bsp() {
+        use libstd::acpi::rdsp::xsdt::{
             madt::{InterruptDevice, MADT},
             XSDT,
         };
 
         // Initialize other CPUs
-        info!("Searching for additional processor cores...");
-        let apic = libkernel::lpu::get().apic();
+        info!("Beginning wake-up sequence for each enabled processor core.");
+        let apic = libstd::cpu::get().apic();
         let icr = apic.interrupt_command_register();
         if let Ok(madt) = XSDT.find_sub_table::<MADT>() {
             for interrupt_device in madt.iter() {
                 if let InterruptDevice::LocalAPIC(lapic_other) = interrupt_device {
-                    use libkernel::acpi::rdsp::xsdt::madt::LocalAPICFlags;
+                    use libstd::acpi::rdsp::xsdt::madt::LocalAPICFlags;
 
                     // Ensure the CPU core can actually be enabled.
                     if lapic_other.flags().intersects(
                         LocalAPICFlags::PROCESSOR_ENABLED | LocalAPICFlags::ONLINE_CAPABLE,
                     ) && apic.id() != lapic_other.id()
                     {
-                        debug!("Identified processor: {:?}", lapic_other);
-
                         const STACK_SIZE: usize = 1000000 /* 1 MiB */;
                         unsafe {
                             AP_STACK_POINTERS[lapic_other.id() as usize] =
-                                (libkernel::alloc!(STACK_SIZE) as *mut u8).add(STACK_SIZE) as usize;
+                                (libstd::alloc!(STACK_SIZE) as *mut u8).add(STACK_SIZE) as usize;
                         }
 
                         let ap_trampoline_page_index =
@@ -172,10 +173,12 @@ extern "C" fn _startup() -> ! {
         }
     }
 
-    libkernel::instructions::hlt_indefinite();
-
-    info!("Kernel has reached safe shutdown state.");
-    unsafe { libkernel::instructions::pwm::qemu_shutdown() }
+    if libstd::cpu::is_bsp() {
+        info!("Kernel has reached safe shutdown state.");
+        unsafe { libstd::instructions::pwm::qemu_shutdown() }
+    } else {
+        libstd::instructions::hlt_indefinite()
+    }
 }
 
 pub unsafe fn init_falloc(memory_map: &[UEFIMemoryDescriptor]) {
@@ -198,7 +201,7 @@ pub unsafe fn init_falloc(memory_map: &[UEFIMemoryDescriptor]) {
         .sum::<usize>();
     info!(
         "Kernel frame allocator will represent {} MB ({} bytes) of system memory.",
-        libkernel::memory::to_mibibytes(total_phys_memory),
+        libstd::memory::to_mibibytes(total_phys_memory),
         total_phys_memory
     );
 
@@ -206,7 +209,7 @@ pub unsafe fn init_falloc(memory_map: &[UEFIMemoryDescriptor]) {
         falloc::FrameAllocator::frame_count_hint(total_falloc_memory) as u64;
     let frame_alloc_ptr = memory_map
         .iter()
-        .filter(|descriptor| descriptor.ty == libkernel::memory::UEFIMemoryType::CONVENTIONAL)
+        .filter(|descriptor| descriptor.ty == libstd::memory::UEFIMemoryType::CONVENTIONAL)
         .find(|descriptor| descriptor.page_count >= frame_alloc_frame_count)
         .map(|descriptor| descriptor.phys_start.as_usize() as *mut _)
         .expect("failed to find viable memory descriptor for memory map");
@@ -215,11 +218,11 @@ pub unsafe fn init_falloc(memory_map: &[UEFIMemoryDescriptor]) {
     debug!("Kernel frame allocator initialized.");
 }
 
-fn reserve_kernel_stack(memory_map: &[UEFIMemoryDescriptor]) -> libkernel::memory::FrameIterator {
+fn reserve_kernel_stack(memory_map: &[UEFIMemoryDescriptor]) -> libstd::memory::FrameIterator {
     debug!("Allocating frames according to BIOS memory map.");
 
     let mut last_frame_end = 0;
-    let mut stack_frames = core::lazy::OnceCell::<libkernel::memory::FrameIterator>::new();
+    let mut stack_frames = core::lazy::OnceCell::<libstd::memory::FrameIterator>::new();
     for descriptor in memory_map {
         let frame_start = descriptor.phys_start.frame_index();
         let frame_count = descriptor.page_count as usize;
@@ -271,7 +274,7 @@ fn init_system_config_table(config_table: &[SystemConfigTableEntry]) {
 
     unsafe {
         // Assign system configuration table prior to reserving frames to ensure one doesn't already exist.
-        libkernel::acpi::init_system_config_table(config_table_ptr, config_table_entry_len);
+        libstd::acpi::init_system_config_table(config_table_ptr, config_table_entry_len);
 
         let frame_range = frame_index..(frame_index + frame_count);
         debug!("System configuration table: {:?}", frame_range);
@@ -285,9 +288,9 @@ fn init_system_config_table(config_table: &[SystemConfigTableEntry]) {
 }
 
 fn init_apic() {
-    use libkernel::structures::idt;
+    use libstd::structures::idt;
 
-    let apic = &libkernel::lpu::get().apic();
+    let apic = &libstd::cpu::get().apic();
 
     apic.auto_configure_timer_frequency();
 
@@ -297,15 +300,15 @@ fn init_apic() {
     apic.error().set_vector(58);
 
     apic.timer()
-        .set_mode(libkernel::structures::apic::TimerMode::Periodic);
+        .set_mode(libstd::structures::apic::TimerMode::Periodic);
     apic.timer().set_masked(false);
     apic.sw_enable();
 
     info!("Core-local APIC configured and enabled.");
 }
 
-extern "x86-interrupt" fn apic_error_handler(_: libkernel::structures::idt::InterruptStackFrame) {
-    let apic = &libkernel::lpu::get().apic();
+extern "x86-interrupt" fn apic_error_handler(_: libstd::structures::idt::InterruptStackFrame) {
+    let apic = &libstd::cpu::get().apic();
 
     error!("APIC ERROR INTERRUPT");
     error!("--------------------");

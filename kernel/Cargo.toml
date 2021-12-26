@@ -1,12 +1,12 @@
 [package]
-name = "gsai"
+name = "kernel"
 version = "0.0.0"
-edition = "2018"
+edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-libkernel = { path = "../libstd", features = [ "global_allocator" ] }
+libstd = { path = "../libstd", features = [ "global_allocator" ] }
 log = { version = "*", default-features = false }
 bit_field = "*"
 bitflags = "*"
@@ -14,10 +14,3 @@ num_enum = { version = "*", default-features = false }
 spin = "*"
 paste = "*"
 x86_64 = "*"
-
-[[bin]]
-name = "kernel"
-path = "src/kernel.rs"
-
-[profile.release]
-opt-level = 3

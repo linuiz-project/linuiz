@@ -4,7 +4,7 @@ pub use types::*;
 use super::queue::QueueDomain;
 use bit_field::BitField;
 use core::{convert::TryFrom, fmt, marker::PhantomData, ops::Range};
-use libkernel::{
+use libstd::{
     addr_ty::Physical, memory::volatile::VolatileCell, volatile_bitfield_getter,
     volatile_bitfield_getter_as, Address, ReadWrite,
 };
