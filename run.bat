@@ -4,7 +4,7 @@ qemu-system-x86_64^
     -machine q35^
     -cpu qemu64^
     -smp 4^
-    -bios ./ovmf/OVMF-pure-efi.fd^
+    -bios ./ovmf.fd^
     -drive format=raw,file=fat:rw:./hdd/image/^
     -drive if=none,format=raw,id=disk,file=./hdd/rootfs.img^
     -device ahci,id=ahci^
@@ -14,5 +14,3 @@ qemu-system-x86_64^
     -net none^
     -no-shutdown^
     -no-reboot^
-    -D C:/Users/semiv/OneDrive/Desktop/qemu_debug.log^
-    -d int^
