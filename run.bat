@@ -5,11 +5,11 @@ qemu-system-x86_64^
     -cpu qemu64^
     -smp 4^
     -bios ./ovmf.fd^
-    -drive format=raw,file=fat:rw:./hdd/image/^
-    -drive if=none,format=raw,id=disk,file=./hdd/rootfs.img^
+    -drive format=raw,file=fat:rw:./.hdd/image/^
+    -drive if=none,format=raw,id=disk,file=./.hdd/rootfs.img^
     -device ahci,id=ahci^
     -device ide-hd,drive=disk,bus=ahci.0^
-    -drive if=none,format=raw,id=nvm,file=./hdd/nvme.img^
+    -drive if=none,format=raw,id=nvm,file=./.hdd/nvme.img^
     -device nvme,drive=nvm,serial=deadbeef^
     -net none^
     -no-shutdown^

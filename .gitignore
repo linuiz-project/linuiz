@@ -11,11 +11,11 @@ Cargo.lock
 **/*.rs.bk
 *.img
 
-hdd/*
 references/*
 kernel.out
 debug/
 .debug/
+.hdd/
 
 kernel/ap_trampoline.o
 

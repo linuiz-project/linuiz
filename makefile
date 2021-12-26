@@ -1,12 +1,13 @@
+PROFILE=release
+
 boot_deps = $(shell find ./boot/src/ -type f -name "*.rs")
 kernel_deps = $(shell find ./kernel/src/ -type f -name "*.rs")
 libkernel_deps = $(shell find ./libstd/src/ -type f -name "*.rs")
 
-bootloader = ./hdd/image/EFI/BOOT/BOOTX64.efi
+bootloader = ./.hdd/image/EFI/BOOT/BOOTX64.efi
 ap_trampoline = ./kernel/ap_trampoline.o
-kernel = ./hdd/image/EFI/gsai/kernel.elf
+kernel = ./.hdd/image/EFI/gsai/kernel.elf
 
-PROFILE=release
 
 all: $(bootloader) $(ap_trampoline) $(kernel)
 
