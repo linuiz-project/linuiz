@@ -52,7 +52,9 @@ pub unsafe fn set(allocator: &'static dyn MemoryAllocator) {
 }
 
 pub fn get() -> &'static dyn MemoryAllocator {
-    *DEFAULT_MALLOCATOR.borrow().expect("no default allocator")
+    *DEFAULT_MALLOCATOR
+        .borrow()
+        .expect("No default allocator currently assigned.")
 }
 
 pub fn try_get() -> Option<&'static dyn MemoryAllocator> {

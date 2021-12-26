@@ -3,11 +3,11 @@ use core::sync::atomic::AtomicUsize;
 
 pub static LPU_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-pub fn get_local_data() -> Option<&'static LPU> {
+pub fn try_get() -> Option<&'static LPU> {
     match MSR::IA32_FS_BASE.read() {
         0 => None,
         ptr => {
-            let lpu = unsafe { &mut *(ptr as *mut LPU) };
+            let lpu = unsafe { &*(ptr as *const LPU) };
 
             if lpu.magic == LPU::MAGIC {
                 Some(lpu)
@@ -18,7 +18,7 @@ pub fn get_local_data() -> Option<&'static LPU> {
     }
 }
 
-pub fn local_data() -> &'static LPU {
+pub fn get() -> &'static LPU {
     assert_ne!(
         MSR::IA32_FS_BASE.read(),
         0,

@@ -17,3 +17,7 @@ kernel.out
 debug/
 
 kernel/ap_trampoline.o
+
+# Added by cargo
+
+/target

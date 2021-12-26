@@ -113,17 +113,7 @@ impl APIC {
             );
         }
 
-        let _self = Self { mmio };
-
-        trace!(
-            "Created APIC ID {} Ver {}: {:?} -> {:?}",
-            _self.id(),
-            _self.read_register(Register::Version),
-            _self.mmio.mapped_addr(),
-            _self.mmio.frames().start().base_addr()
-        );
-
-        _self
+        Self { mmio }
     }
 
     pub unsafe fn mapped_addr(&self) -> Address<Virtual> {

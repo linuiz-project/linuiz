@@ -24,7 +24,7 @@ impl RDSPDescriptor {
 impl Checksum for RDSPDescriptor {}
 
 #[repr(C, packed)]
-pub struct RDSPDescriptor2 {
+pub struct RDSP2Data {
     base: RDSPDescriptor,
     len: u32,
     xsdt_addr: Address<Physical>,
@@ -32,7 +32,7 @@ pub struct RDSPDescriptor2 {
     reserved: [u8; 3],
 }
 
-impl RDSPDescriptor2 {
+impl RDSP2Data {
     pub fn signature(&self) -> &str {
         self.base.signature()
     }
@@ -46,10 +46,10 @@ impl RDSPDescriptor2 {
     }
 }
 
-impl Checksum for RDSPDescriptor2 {}
+impl Checksum for RDSP2Data {}
 
 lazy_static::lazy_static! {
-    pub static ref LAZY_RDSP2: &'static RDSPDescriptor2 = unsafe {
+    pub static ref LAZY_RDSP2: &'static RDSP2Data = unsafe {
         if let Some(entry) = crate::acpi::get_system_config_table_entry(crate::acpi::ACPI2_GUID) {
             entry.as_ref()
         } else {

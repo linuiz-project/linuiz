@@ -45,18 +45,12 @@ pub trait Checksum: Sized {
     }
 
     fn checksum(&self) -> bool {
-        let mut sum: u8 = 0;
-
         unsafe {
-            &*core::ptr::slice_from_raw_parts(
-                core::mem::transmute::<&Self, *const u8>(self),
-                self.bytes_len(),
-            )
+            &*core::ptr::slice_from_raw_parts(self as *const _ as *const u8, self.bytes_len())
         }
         .iter()
-        .for_each(|byte| sum = sum.wrapping_add(*byte));
-
-        sum == 0
+        .sum::<u8>()
+            == 0
     }
 
     fn validate_checksum(&self) {

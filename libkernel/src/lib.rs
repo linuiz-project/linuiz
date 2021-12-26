@@ -12,7 +12,6 @@
     const_ptr_offset,
     const_fn_trait_bound,
     exclusive_range_pattern,
-    const_btree_new,
     extern_types
 )]
 

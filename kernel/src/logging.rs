@@ -20,7 +20,7 @@ impl log::Log for KernelLogger {
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
             if self.modes.contains(LoggingModes::STDOUT) {
-                if let Some(lpu) = libkernel::lpu::get_local_data() {
+                if let Some(lpu) = libkernel::lpu::try_get() {
                     crate::println!(
                         "[{}>{} {}] {}",
                         lpu.id(),
