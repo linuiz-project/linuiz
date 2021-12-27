@@ -48,7 +48,7 @@ pub fn configure_host_bridge(
     );
 
     if !entry.base_addr().is_canonical() {
-        debug!("Failed to configure PCIe host bridge: non-canonical base address");
+        error!("Failed to configure PCIe host bridge: non-canonical base address");
 
         Err(PCIeHostBridgeError::NonCanonicalBaseAddress(
             entry.base_addr(),
@@ -59,7 +59,7 @@ pub fn configure_host_bridge(
             entry.start_pci_bus()..=entry.end_pci_bus(),
         );
 
-        debug!(
+        trace!(
             "Successfully configured PCIe host bridge: {} live busses",
             bridge.busses.len()
         );

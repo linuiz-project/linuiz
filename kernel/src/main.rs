@@ -141,31 +141,30 @@ extern "C" fn _startup() -> ! {
         info!("Beginning wake-up sequence for each enabled processor core.");
         let apic = libstd::cpu::get().apic();
         let icr = apic.interrupt_command_register();
+        let ap_trampoline_page_index = unsafe { __ap_trampoline_start.as_page().index() } as u8;
+
         if let Ok(madt) = XSDT.find_sub_table::<MADT>() {
             for interrupt_device in madt.iter() {
-                if let InterruptDevice::LocalAPIC(lapic_other) = interrupt_device {
+                if let InterruptDevice::LocalAPIC(apic_other) = interrupt_device {
                     use libstd::acpi::rdsp::xsdt::madt::LocalAPICFlags;
 
                     // Ensure the CPU core can actually be enabled.
-                    if lapic_other.flags().intersects(
+                    if apic_other.flags().intersects(
                         LocalAPICFlags::PROCESSOR_ENABLED | LocalAPICFlags::ONLINE_CAPABLE,
-                    ) && apic.id() != lapic_other.id()
+                    ) && apic.id() != apic_other.id()
                     {
                         const STACK_SIZE: usize = 1000000 /* 1 MiB */;
                         unsafe {
-                            AP_STACK_POINTERS[lapic_other.id() as usize] =
+                            AP_STACK_POINTERS[apic_other.id() as usize] =
                                 (libstd::alloc!(STACK_SIZE) as *mut u8).add(STACK_SIZE) as usize;
                         }
 
-                        let ap_trampoline_page_index =
-                            unsafe { __ap_trampoline_start.as_page().index() } as u8;
-
-                        icr.send_init(lapic_other.id());
+                        icr.send_init(apic_other.id());
                         icr.wait_pending();
 
-                        icr.send_sipi(ap_trampoline_page_index, lapic_other.id());
+                        icr.send_sipi(ap_trampoline_page_index, apic_other.id());
                         icr.wait_pending();
-                        icr.send_sipi(ap_trampoline_page_index, lapic_other.id());
+                        icr.send_sipi(ap_trampoline_page_index, apic_other.id());
                         icr.wait_pending();
                     }
                 }
@@ -174,6 +173,52 @@ extern "C" fn _startup() -> ! {
     }
 
     if libstd::cpu::is_bsp() {
+        use crate::drivers::nvme::*;
+        use libstd::{
+            acpi::rdsp::xsdt::{mcfg::MCFG, XSDT},
+            io::pci,
+        };
+
+        if let Ok(mcfg) = XSDT.find_sub_table::<MCFG>() {
+            let bridges: alloc::vec::Vec<pci::PCIeHostBridge> = mcfg
+                .iter()
+                .filter_map(|entry| pci::configure_host_bridge(entry).ok())
+                .collect();
+
+            for device_variant in bridges
+                .iter()
+                .flat_map(|bridge| bridge.iter())
+                .flat_map(|bus| bus.iter())
+            {
+                if let pci::DeviceVariant::Standard(device) = device_variant {
+                    if device.class() == pci::DeviceClass::MassStorageController
+                        && device.subclass() == 0x08
+                    {
+                        // NVMe device
+                        let mut nvme = Controller::from_device(&device);
+
+                        let admin_sq = libstd::slice!(u8, 0x1000);
+                        let admin_cq = libstd::slice!(u8, 0x1000);
+                        
+
+
+                        let cc = nvme.controller_configuration();
+                        cc.set_iosqes(4);
+                        cc.set_iocqes(4);
+
+
+
+                        if unsafe { !nvme.safe_set_enable(true) } {
+                            error!("NVMe controleler failed to safely enable.");
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        loop {}
+
         info!("Kernel has reached safe shutdown state.");
         unsafe { libstd::instructions::pwm::qemu_shutdown() }
     } else {

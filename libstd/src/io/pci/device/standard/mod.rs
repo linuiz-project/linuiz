@@ -37,14 +37,15 @@ impl PCIeDevice<Standard> {
             Standard::REGISTER_COUNT,
         ) {
             if !register.is_unused() {
-                debug!("Device Register {}: {:?}", register_num, register);
+                trace!("Device Register {}: {:?}", register_num, register);
 
                 // The address is MMIO, so is memory-mapped—thus, the page index and frame index will match.
                 let frame_index = register.as_addr().page_index();
                 let frame_usage = crate::align_up_div(register.memory_usage(), 0x1000);
-                debug!(
+                trace!(
                     "\tAcquiring register destination frame as MMIO: {}:{}",
-                    frame_index, frame_usage
+                    frame_index,
+                    frame_usage
                 );
                 let mmio_frames = crate::memory::falloc::get()
                     .acquire_frames(
@@ -53,7 +54,7 @@ impl PCIeDevice<Standard> {
                         crate::memory::falloc::FrameState::Reserved,
                     )
                     .expect("frames are not MMIO");
-                debug!("\tAuto-mapping register destination frame.");
+                trace!("\tAuto-mapping register destination frame.");
                 let register_mmio = crate::memory::mmio::unmapped_mmio(mmio_frames)
                     .expect("failed to create MMIO object")
                     .automap();
@@ -63,7 +64,7 @@ impl PCIeDevice<Standard> {
                     DeviceRegister::MemorySpace64(value, _) => (value & 0b1000) > 0,
                     _ => false,
                 } {
-                    debug!("\tRegister is prefetchable, so enabling WRITE_THROUGH bit on page.");
+                    trace!("\tRegister is prefetchable, so enabling WRITE_THROUGH bit on page.");
                     // Optimize page attributes to enable write-through if it wasn't previously enabled.
                     for page in register_mmio.pages() {
                         use crate::memory::paging::{AttributeModify, PageAttributes};

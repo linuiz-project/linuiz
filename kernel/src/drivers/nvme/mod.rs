@@ -94,7 +94,6 @@ impl fmt::Debug for Capabilities {
 #[repr(transparent)]
 pub struct Version(VolatileCell<u32, ReadOnly>);
 
-impl Volatile for Version {}
 impl Version {
     pub fn major(&self) -> u16 {
         self.0.read().get_bits(16..32) as u16
@@ -108,6 +107,8 @@ impl Version {
         self.0.read().get_bits(0..8) as u8
     }
 }
+
+impl Volatile for Version {}
 
 impl fmt::Debug for Version {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -330,14 +331,13 @@ impl<'dev> Controller<'dev> {
         let cc = nvme.controller_configuration();
         debug!("Resetting controller (disable & wait for unready).");
         unsafe { nvme.safe_set_enable(false) };
+        debug!("NVMe controller successfully reset.");
 
-        debug!("Initializing controller to base values.");
-        cc.set_iosqes(6);
-        cc.set_iocqes(4);
         cc.set_shn(ShutdownNotification::None);
         cc.set_ams(ArbitrationMechanism::RoundRobin);
         cc.set_mps(0); // 4KiB pages
         let css = nvme.capabilities().get_css();
+        // TODO work around multiple supported command sets?
         cc.set_css(if css.contains(CommandSetsSupported::ONLY_ADMIN) {
             CommandSet::Admin
         } else if css.contains(CommandSetsSupported::IO) {
@@ -347,6 +347,8 @@ impl<'dev> Controller<'dev> {
         } else {
             panic!("NVMe driver reports invalid CAP.CSS value: {:?}", css)
         });
+
+        debug!("Software NVMe controller successfully created.");
 
         nvme
     }
@@ -426,11 +428,11 @@ impl<'dev> Controller<'dev> {
         );
 
         assert!(
-            sq_size < 1 << 12,
+            sq_size < (1 << 12),
             "Maximum submission queue index is 12 bits."
         );
         assert!(
-            cq_size < 1 << 12,
+            cq_size < (1 << 12),
             "Maximum completion queue index is 12 bits."
         );
 
