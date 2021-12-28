@@ -1,3 +1,5 @@
+use core::arch::asm;
+
 #[inline]
 pub unsafe fn lgdt(pointer: &crate::structures::gdt::Pointer) {
     asm!("lgdt [{}]", in(reg) pointer, options(readonly, nostack, preserves_flags));

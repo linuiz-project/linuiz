@@ -29,7 +29,7 @@ pub fn cpuid(leaf: u32, subleaf: u32) -> Option<CPUIDResult> {
     let (eax, ebx, ecx, edx);
 
     unsafe {
-        asm!(
+        core::arch::asm!(
             "xchg rsi, rbx",
             "cpuid",
             "xchg rsi, rbx",

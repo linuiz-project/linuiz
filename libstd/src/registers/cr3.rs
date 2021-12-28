@@ -1,4 +1,5 @@
 use crate::{addr_ty::Physical, Address};
+use core::arch::asm;
 
 bitflags::bitflags! {
     pub struct CR3Flags : usize {

@@ -183,7 +183,7 @@ fn efi_main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status
         .expect("failed to acquire boot image device path");
     info!("Acquired boot image device path.");
     let file_handle = boot_services
-        .locate_device_path::<SimpleFileSystem>(device_path)
+        .locate_device_path::<SimpleFileSystem>(&mut &*device_path)
         .expect_success("failed to acquire file handle from device path");
     info!("Acquired file handle from device path.");
     let file_system = get_protocol::<SimpleFileSystem>(boot_services, file_handle)

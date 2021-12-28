@@ -1,4 +1,5 @@
 use crate::{addr_ty::Virtual, Address};
+use core::arch::asm;
 
 macro_rules! basic_register {
     ($register_ident:ident, $register_asm:literal) => {

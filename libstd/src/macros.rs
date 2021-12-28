@@ -2,7 +2,7 @@
 macro_rules! asm_marker {
     ($marker:literal) => {
         unsafe {
-            asm!(
+            core::arch::asm!(
                 "push r8",
                 concat!("mov r8, ", $marker),
                 "pop r8",

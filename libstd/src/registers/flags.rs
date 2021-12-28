@@ -66,7 +66,7 @@ impl RFlags {
         let result: u64;
 
         unsafe {
-            asm!("pushf", "pop {}", out(reg) result);
+            core::arch::asm!("pushf", "pop {}", out(reg) result);
         }
 
         result
@@ -78,6 +78,6 @@ impl RFlags {
         old_flags.set(flags, set);
         let rflags_bits = old_flags.bits() | reserved_bits;
 
-        asm!("push {}", "popf", in(reg) rflags_bits, options(preserves_flags));
+        core::arch::asm!("push {}", "popf", in(reg) rflags_bits, options(preserves_flags));
     }
 }

@@ -23,7 +23,7 @@ impl MSR {
         let value: u64;
 
         unsafe {
-            asm!(
+            core::arch:: asm!(
                 "mov ecx, {:e}",
                 "rdmsr",
                 "mov r8, rdx",  // Move high value in
@@ -65,7 +65,7 @@ impl MSR {
             "CPU does not support use of model-specific registers"
         );
 
-        asm!(
+        core::arch::asm!(
             "mov ecx, {:e}",
             "mov rax, r8",  // Move low value in
             "mov rdx, r8",  // Move high value in

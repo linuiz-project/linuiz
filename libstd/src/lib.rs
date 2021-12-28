@@ -1,6 +1,5 @@
 #![no_std]
 #![feature(
-    asm,
     once_cell,
     raw_ref_op,
     step_trait,

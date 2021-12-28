@@ -1,3 +1,5 @@
+use core::arch::asm;
+
 /// Initiates a breakpoint exception.
 #[inline]
 pub fn breakpoint() {

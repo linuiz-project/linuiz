@@ -1,3 +1,5 @@
+use core::arch::asm;
+
 pub trait PortRead {
     unsafe fn read(port: u16) -> Self;
 }

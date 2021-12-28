@@ -346,32 +346,4 @@ impl VirtualAddressor {
 
         debug!("VIRTUAL ADDRESSOR: BRANCH VALIDATION: COMPLETED");
     }
-
-    #[cfg(debug_assertions)]
-    pub unsafe fn pretty_log(&self) {
-        let offset = self.mapped_page.base_addr();
-        let pml4 = self.pml4();
-
-        info!("PML4");
-        for (p4_index, p4_entry) in pml4.iter().enumerate().filter(|tuple| tuple.1.is_present()) {
-            info!("4 {:?}", p4_entry);
-
-            let p3 = pml4.sub_table(p4_index, offset).unwrap();
-            for (p3_index, p3_entry) in p3.iter().enumerate().filter(|tuple| tuple.1.is_present()) {
-                info!("\t3 {:?}", p3_entry);
-
-                let p2 = p3.sub_table(p3_index, offset).unwrap();
-                for (p2_index, p2_entry) in
-                    p2.iter().enumerate().filter(|tuple| tuple.1.is_present())
-                {
-                    info!("\t\t2 {:?}", p2_entry);
-
-                    let p1 = p2.sub_table(p2_index, offset).unwrap();
-                    for p1_entry in p1.iter().filter(|entry| entry.is_present()) {
-                        info!("\t\t\t1 {:?}", p1_entry);
-                    }
-                }
-            }
-        }
-    }
 }

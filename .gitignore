@@ -15,7 +15,7 @@ references/*
 kernel.out
 debug/
 .debug/
-.hdd/
+.hdd/**
 
 kernel/ap_trampoline.o
 

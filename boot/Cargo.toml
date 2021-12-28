@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 uefi = { version = "*", features = ["exts"] }
-uefi-services = { version = "*", features = ["qemu"] }
+uefi-services = { git = "https://github.com/rust-osdev/uefi-rs" }
 uefi-macros = "*"
 log = { version = "*", default-features = false }
 rlibc = "*"

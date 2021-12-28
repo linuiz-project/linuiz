@@ -8,7 +8,7 @@ impl CR2 {
         let value: usize;
 
         unsafe {
-            asm!("mov {}, cr2", out(reg) value, options(nomem, nostack));
+            core::arch::asm!("mov {}, cr2", out(reg) value, options(nomem, nostack));
         }
 
         Address::<Virtual>::new(value)

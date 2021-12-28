@@ -6,6 +6,8 @@ pub mod pwm;
 pub mod segmentation;
 pub mod tlb;
 
+use core::arch::asm;
+
 #[inline]
 pub fn hlt() {
     unsafe {

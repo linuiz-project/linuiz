@@ -3,7 +3,7 @@ use crate::memory::Page;
 #[inline]
 pub fn invalidate(page: &Page) {
     unsafe {
-        asm!("invlpg [{}]", in(reg) page.base_addr().as_usize(), options(nostack));
+        core::arch::asm!("invlpg [{}]", in(reg) page.base_addr().as_usize(), options(nostack));
     }
 }
 

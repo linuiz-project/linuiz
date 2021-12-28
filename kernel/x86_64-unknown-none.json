@@ -12,7 +12,7 @@
   "pre-link-args": {
     "ld.lld": [
       "--script=x86_64-unknown-none.lds",
-      "/media/carl/GitHub/gsai/kernel/ap_trampoline.o"
+      "C:/Users/semiv/OneDrive/GitHub/gsai_os/kernel/ap_trampoline.o"
     ]
   },
   "panic-strategy": "abort",
