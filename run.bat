@@ -12,5 +12,4 @@ qemu-system-x86_64^
     -drive if=none,format=raw,id=nvm,file=./.hdd/nvme.img^
     -device nvme,drive=nvm,serial=deadbeef^
     -net none^
-    -no-shutdown^
     -no-reboot^

@@ -58,7 +58,7 @@ impl crate::BitValue for FrameState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FrameAllocatorError {
+pub enum FallocError {
     FreeWithAcquire,
     /// Frame allocator encoutered an unexpected frame state.
     /// Field 0 (usize): frame index
@@ -150,7 +150,7 @@ impl<'arr> FrameAllocator<'arr> {
     /* FREE / LOCK / RESERVE / STACK - SINGLE */
 
     /// Attempts to free a specific frame in the allocator.
-    pub unsafe fn free_frame(&self, frame: Frame) -> Result<(), FrameAllocatorError> {
+    pub unsafe fn free_frame(&self, frame: Frame) -> Result<(), FallocError> {
         if self
             .memory_map
             .insert_eq(frame.index(), FrameState::Free, FrameState::Locked)
@@ -167,7 +167,7 @@ impl<'arr> FrameAllocator<'arr> {
             );
             Ok(())
         } else {
-            Err(FrameAllocatorError::ExpectedFrameState(
+            Err(FallocError::ExpectedFrameState(
                 frame.index(),
                 FrameState::Locked,
                 self.memory_map.get(frame.index()),
@@ -179,7 +179,7 @@ impl<'arr> FrameAllocator<'arr> {
         &self,
         index: usize,
         acq_state: FrameState,
-    ) -> Result<Frame, FrameAllocatorError> {
+    ) -> Result<Frame, FallocError> {
         match acq_state {
             // Track out-of-bounds Reserved frames.
             state if index >= self.memory_map.len() => {
@@ -189,14 +189,14 @@ impl<'arr> FrameAllocator<'arr> {
                     if non_usable_oob.insert(index) {
                         Ok(Frame::from_index(index))
                     } else {
-                        Err(FrameAllocatorError::OutOfBoundsExists(index))
+                        Err(FallocError::OutOfBoundsExists(index))
                     }
                 } else {
-                    Err(FrameAllocatorError::OutOfBoundsLock)
+                    Err(FallocError::OutOfBoundsLock)
                 }
             }
             // Illegal to free with acquisition.
-            FrameState::Free => Err(FrameAllocatorError::FreeWithAcquire),
+            FrameState::Free => Err(FallocError::FreeWithAcquire),
             // Acquire frame as locked if it is already free.
             FrameState::Locked
                 if self
@@ -210,7 +210,7 @@ impl<'arr> FrameAllocator<'arr> {
                 Ok(Frame::from_index(index))
             }
             // Failed to acquire frame as locked (incorrect existing frame type).
-            FrameState::Locked => Err(FrameAllocatorError::ExpectedFrameState(
+            FrameState::Locked => Err(FallocError::ExpectedFrameState(
                 index,
                 FrameState::Free,
                 FrameState::Locked,
@@ -233,7 +233,7 @@ impl<'arr> FrameAllocator<'arr> {
     pub unsafe fn free_frames(
         &self,
         frames: impl Iterator<Item = Frame>,
-    ) -> Result<(), FrameAllocatorError> {
+    ) -> Result<(), FallocError> {
         for frame in frames {
             if let Err(error) = self.free_frame(frame) {
                 return Err(error);
@@ -248,7 +248,7 @@ impl<'arr> FrameAllocator<'arr> {
         index: usize,
         count: usize,
         acq_state: FrameState,
-    ) -> Result<crate::memory::FrameIterator, FrameAllocatorError> {
+    ) -> Result<crate::memory::FrameIterator, FallocError> {
         let start_index = index;
         let end_index = index + count;
         for frame_index in start_index..end_index {

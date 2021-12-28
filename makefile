@@ -30,4 +30,3 @@ $(ap_trampoline): $(ap_trampoline_src)
 
 $(kernel): $(ap_trampoline)
 	cd $(root)/kernel/ && cargo fmt && cargo build --profile release -Z unstable-options
->>>>>>> Stashed changes

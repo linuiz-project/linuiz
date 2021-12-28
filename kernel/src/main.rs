@@ -199,14 +199,10 @@ extern "C" fn _startup() -> ! {
 
                         let admin_sq = libstd::slice!(u8, 0x1000);
                         let admin_cq = libstd::slice!(u8, 0x1000);
-                        
-
 
                         let cc = nvme.controller_configuration();
                         cc.set_iosqes(4);
                         cc.set_iocqes(4);
-
-
 
                         if unsafe { !nvme.safe_set_enable(true) } {
                             error!("NVMe controleler failed to safely enable.");

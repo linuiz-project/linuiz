@@ -5,8 +5,17 @@ use crate::{
     Address,
 };
 use core::alloc::Layout;
+use super::{paging::AttributeModify, falloc};
 
-use super::paging::AttributeModify;
+pub enum AllocError {
+    OutOfMemory,
+    OutOfFrames,
+    InvalidAlignment,
+    UndefinedFailure,
+    FallocFailure(falloc::FallocError)
+}
+
+pub type Memory = core::ptr::NonNull<[core::mem::MaybeUninit<u8>]>;
 
 pub trait MemoryAllocator {
     fn minimum_alignment(&self) -> usize;

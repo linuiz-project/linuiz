@@ -1,8 +1,17 @@
-use core::{alloc::Layout, mem::size_of};
+use core::{
+    alloc::Layout,
+    mem::size_of,
+    ptr::{slice_from_raw_parts_mut, NonNull},
+};
 use libstd::{
     addr_ty::{Physical, Virtual},
     align_up_div,
-    memory::{falloc, paging::VirtualAddressor, Frame, FrameIterator, Page},
+    memory::{
+        falloc,
+        malloc::{AllocError, Memory},
+        paging::VirtualAddressor,
+        Frame, FrameIterator, Page,
+    },
     Address, SYSTEM_SLICE_SIZE,
 };
 use spin::{RwLock, RwLockWriteGuard};
@@ -182,92 +191,85 @@ impl BlockAllocator<'_> {
     /* ALLOC & DEALLOC */
 
     pub fn alloc<T>(&self, layout: Layout) -> *mut T {
-        let alignment = libstd::align_up(layout.size(), Self::BLOCK_SIZE);
-        let size_in_blocks = alignment / Self::BLOCK_SIZE;
+        if !layout.align().is_power_of_two() {
+            return core::ptr::null_mut(); //return Err(AllocError::OutOfMemory);
+        }
+
+        let align_shift = usize::max(
+            (layout.align() >> Self::BLOCK_SIZE.trailing_zeros())
+                << Self::BLOCK_SIZE.trailing_zeros(),
+            1,
+        );
+        let size_in_blocks =
+            (layout.size() + (Self::BLOCK_SIZE - 1)) >> Self::BLOCK_SIZE.trailing_zeros();
 
         trace!(
-            "Allocation requested: {}{{by {}}} bytes ({} blocks)",
+            "Allocation requested: {} bytes ({} blocks)",
             layout.size(),
-            alignment,
             size_in_blocks
         );
 
-        let mut map = self.map.write();
-        let (mut block_index, mut current_run);
-        while {
-            block_index = 0;
+        let mut map_write = self.map.write();
+        let mut end_map_index = 0;
+        let mut block_index = 0;
+        let mut current_run = 0;
+        'outer: loop {
             current_run = 0;
 
-            'outer: for block_page in map.pages.iter() {
+            for block_page in map_write.pages.iter().skip(end_map_index) {
                 if block_page.is_full() {
                     current_run = 0;
                     block_index += BlockPage::BLOCKS_PER;
                 } else {
-                    use bit_field::BitField;
-
-                    for bit in (0..64).map(|shift| block_page.value().get_bit(shift)) {
-                        if bit {
-                            current_run = 0;
-                        } else if current_run > 0 || (block_index % alignment) == 0 {
-                            current_run += 1;
-                        }
-
+                    for bit_shift in 0..64 {
                         block_index += 1;
 
-                        if current_run == size_in_blocks {
-                            break 'outer;
+                        if (block_page.value() & bit_shift) > 0 {
+                            current_run = 0;
+                        } else if current_run > 0 || (bit_shift % (align_shift as u64)) == 0 {
+                            current_run += 1;
+
+                            if current_run == size_in_blocks {
+                                break 'outer;
+                            }
                         }
                     }
                 }
+
+                end_map_index += 1;
             }
 
-            current_run < size_in_blocks
-        } {
-            self.grow(size_in_blocks, &mut map);
+            if let Err(alloc_err) = self.grow(size_in_blocks, &mut map_write) {
+                //return Err(alloc_err);
+            }
         }
 
-        let start_block_index = block_index - current_run;
         let end_block_index = block_index;
-        block_index = start_block_index;
-        trace!(
-            "Allocation fulfilling: {}..{}",
-            start_block_index,
-            end_block_index
-        );
+        block_index -= current_run;
+        end_map_index += 1;
+        let start_map_index =
+            end_map_index - libstd::align_up_div(size_in_blocks, BlockPage::BLOCKS_PER);
 
-        let start_map_index = start_block_index / BlockPage::BLOCKS_PER;
-        let end_map_index = align_up_div(end_block_index, BlockPage::BLOCKS_PER);
         for map_index in start_map_index..end_map_index {
-            let (had_bits, has_bits) = {
-                let block_page = &mut map.pages[map_index];
+            let block_page = &mut map_write.pages[map_index];
+            let was_empty = block_page.is_empty();
+            let (bit_count, bit_mask) =
+                Self::calculate_bit_fields(map_index, block_index, end_block_index);
 
-                let had_bits = !block_page.is_empty();
+            *block_page.value_mut() |= bit_mask;
+            block_index += bit_count;
 
-                let (bit_count, bit_mask) =
-                    Self::calculate_bit_fields(map_index, end_block_index, block_index);
-                assert_eq!(
-                    *block_page.value() & bit_mask,
-                    0,
-                    "Attempting to allocate blocks that are already allocated."
-                );
-
-                *block_page.value_mut() |= bit_mask;
-                block_index += bit_count;
-
-                (had_bits, !block_page.is_empty())
-            };
-
-            if !had_bits && has_bits {
-                let page = &mut Page::from_index(map_index);
-
+            if was_empty {
                 unsafe {
-                    map.addressor.map(page, &falloc::get().autolock().unwrap());
-                    page.mem_clear();
+                    map_write.addressor.map(
+                        &Page::from_index(map_index),
+                        &falloc::get().autolock().unwrap(),
+                    );
                 }
             }
         }
 
-        (start_block_index * Self::BLOCK_SIZE) as *mut T
+        (start_map_index << 12) as *mut T
     }
 
     pub fn dealloc<T>(&self, ptr: *mut T, size: usize) {
@@ -290,7 +292,7 @@ impl BlockAllocator<'_> {
                 let had_bits = !block_page.is_empty();
 
                 let (bit_count, bit_mask) =
-                    Self::calculate_bit_fields(map_index, end_block_index, block_index);
+                    Self::calculate_bit_fields(map_index, block_index, end_block_index);
                 assert_eq!(
                     *block_page.value() & bit_mask,
                     bit_mask,
@@ -319,17 +321,18 @@ impl BlockAllocator<'_> {
     /// Calculates the bit count and mask for a given set of block page parameters.
     fn calculate_bit_fields(
         map_index: usize,
+        cur_block_index: usize,
         end_block_index: usize,
-        block_index: usize,
     ) -> (usize, u64) {
         let traversed_blocks = map_index * BlockPage::BLOCKS_PER;
         let remaining_blocks = end_block_index - traversed_blocks;
         // Each block is one bit in our map, so we calculate the offset into
         //  the current section, at which our current index (`block_index`) lies.
-        let bit_offset = block_index - traversed_blocks;
+        let bit_offset = cur_block_index - traversed_blocks;
         let bit_count = core::cmp::min(BlockPage::BLOCKS_PER, remaining_blocks) - bit_offset;
         // Finally, we acquire the respective bitmask to flip all relevant bits in
         //  our current section.
+
         (
             bit_count,
             libstd::U64_BIT_MASKS[bit_count - 1] << bit_offset,
@@ -411,7 +414,259 @@ impl BlockAllocator<'_> {
         }
     }
 
-    pub fn grow(&self, required_blocks: usize, map_write: &mut RwLockWriteGuard<AllocatorMap>) {
+    pub fn alloc_nm(&self, layout: Layout) -> Result<Memory, AllocError> {
+        if !layout.align().is_power_of_two() {
+            return Err(AllocError::OutOfFrames);
+        }
+
+        let align_shift = usize::max(
+            (layout.align() >> Self::BLOCK_SIZE.trailing_zeros())
+                << Self::BLOCK_SIZE.trailing_zeros(),
+            1,
+        );
+        let size_in_blocks =
+            (layout.size() + (Self::BLOCK_SIZE - 1)) >> Self::BLOCK_SIZE.trailing_zeros();
+
+        trace!(
+            "Allocation requested: {} bytes ({} blocks)",
+            layout.size(),
+            size_in_blocks
+        );
+
+        let mut map_write = self.map.write();
+        let mut end_map_index = 0;
+        let mut block_index = 0;
+        let mut current_run = 0;
+        'outer: loop {
+            current_run = 0;
+
+            for block_page in map_write.pages.iter().skip(end_map_index) {
+                if block_page.is_full() {
+                    current_run = 0;
+                    block_index += BlockPage::BLOCKS_PER;
+                } else {
+                    for bit_shift in 0..64 {
+                        block_index += 1;
+
+                        if (block_page.value() & bit_shift) > 0 {
+                            current_run = 0;
+                        } else if current_run > 0 || (bit_shift % (align_shift as u64)) == 0 {
+                            current_run += 1;
+
+                            if current_run == size_in_blocks {
+                                break 'outer;
+                            }
+                        }
+                    }
+                }
+
+                end_map_index += 1;
+            }
+
+            if let Err(alloc_err) = self.grow(size_in_blocks, &mut map_write) {
+                //return Err(alloc_err);
+            }
+        }
+
+        let end_block_index = block_index;
+        let start_block_index = block_index - current_run;
+        block_index = start_block_index;
+        end_map_index += 1;
+        let start_map_index =
+            end_map_index - libstd::align_up_div(size_in_blocks, BlockPage::BLOCKS_PER);
+
+        for map_index in start_map_index..end_map_index {
+            let block_page = &mut map_write.pages[map_index];
+            let was_empty = block_page.is_empty();
+            let (bit_count, bit_mask) =
+                Self::calculate_bit_fields(map_index, block_index, end_block_index);
+
+            *block_page.value_mut() |= bit_mask;
+            block_index += bit_count;
+
+            if was_empty {
+                unsafe {
+                    map_write.addressor.map(
+                        &Page::from_index(map_index),
+                        &falloc::get().autolock().unwrap(),
+                    );
+                }
+            }
+        }
+
+        unsafe {
+            Ok(NonNull::new_unchecked(slice_from_raw_parts_mut(
+                (start_block_index * Self::BLOCK_SIZE) as *mut _,
+                size_in_blocks * Self::BLOCK_SIZE,
+            )))
+        }
+    }
+
+    pub fn alloc_pc(&self, count: usize) -> Result<(Address<Physical>, Memory), AllocError> {
+        let mut map_write = self.map.write();
+        let mut frames = match falloc::get().autolock_many(count) {
+            Some(frames) => frames,
+            None => {
+                return Err(AllocError::OutOfFrames);
+            }
+        };
+
+        let mut start_index = 0;
+        'outer: loop {
+            let mut current_run = 0;
+
+            for (map_index, block_page) in map_write.pages.iter_mut().enumerate().skip(start_index)
+            {
+                if !block_page.is_empty() {
+                    current_run = 0;
+                    start_index = map_index + 1;
+                } else {
+                    current_run += 1;
+
+                    if current_run == count {
+                        break 'outer;
+                    }
+                }
+            }
+
+            if let Err(alloc_err) = self.grow(count * BlockPage::BLOCKS_PER, &mut map_write) {
+                return Err(alloc_err);
+            }
+        }
+
+        for page_index in start_index..(start_index + count) {
+            if let Some(frame) = frames.next() {
+                map_write.pages[page_index].set_full();
+                map_write
+                    .addressor
+                    .map(&Page::from_index(page_index), &frame);
+            } else {
+                for page_index in start_index..page_index {
+                    map_write.pages[page_index].set_empty();
+                }
+
+                unsafe { falloc::get().free_frames(frames) };
+                return Err(AllocError::UndefinedFailure);
+            }
+        }
+
+        unsafe {
+            Ok((
+                frames.start().base_addr(),
+                NonNull::new_unchecked(slice_from_raw_parts_mut(
+                    (start_index * 0x1000) as *mut _,
+                    count * 0x1000,
+                )),
+            ))
+        }
+    }
+
+    pub fn alloc_at(
+        &self,
+        frame_index: usize,
+        count: usize,
+        acq_state: falloc::FrameState,
+    ) -> Result<Memory, AllocError> {
+        let mut map_write = self.map.write();
+        let mut frames =
+            match unsafe { falloc::get().acquire_frames(frame_index, count, acq_state) } {
+                Ok(frames) => frames,
+                Err(falloc_error) => {
+                    return Err(AllocError::FallocFailure(falloc_error));
+                }
+            };
+
+        let mut start_index = 0;
+        'outer: loop {
+            let mut current_run = 0;
+
+            for (map_index, block_page) in map_write.pages.iter_mut().enumerate().skip(start_index)
+            {
+                if !block_page.is_empty() {
+                    current_run = 0;
+                    start_index = map_index + 1;
+                } else {
+                    current_run += 1;
+
+                    if current_run == count {
+                        break 'outer;
+                    }
+                }
+            }
+
+            if let Err(alloc_err) = self.grow(count * BlockPage::BLOCKS_PER, &mut map_write) {
+                return Err(alloc_err);
+            }
+        }
+
+        for page_index in start_index..(start_index + count) {
+            if let Some(frame) = frames.next() {
+                map_write.pages[page_index].set_full();
+                map_write
+                    .addressor
+                    .map(&Page::from_index(page_index), &frame);
+            } else {
+                for page_index in start_index..page_index {
+                    map_write.pages[page_index].set_empty();
+                }
+
+                unsafe { falloc::get().free_frames(frames) };
+                return Err(AllocError::UndefinedFailure);
+            }
+        }
+
+        unsafe {
+            Ok(NonNull::new_unchecked(slice_from_raw_parts_mut(
+                (start_index * 0x1000) as *mut _,
+                count * 0x1000,
+            )))
+        }
+    }
+
+    pub fn alloc_id(
+        &self,
+        frame_index: usize,
+        count: usize,
+        acq_state: falloc::FrameState,
+    ) -> Result<Memory, AllocError> {
+        let mut map_write = self.map.write();
+        let mut frames =
+            match unsafe { falloc::get().acquire_frames(frame_index, count, acq_state) } {
+                Ok(frames) => frames,
+                Err(falloc_error) => {
+                    return Err(AllocError::FallocFailure(falloc_error));
+                }
+            };
+
+        for page_index in frame_index..(frame_index + count) {
+            if let Some(frame) = frames.next() {
+                map_write.pages[page_index].set_full();
+                map_write
+                    .addressor
+                    .map(&Page::from_index(page_index), &frame);
+            } else {
+                for page_index in frame_index..page_index {
+                    map_write.pages[page_index].set_empty();
+                }
+
+                unsafe { falloc::get().free_frames(frames) };
+                return Err(AllocError::UndefinedFailure);
+            }
+        }
+
+        unsafe {
+            Ok(NonNull::new_unchecked(slice_from_raw_parts_mut(
+                (frame_index * 0x1000) as *mut _,
+                count * 0x1000,
+            )))
+        }
+    }
+
+    pub fn grow(
+        &self,
+        required_blocks: usize,
+        map_write: &mut RwLockWriteGuard<AllocatorMap>,
+    ) -> Result<(), AllocError> {
         assert!(required_blocks > 0, "calls to grow must be nonzero");
 
         trace!("Growing map to faciliate {} blocks.", required_blocks);
@@ -428,30 +683,30 @@ impl BlockAllocator<'_> {
             new_page_offset
         );
 
-        {
-            for offset in cur_page_offset..new_page_offset {
-                let map_page = &mut Self::ALLOCATOR_BASE.forward(offset).unwrap();
-                map_write
-                    .addressor
-                    .map(map_page, &falloc::get().autolock().expect("out of memory"));
-            }
+        for offset in cur_page_offset..new_page_offset {
+            let map_page = &mut Self::ALLOCATOR_BASE.forward(offset).unwrap();
+            let frame = match falloc::get().autolock() {
+                Some(frame) => frame,
+                None => return Err(AllocError::OutOfMemory),
+            };
+            map_write.addressor.map(map_page, &frame);
         }
 
         let new_map_len = new_page_offset * (0x1000 / size_of::<BlockPage>());
-        map_write.pages = unsafe {
-            &mut *core::ptr::slice_from_raw_parts_mut(
+        unsafe {
+            map_write.pages = &mut *core::ptr::slice_from_raw_parts_mut(
                 Self::ALLOCATOR_BASE.as_mut_ptr(),
                 new_map_len,
-            )
-        };
-        map_write.pages[cur_map_len..].fill(BlockPage::empty());
+            );
 
-        trace!(
-            "Grew map: {} pages, {} block pages, {} blocks.",
-            new_page_offset,
-            new_map_len,
-            new_map_len * BLOCKS_PER_MAP_PAGE
-        );
+            core::ptr::write_bytes(
+                map_write.pages[cur_map_len..].as_mut_ptr(),
+                0,
+                new_map_len - cur_map_len,
+            );
+        }
+
+        Ok(())
     }
 
     pub unsafe fn physical_memory(&self, addr: Address<Physical>) -> Address<Virtual> {
