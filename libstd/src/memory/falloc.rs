@@ -125,26 +125,30 @@ impl<'arr> FrameAllocator<'arr> {
         memory_counters[FrameState::MASK] = total_memory;
 
         let total_frames = total_memory / 0x1000;
-        let this = Self {
+        let falloc = Self {
             memory_map: BitValueArray::from_slice(
-                &mut *core::ptr::slice_from_raw_parts_mut(
+                core::ptr::slice_from_raw_parts_mut(
                     base_ptr,
                     BitValueArray::<FrameState>::section_length_hint(total_frames),
-                ),
+                )
+                .as_mut()
+                .unwrap(),
                 total_frames,
             ),
             memory: RwLock::new(memory_counters),
             non_usable_oob: core::cell::RefCell::new(alloc::collections::BTreeSet::<usize>::new()),
         };
 
-        this.acquire_frames(
-            (base_ptr as usize) / 0x1000,
-            Self::frame_count_hint(total_memory),
-            FrameState::Reserved,
-        )
-        .expect("unexpectedly failed to reserve frame allocator frames");
+        falloc
+            .acquire_frames(
+                (base_ptr as usize) / 0x1000,
+                Self::frame_count_hint(total_memory),
+                FrameState::Reserved,
+            )
+            .expect("unexpectedly failed to reserve frame allocator frames");
+        falloc.acquire_frame(0, FrameState::Reserved).unwrap();
 
-        this
+        falloc
     }
 
     /* FREE / LOCK / RESERVE / STACK - SINGLE */
@@ -159,12 +163,6 @@ impl<'arr> FrameAllocator<'arr> {
             mem_write[FrameState::Free.as_usize()] += 0x1000;
             mem_write[FrameState::Locked.as_usize()] -= 0x1000;
 
-            trace!(
-                "Freed frame {}: {:?} -> {:?}",
-                frame.index(),
-                FrameState::Locked,
-                FrameState::Free
-            );
             Ok(())
         } else {
             Err(FallocError::ExpectedFrameState(
@@ -224,6 +222,25 @@ impl<'arr> FrameAllocator<'arr> {
 
                 Ok(Frame::from_index(index))
             }
+        }
+    }
+
+    pub unsafe fn unreserve_frame(&self, frame: Frame) -> Result<(), FallocError> {
+        if self
+            .memory_map
+            .insert_eq(frame.index(), FrameState::Free, FrameState::Reserved)
+        {
+            let mut mem_write = self.memory.write();
+            mem_write[FrameState::Free.as_usize()] += 0x1000;
+            mem_write[FrameState::Reserved.as_usize()] -= 0x1000;
+
+            Ok(())
+        } else {
+            Err(FallocError::ExpectedFrameState(
+                frame.index(),
+                FrameState::Reserved,
+                self.memory_map.get(frame.index()),
+            ))
         }
     }
 

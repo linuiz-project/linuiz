@@ -18,24 +18,37 @@ impl FramebufferDriver {
         let byte_len = pixel_len * core::mem::size_of::<Color8i>();
 
         let framebuffer = unsafe {
-            let frame_index = buffer_addr.frame_index();
-            let frame_count = frame_index + ((byte_len + 0xFFF) / 0x1000);
-            let mmio_frames = libstd::memory::falloc::get()
-                .acquire_frames(
-                    frame_index,
-                    frame_count,
+            libstd::memory::malloc::get()
+                .alloc_against(
+                    buffer_addr.frame_index(),
+                    (byte_len + 0xFFF) / 0x1000,
                     libstd::memory::falloc::FrameState::Reserved,
                 )
-                .unwrap();
+                .expect("Allocation error occurred when attempting to create pixelbuffer.")
+                .cast()
+                .expect("Allocated region is of invalid alignment for Color8i.")
+                .into_parts()
+                .0
+        };
 
-            libstd::alloc_to!(&mmio_frames)
+        let backbuffer = unsafe {
+            libstd::memory::malloc::get()
+                .alloc(
+                    byte_len,
+                    core::num::NonZeroUsize::new(core::mem::align_of::<Color8i>()),
+                )
+                .expect("Allocation error occurred when attempting to create pixelbuffer.")
+                .cast()
+                .expect("Allocated region is of invalid alignment for Color8i.")
+                .into_parts()
+                .0
         };
 
         info!("{:?} {}", dimensions, scanline_width);
 
         Self {
             framebuffer: Mutex::new(framebuffer),
-            backbuffer: RwLock::new(libstd::alloc!(byte_len)),
+            backbuffer: RwLock::new(backbuffer),
             dimensions,
             scanline_width,
         }

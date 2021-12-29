@@ -47,7 +47,7 @@ extern "C" {
 }
 
 #[export_name = "__ap_stack_pointers"]
-static mut AP_STACK_POINTERS: [usize; 256] = [0; 256];
+static mut AP_STACK_POINTERS: [*const core::ffi::c_void; 256] = [core::ptr::null(); 256];
 
 #[cfg(debug_assertions)]
 fn get_log_level() -> log::LevelFilter {
@@ -60,8 +60,11 @@ fn get_log_level() -> log::LevelFilter {
 }
 
 static mut CON_OUT: drivers::io::Serial = drivers::io::Serial::new(drivers::io::COM1);
-static KERNEL_MALLOC: block_malloc::BlockAllocator = block_malloc::BlockAllocator::new();
 static TRACE_ENABLED_PATHS: [&str; 1] = ["libstd::structures::apic::icr"];
+
+macro_rules! print {
+    () => {};
+}
 
 #[no_mangle]
 #[export_name = "_entry"]
@@ -93,24 +96,26 @@ extern "efiapi" fn kernel_main(
     unsafe {
         let memory_map = boot_info.memory_map();
         init_falloc(memory_map);
+        reserve_eligible_frames(memory_map);
         init_system_config_table(boot_info.config_table());
 
         info!("Initializing kernel default allocator.");
-        KERNEL_MALLOC.init(reserve_kernel_stack(memory_map));
+        let block_malloc = block_malloc::BlockAllocator::new();
+        block_malloc.init(memory_map);
         // Move the current PML4 into the global processor reference.
         // TODO somehow ensure the PML4 frame is within the first 32KiB for the AP trampoline
         __kernel_pml4
             .as_mut_ptr::<u32>()
             .write(libstd::registers::CR3::read().0.as_usize() as u32);
 
-        libstd::memory::malloc::set(&KERNEL_MALLOC);
+        libstd::memory::malloc::set(alloc::boxed::Box::new(block_malloc));
 
         debug!("Flagging `text` and `rodata` kernel sections as read-only.");
         let malloc = libstd::memory::malloc::get();
         for page in (__text_start.as_page()..__text_end.as_page())
             .chain(__rodata_start.as_page()..__rodata_end.as_page())
         {
-            malloc.set_page_attributes(
+            malloc.set_page_attribs(
                 &page,
                 libstd::memory::paging::PageAttributes::WRITABLE,
                 libstd::memory::paging::AttributeModify::Remove,
@@ -127,11 +132,11 @@ extern "efiapi" fn kernel_main(
 extern "C" fn _startup() -> ! {
     libstd::structures::gdt::init();
     libstd::structures::idt::load();
-    libstd::cpu::init();
+    libstd::lpu::init();
     init_apic();
 
     // If this is the BSP, wake other cores.
-    if libstd::cpu::is_bsp() {
+    if libstd::lpu::is_bsp() {
         use libstd::acpi::rdsp::xsdt::{
             madt::{InterruptDevice, MADT},
             XSDT,
@@ -139,7 +144,7 @@ extern "C" fn _startup() -> ! {
 
         // Initialize other CPUs
         info!("Beginning wake-up sequence for each enabled processor core.");
-        let apic = libstd::cpu::get().apic();
+        let apic = libstd::lpu::get().apic();
         let icr = apic.interrupt_command_register();
         let ap_trampoline_page_index = unsafe { __ap_trampoline_start.as_page().index() } as u8;
 
@@ -156,8 +161,13 @@ extern "C" fn _startup() -> ! {
                         const STACK_SIZE: usize = 1000000 /* 1 MiB */;
                         unsafe {
                             AP_STACK_POINTERS[apic_other.id() as usize] =
-                                (libstd::alloc!(STACK_SIZE) as *mut u8).add(STACK_SIZE) as usize;
-                        }
+                                libstd::memory::malloc::get()
+                                    .alloc(STACK_SIZE, None)
+                                    .expect("Failed to allocate stack for LPU.")
+                                    .into_parts()
+                                    .0 as *mut _ // `c_void` has no alignment, so avoid overhead by direct casting
+                                                 // (rather than using `.cast()`).
+                        };
 
                         icr.send_init(apic_other.id());
                         icr.wait_pending();
@@ -172,7 +182,7 @@ extern "C" fn _startup() -> ! {
         }
     }
 
-    if libstd::cpu::is_bsp() {
+    if libstd::lpu::is_bsp() {
         use crate::drivers::nvme::*;
         use libstd::{
             acpi::rdsp::xsdt::{mcfg::MCFG, XSDT},
@@ -194,20 +204,20 @@ extern "C" fn _startup() -> ! {
                     if device.class() == pci::DeviceClass::MassStorageController
                         && device.subclass() == 0x08
                     {
-                        // NVMe device
-                        let mut nvme = Controller::from_device(&device);
+                        // // NVMe device
+                        // let mut nvme = Controller::from_device(&device);
 
-                        let admin_sq = libstd::slice!(u8, 0x1000);
-                        let admin_cq = libstd::slice!(u8, 0x1000);
+                        // let admin_sq = libstd::slice!(u8, 0x1000);
+                        // let admin_cq = libstd::slice!(u8, 0x1000);
 
-                        let cc = nvme.controller_configuration();
-                        cc.set_iosqes(4);
-                        cc.set_iocqes(4);
+                        // let cc = nvme.controller_configuration();
+                        // cc.set_iosqes(4);
+                        // cc.set_iocqes(4);
 
-                        if unsafe { !nvme.safe_set_enable(true) } {
-                            error!("NVMe controleler failed to safely enable.");
-                            break;
-                        }
+                        // if unsafe { !nvme.safe_set_enable(true) } {
+                        //     error!("NVMe controleler failed to safely enable.");
+                        //     break;
+                        // }
                     }
                 }
             }
@@ -259,11 +269,8 @@ pub unsafe fn init_falloc(memory_map: &[UEFIMemoryDescriptor]) {
     debug!("Kernel frame allocator initialized.");
 }
 
-fn reserve_kernel_stack(memory_map: &[UEFIMemoryDescriptor]) -> libstd::memory::FrameIterator {
-    debug!("Allocating frames according to BIOS memory map.");
-
+fn reserve_eligible_frames(memory_map: &[UEFIMemoryDescriptor]) {
     let mut last_frame_end = 0;
-    let mut stack_frames = core::lazy::OnceCell::<libstd::memory::FrameIterator>::new();
     for descriptor in memory_map {
         let frame_start = descriptor.phys_start.frame_index();
         let frame_count = descriptor.page_count as usize;
@@ -283,25 +290,15 @@ fn reserve_kernel_stack(memory_map: &[UEFIMemoryDescriptor]) -> libstd::memory::
 
         // Reserve descriptor properly, and acquire stack frames if applicable.
         if descriptor.should_reserve() {
-            let descriptor_frames = unsafe {
+            unsafe {
                 falloc::get()
                     .acquire_frames(frame_start, frame_count, falloc::FrameState::Reserved)
                     .unwrap()
             };
-
-            if descriptor.is_stack_descriptor() {
-                debug!("Identified stack frames: {}:{}", frame_start, frame_count);
-
-                stack_frames
-                    .set(descriptor_frames)
-                    .expect("multiple stack descriptors found");
-            }
         }
 
         last_frame_end = frame_start + frame_count;
     }
-
-    stack_frames.take().expect("no stack frames found")
 }
 
 fn init_system_config_table(config_table: &[SystemConfigTableEntry]) {
@@ -331,7 +328,7 @@ fn init_system_config_table(config_table: &[SystemConfigTableEntry]) {
 fn init_apic() {
     use libstd::structures::idt;
 
-    let apic = &libstd::cpu::get().apic();
+    let apic = &libstd::lpu::get().apic();
 
     apic.auto_configure_timer_frequency();
 
@@ -349,7 +346,7 @@ fn init_apic() {
 }
 
 extern "x86-interrupt" fn apic_error_handler(_: libstd::structures::idt::InterruptStackFrame) {
-    let apic = &libstd::cpu::get().apic();
+    let apic = &libstd::lpu::get().apic();
 
     error!("APIC ERROR INTERRUPT");
     error!("--------------------");

@@ -32,11 +32,19 @@ impl<MM, CTE> BootInfo<MM, CTE> {
     }
 
     pub fn memory_map(&self) -> &[MM] {
-        unsafe { &*core::ptr::slice_from_raw_parts(self.memory_map_ptr, self.memory_map_len) }
+        unsafe {
+            core::ptr::slice_from_raw_parts(self.memory_map_ptr, self.memory_map_len)
+                .as_ref()
+                .unwrap()
+        }
     }
 
     pub fn config_table(&self) -> &[CTE] {
-        unsafe { &*core::ptr::slice_from_raw_parts(self.config_table_ptr, self.config_table_len) }
+        unsafe {
+            core::ptr::slice_from_raw_parts(self.config_table_ptr, self.config_table_len)
+                .as_ref()
+                .unwrap()
+        }
     }
 
     pub fn framebuffer_pointer(&self) -> Option<FramebufferInfo> {

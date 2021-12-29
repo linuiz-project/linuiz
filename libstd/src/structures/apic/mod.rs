@@ -3,10 +3,7 @@ pub mod icr;
 use crate::{
     addr_ty::Virtual,
     cell::SyncOnceCell,
-    memory::{
-        mmio::{Mapped, MMIO},
-        volatile::VolatileCell,
-    },
+    memory::{volatile::VolatileCell, MMIO},
     registers::MSR,
     Address, ReadWrite,
 };
@@ -80,36 +77,26 @@ bitflags::bitflags! {
 pub static TIMER_FREQUENCY: SyncOnceCell<u32> = SyncOnceCell::new();
 
 pub struct APIC {
-    mmio: MMIO<Mapped>,
+    mmio: MMIO,
 }
 
 impl APIC {
     pub fn from_msr() -> Self {
-        let frames = unsafe {
-            use crate::memory::falloc;
-
-            falloc::get()
-                .acquire_frame(
-                    MSR::IA32_APIC_BASE.read().get_bits(12..36) as usize,
-                    falloc::FrameState::Reserved,
-                )
-                .unwrap()
-                .into_iter()
-        };
-        let mapped_mmio = crate::memory::mmio::unmapped_mmio(frames)
-            .unwrap()
-            .automap();
-
-        unsafe { Self::new(mapped_mmio) }
+        unsafe {
+            Self::new(
+                crate::memory::MMIO::new(MSR::IA32_APIC_BASE.read().get_bits(12..36) as usize, 1)
+                    .expect("Allocation failure when attempting to create MMIO for APIC."),
+            )
+        }
     }
 
-    pub unsafe fn new(mmio: MMIO<Mapped>) -> Self {
+    pub unsafe fn new(mmio: MMIO) -> Self {
         let assumed_base = MSR::IA32_APIC_BASE.read().get_bits(12..36) as usize;
-        if assumed_base != mmio.frames().start().index() {
+        if assumed_base != mmio.frames().start {
             warn!(
                 "APIC MMIO BASE FRAME INDEX CHECK: IA32_APIC_BASE({:?}) != PROVIDED({:?})",
                 assumed_base,
-                mmio.frames().start().index()
+                mmio.frames().start
             );
         }
 
@@ -163,16 +150,13 @@ impl APIC {
     }
 
     pub fn end_of_interrupt(&self) {
-        unsafe { self.mmio.write(0xB0, 0).unwrap() };
+        unsafe { self.mmio.write(0xB0, 0) };
     }
 
     pub fn cmci(&self) -> LVTRegister<Generic> {
         unsafe {
             LVTRegister::<Generic> {
-                obj: self
-                    .mmio
-                    .borrow::<VolatileCell<u32, ReadWrite>>(0x2F0)
-                    .unwrap(),
+                obj: self.mmio.borrow::<VolatileCell<u32, ReadWrite>>(0x2F0),
                 phantom: PhantomData,
             }
         }
@@ -181,10 +165,7 @@ impl APIC {
     pub fn timer(&self) -> LVTRegister<Timer> {
         unsafe {
             LVTRegister::<Timer> {
-                obj: self
-                    .mmio
-                    .borrow::<VolatileCell<u32, ReadWrite>>(0x320)
-                    .unwrap(),
+                obj: self.mmio.borrow::<VolatileCell<u32, ReadWrite>>(0x320),
                 phantom: PhantomData,
             }
         }
@@ -193,10 +174,7 @@ impl APIC {
     pub fn thermal_sensor(&self) -> LVTRegister<Generic> {
         unsafe {
             LVTRegister::<Generic> {
-                obj: self
-                    .mmio
-                    .borrow::<VolatileCell<u32, ReadWrite>>(0x330)
-                    .unwrap(),
+                obj: self.mmio.borrow::<VolatileCell<u32, ReadWrite>>(0x330),
                 phantom: PhantomData,
             }
         }
@@ -205,10 +183,7 @@ impl APIC {
     pub fn performance(&self) -> LVTRegister<Generic> {
         unsafe {
             LVTRegister::<Generic> {
-                obj: self
-                    .mmio
-                    .borrow::<VolatileCell<u32, ReadWrite>>(0x340)
-                    .unwrap(),
+                obj: self.mmio.borrow::<VolatileCell<u32, ReadWrite>>(0x340),
                 phantom: PhantomData,
             }
         }
@@ -217,10 +192,7 @@ impl APIC {
     pub fn lint0(&self) -> LVTRegister<LINT> {
         unsafe {
             LVTRegister::<LINT> {
-                obj: self
-                    .mmio
-                    .borrow::<VolatileCell<u32, ReadWrite>>(0x350)
-                    .unwrap(),
+                obj: self.mmio.borrow::<VolatileCell<u32, ReadWrite>>(0x350),
                 phantom: PhantomData,
             }
         }
@@ -229,10 +201,7 @@ impl APIC {
     pub fn lint1(&self) -> LVTRegister<LINT> {
         unsafe {
             LVTRegister::<LINT> {
-                obj: self
-                    .mmio
-                    .borrow::<VolatileCell<u32, ReadWrite>>(0x360)
-                    .unwrap(),
+                obj: self.mmio.borrow::<VolatileCell<u32, ReadWrite>>(0x360),
                 phantom: PhantomData,
             }
         }
@@ -241,10 +210,7 @@ impl APIC {
     pub fn error(&self) -> LVTRegister<Error> {
         unsafe {
             LVTRegister::<Error> {
-                obj: self
-                    .mmio
-                    .borrow::<VolatileCell<u32, ReadWrite>>(0x370)
-                    .unwrap(),
+                obj: self.mmio.borrow::<VolatileCell<u32, ReadWrite>>(0x370),
                 phantom: PhantomData,
             }
         }
@@ -262,22 +228,22 @@ impl APIC {
     pub fn interrupt_command_register(&self) -> icr::InterruptCommandRegister {
         unsafe {
             icr::InterruptCommandRegister::new(
-                self.mmio.borrow(Register::ICRL as usize).unwrap(),
-                self.mmio.borrow(Register::ICRH as usize).unwrap(),
+                self.mmio.borrow(Register::ICRL as usize),
+                self.mmio.borrow(Register::ICRH as usize),
             )
         }
     }
 
     pub fn error_status(&self) -> ErrorStatusFlags {
-        ErrorStatusFlags::from_bits_truncate(unsafe { self.mmio.read(0x280).unwrap() })
+        ErrorStatusFlags::from_bits_truncate(unsafe { self.mmio.read(0x280).assume_init() })
     }
 
     pub fn read_register(&self, register: Register) -> u32 {
-        unsafe { self.mmio.read(register as usize).unwrap() }
+        unsafe { self.mmio.read(register as usize).assume_init() }
     }
 
     pub fn write_register(&self, register: Register, value: u32) {
-        unsafe { self.mmio.write(register as usize, value).unwrap() }
+        unsafe { self.mmio.write(register as usize, value) }
     }
 
     pub unsafe fn reset(&self) {

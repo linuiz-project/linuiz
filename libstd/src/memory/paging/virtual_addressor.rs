@@ -7,6 +7,12 @@ use crate::{
     Address,
 };
 
+#[derive(Debug, Clone, Copy)]
+pub enum MapError {
+    AlreadyMapped,
+    AlreadyUnmapped,
+}
+
 pub struct VirtualAddressor {
     mapped_page: Page,
     pml4_frame: Frame,
@@ -68,12 +74,12 @@ impl VirtualAddressor {
         self.mapped_page.forward(self.pml4_frame.index()).unwrap()
     }
 
-    fn pml4(&self) -> &PageTable<Level4> {
-        unsafe { &*self.pml4_page().as_ptr() }
+    fn pml4(&self) -> Option<&PageTable<Level4>> {
+        unsafe { self.pml4_page().as_ptr::<PageTable<Level4>>().as_ref() }
     }
 
-    fn pml4_mut(&mut self) -> &mut PageTable<Level4> {
-        unsafe { &mut *self.pml4_page().as_mut_ptr() }
+    fn pml4_mut(&mut self) -> Option<&mut PageTable<Level4>> {
+        unsafe { self.pml4_page().as_mut_ptr::<PageTable<Level4>>().as_mut() }
     }
 
     fn get_page_entry(&self, page: &Page) -> Option<&PageTableEntry> {
@@ -82,7 +88,7 @@ impl VirtualAddressor {
 
         unsafe {
             self.pml4()
-                .sub_table(addr.p4_index(), offset)
+                .and_then(|p4| p4.sub_table(addr.p4_index(), offset))
                 .and_then(|p3| p3.sub_table(addr.p3_index(), offset))
                 .and_then(|p2| p2.sub_table(addr.p2_index(), offset))
                 .and_then(|p1| Some(p1.get_entry(addr.p1_index())))
@@ -95,7 +101,7 @@ impl VirtualAddressor {
 
         unsafe {
             self.pml4_mut()
-                .sub_table_mut(addr.p4_index(), offset)
+                .and_then(|p4| p4.sub_table_mut(addr.p4_index(), offset))
                 .and_then(|p3| p3.sub_table_mut(addr.p3_index(), offset))
                 .and_then(|p2| p2.sub_table_mut(addr.p2_index(), offset))
                 .and_then(|p1| Some(p1.get_entry_mut(addr.p1_index())))
@@ -107,7 +113,7 @@ impl VirtualAddressor {
         let addr = page.base_addr();
 
         unsafe {
-            self.pml4_mut()
+            self.pml4_mut().unwrap()
                 .sub_table_create(addr.p4_index(), offset)
                 .sub_table_create(addr.p3_index(), offset)
                 .sub_table_create(addr.p2_index(), offset)
@@ -117,34 +123,33 @@ impl VirtualAddressor {
 
     /* MAP / UNMAP */
 
-    pub fn map(&mut self, page: &Page, frame: &Frame) {
-        assert!(
-            !self.is_mapped(page.base_addr()),
-            "Page is already mapped: {:?}",
-            page
-        );
+    pub fn map(&mut self, page: &Page, frame: &Frame) -> Result<(), MapError> {
+        if self.is_mapped(page.base_addr()) {
+            return Err(MapError::AlreadyMapped);
+        }
 
         self.get_page_entry_create(page)
             .set(&frame, PageAttributes::PRESENT | PageAttributes::WRITABLE);
         crate::instructions::tlb::invalidate(page);
-        trace!("Mapped {:?} -> {:?}", page, frame);
 
-        assert!(self.is_mapped_to(page, frame), "failed to map page",);
+        Ok(())
     }
 
-    pub fn unmap(&mut self, page: &Page) {
-        assert!(self.is_mapped(page.base_addr()), "page already unmapped");
+    pub fn unmap(&mut self, page: &Page) -> Result<(), MapError> {
+        if !self.is_mapped(page.base_addr()) {
+            return Err(MapError::AlreadyUnmapped);
+        }
 
         self.get_page_entry_mut(page)
             .unwrap()
             .set_attributes(PageAttributes::PRESENT, AttributeModify::Remove);
         crate::instructions::tlb::invalidate(page);
 
-        assert!(!self.is_mapped(page.base_addr()), "failed to unmap page",);
+        Ok(())
     }
 
-    pub fn identity_map(&mut self, frame: &Frame) {
-        self.map(&Page::from_index(frame.index()), frame);
+    pub fn identity_map(&mut self, frame: &Frame) -> Result<(), MapError> {
+        self.map(&Page::from_index(frame.index()), frame)
     }
 
     /* STATE QUERYING */
@@ -176,18 +181,19 @@ impl VirtualAddressor {
     pub unsafe fn modify_mapped_page(&mut self, page: Page) {
         let total_memory_pages = crate::memory::falloc::get().total_memory(None) / 0x1000;
         for index in 0..total_memory_pages {
-            self.map(&page.forward(index).unwrap(), &Frame::from_index(index));
+            self.map(&page.forward(index).unwrap(), &Frame::from_index(index))
+                .unwrap();
         }
 
         self.mapped_page = page;
     }
 
-    pub unsafe fn get_page_attributes(&self, page: &Page) -> Option<PageAttributes> {
+    pub unsafe fn get_page_attribs(&self, page: &Page) -> Option<PageAttributes> {
         self.get_page_entry(page)
             .map(|page_entry| page_entry.get_attributes())
     }
 
-    pub unsafe fn set_page_attributes(
+    pub unsafe fn set_page_attribs(
         &mut self,
         page: &Page,
         attributes: PageAttributes,
@@ -200,150 +206,5 @@ impl VirtualAddressor {
     pub unsafe fn swap_into(&self) {
         trace!("Swapping {:?} into CR3.", self.pml4_frame.base_addr());
         crate::registers::CR3::write(&self.pml4_frame, crate::registers::CR3Flags::empty());
-    }
-
-    /* MISC */
-
-    fn validate_entry(
-        index4: Option<usize>,
-        index3: Option<usize>,
-        index2: Option<usize>,
-        index1: Option<usize>,
-        entry: &PageTableEntry,
-    ) {
-        match entry.validate() {
-            Ok(()) => {}
-            Err(err) => match err {
-                super::ValidationError::ReservedBits(bits) => panic!(
-                    "{:?} > {:?} > {:?} > {:?} : 0b{:b}",
-                    index4, index3, index2, index1, bits
-                ),
-                super::ValidationError::NonCanonical(addr) => panic!(
-                    "{:?} > {:?} > {:?} > {:?} : {:?}",
-                    index4, index3, index2, index1, addr
-                ),
-            },
-        };
-    }
-    pub fn validate_page_tables(&self) {
-        debug!(
-            "VIRTUAL ADDRESSOR: FULL VALIDATION: STARTED\n\tMAPPED: {:?}\tPML4: {:?}",
-            self.mapped_offset(),
-            self.pml4_page()
-        );
-
-        let mut validations: usize = 0;
-        unsafe {
-            let phys_mapped_addr = self.mapped_offset();
-            for (index4, entry4) in self.pml4().iter().enumerate() {
-                Self::validate_entry(Some(index4), None, None, None, entry4);
-                validations += 1;
-
-                if let Some(table3) = self.pml4().sub_table(index4, phys_mapped_addr) {
-                    for (index3, entry3) in table3.iter().enumerate() {
-                        Self::validate_entry(Some(index4), Some(index3), None, None, entry3);
-                        validations += 1;
-
-                        if let Some(table2) = table3.sub_table(index3, phys_mapped_addr) {
-                            for (index2, entry2) in table2.iter().enumerate() {
-                                Self::validate_entry(
-                                    Some(index4),
-                                    Some(index3),
-                                    Some(index2),
-                                    None,
-                                    entry2,
-                                );
-                                validations += 1;
-
-                                if let Some(table1) = table2.sub_table(index2, phys_mapped_addr) {
-                                    for (index1, entry1) in table1.iter().enumerate() {
-                                        Self::validate_entry(
-                                            Some(index4),
-                                            Some(index3),
-                                            Some(index2),
-                                            Some(index1),
-                                            entry1,
-                                        );
-                                        validations += 1;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        debug!(
-            "VIRTUAL ADDRESSOR: FULL VALIDATION: COMPLETED ({} TOTAL VALIDATIONS)",
-            validations
-        );
-    }
-
-    pub fn validate_page_branch(&self, page: &Page) {
-        debug!(
-            "VIRTUAL ADDRESSOR: BRANCH VALIDATION: STARTED\n\tMAPPED: {:?}\tPML4: {:?}\n\tPAGE: {:?}",
-            self.mapped_offset(),
-            self.pml4_page(),
-            page
-        );
-
-        let base_addr = page.base_addr();
-        let p4_index = base_addr.p4_index();
-        let p3_index = base_addr.p3_index();
-        let p2_index = base_addr.p2_index();
-        let p1_index = base_addr.p1_index();
-
-        let entry4 = self.pml4().get_entry(p4_index);
-        Self::validate_entry(Some(p4_index), None, None, None, entry4);
-        debug!(
-            "VIRTUAL ADDRESSOR: BRANCH VALIDATION:\n\tPTE4: {:?}",
-            entry4
-        );
-
-        unsafe {
-            let phys_mapped_addr = self.mapped_offset();
-
-            if let Some(table3) = self.pml4().sub_table(p4_index, phys_mapped_addr) {
-                let entry3 = table3.get_entry(p3_index);
-                Self::validate_entry(Some(p4_index), Some(p3_index), None, None, entry3);
-                debug!(
-                    "VIRTUAL ADDRESSOR: BRANCH VALIDATION:\n\tPTE3: {:?}",
-                    entry3
-                );
-
-                if let Some(table2) = table3.sub_table(p3_index, phys_mapped_addr) {
-                    let entry2 = table2.get_entry(p2_index);
-                    Self::validate_entry(
-                        Some(p4_index),
-                        Some(p3_index),
-                        Some(p2_index),
-                        None,
-                        entry2,
-                    );
-                    debug!(
-                        "VIRTUAL ADDRESSOR: BRANCH VALIDATION:\n\tPTE2: {:?}",
-                        entry2
-                    );
-
-                    if let Some(table1) = table2.sub_table(p2_index, phys_mapped_addr) {
-                        let entry1 = table1.get_entry(p1_index);
-                        Self::validate_entry(
-                            Some(p4_index),
-                            Some(p3_index),
-                            Some(p2_index),
-                            Some(p1_index),
-                            entry1,
-                        );
-                        debug!(
-                            "VIRTUAL ADDRESSOR: BRANCH VALIDATION:\n\tPTE1: {:?}",
-                            entry1
-                        );
-                    }
-                }
-            }
-        }
-
-        debug!("VIRTUAL ADDRESSOR: BRANCH VALIDATION: COMPLETED");
     }
 }

@@ -1,7 +1,7 @@
 mod msix;
 pub use msix::*;
 
-use crate::memory::mmio::{Mapped, MMIO};
+use crate::memory::MMIO;
 
 /// An exaplanation of the acronyms used here can be inferred from:
 ///  https://lekensteyn.nl/files/docs/PCI_SPEV_V3_0.pdf table H-1
@@ -46,12 +46,12 @@ pub enum Capablities<'cap> {
 }
 
 pub struct CapablitiesIterator<'mmio> {
-    mmio: &'mmio MMIO<Mapped>,
+    mmio: &'mmio MMIO,
     offset: u8,
 }
 
 impl<'mmio> CapablitiesIterator<'mmio> {
-    pub(super) fn new(mmio: &'mmio MMIO<Mapped>, offset: u8) -> Self {
+    pub(super) fn new(mmio: &'mmio MMIO, offset: u8) -> Self {
         Self { mmio, offset }
     }
 }
@@ -64,7 +64,7 @@ impl<'mmio> Iterator for CapablitiesIterator<'mmio> {
             unsafe {
                 use bit_field::BitField;
 
-                let capability_reg_0 = self.mmio.read::<u32>(self.offset as usize).unwrap();
+                let capability_reg_0 = self.mmio.read::<u32>(self.offset as usize).assume_init();
                 let old_offset = self.offset as usize;
                 self.offset = capability_reg_0.get_bits(8..16) as u8;
 
@@ -85,7 +85,7 @@ impl<'mmio> Iterator for CapablitiesIterator<'mmio> {
                     0xE => Capablities::AGP8X,
                     0xF => Capablities::SECURE,
                     0x10 => Capablities::PCIE,
-                    0x11 => Capablities::MSIX(self.mmio.borrow(old_offset).unwrap()),
+                    0x11 => Capablities::MSIX(self.mmio.borrow(old_offset)),
                     0x0 | 0x12..0xFF => Capablities::Reserved,
                     _ => Capablities::NotImplemented,
                 })

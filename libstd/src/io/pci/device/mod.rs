@@ -2,8 +2,8 @@ pub mod standard;
 
 use crate::{
     memory::{
-        mmio::{Mapped, MMIO},
         volatile::{Volatile, VolatileCell},
+        MMIO,
     },
     volatile_bitfield_getter, volatile_bitfield_getter_ro, ReadWrite,
 };
@@ -204,13 +204,16 @@ pub enum DeviceVariant {
 }
 
 pub struct PCIeDevice<T: DeviceType> {
-    mmio: MMIO<Mapped>,
-    registers: Vec<Option<MMIO<Mapped>>>,
+    mmio: MMIO,
+    registers: Vec<Option<MMIO>>,
     phantom: PhantomData<T>,
 }
 
-pub fn new_device(mmio: MMIO<Mapped>) -> DeviceVariant {
-    let type_malfunc = unsafe { mmio.read::<u8>(HeaderOffset::HeaderType.into()).unwrap() };
+pub fn new_device(mmio: MMIO) -> DeviceVariant {
+    let type_malfunc = unsafe {
+        mmio.read::<u8>(HeaderOffset::HeaderType.into())
+            .assume_init()
+    };
 
     // mask off the multifunction bit
     match type_malfunc & !(1 << 7) {
@@ -229,7 +232,7 @@ pub fn new_device(mmio: MMIO<Mapped>) -> DeviceVariant {
             panic!(
                 "header type is invalid (must be 0..=2): {}, mmio addr: {:?}",
                 invalid_type,
-                mmio.physical_addr()
+                mmio.phys_addr()
             )
         }
     }
@@ -237,54 +240,66 @@ pub fn new_device(mmio: MMIO<Mapped>) -> DeviceVariant {
 
 impl<T: DeviceType> PCIeDevice<T> {
     pub fn vendor_id(&self) -> u16 {
-        unsafe { self.mmio.read(HeaderOffset::VendorID.into()).unwrap() }
+        unsafe { self.mmio.read(HeaderOffset::VendorID.into()).assume_init() }
     }
 
     pub fn device_id(&self) -> u16 {
-        unsafe { self.mmio.read(HeaderOffset::DeviceID.into()).unwrap() }
+        unsafe { self.mmio.read(HeaderOffset::DeviceID.into()).assume_init() }
     }
 
     pub fn command(&self) -> &CommandRegister {
-        unsafe { self.mmio.borrow(HeaderOffset::Command.into()).unwrap() }
+        unsafe { self.mmio.borrow(HeaderOffset::Command.into()) }
     }
 
     pub fn status(&self) -> StatusRegister {
-        unsafe { self.mmio.read(HeaderOffset::Status.into()).unwrap() }
+        unsafe { self.mmio.read(HeaderOffset::Status.into()).assume_init() }
     }
 
     pub fn revision_id(&self) -> u8 {
-        unsafe { self.mmio.read(HeaderOffset::RevisionID.into()).unwrap() }
+        unsafe {
+            self.mmio
+                .read(HeaderOffset::RevisionID.into())
+                .assume_init()
+        }
     }
 
     pub fn program_interface(&self) -> u8 {
         unsafe {
             self.mmio
                 .read(HeaderOffset::ProgramInterface.into())
-                .unwrap()
+                .assume_init()
         }
     }
 
     pub fn subclass(&self) -> u8 {
-        unsafe { self.mmio.read(HeaderOffset::Subclass.into()).unwrap() }
+        unsafe { self.mmio.read(HeaderOffset::Subclass.into()).assume_init() }
     }
 
     pub fn class(&self) -> DeviceClass {
-        unsafe { self.mmio.read(HeaderOffset::Class.into()).unwrap() }
+        unsafe { self.mmio.read(HeaderOffset::Class.into()).assume_init() }
     }
 
     pub fn cache_line_size(&self) -> u8 {
-        unsafe { self.mmio.read(HeaderOffset::CacheLineSize.into()).unwrap() }
+        unsafe {
+            self.mmio
+                .read(HeaderOffset::CacheLineSize.into())
+                .assume_init()
+        }
     }
 
     pub fn latency_timer(&self) -> u8 {
-        unsafe { self.mmio.read(HeaderOffset::LatencyTimer.into()).unwrap() }
+        unsafe {
+            self.mmio
+                .read(HeaderOffset::LatencyTimer.into())
+                .assume_init()
+        }
     }
 
     pub fn header_type(&self) -> u8 {
         unsafe {
             self.mmio
                 .read::<u8>(HeaderOffset::HeaderType.into())
-                .unwrap()
+                .assume_init()
                 & !(1 << 7)
         }
     }
@@ -294,7 +309,7 @@ impl<T: DeviceType> PCIeDevice<T> {
             (self
                 .mmio
                 .read::<u8>(HeaderOffset::BuiltInSelfTest.into())
-                .unwrap()
+                .assume_init()
                 & (1 << 7))
                 > 0
         }
@@ -304,7 +319,7 @@ impl<T: DeviceType> PCIeDevice<T> {
         unsafe {
             self.mmio
                 .read(HeaderOffset::BuiltInSelfTest.into())
-                .unwrap()
+                .assume_init()
         }
     }
 

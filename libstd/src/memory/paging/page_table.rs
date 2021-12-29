@@ -67,9 +67,12 @@ impl<L: HeirarchicalLevel> PageTable<L> {
         index: usize,
         phys_mapped_addr: Address<Virtual>,
     ) -> Option<&PageTable<L::NextLevel>> {
-        self.get_entry(index)
-            .get_frame()
-            .map(|frame| &*(phys_mapped_addr + frame.base_addr().as_usize()).as_ptr())
+        self.get_entry(index).get_frame().map(|frame| {
+            (phys_mapped_addr + frame.base_addr().as_usize())
+                .as_ptr::<PageTable<L::NextLevel>>()
+                .as_ref()
+                .unwrap()
+        })
     }
 
     pub unsafe fn sub_table_mut(
@@ -77,9 +80,12 @@ impl<L: HeirarchicalLevel> PageTable<L> {
         index: usize,
         phys_mapped_addr: Address<Virtual>,
     ) -> Option<&mut PageTable<L::NextLevel>> {
-        self.get_entry_mut(index)
-            .get_frame()
-            .map(|frame| &mut *(phys_mapped_addr + frame.base_addr().as_usize()).as_mut_ptr())
+        self.get_entry_mut(index).get_frame().map(|frame| {
+            (phys_mapped_addr + frame.base_addr().as_usize())
+                .as_mut_ptr::<PageTable<L::NextLevel>>()
+                .as_mut()
+                .unwrap()
+        })
     }
 
     pub unsafe fn sub_table_create(
@@ -106,8 +112,11 @@ impl<L: HeirarchicalLevel> PageTable<L> {
             }
         };
 
-        let sub_table: &mut PageTable<L::NextLevel> =
-            &mut *((phys_mapped_addr + frame.base_addr().as_usize()).as_mut_ptr());
+        let sub_table: &mut PageTable<L::NextLevel> = (phys_mapped_addr
+            + frame.base_addr().as_usize())
+        .as_mut_ptr::<PageTable<L::NextLevel>>()
+        .as_mut()
+        .unwrap();
 
         if created {
             sub_table.clear();

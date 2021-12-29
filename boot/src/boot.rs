@@ -63,7 +63,7 @@ pub fn locate_protocol<P: Protocol>(boot_services: &BootServices) -> Option<&mut
 fn acquire_protocol_unwrapped<P: Protocol>(result: uefi::Result<&UnsafeCell<P>>) -> Option<&mut P> {
     if let Ok(completion) = result {
         if completion.status() == Status::SUCCESS {
-            Some(unsafe { &mut *(completion.unwrap().get()) })
+            Some(unsafe { (completion.unwrap().get()).as_mut().unwrap() })
         } else {
             None
         }
@@ -88,7 +88,11 @@ pub fn allocate_pool(
         Err(error) => panic!("{:?}", error),
     };
 
-    unsafe { &mut *slice_from_raw_parts_mut(alloc_pointer, size) }
+    unsafe {
+        slice_from_raw_parts_mut(alloc_pointer, size)
+            .as_mut()
+            .unwrap()
+    }
 }
 
 #[allow(dead_code)]
@@ -114,7 +118,11 @@ pub fn allocate_pages(
         Err(error) => panic!("{:?}", error),
     };
 
-    unsafe { &mut *slice_from_raw_parts_mut(alloc_pointer, pages_count * PAGE_SIZE) }
+    unsafe {
+        slice_from_raw_parts_mut(alloc_pointer, pages_count * PAGE_SIZE)
+            .as_mut()
+            .unwrap()
+    }
 }
 
 #[allow(dead_code)]
@@ -169,7 +177,11 @@ fn efi_main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status
 
     // this ugly little hack is to sever the boot_services' lifetime from the system_table, allowing us
     // to later move the system_table into `kernel_transfer()`
-    let boot_services = unsafe { &*(system_table.boot_services() as *const BootServices) };
+    let boot_services = unsafe {
+        (system_table.boot_services() as *const BootServices)
+            .as_ref()
+            .unwrap()
+    };
     info!("Acquired boot services from UEFI firmware.");
 
     // test to see how much memory we're working with
@@ -247,10 +259,6 @@ fn ensure_enough_memory(boot_services: &BootServices) {
 }
 
 fn select_graphics_mode(graphics_output: &mut GraphicsOutput) -> Mode {
-    graphics_output
-        .modes()
-        .for_each(|mode| debug!("Available graphics mode: {:?}", mode.unwrap().info()));
-
     let graphics_mode = graphics_output
         .modes()
         .map(|mode| mode.expect("warning encountered while querying mode"))
@@ -327,7 +335,11 @@ fn kernel_transfer(
 
     // Create the byte buffer to the used for filling in memory descriptors. This buffer, on the call to `ExitBootServices`, provides
     // lifetime information, and so cannot be reinterpreted easily.
-    let mmap_buffer = unsafe { &mut *slice_from_raw_parts_mut(mmap_ptr, mmap_alloc_size) };
+    let mmap_buffer = unsafe {
+        slice_from_raw_parts_mut(mmap_ptr, mmap_alloc_size)
+            .as_mut()
+            .unwrap()
+    };
     // After this point point, the previous system_table and boot_services are no longer valid
     let (runtime_table, mmap_iter) =
         match system_table.exit_boot_services(image_handle, mmap_buffer) {
@@ -340,7 +352,9 @@ fn kernel_transfer(
     //
     // This could be due to the actual entry size not being equal to size_of::<MemoryDescriptor>().
     let memory_map = unsafe {
-        &mut *slice_from_raw_parts_mut(mmap_ptr as *mut MemoryDescriptor, mmap_iter.len())
+        slice_from_raw_parts_mut(mmap_ptr as *mut MemoryDescriptor, mmap_iter.len())
+            .as_mut()
+            .unwrap()
     };
     for (index, descriptor) in mmap_iter.enumerate() {
         memory_map[index] = *descriptor;

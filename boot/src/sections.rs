@@ -34,7 +34,11 @@ impl<'k> Iterator for SectionIterator<'k> {
             self.section_index += 1;
             self.disk_offset += self.header.section_header_size() as u64;
 
-            Some(unsafe { &*(self.section_buffer.as_ptr() as *const _) })
+            Some(unsafe {
+                (self.section_buffer.as_ptr() as *const Self::Item)
+                    .as_ref()
+                    .unwrap()
+            })
         } else {
             None
         }

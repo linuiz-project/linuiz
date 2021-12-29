@@ -13,7 +13,7 @@ pub trait SubTable {
     const SIGNATURE: &'static str;
 
     fn sdt_header(&self) -> &SDTHeader {
-        unsafe { &*(self as *const _ as *const _) }
+        unsafe { (self as *const _ as *const SDTHeader).as_ref().unwrap() }
     }
 }
 
@@ -43,7 +43,7 @@ impl XSDTData {
         for entry_ptr in self.entries() {
             unsafe {
                 if (**entry_ptr).signature() == T::SIGNATURE {
-                    let table: &T = &*(*entry_ptr as *const _);
+                    let table: &T = (*entry_ptr as *const T).as_ref().unwrap();
                     table.validate_checksum();
                     return Ok(table);
                 }
@@ -70,7 +70,7 @@ impl Checksum for XSDTData {
 
 lazy_static::lazy_static! {
     pub static ref XSDT: &'static XSDTData = unsafe {
-            let xsdt = &*(crate::acpi::rdsp::LAZY_RDSP2.xsdt_addr().as_usize() as *const XSDTData);
+            let xsdt = (crate::acpi::rdsp::LAZY_RDSP2.xsdt_addr().as_usize() as *const XSDTData).as_ref().unwrap();
             xsdt.validate_checksum();
             xsdt
     };

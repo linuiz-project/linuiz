@@ -19,18 +19,10 @@ impl PCIeBus {
                 } else {
                     trace!("Configuring PCIe device at {:?}", offset_addr);
 
-                    let mmio_frames = crate::memory::falloc::get()
-                        .acquire_frame(
-                            offset_addr.frame_index(),
-                            crate::memory::falloc::FrameState::Reserved,
-                        )
-                        .unwrap()
-                        .into_iter();
-
                     Some(crate::io::pci::new_device(
-                        crate::memory::mmio::unmapped_mmio(mmio_frames)
-                            .unwrap()
-                            .automap(),
+                        crate::memory::MMIO::new(offset_addr.frame_index(), 1).expect(
+                            "Allocation error occurred attempting to create MMIO for PCIeBus.",
+                        ),
                     ))
                 }
             })

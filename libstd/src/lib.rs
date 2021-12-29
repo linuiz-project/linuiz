@@ -11,7 +11,11 @@
     const_ptr_offset,
     const_fn_trait_bound,
     exclusive_range_pattern,
-    extern_types
+    extern_types,
+    ptr_as_uninit,
+    slice_ptr_get,
+    const_ptr_as_ref,
+    const_align_offset
 )]
 
 #[macro_use]
@@ -34,7 +38,7 @@ pub mod registers;
 pub mod structures;
 pub use bv_array::*;
 pub mod bit_array;
-pub mod cpu;
+pub mod lpu;
 
 pub use addr::*;
 pub use boot_info::*;

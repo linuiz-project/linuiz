@@ -103,25 +103,24 @@ impl<'ahci> AHCI<'ahci> {
 
         if let Some(hba_mmio) = device.get_register(StandardRegister::Register5) {
             debug!("Parsing valid SATA ports from HBA memory ports.");
-            let sata_ports: Vec<&mut hba::Port> =
-                unsafe { hba_mmio.borrow::<hba::Memory>(0x0).unwrap() }
-                    .ports()
-                    .filter_map(|port| match port.class() {
-                        hba::PortClass::SATA | hba::PortClass::SATAPI => {
-                            debug!("Configuring AHCI port: {:?}", port.class());
-                            let port: &mut hba::Port = unsafe {
-                                // Elide borrow checker.
-                                // TODO: port should be invariantly inner-volatile.
-                                //      Then we can just reutrn an immutable borrow.
-                                &mut *(port as *const _ as *mut _)
-                            };
+            let sata_ports: Vec<&mut hba::Port> = unsafe { hba_mmio.borrow::<hba::Memory>(0x0) }
+                .ports()
+                .filter_map(|port| match port.class() {
+                    hba::PortClass::SATA | hba::PortClass::SATAPI => {
+                        debug!("Configuring AHCI port: {:?}", port.class());
+                        let port: &mut hba::Port = unsafe {
+                            // Elide borrow checker.
+                            // TODO: port should be invariantly inner-volatile.
+                            //      Then we can just reutrn an immutable borrow.
+                            (port as *const _ as *mut hba::Port).as_mut().unwrap()
+                        };
 
-                            port.configure();
-                            Some(port)
-                        }
-                        _port_type => None,
-                    })
-                    .collect();
+                        port.configure();
+                        Some(port)
+                    }
+                    _port_type => None,
+                })
+                .collect();
 
             debug!("Found SATA ports: {}", sata_ports.len());
 

@@ -20,7 +20,7 @@ impl<M: BitSwitchMode> BitSwitch32<'_, M> {
 impl<'val> BitSwitch32<'val, ReadOnly> {
     pub fn new(val: &'val u32, bit_index: u8) -> Self {
         Self {
-            val: unsafe { &mut *(val as *const u32 as *mut u32) },
+            val: unsafe { (val as *const u32 as *mut u32).as_mut().unwrap() },
             bit_index,
             phantom: core::marker::PhantomData,
         }
@@ -39,7 +39,7 @@ impl core::fmt::Debug for BitSwitch32<'_, ReadOnly> {
 impl<'val> BitSwitch32<'val, ReadWrite> {
     pub fn new(val: &'val mut u32, bit_index: u8) -> Self {
         Self {
-            val: unsafe { &mut *(val as *const u32 as *mut u32) },
+            val: unsafe { (val as *const u32 as *mut u32).as_mut().unwrap() },
             bit_index,
             phantom: core::marker::PhantomData,
         }

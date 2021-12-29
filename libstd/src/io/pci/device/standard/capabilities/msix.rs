@@ -132,23 +132,14 @@ impl MSIX {
     pub fn get_message_table<'dev>(
         &self,
         device: &'dev crate::io::pci::PCIeDevice<crate::io::pci::Standard>,
-    ) -> Option<&mut [&'dev MessageTableEntry]> {
+    ) -> Option<&'dev [MessageTableEntry]> {
         device
             .get_register(self.get_table_bir())
             .map(|mmio| unsafe {
-                let table_offset = self.get_table_offset();
-                let table =
-                    crate::slice_mut!(&MessageTableEntry, self.message_control().get_table_len());
-
-                table.iter_mut().enumerate().for_each(|(index, entry)| {
-                    *entry = mmio
-                        .borrow::<MessageTableEntry>(
-                            table_offset + (index * core::mem::size_of::<MessageTableEntry>()),
-                        )
-                        .unwrap()
-                });
-
-                table
+                mmio.slice(
+                    self.get_table_offset(),
+                    self.message_control().get_table_len(),
+                )
             })
     }
 
@@ -162,15 +153,7 @@ impl MSIX {
                 let table_offset = self.get_pending_bit_offset();
                 let table_len = self.message_control().get_table_len();
 
-                BitSlice::<VolatileCell<u64, ReadWrite>>::from_slice(
-                    unsafe {
-                        &mut *core::slice::from_raw_parts_mut(
-                            (mmio.mapped_addr() + table_offset).as_mut_ptr(),
-                            table_len,
-                        )
-                    },
-                    table_len,
-                )
+                todo!("Not entirely sure what I was doing here before, but this needs to return a competent value.")
             })
     }
 }

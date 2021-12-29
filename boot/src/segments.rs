@@ -20,7 +20,9 @@ pub fn allocate_segments(
                 &mut segment_header_buffer,
             );
 
-            &*(segment_header_buffer.as_ptr() as *const SegmentHeader)
+            (segment_header_buffer.as_ptr() as *const SegmentHeader)
+                .as_ref()
+                .unwrap()
         };
 
         // TODO: Also process GNU_RELRO segments.
@@ -57,10 +59,10 @@ pub fn allocate_segments(
 
                     // If this segment's address doesn't align, simply create a slice over the region.
                     unsafe {
-                        &mut *(core::slice::from_raw_parts_mut(
+                        core::slice::from_raw_parts_mut(
                             segment_header.virt_addr.as_ptr::<u8>() as *mut _,
                             segment_header.mem_size,
-                        ))
+                        )
                     }
                 };
 

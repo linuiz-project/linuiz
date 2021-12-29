@@ -3,7 +3,7 @@ pub use capabilities::*;
 
 use crate::{
     io::pci::{DeviceRegister, DeviceRegisterIterator, DeviceType, PCIeDevice, Standard},
-    memory::mmio::{Mapped, MMIO},
+    memory::MMIO,
 };
 use core::fmt;
 use num_enum::TryFromPrimitive;
@@ -20,11 +20,11 @@ pub enum StandardRegister {
 }
 
 impl PCIeDevice<Standard> {
-    pub unsafe fn new(mmio: MMIO<Mapped>) -> Self {
+    pub unsafe fn new(mmio: MMIO) -> Self {
         assert_eq!(
             (mmio
                 .read::<u8>(crate::io::pci::HeaderOffset::HeaderType.into())
-                .unwrap())
+                .assume_init())
                 & !(1 << 7),
             0,
             "incorrect header type for standard specification PCI device"
@@ -47,17 +47,9 @@ impl PCIeDevice<Standard> {
                     frame_index,
                     frame_usage
                 );
-                let mmio_frames = crate::memory::falloc::get()
-                    .acquire_frames(
-                        frame_index,
-                        frame_usage,
-                        crate::memory::falloc::FrameState::Reserved,
-                    )
-                    .expect("frames are not MMIO");
-                trace!("\tAuto-mapping register destination frame.");
-                let register_mmio = crate::memory::mmio::unmapped_mmio(mmio_frames)
-                    .expect("failed to create MMIO object")
-                    .automap();
+
+                let register_mmio = crate::memory::MMIO::new(frame_index, frame_usage)
+                    .expect("failed to create MMIO object");
 
                 if match register {
                     DeviceRegister::MemorySpace32(value, _) => (value & 0b1000) > 0,
@@ -69,7 +61,7 @@ impl PCIeDevice<Standard> {
                     for page in register_mmio.pages() {
                         use crate::memory::paging::{AttributeModify, PageAttributes};
 
-                        crate::memory::malloc::get().set_page_attributes(
+                        crate::memory::malloc::get().set_page_attribs(
                             &page,
                             PageAttributes::WRITE_THROUGH,
                             AttributeModify::Insert,
@@ -94,54 +86,54 @@ impl PCIeDevice<Standard> {
     }
 
     pub fn cardbus_cis_ptr(&self) -> u32 {
-        unsafe { self.mmio.read(0x28).unwrap() }
+        unsafe { self.mmio.read(0x28).assume_init() }
     }
 
     pub fn subsystem_vendor_id(&self) -> u16 {
-        unsafe { self.mmio.read(0x2C).unwrap() }
+        unsafe { self.mmio.read(0x2C).assume_init() }
     }
 
     pub fn subsystem_id(&self) -> u16 {
-        unsafe { self.mmio.read(0x2E).unwrap() }
+        unsafe { self.mmio.read(0x2E).assume_init() }
     }
 
     pub fn expansion_rom_base_addr(&self) -> u32 {
-        unsafe { self.mmio.read(0x30).unwrap() }
+        unsafe { self.mmio.read(0x30).assume_init()}
     }
 
     pub fn capabilities(&self) -> CapablitiesIterator {
         CapablitiesIterator::new(&self.mmio, unsafe {
-            self.mmio.read::<u8>(0x34).unwrap() & !0b11
+            self.mmio.read::<u8>(0x34).assume_init() & !0b11
         })
     }
 
     pub fn interrupt_line(&self) -> Option<u8> {
-        match unsafe { self.mmio.read(0x3C).unwrap() } {
+        match unsafe { self.mmio.read(0x3C).assume_init() } {
             0xFF => None,
             value => Some(value),
         }
     }
 
     pub fn interrupt_pin(&self) -> Option<u8> {
-        match unsafe { self.mmio.read(0x3D).unwrap() } {
+        match unsafe { self.mmio.read(0x3D).assume_init() } {
             0x0 => None,
             value => Some(value),
         }
     }
 
     pub fn min_grant(&self) -> u8 {
-        unsafe { self.mmio.read(0x3E).unwrap() }
+        unsafe { self.mmio.read(0x3E).assume_init() }
     }
 
     pub fn max_latency(&self) -> u8 {
-        unsafe { self.mmio.read(0x3F).unwrap() }
+        unsafe { self.mmio.read(0x3F).assume_init() }
     }
 
-    pub fn get_register(&self, register: StandardRegister) -> Option<&MMIO<Mapped>> {
+    pub fn get_register(&self, register: StandardRegister) -> Option<&MMIO> {
         self.registers[register as usize].as_ref()
     }
 
-    pub fn iter_registers(&self) -> core::slice::Iter<Option<MMIO<Mapped>>> {
+    pub fn iter_registers(&self) -> core::slice::Iter<Option<MMIO>> {
         self.registers.iter()
     }
 }

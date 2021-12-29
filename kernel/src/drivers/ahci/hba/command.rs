@@ -85,12 +85,16 @@ impl Command {
     }
 
     pub fn command_fis<F: CommandFIS + Sized>(&mut self) -> &mut F {
-        unsafe { &mut *(self.command_table_ptr_mut().add(Self::COMMAND_FIS_OFFSET) as *mut F) }
+        unsafe {
+            (self.command_table_ptr_mut().add(Self::COMMAND_FIS_OFFSET) as *mut F)
+                .as_mut()
+                .unwrap()
+        }
     }
 
     pub fn prdt_entries(&mut self) -> &mut [PRDTEntry] {
         unsafe {
-            &mut *core::slice::from_raw_parts_mut(
+            core::slice::from_raw_parts_mut(
                 self.command_table_ptr_mut().add(Self::PRDT_ENTRIES_OFFSET) as *mut PRDTEntry,
                 self.prdt_len as usize,
             )

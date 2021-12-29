@@ -25,7 +25,7 @@ impl xsdt::SubTable for MADT {
 
 impl MADT {
     fn madt_header(&self) -> &Header {
-        unsafe { &*(self as *const _ as *const _) }
+        unsafe { (self as *const _ as *const Header).as_ref().unwrap() }
     }
 
     pub fn apic_addr(&self) -> Address<Physical> {
@@ -61,16 +61,26 @@ impl<'a> Iterator for MADTIterator<'a> {
         if self.cur_header_ptr < self.max_header_ptr {
             unsafe {
                 let header_ptr = self.cur_header_ptr as *const InterruptDeviceHeader;
-                let header = &*header_ptr;
+                let header = header_ptr.as_ref().unwrap();
                 self.cur_header_ptr = self.cur_header_ptr.add(header.len as usize);
 
                 match header.ty {
-                    0x0 => Some(InterruptDevice::LocalAPIC(&*(header_ptr as *const _))),
-                    0x1 => Some(InterruptDevice::IOAPIC(&*(header_ptr as *const _))),
-                    0x2 => Some(InterruptDevice::IRQSrcOverride(&*(header_ptr as *const _))),
-                    0x4 => Some(InterruptDevice::NonMaskableIRQ(&*(header_ptr as *const _))),
+                    0x0 => Some(InterruptDevice::LocalAPIC(
+                        (header_ptr as *const LocalAPIC).as_ref().unwrap(),
+                    )),
+                    0x1 => Some(InterruptDevice::IOAPIC(
+                        (header_ptr as *const IOAPIC).as_ref().unwrap(),
+                    )),
+                    0x2 => Some(InterruptDevice::IRQSrcOverride(
+                        (header_ptr as *const IRQSrcOverride).as_ref().unwrap(),
+                    )),
+                    0x4 => Some(InterruptDevice::NonMaskableIRQ(
+                        (header_ptr as *const NonMaskableIRQ).as_ref().unwrap(),
+                    )),
                     0x5 => Some(InterruptDevice::LocalAPICAddrOverride(
-                        &*(header_ptr as *const _),
+                        (header_ptr as *const LocalAPICAddrOverride)
+                            .as_ref()
+                            .unwrap(),
                     )),
                     0xF..0x7F | 0x80..0xFF => Some(InterruptDevice::Reserved),
                     ty => panic!("invalid interrupt device type: 0x{:X}", ty),

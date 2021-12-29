@@ -25,10 +25,12 @@ pub(crate) trait ACPITable {
 pub(crate) trait SizedACPITable<H, E>: ACPITable {
     fn entries(&self) -> &[E] {
         unsafe {
-            &*core::ptr::slice_from_raw_parts(
+            core::ptr::slice_from_raw_parts(
                 (self as *const _ as *const u8).add(core::mem::size_of::<H>()) as *const E,
                 self.body_len() / core::mem::size_of::<E>(),
             )
+            .as_ref()
+            .unwrap()
         }
     }
 }
@@ -46,7 +48,9 @@ pub trait Checksum: Sized {
 
     fn checksum(&self) -> bool {
         unsafe {
-            &*core::ptr::slice_from_raw_parts(self as *const _ as *const u8, self.bytes_len())
+            core::ptr::slice_from_raw_parts(self as *const _ as *const u8, self.bytes_len())
+                .as_ref()
+                .unwrap()
         }
         .iter()
         .sum::<u8>()
@@ -134,7 +138,7 @@ impl SystemConfigTable {
     }
 
     pub fn iter(&self) -> core::slice::Iter<SystemConfigTableEntry> {
-        unsafe { &*core::ptr::slice_from_raw_parts(self.ptr, self.len) }.iter()
+        unsafe { core::slice::from_raw_parts(self.ptr, self.len) }.iter()
     }
 }
 
@@ -155,9 +159,9 @@ impl SystemConfigTableEntry {
     }
 
     pub unsafe fn as_ref<T>(&self) -> &T {
-        &*(self.addr().as_usize() as *mut T)
+        (self.addr().as_usize() as *mut T).as_ref().unwrap()
     }
     pub unsafe fn as_mut_ref<T>(&self) -> &mut T {
-        &mut *(self.addr().as_usize() as *mut T)
+        (self.addr().as_usize() as *mut T).as_mut().unwrap()
     }
 }

@@ -247,7 +247,7 @@ impl Port {
     }
 
     pub fn command_list(&mut self) -> &mut [super::Command] {
-        unsafe { &mut *core::slice::from_raw_parts_mut(self.cmd_list.get_mut_ptr(), 32) }
+        unsafe { core::slice::from_raw_parts_mut(self.cmd_list.get_mut_ptr(), 32) }
     }
 
     pub fn interrupt_status(&mut self) -> &mut PortInterruptStatus {
@@ -300,21 +300,29 @@ impl Port {
         debug!("Allocting command and FIS lists.");
 
         let cmd_list_byte_len = core::mem::size_of::<super::Command>() * 32;
-        let cmd_list_ptr: *mut u8 = libstd::alloc!(cmd_list_byte_len, 128);
+        let cmd_list_ptr = libstd::memory::malloc::get()
+            .alloc(cmd_list_byte_len, core::num::NonZeroUsize::new(128))
+            .unwrap()
+            .into_parts()
+            .0;
         debug!(
             "\tCommand list base address: {:?}:{}",
             cmd_list_ptr, cmd_list_byte_len
         );
 
         let fis_byte_len = 1024;
-        let fis_base: *mut u8 = libstd::alloc!(fis_byte_len, 128);
+        let fis_base = libstd::memory::malloc::get()
+            .alloc(cmd_list_byte_len, core::num::NonZeroUsize::new(128))
+            .unwrap()
+            .into_parts()
+            .0;
         debug!("\tFIS base address: {:?}:{}", fis_base, fis_byte_len);
 
         unsafe {
             debug!("Clearing command and FIS lists, and updating port metadata.");
 
             core::ptr::write_bytes(cmd_list_ptr, 0, cmd_list_byte_len);
-            core::ptr::write_bytes(fis_base, 0, 1024);
+            core::ptr::write_bytes(fis_base, 0, fis_byte_len);
 
             self.cmd_list.set_ptr(cmd_list_ptr as *mut _);
             self.fis_addr.set_ptr(fis_base as *mut _);
@@ -324,7 +332,7 @@ impl Port {
         self.start_cmd();
     }
 
-    pub fn read(&mut self, sector_base: usize, sector_count: u16) -> &mut [u8] {
+    pub fn read(&mut self, sector_base: usize, sector_count: u16) -> alloc::vec::Vec<u8> {
         use crate::drivers::ahci::{
             FISType, ATA_CMD_READ_DMA_EX, ATA_DEV_BUSY, ATA_DEV_DRQ, FIS_REG_H2D,
         };
@@ -363,7 +371,7 @@ impl Port {
 
         debug!("AHCI PORT: READ: CFG PRDT ENTRY");
         let prdt_entry = &mut command.prdt_entries()[0];
-        let buffer = libstd::slice_mut!(u8, (sector_count as usize) << 9);
+        let buffer = alloc::vec![0u8; (sector_count as usize) * 512];
         prdt_entry.set_db_addr(Address::from_ptr(buffer.as_ptr()));
         prdt_entry.set_sector_count(sector_count as u32);
 
