@@ -13,7 +13,7 @@ mod segments;
 use core::{
     cell::UnsafeCell,
     mem::{size_of, transmute},
-    ptr::slice_from_raw_parts_mut,
+    slice,
 };
 use libstd::{elf::*, FramebufferInfo};
 use uefi::{
@@ -49,7 +49,7 @@ fn configure_log_level() {
 
 #[cfg(not(debug_assertions))]
 fn configure_log_level() {
-    log::set_max_level(log::LevelFilter::Debug);
+    log::set_max_level(log::LevelFilter::Info);
 }
 
 pub fn get_protocol<P: Protocol>(boot_services: &BootServices, handle: Handle) -> Option<&mut P> {
@@ -88,11 +88,7 @@ pub fn allocate_pool(
         Err(error) => panic!("{:?}", error),
     };
 
-    unsafe {
-        slice_from_raw_parts_mut(alloc_pointer, size)
-            .as_mut()
-            .unwrap()
-    }
+    unsafe { slice::from_raw_parts_mut(alloc_pointer, size) }
 }
 
 #[allow(dead_code)]
@@ -118,11 +114,7 @@ pub fn allocate_pages(
         Err(error) => panic!("{:?}", error),
     };
 
-    unsafe {
-        slice_from_raw_parts_mut(alloc_pointer, pages_count * PAGE_SIZE)
-            .as_mut()
-            .unwrap()
-    }
+    unsafe { slice::from_raw_parts_mut(alloc_pointer, pages_count * PAGE_SIZE) }
 }
 
 #[allow(dead_code)]
@@ -193,18 +185,18 @@ fn efi_main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status
     info!("Acquired boot image from boot services.");
     let device_path = get_protocol::<DevicePath>(boot_services, image.device())
         .expect("failed to acquire boot image device path");
-    info!("Acquired boot image device path.");
+    debug!("Acquired boot image device path.");
     let file_handle = boot_services
         .locate_device_path::<SimpleFileSystem>(&mut &*device_path)
         .expect_success("failed to acquire file handle from device path");
-    info!("Acquired file handle from device path.");
+    debug!("Acquired file handle from device path.");
     let file_system = get_protocol::<SimpleFileSystem>(boot_services, file_handle)
         .expect("failed to load file system from file handle");
-    info!("Acquired file system protocol from file handle.");
+    debug!("Acquired file system protocol from file handle.");
     let root_directory = &mut file_system
         .open_volume()
         .expect_success("failed to open boot file system root directory");
-    info!("Loaded boot file system root directory.");
+    debug!("Loaded boot file system root directory.");
 
     // acquire graphics output to ensure a gout device
     let framebuffer = match locate_protocol::<GraphicsOutput>(boot_services) {
@@ -215,7 +207,6 @@ fn efi_main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status
             info!("Selected graphics mode: {:?}", mode_info);
             let resolution = mode_info.resolution();
             let size = libstd::Size::new(resolution.0, resolution.1);
-            info!("Acquired and configured graphics output protocol.");
 
             Some(FramebufferInfo::new(ptr, size, mode_info.stride()))
         }
@@ -227,7 +218,7 @@ fn efi_main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status
 
     // load kernel
     let kernel_file = acquire_kernel_file(root_directory);
-    info!("Acquired kernel image file.");
+    debug!("Acquired kernel image file.");
     let kernel_entry_point = load_kernel(boot_services, kernel_file);
 
     kernel_transfer(image_handle, system_table, kernel_entry_point, framebuffer)
@@ -319,10 +310,9 @@ fn kernel_transfer(
         let boot_services = system_table.boot_services();
         // Determine the total allocation size of the memory map, in bytes (+ to cover any extraneous entries created before `ExitBootServices`).
         let mmap_alloc_size = boot_services.memory_map_size() + (4 * size_of::<MemoryDescriptor>());
-        let alloc_ptr = match boot_services.allocate_pool(KERNEL_DATA, mmap_alloc_size) {
-            Ok(completion) => completion.unwrap(),
-            Err(error) => panic!("{:?}", error),
-        };
+        let alloc_ptr = boot_services
+            .allocate_pool(KERNEL_DATA, mmap_alloc_size)
+            .expect_success("Failed to allocate space for kernel memory map slice.");
 
         (alloc_ptr, mmap_alloc_size)
     };
@@ -335,30 +325,23 @@ fn kernel_transfer(
 
     // Create the byte buffer to the used for filling in memory descriptors. This buffer, on the call to `ExitBootServices`, provides
     // lifetime information, and so cannot be reinterpreted easily.
-    let mmap_buffer = unsafe {
-        slice_from_raw_parts_mut(mmap_ptr, mmap_alloc_size)
-            .as_mut()
-            .unwrap()
-    };
+    let mmap_buffer = unsafe { slice::from_raw_parts_mut(mmap_ptr, mmap_alloc_size) };
     // After this point point, the previous system_table and boot_services are no longer valid
-    let (runtime_table, mmap_iter) =
-        match system_table.exit_boot_services(image_handle, mmap_buffer) {
-            Ok(completion) => completion.unwrap(),
-            Err(error) => panic!("{:?}", error),
-        };
+    let (runtime_table, mmap_iter) = system_table
+        .exit_boot_services(image_handle, mmap_buffer)
+        .expect_success("Error occurred attempting to call `ExitBootServices()`.");
 
     // Remark: For some reason, this cast itself doesn't result in a valid memory map, even provided
-    //  the alignment is correct—so we have to read in the memory descriptors.
+    //  the alignment is correct; so we have to read in the memory descriptors.
     //
     // This could be due to the actual entry size not being equal to size_of::<MemoryDescriptor>().
-    let memory_map = unsafe {
-        slice_from_raw_parts_mut(mmap_ptr as *mut MemoryDescriptor, mmap_iter.len())
-            .as_mut()
-            .unwrap()
-    };
+    let memory_map =
+        unsafe { slice::from_raw_parts_mut(mmap_ptr as *mut MemoryDescriptor, mmap_iter.len()) };
     for (index, descriptor) in mmap_iter.enumerate() {
         memory_map[index] = *descriptor;
     }
+    // We don't ever trust the firmware, so for our sake, we manually sort the descriptors by their physical start address.
+    memory_map.sort_unstable_by(|d1, d2| d1.phys_start.cmp(&d2.phys_start));
 
     // Finally, drop into the kernel.
     let kernel_main: libstd::KernelMain<MemoryDescriptor, uefi::table::cfg::ConfigTableEntry> =

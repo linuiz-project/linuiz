@@ -1,21 +1,15 @@
-use crate::{
-    addr_ty::Virtual, cell::SyncOnceCell, memory::Frame, Address, BitValue, BitValueArray,
-    BitValueArrayIterator,
-};
+use crate::{addr_ty::Virtual, cell::SyncOnceCell, memory::UEFIMemoryDescriptor, Address};
+use core::sync::atomic::{AtomicU32, Ordering};
 use spin::RwLock;
-
-use super::FrameIterator;
 
 static DEFAULT_FALLOCATOR: SyncOnceCell<FrameAllocator> = SyncOnceCell::new();
 
-pub unsafe fn load(ptr: *mut usize, total_memory: usize) {
-    if !DEFAULT_FALLOCATOR.get().is_some() {
-        DEFAULT_FALLOCATOR
-            .set(FrameAllocator::from_ptr(ptr, total_memory))
-            .ok();
-    } else {
-        panic!("frame allocator has already been configured")
-    }
+pub unsafe fn load_new(memory_map: &[UEFIMemoryDescriptor]) {
+    DEFAULT_FALLOCATOR
+        .set(FrameAllocator::new(memory_map))
+        .unwrap_or_else(|_| {
+            panic!("Frame allocator can only be loaded once.");
+        })
 }
 
 pub fn get() -> &'static FrameAllocator<'static> {
@@ -25,48 +19,86 @@ pub fn get() -> &'static FrameAllocator<'static> {
 }
 
 pub fn virtual_map_offset() -> Address<Virtual> {
-    Address::<Virtual>::new(crate::VADDR_HW_MAX - get().total_memory(None))
+    Address::<Virtual>::new(crate::VADDR_HW_MAX - get().total_memory())
 }
 
-#[repr(usize)]
+#[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FrameState {
-    Free = 0,
-    Locked,
-    /// Indicates a frame should never be used by software (except for MMIO).
-    /// REMARK: Acquiring this will _NEVER_ fail, and so is extremely unsafe to do.
-    ///     Use with caution.
+pub enum FrameType {
+    Usable = 0,
+    Unusable,
     Reserved,
 }
 
-impl crate::BitValue for FrameState {
-    const BIT_WIDTH: usize = 0x2;
-    const MASK: usize = 0b11;
+#[derive(Debug)]
+#[repr(transparent)]
+struct Frame(AtomicU32);
 
-    fn from_usize(value: usize) -> Self {
-        match value {
-            0 => FrameState::Free,
-            1 => FrameState::Locked,
-            2 => FrameState::Reserved,
-            _ => panic!("invalid value for frame type: {:?}", value),
-        }
+impl Frame {
+    const FRAME_TYPE_SHIFT: u32 = 30;
+    const LOCKED_SHIFT: u32 = 28;
+    const REF_COUNT_MASK: u32 = 0xFFFFFFF; // first 28 bits
+
+    fn borrow(&self) {
+        // REMARK: Possibly handle case where 2^28 references have been made to a single frame?
+        //          That does seem particularly unlikely, however.
+        self.0.fetch_add(1, Ordering::AcqRel);
     }
 
-    fn as_usize(&self) -> usize {
-        *self as usize
+    fn drop(&self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
+
+    fn lock(&self) {
+        self.0.fetch_or(1 << Self::LOCKED_SHIFT, Ordering::AcqRel);
+    }
+
+    fn free(&self) {
+        self.0
+            .fetch_and(!(1 << Self::LOCKED_SHIFT), Ordering::AcqRel);
+    }
+
+    fn data(&self) -> (FrameType, u32, bool) {
+        let raw = self.0.load(Ordering::Relaxed);
+
+        (
+            match raw >> Self::FRAME_TYPE_SHIFT {
+                0 => FrameType::Usable,
+                1 => FrameType::Unusable,
+                2 => FrameType::Reserved,
+                _ => panic!(""),
+            },
+            raw & Self::REF_COUNT_MASK,
+            ((raw >> Self::LOCKED_SHIFT) & 1) > 0,
+        )
+    }
+
+    fn modify_type(&self, new_type: FrameType) -> Result<(), ()> {
+        let raw = self.0.load(Ordering::Relaxed);
+
+        if (raw >> Self::FRAME_TYPE_SHIFT) == 0 {
+            // Usable / Generic
+            self.0.store(
+                ((new_type as u32) << Self::FRAME_TYPE_SHIFT)
+                    | (raw & ((1 << Self::FRAME_TYPE_SHIFT) - 1)),
+                Ordering::Release,
+            );
+
+            Ok(())
+        } else {
+            Err(())
+        }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FallocError {
-    FreeWithAcquire,
-    /// Frame allocator encoutered an unexpected frame state.
-    /// Field 0 (usize): frame index
-    /// Field 1 (FrameState): expected state
-    /// Field 2 (FrameState): actual state
-    ExpectedFrameState(usize, FrameState, FrameState),
-    OutOfBoundsExists(usize),
-    OutOfBoundsLock,
+    FrameUnusable(usize),
+    FrameBorrowed(usize),
+    FrameLocked(usize),
+    FrameNotBorrowed(usize),
+    FrameNotLocked(usize),
+    NoFreeFrames,
 }
 
 /// Structure for deterministically reserving, locking, and freeing RAM frames.
@@ -84,263 +116,244 @@ pub enum FallocError {
 /// out of thin air. Its creation should be carefully controlled, to ensure each individual frame's
 /// lifetime matches up with how it is used or consumed in hardware and software.
 pub struct FrameAllocator<'arr> {
-    memory_map: BitValueArray<'arr, FrameState>,
-    memory: RwLock<[usize; FrameState::MASK + 1]>,
-    non_usable_oob: core::cell::RefCell<alloc::collections::BTreeSet<usize>>,
+    map: RwLock<&'arr mut [Frame]>,
+    map_len: usize,
+    total_memory: usize,
 }
 
 impl<'arr> FrameAllocator<'arr> {
-    /// Provides a hint as to the total memory usage (in frames, i.e. 0x1000 aligned)
-    ///  a frame allocator will use given a specified total amount of memory.
-    pub fn frame_count_hint(total_memory: usize) -> usize {
-        assert_eq!(
-            total_memory % 0x1000,
-            0,
-            "system memory should be page-aligned"
-        );
-
-        let frame_count = total_memory / 0x1000;
-        crate::align_up_div(
-            // each index of a RwBitArray is a `usize`, so multiply the index count with the `size_of` a `usize`
-            (frame_count * FrameState::BIT_WIDTH) / 8, /* 8 bits per byte */
-            // divide total RwBitArray memory size by frame size to get total frame count
-            0x1000,
-        )
-    }
-
-    unsafe fn from_ptr(base_ptr: *mut usize, total_memory: usize) -> Self {
-        assert_eq!(
-            base_ptr.align_offset(0x1000),
-            0,
-            "frame allocator base pointer must be frame-aligned"
-        );
-        assert_eq!(
-            total_memory % 0x1000,
-            0,
-            "system memory should be page-aligned"
-        );
-
-        let mut memory_counters = [0; FrameState::MASK + 1];
-        memory_counters[FrameState::Free.as_usize()] = total_memory;
-        memory_counters[FrameState::MASK] = total_memory;
-
-        let total_frames = total_memory / 0x1000;
-        let falloc = Self {
-            memory_map: BitValueArray::from_slice(
-                core::ptr::slice_from_raw_parts_mut(
-                    base_ptr,
-                    BitValueArray::<FrameState>::section_length_hint(total_frames),
-                )
-                .as_mut()
-                .unwrap(),
-                total_frames,
-            ),
-            memory: RwLock::new(memory_counters),
-            non_usable_oob: core::cell::RefCell::new(alloc::collections::BTreeSet::<usize>::new()),
-        };
-
-        falloc
-            .acquire_frames(
-                (base_ptr as usize) / 0x1000,
-                Self::frame_count_hint(total_memory),
-                FrameState::Reserved,
-            )
-            .expect("unexpectedly failed to reserve frame allocator frames");
-        falloc.acquire_frame(0, FrameState::Reserved).unwrap();
-
-        falloc
-    }
-
-    /* FREE / LOCK / RESERVE / STACK - SINGLE */
-
-    /// Attempts to free a specific frame in the allocator.
-    pub unsafe fn free_frame(&self, frame: Frame) -> Result<(), FallocError> {
-        if self
-            .memory_map
-            .insert_eq(frame.index(), FrameState::Free, FrameState::Locked)
-        {
-            let mut mem_write = self.memory.write();
-            mem_write[FrameState::Free.as_usize()] += 0x1000;
-            mem_write[FrameState::Locked.as_usize()] -= 0x1000;
-
-            Ok(())
-        } else {
-            Err(FallocError::ExpectedFrameState(
-                frame.index(),
-                FrameState::Locked,
-                self.memory_map.get(frame.index()),
-            ))
-        }
-    }
-
-    pub unsafe fn acquire_frame(
-        &self,
-        index: usize,
-        acq_state: FrameState,
-    ) -> Result<Frame, FallocError> {
-        match acq_state {
-            // Track out-of-bounds Reserved frames.
-            state if index >= self.memory_map.len() => {
-                if state == FrameState::Reserved {
-                    let mut non_usable_oob = self.non_usable_oob.borrow_mut();
-
-                    if non_usable_oob.insert(index) {
-                        Ok(Frame::from_index(index))
-                    } else {
-                        Err(FallocError::OutOfBoundsExists(index))
-                    }
-                } else {
-                    Err(FallocError::OutOfBoundsLock)
-                }
-            }
-            // Illegal to free with acquisition.
-            FrameState::Free => Err(FallocError::FreeWithAcquire),
-            // Acquire frame as locked if it is already free.
-            FrameState::Locked
-                if self
-                    .memory_map
-                    .insert_eq(index, acq_state, FrameState::Free) =>
-            {
-                let mut mem_write = self.memory.write();
-                mem_write[FrameState::Free.as_usize()] -= 0x1000;
-                mem_write[acq_state.as_usize()] += 0x1000;
-
-                Ok(Frame::from_index(index))
-            }
-            // Failed to acquire frame as locked (incorrect existing frame type).
-            FrameState::Locked => Err(FallocError::ExpectedFrameState(
-                index,
-                FrameState::Free,
-                FrameState::Locked,
-            )),
-            // Acquire specific frame as non-usable (this will NEVER fail).
-            FrameState::Reserved => {
-                let old_state = self.memory_map.insert(index, FrameState::Reserved);
-                if old_state != FrameState::Reserved {
-                    self.memory.write()[old_state.as_usize()] -= 0x1000;
-                }
-
-                Ok(Frame::from_index(index))
-            }
-        }
-    }
-
-    pub unsafe fn unreserve_frame(&self, frame: Frame) -> Result<(), FallocError> {
-        if self
-            .memory_map
-            .insert_eq(frame.index(), FrameState::Free, FrameState::Reserved)
-        {
-            let mut mem_write = self.memory.write();
-            mem_write[FrameState::Free.as_usize()] += 0x1000;
-            mem_write[FrameState::Reserved.as_usize()] -= 0x1000;
-
-            Ok(())
-        } else {
-            Err(FallocError::ExpectedFrameState(
-                frame.index(),
-                FrameState::Reserved,
-                self.memory_map.get(frame.index()),
-            ))
-        }
-    }
-
-    /* FREE / LOCK / RESERVE / STACK - ITER */
-
-    /// Attempts to free many frames from an iterator.
-    pub unsafe fn free_frames(
-        &self,
-        frames: impl Iterator<Item = Frame>,
-    ) -> Result<(), FallocError> {
-        for frame in frames {
-            if let Err(error) = self.free_frame(frame) {
-                return Err(error);
-            }
-        }
-
-        Ok(())
-    }
-
-    pub unsafe fn acquire_frames(
-        &self,
-        index: usize,
-        count: usize,
-        acq_state: FrameState,
-    ) -> Result<crate::memory::FrameIterator, FallocError> {
-        let start_index = index;
-        let end_index = index + count;
-        for frame_index in start_index..end_index {
-            if let Err(error) = self.acquire_frame(frame_index, acq_state) {
-                return Err(error);
-            }
-        }
-
-        Ok(crate::memory::FrameIterator::new(start_index..end_index))
-    }
-
-    /// Attempts to iterate the allocator's frames, and returns the first unallocated frame.
-    pub fn autolock(&self) -> Option<Frame> {
-        self.memory_map
-            .set_eq_next(FrameState::Locked, FrameState::Free)
-            .map(|index| {
-                debug_assert_eq!(
-                    self.memory_map.get(index),
-                    FrameState::Locked,
-                    "failed to allocate next frame"
-                );
-
-                let mut mem_write = self.memory.write();
-                mem_write[FrameState::Free.as_usize()] -= 0x1000;
-                mem_write[FrameState::Locked.as_usize()] += 0x1000;
-
-                let frame = unsafe { Frame::from_index(index) };
-                trace!("Locked next free frame: {:?}", frame);
-                frame
+    fn new(memory_map: &[UEFIMemoryDescriptor]) -> Self {
+        // Calculates total (usable) system memory.
+        let total_usable_memory = memory_map
+            .iter()
+            .filter(|descriptor| !descriptor.should_reserve())
+            .map(|descriptor| descriptor.page_count * 0x1000)
+            .sum::<u64>() as usize;
+        // Calculates total system memory.
+        let total_system_memory = memory_map
+            .iter()
+            .filter(|descriptor| !descriptor.should_reserve())
+            .max_by_key(|descriptor| descriptor.phys_start)
+            .map(|descriptor| {
+                descriptor.phys_start.as_usize() + ((descriptor.page_count * 0x1000) as usize)
             })
+            .expect("no descriptor with max value");
+        // Memory required to represent all system frames.
+        let total_system_frames = total_system_memory / 0x1000;
+        let req_falloc_memory = total_system_frames * core::mem::size_of::<Frame>();
+        let req_falloc_memory_frames = crate::align_up_div(req_falloc_memory, 0x1000);
+
+        info!(
+            "Frame allocator will manage {} MB of system memory.",
+            crate::memory::to_mibibytes(total_usable_memory)
+        );
+
+        let descriptor = memory_map
+            .iter()
+            .filter(|descriptor| !descriptor.should_reserve())
+            .find(|descriptor| descriptor.page_count >= (req_falloc_memory_frames as u64))
+            .expect("Failed to find viable memory descriptor for frame allocator");
+
+        unsafe {
+            let descriptor_ptr = descriptor.phys_start.as_usize() as *mut _;
+            core::ptr::write_bytes(descriptor_ptr, 0, total_system_frames);
+
+            let falloc = Self {
+                map: RwLock::new(core::slice::from_raw_parts_mut(
+                    descriptor_ptr,
+                    total_system_frames,
+                )),
+                map_len: total_system_frames,
+                total_memory: total_system_memory,
+            };
+
+            falloc.try_modify_type(0, FrameType::Unusable).unwrap();
+            let frame_range = descriptor.phys_start.frame_index()
+                ..(descriptor.phys_start.frame_index() + req_falloc_memory_frames);
+            debug!(
+                "Locking frames {:?} to facilitate static frame allocator map.",
+                frame_range
+            );
+            for frame_index in frame_range {
+                falloc.lock(frame_index).unwrap();
+            }
+
+            falloc
+        }
     }
 
-    pub fn autolock_many(&self, count: usize) -> Option<FrameIterator> {
-        let base_index = core::lazy::OnceCell::new();
-        let mut current_run = 0;
+    pub fn lock(&self, index: usize) -> Result<usize, FallocError> {
+        let frame = &mut self.map.write()[index];
+        let (ty, ref_count, locked) = frame.data();
 
-        for (frame_index, frame_state) in self.memory_map.iter().enumerate() {
-            if frame_state == FrameState::Free {
+        if ty == FrameType::Unusable {
+            Err(FallocError::FrameUnusable(index))
+        } else if ref_count > 0 {
+            Err(FallocError::FrameBorrowed(index))
+        } else if locked {
+            Err(FallocError::FrameLocked(index))
+        } else {
+            frame.lock();
+            Ok(index)
+        }
+    }
+
+    pub fn lock_many(&self, index: usize, count: usize) -> Result<usize, FallocError> {
+        self.map
+            .write()
+            .iter()
+            .skip(index)
+            .take(count)
+            .find_map(|frame| {
+                let (ty, ref_count, locked) = frame.data();
+
+                if ty == FrameType::Unusable {
+                    Some(FallocError::FrameUnusable(index))
+                } else if ref_count > 0 {
+                    Some(FallocError::FrameBorrowed(index))
+                } else if locked {
+                    Some(FallocError::FrameLocked(index))
+                } else {
+                    frame.lock();
+                    None
+                }
+            })
+            .map_or(Ok(index), |error| Err(error))
+    }
+
+    pub fn free(&self, index: usize) -> Result<(), FallocError> {
+        let frame = &self.map.read()[index];
+        let (_, _, locked) = frame.data();
+
+        if !locked {
+            Err(FallocError::FrameNotLocked(index))
+        } else {
+            frame.free();
+            Ok(())
+        }
+    }
+
+    pub fn borrow(&self, index: usize) -> Result<usize, FallocError> {
+        let frame = &self.map.read()[index];
+        let (ty, _, locked) = frame.data();
+
+        if ty == FrameType::Unusable {
+            Err(FallocError::FrameUnusable(index))
+        } else if locked {
+            Err(FallocError::FrameLocked(index))
+        } else {
+            frame.borrow();
+            Ok(index)
+        }
+    }
+
+    pub fn drop(&self, index: usize) -> Result<(), FallocError> {
+        let frame = &self.map.read()[index];
+        let (_, ref_count, _) = frame.data();
+
+        if ref_count == 0 {
+            Err(FallocError::FrameNotBorrowed(index))
+        } else {
+            frame.drop();
+            Ok(())
+        }
+    }
+
+    pub fn lock_next(&self) -> Result<usize, FallocError> {
+        self.map
+            .read()
+            .iter()
+            .enumerate()
+            .find_map(|(index, frame)| {
+                let (ty, ref_count, locked) = frame.data();
+
+                if ty == FrameType::Usable && ref_count == 0 && !locked {
+                    frame.lock();
+                    Some(index)
+                } else {
+                    None
+                }
+            })
+            .ok_or(FallocError::NoFreeFrames)
+    }
+
+    pub fn lock_next_many(&self, count: usize) -> Result<usize, FallocError> {
+        let map = self.map.write();
+
+        let mut start_index = 0;
+        let mut current_run = 0;
+        for (index, frame) in map.iter().enumerate() {
+            let (ty, ref_count, locked) = frame.data();
+
+            if ty == FrameType::Usable && ref_count == 0 && !locked {
                 current_run += 1;
+
+                if current_run == count {
+                    break;
+                }
             } else {
                 current_run = 0;
-            }
-
-            if current_run == count {
-                // Count to next frame index to ensure we cover only the currently checked indexes.
-                base_index.set((frame_index + 1) - current_run).unwrap();
-                break;
+                start_index = index + 1;
             }
         }
 
-        base_index.get().map(|frame_index| {
-            for index in *frame_index..(*frame_index + count) {
-                self.memory_map.insert(index, FrameState::Locked);
-            }
+        if current_run < count {
+            Err(FallocError::NoFreeFrames)
+        } else {
+            map.iter()
+                .skip(start_index)
+                .take(count)
+                .for_each(|frame| frame.lock());
 
-            unsafe { FrameIterator::new(*frame_index..(*frame_index + count)) }
-        })
+            Ok(start_index)
+        }
+    }
+
+    pub fn try_modify_type(
+        &self,
+        index: usize,
+        new_type: FrameType,
+    ) -> core::result::Result<(), ()> {
+        self.map.read()[index].modify_type(new_type)
     }
 
     /// Total memory of a given type represented by frame allocator. If `None` is
     ///  provided for type, the total of all memory types is returned instead.
-    pub fn total_memory(&self, of_type: Option<FrameState>) -> usize {
-        let mem_read = self.memory.read();
-        match of_type {
-            Some(frame_type) => mem_read[frame_type.as_usize()],
-            None => *mem_read.last().unwrap(),
-        }
+    pub fn total_memory(&self) -> usize {
+        self.total_memory
     }
 
-    pub fn iter<'outer>(&'arr self) -> BitValueArrayIterator<'outer, 'arr, FrameState> {
-        self.memory_map.iter()
+    pub fn iter<'outer>(&'arr self) -> FallocIterator<'outer, 'arr> {
+        FallocIterator {
+            map: &self.map,
+            map_len: self.map_len,
+            cur_index: 0,
+        }
     }
 
     #[cfg(debug_assertions)]
     pub fn debug_log_elements(&self) {
-        self.memory_map.debug_log_elements();
+        self.map.debug_log_elements();
+    }
+}
+
+pub struct FallocIterator<'lock, 'arr> {
+    map: &'lock RwLock<&'arr mut [Frame]>,
+    map_len: usize,
+    cur_index: usize,
+}
+
+impl Iterator for FallocIterator<'_, '_> {
+    type Item = (FrameType, u32, bool);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.cur_index < self.map_len {
+            let cur_index = self.cur_index;
+            self.cur_index += 1;
+
+            Some(self.map.read()[cur_index].data())
+        } else {
+            None
+        }
     }
 }

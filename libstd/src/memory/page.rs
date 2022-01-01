@@ -28,12 +28,14 @@ impl Page {
     pub fn from_ptr<T>(ptr: *const T) -> Self {
         let ptr_usize = ptr as usize;
 
-        if (ptr_usize % 0x1000) != 0 {
-            panic!("page address is not page-aligned")
-        } else {
-            Self {
-                index: ptr_usize / 0x1000,
-            }
+        assert_eq!(
+            ptr_usize % 0x1000,
+            0,
+            "Pointers must be page-aligned to use as page addresses."
+        );
+
+        Self {
+            index: ptr_usize / 0x1000,
         }
     }
 

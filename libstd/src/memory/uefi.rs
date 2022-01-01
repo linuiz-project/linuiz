@@ -44,7 +44,7 @@ bitflags::bitflags! {
 #[derive(Debug, Clone, Copy)]
 pub struct UEFIMemoryDescriptor {
     pub ty: UEFIMemoryType,
-    padding: u32,
+    ty_padding: u32,
     pub phys_start: Address<crate::addr_ty::Physical>,
     pub virt_start: Address<crate::addr_ty::Virtual>,
     pub page_count: u64,

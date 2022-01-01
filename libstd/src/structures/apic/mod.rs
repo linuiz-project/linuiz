@@ -85,7 +85,7 @@ impl APIC {
         unsafe {
             Self::new(
                 crate::memory::MMIO::new(MSR::IA32_APIC_BASE.read().get_bits(12..36) as usize, 1)
-                    .expect("Allocation failure when attempting to create MMIO for APIC."),
+                    .expect("Allocation failure when attempting to create MMIO for APIC"),
             )
         }
     }
@@ -288,7 +288,7 @@ impl APIC {
         use core::sync::atomic::{AtomicU32, Ordering};
 
         static mut ELAPSED_TICKS: AtomicU32 = AtomicU32::new(0);
-        extern "x86-interrupt" fn pit_tick_handler(isf: idt::InterruptStackFrame) {
+        extern "x86-interrupt" fn pit_tick_handler(_: idt::InterruptStackFrame) {
             unsafe { ELAPSED_TICKS.fetch_add(1, Ordering::Release) };
             pic8259::end_of_interrupt(pic8259::InterruptOffset::Timer);
         }

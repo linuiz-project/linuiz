@@ -6,7 +6,7 @@ pub use serial::*;
 use spin::Mutex;
 
 use core::fmt::Write;
-use libstd::cell::SyncRefCell;
+use libstd::{cell::SyncRefCell, io::port::WriteOnlyPort};
 
 static STDOUT: SyncRefCell<Mutex<&'static mut dyn Write>> = SyncRefCell::empty();
 
@@ -44,4 +44,22 @@ macro_rules! print {
 macro_rules! println {
     () => ($crate::print!("\n"));
     ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
+}
+
+pub struct QEMUE9(WriteOnlyPort<u8>);
+
+impl QEMUE9 {
+    pub const fn new() -> Self {
+        Self(unsafe { WriteOnlyPort::new(0xE9) })
+    }
+}
+
+impl Write for QEMUE9 {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        for byte in s.bytes() {
+            unsafe { self.0.write(byte) };
+        }
+
+        Ok(())
+    }
 }

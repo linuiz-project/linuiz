@@ -40,7 +40,7 @@ pub fn init() {
 
         let (ptr, len): (*mut u8, usize) =
             crate::alloc!(LPU_STRUCTURE_SIZE, core::num::NonZeroUsize::new(0x1000))
-                .expect("Unrecoverable error in LPU creation.")
+                .expect("Unrecoverable error in LPU creation")
                 .into_parts();
         core::ptr::write_bytes(ptr, 0, len);
         trace!("Allocated memory for LPU structure: {:?}:{}", ptr, len);

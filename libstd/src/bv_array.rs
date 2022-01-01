@@ -1,12 +1,9 @@
 use core::{fmt, marker::PhantomData};
 use spin::RwLock;
 
-pub trait BitValue: Eq {
+pub trait BitValue: Eq + Copy + From<usize> + Into<usize> {
     const BIT_WIDTH: usize;
     const MASK: usize;
-
-    fn as_usize(&self) -> usize;
-    fn from_usize(value: usize) -> Self;
 }
 
 pub struct BitValueArray<'arr, BV>
@@ -65,7 +62,7 @@ impl<'arr, BV: BitValue> BitValueArray<'arr, BV> {
         let (section_index, section_offset) = Self::get_index_and_offset(index);
         let section_value = self.array.read()[section_index];
 
-        BV::from_usize((section_value >> section_offset) & BV::MASK)
+        BV::from((section_value >> section_offset) & BV::MASK)
     }
 
     pub fn insert(&self, index: usize, new_type: BV) -> BV {
@@ -80,11 +77,11 @@ impl<'arr, BV: BitValue> BitValueArray<'arr, BV> {
         let sections_read = self.array.upgradeable_read();
         let section_value = sections_read[section_index];
 
-        let section_bits_set = new_type.as_usize() << section_offset;
+        let section_bits_set = new_type.into() << section_offset;
         let section_bits_nonset = section_value & !(BV::MASK << section_offset);
         sections_read.upgrade()[section_index] = section_bits_set | section_bits_nonset;
 
-        BV::from_usize((section_value >> section_offset) & BV::MASK)
+        BV::from((section_value >> section_offset) & BV::MASK)
     }
 
     pub fn insert_eq(&self, index: usize, new_type: BV, eq_type: BV) -> bool {
@@ -99,13 +96,13 @@ impl<'arr, BV: BitValue> BitValueArray<'arr, BV> {
             let (section_index, section_offset) = Self::get_index_and_offset(index);
             let sections_read = self.array.upgradeable_read();
             let section_value = sections_read[section_index];
-            let type_actual = BV::from_usize((section_value >> section_offset) & BV::MASK);
+            let type_actual = BV::from((section_value >> section_offset) & BV::MASK);
 
             if type_actual != eq_type {
                 return false;
             }
 
-            let section_bits_set = new_type.as_usize() << section_offset;
+            let section_bits_set = new_type.into() << section_offset;
             let section_bits_nonset = section_value & !(BV::MASK << section_offset);
             sections_read.upgrade()[section_index] = section_bits_set | section_bits_nonset;
         }
@@ -119,9 +116,8 @@ impl<'arr, BV: BitValue> BitValueArray<'arr, BV> {
             for offset in (0..64).step_by(BV::BIT_WIDTH) {
                 use bit_field::BitField;
 
-                if section.get_bits(offset..(offset + BV::BIT_WIDTH)) == eq_type.as_usize() {
-                    section.set_bits(offset..(offset + BV::BIT_WIDTH), new_type.as_usize());
-                    trace!("set_eq_next {}:{}:0b{:b}", index, offset, section);
+                if section.get_bits(offset..(offset + BV::BIT_WIDTH)) == eq_type.into() {
+                    section.set_bits(offset..(offset + BV::BIT_WIDTH), new_type.into());
                     return Some((index * Self::ELEMENTS_PER_SECTION) + (offset / BV::BIT_WIDTH));
                 }
             }
@@ -135,6 +131,7 @@ impl<'arr, BV: BitValue> BitValueArray<'arr, BV> {
             array: &self.array,
             section_index: 0,
             section_offset: 0,
+            section_value: self.array.read()[0],
             cur_len: 0,
             max_len: self.len(),
             phantom: PhantomData,
@@ -175,6 +172,7 @@ pub struct BitValueArrayIterator<'lock, 'arr, BV: BitValue> {
     array: &'lock RwLock<&'arr mut [usize]>,
     section_index: usize,
     section_offset: usize,
+    section_value: usize,
     cur_len: usize,
     max_len: usize,
     phantom: PhantomData<BV>,
@@ -185,17 +183,22 @@ impl<'lock, 'arr, BV: BitValue> Iterator for BitValueArrayIterator<'lock, 'arr, 
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.cur_len < self.max_len {
-            let section_value = self.array.read()[self.section_index];
             let cur_offset = self.section_offset;
+            self.section_offset += BV::BIT_WIDTH;
 
             self.cur_len += 1;
-            self.section_offset += BV::BIT_WIDTH;
             if self.section_offset >= BitValueArray::<BV>::SECTION_LEN {
                 self.section_offset = 0;
                 self.section_index += 1;
+
+                // Handle a case where section_index can overrun the array
+                //  (if max_len is perfectly aligned to SECTION_LEN).
+                if self.cur_len < self.max_len {
+                    self.section_value = self.array.read()[self.section_index];
+                }
             }
 
-            Some(BV::from_usize((section_value >> cur_offset) & BV::MASK))
+            Some(BV::from((self.section_value >> cur_offset) & BV::MASK))
         } else {
             None
         }

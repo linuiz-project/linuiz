@@ -21,7 +21,8 @@ mod timer;
 
 use libstd::{
     acpi::SystemConfigTableEntry,
-    memory::{falloc, UEFIMemoryDescriptor},
+    cell::SyncOnceCell,
+    memory::{falloc, malloc::MemoryAllocator, UEFIMemoryDescriptor},
     BootInfo, LinkerSymbol,
 };
 
@@ -29,6 +30,9 @@ extern "C" {
     static __ap_trampoline_start: LinkerSymbol;
     static __ap_trampoline_end: LinkerSymbol;
     static __kernel_pml4: LinkerSymbol;
+
+    static __kernel_stack_bottom: LinkerSymbol;
+    static __kernel_stack_top: LinkerSymbol;
 
     static __ap_stack_bottom: LinkerSymbol;
     static __ap_stack_top: LinkerSymbol;
@@ -61,26 +65,49 @@ fn get_log_level() -> log::LevelFilter {
 
 static mut CON_OUT: drivers::io::Serial = drivers::io::Serial::new(drivers::io::COM1);
 static TRACE_ENABLED_PATHS: [&str; 1] = ["libstd::structures::apic::icr"];
+static BOOT_INFO: SyncOnceCell<BootInfo<UEFIMemoryDescriptor, SystemConfigTableEntry>> =
+    SyncOnceCell::new();
 
 macro_rules! print {
     () => {};
 }
 
+/// Clears the kernel stack by resetting `RSP`.
+///
+/// Safety: This method does *extreme* damage to the stack. It should only ever be used when
+///         ABSOLUTELY NO dangling references to the old stack will exist (i.e. calling a
+///         no-argument function directly after).
+#[inline(always)]
+unsafe fn clear_stack() {
+    unsafe { libstd::registers::stack::RSP::write(__kernel_stack_top.as_page().base_addr()) };
+}
+
 #[no_mangle]
 #[export_name = "_entry"]
-extern "efiapi" fn kernel_main(
+unsafe extern "efiapi" fn _kernel_pre_init(
     boot_info: BootInfo<UEFIMemoryDescriptor, SystemConfigTableEntry>,
 ) -> ! {
-    unsafe {
-        CON_OUT.init(drivers::io::SerialSpeed::S115200);
+    BOOT_INFO.set(boot_info);
 
-        match drivers::io::set_stdout(&mut CON_OUT, get_log_level(), &TRACE_ENABLED_PATHS) {
-            Ok(()) => {
-                info!("Successfully loaded into kernel, with logging enabled.");
-            }
-            Err(_) => loop {},
-        }
+    unsafe {
+        clear_stack();
+        kernel_init()
     }
+}
+
+unsafe fn kernel_init() -> ! {
+    CON_OUT.init(drivers::io::SerialSpeed::S115200);
+
+    match drivers::io::set_stdout(&mut CON_OUT, get_log_level(), &TRACE_ENABLED_PATHS) {
+        Ok(()) => {
+            info!("Successfully loaded into kernel, with logging enabled.");
+        }
+        Err(_) => libstd::instructions::interrupts::breakpoint(),
+    }
+
+    let boot_info = BOOT_INFO
+        .get()
+        .expect("Boot info hasn't been initialized in kernel memory");
 
     info!("Validating BootInfo struct.");
     boot_info.validate_magic();
@@ -90,41 +117,45 @@ extern "efiapi" fn kernel_main(
         libstd::instructions::cpu_features()
     );
 
-    // `boot_info` will not be usable after initalizing the global allocator,
-    //   due to the stack being moved in virtual memory, thus invalidating
-    //   the stack pointer to the struct.
-    unsafe {
-        let memory_map = boot_info.memory_map();
-        init_falloc(memory_map);
-        reserve_eligible_frames(memory_map);
-        init_system_config_table(boot_info.config_table());
+    debug!("Initializing kernel frame allocator.");
+    falloc::load_new(boot_info.memory_map());
+    reserve_system_frames(boot_info.memory_map());
+    init_system_config_table(boot_info.config_table());
 
-        info!("Initializing kernel default allocator.");
-        let block_malloc = block_malloc::BlockAllocator::new();
-        block_malloc.init(memory_map);
-        // Move the current PML4 into the global processor reference.
-        // TODO somehow ensure the PML4 frame is within the first 32KiB for the AP trampoline
-        __kernel_pml4
-            .as_mut_ptr::<u32>()
-            .write(libstd::registers::CR3::read().0.as_usize() as u32);
+    clear_stack();
+    kernel_mem_init()
+}
 
-        libstd::memory::malloc::set(alloc::boxed::Box::new(block_malloc));
+#[inline(never)]
+unsafe fn kernel_mem_init() -> ! {
+    info!("Initializing kernel default allocator.");
 
-        debug!("Flagging `text` and `rodata` kernel sections as read-only.");
-        let malloc = libstd::memory::malloc::get();
-        for page in (__text_start.as_page()..__text_end.as_page())
-            .chain(__rodata_start.as_page()..__rodata_end.as_page())
-        {
-            malloc.set_page_attribs(
-                &page,
-                libstd::memory::paging::PageAttributes::WRITABLE,
-                libstd::memory::paging::AttributeModify::Remove,
-            );
-        }
+    let memory_map = BOOT_INFO
+        .get()
+        .expect("Boot info struct has not been passed into kernel executable memory")
+        .memory_map();
 
-        debug!("Memory initialization complete.");
+    let malloc = block_malloc::BlockAllocator::new(memory_map);
+
+    debug!("Flagging `text` and `rodata` kernel sections as read-only.");
+    for page in (__text_start.as_page()..__text_end.as_page())
+        .chain(__rodata_start.as_page()..__rodata_end.as_page())
+    {
+        malloc.set_page_attribs(
+            &page,
+            libstd::memory::paging::PageAttributes::WRITABLE,
+            libstd::memory::paging::AttributeModify::Remove,
+        );
     }
 
+    libstd::memory::malloc::set(alloc::boxed::Box::new(malloc));
+    // Move the current (new) PML4 into the global processor reference.
+    // TODO somehow ensure the PML4 frame is within the first 32KiB for the AP trampoline
+    __kernel_pml4
+        .as_mut_ptr::<u32>()
+        .write(libstd::registers::CR3::read().0.as_usize() as u32);
+
+    clear_stack();
     _startup()
 }
 
@@ -158,12 +189,12 @@ extern "C" fn _startup() -> ! {
                         LocalAPICFlags::PROCESSOR_ENABLED | LocalAPICFlags::ONLINE_CAPABLE,
                     ) && apic.id() != apic_other.id()
                     {
-                        const STACK_SIZE: usize = 1000000 /* 1 MiB */;
+                        const STACK_SIZE: usize = 32000 /* 32 KiB */;
                         unsafe {
                             AP_STACK_POINTERS[apic_other.id() as usize] =
                                 libstd::memory::malloc::get()
                                     .alloc(STACK_SIZE, None)
-                                    .expect("Failed to allocate stack for LPU.")
+                                    .expect("Failed to allocate stack for LPU")
                                     .into_parts()
                                     .0 as *mut _ // `c_void` has no alignment, so avoid overhead by direct casting
                                                  // (rather than using `.cast()`).
@@ -232,72 +263,43 @@ extern "C" fn _startup() -> ! {
     }
 }
 
-pub unsafe fn init_falloc(memory_map: &[UEFIMemoryDescriptor]) {
-    info!("Initializing kernel frame allocator.");
+fn reserve_system_frames(memory_map: &[UEFIMemoryDescriptor]) {
+    let falloc = falloc::get();
 
-    // calculates total system memory
-    let total_falloc_memory = memory_map
-        .iter()
-        .filter(|descriptor| !descriptor.should_reserve())
-        .max_by_key(|descriptor| descriptor.phys_start)
-        .map(|descriptor| {
-            (descriptor.phys_start + ((descriptor.page_count as usize) * 0x1000)).as_usize()
-        })
-        .expect("no descriptor with max value");
-
-    let total_phys_memory = memory_map
-        .iter()
-        .filter(|descriptor| !descriptor.should_reserve())
-        .map(|descriptor| (descriptor.page_count as usize) * 0x1000)
-        .sum::<usize>();
-    info!(
-        "Kernel frame allocator will represent {} MB ({} bytes) of system memory.",
-        libstd::memory::to_mibibytes(total_phys_memory),
-        total_phys_memory
-    );
-
-    let frame_alloc_frame_count =
-        falloc::FrameAllocator::frame_count_hint(total_falloc_memory) as u64;
-    let frame_alloc_ptr = memory_map
-        .iter()
-        .filter(|descriptor| descriptor.ty == libstd::memory::UEFIMemoryType::CONVENTIONAL)
-        .find(|descriptor| descriptor.page_count >= frame_alloc_frame_count)
-        .map(|descriptor| descriptor.phys_start.as_usize() as *mut _)
-        .expect("failed to find viable memory descriptor for memory map");
-
-    falloc::load(frame_alloc_ptr, total_falloc_memory);
-    debug!("Kernel frame allocator initialized.");
-}
-
-fn reserve_eligible_frames(memory_map: &[UEFIMemoryDescriptor]) {
     let mut last_frame_end = 0;
     for descriptor in memory_map {
-        let frame_start = descriptor.phys_start.frame_index();
+        let frame_index = descriptor.phys_start.frame_index();
         let frame_count = descriptor.page_count as usize;
 
+        if !descriptor.phys_start.is_aligned(0x1000) {
+            warn!("Found unaligned UEFI memory descriptor! Refusing to process.");
+            continue;
+
         // Checks for 'holes' in system memory which we shouldn't try to allocate to.
-        if last_frame_end < frame_start {
-            unsafe {
-                falloc::get()
-                    .acquire_frames(
-                        last_frame_end,
-                        frame_start - last_frame_end,
-                        falloc::FrameState::Reserved,
-                    )
-                    .unwrap()
-            };
-        }
+        } else if last_frame_end < frame_index {
+            for frame_index in last_frame_end..frame_index {
+                unsafe { falloc.try_modify_type(frame_index, falloc::FrameType::Unusable) };
+            }
+        };
 
-        // Reserve descriptor properly, and acquire stack frames if applicable.
         if descriptor.should_reserve() {
-            unsafe {
-                falloc::get()
-                    .acquire_frames(frame_start, frame_count, falloc::FrameState::Reserved)
-                    .unwrap()
-            };
+            falloc.lock_many(frame_index, frame_count);
         }
 
-        last_frame_end = frame_start + frame_count;
+        for frame_index in frame_index..(frame_index + frame_count) {
+            unsafe {
+                falloc.try_modify_type(
+                    frame_index,
+                    if descriptor.should_reserve() {
+                        falloc::FrameType::Reserved
+                    } else {
+                        falloc::FrameType::Usable
+                    },
+                );
+            }
+        }
+
+        last_frame_end = frame_index + frame_count;
     }
 }
 
@@ -316,11 +318,9 @@ fn init_system_config_table(config_table: &[SystemConfigTableEntry]) {
 
         let frame_range = frame_index..(frame_index + frame_count);
         debug!("System configuration table: {:?}", frame_range);
-        let frame_allocator = falloc::get();
-        for index in frame_range {
-            frame_allocator
-                .acquire_frame(index, falloc::FrameState::Reserved)
-                .unwrap();
+        let falloc = falloc::get();
+        for frame_index in frame_index..(frame_index + frame_count) {
+            falloc.borrow(frame_index);
         }
     }
 }

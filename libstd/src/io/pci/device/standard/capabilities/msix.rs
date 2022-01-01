@@ -73,30 +73,34 @@ impl fmt::Debug for MessageTableEntry {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PendingBit {
     Unset,
     Set,
 }
 
-impl crate::BitValue for PendingBit {
-    const BIT_WIDTH: usize = 0x1;
-    const MASK: usize = 0x1;
-
-    fn as_usize(&self) -> usize {
-        match self {
-            PendingBit::Unset => 0,
-            PendingBit::Set => 1,
-        }
-    }
-
-    fn from_usize(value: usize) -> Self {
+impl From<usize> for PendingBit {
+    fn from(value: usize) -> Self {
         match value {
             0 => Self::Unset,
             1 => Self::Set,
             value => panic!("Invalid pending bit value: {}", value),
         }
     }
+}
+
+impl Into<usize> for PendingBit {
+    fn into(self) -> usize {
+        match self {
+            PendingBit::Unset => 0,
+            PendingBit::Set => 1,
+        }
+    }
+}
+
+impl crate::BitValue for PendingBit {
+    const BIT_WIDTH: usize = 0x1;
+    const MASK: usize = 0x1;
 }
 
 #[repr(C)]
@@ -149,7 +153,7 @@ impl MSIX {
     ) -> Option<BitSlice<VolatileCell<u64, ReadWrite>>> {
         device
             .get_register(self.get_pending_bit_bir())
-            .map(|mmio| unsafe {
+            .map(|mmio|  {
                 let table_offset = self.get_pending_bit_offset();
                 let table_len = self.message_control().get_table_len();
 

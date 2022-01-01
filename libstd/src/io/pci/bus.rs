@@ -21,7 +21,7 @@ impl PCIeBus {
 
                     Some(crate::io::pci::new_device(
                         crate::memory::MMIO::new(offset_addr.frame_index(), 1).expect(
-                            "Allocation error occurred attempting to create MMIO for PCIeBus.",
+                            "Allocation error occurred attempting to create MMIO for PCIeBus",
                         ),
                     ))
                 }

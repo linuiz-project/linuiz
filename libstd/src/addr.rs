@@ -34,14 +34,17 @@ impl<T: AddressType> Address<T> {
         }
     }
 
+    #[inline]
     pub const fn as_usize(&self) -> usize {
         self.value
     }
 
+    #[inline]
     pub const fn is_null(&self) -> bool {
         self.value == 0
     }
 
+    #[inline]
     pub const fn align_up(self, alignment: usize) -> Self {
         Self {
             value: crate::align_up(self.value, alignment),
@@ -49,6 +52,7 @@ impl<T: AddressType> Address<T> {
         }
     }
 
+    #[inline]
     pub const fn align_down(self, alignment: usize) -> Self {
         Self {
             value: crate::align_down(self.value, alignment),
@@ -56,6 +60,7 @@ impl<T: AddressType> Address<T> {
         }
     }
 
+    #[inline]
     pub const fn is_aligned(&self, alignment: usize) -> bool {
         crate::align_down(self.value, alignment) == self.value
     }
@@ -80,18 +85,9 @@ impl<T: AddressType> PartialEq for Address<T> {
 
 impl<T: AddressType> Ord for Address<T> {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        use core::cmp::Ordering;
-
-        if self.value < other.value {
-            Ordering::Less
-        } else if self.value > other.value {
-            Ordering::Greater
-        } else {
-            Ordering::Equal
-        }
+        self.value.cmp(&other.value)
     }
 }
-
 impl<T: AddressType> PartialOrd for Address<T> {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         Some(self.cmp(other))
@@ -116,14 +112,17 @@ impl Address<Physical> {
         }
     }
 
+    #[inline]
     pub const fn frame_index(&self) -> usize {
         self.as_usize() / 0x1000
     }
 
+    #[inline]
     pub const fn is_canonical(&self) -> bool {
         (self.value >> 52) == 0
     }
 
+    #[inline]
     pub const fn is_frame_aligned(&self) -> bool {
         (self.value & 0xFFF) == 0
     }
@@ -201,42 +200,52 @@ impl Address<Virtual> {
         }
     }
 
+    #[inline]
     pub fn from_ptr<T>(ptr: *const T) -> Self {
         Self::new(ptr as usize)
     }
 
+    #[inline]
     pub const fn page_index(&self) -> usize {
         self.as_usize() / 0x1000
     }
 
+    #[inline]
     pub const fn as_ptr<T>(&self) -> *const T {
         self.value as *const T
     }
 
+    #[inline]
     pub const fn as_mut_ptr<T>(&mut self) -> *mut T {
         self.value as *mut T
     }
 
+    #[inline]
     pub const fn page_offset(&self) -> usize {
         self.value & 0xFFF
     }
 
+    #[inline]
     pub const fn p1_index(&self) -> usize {
         (self.value >> 12) & 0x1FF
     }
 
+    #[inline]
     pub const fn p2_index(&self) -> usize {
         (self.value >> 12 >> 9) & 0x1FF
     }
 
+    #[inline]
     pub const fn p3_index(&self) -> usize {
         (self.value >> 12 >> 9 >> 9) & 0x1FF
     }
 
+    #[inline]
     pub const fn p4_index(&self) -> usize {
         (self.value >> 12 >> 9 >> 9 >> 9) & 0x1FF
     }
 
+    #[inline]
     pub const fn is_page_aligned(&self) -> bool {
         (self.value & 0xFFF) == 0
     }

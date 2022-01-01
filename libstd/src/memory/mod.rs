@@ -1,11 +1,11 @@
-mod frame;
+//mod frame;
 mod page;
 mod uefi;
 
 #[cfg(feature = "global_allocator")]
 mod galloc;
 
-pub use frame::*;
+//pub use frame::*;
 pub use page::*;
 pub use uefi::*;
 pub mod falloc;
@@ -75,17 +75,15 @@ impl MMIO {
     // TODO possibly introduct an Address<Frame> type to represent
     // frame addresses?
     pub unsafe fn new(frame_index: usize, count: usize) -> Result<Self, malloc::AllocError> {
-        malloc::get()
-            .alloc_against(frame_index, count, falloc::FrameState::Reserved)
-            .map(|data| {
-                let parts = data.into_parts();
+        malloc::get().alloc_against(frame_index, count).map(|data| {
+            let parts = data.into_parts();
 
-                Self {
-                    frame_range: frame_index..(frame_index + count),
-                    ptr: parts.0,
-                    len: parts.1,
-                }
-            })
+            Self {
+                frame_range: frame_index..(frame_index + count),
+                ptr: parts.0,
+                len: parts.1,
+            }
+        })
     }
 
     pub fn frames(&self) -> &Range<usize> {

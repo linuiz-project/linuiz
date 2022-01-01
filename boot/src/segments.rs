@@ -28,16 +28,12 @@ pub fn allocate_segments(
         // TODO: Also process GNU_RELRO segments.
         // Ensure the segment needs to be loaded at all.
         if segment_header.ty == SegmentType::LOAD {
-            debug!("Identified loadable segment:\n{:#?}", segment_header);
-
             // Determine if this segment requires its own page mapping.
             // NOTE: This could be required due to an odd bug with rust.lld compilation?
             //       It doesn't seem like a normal issue. This, however, handles it so
             //       far as I know.
             let segment_buffer =
                 if (segment_header.virt_addr.as_usize() % segment_header.align) == 0 {
-                    debug!("Segment is self-aligned. Allocating buffer & slicing.");
-
                     // Align the address of the segment to page boundaries.
                     let page_aligned_addr =
                         libstd::align_down(segment_header.virt_addr.as_usize(), 0x1000);
@@ -55,8 +51,6 @@ pub fn allocate_segments(
                     // Handle any internal page offsets (i.e. segment has a non-page alignment).
                     &mut buffer[alignment_offset..(alignment_offset + segment_header.mem_size)]
                 } else {
-                    debug!("Segment is not self-aligned. Slicing memory directly.");
-
                     // If this segment's address doesn't align, simply create a slice over the region.
                     unsafe {
                         core::slice::from_raw_parts_mut(

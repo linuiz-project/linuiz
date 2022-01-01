@@ -1,12 +1,13 @@
-use alloc::{boxed::Box, vec::Vec};
-
-use super::{falloc, paging::AttributeModify};
 use crate::{
     addr_ty::{Physical, Virtual},
     cell::SyncRefCell,
-    memory::{paging::PageAttributes, Page},
+    memory::{
+        paging::{AttributeModify, PageAttributes},
+        Page,
+    },
     Address,
 };
+use alloc::{boxed::Box, vec::Vec};
 use core::{
     alloc::Layout,
     mem::{align_of, MaybeUninit},
@@ -17,11 +18,8 @@ pub enum AllocError {
     OutOfMemory,
     OutOfFrames,
     InvalidAlignment,
-    UndefinedFailure,
-    FallocFailure(falloc::FallocError),
+    IdentityMappingOverlaps,
 }
-
-// pub type Memory = core::ptr::NonNull<[u8]>;
 
 pub struct Alloc<T> {
     ptr: *mut T,
@@ -112,19 +110,13 @@ pub trait MemoryAllocator {
 
     fn alloc_contiguous(&self, count: usize) -> Result<(Address<Physical>, Alloc<u8>), AllocError>;
 
-    fn alloc_against(
-        &self,
-        frame_index: usize,
-        count: usize,
-        acq_state: falloc::FrameState,
-    ) -> Result<Alloc<u8>, AllocError>;
+    fn alloc_against(&self, frame_index: usize, count: usize) -> Result<Alloc<u8>, AllocError>;
 
-    fn alloc_identity(
-        &self,
-        frame_index: usize,
-        count: usize,
-        acq_state: falloc::FrameState,
-    ) -> Result<Alloc<u8>, AllocError>;
+    /// Attempts to allocate a 1:1 mapping of virtual memory to its physical memory.
+    ///
+    /// REMARK:
+    ///     This function is required only to offer the same guarantees as `VirtualAddressor::identity_map()`.
+    fn alloc_identity(&self, frame_index: usize, count: usize) -> Result<Alloc<u8>, AllocError>;
 
     fn dealloc(&self, ptr: *mut u8, layout: Layout);
 
@@ -151,7 +143,7 @@ pub unsafe fn set(allocator: Box<dyn MemoryAllocator>) {
 pub fn get() -> &'static Box<dyn MemoryAllocator> {
     DEFAULT_MALLOCATOR
         .borrow()
-        .expect("No default allocator currently assigned.")
+        .expect("No default allocator currently assigned")
 }
 
 pub fn try_get() -> Option<&'static Box<dyn MemoryAllocator>> {

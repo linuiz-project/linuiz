@@ -19,14 +19,10 @@ impl FramebufferDriver {
 
         let framebuffer = unsafe {
             libstd::memory::malloc::get()
-                .alloc_against(
-                    buffer_addr.frame_index(),
-                    (byte_len + 0xFFF) / 0x1000,
-                    libstd::memory::falloc::FrameState::Reserved,
-                )
-                .expect("Allocation error occurred when attempting to create pixelbuffer.")
+                .alloc_against(buffer_addr.frame_index(), (byte_len + 0xFFF) / 0x1000)
+                .expect("Allocation error occurred when attempting to create pixelbuffer")
                 .cast()
-                .expect("Allocated region is of invalid alignment for Color8i.")
+                .expect("Allocated region is of invalid alignment for Color8i")
                 .into_parts()
                 .0
         };
@@ -37,9 +33,9 @@ impl FramebufferDriver {
                     byte_len,
                     core::num::NonZeroUsize::new(core::mem::align_of::<Color8i>()),
                 )
-                .expect("Allocation error occurred when attempting to create pixelbuffer.")
+                .expect("Allocation error occurred when attempting to create pixelbuffer")
                 .cast()
-                .expect("Allocated region is of invalid alignment for Color8i.")
+                .expect("Allocated region is of invalid alignment for Color8i")
                 .into_parts()
                 .0
         };

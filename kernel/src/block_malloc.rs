@@ -3,12 +3,12 @@ use libstd::{
     addr_ty::{Physical, Virtual},
     align_up_div,
     memory::{
-        falloc,
+        falloc::{self, FrameType},
         malloc::{Alloc, AllocError, MemoryAllocator},
-        paging::VirtualAddressor,
-        Frame, Page,
+        paging::{PageTableEntry, VirtualAddressor},
+        Page, UEFIMemoryDescriptor,
     },
-    Address, SYSTEM_SLICE_SIZE,
+    Address,
 };
 use spin::{RwLock, RwLockWriteGuard};
 
@@ -72,127 +72,82 @@ pub struct BlockAllocator<'map> {
     map: RwLock<AllocatorMap<'map>>,
 }
 
-impl BlockAllocator<'_> {
+impl<'map> BlockAllocator<'map> {
     /// The size of an allocator block.
     pub const BLOCK_SIZE: usize = 0x1000 / BlockPage::BLOCKS_PER;
 
-    /// Base page the allocator uses to store the internal block page map.
-    const ALLOCATOR_BASE: Page =
-        Page::from_addr(unsafe { Address::new_unsafe(SYSTEM_SLICE_SIZE * 0xA) });
-
     // TODO possibly move the initialization code from `init()` into this `new()` function.
     #[allow(const_item_mutation)]
-    pub const fn new() -> Self {
+    pub fn new(memory_map: &[UEFIMemoryDescriptor]) -> Self {
         const EMPTY: [BlockPage; 0] = [];
 
-        Self {
+        let block_malloc = Self {
             // TODO make addressor use a RwLock
             map: RwLock::new(AllocatorMap {
                 addressor: VirtualAddressor::null(),
                 pages: &mut EMPTY,
             }),
-        }
-    }
+        };
 
-    /* INITIALIZATION */
-
-    pub unsafe fn init(&self, memory_map: &[libstd::memory::UEFIMemoryDescriptor]) {
         {
-            debug!("Initializing allocator's virtual addressor...");
-            let mut map_write = self.map.write();
-            map_write.addressor = VirtualAddressor::new(Page::null());
+            let mut map_write = block_malloc.map.write();
 
-            debug!("Identity mapping all reserved global memory frames...");
-            falloc::get()
-                .iter()
-                .enumerate()
-                .filter(|(_, state)| state.eq(&falloc::FrameState::Reserved))
-                .for_each(|(index, _)| {
-                    map_write.addressor.identity_map(&Frame::from_index(index));
-                });
+            unsafe {
+                debug!("Initializing allocator's virtual addressor...");
+                map_write.addressor = VirtualAddressor::new(Page::null());
+
+                // TODO the addressors shouldn't mmap all reserved frames by default.
+                //  It is, for insatnce, useless in userland addressors, where ACPI tables
+                //  don't need to be mapped.
+                debug!("Identity mapping all reserved global memory frames...");
+                falloc::get()
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, (ty, _, _))| ty.eq(&falloc::FrameType::Reserved))
+                    .for_each(|(index, _)| {
+                        map_write.addressor.identity_map(&Page::from_index(index));
+                    });
+            }
 
             // Since we're using physical offset mapping for our page table modification
             //  strategy, the memory needs to be identity mapped at the correct offset.
             let phys_mapping_addr = falloc::virtual_map_offset();
             debug!("Mapping physical memory at offset: {:?}", phys_mapping_addr);
-            map_write
-                .addressor
-                .modify_mapped_page(Page::from_addr(phys_mapping_addr));
+            unsafe {
+                map_write
+                    .addressor
+                    .modify_mapped_page(Page::from_addr(phys_mapping_addr));
+            }
 
-            // Swap the PML4 into CR3
             info!("Writing kernel addressor's PML4 to the CR3 register.");
-            map_write.addressor.swap_into();
+            unsafe { map_write.addressor.swap_into() };
 
             debug!("Allocating reserved global memory frames...");
             falloc::get()
                 .iter()
                 .enumerate()
-                .filter(|(_, state)| state.eq(&falloc::FrameState::Reserved))
+                .filter(|(_, (ty, _, _))| ty.eq(&FrameType::Reserved))
                 .for_each(|(index, _)| {
                     while map_write.pages.len() <= index {
-                        self.grow(
-                            usize::max(index - map_write.pages.len(), 1) * BlockPage::BLOCKS_PER,
-                            &mut map_write,
-                        );
+                        block_malloc
+                            .grow(
+                                usize::max(index - map_write.pages.len(), 1)
+                                    * BlockPage::BLOCKS_PER,
+                                &mut map_write,
+                            )
+                            .unwrap();
                     }
 
                     map_write.pages[index].set_full();
                 });
+
+            map_write.pages[0].set_full();
+
+            info!("Finished block allocator initialization.");
         }
 
-        // 2MiB
-        const STACK_SIZE: usize = 2000000;
-
-        debug!("Heap-allocating dynamic kernel stack...");
-        let stack_descriptor = memory_map
-            .iter()
-            .find(|descriptor| descriptor.is_stack_descriptor())
-            .expect("No origin stack detected.")
-            .clone();
-        let org_stack_size = (stack_descriptor.page_count * 0x1000) as usize;
-        let org_stack_top = stack_descriptor.phys_start.as_usize() as *const u8;
-        let org_top_dyn_top_rel = self
-            .alloc(STACK_SIZE, NonZeroUsize::new(1))
-            .unwrap()
-            .into_parts()
-            .0
-            .add(STACK_SIZE - org_stack_size);
-
-        debug!("Copying origin stack contents to dynamic stack...");
-        // Finally, copy the old identity-mapped stack.
-        core::ptr::copy_nonoverlapping(org_stack_top, org_top_dyn_top_rel, org_stack_size);
-
-        debug!("Adjusting stack pointer to dynamic stack...");
-        // Determine offset between the two stacks, to properly move RSP.
-        let stack_ptr_offset = org_stack_top.offset_from(org_top_dyn_top_rel);
-
-        use libstd::registers::stack::RSP;
-        if stack_ptr_offset.is_positive() {
-            RSP::sub(stack_ptr_offset.abs() as u64);
-        } else {
-            RSP::add(stack_ptr_offset.abs() as u64);
-        }
-
-        debug!("Unmapping origin stack & unreserving frames...");
-        let stack_descriptor = (&raw const stack_descriptor).read_volatile();
-        let mut map_write = self.map.write();
-        let start_index = stack_descriptor.phys_start.frame_index();
-        let count = stack_descriptor.page_count as usize;
-        for frame_index in start_index..(start_index + count) {
-            map_write
-                .addressor
-                .unmap(&Page::from_index(frame_index))
-                .unwrap();
-            // TODO also unreserve the frame which the mapping points to.
-        }
-
-        // Reserve the null page.
-        map_write.pages[0].set_full();
-
-        info!("Finished block allocator initialization.");
+        block_malloc
     }
-
-    /* ALLOC & DEALLOC */
 
     /// Calculates the bit count and mask for a given set of block page parameters.
     fn calculate_bit_fields(
@@ -220,44 +175,99 @@ impl BlockAllocator<'_> {
         required_blocks: usize,
         map_write: &mut RwLockWriteGuard<AllocatorMap>,
     ) -> Result<(), AllocError> {
+        assert!(
+            map_write.addressor.is_swapped_in(),
+            "Cannot modify allocator state when addressor is not active."
+        );
         assert!(required_blocks > 0, "calls to grow must be nonzero");
 
-        trace!("Growing map to faciliate {} blocks.", required_blocks);
-        const BLOCKS_PER_MAP_PAGE: usize = 8 /* bits per byte */ * 0x1000;
-        let cur_map_len = map_write.pages.len();
-        let cur_page_offset = (cur_map_len * BlockPage::BLOCKS_PER) / BLOCKS_PER_MAP_PAGE;
-        let new_page_offset = (cur_page_offset
-            + libstd::align_up_div(required_blocks, BLOCKS_PER_MAP_PAGE))
-        .next_power_of_two();
-
-        trace!(
-            "Growing map: {}..{} pages",
-            cur_page_offset,
-            new_page_offset
+        info!(
+            "Allocator map requires growth: {} blocks required.",
+            required_blocks
         );
 
-        for offset in cur_page_offset..new_page_offset {
-            let map_page = &mut Self::ALLOCATOR_BASE.forward(offset).unwrap();
-            let frame = match falloc::get().autolock() {
-                Some(frame) => frame,
-                None => return Err(AllocError::OutOfMemory),
-            };
-            map_write.addressor.map(map_page, &frame);
+        // Current length of our map, in indexes.
+        let cur_map_len = map_write.pages.len();
+        // Required length of our map, in indexes.
+        let req_map_len = (map_write.pages.len()
+            + libstd::align_up_div(required_blocks, BlockPage::BLOCKS_PER))
+        .next_power_of_two();
+        // Current page count of our map (i.e. how many pages the slice requires)
+        let cur_map_pages = libstd::align_up_div(cur_map_len * size_of::<BlockPage>(), 0x1000);
+        // Required page count of our map.
+        let req_map_pages = libstd::align_up_div(req_map_len * size_of::<BlockPage>(), 0x1000);
+
+        info!(
+            "Growth parameters: len {} => {}, pages {} => {}",
+            cur_map_len, req_map_len, cur_map_pages, req_map_pages
+        );
+
+        // Attempt to find a run of already-mapped pages within our allocator
+        // that can contain our required slice length.
+        let mut current_run = 0;
+        let start_index = core::lazy::OnceCell::new();
+        for (index, block_page) in map_write.pages.iter().enumerate() {
+            if block_page.is_empty() {
+                current_run += 1;
+
+                if current_run == req_map_pages {
+                    start_index.set(index - (current_run - 1));
+                    break;
+                }
+            } else {
+                current_run = 0;
+            }
         }
 
-        let new_map_len = new_page_offset * (0x1000 / size_of::<BlockPage>());
-        unsafe {
-            map_write.pages =
-                core::ptr::slice_from_raw_parts_mut(Self::ALLOCATOR_BASE.as_mut_ptr(), new_map_len)
-                    .as_mut()
-                    .unwrap();
+        let falloc = falloc::get();
+        let cur_map_page = Page::from_index((map_write.pages.as_ptr() as usize) / 0x1000);
+        let new_map_page = Page::from_index(*start_index.get_or_init(|| {
+            // When the map is zero-sized, this allows us to skip the first page in our
+            // allocations (in order to keep the 0th page as null & unmapped).
+            if cur_map_len == 0 {
+                cur_map_len + 1
+            } else {
+                cur_map_len
+            }
+        }));
 
-            core::ptr::write_bytes(
-                map_write.pages[cur_map_len..].as_mut_ptr(),
-                0,
-                new_map_len - cur_map_len,
+        info!("Copy mapping current map to new pages.");
+        for page_offset in 0..cur_map_pages {
+            map_write.addressor.copy_by_map(
+                &cur_map_page.forward(page_offset).unwrap(),
+                &new_map_page.forward(page_offset).unwrap(),
             );
         }
+
+        info!("Allocating and mapping remaining pages of map.");
+        for page_offset in cur_map_pages..req_map_pages {
+            let mut new_page = new_map_page.forward(page_offset).unwrap();
+
+            map_write.addressor.automap(&new_page, true);
+            // Clear the newly allocated map page.
+            unsafe { new_page.mem_clear() };
+        }
+
+        // Point to new map.
+        map_write.pages = unsafe {
+            core::slice::from_raw_parts_mut(
+                new_map_page.as_mut_ptr(),
+                libstd::align_up(req_map_len, 0x1000 / size_of::<BlockPage>()),
+            )
+        };
+
+        map_write
+            .pages
+            .iter_mut()
+            .skip(new_map_page.index())
+            .take(req_map_pages)
+            .for_each(|block_page| block_page.set_full());
+        map_write
+            .pages
+            .iter_mut()
+            .skip(cur_map_page.index())
+            .take(cur_map_pages)
+            .for_each(|block_page| block_page.set_empty());
 
         Ok(())
     }
@@ -310,6 +320,7 @@ impl MemoryAllocator for BlockAllocator<'_> {
             }
         }
 
+        // TODO fix the indexing on these
         let end_block_index = block_index;
         let start_block_index = block_index - current_run;
         block_index = start_block_index;
@@ -330,11 +341,7 @@ impl MemoryAllocator for BlockAllocator<'_> {
                 unsafe {
                     map_write
                         .addressor
-                        .map(
-                            &Page::from_index(map_index),
-                            &falloc::get().autolock().unwrap(),
-                        )
-                        .unwrap();
+                        .automap(&Page::from_index(map_index), true);
                 }
             }
         }
@@ -349,9 +356,9 @@ impl MemoryAllocator for BlockAllocator<'_> {
 
     fn alloc_contiguous(&self, count: usize) -> Result<(Address<Physical>, Alloc<u8>), AllocError> {
         let mut map_write = self.map.write();
-        let mut frames = match falloc::get().autolock_many(count) {
-            Some(frames) => frames,
-            None => {
+        let frame_index = match falloc::get().lock_next_many(count) {
+            Ok(frame_index) => frame_index,
+            Err(falloc_err) => {
                 return Err(AllocError::OutOfFrames);
             }
         };
@@ -379,45 +386,26 @@ impl MemoryAllocator for BlockAllocator<'_> {
             }
         }
 
-        for page_index in start_index..(start_index + count) {
-            if let Some(frame) = frames.next() {
-                map_write.pages[page_index].set_full();
-                map_write
-                    .addressor
-                    .map(&Page::from_index(page_index), &frame);
-            } else {
-                for page_index in start_index..page_index {
-                    map_write.pages[page_index].set_empty();
-                }
+        for offset in 0..count {
+            let page_index = start_index + offset;
+            let frame_index = frame_index + offset;
 
-                unsafe { falloc::get().free_frames(frames) };
-                return Err(AllocError::UndefinedFailure);
-            }
+            map_write.pages[page_index].set_full();
+            map_write
+                .addressor
+                .map(&Page::from_index(page_index), frame_index, None);
         }
 
         unsafe {
             Ok((
-                frames.start().base_addr(),
+                Address::<Physical>::new(frame_index * 0x1000),
                 Alloc::new((start_index * 0x1000) as *mut _, count * 0x1000),
             ))
         }
     }
 
-    fn alloc_against(
-        &self,
-        frame_index: usize,
-        count: usize,
-        acq_state: falloc::FrameState,
-    ) -> Result<Alloc<u8>, AllocError> {
+    fn alloc_against(&self, frame_index: usize, count: usize) -> Result<Alloc<u8>, AllocError> {
         let mut map_write = self.map.write();
-        let mut frames =
-            match unsafe { falloc::get().acquire_frames(frame_index, count, acq_state) } {
-                Ok(frames) => frames,
-                Err(falloc_error) => {
-                    return Err(AllocError::FallocFailure(falloc_error));
-                }
-            };
-
         let mut start_index = 0;
         'outer: loop {
             let mut current_run = 0;
@@ -441,31 +429,20 @@ impl MemoryAllocator for BlockAllocator<'_> {
             }
         }
 
-        for page_index in start_index..(start_index + count) {
-            if let Some(frame) = frames.next() {
-                map_write.pages[page_index].set_full();
-                map_write
-                    .addressor
-                    .map(&Page::from_index(page_index), &frame);
-            } else {
-                for page_index in start_index..page_index {
-                    map_write.pages[page_index].set_empty();
-                }
+        for offset in 0..count {
+            let page_index = start_index + offset;
+            let frame_index = frame_index + offset;
 
-                unsafe { falloc::get().free_frames(frames) };
-                return Err(AllocError::UndefinedFailure);
-            }
+            map_write.pages[page_index].set_full();
+            map_write
+                .addressor
+                .map(&Page::from_index(page_index), frame_index, None);
         }
 
         unsafe { Ok(Alloc::new((start_index * 0x1000) as *mut _, count * 0x1000)) }
     }
 
-    fn alloc_identity(
-        &self,
-        frame_index: usize,
-        count: usize,
-        acq_state: falloc::FrameState,
-    ) -> Result<Alloc<u8>, AllocError> {
+    fn alloc_identity(&self, frame_index: usize, count: usize) -> Result<Alloc<u8>, AllocError> {
         let mut map_write = self.map.write();
 
         if map_write.pages.len() < (frame_index + count) {
@@ -476,25 +453,21 @@ impl MemoryAllocator for BlockAllocator<'_> {
             .unwrap();
         }
 
-        let mut frames =
-            match unsafe { falloc::get().acquire_frames(frame_index, count, acq_state) } {
-                Ok(frames) => frames,
-                Err(falloc_error) => {
-                    return Err(AllocError::FallocFailure(falloc_error));
-                }
-            };
-
         for page_index in frame_index..(frame_index + count) {
-            if let Some(frame) = frames.next() {
+            if map_write.pages[page_index].is_empty() {
                 map_write.pages[page_index].set_full();
-                map_write.addressor.identity_map(&frame);
+                map_write
+                    .addressor
+                    .identity_map(&Page::from_index(page_index));
             } else {
                 for page_index in frame_index..page_index {
                     map_write.pages[page_index].set_empty();
+                    map_write
+                        .addressor
+                        .unmap(&Page::from_index(page_index), false);
                 }
 
-                unsafe { falloc::get().free_frames(frames) };
-                return Err(AllocError::UndefinedFailure);
+                return Err(AllocError::IdentityMappingOverlaps);
             }
         }
 
@@ -535,14 +508,8 @@ impl MemoryAllocator for BlockAllocator<'_> {
             };
 
             if had_bits && !has_bits {
-                let page = &Page::from_index(map_index);
-
-                unsafe {
-                    falloc::get()
-                        .free_frame(map.addressor.translate_page(page).unwrap())
-                        .unwrap()
-                };
-                map.addressor.unmap(page);
+                // TODO we actually *don't know* if this page locked a frame or not...
+                map.addressor.unmap(&Page::from_index(map_index), true);
             }
         }
     }

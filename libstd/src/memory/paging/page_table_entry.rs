@@ -1,4 +1,3 @@
-use crate::memory::Frame;
 use core::fmt;
 
 bitflags::bitflags! {
@@ -26,31 +25,34 @@ pub enum AttributeModify {
     Toggle,
 }
 
-pub enum ValidationError {
-    ReservedBits(usize),
-    NonCanonical(crate::Address<crate::addr_ty::Physical>),
-}
-
 #[repr(transparent)]
 pub struct PageTableEntry(usize);
 
 impl PageTableEntry {
-    pub const UNUSED: Self = Self { 0: 0 };
+    const FRAME_BITS: usize = 0x000FFFFF_FFFFF000;
+    pub const UNUSED: Self = Self(0);
 
-    pub const fn set(&mut self, frame: &Frame, attributes: PageAttributes) {
-        self.0 = frame.base_addr().as_usize() | attributes.bits();
+    pub const fn set(&mut self, frame_index: usize, attributes: PageAttributes) {
+        self.0 = (frame_index * 0x1000) | attributes.bits();
     }
 
-    pub const fn get_frame(&self) -> Option<Frame> {
+    pub const fn get_frame_index(&self) -> Option<usize> {
         if self.get_attributes().contains(PageAttributes::PRESENT) {
-            Some(unsafe { Frame::from_index((self.0 & 0x000FFFFF_FFFFF000) >> 12) })
+            Some((self.0 & Self::FRAME_BITS) / 0x1000)
         } else {
             None
         }
     }
 
-    pub const fn set_frame(&mut self, frame: &Frame) {
-        self.0 = (self.0 & PageAttributes::all().bits()) | frame.base_addr().as_usize();
+    pub const fn set_frame_index(&mut self, frame_index: usize) {
+        self.0 = (self.0 & PageAttributes::all().bits()) | (frame_index * 0x1000);
+    }
+
+    // Takes this page table entry's frame, even if it is non-present.
+    pub const unsafe fn take_frame_index(&mut self) -> usize {
+        let frame_index = (self.0 & Self::FRAME_BITS) / 0x1000;
+        self.0 &= !Self::FRAME_BITS;
+        frame_index
     }
 
     pub const fn get_attributes(&self) -> PageAttributes {
@@ -73,28 +75,13 @@ impl PageTableEntry {
     pub const unsafe fn set_unused(&mut self) {
         self.0 = 0;
     }
-
-    pub fn validate(&self) -> Result<(), ValidationError> {
-        const RESERVED_BITS: usize = !(PageAttributes::all().bits() | 0x000FFFFF_FFFFF000);
-
-        match self.get_frame() {
-            _ if (self.0 & RESERVED_BITS) > 0 => {
-                Err(ValidationError::ReservedBits(self.0 & RESERVED_BITS))
-            }
-            Some(frame) if (frame.base_addr().as_usize() & !0x000FFFFF_FFFFF000) > 0 => {
-                Err(ValidationError::NonCanonical(frame.base_addr()))
-            }
-            Some(_) => Ok(()),
-            None => Ok(()),
-        }
-    }
 }
 
 impl fmt::Debug for PageTableEntry {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_tuple("Page Table Entry")
-            .field(&self.get_frame())
+            .field(&self.get_frame_index())
             .field(&self.get_attributes())
             .field(&format_args!("0x{:X}", self.0))
             .finish()

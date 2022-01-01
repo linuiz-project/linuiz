@@ -166,4 +166,13 @@ impl core::fmt::Write for Serial {
         self.write_str(string);
         Ok(())
     }
+
+    fn write_char(&mut self, c: char) -> core::fmt::Result {
+        if c.is_ascii() {
+            self.write(c as u8);
+            Ok(())
+        } else {
+            Err(core::fmt::Error)
+        }
+    }
 }

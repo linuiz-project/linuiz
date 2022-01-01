@@ -14,8 +14,8 @@
     extern_types,
     ptr_as_uninit,
     slice_ptr_get,
-    const_ptr_as_ref,
-    const_align_offset
+    const_align_offset,
+    const_transmute_copy
 )]
 
 #[macro_use]
@@ -244,6 +244,6 @@ impl LinkerSymbol {
     }
 
     pub fn as_page(&'static self) -> memory::Page {
-        memory::Page::from_index(self.as_usize() / 0x1000)
+        memory::Page::from_ptr(self.as_ptr::<core::ffi::c_void>())
     }
 }

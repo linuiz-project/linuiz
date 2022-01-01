@@ -98,8 +98,6 @@ fn allocate_sections(
                     crate::read_file(kernel_file, section_header.offset as u64, &mut rela_buffer);
                     let rela: &Rela64 = unsafe { &core::mem::transmute(rela_buffer) };
 
-                    debug!("Processing relocation: {:?}", rela);
-
                     if rela.info == libstd::elf::X86_64_RELATIVE
                         && (buffer_base..=(buffer_base + total_memory_size))
                             .contains(&rela.addr.as_usize())
