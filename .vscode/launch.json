@@ -8,15 +8,14 @@
             "type": "lldb",
             "request": "launch",
             "name": "Debug",
-            "program": "qemu-system-x86_64",
+            "program": "make",
             "args": [
-                "-nodefaults", 
-                "-nographic", 
-                "-bios", "./ovmf/OVMF-pure-efi.fd", 
-                "-drive", "format=raw,file=fat:rw:./image/", 
-                "-serial", "stdio"],
+                "run"
+            ],
             "cwd": "${workspaceRoot}",
-            "sourceLanguages": ["rust"]
+            "sourceLanguages": [
+                "rust"
+            ]
         }
     ]
 }

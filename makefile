@@ -16,9 +16,9 @@ run: all
 	run.bat
 
 soft-reset: 
-	rm -f $(bootloader) $(ap_trampoline) $(kernel)
+	rm -fs $(bootloader) $(ap_trampoline) $(kernel)
 
-reset: soft-reset
+reset:
 	cd $(root)/boot/ && cargo clean
 	cd $(root)/kernel/ && cargo clean
 	cd $(root)/libstd/ && cargo clean
