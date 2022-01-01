@@ -151,23 +151,6 @@ impl<BV: BitValue + fmt::Debug> fmt::Debug for BitValueArray<'_, BV> {
     }
 }
 
-#[cfg(debug_assertions)]
-impl<'arr, BV: BitValue + core::fmt::Debug> BitValueArray<'arr, BV> {
-    pub fn debug_log_elements(&self) {
-        let mut run = 0;
-        let mut last_bv = BV::from_usize(0);
-        for bv in self.iter() {
-            if bv == last_bv {
-                run += 1;
-            } else {
-                debug!("{:?}: {}", last_bv, run);
-                last_bv = bv;
-                run = 0;
-            }
-        }
-    }
-}
-
 pub struct BitValueArrayIterator<'lock, 'arr, BV: BitValue> {
     array: &'lock RwLock<&'arr mut [usize]>,
     section_index: usize,

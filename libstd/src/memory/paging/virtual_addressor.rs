@@ -179,7 +179,7 @@ impl VirtualAddressor {
             unsafe { entry.take_frame_index() }
         }) {
             Some(frame_index) => {
-                self.map(map_to, frame_index, None);
+                self.map(map_to, frame_index, None).unwrap();
                 crate::instructions::tlb::invalidate(unmap_from);
 
                 Ok(())
@@ -188,8 +188,9 @@ impl VirtualAddressor {
         }
     }
 
-    pub fn automap(&mut self, page: &Page, locked: bool) {
-        self.map(page, falloc::get().lock_next().unwrap(), None);
+    pub fn automap(&mut self, page: &Page) {
+        self.map(page, falloc::get().lock_next().unwrap(), None)
+            .unwrap();
     }
 
     /// Attempts to create a 1:1 mapping between a virual memory page and its physical counterpart.
@@ -229,8 +230,7 @@ impl VirtualAddressor {
     /* STATE CHANGING */
 
     pub unsafe fn modify_mapped_page(&mut self, page: Page) {
-        let total_memory_pages = falloc::get().total_memory() / 0x1000;
-        for index in 0..total_memory_pages {
+        for index in 0..falloc::get().total_frame_count() {
             self.get_page_entry_create(&page.forward(index).unwrap())
                 .set(index, PageAttributes::PRESENT | PageAttributes::WRITABLE);
 

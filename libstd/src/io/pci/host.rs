@@ -12,14 +12,12 @@ pub enum PCIeHostBridgeError {
 
 #[derive(Debug)]
 pub struct PCIeHostBridge {
-    min_bus: u8,
     busses: Vec<PCIeBus>,
 }
 
 impl PCIeHostBridge {
     pub fn new(base_addr: Address<Physical>, bus_range: RangeInclusive<u8>) -> Self {
         Self {
-            min_bus: *bus_range.start(),
             busses: bus_range
                 .filter_map(|bus_index| {
                     let bus = unsafe { PCIeBus::new(base_addr + ((bus_index as usize) << 20)) };

@@ -323,17 +323,16 @@ impl<'arr> FrameAllocator<'arr> {
         self.total_memory
     }
 
+    pub fn total_frame_count(&self) -> usize {
+        self.map_len
+    }
+
     pub fn iter<'outer>(&'arr self) -> FallocIterator<'outer, 'arr> {
         FallocIterator {
             map: &self.map,
             map_len: self.map_len,
             cur_index: 0,
         }
-    }
-
-    #[cfg(debug_assertions)]
-    pub fn debug_log_elements(&self) {
-        self.map.debug_log_elements();
     }
 }
 

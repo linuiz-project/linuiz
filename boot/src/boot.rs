@@ -1,3 +1,4 @@
+#![allow(non_snake_case)]
 #![no_std]
 #![no_main]
 #![feature(abi_efiapi, const_option, negative_impls, core_intrinsics)]

@@ -300,22 +300,26 @@ impl Port {
         debug!("Allocting command and FIS lists.");
 
         let cmd_list_byte_len = core::mem::size_of::<super::Command>() * 32;
-        let cmd_list_ptr = libstd::memory::malloc::get()
-            .alloc(cmd_list_byte_len, core::num::NonZeroUsize::new(128))
-            .unwrap()
-            .into_parts()
-            .0;
+        let cmd_list_ptr = unsafe {
+            libstd::memory::malloc::get()
+                .alloc(cmd_list_byte_len, core::num::NonZeroUsize::new(128))
+                .unwrap()
+                .into_parts()
+                .0
+        };
         debug!(
             "\tCommand list base address: {:?}:{}",
             cmd_list_ptr, cmd_list_byte_len
         );
 
         let fis_byte_len = 1024;
-        let fis_base = libstd::memory::malloc::get()
-            .alloc(cmd_list_byte_len, core::num::NonZeroUsize::new(128))
-            .unwrap()
-            .into_parts()
-            .0;
+        let fis_base = unsafe {
+            libstd::memory::malloc::get()
+                .alloc(cmd_list_byte_len, core::num::NonZeroUsize::new(128))
+                .unwrap()
+                .into_parts()
+                .0
+        };
         debug!("\tFIS base address: {:?}:{}", fis_base, fis_byte_len);
 
         unsafe {
@@ -391,5 +395,5 @@ impl Port {
         buffer
     }
 
-    pub fn write(&mut self, sector_base: usize, data: &[u8]) {}
+    // pub fn write(&mut self, sector_base: usize, data: &[u8]) {}
 }

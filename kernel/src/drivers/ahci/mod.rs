@@ -7,6 +7,8 @@ use libstd::io::pci::{standard::StandardRegister, PCIeDevice, Standard};
 pub const ATA_DEV_BUSY: u8 = 0x80;
 pub const ATA_DEV_DRQ: u8 = 0x08;
 pub const ATA_CMD_READ_DMA_EX: u8 = 0x25;
+
+#[allow(non_upper_case_globals)]
 pub const HBA_PxIS_TFES: u32 = 1 << 30;
 
 #[allow(non_camel_case_types)]

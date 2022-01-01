@@ -1,13 +1,6 @@
 #![no_std]
 #![no_main]
-#![feature(
-    asm,
-    abi_efiapi,
-    abi_x86_interrupt,
-    once_cell,
-    const_mut_refs,
-    raw_ref_op
-)]
+#![feature(abi_efiapi, abi_x86_interrupt, once_cell, const_mut_refs, raw_ref_op)]
 
 #[macro_use]
 extern crate log;
@@ -53,12 +46,6 @@ extern "C" {
 #[export_name = "__ap_stack_pointers"]
 static mut AP_STACK_POINTERS: [*const core::ffi::c_void; 256] = [core::ptr::null(); 256];
 
-#[cfg(debug_assertions)]
-fn get_log_level() -> log::LevelFilter {
-    log::LevelFilter::Trace
-}
-
-#[cfg(not(debug_assertions))]
 fn get_log_level() -> log::LevelFilter {
     log::LevelFilter::Debug
 }
@@ -68,10 +55,6 @@ static TRACE_ENABLED_PATHS: [&str; 1] = ["libstd::structures::apic::icr"];
 static BOOT_INFO: SyncOnceCell<BootInfo<UEFIMemoryDescriptor, SystemConfigTableEntry>> =
     SyncOnceCell::new();
 
-macro_rules! print {
-    () => {};
-}
-
 /// Clears the kernel stack by resetting `RSP`.
 ///
 /// Safety: This method does *extreme* damage to the stack. It should only ever be used when
@@ -79,7 +62,7 @@ macro_rules! print {
 ///         no-argument function directly after).
 #[inline(always)]
 unsafe fn clear_stack() {
-    unsafe { libstd::registers::stack::RSP::write(__kernel_stack_top.as_page().base_addr()) };
+    libstd::registers::stack::RSP::write(__kernel_stack_top.as_page().base_addr());
 }
 
 #[no_mangle]
@@ -87,12 +70,12 @@ unsafe fn clear_stack() {
 unsafe extern "efiapi" fn _kernel_pre_init(
     boot_info: BootInfo<UEFIMemoryDescriptor, SystemConfigTableEntry>,
 ) -> ! {
-    BOOT_INFO.set(boot_info);
-
-    unsafe {
-        clear_stack();
-        kernel_init()
+    if let Err(_) = BOOT_INFO.set(boot_info) {
+        libstd::instructions::interrupts::breakpoint();
     }
+
+    clear_stack();
+    kernel_init()
 }
 
 unsafe fn kernel_init() -> ! {
@@ -214,7 +197,6 @@ extern "C" fn _startup() -> ! {
     }
 
     if libstd::lpu::is_bsp() {
-        use crate::drivers::nvme::*;
         use libstd::{
             acpi::rdsp::xsdt::{mcfg::MCFG, XSDT},
             io::pci,
@@ -236,6 +218,9 @@ extern "C" fn _startup() -> ! {
                         && device.subclass() == 0x08
                     {
                         // // NVMe device
+
+                        // use crate::drivers::nvme::*;
+
                         // let mut nvme = Controller::from_device(&device);
 
                         // let admin_sq = libstd::slice!(u8, 0x1000);
@@ -253,14 +238,9 @@ extern "C" fn _startup() -> ! {
                 }
             }
         }
-
-        loop {}
-
-        info!("Kernel has reached safe shutdown state.");
-        unsafe { libstd::instructions::pwm::qemu_shutdown() }
-    } else {
-        libstd::instructions::hlt_indefinite()
     }
+
+    libstd::instructions::hlt_indefinite()
 }
 
 fn reserve_system_frames(memory_map: &[UEFIMemoryDescriptor]) {
@@ -278,24 +258,19 @@ fn reserve_system_frames(memory_map: &[UEFIMemoryDescriptor]) {
         // Checks for 'holes' in system memory which we shouldn't try to allocate to.
         } else if last_frame_end < frame_index {
             for frame_index in last_frame_end..frame_index {
-                unsafe { falloc.try_modify_type(frame_index, falloc::FrameType::Unusable) };
+                falloc
+                    .try_modify_type(frame_index, falloc::FrameType::Unusable)
+                    .unwrap();
             }
         };
 
         if descriptor.should_reserve() {
-            falloc.lock_many(frame_index, frame_count);
-        }
+            falloc.lock_many(frame_index, frame_count).unwrap();
 
-        for frame_index in frame_index..(frame_index + frame_count) {
-            unsafe {
-                falloc.try_modify_type(
-                    frame_index,
-                    if descriptor.should_reserve() {
-                        falloc::FrameType::Reserved
-                    } else {
-                        falloc::FrameType::Usable
-                    },
-                );
+            for frame_index in frame_index..(frame_index + frame_count) {
+                falloc
+                    .try_modify_type(frame_index, falloc::FrameType::Reserved)
+                    .unwrap();
             }
         }
 
@@ -320,7 +295,7 @@ fn init_system_config_table(config_table: &[SystemConfigTableEntry]) {
         debug!("System configuration table: {:?}", frame_range);
         let falloc = falloc::get();
         for frame_index in frame_index..(frame_index + frame_count) {
-            falloc.borrow(frame_index);
+            falloc.borrow(frame_index).unwrap();
         }
     }
 }

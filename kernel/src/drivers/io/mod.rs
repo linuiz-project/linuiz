@@ -57,7 +57,7 @@ impl QEMUE9 {
 impl Write for QEMUE9 {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         for byte in s.bytes() {
-            unsafe { self.0.write(byte) };
+            self.0.write(byte);
         }
 
         Ok(())

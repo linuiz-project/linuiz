@@ -153,9 +153,9 @@ impl MSIX {
     ) -> Option<BitSlice<VolatileCell<u64, ReadWrite>>> {
         device
             .get_register(self.get_pending_bit_bir())
-            .map(|mmio|  {
-                let table_offset = self.get_pending_bit_offset();
-                let table_len = self.message_control().get_table_len();
+            .map(|_mmio|  {
+                let _table_offset = self.get_pending_bit_offset();
+                let _table_len = self.message_control().get_table_len();
 
                 todo!("Not entirely sure what I was doing here before, but this needs to return a competent value.")
             })

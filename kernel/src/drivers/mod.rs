@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 pub mod ahci;
 pub mod graphics;
 pub mod io;

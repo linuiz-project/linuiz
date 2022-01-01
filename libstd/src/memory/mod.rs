@@ -53,16 +53,17 @@ pub fn alloc_generic<T>(
     size: usize,
     align: Option<NonZeroUsize>,
 ) -> Result<malloc::Alloc<T>, crate::memory::malloc::AllocError> {
-    crate::memory::malloc::get()
-        .alloc(
+    unsafe {
+        crate::memory::malloc::get().alloc(
             size * core::mem::size_of::<T>(),
             align.or(core::num::NonZeroUsize::new(core::mem::align_of::<T>())),
         )
-        .and_then(|alloc| {
-            alloc
-                .cast()
-                .map_err(|_| crate::memory::malloc::AllocError::InvalidAlignment)
-        })
+    }
+    .and_then(|alloc| {
+        alloc
+            .cast()
+            .map_err(|_| crate::memory::malloc::AllocError::InvalidAlignment)
+    })
 }
 
 pub struct MMIO {

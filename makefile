@@ -9,6 +9,7 @@ bootloader = $(root)/.hdd/image/EFI/BOOT/BOOTX64.efi
 ap_trampoline = $(root)/kernel/ap_trampoline.o
 kernel = $(root)/.hdd/image/EFI/gsai/kernel.elf
 
+PROFILE=release
 
 all: $(bootloader) $(kernel)
 
@@ -30,10 +31,10 @@ update:
 	cd $(root)/libstd/ && cargo update
 
 $(bootloader): $(bootloader_deps)
-	cd $(root)/boot/ && cargo fmt && cargo build --profile release -Z unstable-options
+	cd $(root)/boot/ && cargo fmt && cargo build --profile $(PROFILE) -Z unstable-options
 
 $(ap_trampoline): $(root)/kernel/src/ap_trampoline.asm
 		nasm -f elf64 -o $(ap_trampoline) $(ap_trampoline_src)
 
 $(kernel): $(ap_trampoline) $(kernel_deps) $(libstd_deps)
-	cd $(root)/kernel/ && cargo fmt && cargo build --profile release -Z unstable-options
+	cd $(root)/kernel/ && cargo fmt && cargo build --profile $(PROFILE) -Z unstable-options
