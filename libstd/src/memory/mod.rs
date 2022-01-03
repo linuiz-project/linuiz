@@ -45,7 +45,7 @@ macro_rules! alloc {
 #[macro_export]
 macro_rules! alloc_to {
     ($frame_index:expr, $count:expr) => {
-        $crate::memory::malloc::get().alloc_against($frame_index, $count)
+        $crate::memory::malloc::try_get().unwrap().alloc_against($frame_index, $count)
     };
 }
 
@@ -54,7 +54,7 @@ pub fn alloc_generic<T>(
     align: Option<NonZeroUsize>,
 ) -> Result<malloc::Alloc<T>, crate::memory::malloc::AllocError> {
     unsafe {
-        crate::memory::malloc::get().alloc(
+        crate::memory::malloc::try_get().unwrap().alloc(
             size * core::mem::size_of::<T>(),
             align.or(core::num::NonZeroUsize::new(core::mem::align_of::<T>())),
         )
@@ -76,7 +76,7 @@ impl MMIO {
     // TODO possibly introduct an Address<Frame> type to represent
     // frame addresses?
     pub unsafe fn new(frame_index: usize, count: usize) -> Result<Self, malloc::AllocError> {
-        malloc::get().alloc_against(frame_index, count).map(|data| {
+        malloc::try_get().unwrap().alloc_against(frame_index, count).map(|data| {
             let parts = data.into_parts();
 
             Self {

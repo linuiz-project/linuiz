@@ -29,7 +29,7 @@
 
 //         let size_in_bytes = (entry_count as usize) * entry_size;
 //         let min_frame_count = libstd::align_up_div(size_in_bytes, 0x1000);
-//         let alloc = malloc::get()
+//         let alloc = malloc::try_get().unwrap()
 //             .alloc_contiguous(min_frame_count)
 //             .expect("Allocation error while attempting to create queue.")
 //             .1;
@@ -92,7 +92,7 @@
 
 //         let size_in_bytes = (entry_count as usize) * entry_size;
 //         let min_frame_count = libstd::align_up_div(size_in_bytes, 0x1000);
-//         let alloc_addr = malloc::get().alloc_contiguous(&frames);
+//         let alloc_addr = malloc::try_get().unwrap().alloc_contiguous(&frames);
 
 //         unsafe {
 //             core::ptr::write_bytes(alloc_addr as *mut u8, 0, size_in_bytes);
@@ -154,7 +154,7 @@
 // // impl Drop for SubmissionQueue<'_> {
 // //     fn drop(&mut self) {
 // //         unsafe {
-// //             libstd::memory::malloc::get().dealloc(
+// //             libstd::memory::malloc::try_get().unwrap().dealloc(
 // //                 self.entries.as_mut_ptr() as *mut u8,
 // //                 core::alloc::Layout::from_size_align_unchecked(
 // //                     self.entries.len() * core::mem::size_of::<[u32; COMMAND_DWORDS]>(),

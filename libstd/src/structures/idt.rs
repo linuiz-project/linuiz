@@ -201,8 +201,8 @@ pub fn init() {
     // --- triple fault (can't handle)
 }
 
-pub fn load() {
-    unsafe { IDT.lock().load_unsafe() };
+pub unsafe fn load() {
+    IDT.lock().load_unsafe();
     trace!("Loaded IDT.");
 }
 

@@ -14,6 +14,15 @@ SECTIONS
         __ap_trampoline_end = .;
     }
 
+    .global_data : ALIGN(0x40) {
+        __global_data_start = .;
+
+        *(.global_data.*)
+        *(.global_data)
+
+        __global_data_end = .;
+    }
+
     . = 0x200000; /* 2 MiB */
 
     .text : ALIGN(0x1000) {
@@ -46,8 +55,8 @@ SECTIONS
     .bss : ALIGN(0x1000) {
         __bss_start = .;
 
-        __kernel_stack_bottom = .;
-        __kernel_stack_top = . + 0x2000;
+        __bsp_stack_start = .;
+        __bsp_stack_end = . + 0x2000;
 
         *(.bss.*)
         *(.bss)

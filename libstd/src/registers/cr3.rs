@@ -16,14 +16,14 @@ impl CR3 {
             addr.is_frame_aligned(),
             "CR3 address must be frame-aligned (4096)."
         );
-        asm!("mov cr3, {}", in(reg) addr.frame_index() | flags.bits(), options(nostack));
+        asm!("mov cr3, {}", in(reg) addr.as_usize() | flags.bits(), options(nostack));
     }
 
     pub fn read() -> (Address<Physical>, CR3Flags) {
         let value: usize;
 
         unsafe {
-            asm!("mov {}, cr3", out(reg) value, options(nostack));
+            asm!("mov {}, cr3", out(reg) value, options(nostack, nomem));
         }
 
         (

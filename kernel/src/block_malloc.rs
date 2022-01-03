@@ -6,7 +6,7 @@ use libstd::{
         falloc::{self, FrameType},
         malloc::{Alloc, AllocError, MemoryAllocator},
         paging::VirtualAddressor,
-        Page, UEFIMemoryDescriptor,
+        Page,
     },
     Address,
 };
@@ -52,7 +52,10 @@ impl BlockPage {
 
 impl core::fmt::Debug for BlockPage {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter.debug_tuple("BlockPage").field(&self.0).finish()
+        formatter
+            .debug_tuple("BlockPage")
+            .field(&format_args!("0b{:b}", self.0))
+            .finish()
     }
 }
 
@@ -73,7 +76,7 @@ impl<'map> BlockAllocator<'map> {
 
     // TODO possibly move the initialization code from `init()` into this `new()` function.
     #[allow(const_item_mutation)]
-    pub fn new(memory_map: &[UEFIMemoryDescriptor]) -> Self {
+    pub fn new() -> Self {
         const EMPTY: [BlockPage; 0] = [];
 
         let block_malloc = Self {
@@ -120,7 +123,7 @@ impl<'map> BlockAllocator<'map> {
             info!("Writing kernel addressor's PML4 to the CR3 register.");
             unsafe { map_write.addressor.swap_into() };
 
-            debug!("Allocating reserved global memory frames...");
+            debug!("Allocating reserved physical memory frames...");
             falloc::get()
                 .iter()
                 .enumerate()
@@ -153,18 +156,14 @@ impl<'map> BlockAllocator<'map> {
         cur_block_index: usize,
         end_block_index: usize,
     ) -> (usize, u64) {
-        let traversed_blocks = map_index * BlockPage::BLOCKS_PER;
-        let remaining_blocks = end_block_index - traversed_blocks;
-        // Each block is one bit in our map, so we calculate the offset into
-        //  the current section, at which our current index (`block_index`) lies.
-        let bit_offset = cur_block_index - traversed_blocks;
-        let bit_count = core::cmp::min(BlockPage::BLOCKS_PER, remaining_blocks) - bit_offset;
-        // Finally, we acquire the respective bitmask to flip all relevant bits in
-        //  our current section.
+        let floor_blocks_index = map_index * BlockPage::BLOCKS_PER;
+        let ceil_blocks_index = floor_blocks_index + BlockPage::BLOCKS_PER;
+        let mask_bit_offset = cur_block_index - floor_blocks_index;
+        let mask_bit_count = usize::min(ceil_blocks_index, end_block_index) - cur_block_index;
 
         (
-            bit_count,
-            libstd::U64_BIT_MASKS[bit_count - 1] << bit_offset,
+            mask_bit_count,
+            libstd::U64_BIT_MASKS[mask_bit_count - 1] << mask_bit_offset,
         )
     }
 
@@ -179,7 +178,7 @@ impl<'map> BlockAllocator<'map> {
         );
         assert!(required_blocks > 0, "calls to grow must be nonzero");
 
-        info!(
+        trace!(
             "Allocator map requires growth: {} blocks required.",
             required_blocks
         );
@@ -195,9 +194,12 @@ impl<'map> BlockAllocator<'map> {
         // Required page count of our map.
         let req_map_pages = libstd::align_up_div(req_map_len * size_of::<BlockPage>(), 0x1000);
 
-        info!(
+        trace!(
             "Growth parameters: len {} => {}, pages {} => {}",
-            cur_map_len, req_map_len, cur_map_pages, req_map_pages
+            cur_map_len,
+            req_map_len,
+            cur_map_pages,
+            req_map_pages
         );
 
         // Attempt to find a run of already-mapped pages within our allocator
@@ -228,7 +230,7 @@ impl<'map> BlockAllocator<'map> {
             }
         }));
 
-        info!("Copy mapping current map to new pages.");
+        trace!("Copy mapping current map to new pages.");
         for page_offset in 0..cur_map_pages {
             map_write
                 .addressor
@@ -239,7 +241,7 @@ impl<'map> BlockAllocator<'map> {
                 .unwrap();
         }
 
-        info!("Allocating and mapping remaining pages of map.");
+        trace!("Allocating and mapping remaining pages of map.");
         for page_offset in cur_map_pages..req_map_pages {
             let mut new_page = new_map_page.forward(page_offset).unwrap();
 
@@ -286,35 +288,36 @@ impl MemoryAllocator for BlockAllocator<'_> {
 
         let align_shift = usize::max(align / Self::BLOCK_SIZE, 1);
         let size_in_blocks = libstd::align_up_div(size, Self::BLOCK_SIZE);
-
         let mut map_write = self.map.write();
-        let mut end_map_index = 0;
-        let mut block_index = 0;
+
+        let end_map_index;
+        let mut block_index;
         let mut current_run;
+
         'outer: loop {
+            block_index = 0;
             current_run = 0;
 
-            for block_page in map_write.pages.iter().skip(end_map_index) {
+            for (map_index, block_page) in map_write.pages.iter().enumerate() {
                 if block_page.is_full() {
                     current_run = 0;
                     block_index += BlockPage::BLOCKS_PER;
                 } else {
-                    for bit_shift in 0..64 {
-                        block_index += 1;
-
-                        if (block_page.value() & bit_shift) > 0 {
+                    for bit_shift in 0..BlockPage::BLOCKS_PER {
+                        if (block_page.value() & (1 << bit_shift)) > 0 {
                             current_run = 0;
-                        } else if current_run > 0 || (bit_shift % (align_shift as u64)) == 0 {
+                        } else if current_run > 0 || (bit_shift % align_shift) == 0 {
                             current_run += 1;
 
                             if current_run == size_in_blocks {
+                                end_map_index = map_index + 1;
                                 break 'outer;
                             }
                         }
+
+                        block_index += 1;
                     }
                 }
-
-                end_map_index += 1;
             }
 
             if let Err(alloc_err) = self.grow(size_in_blocks, &mut map_write) {
@@ -322,22 +325,22 @@ impl MemoryAllocator for BlockAllocator<'_> {
             }
         }
 
-        // TODO fix the indexing on these
-        let end_block_index = block_index;
-        let start_block_index = block_index - current_run;
-        block_index = start_block_index;
-        end_map_index += 1;
-        let start_map_index =
-            end_map_index - libstd::align_up_div(size_in_blocks, BlockPage::BLOCKS_PER);
+        let end_block_index = block_index + 1;
+        block_index -= current_run - 1;
+        let start_block_index = block_index;
+        let start_map_index = start_block_index / BlockPage::BLOCKS_PER;
 
         for map_index in start_map_index..end_map_index {
             let block_page = &mut map_write.pages[map_index];
             let was_empty = block_page.is_empty();
-            let (bit_count, bit_mask) =
-                Self::calculate_bit_fields(map_index, block_index, end_block_index);
 
-            *block_page.value_mut() |= bit_mask;
-            block_index += bit_count;
+            let low_offset = block_index - (map_index * BlockPage::BLOCKS_PER);
+            let high_offset = (end_map_index * BlockPage::BLOCKS_PER) - end_block_index;
+            let mask_bits_count = BlockPage::BLOCKS_PER - (low_offset + high_offset);
+            let mask_bits = libstd::U64_BIT_MASKS[mask_bits_count - 1];
+
+            *block_page.value_mut() |= mask_bits << low_offset;
+            block_index += mask_bits_count;
 
             if was_empty {
                 map_write.addressor.automap(&Page::from_index(map_index));

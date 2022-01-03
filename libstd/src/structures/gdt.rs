@@ -1,4 +1,3 @@
-use crate::{addr_ty::Virtual, Address};
 use x86_64::{instructions::segmentation::Segment, structures::tss::TaskStateSegment};
 
 pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
@@ -68,9 +67,21 @@ impl Entry {
 }
 
 #[repr(C, packed)]
-pub struct Pointer {
+pub struct DescriptorTablePointer {
     limit: u16,
-    base: Address<Virtual>,
+    base: u64,
+}
+
+impl core::fmt::Debug for DescriptorTablePointer {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        unsafe {
+            formatter
+                .debug_tuple("Pointer")
+                .field(&((&raw const self.base).read_unaligned()))
+                .field(&((&raw const self.limit).read_unaligned()))
+                .finish()
+        }
+    }
 }
 
 #[repr(C)]
@@ -118,69 +129,62 @@ impl GlobalDescriptorTable {
         unsafe { crate::instructions::segmentation::lgdt(&self.pointer()) }
     }
 
-    fn pointer(&self) -> Pointer {
-        Pointer {
+    fn pointer(&self) -> DescriptorTablePointer {
+        DescriptorTablePointer {
+            base: self.table.as_ptr() as usize as u64,
             limit: ((self.next_free * core::mem::size_of::<u64>()) - 1) as u16,
-            base: Address::<Virtual>::from_ptr(self.table.as_ptr()),
         }
     }
 }
 
+#[derive(Debug)]
 struct Selectors {
-    code_selector: u16,
-    data_selector: u16,
-    tss_selector: u16,
+    code: u16,
+    data: u16,
+    tss: u16,
 }
 
 lazy_static::lazy_static! {
-    static ref GDT: (GlobalDescriptorTable, Selectors) = {
-        let mut gdt = GlobalDescriptorTable::new();
-        let code_selector = gdt.add_entry(Entry::User(Flags::KERNEL_CODE.bits()));
-        let data_selector = gdt.add_entry(Entry::User(Flags::KERNEL_DATA.bits()));
-        let tss_selector = gdt.add_entry(Entry::tss(&TSS));
+static ref GDT: (GlobalDescriptorTable, Selectors) = {
+    let mut gdt = GlobalDescriptorTable::new();
+    let code = gdt.add_entry(Entry::User(Flags::KERNEL_CODE.bits()));
+    let data = gdt.add_entry(Entry::User(Flags::KERNEL_DATA.bits()));
+    let tss = gdt.add_entry(Entry::tss(&TSS));
 
-        (
-            gdt,
-            Selectors {
-                code_selector,
-                data_selector,
-                tss_selector,
-            },
-        )
-    };
-}
-
-pub fn init() {
-    load();
-
-    unsafe {
-        crate::instructions::init_segment_registers(data());
-        x86_64::instructions::segmentation::CS::set_reg(core::mem::transmute(code()));
-        // crate::instructions::segmentation::ltr(tss());
-        // debug!("Loaded TSS.");
-    }
-
-    trace!("GDT initialized.");
+    (
+        gdt,
+        Selectors {
+            code,
+            data,
+            tss,
+        },
+    )
+};
 }
 
 #[inline]
 pub fn load() {
     GDT.0.load();
-    trace!("GDT loaded.");
+
+    unsafe {
+        crate::instructions::init_segment_registers(data());
+        x86_64::instructions::segmentation::CS::set_reg(core::mem::transmute(code()));
+        // crate::instructions::segmentation::ltr(tss());
+    }
+}
+
+pub fn pointer() -> DescriptorTablePointer {
+    GDT.0.pointer()
 }
 
 pub fn code() -> u16 {
-    GDT.1.code_selector
+    GDT.1.code
 }
 
 pub fn data() -> u16 {
-    GDT.1.data_selector
+    GDT.1.data
 }
 
 pub fn tss() -> u16 {
-    GDT.1.tss_selector
-}
-
-pub fn pointer() -> Pointer {
-    GDT.0.pointer()
+    GDT.1.tss
 }

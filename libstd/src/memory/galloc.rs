@@ -10,7 +10,7 @@ impl DefaultAllocatorProxy {
 
 unsafe impl core::alloc::GlobalAlloc for DefaultAllocatorProxy {
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
-        match crate::memory::malloc::get()
+        match crate::memory::malloc::try_get().unwrap()
             .alloc(layout.size(), core::num::NonZeroUsize::new(layout.align()))
         {
             Ok(alloc) => alloc.into_parts().0 as *mut _,
@@ -19,7 +19,7 @@ unsafe impl core::alloc::GlobalAlloc for DefaultAllocatorProxy {
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
-        crate::memory::malloc::get().dealloc(ptr, layout);
+        crate::memory::malloc::try_get().unwrap().dealloc(ptr, layout);
     }
 }
 

@@ -28,7 +28,6 @@ mod bv_array;
 mod macros;
 
 pub mod acpi;
-pub mod bit_switch;
 pub mod cell;
 pub mod elf;
 pub mod instructions;
@@ -36,6 +35,7 @@ pub mod io;
 pub mod memory;
 pub mod registers;
 pub mod structures;
+
 pub use bv_array::*;
 pub mod bit_array;
 pub mod lpu;
@@ -240,7 +240,7 @@ impl LinkerSymbol {
     }
 
     pub fn as_usize(&'static self) -> usize {
-        self.as_ptr::<core::ffi::c_void>() as usize
+        self as *const _ as usize
     }
 
     pub fn as_page(&'static self) -> memory::Page {

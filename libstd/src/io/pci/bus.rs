@@ -10,7 +10,7 @@ impl PCIeBus {
         let devices: Vec<DeviceVariant> = (0..32)
             .filter_map(|device_index| {
                 let offset_addr = base_addr + (device_index << 15);
-                let vendor_id = *crate::memory::malloc::get()
+                let vendor_id = *crate::memory::malloc::try_get().unwrap()
                     .physical_memory(offset_addr)
                     .as_ptr::<u16>();
 

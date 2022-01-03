@@ -145,18 +145,12 @@ pub trait MemoryAllocator {
     );
 }
 
-static DEFAULT_MALLOCATOR: SyncRefCell<Box<dyn MemoryAllocator>> = SyncRefCell::empty();
+static DEFAULT_MALLOCATOR: SyncRefCell<&'static dyn MemoryAllocator> = SyncRefCell::empty();
 
-pub unsafe fn set(allocator: Box<dyn MemoryAllocator>) {
+pub unsafe fn set(allocator: &'static dyn MemoryAllocator) {
     DEFAULT_MALLOCATOR.set(allocator);
 }
 
-pub fn get() -> &'static Box<dyn MemoryAllocator> {
-    DEFAULT_MALLOCATOR
-        .borrow()
-        .expect("No default allocator currently assigned")
-}
-
-pub fn try_get() -> Option<&'static Box<dyn MemoryAllocator>> {
-    DEFAULT_MALLOCATOR.borrow()
+pub fn try_get() -> Option<&'static dyn MemoryAllocator> {
+    DEFAULT_MALLOCATOR.borrow().map(|a| *a)
 }

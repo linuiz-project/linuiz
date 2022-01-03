@@ -1,7 +1,7 @@
 use core::arch::asm;
 
 #[inline]
-pub unsafe fn lgdt(pointer: &crate::structures::gdt::Pointer) {
+pub unsafe fn lgdt(pointer: &crate::structures::gdt::DescriptorTablePointer) {
     asm!("lgdt [{}]", in(reg) pointer, options(readonly, nostack, preserves_flags));
 }
 

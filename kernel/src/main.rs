@@ -23,12 +23,15 @@ extern "C" {
     static __ap_trampoline_start: LinkerSymbol;
     static __ap_trampoline_end: LinkerSymbol;
     static __kernel_pml4: LinkerSymbol;
+    #[link_name = "__gdt.pointer"]
+    static __gdt_pointer: LinkerSymbol;
+    #[link_name = "__gdt.code"]
+    static __gdt_code: LinkerSymbol;
+    #[link_name = "__gdt.data"]
+    static __gdt_data: LinkerSymbol;
 
-    static __kernel_stack_bottom: LinkerSymbol;
-    static __kernel_stack_top: LinkerSymbol;
-
-    static __ap_stack_bottom: LinkerSymbol;
-    static __ap_stack_top: LinkerSymbol;
+    static __bsp_stack_start: LinkerSymbol;
+    static __bsp_stack_end: LinkerSymbol;
 
     static __text_start: LinkerSymbol;
     static __text_end: LinkerSymbol;
@@ -44,7 +47,7 @@ extern "C" {
 }
 
 #[export_name = "__ap_stack_pointers"]
-static mut AP_STACK_POINTERS: [*const core::ffi::c_void; 256] = [core::ptr::null(); 256];
+static mut AP_STACK_POINTERS: [*const (); 256] = [core::ptr::null(); 256];
 
 fn get_log_level() -> log::LevelFilter {
     log::LevelFilter::Debug
@@ -54,6 +57,7 @@ static mut CON_OUT: drivers::io::Serial = drivers::io::Serial::new(drivers::io::
 static TRACE_ENABLED_PATHS: [&str; 1] = ["libstd::structures::apic::icr"];
 static BOOT_INFO: SyncOnceCell<BootInfo<UEFIMemoryDescriptor, SystemConfigTableEntry>> =
     SyncOnceCell::new();
+static KERNEL_MALLOCATOR: SyncOnceCell<block_malloc::BlockAllocator> = SyncOnceCell::new();
 
 /// Clears the kernel stack by resetting `RSP`.
 ///
@@ -62,7 +66,7 @@ static BOOT_INFO: SyncOnceCell<BootInfo<UEFIMemoryDescriptor, SystemConfigTableE
 ///         no-argument function directly after).
 #[inline(always)]
 unsafe fn clear_stack() {
-    libstd::registers::stack::RSP::write(__kernel_stack_top.as_page().base_addr());
+    libstd::registers::stack::RSP::write(__bsp_stack_end.as_ptr());
 }
 
 #[no_mangle]
@@ -88,6 +92,20 @@ unsafe fn kernel_init() -> ! {
         Err(_) => libstd::instructions::interrupts::breakpoint(),
     }
 
+    {
+        libstd::instructions::segmentation::lgdt(
+            __gdt_pointer
+                .as_ptr::<libstd::structures::gdt::DescriptorTablePointer>()
+                .as_ref()
+                .unwrap(),
+        );
+        libstd::instructions::init_segment_registers(__gdt_data.as_usize() as u16);
+        use x86_64::instructions::segmentation::Segment;
+        x86_64::instructions::segmentation::CS::set_reg(core::mem::transmute(
+            __gdt_code.as_usize() as u16,
+        ));
+    }
+
     let boot_info = BOOT_INFO
         .get()
         .expect("Boot info hasn't been initialized in kernel memory");
@@ -102,7 +120,6 @@ unsafe fn kernel_init() -> ! {
 
     debug!("Initializing kernel frame allocator.");
     falloc::load_new(boot_info.memory_map());
-    reserve_system_frames(boot_info.memory_map());
     init_system_config_table(boot_info.config_table());
 
     clear_stack();
@@ -113,17 +130,14 @@ unsafe fn kernel_init() -> ! {
 unsafe fn kernel_mem_init() -> ! {
     info!("Initializing kernel default allocator.");
 
-    let memory_map = BOOT_INFO
-        .get()
-        .expect("Boot info struct has not been passed into kernel executable memory")
-        .memory_map();
-
-    let malloc = block_malloc::BlockAllocator::new(memory_map);
-
+    let malloc = block_malloc::BlockAllocator::new();
     debug!("Flagging `text` and `rodata` kernel sections as read-only.");
-    for page in (__text_start.as_page()..__text_end.as_page())
-        .chain(__rodata_start.as_page()..__rodata_end.as_page())
-    {
+    use libstd::memory::Page;
+    let text_page_range = Page::from_index(__text_start.as_usize() / 0x1000)
+        ..=Page::from_index(__text_end.as_usize() / 0x1000);
+    let rodata_page_range = Page::from_index(__rodata_start.as_usize() / 0x1000)
+        ..=Page::from_index(__rodata_end.as_usize() / 0x1000);
+    for page in text_page_range.chain(rodata_page_range) {
         malloc.set_page_attribs(
             &page,
             libstd::memory::paging::PageAttributes::WRITABLE,
@@ -131,12 +145,16 @@ unsafe fn kernel_mem_init() -> ! {
         );
     }
 
-    libstd::memory::malloc::set(alloc::boxed::Box::new(malloc));
-    // Move the current (new) PML4 into the global processor reference.
+    debug!("Setting libstd's default memory allocator to new kernel allocator.");
+    KERNEL_MALLOCATOR.set(malloc).map_err(|_| panic!()).ok();
+    libstd::memory::malloc::set(KERNEL_MALLOCATOR.get().unwrap());
     // TODO somehow ensure the PML4 frame is within the first 32KiB for the AP trampoline
+    debug!("Moving the kernel PML4 mapping frame into the global processor reference.");
     __kernel_pml4
         .as_mut_ptr::<u32>()
         .write(libstd::registers::CR3::read().0.as_usize() as u32);
+
+    info!("Finalizing kernel memory allocator initialization.");
 
     clear_stack();
     _startup()
@@ -144,10 +162,13 @@ unsafe fn kernel_mem_init() -> ! {
 
 #[no_mangle]
 extern "C" fn _startup() -> ! {
-    libstd::structures::gdt::init();
-    libstd::structures::idt::load();
+    unsafe { libstd::registers::debug::DR0::write(2) };
+    unsafe { libstd::structures::idt::load() };
+    unsafe { libstd::registers::debug::DR0::write(3) };
     libstd::lpu::init();
+    unsafe { libstd::registers::debug::DR0::write(4) };
     init_apic();
+    unsafe { libstd::registers::debug::DR0::write(5) };
 
     // If this is the BSP, wake other cores.
     if libstd::lpu::is_bsp() {
@@ -157,12 +178,12 @@ extern "C" fn _startup() -> ! {
         };
 
         // Initialize other CPUs
-        info!("Beginning wake-up sequence for each enabled processor core.");
-        let apic = libstd::lpu::get().apic();
+        let apic = libstd::lpu::try_get().unwrap().apic();
         let icr = apic.interrupt_command_register();
         let ap_trampoline_page_index = unsafe { __ap_trampoline_start.as_page().index() } as u8;
 
         if let Ok(madt) = XSDT.find_sub_table::<MADT>() {
+            info!("Beginning wake-up sequence for enabled processors.");
             for interrupt_device in madt.iter() {
                 if let InterruptDevice::LocalAPIC(apic_other) = interrupt_device {
                     use libstd::acpi::rdsp::xsdt::madt::LocalAPICFlags;
@@ -172,15 +193,17 @@ extern "C" fn _startup() -> ! {
                         LocalAPICFlags::PROCESSOR_ENABLED | LocalAPICFlags::ONLINE_CAPABLE,
                     ) && apic.id() != apic_other.id()
                     {
-                        const STACK_SIZE: usize = 32000 /* 32 KiB */;
                         unsafe {
+                            const AP_STACK_SIZE: usize = 0x2000;
+
+                            let (stack_bottom, len) = libstd::memory::malloc::try_get()
+                                .unwrap()
+                                .alloc(AP_STACK_SIZE, core::num::NonZeroUsize::new(0x1000))
+                                .expect("Failed to allocate stack for LPU")
+                                .into_parts();
+
                             AP_STACK_POINTERS[apic_other.id() as usize] =
-                                libstd::memory::malloc::get()
-                                    .alloc(STACK_SIZE, None)
-                                    .expect("Failed to allocate stack for LPU")
-                                    .into_parts()
-                                    .0 as *mut _ // `c_void` has no alignment, so avoid overhead by direct casting
-                                                 // (rather than using `.cast()`).
+                                stack_bottom.add(len) as *mut _;
                         };
 
                         icr.send_init(apic_other.id());
@@ -196,86 +219,51 @@ extern "C" fn _startup() -> ! {
         }
     }
 
-    if libstd::lpu::is_bsp() {
-        use libstd::{
-            acpi::rdsp::xsdt::{mcfg::MCFG, XSDT},
-            io::pci,
-        };
+    // if libstd::lpu::is_bsp() {
+    //     use libstd::{
+    //         acpi::rdsp::xsdt::{mcfg::MCFG, XSDT},
+    //         io::pci,
+    //     };
 
-        if let Ok(mcfg) = XSDT.find_sub_table::<MCFG>() {
-            let bridges: alloc::vec::Vec<pci::PCIeHostBridge> = mcfg
-                .iter()
-                .filter_map(|entry| pci::configure_host_bridge(entry).ok())
-                .collect();
+    //     if let Ok(mcfg) = XSDT.find_sub_table::<MCFG>() {
+    //         let bridges: alloc::vec::Vec<pci::PCIeHostBridge> = mcfg
+    //             .iter()
+    //             .filter_map(|entry| pci::configure_host_bridge(entry).ok())
+    //             .collect();
 
-            for device_variant in bridges
-                .iter()
-                .flat_map(|bridge| bridge.iter())
-                .flat_map(|bus| bus.iter())
-            {
-                if let pci::DeviceVariant::Standard(device) = device_variant {
-                    if device.class() == pci::DeviceClass::MassStorageController
-                        && device.subclass() == 0x08
-                    {
-                        // // NVMe device
+    //         for device_variant in bridges
+    //             .iter()
+    //             .flat_map(|bridge| bridge.iter())
+    //             .flat_map(|bus| bus.iter())
+    //         {
+    //             if let pci::DeviceVariant::Standard(device) = device_variant {
+    //                 if device.class() == pci::DeviceClass::MassStorageController
+    //                     && device.subclass() == 0x08
+    //                 {
+    //                     // // NVMe device
 
-                        // use crate::drivers::nvme::*;
+    //                     // use crate::drivers::nvme::*;
 
-                        // let mut nvme = Controller::from_device(&device);
+    //                     // let mut nvme = Controller::from_device(&device);
 
-                        // let admin_sq = libstd::slice!(u8, 0x1000);
-                        // let admin_cq = libstd::slice!(u8, 0x1000);
+    //                     // let admin_sq = libstd::slice!(u8, 0x1000);
+    //                     // let admin_cq = libstd::slice!(u8, 0x1000);
 
-                        // let cc = nvme.controller_configuration();
-                        // cc.set_iosqes(4);
-                        // cc.set_iocqes(4);
+    //                     // let cc = nvme.controller_configuration();
+    //                     // cc.set_iosqes(4);
+    //                     // cc.set_iocqes(4);
 
-                        // if unsafe { !nvme.safe_set_enable(true) } {
-                        //     error!("NVMe controleler failed to safely enable.");
-                        //     break;
-                        // }
-                    }
-                }
-            }
-        }
-    }
+    //                     // if unsafe { !nvme.safe_set_enable(true) } {
+    //                     //     error!("NVMe controleler failed to safely enable.");
+    //                     //     break;
+    //                     // }
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
 
     libstd::instructions::hlt_indefinite()
-}
-
-fn reserve_system_frames(memory_map: &[UEFIMemoryDescriptor]) {
-    let falloc = falloc::get();
-
-    let mut last_frame_end = 0;
-    for descriptor in memory_map {
-        let frame_index = descriptor.phys_start.frame_index();
-        let frame_count = descriptor.page_count as usize;
-
-        if !descriptor.phys_start.is_aligned(0x1000) {
-            warn!("Found unaligned UEFI memory descriptor! Refusing to process.");
-            continue;
-
-        // Checks for 'holes' in system memory which we shouldn't try to allocate to.
-        } else if last_frame_end < frame_index {
-            for frame_index in last_frame_end..frame_index {
-                falloc
-                    .try_modify_type(frame_index, falloc::FrameType::Unusable)
-                    .unwrap();
-            }
-        };
-
-        if descriptor.should_reserve() {
-            falloc.lock_many(frame_index, frame_count).unwrap();
-
-            for frame_index in frame_index..(frame_index + frame_count) {
-                falloc
-                    .try_modify_type(frame_index, falloc::FrameType::Reserved)
-                    .unwrap();
-            }
-        }
-
-        last_frame_end = frame_index + frame_count;
-    }
 }
 
 fn init_system_config_table(config_table: &[SystemConfigTableEntry]) {
@@ -303,7 +291,7 @@ fn init_system_config_table(config_table: &[SystemConfigTableEntry]) {
 fn init_apic() {
     use libstd::structures::idt;
 
-    let apic = &libstd::lpu::get().apic();
+    let apic = &libstd::lpu::try_get().unwrap().apic();
 
     apic.auto_configure_timer_frequency();
 
@@ -321,7 +309,7 @@ fn init_apic() {
 }
 
 extern "x86-interrupt" fn apic_error_handler(_: libstd::structures::idt::InterruptStackFrame) {
-    let apic = &libstd::lpu::get().apic();
+    let apic = &libstd::lpu::try_get().unwrap().apic();
 
     error!("APIC ERROR INTERRUPT");
     error!("--------------------");

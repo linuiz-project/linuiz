@@ -2,12 +2,14 @@ pub mod icr;
 
 use crate::{
     addr_ty::Virtual,
-    cell::SyncOnceCell,
     memory::{volatile::VolatileCell, MMIO},
     registers::MSR,
     Address, ReadWrite,
 };
-use core::marker::PhantomData;
+use core::{
+    marker::PhantomData,
+    sync::atomic::{AtomicU32, Ordering},
+};
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,7 +76,7 @@ bitflags::bitflags! {
     }
 }
 
-pub static TIMER_FREQUENCY: SyncOnceCell<u32> = SyncOnceCell::new();
+static TIMER_FREQUENCY: AtomicU32 = AtomicU32::new(0);
 
 pub struct APIC {
     mmio: MMIO,
@@ -263,7 +265,7 @@ impl APIC {
     }
 
     pub fn auto_configure_timer_frequency(&self) {
-        if let None = TIMER_FREQUENCY.get() {
+        if TIMER_FREQUENCY.load(Ordering::Relaxed) == 0 {
             self.auto_determine_timer_frequency();
         } else {
             trace!("Global timer frequency already determined, skipping routine.");
@@ -271,21 +273,20 @@ impl APIC {
 
         self.write_register(
             Register::TimerInitialCount,
-            u32::MAX - *TIMER_FREQUENCY.get().unwrap(),
+            u32::MAX - TIMER_FREQUENCY.load(Ordering::Relaxed),
         );
         self.write_register(Register::TimerDivisor, TimerDivisor::Div1 as u32);
     }
 
     fn auto_determine_timer_frequency(&self) {
         assert!(
-            TIMER_FREQUENCY.get().is_none(),
-            "Timer frequency has already been determined."
+            TIMER_FREQUENCY.load(Ordering::Relaxed) == 0,
+            "Timer frequency has already been determined.",
         );
 
         debug!("Determining global APIC timer frequency.");
 
         use crate::structures::{idt, pic8259};
-        use core::sync::atomic::{AtomicU32, Ordering};
 
         static mut ELAPSED_TICKS: AtomicU32 = AtomicU32::new(0);
         extern "x86-interrupt" fn pit_tick_handler(_: idt::InterruptStackFrame) {
@@ -315,7 +316,7 @@ impl APIC {
         trace!("Determining APIC timer frequency using PIT windowing.");
         self.timer().set_masked(false);
 
-        unsafe { while ELAPSED_TICKS.load(Ordering::Acquire) < 1000 {} }
+        unsafe { while ELAPSED_TICKS.load(Ordering::Acquire) <= 1000 {} }
 
         self.timer().set_masked(true);
         self.sw_disable();
@@ -325,7 +326,7 @@ impl APIC {
         crate::instructions::interrupts::without_interrupts(|| unsafe { pic8259::disable() });
 
         info!("APIC timer frequency: {}Hz", apic_freq);
-        TIMER_FREQUENCY.set(apic_freq).unwrap();
+        TIMER_FREQUENCY.store(apic_freq, Ordering::Relaxed);
         trace!("It's possible the BSP core's measured nominal clock does not match the other cores; in this case, scheduling accuracy will be impacted.");
     }
 }

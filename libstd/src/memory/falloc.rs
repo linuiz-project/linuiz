@@ -126,7 +126,7 @@ impl<'arr> FrameAllocator<'arr> {
         // Calculates total (usable) system memory.
         let total_usable_memory = memory_map
             .iter()
-            .filter(|descriptor| !descriptor.should_reserve())
+            .filter(|descriptor| descriptor.ty != crate::memory::uefi::UEFIMemoryType::UNUSABLE)
             .map(|descriptor| descriptor.page_count * 0x1000)
             .sum::<u64>() as usize;
         // Calculates total system memory.
@@ -139,12 +139,12 @@ impl<'arr> FrameAllocator<'arr> {
             })
             .expect("no descriptor with max value");
         // Memory required to represent all system frames.
-        let total_system_frames = total_system_memory / 0x1000;
+        let total_system_frames = crate::align_up_div(total_system_memory, 0x1000);
         let req_falloc_memory = total_system_frames * core::mem::size_of::<Frame>();
         let req_falloc_memory_frames = crate::align_up_div(req_falloc_memory, 0x1000);
 
         info!(
-            "Frame allocator will manage {} MB of system memory.",
+            "Frame allocator will manage {} MiB of system memory.",
             crate::memory::to_mibibytes(total_usable_memory)
         );
 
@@ -154,32 +154,59 @@ impl<'arr> FrameAllocator<'arr> {
             .find(|descriptor| descriptor.page_count >= (req_falloc_memory_frames as u64))
             .expect("Failed to find viable memory descriptor for frame allocator");
 
-        unsafe {
-            let descriptor_ptr = descriptor.phys_start.as_usize() as *mut _;
-            core::ptr::write_bytes(descriptor_ptr, 0, total_system_frames);
+        let descriptor_ptr = descriptor.phys_start.as_usize() as *mut _;
+        unsafe { core::ptr::write_bytes(descriptor_ptr, 0, total_system_frames) };
 
-            let falloc = Self {
-                map: RwLock::new(core::slice::from_raw_parts_mut(
-                    descriptor_ptr,
-                    total_system_frames,
-                )),
-                map_len: total_system_frames,
-                total_memory: total_system_memory,
-            };
+        let falloc = Self {
+            map: RwLock::new(unsafe {
+                core::slice::from_raw_parts_mut(descriptor_ptr, total_system_frames)
+            }),
+            map_len: total_system_frames,
+            total_memory: total_system_memory,
+        };
 
-            falloc.try_modify_type(0, FrameType::Unusable).unwrap();
-            let frame_range = descriptor.phys_start.frame_index()
-                ..(descriptor.phys_start.frame_index() + req_falloc_memory_frames);
-            debug!(
-                "Locking frames {:?} to facilitate static frame allocator map.",
-                frame_range
-            );
-            for frame_index in frame_range {
-                falloc.lock(frame_index).unwrap();
+        falloc.try_modify_type(0, FrameType::Unusable).unwrap();
+        let frame_range = descriptor.phys_start.frame_index()
+            ..(descriptor.phys_start.frame_index() + req_falloc_memory_frames);
+        debug!(
+            "Locking frames {:?} to facilitate static frame allocator map.",
+            frame_range
+        );
+        for frame_index in frame_range {
+            falloc
+                .try_modify_type(frame_index, FrameType::Reserved)
+                .unwrap();
+            falloc.lock(frame_index).unwrap();
+        }
+
+        let mut last_frame_end = 0;
+        for descriptor in memory_map
+            .iter()
+            .filter(|d| d.phys_start.is_frame_aligned())
+        {
+            let frame_index = descriptor.phys_start.frame_index();
+            let frame_count = descriptor.page_count as usize;
+
+            // Checks for 'holes' in system memory which we shouldn't try to allocate to.
+            for frame_index in last_frame_end..frame_index {
+                falloc
+                    .try_modify_type(frame_index, FrameType::Unusable)
+                    .unwrap();
             }
 
-            falloc
+            if descriptor.should_reserve() {
+                falloc.lock_many(frame_index, frame_count).unwrap();
+                for frame_index in frame_index..(frame_index + frame_count) {
+                    falloc
+                        .try_modify_type(frame_index, FrameType::Reserved)
+                        .unwrap()
+                }
+            }
+
+            last_frame_end = frame_index + frame_count;
         }
+
+        falloc
     }
 
     pub fn lock(&self, index: usize) -> Result<usize, FallocError> {

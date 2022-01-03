@@ -202,7 +202,7 @@ impl Address<Virtual> {
 
     #[inline]
     pub fn from_ptr<T>(ptr: *const T) -> Self {
-        Self::new(ptr as usize)
+        Self::new( ptr as usize)
     }
 
     #[inline]

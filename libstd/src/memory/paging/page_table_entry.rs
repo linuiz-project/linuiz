@@ -29,7 +29,7 @@ pub enum AttributeModify {
 pub struct PageTableEntry(usize);
 
 impl PageTableEntry {
-    const FRAME_BITS: usize = 0x000FFFFF_FFFFF000;
+    const FRAME_INDEX_MASK: usize = 0x000FFFFF_FFFFF000;
     pub const UNUSED: Self = Self(0);
 
     pub const fn set(&mut self, frame_index: usize, attributes: PageAttributes) {
@@ -38,7 +38,7 @@ impl PageTableEntry {
 
     pub const fn get_frame_index(&self) -> Option<usize> {
         if self.get_attributes().contains(PageAttributes::PRESENT) {
-            Some((self.0 & Self::FRAME_BITS) / 0x1000)
+            Some((self.0 & Self::FRAME_INDEX_MASK) / 0x1000)
         } else {
             None
         }
@@ -50,8 +50,8 @@ impl PageTableEntry {
 
     // Takes this page table entry's frame, even if it is non-present.
     pub const unsafe fn take_frame_index(&mut self) -> usize {
-        let frame_index = (self.0 & Self::FRAME_BITS) / 0x1000;
-        self.0 &= !Self::FRAME_BITS;
+        let frame_index = (self.0 & Self::FRAME_INDEX_MASK) / 0x1000;
+        self.0 &= !Self::FRAME_INDEX_MASK;
         frame_index
     }
 

@@ -64,23 +64,22 @@ impl UEFIMemoryDescriptor {
 
     pub fn is_stack_descriptor(&self) -> bool {
         self.range()
-            .contains(&(crate::registers::stack::RSP::read().as_usize() as u64))
+            .contains(&(crate::registers::stack::RSP::read() as u64))
     }
 
     pub fn should_reserve(&self) -> bool {
-        match self.ty {
-            UEFIMemoryType::BOOT_SERVICES_CODE
-            | UEFIMemoryType::BOOT_SERVICES_DATA
-            | UEFIMemoryType::LOADER_CODE
-            | UEFIMemoryType::LOADER_DATA
-            | UEFIMemoryType::CONVENTIONAL => {
-                // If this is a stack descriptor, it should be reserved.
-                //
-                // I'm not sure if we can count on BIOS always using the same descriptor type
-                //  for the stack descriptor, so this is a more robust way to handle that possibility.
-                self.is_stack_descriptor()
-            }
-            _ => true,
-        }
+        !matches!(
+            self.ty,
+                  UEFIMemoryType::BOOT_SERVICES_CODE
+                | UEFIMemoryType::BOOT_SERVICES_DATA
+                | UEFIMemoryType::LOADER_CODE
+                | UEFIMemoryType::LOADER_DATA
+                | UEFIMemoryType::CONVENTIONAL
+        )
+        // If this is a stack descriptor, it should be reserved.
+        //
+        // I'm not sure if we can count on BIOS always using the same descriptor type
+        //  for the stack descriptor, so this is a more robust way to handle that possibility.
+        || self.is_stack_descriptor()
     }
 }

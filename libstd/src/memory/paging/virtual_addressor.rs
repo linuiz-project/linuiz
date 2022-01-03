@@ -256,9 +256,7 @@ impl VirtualAddressor {
     }
 
     pub unsafe fn swap_into(&self) {
-        let addr = self.pml4_addr();
-        trace!("Swapping {:?} into CR3.", addr);
-        crate::registers::CR3::write(addr, crate::registers::CR3Flags::empty());
+        crate::registers::CR3::write(self.pml4_addr(), crate::registers::CR3Flags::empty());
     }
 
     /// Returns `true` if the current CR3 address matches the addressor's

@@ -36,16 +36,16 @@ macro_rules! basic_register_ptr {
 
         impl $register_ident {
             #[inline(always)]
-            pub unsafe fn write(addr: $crate::Address<$crate::addr_ty::Virtual>) {
-                core::arch::asm!(concat!("mov ", stringify!($register_ident), ", {}"), in(reg) addr.as_usize(), options(nomem, nostack));
+            pub unsafe fn write(ptr: *const ()) {
+                core::arch::asm!(concat!("mov ", stringify!($register_ident), ", {}"), in(reg) ptr, options(nomem, nostack));
             }
 
             #[inline(always)]
-            pub fn read() -> $crate::Address<$crate::addr_ty::Virtual> {
-                let addr: u64;
+            pub fn read() -> *const () {
+                let ptr: *const ();
                 unsafe {
-                    core::arch::asm!(concat!("mov {}, ", stringify!($register_ident)), out(reg) addr, options(nomem, nostack));
-                    $crate::Address::new_unsafe(addr as usize)
+                    core::arch::asm!(concat!("mov {}, ", stringify!($register_ident)), out(reg) ptr, options(nomem, nostack));
+                    ptr
                 }
             }
         }

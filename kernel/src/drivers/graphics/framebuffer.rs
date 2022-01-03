@@ -18,7 +18,8 @@ impl FramebufferDriver {
         let byte_len = pixel_len * core::mem::size_of::<Color8i>();
 
         let framebuffer = unsafe {
-            libstd::memory::malloc::get()
+            libstd::memory::malloc::try_get()
+                .unwrap()
                 .alloc_against(buffer_addr.frame_index(), (byte_len + 0xFFF) / 0x1000)
                 .expect("Allocation error occurred when attempting to create pixelbuffer")
                 .cast()
@@ -28,7 +29,8 @@ impl FramebufferDriver {
         };
 
         let backbuffer = unsafe {
-            libstd::memory::malloc::get()
+            libstd::memory::malloc::try_get()
+                .unwrap()
                 .alloc(
                     byte_len,
                     core::num::NonZeroUsize::new(core::mem::align_of::<Color8i>()),
