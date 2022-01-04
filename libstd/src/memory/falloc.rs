@@ -132,12 +132,11 @@ impl<'arr> FrameAllocator<'arr> {
         // Calculates total system memory.
         let total_system_memory = memory_map
             .iter()
-            .filter(|descriptor| !descriptor.should_reserve())
             .max_by_key(|descriptor| descriptor.phys_start)
             .map(|descriptor| {
                 descriptor.phys_start.as_usize() + ((descriptor.page_count * 0x1000) as usize)
             })
-            .expect("no descriptor with max value");
+            .unwrap();
         // Memory required to represent all system frames.
         let total_system_frames = crate::align_up_div(total_system_memory, 0x1000);
         let req_falloc_memory = total_system_frames * core::mem::size_of::<Frame>();
@@ -179,6 +178,7 @@ impl<'arr> FrameAllocator<'arr> {
             falloc.lock(frame_index).unwrap();
         }
 
+        debug!("Reserving requsite frames from BIOS memory map.");
         let mut last_frame_end = 0;
         for descriptor in memory_map
             .iter()
@@ -196,6 +196,7 @@ impl<'arr> FrameAllocator<'arr> {
 
             if descriptor.should_reserve() {
                 falloc.lock_many(frame_index, frame_count).unwrap();
+
                 for frame_index in frame_index..(frame_index + frame_count) {
                     falloc
                         .try_modify_type(frame_index, FrameType::Reserved)

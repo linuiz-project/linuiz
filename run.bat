@@ -1,5 +1,5 @@
 qemu-system-x86_64^
-    -m 4G^
+    -m 256M^
     -serial stdio^
     -machine q35^
     -cpu qemu64^
@@ -10,5 +10,3 @@ qemu-system-x86_64^
     -device nvme,drive=nvm,serial=deadbeef^
     -net none^
     -no-reboot^
-    -D ./.debug/qemu_debug.log^
-    -d int

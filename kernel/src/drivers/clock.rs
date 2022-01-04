@@ -1,20 +1,64 @@
 #![allow(dead_code)]
 
-pub extern "x86-interrupt" fn apic_tick_handler(_: libstd::structures::idt::InterruptStackFrame) {
-    // TODO configure APIC timer should be done OUTSIDE the APIC, most likely. It will be
-    //      kernel-dependent, and so shouldn't be in libstd.
+use libstd::registers::MSR;
 
-    unsafe {
-        use libstd::registers::MSR;
-        MSR::IA32_GS_BASE.write(MSR::IA32_GS_BASE.read() + 1);
+pub trait Clock {
+    fn frequency(&self) -> u64;
+    fn get_ticks(&self) -> u64;
+
+    fn tick(&self);
+}
+
+pub struct MSRClock(u64);
+
+impl MSRClock {
+    pub fn new(frequency: u64) -> Self {
+        assert!(
+            libstd::instructions::cpuid::FEATURES
+                .contains(libstd::instructions::cpuid::Features::MSR),
+            "MSR clock cannot be used without CPU support."
+        );
+
+        Self(frequency)
+    }
+}
+
+impl Clock for MSRClock {
+    fn frequency(&self) -> u64 {
+        self.0
     }
 
-    libstd::lpu::try_get().unwrap().apic().end_of_interrupt();
+    fn get_ticks(&self) -> u64 {
+        unsafe { MSR::IA32_GS_BASE.read_unchecked() }
+    }
+
+    fn tick(&self) {
+        unsafe {
+            let msr = MSR::IA32_GS_BASE.read_unchecked();
+            MSR::IA32_GS_BASE.write_unchecked(msr + 1);
+
+            if (msr % 100) == 0 {
+                crate::println!("{}", msr);
+            }
+        }
+    }
+}
+
+pub extern "x86-interrupt" fn apic_tick_handler(_: libstd::structures::idt::InterruptStackFrame) {
+    if let Some(lpu) = crate::lpu::try_get() {
+        lpu.clock().tick();
+        lpu.apic().end_of_interrupt();
+    } else {
+        panic!("Interrupts enabled without system clock (no LPU structure)!");
+    }
 }
 
 #[inline(always)]
-pub fn get_ticks() -> u64 {
-    unsafe { libstd::registers::MSR::IA32_GS_BASE.read_unchecked() }
+fn get_ticks() -> u64 {
+    crate::lpu::try_get()
+        .expect("LPU structure has not been configured")
+        .clock()
+        .get_ticks()
 }
 
 #[inline(always)]

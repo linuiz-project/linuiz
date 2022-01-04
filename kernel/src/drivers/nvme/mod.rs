@@ -420,7 +420,7 @@ impl<'dev> Controller<'dev> {
             max_wait
         );
         while (!csts.get_cfs() || csts.get_rdy() != enabled) && msec_waited < max_wait {
-            crate::timer::sleep_msec(10);
+            crate::drivers::clock::sleep_msec(10);
             msec_waited += 10;
         }
 
