@@ -1,18 +1,18 @@
 use bit_field::BitField;
 use core::convert::TryFrom;
 use libstd::{
-    memory::volatile::{VolatileCell, VolatileSplitPtr},
+    memory::volatile::{Volatile, VolatileCell, VolatileSplitPtr},
     volatile_bitfield_getter, volatile_bitfield_getter_ro, Address, ReadOnly, ReadWrite,
 };
 use num_enum::TryFromPrimitive;
 
 // INVARIANT: All memory accesses through this struct are volatile.
 #[repr(transparent)]
-pub struct PortCommandStatus {
+pub struct CommandStatus {
     bits: VolatileCell<u32, ReadWrite>,
 }
 
-impl PortCommandStatus {
+impl CommandStatus {
     volatile_bitfield_getter!(bits, st, 0);
     // SUD - Check CAP.SSS is 1 or 0 for RW or RO
 
@@ -48,7 +48,9 @@ impl PortCommandStatus {
     volatile_bitfield_getter!(bits, u32, icc, 28..32);
 }
 
-impl core::fmt::Debug for PortCommandStatus {
+impl Volatile for CommandStatus {}
+
+impl core::fmt::Debug for CommandStatus {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
             .debug_struct("Command Status Register")
@@ -76,13 +78,12 @@ impl core::fmt::Debug for PortCommandStatus {
     }
 }
 
-// INVARIANT: All memory accesses through this struct are volatile.
 #[repr(transparent)]
-pub struct PortInterruptStatus {
+pub struct InterruptStatus {
     bits: VolatileCell<u32, ReadWrite>,
 }
 
-impl PortInterruptStatus {
+impl InterruptStatus {
     volatile_bitfield_getter!(bits, dhrs, 0);
     volatile_bitfield_getter!(bits, pss, 1);
     volatile_bitfield_getter!(bits, dss, 2);
@@ -101,12 +102,14 @@ impl PortInterruptStatus {
     volatile_bitfield_getter!(bits, tfes, 30);
     volatile_bitfield_getter!(bits, cpds, 31);
 
-    pub fn clear(&mut self) {
+    pub fn clear(&self) {
         self.bits.write(0);
     }
 }
 
-impl core::fmt::Debug for PortInterruptStatus {
+impl Volatile for InterruptStatus {}
+
+impl core::fmt::Debug for InterruptStatus {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
             .debug_struct("Interrupt Status")
@@ -160,11 +163,11 @@ pub enum DeviceDetection {
 
 // INVARIANT: All memory accesses through this struct are volatile.
 #[repr(transparent)]
-pub struct HBAPortSATAStatus {
+pub struct SATAStatus {
     status: VolatileCell<u32, ReadWrite>,
 }
 
-impl HBAPortSATAStatus {
+impl SATAStatus {
     pub fn interface_pwm(&self) -> InterfacePowerManagement {
         InterfacePowerManagement::try_from(self.status.read().get_bits(8..12)).unwrap()
     }
@@ -178,7 +181,9 @@ impl HBAPortSATAStatus {
     }
 }
 
-impl core::fmt::Debug for HBAPortSATAStatus {
+impl Volatile for SATAStatus {}
+
+impl core::fmt::Debug for SATAStatus {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
             .debug_struct("SATA Port Status")
@@ -191,7 +196,7 @@ impl core::fmt::Debug for HBAPortSATAStatus {
 
 #[repr(u32)]
 #[derive(Debug, PartialEq, Eq)]
-pub enum PortClass {
+pub enum Class {
     None = 0x0,
     SATA = 0x00000101,
     SEMB = 0xC33C0101,
@@ -204,13 +209,13 @@ pub enum PortClass {
 pub struct Port {
     cmd_list: VolatileSplitPtr<super::Command>,
     fis_addr: VolatileSplitPtr<u8>,
-    interrupt_status: PortInterruptStatus,
+    interrupt_status: InterruptStatus,
     interrupt_enable: VolatileCell<u32, ReadOnly>,
-    command_status: PortCommandStatus,
+    command_status: CommandStatus,
     _reserved0: [u8; 4],
     task_file_data: VolatileCell<u32, ReadOnly>,
-    signature: VolatileCell<PortClass, ReadOnly>,
-    sata_status: HBAPortSATAStatus,
+    signature: VolatileCell<Class, ReadOnly>,
+    sata_status: SATAStatus,
     sata_control: VolatileCell<u32, ReadOnly>,
     sata_error: VolatileCell<u32, ReadOnly>,
     sata_active: VolatileCell<u32, ReadOnly>,
@@ -222,7 +227,7 @@ pub struct Port {
 }
 
 impl Port {
-    pub fn class(&self) -> PortClass {
+    pub fn class(&self) -> Class {
         // Ensures port is in a valid state (deteced & powered).
         if self.sata_status().device_detection() == DeviceDetection::DetectedAndPhy
             && self.sata_status().interface_pwm() == InterfacePowerManagement::Active
@@ -230,31 +235,31 @@ impl Port {
             self.signature.read()
         } else {
             // Finally, determine port type from its signature.
-            PortClass::None
+            Class::None
         }
     }
 
-    pub fn sata_status(&self) -> &HBAPortSATAStatus {
+    pub fn sata_status(&self) -> &SATAStatus {
         &self.sata_status
     }
 
-    pub fn command_status(&mut self) -> &mut PortCommandStatus {
-        &mut self.command_status
+    pub fn command_status(&self) -> &CommandStatus {
+        &self.command_status
     }
 
     pub fn task_file_data(&self) -> u32 {
         self.task_file_data.read()
     }
 
-    pub fn command_list(&mut self) -> &mut [super::Command] {
+    pub fn command_list(&self) -> &mut [super::Command] {
         unsafe { core::slice::from_raw_parts_mut(self.cmd_list.get_mut_ptr(), 32) }
     }
 
-    pub fn interrupt_status(&mut self) -> &mut PortInterruptStatus {
-        &mut self.interrupt_status
+    pub fn interrupt_status(&self) -> &InterruptStatus {
+        &self.interrupt_status
     }
 
-    pub fn issue_command_slot(&mut self, cmd_index: usize) {
+    pub fn issue_command_slot(&self, cmd_index: usize) {
         assert!(cmd_index < 32, "Command index must be between 0..32");
         assert!(
             self.command_status().get_st(),
@@ -265,13 +270,13 @@ impl Port {
             .write(self.command_issue.read() | (1 << cmd_index));
     }
 
-    pub fn check_command_slot(&mut self, cmd_index: usize) -> bool {
+    pub fn check_command_slot(&self, cmd_index: usize) -> bool {
         assert!(cmd_index < 32, "Command index must be between 0..32");
 
         self.command_issue.read().get_bit(cmd_index)
     }
 
-    pub fn start_cmd(&mut self) {
+    pub fn start_cmd(&self) {
         debug!("AHCI PORT: START CMD");
 
         let cmd = self.command_status();
@@ -282,7 +287,7 @@ impl Port {
         cmd.set_st(true);
     }
 
-    pub fn stop_cmd(&mut self) {
+    pub fn stop_cmd(&self) {
         debug!("AHCI PORT: STOP CMD");
 
         let cmd = self.command_status();
@@ -293,7 +298,7 @@ impl Port {
         while cmd.get_fr() | cmd.get_cr() {}
     }
 
-    pub fn configure(&mut self) {
+    pub fn configure(&self) {
         self.stop_cmd();
         debug!("AHCI PORT: CONFIGURING");
 
@@ -338,7 +343,7 @@ impl Port {
         self.start_cmd();
     }
 
-    pub fn read(&mut self, sector_base: usize, sector_count: u16) -> alloc::vec::Vec<u8> {
+    pub fn read(&self, sector_base: usize, sector_count: u16) -> alloc::vec::Vec<u8> {
         use crate::drivers::ahci::{
             FISType, ATA_CMD_READ_DMA_EX, ATA_DEV_BUSY, ATA_DEV_DRQ, FIS_REG_H2D,
         };
@@ -362,13 +367,7 @@ impl Port {
         self.interrupt_status().clear(); // clear interrupts
 
         debug!("AHCI PORT: READ: CFG COMMAND FIS (DIS_REG_H2D)");
-        let mut fis = FIS_REG_H2D::default();
-        fis.fis_type = FISType::H2D;
-        fis.set_command_control(true); // is command
-        fis.command = ATA_CMD_READ_DMA_EX;
-        fis.set_sector_base(sector_base);
-        fis.device_register = 1 << 6; // LBA mode
-        fis.set_sector_count(sector_count);
+        let mut fis = super::fis::Hw2Dev::read(sector_base, sector_count);
 
         debug!("AHCI PORT: READ: CFG COMMAND");
         let command = &mut self.command_list()[0];
@@ -399,3 +398,5 @@ impl Port {
 
     // pub fn write(&mut self, sector_base: usize, data: &[u8]) {}
 }
+
+impl libstd::memory::volatile::Volatile for Port {}

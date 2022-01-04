@@ -1,4 +1,5 @@
 mod command;
+pub mod fis;
 mod port;
 
 pub use command::*;
