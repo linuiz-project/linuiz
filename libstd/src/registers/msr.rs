@@ -1,3 +1,5 @@
+use crate::instructions::cpuid::{Features, FEATURES};
+
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
@@ -21,7 +23,7 @@ impl MSR {
     #[inline(always)]
     pub fn read(self) -> u64 {
         assert!(
-            crate::instructions::FEATURES.contains(crate::instructions::CPUFeatures::MSR),
+            FEATURES.contains(Features::MSR),
             "CPU does not support use of model-specific registers."
         );
 
@@ -66,7 +68,7 @@ impl MSR {
 
     pub unsafe fn write(self, value: u64) {
         assert!(
-            crate::instructions::FEATURES.contains(crate::instructions::CPUFeatures::MSR),
+            FEATURES.contains(Features::MSR),
             "CPU does not support use of model-specific registers"
         );
 

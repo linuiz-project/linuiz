@@ -7,7 +7,7 @@ const fn data0() -> WriteOnlyPort<u8> {
 
 #[repr(u8)]
 pub enum OperatingMode {
-    InterruptOnTerminaLCount = 0b000,
+    InterruptOnTerminalCount = 0b000,
     HardwareRetriggerableOneShot = 0b001,
     RateGenerator = 0b010,
     SquareWaveGenerator = 0b011,
@@ -66,7 +66,7 @@ pub fn send_command(command: Command) {
 }
 
 pub fn set_timer_freq(frequency: u32, operating_mode: OperatingMode) {
-    const TICK_RATE: u32 = 1193181;
+    const TICK_RATE: u32 = 1193182;
 
     if frequency > TICK_RATE {
         panic!(

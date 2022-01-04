@@ -1,6 +1,4 @@
-mod cpuid;
-
-pub use cpuid::*;
+pub mod cpuid;
 pub mod interrupts;
 pub mod pwm;
 pub mod segmentation;

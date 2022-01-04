@@ -113,7 +113,7 @@ unsafe fn kernel_init() -> ! {
     info!("Validating BootInfo struct.");
     boot_info.validate_magic();
 
-    debug!("CPU features: {:?}", libstd::instructions::FEATURES);
+    debug!("CPU features: {:?}", libstd::instructions::cpuid::FEATURES);
 
     debug!("Initializing kernel frame allocator.");
     falloc::load_new(boot_info.memory_map());
@@ -159,13 +159,9 @@ unsafe fn kernel_mem_init() -> ! {
 
 #[no_mangle]
 extern "C" fn _startup() -> ! {
-    unsafe { libstd::registers::debug::DR0::write(2) };
     unsafe { libstd::structures::idt::load() };
-    unsafe { libstd::registers::debug::DR0::write(3) };
     libstd::lpu::init();
-    unsafe { libstd::registers::debug::DR0::write(4) };
     init_apic();
-    unsafe { libstd::registers::debug::DR0::write(5) };
 
     // If this is the BSP, wake other cores.
     if libstd::lpu::is_bsp() {
@@ -251,13 +247,9 @@ extern "C" fn _startup() -> ! {
     loop {
         use libstd::registers::MSR;
 
-        info!(
-            "FS 0x{:X}  GS {}",
-            MSR::IA32_FS_BASE.read(),
-            MSR::IA32_GS_BASE.read(),
-        );
+        crate::println!("{}", unsafe { MSR::IA32_GS_BASE.read_unchecked() });
 
-        timer::sleep_sec(1);
+        timer::sleep_msec(10);
     }
 
     libstd::instructions::hlt_indefinite()
@@ -291,56 +283,58 @@ fn init_apic() {
         structures::{apic::*, idt, pic8259},
     };
 
-    let apic = &libstd::lpu::try_get().unwrap().apic();
-
-    debug!("Determining APIC timer frequency.");
-
-    unsafe { MSR::IA32_GS_BASE.write(0) };
     extern "x86-interrupt" fn pit_tick_handler(_: idt::InterruptStackFrame) {
         unsafe { MSR::IA32_GS_BASE.write(MSR::IA32_GS_BASE.read() + 1) };
-
         pic8259::end_of_interrupt(pic8259::InterruptOffset::Timer);
     }
+
+    libstd::instructions::interrupts::disable();
+    let apic = &libstd::lpu::try_get().unwrap().apic();
 
     unsafe {
         trace!("Resetting and enabling local APIC (it may have already been enabled).");
         apic.reset();
         apic.sw_enable();
         apic.set_spurious_vector(u8::MAX);
+        apic.timer().set_mode(TimerMode::OneShot);
+        apic.write_register(Register::TimerDivisor, TimerDivisor::Div1 as u32);
+        apic.write_register(Register::TimerInitialCount, u32::MAX);
     }
 
-    trace!("Configuring APIC timer state.");
-    apic.write_register(Register::TimerDivisor, divisor as u32);
-    apic.write_register(Register::TimerInitialCount, u32::MAX);
-    apic.timer().set_mode(TimerMode::OneShot);
+    const FREQ: u32 = 1000;
+    const FREQ_WINDOW: u64 = 10;
 
     pic8259::enable();
-    pic8259::pit::set_timer_freq(frequency, pic8259::pit::OperatingMode::RateGenerator);
-    trace!("Successfully initialized PIC with 1000Hz frequency.");
-
     idt::set_interrupt_handler(32, pit_tick_handler);
-    libstd::instructions::interrupts::enable();
+    pic8259::pit::set_timer_freq(FREQ, pic8259::pit::OperatingMode::RateGenerator);
+    trace!("Successfully initialized PIT with 1000Hz frequency.");
 
-    trace!("Determining APIC timer frequency using PIT windowing.");
+    trace!("Determining APIT frequency using PIT windowing.");
+    unsafe { MSR::IA32_GS_BASE.write(0) };
     apic.timer().set_masked(false);
-    while MSR::IA32_GS_BASE.read() <= (frequency as u64) {}
+    libstd::instructions::interrupts::enable();
+    while MSR::IA32_GS_BASE.read() < FREQ_WINDOW {}
     apic.timer().set_masked(true);
+    unsafe { MSR::IA32_GS_BASE.write(0) };
 
     trace!("Disabling 8259 emulated PIC.");
     libstd::instructions::interrupts::without_interrupts(|| unsafe { pic8259::disable() });
 
-    let apic_freq = apic.read_register(Register::TimerCurrentCount);
-    info!(
-        "APIC timer frequency: {}Hz",
-        apic_freq * divisor.as_divide_value()
+    apic.write_register(
+        Register::TimerInitialCount,
+        (u32::MAX - apic.read_register(Register::TimerCurrentCount)) / (FREQ_WINDOW as u32),
     );
-    apic.write_register(Register::TimerInitialCount, u32::MAX - apic_freq);
+    debug!(
+        "APIC clock frequency: {}KHz",
+        apic.read_register(Register::TimerInitialCount)
+    );
 
     idt::set_interrupt_handler(32, timer::apic_tick_handler);
     apic.timer().set_vector(32);
     idt::set_interrupt_handler(58, apic_error_handler);
     apic.error().set_vector(58);
 
+    apic.timer().set_mode(TimerMode::Periodic);
     apic.timer().set_masked(false);
     apic.sw_enable();
 

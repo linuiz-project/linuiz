@@ -1,61 +1,49 @@
 #![allow(dead_code)]
 
-use core::sync::atomic::{AtomicUsize, Ordering};
-
-static TICKS: AtomicUsize = AtomicUsize::new(0);
-
-// Frequency of timer, or ticks per second.
-pub const FREQUENCY: usize = 1000;
-
-pub extern "x86-interrupt" fn tick_handler(_: libstd::structures::idt::InterruptStackFrame) {
-    TICKS.fetch_add(1, Ordering::AcqRel);
-
-    use libstd::structures::pic8259;
-    pic8259::end_of_interrupt(pic8259::InterruptOffset::Timer);
-}
-
 pub extern "x86-interrupt" fn apic_tick_handler(_: libstd::structures::idt::InterruptStackFrame) {
-    TICKS.fetch_add(1, Ordering::AcqRel);
+    // TODO configure APIC timer should be done OUTSIDE the APIC, most likely. It will be
+    //      kernel-dependent, and so shouldn't be in libstd.
+
+    unsafe {
+        use libstd::registers::MSR;
+        MSR::IA32_GS_BASE.write(MSR::IA32_GS_BASE.read() + 1);
+    }
+
     libstd::lpu::try_get().unwrap().apic().end_of_interrupt();
 }
 
 #[inline(always)]
-pub fn get_ticks() -> usize {
-    TICKS.load(Ordering::Acquire)
+pub fn get_ticks() -> u64 {
+    unsafe { libstd::registers::MSR::IA32_GS_BASE.read_unchecked() }
 }
 
 #[inline(always)]
-pub fn get_ticks_unordered() -> usize {
-    TICKS.load(Ordering::Relaxed)
-}
-
-#[inline(always)]
-pub fn sleep_msec(milliseconds: usize) {
+pub fn sleep_msec(milliseconds: u64) {
     tick_wait(get_ticks() + milliseconds);
 }
 
 #[inline(always)]
-pub fn sleep_sec(seconds: usize) {
-    tick_wait(get_ticks() + (seconds * FREQUENCY));
+pub fn sleep_sec(seconds: u64) {
+    tick_wait(get_ticks() + (seconds * 1000));
 }
 
 #[inline(always)]
-fn tick_wait(target_ticks: usize) {
+fn tick_wait(target_ticks: u64) {
     while get_ticks() < target_ticks {
         libstd::instructions::hlt();
     }
 }
 
 pub struct Timer {
-    ticks: usize,
+    ticks: u64,
 }
 
 impl Timer {
-    pub fn new(ticks: usize) -> Self {
+    pub fn new(ticks: u64) -> Self {
         Self { ticks }
     }
 
-    pub fn wait_new(ticks: usize) {
+    pub fn wait_new(ticks: u64) {
         let timer = Self::new(ticks);
         timer.wait();
     }
@@ -67,8 +55,8 @@ impl Timer {
 }
 
 pub struct Stopwatch {
-    start_tick: Option<usize>,
-    stop_tick: Option<usize>,
+    start_tick: Option<u64>,
+    stop_tick: Option<u64>,
 }
 
 impl Stopwatch {
@@ -98,7 +86,7 @@ impl Stopwatch {
         }
     }
 
-    pub fn elapsed_ticks(&self) -> usize {
+    pub fn elapsed_ticks(&self) -> u64 {
         let start_tick = self.start_tick.expect("no start tick");
         let stop_tick = self.stop_tick.expect("no stop tick");
 

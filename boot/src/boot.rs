@@ -352,5 +352,6 @@ fn kernel_transfer(
         runtime_table.config_table(),
         framebuffer,
     );
+
     kernel_main(boot_info)
 }

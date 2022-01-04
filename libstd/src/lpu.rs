@@ -28,7 +28,9 @@ pub fn init() {
     unsafe {
         use bit_field::BitField;
 
-        let cpuid = crate::instructions::cpuid(0x1, 0x0).unwrap();
+        let cpuid =
+            crate::instructions::cpuid::exec(0x1, 0x0)
+                .unwrap();
         let apic_id = cpuid.ebx().get_bits(24..) as u8;
         let htt_count = cpuid.ebx().get_bits(16..24) as u8;
         let apic = APIC::from_msr();

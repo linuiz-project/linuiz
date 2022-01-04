@@ -6,10 +6,7 @@ use crate::{
     registers::MSR,
     Address, ReadWrite,
 };
-use core::{
-    marker::PhantomData,
-    sync::atomic::{AtomicU32, Ordering},
-};
+use core::marker::PhantomData;
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +49,21 @@ pub enum TimerDivisor {
     Div1 = 0b1011,
 }
 
+impl TimerDivisor {
+    pub const fn as_divide_value(self) -> u32 {
+        match self {
+            TimerDivisor::Div2 => 2,
+            TimerDivisor::Div4 => 4,
+            TimerDivisor::Div8 => 8,
+            TimerDivisor::Div16 => 16,
+            TimerDivisor::Div32 => 32,
+            TimerDivisor::Div64 => 64,
+            TimerDivisor::Div128 => 128,
+            TimerDivisor::Div1 => 1,
+        }
+    }
+}
+
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
@@ -75,8 +87,6 @@ bitflags::bitflags! {
         const ILLEGAL_REGISTER_ADDRESS = 1 << 7;
     }
 }
-
-static TIMER_FREQUENCY: AtomicU32 = AtomicU32::new(0);
 
 pub struct APIC {
     mmio: MMIO,
@@ -262,72 +272,6 @@ impl APIC {
         self.lint1().set_masked(true);
         self.write_register(Register::TaskPriority, 0);
         self.write_register(Register::TimerInitialCount, 0);
-    }
-
-    pub fn auto_configure_timer_frequency(&self) {
-        if TIMER_FREQUENCY.load(Ordering::Relaxed) == 0 {
-            self.auto_determine_timer_frequency();
-        } else {
-            trace!("Global timer frequency already determined, skipping routine.");
-        }
-
-        self.write_register(
-            Register::TimerInitialCount,
-            u32::MAX - TIMER_FREQUENCY.load(Ordering::Relaxed),
-        );
-        self.write_register(Register::TimerDivisor, TimerDivisor::Div1 as u32);
-    }
-
-    fn auto_determine_timer_frequency(&self) {
-        assert!(
-            TIMER_FREQUENCY.load(Ordering::Relaxed) == 0,
-            "Timer frequency has already been determined.",
-        );
-
-        debug!("Determining global APIC timer frequency.");
-
-        use crate::structures::{idt, pic8259};
-
-        static mut ELAPSED_TICKS: AtomicU32 = AtomicU32::new(0);
-        extern "x86-interrupt" fn pit_tick_handler(_: idt::InterruptStackFrame) {
-            unsafe { ELAPSED_TICKS.fetch_add(1, Ordering::Release) };
-            pic8259::end_of_interrupt(pic8259::InterruptOffset::Timer);
-        }
-
-        unsafe {
-            trace!("Resetting and enabling local APIC (it may have already been enabled).");
-            self.reset();
-            self.sw_enable();
-            self.set_spurious_vector(u8::MAX);
-        }
-
-        trace!("Configuring APIC timer state.");
-        self.write_register(Register::TimerDivisor, TimerDivisor::Div1 as u32);
-        self.write_register(Register::TimerInitialCount, u32::MAX);
-        self.timer().set_mode(TimerMode::OneShot);
-
-        pic8259::enable();
-        pic8259::pit::set_timer_freq(1000, pic8259::pit::OperatingMode::RateGenerator);
-        trace!("Successfully initialized PIC with 1000Hz frequency.");
-
-        idt::set_interrupt_handler(32, pit_tick_handler);
-        crate::instructions::interrupts::enable();
-
-        trace!("Determining APIC timer frequency using PIT windowing.");
-        self.timer().set_masked(false);
-
-        unsafe { while ELAPSED_TICKS.load(Ordering::Acquire) <= 1000 {} }
-
-        self.timer().set_masked(true);
-        self.sw_disable();
-        let apic_freq = self.read_register(Register::TimerCurrentCount);
-
-        trace!("Disabling 8259 emulated PIC.");
-        crate::instructions::interrupts::without_interrupts(|| unsafe { pic8259::disable() });
-
-        info!("APIC timer frequency: {}Hz", apic_freq);
-        TIMER_FREQUENCY.store(apic_freq, Ordering::Relaxed);
-        trace!("It's possible the BSP core's measured nominal clock does not match the other cores; in this case, scheduling accuracy will be impacted.");
     }
 }
 
