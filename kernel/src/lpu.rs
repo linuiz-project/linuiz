@@ -1,5 +1,8 @@
-use crate::{registers::MSR, structures::apic::APIC};
+use alloc::boxed::Box;
 use core::sync::atomic::AtomicUsize;
+use libstd::{registers::MSR, structures::apic::APIC};
+
+use crate::drivers::clock::Clock;
 
 pub static LPU_COUNT: AtomicUsize = AtomicUsize::new(0);
 
@@ -18,7 +21,7 @@ pub fn try_get() -> Option<&'static LPU> {
     }
 }
 
-pub fn init() {
+pub fn init(clock: Box<dyn Clock>) {
     assert_eq!(
         MSR::IA32_FS_BASE.read(),
         0,
@@ -28,14 +31,12 @@ pub fn init() {
     unsafe {
         use bit_field::BitField;
 
-        let cpuid =
-            crate::instructions::cpuid::exec(0x1, 0x0)
-                .unwrap();
+        let cpuid = libstd::instructions::cpuid::exec(0x1, 0x0).unwrap();
         let apic_id = cpuid.ebx().get_bits(24..) as u8;
         let htt_count = cpuid.ebx().get_bits(16..24) as u8;
         let apic = APIC::from_msr();
 
-        let ptr: *mut LPU = crate::memory::malloc::try_get()
+        let ptr: *mut LPU = libstd::memory::malloc::try_get()
             .unwrap()
             .alloc(core::mem::size_of::<LPU>(), None)
             .expect("Unrecoverable error in LPU creation")
@@ -48,6 +49,7 @@ pub fn init() {
             apic_id,
             htt_count,
             apic,
+            clock,
         });
 
         MSR::IA32_FS_BASE.write(ptr as u64);
@@ -59,7 +61,7 @@ pub fn init() {
         try_get().expect("Unexpected error occured attempting to access newly-configured LPU state structure").id()
     );
 
-    LPU_COUNT.fetch_add(1, core::sync::atomic::Ordering::AcqRel);
+    LPU_COUNT.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
 }
 
 pub fn is_bsp() -> bool {
@@ -72,6 +74,7 @@ pub struct LPU {
     apic_id: u8,
     htt_count: u8,
     apic: APIC,
+    clock: Box<dyn Clock>,
 }
 
 impl LPU {
@@ -81,7 +84,11 @@ impl LPU {
         self.apic_id
     }
 
-    pub fn apic(&'static self) -> &'static APIC {
+    pub fn apic(&self) -> &APIC {
         &self.apic
+    }
+
+    pub fn clock(&self) -> &dyn Clock {
+        self.clock.as_ref()
     }
 }
