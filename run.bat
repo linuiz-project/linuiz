@@ -9,8 +9,6 @@ qemu-system-x86_64^
     -drive if=none,format=raw,id=disk,file=./.hdd/rootfs.img^
     -device ahci,id=ahci^
     -device ide-hd,drive=disk,bus=ahci.0^
-    -drive if=none,format=raw,id=nvm,file=./.hdd/nvme.img^
-    -device nvme,drive=nvm,serial=deadbeef^
     -net none^
     -no-reboot^
     -D ./.debug/qemu_debug.log^

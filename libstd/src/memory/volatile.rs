@@ -52,7 +52,7 @@ pub struct VolatileSplitPtr<T: Sized> {
 }
 
 impl<T: Sized> VolatileSplitPtr<T> {
-    pub fn set_ptr(&mut self, ptr: *mut T) {
+    pub fn set_ptr(&self, ptr: *mut T) {
         let ptr_usize = ptr as usize;
         self.low.write(ptr_usize as u32);
         self.high.write((ptr_usize >> 32) as u32);
@@ -62,7 +62,7 @@ impl<T: Sized> VolatileSplitPtr<T> {
         ((self.low.read() as u64) | ((self.high.read() as u64) << 32)) as *const T
     }
 
-    pub fn get_mut_ptr(&mut self) -> *mut T {
+    pub fn get_mut_ptr(&self) -> *mut T {
         ((self.low.read() as u64) | ((self.high.read() as u64) << 32)) as *mut T
     }
 }

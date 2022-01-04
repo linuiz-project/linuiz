@@ -219,49 +219,32 @@ extern "C" fn _startup() -> ! {
         }
     }
 
-    // if libstd::lpu::is_bsp() {
-    //     use libstd::{
-    //         acpi::rdsp::xsdt::{mcfg::MCFG, XSDT},
-    //         io::pci,
-    //     };
+    if libstd::lpu::is_bsp() {
+        use libstd::{
+            acpi::rdsp::xsdt::{mcfg::MCFG, XSDT},
+            io::pci,
+        };
 
-    //     if let Ok(mcfg) = XSDT.find_sub_table::<MCFG>() {
-    //         let bridges: alloc::vec::Vec<pci::PCIeHostBridge> = mcfg
-    //             .iter()
-    //             .filter_map(|entry| pci::configure_host_bridge(entry).ok())
-    //             .collect();
+        if let Ok(mcfg) = XSDT.find_sub_table::<MCFG>() {
+            let bridges: alloc::vec::Vec<pci::PCIeHostBridge> = mcfg
+                .iter()
+                .filter_map(|entry| pci::configure_host_bridge(entry).ok())
+                .collect();
 
-    //         for device_variant in bridges
-    //             .iter()
-    //             .flat_map(|bridge| bridge.iter())
-    //             .flat_map(|bus| bus.iter())
-    //         {
-    //             if let pci::DeviceVariant::Standard(device) = device_variant {
-    //                 if device.class() == pci::DeviceClass::MassStorageController
-    //                     && device.subclass() == 0x08
-    //                 {
-    //                     // // NVMe device
-
-    //                     // use crate::drivers::nvme::*;
-
-    //                     // let mut nvme = Controller::from_device(&device);
-
-    //                     // let admin_sq = libstd::slice!(u8, 0x1000);
-    //                     // let admin_cq = libstd::slice!(u8, 0x1000);
-
-    //                     // let cc = nvme.controller_configuration();
-    //                     // cc.set_iosqes(4);
-    //                     // cc.set_iocqes(4);
-
-    //                     // if unsafe { !nvme.safe_set_enable(true) } {
-    //                     //     error!("NVMe controleler failed to safely enable.");
-    //                     //     break;
-    //                     // }
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
+            for device_variant in bridges
+                .iter()
+                .flat_map(|bridge| bridge.iter())
+                .flat_map(|bus| bus.iter())
+            {
+                if let pci::DeviceVariant::Standard(device) = device_variant {
+                    if device.class() == pci::DeviceClass::MassStorageController
+                        // Serial ATA Controller
+                        && device.subclass() == 0x08
+                    {}
+                }
+            }
+        }
+    }
 
     libstd::instructions::hlt_indefinite()
 }
