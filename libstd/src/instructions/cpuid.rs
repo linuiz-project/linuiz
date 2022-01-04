@@ -108,8 +108,15 @@ bitflags::bitflags! {
     }
 }
 
-#[inline]
-pub fn cpu_features() -> CPUFeatures {
-    let features = cpuid(0x1, 0x0).unwrap();
-    CPUFeatures::from_bits_truncate(((features.edx() as u64) << 32) | (features.ecx() as u64))
+lazy_static::lazy_static! {
+    pub static ref FEATURES: CPUFeatures = {
+        let cpuid = cpuid(0x1, 0x0).unwrap();
+        CPUFeatures::from_bits_truncate(((cpuid.edx() as u64) << 32) | (cpuid.ecx() as u64))
+    };
+}
+
+impl core::fmt::Debug for FEATURES {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        CPUFeatures::fmt(self, f)
+    }
 }
