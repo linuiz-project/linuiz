@@ -1,7 +1,6 @@
-mod types;
-pub use types::*;
+pub mod admin;
+pub mod io;
 
-use super::queue::QueueDomain;
 use bit_field::BitField;
 use core::{convert::TryFrom, fmt, marker::PhantomData, ops::Range};
 use libstd::{
@@ -10,23 +9,23 @@ use libstd::{
 };
 use num_enum::TryFromPrimitive;
 
-const COMMAND_DWORD_COUNT: usize = {
-    use core::mem::size_of;
-
-    size_of::<Command<super::queue::Admin, Abort>>() / size_of::<u32>()
-};
-
-pub type NVME_COMMAND = [u32; COMMAND_DWORD_COUNT];
-
-#[repr(u32)]
+#[repr(u8)]
 #[derive(TryFromPrimitive)]
-pub enum FusedCommandInfo {
+pub enum FuseOperation {
     Normal = 0b00,
-    FusedFirst = 0b01,
-    FusedSecond = 0b10,
+    FirstCommand = 0b01,
+    SecondCommand = 0b10,
 }
 
-#[repr(usize)]
+#[repr(u8)]
+pub enum PSDT {
+    PRP = 0b00,
+    SGLPhysBuffer = 0b01,
+    SUGLDescriptor = 0b10,
+    Reserved = 0b11,
+}
+
+#[repr(u32)]
 pub enum DataTransfer {
     NoData = 0b00,
     HostToController = 0b01,
@@ -35,87 +34,41 @@ pub enum DataTransfer {
 }
 
 pub enum DataPointer {
-    PSDT(Address<Physical>, Address<Physical>),
+    PRP(Address<Physical>, Address<Physical>),
     SGL(u128),
 }
 
-#[repr(C)]
-pub struct Command<Q: QueueDomain, T: CommandType<Q>> {
-    header: VolatileCell<u32, ReadWrite>,
-    namespace_id: VolatileCell<u32, ReadWrite>,
-    dword2: VolatileCell<u32, ReadWrite>,
-    dword3: VolatileCell<u32, ReadWrite>,
-    metadata_ptr: VolatileCell<Address<Physical>, ReadWrite>,
-    data_ptr_low: VolatileCell<u64, ReadWrite>,
-    data_ptr_high: VolatileCell<u64, ReadWrite>,
-    dword10: VolatileCell<u32, ReadWrite>,
-    dword11: VolatileCell<u32, ReadWrite>,
-    dword12: VolatileCell<u32, ReadWrite>,
-    dword13: VolatileCell<u32, ReadWrite>,
-    dword14: VolatileCell<u32, ReadWrite>,
-    dword15: VolatileCell<u32, ReadWrite>,
-    phantomq: PhantomData<Q>,
-    phantomt: PhantomData<T>,
-}
-
-impl<Q: QueueDomain, T: CommandType<Q>> Command<Q, T> {
-    const OPCODE: Range<usize> = 0..8;
-    const FUSED_INFO: Range<usize> = 8..10;
-    const COMMAND_ID: Range<usize> = 16..32;
-    const PSDT: Range<usize> = 14..16;
-    const PRP_ENTRY_1: Range<usize> = 0..64;
-    const PRP_ENTRY_2: Range<usize> = 64..128;
-
-    pub fn clear(&mut self) {
-        unsafe { core::ptr::write_bytes((&raw mut *self) as *mut u32, 0, COMMAND_DWORD_COUNT) }
-    }
-
-    volatile_bitfield_getter_as!(header, u32, u8, opcode, Self::OPCODE);
-
-    pub fn get_fuse_info(&self) -> FusedCommandInfo {
-        FusedCommandInfo::try_from(self.header.read().get_bits(Self::FUSED_INFO)).unwrap()
-    }
-
-    pub fn set_fuse_info(&mut self, fuse_info: FusedCommandInfo) {
-        self.header.write(
-            *self
-                .header
-                .read()
-                .set_bits(Self::FUSED_INFO, fuse_info as u32),
-        );
-    }
-
-    volatile_bitfield_getter_as!(header, u32, u16, command_id, Self::COMMAND_ID);
-    volatile_bitfield_getter!(namespace_id, u32, namespace_id, 0..32);
-
-    pub fn set_metadata_ptr(&mut self, ptr: Address<Physical>) {
-        self.metadata_ptr.write(ptr);
-    }
-
-    pub fn set_data_ptr(&mut self, ptr: DataPointer) {
-        match ptr {
-            DataPointer::PSDT(prp_entry_1, prp_entry_2) => {
-                self.data_ptr_low.write(prp_entry_1.as_usize() as u64);
-                self.data_ptr_high.write(prp_entry_2.as_usize() as u64);
-                self.header
-                    .write(*self.header.read().set_bits(Self::PSDT, 0b00));
+impl DataPointer {
+    pub const fn as_u128(self) -> u128 {
+        match self {
+            Self::PRP(addr1, addr2) => {
+                ((addr2.as_usize() as u128) << 64) | (addr1.as_usize() as u128)
             }
-            DataPointer::SGL(sgl) => {
-                self.data_ptr_low.write(sgl as u64);
-                self.data_ptr_high.write((sgl >> 64) as u64);
-                // TODO segmented and buffered SGL
-                self.header
-                    .write(*self.header.read().set_bits(Self::PSDT, 0b01));
-            }
+            Self::SGL(sgl) => sgl,
         }
     }
+}
 
-    fn base_configure(&mut self, namespace_id: Option<u32>, command_id: u16) {
-        self.clear();
-        self.set_opcode(T::OPCODE);
-        self.set_command_id(command_id);
-        self.set_namespace_id(namespace_id.unwrap_or(0));
-    }
+pub trait QueueDomain {}
+pub enum IO {}
+impl QueueDomain for IO {}
+
+#[repr(C)]
+pub struct Command<Q: QueueDomain> {
+    opcode: u8,
+    fuse_psdt: u8,
+    ns_id: u32,
+    cdw2: u32,
+    cdw3: u32,
+    mdata_ptr: Address<Physical>,
+    data_ptr: u128,
+    cdw10: u32,
+    cdw11: u32,
+    cdw12: u32,
+    cdw13: u32,
+    cdw14: u32,
+    cdw15: u32,
+    marker: core::marker::PhantomData<Q>,
 }
 
 #[repr(u32)]

@@ -75,4 +75,4 @@ impl Hw2Dev {
     }
 }
 
-impl hba::CommandFIS for Hw2Dev {}
+impl super::super::hba::CommandFIS for Hw2Dev {}

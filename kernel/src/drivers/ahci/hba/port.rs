@@ -344,9 +344,7 @@ impl Port {
     }
 
     pub fn read(&self, sector_base: usize, sector_count: u16) -> alloc::vec::Vec<u8> {
-        use crate::drivers::ahci::{
-            FISType, ATA_CMD_READ_DMA_EX, ATA_DEV_BUSY, ATA_DEV_DRQ, FIS_REG_H2D,
-        };
+        use crate::drivers::ahci::{hba::fis, ATA_DEV_BUSY, ATA_DEV_DRQ};
 
         debug!("AHCI PORT: READ: RECEIVED");
 

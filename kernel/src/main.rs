@@ -113,10 +113,7 @@ unsafe fn kernel_init() -> ! {
     info!("Validating BootInfo struct.");
     boot_info.validate_magic();
 
-    debug!(
-        "Detected CPU features: {:?}",
-        libstd::instructions::cpu_features()
-    );
+    debug!("CPU features: {:?}", libstd::instructions::FEATURES);
 
     debug!("Initializing kernel frame allocator.");
     falloc::load_new(boot_info.memory_map());
@@ -219,7 +216,7 @@ extern "C" fn _startup() -> ! {
         }
     }
 
-    if libstd::lpu::is_bsp() {
+    if libstd::lpu::is_bsp() && false {
         use libstd::{
             acpi::rdsp::xsdt::{mcfg::MCFG, XSDT},
             io::pci,
@@ -240,10 +237,27 @@ extern "C" fn _startup() -> ! {
                     if device.class() == pci::DeviceClass::MassStorageController
                         // Serial ATA Controller
                         && device.subclass() == 0x08
-                    {}
+                    {
+                        use crate::drivers::nvme::Controller;
+                        let nvme = Controller::from_device(device, 4, 4);
+
+                        info!("{:#?}", nvme);
+                    }
                 }
             }
         }
+    }
+
+    loop {
+        use libstd::registers::MSR;
+
+        info!(
+            "FS 0x{:X}  GS {}",
+            MSR::IA32_FS_BASE.read(),
+            MSR::IA32_GS_BASE.read(),
+        );
+
+        timer::sleep_sec(1);
     }
 
     libstd::instructions::hlt_indefinite()
@@ -272,19 +286,61 @@ fn init_system_config_table(config_table: &[SystemConfigTableEntry]) {
 }
 
 fn init_apic() {
-    use libstd::structures::idt;
+    use libstd::{
+        registers::MSR,
+        structures::{apic::*, idt, pic8259},
+    };
 
     let apic = &libstd::lpu::try_get().unwrap().apic();
 
-    apic.auto_configure_timer_frequency();
+    debug!("Determining APIC timer frequency.");
+
+    unsafe { MSR::IA32_GS_BASE.write(0) };
+    extern "x86-interrupt" fn pit_tick_handler(_: idt::InterruptStackFrame) {
+        unsafe { MSR::IA32_GS_BASE.write(MSR::IA32_GS_BASE.read() + 1) };
+
+        pic8259::end_of_interrupt(pic8259::InterruptOffset::Timer);
+    }
+
+    unsafe {
+        trace!("Resetting and enabling local APIC (it may have already been enabled).");
+        apic.reset();
+        apic.sw_enable();
+        apic.set_spurious_vector(u8::MAX);
+    }
+
+    trace!("Configuring APIC timer state.");
+    apic.write_register(Register::TimerDivisor, divisor as u32);
+    apic.write_register(Register::TimerInitialCount, u32::MAX);
+    apic.timer().set_mode(TimerMode::OneShot);
+
+    pic8259::enable();
+    pic8259::pit::set_timer_freq(frequency, pic8259::pit::OperatingMode::RateGenerator);
+    trace!("Successfully initialized PIC with 1000Hz frequency.");
+
+    idt::set_interrupt_handler(32, pit_tick_handler);
+    libstd::instructions::interrupts::enable();
+
+    trace!("Determining APIC timer frequency using PIT windowing.");
+    apic.timer().set_masked(false);
+    while MSR::IA32_GS_BASE.read() <= (frequency as u64) {}
+    apic.timer().set_masked(true);
+
+    trace!("Disabling 8259 emulated PIC.");
+    libstd::instructions::interrupts::without_interrupts(|| unsafe { pic8259::disable() });
+
+    let apic_freq = apic.read_register(Register::TimerCurrentCount);
+    info!(
+        "APIC timer frequency: {}Hz",
+        apic_freq * divisor.as_divide_value()
+    );
+    apic.write_register(Register::TimerInitialCount, u32::MAX - apic_freq);
 
     idt::set_interrupt_handler(32, timer::apic_tick_handler);
     apic.timer().set_vector(32);
     idt::set_interrupt_handler(58, apic_error_handler);
     apic.error().set_vector(58);
 
-    apic.timer()
-        .set_mode(libstd::structures::apic::TimerMode::Periodic);
     apic.timer().set_masked(false);
     apic.sw_enable();
 

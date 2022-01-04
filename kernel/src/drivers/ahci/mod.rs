@@ -7,7 +7,7 @@ use libstd::io::pci::{standard::StandardRegister, PCIeDevice, Standard};
 pub const ATA_DEV_BUSY: u8 = 0x80;
 pub const ATA_DEV_DRQ: u8 = 0x08;
 
-#[repr]
+#[repr(u8)]
 pub enum CommandType {
     ReadDMA = 0x25,
 }
