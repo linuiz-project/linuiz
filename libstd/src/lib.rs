@@ -247,3 +247,35 @@ impl LinkerSymbol {
         memory::Page::from_ptr(self.as_ptr::<core::ffi::c_void>())
     }
 }
+
+pub struct IndexRing {
+    current: usize,
+    max: usize,
+}
+
+impl IndexRing {
+    pub fn new(max: usize) -> Self {
+        Self { current: 0, max }
+    }
+
+    pub fn index(&self) -> usize {
+        self.current
+    }
+
+    pub fn increment(&mut self) {
+        self.current = self.next_index();
+    }
+
+    pub fn next_index(&self) -> usize {
+        (self.current + 1) % self.max
+    }
+}
+
+impl core::fmt::Debug for IndexRing {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_tuple("Index Ring")
+            .field(&format_args!("{}/{}", self.current, self.max - 1))
+            .finish()
+    }
+}

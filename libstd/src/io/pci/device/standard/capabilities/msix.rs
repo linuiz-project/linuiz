@@ -1,7 +1,6 @@
 use crate::{
     addr_ty::Virtual,
-    bit_array::BitSlice,
-    io::pci::standard::StandardRegister,
+    io::pci::{standard::StandardRegister, PCIeDevice, Standard},
     memory::volatile::{Volatile, VolatileCell},
     volatile_bitfield_getter, Address, ReadOnly, ReadWrite,
 };
@@ -34,41 +33,71 @@ impl fmt::Debug for MessageControl {
 }
 
 #[repr(C)]
-pub struct MessageTableEntry {
-    msg_addr_low: VolatileCell<u32, ReadOnly>,
-    msg_addr_high: VolatileCell<u32, ReadOnly>,
-    msg_data: VolatileCell<u32, ReadWrite>,
+pub struct Message {
+    addr_low: VolatileCell<u32, ReadOnly>,
+    addr_high: VolatileCell<u32, ReadOnly>,
+    data: VolatileCell<u32, ReadWrite>,
     mask: VolatileCell<u32, ReadWrite>,
 }
 
-impl MessageTableEntry {
+impl Message {
+    pub fn get_masked(&self) -> bool {
+        self.mask.read().get_bit(0)
+    }
+
+    pub fn set_masked(&self, masked: bool) {
+        self.mask.write(*self.mask.read().set_bit(0, masked));
+    }
+
     pub fn get_addr(&self) -> Address<Virtual> {
-        let addr_low = (self.msg_addr_low.read() & !0b11111) as usize;
-        let addr_high = (self.msg_addr_high.read() as usize) << 32;
+        let addr_low = self.addr_low.read() as usize;
+        assert!(
+            (addr_low & 0b11) == 0,
+            "Software has failed to maintain DWORD alignment for message address."
+        );
+        let addr_high = (self.addr_high.read() as usize) << 32;
 
         Address::<Virtual>::new(addr_high | addr_low)
     }
 
-    pub fn get_message_data(&self) -> u32 {
-        self.msg_data.read()
+    // TODO figure out if this is even usable?
+    // pub fn set_addr(&self, addr: Address<Virtual>) {
+    //     assert!(
+    //         self.get_masked(),
+    //         "Cannot modify message state when unmasked."
+    //     );
+    //     assert!(
+    //         addr.is_aligned(0b100),
+    //         "Address must be aligned to a DWORD boundary."
+    //     );
+
+    //     let addr_usize = addr.as_usize();
+    //     self.addr_low.write(addr_usize as u32);
+    //     self.addr_high.write((addr_usize >> 32) as u32);
+    // }
+
+    pub fn get_data(&self) -> u32 {
+        self.data.read()
     }
 
-    pub fn set_message_data(&self, value: u32) {
-        self.msg_data.write(value);
+    pub fn set_data(&self, value: u32) {
+        assert!(
+            self.get_masked(),
+            "Cannot modify message state when unmasked."
+        );
+        self.data.write(value);
     }
-
-    volatile_bitfield_getter!(mask, masked, 0);
 }
 
-impl Volatile for MessageTableEntry {}
+impl Volatile for Message {}
 
-impl fmt::Debug for MessageTableEntry {
+impl fmt::Debug for Message {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("Message Table Entry")
             .field("Masked", &self.get_masked())
             .field("Address", &self.get_addr())
-            .field("Data", &self.get_message_data())
+            .field("Data", &self.get_data())
             .finish()
     }
 }
@@ -104,75 +133,109 @@ impl crate::BitValue for PendingBit {
 }
 
 #[repr(C)]
-pub struct MSIX {
-    message_control: MessageControl,
+struct Data {
+    reg0: VolatileCell<u32, ReadWrite>,
     reg1: VolatileCell<u32, ReadOnly>,
     reg2: VolatileCell<u32, ReadOnly>,
 }
 
-impl MSIX {
-    pub fn message_control(&self) -> &MessageControl {
-        &self.message_control
+impl Data {
+    pub fn get_enable(&self) -> bool {
+        self.reg0.read().get_bit(31)
     }
 
-    pub fn get_table_bir(&self) -> StandardRegister {
-        StandardRegister::try_from(self.reg1.read().get_bits(0..3) as usize)
-            .expect("reserved BIR value")
+    pub fn set_enable(&self, enable: bool) {
+        self.reg0.write(*self.reg0.read().set_bit(31, enable));
     }
 
-    pub fn get_table_offset(&self) -> usize {
-        (self.reg1.read() & !0b111) as usize
+    pub fn get_function_mask(&self) -> bool {
+        self.reg0.read().get_bit(30)
     }
 
-    pub fn get_pending_bit_bir(&self) -> StandardRegister {
-        StandardRegister::try_from(self.reg2.read().get_bits(0..3) as usize)
-            .expect("reserved pending BIR value")
+    pub fn set_function_mask(&self, mask_all: bool) {
+        self.reg0.write(*self.reg0.read().set_bit(30, mask_all));
     }
 
-    pub fn get_pending_bit_offset(&self) -> usize {
-        (self.reg2.read() & !0b111) as usize
+    fn get_table_len(&self) -> usize {
+        // Field is encoded as N-1, so add one to get N (table length).
+        (self.reg0.read().get_bits(16..27) as usize) + 1
     }
 
-    pub fn get_message_table<'dev>(
-        &self,
-        device: &'dev crate::io::pci::PCIeDevice<crate::io::pci::Standard>,
-    ) -> Option<&'dev [MessageTableEntry]> {
-        device
-            .get_register(self.get_table_bir())
-            .map(|mmio| unsafe {
-                mmio.slice(
-                    self.get_table_offset(),
-                    self.message_control().get_table_len(),
-                )
-            })
+    fn get_table_info(&self) -> (StandardRegister, usize) {
+        let reg1 = self.reg1.read();
+
+        (
+            StandardRegister::try_from(reg1.get_bits(0..3) as usize).unwrap(),
+            (reg1 & !0b111) as usize,
+        )
     }
 
-    pub fn get_pending_bits<'dev>(
-        &self,
-        device: &'dev crate::io::pci::PCIeDevice<crate::io::pci::Standard>,
-    ) -> Option<BitSlice<VolatileCell<u64, ReadWrite>>> {
-        device
-            .get_register(self.get_pending_bit_bir())
-            .map(|_mmio|  {
-                let _table_offset = self.get_pending_bit_offset();
-                let _table_len = self.message_control().get_table_len();
+    fn get_pending_info(&self) -> (StandardRegister, usize) {
+        let reg2 = self.reg2.read();
 
-                todo!("Not entirely sure what I was doing here before, but this needs to return a competent value.")
-            })
+        (
+            StandardRegister::try_from(reg2.get_bits(0..3) as usize).unwrap(),
+            (reg2 & !0b111) as usize,
+        )
     }
 }
 
-impl Volatile for MSIX {}
+pub struct MSIX<'dev> {
+    data: &'dev Data,
+    messages: &'dev [Message],
+}
 
-impl fmt::Debug for MSIX {
+impl<'dev> MSIX<'dev> {
+    pub(in crate::io::pci::device::standard) fn try_new(
+        device: &'dev PCIeDevice<Standard>,
+    ) -> Option<Self> {
+        device
+            .capabilities()
+            .find(|(_, capability)| *capability == super::Capablities::MSIX)
+            .map(|(addr, _)| {
+                let data = unsafe { addr.as_ptr::<Data>().as_ref() }.unwrap();
+                let (msg_register, msg_offset) = data.get_table_info();
+
+                Self {
+                    data,
+                    messages: device
+                        .get_register(msg_register)
+                        .map(|mmio| unsafe { mmio.slice(msg_offset, data.get_table_len()) })
+                        .expect(
+                            "Device does not have requisite BARs to construct MSIX capability.",
+                        ),
+                }
+            })
+    }
+
+    pub fn get_enable(&self) -> bool {
+        self.data.get_enable()
+    }
+
+    pub fn set_enable(&self, enable: bool) {
+        self.data.set_enable(enable);
+    }
+
+    pub fn get_function_mask(&self) -> bool {
+        self.data.get_function_mask()
+    }
+
+    pub fn set_function_mask(&self, mask_all: bool) {
+        self.data.set_function_mask(mask_all);
+    }
+
+    pub fn iter_messages(&self) -> core::slice::Iter<Message> {
+        self.messages.iter()
+    }
+}
+
+impl fmt::Debug for MSIX<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("MSI-X")
-            .field("Message Control", &self.message_control())
-            .field("BIR", &self.get_table_bir())
-            .field("Table Offset", &self.get_table_offset())
-            .field("Pending Bit BIR", &self.get_pending_bit_bir())
-            .field("Pending Bit Offset", &self.get_pending_bit_offset())
+            .field("Enabled", &self.get_enable())
+            .field("Function Mask", &self.get_function_mask())
+            .field("Messages", &self.messages)
             .finish()
     }
 }

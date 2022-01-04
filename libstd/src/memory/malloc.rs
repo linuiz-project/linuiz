@@ -88,6 +88,12 @@ impl<T> Alloc<T> {
     }
 }
 
+impl<T: Default + Clone> Alloc<T> {
+    pub fn clear(&mut self) {
+        unsafe { core::slice::from_raw_parts_mut(self.ptr, self.len) }.fill(T::default())
+    }
+}
+
 impl<T> core::fmt::Debug for Alloc<T> {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter

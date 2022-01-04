@@ -98,12 +98,12 @@ impl PCIeDevice<Standard> {
     }
 
     pub fn expansion_rom_base_addr(&self) -> u32 {
-        unsafe { self.mmio.read(0x30).assume_init()}
+        unsafe { self.mmio.read(0x30).assume_init() }
     }
 
-    pub fn capabilities(&self) -> CapablitiesIterator {
+    pub(self) fn capabilities(&self) -> CapablitiesIterator {
         CapablitiesIterator::new(&self.mmio, unsafe {
-            self.mmio.read::<u8>(0x34).assume_init() & !0b11
+            (self.mmio.read::<u8>(0x34).assume_init() & !0b11) as usize
         })
     }
 
@@ -135,6 +135,10 @@ impl PCIeDevice<Standard> {
 
     pub fn iter_registers(&self) -> core::slice::Iter<Option<MMIO>> {
         self.registers.iter()
+    }
+
+    pub fn find_msix(&self) -> Option<MSIX> {
+        MSIX::try_new(self)
     }
 }
 
