@@ -206,14 +206,12 @@ pub unsafe fn load() {
     trace!("Loaded IDT.");
 }
 
-pub fn set_interrupt_handler(index: u8, handler: extern "x86-interrupt" fn(InterruptStackFrame)) {
+pub fn set_interrupt_handler(
+    vector: super::apic::InterruptVector,
+    handler: extern "x86-interrupt" fn(InterruptStackFrame),
+) {
     crate::instructions::interrupts::without_interrupts(|| {
-        trace!("Modifying IDT handler at index: {}", index);
-        IDT.lock()[index as usize].set_handler_fn(handler);
+        trace!("Modifying IDT handler: {:?}", vector);
+        IDT.lock()[vector as usize].set_handler_fn(handler);
     });
-}
-
-pub fn virt_addr() -> crate::Address<crate::addr_ty::Virtual> {
-    let idt = IDT.lock();
-    crate::Address::<crate::addr_ty::Virtual>::from_ptr(&raw const *idt)
 }

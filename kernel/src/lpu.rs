@@ -28,14 +28,20 @@ pub fn init(clock: Box<dyn Clock>) {
         "IA32_FS MSR has already been configured."
     );
 
-    unsafe {
-        use bit_field::BitField;
+    use bit_field::BitField;
 
+    let (apic_id, htt_count) = {
         let cpuid = libstd::instructions::cpuid::exec(0x1, 0x0).unwrap();
-        let apic_id = cpuid.ebx().get_bits(24..) as u8;
-        let htt_count = cpuid.ebx().get_bits(16..24) as u8;
-        let apic = APIC::from_msr();
 
+        (
+            cpuid.ebx().get_bits(24..) as u8,
+            cpuid.ebx().get_bits(16..24) as u8,
+        )
+    };
+
+    let apic = APIC::from_msr();
+
+    unsafe {
         let ptr: *mut LPU = libstd::memory::malloc::try_get()
             .unwrap()
             .alloc(core::mem::size_of::<LPU>(), None)

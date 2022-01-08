@@ -17,7 +17,7 @@ pub enum Register {
     TaskPriority = 0x80,
     LDR = 0xD0,
     DFR = 0xE0,
-    SPR = 0xF0,
+    Spurious = 0xF0,
     ICRL = 0x300,
     ICRH = 0x310,
     TimerInitialCount = 0x380,
@@ -88,9 +88,21 @@ bitflags::bitflags! {
     }
 }
 
-pub struct APIC {
-    mmio: MMIO,
+#[repr(u8)]
+#[derive(Debug)]
+pub enum InterruptVector {
+    Timer = 32,
+    CMCI,
+    Performance,
+    ThermalSensor,
+    LINT0,
+    LINT1,
+    Error,
+    Storage,
+    Spurious = u8::MAX,
 }
+
+pub struct APIC(MMIO);
 
 impl APIC {
     pub fn from_msr() -> Self {
@@ -112,11 +124,29 @@ impl APIC {
             );
         }
 
-        Self { mmio }
+        let apic = Self(mmio);
+
+        apic.timer().set_vector(InterruptVector::Timer as u8);
+        apic.cmci().set_vector(InterruptVector::CMCI as u8);
+        apic.performance()
+            .set_vector(InterruptVector::Performance as u8);
+        apic.thermal_sensor()
+            .set_vector(InterruptVector::ThermalSensor as u8);
+        apic.lint0().set_vector(InterruptVector::LINT0 as u8);
+        apic.lint1().set_vector(InterruptVector::LINT1 as u8);
+        apic.error().set_vector(InterruptVector::Error as u8);
+        apic.write_register(
+            Register::Spurious,
+            *apic
+                .read_register(Register::Spurious)
+                .set_bits(0..8, InterruptVector::Spurious as u32),
+        );
+
+        apic
     }
 
     pub unsafe fn mapped_addr(&self) -> Address<Virtual> {
-        self.mmio.mapped_addr()
+        self.0.mapped_addr()
     }
 
     pub fn is_enabled(&self) -> bool {
@@ -133,16 +163,29 @@ impl APIC {
 
     pub fn sw_enable(&self) {
         self.write_register(
-            Register::SPR,
-            *self.read_register(Register::SPR).set_bit(9, true),
+            Register::Spurious,
+            *self.read_register(Register::Spurious).set_bit(9, true),
         );
     }
 
     pub fn sw_disable(&self) {
         self.write_register(
-            Register::SPR,
-            *self.read_register(Register::SPR).set_bit(9, false),
+            Register::Spurious,
+            *self.read_register(Register::Spurious).set_bit(9, false),
         );
+    }
+
+    pub fn set_eoi_broadcast_suppression(&self, suppress: bool) -> Result<(), ()> {
+        if self.read_register(Register::Version).get_bit(24) {
+            self.write_register(
+                Register::Spurious,
+                *self.read_register(Register::Spurious).set_bit(12, suppress),
+            );
+
+            Ok(())
+        } else {
+            Err(())
+        }
     }
 
     pub fn id(&self) -> u8 {
@@ -157,18 +200,26 @@ impl APIC {
         self.read_register(Register::Version).get_bits(16..24) as u8
     }
 
-    pub fn eoi_broadcast_suppression(&self) -> bool {
-        self.read_register(Register::Version).get_bit(24)
+    pub fn error_status(&self) -> ErrorStatusFlags {
+        ErrorStatusFlags::from_bits_truncate(unsafe { self.0.read(0x280).assume_init() })
+    }
+
+    pub fn read_register(&self, register: Register) -> u32 {
+        unsafe { self.0.read(register as usize).assume_init() }
+    }
+
+    pub fn write_register(&self, register: Register, value: u32) {
+        unsafe { self.0.write(register as usize, value) }
     }
 
     pub fn end_of_interrupt(&self) {
-        unsafe { self.mmio.write(0xB0, 0) };
+        unsafe { self.0.write(0xB0, 0) };
     }
 
     pub fn cmci(&self) -> LVTRegister<Generic> {
         unsafe {
             LVTRegister::<Generic> {
-                obj: self.mmio.borrow::<VolatileCell<u32, ReadWrite>>(0x2F0),
+                obj: self.0.borrow::<VolatileCell<u32, ReadWrite>>(0x2F0),
                 phantom: PhantomData,
             }
         }
@@ -177,7 +228,7 @@ impl APIC {
     pub fn timer(&self) -> LVTRegister<Timer> {
         unsafe {
             LVTRegister::<Timer> {
-                obj: self.mmio.borrow::<VolatileCell<u32, ReadWrite>>(0x320),
+                obj: self.0.borrow::<VolatileCell<u32, ReadWrite>>(0x320),
                 phantom: PhantomData,
             }
         }
@@ -186,7 +237,7 @@ impl APIC {
     pub fn thermal_sensor(&self) -> LVTRegister<Generic> {
         unsafe {
             LVTRegister::<Generic> {
-                obj: self.mmio.borrow::<VolatileCell<u32, ReadWrite>>(0x330),
+                obj: self.0.borrow::<VolatileCell<u32, ReadWrite>>(0x330),
                 phantom: PhantomData,
             }
         }
@@ -195,7 +246,7 @@ impl APIC {
     pub fn performance(&self) -> LVTRegister<Generic> {
         unsafe {
             LVTRegister::<Generic> {
-                obj: self.mmio.borrow::<VolatileCell<u32, ReadWrite>>(0x340),
+                obj: self.0.borrow::<VolatileCell<u32, ReadWrite>>(0x340),
                 phantom: PhantomData,
             }
         }
@@ -204,7 +255,7 @@ impl APIC {
     pub fn lint0(&self) -> LVTRegister<LINT> {
         unsafe {
             LVTRegister::<LINT> {
-                obj: self.mmio.borrow::<VolatileCell<u32, ReadWrite>>(0x350),
+                obj: self.0.borrow::<VolatileCell<u32, ReadWrite>>(0x350),
                 phantom: PhantomData,
             }
         }
@@ -213,7 +264,7 @@ impl APIC {
     pub fn lint1(&self) -> LVTRegister<LINT> {
         unsafe {
             LVTRegister::<LINT> {
-                obj: self.mmio.borrow::<VolatileCell<u32, ReadWrite>>(0x360),
+                obj: self.0.borrow::<VolatileCell<u32, ReadWrite>>(0x360),
                 phantom: PhantomData,
             }
         }
@@ -222,40 +273,19 @@ impl APIC {
     pub fn error(&self) -> LVTRegister<Error> {
         unsafe {
             LVTRegister::<Error> {
-                obj: self.mmio.borrow::<VolatileCell<u32, ReadWrite>>(0x370),
+                obj: self.0.borrow::<VolatileCell<u32, ReadWrite>>(0x370),
                 phantom: PhantomData,
             }
         }
     }
 
-    pub fn set_spurious_vector(&self, vector: u8) {
-        self.write_register(
-            Register::SPR,
-            *self
-                .read_register(Register::SPR)
-                .set_bits(0..8, vector as u32),
-        );
-    }
-
     pub fn interrupt_command_register(&self) -> icr::InterruptCommandRegister {
         unsafe {
             icr::InterruptCommandRegister::new(
-                self.mmio.borrow(Register::ICRL as usize),
-                self.mmio.borrow(Register::ICRH as usize),
+                self.0.borrow(Register::ICRL as usize),
+                self.0.borrow(Register::ICRH as usize),
             )
         }
-    }
-
-    pub fn error_status(&self) -> ErrorStatusFlags {
-        ErrorStatusFlags::from_bits_truncate(unsafe { self.mmio.read(0x280).assume_init() })
-    }
-
-    pub fn read_register(&self, register: Register) -> u32 {
-        unsafe { self.mmio.read(register as usize).assume_init() }
-    }
-
-    pub fn write_register(&self, register: Register, value: u32) {
-        unsafe { self.mmio.write(register as usize, value) }
     }
 
     pub unsafe fn reset(&self) {
@@ -302,7 +332,7 @@ impl<T: LVTRegisterVariant> LVTRegister<'_, T> {
     const MASKED_OFFSET: usize = 16;
     const VECTOR_MASK: u32 = 0xFF;
 
-    pub fn is_interrupted(&self) -> bool {
+    pub fn get_interrupted(&self) -> bool {
         self.obj.read().get_bit(Self::INTERRUPTED_OFFSET)
     }
 
@@ -319,14 +349,9 @@ impl<T: LVTRegisterVariant> LVTRegister<'_, T> {
         (self.obj.read() & Self::VECTOR_MASK) as u8
     }
 
-    pub fn set_vector(&mut self, vector: u8) {
+    fn set_vector(&mut self, vector: u8) {
         self.obj
             .write((self.obj.read() & !Self::VECTOR_MASK) | vector as u32);
-    }
-
-    #[cfg(debug_assertions)]
-    pub fn read_raw(&self) -> u32 {
-        self.obj.read()
     }
 }
 

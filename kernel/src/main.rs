@@ -113,7 +113,11 @@ unsafe fn kernel_init() -> ! {
     info!("Validating BootInfo struct.");
     boot_info.validate_magic();
 
-    debug!("CPU features: {:?}", libstd::instructions::cpuid::FEATURES);
+    debug!(
+        "CPU features: {:?} | {:?}",
+        libstd::instructions::cpuid::FEATURES,
+        libstd::instructions::cpuid::FEATURES_EXT
+    );
 
     debug!("Initializing kernel frame allocator.");
     falloc::load_new(boot_info.memory_map());
@@ -217,7 +221,7 @@ extern "C" fn _startup() -> ! {
         }
     }
 
-    if crate::lpu::is_bsp() && false {
+    if crate::lpu::is_bsp() {
         use libstd::{
             acpi::rdsp::xsdt::{mcfg::MCFG, XSDT},
             io::pci,
@@ -241,7 +245,6 @@ extern "C" fn _startup() -> ! {
                     {
                         use crate::drivers::nvme::Controller;
                         let nvme = Controller::from_device(device, 4, 4);
-
                         info!("{:#?}", nvme);
                     }
                 }
@@ -292,7 +295,6 @@ fn init_apic() {
     trace!("Resetting and enabling local APIC (it may have already been enabled).");
     unsafe { apic.reset() };
     apic.sw_enable();
-    apic.set_spurious_vector(u8::MAX);
     apic.write_register(Register::TimerDivisor, TimerDivisor::Div1 as u32);
     apic.write_register(Register::TimerInitialCount, u32::MAX);
     apic.timer().set_mode(TimerMode::OneShot);
@@ -301,7 +303,7 @@ fn init_apic() {
     const FREQ_WINDOW: u64 = (MIN_FREQ / 100) as u64;
 
     pic8259::enable();
-    idt::set_interrupt_handler(32, pit_tick_handler);
+    idt::set_interrupt_handler(InterruptVector::Timer, pit_tick_handler);
     pic8259::pit::set_timer_freq(MIN_FREQ, pic8259::pit::OperatingMode::RateGenerator);
 
     trace!("Determining APIT frequency using PIT windowing.");
@@ -324,10 +326,8 @@ fn init_apic() {
         apic.read_register(Register::TimerInitialCount)
     );
 
-    idt::set_interrupt_handler(32, drivers::clock::apic_tick_handler);
-    apic.timer().set_vector(32);
-    idt::set_interrupt_handler(58, apic_error_handler);
-    apic.error().set_vector(58);
+    idt::set_interrupt_handler(InterruptVector::Timer, drivers::clock::apic_tick_handler);
+    idt::set_interrupt_handler(InterruptVector::Error, apic_error_handler);
 
     apic.timer().set_mode(TimerMode::Periodic);
     apic.timer().set_masked(false);
