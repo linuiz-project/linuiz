@@ -126,9 +126,9 @@ bitflags::bitflags! {
 bitflags::bitflags! {
     pub struct FeaturesExt : u64 {
         const LAHF          = 1 << 0;
-        const LZCNT         = 1 << 4;
-        const PREFETCHW     = 1 << 7;
-        const SYSCALL       = 1 << 41;
+        const LZCNT         = 1 << 5;
+        const PREFETCHW     = 1 << 8;
+        const SYSCALL       = 1 << 43;
         const EXEC_DISABLE  = 1 << 52;
         const GB_PAGES      = 1 << 58;
         const RDTSCP        = 1 << 59;
@@ -149,15 +149,15 @@ impl core::fmt::Debug for FEATURES {
     }
 }
 
-// lazy_static::lazy_static! {
-//     pub static ref FEATURES_EXT: FeaturesExt = {
-//         let cpuid = exec(0x80000001, 0x0).unwrap();
-//         FeaturesExt::from_bits_truncate(((cpuid.edx() as u64) << 32) | (cpuid.ecx() as u64))
-//     };
-// }
+lazy_static::lazy_static! {
+    pub static ref FEATURES_EXT: FeaturesExt = {
+        let cpuid = exec(0x80000001, 0x0).unwrap();
+        FeaturesExt::from_bits_truncate(((cpuid.edx() as u64) << 32) | (cpuid.ecx() as u64))
+    };
+}
 
-// impl core::fmt::Debug for FEATURES_EXT {
-//     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-//         FeaturesExt::fmt(self, f)
-//     }
-// }
+impl core::fmt::Debug for FEATURES_EXT {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        FeaturesExt::fmt(self, f)
+    }
+}

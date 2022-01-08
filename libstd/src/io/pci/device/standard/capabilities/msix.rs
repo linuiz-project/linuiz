@@ -34,8 +34,8 @@ impl fmt::Debug for MessageControl {
 
 #[repr(C)]
 pub struct Message {
-    addr_low: VolatileCell<u32, ReadOnly>,
-    addr_high: VolatileCell<u32, ReadOnly>,
+    addr_low: VolatileCell<u32, ReadWrite>,
+    addr_high: VolatileCell<u32, ReadWrite>,
     data: VolatileCell<u32, ReadWrite>,
     mask: VolatileCell<u32, ReadWrite>,
 }
@@ -60,21 +60,20 @@ impl Message {
         Address::<Virtual>::new(addr_high | addr_low)
     }
 
-    // TODO figure out if this is even usable?
-    // pub fn set_addr(&self, addr: Address<Virtual>) {
-    //     assert!(
-    //         self.get_masked(),
-    //         "Cannot modify message state when unmasked."
-    //     );
-    //     assert!(
-    //         addr.is_aligned(0b100),
-    //         "Address must be aligned to a DWORD boundary."
-    //     );
+    pub fn set_addr(&self, addr: Address<Virtual>) {
+        assert!(
+            self.get_masked(),
+            "Cannot modify message state when unmasked."
+        );
+        assert!(
+            addr.is_aligned(0b100),
+            "Address must be aligned to a DWORD boundary."
+        );
 
-    //     let addr_usize = addr.as_usize();
-    //     self.addr_low.write(addr_usize as u32);
-    //     self.addr_high.write((addr_usize >> 32) as u32);
-    // }
+        let addr_usize = addr.as_usize();
+        self.addr_low.write(addr_usize as u32);
+        self.addr_high.write((addr_usize >> 32) as u32);
+    }
 
     pub fn get_data(&self) -> u32 {
         self.data.read()

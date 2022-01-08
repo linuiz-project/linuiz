@@ -34,12 +34,7 @@ impl Clock for MSRClock {
 
     fn tick(&self) {
         unsafe {
-            let msr = MSR::IA32_GS_BASE.read_unchecked();
-            MSR::IA32_GS_BASE.write_unchecked(msr + 1);
-
-            if (msr % 100) == 0 {
-                crate::println!("{}", msr);
-            }
+            MSR::IA32_GS_BASE.write_unchecked(MSR::IA32_GS_BASE.read_unchecked() + 1);
         }
     }
 }
