@@ -162,8 +162,6 @@ impl<'q> SubmissionQueue<'q> {
     }
 }
 
-// TODO drop
-
 impl core::fmt::Debug for SubmissionQueue<'_> {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter

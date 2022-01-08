@@ -24,7 +24,21 @@ bitflags::bitflags! {
     pub struct CommandSetsSupported: u8 {
         const NVM = 1 << 0;
         const IO = 1 << 6;
-        const ONLY_ADMIN = 1 << 7;
+        const ADMIN = 1 << 7;
+    }
+}
+
+impl CommandSetsSupported {
+    pub fn into_command_set(self) -> CommandSet {
+        if self.contains(Self::ADMIN) {
+            CommandSet::Admin
+        } else if self.contains(Self::IO) {
+            CommandSet::IO
+        } else if self.contains(Self::NVM) {
+            CommandSet::NVM
+        } else {
+            panic!("Invalid state for CAP.CSS: {:?}", self)
+        }
     }
 }
 
@@ -300,6 +314,12 @@ impl InterruptMask {
     }
 }
 
+#[derive(Debug)]
+pub enum ControllerEnableError {
+    FatalStatus,
+    NoReady,
+}
+
 pub struct Controller<'dev> {
     device: &'dev PCIeDevice<Standard>,
     msix: libstd::io::pci::standard::MSIX<'dev>,
@@ -333,7 +353,11 @@ impl<'dev> Controller<'dev> {
             admin_com: None,
         };
 
-        unsafe { nvme.set_enable_and_wait(false) };
+        unsafe {
+            nvme.set_enable_and_wait(false)
+                .expect("NVMe controller failed to reset");
+        }
+
         debug!("NVMe controller successfully reset.");
 
         debug!("Creating admin submission & completion queues.");
@@ -342,24 +366,19 @@ impl<'dev> Controller<'dev> {
         nvme.admin_com = Some(queue::admin::CompletionQueue::new(reg0, com_entry_count));
 
         let cc = nvme.config();
-
-        let css = nvme.capabilities().get_css();
-        cc.set_css(if css.contains(CommandSetsSupported::ONLY_ADMIN) {
-            CommandSet::Admin
-        } else if css.contains(CommandSetsSupported::IO) {
-            CommandSet::IO
-        } else if css.contains(CommandSetsSupported::NVM) {
-            CommandSet::NVM
-        } else {
-            panic!("NVMe driver reports invalid CAP.CSS value: {:?}", css)
-        });
-
-        cc.set_shn(ShutdownNotification::None);
+        cc.set_css(nvme.capabilities().get_css().into_command_set());
         cc.set_ams(ArbitrationMechanism::RoundRobin);
         cc.set_mps(0); // 4KiB pages
+        cc.set_iosqes(6); // 64 bytes (2^6)
+        cc.set_iocqes(4); // 16 bytes (2^4)
 
-        unsafe { nvme.set_enable_and_wait(true) };
-        debug!("Software NVMe controller successfully created.");
+        unsafe {
+            nvme.set_enable_and_wait(true)
+                .expect("NVMe driver failed to enable");
+        }
+
+        nvme.msix.iter_messages().nth(0).unwrap().set_masked(false);
+
         nvme
     }
 
@@ -408,7 +427,7 @@ impl<'dev> Controller<'dev> {
         }
     }
 
-    pub unsafe fn set_enable_and_wait(&self, enabled: bool) -> bool {
+    pub unsafe fn set_enable_and_wait(&self, enabled: bool) -> Result<(), ControllerEnableError> {
         debug!("Resetting controller to enabled state: {}.", enabled);
         self.config().set_en(enabled);
         let csts = self.status();
@@ -419,12 +438,20 @@ impl<'dev> Controller<'dev> {
             "Waiting up to {}ms for controller to finalize enable state.",
             max_wait
         );
-        while (!csts.get_cfs() || csts.get_rdy() != enabled) && msec_waited < max_wait {
-            crate::drivers::clock::sleep_msec(10);
-            msec_waited += 10;
+        while csts.get_rdy() != enabled && !csts.get_cfs() && msec_waited < max_wait {
+            const SLEEP_INTERVAL: u64 = 100;
+
+            crate::drivers::clock::sleep_msec(SLEEP_INTERVAL);
+            msec_waited += SLEEP_INTERVAL;
         }
 
-        msec_waited < max_wait
+        if csts.get_cfs() {
+            Err(ControllerEnableError::FatalStatus)
+        } else if csts.get_rdy() != enabled {
+            Err(ControllerEnableError::NoReady)
+        } else {
+            Ok(())
+        }
     }
 
     pub fn admin_submission_queue(&self) -> Option<&queue::admin::SubmissionQueue> {
@@ -443,6 +470,7 @@ impl fmt::Debug for Controller<'_> {
             .field("Capabilities", &self.capabilities())
             .field("Version", &self.version())
             .field("Interrupt Mask", &self.interrupt_mask().raw_bits_str())
+            .field("MSIX", &self.msix)
             .field("Controller Configuration", &self.config())
             .field("Controller Status", &self.status())
             .field("Admin Submission Queue Address", &self.admin_sub)
