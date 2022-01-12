@@ -335,7 +335,7 @@ impl MemoryAllocator for BlockAllocator<'_> {
             let was_empty = block_page.is_empty();
 
             let low_offset = block_index - (map_index * BlockPage::BLOCKS_PER);
-            let high_offset = (end_map_index * BlockPage::BLOCKS_PER) - end_block_index;
+            let high_offset = 64 - usize::min(end_block_index - block_index, 64);
             let mask_bits_count = BlockPage::BLOCKS_PER - (low_offset + high_offset);
             let mask_bits = libstd::U64_BIT_MASKS[mask_bits_count - 1];
 
