@@ -1,3 +1,4 @@
+pub mod hpet;
 pub mod madt;
 pub mod mcfg;
 
@@ -51,6 +52,13 @@ impl XSDTData {
         }
 
         Err(XSDTError::TableNotFound)
+    }
+
+    pub fn list_sub_tables(&self) {
+        debug!("XSDT Sub-Tables:");
+        for entry_ptr in self.entries() {
+            debug!("{}", unsafe { (**entry_ptr).signature() });
+        }
     }
 }
 

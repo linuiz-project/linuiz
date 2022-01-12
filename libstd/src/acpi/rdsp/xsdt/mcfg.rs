@@ -4,13 +4,13 @@ use crate::{
     Address,
 };
 
-#[repr(C)]
+#[repr(C, packed)]
 struct Header {
     sdt_header: SDTHeader,
     reserved: [u8; 8],
 }
 
-#[repr(C)]
+#[repr(C, packed)]
 pub struct Entry {
     base_addr: Address<Physical>,
     seg_group_num: u16,

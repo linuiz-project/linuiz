@@ -10,7 +10,7 @@ bitflags::bitflags! {
     }
 }
 
-#[repr(C)]
+#[repr(C, packed)]
 pub struct Header {
     sdt_header: xsdt::SDTHeader,
     apic_addr: u32,
@@ -32,8 +32,9 @@ impl MADT {
         Address::<Physical>::new(self.madt_header().apic_addr as usize)
     }
 
-    pub fn flags(&self) -> &Flags {
-        &self.madt_header().flags
+    pub fn flags(&self) -> Flags {
+        let flags = self.madt_header().flags;
+        flags
     }
 
     pub fn iter(&self) -> MADTIterator {
