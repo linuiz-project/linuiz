@@ -2,6 +2,8 @@
 
 use libstd::registers::MSR;
 
+// TODO PIT needs to be processor-global; initialized and running on its own.
+
 pub trait Clock {
     fn frequency(&self) -> u64;
     fn get_ticks(&self) -> u64;
@@ -36,15 +38,6 @@ impl Clock for MSRClock {
         unsafe {
             MSR::IA32_GS_BASE.write_unchecked(MSR::IA32_GS_BASE.read_unchecked() + 1);
         }
-    }
-}
-
-pub extern "x86-interrupt" fn apic_tick_handler(_: libstd::structures::idt::InterruptStackFrame) {
-    if let Some(lpu) = crate::lpu::try_get() {
-        lpu.clock().tick();
-        lpu.apic().end_of_interrupt();
-    } else {
-        panic!("Interrupts enabled without system clock (no LPU structure)!");
     }
 }
 

@@ -156,11 +156,11 @@ extern "x86-interrupt" fn security_exception_handler(
 
 /* IDT */
 
-static IDT: spin::Mutex<InterruptDescriptorTable> =
-    spin::Mutex::new(InterruptDescriptorTable::new());
+// static IDT: spin::Mutex<InterruptDescriptorTable> =
+//     spin::Mutex::new(InterruptDescriptorTable::new());
 
-pub fn init() {
-    let mut idt = IDT.lock();
+pub fn configure(idt: &mut InterruptDescriptorTable) {
+    trace!("Initializing IDT fault entires.");
 
     // fault interrupts
     idt.divide_error.set_handler_fn(divide_error_handler);
@@ -201,17 +201,9 @@ pub fn init() {
     // --- triple fault (can't handle)
 }
 
-pub unsafe fn load() {
-    IDT.lock().load_unsafe();
-    trace!("Loaded IDT.");
-}
-
-pub fn set_interrupt_handler(
-    vector: super::apic::InterruptVector,
-    handler: extern "x86-interrupt" fn(InterruptStackFrame),
-) {
-    crate::instructions::interrupts::without_interrupts(|| {
-        trace!("Modifying IDT handler: {:?}", vector);
-        IDT.lock()[vector as usize].set_handler_fn(handler);
-    });
-}
+// pub fn set_interrupt_handler(vector: u8, handler: extern "x86-interrupt" fn(InterruptStackFrame)) {
+//     crate::instructions::interrupts::without_interrupts(|| {
+//         trace!("Modifying IDT handler: {}", vector);
+//         IDT.lock()[vector as usize].set_handler_fn(handler);
+//     });
+// }

@@ -126,7 +126,7 @@ impl Into<usize> for PendingBit {
     }
 }
 
-impl crate::BitValue for PendingBit {
+impl crate::collections::bv_array::BitValue for PendingBit {
     const BIT_WIDTH: usize = 0x1;
     const MASK: usize = 0x1;
 }
@@ -199,7 +199,7 @@ impl<'dev> MSIX<'dev> {
                     data,
                     messages: device
                         .get_register(msg_register)
-                        .map(|mmio| unsafe { mmio.slice(msg_offset, data.get_table_len()) })
+                        .map(|mmio| unsafe { mmio.slice(msg_offset, data.get_table_len()).unwrap() })
                         .expect(
                             "Device does not have requisite BARs to construct MSIX capability.",
                         ),

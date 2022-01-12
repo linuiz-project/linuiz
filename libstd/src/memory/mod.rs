@@ -17,7 +17,7 @@ use crate::{
     addr_ty::{Physical, Virtual},
     Address,
 };
-use core::{mem::MaybeUninit, num::NonZeroUsize, ops::Range};
+use core::{mem::MaybeUninit, ops::Range};
 
 use self::volatile::Volatile;
 
@@ -37,6 +37,7 @@ macro_rules! alloc {
     ($size:expr) => {
         $crate::memory::alloc_generic($size, None)
     };
+
     ($size:expr, $align:expr) => {
         $crate::memory::alloc_generic($size, $align)
     };
@@ -45,13 +46,15 @@ macro_rules! alloc {
 #[macro_export]
 macro_rules! alloc_to {
     ($frame_index:expr, $count:expr) => {
-        $crate::memory::malloc::try_get().unwrap().alloc_against($frame_index, $count)
+        $crate::memory::malloc::try_get()
+            .unwrap()
+            .alloc_against($frame_index, $count)
     };
 }
 
 pub fn alloc_generic<T>(
     size: usize,
-    align: Option<NonZeroUsize>,
+    align: Option<core::num::NonZeroUsize>,
 ) -> Result<malloc::Alloc<T>, crate::memory::malloc::AllocError> {
     unsafe {
         crate::memory::malloc::try_get().unwrap().alloc(
@@ -76,15 +79,18 @@ impl MMIO {
     // TODO possibly introduct an Address<Frame> type to represent
     // frame addresses?
     pub unsafe fn new(frame_index: usize, count: usize) -> Result<Self, malloc::AllocError> {
-        malloc::try_get().unwrap().alloc_against(frame_index, count).map(|data| {
-            let parts = data.into_parts();
+        malloc::try_get()
+            .unwrap()
+            .alloc_against(frame_index, count)
+            .map(|data| {
+                let parts = data.into_parts();
 
-            Self {
-                frame_range: frame_index..(frame_index + count),
-                ptr: parts.0,
-                len: parts.1,
-            }
-        })
+                Self {
+                    frame_range: frame_index..(frame_index + count),
+                    ptr: parts.0,
+                    len: parts.1,
+                }
+            })
     }
 
     pub fn frames(&self) -> &Range<usize> {
@@ -108,37 +114,54 @@ impl MMIO {
     }
 
     #[inline]
-    fn offset(&self, offset: usize) -> *mut u8 {
-        if offset < self.len {
-            unsafe { self.ptr.add(offset) }
-        } else {
-            panic!(
-                "Offset is {}, but MMIO ends at offset {}.",
-                offset, self.len
-            )
+    const fn offset<T>(&self, offset: usize) -> *mut T {
+        if (offset + core::mem::size_of::<T>()) < self.len {
+            let ptr = unsafe { self.ptr.add(offset).cast::<T>() };
+
+            if ptr.align_offset(core::mem::align_of::<T>()) == 0 {
+                return ptr;
+            }
         }
+
+        core::ptr::null_mut()
     }
 
+    #[inline]
     pub fn read<T>(&self, offset: usize) -> MaybeUninit<T> {
-        unsafe { (self.offset(offset) as *const MaybeUninit<T>).read_volatile() }
+        unsafe { self.offset::<MaybeUninit<T>>(offset).read_volatile() }
     }
 
+    #[inline]
     pub unsafe fn write<T>(&self, offset: usize, value: T) {
-        (self.offset(offset) as *mut T).write_volatile(value);
+        self.offset::<T>(offset).write_volatile(value)
     }
 
-    pub unsafe fn borrow<T: volatile::Volatile>(&self, offset: usize) -> &T {
-        (self.offset(offset) as *const T).as_ref().unwrap()
+    #[inline]
+    pub const unsafe fn borrow<T: volatile::Volatile>(&self, offset: usize) -> &T {
+        self.offset::<T>(offset).as_ref().unwrap()
     }
 
-    pub unsafe fn slice<'a, T: Volatile>(&'a self, offset: usize, len: usize) -> &'a [T] {
+    #[inline]
+    pub const unsafe fn slice<'a, T: Volatile>(
+        &'a self,
+        offset: usize,
+        len: usize,
+    ) -> Option<&'a [T]> {
         if (offset + len) < self.len {
-            core::slice::from_raw_parts(self.offset(offset) as *const _, len)
+            Some(core::slice::from_raw_parts(self.offset::<T>(offset), len))
         } else {
-            panic!(
-                "Offset is {} and len is {}, but MMIO ends at offset {}.",
-                offset, len, self.len
-            )
+            None
         }
+    }
+}
+
+impl core::fmt::Debug for MMIO {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("MMIO")
+            .field("Frames", &self.frame_range)
+            .field("Virtual Base", &self.ptr)
+            .field("Length", &self.len)
+            .finish()
     }
 }

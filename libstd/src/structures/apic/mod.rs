@@ -1,11 +1,11 @@
 pub mod icr;
 
 use crate::{
-    addr_ty::Virtual,
     memory::{volatile::VolatileCell, MMIO},
     registers::MSR,
-    Address, ReadWrite,
+    ReadWrite,
 };
+use bit_field::BitField;
 use core::marker::PhantomData;
 
 #[repr(u32)]
@@ -88,104 +88,93 @@ bitflags::bitflags! {
     }
 }
 
-#[repr(u8)]
 #[derive(Debug)]
-pub enum InterruptVector {
-    Timer = 32,
-    CMCI,
-    Performance,
-    ThermalSensor,
-    LINT0,
-    LINT1,
-    Error,
-    Storage,
-    Spurious = u8::MAX,
-}
+pub struct APICExistsError;
 
 pub struct APIC(MMIO);
 
 impl APIC {
-    pub fn from_msr() -> Self {
+    pub const SPR: usize = 0xF0;
+    pub const ERRST: usize = 0x280;
+    pub const EOI: usize = 0xB0;
+
+    pub fn from_msr() -> Result<Self, APICExistsError> {
         unsafe {
-            Self::new(
-                crate::memory::MMIO::new(MSR::IA32_APIC_BASE.read().get_bits(12..36) as usize, 1)
-                    .expect("Allocation failure when attempting to create MMIO for APIC"),
-            )
+            let mmio = MMIO::new(MSR::IA32_APIC_BASE.read().get_bits(12..36) as usize, 1).unwrap();
+
+            // Validate that APIC hasn't been created already.
+            if mmio.read::<u32>(Register::DFR as usize).assume_init() == u32::MAX {
+                mmio.write(
+                    Self::SPR,
+                    *mmio
+                        .read::<u32>(Self::SPR)
+                        .assume_init()
+                        .set_bits(0..8, u8::MAX as u32),
+                );
+
+                Ok(Self(mmio))
+            } else {
+                Err(APICExistsError)
+            }
         }
     }
 
-    pub unsafe fn new(mmio: MMIO) -> Self {
-        let assumed_base = MSR::IA32_APIC_BASE.read().get_bits(12..36) as usize;
-        if assumed_base != mmio.frames().start {
-            warn!(
-                "APIC MMIO BASE FRAME INDEX CHECK: IA32_APIC_BASE({:?}) != PROVIDED({:?})",
-                assumed_base,
-                mmio.frames().start
-            );
-        }
-
-        let apic = Self(mmio);
-
-        apic.timer().set_vector(InterruptVector::Timer as u8);
-        apic.cmci().set_vector(InterruptVector::CMCI as u8);
-        apic.performance()
-            .set_vector(InterruptVector::Performance as u8);
-        apic.thermal_sensor()
-            .set_vector(InterruptVector::ThermalSensor as u8);
-        apic.lint0().set_vector(InterruptVector::LINT0 as u8);
-        apic.lint1().set_vector(InterruptVector::LINT1 as u8);
-        apic.error().set_vector(InterruptVector::Error as u8);
-        apic.write_register(
-            Register::Spurious,
-            *apic
-                .read_register(Register::Spurious)
-                .set_bits(0..8, InterruptVector::Spurious as u32),
-        );
-
-        apic
+    #[inline]
+    pub fn read_register(&self, register: Register) -> u32 {
+        unsafe { self.0.read(register as usize).assume_init() }
     }
 
-    pub unsafe fn mapped_addr(&self) -> Address<Virtual> {
-        self.0.mapped_addr()
+    #[inline]
+    pub fn write_register(&self, register: Register, value: u32) {
+        unsafe { self.0.write(register as usize, value) }
     }
 
-    pub fn is_enabled(&self) -> bool {
+    pub fn is_hw_enabled(&self) -> bool {
         (MSR::IA32_APIC_BASE.read() & (1 << 11)) > 0
     }
 
     pub unsafe fn hw_enable(&self) {
-        MSR::IA32_APIC_BASE.write_bit(11, true);
+        MSR::IA32_APIC_BASE.write(MSR::IA32_APIC_BASE.read() | (1 << 11));
     }
 
     pub unsafe fn hw_disable(&self) {
-        MSR::IA32_APIC_BASE.write_bit(11, false);
+        MSR::IA32_APIC_BASE.write(MSR::IA32_APIC_BASE.read() & !(1 << 11));
     }
 
-    pub fn sw_enable(&self) {
-        self.write_register(
-            Register::Spurious,
-            *self.read_register(Register::Spurious).set_bit(9, true),
+    pub unsafe fn sw_enable(&self) {
+        self.0.write(
+            Self::SPR,
+            *self.0.read::<u32>(Self::SPR).assume_init().set_bit(9, true),
         );
     }
 
-    pub fn sw_disable(&self) {
-        self.write_register(
-            Register::Spurious,
-            *self.read_register(Register::Spurious).set_bit(9, false),
+    pub unsafe fn sw_disable(&self) {
+        self.0.write(
+            Self::SPR,
+            *self
+                .0
+                .read::<u32>(Self::SPR)
+                .assume_init()
+                .set_bit(9, false),
         );
     }
 
-    pub fn set_eoi_broadcast_suppression(&self, suppress: bool) -> Result<(), ()> {
-        if self.read_register(Register::Version).get_bit(24) {
-            self.write_register(
-                Register::Spurious,
-                *self.read_register(Register::Spurious).set_bit(12, suppress),
-            );
+    pub fn set_eoi_broadcast_suppression(&self, suppress: bool) {
+        unsafe {
+            self.0.write(
+                Self::SPR,
+                *self
+                    .0
+                    .read::<u32>(Self::SPR)
+                    .assume_init()
+                    .set_bit(12, suppress),
+            )
+        };
+    }
 
-            Ok(())
-        } else {
-            Err(())
-        }
+    #[inline]
+    pub fn end_of_interrupt(&self) {
+        unsafe { self.0.write(Self::EOI, 0) };
     }
 
     pub fn id(&self) -> u8 {
@@ -196,90 +185,11 @@ impl APIC {
         self.read_register(Register::Version).get_bits(0..8) as u8
     }
 
-    pub fn max_lvt_entry(&self) -> u8 {
-        self.read_register(Register::Version).get_bits(16..24) as u8
-    }
-
     pub fn error_status(&self) -> ErrorStatusFlags {
-        ErrorStatusFlags::from_bits_truncate(unsafe { self.0.read(0x280).assume_init() })
+        ErrorStatusFlags::from_bits_truncate(unsafe { self.0.read(Self::ERRST).assume_init() })
     }
 
-    pub fn read_register(&self, register: Register) -> u32 {
-        unsafe { self.0.read(register as usize).assume_init() }
-    }
-
-    pub fn write_register(&self, register: Register, value: u32) {
-        unsafe { self.0.write(register as usize, value) }
-    }
-
-    pub fn end_of_interrupt(&self) {
-        unsafe { self.0.write(0xB0, 0) };
-    }
-
-    pub fn cmci(&self) -> LVTRegister<Generic> {
-        unsafe {
-            LVTRegister::<Generic> {
-                obj: self.0.borrow::<VolatileCell<u32, ReadWrite>>(0x2F0),
-                phantom: PhantomData,
-            }
-        }
-    }
-
-    pub fn timer(&self) -> LVTRegister<Timer> {
-        unsafe {
-            LVTRegister::<Timer> {
-                obj: self.0.borrow::<VolatileCell<u32, ReadWrite>>(0x320),
-                phantom: PhantomData,
-            }
-        }
-    }
-
-    pub fn thermal_sensor(&self) -> LVTRegister<Generic> {
-        unsafe {
-            LVTRegister::<Generic> {
-                obj: self.0.borrow::<VolatileCell<u32, ReadWrite>>(0x330),
-                phantom: PhantomData,
-            }
-        }
-    }
-
-    pub fn performance(&self) -> LVTRegister<Generic> {
-        unsafe {
-            LVTRegister::<Generic> {
-                obj: self.0.borrow::<VolatileCell<u32, ReadWrite>>(0x340),
-                phantom: PhantomData,
-            }
-        }
-    }
-
-    pub fn lint0(&self) -> LVTRegister<LINT> {
-        unsafe {
-            LVTRegister::<LINT> {
-                obj: self.0.borrow::<VolatileCell<u32, ReadWrite>>(0x350),
-                phantom: PhantomData,
-            }
-        }
-    }
-
-    pub fn lint1(&self) -> LVTRegister<LINT> {
-        unsafe {
-            LVTRegister::<LINT> {
-                obj: self.0.borrow::<VolatileCell<u32, ReadWrite>>(0x360),
-                phantom: PhantomData,
-            }
-        }
-    }
-
-    pub fn error(&self) -> LVTRegister<Error> {
-        unsafe {
-            LVTRegister::<Error> {
-                obj: self.0.borrow::<VolatileCell<u32, ReadWrite>>(0x370),
-                phantom: PhantomData,
-            }
-        }
-    }
-
-    pub fn interrupt_command_register(&self) -> icr::InterruptCommandRegister {
+    pub const fn interrupt_command(&self) -> icr::InterruptCommandRegister {
         unsafe {
             icr::InterruptCommandRegister::new(
                 self.0.borrow(Register::ICRL as usize),
@@ -288,83 +198,147 @@ impl APIC {
         }
     }
 
+    #[inline]
+    pub const fn cmci(&self) -> &LocalVector<Generic> {
+        unsafe { self.0.borrow(0x2F0) }
+    }
+
+    #[inline]
+    pub const fn timer(&self) -> &LocalVector<Timer> {
+        unsafe { self.0.borrow(0x320) }
+    }
+
+    #[inline]
+    pub const fn thermal_sensor(&self) -> &LocalVector<Generic> {
+        unsafe { self.0.borrow(0x330) }
+    }
+
+    #[inline]
+    pub const fn performance(&self) -> &LocalVector<Generic> {
+        unsafe { self.0.borrow(0x340) }
+    }
+
+    #[inline]
+    pub const fn lint0(&self) -> &LocalVector<LINT> {
+        unsafe { self.0.borrow(0x350) }
+    }
+
+    #[inline]
+    pub const fn lint1(&self) -> &LocalVector<LINT> {
+        unsafe { self.0.borrow(0x360) }
+    }
+
+    #[inline]
+    pub const fn error(&self) -> &LocalVector<Error> {
+        unsafe { self.0.borrow(0x370) }
+    }
+
     pub unsafe fn reset(&self) {
         self.sw_disable();
-        self.write_register(Register::DFR, 0xFFFFFFFF);
+        self.write_register(Register::DFR, u32::MAX);
         let mut ldr = self.read_register(Register::LDR);
         ldr &= 0xFFFFFF;
         ldr = (ldr & !0xFF) | ((ldr & 0xFF) | 1);
-        self.write_register(Register::LDR, ldr);
-        self.timer().set_masked(true);
         self.performance()
             .set_delivery_mode(DeliveryMode::NonMaskable);
-        // self.lint0().set_masked(true);
-        self.lint1().set_masked(true);
+        self.write_register(Register::LDR, ldr);
         self.write_register(Register::TaskPriority, 0);
         self.write_register(Register::TimerInitialCount, 0);
+        self.cmci().set_masked(true);
+        self.timer().set_masked(true);
+        self.performance().set_masked(true);
+        self.thermal_sensor().set_masked(true);
+        // For whatever reason, masking this interrupt causes the PIT not to fire.
+        // self.lint0().set_masked(true);
+        self.lint1().set_masked(true);
+        self.error().set_masked(true);
     }
 }
 
-pub trait LVTRegisterVariant {}
+pub trait LocalVectorVariant {}
 
 pub enum Timer {}
-impl LVTRegisterVariant for Timer {}
+impl LocalVectorVariant for Timer {}
 
 pub enum Generic {}
-impl LVTRegisterVariant for Generic {}
+impl LocalVectorVariant for Generic {}
 
 pub enum LINT {}
-impl LVTRegisterVariant for LINT {}
+impl LocalVectorVariant for LINT {}
 
 pub enum Error {}
-impl LVTRegisterVariant for Error {}
-
-use bit_field::BitField;
+impl LocalVectorVariant for Error {}
 
 #[repr(transparent)]
-pub struct LVTRegister<'reg, T: LVTRegisterVariant> {
-    obj: &'reg crate::memory::volatile::VolatileCell<u32, ReadWrite>,
+pub struct LocalVector<T: LocalVectorVariant> {
+    vol: VolatileCell<u32, ReadWrite>,
     phantom: PhantomData<T>,
 }
 
-impl<T: LVTRegisterVariant> LVTRegister<'_, T> {
+impl<T: LocalVectorVariant> crate::memory::volatile::Volatile for LocalVector<T> {}
+
+impl<T: LocalVectorVariant> LocalVector<T> {
     const INTERRUPTED_OFFSET: usize = 12;
     const MASKED_OFFSET: usize = 16;
-    const VECTOR_MASK: u32 = 0xFF;
 
+    #[inline]
     pub fn get_interrupted(&self) -> bool {
-        self.obj.read().get_bit(Self::INTERRUPTED_OFFSET)
+        self.vol.read().get_bit(Self::INTERRUPTED_OFFSET)
     }
 
-    pub fn is_masked(&self) -> bool {
-        self.obj.read().get_bit(Self::MASKED_OFFSET)
+    #[inline]
+    pub fn get_masked(&self) -> bool {
+        self.vol.read().get_bit(Self::MASKED_OFFSET)
     }
 
-    pub fn set_masked(&mut self, masked: bool) {
-        self.obj
-            .write(*self.obj.read().set_bit(Self::MASKED_OFFSET, masked));
+    #[inline]
+    pub fn set_masked(&self, masked: bool) {
+        self.vol
+            .write(*self.vol.read().set_bit(Self::MASKED_OFFSET, masked));
     }
 
-    pub fn get_vector(&self) -> u8 {
-        (self.obj.read() & Self::VECTOR_MASK) as u8
+    #[inline]
+    pub fn get_vector(&self) -> Option<u8> {
+        match self.vol.read().get_bits(0..8) {
+            0..32 => None,
+            vector => Some(vector as u8),
+        }
     }
 
-    fn set_vector(&mut self, vector: u8) {
-        self.obj
-            .write((self.obj.read() & !Self::VECTOR_MASK) | vector as u32);
+    #[inline]
+    pub fn set_vector(&self, vector: u8) {
+        self.vol
+            .write(*self.vol.read().set_bits(0..8, vector as u32));
     }
 }
 
-impl LVTRegister<'_, Timer> {
-    pub fn set_mode(&mut self, mode: TimerMode) {
-        self.obj
-            .write(*self.obj.read().set_bits(17..19, mode as u32));
+impl<T: LocalVectorVariant> core::fmt::Debug for LocalVector<T> {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_tuple("Local Vector")
+            .field(&format_args!("0b{:b}", self.vol.read()))
+            .finish()
     }
 }
 
-impl LVTRegister<'_, Generic> {
-    pub fn set_delivery_mode(&mut self, mode: DeliveryMode) {
-        self.obj
-            .write(*self.obj.read().set_bits(8..11, mode as u32));
+impl LocalVector<Timer> {
+    #[inline]
+    pub fn set_mode(&self, mode: TimerMode) {
+        use crate::instructions::cpuid::{Features, FEATURES};
+
+        if mode == TimerMode::TSC_Deadline && !FEATURES.contains(Features::TSC_DL) {
+            panic!("TSC deadline is not supported on this CPU.")
+        }
+
+        self.vol
+            .write(*self.vol.read().set_bits(17..19, mode as u32));
+    }
+}
+
+impl LocalVector<Generic> {
+    #[inline]
+    pub fn set_delivery_mode(&self, mode: DeliveryMode) {
+        self.vol
+            .write(*self.vol.read().set_bits(8..11, mode as u32));
     }
 }

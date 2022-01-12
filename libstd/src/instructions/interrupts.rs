@@ -1,15 +1,15 @@
 use core::arch::asm;
 
 /// Initiates a breakpoint exception.
-#[inline]
+#[inline(always)]
 pub fn breakpoint() {
     unsafe {
-        asm!("int 3");
+        asm!("int3");
     }
 }
 
 /// Enables interrupts via `sti`.
-#[inline]
+#[inline(always)]
 pub fn enable() {
     unsafe {
         asm!("sti", options(nostack, nomem));
@@ -17,7 +17,7 @@ pub fn enable() {
 }
 
 /// Disables interrupts via `cli`.
-#[inline]
+#[inline(always)]
 pub fn disable() {
     unsafe {
         asm!("cli", options(nostack, nomem));

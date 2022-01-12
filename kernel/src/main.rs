@@ -30,8 +30,8 @@ extern "C" {
     #[link_name = "__gdt.data"]
     static __gdt_data: LinkerSymbol;
 
-    static __bsp_stack_start: LinkerSymbol;
-    static __bsp_stack_end: LinkerSymbol;
+    static __bsp_stack_bottom: LinkerSymbol;
+    static __bsp_stack_top: LinkerSymbol;
 
     static __text_start: LinkerSymbol;
     static __text_end: LinkerSymbol;
@@ -63,10 +63,10 @@ static KERNEL_MALLOCATOR: SyncOnceCell<block_malloc::BlockAllocator> = SyncOnceC
 ///
 /// Safety: This method does *extreme* damage to the stack. It should only ever be used when
 ///         ABSOLUTELY NO dangling references to the old stack will exist (i.e. calling a
-///         no-argument function directly after).
+///         no-argument non-returning function directly after).
 #[inline(always)]
 unsafe fn clear_stack() {
-    libstd::registers::stack::RSP::write(__bsp_stack_end.as_ptr());
+    libstd::registers::stack::RSP::write(__bsp_stack_top.as_ptr());
 }
 
 #[no_mangle]
@@ -127,7 +127,6 @@ unsafe fn kernel_init() -> ! {
     kernel_mem_init()
 }
 
-#[inline(never)]
 unsafe fn kernel_mem_init() -> ! {
     info!("Initializing kernel default allocator.");
 
@@ -163,9 +162,9 @@ unsafe fn kernel_mem_init() -> ! {
 
 #[no_mangle]
 extern "C" fn _startup() -> ! {
-    unsafe { libstd::structures::idt::load() };
     crate::lpu::init(alloc::boxed::Box::new(drivers::clock::MSRClock::new(1000)));
-    init_apic();
+
+    unsafe { (0x100000000 as *mut u8).write_volatile(1) };
 
     // If this is the BSP, wake other cores.
     if crate::lpu::is_bsp() {
@@ -175,8 +174,8 @@ extern "C" fn _startup() -> ! {
         };
 
         // Initialize other CPUs
-        let apic = crate::lpu::try_get().unwrap().apic();
-        let icr = apic.interrupt_command_register();
+        let lpu = crate::lpu::try_get().unwrap();
+        let icr = lpu.int_ctrl().interrupt_command();
         let ap_trampoline_page_index = unsafe { __ap_trampoline_start.as_page().index() } as u8;
 
         if let Ok(madt) = XSDT.find_sub_table::<MADT>() {
@@ -188,7 +187,7 @@ extern "C" fn _startup() -> ! {
                     // Ensure the CPU core can actually be enabled.
                     if apic_other.flags().intersects(
                         LocalAPICFlags::PROCESSOR_ENABLED | LocalAPICFlags::ONLINE_CAPABLE,
-                    ) && apic.id() != apic_other.id()
+                    ) && lpu.id() != apic_other.id()
                     {
                         unsafe {
                             const AP_STACK_SIZE: usize = 0x2000;
@@ -275,74 +274,4 @@ fn init_system_config_table(config_table: &[SystemConfigTableEntry]) {
             falloc.borrow(frame_index).unwrap();
         }
     }
-}
-
-fn init_apic() {
-    use libstd::{
-        registers::MSR,
-        structures::{apic::*, idt, pic8259},
-    };
-
-    extern "x86-interrupt" fn pit_tick_handler(_: idt::InterruptStackFrame) {
-        unsafe { MSR::IA32_GS_BASE.write(MSR::IA32_GS_BASE.read() + 1) };
-        pic8259::end_of_interrupt(pic8259::InterruptOffset::Timer);
-    }
-
-    libstd::instructions::interrupts::disable();
-    let lpu = crate::lpu::try_get().unwrap();
-    let apic = lpu.apic();
-
-    trace!("Resetting and enabling local APIC (it may have already been enabled).");
-    unsafe { apic.reset() };
-    apic.sw_enable();
-    apic.write_register(Register::TimerDivisor, TimerDivisor::Div1 as u32);
-    apic.write_register(Register::TimerInitialCount, u32::MAX);
-    apic.timer().set_mode(TimerMode::OneShot);
-
-    const MIN_FREQ: u32 = 1000;
-    const FREQ_WINDOW: u64 = (MIN_FREQ / 100) as u64;
-
-    pic8259::enable();
-    idt::set_interrupt_handler(InterruptVector::Timer, pit_tick_handler);
-    pic8259::pit::set_timer_freq(MIN_FREQ, pic8259::pit::OperatingMode::RateGenerator);
-
-    trace!("Determining APIT frequency using PIT windowing.");
-    unsafe { MSR::IA32_GS_BASE.write(0) };
-    apic.timer().set_masked(false);
-    libstd::instructions::interrupts::enable();
-    while MSR::IA32_GS_BASE.read() < FREQ_WINDOW {}
-    apic.timer().set_masked(true);
-    unsafe { MSR::IA32_GS_BASE.write(0) };
-
-    trace!("Disabling 8259 emulated PIC.");
-    libstd::instructions::interrupts::without_interrupts(|| unsafe { pic8259::disable() });
-
-    let mut per_ms =
-        (u32::MAX - apic.read_register(Register::TimerCurrentCount)) / (FREQ_WINDOW as u32);
-    per_ms *= u32::max((lpu.clock().frequency() as u32) / MIN_FREQ, 1);
-    apic.write_register(Register::TimerInitialCount, per_ms);
-    debug!(
-        "APIC clock frequency: {}KHz",
-        apic.read_register(Register::TimerInitialCount)
-    );
-
-    idt::set_interrupt_handler(InterruptVector::Timer, drivers::clock::apic_tick_handler);
-    idt::set_interrupt_handler(InterruptVector::Error, apic_error_handler);
-
-    apic.timer().set_mode(TimerMode::Periodic);
-    apic.timer().set_masked(false);
-    apic.sw_enable();
-
-    debug!("Core-local APIC configured and enabled.");
-}
-
-extern "x86-interrupt" fn apic_error_handler(_: libstd::structures::idt::InterruptStackFrame) {
-    let apic = &crate::lpu::try_get().unwrap().apic();
-
-    error!("APIC ERROR INTERRUPT");
-    error!("--------------------");
-    error!("DUMPING APIC ERROR REGISTER:");
-    error!("  {:?}", apic.error_status());
-
-    apic.end_of_interrupt();
 }

@@ -28,10 +28,8 @@ pub struct InterruptCommandRegister<'v> {
     high: &'v VolatileCell<u32, ReadWrite>,
 }
 
-impl crate::memory::volatile::Volatile for InterruptCommandRegister<'_> {}
-
 impl<'v> InterruptCommandRegister<'v> {
-    pub(super) fn new(
+    pub(super) const fn new(
         low: &'v VolatileCell<u32, ReadWrite>,
         high: &'v VolatileCell<u32, ReadWrite>,
     ) -> Self {
