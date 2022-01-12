@@ -15,7 +15,11 @@
     ptr_as_uninit,
     slice_ptr_get,
     const_align_offset,
-    const_transmute_copy
+    const_transmute_copy,
+    const_ptr_as_ref,
+    const_option,
+    const_slice_from_raw_parts,
+    const_ptr_is_null
 )]
 
 #[macro_use]
@@ -24,20 +28,17 @@ extern crate alloc;
 
 mod addr;
 mod boot_info;
-mod bv_array;
 mod macros;
 
 pub mod acpi;
 pub mod cell;
+pub mod collections;
 pub mod elf;
 pub mod instructions;
 pub mod io;
 pub mod memory;
 pub mod registers;
 pub mod structures;
-
-pub use bv_array::*;
-pub mod bit_array;
 
 pub use addr::*;
 pub use boot_info::*;

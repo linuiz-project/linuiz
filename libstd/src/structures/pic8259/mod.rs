@@ -14,27 +14,26 @@ use crate::io::port::{ReadWritePort, WriteOnlyPort};
 const CMD_INIT: u8 = 0x11;
 const CMD_END_OF_INTERRUPT: u8 = 0x20;
 const MODE_8806: u8 = 0x01;
-pub const PIC_8259_HZ: usize = 1193182;
+pub const TICK_RATE: u32 = 1193182;
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InterruptOffset {
     Timer = Self::BASE,
-    Keyboard,
-    Cascade,
-    COM2,
-    COM1,
-    LPT2,
-    FloppyDisk,
-    SpuriousMaster,
-    CMOSClock,
-    Peripheral0,
-    Peripheral1,
-    Peripheral2,
-    PS2Mouse,
-    FPU,
-    PrimaryATA,
-    SpuriousSlave,
+    Keyboard = 1,
+    COM2 = 3,
+    COM1 = 4,
+    LPT2 = 5,
+    FloppyDisk = 6,
+    SpuriousMaster = 7,
+    CMOSClock = 8,
+    Peripheral0 = 9,
+    Peripheral1 = 10,
+    Peripheral2 = 11,
+    PS2Mouse = 12,
+    FPU = 13,
+    PrimaryATA = 14,
+    SpuriousSlave = 15,
 }
 
 impl InterruptOffset {
@@ -57,7 +56,6 @@ bitflags::bitflags! {
     pub struct InterruptLines : u16 {
         const TIMER = 1 << 0;
         const KEYBOARD = 1 << 1;
-        const CASCADE = 1 << 2;
     }
 }
 
@@ -121,8 +119,8 @@ impl PIC8259 {
         // the next is sent.
         //
         // Additionally, at this point we don't necessarily have any kind of timer yet, because they
-        // tend to required interrupts. This is usually worked around by writing garbage data to port 0x80,
-        // which should take long enough to make everything work (* on most hardware).
+        // tend to require interrupts. This is usually worked around by writing garbage data to port 0x80,
+        // which should take long enough to make everything work (* on most hardware ?).
         let mut io_wait_port = WriteOnlyPort::<u8>::new(0x80);
         let mut io_wait = || io_wait_port.write(0x0);
 
@@ -151,7 +149,9 @@ impl PIC8259 {
         io_wait();
 
         // Write masks to data port, specifying which interrupts are ignored.
-        self.pics[0].data.write(!enabled.low());
+        self.pics[0]
+            .data
+            .write(!enabled.low() & !(1 << 2) /* never mask cascade */);
         io_wait();
         self.pics[1].data.write(!enabled.high());
     }
@@ -188,11 +188,9 @@ impl PIC8259 {
 static PIC8259: spin::Mutex<PIC8259> =
     spin::Mutex::new(unsafe { PIC8259::new(InterruptOffset::BASE, InterruptOffset::BASE + 8) });
 
-pub fn enable() {
+pub fn enable(enabled_lines: InterruptLines) {
     unsafe {
-        PIC8259
-            .lock()
-            .init(InterruptLines::TIMER | InterruptLines::CASCADE);
+        PIC8259.lock().init(enabled_lines);
     }
 }
 

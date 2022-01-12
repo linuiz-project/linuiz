@@ -1,7 +1,7 @@
 use crate::io::port::WriteOnlyPort;
 use bit_field::BitField;
 
-const fn data0() -> WriteOnlyPort<u8> {
+const fn get_data_port() -> WriteOnlyPort<u8> {
     unsafe { WriteOnlyPort::<u8>::new(0x40) }
 }
 
@@ -66,7 +66,7 @@ pub fn send_command(command: Command) {
 }
 
 pub fn set_timer_freq(frequency: u32, operating_mode: OperatingMode) {
-    const TICK_RATE: u32 = 1193182;
+    use super::TICK_RATE;
 
     if frequency > TICK_RATE {
         panic!(
@@ -89,6 +89,7 @@ pub fn set_timer_freq(frequency: u32, operating_mode: OperatingMode) {
         divisor
     );
 
-    data0().write(divisor as u8);
-    data0().write((divisor >> 8) as u8);
+    let data = &mut get_data_port();
+    data.write(divisor as u8);
+    data.write((divisor >> 8) as u8);
 }

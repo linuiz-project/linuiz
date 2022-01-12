@@ -62,7 +62,8 @@ pub trait Checksum: Sized {
     }
 }
 
-#[repr(C)]
+#[repr(C, packed)]
+#[derive(Clone, Copy)]
 pub struct SDTHeader {
     signature: [u8; 4],
     len: u32,

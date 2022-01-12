@@ -30,6 +30,7 @@ impl MSR {
         unsafe { self.read_unchecked() }
     }
 
+    #[inline(always)]
     pub unsafe fn read_unchecked(self) -> u64 {
         let value: u64;
 
@@ -45,27 +46,7 @@ impl MSR {
         value
     }
 
-    pub unsafe fn write_bit(self, bit: usize, set: bool) {
-        assert!(bit <= 64, "bit must be within u64");
-
-        let bit_mask = 1 << bit;
-        let set_bit = (set as u64) << bit;
-
-        self.write((self.read() & bit_mask) | set_bit);
-    }
-
-    pub unsafe fn write_bits(self, range: core::ops::Range<usize>, value: u64) {
-        assert!(range.end <= 64, "range must be within u64 bits");
-
-        let mask = crate::U64_BIT_MASKS[range.end - range.start];
-        assert_eq!(value & !mask, 0, "value must exist within range");
-
-        let shifted_mask = mask << range.start;
-        let shifted_value = value << range.start;
-
-        self.write((self.read() & !shifted_mask) | shifted_value);
-    }
-
+    #[inline(always)]
     pub unsafe fn write(self, value: u64) {
         assert!(
             FEATURES.contains(Features::MSR),
@@ -75,6 +56,7 @@ impl MSR {
         self.write_unchecked(value);
     }
 
+    #[inline(always)]
     pub unsafe fn write_unchecked(self, value: u64) {
         core::arch::asm!(
             "mov rdx, rax", // Move high value in

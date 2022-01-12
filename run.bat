@@ -10,3 +10,6 @@ qemu-system-x86_64^
     -device nvme,drive=nvm,serial=deadbeef^
     -net none^
     -no-reboot^
+    -D ./.debug/qemu_debug.log^
+    -d guest_errors,int
+
