@@ -334,13 +334,17 @@ impl MemoryAllocator for BlockAllocator<'_> {
             let block_page = &mut map_write.pages[map_index];
             let was_empty = block_page.is_empty();
 
-            let low_offset = block_index - (map_index * BlockPage::BLOCKS_PER);
-            let high_offset = 64 - usize::min(end_block_index - block_index, 64);
-            let mask_bits_count = BlockPage::BLOCKS_PER - (low_offset + high_offset);
-            let mask_bits = libstd::U64_BIT_MASKS[mask_bits_count - 1];
+            let block_index_floor = map_index * BlockPage::BLOCKS_PER;
+            let low_offset = block_index - block_index_floor;
+            let remaining_blocks_in_slice = usize::min(
+                end_block_index - block_index,
+                (block_index_floor + BlockPage::BLOCKS_PER) - block_index,
+            );
+
+            let mask_bits = libstd::U64_BIT_MASKS[remaining_blocks_in_slice];
 
             *block_page.value_mut() |= mask_bits << low_offset;
-            block_index += mask_bits_count;
+            block_index += remaining_blocks_in_slice;
 
             if was_empty {
                 map_write.addressor.automap(&Page::from_index(map_index));
