@@ -8,6 +8,7 @@ extern crate alloc;
 extern crate libstd;
 
 mod block_malloc;
+mod clock;
 mod drivers;
 mod logging;
 mod lpu;
@@ -106,6 +107,9 @@ unsafe fn kernel_init() -> ! {
         ));
     }
 
+    libstd::structures::idt::load();
+    crate::clock::global::configure();
+
     let boot_info = BOOT_INFO
         .get()
         .expect("Boot info hasn't been initialized in kernel memory");
@@ -162,9 +166,9 @@ unsafe fn kernel_mem_init() -> ! {
 
 #[no_mangle]
 extern "C" fn _startup() -> ! {
-    crate::lpu::init(alloc::boxed::Box::new(drivers::clock::MSRClock::new(1000)));
+    crate::lpu::init();
 
-    unsafe { (0x100000000 as *mut u8).write_volatile(1) };
+    //unsafe { (0x100000000 as *mut u8).write_volatile(1) };
 
     // If this is the BSP, wake other cores.
     if crate::lpu::is_bsp() {

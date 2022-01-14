@@ -70,20 +70,24 @@ unsafe impl<T> Send for SyncOnceCell<T> {}
 unsafe impl<T> Sync for SyncOnceCell<T> {}
 
 impl<T> SyncOnceCell<T> {
+    #[inline]
     pub const fn new() -> Self {
         Self {
             inner_cell: core::lazy::OnceCell::new(),
         }
     }
 
+    #[inline]
     pub fn set(&self, obj: T) -> Result<(), T> {
         self.inner_cell.set(obj)
     }
 
+    #[inline]
     pub fn get(&self) -> Option<&T> {
         self.inner_cell.get()
     }
 
+    #[inline]
     pub fn get_mut(&mut self) -> Option<&mut T> {
         self.inner_cell.get_mut()
     }

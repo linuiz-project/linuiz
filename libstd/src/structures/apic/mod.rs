@@ -248,10 +248,9 @@ impl APIC {
         self.timer().set_masked(true);
         self.performance().set_masked(true);
         self.thermal_sensor().set_masked(true);
-        // For whatever reason, masking this interrupt causes the PIT not to fire.
-        // self.lint0().set_masked(true);
-        self.lint1().set_masked(true);
         self.error().set_masked(true);
+        // Don't mask the LINT0&1 vectors, as they're used for
+        // external interrupts (PIC, SMIs, NMIs).
     }
 }
 

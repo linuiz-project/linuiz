@@ -441,7 +441,7 @@ impl<'dev> Controller<'dev> {
         while csts.get_rdy() != enabled && !csts.get_cfs() && msec_waited < max_wait {
             const SLEEP_INTERVAL: u64 = 100;
 
-            crate::drivers::clock::sleep_msec(SLEEP_INTERVAL);
+            crate::clock::global::sleep_msec(SLEEP_INTERVAL);
             msec_waited += SLEEP_INTERVAL;
         }
 

@@ -14,3 +14,4 @@ num_enum = { version = "*", default-features = false }
 spin = "*"
 paste = "*"
 x86_64 = "*"
+lazy_static = "*"

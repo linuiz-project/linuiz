@@ -2,14 +2,13 @@ mod interrupt_controller;
 
 pub use interrupt_controller::*;
 
-use crate::drivers::clock::Clock;
-use alloc::boxed::Box;
+use crate::clock::AtomicClock;
 use core::sync::atomic::AtomicUsize;
 use libstd::registers::MSR;
 
 pub static LPU_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-pub fn init(clock: Box<dyn Clock>) {
+pub fn init() {
     assert_eq!(
         MSR::IA32_FS_BASE.read(),
         0,
@@ -35,7 +34,7 @@ pub fn init(clock: Box<dyn Clock>) {
         ptr.write_volatile(LPU {
             magic: LPU::MAGIC,
             apic_id,
-            clock,
+            clock: AtomicClock::new(),
             int_ctrl: InterruptController::create(),
         });
 
@@ -60,7 +59,7 @@ pub fn try_get() -> Option<&'static LPU> {
 pub struct LPU {
     magic: usize,
     apic_id: u8,
-    clock: Box<dyn Clock>,
+    clock: AtomicClock,
     int_ctrl: InterruptController,
 }
 
@@ -71,8 +70,8 @@ impl LPU {
         self.apic_id
     }
 
-    pub fn clock(&self) -> &dyn Clock {
-        self.clock.as_ref()
+    pub fn clock(&self) -> &AtomicClock {
+        &self.clock
     }
 
     pub fn int_ctrl(&self) -> &InterruptController {
