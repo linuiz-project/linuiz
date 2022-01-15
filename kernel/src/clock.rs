@@ -33,7 +33,7 @@ pub mod global {
                     tick_handler,
                 );
 
-                debug!("Global timer configured at 1000hz.");
+                debug!("Global clock configured at 1000hz.");
             })
         } else {
             panic!("Global clock already configured.");
@@ -45,7 +45,7 @@ pub mod global {
         unsafe {
             GLOBAL_CLOCK
                 .get()
-                // This handler will only be called after GLOBAL_CLOCK is lazy initialized.
+                // This handler will only be called after GLOBAL_CLOCK is already initialized.
                 .unwrap_unchecked()
         }
         .tick();
@@ -54,31 +54,25 @@ pub mod global {
         pic8259::end_of_interrupt(pic8259::InterruptOffset::Timer);
     }
 
-    #[inline(always)]
-    fn get_ticks() -> Option<u64> {
+    pub fn get_ticks() -> Option<u64> {
         GLOBAL_CLOCK
             .get()
             .map(|global_clock| global_clock.get_ticks())
     }
 
-    #[inline(always)]
-    pub fn sleep_msec(milliseconds: u64) {
+    pub fn busy_wait_msec(milliseconds: u64) {
         let target_ticks = get_ticks().unwrap() + milliseconds;
-        while get_ticks().unwrap() < target_ticks {
-            libstd::instructions::hlt();
-        }
+        while get_ticks().unwrap() < target_ticks {}
     }
 }
 
 pub mod local {
-    #[inline(always)]
-    fn get_ticks() -> u64 {
+    pub fn get_ticks() -> u64 {
         crate::local_state::clock()
             .expect("LPU structure has not been configured")
             .get_ticks()
     }
 
-    #[inline(always)]
     pub fn sleep_msec(milliseconds: u64) {
         let target_ticks = get_ticks() + milliseconds;
 
