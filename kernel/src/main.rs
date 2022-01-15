@@ -17,6 +17,7 @@ use libstd::{
     acpi::SystemConfigTableEntry,
     cell::SyncOnceCell,
     memory::{falloc, malloc::MemoryAllocator, UEFIMemoryDescriptor},
+    structures::pic8259::InterruptLines,
     BootInfo, LinkerSymbol,
 };
 
@@ -62,7 +63,7 @@ static KERNEL_MALLOCATOR: SyncOnceCell<block_malloc::BlockAllocator> = SyncOnceC
 
 /// Clears the kernel stack by resetting `RSP`.
 ///
-/// Safety: This method does *extreme* damage to the stack. It should only ever be used when
+/// SAFETY: This method does *extreme* damage to the stack. It should only ever be used when
 ///         ABSOLUTELY NO dangling references to the old stack will exist (i.e. calling a
 ///         no-argument non-returning function directly after).
 #[inline(always)]
@@ -106,12 +107,6 @@ unsafe fn kernel_init() -> ! {
             __gdt_code.as_usize() as u16,
         ));
     }
-
-    // Initialize global IDT.
-    libstd::structures::idt::load_unchecked();
-    // Initialize global clock (PIT).
-    // TODO possible move to using HPET as global clock?
-    crate::clock::global::configure();
 
     let boot_info = BOOT_INFO
         .get()
@@ -169,14 +164,34 @@ unsafe fn kernel_mem_init() -> ! {
 
 #[no_mangle]
 extern "C" fn _startup() -> ! {
+    use crate::local_state::is_bsp;
+
+    unsafe { libstd::structures::idt::load_unchecked() };
+
+    if is_bsp() {
+        use libstd::structures::idt;
+        use local_state::{handlers, InterruptVector};
+
+        idt::set_handler_fn(InterruptVector::LocalTimer as u8, handlers::apit_handler);
+        idt::set_handler_fn(InterruptVector::Spurious as u8, handlers::spurious_handler);
+        idt::set_handler_fn(InterruptVector::Error as u8, handlers::error_handler);
+
+        // Initialize global clock (PIT).
+        // TODO possible move to using HPET as global clock?
+        crate::clock::global::configure();
+    }
+
     crate::local_state::init();
-    unsafe { crate::local_state::int_ctrl().unwrap().sw_enable() };
 
     // If this is the BSP, wake other cores.
     if crate::local_state::is_bsp() {
-        use libstd::acpi::rdsp::xsdt::{
-            madt::{InterruptDevice, MADT},
-            XSDT,
+        use libstd::{
+            acpi::rdsp::xsdt::{
+                madt::{InterruptDevice, MADT},
+                mcfg::MCFG,
+                XSDT,
+            },
+            io::pci,
         };
 
         // Initialize other CPUs
@@ -186,51 +201,56 @@ extern "C" fn _startup() -> ! {
 
         if let Ok(madt) = XSDT.find_sub_table::<MADT>() {
             info!("Beginning wake-up sequence for enabled processors.");
-            for interrupt_device in madt.iter() {
-                if let InterruptDevice::LocalAPIC(apic_other) = interrupt_device {
+            for lapic in madt
+                .iter()
+                // Filter out non-lapic devices.
+                .filter_map(|interrupt_device| {
+                    if let InterruptDevice::LocalAPIC(apic_other) = interrupt_device {
+                        Some(apic_other)
+                    } else {
+                        None
+                    }
+                })
+                // Filter out invalid lapic devices.
+                .filter(|lapic| {
                     use libstd::acpi::rdsp::xsdt::madt::LocalAPICFlags;
 
-                    // Ensure the CPU core can actually be enabled.
-                    if apic_other.flags().intersects(
-                        LocalAPICFlags::PROCESSOR_ENABLED | LocalAPICFlags::ONLINE_CAPABLE,
-                    ) && id != apic_other.id()
-                    {
-                        unsafe {
-                            const AP_STACK_SIZE: usize = 0x2000;
+                    lapic.id() != id
+                        && lapic.flags().intersects(
+                            LocalAPICFlags::PROCESSOR_ENABLED | LocalAPICFlags::ONLINE_CAPABLE,
+                        )
+                })
+            {
+                unsafe {
+                    const AP_STACK_SIZE: usize = 0x2000;
 
-                            let (stack_bottom, len) = libstd::memory::malloc::try_get()
-                                .unwrap()
-                                .alloc(AP_STACK_SIZE, core::num::NonZeroUsize::new(0x1000))
-                                .expect("Failed to allocate stack for LPU")
-                                .into_parts();
+                    let (stack_bottom, len) = libstd::memory::malloc::try_get()
+                        .unwrap()
+                        .alloc(AP_STACK_SIZE, core::num::NonZeroUsize::new(0x1000))
+                        .expect("Failed to allocate stack for LPU")
+                        .into_parts();
 
-                            AP_STACK_POINTERS[apic_other.id() as usize] =
-                                stack_bottom.add(len) as *mut _;
-                        };
+                    AP_STACK_POINTERS[lapic.id() as usize] = stack_bottom.add(len) as *mut _;
+                };
 
-                        icr.send_init(apic_other.id());
-                        icr.wait_pending();
-
-                        icr.send_sipi(ap_trampoline_page_index, apic_other.id());
-                        icr.wait_pending();
-                        icr.send_sipi(ap_trampoline_page_index, apic_other.id());
-                        icr.wait_pending();
-                    }
-                }
+                // Reset target processor.
+                trace!("Sending INIT interrupt to: {}", lapic.id());
+                icr.send_init(lapic.id());
+                icr.wait_pending();
+                // REMARK: IA32 spec indicates doing it twice, as so, ensures the interrupt is received.
+                trace!("Sending SIPI x1 interrupt to: {}", lapic.id());
+                icr.send_sipi(ap_trampoline_page_index, lapic.id());
+                icr.wait_pending();
+                trace!("Sending SIPI x2 interrupt to: {}", lapic.id());
+                icr.send_sipi(ap_trampoline_page_index, lapic.id());
+                icr.wait_pending();
             }
 
             if local_state::INIT_COUNT.load(core::sync::atomic::Ordering::Relaxed) == 1 {
                 info!("Single-core CPU detected. No multiprocessing will occur.");
-                // TODO somehow handle single-core.
+                // TODO somehow handle single-core ?
             }
         }
-    }
-
-    if crate::local_state::is_bsp() {
-        use libstd::{
-            acpi::rdsp::xsdt::{mcfg::MCFG, XSDT},
-            io::pci,
-        };
 
         if let Ok(mcfg) = XSDT.find_sub_table::<MCFG>() {
             let bridges: alloc::vec::Vec<pci::PCIeHostBridge> = mcfg
@@ -245,7 +265,6 @@ extern "C" fn _startup() -> ! {
             {
                 if let pci::DeviceVariant::Standard(device) = device_variant {
                     if device.class() == pci::DeviceClass::MassStorageController
-                        // Serial ATA Controller
                         && device.subclass() == 0x08
                     {
                         use crate::drivers::nvme::Controller;
