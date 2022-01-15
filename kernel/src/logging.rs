@@ -20,10 +20,10 @@ impl log::Log for KernelLogger {
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
             if self.modes.contains(LoggingModes::STDOUT) {
-                if let Some(lpu) = crate::lpu::try_get() {
+                if let Some(apic_id) = crate::local_state::id() {
                     crate::println!(
                         "[{}>{} {}] {}",
-                        lpu.id(),
+                        apic_id,
                         record.level(),
                         record.module_path().unwrap_or("None"),
                         record.args()

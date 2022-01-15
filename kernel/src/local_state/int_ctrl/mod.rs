@@ -1,7 +1,7 @@
+mod handlers;
+
 use core::sync::atomic::AtomicU64;
 use libstd::structures::apic::APIC;
-
-mod handlers;
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -19,12 +19,12 @@ pub enum InterruptVector {
     Spurious = u8::MAX,
 }
 
+static INT_CTRL_CREATE_LOCK: spin::Mutex<u8> = spin::Mutex::new(0);
+
 pub struct InterruptController {
     apic: APIC,
     counters: [AtomicU64; 256],
 }
-
-pub unsafe fn configure_default_idt_handlers() {}
 
 impl InterruptController {
     const ATOMIC_ZERO: AtomicU64 = AtomicU64::new(0);
@@ -32,9 +32,11 @@ impl InterruptController {
     pub fn create() -> Self {
         use libstd::structures::{apic::*, idt};
 
-        extern "x86-interrupt" fn apit_counter_deplete(_: idt::InterruptStackFrame) {
-            panic!("APIT has fired an interrupt during initialization (NOTE: APIT should not have enough time to fully deplete its counter register).");
-        }
+        idt::set_handler_fn(InterruptVector::Spurious as u8, handlers::spurious_handler);
+        idt::set_handler_fn(InterruptVector::Error as u8, handlers::error_handler);
+
+        // Ensure interrupts are enabled.
+        libstd::instructions::interrupts::enable();
 
         debug!("Configuring APIC & APIT.");
         let apic = APIC::from_msr().expect("APIC has already been configured on this core");
@@ -46,25 +48,29 @@ impl InterruptController {
         apic.timer().set_vector(InterruptVector::LocalTimer as u8);
         apic.timer().set_mode(TimerMode::OneShot);
 
-        idt::set_interrupt_handler(InterruptVector::Spurious as u8, handlers::spurious_handler);
-        idt::set_interrupt_handler(InterruptVector::Error as u8, handlers::error_handler);
-        libstd::instructions::interrupts::enable();
+        {
+            // Lock here, to ensure swaps of the handler at the APIT IDT offset aren't intermingled.
+            let lock = INT_CTRL_CREATE_LOCK.lock();
 
-        unsafe {
+            extern "x86-interrupt" fn apit_counter_deplete_error(_: idt::InterruptStackFrame) {
+                panic!("APIT has fired an interrupt during initialization (NOTE: APIT should not have enough time to fully deplete its counter register).");
+            }
+
+            idt::set_handler_fn(
+                InterruptVector::LocalTimer as u8,
+                apit_counter_deplete_error,
+            );
+
             debug!("Determining APIT frequency.");
-
-            // Configure PIT & APIT interrupts.
-            idt::set_interrupt_handler(InterruptVector::LocalTimer as u8, apit_counter_deplete);
-
-            // Make sure the global timer is already configured.
-            crate::clock::global::sleep_msec(1);
             // 'Enable' the APIT to begin counting down in `Register::TimerCurrentCount`
             apic.write_register(Register::TimerInitialCount, u32::MAX);
             // Wait for 10ms to get good average tickrate.
             crate::clock::global::sleep_msec(10);
 
-            // Set final handler for APIT.
-            idt::set_interrupt_handler(InterruptVector::LocalTimer as u8, handlers::apit_handler);
+            idt::set_handler_fn(InterruptVector::LocalTimer as u8, handlers::apit_handler);
+
+            // Drop lock manually, to (hopefully) ensure it isn't optimized away (?).
+            drop(lock);
         }
 
         apic.write_register(
@@ -110,7 +116,7 @@ impl InterruptController {
     }
 
     #[inline]
-    pub fn interrupt_command(&self) -> libstd::structures::apic::icr::InterruptCommandRegister {
+    pub fn icr(&self) -> libstd::structures::apic::icr::InterruptCommandRegister {
         self.apic.interrupt_command()
     }
 

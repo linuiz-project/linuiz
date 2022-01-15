@@ -10,8 +10,8 @@ extern crate libstd;
 mod block_malloc;
 mod clock;
 mod drivers;
+mod local_state;
 mod logging;
-mod lpu;
 
 use libstd::{
     acpi::SystemConfigTableEntry,
@@ -107,7 +107,10 @@ unsafe fn kernel_init() -> ! {
         ));
     }
 
-    libstd::structures::idt::load();
+    // Initialize global IDT.
+    libstd::structures::idt::load_unchecked();
+    // Initialize global clock (PIT).
+    // TODO possible move to using HPET as global clock?
     crate::clock::global::configure();
 
     let boot_info = BOOT_INFO
@@ -166,20 +169,19 @@ unsafe fn kernel_mem_init() -> ! {
 
 #[no_mangle]
 extern "C" fn _startup() -> ! {
-    crate::lpu::init();
-
-    //unsafe { (0x100000000 as *mut u8).write_volatile(1) };
+    crate::local_state::init();
+    unsafe { crate::local_state::int_ctrl().unwrap().sw_enable() };
 
     // If this is the BSP, wake other cores.
-    if crate::lpu::is_bsp() {
+    if crate::local_state::is_bsp() {
         use libstd::acpi::rdsp::xsdt::{
             madt::{InterruptDevice, MADT},
             XSDT,
         };
 
         // Initialize other CPUs
-        let lpu = crate::lpu::try_get().unwrap();
-        let icr = lpu.int_ctrl().interrupt_command();
+        let id = crate::local_state::id().unwrap();
+        let icr = crate::local_state::int_ctrl().unwrap().icr();
         let ap_trampoline_page_index = unsafe { __ap_trampoline_start.as_page().index() } as u8;
 
         if let Ok(madt) = XSDT.find_sub_table::<MADT>() {
@@ -191,7 +193,7 @@ extern "C" fn _startup() -> ! {
                     // Ensure the CPU core can actually be enabled.
                     if apic_other.flags().intersects(
                         LocalAPICFlags::PROCESSOR_ENABLED | LocalAPICFlags::ONLINE_CAPABLE,
-                    ) && lpu.id() != apic_other.id()
+                    ) && id != apic_other.id()
                     {
                         unsafe {
                             const AP_STACK_SIZE: usize = 0x2000;
@@ -217,14 +219,14 @@ extern "C" fn _startup() -> ! {
                 }
             }
 
-            if lpu::LPU_COUNT.load(core::sync::atomic::Ordering::Relaxed) == 1 {
+            if local_state::INIT_COUNT.load(core::sync::atomic::Ordering::Relaxed) == 1 {
                 info!("Single-core CPU detected. No multiprocessing will occur.");
                 // TODO somehow handle single-core.
             }
         }
     }
 
-    if crate::lpu::is_bsp() {
+    if crate::local_state::is_bsp() {
         use libstd::{
             acpi::rdsp::xsdt::{mcfg::MCFG, XSDT},
             io::pci,

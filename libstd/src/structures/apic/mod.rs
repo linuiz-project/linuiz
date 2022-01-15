@@ -144,7 +144,7 @@ impl APIC {
     pub unsafe fn sw_enable(&self) {
         self.0.write(
             Self::SPR,
-            *self.0.read::<u32>(Self::SPR).assume_init().set_bit(9, true),
+            *self.0.read::<u32>(Self::SPR).assume_init().set_bit(8, true),
         );
     }
 
@@ -155,7 +155,7 @@ impl APIC {
                 .0
                 .read::<u32>(Self::SPR)
                 .assume_init()
-                .set_bit(9, false),
+                .set_bit(8, false),
         );
     }
 

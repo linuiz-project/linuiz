@@ -28,8 +28,8 @@ pub mod global {
 
                 pic8259::enable(pic8259::InterruptLines::TIMER);
                 pic8259::pit::set_timer_freq(1000, pic8259::pit::OperatingMode::RateGenerator);
-                libstd::structures::idt::set_interrupt_handler(
-                    crate::lpu::InterruptVector::GlobalTimer as u8,
+                libstd::structures::idt::set_handler_fn(
+                    crate::local_state::InterruptVector::GlobalTimer as u8,
                     tick_handler,
                 );
 
@@ -42,10 +42,13 @@ pub mod global {
 
     use libstd::{cell::SyncOnceCell, structures::idt::InterruptStackFrame};
     extern "x86-interrupt" fn tick_handler(_: InterruptStackFrame) {
-        GLOBAL_CLOCK
-            .get()
-            .expect("Global clock not configured")
-            .tick();
+        unsafe {
+            GLOBAL_CLOCK
+                .get()
+                // This handler will only be called after GLOBAL_CLOCK is lazy initialized.
+                .unwrap_unchecked()
+        }
+        .tick();
 
         use libstd::structures::pic8259;
         pic8259::end_of_interrupt(pic8259::InterruptOffset::Timer);
@@ -70,9 +73,8 @@ pub mod global {
 pub mod local {
     #[inline(always)]
     fn get_ticks() -> u64 {
-        crate::lpu::try_get()
+        crate::local_state::clock()
             .expect("LPU structure has not been configured")
-            .clock()
             .get_ticks()
     }
 
