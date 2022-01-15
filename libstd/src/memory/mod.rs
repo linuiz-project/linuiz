@@ -76,8 +76,6 @@ pub struct MMIO {
 }
 
 impl MMIO {
-    // TODO possibly introduct an Address<Frame> type to represent
-    // frame addresses?
     pub unsafe fn new(frame_index: usize, count: usize) -> Result<Self, malloc::AllocError> {
         malloc::try_get()
             .unwrap()
@@ -132,8 +130,18 @@ impl MMIO {
     }
 
     #[inline]
-    pub unsafe fn write<T>(&self, offset: usize, value: T) {
-        self.offset::<T>(offset).write_volatile(value)
+    pub fn write<T>(&self, offset: usize, value: T) {
+        unsafe { self.offset::<T>(offset).write_volatile(value) }
+    }
+
+    #[inline(always)]
+    pub unsafe fn read_unchecked<T>(&self, offset: usize) -> T {
+        core::ptr::read_volatile(self.ptr.add(offset) as *const T)
+    }
+
+    #[inline(always)]
+    pub unsafe fn write_unchecked<T>(&self, offset: usize, value: T) {
+        core::ptr::write_volatile(self.ptr.add(offset) as *mut T, value);
     }
 
     #[inline]

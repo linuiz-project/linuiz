@@ -121,52 +121,52 @@ impl APIC {
 
     #[inline]
     pub fn read_register(&self, register: Register) -> u32 {
-        unsafe { self.0.read(register as usize).assume_init() }
+        unsafe { self.0.read_unchecked::<u32>(register as usize) }
     }
 
     #[inline]
     pub fn write_register(&self, register: Register, value: u32) {
-        unsafe { self.0.write(register as usize, value) }
+        unsafe { self.0.write_unchecked(register as usize, value) }
     }
 
+    #[inline]
     pub fn is_hw_enabled(&self) -> bool {
         (MSR::IA32_APIC_BASE.read() & (1 << 11)) > 0
     }
 
+    #[inline]
     pub unsafe fn hw_enable(&self) {
         MSR::IA32_APIC_BASE.write(MSR::IA32_APIC_BASE.read() | (1 << 11));
     }
 
+    #[inline]
     pub unsafe fn hw_disable(&self) {
         MSR::IA32_APIC_BASE.write(MSR::IA32_APIC_BASE.read() & !(1 << 11));
     }
 
+    #[inline]
     pub unsafe fn sw_enable(&self) {
-        self.0.write(
+        self.0.write_unchecked(
             Self::SPR,
-            *self.0.read::<u32>(Self::SPR).assume_init().set_bit(8, true),
+            *self.0.read_unchecked::<u32>(Self::SPR).set_bit(8, true),
         );
     }
 
+    #[inline]
     pub unsafe fn sw_disable(&self) {
-        self.0.write(
+        self.0.write_unchecked(
             Self::SPR,
-            *self
-                .0
-                .read::<u32>(Self::SPR)
-                .assume_init()
-                .set_bit(8, false),
+            *self.0.read_unchecked::<u32>(Self::SPR).set_bit(8, false),
         );
     }
 
     pub fn set_eoi_broadcast_suppression(&self, suppress: bool) {
         unsafe {
-            self.0.write(
+            self.0.write_unchecked(
                 Self::SPR,
                 *self
                     .0
-                    .read::<u32>(Self::SPR)
-                    .assume_init()
+                    .read_unchecked::<u32>(Self::SPR)
                     .set_bit(12, suppress),
             )
         };
@@ -174,7 +174,7 @@ impl APIC {
 
     #[inline]
     pub fn end_of_interrupt(&self) {
-        unsafe { self.0.write(Self::EOI, 0) };
+        unsafe { self.0.write_unchecked(Self::EOI, 0) };
     }
 
     pub fn id(&self) -> u8 {
@@ -249,8 +249,7 @@ impl APIC {
         self.performance().set_masked(true);
         self.thermal_sensor().set_masked(true);
         self.error().set_masked(true);
-        // Don't mask the LINT0&1 vectors, as they're used for
-        // external interrupts (PIC, SMIs, NMIs).
+        // Don't mask the LINT0&1 vectors, as they're used for external interrupts (PIC, SMIs, NMIs).
     }
 }
 
