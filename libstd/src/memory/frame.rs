@@ -12,15 +12,9 @@ impl Frame {
         Self { index: 0 }
     }
 
-    /// TODO stop using range operator syntax for frames, introduce frame iterator
+    /// Creates a frame representing the specified frame index (physical memory in 0x1000 increments).
     ///
-    /// Frame iterator only creatable by FrameAllocator (?)
-
-    /// Creates a frame representing the specified frame index
-    ///
-    /// Note: usually offsets in 0x1000 steps.
-    ///
-    /// Safety: Frame creation should be deterministic. This concept is explained
+    /// SAFETY: Frame creation should be deterministic. This concept is explained
     ///     in the `FrameAllocator` documentation.
     pub const unsafe fn from_index(index: usize) -> Self {
         Self { index }

@@ -26,7 +26,7 @@ pub enum InterruptOffset {
     LPT2 = 5,
     FloppyDisk = 6,
     SpuriousMaster = 7,
-    CMOSClock = 8,
+    RTC = 8,
     Peripheral0 = 9,
     Peripheral1 = 10,
     Peripheral2 = 11,
@@ -54,8 +54,21 @@ impl InterruptOffset {
 
 bitflags::bitflags! {
     pub struct InterruptLines : u16 {
-        const TIMER = 1 << 0;
-        const KEYBOARD = 1 << 1;
+        const TIMER =           1 << 0;
+        const KEYBOARD =        1 << 1;
+        const COM2 =            1 << 3;
+        const COM1 =            1 << 4;
+        const LPT2 =            1 << 5;
+        const FLOPPY_DISK =     1 << 6;
+        const SPURIOUS_MASTER = 1 << 7;
+        const RTC =             1 << 8;
+        const PERIPHERAL0 =     1 << 9;
+        const PERIPHERAL1 =     1 << 10;
+        const PERIPHERAL2 =     1 << 11;
+        const PS2_MOUSE =       1 << 12;
+        const FPU =             1 << 13;
+        const PRIMARY_ATA =     1 << 14;
+        const SPURIOUS_SLAVE =  1 << 15;
     }
 }
 
@@ -87,7 +100,7 @@ impl PIC {
 
 /// A pair of chained PIC controllers.
 ///
-/// Remark: This is the standard setup on x86.
+/// REMARK: This is the standard setup on x86.
 struct PIC8259 {
     pics: [PIC; 2],
 }

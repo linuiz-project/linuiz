@@ -67,7 +67,6 @@ impl<'v> InterruptCommandRegister<'v> {
         dest_shorthand: DestinationShorthand,
         apic_id: u8,
     ) {
-        assert!(apic_id < 0b10000, "APIC ID must be no more than 4 bits.");
         assert!(
             !self.is_pending(),
             "Cannot send command when command is already pending."
@@ -90,8 +89,6 @@ impl<'v> InterruptCommandRegister<'v> {
     }
 
     pub fn wait_pending(&self) {
-        while self.is_pending() {
-            crate::instructions::hlt();
-        }
+        while self.is_pending() {}
     }
 }

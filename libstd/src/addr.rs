@@ -13,6 +13,8 @@ use core::marker::PhantomData;
 
 pub const VADDR_HW_MAX: usize = 0x1000000000000;
 
+// TODO possibly introduce an Address<Frame> type to represent frame addresses?
+
 #[repr(transparent)]
 pub struct Address<T: AddressType> {
     value: usize,
@@ -202,7 +204,7 @@ impl Address<Virtual> {
 
     #[inline]
     pub fn from_ptr<T>(ptr: *const T) -> Self {
-        Self::new( ptr as usize)
+        Self::new(ptr as usize)
     }
 
     #[inline]

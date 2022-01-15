@@ -52,9 +52,43 @@ extern "x86-interrupt" fn segment_not_present_handler(
     stack_frame: InterruptStackFrame,
     error_code: u64,
 ) {
+    use bit_field::BitField;
+
+    #[derive(Debug)]
+    enum StackSelectorErrorTable {
+        GDT,
+        IDT,
+        LDT,
+        Invalid(u32),
+    }
+
+    struct StackSelectorErrorCode(u32);
+    impl core::fmt::Debug for StackSelectorErrorCode {
+        fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            formatter
+                .debug_struct("Stack Selector Error")
+                .field("External", &self.0.get_bit(0))
+                .field(
+                    "Table",
+                    &match self.0.get_bits(1..3) {
+                        0b00 => StackSelectorErrorTable::GDT,
+                        0b01 | 0b11 => StackSelectorErrorTable::IDT,
+                        0b10 => StackSelectorErrorTable::LDT,
+                        value => StackSelectorErrorTable::Invalid(value),
+                    },
+                )
+                .field(
+                    "Index",
+                    &format_args!("0x{0:X} | {0}", self.0.get_bits(3..16)),
+                )
+                .finish()
+        }
+    }
+
     panic!(
-        "CPU EXCEPTION: SEGMENT NOT PRESENT: {}\n{:#?}",
-        error_code, stack_frame
+        "CPU EXCEPTION: SEGMENT NOT PRESENT:\nError: {:?}\n{:#?}",
+        StackSelectorErrorCode(error_code as u32),
+        stack_frame
     );
 }
 
@@ -151,7 +185,6 @@ extern "x86-interrupt" fn security_exception_handler(
 }
 
 // reserved 31
-
 // --- triple fault (can't handle)
 
 lazy_static::lazy_static! {

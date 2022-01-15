@@ -1,3 +1,4 @@
+use bit_field::BitField;
 use core::{alloc::Layout, mem::size_of, num::NonZeroUsize};
 use libstd::{
     addr_ty::{Physical, Virtual},
@@ -74,13 +75,11 @@ impl<'map> BlockAllocator<'map> {
     /// The size of an allocator block.
     pub const BLOCK_SIZE: usize = 0x1000 / BlockPage::BLOCKS_PER;
 
-    // TODO possibly move the initialization code from `init()` into this `new()` function.
     #[allow(const_item_mutation)]
     pub fn new() -> Self {
         const EMPTY: [BlockPage; 0] = [];
 
         let block_malloc = Self {
-            // TODO make addressor use a RwLock
             map: RwLock::new(AllocatorMap {
                 addressor: VirtualAddressor::null(),
                 pages: &mut EMPTY,
@@ -95,7 +94,7 @@ impl<'map> BlockAllocator<'map> {
                 map_write.addressor = VirtualAddressor::new(Page::null());
 
                 // TODO the addressors shouldn't mmap all reserved frames by default.
-                //  It is, for insatnce, useless in userland addressors, where ACPI tables
+                //  It is, for instance, useless in userland addressors, where ACPI tables
                 //  don't need to be mapped.
                 debug!("Identity mapping all reserved global memory frames...");
                 falloc::get()
@@ -340,8 +339,7 @@ impl MemoryAllocator for BlockAllocator<'_> {
                 end_block_index - block_index,
                 (block_index_floor + BlockPage::BLOCKS_PER) - block_index,
             );
-
-            let mask_bits = libstd::U64_BIT_MASKS[remaining_blocks_in_slice];
+            let mask_bits = libstd::U64_BIT_MASKS[remaining_blocks_in_slice - 1];
 
             *block_page.value_mut() |= mask_bits << low_offset;
             block_index += remaining_blocks_in_slice;
@@ -524,7 +522,10 @@ impl MemoryAllocator for BlockAllocator<'_> {
             };
 
             if had_bits && !has_bits {
-                // TODO we actually *don't know* if this page locked a frame or not...
+                // FIXME:
+                // This is wildly unsafe. There's no way to validate—without *only* going through
+                // the Rust global allocator—that the given page allocated a frame and wasn't a direct allocation
+                // of some sort.
                 map.addressor
                     .unmap(&Page::from_index(map_index), true)
                     .unwrap();

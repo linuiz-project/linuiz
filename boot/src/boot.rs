@@ -302,7 +302,7 @@ fn kernel_transfer(
     info!("Preparing to exit boot services environment.");
     // Retrieve a raw allocation pointer & size for the system memory map.
     //
-    // Remark:
+    // REMARK:
     //  We can't use `memory::allocate_pool`, because the `system_table.boot_services()` would have its lifetime
     //  used to provide a lifetime to the returned pointer buffer. This is a problem because `system_table` has
     //  to be moved into `ExitBootServices`, which isn't possible if `boot_services()` has had its lifetime used
@@ -332,7 +332,7 @@ fn kernel_transfer(
         .exit_boot_services(image_handle, mmap_buffer)
         .expect_success("Error occurred attempting to call `ExitBootServices()`.");
 
-    // Remark: For some reason, this cast itself doesn't result in a valid memory map, even provided
+    // REMARK: For some reason, this cast itself doesn't result in a valid memory map, even provided
     //  the alignment is correct; so we have to read in the memory descriptors.
     //
     // This could be due to the actual entry size not being equal to size_of::<MemoryDescriptor>().

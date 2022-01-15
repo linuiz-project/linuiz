@@ -31,7 +31,7 @@ impl VirtualAddressor {
     /// Attempts to create a new VirtualAddressor, with `mapped_page` specifying the current page
     /// where the entirety of the system physical memory is mapped.
     ///
-    /// Safety: this method is unsafe because `mapped_page` can be any value; that is, not necessarily
+    /// SAFETY: this method is unsafe because `mapped_page` can be any value; that is, not necessarily
     /// a valid address in which physical memory is already mapped. The expectation is that `mapped_page` is
     /// a propery starting page for the physical memory mapping.
     pub unsafe fn new(mapped_page: Page) -> Self {
