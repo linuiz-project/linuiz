@@ -1,5 +1,3 @@
-use super::InterruptVector;
-use core::sync::atomic::Ordering;
 use libstd::structures::idt::InterruptStackFrame;
 
 pub extern "x86-interrupt" fn apit_handler(_: InterruptStackFrame) {

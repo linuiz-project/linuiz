@@ -37,7 +37,7 @@ pub fn __std_out(args: core::fmt::Arguments) {
 
 #[macro_export]
 macro_rules! print {
-    ($($arg:tt)*) => ($crate::drivers::io::__std_out(format_args!($($arg)*)));
+    ($($arg:tt)*) => ($crate::drivers::stdout::__std_out(format_args!($($arg)*)));
 }
 
 #[macro_export]

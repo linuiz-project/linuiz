@@ -54,7 +54,7 @@ fn get_log_level() -> log::LevelFilter {
     log::LevelFilter::Debug
 }
 
-static mut CON_OUT: drivers::io::Serial = drivers::io::Serial::new(drivers::io::COM1);
+static mut CON_OUT: drivers::stdout::Serial = drivers::stdout::Serial::new(drivers::stdout::COM1);
 static TRACE_ENABLED_PATHS: [&str; 1] = ["libstd::structures::apic::icr"];
 static BOOT_INFO: SyncOnceCell<BootInfo<UEFIMemoryDescriptor, SystemConfigTableEntry>> =
     SyncOnceCell::new();
@@ -84,9 +84,9 @@ unsafe extern "efiapi" fn _kernel_pre_init(
 }
 
 unsafe fn kernel_init() -> ! {
-    CON_OUT.init(drivers::io::SerialSpeed::S115200);
+    CON_OUT.init(drivers::stdout::SerialSpeed::S115200);
 
-    match drivers::io::set_stdout(&mut CON_OUT, get_log_level(), &TRACE_ENABLED_PATHS) {
+    match drivers::stdout::set_stdout(&mut CON_OUT, get_log_level(), &TRACE_ENABLED_PATHS) {
         Ok(()) => {
             info!("Successfully loaded into kernel, with logging enabled.");
         }

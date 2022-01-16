@@ -226,7 +226,8 @@ fn efi_main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status
 }
 
 fn ensure_enough_memory(boot_services: &BootServices) {
-    let mmap_size_bytes = boot_services.memory_map_size() + (size_of::<MemoryDescriptor>() * 2);
+    let mmap_size_bytes =
+        boot_services.memory_map_size().map_size + (size_of::<MemoryDescriptor>() * 2);
     let mmap_buffer = allocate_pool(boot_services, MemoryType::LOADER_DATA, mmap_size_bytes);
     let total_memory: usize = match boot_services.memory_map(mmap_buffer) {
         Ok(completion) => completion.unwrap().1,
@@ -310,7 +311,8 @@ fn kernel_transfer(
     let (mmap_ptr, mmap_alloc_size) = {
         let boot_services = system_table.boot_services();
         // Determine the total allocation size of the memory map, in bytes (+ to cover any extraneous entries created before `ExitBootServices`).
-        let mmap_alloc_size = boot_services.memory_map_size() + (4 * size_of::<MemoryDescriptor>());
+        let mmap_size = boot_services.memory_map_size();
+        let mmap_alloc_size = mmap_size.map_size + (4 * size_of::<MemoryDescriptor>());
         let alloc_ptr = boot_services
             .allocate_pool(KERNEL_DATA, mmap_alloc_size)
             .expect_success("Failed to allocate space for kernel memory map slice.");

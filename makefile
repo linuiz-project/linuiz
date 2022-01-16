@@ -1,54 +1,72 @@
+## Command-line arguments
+
 PROFILE=release
 
-root = $(shell cd)
-bootloader_deps = $(shell dir /s /b .\boot\src\*.rs)
-kernel_deps = $(shell dir /s /b .\kernel\src\*.rs)
-kernel_compile_args = $(root)/kernel/x86_64-unknown-none.json $(root)/kernel/x86_64-unknown-none.lds
-libstd_deps = $(shell dir /s /b .\libstd\src\*.rs)
-ap_trampoline_src = $(root)/kernel/src/ap_trampoline.asm
+
+## Dependencies
+
+libstd_deps = $(shell find ./libstd/src/ -type f -name "*.rs")
+
+bootloader = ./.hdd/image/EFI/BOOT/BOOTX64.efi
+bootloader_deps = $(shell find ./boot/src/ -type f -name "*.rs")
+
+kernel = ./.hdd/image/EFI/gsai/kernel.elf
+kernel_deps = $(shell find ./kernel/src/ -type f -name "*.rs")
+kernel_linker_args = ./kernel/x86_64-unknown-none.json ./kernel/x86_64-unknown-none.lds
+
+ap_trampoline_src = ./kernel/src/ap_trampoline.asm
+ap_trampoline_out = ./kernel/ap_trampoline.o
+
 hdd = .hdd
 nvme_img = $(hdd)/nvme.img
-rootfs_img = $(hdd)/rootf.img
+rootfs_img = $(hdd)/rootfs.img
 
-bootloader = $(root)/.hdd/image/EFI/BOOT/BOOTX64.efi
-ap_trampoline = $(root)/kernel/ap_trampoline.o
-kernel = $(root)/.hdd/image/EFI/gsai/kernel.elf
+debug = .debug
 
-PROFILE=release
+
+
+## Commands
 
 all: $(nvme_img) $(rootfs_img) $(bootloader) $(kernel) 
 
-run: all
-	run.bat
+run: all $(debug)
+	sh run.sh
 
-soft-reset: 
-	rm -fs $(bootloader) $(ap_trampoline) $(kernel)
+reset: clean
+	rm -f $(bootloader) $(kernel) $(ap_trampoline_out)
 
 clean:
-	cd $(root)/boot/ && cargo clean
-	cd $(root)/kernel/ && cargo clean
-	cd $(root)/libstd/ && cargo clean
+	cd ./boot/ && cargo clean
+	cd ./kernel/ && cargo clean
+	cd ./libstd/ && cargo clean
 
 update:
 	rustup update
-	cd $(root)/boot/ && cargo update
-	cd $(root)/kernel/ && cargo update
-	cd $(root)/libstd/ && cargo update
+	cd ./boot/ && cargo update
+	cd ./kernel/ && cargo update
+	cd ./libstd/ && cargo update
+
+
+## Dependency paths
 
 $(bootloader): $(bootloader_deps)
-	cd $(root)/boot/ && cargo fmt && cargo build --profile $(PROFILE) -Z unstable-options
+	cd ./boot/ && cargo fmt && cargo build --profile $(PROFILE) -Z unstable-options
 
-$(ap_trampoline): $(ap_trampoline_src)
-	'C:\Program Files\NASM\nasm.exe' -f elf64 -o $(ap_trampoline) $(ap_trampoline_src)
+$(ap_trampoline_out): $(ap_trampoline_src)
+		nasm -f elf64 -o $(ap_trampoline_out) $(ap_trampoline_src)
 
-$(kernel): $(ap_trampoline) $(kernel_deps) $(kernel_compile_args) $(libstd_deps)
-	cd $(root)/kernel/ && cargo fmt && cargo build --profile $(PROFILE) -Z unstable-options
+$(kernel): $(ap_trampoline_out) $(kernel_deps) $(kernel_linker_args) $(libstd_deps)
+	cd ./kernel/ && cargo fmt && cargo build --profile $(PROFILE) -Z unstable-options;\
+		rm -f $(ap_trampoline_out)
 
 $(nvme_img): $(hdd)
-	qemu-img.exe create -f raw $(nvme_img) 256M
+	qemu-img create -f raw $(nvme_img) 256M
 
 $(rootfs_img): $(hdd)
-	qemu-img.exe create -f raw $(rootfs_img) 256M 
+	qemu-img create -f raw $(rootfs_img) 256M 
 
 $(hdd):
 	mkdir $(hdd)
+
+$(debug):
+	mkdir $(debug)
