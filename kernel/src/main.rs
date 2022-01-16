@@ -68,6 +68,7 @@ static KERNEL_MALLOCATOR: SyncOnceCell<block_malloc::BlockAllocator> = SyncOnceC
 #[inline(always)]
 unsafe fn clear_stack() {
     libstd::registers::stack::RSP::write(__bsp_stack_top.as_ptr());
+    core::arch::asm!("cpuid"); // Serializing instruction
 }
 
 #[no_mangle]
@@ -250,12 +251,50 @@ extern "C" fn _startup() -> ! {
         }
     }
 
-    //unsafe { clear_stack() };
+    unsafe { clear_stack() };
     kernel_main()
 }
 
 fn kernel_main() -> ! {
     debug!("Successfully entered `kernel_main()`.");
+
+    if crate::local_state::is_bsp() {
+        use libstd::{
+            acpi::rdsp::xsdt::{mcfg::MCFG, XSDT},
+            io::pci,
+        };
+
+        if let Ok(mcfg) = XSDT.find_sub_table::<MCFG>() {
+            let bridges: alloc::vec::Vec<pci::PCIeHostBridge> = mcfg
+                .iter()
+                .filter_map(|entry| pci::configure_host_bridge(entry).ok())
+                .collect();
+
+            for device_variant in bridges
+                .iter()
+                .flat_map(|bridge| bridge.iter())
+                .flat_map(|bus| bus.iter())
+            {
+                if let pci::DeviceVariant::Standard(device) = device_variant {
+                    if device.class() == pci::DeviceClass::MassStorageController
+                        && device.subclass() == 0x08
+                    {
+                        use crate::drivers::nvme::{command::Command, Controller};
+                        let mut nvme = Controller::from_device(device, 4, 4);
+
+                        let sub_queue = nvme.admin_submission_queue();
+                        let (data, command) = Command::identify(0);
+                        sub_queue.submit_command(command).unwrap();
+                        sub_queue.flush_commands();
+
+                        crate::clock::local::sleep_msec(10);
+
+                        info!("{:?}", data);
+                    }
+                }
+            }
+        }
+    }
 
     libstd::instructions::hlt_indefinite()
 }

@@ -30,7 +30,7 @@ debug = .debug
 all: $(nvme_img) $(rootfs_img) $(bootloader) $(kernel) 
 
 run: all $(debug)
-	sh run.sh
+	./run.sh
 
 reset: clean
 	rm -f $(bootloader) $(kernel) $(ap_trampoline_out)
@@ -56,8 +56,7 @@ $(ap_trampoline_out): $(ap_trampoline_src)
 		nasm -f elf64 -o $(ap_trampoline_out) $(ap_trampoline_src)
 
 $(kernel): $(ap_trampoline_out) $(kernel_deps) $(kernel_linker_args) $(libstd_deps)
-	cd ./kernel/ && cargo fmt && cargo build --profile $(PROFILE) -Z unstable-options;\
-		rm -f $(ap_trampoline_out)
+	cd ./kernel/ && cargo fmt && cargo build --profile $(PROFILE) -Z unstable-options && rm -f $(ap_trampoline_out)
 
 $(nvme_img): $(hdd)
 	qemu-img create -f raw $(nvme_img) 256M

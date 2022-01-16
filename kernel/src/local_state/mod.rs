@@ -9,10 +9,64 @@ use libstd::registers::MSR;
 
 pub static INIT_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-const IA32_FS_BASE_ALIGN: u64 = 0x100;
-
 pub fn is_bsp() -> bool {
     MSR::IA32_APIC_BASE.read().get_bit(8)
+}
+
+struct LocalStateRegister;
+
+impl LocalStateRegister {
+    const ID_FLAG: u64 = 1 << 0;
+    const PTR_FLAG: u64 = 1 << 1;
+    const ID_BITS_SHFT: u64 = Self::PTR_FLAG.trailing_zeros() + 1;
+    const ID_BITS: u64 = 0xFF << Self::ID_BITS_SHFT;
+    const DATA_MASK: u64 = Self::ID_BITS | Self::PTR_FLAG | Self::ID_FLAG;
+
+    #[inline]
+    fn get_id() -> u8 {
+        let fs_base = unsafe { MSR::IA32_FS_BASE.read_unchecked() };
+        if (fs_base & Self::ID_FLAG) == 0 {
+            let cpuid_id =
+                (libstd::instructions::cpuid::exec(0x1, 0x0).unwrap().ebx() >> 24) as u64;
+
+            unsafe {
+                MSR::IA32_FS_BASE.write_unchecked(
+                    MSR::IA32_FS_BASE.read_unchecked()
+                        | (cpuid << Self::ID_BITS_SHFT)
+                        | Self::ID_FLAG,
+                )
+            };
+
+            cpuid_id as u8
+        } else {
+            (fs_base & Self::ID_BITS) >> Self::ID_BITS_SHFT
+        }
+    }
+
+    fn try_get_local_state() -> Option<&'static LocalState> {
+        unsafe {
+            let fs_base = MSR::IA32_FS_BASE.read_unchecked();
+            if (fs_base & Self::PTR_FLAG) > 0 {
+                ((fs_base & !Self::DATA_MASK) as *mut LocalState).as_ref()
+            }
+        }
+    }
+
+    fn set_local_state_ptr(ptr: *mut LocalState) {
+        let ptr_u64 = ptr as u64;
+
+        assert_eq!(
+            ptr_u64 & Self::DATA_MASK,
+            0,
+            "LocalState pointer cannot have data bits set."
+        );
+
+        unsafe {
+            MSR::IA32_FS_BASE.write_unchecked(
+                ptr_u64 | (MSR::IA32_FS_BASE.read_unchecked() & Self::DATA_MASK) | Self::PTR_FLAG,
+            )
+        };
+    }
 }
 
 struct LocalState {
@@ -42,8 +96,8 @@ pub fn init() {
             .unwrap()
             .alloc(
                 core::mem::size_of::<LocalState>(),
-                // Align to 0x1000 to accomodate some state bits.
-                core::num::NonZeroUsize::new(IA32_FS_BASE_ALIGN as usize),
+                // Invariantly asssumes LocalStateFlags bitfields will be packed.
+                core::num::NonZeroUsize::new(LocalStateFlags::all().bits() + 1),
             )
             .unwrap()
             .cast::<LocalState>()
@@ -66,34 +120,19 @@ pub fn init() {
         }
 
         // Convert ptr to 64 bit representation, and write metadata into low bits.
-        MSR::IA32_FS_BASE.write(lpu_ptr as u64 | cpuid_id as u64);
+        LocalStateRegister::set_local_state_ptr(lpu_ptr);
         int_ctrl().unwrap().sw_enable();
     }
 }
 
-fn get_fs_base() -> Option<u64> {
-    let fs_base = MSR::IA32_FS_BASE.read();
-    if fs_base > 0 {
-        Some(fs_base)
-    } else {
-        None
-    }
-}
-
-fn try_get_lpu() -> Option<&'static LocalState> {
-    get_fs_base().and_then(|fs_base| unsafe {
-        ((fs_base & !(IA32_FS_BASE_ALIGN - 1)) as *const LocalState).as_ref()
-    })
-}
-
-pub fn id() -> Option<u8> {
-    get_fs_base().map(|fs_base| fs_base as u8)
+pub fn id() -> u8 {
+    LocalStateRegister::get_id()
 }
 
 pub fn clock() -> Option<&'static AtomicClock> {
-    try_get_lpu().map(|lpu| &lpu.clock)
+    LocalStateRegister::try_get_local_state().map(|lpu| &lpu.clock)
 }
 
 pub fn int_ctrl() -> Option<&'static InterruptController> {
-    try_get_lpu().map(|lpu| &lpu.int_ctrl)
+    LocalStateRegister::try_get_local_state().map(|lpu| &lpu.int_ctrl)
 }

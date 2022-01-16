@@ -323,8 +323,8 @@ pub enum ControllerEnableError {
 pub struct Controller<'dev> {
     device: &'dev PCIeDevice<Standard>,
     msix: libstd::io::pci::standard::MSIX<'dev>,
-    admin_sub: Option<queue::admin::SubmissionQueue<'dev>>,
-    admin_com: Option<queue::admin::CompletionQueue<'dev>>,
+    admin_sub: queue::admin::SubmissionQueue<'dev>,
+    admin_com: queue::admin::CompletionQueue<'dev>,
 }
 
 impl<'dev> Controller<'dev> {
@@ -343,13 +343,17 @@ impl<'dev> Controller<'dev> {
         sub_entry_count: u16,
         com_entry_count: u16,
     ) -> Self {
-        let mut nvme = Self {
-            device,
-            msix: device
-                .find_msix()
-                .expect("MSIX is required for NVMe controller creation."),
-            admin_sub: None,
-            admin_com: None,
+        let nvme = {
+            let reg0 = device.get_register(StandardRegister::Register0).unwrap();
+
+            Self {
+                device,
+                msix: device
+                    .find_msix()
+                    .expect("MSIX is required for NVMe controller creation."),
+                admin_sub: queue::admin::SubmissionQueue::new(reg0, sub_entry_count),
+                admin_com: queue::admin::CompletionQueue::new(reg0, com_entry_count),
+            }
         };
 
         unsafe {
@@ -358,11 +362,6 @@ impl<'dev> Controller<'dev> {
         }
 
         debug!("NVMe controller successfully reset.");
-
-        debug!("Creating admin submission & completion queues.");
-        let reg0 = device.get_register(StandardRegister::Register0).unwrap();
-        nvme.admin_sub = Some(queue::admin::SubmissionQueue::new(reg0, sub_entry_count));
-        nvme.admin_com = Some(queue::admin::CompletionQueue::new(reg0, com_entry_count));
 
         let cc = nvme.config();
         cc.set_css(nvme.capabilities().get_css().into_command_set());
@@ -463,12 +462,12 @@ impl<'dev> Controller<'dev> {
         }
     }
 
-    pub fn admin_submission_queue(&'dev mut self) -> Option<&mut queue::admin::SubmissionQueue> {
-        self.admin_sub.as_mut()
+    pub fn admin_submission_queue(&'dev mut self) -> &mut queue::admin::SubmissionQueue {
+        &mut self.admin_sub
     }
 
-    pub fn admin_completion_queue(&'dev mut self) -> Option<&mut queue::admin::CompletionQueue> {
-        self.admin_com.as_mut()
+    pub fn admin_completion_queue(&'dev mut self) -> &mut queue::admin::CompletionQueue {
+        &mut self.admin_com
     }
 }
 
