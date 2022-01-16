@@ -8,13 +8,11 @@ bitflags::bitflags! {
 
 pub struct KernelLogger {
     modes: LoggingModes,
-    trace_enabled_paths: &'static [&'static str],
 }
 
 impl log::Log for KernelLogger {
     fn enabled(&self, metadata: &log::Metadata) -> bool {
-        metadata.level() < log::Level::Trace
-            || self.trace_enabled_paths.contains(&metadata.target())
+        true
     }
 
     fn log(&self, record: &log::Record) {
@@ -43,16 +41,12 @@ static mut LOGGER: Option<KernelLogger> = None;
 pub fn init_logger(
     modes: LoggingModes,
     min_level: log::LevelFilter,
-    trace_enabled_paths: &'static [&'static str],
 ) -> Result<(), log::SetLoggerError> {
     unsafe {
         if LOGGER.is_some() {
             panic!("logger can only be configured once")
         } else {
-            LOGGER = Some(KernelLogger {
-                modes,
-                trace_enabled_paths,
-            });
+            LOGGER = Some(KernelLogger { modes });
 
             match log::set_logger_racy(LOGGER.as_ref().unwrap()) {
                 Ok(()) => {

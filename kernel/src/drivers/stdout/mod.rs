@@ -39,15 +39,10 @@ static STD_OUT: StandardOut = StandardOut(Mutex::new(None));
 pub fn set_stdout(
     std_out: &'static mut dyn Write,
     minimum_level: log::LevelFilter,
-    trace_enabled_paths: &'static [&'static str],
 ) -> Result<(), log::SetLoggerError> {
     *STD_OUT.lock() = Some(std_out);
 
-    crate::logging::init_logger(
-        crate::logging::LoggingModes::SERIAL,
-        minimum_level,
-        trace_enabled_paths,
-    )
+    crate::logging::init_logger(crate::logging::LoggingModes::SERIAL, minimum_level)
 }
 
 #[doc(hidden)]

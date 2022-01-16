@@ -55,7 +55,6 @@ fn get_log_level() -> log::LevelFilter {
 }
 
 static mut CON_OUT: drivers::stdout::Serial = drivers::stdout::Serial::new(drivers::stdout::COM1);
-static TRACE_ENABLED_PATHS: [&str; 1] = ["libstd::structures::apic::icr"];
 static BOOT_INFO: SyncOnceCell<BootInfo<UEFIMemoryDescriptor, SystemConfigTableEntry>> =
     SyncOnceCell::new();
 static KERNEL_MALLOCATOR: SyncOnceCell<block_malloc::BlockAllocator> = SyncOnceCell::new();
@@ -66,8 +65,14 @@ static KERNEL_MALLOCATOR: SyncOnceCell<block_malloc::BlockAllocator> = SyncOnceC
 ///         ABSOLUTELY NO dangling references to the old stack will exist (i.e. calling a
 ///         no-argument non-returning function directly after).
 #[inline(always)]
-unsafe fn clear_stack() {
+unsafe fn clear_bsp_stack() {
+    assert!(
+        crate::local_state::is_bsp(),
+        "Cannot clear AP stack pointers to BSP stack bottom."
+    );
+
     libstd::registers::stack::RSP::write(__bsp_stack_top.as_ptr());
+    // Serializing instruction to clear pipeline of any dangling references.
     libstd::instructions::cpuid::exec(0x0, 0x0).unwrap();
 }
 
@@ -80,14 +85,14 @@ unsafe extern "efiapi" fn _kernel_pre_init(
         libstd::instructions::interrupts::breakpoint();
     }
 
-    clear_stack();
+    clear_bsp_stack();
     kernel_init()
 }
 
 unsafe fn kernel_init() -> ! {
     CON_OUT.init(drivers::stdout::SerialSpeed::S115200);
 
-    match drivers::stdout::set_stdout(&mut CON_OUT, get_log_level(), &TRACE_ENABLED_PATHS) {
+    match drivers::stdout::set_stdout(&mut CON_OUT, get_log_level()) {
         Ok(()) => {
             info!("Successfully loaded into kernel, with logging enabled.");
         }
@@ -125,7 +130,7 @@ unsafe fn kernel_init() -> ! {
     falloc::load_new(boot_info.memory_map());
     init_system_config_table(boot_info.config_table());
 
-    clear_stack();
+    clear_bsp_stack();
     kernel_mem_init()
 }
 
@@ -158,7 +163,7 @@ unsafe fn kernel_mem_init() -> ! {
 
     info!("Finalizing kernel memory allocator initialization.");
 
-    clear_stack();
+    clear_bsp_stack();
     _startup()
 }
 
@@ -183,6 +188,7 @@ extern "C" fn _startup() -> ! {
         crate::clock::global::init();
     }
 
+    // Initialize the processor-local state.
     crate::local_state::init();
 
     // If this is the BSP, wake other cores.
@@ -246,7 +252,6 @@ extern "C" fn _startup() -> ! {
         }
     }
 
-    unsafe { clear_stack() };
     kernel_main()
 }
 
