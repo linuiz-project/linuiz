@@ -16,7 +16,7 @@ use core::{
 #[derive(Debug, Clone, Copy)]
 pub enum AllocError {
     OutOfMemory,
-    InvalidAlignment,
+    InvalidAlignment(usize),
     IdentityMappingOverlaps,
     FallocError(crate::memory::falloc::FallocError),
 }

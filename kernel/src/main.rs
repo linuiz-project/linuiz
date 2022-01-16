@@ -68,7 +68,7 @@ static KERNEL_MALLOCATOR: SyncOnceCell<block_malloc::BlockAllocator> = SyncOnceC
 #[inline(always)]
 unsafe fn clear_stack() {
     libstd::registers::stack::RSP::write(__bsp_stack_top.as_ptr());
-    core::arch::asm!("cpuid"); // Serializing instruction
+    libstd::instructions::cpuid::exec(0x0, 0x0).unwrap();
 }
 
 #[no_mangle]
@@ -193,7 +193,7 @@ extern "C" fn _startup() -> ! {
         };
 
         // Initialize other CPUs
-        let id = crate::local_state::id().unwrap();
+        let id = crate::local_state::processor_id();
         let icr = crate::local_state::int_ctrl().unwrap().icr();
         let ap_trampoline_page_index = unsafe { __ap_trampoline_start.as_page().index() } as u8;
 
@@ -225,7 +225,7 @@ extern "C" fn _startup() -> ! {
                     let (stack_bottom, len) = libstd::memory::malloc::try_get()
                         .unwrap()
                         .alloc(AP_STACK_SIZE, core::num::NonZeroUsize::new(0x1000))
-                        .expect("Failed to allocate stack for LPU")
+                        .unwrap()
                         .into_parts();
 
                     AP_STACK_POINTERS[lapic.id() as usize] = stack_bottom.add(len) as *mut _;
@@ -242,11 +242,6 @@ extern "C" fn _startup() -> ! {
                 trace!("Sending SIPI x2 interrupt to: {}", lapic.id());
                 icr.send_sipi(ap_trampoline_page_index, lapic.id());
                 icr.wait_pending();
-            }
-
-            if local_state::INIT_COUNT.load(core::sync::atomic::Ordering::Relaxed) == 1 {
-                info!("Single-processor CPU detected. No multiprocessing will occur.");
-                // TODO somehow handle single-core ?
             }
         }
     }

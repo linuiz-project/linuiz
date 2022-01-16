@@ -281,7 +281,7 @@ impl MemoryAllocator for BlockAllocator<'_> {
     ) -> Result<Alloc<u8>, AllocError> {
         let align = align.unwrap_or(NonZeroUsize::new_unchecked(1)).get();
         if !align.is_power_of_two() {
-            return Err(AllocError::InvalidAlignment);
+            return Err(AllocError::InvalidAlignment(align));
         }
 
         let align_shift = usize::max(align / Self::BLOCK_SIZE, 1);

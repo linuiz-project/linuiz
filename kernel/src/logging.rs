@@ -20,22 +20,13 @@ impl log::Log for KernelLogger {
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
             if self.modes.contains(LoggingModes::SERIAL) {
-                if let Some(apic_id) = crate::local_state::id() {
-                    crate::println!(
-                        "[{}>{} {}] {}",
-                        apic_id,
-                        record.level(),
-                        record.module_path().unwrap_or("*"),
-                        record.args()
-                    );
-                } else {
-                    crate::println!(
-                        "[{} {}] {}",
-                        record.level(),
-                        record.module_path().unwrap_or("*"),
-                        record.args()
-                    );
-                }
+                crate::println!(
+                    "[{}>{} {}] {}",
+                    crate::local_state::processor_id(),
+                    record.level(),
+                    record.module_path().unwrap_or("*"),
+                    record.args()
+                );
             }
 
             if self.modes.contains(LoggingModes::GRAPHIC) {

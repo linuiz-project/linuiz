@@ -30,13 +30,15 @@ pub fn exec(leaf: u32, subleaf: u32) -> Option<Registers> {
 
     unsafe {
         core::arch::asm!(
-            "xchg esi, ebx",
+            "push rbx",
             "cpuid",
-            "xchg esi, ebx",
+            "xchg rbx, rsi",
+            "pop rbx",
             inout("eax") leaf => eax,
             inout("ecx") subleaf => ecx,
             lateout("esi") ebx,
             lateout("edx") edx,
+            options(nomem)
         )
     }
 
@@ -46,21 +48,6 @@ pub fn exec(leaf: u32, subleaf: u32) -> Option<Registers> {
         None
     }
 }
-
-// lazy_static::lazy_static! {
-//     pub static ref MAX_CPUID_LEAF: u32 = unsafe {
-//         let value: u32;
-
-//         core::arch::asm!(
-//             "mov eax, 0x0",
-//             "cpuid",
-//             out("eax") value,
-//             options(nostack, nomem)
-//         );
-
-//         value
-//     };
-// }
 
 bitflags::bitflags! {
     pub struct Features : u64 {

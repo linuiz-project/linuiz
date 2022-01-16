@@ -56,10 +56,6 @@ impl<T> SyncRefCell<T> {
     pub fn borrow<'a>(&'a self) -> Option<&'a T> {
         unsafe { self.cell.get().as_ref().unwrap().as_ref() }
     }
-
-    pub fn borrow_mut<'a>(&'a self) -> Option<&'a mut T> {
-        unsafe { self.cell.get().as_mut().unwrap().as_mut() }
-    }
 }
 
 pub struct SyncOnceCell<T> {

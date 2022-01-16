@@ -65,7 +65,7 @@ pub fn alloc_generic<T>(
     .and_then(|alloc| {
         alloc
             .cast()
-            .map_err(|_| crate::memory::malloc::AllocError::InvalidAlignment)
+            .map_err(|_| crate::memory::malloc::AllocError::InvalidAlignment(0))
     })
 }
 
