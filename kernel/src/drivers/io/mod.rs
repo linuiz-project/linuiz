@@ -18,7 +18,7 @@ pub fn set_stdout(
     STDOUT.set(Mutex::new(stdout));
 
     crate::logging::init_logger(
-        crate::logging::LoggingModes::STDOUT,
+        crate::logging::LoggingModes::SERIAL,
         minimum_level,
         trace_enabled_paths,
     )

@@ -1,7 +1,7 @@
 bitflags::bitflags! {
     pub struct LoggingModes : u8 {
         const NONE = 0;
-        const STDOUT = 1 << 0;
+        const SERIAL = 1 << 0;
         const GRAPHIC = 1 << 1;
     }
 }
@@ -19,20 +19,20 @@ impl log::Log for KernelLogger {
 
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
-            if self.modes.contains(LoggingModes::STDOUT) {
+            if self.modes.contains(LoggingModes::SERIAL) {
                 if let Some(apic_id) = crate::local_state::id() {
                     crate::println!(
                         "[{}>{} {}] {}",
                         apic_id,
                         record.level(),
-                        record.module_path().unwrap_or("None"),
+                        record.module_path().unwrap_or("*"),
                         record.args()
                     );
                 } else {
                     crate::println!(
                         "[{} {}] {}",
                         record.level(),
-                        record.module_path().unwrap_or("None"),
+                        record.module_path().unwrap_or("*"),
                         record.args()
                     );
                 }

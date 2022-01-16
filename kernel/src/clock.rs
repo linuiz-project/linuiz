@@ -21,7 +21,7 @@ impl AtomicClock {
 pub mod global {
     static GLOBAL_CLOCK: SyncOnceCell<super::AtomicClock> = SyncOnceCell::new();
 
-    pub fn configure() {
+    pub fn init() {
         if let Ok(()) = GLOBAL_CLOCK.set(super::AtomicClock::new()) {
             libstd::instructions::interrupts::without_interrupts(|| {
                 use libstd::structures::pic8259;
@@ -62,7 +62,7 @@ pub mod global {
 
     pub fn busy_wait_msec(milliseconds: u64) {
         let target_ticks = get_ticks().unwrap() + milliseconds;
-        while get_ticks().unwrap() < target_ticks {}
+        while get_ticks().unwrap() <= target_ticks {}
     }
 }
 
@@ -76,7 +76,7 @@ pub mod local {
     pub fn sleep_msec(milliseconds: u64) {
         let target_ticks = get_ticks() + milliseconds;
 
-        while get_ticks() < target_ticks {
+        while get_ticks() <= target_ticks {
             libstd::instructions::hlt();
         }
     }

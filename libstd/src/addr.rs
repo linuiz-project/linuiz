@@ -107,6 +107,7 @@ impl Address<Physical> {
         }
     }
 
+    #[inline]
     pub const fn new_truncate(addr: usize) -> Self {
         Self {
             value: addr & 0xFFFFFFFFFFFFF,
@@ -195,6 +196,7 @@ impl Address<Virtual> {
         }
     }
 
+    #[inline]
     pub const fn new_truncate(addr: usize) -> Self {
         Self {
             value: (((addr << 16) as isize) >> 16) as usize,

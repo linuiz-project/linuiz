@@ -8,13 +8,13 @@ use libstd::structures::apic::APIC;
 pub enum InterruptVector {
     GlobalTimer = 32,
     LocalTimer = 48,
-    CMCI,
-    Performance,
-    ThermalSensor,
-    LINT0,
-    LINT1,
-    Error,
-    Storage,
+    CMCI = 49,
+    Performance = 50,
+    ThermalSensor = 51,
+    LINT0 = 52,
+    LINT1 = 53,
+    Error = 54,
+    Storage = 55,
     // APIC spurious interrupt is default mapped to 255.
     Spurious = u8::MAX,
 }
@@ -33,18 +33,17 @@ impl InterruptController {
         // Ensure interrupts are enabled.
         libstd::instructions::interrupts::enable();
 
-        debug!("Configuring APIC & APIT.");
+        trace!("Configuring APIC & APIT.");
         let apic = APIC::from_msr().expect("APIC has already been configured on this core");
         unsafe {
             apic.reset();
             apic.hw_enable();
         }
         apic.write_register(Register::TimerDivisor, TimerDivisor::Div1 as u32);
-        apic.timer().set_vector(InterruptVector::LocalTimer as u8);
         apic.timer().set_mode(TimerMode::OneShot);
 
         let ticks_per_10ms = {
-            debug!("Determining APIT frequency.");
+            trace!("Determining APIT frequency.");
 
             // Wait on the global timer, to ensure we're starting the count on the rising edge of each millisecond.
             crate::clock::global::busy_wait_msec(1);
@@ -60,14 +59,15 @@ impl InterruptController {
             Register::TimerInitialCount,
             (u32::MAX - ticks_per_10ms) / 10,
         );
-        debug!(
+        trace!(
             "APIT frequency: {}KHz",
             apic.read_register(Register::TimerInitialCount)
         );
 
         // Configure timer.
+        apic.timer().set_vector(InterruptVector::LocalTimer as u8);
         apic.timer().set_mode(TimerMode::Periodic);
-        apic.timer().set_masked(false);
+        apic.timer().set_masked(true);
         // Set default vectors.
         apic.cmci().set_vector(InterruptVector::CMCI as u8);
         apic.performance()
@@ -80,12 +80,17 @@ impl InterruptController {
         apic.error().set_vector(InterruptVector::Error as u8);
         apic.error().set_masked(false);
 
-        debug!("Core-local APIC configured and enabled.");
+        trace!("Core-local APIC configured and enabled.");
 
         Self {
             apic,
             counters: [Self::ATOMIC_ZERO; 256],
         }
+    }
+
+    #[inline]
+    pub fn apic_id(&self) -> u8 {
+        self.apic.id()
     }
 
     #[inline]

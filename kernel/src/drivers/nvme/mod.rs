@@ -343,7 +343,6 @@ impl<'dev> Controller<'dev> {
         sub_entry_count: u16,
         com_entry_count: u16,
     ) -> Self {
-        // TODO support MSI as well as MSIX
         let mut nvme = Self {
             device,
             msix: device
@@ -377,7 +376,17 @@ impl<'dev> Controller<'dev> {
                 .expect("NVMe driver failed to enable");
         }
 
-        nvme.msix.iter_messages().nth(0).unwrap().set_masked(false);
+        // Configure MSI-X for completion queue.
+        nvme.msix.set_enable(true);
+        nvme.msix.set_function_mask(false);
+
+        nvme.msix[0].configure(
+            crate::local_state::id().unwrap(),
+            crate::local_state::InterruptVector::Storage as u8,
+            libstd::InterruptDeliveryMode::Fixed,
+        );
+        nvme.msix[0].set_masked(false);
+        info!("{:?}", nvme.msix[0]);
 
         nvme
     }
@@ -454,12 +463,12 @@ impl<'dev> Controller<'dev> {
         }
     }
 
-    pub fn admin_submission_queue(&self) -> Option<&queue::admin::SubmissionQueue> {
-        self.admin_sub.as_ref()
+    pub fn admin_submission_queue(&'dev mut self) -> Option<&mut queue::admin::SubmissionQueue> {
+        self.admin_sub.as_mut()
     }
 
-    pub fn admin_completion_queue(&mut self) -> Option<&queue::admin::CompletionQueue> {
-        self.admin_com.as_ref()
+    pub fn admin_completion_queue(&'dev mut self) -> Option<&mut queue::admin::CompletionQueue> {
+        self.admin_com.as_mut()
     }
 }
 

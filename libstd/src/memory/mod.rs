@@ -155,7 +155,7 @@ impl MMIO {
         offset: usize,
         len: usize,
     ) -> Option<&'a [T]> {
-        if (offset + len) < self.len {
+        if (offset + (len * core::mem::size_of::<T>())) < self.len {
             Some(core::slice::from_raw_parts(self.offset::<T>(offset), len))
         } else {
             None

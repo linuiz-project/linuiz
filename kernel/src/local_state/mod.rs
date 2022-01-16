@@ -9,6 +9,17 @@ use libstd::registers::MSR;
 
 pub static INIT_COUNT: AtomicUsize = AtomicUsize::new(0);
 
+const IA32_FS_BASE_ALIGN: u64 = 0x100;
+
+pub fn is_bsp() -> bool {
+    MSR::IA32_APIC_BASE.read().get_bit(8)
+}
+
+struct LocalState {
+    clock: AtomicClock,
+    int_ctrl: InterruptController,
+}
+
 pub fn init() {
     assert_eq!(
         MSR::IA32_FS_BASE.read(),
@@ -18,21 +29,21 @@ pub fn init() {
 
     INIT_COUNT.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
 
-    let apic_id = {
+    let cpuid_id = {
         libstd::instructions::cpuid::exec(0x1, 0x0)
             .unwrap()
             .ebx()
-            .get_bits(24..) as u64
+            .get_bits(24..) as u8
     };
-    debug!("Configuring local state: {}.", apic_id);
 
+    trace!("Configuring local state: {}.", cpuid_id);
     unsafe {
         let lpu_ptr = libstd::memory::malloc::try_get()
             .unwrap()
             .alloc(
                 core::mem::size_of::<LocalState>(),
                 // Align to 0x1000 to accomodate some state bits.
-                core::num::NonZeroUsize::new(0x1000),
+                core::num::NonZeroUsize::new(IA32_FS_BASE_ALIGN as usize),
             )
             .unwrap()
             .cast::<LocalState>()
@@ -40,21 +51,24 @@ pub fn init() {
             .into_parts()
             .0;
 
-        // Write the LPU structure into memory.
-        lpu_ptr.write(LocalState {
-            clock: AtomicClock::new(),
-            int_ctrl: InterruptController::create(),
-        });
+        {
+            let clock = AtomicClock::new();
+            let int_ctrl = InterruptController::create();
+
+            assert_eq!(
+                cpuid_id,
+                int_ctrl.apic_id(),
+                "CPUID processor ID does not match APIC ID."
+            );
+
+            // Write the LPU structure into memory.
+            lpu_ptr.write(LocalState { clock, int_ctrl });
+        }
 
         // Convert ptr to 64 bit representation, and write metadata into low bits.
-        MSR::IA32_FS_BASE.write(lpu_ptr as u64 | apic_id);
+        MSR::IA32_FS_BASE.write(lpu_ptr as u64 | cpuid_id as u64);
         int_ctrl().unwrap().sw_enable();
     }
-}
-
-struct LocalState {
-    clock: AtomicClock,
-    int_ctrl: InterruptController,
 }
 
 fn get_fs_base() -> Option<u64> {
@@ -67,15 +81,13 @@ fn get_fs_base() -> Option<u64> {
 }
 
 fn try_get_lpu() -> Option<&'static LocalState> {
-    get_fs_base().and_then(|fs_base| unsafe { ((fs_base & !0xFFF) as *const LocalState).as_ref() })
-}
-
-pub fn is_bsp() -> bool {
-    MSR::IA32_APIC_BASE.read().get_bit(8)
+    get_fs_base().and_then(|fs_base| unsafe {
+        ((fs_base & !(IA32_FS_BASE_ALIGN - 1)) as *const LocalState).as_ref()
+    })
 }
 
 pub fn id() -> Option<u8> {
-    get_fs_base().map(|fs_base| fs_base.get_bits(4..12) as u8)
+    get_fs_base().map(|fs_base| fs_base as u8)
 }
 
 pub fn clock() -> Option<&'static AtomicClock> {

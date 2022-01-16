@@ -1,4 +1,3 @@
-use bit_field::BitField;
 use core::{alloc::Layout, mem::size_of, num::NonZeroUsize};
 use libstd::{
     addr_ty::{Physical, Virtual},
