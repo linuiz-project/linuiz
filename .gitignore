@@ -11,10 +11,7 @@ Cargo.lock
 **/*.rs.bk
 *.img
 
-references/*
-kernel.out
-debug/
-.debug/
+.debug/**
 .hdd/**
 
 kernel/ap_trampoline.o
