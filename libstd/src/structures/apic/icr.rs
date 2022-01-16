@@ -1,13 +1,6 @@
-use crate::{memory::volatile::VolatileCell, ReadWrite};
+use crate::{memory::volatile::VolatileCell, ReadWrite, InterruptDeliveryMode};
 
-#[repr(u32)]
-pub enum DeliveryMode {
-    Fixed = 0b000,
-    SMI = 0b010,
-    NMI = 0b100,
-    INIT = 0b101,
-    StartUp = 0b110,
-}
+
 
 #[repr(u32)]
 pub enum DestinationMode {
@@ -39,7 +32,7 @@ impl<'v> InterruptCommandRegister<'v> {
     pub fn send_init(&self, apic_id: u8) {
         self.send(
             0,
-            DeliveryMode::INIT,
+            InterruptDeliveryMode::INIT,
             DestinationMode::Physical,
             true,
             DestinationShorthand::None,
@@ -50,7 +43,7 @@ impl<'v> InterruptCommandRegister<'v> {
     pub fn send_sipi(&self, vector: u8, apic_id: u8) {
         self.send(
             vector,
-            DeliveryMode::StartUp,
+            InterruptDeliveryMode::StartUp,
             DestinationMode::Physical,
             true,
             DestinationShorthand::None,
@@ -61,7 +54,7 @@ impl<'v> InterruptCommandRegister<'v> {
     pub fn send(
         &self,
         vector: u8,
-        delivery_mode: DeliveryMode,
+        delivery_mode: InterruptDeliveryMode,
         dest_mode: DestinationMode,
         deassert: bool,
         dest_shorthand: DestinationShorthand,

@@ -17,7 +17,6 @@ use libstd::{
     acpi::SystemConfigTableEntry,
     cell::SyncOnceCell,
     memory::{falloc, malloc::MemoryAllocator, UEFIMemoryDescriptor},
-    structures::pic8259::InterruptLines,
     BootInfo, LinkerSymbol,
 };
 
@@ -166,6 +165,7 @@ unsafe fn kernel_mem_init() -> ! {
 extern "C" fn _startup() -> ! {
     use crate::local_state::is_bsp;
 
+    // Ensure we load the IDT as early as possible in startup sequence.
     unsafe { libstd::structures::idt::load_unchecked() };
 
     if is_bsp() {
@@ -173,25 +173,22 @@ extern "C" fn _startup() -> ! {
         use local_state::{handlers, InterruptVector};
 
         idt::set_handler_fn(InterruptVector::LocalTimer as u8, handlers::apit_handler);
+        idt::set_handler_fn(InterruptVector::Storage as u8, handlers::storage_handler);
         idt::set_handler_fn(InterruptVector::Spurious as u8, handlers::spurious_handler);
         idt::set_handler_fn(InterruptVector::Error as u8, handlers::error_handler);
 
         // Initialize global clock (PIT).
         // TODO possible move to using HPET as global clock?
-        crate::clock::global::configure();
+        crate::clock::global::init();
     }
 
     crate::local_state::init();
 
     // If this is the BSP, wake other cores.
-    if crate::local_state::is_bsp() {
-        use libstd::{
-            acpi::rdsp::xsdt::{
-                madt::{InterruptDevice, MADT},
-                mcfg::MCFG,
-                XSDT,
-            },
-            io::pci,
+    if is_bsp() {
+        use libstd::acpi::rdsp::xsdt::{
+            madt::{InterruptDevice, MADT},
+            XSDT,
         };
 
         // Initialize other CPUs
@@ -247,34 +244,18 @@ extern "C" fn _startup() -> ! {
             }
 
             if local_state::INIT_COUNT.load(core::sync::atomic::Ordering::Relaxed) == 1 {
-                info!("Single-core CPU detected. No multiprocessing will occur.");
+                info!("Single-processor CPU detected. No multiprocessing will occur.");
                 // TODO somehow handle single-core ?
             }
         }
-
-        if let Ok(mcfg) = XSDT.find_sub_table::<MCFG>() {
-            let bridges: alloc::vec::Vec<pci::PCIeHostBridge> = mcfg
-                .iter()
-                .filter_map(|entry| pci::configure_host_bridge(entry).ok())
-                .collect();
-
-            for device_variant in bridges
-                .iter()
-                .flat_map(|bridge| bridge.iter())
-                .flat_map(|bus| bus.iter())
-            {
-                if let pci::DeviceVariant::Standard(device) = device_variant {
-                    if device.class() == pci::DeviceClass::MassStorageController
-                        && device.subclass() == 0x08
-                    {
-                        use crate::drivers::nvme::Controller;
-                        let nvme = Controller::from_device(device, 4, 4);
-                        info!("{:#?}", nvme);
-                    }
-                }
-            }
-        }
     }
+
+    //unsafe { clear_stack() };
+    kernel_main()
+}
+
+fn kernel_main() -> ! {
+    debug!("Successfully entered `kernel_main()`.");
 
     libstd::instructions::hlt_indefinite()
 }

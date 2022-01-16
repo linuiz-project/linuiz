@@ -3,7 +3,7 @@ pub mod icr;
 use crate::{
     memory::{volatile::VolatileCell, MMIO},
     registers::MSR,
-    ReadWrite,
+    ReadWrite, InterruptDeliveryMode,
 };
 use bit_field::BitField;
 use core::marker::PhantomData;
@@ -64,16 +64,7 @@ impl TimerDivisor {
     }
 }
 
-#[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(non_camel_case_types)]
-pub enum DeliveryMode {
-    Fixed = 0b000,
-    SystemManagement = 0b010,
-    NonMaskable = 0b100,
-    External = 0b111,
-    INIT = 0b101,
-}
+
 
 bitflags::bitflags! {
     pub struct ErrorStatusFlags: u8 {
@@ -97,6 +88,13 @@ impl APIC {
     pub const SPR: usize = 0xF0;
     pub const ERRST: usize = 0x280;
     pub const EOI: usize = 0xB0;
+
+    #[inline]
+    pub fn base_addr() -> crate::Address<crate::addr_ty::Virtual> {
+        crate::Address::<crate::addr_ty::Virtual>::new_truncate(
+            (MSR::IA32_APIC_BASE.read() & 0xFFFFFF000) as usize,
+        )
+    }
 
     pub fn from_msr() -> Result<Self, APICExistsError> {
         unsafe {
@@ -240,7 +238,7 @@ impl APIC {
         ldr &= 0xFFFFFF;
         ldr = (ldr & !0xFF) | ((ldr & 0xFF) | 1);
         self.performance()
-            .set_delivery_mode(DeliveryMode::NonMaskable);
+            .set_delivery_mode(InterruptDeliveryMode::NMI);
         self.write_register(Register::LDR, ldr);
         self.write_register(Register::TaskPriority, 0);
         self.write_register(Register::TimerInitialCount, 0);
@@ -335,7 +333,7 @@ impl LocalVector<Timer> {
 
 impl LocalVector<Generic> {
     #[inline]
-    pub fn set_delivery_mode(&self, mode: DeliveryMode) {
+    pub fn set_delivery_mode(&self, mode: InterruptDeliveryMode) {
         self.vol
             .write(*self.vol.read().set_bits(8..11, mode as u32));
     }

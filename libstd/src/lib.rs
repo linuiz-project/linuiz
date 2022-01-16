@@ -248,6 +248,18 @@ impl LinkerSymbol {
     }
 }
 
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InterruptDeliveryMode {
+    Fixed = 0b000,
+    LowPriority = 0b001,
+    SMI = 0b010,
+    NMI = 0b100,
+    INIT = 0b101,
+    StartUp = 0b110,
+    ExtINT = 0b111,
+}
+
 pub struct IndexRing {
     current: usize,
     max: usize,
@@ -279,3 +291,5 @@ impl core::fmt::Debug for IndexRing {
             .finish()
     }
 }
+
+

@@ -1,8 +1,7 @@
 use crate::{
-    addr_ty::Virtual,
     io::pci::{standard::StandardRegister, PCIeDevice, Standard},
     memory::volatile::{Volatile, VolatileCell},
-    volatile_bitfield_getter, Address, ReadOnly, ReadWrite,
+    volatile_bitfield_getter, InterruptDeliveryMode, ReadOnly, ReadWrite,
 };
 use bit_field::BitField;
 use core::{convert::TryFrom, fmt};
@@ -49,42 +48,32 @@ impl Message {
         self.mask.write(*self.mask.read().set_bit(0, masked));
     }
 
-    pub fn get_addr(&self) -> Address<Virtual> {
-        let addr_low = self.addr_low.read() as usize;
-        assert!(
-            (addr_low & 0b11) == 0,
-            "Software has failed to maintain DWORD alignment for message address."
-        );
-        let addr_high = (self.addr_high.read() as usize) << 32;
-
-        Address::<Virtual>::new(addr_high | addr_low)
-    }
-
-    pub fn set_addr(&self, addr: Address<Virtual>) {
+    // TODO features gate this function behind x86, because it's contents are arch-specific
+    pub fn configure(&self, processor_id: u8, vector: u8, delivery_mode: InterruptDeliveryMode) {
         assert!(
             self.get_masked(),
-            "Cannot modify message state when unmasked."
+            "Cannot modify MSI-X message when it is unmasked."
         );
-        assert!(
-            addr.is_aligned(0b100),
-            "Address must be aligned to a DWORD boundary."
-        );
+        assert!(vector > 0xF, "MSI-X message vector cannot be <=0xF.");
 
-        let addr_usize = addr.as_usize();
-        self.addr_low.write(addr_usize as u32);
-        self.addr_high.write((addr_usize >> 32) as u32);
-    }
+        let mut data = 0;
+        data.set_bits(0..8, vector as u32);
+        data.set_bits(8..11, delivery_mode as u32);
+        data.set_bit(14, false);
+        data.set_bit(15, false);
+        data.set_bits(16..32, 0);
 
-    pub fn get_data(&self) -> u32 {
-        self.data.read()
-    }
+        let mut addr = 0;
+        addr.set_bits(0..2, 0);
+        addr.set_bit(2, false);
+        addr.set_bit(3, false);
+        addr.set_bits(12..20, processor_id as u32);
+        addr.set_bits(20..32, 0xFEE);
 
-    pub fn set_data(&self, value: u32) {
-        assert!(
-            self.get_masked(),
-            "Cannot modify message state when unmasked."
-        );
-        self.data.write(value);
+        self.data.write(data);
+        self.addr_low.write(addr as u32);
+        // High address is reserved (zeroed) in x86.
+        self.addr_high.write(0);
     }
 }
 
@@ -95,8 +84,14 @@ impl fmt::Debug for Message {
         formatter
             .debug_struct("Message Table Entry")
             .field("Masked", &self.get_masked())
-            .field("Address", &self.get_addr())
-            .field("Data", &self.get_data())
+            .field(
+                "Address",
+                &format_args!(
+                    "0x{:X}",
+                    ((self.addr_high.read() as u64) << 32) | (self.addr_low.read() as u64)
+                ),
+            )
+            .field("Data", &format_args!("0b{:b}", self.data.read()))
             .finish()
     }
 }
@@ -199,7 +194,9 @@ impl<'dev> MSIX<'dev> {
                     data,
                     messages: device
                         .get_register(msg_register)
-                        .map(|mmio| unsafe { mmio.slice(msg_offset, data.get_table_len()).unwrap() })
+                        .map(|mmio| unsafe {
+                            mmio.slice(msg_offset, data.get_table_len()).unwrap()
+                        })
                         .expect(
                             "Device does not have requisite BARs to construct MSIX capability.",
                         ),
@@ -222,9 +219,13 @@ impl<'dev> MSIX<'dev> {
     pub fn set_function_mask(&self, mask_all: bool) {
         self.data.set_function_mask(mask_all);
     }
+}
 
-    pub fn iter_messages(&self) -> core::slice::Iter<Message> {
-        self.messages.iter()
+impl core::ops::Index<usize> for MSIX<'_> {
+    type Output = Message;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.messages[index]
     }
 }
 

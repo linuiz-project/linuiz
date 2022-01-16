@@ -12,4 +12,3 @@ qemu-system-x86_64^
     -no-reboot^
     -D ./.debug/qemu_debug.log^
     -d guest_errors,int
-

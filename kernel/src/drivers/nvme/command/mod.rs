@@ -57,6 +57,7 @@ impl QueueDomain for IO {}
 pub struct Command<Q: QueueDomain> {
     opcode: u8,
     fuse_psdt: u8,
+    command_id: u16,
     ns_id: u32,
     cdw2: u32,
     cdw3: u32,

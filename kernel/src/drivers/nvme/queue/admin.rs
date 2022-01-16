@@ -7,6 +7,9 @@ const AQA_OFFSET: usize = 0x24;
 const ASQ_OFFSET: usize = 0x28;
 const ACQ_OFFSET: usize = 0x30;
 
+#[derive(Debug)]
+pub struct QueueOverflow;
+
 pub struct CompletionQueue<'q> {
     phys_addr: Address<Physical>,
     entries: alloc::boxed::Box<[MaybeUninit<Completion>]>,
@@ -126,35 +129,17 @@ impl<'q> SubmissionQueue<'q> {
         }
     }
 
-    fn entries(&self) -> &[MaybeUninit<Command<Admin>>] {
-        &self.entries[..(self.entry_count as usize)]
-    }
+    pub fn submit_command(&mut self, command: Command<Admin>) -> Result<(), QueueOverflow> {
+        if self.pending_count < self.entry_count {
+            self.entries[self.cur_index.index()] = MaybeUninit::new(command);
+            self.cur_index.increment();
+            self.pending_count += 1;
 
-    // pub fn next_entry<T: super::command::CommandType<Q>>(
-    //     &self,
-    // ) -> Option<&mut super::command::Command<Q, T>> {
-    //     if self.pending_entries.load(Ordering::Acquire) < self.entry_count {
-    //         // transmute the &mut [u32] to an &mut Command
-    //         let entry: &mut super::command::Command<Q, T> = unsafe {
-    //             &mut *(self
-    //                 .entries
-    //                 .add(self.cur_index.load(Ordering::Acquire) as usize)
-    //                 as *mut _)
-    //         };
-    //         self.pending_entries.fetch_add(1, Ordering::AcqRel);
-    //         if self.cur_index.load(Ordering::Acquire) == self.entry_count {
-    //             self.cur_index.store(0, Ordering::Release);
-    //         } else {
-    //             self.cur_index.fetch_add(1, Ordering::AcqRel);
-    //         }
-    //         entry.clear();
-    //         // Automatically set opcode for command type T.
-    //         entry.set_opcode(T::OPCODE);
-    //         Some(entry)
-    //     } else {
-    //         None
-    //     }
-    // }
+            Ok(())
+        } else {
+            Err(QueueOverflow)
+        }
+    }
 
     pub fn flush_commands(&mut self) {
         self.doorbell.write(self.cur_index.index() as u32);
@@ -167,7 +152,7 @@ impl core::fmt::Debug for SubmissionQueue<'_> {
         formatter
             .debug_struct("Admin Submission Queue")
             .field("Physical Address", &self.phys_addr)
-            .field("Entries", &self.entries())
+            .field("Entries", &self.entries)
             .field("Index", &self.cur_index)
             .field("Pending", &self.pending_count)
             .finish()

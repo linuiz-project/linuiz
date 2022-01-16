@@ -1,4 +1,7 @@
-use core::marker::PhantomData;
+use core::{
+    fmt::{Debug, Formatter, Result},
+    marker::PhantomData,
+};
 
 use alloc::boxed::Box;
 use libstd::{addr_ty::Physical, Address};
@@ -31,7 +34,8 @@ impl super::Command<Admin> {
     ) -> Self {
         Self {
             opcode: Opcode::CreateIOCompletionQueue as u8,
-            fuse_psdt: ((super::PSDT::PRP as u8) << 14) | (super::FuseOperation::Normal as u8),
+            fuse_psdt: ((super::PSDT::PRP as u8) << 6) | (super::FuseOperation::Normal as u8),
+            command_id: 0, // TODO support this
             ns_id: 0,
             cdw2: 0,
             cdw3: 0,
@@ -62,7 +66,8 @@ impl super::Command<Admin> {
             alloc.cast().unwrap().into_uninit_value().unwrap(),
             Self {
                 opcode: Opcode::Identify as u8,
-                fuse_psdt: ((super::PSDT::PRP as u8) << 14) | (super::FuseOperation::Normal as u8),
+                fuse_psdt: ((super::PSDT::PRP as u8) << 6) | (super::FuseOperation::Normal as u8),
+                command_id: 0, // TODO support this
                 ns_id: 0,
                 cdw2: 0,
                 cdw3: 0,
@@ -85,4 +90,19 @@ pub struct Identify {
     rsdv0: [u8; 80],
     version: [u8; 3],
     rsvd1: [u8; 4096 - 83],
+}
+
+impl Debug for Identify {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> Result {
+        formatter
+            .debug_struct("NVMe Controller Identify")
+            .field(
+                "Version",
+                &format_args!(
+                    "{}.{}.{}",
+                    self.version[0], self.version[1], self.version[2]
+                ),
+            )
+            .finish()
+    }
 }
