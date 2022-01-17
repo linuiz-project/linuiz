@@ -279,6 +279,8 @@ fn kernel_main() -> ! {
                     if device.class() == pci::DeviceClass::MassStorageController
                         && device.subclass() == 0x08
                     {
+                        unsafe { libstd::structures::pic8259::disable() };
+
                         use crate::drivers::nvme::{command::Command, Controller};
                         let mut nvme = Controller::from_device(device, 4, 4);
 
@@ -286,10 +288,6 @@ fn kernel_main() -> ! {
                         let (data, command) = Command::identify(0);
                         sub_queue.submit_command(command).unwrap();
                         sub_queue.flush_commands();
-
-                        crate::clock::local::sleep_msec(10);
-
-                        info!("{:?}", data);
                     }
                 }
             }

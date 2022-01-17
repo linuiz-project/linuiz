@@ -6,6 +6,7 @@ pub extern "x86-interrupt" fn apit_handler(_: InterruptStackFrame) {
 }
 
 pub extern "x86-interrupt" fn storage_handler(_: InterruptStackFrame) {
+    // TODO somehow notify storage driver of interrupt
     crate::local_state::int_ctrl().unwrap().end_of_interrupt();
 }
 

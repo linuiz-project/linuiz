@@ -370,12 +370,11 @@ impl<'dev> Controller<'dev> {
         cc.set_iosqes(6); // 64 bytes (2^6)
         cc.set_iocqes(4); // 16 bytes (2^4)
 
-        unsafe {
-            nvme.set_enable_and_wait(true)
-                .expect("NVMe driver failed to enable");
-        }
-
-        // Configure MSI-X for completion queue.
+        // Configure MSI-X for admin completion queue.
+        // REMARK: This needs to be before the enable, as QEMU tracks
+        //         driver message IRQ usage internally, and doesn't
+        //         'use' the first interrupt message if MSI-X isn't
+        //         enabled when the controller starts.
         nvme.msix.set_enable(true);
         nvme.msix.set_function_mask(false);
 
@@ -385,7 +384,11 @@ impl<'dev> Controller<'dev> {
             libstd::InterruptDeliveryMode::Fixed,
         );
         nvme.msix[0].set_masked(false);
-        info!("{:?}", nvme.msix[0]);
+
+        unsafe {
+            nvme.set_enable_and_wait(true)
+                .expect("NVMe driver failed to enable");
+        }
 
         nvme
     }
