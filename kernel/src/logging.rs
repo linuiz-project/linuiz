@@ -11,7 +11,7 @@ pub struct KernelLogger {
 }
 
 impl log::Log for KernelLogger {
-    fn enabled(&self, metadata: &log::Metadata) -> bool {
+    fn enabled(&self, _: &log::Metadata) -> bool {
         true
     }
 

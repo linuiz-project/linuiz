@@ -1,5 +1,3 @@
-use crate::instructions::cpuid::{Features, FEATURES};
-
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
@@ -19,51 +17,37 @@ pub enum MSR {
     FSB_FREQ = 0xCD,
 }
 
+// UNSAFETY: It is *possible* that the current CPU doesn't support the MSR
+//           feature. In this case, well... all of this fails. And we're
+//           going to ignore that. :)
 impl MSR {
     #[inline(always)]
     pub fn read(self) -> u64 {
-        assert!(
-            FEATURES.contains(Features::MSR),
-            "CPU does not support use of model-specific registers."
-        );
+        unsafe {
+            let value: u64;
 
-        unsafe { self.read_unchecked() }
-    }
+            core::arch:: asm!(
+                "push rax",     // Preserve the `rax` value.
+                "rdmsr",
+                "shl rdx, 32",  // Shift high value to high bits
+                "or rdx, rax",  // Copy low value in
+                "pop rax",
+                in("ecx") self as u32,
+                out("rdx") value,
+                options(nostack, nomem)
+            );
 
-    #[inline(always)]
-    pub unsafe fn read_unchecked(self) -> u64 {
-        let value: u64;
-
-        core::arch:: asm!(
-            "rdmsr",
-            "shl rdx, 32",   // Shift high value to high bits
-            "or rdx, rax",   // Copy low value in
-            in("ecx") self as u32,
-            out("rdx") value,
-            options(nostack, nomem)
-        );
-
-        value
+            value
+        }
     }
 
     #[inline(always)]
     pub unsafe fn write(self, value: u64) {
-        assert!(
-            FEATURES.contains(Features::MSR),
-            "CPU does not support use of model-specific registers"
-        );
-
-        self.write_unchecked(value);
-    }
-
-    #[inline(always)]
-    pub unsafe fn write_unchecked(self, value: u64) {
         core::arch::asm!(
-            "mov rdx, rax", // Move high value in
-            "shr rdx, 32",  // Shift high value to edx bits
             "wrmsr",
             in("ecx") self as u32,
             in("rax") value,
+            in("rdx") value >> 32,
             options(nostack, nomem)
         );
     }
