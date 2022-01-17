@@ -67,7 +67,7 @@ impl InterruptController {
         // Configure timer.
         apic.timer().set_vector(InterruptVector::LocalTimer as u8);
         apic.timer().set_mode(TimerMode::Periodic);
-        apic.timer().set_masked(true);
+        apic.timer().set_masked(false);
         // Set default vectors.
         apic.cmci().set_vector(InterruptVector::CMCI as u8);
         apic.performance()

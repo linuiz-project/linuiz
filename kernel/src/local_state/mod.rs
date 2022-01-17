@@ -10,7 +10,7 @@ use libstd::registers::MSR;
 pub static INIT_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 pub fn is_bsp() -> bool {
-    unsafe { MSR::IA32_APIC_BASE.read().get_bit(8) }
+    MSR::IA32_APIC_BASE.read().get_bit(8)
 }
 
 struct LocalStateRegister;
@@ -24,16 +24,14 @@ impl LocalStateRegister {
 
     #[inline]
     fn get_id() -> u8 {
-        let fs_base = unsafe { MSR::IA32_FS_BASE.read() };
+        let fs_base = MSR::IA32_FS_BASE.read();
         if (fs_base & Self::ID_FLAG) == 0 {
             let cpuid_id =
                 (libstd::instructions::cpuid::exec(0x1, 0x0).unwrap().ebx() >> 24) as u64;
 
             unsafe {
-                MSR::IA32_FS_BASE.write_unchecked(
-                    MSR::IA32_FS_BASE.read_unchecked()
-                        | (cpuid_id << Self::ID_BITS_SHFT)
-                        | Self::ID_FLAG,
+                MSR::IA32_FS_BASE.write(
+                    MSR::IA32_FS_BASE.read() | (cpuid_id << Self::ID_BITS_SHFT) | Self::ID_FLAG,
                 )
             };
 

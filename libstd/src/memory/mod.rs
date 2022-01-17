@@ -35,11 +35,11 @@ pub const fn to_mibibytes(value: usize) -> usize {
 #[macro_export]
 macro_rules! alloc {
     ($size:expr) => {
-        $crate::memory::alloc_generic($size, None)
+        crate::memory::malloc::try_get().unwrap().alloc(size, None)
     };
 
     ($size:expr, $align:expr) => {
-        $crate::memory::alloc_generic($size, $align)
+        crate::memory::malloc::try_get().unwrap().alloc(size, align)
     };
 }
 
@@ -50,23 +50,6 @@ macro_rules! alloc_to {
             .unwrap()
             .alloc_against($frame_index, $count)
     };
-}
-
-pub fn alloc_generic<T>(
-    size: usize,
-    align: Option<core::num::NonZeroUsize>,
-) -> Result<malloc::Alloc<T>, crate::memory::malloc::AllocError> {
-    unsafe {
-        crate::memory::malloc::try_get().unwrap().alloc(
-            size * core::mem::size_of::<T>(),
-            align.or(core::num::NonZeroUsize::new(core::mem::align_of::<T>())),
-        )
-    }
-    .and_then(|alloc| {
-        alloc
-            .cast()
-            .map_err(|_| crate::memory::malloc::AllocError::InvalidAlignment(0))
-    })
 }
 
 pub struct MMIO {
