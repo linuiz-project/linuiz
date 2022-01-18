@@ -21,12 +21,7 @@ use uefi::{
     prelude::BootServices,
     proto::{
         console::gop::{GraphicsOutput, Mode},
-        device_path::DevicePath,
-        loaded_image::LoadedImage,
-        media::{
-            file::{Directory, File, FileAttribute, FileMode, RegularFile},
-            fs::SimpleFileSystem,
-        },
+        media::file::{Directory, File, FileAttribute, FileMode, RegularFile},
         Protocol,
     },
     table::{
@@ -51,10 +46,6 @@ fn configure_log_level() {
 #[cfg(not(debug_assertions))]
 fn configure_log_level() {
     log::set_max_level(log::LevelFilter::Info);
-}
-
-pub fn get_protocol<P: Protocol>(boot_services: &BootServices, handle: Handle) -> Option<&mut P> {
-    acquire_protocol_unwrapped(boot_services.handle_protocol(handle))
 }
 
 pub fn locate_protocol<P: Protocol>(boot_services: &BootServices) -> Option<&mut P> {
@@ -180,26 +171,25 @@ fn efi_main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status
     // test to see how much memory we're working with
     ensure_enough_memory(boot_services);
 
-    // prepare required environment data
-    let image = get_protocol::<LoadedImage>(boot_services, image_handle)
-        .expect("failed to acquire boot image");
-    info!("Acquired boot image from boot services.");
-    let device_path = get_protocol::<DevicePath>(boot_services, image.device())
-        .expect("failed to acquire boot image device path");
-    debug!("Acquired boot image device path.");
-    let file_handle = boot_services
-        .locate_device_path::<SimpleFileSystem>(&mut &*device_path)
-        .expect_success("failed to acquire file handle from device path");
-    debug!("Acquired file handle from device path.");
-    let file_system = get_protocol::<SimpleFileSystem>(boot_services, file_handle)
-        .expect("failed to load file system from file handle");
-    debug!("Acquired file system protocol from file handle.");
-    let root_directory = &mut file_system
-        .open_volume()
-        .expect_success("failed to open boot file system root directory");
-    debug!("Loaded boot file system root directory.");
+    // Acquire kernel entry point.
+    let kernel_entry_point = {
+        let file_system = boot_services
+            .get_image_file_system(image_handle)
+            .expect_success("failed to load file system from file handle");
+        debug!("Acquired file system protocol from file handle.");
+        let root_directory = &mut unsafe {
+            (&mut *file_system.interface.get())
+                .open_volume()
+                .expect_success("failed to open boot file system root directory")
+        };
+        debug!("Loaded boot file system root directory.");
+        let kernel_file = acquire_kernel_file(root_directory);
+        debug!("Acquired kernel image file.");
 
-    // acquire graphics output to ensure a gout device
+        load_kernel(boot_services, kernel_file)
+    };
+
+    // acquire graphics output to ensure a gout device.
     let framebuffer = match locate_protocol::<GraphicsOutput>(boot_services) {
         Some(graphics_output) => {
             let ptr = graphics_output.frame_buffer().as_mut_ptr() as *mut u8;
@@ -216,11 +206,6 @@ fn efi_main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status
             None
         }
     };
-
-    // load kernel
-    let kernel_file = acquire_kernel_file(root_directory);
-    debug!("Acquired kernel image file.");
-    let kernel_entry_point = load_kernel(boot_services, kernel_file);
 
     kernel_transfer(image_handle, system_table, kernel_entry_point, framebuffer)
 }
@@ -292,6 +277,78 @@ pub fn load_kernel(boot_services: &BootServices, mut kernel_file: RegularFile) -
     info!("Kernel successfully read into memory.");
 
     kernel_header.entry_address()
+}
+
+fn apply_relocations(
+    kernel_file: &mut RegularFile,
+    kernel_header: &ELFHeader64,
+    segment_virt_addr: libstd::Address<libstd::addr_ty::Virtual>,
+    segment_size: usize,
+    segment_buffer: &mut [u8],
+) {
+    debug!("Identifying relocations to apply.");
+    let mut section_header_buffer = [0u8; size_of::<SectionHeader>()];
+    let mut section_header_disk_offset = kernel_header.section_headers_offset();
+
+    for _ in 0..kernel_header.section_header_count() {
+        read_file(
+            kernel_file,
+            section_header_disk_offset as u64,
+            &mut section_header_buffer,
+        );
+        let section_header = unsafe {
+            section_header_buffer
+                .as_ptr()
+                .cast::<SectionHeader>()
+                .as_ref()
+                .unwrap()
+        };
+
+        match section_header.ty {
+            SectionType::RELA => {
+                if section_header.entry_size != size_of::<Rela64>() {
+                    warn!(
+                        "Unknown entry size for RELA section: {} (should be {})",
+                        section_header.entry_size,
+                        size_of::<Rela64>()
+                    );
+                }
+
+                for offset in (0..section_header.size).step_by(section_header.entry_size) {
+                    let mut rela_buffer = [0u8; size_of::<Rela64>()];
+                    read_file(
+                        kernel_file,
+                        (section_header.offset + offset) as u64,
+                        &mut rela_buffer,
+                    );
+                    let rela = unsafe { rela_buffer.as_ptr().cast::<Rela64>().as_ref().unwrap() };
+
+                    debug!("Processing relocation: {:?}", rela);
+
+                    match rela.info {
+                        libstd::elf::X86_64_RELATIVE => {
+                            if (segment_virt_addr..=(segment_virt_addr + segment_size + 8))
+                                .contains(&rela.addr)
+                            {
+                                unsafe {
+                                    (segment_buffer
+                                        .as_ptr()
+                                        .sub(segment_virt_addr.as_usize())
+                                        .add(rela.addr.as_usize())
+                                        as *mut u64)
+                                        .write(rela.addend)
+                                }
+                            }
+                        }
+                        ty => warn!("Unknown RELA type: {}", ty),
+                    }
+                }
+            }
+            section_type => trace!("Unhandled section type: {:?}", section_type),
+        }
+
+        section_header_disk_offset += kernel_header.section_header_size() as usize;
+    }
 }
 
 fn kernel_transfer(
