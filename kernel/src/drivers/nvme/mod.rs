@@ -1,15 +1,18 @@
 pub mod command;
 pub mod queue;
 
+use alloc::collections::BTreeMap;
 use bit_field::BitField;
-use core::{convert::TryFrom, fmt};
+use core::{convert::TryFrom, fmt, marker::PhantomData, mem::MaybeUninit};
 use libstd::{
     addr_ty::Physical,
     io::pci::{standard::StandardRegister, PCIeDevice, Standard},
     memory::volatile::{Volatile, VolatileCell},
+    sync::{SuccessSource, SuccessToken, ValuedSuccessToken},
     volatile_bitfield_getter, volatile_bitfield_getter_ro, Address, ReadOnly, ReadWrite,
 };
 use num_enum::TryFromPrimitive;
+use spin::{Mutex, MutexGuard};
 
 #[repr(u64)]
 #[derive(Debug, TryFromPrimitive)]
@@ -283,7 +286,7 @@ impl fmt::Debug for ControllerStatus {
         formatter
             .debug_struct("Controller Status")
             .field("Ready", &self.get_rdy())
-            .field("Controller Fatal Status", &self.get_cfs())
+            .field("Fatal Status", &self.get_cfs())
             .field("Shutdown Status", &self.get_shst())
             .field("NVM Subsystem Reset Occurred", &self.get_nssro())
             .field("Processing Paused", &self.get_pp())
@@ -323,8 +326,9 @@ pub enum ControllerEnableError {
 pub struct Controller<'dev> {
     device: &'dev PCIeDevice<Standard>,
     msix: libstd::io::pci::standard::MSIX<'dev>,
-    admin_sub: queue::admin::SubmissionQueue<'dev>,
-    admin_com: queue::admin::CompletionQueue<'dev>,
+    admin_sub: Mutex<queue::SubmissionQueue<'dev>>,
+    admin_com: Mutex<queue::CompletionQueue<'dev>>,
+    pending_cmds: Mutex<BTreeMap<u16, SuccessSource>>,
 }
 
 impl<'dev> Controller<'dev> {
@@ -346,13 +350,23 @@ impl<'dev> Controller<'dev> {
         let nvme = {
             let reg0 = device.get_register(StandardRegister::Register0).unwrap();
 
+            let admin_sub = queue::SubmissionQueue::new(reg0, 0, sub_entry_count);
+            let admin_com = queue::CompletionQueue::new(reg0, 0, com_entry_count);
+            reg0.write(Self::ASQ, admin_sub.phys_addr().as_u64());
+            reg0.write(Self::ACQ, admin_com.phys_addr().as_u64());
+            reg0.write(
+                Self::AQA,
+                ((com_entry_count as u32) << 16) | (sub_entry_count as u32),
+            );
+
             Self {
                 device,
                 msix: device
                     .find_msix()
                     .expect("MSIX is required for NVMe controller creation."),
-                admin_sub: queue::admin::SubmissionQueue::new(reg0, sub_entry_count),
-                admin_com: queue::admin::CompletionQueue::new(reg0, com_entry_count),
+                admin_sub: Mutex::new(admin_sub),
+                admin_com: Mutex::new(admin_com),
+                pending_cmds: Mutex::new(BTreeMap::new()),
             }
         };
 
@@ -360,7 +374,6 @@ impl<'dev> Controller<'dev> {
             nvme.set_enable_and_wait(false)
                 .expect("NVMe controller failed to reset");
         }
-
         debug!("NVMe controller successfully reset.");
 
         let cc = nvme.config();
@@ -369,8 +382,6 @@ impl<'dev> Controller<'dev> {
         cc.set_mps(0); // 4KiB pages
         cc.set_iosqes(6); // 64 bytes (2^6)
         cc.set_iocqes(4); // 16 bytes (2^4)
-
-        // Configure MSI-X for completion queue.
 
         // Configure MSI-X for admin completion queue.
         // REMARK: This needs to be before the enable, as QEMU tracks
@@ -467,12 +478,97 @@ impl<'dev> Controller<'dev> {
         }
     }
 
-    pub fn admin_submission_queue(&'dev mut self) -> &mut queue::admin::SubmissionQueue {
-        &mut self.admin_sub
+    fn next_command_id(pending_cmds: &MutexGuard<BTreeMap<u16, SuccessSource>>) -> u16 {
+        // TODO optimize this
+        let mut command_id = u16::MAX;
+        for id in u16::MIN..u16::MAX {
+            if !pending_cmds.contains_key(&id) {
+                command_id = id;
+                break;
+            }
+        }
+
+        if command_id == u16::MAX {
+            panic!("No more command IDs available.");
+        } else {
+            command_id
+        }
     }
 
-    pub fn admin_completion_queue(&'dev mut self) -> &mut queue::admin::CompletionQueue {
-        &mut self.admin_com
+    pub fn submit_admin_command(&self, command: command::admin::AdminCommand) -> PendingCommand {
+        let mut pending_cmds = self.pending_cmds.lock();
+        let command_id = Self::next_command_id(&pending_cmds);
+
+        use command::{
+            admin::{AdminCommand, Identify},
+            Command, DataPointer, FuseOperation, PSDT,
+        };
+
+        let opcode = command.get_opcode();
+        match command {
+            AdminCommand::Identify { ctrl_id } => {
+                // Allocate the necessary memory for returning the command value.
+                let (phys_addr, alloc) = unsafe {
+                    libstd::memory::malloc::try_get()
+                        .unwrap()
+                        .alloc_contiguous(1)
+                        .unwrap()
+                };
+
+                // Construct the command with the provided data.
+                let command = Command {
+                    opcode,
+                    fuse_psdt: ((PSDT::PRP as u8) << 6) | (FuseOperation::Normal as u8),
+                    command_id,
+                    ns_id: 0,
+                    cdw2: 0,
+                    cdw3: 0,
+                    mdata_ptr: Address::zero(),
+                    data_ptr: DataPointer::new_prp(phys_addr, None),
+                    cdw10: ((ctrl_id as u32) << 16) | 0b1, // TODO implement CNS
+                    cdw11: 0, // Ensure CSI or CNS Specific Identifier are not required,
+                    cdw12: 0,
+                    cdw13: 0,
+                    cdw14: 0, // Ensure no UUID is required, or possibly allow providing one (?)
+                    cdw15: 0,
+                };
+
+                // Create the success synchronization.
+                let (success_source, success_token) = SuccessSource::new_valued(unsafe {
+                    alloc.cast::<Identify>().unwrap().into_value().unwrap()
+                });
+
+                // Pend command success synchronization, and submit.
+                pending_cmds.insert(command_id, success_source);
+                self.admin_sub.lock().submit_command(command);
+
+                PendingCommand::Identify(success_token)
+            }
+        }
+    }
+
+    pub fn flush_admin_commands(&mut self) {
+        self.admin_sub.lock().flush_commands();
+    }
+
+    // TODO submit_command to use lpu::processor_id to index the submission and completion queues
+
+    pub fn run(&self) {
+        let mut admin_com = self.admin_com.lock();
+        if let Some(completion) = admin_com.next_completion() {
+            let mut pending_cmds = self.pending_cmds.lock();
+            let success_source = pending_cmds
+                .remove(&completion.get_command_id())
+                .expect("NVMe completion provided unknown command ID");
+
+            use command::{GenericStatus, StatusCode};
+            match completion.get_status().status_code() {
+                StatusCode::Generic(GenericStatus::SuccessfulCompletion) => {
+                    success_source.complete(true)
+                }
+                _ => success_source.complete(false),
+            }
+        }
     }
 }
 
@@ -490,4 +586,9 @@ impl fmt::Debug for Controller<'_> {
             .field("Admin Completion Queue Address", &self.admin_com)
             .finish()
     }
+}
+
+pub enum PendingCommand {
+    Identify(ValuedSuccessToken<alloc::boxed::Box<command::admin::Identify>>),
+    Generic(SuccessToken),
 }

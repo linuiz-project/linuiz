@@ -1,6 +1,23 @@
-use crate::drivers::nvme::command::{admin::Admin, Command, Completion};
-use core::mem::MaybeUninit;
-use libstd::{addr_ty::Physical, memory::volatile::VolatileCell, Address, IndexRing, ReadWrite};
+use super::command::{Command, Completion};
+use core::{
+    mem::MaybeUninit,
+    sync::atomic::{AtomicU16, Ordering},
+};
+use libstd::{
+    addr_ty::{Physical, Virtual},
+    memory::{falloc, malloc, volatile::VolatileCell},
+    Address, IndexRing, ReadWrite,
+};
+
+#[repr(usize)]
+enum QueueType {
+    Submission = 0,
+    Completion = 1,
+}
+
+const fn get_doorbell_offset(queue_id: u16, ty: QueueType, dstrd: usize) -> usize {
+    0x1000 + ((((queue_id as usize) * 2) + (ty as usize)) * (4 << dstrd))
+}
 
 const CAP_OFFSET: usize = 0x0;
 const AQA_OFFSET: usize = 0x24;
@@ -10,7 +27,7 @@ const ACQ_OFFSET: usize = 0x30;
 #[derive(Debug)]
 pub struct QueueOverflow;
 
-pub struct CompletionQueue<'q> {
+pub(super) struct CompletionQueue<'q> {
     phys_addr: Address<Physical>,
     entries: alloc::boxed::Box<[MaybeUninit<Completion>]>,
     entry_count: u16,
@@ -20,7 +37,11 @@ pub struct CompletionQueue<'q> {
 }
 
 impl<'q> CompletionQueue<'q> {
-    pub fn new(reg0: &'q libstd::memory::MMIO, entry_count: u16) -> Self {
+    pub fn new(
+        reg0: &'q libstd::memory::MMIO,
+        queue_id: u16, /* may need a way to dynamically select this? */
+        entry_count: u16,
+    ) -> Self {
         let size_in_bytes = (entry_count as usize) * core::mem::size_of::<Completion>();
         let size_in_frames = libstd::align_up_div(size_in_bytes, 0x1000);
 
@@ -33,21 +54,12 @@ impl<'q> CompletionQueue<'q> {
                 );
             alloc.clear();
 
-            let dstrd = reg0
-                .borrow::<crate::drivers::nvme::Capabilities>(CAP_OFFSET)
-                .get_dstrd();
-            let doorbell_offset =
-                super::get_doorbell_offset(0, super::QueueType::Completion, dstrd as usize);
-
-            use bit_field::BitField;
-            reg0.write(
-                AQA_OFFSET,
-                *reg0
-                    .read::<u32>(AQA_OFFSET)
-                    .assume_init()
-                    .set_bits(16.., entry_count as u32),
+            let doorbell_offset = get_doorbell_offset(
+                queue_id,
+                QueueType::Completion,
+                reg0.borrow::<crate::drivers::nvme::Capabilities>(CAP_OFFSET)
+                    .get_dstrd() as usize,
             );
-            reg0.write(ACQ_OFFSET, phys_addr.as_usize());
 
             Self {
                 phys_addr,
@@ -58,6 +70,37 @@ impl<'q> CompletionQueue<'q> {
                 phase_tag: true,
             }
         }
+    }
+
+    pub const fn phys_addr(&self) -> Address<Physical> {
+        self.phys_addr
+    }
+
+    pub fn next_completion(&mut self) -> Option<Completion> {
+        // Assume the current completion is initialized, to test the Phase Tag bit.
+        let cur_completion = unsafe { self.entries()[self.cur_index.index()].assume_init() };
+
+        info!("CHECKING COMPLETION: {:?}", cur_completion);
+
+        // Test the current completion's phase tag bit against our own.
+        //
+        // Our phase tag bit should always be inverted to newly incoming completions.
+        //
+        // REMARK: It may be possible to fail processing sufficient completions
+        //         before the next interrupt is sent, thus resulting in this approach
+        //         not processing all of the queued completions.
+        if cur_completion.get_phase_tag() != self.phase_tag {
+            self.doorbell.write(self.cur_index.index() as u32);
+            self.cur_index.increment();
+
+            Some(cur_completion)
+        } else {
+            None
+        }
+    }
+
+    pub fn invert_phase(&mut self) {
+        self.phase_tag = !self.phase_tag;
     }
 
     fn entries(&self) -> &[MaybeUninit<Completion>] {
@@ -77,9 +120,9 @@ impl core::fmt::Debug for CompletionQueue<'_> {
     }
 }
 
-pub struct SubmissionQueue<'q> {
+pub(super) struct SubmissionQueue<'q> {
     phys_addr: Address<Physical>,
-    entries: alloc::boxed::Box<[MaybeUninit<Command<Admin>>]>,
+    entries: alloc::boxed::Box<[MaybeUninit<Command>]>,
     entry_count: u16,
     cur_index: IndexRing,
     pending_count: u16,
@@ -87,10 +130,10 @@ pub struct SubmissionQueue<'q> {
 }
 
 impl<'q> SubmissionQueue<'q> {
-    pub fn new(reg0: &'q libstd::memory::MMIO, entry_count: u16) -> Self {
+    pub fn new(reg0: &'q libstd::memory::MMIO, queue_id: u16, entry_count: u16) -> Self {
         // TODO somehow validate entry size?
 
-        let size_in_bytes = (entry_count as usize) * core::mem::size_of::<Command<Admin>>();
+        let size_in_bytes = (entry_count as usize) * core::mem::size_of::<Command>();
         let size_in_frames = libstd::align_up_div(size_in_bytes, 0x1000);
 
         unsafe {
@@ -102,21 +145,12 @@ impl<'q> SubmissionQueue<'q> {
                 );
             alloc.clear();
 
-            let dstrd = reg0
-                .borrow::<crate::drivers::nvme::Capabilities>(CAP_OFFSET)
-                .get_dstrd();
-            let doorbell_offset =
-                super::get_doorbell_offset(0, super::QueueType::Submission, dstrd as usize);
-
-            use bit_field::BitField;
-            reg0.write(
-                AQA_OFFSET,
-                *reg0
-                    .read::<u32>(AQA_OFFSET)
-                    .assume_init()
-                    .set_bits(..16, entry_count as u32),
+            let doorbell_offset = get_doorbell_offset(
+                queue_id,
+                QueueType::Submission,
+                reg0.borrow::<crate::drivers::nvme::Capabilities>(CAP_OFFSET)
+                    .get_dstrd() as usize,
             );
-            reg0.write(ASQ_OFFSET, phys_addr.as_usize());
 
             Self {
                 phys_addr,
@@ -129,7 +163,11 @@ impl<'q> SubmissionQueue<'q> {
         }
     }
 
-    pub fn submit_command(&mut self, command: Command<Admin>) -> Result<(), QueueOverflow> {
+    pub const fn phys_addr(&self) -> Address<Physical> {
+        self.phys_addr
+    }
+
+    pub fn submit_command(&mut self, command: Command) -> Result<(), QueueOverflow> {
         if self.pending_count < self.entry_count {
             self.entries[self.cur_index.index()] = MaybeUninit::new(command);
             self.cur_index.increment();

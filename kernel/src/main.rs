@@ -1,6 +1,13 @@
 #![no_std]
 #![no_main]
-#![feature(abi_efiapi, abi_x86_interrupt, once_cell, const_mut_refs, raw_ref_op)]
+#![feature(
+    abi_efiapi,
+    abi_x86_interrupt,
+    once_cell,
+    const_mut_refs,
+    raw_ref_op,
+    const_option_ext
+)]
 
 #[macro_use]
 extern crate log;
@@ -256,38 +263,38 @@ extern "C" fn _startup() -> ! {
 }
 
 fn kernel_main() -> ! {
-    debug!("Successfully entered `kernel_main()`.");
+    trace!("Successfully entered `kernel_main()`.");
 
     if crate::local_state::is_bsp() {
-        use libstd::{
-            acpi::rdsp::xsdt::{mcfg::MCFG, XSDT},
-            io::pci,
-        };
+        use libstd::io::pci;
 
-        if let Ok(mcfg) = XSDT.find_sub_table::<MCFG>() {
-            let bridges: alloc::vec::Vec<pci::PCIeHostBridge> = mcfg
-                .iter()
-                .filter_map(|entry| pci::configure_host_bridge(entry).ok())
-                .collect();
+        for device_variant in pci::BRIDGES
+            .lock()
+            .iter()
+            .flat_map(|bridge| bridge.iter())
+            .flat_map(|bus| bus.iter())
+        {
+            if let pci::DeviceVariant::Standard(device) = device_variant {
+                if device.class() == pci::DeviceClass::MassStorageController
+                    && device.subclass() == 0x08
+                {
+                    use crate::drivers::nvme::{
+                        command::admin::AdminCommand, Controller, PendingCommand,
+                    };
 
-            for device_variant in bridges
-                .iter()
-                .flat_map(|bridge| bridge.iter())
-                .flat_map(|bus| bus.iter())
-            {
-                if let pci::DeviceVariant::Standard(device) = device_variant {
-                    if device.class() == pci::DeviceClass::MassStorageController
-                        && device.subclass() == 0x08
-                    {
-                        unsafe { libstd::structures::pic8259::disable() };
+                    let mut nvme = Controller::from_device(device, 4, 4);
 
-                        use crate::drivers::nvme::{command::Command, Controller};
-                        let mut nvme = Controller::from_device(device, 4, 4);
+                    let pending_command =
+                        nvme.submit_admin_command(AdminCommand::Identify { ctrl_id: 0 });
+                    nvme.flush_admin_commands();
 
-                        let sub_queue = nvme.admin_submission_queue();
-                        let (data, command) = Command::identify(0);
-                        sub_queue.submit_command(command).unwrap();
-                        sub_queue.flush_commands();
+                    // For now, we just assume the command resulted in a valid completion queue entry in a reasonable time.
+                    nvme.run();
+
+                    if let PendingCommand::Identify(identify_success) = pending_command {
+                        info!("{:#?}", identify_success.busy_wait().unwrap());
+                    } else {
+                        error!("Invalid command returned");
                     }
                 }
             }
