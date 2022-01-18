@@ -42,6 +42,11 @@ impl<T: AddressType> Address<T> {
     }
 
     #[inline]
+    pub const fn as_u64(&self) -> u64 {
+        self.value as u64
+    }
+
+    #[inline]
     pub const fn is_null(&self) -> bool {
         self.value == 0
     }
