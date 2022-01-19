@@ -206,6 +206,7 @@ impl<T> Into<Option<T>> for FFIOption<T> {
 
 pub type KernelMain<MM, CTE> = extern "efiapi" fn(crate::BootInfo<MM, CTE>) -> !;
 
+#[inline(always)]
 pub const fn align_up(value: usize, alignment: usize) -> usize {
     let alignment_mask = alignment - 1;
     if value & alignment_mask == 0 {
@@ -215,14 +216,17 @@ pub const fn align_up(value: usize, alignment: usize) -> usize {
     }
 }
 
+#[inline(always)]
 pub const fn align_up_div(value: usize, alignment: usize) -> usize {
     ((value + alignment) - 1) / alignment
 }
 
+#[inline(always)]
 pub const fn align_down(value: usize, alignment: usize) -> usize {
     value & !(alignment - 1)
 }
 
+#[inline(always)]
 pub const fn align_down_div(value: usize, alignment: usize) -> usize {
     align_down(value, alignment) / alignment
 }
@@ -292,5 +296,3 @@ impl core::fmt::Debug for IndexRing {
             .finish()
     }
 }
-
-

@@ -19,6 +19,7 @@ mod clock;
 mod drivers;
 mod local_state;
 mod logging;
+mod scheduling;
 
 use libstd::{
     acpi::SystemConfigTableEntry,
@@ -85,18 +86,17 @@ unsafe fn clear_bsp_stack() {
 
 #[no_mangle]
 #[export_name = "_entry"]
-unsafe extern "efiapi" fn _kernel_pre_init(
+unsafe extern "efiapi" fn kernel_init(
     boot_info: BootInfo<UEFIMemoryDescriptor, SystemConfigTableEntry>,
 ) -> ! {
+    /* PRE-INIT (no environment prepared) */
     if let Err(_) = BOOT_INFO.set(boot_info) {
         libstd::instructions::interrupts::breakpoint();
     }
 
     clear_bsp_stack();
-    kernel_init()
-}
 
-unsafe fn kernel_init() -> ! {
+    /* INIT STDOUT */
     CON_OUT.init(drivers::stdout::SerialSpeed::S115200);
 
     match drivers::stdout::set_stdout(&mut CON_OUT, get_log_level()) {
@@ -106,19 +106,18 @@ unsafe fn kernel_init() -> ! {
         Err(_) => libstd::instructions::interrupts::breakpoint(),
     }
 
-    {
-        libstd::instructions::segmentation::lgdt(
-            __gdt_pointer
-                .as_ptr::<libstd::structures::gdt::DescriptorTablePointer>()
-                .as_ref()
-                .unwrap(),
-        );
-        libstd::instructions::init_segment_registers(__gdt_data.as_usize() as u16);
-        use x86_64::instructions::segmentation::Segment;
-        x86_64::instructions::segmentation::CS::set_reg(core::mem::transmute(
-            __gdt_code.as_usize() as u16,
-        ));
-    }
+    /* INIT GDT */
+    libstd::instructions::segmentation::lgdt(
+        __gdt_pointer
+            .as_ptr::<libstd::structures::gdt::DescriptorTablePointer>()
+            .as_ref()
+            .unwrap(),
+    );
+    libstd::instructions::init_segment_registers(__gdt_data.as_usize() as u16);
+    use x86_64::instructions::segmentation::Segment;
+    x86_64::instructions::segmentation::CS::set_reg(core::mem::transmute(
+        __gdt_code.as_usize() as u16
+    ));
 
     let boot_info = BOOT_INFO
         .get()
@@ -133,15 +132,32 @@ unsafe fn kernel_init() -> ! {
         libstd::instructions::cpuid::FEATURES_EXT
     );
 
+    /* INIT FRAME ALLOCATOR */
     debug!("Initializing kernel frame allocator.");
     falloc::load_new(boot_info.memory_map());
-    init_system_config_table(boot_info.config_table());
+
+    /* INIT SYSTEM CONFIGURATION TABLE */
+    info!("Initializing system configuration table.");
+    let config_table_ptr = boot_info.config_table().as_ptr();
+    let config_table_entry_len = boot_info.config_table().len();
+    let frame_index = libstd::align_down_div(config_table_ptr as usize, 0x1000);
+    let frame_count = libstd::align_down_div(
+        config_table_entry_len * core::mem::size_of::<SystemConfigTableEntry>(),
+        0x1000,
+    );
+
+    unsafe {
+        // Assign system configuration table prior to reserving frames to ensure one doesn't already exist.
+        libstd::acpi::init_system_config_table(config_table_ptr, config_table_entry_len);
+        let falloc = falloc::get();
+        for frame_index in frame_index..(frame_index + frame_count) {
+            falloc.borrow(frame_index).unwrap();
+        }
+    }
 
     clear_bsp_stack();
-    kernel_mem_init()
-}
 
-unsafe fn kernel_mem_init() -> ! {
+    /* INIT KERNEL MEMORY */
     info!("Initializing kernel default allocator.");
 
     let malloc = block_malloc::BlockAllocator::new();
@@ -168,23 +184,24 @@ unsafe fn kernel_mem_init() -> ! {
         .as_mut_ptr::<u32>()
         .write(libstd::registers::CR3::read().0.as_usize() as u32);
 
-    info!("Finalizing kernel memory allocator initialization.");
+    info!("Kernel memory initialized.");
 
     clear_bsp_stack();
+
+    /* COMMON KERNEL START (prepare local state and AP processors) */
     _startup()
 }
 
 #[no_mangle]
 extern "C" fn _startup() -> ! {
-    use crate::local_state::is_bsp;
-
     // Ensure we load the IDT as early as possible in startup sequence.
     unsafe { libstd::structures::idt::load_unchecked() };
 
-    if is_bsp() {
+    if crate::local_state::is_bsp() {
         use libstd::structures::idt;
         use local_state::{handlers, InterruptVector};
 
+        // This is where we'll configure the kernel-static IDT entries.
         idt::set_handler_fn(InterruptVector::LocalTimer as u8, handlers::apit_handler);
         idt::set_handler_fn(InterruptVector::Storage as u8, handlers::storage_handler);
         idt::set_handler_fn(InterruptVector::Spurious as u8, handlers::spurious_handler);
@@ -199,7 +216,7 @@ extern "C" fn _startup() -> ! {
     crate::local_state::init();
 
     // If this is the BSP, wake other cores.
-    if is_bsp() {
+    if crate::local_state::is_bsp() {
         use libstd::acpi::rdsp::xsdt::{
             madt::{InterruptDevice, MADT},
             XSDT,
@@ -263,65 +280,43 @@ extern "C" fn _startup() -> ! {
 }
 
 fn kernel_main() -> ! {
-    trace!("Successfully entered `kernel_main()`.");
+    debug!("Successfully entered `kernel_main()`.");
 
-    if crate::local_state::is_bsp() {
-        use libstd::io::pci;
+    // if crate::local_state::is_bsp() {
+    //     use libstd::io::pci;
 
-        for device_variant in pci::BRIDGES
-            .lock()
-            .iter()
-            .flat_map(|bridge| bridge.iter())
-            .flat_map(|bus| bus.iter())
-        {
-            if let pci::DeviceVariant::Standard(device) = device_variant {
-                if device.class() == pci::DeviceClass::MassStorageController
-                    && device.subclass() == 0x08
-                {
-                    use crate::drivers::nvme::{
-                        command::admin::AdminCommand, Controller, PendingCommand,
-                    };
+    //     for device_variant in pci::BRIDGES
+    //         .lock()
+    //         .iter()
+    //         .flat_map(|bridge| bridge.iter())
+    //         .flat_map(|bus| bus.iter())
+    //     {
+    //         if let pci::DeviceVariant::Standard(device) = device_variant {
+    //             if device.class() == pci::DeviceClass::MassStorageController
+    //                 && device.subclass() == 0x08
+    //             {
+    //                 use crate::drivers::nvme::{
+    //                     command::admin::AdminCommand, Controller, PendingCommand,
+    //                 };
 
-                    let mut nvme = Controller::from_device(device, 4, 4);
+    //                 let mut nvme = Controller::from_device(device, 4, 4);
 
-                    let pending_command =
-                        nvme.submit_admin_command(AdminCommand::Identify { ctrl_id: 0 });
-                    nvme.flush_admin_commands();
+    //                 let pending_command =
+    //                     nvme.submit_admin_command(AdminCommand::Identify { ctrl_id: 0 });
+    //                 nvme.flush_admin_commands();
 
-                    // For now, we just assume the command resulted in a valid completion queue entry in a reasonable time.
-                    nvme.run();
+    //                 // For now, we just assume the command resulted in a valid completion queue entry in a reasonable time.
+    //                 nvme.run();
 
-                    if let PendingCommand::Identify(identify_success) = pending_command {
-                        info!("{:#?}", identify_success.busy_wait().unwrap());
-                    } else {
-                        error!("Invalid command returned");
-                    }
-                }
-            }
-        }
-    }
+    //                 if let PendingCommand::Identify(identify_success) = pending_command {
+    //                     info!("{:#?}", identify_success.busy_wait().unwrap());
+    //                 } else {
+    //                     error!("Invalid command returned");
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
 
     libstd::instructions::hlt_indefinite()
-}
-
-fn init_system_config_table(config_table: &[SystemConfigTableEntry]) {
-    info!("Initializing system configuration table.");
-    let config_table_ptr = config_table.as_ptr();
-    let config_table_entry_len = config_table.len();
-
-    let frame_index = (config_table_ptr as usize) / 0x1000;
-    let frame_count =
-        (config_table_entry_len * core::mem::size_of::<SystemConfigTableEntry>()) / 0x1000;
-
-    unsafe {
-        // Assign system configuration table prior to reserving frames to ensure one doesn't already exist.
-        libstd::acpi::init_system_config_table(config_table_ptr, config_table_entry_len);
-
-        let frame_range = frame_index..(frame_index + frame_count);
-        debug!("System configuration table: {:?}", frame_range);
-        let falloc = falloc::get();
-        for frame_index in frame_index..(frame_index + frame_count) {
-            falloc.borrow(frame_index).unwrap();
-        }
-    }
 }
