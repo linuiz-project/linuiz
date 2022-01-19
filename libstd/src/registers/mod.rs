@@ -66,6 +66,22 @@ pub mod debug {
 }
 
 pub mod stack {
-    basic_register_ptr! {RSP}
     basic_register_ptr! {RBP}
+
+    pub struct RSP;
+    impl RSP {
+        #[inline(always)]
+        pub unsafe fn write(ptr: *const ()) {
+            core::arch::asm!(concat!("mov rsp, {}"), in(reg) ptr, options(nomem));
+        }
+
+        #[inline(always)]
+        pub fn read() -> *const () {
+            let ptr: *const ();
+            unsafe {
+                core::arch::asm!("mov {}, rsp", out(reg) ptr, options(nomem, nostack));
+                ptr
+            }
+        }
+    }
 }
