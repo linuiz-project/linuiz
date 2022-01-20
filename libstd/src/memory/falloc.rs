@@ -39,25 +39,31 @@ impl Frame {
     const LOCKED_SHIFT: u32 = 28;
     const REF_COUNT_MASK: u32 = 0xFFFFFFF; // first 28 bits
 
+    /// 'Borrows' a frame, incrementing the reference counter.
     fn borrow(&self) {
         // REMARK: Possibly handle case where 2^28 references have been made to a single frame?
-        //          That does seem particularly unlikely, however.
+        //         That does seem particularly unlikely, however.
         self.0.fetch_add(1, Ordering::AcqRel);
     }
 
+    /// 'Drops' a frame, decrementing the reference counter.
     fn drop(&self) {
         self.0.fetch_sub(1, Ordering::Relaxed);
     }
 
+    /// Locks a frame, setting the `locked` bit.
     fn lock(&self) {
         self.0.fetch_or(1 << Self::LOCKED_SHIFT, Ordering::AcqRel);
     }
 
+    /// Frees a frame, unsetting the `locked` bit.
     fn free(&self) {
         self.0
             .fetch_and(!(1 << Self::LOCKED_SHIFT), Ordering::AcqRel);
     }
 
+    /// Returns the frame data in a tuple.
+    /// (frame type, reference count, is locked)
     fn data(&self) -> (FrameType, u32, bool) {
         let raw = self.0.load(Ordering::Relaxed);
 
@@ -73,6 +79,8 @@ impl Frame {
         )
     }
 
+    /// Attempts to modify the frame type. There are various checks internally to
+    /// ensure this is a valid operation.
     fn modify_type(&self, new_type: FrameType) -> Result<(), ()> {
         let raw = self.0.load(Ordering::Relaxed);
 
@@ -101,20 +109,6 @@ pub enum FallocError {
     NoFreeFrames,
 }
 
-/// Structure for deterministically reserving, locking, and freeing RAM frames.
-///
-/// Deterministic Frame Lifetimes
-/// -----------------------------
-/// Deterministic frame lifetimes is the concept that a frame's lifetime should be
-/// carefully controlled to ensure its behaviour matches how its used in hardware.
-///
-/// As an example, a page table entry locks a frame to create a sub-table. Conceptually,
-/// the sub-table's entry in the page table owns the frame that sub-table exists on. It
-/// follows that that entry should control the lifetime of that frame.
-///
-/// This example encapsulates the core idea, that the `Frame` struct shouldn't be instantiated
-/// out of thin air. Its creation should be carefully controlled, to ensure each individual frame's
-/// lifetime matches up with how it is used or consumed in hardware and software.
 pub struct FrameAllocator<'arr> {
     map: RwLock<&'arr mut [Frame]>,
     map_len: usize,
@@ -147,13 +141,15 @@ impl<'arr> FrameAllocator<'arr> {
             crate::memory::to_mibibytes(total_usable_memory)
         );
 
+        // Find the best-fit descriptor for the falloc memory frames.
         let descriptor = memory_map
             .iter()
             .filter(|descriptor| !descriptor.should_reserve())
-            .find(|descriptor| descriptor.page_count >= (req_falloc_memory_frames as u64))
+            .filter(|descriptor| descriptor.page_count >= (req_falloc_memory_frames as u64))
+            .min_by_key(|descriptor| descriptor.page_count)
             .expect("Failed to find viable memory descriptor for frame allocator");
-
         let descriptor_ptr = descriptor.phys_start.as_usize() as *mut _;
+        // Clear the memory of the chosen descriptor.
         unsafe { core::ptr::write_bytes(descriptor_ptr, 0, total_system_frames) };
 
         let falloc = Self {

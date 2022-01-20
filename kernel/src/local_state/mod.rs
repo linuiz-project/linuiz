@@ -24,14 +24,14 @@ impl LocalStateRegister {
 
     #[inline]
     fn get_id() -> u8 {
-        let fs_base = MSR::IA32_FS_BASE.read();
+        let fs_base = MSR::IA32_GS_BASE.read();
         if (fs_base & Self::ID_FLAG) == 0 {
             let cpuid_id =
                 (libstd::instructions::cpuid::exec(0x1, 0x0).unwrap().ebx() >> 24) as u64;
 
             unsafe {
-                MSR::IA32_FS_BASE.write(
-                    MSR::IA32_FS_BASE.read() | (cpuid_id << Self::ID_BITS_SHFT) | Self::ID_FLAG,
+                MSR::IA32_GS_BASE.write(
+                    MSR::IA32_GS_BASE.read() | (cpuid_id << Self::ID_BITS_SHFT) | Self::ID_FLAG,
                 )
             };
 
@@ -43,7 +43,7 @@ impl LocalStateRegister {
 
     fn try_get_local_state() -> Option<&'static LocalState> {
         unsafe {
-            let fs_base = MSR::IA32_FS_BASE.read();
+            let fs_base = MSR::IA32_GS_BASE.read();
             if (fs_base & Self::PTR_FLAG) > 0 {
                 ((fs_base & !Self::DATA_MASK) as *mut LocalState).as_ref()
             } else {
@@ -62,8 +62,8 @@ impl LocalStateRegister {
         );
 
         unsafe {
-            MSR::IA32_FS_BASE
-                .write(ptr_u64 | (MSR::IA32_FS_BASE.read() & Self::DATA_MASK) | Self::PTR_FLAG)
+            MSR::IA32_GS_BASE
+                .write(ptr_u64 | (MSR::IA32_GS_BASE.read() & Self::DATA_MASK) | Self::PTR_FLAG)
         };
     }
 }

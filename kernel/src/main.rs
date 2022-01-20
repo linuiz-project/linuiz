@@ -6,7 +6,9 @@
     once_cell,
     const_mut_refs,
     raw_ref_op,
-    const_option_ext
+    const_option_ext,
+    naked_functions,
+    asm_sym
 )]
 
 #[macro_use]
@@ -21,12 +23,15 @@ mod local_state;
 mod logging;
 mod scheduling;
 
+use core::sync::atomic::AtomicU8;
+
 use libstd::{
     acpi::SystemConfigTableEntry,
     cell::SyncOnceCell,
     memory::{falloc, malloc::MemoryAllocator, UEFIMemoryDescriptor},
     BootInfo, LinkerSymbol,
 };
+use scheduling::TaskRegisters;
 
 extern "C" {
     static __ap_trampoline_start: LinkerSymbol;
@@ -72,16 +77,17 @@ static KERNEL_MALLOCATOR: SyncOnceCell<block_malloc::BlockAllocator> = SyncOnceC
 /// SAFETY: This method does *extreme* damage to the stack. It should only ever be used when
 ///         ABSOLUTELY NO dangling references to the old stack will exist (i.e. calling a
 ///         no-argument non-returning function directly after).
-#[inline(always)]
-unsafe fn clear_bsp_stack() {
-    assert!(
-        crate::local_state::is_bsp(),
-        "Cannot clear AP stack pointers to BSP stack bottom."
-    );
+macro_rules! clear_bsp_stack {
+    () => {
+        assert!(
+            $crate::local_state::is_bsp(),
+            "Cannot clear AP stack pointers to BSP stack top."
+        );
 
-    libstd::registers::stack::RSP::write(__bsp_stack_top.as_ptr());
-    // Serializing instruction to clear pipeline of any dangling references.
-    libstd::instructions::cpuid::exec(0x0, 0x0).unwrap();
+        libstd::registers::stack::RSP::write(__bsp_stack_top.as_ptr());
+        // Serializing instruction to clear pipeline of any dangling references (and order all instruction before / after).
+        libstd::instructions::cpuid::exec(0x0, 0x0).unwrap();
+    };
 }
 
 #[no_mangle]
@@ -94,7 +100,7 @@ unsafe extern "efiapi" fn kernel_init(
         libstd::instructions::interrupts::breakpoint();
     }
 
-    clear_bsp_stack();
+    clear_bsp_stack!();
 
     /* INIT STDOUT */
     CON_OUT.init(drivers::stdout::SerialSpeed::S115200);
@@ -119,34 +125,34 @@ unsafe extern "efiapi" fn kernel_init(
         __gdt_code.as_usize() as u16
     ));
 
-    let boot_info = BOOT_INFO
-        .get()
-        .expect("Boot info hasn't been initialized in kernel memory");
+    // Brace execution of this block, to avoid accidentally using `boot_info` after stack is cleared.
+    {
+        let boot_info = BOOT_INFO
+            .get()
+            .expect("Boot info hasn't been initialized in kernel memory");
 
-    info!("Validating BootInfo struct.");
-    boot_info.validate_magic();
+        info!("Validating BootInfo struct.");
+        boot_info.validate_magic();
 
-    debug!(
-        "CPU features: {:?} | {:?}",
-        libstd::instructions::cpuid::FEATURES,
-        libstd::instructions::cpuid::FEATURES_EXT
-    );
+        debug!(
+            "CPU features: {:?} | {:?}",
+            libstd::instructions::cpuid::FEATURES,
+            libstd::instructions::cpuid::FEATURES_EXT
+        );
 
-    /* INIT FRAME ALLOCATOR */
-    debug!("Initializing kernel frame allocator.");
-    falloc::load_new(boot_info.memory_map());
+        /* INIT FRAME ALLOCATOR */
+        debug!("Initializing kernel frame allocator.");
+        falloc::load_new(boot_info.memory_map());
 
-    /* INIT SYSTEM CONFIGURATION TABLE */
-    info!("Initializing system configuration table.");
-    let config_table_ptr = boot_info.config_table().as_ptr();
-    let config_table_entry_len = boot_info.config_table().len();
-    let frame_index = libstd::align_down_div(config_table_ptr as usize, 0x1000);
-    let frame_count = libstd::align_down_div(
-        config_table_entry_len * core::mem::size_of::<SystemConfigTableEntry>(),
-        0x1000,
-    );
-
-    unsafe {
+        /* INIT SYSTEM CONFIGURATION TABLE */
+        info!("Initializing system configuration table.");
+        let config_table_ptr = boot_info.config_table().as_ptr();
+        let config_table_entry_len = boot_info.config_table().len();
+        let frame_index = libstd::align_down_div(config_table_ptr as usize, 0x1000);
+        let frame_count = libstd::align_down_div(
+            config_table_entry_len * core::mem::size_of::<SystemConfigTableEntry>(),
+            0x1000,
+        );
         // Assign system configuration table prior to reserving frames to ensure one doesn't already exist.
         libstd::acpi::init_system_config_table(config_table_ptr, config_table_entry_len);
         let falloc = falloc::get();
@@ -155,38 +161,40 @@ unsafe extern "efiapi" fn kernel_init(
         }
     }
 
-    clear_bsp_stack();
+    clear_bsp_stack!();
 
     /* INIT KERNEL MEMORY */
-    info!("Initializing kernel default allocator.");
+    {
+        info!("Initializing kernel default allocator.");
 
-    let malloc = block_malloc::BlockAllocator::new();
-    debug!("Flagging `text` and `rodata` kernel sections as read-only.");
-    use libstd::memory::Page;
-    let text_page_range = Page::from_index(__text_start.as_usize() / 0x1000)
-        ..=Page::from_index(__text_end.as_usize() / 0x1000);
-    let rodata_page_range = Page::from_index(__rodata_start.as_usize() / 0x1000)
-        ..=Page::from_index(__rodata_end.as_usize() / 0x1000);
-    for page in text_page_range.chain(rodata_page_range) {
-        malloc.set_page_attribs(
-            &page,
-            libstd::memory::paging::PageAttributes::WRITABLE,
-            libstd::memory::paging::AttributeModify::Remove,
-        );
+        let malloc = block_malloc::BlockAllocator::new();
+        debug!("Flagging `text` and `rodata` kernel sections as read-only.");
+        use libstd::memory::Page;
+        let text_page_range = Page::from_index(__text_start.as_usize() / 0x1000)
+            ..=Page::from_index(__text_end.as_usize() / 0x1000);
+        let rodata_page_range = Page::from_index(__rodata_start.as_usize() / 0x1000)
+            ..=Page::from_index(__rodata_end.as_usize() / 0x1000);
+        for page in text_page_range.chain(rodata_page_range) {
+            malloc.set_page_attribs(
+                &page,
+                libstd::memory::paging::PageAttributes::WRITABLE,
+                libstd::memory::paging::AttributeModify::Remove,
+            );
+        }
+
+        debug!("Setting libstd's default memory allocator to new kernel allocator.");
+        KERNEL_MALLOCATOR.set(malloc).map_err(|_| panic!()).ok();
+        libstd::memory::malloc::set(KERNEL_MALLOCATOR.get().unwrap());
+        // TODO somehow ensure the PML4 frame is within the first 32KiB for the AP trampoline
+        debug!("Moving the kernel PML4 mapping frame into the global processor reference.");
+        __kernel_pml4
+            .as_mut_ptr::<u32>()
+            .write(libstd::registers::CR3::read().0.as_usize() as u32);
+
+        info!("Kernel memory initialized.");
     }
 
-    debug!("Setting libstd's default memory allocator to new kernel allocator.");
-    KERNEL_MALLOCATOR.set(malloc).map_err(|_| panic!()).ok();
-    libstd::memory::malloc::set(KERNEL_MALLOCATOR.get().unwrap());
-    // TODO somehow ensure the PML4 frame is within the first 32KiB for the AP trampoline
-    debug!("Moving the kernel PML4 mapping frame into the global processor reference.");
-    __kernel_pml4
-        .as_mut_ptr::<u32>()
-        .write(libstd::registers::CR3::read().0.as_usize() as u32);
-
-    info!("Kernel memory initialized.");
-
-    clear_bsp_stack();
+    clear_bsp_stack!();
 
     /* COMMON KERNEL START (prepare local state and AP processors) */
     _startup()
@@ -265,7 +273,7 @@ extern "C" fn _startup() -> ! {
                 trace!("Sending INIT interrupt to: {}", lapic.id());
                 icr.send_init(lapic.id());
                 icr.wait_pending();
-                // REMARK: IA32 spec indicates doing it twice, as so, ensures the interrupt is received.
+                // REMARK: IA32 spec indicates that doing this twice, as so, ensures the interrupt is received.
                 trace!("Sending SIPI x1 interrupt to: {}", lapic.id());
                 icr.send_sipi(ap_trampoline_page_index, lapic.id());
                 icr.wait_pending();
@@ -309,9 +317,9 @@ fn kernel_main() -> ! {
     //                 nvme.run();
 
     //                 if let PendingCommand::Identify(identify_success) = pending_command {
-    //                     info!("{:#?}", identify_success.busy_wait().unwrap());
+    //                     // info!("{:#?}", identify_success.busy_wait().unwrap());
     //                 } else {
-    //                     error!("Invalid command returned");
+    //                     //  error!("Invalid command returned");
     //                 }
     //             }
     //         }

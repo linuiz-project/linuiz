@@ -50,7 +50,7 @@ bitflags! {
         /// Used when virtual-8086 mode extensions (CR4.VME) or protected-mode virtual
         /// interrupts (CR4.PVI) are activated.
         const VIRTUAL_INTERRUPT_PENDING = 1 << 20;
-         /// Processor feature identification flag.
+        /// Processor feature identification flag.
         ///
         /// If this flag is modifiable, the CPU supports CPUID.
         const ID = 1 << 21;
@@ -58,6 +58,11 @@ bitflags! {
 }
 
 impl RFlags {
+    #[inline]
+    pub const fn minimal() -> Self {
+        Self::INTERRUPT_FLAG
+    }
+
     pub fn read() -> Self {
         Self::from_bits_truncate(Self::read_raw())
     }
@@ -66,7 +71,7 @@ impl RFlags {
         let result: u64;
 
         unsafe {
-            core::arch::asm!("pushf", "pop {}", out(reg) result);
+            core::arch::asm!("pushf", "pop {}", out(reg) result, options(nostack, nomem));
         }
 
         result
