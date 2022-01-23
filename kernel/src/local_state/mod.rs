@@ -126,26 +126,35 @@ pub fn init() {
 
         // Convert ptr to 64 bit representation, and write metadata into low bits.
         LocalStateRegister::set_local_state_ptr(lpu_ptr);
-        int_ctrl().unwrap().sw_enable();
+        int_ctrl().sw_enable();
+        int_ctrl().reload_timer(core::num::NonZeroU32::new(1));
     }
 }
+
+static LOCAL_STATE_NO_INIT: &str = "Processor local state has not been initialized";
 
 pub fn processor_id() -> u8 {
     LocalStateRegister::get_id()
 }
 
 pub fn clock() -> &'static AtomicClock {
-    LocalStateRegister::try_get().map(|ls| &ls.clock)
+    LocalStateRegister::try_get()
+        .map(|ls| &ls.clock)
+        .expect(LOCAL_STATE_NO_INIT)
 }
 
 pub fn int_ctrl() -> &'static InterruptController {
-    LocalStateRegister::try_get().map(|ls| &ls.int_ctrl)
+    LocalStateRegister::try_get()
+        .map(|ls| &ls.int_ctrl)
+        .expect(LOCAL_STATE_NO_INIT)
 }
 
-pub fn lock_thread() -> Option<MutexGuard<Thread>> {
-    LocalStateRegister::try_get().map(|ls| ls.thread.lock())
+pub fn lock_thread() -> MutexGuard<'static, Thread> {
+    LocalStateRegister::try_get()
+        .map(|ls| ls.thread.lock())
+        .expect(LOCAL_STATE_NO_INIT)
 }
 
-pub fn try_lock_thread() -> Option<MutexGuard<Thread>> {
-
+pub fn try_lock_thread() -> Option<MutexGuard<'static, Thread>> {
+    LocalStateRegister::try_get().and_then(|ls| ls.thread.try_lock())
 }

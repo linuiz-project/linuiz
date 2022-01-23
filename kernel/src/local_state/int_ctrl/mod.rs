@@ -1,6 +1,6 @@
 pub(crate) mod handlers;
 
-use core::sync::atomic::AtomicU64;
+use core::{num::NonZeroU32, sync::atomic::AtomicU64};
 use libstd::structures::apic::APIC;
 
 #[repr(u8)]
@@ -21,6 +21,7 @@ pub enum InterruptVector {
 
 pub struct InterruptController {
     apic: APIC,
+    per_ms: u32,
     counters: [AtomicU64; 256],
 }
 
@@ -42,7 +43,7 @@ impl InterruptController {
         apic.write_register(Register::TimerDivisor, TimerDivisor::Div1 as u32);
         apic.timer().set_mode(TimerMode::OneShot);
 
-        let ticks_per_10ms = {
+        let per_10ms = {
             trace!("Determining APIT frequency.");
 
             // Wait on the global timer, to ensure we're starting the count on the rising edge of each millisecond.
@@ -55,18 +56,11 @@ impl InterruptController {
             apic.read_register(Register::TimerCurrentCount)
         };
 
-        apic.write_register(
-            Register::TimerInitialCount,
-            (u32::MAX - ticks_per_10ms) / 10,
-        );
-        trace!(
-            "APIT frequency: {}KHz",
-            apic.read_register(Register::TimerInitialCount)
-        );
+        let per_ms = (u32::MAX - per_10ms) / 10;
+        trace!("APIT frequency: {}Hz", per_10ms * 100);
 
         // Configure timer.
         apic.timer().set_vector(InterruptVector::LocalTimer as u8);
-        apic.timer().set_mode(TimerMode::Periodic);
         apic.timer().set_masked(false);
         // Set default vectors.
         apic.cmci().set_vector(InterruptVector::CMCI as u8);
@@ -80,10 +74,11 @@ impl InterruptController {
         apic.error().set_vector(InterruptVector::Error as u8);
         apic.error().set_masked(false);
 
-        trace!("Core-local APIC configured and enabled.");
+        trace!("Core-local APIC configured.");
 
         Self {
             apic,
+            per_ms,
             counters: [Self::ATOMIC_ZERO; 256],
         }
     }
@@ -106,6 +101,16 @@ impl InterruptController {
     #[inline]
     pub fn icr(&self) -> libstd::structures::apic::icr::InterruptCommandRegister {
         self.apic.interrupt_command()
+    }
+
+    #[inline]
+    pub fn reload_timer(&self, ms_multiplier: Option<NonZeroU32>) {
+        const NON_ZERO_U32_ONE: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(1) };
+
+        self.apic.write_register(
+            libstd::structures::apic::Register::TimerInitialCount,
+            ms_multiplier.unwrap_or(NON_ZERO_U32_ONE).get() * self.per_ms,
+        );
     }
 
     #[inline]

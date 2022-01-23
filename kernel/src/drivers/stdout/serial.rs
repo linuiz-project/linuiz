@@ -163,8 +163,12 @@ impl Serial {
 
 impl core::fmt::Write for Serial {
     fn write_str(&mut self, string: &str) -> core::fmt::Result {
-        self.write_str(string);
-        Ok(())
+        if string.is_ascii() {
+            self.write_str(string);
+            Ok(())
+        } else {
+            Err(core::fmt::Error)
+        }
     }
 
     fn write_char(&mut self, c: char) -> core::fmt::Result {

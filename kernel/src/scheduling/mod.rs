@@ -1,13 +1,8 @@
-use core::{ops::Add, sync::atomic::AtomicU64};
+use alloc::{boxed::Box, collections::BinaryHeap};
+use core::{cmp, sync::atomic::AtomicU64};
+use libstd::{registers::RFlags, structures::idt::InterruptStackFrame};
 
-use alloc::{
-    boxed::Box,
-    collections::{BTreeSet, BinaryHeap},
-    vec::Vec,
-};
-use libstd::{registers::RFlags, structures::idt::InterruptStackFrame, IndexRing};
-
-#[repr(C)]
+#[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct TaskRegisters {
     pub rax: u64,
@@ -53,12 +48,13 @@ static CURRENT_TASK_ID: AtomicU64 = AtomicU64::new(0);
 
 pub struct Task {
     id: u64,
-    exec_decr: u64,
+    prio: u8,
+    time: u64,
     pub rip: u64,
     pub cs: u64,
     pub rsp: u64,
     pub ss: u64,
-    pub rfl: u64,
+    pub rfl: RFlags,
     pub gprs: TaskRegisters,
     pub stack: Box<[u8]>,
 }
@@ -66,12 +62,17 @@ pub struct Task {
 impl Task {
     const DEFAULT_STACK_SIZE: usize = 0x1000;
 
-    pub fn new(function: fn(), stack: Option<Box<[u8]>>, flags: Option<RFlags>) -> Self {
+    pub fn new(
+        priority: u8,
+        function: fn(),
+        stack: Option<Box<[u8]>>,
+        flags: Option<RFlags>,
+    ) -> Self {
         let rip = function as u64;
         let stack = stack.unwrap_or_else(|| unsafe {
             libstd::memory::malloc::try_get()
                 .unwrap()
-                .alloc(0x1000, None)
+                .alloc(Self::DEFAULT_STACK_SIZE, None)
                 .unwrap()
                 .into_slice()
         });
@@ -79,7 +80,8 @@ impl Task {
         use libstd::structures::gdt;
         Self {
             id: CURRENT_TASK_ID.fetch_add(1, core::sync::atomic::Ordering::AcqRel),
-            exec_decr: u64::MAX,
+            prio: priority,
+            time: u64::MAX,
             rip,
             cs: gdt::code() as u64,
             rsp: unsafe { stack.as_ptr().add(stack.len()) as u64 },
@@ -91,103 +93,108 @@ impl Task {
     }
 }
 
+impl Eq for Task {}
+impl PartialEq for Task {
+    fn eq(&self, other: &Self) -> bool {
+        self.prio == other.prio && self.time == other.time
+    }
+}
+
 impl Ord for Task {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        self.exec_decr.cmp(&other.exec_decr)
+        if self.time < other.time {
+            if self.prio > other.prio {
+                cmp::Ordering::Greater
+            } else {
+                cmp::Ordering::Less
+            }
+        } else if self.time == other.time {
+            self.prio.cmp(&other.prio)
+        } else {
+            cmp::Ordering::Less
+        }
     }
 }
 
 impl PartialOrd for Task {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        self.exec_decr.partial_cmp(&other.exec_decr)
+        Some(self.cmp(&other))
     }
 }
 
-struct Tasks {
-    priority_index: IndexRing,
-    tasks: [BinaryHeap<Task>; 256],
-}
-
-impl Tasks {
-    pub fn new() -> Self {
-        Self {
-            priority_index: IndexRing::new(256),
-            tasks: [BinaryHeap::new(); 256],
-        }
-    }
-
-    pub fn get_next(&mut self) -> Option<(u8, Task)> {
-        let index = self.priority_index.index();
-        let task = self.tasks[index].pop();
-        self.priority_index.increment();
-
-        task.map(|task| (index, task))
-    }
-
-    pub fn push(&mut self, priority: u8, task: Task) {
-        self.tasks[priority as usize].push(task);
-    }
-}
+const MAX_TIME_SLICE_MS: usize = 50;
+const MIN_TIME_SLICE_MS: usize = 4;
 
 pub struct Thread {
-    pending_tasks: Vec<(u8, Task)>,
-    current_task: Option<(u8, Task)>,
-    tasks: Tasks,
+    enabled: bool,
+    tasks: BinaryHeap<Task>,
+    current_task: Option<Task>,
 }
 
 impl Thread {
     pub fn new() -> Self {
         Self {
-            pending_tasks: Vec::new(),
+            enabled: false,
+            tasks: BinaryHeap::new(),
             current_task: None,
-            tasks: Tasks::new(),
         }
     }
 
-    pub fn queue_task(&mut self, task: Task, priority: u8) {
-        self.pending_tasks.push((priority, task))
+    pub fn push_task(&mut self, task: Task) {
+        self.tasks.push(task)
+    }
+
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
     }
 
     // TODO this needs to be a decision, not an always-switch
-    pub fn next_task(
+    pub fn run_next(
         &mut self,
         stack_frame: &mut InterruptStackFrame,
-        cached_regs: &mut TaskRegisters,
-    ) {
-        // Run all pending tasks.
-        for (priority, task) in self.pending_tasks.drain(0..) {
-            self.tasks.push(priority, task);
-        }
-
+        cached_regs: *mut TaskRegisters,
+    ) -> usize {
         // Move out old task.
-        if let Some((priority, task)) = self.current_task.take() {
+        if let Some(mut task) = self.current_task.take() {
             task.rip = stack_frame.instruction_pointer.as_u64();
             task.cs = stack_frame.code_segment;
             task.rsp = stack_frame.stack_pointer.as_u64();
             task.ss = stack_frame.stack_segment;
-            task.rfl = stack_frame.cpu_flags;
-            task.gprs = *cached_regs;
-            task.exec_decr -= 1;
-            self.tasks.push(priority, task);
+            task.rfl = RFlags::from_bits_truncate(stack_frame.cpu_flags);
+            task.gprs = unsafe { cached_regs.read_volatile() };
+            task.time += 1;
+
+            self.tasks.push(task);
         }
 
-        // Move in new task.
-        if let Some(next_task) = self.tasks.get_next() {
-            unsafe {
-                stack_frame
-                    .as_mut()
-                    .write(x86_64::structures::idt::InterruptStackFrameValue {
-                        instruction_pointer: VirtAddr::new_truncate(next_task.1.rip),
-                        code_segment: next_task.1.cs,
-                        cpu_flags: next_task.1.rfl,
-                        stack_pointer: VirtAddr::new_truncate(next_task.1.rsp),
-                        stack_segment: next_task.1.ss,
-                    })
-            };
+        // Move in new task if enabled.
+        if self.enabled {
+            if let Some(next_task) = self.tasks.pop() {
+                unsafe {
+                    stack_frame
+                        .as_mut()
+                        .write(x86_64::structures::idt::InterruptStackFrameValue {
+                            instruction_pointer: x86_64::VirtAddr::new_truncate(next_task.rip),
+                            code_segment: next_task.cs,
+                            cpu_flags: next_task.rfl.bits(),
+                            stack_pointer: x86_64::VirtAddr::new_truncate(next_task.rsp),
+                            stack_segment: next_task.ss,
+                        });
+                    cached_regs.write_volatile(next_task.gprs);
+                }
 
-            *cached_regs = next_task.1.gprs;
+                self.current_task = Some(next_task);
+            }
+        }
 
-            self.current_task = next_task;
+        let total_tasks = self.tasks.len() + if self.current_task.is_some() { 1 } else { 0 };
+        let ideal_time_slice = 1000 / total_tasks;
+
+        if total_tasks > 0 {
+            ideal_time_slice.clamp(MIN_TIME_SLICE_MS, MAX_TIME_SLICE_MS)
+        } else {
+            // If only one task, no time slice is required.
+            0
         }
     }
 }

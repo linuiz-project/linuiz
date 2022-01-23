@@ -23,15 +23,12 @@ mod local_state;
 mod logging;
 mod scheduling;
 
-use core::sync::atomic::AtomicU8;
-
 use libstd::{
     acpi::SystemConfigTableEntry,
     cell::SyncOnceCell,
     memory::{falloc, malloc::MemoryAllocator, UEFIMemoryDescriptor},
     BootInfo, LinkerSymbol,
 };
-use scheduling::TaskRegisters;
 
 extern "C" {
     static __ap_trampoline_start: LinkerSymbol;
@@ -232,7 +229,7 @@ extern "C" fn _startup() -> ! {
 
         // Initialize other CPUs
         let id = crate::local_state::processor_id();
-        let icr = crate::local_state::int_ctrl().unwrap().icr();
+        let icr = crate::local_state::int_ctrl().icr();
         let ap_trampoline_page_index = unsafe { __ap_trampoline_start.as_page().index() } as u8;
 
         if let Ok(madt) = XSDT.find_sub_table::<MADT>() {
@@ -282,9 +279,35 @@ extern "C" fn _startup() -> ! {
                 icr.wait_pending();
             }
         }
+
+        use scheduling::Task;
+        let mut thread = local_state::lock_thread();
+        thread.push_task(Task::new(0, task1, None, None));
+        thread.push_task(Task::new(0, task2, None, None));
+        thread.set_enabled(true);
     }
 
-    kernel_main()
+    libstd::instructions::hlt_indefinite()
+
+    // kernel_main()
+}
+
+fn task1() {
+    loop {
+        for i in 65..91 {
+            unsafe { CON_OUT.write(i) };
+            clock::global::busy_wait_msec(1);
+        }
+    }
+}
+
+fn task2() {
+    loop {
+        for i in 97..123 {
+            unsafe { CON_OUT.write(i) };
+            clock::global::busy_wait_msec(1);
+        }
+    }
 }
 
 fn kernel_main() -> ! {

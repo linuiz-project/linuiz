@@ -1,9 +1,4 @@
-use core::{
-    ops::Add,
-    sync::atomic::{AtomicBool, Ordering},
-};
-
-use crate::scheduling::{Task, TaskRegisters};
+use crate::scheduling::TaskRegisters;
 use libstd::structures::idt::InterruptStackFrame;
 
 #[naked]
@@ -27,6 +22,8 @@ pub extern "x86-interrupt" fn apit_handler(_: InterruptStackFrame) {
             push rcx
             push rbx
             push rax
+
+            cld
 
             /* Move stack frame into first parameter. */
             mov rcx, rsp
@@ -54,116 +51,38 @@ pub extern "x86-interrupt" fn apit_handler(_: InterruptStackFrame) {
 
             iretq
             ",
-            sym trap_handler,
+            sym apit_handler_inner,
             options(noreturn)
         )
     };
 }
 
 pub extern "x86-interrupt" fn storage_handler(_: InterruptStackFrame) {
-    crate::local_state::int_ctrl().unwrap().end_of_interrupt();
+    crate::local_state::int_ctrl().end_of_interrupt();
 }
 
-pub static mut TASK_1: Option<Task> = None;
-pub static mut TASK_2: Option<Task> = None;
-
-static IS_TASK_1: AtomicBool = AtomicBool::new(false);
-static IS_FINISHED: AtomicBool = AtomicBool::new(false);
-fn task1() {
-    loop {
-        while IS_FINISHED.load(Ordering::Acquire) {}
-
-        crate::println!(".");
-        IS_FINISHED.store(true, Ordering::Release)
-    }
-}
-
-fn task2() {
-    loop {
-        while IS_FINISHED.load(Ordering::Acquire) {}
-
-        crate::println!("!");
-        IS_FINISHED.store(true, Ordering::Release)
-    }
-}
-
-extern "win64" fn trap_handler(
+extern "win64" fn apit_handler_inner(
     stack_frame: &mut InterruptStackFrame,
-    cached_regs: &mut TaskRegisters,
+    cached_regs: *mut TaskRegisters,
 ) {
-    let stack_frame_value = unsafe { stack_frame.as_mut().read() };
+    const THREAD_LOCK_FAIL_PERIOD_MS: u32 = 1;
+    const DEFAULT_SCHEDULING_PERIOD_MS: u32 = 20;
 
-    let task = if IS_TASK_1.load(Ordering::Relaxed) {
-        crate::println!("Switching to Task 2.");
-        IS_TASK_1.store(false, Ordering::Relaxed);
+    let time_slice_ms =
+        crate::local_state::try_lock_thread().map_or(THREAD_LOCK_FAIL_PERIOD_MS, |mut thread| {
+            match thread.run_next(stack_frame, cached_regs) {
+                0 => DEFAULT_SCHEDULING_PERIOD_MS,
+                period_ms => period_ms as u32,
+            }
+        });
 
-        unsafe {
-            TASK_2.get_or_insert_with(|| {
-                let stack = libstd::memory::malloc::try_get()
-                    .unwrap()
-                    .alloc(0x1000, None)
-                    .unwrap()
-                    .into_slice();
-
-                Task {
-                    rip: task2 as u64,
-                    cs: stack_frame_value.code_segment,
-                    rsp: stack.as_ptr().add(stack.len()) as u64,
-                    ss: stack_frame_value.stack_segment,
-                    rfl: libstd::registers::RFlags::minimal().bits(),
-                    gprs: TaskRegisters::empty(),
-                    stack,
-                }
-            })
-        }
-    } else {
-        crate::println!("Switching to Task 1.");
-        IS_TASK_1.store(true, Ordering::Relaxed);
-
-        unsafe {
-            TASK_1.get_or_insert_with(|| {
-                let stack = libstd::memory::malloc::try_get()
-                    .unwrap()
-                    .alloc(0x1000, None)
-                    .unwrap()
-                    .into_slice();
-
-                Task {
-                    rip: task1 as u64,
-                    cs: stack_frame_value.code_segment,
-                    rsp: stack.as_ptr().add(stack.len()) as u64,
-                    ss: stack_frame_value.stack_segment,
-                    rfl: libstd::registers::RFlags::minimal().bits(),
-                    gprs: TaskRegisters::empty(),
-                    stack,
-                }
-            })
-        }
-    };
-
-    use x86_64::VirtAddr;
-
-    unsafe {
-        stack_frame
-            .as_mut()
-            .write(x86_64::structures::idt::InterruptStackFrameValue {
-                instruction_pointer: VirtAddr::new_truncate(task.rip),
-                code_segment: task.cs,
-                cpu_flags: task.rfl,
-                stack_pointer: VirtAddr::new_truncate(task.rsp),
-                stack_segment: task.ss,
-            })
-    };
-
-    *cached_regs = task.gprs;
-
-    crate::local_state::clock().unwrap().tick();
-    crate::local_state::int_ctrl().unwrap().end_of_interrupt();
-    IS_FINISHED.store(false, Ordering::Release);
+    let int_ctrl = crate::local_state::int_ctrl();
+    int_ctrl.reload_timer(core::num::NonZeroU32::new(time_slice_ms));
+    int_ctrl.end_of_interrupt();
 }
 
 pub extern "x86-interrupt" fn error_handler(_: InterruptStackFrame) {
-    let apic = &crate::local_state::int_ctrl().unwrap().apic;
+    let apic = &crate::local_state::int_ctrl().apic;
     error!("APIC ERROR INTERRUPT");
     error!("--------------------");
     error!("DUMPING APIC ERROR REGISTER:");

@@ -9,8 +9,8 @@ impl AtomicClock {
         Self(AtomicU64::new(0))
     }
 
-    pub fn tick(&self) {
-        self.0.fetch_add(1, Ordering::Relaxed);
+    pub fn tick(&self) -> u64 {
+        self.0.fetch_add(1, Ordering::Relaxed)
     }
 
     pub fn get_ticks(&self) -> u64 {
@@ -33,7 +33,7 @@ pub mod global {
                     tick_handler,
                 );
 
-                debug!("Global clock configured at 1000hz.");
+                debug!("Global clock configured at 1000Hz.");
             })
         } else {
             panic!("Global clock already configured.");
@@ -68,9 +68,7 @@ pub mod global {
 
 pub mod local {
     pub fn get_ticks() -> u64 {
-        crate::local_state::clock()
-            .expect("LPU structure has not been configured")
-            .get_ticks()
+        crate::local_state::clock().get_ticks()
     }
 
     pub fn sleep_msec(milliseconds: u64) {
