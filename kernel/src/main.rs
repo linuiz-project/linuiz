@@ -36,9 +36,9 @@ extern "C" {
     static __kernel_pml4: LinkerSymbol;
     #[link_name = "__gdt.pointer"]
     static __gdt_pointer: LinkerSymbol;
-    #[link_name = "__gdt.code"]
+    #[link_name = "__gdt.kcode"]
     static __gdt_code: LinkerSymbol;
-    #[link_name = "__gdt.data"]
+    #[link_name = "__gdt.kdata"]
     static __gdt_data: LinkerSymbol;
 
     static __bsp_stack_bottom: LinkerSymbol;
@@ -280,19 +280,42 @@ extern "C" fn _startup() -> ! {
             }
         }
 
+        //     use libstd::io::pci;
+        //     let nvme_driver = pci::BRIDGES
+        //         .lock()
+        //         .iter()
+        //         .flat_map(|bridge| bridge.iter())
+        //         .flat_map(|bus| bus.iter())
+        //         .find_map(|device| {
+        //             if let pci::DeviceVariant::Standard(device) = device_variant {
+        //                 if device.class() == pci::DeviceClass::MassStorageController
+        //                     && device.subclass() == 0x08
+        //                 {
+        //                     Some(drivers::nvme::Controller::from_device(&device, 4, 4))
+        //                 }
+        //             }
+        //         });
+
+        //     use scheduling::Task;
+        //     let mut thread = local_state::lock_thread();
+        //     let mut nvme = nvme_driver.expect("No NVMe drive detected.");
+        //     thread.push_task(Task::new(128, nvme.run, None, None));
+        //     thread.push_task(Task::new(0, bsp_main, None, None));
+        //     thread.set_enabled(true);
+        // }
+
         use scheduling::Task;
         let mut thread = local_state::lock_thread();
-        thread.push_task(Task::new(0, task1, None, None));
-        thread.push_task(Task::new(0, task2, None, None));
         thread.set_enabled(true);
+        thread.push_task(Task::new(255, task1, None, None));
+        thread.push_task(Task::new(255, task2, None, None));
     }
+    // libstd::instructions::hlt_indefinite()
 
-    libstd::instructions::hlt_indefinite()
-
-    // kernel_main()
+    kernel_main()
 }
 
-fn task1() {
+fn task1() -> ! {
     loop {
         for i in 65..91 {
             unsafe { CON_OUT.write(i) };
@@ -301,7 +324,7 @@ fn task1() {
     }
 }
 
-fn task2() {
+fn task2() -> ! {
     loop {
         for i in 97..123 {
             unsafe { CON_OUT.write(i) };
@@ -310,44 +333,12 @@ fn task2() {
     }
 }
 
+fn bsp_main(nvme: drivers::nvme::Controller) -> ! {
+    libstd::instructions::hlt_indefinite()
+}
+
 fn kernel_main() -> ! {
     debug!("Successfully entered `kernel_main()`.");
-
-    // if crate::local_state::is_bsp() {
-    //     use libstd::io::pci;
-
-    //     for device_variant in pci::BRIDGES
-    //         .lock()
-    //         .iter()
-    //         .flat_map(|bridge| bridge.iter())
-    //         .flat_map(|bus| bus.iter())
-    //     {
-    //         if let pci::DeviceVariant::Standard(device) = device_variant {
-    //             if device.class() == pci::DeviceClass::MassStorageController
-    //                 && device.subclass() == 0x08
-    //             {
-    //                 use crate::drivers::nvme::{
-    //                     command::admin::AdminCommand, Controller, PendingCommand,
-    //                 };
-
-    //                 let mut nvme = Controller::from_device(device, 4, 4);
-
-    //                 let pending_command =
-    //                     nvme.submit_admin_command(AdminCommand::Identify { ctrl_id: 0 });
-    //                 nvme.flush_admin_commands();
-
-    //                 // For now, we just assume the command resulted in a valid completion queue entry in a reasonable time.
-    //                 nvme.run();
-
-    //                 if let PendingCommand::Identify(identify_success) = pending_command {
-    //                     // info!("{:#?}", identify_success.busy_wait().unwrap());
-    //                 } else {
-    //                     //  error!("Invalid command returned");
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
 
     libstd::instructions::hlt_indefinite()
 }

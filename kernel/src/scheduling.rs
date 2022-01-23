@@ -64,7 +64,7 @@ impl Task {
 
     pub fn new(
         priority: u8,
-        function: fn(),
+        function: fn() -> !,
         stack: Option<Box<[u8]>>,
         flags: Option<RFlags>,
     ) -> Self {
@@ -188,10 +188,8 @@ impl Thread {
         }
 
         let total_tasks = self.tasks.len() + if self.current_task.is_some() { 1 } else { 0 };
-        let ideal_time_slice = 1000 / total_tasks;
-
         if total_tasks > 0 {
-            ideal_time_slice.clamp(MIN_TIME_SLICE_MS, MAX_TIME_SLICE_MS)
+            (1000 / total_tasks).clamp(MIN_TIME_SLICE_MS, MAX_TIME_SLICE_MS)
         } else {
             // If only one task, no time slice is required.
             0
