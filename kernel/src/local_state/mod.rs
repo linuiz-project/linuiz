@@ -2,8 +2,9 @@ mod int_ctrl;
 
 use bit_field::BitField;
 pub use int_ctrl::*;
+use spin::{Mutex, MutexGuard};
 
-use crate::clock::AtomicClock;
+use crate::{clock::AtomicClock, scheduling::Thread};
 use core::sync::atomic::AtomicUsize;
 use libstd::registers::MSR;
 
@@ -41,7 +42,7 @@ impl LocalStateRegister {
         }
     }
 
-    fn try_get_local_state() -> Option<&'static LocalState> {
+    fn try_get() -> Option<&'static LocalState> {
         unsafe {
             let fs_base = MSR::IA32_GS_BASE.read();
             if (fs_base & Self::PTR_FLAG) > 0 {
@@ -71,11 +72,12 @@ impl LocalStateRegister {
 struct LocalState {
     clock: AtomicClock,
     int_ctrl: InterruptController,
+    thread: Mutex<Thread>,
 }
 
 pub fn init() {
     assert!(
-        !LocalStateRegister::try_get_local_state().is_some(),
+        !LocalStateRegister::try_get().is_some(),
         "Local state register has already been configured."
     );
 
@@ -106,6 +108,7 @@ pub fn init() {
         {
             let clock = AtomicClock::new();
             let int_ctrl = InterruptController::create();
+            let thread = Mutex::new(Thread::new());
 
             assert_eq!(
                 cpuid_id,
@@ -114,7 +117,11 @@ pub fn init() {
             );
 
             // Write the LPU structure into memory.
-            lpu_ptr.write(LocalState { clock, int_ctrl });
+            lpu_ptr.write(LocalState {
+                clock,
+                int_ctrl,
+                thread,
+            });
         }
 
         // Convert ptr to 64 bit representation, and write metadata into low bits.
@@ -127,10 +134,18 @@ pub fn processor_id() -> u8 {
     LocalStateRegister::get_id()
 }
 
-pub fn clock() -> Option<&'static AtomicClock> {
-    LocalStateRegister::try_get_local_state().map(|lpu| &lpu.clock)
+pub fn clock() -> &'static AtomicClock {
+    LocalStateRegister::try_get().map(|ls| &ls.clock)
 }
 
-pub fn int_ctrl() -> Option<&'static InterruptController> {
-    LocalStateRegister::try_get_local_state().map(|lpu| &lpu.int_ctrl)
+pub fn int_ctrl() -> &'static InterruptController {
+    LocalStateRegister::try_get().map(|ls| &ls.int_ctrl)
+}
+
+pub fn lock_thread() -> Option<MutexGuard<Thread>> {
+    LocalStateRegister::try_get().map(|ls| ls.thread.lock())
+}
+
+pub fn try_lock_thread() -> Option<MutexGuard<Thread>> {
+
 }
