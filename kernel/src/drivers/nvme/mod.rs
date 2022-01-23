@@ -553,20 +553,22 @@ impl<'dev> Controller<'dev> {
 
     // TODO submit_command to use lpu::processor_id to index the submission and completion queues
 
-    pub fn run(&self) {
-        let mut admin_com = self.admin_com.lock();
-        if let Some(completion) = admin_com.next_completion() {
-            let mut pending_cmds = self.pending_cmds.lock();
-            let success_source = pending_cmds
-                .remove(&completion.get_command_id())
-                .expect("NVMe completion provided unknown command ID");
+    pub fn run(&self) -> ! {
+        loop {
+            let mut admin_com = self.admin_com.lock();
+            if let Some(completion) = admin_com.next_completion() {
+                let mut pending_cmds = self.pending_cmds.lock();
+                let success_source = pending_cmds
+                    .remove(&completion.get_command_id())
+                    .expect("NVMe completion provided unknown command ID");
 
-            use command::{GenericStatus, StatusCode};
-            match completion.get_status().status_code() {
-                StatusCode::Generic(GenericStatus::SuccessfulCompletion) => {
-                    success_source.complete(true)
+                use command::{GenericStatus, StatusCode};
+                match completion.get_status().status_code() {
+                    StatusCode::Generic(GenericStatus::SuccessfulCompletion) => {
+                        success_source.complete(true)
+                    }
+                    _ => success_source.complete(false),
                 }
-                _ => success_source.complete(false),
             }
         }
     }
@@ -591,4 +593,27 @@ impl fmt::Debug for Controller<'_> {
 pub enum PendingCommand {
     Identify(ValuedSuccessToken<alloc::boxed::Box<command::admin::Identify>>),
     Generic(SuccessToken),
+}
+
+pub fn exec_driver() {
+    use libstd::io::pci;
+
+    let bridges = pci::BRIDGES.lock();
+    let nvme: Controller = bridges
+        .iter()
+        .flat_map(|bridge| bridge.iter())
+        .flat_map(|bus| bus.iter())
+        .find_map(|device_variant| match device_variant {
+            pci::DeviceVariant::Standard(device)
+                if device.class() == pci::DeviceClass::MassStorageController
+                    && device.subclass() == 0x08 =>
+            {
+                Some(Controller::from_device(&device, 4, 4))
+            }
+            _ => None,
+        })
+        // TODO exit task syscall instead ?
+        .expect("No NVMe device attached.");
+
+    nvme.run()
 }
