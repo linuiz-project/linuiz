@@ -5,7 +5,7 @@ qemu-system-x86_64 \
     -machine q35 \
     -cpu qemu64 \
     -smp 1 \
-    -m 256M \
+    -m 64M \
     -serial stdio \
     -display none \
     -net none \

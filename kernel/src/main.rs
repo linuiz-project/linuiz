@@ -100,6 +100,7 @@ unsafe extern "efiapi" fn kernel_init(
     boot_info: BootInfo<uefi::MemoryDescriptor, SystemConfigTableEntry>,
 ) -> ! {
     /* PRE-INIT (no environment prepared) */
+    boot_info.validate_magic();
     if let Err(_) = lib::BOOT_INFO.set(boot_info) {
         panic!("`BOOT_INFO` already set.");
     }
@@ -137,21 +138,11 @@ unsafe extern "efiapi" fn kernel_init(
         __gdt_tss.as_u64() as u16,
     ));
 
-    // Brace execution of this block, to avoid accidentally using `boot_info` after stack is cleared.
-    {
-        let boot_info = lib::BOOT_INFO
-            .get()
-            .expect("Boot info hasn't been initialized in kernel memory");
-
-        info!("Validating BootInfo struct.");
-        boot_info.validate_magic();
-
-        debug!(
-            "CPU features: {:?} | {:?}",
-            lib::instructions::cpuid::FEATURES,
-            lib::instructions::cpuid::FEATURES_EXT
-        );
-    }
+    debug!(
+        "CPU features: {:?} | {:?}",
+        lib::instructions::cpuid::FEATURES,
+        lib::instructions::cpuid::FEATURES_EXT
+    );
 
     /* INIT KERNEL MEMORY */
     {

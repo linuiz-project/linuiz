@@ -1,13 +1,15 @@
 use crate::{addr_ty::Virtual, memory::uefi, Address};
 use core::sync::atomic::{AtomicU32, Ordering};
+use num_enum::TryFromPrimitive;
 use spin::RwLock;
 
 #[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
 pub enum FrameType {
     Usable = 0,
     Unusable,
     Reserved,
+    MMIO,
 }
 
 #[derive(Debug)]
@@ -15,13 +17,13 @@ pub enum FrameType {
 struct Frame(AtomicU32);
 
 impl Frame {
-    const FRAME_TYPE_SHIFT: u32 = 30;
-    const LOCKED_SHIFT: u32 = 28;
-    const REF_COUNT_MASK: u32 = 0xFFFFFFF; // first 28 bits
+    const REF_COUNT_MASK: u32 = 0xFFFF;
+    const LOCKED_SHIFT: u32 = 16;
+    const FRAME_TYPE_SHIFT: u32 = 17;
 
     /// 'Borrows' a frame, incrementing the reference counter.
     fn borrow(&self) {
-        // REMARK: Possibly handle case where 2^28 references have been made to a single frame?
+        // REMARK: Possibly handle case where 2^16 references have been made to a single frame?
         //         That does seem particularly unlikely, however.
         self.0.fetch_add(1, Ordering::AcqRel);
     }
@@ -61,10 +63,16 @@ impl Frame {
 
     /// Attempts to modify the frame type. There are various checks internally to
     /// ensure this is a valid operation.
-    fn modify_type(&self, new_type: FrameType) -> Result<(), ()> {
+    fn modify_type(&self, new_type: FrameType) -> Result<(), FrameError> {
         let raw = self.0.load(Ordering::Relaxed);
+        let frame_type = FrameType::try_from(raw >> Self::FRAME_TYPE_SHIFT).unwrap();
 
-        if (raw >> Self::FRAME_TYPE_SHIFT) == 0 {
+        if frame_type == new_type {
+            Ok(())
+        } else if frame_type == FrameType::Usable
+            || (new_type == FrameType::MMIO
+                && matches!(frame_type, FrameType::Unusable | FrameType::Reserved))
+        {
             // Usable / Generic
             self.0.store(
                 ((new_type as u32) << Self::FRAME_TYPE_SHIFT)
@@ -74,7 +82,7 @@ impl Frame {
 
             Ok(())
         } else {
-            Err(())
+            Err(FrameError::TypeConversion(frame_type, new_type))
         }
     }
 }
@@ -86,6 +94,8 @@ pub enum FrameError {
     FrameLocked(usize),
     FrameNotBorrowed(usize),
     FrameNotLocked(usize),
+    OutOfRange(usize),
+    TypeConversion(FrameType, FrameType),
     NoFreeFrames,
 }
 
@@ -156,6 +166,7 @@ impl<'arr> FrameManager<'arr> {
 
         debug!("Reserving requsite frames from BIOS memory map.");
         let mut last_frame_end = 0;
+        let mut reserved_byte_count = 0;
         for descriptor in memory_map
             .iter()
             .filter(|d| d.phys_start.is_frame_aligned())
@@ -174,14 +185,33 @@ impl<'arr> FrameManager<'arr> {
                 falloc.lock_many(frame_index, frame_count).unwrap();
 
                 for frame_index in frame_index..(frame_index + frame_count) {
-                    falloc
-                        .try_modify_type(frame_index, FrameType::Reserved)
-                        .unwrap()
+                    if descriptor.ty == uefi::MemoryType::MMIO {
+                        falloc
+                            .try_modify_type(frame_index, FrameType::MMIO)
+                            .unwrap();
+                    } else {
+                        falloc
+                            .try_modify_type(frame_index, FrameType::Reserved)
+                            .unwrap();
+
+                        if matches!(
+                            descriptor.ty,
+                            uefi::MemoryType::RUNTIME_SERVICES_CODE
+                                | uefi::MemoryType::RUNTIME_SERVICES_DATA
+                        ) {
+                            reserved_byte_count += 0x1000;
+                        }
+                    }
                 }
             }
 
             last_frame_end = frame_index + frame_count;
         }
+
+        info!(
+            "BIOS has reserved {}MiB of usable memory.",
+            super::to_mibibytes(reserved_byte_count)
+        );
 
         falloc
     }
@@ -317,8 +347,12 @@ impl<'arr> FrameManager<'arr> {
         &self,
         index: usize,
         new_type: FrameType,
-    ) -> core::result::Result<(), ()> {
-        self.map.read()[index].modify_type(new_type)
+    ) -> core::result::Result<(), FrameError> {
+        self.map
+            .read()
+            .get(index)
+            .ok_or(FrameError::OutOfRange(index))
+            .and_then(|frame| frame.modify_type(new_type))
     }
 
     /// Total memory of a given type represented by frame allocator. If `None` is
