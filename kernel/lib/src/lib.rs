@@ -265,7 +265,7 @@ impl<MM, CTE> BootInfo<MM, CTE> {
 pub type KernelMain<MM, CTE> = extern "efiapi" fn(crate::BootInfo<MM, CTE>) -> !;
 
 pub static BOOT_INFO: cell::SyncOnceCell<
-    BootInfo<memory::UEFIMemoryDescriptor, acpi::SystemConfigTableEntry>,
+    BootInfo<memory::uefi::MemoryDescriptor, acpi::SystemConfigTableEntry>,
 > = cell::SyncOnceCell::new();
 
 #[inline(always)]

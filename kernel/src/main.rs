@@ -27,7 +27,7 @@ mod slob;
 use lib::{
     acpi::SystemConfigTableEntry,
     cell::SyncOnceCell,
-    memory::{malloc::MemoryAllocator, UEFIMemoryDescriptor},
+    memory::{malloc::MemoryAllocator, uefi},
     BootInfo, LinkerSymbol,
 };
 
@@ -97,7 +97,7 @@ macro_rules! clear_bsp_stack {
 #[no_mangle]
 #[export_name = "_entry"]
 unsafe extern "efiapi" fn kernel_init(
-    boot_info: BootInfo<UEFIMemoryDescriptor, SystemConfigTableEntry>,
+    boot_info: BootInfo<uefi::MemoryDescriptor, SystemConfigTableEntry>,
 ) -> ! {
     /* PRE-INIT (no environment prepared) */
     if let Err(_) = lib::BOOT_INFO.set(boot_info) {

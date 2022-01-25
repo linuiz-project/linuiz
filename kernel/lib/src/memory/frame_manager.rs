@@ -1,4 +1,4 @@
-use crate::{addr_ty::Virtual, memory::UEFIMemoryDescriptor, Address};
+use crate::{addr_ty::Virtual, memory::uefi, Address};
 use core::sync::atomic::{AtomicU32, Ordering};
 use spin::RwLock;
 
@@ -96,11 +96,11 @@ pub struct FrameManager<'arr> {
 }
 
 impl<'arr> FrameManager<'arr> {
-    fn new(memory_map: &[UEFIMemoryDescriptor]) -> Self {
+    fn new(memory_map: &[uefi::MemoryDescriptor]) -> Self {
         // Calculates total (usable) system memory.
         let total_usable_memory = memory_map
             .iter()
-            .filter(|descriptor| descriptor.ty != crate::memory::uefi::UEFIMemoryType::UNUSABLE)
+            .filter(|descriptor| descriptor.ty != crate::memory::uefi::MemoryType::UNUSABLE)
             .map(|descriptor| descriptor.page_count * 0x1000)
             .sum::<u64>() as usize;
         // Calculates total system memory.
