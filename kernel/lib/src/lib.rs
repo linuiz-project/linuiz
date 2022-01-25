@@ -236,20 +236,24 @@ extern "C" {
 }
 
 impl LinkerSymbol {
-    pub const fn as_ptr<T>(&'static self) -> *const T {
+    #[inline]
+    pub const unsafe fn as_ptr<T>(&'static self) -> *const T {
         self as *const _ as *const _
     }
 
-    pub const fn as_mut_ptr<T>(&'static self) -> *mut T {
+    #[inline]
+    pub const unsafe fn as_mut_ptr<T>(&'static self) -> *mut T {
         self as *const _ as *mut _
     }
 
-    pub fn as_usize(&'static self) -> usize {
+    #[inline]
+    pub unsafe fn as_usize(&'static self) -> usize {
         self as *const _ as usize
     }
 
-    pub fn as_page(&'static self) -> memory::Page {
-        memory::Page::from_ptr(self.as_ptr::<core::ffi::c_void>())
+    #[inline]
+    pub unsafe fn as_u64(&'static self) -> u64 {
+        self as *const _ as u64
     }
 }
 

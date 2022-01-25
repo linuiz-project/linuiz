@@ -32,7 +32,7 @@ realmode:
 
     ; Set GDT & long-jump to long mode
     lgdt [__gdt.pointer]
-    jmp __gdt.code:longmode
+    jmp __gdt.kcode:longmode
 
 ; Access bits
 PRESENT        equ 1 << 7
@@ -40,6 +40,7 @@ NOT_SYS        equ 1 << 4
 EXEC           equ 1 << 3
 DC             equ 1 << 2
 RW             equ 1 << 1
+USER           equ 3 << 5
 ACCESSED       equ 1 << 0
 
 ; Flags bits
@@ -49,26 +50,38 @@ GRAN_4K       equ 1 << 7
 SZ_32         equ 1 << 6
 LONG_MODE     equ 1 << 5
 
-global __gdt.code, __gdt.data, __gdt.tss, __gdt.pointer
+global __gdt, __gdt.kcode, __gdt.kdata, __gdt.ucode, __gdt.udata, __gdt.tss, __gdt.pointer
 
 __gdt:
     .null: equ $ - __gdt
         dq 0
-    .code: equ $ - __gdt
+    .kcode: equ $ - __gdt
         dd 0xFFFF                           ; Limit & Base (low)
         db 0                                ; Base (mid)
         db PRESENT | NOT_SYS | EXEC | RW    ; Access
         db GRAN_4K | LONG_MODE | 0xF        ; Flags
         db 0                                ; Base (high)
-    .data: equ $ - __gdt
+    .kdata: equ $ - __gdt
         dd 0xFFFF                           ; Limit & Base (low)
         db 0                                ; Base (mid)
         db PRESENT | NOT_SYS | RW           ; Access
         db GRAN_4K | SZ_32 | 0xF            ; Flags
         db 0                                ; Base (high)
+    .udata: equ $ - __gdt
+        dd 0xFFFF                           ; Limit & Base (low)
+        db 0                                ; Base (mid)
+        db PRESENT | NOT_SYS | RW | USER    ; Access
+        db GRAN_4K | SZ_32 | 0xF            ; Flags
+        db 0                                ; Base (high)
+    .ucode: equ $ - __gdt
+        dd 0xFFFF                                   ; Limit & Base (low)
+        db 0                                        ; Base (mid)
+        db PRESENT | NOT_SYS | EXEC | RW | USER     ; Access
+        db GRAN_4K | LONG_MODE | 0xF                ; Flags
+        db 0                                        ; Base (high)
     .tss: equ $ - __gdt
-        dd 0x00000068
-        dd 0x00CF8900
+        dq 0x0
+        dq 0x0
     .pointer:
         dw $ - __gdt - 1
         dq __gdt
@@ -78,7 +91,7 @@ longmode:
     cli
 
     ; Update segment registers  
-    mov ax, __gdt.data
+    mov ax, __gdt.kdata
     mov ds, ax
     mov es, ax
     mov fs, ax
@@ -91,7 +104,7 @@ longmode:
     shr ebx, 24
     and ebx, 0xFF                   ; `ebx` or `bl` now contains the APIC ID, so we chop off the sign-extended bits
     mov eax, 0x8                    ; Native integer width
-    mul ebx                         ; `eax` now contains byte offset of APIC ID (relative to `__ap_stack
+    mul ebx                         ; `eax` now contains byte offset of APIC ID (relative to `__ap_stack_pointers`)
     add eax, __ap_stack_pointers    ; `eax` now contains the absolute offset of the AP stack pointer
 
     mov rsp, [eax]

@@ -8,7 +8,8 @@
     raw_ref_op,
     const_option_ext,
     naked_functions,
-    asm_sym
+    asm_sym,
+    asm_const
 )]
 
 #[macro_use]
@@ -34,12 +35,20 @@ extern "C" {
     static __ap_trampoline_start: LinkerSymbol;
     static __ap_trampoline_end: LinkerSymbol;
     static __kernel_pml4: LinkerSymbol;
+
+    static __gdt: LinkerSymbol;
     #[link_name = "__gdt.pointer"]
     static __gdt_pointer: LinkerSymbol;
     #[link_name = "__gdt.kcode"]
-    static __gdt_code: LinkerSymbol;
+    static __gdt_kcode: LinkerSymbol;
     #[link_name = "__gdt.kdata"]
-    static __gdt_data: LinkerSymbol;
+    static __gdt_kdata: LinkerSymbol;
+    #[link_name = "__gdt.ucode"]
+    static __gdt_ucode: LinkerSymbol;
+    #[link_name = "__gdt.udata"]
+    static __gdt_udata: LinkerSymbol;
+    #[link_name = "__gdt.tss"]
+    static __gdt_tss: LinkerSymbol;
 
     static __bsp_stack_bottom: LinkerSymbol;
     static __bsp_stack_top: LinkerSymbol;
@@ -110,16 +119,24 @@ unsafe extern "efiapi" fn kernel_init(
     }
 
     /* INIT GDT */
+    __gdt
+        .as_mut_ptr::<u8>()
+        .add(__gdt_tss.as_usize())
+        .cast::<libstd::structures::gdt::TSSEntry>()
+        .write_volatile(libstd::structures::gdt::TSS.as_gdt_entry());
     libstd::instructions::segmentation::lgdt(
         __gdt_pointer
             .as_ptr::<libstd::structures::gdt::DescriptorTablePointer>()
             .as_ref()
             .unwrap(),
     );
-    libstd::instructions::init_segment_registers(__gdt_data.as_usize() as u16);
+    libstd::instructions::init_segment_registers(__gdt_kdata.as_usize() as u16);
     use x86_64::instructions::segmentation::Segment;
     x86_64::instructions::segmentation::CS::set_reg(core::mem::transmute(
-        __gdt_code.as_usize() as u16
+        __gdt_kcode.as_usize() as u16
+    ));
+    x86_64::instructions::tables::load_tss(x86_64::registers::segmentation::SegmentSelector(
+        __gdt_tss.as_u64() as u16,
     ));
 
     // Brace execution of this block, to avoid accidentally using `boot_info` after stack is cleared.
@@ -230,7 +247,7 @@ extern "C" fn _startup() -> ! {
         // Initialize other CPUs
         let id = crate::local_state::processor_id();
         let icr = crate::local_state::int_ctrl().icr();
-        let ap_trampoline_page_index = unsafe { __ap_trampoline_start.as_page().index() } as u8;
+        let ap_trampoline_page_index = unsafe { __ap_trampoline_start.as_usize() / 0x1000 } as u8;
 
         if let Ok(madt) = XSDT.find_sub_table::<MADT>() {
             info!("Beginning wake-up sequence for enabled processors.");
@@ -306,13 +323,43 @@ extern "C" fn _startup() -> ! {
 
         use scheduling::Task;
         let mut thread = local_state::lock_thread();
-        thread.set_enabled(true);
+        //thread.set_enabled(true);
         thread.push_task(Task::new(255, task1, None, None));
         thread.push_task(Task::new(255, task2, None, None));
     }
     // libstd::instructions::hlt_indefinite()
 
+    unsafe {
+        use libstd::registers::MSR;
+
+        // Enable `sysenter`/`sysexit`.
+        MSR::IA32_EFER.write(MSR::IA32_EFER.read() | 0x1);
+        // Configure system call environment registers.
+        MSR::IA32_STAR.write((__gdt_kdata.as_u64() << 48) | (__gdt_kcode.as_u64() << 32));
+        MSR::IA32_SFMASK.write(u64::MAX);
+        // MSR::IA32_LSTAR.write(0x0);
+    }
+
     kernel_main()
+}
+
+#[naked]
+unsafe fn swap_ring3() {
+    core::arch::asm!(
+    "
+        lea rcx, {}
+        mov r11, {}
+
+        sysretq
+    ",
+    sym test_user_function,
+    const libstd::registers::RFlags::INTERRUPT_FLAG.bits(),
+    options(noreturn)
+    );
+}
+
+fn test_user_function() {
+    libstd::instructions::hlt_indefinite();
 }
 
 fn task1() -> ! {
@@ -339,6 +386,8 @@ fn bsp_main(nvme: drivers::nvme::Controller) -> ! {
 
 fn kernel_main() -> ! {
     debug!("Successfully entered `kernel_main()`.");
+
+    unsafe { swap_ring3() };
 
     libstd::instructions::hlt_indefinite()
 }

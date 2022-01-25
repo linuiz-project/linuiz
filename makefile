@@ -5,13 +5,11 @@ PROFILE=release
 
 ## Dependencies
 
-libstd_deps = $(shell find ./libstd/src/ -type f -name "*.rs")
-
 bootloader = ./.hdd/image/EFI/BOOT/BOOTX64.efi
-bootloader_deps = $(shell find ./boot/src/ -type f -name "*.rs")
+bootloader_deps = $(shell find ./boot/ -type f -name "*.rs")
 
 kernel = ./.hdd/image/EFI/gsai/kernel.elf
-kernel_deps = $(shell find ./kernel/src/ -type f -name "*.rs")
+kernel_deps = $(shell find ./kernel/ -type f -name "*.rs")
 kernel_linker_args = ./kernel/x86_64-unknown-none.json ./kernel/x86_64-unknown-none.lds
 
 ap_trampoline_src = ./kernel/src/ap_trampoline.asm
@@ -27,7 +25,7 @@ debug = .debug
 
 ## Commands
 
-all: $(nvme_img) $(rootfs_img) $(bootloader) $(kernel) 
+all: $(nvme_img) $(rootfs_img) $(bootloader) $(kernel)
 
 run: all $(debug)
 	./run.sh
@@ -38,13 +36,13 @@ reset: clean
 clean:
 	cd ./boot/ && cargo clean
 	cd ./kernel/ && cargo clean
-	cd ./libstd/ && cargo clean
+	cd ./kernel/lib/ && cargo clean
 
 update:
 	rustup update
 	cd ./boot/ && cargo update
 	cd ./kernel/ && cargo update
-	cd ./libstd/ && cargo update
+	cd ./kernel/lib/ && cargo update
 
 
 ## Dependency paths
@@ -55,7 +53,7 @@ $(bootloader): $(bootloader_deps)
 $(ap_trampoline_out): $(ap_trampoline_src)
 		nasm -f elf64 -o $(ap_trampoline_out) $(ap_trampoline_src)
 
-$(kernel): $(ap_trampoline_out) $(kernel_deps) $(kernel_linker_args) $(libstd_deps)
+$(kernel): $(ap_trampoline_out) $(kernel_deps) $(kernel_linker_args)
 	cd ./kernel/ && cargo fmt && cargo build --profile $(PROFILE) -Z unstable-options && rm -f $(ap_trampoline_out)
 
 $(nvme_img): $(hdd)

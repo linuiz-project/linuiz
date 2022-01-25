@@ -18,6 +18,23 @@ lazy_static::lazy_static! {
     };
 }
 
+impl TSS {
+    pub fn as_gdt_entry(&self) -> TSSEntry {
+        let ptr = self as *const _ as u64;
+
+        let base = (ptr & 0xFFFFFFFF) << 16;
+        let limit = (core::mem::size_of::<TaskStateSegment>() - 1) as u64;
+        let ty = 0b1001 << 40;
+        let low = Flags::PRESENT.bits() | base | limit | ty;
+        let high = (ptr & 0xFFFFFFFF00000000) >> 32;
+
+        TSSEntry(low, high)
+    }
+}
+
+#[repr(C)]
+pub struct TSSEntry(u64, u64);
+
 bitflags::bitflags! {
     pub struct Flags: u64 {
         const ACCESSED = 1 << 40;
