@@ -1,7 +1,7 @@
 use core::fmt::{Debug, Formatter, Result};
 
 use bit_field::BitField;
-use libstd::{
+use lib::{
     memory::{
         volatile::{Volatile, VolatileCell},
         MMIO,
@@ -281,7 +281,7 @@ impl HighPerfTimer {
     const TIMERS_BASE: usize = 0x100;
 
     // pub unsafe fn from_acpi_tables() -> Option<Self> {
-    //     use libstd::acpi::rdsp::xsdt::{hpet::HPET, XSDT};
+    //     use lib::acpi::rdsp::xsdt::{hpet::HPET, XSDT};
 
     //     XSDT.find_sub_table::<HPET>().ok().map(|hpet| {
     //         let mut hpet_driver = Self {

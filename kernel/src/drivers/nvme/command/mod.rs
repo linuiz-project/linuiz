@@ -3,7 +3,7 @@ pub mod io;
 
 use bit_field::BitField;
 use core::{convert::TryFrom, fmt, marker::PhantomData, ops::Range};
-use libstd::{
+use lib::{
     addr_ty::Physical, memory::volatile::VolatileCell, volatile_bitfield_getter,
     volatile_bitfield_getter_as, Address, ReadWrite,
 };

@@ -1,25 +1,51 @@
 //mod frame;
-mod page;
+mod frame_manager;
+mod page_manager;
 mod uefi;
 
-#[cfg(feature = "global_allocator")]
-mod galloc;
-
 //pub use frame::*;
-pub use page::*;
+pub use frame_manager::*;
+pub use page_manager::*;
+pub use paging::*;
 pub use uefi::*;
-pub mod falloc;
 pub mod malloc;
 pub mod paging;
 pub mod volatile;
+
+#[cfg(feature = "global_allocator")]
+mod global_alloc {
+    struct DefaultAllocatorProxy;
+
+    impl DefaultAllocatorProxy {
+        pub const fn new() -> Self {
+            Self
+        }
+    }
+
+    unsafe impl core::alloc::GlobalAlloc for DefaultAllocatorProxy {
+        unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
+            match super::malloc::get()
+                .alloc(layout.size(), core::num::NonZeroUsize::new(layout.align()))
+            {
+                Ok(alloc) => alloc.into_parts().0 as *mut _,
+                Err(_) => core::ptr::null_mut(),
+            }
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
+            super::malloc::get().dealloc(ptr, layout);
+        }
+    }
+
+    #[global_allocator]
+    static GLOBAL_ALLOCATOR: DefaultAllocatorProxy = DefaultAllocatorProxy::new();
+}
 
 use crate::{
     addr_ty::{Physical, Virtual},
     Address,
 };
 use core::{mem::MaybeUninit, ops::Range};
-
-use self::volatile::Volatile;
 
 pub const KIBIBYTE: usize = 0x400; // 1024
 pub const MIBIBYTE: usize = KIBIBYTE * KIBIBYTE;
@@ -35,18 +61,18 @@ pub const fn to_mibibytes(value: usize) -> usize {
 #[macro_export]
 macro_rules! alloc {
     ($size:expr) => {
-        crate::memory::malloc::try_get().unwrap().alloc(size, None)
+        crate::memory::malloc::get().alloc(size, None)
     };
 
     ($size:expr, $align:expr) => {
-        crate::memory::malloc::try_get().unwrap().alloc(size, align)
+        crate::memory::malloc::get().alloc(size, align)
     };
 }
 
 #[macro_export]
 macro_rules! alloc_to {
     ($frame_index:expr, $count:expr) => {
-        $crate::memory::malloc::try_get()
+        $crate::memory::malloc::get()
             .unwrap()
             .alloc_against($frame_index, $count)
     };
@@ -60,18 +86,15 @@ pub struct MMIO {
 
 impl MMIO {
     pub unsafe fn new(frame_index: usize, count: usize) -> Result<Self, malloc::AllocError> {
-        malloc::try_get()
-            .unwrap()
-            .alloc_against(frame_index, count)
-            .map(|data| {
-                let parts = data.into_parts();
+        malloc::get().alloc_against(frame_index, count).map(|data| {
+            let parts = data.into_parts();
 
-                Self {
-                    frame_range: frame_index..(frame_index + count),
-                    ptr: parts.0,
-                    len: parts.1,
-                }
-            })
+            Self {
+                frame_range: frame_index..(frame_index + count),
+                ptr: parts.0,
+                len: parts.1,
+            }
+        })
     }
 
     pub fn frames(&self) -> &Range<usize> {
@@ -86,9 +109,9 @@ impl MMIO {
         Address::<Virtual>::from_ptr(self.ptr)
     }
 
-    pub fn pages(&self) -> page::PageIterator {
-        let base_page = page::Page::from_addr(self.mapped_addr());
-        page::PageIterator::new(
+    pub fn pages(&self) -> paging::PageIterator {
+        let base_page = paging::Page::from_addr(self.mapped_addr());
+        paging::PageIterator::new(
             &base_page,
             &base_page.forward(self.frame_range.len()).unwrap(),
         )
@@ -133,7 +156,7 @@ impl MMIO {
     }
 
     #[inline]
-    pub const unsafe fn slice<'a, T: Volatile>(
+    pub const unsafe fn slice<'a, T: volatile::Volatile>(
         &'a self,
         offset: usize,
         len: usize,

@@ -1,6 +1,5 @@
 use crate::{
     addr_ty::{Physical, Virtual},
-    cell::SyncRefCell,
     memory::{
         paging::{AttributeModify, PageAttributes},
         Page,
@@ -10,7 +9,7 @@ use crate::{
 use alloc::{boxed::Box, vec::Vec};
 use core::{
     alloc::Layout,
-    mem::{align_of, MaybeUninit},
+    mem::{align_of, MaybeUninit}, panic,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -18,7 +17,7 @@ pub enum AllocError {
     OutOfMemory,
     InvalidAlignment(usize),
     IdentityMappingOverlaps,
-    FallocError(crate::memory::falloc::FallocError),
+    FallocError(crate::memory::FrameError),
 }
 
 pub struct Alloc<T> {
@@ -151,12 +150,15 @@ pub trait MemoryAllocator {
     );
 }
 
-static DEFAULT_MALLOCATOR: SyncRefCell<&'static dyn MemoryAllocator> = SyncRefCell::empty();
+static MEMORY_ALLOCATOR: crate::cell::SyncOnceCell<&'static dyn MemoryAllocator> =
+    crate::cell::SyncOnceCell::new();
 
 pub unsafe fn set(allocator: &'static dyn MemoryAllocator) {
-    DEFAULT_MALLOCATOR.set(allocator);
+    if let Err(_) = MEMORY_ALLOCATOR.set(allocator) {
+        panic!("Default memory allocator has already been set.");
+    }
 }
 
-pub fn try_get() -> Option<&'static dyn MemoryAllocator> {
-    DEFAULT_MALLOCATOR.borrow().map(|a| *a)
+pub fn get() -> &'static dyn MemoryAllocator {
+    *MEMORY_ALLOCATOR.get().unwrap()
 }

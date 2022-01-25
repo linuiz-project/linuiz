@@ -23,12 +23,12 @@ pub mod global {
 
     pub fn init() {
         if let Ok(()) = GLOBAL_CLOCK.set(super::AtomicClock::new()) {
-            libstd::instructions::interrupts::without_interrupts(|| {
-                use libstd::structures::pic8259;
+            lib::instructions::interrupts::without_interrupts(|| {
+                use lib::structures::pic8259;
 
                 pic8259::enable(pic8259::InterruptLines::TIMER);
                 pic8259::pit::set_timer_freq(1000, pic8259::pit::OperatingMode::RateGenerator);
-                libstd::structures::idt::set_handler_fn(
+                lib::structures::idt::set_handler_fn(
                     crate::local_state::InterruptVector::GlobalTimer as u8,
                     tick_handler,
                 );
@@ -40,7 +40,7 @@ pub mod global {
         }
     }
 
-    use libstd::{cell::SyncOnceCell, structures::idt::InterruptStackFrame};
+    use lib::{cell::SyncOnceCell, structures::idt::InterruptStackFrame};
     extern "x86-interrupt" fn tick_handler(_: InterruptStackFrame) {
         unsafe {
             GLOBAL_CLOCK
@@ -50,7 +50,7 @@ pub mod global {
         }
         .tick();
 
-        use libstd::structures::pic8259;
+        use lib::structures::pic8259;
         pic8259::end_of_interrupt(pic8259::InterruptOffset::Timer);
     }
 
@@ -75,7 +75,7 @@ pub mod local {
         let target_ticks = get_ticks() + milliseconds;
 
         while get_ticks() <= target_ticks {
-            libstd::instructions::hlt();
+            lib::instructions::hlt();
         }
     }
 

@@ -1,7 +1,7 @@
 pub(crate) mod handlers;
 
 use core::{num::NonZeroU32, sync::atomic::AtomicU64};
-use libstd::structures::apic::APIC;
+use lib::structures::apic::APIC;
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -29,10 +29,10 @@ impl InterruptController {
     const ATOMIC_ZERO: AtomicU64 = AtomicU64::new(0);
 
     pub fn create() -> Self {
-        use libstd::structures::apic::*;
+        use lib::structures::apic::*;
 
         // Ensure interrupts are enabled.
-        libstd::instructions::interrupts::enable();
+        lib::instructions::interrupts::enable();
 
         trace!("Configuring APIC & APIT.");
         let apic = APIC::from_msr().expect("APIC has already been configured on this core");
@@ -99,7 +99,7 @@ impl InterruptController {
     }
 
     #[inline]
-    pub fn icr(&self) -> libstd::structures::apic::icr::InterruptCommandRegister {
+    pub fn icr(&self) -> lib::structures::apic::icr::InterruptCommandRegister {
         self.apic.interrupt_command()
     }
 
@@ -108,7 +108,7 @@ impl InterruptController {
         const NON_ZERO_U32_ONE: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(1) };
 
         self.apic.write_register(
-            libstd::structures::apic::Register::TimerInitialCount,
+            lib::structures::apic::Register::TimerInitialCount,
             ms_multiplier.unwrap_or(NON_ZERO_U32_ONE).get() * self.per_ms,
         );
     }
