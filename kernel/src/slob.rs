@@ -282,11 +282,7 @@ impl MemoryAllocator for SLOB<'_> {
             return Err(AllocError::InvalidAlignment(align));
         }
 
-<<<<<<< HEAD:kernel/src/block_malloc.rs
-        let align_shift = usize::max(align / Self::BLOCK_SIZE, 1);
-=======
         let align_mask = usize::max(align / Self::BLOCK_SIZE, 1) - 1;
->>>>>>> 3654f20bf47b9579165b01e4dbba11d2d868b66f:kernel/src/slob.rs
         let size_in_blocks = lib::align_up_div(size, Self::BLOCK_SIZE);
         let mut map_write = self.map.write();
 
@@ -535,11 +531,7 @@ impl MemoryAllocator for SLOB<'_> {
     }
 
     fn get_page_attribs(&self, page: &Page) -> Option<lib::memory::paging::PageAttributes> {
-<<<<<<< HEAD:kernel/src/block_malloc.rs
-        self.map.read().addressor.get_page_attribs(page)
-=======
         self.map.read().page_manager.get_page_attribs(page)
->>>>>>> 3654f20bf47b9579165b01e4dbba11d2d868b66f:kernel/src/slob.rs
     }
 
     unsafe fn set_page_attribs(

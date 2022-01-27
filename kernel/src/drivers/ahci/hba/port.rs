@@ -319,12 +319,7 @@ impl Port {
 
         let fis_byte_len = 1024;
         let fis_base = unsafe {
-<<<<<<< HEAD
-            lib::memory::malloc::try_get()
-                .unwrap()
-=======
             lib::memory::malloc::get()
->>>>>>> 3654f20bf47b9579165b01e4dbba11d2d868b66f
                 .alloc(cmd_list_byte_len, core::num::NonZeroUsize::new(128))
                 .unwrap()
                 .into_parts()

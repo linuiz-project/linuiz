@@ -136,12 +136,7 @@ impl<'q> SubmissionQueue<'q> {
         let size_in_frames = lib::align_up_div(size_in_bytes, 0x1000);
 
         unsafe {
-<<<<<<< HEAD
-            let (phys_addr, mut alloc) = lib::memory::malloc::try_get()
-                .unwrap()
-=======
             let (phys_addr, mut alloc) = lib::memory::malloc::get()
->>>>>>> 3654f20bf47b9579165b01e4dbba11d2d868b66f
                 .alloc_contiguous(size_in_frames)
                 .expect(
                     "Failed to allocate contiguous memory for an administrative completion queue.",
