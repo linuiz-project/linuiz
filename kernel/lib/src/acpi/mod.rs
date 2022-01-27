@@ -1,6 +1,6 @@
 pub mod rdsp;
 
-use crate::{addr_ty::Physical, cell::SyncOnceCell, structures::GUID, Address};
+use crate::{addr_ty::Physical, structures::GUID, Address};
 
 pub const ACPI_GUID: GUID = GUID::new(
     0xeb9d2d30,
@@ -111,36 +111,13 @@ impl core::fmt::Debug for SDTHeader {
     }
 }
 
-static SYSTEM_CONFIG_TABLE: SyncOnceCell<SystemConfigTable> = SyncOnceCell::new();
-
-pub unsafe fn init_system_config_table(ptr: *const SystemConfigTableEntry, len: usize) {
-    SYSTEM_CONFIG_TABLE
-        .set(SystemConfigTable::from_ptr(ptr, len))
-        .expect("global ACPI config table has already been set");
-}
-
 pub fn get_system_config_table_entry(guid: GUID) -> Option<&'static SystemConfigTableEntry> {
-    SYSTEM_CONFIG_TABLE
+    crate::BOOT_INFO
         .get()
-        .expect("global ACPI configration table has not been set")
+        .unwrap()
+        .config_table()
         .iter()
         .find(|entry| entry.guid() == guid)
-}
-
-#[derive(Debug)]
-pub struct SystemConfigTable {
-    ptr: *const SystemConfigTableEntry,
-    len: usize,
-}
-
-impl SystemConfigTable {
-    unsafe fn from_ptr(ptr: *const SystemConfigTableEntry, len: usize) -> Self {
-        Self { ptr, len }
-    }
-
-    pub fn iter(&self) -> core::slice::Iter<SystemConfigTableEntry> {
-        unsafe { core::slice::from_raw_parts(self.ptr, self.len) }.iter()
-    }
 }
 
 #[repr(C)]

@@ -70,8 +70,8 @@ impl Task {
     ) -> Self {
         let rip = function as u64;
         let stack = stack.unwrap_or_else(|| unsafe {
-            lib::memory::malloc::try_get()
-                .unwrap()
+
+            lib::memory::malloc::get()
                 .alloc(Self::DEFAULT_STACK_SIZE, None)
                 .unwrap()
                 .into_slice()

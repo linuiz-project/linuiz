@@ -17,17 +17,17 @@ extern crate log;
 extern crate alloc;
 extern crate lib;
 
-mod block_malloc;
 mod clock;
 mod drivers;
 mod local_state;
 mod logging;
 mod scheduling;
+mod slob;
 
 use lib::{
     acpi::SystemConfigTableEntry,
     cell::SyncOnceCell,
-    memory::{falloc, malloc::MemoryAllocator, UEFIMemoryDescriptor},
+    memory::{malloc::MemoryAllocator, uefi},
     BootInfo, LinkerSymbol,
 };
 
@@ -74,9 +74,7 @@ fn get_log_level() -> log::LevelFilter {
 }
 
 static mut CON_OUT: drivers::stdout::Serial = drivers::stdout::Serial::new(drivers::stdout::COM1);
-static BOOT_INFO: SyncOnceCell<BootInfo<UEFIMemoryDescriptor, SystemConfigTableEntry>> =
-    SyncOnceCell::new();
-static KERNEL_MALLOCATOR: SyncOnceCell<block_malloc::BlockAllocator> = SyncOnceCell::new();
+static KERNEL_MALLOCATOR: SyncOnceCell<slob::SLOB> = SyncOnceCell::new();
 
 /// Clears the kernel stack by resetting `RSP`.
 ///
@@ -99,12 +97,13 @@ macro_rules! clear_bsp_stack {
 #[no_mangle]
 #[export_name = "_entry"]
 unsafe extern "efiapi" fn kernel_init(
-    boot_info: BootInfo<UEFIMemoryDescriptor, SystemConfigTableEntry>,
+    boot_info: BootInfo<uefi::MemoryDescriptor, SystemConfigTableEntry>,
 ) -> ! {
     /* PRE-INIT (no environment prepared) */
-    if let Err(_) = BOOT_INFO.set(boot_info) {
-        lib::instructions::interrupts::breakpoint();
-    }
+    boot_info.validate_magic();
+    if let Err(_) = lib::BOOT_INFO.set(boot_info) {
+        panic!("`BOOT_INFO` already set.");
+}
 
     clear_bsp_stack!();
 
@@ -139,49 +138,17 @@ unsafe extern "efiapi" fn kernel_init(
         __gdt_tss.as_u64() as u16,
     ));
 
-    // Brace execution of this block, to avoid accidentally using `boot_info` after stack is cleared.
-    {
-        let boot_info = BOOT_INFO
-            .get()
-            .expect("Boot info hasn't been initialized in kernel memory");
-
-        info!("Validating BootInfo struct.");
-        boot_info.validate_magic();
-
-        debug!(
-            "CPU features: {:?} | {:?}",
-            lib::instructions::cpuid::FEATURES,
-            lib::instructions::cpuid::FEATURES_EXT
-        );
-
-        /* INIT FRAME ALLOCATOR */
-        debug!("Initializing kernel frame allocator.");
-        falloc::load_new(boot_info.memory_map());
-
-        /* INIT SYSTEM CONFIGURATION TABLE */
-        info!("Initializing system configuration table.");
-        let config_table_ptr = boot_info.config_table().as_ptr();
-        let config_table_entry_len = boot_info.config_table().len();
-        let frame_index = lib::align_down_div(config_table_ptr as usize, 0x1000);
-        let frame_count = lib::align_down_div(
-            config_table_entry_len * core::mem::size_of::<SystemConfigTableEntry>(),
-            0x1000,
-        );
-        // Assign system configuration table prior to reserving frames to ensure one doesn't already exist.
-        lib::acpi::init_system_config_table(config_table_ptr, config_table_entry_len);
-        let falloc = falloc::get();
-        for frame_index in frame_index..(frame_index + frame_count) {
-            falloc.borrow(frame_index).unwrap();
-        }
-    }
-
-    clear_bsp_stack!();
+    debug!(
+        "CPU features: {:?} | {:?}",
+        lib::instructions::cpuid::FEATURES,
+        lib::instructions::cpuid::FEATURES_EXT
+    );
 
     /* INIT KERNEL MEMORY */
     {
         info!("Initializing kernel default allocator.");
 
-        let malloc = block_malloc::BlockAllocator::new();
+        let malloc = slob::SLOB::new();
         debug!("Flagging `text` and `rodata` kernel sections as read-only.");
         use lib::memory::Page;
         let text_page_range = Page::from_index(__text_start.as_usize() / 0x1000)
@@ -197,7 +164,7 @@ unsafe extern "efiapi" fn kernel_init(
         }
 
         debug!("Setting lib's default memory allocator to new kernel allocator.");
-        KERNEL_MALLOCATOR.set(malloc).map_err(|_| panic!()).ok();
+        KERNEL_MALLOCATOR.set(malloc).map_err(|_| panic!()).unwrap();
         lib::memory::malloc::set(KERNEL_MALLOCATOR.get().unwrap());
         // TODO somehow ensure the PML4 frame is within the first 32KiB for the AP trampoline
         debug!("Moving the kernel PML4 mapping frame into the global processor reference.");
@@ -274,9 +241,8 @@ extern "C" fn _startup() -> ! {
                 unsafe {
                     const AP_STACK_SIZE: usize = 0x2000;
 
-                    let (stack_bottom, len) = lib::memory::malloc::try_get()
-                        .unwrap()
-                        .alloc(AP_STACK_SIZE, core::num::NonZeroUsize::new(0x1000))
+                    let (stack_bottom, len) = lib::memory::malloc::get()
+                       .alloc(AP_STACK_SIZE, core::num::NonZeroUsize::new(0x1000))
                         .unwrap()
                         .into_parts();
 

@@ -1,0 +1,388 @@
+use crate::{addr_ty::Virtual, Address};
+use core::fmt;
+use core::marker::PhantomData;
+
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Page {
+    index: usize,
+}
+
+impl Page {
+    pub const fn null() -> Self {
+        Self { index: 0 }
+    }
+
+    pub const fn from_index(index: usize) -> Self {
+        Self { index }
+    }
+
+    pub const fn from_addr(addr: Address<Virtual>) -> Self {
+        if addr.is_aligned(0x1000) {
+            Self {
+                index: addr.page_index(),
+            }
+        } else {
+            panic!("page address is not page-aligned")
+        }
+    }
+
+    pub fn from_ptr<T>(ptr: *const T) -> Self {
+        let ptr_usize = ptr as usize;
+
+        assert_eq!(
+            ptr_usize % 0x1000,
+            0,
+            "Pointers must be page-aligned to use as page addresses."
+        );
+
+        Self {
+            index: ptr_usize / 0x1000,
+        }
+    }
+
+    pub const fn containing_addr(addr: Address<Virtual>) -> Self {
+        Self {
+            index: addr.page_index(),
+        }
+    }
+
+    pub const fn index(&self) -> usize {
+        self.index
+    }
+
+    pub const fn base_addr(&self) -> Address<Virtual> {
+        unsafe { Address::new_unsafe(self.index * 0x1000) }
+    }
+
+    pub const fn as_ptr<T>(&self) -> *const T {
+        (self.index * 0x1000) as *const T
+    }
+
+    pub const fn as_mut_ptr<T>(&self) -> *mut T {
+        (self.index * 0x1000) as *mut T
+    }
+
+    pub unsafe fn mem_clear(&mut self) {
+        core::ptr::write_bytes::<usize>(
+            self.as_mut_ptr(),
+            0x0,
+            0x1000 / core::mem::size_of::<usize>(),
+        );
+    }
+
+    pub fn to(&self, count: usize) -> Option<PageIterator> {
+        self.forward(count).map(|end| PageIterator::new(self, &end))
+    }
+
+    pub const fn forward(&self, count: usize) -> Option<Self> {
+        if self.index() <= (usize::MAX - count) {
+            Some(Page::from_index(self.index() + count))
+        } else {
+            None
+        }
+    }
+
+    pub const fn backward(&self, count: usize) -> Option<Self> {
+        if self.index() > (usize::MIN + count) {
+            Some(Page::from_index(self.index() - count))
+        } else {
+            None
+        }
+    }
+}
+
+impl core::iter::Step for Page {
+    fn forward_checked(start: Self, count: usize) -> Option<Self> {
+        start.forward(count)
+    }
+
+    fn backward_checked(start: Self, count: usize) -> Option<Self> {
+        start.backward(count)
+    }
+
+    fn steps_between(start: &Self, end: &Self) -> Option<usize> {
+        Some(end.index() - start.index())
+    }
+}
+
+impl core::fmt::Debug for Page {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_tuple("Page")
+            .field(&format_args!("0x{:X}", self.index << 12))
+            .finish()
+    }
+}
+
+pub struct PageIterator {
+    start: Page,
+    current: Page,
+    end: Page,
+}
+
+impl PageIterator {
+    pub fn new(start: &Page, end: &Page) -> Self {
+        Self {
+            start: *start,
+            current: *start,
+            end: *end,
+        }
+    }
+
+    pub fn start(&self) -> &Page {
+        &self.start
+    }
+
+    pub fn current(&self) -> &Page {
+        &self.current
+    }
+
+    pub fn end(&self) -> &Page {
+        &self.end
+    }
+
+    pub fn captured_len(&self) -> usize {
+        self.end().index() - self.start().index()
+    }
+
+    pub fn reset(&mut self) {
+        self.current = *self.start();
+    }
+}
+
+impl Iterator for PageIterator {
+    type Item = Page;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current.index < self.end.index {
+            let page = self.current.clone();
+            self.current.index += 1;
+            Some(page)
+        } else {
+            None
+        }
+    }
+}
+
+impl ExactSizeIterator for PageIterator {
+    fn len(&self) -> usize {
+        self.end().index() - self.start().index()
+    }
+}
+
+bitflags::bitflags! {
+    pub struct PageAttributes: usize {
+        const PRESENT = 1 << 0;
+        const WRITABLE = 1 << 1;
+        const USER_ACCESSIBLE = 1 << 2;
+        const WRITE_THROUGH = 1 << 3;
+        const UNCACHEABLE = 1 << 4;
+        const ACCESSED = 1 << 5;
+        const DIRTY = 1 << 6;
+        const HUGE_PAGE = 1 << 7;
+        const GLOBAL = 1 << 8;
+        const MAXIMUM_ADDRESS_BIT = 1 << 48;
+        // 3 bits free for use by OS
+        const NO_EXECUTE = 1 << 63;
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttributeModify {
+    Set,
+    Insert,
+    Remove,
+    Toggle,
+}
+
+#[repr(transparent)]
+pub struct PageTableEntry(usize);
+
+impl PageTableEntry {
+    const FRAME_INDEX_MASK: usize = 0x000FFFFF_FFFFF000;
+    pub const UNUSED: Self = Self(0);
+
+    pub const fn set(&mut self, frame_index: usize, attributes: PageAttributes) {
+        self.0 = (frame_index * 0x1000) | attributes.bits();
+    }
+
+    pub const fn get_frame_index(&self) -> Option<usize> {
+        if self.get_attributes().contains(PageAttributes::PRESENT) {
+            Some((self.0 & Self::FRAME_INDEX_MASK) / 0x1000)
+        } else {
+            None
+        }
+    }
+
+    pub const fn set_frame_index(&mut self, frame_index: usize) {
+        self.0 = (self.0 & PageAttributes::all().bits()) | (frame_index * 0x1000);
+    }
+
+    // Takes this page table entry's frame, even if it is non-present.
+    pub const unsafe fn take_frame_index(&mut self) -> usize {
+        let frame_index = (self.0 & Self::FRAME_INDEX_MASK) / 0x1000;
+        self.0 &= !Self::FRAME_INDEX_MASK;
+        frame_index
+    }
+
+    pub const fn get_attributes(&self) -> PageAttributes {
+        PageAttributes::from_bits_truncate(self.0)
+    }
+
+    pub fn set_attributes(&mut self, new_attributes: PageAttributes, modify_mode: AttributeModify) {
+        let mut attributes = PageAttributes::from_bits_truncate(self.0);
+
+        match modify_mode {
+            AttributeModify::Set => attributes = new_attributes,
+            AttributeModify::Insert => attributes.insert(new_attributes),
+            AttributeModify::Remove => attributes.remove(new_attributes),
+            AttributeModify::Toggle => attributes.toggle(new_attributes),
+        }
+
+        self.0 = (self.0 & !PageAttributes::all().bits()) | attributes.bits();
+    }
+
+    pub const unsafe fn set_unused(&mut self) {
+        self.0 = 0;
+    }
+}
+
+impl fmt::Debug for PageTableEntry {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_tuple("Page Table Entry")
+            .field(&self.get_frame_index())
+            .field(&self.get_attributes())
+            .field(&format_args!("0x{:X}", self.0))
+            .finish()
+    }
+}
+
+pub trait TableLevel {}
+
+pub enum Level4 {}
+pub enum Level3 {}
+pub enum Level2 {}
+pub enum Level1 {}
+
+impl TableLevel for Level4 {}
+impl TableLevel for Level3 {}
+impl TableLevel for Level2 {}
+impl TableLevel for Level1 {}
+
+pub trait HeirarchicalLevel: TableLevel {
+    type NextLevel: TableLevel;
+}
+impl HeirarchicalLevel for Level4 {
+    type NextLevel = Level3;
+}
+impl HeirarchicalLevel for Level3 {
+    type NextLevel = Level2;
+}
+impl HeirarchicalLevel for Level2 {
+    type NextLevel = Level1;
+}
+
+#[repr(C, align(0x1000))]
+pub struct PageTable<L: TableLevel> {
+    entries: [PageTableEntry; 512],
+    level: PhantomData<L>,
+}
+
+impl<L: TableLevel> PageTable<L> {
+    pub const fn new() -> Self {
+        Self {
+            entries: [PageTableEntry::UNUSED; 512],
+            level: PhantomData,
+        }
+    }
+
+    pub unsafe fn clear(&mut self) {
+        core::ptr::write_bytes(self as *mut _ as *mut u8, 0, 0x1000);
+    }
+
+    pub fn get_entry(&self, index: usize) -> &PageTableEntry {
+        &self.entries[index]
+    }
+
+    pub fn get_entry_mut(&mut self, index: usize) -> &mut PageTableEntry {
+        &mut self.entries[index]
+    }
+
+    pub fn iter(&self) -> core::slice::Iter<PageTableEntry> {
+        self.entries.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> core::slice::IterMut<PageTableEntry> {
+        self.entries.iter_mut()
+    }
+}
+
+impl<L: HeirarchicalLevel> PageTable<L> {
+    pub unsafe fn sub_table(
+        &self,
+        index: usize,
+        phys_mapped_page: Page,
+    ) -> Option<&PageTable<L::NextLevel>> {
+        self.get_entry(index).get_frame_index().map(|frame_index| {
+            phys_mapped_page
+                .forward(frame_index)
+                .unwrap()
+                .as_ptr::<PageTable<L::NextLevel>>()
+                .as_ref()
+                .unwrap()
+        })
+    }
+
+    pub unsafe fn sub_table_mut(
+        &mut self,
+        index: usize,
+        phys_mapped_page: Page,
+    ) -> Option<&mut PageTable<L::NextLevel>> {
+        self.get_entry_mut(index)
+            .get_frame_index()
+            .map(|frame_index| {
+                phys_mapped_page
+                    .forward(frame_index)
+                    .unwrap()
+                    .as_mut_ptr::<PageTable<L::NextLevel>>()
+                    .as_mut()
+                    .unwrap()
+            })
+    }
+
+    pub unsafe fn sub_table_create(
+        &mut self,
+        index: usize,
+        phys_mapping_page: Page,
+    ) -> &mut PageTable<L::NextLevel> {
+        let entry = self.get_entry_mut(index);
+        let (frame_index, created) = match entry.get_frame_index() {
+            Some(frame_index) => (frame_index, false),
+            None => {
+                let frame_index = crate::memory::FRAME_MANAGER.lock_next().unwrap();
+
+                entry.set(
+                    frame_index,
+                    PageAttributes::PRESENT | PageAttributes::WRITABLE,
+                );
+
+                (frame_index, true)
+            }
+        };
+
+        let sub_table: &mut PageTable<L::NextLevel> = phys_mapping_page
+            .forward(frame_index)
+            .unwrap()
+            .as_mut_ptr::<PageTable<L::NextLevel>>()
+            .as_mut()
+            .unwrap();
+
+        if created {
+            sub_table.clear();
+        }
+
+        sub_table
+    }
+}

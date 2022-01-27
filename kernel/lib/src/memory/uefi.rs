@@ -3,7 +3,7 @@ use crate::Address;
 #[repr(u32)]
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UEFIMemoryType {
+pub enum MemoryType {
     RESERVED,
     LOADER_CODE,
     LOADER_DATA,
@@ -24,7 +24,7 @@ pub enum UEFIMemoryType {
 }
 
 bitflags::bitflags! {
-    pub struct UEFIMemoryAttribute: u64 {
+    pub struct MemoryAttributes: u64 {
         const UNCACHEABLE = 0x1;
         const WRITE_COMBINE = 0x2;
         const WRITE_THROUGH = 0x4;
@@ -42,16 +42,16 @@ bitflags::bitflags! {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
-pub struct UEFIMemoryDescriptor {
-    pub ty: UEFIMemoryType,
+pub struct MemoryDescriptor {
+    pub ty: MemoryType,
     ty_padding: u32,
     pub phys_start: Address<crate::addr_ty::Physical>,
     pub virt_start: Address<crate::addr_ty::Virtual>,
     pub page_count: u64,
-    pub att: UEFIMemoryAttribute,
+    pub att: MemoryAttributes,
 }
 
-impl UEFIMemoryDescriptor {
+impl MemoryDescriptor {
     pub fn range(&self) -> core::ops::Range<u64> {
         let addr_u64 = self.phys_start.as_usize() as u64;
         addr_u64..(addr_u64 + (self.page_count * 0x1000))
@@ -70,11 +70,11 @@ impl UEFIMemoryDescriptor {
     pub fn should_reserve(&self) -> bool {
         !matches!(
             self.ty,
-                  UEFIMemoryType::BOOT_SERVICES_CODE
-                | UEFIMemoryType::BOOT_SERVICES_DATA
-                | UEFIMemoryType::LOADER_CODE
-                | UEFIMemoryType::LOADER_DATA
-                | UEFIMemoryType::CONVENTIONAL
+                  MemoryType::BOOT_SERVICES_CODE
+                | MemoryType::BOOT_SERVICES_DATA
+                | MemoryType::LOADER_CODE
+                | MemoryType::LOADER_DATA
+                | MemoryType::CONVENTIONAL
         )
         // If this is a stack descriptor, it should be reserved.
         //

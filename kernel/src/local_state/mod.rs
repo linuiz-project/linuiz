@@ -91,8 +91,7 @@ pub fn init() {
 
     trace!("Configuring local state: {}.", cpuid_id);
     unsafe {
-        let lpu_ptr = lib::memory::malloc::try_get()
-            .unwrap()
+        let lpu_ptr = lib::memory::malloc::get()
             .alloc(
                 core::mem::size_of::<LocalState>(),
                 // Invariantly asssumes LocalStateFlags bitfields will be packed.

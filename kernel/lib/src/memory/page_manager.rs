@@ -1,9 +1,8 @@
 use crate::{
     addr_ty::{Physical, Virtual},
     memory::{
-        falloc,
         paging::{AttributeModify, Level4, PageAttributes, PageTable, PageTableEntry},
-        Page,
+        Page, FRAME_MANAGER,
     },
     Address,
 };
@@ -12,15 +11,15 @@ use crate::{
 pub enum MapError {
     NotMapped,
     AlreadyMapped,
-    FallocError(crate::memory::falloc::FallocError),
+    FrameError(crate::memory::FrameError),
 }
 
-pub struct VirtualAddressor {
+pub struct PageManager {
     mapped_page: Page,
     pml4_index: usize,
 }
 
-impl VirtualAddressor {
+impl PageManager {
     pub const fn null() -> Self {
         Self {
             mapped_page: Page::null(),
@@ -35,7 +34,7 @@ impl VirtualAddressor {
     /// a valid address in which physical memory is already mapped. The expectation is that `mapped_page` is
     /// a propery starting page for the physical memory mapping.
     pub unsafe fn new(mapped_page: Page) -> Self {
-        let pml4_index = falloc::get()
+        let pml4_index = FRAME_MANAGER
             .lock_next()
             .expect("Failed to lock frame for virtual addressor's PML4");
 
@@ -131,12 +130,12 @@ impl VirtualAddressor {
     ) -> Result<(), MapError> {
         // Attempt to acquire the requisite frame, following the outlined parsing of `req_falloc`.
         match req_falloc {
-            Some(true) => falloc::get().lock(frame_index),
-            Some(false) => falloc::get().borrow(frame_index),
+            Some(true) => FRAME_MANAGER.lock(frame_index),
+            Some(false) => FRAME_MANAGER.borrow(frame_index),
             None => Ok(frame_index),
         }
         // If the acquisition of the frame fails, transform the error.
-        .map_err(|falloc_err| MapError::FallocError(falloc_err))
+        .map_err(|falloc_err| MapError::FrameError(falloc_err))
         // If acquisition of the frame is successful, map the page to the frame index.
         .map(|frame_index| {
             self.get_page_entry_create(page).set(
@@ -156,9 +155,9 @@ impl VirtualAddressor {
                 // Drop pointed frame since the entry is no longer present.
                 unsafe {
                     if locked {
-                        falloc::get().free(entry.take_frame_index()).unwrap();
+                        FRAME_MANAGER.free(entry.take_frame_index()).unwrap();
                     } else {
-                        falloc::get().drop(entry.take_frame_index()).unwrap();
+                        FRAME_MANAGER.drop(entry.take_frame_index()).unwrap();
                     }
                 }
 
@@ -189,7 +188,7 @@ impl VirtualAddressor {
     }
 
     pub fn automap(&mut self, page: &Page) {
-        self.map(page, falloc::get().lock_next().unwrap(), None)
+        self.map(page, FRAME_MANAGER.lock_next().unwrap(), None)
             .unwrap();
     }
 
@@ -230,7 +229,7 @@ impl VirtualAddressor {
     /* STATE CHANGING */
 
     pub unsafe fn modify_mapped_page(&mut self, page: Page) {
-        for index in 0..falloc::get().total_frame_count() {
+        for index in 0..FRAME_MANAGER.total_frame_count() {
             self.get_page_entry_create(&page.forward(index).unwrap())
                 .set(index, PageAttributes::PRESENT | PageAttributes::WRITABLE);
 
