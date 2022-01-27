@@ -2,18 +2,18 @@ use crate::{addr_ty::Virtual, cell::SyncOnceCell, memory::UEFIMemoryDescriptor, 
 use core::sync::atomic::{AtomicU32, Ordering};
 use spin::RwLock;
 
-static DEFAULT_FALLOCATOR: SyncOnceCell<FrameAllocator> = SyncOnceCell::new();
+static FRAME_MANAGER: SyncOnceCell<FrameManager> = SyncOnceCell::new();
 
 pub unsafe fn load_new(memory_map: &[UEFIMemoryDescriptor]) {
-    DEFAULT_FALLOCATOR
-        .set(FrameAllocator::new(memory_map))
+    FRAME_MANAGER
+        .set(FrameManager::new(memory_map))
         .unwrap_or_else(|_| {
             panic!("Frame allocator can only be loaded once.");
         })
 }
 
-pub fn get() -> &'static FrameAllocator<'static> {
-    DEFAULT_FALLOCATOR
+pub fn get() -> &'static FrameManager<'static> {
+    FRAME_MANAGER
         .get()
         .expect("frame allocator has not been configured")
 }
@@ -109,13 +109,13 @@ pub enum FallocError {
     NoFreeFrames,
 }
 
-pub struct FrameAllocator<'arr> {
+pub struct FrameManager<'arr> {
     map: RwLock<&'arr mut [Frame]>,
     map_len: usize,
     total_memory: usize,
 }
 
-impl<'arr> FrameAllocator<'arr> {
+impl<'arr> FrameManager<'arr> {
     fn new(memory_map: &[UEFIMemoryDescriptor]) -> Self {
         // Calculates total (usable) system memory.
         let total_usable_memory = memory_map

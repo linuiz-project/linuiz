@@ -3,7 +3,7 @@ use core::{
     mem::MaybeUninit,
     sync::atomic::{AtomicU16, Ordering},
 };
-use libstd::{
+use lib::{
     addr_ty::{Physical, Virtual},
     memory::{falloc, malloc, volatile::VolatileCell},
     Address, IndexRing, ReadWrite,
@@ -38,15 +38,15 @@ pub(super) struct CompletionQueue<'q> {
 
 impl<'q> CompletionQueue<'q> {
     pub fn new(
-        reg0: &'q libstd::memory::MMIO,
+        reg0: &'q lib::memory::MMIO,
         queue_id: u16, /* may need a way to dynamically select this? */
         entry_count: u16,
     ) -> Self {
         let size_in_bytes = (entry_count as usize) * core::mem::size_of::<Completion>();
-        let size_in_frames = libstd::align_up_div(size_in_bytes, 0x1000);
+        let size_in_frames = lib::align_up_div(size_in_bytes, 0x1000);
 
         unsafe {
-            let (phys_addr, mut alloc) = libstd::memory::malloc::try_get()
+            let (phys_addr, mut alloc) = lib::memory::malloc::try_get()
                 .unwrap()
                 .alloc_contiguous(size_in_frames)
                 .expect(
@@ -130,14 +130,14 @@ pub(super) struct SubmissionQueue<'q> {
 }
 
 impl<'q> SubmissionQueue<'q> {
-    pub fn new(reg0: &'q libstd::memory::MMIO, queue_id: u16, entry_count: u16) -> Self {
+    pub fn new(reg0: &'q lib::memory::MMIO, queue_id: u16, entry_count: u16) -> Self {
         // TODO somehow validate entry size?
 
         let size_in_bytes = (entry_count as usize) * core::mem::size_of::<Command>();
-        let size_in_frames = libstd::align_up_div(size_in_bytes, 0x1000);
+        let size_in_frames = lib::align_up_div(size_in_bytes, 0x1000);
 
         unsafe {
-            let (phys_addr, mut alloc) = libstd::memory::malloc::try_get()
+            let (phys_addr, mut alloc) = lib::memory::malloc::try_get()
                 .unwrap()
                 .alloc_contiguous(size_in_frames)
                 .expect(

@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use libstd::io::port::{ReadOnlyPort, ReadWritePort, WriteOnlyPort};
+use lib::io::port::{ReadOnlyPort, ReadWritePort, WriteOnlyPort};
 
 /// Address of the first COM port.
 /// This port is VERY likely to be at this address.

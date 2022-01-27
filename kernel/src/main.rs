@@ -15,7 +15,7 @@
 #[macro_use]
 extern crate log;
 extern crate alloc;
-extern crate libstd;
+extern crate lib;
 
 mod block_malloc;
 mod clock;
@@ -24,7 +24,7 @@ mod local_state;
 mod logging;
 mod scheduling;
 
-use libstd::{
+use lib::{
     acpi::SystemConfigTableEntry,
     cell::SyncOnceCell,
     memory::{falloc, malloc::MemoryAllocator, UEFIMemoryDescriptor},
@@ -90,9 +90,9 @@ macro_rules! clear_bsp_stack {
             "Cannot clear AP stack pointers to BSP stack top."
         );
 
-        libstd::registers::stack::RSP::write(__bsp_stack_top.as_ptr());
+        lib::registers::stack::RSP::write(__bsp_stack_top.as_ptr());
         // Serializing instruction to clear pipeline of any dangling references (and order all instruction before / after).
-        libstd::instructions::cpuid::exec(0x0, 0x0).unwrap();
+        lib::instructions::cpuid::exec(0x0, 0x0).unwrap();
     };
 }
 
@@ -103,7 +103,7 @@ unsafe extern "efiapi" fn kernel_init(
 ) -> ! {
     /* PRE-INIT (no environment prepared) */
     if let Err(_) = BOOT_INFO.set(boot_info) {
-        libstd::instructions::interrupts::breakpoint();
+        lib::instructions::interrupts::breakpoint();
     }
 
     clear_bsp_stack!();
@@ -115,22 +115,22 @@ unsafe extern "efiapi" fn kernel_init(
         Ok(()) => {
             info!("Successfully loaded into kernel, with logging enabled.");
         }
-        Err(_) => libstd::instructions::interrupts::breakpoint(),
+        Err(_) => lib::instructions::interrupts::breakpoint(),
     }
 
     /* INIT GDT */
     __gdt
         .as_mut_ptr::<u8>()
         .add(__gdt_tss.as_usize())
-        .cast::<libstd::structures::gdt::TSSEntry>()
-        .write_volatile(libstd::structures::gdt::TSS.as_gdt_entry());
-    libstd::instructions::segmentation::lgdt(
+        .cast::<lib::structures::gdt::TSSEntry>()
+        .write_volatile(lib::structures::gdt::TSS.as_gdt_entry());
+    lib::instructions::segmentation::lgdt(
         __gdt_pointer
-            .as_ptr::<libstd::structures::gdt::DescriptorTablePointer>()
+            .as_ptr::<lib::structures::gdt::DescriptorTablePointer>()
             .as_ref()
             .unwrap(),
     );
-    libstd::instructions::init_segment_registers(__gdt_kdata.as_usize() as u16);
+    lib::instructions::init_segment_registers(__gdt_kdata.as_usize() as u16);
     use x86_64::instructions::segmentation::Segment;
     x86_64::instructions::segmentation::CS::set_reg(core::mem::transmute(
         __gdt_kcode.as_usize() as u16
@@ -150,8 +150,8 @@ unsafe extern "efiapi" fn kernel_init(
 
         debug!(
             "CPU features: {:?} | {:?}",
-            libstd::instructions::cpuid::FEATURES,
-            libstd::instructions::cpuid::FEATURES_EXT
+            lib::instructions::cpuid::FEATURES,
+            lib::instructions::cpuid::FEATURES_EXT
         );
 
         /* INIT FRAME ALLOCATOR */
@@ -162,13 +162,13 @@ unsafe extern "efiapi" fn kernel_init(
         info!("Initializing system configuration table.");
         let config_table_ptr = boot_info.config_table().as_ptr();
         let config_table_entry_len = boot_info.config_table().len();
-        let frame_index = libstd::align_down_div(config_table_ptr as usize, 0x1000);
-        let frame_count = libstd::align_down_div(
+        let frame_index = lib::align_down_div(config_table_ptr as usize, 0x1000);
+        let frame_count = lib::align_down_div(
             config_table_entry_len * core::mem::size_of::<SystemConfigTableEntry>(),
             0x1000,
         );
         // Assign system configuration table prior to reserving frames to ensure one doesn't already exist.
-        libstd::acpi::init_system_config_table(config_table_ptr, config_table_entry_len);
+        lib::acpi::init_system_config_table(config_table_ptr, config_table_entry_len);
         let falloc = falloc::get();
         for frame_index in frame_index..(frame_index + frame_count) {
             falloc.borrow(frame_index).unwrap();
@@ -183,7 +183,7 @@ unsafe extern "efiapi" fn kernel_init(
 
         let malloc = block_malloc::BlockAllocator::new();
         debug!("Flagging `text` and `rodata` kernel sections as read-only.");
-        use libstd::memory::Page;
+        use lib::memory::Page;
         let text_page_range = Page::from_index(__text_start.as_usize() / 0x1000)
             ..=Page::from_index(__text_end.as_usize() / 0x1000);
         let rodata_page_range = Page::from_index(__rodata_start.as_usize() / 0x1000)
@@ -191,19 +191,19 @@ unsafe extern "efiapi" fn kernel_init(
         for page in text_page_range.chain(rodata_page_range) {
             malloc.set_page_attribs(
                 &page,
-                libstd::memory::paging::PageAttributes::WRITABLE,
-                libstd::memory::paging::AttributeModify::Remove,
+                lib::memory::paging::PageAttributes::WRITABLE,
+                lib::memory::paging::AttributeModify::Remove,
             );
         }
 
-        debug!("Setting libstd's default memory allocator to new kernel allocator.");
+        debug!("Setting lib's default memory allocator to new kernel allocator.");
         KERNEL_MALLOCATOR.set(malloc).map_err(|_| panic!()).ok();
-        libstd::memory::malloc::set(KERNEL_MALLOCATOR.get().unwrap());
+        lib::memory::malloc::set(KERNEL_MALLOCATOR.get().unwrap());
         // TODO somehow ensure the PML4 frame is within the first 32KiB for the AP trampoline
         debug!("Moving the kernel PML4 mapping frame into the global processor reference.");
         __kernel_pml4
             .as_mut_ptr::<u32>()
-            .write(libstd::registers::CR3::read().0.as_usize() as u32);
+            .write(lib::registers::CR3::read().0.as_usize() as u32);
 
         info!("Kernel memory initialized.");
     }
@@ -217,10 +217,10 @@ unsafe extern "efiapi" fn kernel_init(
 #[no_mangle]
 extern "C" fn _startup() -> ! {
     // Ensure we load the IDT as early as possible in startup sequence.
-    unsafe { libstd::structures::idt::load_unchecked() };
+    unsafe { lib::structures::idt::load_unchecked() };
 
     if crate::local_state::is_bsp() {
-        use libstd::structures::idt;
+        use lib::structures::idt;
         use local_state::{handlers, InterruptVector};
 
         // This is where we'll configure the kernel-static IDT entries.
@@ -239,7 +239,7 @@ extern "C" fn _startup() -> ! {
 
     // If this is the BSP, wake other cores.
     if crate::local_state::is_bsp() {
-        use libstd::acpi::rdsp::xsdt::{
+        use lib::acpi::rdsp::xsdt::{
             madt::{InterruptDevice, MADT},
             XSDT,
         };
@@ -263,7 +263,7 @@ extern "C" fn _startup() -> ! {
                 })
                 // Filter out invalid lapic devices.
                 .filter(|lapic| {
-                    use libstd::acpi::rdsp::xsdt::madt::LocalAPICFlags;
+                    use lib::acpi::rdsp::xsdt::madt::LocalAPICFlags;
 
                     lapic.id() != id
                         && lapic.flags().intersects(
@@ -274,7 +274,7 @@ extern "C" fn _startup() -> ! {
                 unsafe {
                     const AP_STACK_SIZE: usize = 0x2000;
 
-                    let (stack_bottom, len) = libstd::memory::malloc::try_get()
+                    let (stack_bottom, len) = lib::memory::malloc::try_get()
                         .unwrap()
                         .alloc(AP_STACK_SIZE, core::num::NonZeroUsize::new(0x1000))
                         .unwrap()
@@ -297,7 +297,7 @@ extern "C" fn _startup() -> ! {
             }
         }
 
-        //     use libstd::io::pci;
+        //     use lib::io::pci;
         //     let nvme_driver = pci::BRIDGES
         //         .lock()
         //         .iter()
@@ -327,10 +327,10 @@ extern "C" fn _startup() -> ! {
         thread.push_task(Task::new(255, task1, None, None));
         thread.push_task(Task::new(255, task2, None, None));
     }
-    // libstd::instructions::hlt_indefinite()
+    // lib::instructions::hlt_indefinite()
 
     unsafe {
-        use libstd::registers::MSR;
+        use lib::registers::MSR;
 
         // Enable `sysenter`/`sysexit`.
         MSR::IA32_EFER.write(MSR::IA32_EFER.read() | 0x1);
@@ -353,13 +353,13 @@ unsafe fn swap_ring3() {
         sysretq
     ",
     sym test_user_function,
-    const libstd::registers::RFlags::INTERRUPT_FLAG.bits(),
+    const lib::registers::RFlags::INTERRUPT_FLAG.bits(),
     options(noreturn)
     );
 }
 
 fn test_user_function() {
-    libstd::instructions::hlt_indefinite();
+    lib::instructions::hlt_indefinite();
 }
 
 fn task1() -> ! {
@@ -381,7 +381,7 @@ fn task2() -> ! {
 }
 
 fn bsp_main(nvme: drivers::nvme::Controller) -> ! {
-    libstd::instructions::hlt_indefinite()
+    lib::instructions::hlt_indefinite()
 }
 
 fn kernel_main() -> ! {
@@ -389,5 +389,5 @@ fn kernel_main() -> ! {
 
     unsafe { swap_ring3() };
 
-    libstd::instructions::hlt_indefinite()
+    lib::instructions::hlt_indefinite()
 }

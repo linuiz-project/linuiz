@@ -1,5 +1,5 @@
 use core::{alloc::Layout, mem::size_of, num::NonZeroUsize};
-use libstd::{
+use lib::{
     addr_ty::{Physical, Virtual},
     align_up_div,
     memory::{
@@ -161,7 +161,7 @@ impl<'map> BlockAllocator<'map> {
 
         (
             mask_bit_count,
-            libstd::U64_BIT_MASKS[mask_bit_count - 1] << mask_bit_offset,
+            lib::U64_BIT_MASKS[mask_bit_count - 1] << mask_bit_offset,
         )
     }
 
@@ -185,12 +185,12 @@ impl<'map> BlockAllocator<'map> {
         let cur_map_len = map_write.pages.len();
         // Required length of our map, in indexes.
         let req_map_len = (map_write.pages.len()
-            + libstd::align_up_div(required_blocks, BlockPage::BLOCKS_PER))
+            + lib::align_up_div(required_blocks, BlockPage::BLOCKS_PER))
         .next_power_of_two();
         // Current page count of our map (i.e. how many pages the slice requires)
-        let cur_map_pages = libstd::align_up_div(cur_map_len * size_of::<BlockPage>(), 0x1000);
+        let cur_map_pages = lib::align_up_div(cur_map_len * size_of::<BlockPage>(), 0x1000);
         // Required page count of our map.
-        let req_map_pages = libstd::align_up_div(req_map_len * size_of::<BlockPage>(), 0x1000);
+        let req_map_pages = lib::align_up_div(req_map_len * size_of::<BlockPage>(), 0x1000);
 
         trace!(
             "Growth parameters: len {} => {}, pages {} => {}",
@@ -252,7 +252,7 @@ impl<'map> BlockAllocator<'map> {
         map_write.pages = unsafe {
             core::slice::from_raw_parts_mut(
                 new_map_page.as_mut_ptr(),
-                libstd::align_up(req_map_len, 0x1000 / size_of::<BlockPage>()),
+                lib::align_up(req_map_len, 0x1000 / size_of::<BlockPage>()),
             )
         };
 
@@ -285,7 +285,7 @@ impl MemoryAllocator for BlockAllocator<'_> {
         }
 
         let align_shift = usize::max(align / Self::BLOCK_SIZE, 1);
-        let size_in_blocks = libstd::align_up_div(size, Self::BLOCK_SIZE);
+        let size_in_blocks = lib::align_up_div(size, Self::BLOCK_SIZE);
         let mut map_write = self.map.write();
 
         let end_map_index;
@@ -338,7 +338,7 @@ impl MemoryAllocator for BlockAllocator<'_> {
                 end_block_index - block_index,
                 (block_index_floor + BlockPage::BLOCKS_PER) - block_index,
             );
-            let mask_bits = libstd::U64_BIT_MASKS[remaining_blocks_in_slice - 1];
+            let mask_bits = lib::U64_BIT_MASKS[remaining_blocks_in_slice - 1];
 
             *block_page.value_mut() |= mask_bits << low_offset;
             block_index += remaining_blocks_in_slice;
@@ -532,15 +532,15 @@ impl MemoryAllocator for BlockAllocator<'_> {
         }
     }
 
-    fn get_page_attribs(&self, page: &Page) -> Option<libstd::memory::paging::PageAttributes> {
+    fn get_page_attribs(&self, page: &Page) -> Option<lib::memory::paging::PageAttributes> {
         self.map.read().addressor.get_page_attribs(page)
     }
 
     unsafe fn set_page_attribs(
         &self,
         page: &Page,
-        attributes: libstd::memory::paging::PageAttributes,
-        modify_mode: libstd::memory::paging::AttributeModify,
+        attributes: lib::memory::paging::PageAttributes,
+        modify_mode: lib::memory::paging::AttributeModify,
     ) {
         self.map
             .write()

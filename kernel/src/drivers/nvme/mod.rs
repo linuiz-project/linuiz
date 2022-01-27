@@ -4,7 +4,7 @@ pub mod queue;
 use alloc::collections::BTreeMap;
 use bit_field::BitField;
 use core::{convert::TryFrom, fmt, marker::PhantomData, mem::MaybeUninit};
-use libstd::{
+use lib::{
     addr_ty::Physical,
     io::pci::{standard::StandardRegister, PCIeDevice, Standard},
     memory::volatile::{Volatile, VolatileCell},
@@ -325,7 +325,7 @@ pub enum ControllerEnableError {
 
 pub struct Controller<'dev> {
     device: &'dev PCIeDevice<Standard>,
-    msix: libstd::io::pci::standard::MSIX<'dev>,
+    msix: lib::io::pci::standard::MSIX<'dev>,
     admin_sub: Mutex<queue::SubmissionQueue<'dev>>,
     admin_com: Mutex<queue::CompletionQueue<'dev>>,
     pending_cmds: Mutex<BTreeMap<u16, SuccessSource>>,
@@ -394,7 +394,7 @@ impl<'dev> Controller<'dev> {
         nvme.msix[0].configure(
             crate::local_state::processor_id(),
             crate::local_state::InterruptVector::Storage as u8,
-            libstd::InterruptDeliveryMode::Fixed,
+            lib::InterruptDeliveryMode::Fixed,
         );
         nvme.msix[0].set_masked(false);
 
@@ -509,7 +509,7 @@ impl<'dev> Controller<'dev> {
             AdminCommand::Identify { ctrl_id } => {
                 // Allocate the necessary memory for returning the command value.
                 let (phys_addr, alloc) = unsafe {
-                    libstd::memory::malloc::try_get()
+                    lib::memory::malloc::try_get()
                         .unwrap()
                         .alloc_contiguous(1)
                         .unwrap()
@@ -596,7 +596,7 @@ pub enum PendingCommand {
 }
 
 pub fn exec_driver() {
-    use libstd::io::pci;
+    use lib::io::pci;
 
     let bridges = pci::BRIDGES.lock();
     let nvme: Controller = bridges

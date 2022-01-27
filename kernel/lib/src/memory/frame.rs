@@ -15,7 +15,7 @@ impl Frame {
     /// Creates a frame representing the specified frame index (physical memory in 0x1000 increments).
     ///
     /// SAFETY: Frame creation should be deterministic. This concept is explained
-    ///     in the `FrameAllocator` documentation.
+    ///     in the `FrameManager` documentation.
     pub const unsafe fn from_index(index: usize) -> Self {
         Self { index }
     }

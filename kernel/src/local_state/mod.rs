@@ -6,7 +6,7 @@ use spin::{Mutex, MutexGuard};
 
 use crate::{clock::AtomicClock, scheduling::Thread};
 use core::sync::atomic::AtomicUsize;
-use libstd::registers::MSR;
+use lib::registers::MSR;
 
 pub static INIT_COUNT: AtomicUsize = AtomicUsize::new(0);
 
@@ -27,8 +27,7 @@ impl LocalStateRegister {
     fn get_id() -> u8 {
         let fs_base = MSR::IA32_GS_BASE.read();
         if (fs_base & Self::ID_FLAG) == 0 {
-            let cpuid_id =
-                (libstd::instructions::cpuid::exec(0x1, 0x0).unwrap().ebx() >> 24) as u64;
+            let cpuid_id = (lib::instructions::cpuid::exec(0x1, 0x0).unwrap().ebx() >> 24) as u64;
 
             unsafe {
                 MSR::IA32_GS_BASE.write(
@@ -84,7 +83,7 @@ pub fn init() {
     INIT_COUNT.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
 
     let cpuid_id = {
-        libstd::instructions::cpuid::exec(0x1, 0x0)
+        lib::instructions::cpuid::exec(0x1, 0x0)
             .unwrap()
             .ebx()
             .get_bits(24..) as u8
@@ -92,7 +91,7 @@ pub fn init() {
 
     trace!("Configuring local state: {}.", cpuid_id);
     unsafe {
-        let lpu_ptr = libstd::memory::malloc::try_get()
+        let lpu_ptr = lib::memory::malloc::try_get()
             .unwrap()
             .alloc(
                 core::mem::size_of::<LocalState>(),

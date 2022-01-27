@@ -1,6 +1,6 @@
 use alloc::{boxed::Box, collections::BinaryHeap};
 use core::{cmp, sync::atomic::AtomicU64};
-use libstd::{registers::RFlags, structures::idt::InterruptStackFrame};
+use lib::{registers::RFlags, structures::idt::InterruptStackFrame};
 
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
@@ -70,14 +70,14 @@ impl Task {
     ) -> Self {
         let rip = function as u64;
         let stack = stack.unwrap_or_else(|| unsafe {
-            libstd::memory::malloc::try_get()
+            lib::memory::malloc::try_get()
                 .unwrap()
                 .alloc(Self::DEFAULT_STACK_SIZE, None)
                 .unwrap()
                 .into_slice()
         });
 
-        use libstd::structures::gdt;
+        use lib::structures::gdt;
         Self {
             id: CURRENT_TASK_ID.fetch_add(1, core::sync::atomic::Ordering::AcqRel),
             prio: priority,
