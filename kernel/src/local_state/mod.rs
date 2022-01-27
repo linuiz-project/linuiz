@@ -4,7 +4,7 @@ use bit_field::BitField;
 pub use int_ctrl::*;
 use spin::{Mutex, MutexGuard};
 
-use crate::{clock::AtomicClock, scheduling::Thread};
+use crate::{clock::AtomicClock, scheduling::Scheduler};
 use core::sync::atomic::AtomicUsize;
 use lib::registers::MSR;
 
@@ -71,7 +71,7 @@ impl LocalStateRegister {
 struct LocalState {
     clock: AtomicClock,
     int_ctrl: InterruptController,
-    thread: Mutex<Thread>,
+    thread: Mutex<Scheduler>,
 }
 
 pub fn init() {
@@ -106,7 +106,7 @@ pub fn init() {
         {
             let clock = AtomicClock::new();
             let int_ctrl = InterruptController::create();
-            let thread = Mutex::new(Thread::new());
+            let thread = Mutex::new(Scheduler::new());
 
             assert_eq!(
                 cpuid_id,
@@ -147,12 +147,12 @@ pub fn int_ctrl() -> &'static InterruptController {
         .expect(LOCAL_STATE_NO_INIT)
 }
 
-pub fn lock_thread() -> MutexGuard<'static, Thread> {
+pub fn lock_scheduler() -> MutexGuard<'static, Scheduler> {
     LocalStateRegister::try_get()
         .map(|ls| ls.thread.lock())
         .expect(LOCAL_STATE_NO_INIT)
 }
 
-pub fn try_lock_thread() -> Option<MutexGuard<'static, Thread>> {
+pub fn try_lock_scheduler() -> Option<MutexGuard<'static, Scheduler>> {
     LocalStateRegister::try_get().and_then(|ls| ls.thread.try_lock())
 }

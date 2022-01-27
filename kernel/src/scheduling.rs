@@ -4,7 +4,7 @@ use lib::{registers::RFlags, structures::idt::InterruptStackFrame};
 
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
-pub struct TaskRegisters {
+pub struct ThreadRegisters {
     pub rax: u64,
     pub rbx: u64,
     pub rcx: u64,
@@ -22,7 +22,7 @@ pub struct TaskRegisters {
     pub r15: u64,
 }
 
-impl TaskRegisters {
+impl ThreadRegisters {
     pub const fn empty() -> Self {
         Self {
             rax: 0,
@@ -44,9 +44,9 @@ impl TaskRegisters {
     }
 }
 
-static CURRENT_TASK_ID: AtomicU64 = AtomicU64::new(0);
+static CURRENT_THREAD_ID: AtomicU64 = AtomicU64::new(0);
 
-pub struct Task {
+pub struct Thread {
     id: u64,
     prio: u8,
     time: u64,
@@ -55,11 +55,11 @@ pub struct Task {
     pub rsp: u64,
     pub ss: u64,
     pub rfl: RFlags,
-    pub gprs: TaskRegisters,
+    pub gprs: ThreadRegisters,
     pub stack: Box<[u8]>,
 }
 
-impl Task {
+impl Thread {
     const DEFAULT_STACK_SIZE: usize = 0x1000;
 
     pub fn new(
@@ -70,7 +70,6 @@ impl Task {
     ) -> Self {
         let rip = function as u64;
         let stack = stack.unwrap_or_else(|| unsafe {
-
             lib::memory::malloc::get()
                 .alloc(Self::DEFAULT_STACK_SIZE, None)
                 .unwrap()
@@ -79,7 +78,7 @@ impl Task {
 
         use lib::structures::gdt;
         Self {
-            id: CURRENT_TASK_ID.fetch_add(1, core::sync::atomic::Ordering::AcqRel),
+            id: CURRENT_THREAD_ID.fetch_add(1, core::sync::atomic::Ordering::AcqRel),
             prio: priority,
             time: u64::MAX,
             rip,
@@ -87,20 +86,20 @@ impl Task {
             rsp: unsafe { stack.as_ptr().add(stack.len()) as u64 },
             ss: gdt::data() as u64,
             rfl: flags.unwrap_or(RFlags::minimal()),
-            gprs: TaskRegisters::empty(),
+            gprs: ThreadRegisters::empty(),
             stack,
         }
     }
 }
 
-impl Eq for Task {}
-impl PartialEq for Task {
+impl Eq for Thread {}
+impl PartialEq for Thread {
     fn eq(&self, other: &Self) -> bool {
         self.prio == other.prio && self.time == other.time
     }
 }
 
-impl Ord for Task {
+impl Ord for Thread {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         if self.time < other.time {
             if self.prio > other.prio {
@@ -116,7 +115,7 @@ impl Ord for Task {
     }
 }
 
-impl PartialOrd for Task {
+impl PartialOrd for Thread {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         Some(self.cmp(&other))
     }
@@ -125,13 +124,13 @@ impl PartialOrd for Task {
 const MAX_TIME_SLICE_MS: usize = 50;
 const MIN_TIME_SLICE_MS: usize = 4;
 
-pub struct Thread {
+pub struct Scheduler {
     enabled: bool,
-    tasks: BinaryHeap<Task>,
-    current_task: Option<Task>,
+    tasks: BinaryHeap<Thread>,
+    current_task: Option<Thread>,
 }
 
-impl Thread {
+impl Scheduler {
     pub fn new() -> Self {
         Self {
             enabled: false,
@@ -140,7 +139,7 @@ impl Thread {
         }
     }
 
-    pub fn push_task(&mut self, task: Task) {
+    pub fn push_thread(&mut self, task: Thread) {
         self.tasks.push(task)
     }
 
@@ -152,7 +151,7 @@ impl Thread {
     pub fn run_next(
         &mut self,
         stack_frame: &mut InterruptStackFrame,
-        cached_regs: *mut TaskRegisters,
+        cached_regs: *mut ThreadRegisters,
     ) -> usize {
         // Move out old task.
         if let Some(mut task) = self.current_task.take() {

@@ -27,12 +27,12 @@ impl PageManager {
         }
     }
 
-    /// Attempts to create a new VirtualAddressor, with `mapped_page` specifying the current page
+    /// Attempts to create a new PageManager, with `mapped_page` specifying the current page
     /// where the entirety of the system physical memory is mapped.
     ///
     /// SAFETY: this method is unsafe because `mapped_page` can be any value; that is, not necessarily
     /// a valid address in which physical memory is already mapped. The expectation is that `mapped_page` is
-    /// a propery starting page for the physical memory mapping.
+    /// a proper starting page for the physical memory mapping.
     pub unsafe fn new(mapped_page: Page) -> Self {
         let pml4_index = FRAME_MANAGER
             .lock_next()
@@ -119,17 +119,18 @@ impl PageManager {
 
     /// Maps the specified frame to the specified frame index.
     ///
-    /// The `req_falloc` parameter is set as follows:
+    /// The `lock_frame` parameter is set as follows:
     ///     `Some` or `None` indicates whether frame allocation is required,
-    ///         `true` or `false` in a `Some` indicates whether the allocation is locked.
+    ///         `true` or `false` in a `Some` indicates whether the frame is locked or merely referenced.
     pub fn map(
         &mut self,
         page: &Page,
         frame_index: usize,
-        req_falloc: Option<bool>,
+        lock_frame: Option<bool>,
+        attribs: PageAttributes,
     ) -> Result<(), MapError> {
-        // Attempt to acquire the requisite frame, following the outlined parsing of `req_falloc`.
-        match req_falloc {
+        // Attempt to acquire the requisite frame, following the outlined parsing of `lock_frame`.
+        match lock_frame {
             Some(true) => FRAME_MANAGER.lock(frame_index),
             Some(false) => FRAME_MANAGER.borrow(frame_index),
             None => Ok(frame_index),
@@ -138,10 +139,8 @@ impl PageManager {
         .map_err(|falloc_err| MapError::FrameError(falloc_err))
         // If acquisition of the frame is successful, map the page to the frame index.
         .map(|frame_index| {
-            self.get_page_entry_create(page).set(
-                frame_index,
-                PageAttributes::PRESENT | PageAttributes::WRITABLE,
-            );
+            self.get_page_entry_create(page)
+                .set(frame_index, PageAttributes::PRESENT | attribs);
 
             crate::instructions::tlb::invalidate(page);
         })

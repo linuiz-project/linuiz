@@ -3,26 +3,6 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use num_enum::TryFromPrimitive;
 use spin::RwLock;
 
-static FRAME_MANAGER: SyncOnceCell<FrameManager> = SyncOnceCell::new();
-
-pub unsafe fn load_new(memory_map: &[UEFIMemoryDescriptor]) {
-    FRAME_MANAGER
-        .set(FrameManager::new(memory_map))
-        .unwrap_or_else(|_| {
-            panic!("Frame allocator can only be loaded once.");
-        })
-}
-
-pub fn get() -> &'static FrameManager<'static> {
-    FRAME_MANAGER
-        .get()
-        .expect("frame allocator has not been configured")
-}
-
-pub fn virtual_map_offset() -> Address<Virtual> {
-    Address::<Virtual>::new(crate::VADDR_HW_MAX - get().total_memory())
-}
-
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
 pub enum FrameType {
@@ -126,7 +106,6 @@ pub struct FrameManager<'arr> {
 }
 
 impl<'arr> FrameManager<'arr> {
-
     fn new(memory_map: &[uefi::MemoryDescriptor]) -> Self {
         // Calculates total (usable) system memory.
         let total_usable_memory = memory_map

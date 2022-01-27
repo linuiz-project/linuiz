@@ -103,7 +103,7 @@ unsafe extern "efiapi" fn kernel_init(
     boot_info.validate_magic();
     if let Err(_) = lib::BOOT_INFO.set(boot_info) {
         panic!("`BOOT_INFO` already set.");
-}
+    }
 
     clear_bsp_stack!();
 
@@ -242,7 +242,7 @@ extern "C" fn _startup() -> ! {
                     const AP_STACK_SIZE: usize = 0x2000;
 
                     let (stack_bottom, len) = lib::memory::malloc::get()
-                       .alloc(AP_STACK_SIZE, core::num::NonZeroUsize::new(0x1000))
+                        .alloc(AP_STACK_SIZE, core::num::NonZeroUsize::new(0x1000))
                         .unwrap()
                         .into_parts();
 
@@ -287,11 +287,11 @@ extern "C" fn _startup() -> ! {
         //     thread.set_enabled(true);
         // }
 
-        use scheduling::Task;
-        let mut thread = local_state::lock_thread();
+        use scheduling::Thread;
+        let mut thread = local_state::lock_scheduler();
         //thread.set_enabled(true);
-        thread.push_task(Task::new(255, task1, None, None));
-        thread.push_task(Task::new(255, task2, None, None));
+        thread.push_thread(Thread::new(255, task1, None, None));
+        thread.push_thread(Thread::new(255, task2, None, None));
     }
     // lib::instructions::hlt_indefinite()
 

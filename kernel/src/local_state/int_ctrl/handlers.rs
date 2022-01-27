@@ -1,4 +1,4 @@
-use crate::scheduling::TaskRegisters;
+use crate::scheduling::ThreadRegisters;
 use lib::structures::idt::InterruptStackFrame;
 
 #[naked]
@@ -63,13 +63,13 @@ pub extern "x86-interrupt" fn storage_handler(_: InterruptStackFrame) {
 
 extern "win64" fn apit_handler_inner(
     stack_frame: &mut InterruptStackFrame,
-    cached_regs: *mut TaskRegisters,
+    cached_regs: *mut ThreadRegisters,
 ) {
     const THREAD_LOCK_FAIL_PERIOD_MS: u32 = 1;
     const DEFAULT_SCHEDULING_PERIOD_MS: u32 = 20;
 
     let time_slice_ms =
-        crate::local_state::try_lock_thread().map_or(THREAD_LOCK_FAIL_PERIOD_MS, |mut thread| {
+        crate::local_state::try_lock_scheduler().map_or(THREAD_LOCK_FAIL_PERIOD_MS, |mut thread| {
             match thread.run_next(stack_frame, cached_regs) {
                 0 => DEFAULT_SCHEDULING_PERIOD_MS,
                 period_ms => period_ms as u32,

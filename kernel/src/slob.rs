@@ -440,7 +440,10 @@ impl MemoryAllocator for SLOB<'_> {
             map_write.pages[page_index].set_full();
             map_write
                 .page_manager
-                .map(&Page::from_index(page_index), frame_index, None)
+                .map(&Page::from_index(page_index), frame_index, None, {
+                    use lib::memory::PageAttributes;
+                    PageAttributes::NO_EXECUTE | PageAttributes::WRITABLE
+                })
                 .unwrap();
         }
 
