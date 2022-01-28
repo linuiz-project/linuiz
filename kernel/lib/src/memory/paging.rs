@@ -184,6 +184,8 @@ bitflags::bitflags! {
         const GLOBAL = 1 << 8;
         // 3 bits free for use by OS
         const NO_EXECUTE = 1 << 63;
+
+        const DATA = Self::PRESENT.bits() | Self::WRITABLE.bits() | Self::NO_EXECUTE.bits();
     }
 }
 
@@ -195,6 +197,7 @@ pub enum AttributeModify {
     Toggle,
 }
 
+// TODO use u64 here
 #[repr(transparent)]
 pub struct PageTableEntry(usize);
 
@@ -207,7 +210,7 @@ impl PageTableEntry {
     }
 
     pub const fn get_frame_index(&self) -> Option<usize> {
-        if self.get_attributes().contains(PageAttributes::PRESENT) {
+        if self.get_attribs().contains(PageAttributes::PRESENT) {
             Some((self.0 & Self::FRAME_INDEX_MASK) / 0x1000)
         } else {
             None
@@ -225,21 +228,21 @@ impl PageTableEntry {
         frame_index
     }
 
-    pub const fn get_attributes(&self) -> PageAttributes {
+    pub const fn get_attribs(&self) -> PageAttributes {
         PageAttributes::from_bits_truncate(self.0)
     }
 
-    pub fn set_attributes(&mut self, new_attributes: PageAttributes, modify_mode: AttributeModify) {
-        let mut attributes = PageAttributes::from_bits_truncate(self.0);
+    pub fn set_attributes(&mut self, new_attribs: PageAttributes, modify_mode: AttributeModify) {
+        let mut attribs = PageAttributes::from_bits_truncate(self.0);
 
         match modify_mode {
-            AttributeModify::Set => attributes = new_attributes,
-            AttributeModify::Insert => attributes.insert(new_attributes),
-            AttributeModify::Remove => attributes.remove(new_attributes),
-            AttributeModify::Toggle => attributes.toggle(new_attributes),
+            AttributeModify::Set => attribs = new_attribs,
+            AttributeModify::Insert => attribs.insert(new_attribs),
+            AttributeModify::Remove => attribs.remove(new_attribs),
+            AttributeModify::Toggle => attribs.toggle(new_attribs),
         }
 
-        self.0 = (self.0 & !PageAttributes::all().bits()) | attributes.bits();
+        self.0 = (self.0 & !PageAttributes::all().bits()) | attribs.bits();
     }
 
     pub const unsafe fn set_unused(&mut self) {
@@ -252,7 +255,7 @@ impl fmt::Debug for PageTableEntry {
         formatter
             .debug_tuple("Page Table Entry")
             .field(&self.get_frame_index())
-            .field(&self.get_attributes())
+            .field(&self.get_attribs())
             .field(&format_args!("0x{:X}", self.0))
             .finish()
     }

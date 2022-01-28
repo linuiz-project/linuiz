@@ -68,13 +68,13 @@ extern "win64" fn apit_handler_inner(
     const THREAD_LOCK_FAIL_PERIOD_MS: u32 = 1;
     const DEFAULT_SCHEDULING_PERIOD_MS: u32 = 20;
 
-    let time_slice_ms =
-        crate::local_state::try_lock_scheduler().map_or(THREAD_LOCK_FAIL_PERIOD_MS, |mut thread| {
-            match thread.run_next(stack_frame, cached_regs) {
-                0 => DEFAULT_SCHEDULING_PERIOD_MS,
-                period_ms => period_ms as u32,
-            }
-        });
+    let time_slice_ms = crate::local_state::try_lock_scheduler().map_or(
+        THREAD_LOCK_FAIL_PERIOD_MS,
+        |mut thread| match thread.run_next(stack_frame, cached_regs) {
+            0 => DEFAULT_SCHEDULING_PERIOD_MS,
+            period_ms => period_ms as u32,
+        },
+    );
 
     let int_ctrl = crate::local_state::int_ctrl();
     int_ctrl.reload_timer(core::num::NonZeroU32::new(time_slice_ms));

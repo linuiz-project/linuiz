@@ -1,10 +1,11 @@
 # Gsai OS
+
+## About
 **Gsai OS** is a semi-modular operating system written in the Rust programming language. Its intent is to find the best of both worlds: combine the excellent performance of modular kernel configurations, with the extremely low memory overhead of monolithic kernels.
 
 </br>
 
 ## Running the OS
----
 In order to build and run Gsai OS, you'll require a few things:
 - QEMU installed and in your PATH
 - NASM installed and in your PATH

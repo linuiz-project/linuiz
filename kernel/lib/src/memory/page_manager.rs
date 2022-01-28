@@ -139,8 +139,7 @@ impl PageManager {
         .map_err(|falloc_err| MapError::FrameError(falloc_err))
         // If acquisition of the frame is successful, map the page to the frame index.
         .map(|frame_index| {
-            self.get_page_entry_create(page)
-                .set(frame_index, PageAttributes::PRESENT | attribs);
+            self.get_page_entry_create(page).set(frame_index, attribs);
 
             crate::instructions::tlb::invalidate(page);
         })
@@ -166,18 +165,24 @@ impl PageManager {
             .ok_or(MapError::NotMapped)
     }
 
-    pub fn copy_by_map(&mut self, unmap_from: &Page, map_to: &Page) -> Result<(), MapError> {
+    pub fn copy_by_map(
+        &mut self,
+        unmap_from: &Page,
+        map_to: &Page,
+        new_attribs: Option<PageAttributes>,
+    ) -> Result<(), MapError> {
         // TODO possibly elide this check for perf?
         if self.is_mapped(map_to.base_addr()) {
             return Err(MapError::AlreadyMapped);
         }
 
-        match self.get_page_entry_mut(unmap_from).map(|entry| {
-            entry.set_attributes(PageAttributes::PRESENT, AttributeModify::Remove);
-            unsafe { entry.take_frame_index() }
-        }) {
-            Some(frame_index) => {
-                self.map(map_to, frame_index, None).unwrap();
+        match self.get_page_entry_mut(unmap_from) {
+            Some(entry) => {
+                let attribs = new_attribs.unwrap_or_else(|| entry.get_attribs());
+                entry.set_attributes(PageAttributes::empty(), AttributeModify::Set);
+                let frame_index = unsafe { entry.take_frame_index() };
+
+                self.map(map_to, frame_index, None, attribs).unwrap();
                 crate::instructions::tlb::invalidate(unmap_from);
 
                 Ok(())
@@ -186,8 +191,8 @@ impl PageManager {
         }
     }
 
-    pub fn automap(&mut self, page: &Page) {
-        self.map(page, FRAME_MANAGER.lock_next().unwrap(), None)
+    pub fn automap(&mut self, page: &Page, attribs: PageAttributes) {
+        self.map(page, FRAME_MANAGER.lock_next().unwrap(), None, attribs)
             .unwrap();
     }
 
@@ -197,8 +202,8 @@ impl PageManager {
     ///     This function assumes the frame for the identity mapping is:
     ///         A) a valid lock or borrow
     ///         B) not required for the mapping
-    pub fn identity_map(&mut self, page: &Page) -> Result<(), MapError> {
-        self.map(page, page.index(), None)
+    pub fn identity_map(&mut self, page: &Page, attribs: PageAttributes) -> Result<(), MapError> {
+        self.map(page, page.index(), None, attribs)
     }
 
     /* STATE QUERYING */
@@ -206,7 +211,7 @@ impl PageManager {
     pub fn is_mapped(&self, virt_addr: Address<Virtual>) -> bool {
         self.get_page_entry(&Page::containing_addr(virt_addr))
             .map_or(false, |entry| {
-                entry.get_attributes().contains(PageAttributes::PRESENT)
+                entry.get_attribs().contains(PageAttributes::PRESENT)
             })
     }
 
@@ -240,7 +245,7 @@ impl PageManager {
 
     pub fn get_page_attribs(&self, page: &Page) -> Option<PageAttributes> {
         self.get_page_entry(page)
-            .map(|page_entry| page_entry.get_attributes())
+            .map(|page_entry| page_entry.get_attribs())
     }
 
     pub unsafe fn set_page_attribs(

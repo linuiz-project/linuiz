@@ -13,37 +13,37 @@ use spin::{RwLock, RwLockWriteGuard};
 /// Represents one page worth of memory blocks (i.e. 4096 bytes in blocks).
 #[repr(transparent)]
 #[derive(Clone)]
-struct BlockPage(u64);
+struct BlockPage(u128);
 
 impl BlockPage {
     /// How many bits/block indexes in section primitive.
-    const BLOCKS_PER: usize = size_of::<u64>() * 8;
+    const BLOCKS_PER: usize = size_of::<u128>() * 8;
 
     /// Whether the block page is empty.
     pub const fn is_empty(&self) -> bool {
-        self.0 == u64::MIN
+        self.0 == u128::MIN
     }
 
     /// Whether the block page is full.
     pub const fn is_full(&self) -> bool {
-        self.0 == u64::MAX
+        self.0 == u128::MAX
     }
 
     /// Unset all of the block page's blocks.
     pub const fn set_empty(&mut self) {
-        self.0 = u64::MIN;
+        self.0 = u128::MIN;
     }
 
     /// Set all of the block page's blocks.
     pub const fn set_full(&mut self) {
-        self.0 = u64::MAX;
+        self.0 = u128::MAX;
     }
 
-    pub const fn value(&self) -> &u64 {
+    pub const fn value(&self) -> &u128 {
         &self.0
     }
 
-    pub const fn value_mut(&mut self) -> &mut u64 {
+    pub const fn value_mut(&mut self) -> &mut u128 {
         &mut self.0
     }
 }
@@ -62,7 +62,7 @@ pub struct AllocatorMap<'map> {
     pages: &'map mut [BlockPage],
 }
 
-/// Allocator utilizing blocks of memory, in size of 16 bytes per block, to
+/// Allocator utilizing blocks of memory, in size of 64 bytes per block, to
 ///  easily and efficiently allocate.
 pub struct SLOB<'map> {
     map: RwLock<AllocatorMap<'map>>,
@@ -151,7 +151,7 @@ impl<'map> SLOB<'map> {
         map_index: usize,
         cur_block_index: usize,
         end_block_index: usize,
-    ) -> (usize, u64) {
+    ) -> (usize, u128) {
         let floor_blocks_index = map_index * BlockPage::BLOCKS_PER;
         let ceil_blocks_index = floor_blocks_index + BlockPage::BLOCKS_PER;
         let mask_bit_offset = cur_block_index - floor_blocks_index;
@@ -159,7 +159,7 @@ impl<'map> SLOB<'map> {
 
         (
             mask_bit_count,
-            lib::U64_BIT_MASKS[mask_bit_count - 1] << mask_bit_offset,
+            ((1 as u128) << mask_bit_count).wrapping_sub(1) << mask_bit_offset,
         )
     }
 
@@ -336,7 +336,7 @@ impl MemoryAllocator for SLOB<'_> {
                 end_block_index - block_index,
                 (block_index_floor + BlockPage::BLOCKS_PER) - block_index,
             );
-            let mask_bits = lib::U64_BIT_MASKS[remaining_blocks_in_slice - 1];
+            let mask_bits = ((1 as u128) << remaining_blocks_in_slice).wrapping_sub(1);
 
             *block_page.value_mut() |= mask_bits << low_offset;
             block_index += remaining_blocks_in_slice;
@@ -394,7 +394,12 @@ impl MemoryAllocator for SLOB<'_> {
             map_write.pages[page_index].set_full();
             map_write
                 .page_manager
-                .map(&Page::from_index(page_index), frame_index, None)
+                .map(
+                    &Page::from_index(page_index),
+                    frame_index,
+                    None,
+                    lib::memory::PageAttributes::WRITABLE,
+                )
                 .unwrap();
         }
 
