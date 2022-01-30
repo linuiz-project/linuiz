@@ -32,6 +32,7 @@ mod macros;
 pub mod acpi;
 pub mod cell;
 pub mod collections;
+pub mod cpu;
 pub mod elf;
 pub mod instructions;
 pub mod io;
@@ -39,7 +40,6 @@ pub mod memory;
 pub mod registers;
 pub mod structures;
 pub mod sync;
-
 pub use addr::*;
 
 pub const SYSTEM_SLICE_SIZE: usize = 0x10000000000;
