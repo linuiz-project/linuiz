@@ -141,11 +141,16 @@ unsafe extern "efiapi" fn kernel_init(
         __gdt_tss.as_u64() as u16,
     ));
 
-    info!("CPU Info:");
-    info!("Vendor           {:?}", lib::cpu::VENDOR);
-    info!("Features         {:?}", lib::cpu::FEATURES);
-    info!("Features Ext     {:?}", lib::cpu::FEATURES_EXT);
+    debug!("CR3: {:?}", lib::registers::CR3::read());
+    debug!("CR4: {:?}", lib::registers::CR4::read());
+    debug!("CPU Vendor           {:?}", lib::cpu::VENDOR);
+    debug!("CPU Features         {:?}", lib::cpu::FEATURES);
+    debug!("CPU Features Ext     {:?}", lib::cpu::FEATURES_EXT);
 
+    // Enable use of the `GLOBAL` page attribute.
+    lib::registers::CR4::enable(lib::registers::CR4Flags::PGE);
+
+    // Enable use of the `NO_EXECUTE` page attribute, if supported.
     if lib::cpu::FEATURES_EXT.contains(lib::cpu::FeaturesExt::NO_EXEC) {
         lib::registers::msr::IA32_EFER::set_nxe(true);
     }
@@ -366,7 +371,7 @@ extern "C" fn _startup() -> ! {
         let icr = crate::local_state::int_ctrl().icr();
         let ap_text_page_index = unsafe { __ap_text_start.as_usize() / 0x1000 } as u8;
 
-        if let Ok(madt) = XSDT.find_sub_table::<MADT>() {
+        if let Some(madt) = XSDT.find_sub_table::<MADT>() {
             info!("Beginning wake-up sequence for enabled processors.");
             for lapic in madt
                 .iter()

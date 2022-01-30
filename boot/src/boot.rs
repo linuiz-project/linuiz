@@ -304,47 +304,44 @@ fn apply_relocations(
                 .unwrap()
         };
 
-        match section_header.ty {
-            SectionType::RELA => {
-                if section_header.entry_size != size_of::<Rela64>() {
-                    warn!(
-                        "Unknown entry size for RELA section: {} (should be {})",
-                        section_header.entry_size,
-                        size_of::<Rela64>()
-                    );
-                }
+        if let SectionType::RELA = section_header.ty {
+            if section_header.entry_size != size_of::<Rela64>() {
+                warn!(
+                    "Unknown entry size for RELA section: {} (should be {})",
+                    section_header.entry_size,
+                    size_of::<Rela64>()
+                );
+            }
 
-                for offset in (0..section_header.size).step_by(section_header.entry_size) {
-                    let mut rela_buffer = [0u8; size_of::<Rela64>()];
-                    read_file(
-                        kernel_file,
-                        (section_header.offset + offset) as u64,
-                        &mut rela_buffer,
-                    );
-                    let rela = unsafe { rela_buffer.as_ptr().cast::<Rela64>().as_ref().unwrap() };
+            for offset in (0..section_header.size).step_by(section_header.entry_size) {
+                let mut rela_buffer = [0u8; size_of::<Rela64>()];
+                read_file(
+                    kernel_file,
+                    (section_header.offset + offset) as u64,
+                    &mut rela_buffer,
+                );
+                let rela = unsafe { rela_buffer.as_ptr().cast::<Rela64>().as_ref().unwrap() };
 
-                    debug!("Processing relocation: {:?}", rela);
+                debug!("Processing relocation: {:?}", rela);
 
-                    match rela.info {
-                        lib::elf::X86_64_RELATIVE => {
-                            if (segment_virt_addr..=(segment_virt_addr + segment_size + 8))
-                                .contains(&rela.addr)
-                            {
-                                unsafe {
-                                    (segment_buffer
-                                        .as_ptr()
-                                        .sub(segment_virt_addr.as_usize())
-                                        .add(rela.addr.as_usize())
-                                        as *mut u64)
-                                        .write(rela.addend)
-                                }
+                match rela.info {
+                    lib::elf::X86_64_RELATIVE => {
+                        if (segment_virt_addr..=(segment_virt_addr + segment_size + 8))
+                            .contains(&rela.addr)
+                        {
+                            unsafe {
+                                (segment_buffer
+                                    .as_ptr()
+                                    .sub(segment_virt_addr.as_usize())
+                                    .add(rela.addr.as_usize())
+                                    as *mut u64)
+                                    .write(rela.addend)
                             }
                         }
-                        ty => warn!("Unknown RELA type: {}", ty),
                     }
+                    ty => warn!("Unknown RELA type: {}", ty),
                 }
             }
-            section_type => trace!("Unhandled section type: {:?}", section_type),
         }
 
         section_header_disk_offset += kernel_header.section_header_size() as usize;

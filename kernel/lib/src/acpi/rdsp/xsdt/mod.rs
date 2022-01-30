@@ -40,18 +40,18 @@ impl XSDTData {
         &self.header
     }
 
-    pub fn find_sub_table<'entry, T: SubTable>(&'entry self) -> Result<&'entry T, XSDTError> {
+    pub fn find_sub_table<'entry, T: SubTable>(&'entry self) -> Option<&'entry T> {
         for entry_ptr in self.entries() {
             unsafe {
                 if (**entry_ptr).signature() == T::SIGNATURE {
                     let table: &T = (*entry_ptr as *const T).as_ref().unwrap();
                     table.validate_checksum();
-                    return Ok(table);
+                    return Some(table);
                 }
             }
         }
 
-        Err(XSDTError::TableNotFound)
+        None
     }
 
     pub fn list_sub_tables(&self) {

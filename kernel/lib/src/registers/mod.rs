@@ -1,12 +1,14 @@
 mod cr2;
 mod cr3;
-mod flags;
+mod cr4;
+mod rflags;
 mod tsc;
 
+pub use cr4::*;
 pub mod msr;
 pub use cr2::*;
 pub use cr3::*;
-pub use flags::*;
+pub use rflags::*;
 pub use tsc::*;
 
 macro_rules! basic_register_raw {
