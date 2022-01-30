@@ -116,11 +116,12 @@ impl VirtualMapper {
     }
 
     pub unsafe fn modify_mapped_page(&mut self, page: Page) {
-        for index in 0..FRAME_MANAGER.total_frame_count() {
-            self.get_page_entry_create(&page.forward(index).unwrap())
-                .set(index, PageAttributes::PRESENT | PageAttributes::WRITABLE);
+        for frame_index in 0..FRAME_MANAGER.total_frame_count() {
+            let cur_page = page.forward(frame_index).unwrap();
+            self.get_page_entry_create(&cur_page)
+                .set(frame_index, PageAttributes::DATA_BITS);
 
-            crate::instructions::tlb::invalidate(&page);
+            crate::instructions::tlb::invalidate(&cur_page);
         }
 
         self.mapped_page = page;

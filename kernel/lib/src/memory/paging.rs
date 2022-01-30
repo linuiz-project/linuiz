@@ -250,7 +250,7 @@ impl PageTableEntry {
         self.0 = (self.0 & !PageAttributes::all().bits()) | attribs.bits();
     }
 
-    pub const unsafe fn set_unused(&mut self) {
+    pub const unsafe fn clear(&mut self) {
         self.0 = 0;
     }
 }
