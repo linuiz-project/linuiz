@@ -2,7 +2,7 @@ pub mod icr;
 
 use crate::{
     memory::{volatile::VolatileCell, MMIO},
-    registers::msr::MSR,
+    registers::msr::IA32_APIC_BASE,
     InterruptDeliveryMode, ReadWrite,
 };
 use bit_field::BitField;
@@ -87,16 +87,9 @@ impl APIC {
     pub const ERRST: usize = 0x280;
     pub const EOI: usize = 0xB0;
 
-    #[inline]
-    pub fn base_addr() -> crate::Address<crate::addr_ty::Virtual> {
-        crate::Address::<crate::addr_ty::Virtual>::new_truncate(
-            (MSR::IA32_APIC_BASE.read() & 0xFFFFFF000) as usize,
-        )
-    }
-
     pub fn from_msr() -> Result<Self, APICExistsError> {
         unsafe {
-            let mmio = MMIO::new(MSR::IA32_APIC_BASE.read().get_bits(12..36) as usize, 1).unwrap();
+            let mmio = MMIO::new(IA32_APIC_BASE::get_base_addr().frame_index(), 1).unwrap();
 
             // Validate that APIC hasn't been created already.
             if mmio.read::<u32>(Register::DFR as usize).assume_init() == u32::MAX {
@@ -127,17 +120,17 @@ impl APIC {
 
     #[inline]
     pub fn is_hw_enabled(&self) -> bool {
-        (MSR::IA32_APIC_BASE.read() & (1 << 11)) > 0
+        IA32_APIC_BASE::get_hw_enable()
     }
 
     #[inline]
     pub unsafe fn hw_enable(&self) {
-        MSR::IA32_APIC_BASE.write(MSR::IA32_APIC_BASE.read() | (1 << 11));
+        IA32_APIC_BASE::set_hw_enable(true);
     }
 
     #[inline]
     pub unsafe fn hw_disable(&self) {
-        MSR::IA32_APIC_BASE.write(MSR::IA32_APIC_BASE.read() & !(1 << 11));
+        IA32_APIC_BASE::set_hw_enable(false);
     }
 
     #[inline]

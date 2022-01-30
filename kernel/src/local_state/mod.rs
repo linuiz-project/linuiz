@@ -6,12 +6,12 @@ use spin::{Mutex, MutexGuard};
 
 use crate::{clock::AtomicClock, scheduling::Scheduler};
 use core::sync::atomic::AtomicUsize;
-use lib::registers::msr::MSR;
+use lib::registers::{msr, msr::GenericMSR};
 
 pub static INIT_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 pub fn is_bsp() -> bool {
-    MSR::IA32_APIC_BASE.read().get_bit(8)
+    msr::IA32_APIC_BASE::is_bsp()
 }
 
 struct LocalStateRegister;
@@ -25,27 +25,27 @@ impl LocalStateRegister {
 
     #[inline]
     fn get_id() -> u8 {
-        let fs_base = MSR::IA32_GS_BASE.read();
-        if (fs_base & Self::ID_FLAG) == 0 {
+        let gs_base = msr::IA32_GS_BASE::read();
+        if (gs_base & Self::ID_FLAG) == 0 {
             let cpuid_id = (lib::instructions::cpuid::exec(0x1, 0x0).unwrap().ebx() >> 24) as u64;
 
             unsafe {
-                MSR::IA32_GS_BASE.write(
-                    MSR::IA32_GS_BASE.read() | (cpuid_id << Self::ID_BITS_SHFT) | Self::ID_FLAG,
+                msr::IA32_GS_BASE::write(
+                    msr::IA32_GS_BASE::read() | (cpuid_id << Self::ID_BITS_SHFT) | Self::ID_FLAG,
                 )
             };
 
             cpuid_id as u8
         } else {
-            ((fs_base & Self::ID_BITS) >> Self::ID_BITS_SHFT) as u8
+            ((gs_base & Self::ID_BITS) >> Self::ID_BITS_SHFT) as u8
         }
     }
 
     fn try_get() -> Option<&'static LocalState> {
         unsafe {
-            let fs_base = MSR::IA32_GS_BASE.read();
-            if (fs_base & Self::PTR_FLAG) > 0 {
-                ((fs_base & !Self::DATA_MASK) as *mut LocalState).as_ref()
+            let gs_base = msr::IA32_GS_BASE::read();
+            if (gs_base & Self::PTR_FLAG) > 0 {
+                ((gs_base & !Self::DATA_MASK) as *mut LocalState).as_ref()
             } else {
                 None
             }
@@ -62,8 +62,9 @@ impl LocalStateRegister {
         );
 
         unsafe {
-            MSR::IA32_GS_BASE
-                .write(ptr_u64 | (MSR::IA32_GS_BASE.read() & Self::DATA_MASK) | Self::PTR_FLAG)
+            msr::IA32_GS_BASE::write(
+                ptr_u64 | (msr::IA32_GS_BASE::read() & Self::DATA_MASK) | Self::PTR_FLAG,
+            )
         };
     }
 }

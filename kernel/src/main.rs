@@ -145,8 +145,10 @@ unsafe extern "efiapi" fn kernel_init(
     info!("Vendor           {:?}", lib::cpu::VENDOR);
     info!("Features         {:?}", lib::cpu::FEATURES);
     info!("Features Ext     {:?}", lib::cpu::FEATURES_EXT);
-    info!("TEXT END {:?}", __text_end.as_ptr::<u8>());
-    info!("RODATA START {:?}", __rodata_start.as_ptr::<u8>());
+
+    if lib::cpu::FEATURES_EXT.contains(lib::cpu::FeaturesExt::NO_EXEC) {
+        lib::registers::msr::IA32_EFER::set_nxe(true);
+    }
 
     /* INIT KERNEL MEMORY */
     {
@@ -184,8 +186,6 @@ unsafe extern "efiapi" fn kernel_init(
                             )
                             .unwrap();
                     });
-
-                // Set proper page attributes for known sections.
 
                 debug!("Configuring page table entries for kernel ELF sections.");
                 use lib::memory::{AttributeModify, PageAttributes};
@@ -235,7 +235,6 @@ unsafe extern "efiapi" fn kernel_init(
                     }
 
                     // Overwrite UEFI page attributes for kernel ELF sections.
-                    use lib::{align_down_div, align_up_div};
                     let kernel_text = Page::range(
                         __text_start.as_usize() / 0x1000,
                         __text_end.as_usize() / 0x1000,
@@ -447,13 +446,13 @@ extern "C" fn _startup() -> ! {
     // lib::instructions::hlt_indefinite()
 
     unsafe {
-        use lib::registers::msr::MSR;
+        use lib::registers::{msr, msr::GenericMSR};
 
-        // Enable `sysenter`/`sysexit`.
-        MSR::IA32_EFER.write(MSR::IA32_EFER.read() | 0x1);
+        // Enable `syscall`/`sysret`.
+        msr::IA32_EFER::set_sce(true);
         // Configure system call environment registers.
-        MSR::IA32_STAR.write((__gdt_kdata.as_u64() << 48) | (__gdt_kcode.as_u64() << 32));
-        MSR::IA32_SFMASK.write(u64::MAX);
+        msr::IA32_STAR::set_selectors(__gdt_kcode.as_u64() as u16, __gdt_kdata.as_u64() as u16);
+        msr::IA32_SFMASK::write(u64::MAX);
         // MSR::IA32_LSTAR.write(0x0);
     }
 
