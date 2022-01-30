@@ -1,9 +1,5 @@
 use crate::{
-    addr_ty::{Physical, Virtual},
-    memory::{
-        paging::{AttributeModify, PageAttributes},
-        Page,
-    },
+    addr_ty::{Physical},
     Address,
 };
 use alloc::{boxed::Box, vec::Vec};
@@ -14,6 +10,7 @@ use core::{
 
 #[derive(Debug, Clone, Copy)]
 pub enum AllocError {
+    TryReserveNonEmptyPage,
     OutOfMemory,
     InvalidAlignment(usize),
     IdentityMappingOverlaps,
@@ -104,9 +101,6 @@ impl<T> core::fmt::Debug for Alloc<T> {
 }
 
 pub trait MemoryAllocator {
-    // Returns the direct-mapped virtual address for the given physical address.
-    fn physical_memory(&self, addr: Address<Physical>) -> Address<Virtual>;
-
     unsafe fn alloc(
         &self,
         size: usize,
@@ -140,14 +134,6 @@ pub trait MemoryAllocator {
     // Option is whether it is mapped
     // `bool` is whether it is allocated to
     fn get_page_state(&self, page_index: usize) -> Option<bool>;
-
-    fn get_page_attribs(&self, page: &Page) -> Option<PageAttributes>;
-    unsafe fn set_page_attribs(
-        &self,
-        page: &Page,
-        attribs: PageAttributes,
-        modify_mode: AttributeModify,
-    );
 }
 
 static MEMORY_ALLOCATOR: crate::cell::SyncOnceCell<&'static dyn MemoryAllocator> =

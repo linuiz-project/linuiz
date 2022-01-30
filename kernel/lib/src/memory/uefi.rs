@@ -32,7 +32,7 @@ bitflags::bitflags! {
         const UNCACHABLE_EXPORTED = 0x10;
         const WRITE_PROTECT = 0x1000;
         const READ_PROTECT = 0x2000;
-        const EXECUTE_PROTECT = 0x4000;
+        const EXEC_PROTECT = 0x4000;
         const NON_VOLATILE = 0x8000;
         const MORE_RELIABLE = 0x10000;
         const READ_ONLY = 0x20000;

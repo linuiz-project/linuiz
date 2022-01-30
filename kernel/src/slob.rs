@@ -1,10 +1,11 @@
 use core::{alloc::Layout, mem::size_of, num::NonZeroUsize};
 use lib::{
-    addr_ty::{Physical, Virtual},
+    addr_ty::Physical,
     align_up_div,
     memory::{
+        get_page_manager,
         malloc::{Alloc, AllocError, MemoryAllocator},
-        FrameType, Page, PageManager, FRAME_MANAGER,
+        Page, PageAttributes, FRAME_MANAGER,
     },
     Address,
 };
@@ -13,37 +14,37 @@ use spin::{RwLock, RwLockWriteGuard};
 /// Represents one page worth of memory blocks (i.e. 4096 bytes in blocks).
 #[repr(transparent)]
 #[derive(Clone)]
-struct BlockPage(u128);
+struct BlockPage(u64);
 
 impl BlockPage {
     /// How many bits/block indexes in section primitive.
-    const BLOCKS_PER: usize = size_of::<u128>() * 8;
+    const BLOCKS_PER: usize = size_of::<u64>() * 8;
 
     /// Whether the block page is empty.
     pub const fn is_empty(&self) -> bool {
-        self.0 == u128::MIN
+        self.0 == u64::MIN
     }
 
     /// Whether the block page is full.
     pub const fn is_full(&self) -> bool {
-        self.0 == u128::MAX
+        self.0 == u64::MAX
     }
 
     /// Unset all of the block page's blocks.
     pub const fn set_empty(&mut self) {
-        self.0 = u128::MIN;
+        self.0 = u64::MIN;
     }
 
     /// Set all of the block page's blocks.
     pub const fn set_full(&mut self) {
-        self.0 = u128::MAX;
+        self.0 = u64::MAX;
     }
 
-    pub const fn value(&self) -> &u128 {
+    pub const fn value(&self) -> &u64 {
         &self.0
     }
 
-    pub const fn value_mut(&mut self) -> &mut u128 {
+    pub const fn value_mut(&mut self) -> &mut u64 {
         &mut self.0
     }
 }
@@ -57,15 +58,10 @@ impl core::fmt::Debug for BlockPage {
     }
 }
 
-pub struct AllocatorMap<'map> {
-    page_manager: PageManager,
-    pages: &'map mut [BlockPage],
-}
-
 /// Allocator utilizing blocks of memory, in size of 64 bytes per block, to
 ///  easily and efficiently allocate.
 pub struct SLOB<'map> {
-    map: RwLock<AllocatorMap<'map>>,
+    map: RwLock<&'map mut [BlockPage]>,
 }
 
 impl<'map> SLOB<'map> {
@@ -76,74 +72,9 @@ impl<'map> SLOB<'map> {
     pub fn new() -> Self {
         const EMPTY: [BlockPage; 0] = [];
 
-        let block_malloc = Self {
-            map: RwLock::new(AllocatorMap {
-                page_manager: PageManager::null(),
-                pages: &mut EMPTY,
-            }),
-        };
-
-        {
-            let mut map_write = block_malloc.map.write();
-
-            unsafe {
-                debug!("Initializing allocator's virtual addressor...");
-                map_write.page_manager = PageManager::new(Page::null());
-
-                // TODO the addressors shouldn't mmap all reserved frames by default.
-                //  It is, for instance, useless in userland addressors, where ACPI tables
-                //  don't need to be mapped.
-                debug!("Identity mapping all reserved global memory frames...");
-                FRAME_MANAGER
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, (ty, _, _))| ty.eq(&FrameType::Reserved))
-                    .for_each(|(index, _)| {
-                        map_write
-                            .page_manager
-                            .identity_map(&Page::from_index(index))
-                            .unwrap();
-                    });
-            }
-
-            // Since we're using physical offset mapping for our page table modification
-            //  strategy, the memory needs to be identity mapped at the correct offset.
-            let phys_mapping_addr = lib::memory::virtual_map_offset();
-            debug!("Mapping physical memory at offset: {:?}", phys_mapping_addr);
-            unsafe {
-                map_write
-                    .page_manager
-                    .modify_mapped_page(Page::from_addr(phys_mapping_addr));
-            }
-
-            info!("Writing kernel addressor's PML4 to the CR3 register.");
-            unsafe { map_write.page_manager.swap_into() };
-
-            debug!("Allocating reserved physical memory frames...");
-            FRAME_MANAGER
-                .iter()
-                .enumerate()
-                .filter(|(_, (ty, _, _))| ty.eq(&FrameType::Reserved))
-                .for_each(|(index, _)| {
-                    while map_write.pages.len() <= index {
-                        block_malloc
-                            .grow(
-                                usize::max(index - map_write.pages.len(), 1)
-                                    * BlockPage::BLOCKS_PER,
-                                &mut map_write,
-                            )
-                            .unwrap();
-                    }
-
-                    map_write.pages[index].set_full();
-                });
-
-            map_write.pages[0].set_full();
-
-            info!("Finished block allocator initialization.");
+        Self {
+            map: RwLock::new(&mut EMPTY),
         }
-
-        block_malloc
     }
 
     /// Calculates the bit count and mask for a given set of block page parameters.
@@ -151,7 +82,7 @@ impl<'map> SLOB<'map> {
         map_index: usize,
         cur_block_index: usize,
         end_block_index: usize,
-    ) -> (usize, u128) {
+    ) -> (usize, u64) {
         let floor_blocks_index = map_index * BlockPage::BLOCKS_PER;
         let ceil_blocks_index = floor_blocks_index + BlockPage::BLOCKS_PER;
         let mask_bit_offset = cur_block_index - floor_blocks_index;
@@ -159,19 +90,36 @@ impl<'map> SLOB<'map> {
 
         (
             mask_bit_count,
-            ((1 as u128) << mask_bit_count).wrapping_sub(1) << mask_bit_offset,
+            ((1 as u64) << mask_bit_count).wrapping_sub(1) << mask_bit_offset,
         )
     }
 
-    pub fn grow(
+    pub unsafe fn reserve_page(&self, page: &Page) -> Result<(), AllocError> {
+        let mut map_write = self.map.write();
+
+        if map_write.len() <= page.index() {
+            if let Err(error) = self.grow(
+                usize::max(page.index() - map_write.len(), 1) * BlockPage::BLOCKS_PER,
+                &mut map_write,
+            ) {
+                return Err(error);
+            }
+        }
+
+        if map_write[page.index()].is_empty() {
+            map_write[page.index()].set_full();
+
+            Ok(())
+        } else {
+            Err(AllocError::TryReserveNonEmptyPage)
+        }
+    }
+
+    fn grow(
         &self,
         required_blocks: usize,
-        map_write: &mut RwLockWriteGuard<AllocatorMap>,
+        map_write: &mut RwLockWriteGuard<&mut [BlockPage]>,
     ) -> Result<(), AllocError> {
-        assert!(
-            map_write.page_manager.is_swapped_in(),
-            "Cannot modify allocator state when addressor is not active."
-        );
         assert!(required_blocks > 0, "calls to grow must be nonzero");
 
         trace!(
@@ -180,9 +128,9 @@ impl<'map> SLOB<'map> {
         );
 
         // Current length of our map, in indexes.
-        let cur_map_len = map_write.pages.len();
+        let cur_map_len = map_write.len();
         // Required length of our map, in indexes.
-        let req_map_len = (map_write.pages.len()
+        let req_map_len = (map_write.len()
             + lib::align_up_div(required_blocks, BlockPage::BLOCKS_PER))
         .next_power_of_two();
         // Current page count of our map (i.e. how many pages the slice requires)
@@ -202,7 +150,7 @@ impl<'map> SLOB<'map> {
         // that can contain our required slice length.
         let mut current_run = 0;
         let start_index = core::lazy::OnceCell::new();
-        for (index, block_page) in map_write.pages.iter().enumerate() {
+        for (index, block_page) in map_write.iter().enumerate() {
             if block_page.is_empty() {
                 current_run += 1;
 
@@ -215,7 +163,7 @@ impl<'map> SLOB<'map> {
             }
         }
 
-        let cur_map_page = Page::from_index((map_write.pages.as_ptr() as usize) / 0x1000);
+        let cur_map_page = Page::from_index((map_write.as_ptr() as usize) / 0x1000);
         let new_map_page = Page::from_index(*start_index.get_or_init(|| {
             // When the map is zero-sized, this allows us to skip the first page in our
             // allocations (in order to keep the 0th page as null & unmapped).
@@ -228,11 +176,11 @@ impl<'map> SLOB<'map> {
 
         trace!("Copy mapping current map to new pages.");
         for page_offset in 0..cur_map_pages {
-            map_write
-                .page_manager
+            get_page_manager()
                 .copy_by_map(
                     &cur_map_page.forward(page_offset).unwrap(),
                     &new_map_page.forward(page_offset).unwrap(),
+                    None,
                 )
                 .unwrap();
         }
@@ -241,13 +189,13 @@ impl<'map> SLOB<'map> {
         for page_offset in cur_map_pages..req_map_pages {
             let mut new_page = new_map_page.forward(page_offset).unwrap();
 
-            map_write.page_manager.automap(&new_page);
+            get_page_manager().auto_map(&new_page, PageAttributes::DATA_BITS);
             // Clear the newly allocated map page.
             unsafe { new_page.mem_clear() };
         }
 
         // Point to new map.
-        map_write.pages = unsafe {
+        **map_write = unsafe {
             core::slice::from_raw_parts_mut(
                 new_map_page.as_mut_ptr(),
                 lib::align_up(req_map_len, 0x1000 / size_of::<BlockPage>()),
@@ -255,13 +203,11 @@ impl<'map> SLOB<'map> {
         };
 
         map_write
-            .pages
             .iter_mut()
             .skip(new_map_page.index())
             .take(req_map_pages)
             .for_each(|block_page| block_page.set_full());
         map_write
-            .pages
             .iter_mut()
             .skip(cur_map_page.index())
             .take(cur_map_pages)
@@ -294,7 +240,7 @@ impl MemoryAllocator for SLOB<'_> {
             block_index = 0;
             current_run = 0;
 
-            for (map_index, block_page) in map_write.pages.iter().enumerate() {
+            for (map_index, block_page) in map_write.iter().enumerate() {
                 if block_page.is_full() {
                     current_run = 0;
                     block_index += BlockPage::BLOCKS_PER;
@@ -327,7 +273,7 @@ impl MemoryAllocator for SLOB<'_> {
         let start_map_index = start_block_index / BlockPage::BLOCKS_PER;
 
         for map_index in start_map_index..end_map_index {
-            let block_page = &mut map_write.pages[map_index];
+            let block_page = &mut map_write[map_index];
             let was_empty = block_page.is_empty();
 
             let block_index_floor = map_index * BlockPage::BLOCKS_PER;
@@ -336,13 +282,14 @@ impl MemoryAllocator for SLOB<'_> {
                 end_block_index - block_index,
                 (block_index_floor + BlockPage::BLOCKS_PER) - block_index,
             );
-            let mask_bits = ((1 as u128) << remaining_blocks_in_slice).wrapping_sub(1);
+            let mask_bits = ((1 as u64) << remaining_blocks_in_slice).wrapping_sub(1);
 
             *block_page.value_mut() |= mask_bits << low_offset;
             block_index += remaining_blocks_in_slice;
 
             if was_empty {
-                map_write.page_manager.automap(&Page::from_index(map_index));
+                get_page_manager()
+                    .auto_map(&Page::from_index(map_index), PageAttributes::DATA_BITS);
             }
         }
 
@@ -368,8 +315,7 @@ impl MemoryAllocator for SLOB<'_> {
         'outer: loop {
             let mut current_run = 0;
 
-            for (map_index, block_page) in map_write.pages.iter_mut().enumerate().skip(start_index)
-            {
+            for (map_index, block_page) in map_write.iter_mut().enumerate().skip(start_index) {
                 if !block_page.is_empty() {
                     current_run = 0;
                     start_index = map_index + 1;
@@ -391,14 +337,13 @@ impl MemoryAllocator for SLOB<'_> {
             let page_index = start_index + offset;
             let frame_index = frame_index + offset;
 
-            map_write.pages[page_index].set_full();
-            map_write
-                .page_manager
+            map_write[page_index].set_full();
+            get_page_manager()
                 .map(
                     &Page::from_index(page_index),
                     frame_index,
                     None,
-                    lib::memory::PageAttributes::WRITABLE,
+                    PageAttributes::DATA_BITS,
                 )
                 .unwrap();
         }
@@ -419,8 +364,7 @@ impl MemoryAllocator for SLOB<'_> {
         'outer: loop {
             let mut current_run = 0;
 
-            for (map_index, block_page) in map_write.pages.iter_mut().enumerate().skip(start_index)
-            {
+            for (map_index, block_page) in map_write.iter_mut().enumerate().skip(start_index) {
                 if !block_page.is_empty() {
                     current_run = 0;
                     start_index = map_index + 1;
@@ -442,13 +386,14 @@ impl MemoryAllocator for SLOB<'_> {
             let page_index = start_index + offset;
             let frame_index = frame_index + offset;
 
-            map_write.pages[page_index].set_full();
-            map_write
-                .page_manager
-                .map(&Page::from_index(page_index), frame_index, None, {
-                    use lib::memory::PageAttributes;
-                    PageAttributes::NO_EXECUTE | PageAttributes::WRITABLE
-                })
+            map_write[page_index].set_full();
+            get_page_manager()
+                .map(
+                    &Page::from_index(page_index),
+                    frame_index,
+                    None,
+                    PageAttributes::DATA_BITS,
+                )
                 .unwrap();
         }
 
@@ -462,7 +407,7 @@ impl MemoryAllocator for SLOB<'_> {
     ) -> Result<Alloc<u8>, AllocError> {
         let mut map_write = self.map.write();
 
-        if map_write.pages.len() < (frame_index + count) {
+        if map_write.len() < (frame_index + count) {
             self.grow(
                 (frame_index + count) * BlockPage::BLOCKS_PER,
                 &mut map_write,
@@ -471,17 +416,15 @@ impl MemoryAllocator for SLOB<'_> {
         }
 
         for page_index in frame_index..(frame_index + count) {
-            if map_write.pages[page_index].is_empty() {
-                map_write.pages[page_index].set_full();
-                map_write
-                    .page_manager
-                    .identity_map(&Page::from_index(page_index))
+            if map_write[page_index].is_empty() {
+                map_write[page_index].set_full();
+                get_page_manager()
+                    .identity_map(&Page::from_index(page_index), PageAttributes::DATA_BITS)
                     .unwrap();
             } else {
                 for page_index in frame_index..page_index {
-                    map_write.pages[page_index].set_empty();
-                    map_write
-                        .page_manager
+                    map_write[page_index].set_empty();
+                    get_page_manager()
                         .unmap(&Page::from_index(page_index), false)
                         .unwrap();
                 }
@@ -505,10 +448,10 @@ impl MemoryAllocator for SLOB<'_> {
 
         let start_map_index = start_block_index / BlockPage::BLOCKS_PER;
         let end_map_index = align_up_div(end_block_index, BlockPage::BLOCKS_PER);
-        let mut map = self.map.write();
+        let mut map_write = self.map.write();
         for map_index in start_map_index..end_map_index {
             let (had_bits, has_bits) = {
-                let block_page = &mut map.pages[map_index];
+                let block_page = &mut map_write[map_index];
 
                 let had_bits = !block_page.is_empty();
 
@@ -531,38 +474,17 @@ impl MemoryAllocator for SLOB<'_> {
                 // This is wildly unsafe. There's no way to validate—without *only* going through
                 // the Rust global allocator—that the given page allocated a frame and wasn't a direct allocation
                 // of some sort.
-                map.page_manager
+                get_page_manager()
                     .unmap(&Page::from_index(map_index), true)
                     .unwrap();
             }
         }
     }
 
-    fn get_page_attribs(&self, page: &Page) -> Option<lib::memory::paging::PageAttributes> {
-        self.map.read().page_manager.get_page_attribs(page)
-    }
-
-    unsafe fn set_page_attribs(
-        &self,
-        page: &Page,
-        attributes: lib::memory::paging::PageAttributes,
-        modify_mode: lib::memory::paging::AttributeModify,
-    ) {
-        self.map
-            .write()
-            .page_manager
-            .set_page_attribs(page, attributes, modify_mode)
-    }
-
     fn get_page_state(&self, page_index: usize) -> Option<bool> {
         self.map
             .read()
-            .pages
             .get(page_index)
             .map(|block_page| !block_page.is_empty())
-    }
-
-    fn physical_memory(&self, addr: Address<Physical>) -> Address<Virtual> {
-        self.map.read().page_manager.mapped_offset() + addr.as_usize()
     }
 }

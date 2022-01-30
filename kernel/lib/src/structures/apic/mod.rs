@@ -2,8 +2,8 @@ pub mod icr;
 
 use crate::{
     memory::{volatile::VolatileCell, MMIO},
-    registers::MSR,
-    ReadWrite, InterruptDeliveryMode,
+    registers::msr::MSR,
+    InterruptDeliveryMode, ReadWrite,
 };
 use bit_field::BitField;
 use core::marker::PhantomData;
@@ -63,8 +63,6 @@ impl TimerDivisor {
         }
     }
 }
-
-
 
 bitflags::bitflags! {
     pub struct ErrorStatusFlags: u8 {
@@ -320,9 +318,9 @@ impl<T: LocalVectorVariant> core::fmt::Debug for LocalVector<T> {
 impl LocalVector<Timer> {
     #[inline]
     pub fn set_mode(&self, mode: TimerMode) {
-        use crate::instructions::cpuid::{Features, FEATURES};
-
-        if mode == TimerMode::TSC_Deadline && !FEATURES.contains(Features::TSC_DL) {
+        if mode == TimerMode::TSC_Deadline
+            && !crate::cpu::FEATURES.contains(crate::cpu::Features::TSC_DL)
+        {
             panic!("TSC deadline is not supported on this CPU.")
         }
 

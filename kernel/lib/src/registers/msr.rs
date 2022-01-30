@@ -1,3 +1,41 @@
+use bit_field::BitField;
+
+// TODO make a trait of MSR
+// trait MSR {
+//     const ECX: u32;
+
+//     #[inline(always)]
+//     fn read() -> u64 {
+//         unsafe {
+//             let value: u64;
+
+//             core::arch:: asm!(
+//                 "push rax",     // Preserve the `rax` value.
+//                 "rdmsr",
+//                 "shl rdx, 32",  // Shift high value to high bits
+//                 "or rdx, rax",  // Copy low value in
+//                 "pop rax",
+//                 in("ecx") Self::ECX,
+//                 out("rdx") value,
+//                 options(nostack, nomem)
+//             );
+
+//             value
+//         }
+//     }
+
+//     #[inline(always)]
+//     unsafe fn write(value: u64) {
+//         core::arch::asm!(
+//             "wrmsr",
+//             in("ecx") Self::ECX,
+//             in("rax") value,
+//             in("rdx") value >> 32,
+//             options(nostack, nomem)
+//         );
+//     }
+// }
+
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
@@ -57,5 +95,41 @@ impl MSR {
             in("rdx") value >> 32,
             options(nostack, nomem)
         );
+    }
+}
+
+pub struct IA32_EFER;
+
+impl IA32_EFER {
+    /// Gets the IA32_EFER.SCE (syscall/syret enable) bit.
+    pub fn get_sce() -> bool {
+        MSR::IA32_EFER.read().get_bit(0)
+    }
+
+    /// Sets the IA32_EFER.SCE (syscall/syret enable) bit.
+    pub fn set_sce(set: bool) {
+        unsafe { MSR::IA32_EFER.write(*MSR::IA32_EFER.read().set_bit(0, set)) };
+    }
+
+    /// Gets the IA32_EFER.LMA (long-mode active) bit.
+    pub fn get_lma() -> bool {
+        MSR::IA32_EFER.read().get_bit(10)
+    }
+
+    /// Sets the IA32_EFER.LME (long-mode enable) bit.
+    pub fn set_lme(set: bool) {
+        unsafe { MSR::IA32_EFER.write(*MSR::IA32_EFER.read().set_bit(8, set)) };
+    }
+
+    /// Gets the IA32_EFER.NXE (no-execute enable) bit.
+    pub fn get_nxe() -> bool {
+        MSR::IA32_EFER.read().get_bit(11)
+    }
+
+    /// Sets the IA32_EFER.NXE (no-execute enable) bit.
+    pub fn set_nxe(set: bool) {
+        // TODO check and ensure FEATURES_EXT is supported.
+
+        unsafe { MSR::IA32_EFER.write(*MSR::IA32_EFER.read().set_bit(11, set)) };
     }
 }

@@ -10,9 +10,10 @@ impl PCIeBus {
         let devices: Vec<DeviceVariant> = (0..32)
             .filter_map(|device_index| {
                 let offset_addr = base_addr + (device_index << 15);
-                let vendor_id = *crate::memory::malloc::get()
-                    .physical_memory(offset_addr)
-                    .as_ptr::<u16>();
+                let vendor_id = (crate::memory::get_page_manager().mapped_addr()
+                    + offset_addr.as_usize())
+                .as_ptr::<u16>()
+                .read();
 
                 if vendor_id == u16::MAX || vendor_id == u16::MIN {
                     None

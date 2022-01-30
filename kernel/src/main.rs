@@ -27,13 +27,15 @@ mod slob;
 use lib::{
     acpi::SystemConfigTableEntry,
     cell::SyncOnceCell,
-    memory::{malloc::MemoryAllocator, uefi},
+    memory::{uefi, PageManager},
     BootInfo, LinkerSymbol,
 };
 
 extern "C" {
-    static __ap_trampoline_start: LinkerSymbol;
-    static __ap_trampoline_end: LinkerSymbol;
+    static __ap_text_start: LinkerSymbol;
+    static __ap_text_end: LinkerSymbol;
+    static __ap_data_start: LinkerSymbol;
+    static __ap_data_end: LinkerSymbol;
     static __kernel_pml4: LinkerSymbol;
 
     static __gdt: LinkerSymbol;
@@ -74,6 +76,7 @@ fn get_log_level() -> log::LevelFilter {
 }
 
 static mut CON_OUT: drivers::stdout::Serial = drivers::stdout::Serial::new(drivers::stdout::COM1);
+static KERNEL_PAGE_MANAGER: SyncOnceCell<PageManager> = SyncOnceCell::new();
 static KERNEL_MALLOCATOR: SyncOnceCell<slob::SLOB> = SyncOnceCell::new();
 
 /// Clears the kernel stack by resetting `RSP`.
@@ -138,33 +141,181 @@ unsafe extern "efiapi" fn kernel_init(
         __gdt_tss.as_u64() as u16,
     ));
 
-    debug!(
-        "CPU features: {:?} | {:?}",
-        lib::instructions::cpuid::FEATURES,
-        lib::instructions::cpuid::FEATURES_EXT
-    );
+    info!("CPU Info:");
+    info!("Vendor           {:?}", lib::cpu::VENDOR);
+    info!("Features         {:?}", lib::cpu::FEATURES);
+    info!("Features Ext     {:?}", lib::cpu::FEATURES_EXT);
+    info!("TEXT END {:?}", __text_end.as_ptr::<u8>());
+    info!("RODATA START {:?}", __rodata_start.as_ptr::<u8>());
 
     /* INIT KERNEL MEMORY */
     {
-        info!("Initializing kernel default allocator.");
-
-        let malloc = slob::SLOB::new();
-        debug!("Flagging `text` and `rodata` kernel sections as read-only.");
         use lib::memory::Page;
-        let text_page_range = Page::from_index(__text_start.as_usize() / 0x1000)
-            ..=Page::from_index(__text_end.as_usize() / 0x1000);
-        let rodata_page_range = Page::from_index(__rodata_start.as_usize() / 0x1000)
-            ..=Page::from_index(__rodata_end.as_usize() / 0x1000);
-        for page in text_page_range.chain(rodata_page_range) {
-            malloc.set_page_attribs(
-                &page,
-                lib::memory::paging::PageAttributes::WRITABLE,
-                lib::memory::paging::AttributeModify::Remove,
-            );
+
+        KERNEL_PAGE_MANAGER
+            .set(PageManager::new(&Page::null()))
+            .unwrap_or_else(|_| panic!(""));
+        lib::memory::set_page_manager(KERNEL_PAGE_MANAGER.get().unwrap_or_else(|| panic!("")));
+        KERNEL_MALLOCATOR
+            .set(slob::SLOB::new())
+            .unwrap_or_else(|_| panic!(""));
+
+        // Configure and use page manager.
+        {
+            use lib::memory::{FrameType, FRAME_MANAGER};
+            info!("Initializing kernel SLOB allocator.");
+
+            {
+                let page_manager = lib::memory::get_page_manager();
+
+                // TODO the addressors shouldn't mmap all reserved frames by default.
+                //  It is, for instance, useless in userland addressors, where ACPI tables
+                //  don't need to be mapped.
+                debug!("Identity mapping all reserved global memory frames...");
+                FRAME_MANAGER
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, (ty, _, _))| !ty.eq(&FrameType::Usable))
+                    .for_each(|(index, _)| {
+                        page_manager
+                            .identity_map(
+                                &Page::from_index(index),
+                                lib::memory::PageAttributes::PRESENT,
+                            )
+                            .unwrap();
+                    });
+
+                // Set proper page attributes for known sections.
+
+                debug!("Configuring page table entries for kernel ELF sections.");
+                use lib::memory::{AttributeModify, PageAttributes};
+
+                // Set page attributes for UEFI descriptor pages.
+                for descriptor in lib::BOOT_INFO.get().unwrap().memory_map().iter() {
+                    let desc_attribs = descriptor.att;
+                    let mut page_attribs = PageAttributes::empty();
+
+                    use lib::memory::uefi::MemoryAttributes;
+                    if desc_attribs.contains(MemoryAttributes::UNCACHEABLE) {
+                        page_attribs.insert(PageAttributes::UNCACHEABLE);
+                    }
+
+                    if desc_attribs.contains(MemoryAttributes::WRITE_THROUGH) {
+                        page_attribs.insert(PageAttributes::WRITABLE);
+                        page_attribs.insert(PageAttributes::WRITE_THROUGH);
+                    }
+
+                    if desc_attribs.contains(MemoryAttributes::WRITE_BACK) {
+                        page_attribs.insert(PageAttributes::WRITABLE);
+                        page_attribs.remove(PageAttributes::WRITE_THROUGH);
+                    }
+
+                    if desc_attribs.contains(MemoryAttributes::EXEC_PROTECT) {
+                        page_attribs.insert(PageAttributes::NO_EXECUTE);
+                    }
+
+                    if desc_attribs.contains(MemoryAttributes::UNCACHEABLE) {
+                        page_attribs.insert(PageAttributes::UNCACHEABLE);
+                    }
+
+                    if desc_attribs.contains(MemoryAttributes::READ_ONLY) {
+                        page_attribs.remove(PageAttributes::WRITABLE);
+                        page_attribs.remove(PageAttributes::WRITE_THROUGH);
+                    }
+
+                    for page in descriptor
+                        .frame_range()
+                        .map(|index| Page::from_index(index))
+                    {
+                        page_manager.set_page_attribs(
+                            &page,
+                            PageAttributes::PRESENT | page_attribs,
+                            AttributeModify::Set,
+                        )
+                    }
+
+                    // Overwrite UEFI page attributes for kernel ELF sections.
+                    use lib::{align_down_div, align_up_div};
+                    let kernel_text = Page::range(
+                        __text_start.as_usize() / 0x1000,
+                        __text_end.as_usize() / 0x1000,
+                    );
+                    let kernel_rodata = Page::range(
+                        __rodata_start.as_usize() / 0x1000,
+                        __rodata_end.as_usize() / 0x1000,
+                    );
+                    let kernel_data = Page::range(
+                        __data_start.as_usize() / 0x1000,
+                        __data_end.as_usize() / 0x1000,
+                    );
+                    let kernel_bss = Page::range(
+                        __bss_start.as_usize() / 0x1000,
+                        __bss_end.as_usize() / 0x1000,
+                    );
+                    let ap_text = Page::range(
+                        __ap_text_start.as_usize() / 0x1000,
+                        __ap_text_end.as_usize() / 0x1000,
+                    );
+                    let ap_data = Page::range(
+                        __ap_data_start.as_usize() / 0x1000,
+                        __ap_data_end.as_usize() / 0x1000,
+                    );
+
+                    for page in kernel_text.chain(ap_text) {
+                        page_manager.set_page_attribs(
+                            &page,
+                            PageAttributes::PRESENT | PageAttributes::GLOBAL,
+                            AttributeModify::Set,
+                        );
+                    }
+
+                    for page in kernel_rodata {
+                        page_manager.set_page_attribs(
+                            &page,
+                            PageAttributes::PRESENT
+                                | PageAttributes::GLOBAL
+                                | PageAttributes::NO_EXECUTE,
+                            AttributeModify::Set,
+                        );
+                    }
+
+                    for page in kernel_data.chain(kernel_bss).chain(ap_data) {
+                        page_manager.set_page_attribs(
+                            &page,
+                            PageAttributes::PRESENT
+                                | PageAttributes::GLOBAL
+                                | PageAttributes::NO_EXECUTE
+                                | PageAttributes::WRITABLE,
+                            AttributeModify::Set,
+                        );
+                    }
+                }
+
+                // Since we're using physical offset mapping for our page table modification
+                //  strategy, the memory needs to be identity mapped at the correct offset.
+                let phys_mapping_addr = lib::memory::virtual_map_offset();
+                debug!("Mapping physical memory at offset: {:?}", phys_mapping_addr);
+                page_manager.modify_mapped_page(Page::from_addr(phys_mapping_addr));
+
+                info!("Writing kernel addressor's PML4 to the CR3 register.");
+                page_manager.write_cr3();
+            }
+
+            // Configure SLOB allocator.
+            debug!("Allocating reserved physical memory frames...");
+            let slob = KERNEL_MALLOCATOR.get().unwrap();
+            FRAME_MANAGER
+                .iter()
+                .enumerate()
+                .filter(|(_, (ty, _, _))| !ty.eq(&FrameType::Usable))
+                .for_each(|(index, _)| {
+                    slob.reserve_page(&Page::from_index(index)).unwrap();
+                });
+
+            info!("Finished block allocator initialization.");
         }
 
-        debug!("Setting lib's default memory allocator to new kernel allocator.");
-        KERNEL_MALLOCATOR.set(malloc).map_err(|_| panic!()).unwrap();
+        debug!("Setting newly-configured default allocator.");
         lib::memory::malloc::set(KERNEL_MALLOCATOR.get().unwrap());
         // TODO somehow ensure the PML4 frame is within the first 32KiB for the AP trampoline
         debug!("Moving the kernel PML4 mapping frame into the global processor reference.");
@@ -214,7 +365,7 @@ extern "C" fn _startup() -> ! {
         // Initialize other CPUs
         let id = crate::local_state::processor_id();
         let icr = crate::local_state::int_ctrl().icr();
-        let ap_trampoline_page_index = unsafe { __ap_trampoline_start.as_usize() / 0x1000 } as u8;
+        let ap_text_page_index = unsafe { __ap_text_start.as_usize() / 0x1000 } as u8;
 
         if let Ok(madt) = XSDT.find_sub_table::<MADT>() {
             info!("Beginning wake-up sequence for enabled processors.");
@@ -255,10 +406,10 @@ extern "C" fn _startup() -> ! {
                 icr.wait_pending();
                 // REMARK: IA32 spec indicates that doing this twice, as so, ensures the interrupt is received.
                 trace!("Sending SIPI x1 interrupt to: {}", lapic.id());
-                icr.send_sipi(ap_trampoline_page_index, lapic.id());
+                icr.send_sipi(ap_text_page_index, lapic.id());
                 icr.wait_pending();
                 trace!("Sending SIPI x2 interrupt to: {}", lapic.id());
-                icr.send_sipi(ap_trampoline_page_index, lapic.id());
+                icr.send_sipi(ap_text_page_index, lapic.id());
                 icr.wait_pending();
             }
         }
@@ -296,7 +447,7 @@ extern "C" fn _startup() -> ! {
     // lib::instructions::hlt_indefinite()
 
     unsafe {
-        use lib::registers::MSR;
+        use lib::registers::msr::MSR;
 
         // Enable `sysenter`/`sysexit`.
         MSR::IA32_EFER.write(MSR::IA32_EFER.read() | 0x1);

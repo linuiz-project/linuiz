@@ -61,7 +61,7 @@ impl PCIeDevice<Standard> {
                     for page in register_mmio.pages() {
                         use crate::memory::paging::{AttributeModify, PageAttributes};
 
-                        crate::memory::malloc::get().set_page_attribs(
+                        crate::memory::get_page_manager().set_page_attribs(
                             &page,
                             PageAttributes::WRITE_THROUGH,
                             AttributeModify::Insert,

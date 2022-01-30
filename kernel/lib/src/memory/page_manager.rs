@@ -1,3 +1,7 @@
+use core::mem::MaybeUninit;
+
+use spin::RwLock;
+
 use crate::{
     addr_ty::{Physical, Virtual},
     memory::{
@@ -14,17 +18,17 @@ pub enum MapError {
     FrameError(crate::memory::FrameError),
 }
 
-pub struct PageManager {
+struct VirtualMapper {
     mapped_page: Page,
-    pml4_index: usize,
+    pml4_frame: usize,
 }
 
-impl PageManager {
-    pub const fn null() -> Self {
-        Self {
+impl VirtualMapper {
+    pub const fn uninit() -> MaybeUninit<Self> {
+        MaybeUninit::new(Self {
             mapped_page: Page::null(),
-            pml4_index: usize::MAX,
-        }
+            pml4_frame: usize::MAX,
+        })
     }
 
     /// Attempts to create a new PageManager, with `mapped_page` specifying the current page
@@ -33,7 +37,7 @@ impl PageManager {
     /// SAFETY: this method is unsafe because `mapped_page` can be any value; that is, not necessarily
     /// a valid address in which physical memory is already mapped. The expectation is that `mapped_page` is
     /// a proper starting page for the physical memory mapping.
-    pub unsafe fn new(mapped_page: Page) -> Self {
+    pub unsafe fn new(mapped_page: &Page) -> Self {
         let pml4_index = FRAME_MANAGER
             .lock_next()
             .expect("Failed to lock frame for virtual addressor's PML4");
@@ -48,8 +52,8 @@ impl PageManager {
         Self {
             // We don't know where physical memory is mapped at this point,
             // so rely on what the caller specifies for us.
-            mapped_page,
-            pml4_index,
+            mapped_page: *mapped_page,
+            pml4_frame: pml4_index,
         }
     }
 
@@ -59,12 +63,8 @@ impl PageManager {
 
     /* ACQUIRE STATE */
 
-    pub fn pml4_addr(&self) -> Address<Physical> {
-        Address::<Physical>::new(self.pml4_index * 0x1000)
-    }
-
     fn pml4_page(&self) -> Page {
-        self.mapped_page.forward(self.pml4_index).unwrap()
+        self.mapped_page.forward(self.pml4_frame).unwrap()
     }
 
     fn pml4(&self) -> Option<&PageTable<Level4>> {
@@ -115,6 +115,65 @@ impl PageManager {
         }
     }
 
+    pub unsafe fn modify_mapped_page(&mut self, page: Page) {
+        for index in 0..FRAME_MANAGER.total_frame_count() {
+            self.get_page_entry_create(&page.forward(index).unwrap())
+                .set(index, PageAttributes::PRESENT | PageAttributes::WRITABLE);
+
+            crate::instructions::tlb::invalidate(&page);
+        }
+
+        self.mapped_page = page;
+    }
+
+    /// Returns `true` if the current CR3 address matches the addressor's PML4 frame, and `false` otherwise.
+    pub fn is_active(&self) -> bool {
+        crate::registers::CR3::read().0.frame_index() == self.pml4_frame
+    }
+
+    pub unsafe fn write_cr3(&self) {
+        crate::registers::CR3::write(
+            Address::<Physical>::new(self.pml4_frame * 0x1000),
+            crate::registers::CR3Flags::empty(),
+        );
+    }
+
+    // TODO
+    // fn copy_physical_memory_entries(page_manager: &mut PageManager) {
+    //     let k_vmap = PAGE_MANAGER.virtual_mapper.read();
+    //     let mut cur_vmap = page_manager.virtual_mapper.write();
+
+    //     let k_pml4 = k_vmap
+    //         .pml4()
+    //         .expect("Kernel page manager has no valid PML4.");
+    //     let cur_pml4 = cur_vmap
+    //         .pml4_mut()
+    //         .expect("Provided page manager has no valid PML4.");
+
+    //     for entry_index in k_vmap.mapped_offset().p4_index()..512 {
+    //         *cur_pml4.get_entry_mut(entry_index) = *k_pml4.get_entry(entry_index);
+    //     }
+    // }
+}
+
+pub struct PageManager {
+    virtual_mapper: RwLock<VirtualMapper>,
+}
+
+impl PageManager {
+    pub const fn uninit() -> MaybeUninit<Self> {
+        MaybeUninit::new(Self {
+            virtual_mapper: RwLock::new(unsafe { VirtualMapper::uninit().assume_init() }),
+        })
+    }
+
+    /// SAFETY: Refer to `VirtualMapper::new()`.
+    pub unsafe fn new(mapped_page: &Page) -> Self {
+        Self {
+            virtual_mapper: RwLock::new(VirtualMapper::new(mapped_page)),
+        }
+    }
+
     /* MAP / UNMAP */
 
     /// Maps the specified frame to the specified frame index.
@@ -123,7 +182,7 @@ impl PageManager {
     ///     `Some` or `None` indicates whether frame allocation is required,
     ///         `true` or `false` in a `Some` indicates whether the frame is locked or merely referenced.
     pub fn map(
-        &mut self,
+        &self,
         page: &Page,
         frame_index: usize,
         lock_frame: Option<bool>,
@@ -139,14 +198,19 @@ impl PageManager {
         .map_err(|falloc_err| MapError::FrameError(falloc_err))
         // If acquisition of the frame is successful, map the page to the frame index.
         .map(|frame_index| {
-            self.get_page_entry_create(page).set(frame_index, attribs);
+            self.virtual_mapper
+                .write()
+                .get_page_entry_create(page)
+                .set(frame_index, attribs);
 
             crate::instructions::tlb::invalidate(page);
         })
     }
 
-    pub fn unmap(&mut self, page: &Page, locked: bool) -> Result<(), MapError> {
-        self.get_page_entry_mut(page)
+    pub fn unmap(&self, page: &Page, locked: bool) -> Result<(), MapError> {
+        self.virtual_mapper
+            .write()
+            .get_page_entry_mut(page)
             .map(|entry| {
                 entry.set_attributes(PageAttributes::PRESENT, AttributeModify::Remove);
 
@@ -166,32 +230,31 @@ impl PageManager {
     }
 
     pub fn copy_by_map(
-        &mut self,
+        &self,
         unmap_from: &Page,
         map_to: &Page,
         new_attribs: Option<PageAttributes>,
     ) -> Result<(), MapError> {
-        // TODO possibly elide this check for perf?
-        if self.is_mapped(map_to.base_addr()) {
-            return Err(MapError::AlreadyMapped);
-        }
+        let frame_index = {
+            self.virtual_mapper
+                .write()
+                .get_page_entry_mut(unmap_from)
+                .map(|entry| {
+                    let attribs = new_attribs.unwrap_or_else(|| entry.get_attribs());
+                    entry.set_attributes(PageAttributes::empty(), AttributeModify::Set);
+                    unsafe { (attribs, entry.take_frame_index()) }
+                })
+        };
 
-        match self.get_page_entry_mut(unmap_from) {
-            Some(entry) => {
-                let attribs = new_attribs.unwrap_or_else(|| entry.get_attribs());
-                entry.set_attributes(PageAttributes::empty(), AttributeModify::Set);
-                let frame_index = unsafe { entry.take_frame_index() };
-
+        frame_index
+            .ok_or(MapError::NotMapped)
+            .map(|(attribs, frame_index)| {
                 self.map(map_to, frame_index, None, attribs).unwrap();
                 crate::instructions::tlb::invalidate(unmap_from);
-
-                Ok(())
-            }
-            None => Err(MapError::NotMapped),
-        }
+            })
     }
 
-    pub fn automap(&mut self, page: &Page, attribs: PageAttributes) {
+    pub fn auto_map(&self, page: &Page, attribs: PageAttributes) {
         self.map(page, FRAME_MANAGER.lock_next().unwrap(), None, attribs)
             .unwrap();
     }
@@ -202,21 +265,24 @@ impl PageManager {
     ///     This function assumes the frame for the identity mapping is:
     ///         A) a valid lock or borrow
     ///         B) not required for the mapping
-    pub fn identity_map(&mut self, page: &Page, attribs: PageAttributes) -> Result<(), MapError> {
+    pub fn identity_map(&self, page: &Page, attribs: PageAttributes) -> Result<(), MapError> {
         self.map(page, page.index(), None, attribs)
     }
 
     /* STATE QUERYING */
 
-    pub fn is_mapped(&self, virt_addr: Address<Virtual>) -> bool {
-        self.get_page_entry(&Page::containing_addr(virt_addr))
-            .map_or(false, |entry| {
-                entry.get_attribs().contains(PageAttributes::PRESENT)
-            })
+    pub fn is_mapped(&self, virt_addr: Address<Virtual>) -> Option<usize> {
+        self.virtual_mapper
+            .read()
+            .get_page_entry(&Page::containing_addr(virt_addr))
+            .filter(|entry| entry.get_attribs().contains(PageAttributes::PRESENT))
+            .and_then(|entry| entry.get_frame_index())
     }
 
     pub fn is_mapped_to(&self, page: &Page, frame_index: usize) -> bool {
-        match self
+        let vmap = self.virtual_mapper.read();
+
+        match vmap
             .get_page_entry(page)
             .and_then(|entry| entry.get_frame_index())
         {
@@ -225,46 +291,53 @@ impl PageManager {
         }
     }
 
-    pub fn translate_page(&self, page: &Page) -> Option<usize> {
-        self.get_page_entry(page)
-            .and_then(|entry| entry.get_frame_index())
-    }
-
     /* STATE CHANGING */
 
-    pub unsafe fn modify_mapped_page(&mut self, page: Page) {
-        for index in 0..FRAME_MANAGER.total_frame_count() {
-            self.get_page_entry_create(&page.forward(index).unwrap())
-                .set(index, PageAttributes::PRESENT | PageAttributes::WRITABLE);
-
-            crate::instructions::tlb::invalidate(&page);
-        }
-
-        self.mapped_page = page;
-    }
-
     pub fn get_page_attribs(&self, page: &Page) -> Option<PageAttributes> {
-        self.get_page_entry(page)
+        self.virtual_mapper
+            .read()
+            .get_page_entry(page)
             .map(|page_entry| page_entry.get_attribs())
     }
 
     pub unsafe fn set_page_attribs(
-        &mut self,
+        &self,
         page: &Page,
         attributes: PageAttributes,
         modify_mode: AttributeModify,
     ) {
-        self.get_page_entry_mut(page)
+        self.virtual_mapper
+            .write()
+            .get_page_entry_mut(page)
             .map(|page_entry| page_entry.set_attributes(attributes, modify_mode));
     }
 
-    pub unsafe fn swap_into(&self) {
-        crate::registers::CR3::write(self.pml4_addr(), crate::registers::CR3Flags::empty());
+    pub unsafe fn modify_mapped_page(&self, page: Page) {
+        self.virtual_mapper.write().modify_mapped_page(page);
     }
 
-    /// Returns `true` if the current CR3 address matches the addressor's
-    /// PML4 frame, and `false` otherwise.
-    pub fn is_swapped_in(&self) -> bool {
-        crate::registers::CR3::read().0.frame_index() == self.pml4_index
+    pub fn mapped_addr(&self) -> Address<Virtual> {
+        self.virtual_mapper.read().mapped_page.base_addr()
     }
+
+    pub fn write_cr3(&self) {
+        unsafe {
+            crate::registers::CR3::write(
+                Address::<Physical>::new(self.virtual_mapper.read().pml4_frame * 0x1000),
+                crate::registers::CR3Flags::empty(),
+            )
+        };
+    }
+}
+
+static UNINIT_PAGE_MANAGER: PageManager = unsafe { PageManager::uninit().assume_init() };
+
+static mut PAGE_MANAGER: &'static PageManager = &UNINIT_PAGE_MANAGER;
+
+pub unsafe fn set_page_manager(page_manager: &'static PageManager) {
+    PAGE_MANAGER = page_manager;
+}
+
+pub fn get_page_manager() -> &'static PageManager {
+    unsafe { PAGE_MANAGER }
 }

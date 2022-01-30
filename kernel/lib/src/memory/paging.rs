@@ -47,6 +47,10 @@ impl Page {
         }
     }
 
+    pub const fn range(start: usize, end: usize) -> core::ops::Range<Self> {
+        Self::from_index(start)..Self::from_index(end)
+    }
+
     pub const fn index(&self) -> usize {
         self.index
     }
@@ -185,7 +189,7 @@ bitflags::bitflags! {
         // 3 bits free for use by OS
         const NO_EXECUTE = 1 << 63;
 
-        const DATA = Self::PRESENT.bits() | Self::WRITABLE.bits() | Self::NO_EXECUTE.bits();
+        const DATA_BITS = Self::PRESENT.bits() | Self::WRITABLE.bits() | Self::NO_EXECUTE.bits();
     }
 }
 
@@ -199,6 +203,7 @@ pub enum AttributeModify {
 
 // TODO use u64 here
 #[repr(transparent)]
+#[derive(Clone, Copy)]
 pub struct PageTableEntry(usize);
 
 impl PageTableEntry {
