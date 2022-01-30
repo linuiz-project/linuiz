@@ -118,8 +118,10 @@ impl VirtualMapper {
     pub unsafe fn modify_mapped_page(&mut self, page: Page) {
         for frame_index in 0..FRAME_MANAGER.total_frame_count() {
             let cur_page = page.forward(frame_index).unwrap();
-            self.get_page_entry_create(&cur_page)
-                .set(frame_index, PageAttributes::DATA_BITS);
+            self.get_page_entry_create(&cur_page).set(
+                frame_index,
+                PageAttributes::DATA_BITS | PageAttributes::GLOBAL,
+            );
 
             crate::instructions::tlb::invalidate(&cur_page);
         }
