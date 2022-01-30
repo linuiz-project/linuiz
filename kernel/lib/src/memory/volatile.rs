@@ -14,20 +14,24 @@ pub struct VolatileCell<T, V: VolatileAccess> {
 }
 
 impl<T, V: VolatileAccess> VolatileCell<T, V> {
+    #[inline]
     pub fn read(&self) -> T {
         unsafe { self.inner.get().read_volatile() }
     }
 
+    #[inline]
     pub fn as_ptr(&self) -> *const T {
         self.inner.get()
     }
 }
 
 impl<T> VolatileCell<T, ReadWrite> {
+    #[inline]
     pub fn write(&self, value: T) {
         unsafe { self.inner.get().write_volatile(value) };
     }
 
+    #[inline]
     pub fn as_mut_ptr(&self) -> *mut T {
         self.inner.get()
     }

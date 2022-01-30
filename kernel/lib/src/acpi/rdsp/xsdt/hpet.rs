@@ -25,7 +25,7 @@ pub struct Header {
     page_prot: u8,
 }
 
-pub struct HPET {}
+pub struct HPET;
 
 impl xsdt::SubTable for HPET {
     const SIGNATURE: &'static str = &"HPET";
@@ -34,10 +34,9 @@ impl xsdt::SubTable for HPET {
 impl HPET {
     fn hept_header(&self) -> Header {
         unsafe {
-            (self as *const _ as *const Header)
+            *(self as *const _ as *const Header)
                 .as_ref()
                 .unwrap()
-                .clone()
         }
     }
 

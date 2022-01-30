@@ -14,26 +14,32 @@ pub struct Capabilities(VolatileCell<u64, ReadWrite>);
 
 impl Volatile for Capabilities {}
 impl Capabilities {
+    #[inline]
     pub fn rev_id(&self) -> u8 {
         self.0.read().get_bits(0..8) as u8
     }
 
+    #[inline]
     pub fn timer_count(&self) -> u8 {
         (self.0.read().get_bits(8..13) + 1) as u8
     }
 
+    #[inline]
     pub fn ia64_capable(&self) -> bool {
         self.0.read().get_bit(13)
     }
 
+    #[inline]
     pub fn legacy_irqs(&self) -> bool {
         self.0.read().get_bit(15)
     }
 
+    #[inline]
     pub fn vendor_id(&self) -> u16 {
         self.0.read().get_bits(16..32) as u16
     }
 
+    #[inline]
     pub fn clock_period(&self) -> u32 {
         self.0.read().get_bits(32..64) as u32
     }
@@ -58,12 +64,13 @@ pub struct Config(VolatileCell<u64, ReadWrite>);
 
 impl Volatile for Config {}
 impl Config {
-    pub fn set_enable(&mut self, enable: bool) {
-        // TODO generalize this stuff. It's repeated a lot.
+    #[inline]
+    pub fn set_enable(&self, enable: bool) {
         self.0.write(*self.0.read().set_bit(0, enable));
     }
 
-    pub fn set_legacy_irqs(&mut self, enable: bool) {
+    #[inline]
+    pub fn set_legacy_irqs(&self, enable: bool) {
         self.0.write(*self.0.read().set_bit(1, enable));
     }
 }
@@ -83,6 +90,7 @@ pub struct InterruptStatus(VolatileCell<u64, ReadWrite>);
 
 impl Volatile for InterruptStatus {}
 impl InterruptStatus {
+    #[inline]
     pub fn get_statuses(&self) -> u32 {
         self.0.read().get_bits(0..32) as u32
     }
@@ -102,11 +110,13 @@ pub struct MainCounter(VolatileCell<u64, ReadWrite>);
 
 impl Volatile for MainCounter {}
 impl MainCounter {
+    #[inline]
     pub fn get(&self) -> u64 {
         self.0.read()
     }
 
-    pub fn set(&mut self, value: u64) {
+    #[inline]
+    pub fn set(&self, value: u64) {
         self.0.write(value);
     }
 }
@@ -137,6 +147,7 @@ impl TimerData {
         }
     }
 
+    #[inline]
     pub fn set_enable(&self, enable: bool) {
         self.0.write(*self.0.read().set_bit(2, enable));
     }
@@ -250,9 +261,10 @@ pub enum TimerComparator<'c> {
 pub struct TimerRegister {
     data: TimerData,
     comparator: VolatileCell<u64, ReadWrite>,
-    fsb: u64,
+    fsb: VolatileCell<u64, ReadWrite>,
 }
 
+impl Volatile for TimerRegister {}
 impl TimerRegister {
     pub fn data(&self) -> &TimerData {
         &self.data
@@ -267,58 +279,85 @@ impl TimerRegister {
     }
 }
 
-pub struct HighPerfTimer {
+pub struct HPET {
     min_tick: u16,
     freq: u64,
     mmio: MMIO,
 }
 
-impl HighPerfTimer {
+impl HPET {
     const CAPABILITIES: usize = 0x0;
     const CONFIG: usize = 0x10;
     const INTERRUPT_STATUS: usize = 0x20;
     const MAIN_COUNTER: usize = 0xF0;
     const TIMERS_BASE: usize = 0x100;
 
-    // pub unsafe fn from_acpi_tables() -> Option<Self> {
-    //     use lib::acpi::rdsp::xsdt::{hpet::HPET, XSDT};
+    pub unsafe fn new_from_acpi_table() -> Option<Self> {
+        use lib::acpi::rdsp::xsdt;
 
-    //     XSDT.find_sub_table::<HPET>().ok().map(|hpet| {
-    //         let mut hpet_driver = Self {
-    //             min_tick: hpet.min_tick(),
-    //             mmio: MMIO::new(
-    //                 {
-    //                     let address = hpet.address_data().address;
-    //                     address.frame_index()
-    //                 },
-    //                 1,
-    //             )
-    //             .unwrap(),
-    //             freq: 0,
-    //         };
+        xsdt::XSDT.find_sub_table::<xsdt::hpet::HPET>().map(|hpet| {
+            let mut hpet_driver = Self {
+                min_tick: hpet.min_tick(),
+                mmio: MMIO::new(
+                    {
+                        let address_data = hpet.address_data();
+                        let address = address_data.address;
+                        address.frame_index()
+                    },
+                    1,
+                )
+                .unwrap(),
+                freq: 0,
+            };
 
-    //         hpet_driver.freq = u32::pow(10, 15) / hpet_driver.capabilities().clock_period();
-    //     })
-    // }
+            hpet_driver.config().set_enable(false);
+            hpet_driver.config().set_legacy_irqs(false);
+            hpet_driver.main_counter().set(0);
+            hpet_driver.freq =
+                u64::pow(10, 15) / (hpet_driver.capabilities().clock_period() as u64);
 
+            hpet_driver
+        })
+    }
+
+    #[inline]
+    pub const fn frequency(&self) -> u64 {
+        self.freq
+    }
+
+    #[inline]
     pub fn capabilities(&self) -> &Capabilities {
         unsafe { self.mmio.borrow(Self::CAPABILITIES) }
     }
 
+    #[inline]
     pub fn config(&self) -> &Config {
         unsafe { self.mmio.borrow(Self::CONFIG) }
     }
 
+    #[inline]
     pub fn interrupt_status(&self) -> &InterruptStatus {
         unsafe { self.mmio.borrow(Self::INTERRUPT_STATUS) }
     }
 
+    #[inline]
     pub fn main_counter(&self) -> &MainCounter {
         unsafe { self.mmio.borrow(Self::MAIN_COUNTER) }
     }
+
+    pub fn get_timer(&self, timer_index: u8) -> &TimerRegister {
+        assert!(
+            timer_index < self.capabilities().timer_count(),
+            "Timer index out of bounds ({} >= max {}",
+            timer_index,
+            self.capabilities().timer_count()
+        );
+
+        unsafe { self.mmio.borrow(0x100 + (0x20 * (timer_index as usize))) }
+    }
 }
 
-impl Debug for HighPerfTimer {
+impl Debug for HPET {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> Result {
         formatter
             .debug_struct("HPET")
