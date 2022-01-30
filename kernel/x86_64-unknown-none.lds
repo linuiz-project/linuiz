@@ -5,22 +5,22 @@ SECTIONS
 {
     . = 0x8000; /* 32 KiB */
 
-    .ap_trampoline : ALIGN(0x40) {
-        __ap_trampoline_start = .;
+    .ap_text : ALIGN(0x1000) {
+        __ap_text_start = .;
 
-        *(.ap_trampoline.*)
-        *(.ap_trampoline)
+        *(.ap_text.*)
+        *(.ap_text)
 
-        __ap_trampoline_end = .;
+        __ap_text_end = .;
     }
 
-    .global_data : ALIGN(0x40) {
-        __global_data_start = .;
+    .ap_data : ALIGN(0x1000) {
+        __ap_data_start = .;
 
-        *(.global_data.*)
-        *(.global_data)
+        *(.ap_data.*)
+        *(.ap_data)
 
-        __global_data_end = .;
+        __ap_data_end = .;
     }
 
     . = 0x200000; /* 2 MiB */
