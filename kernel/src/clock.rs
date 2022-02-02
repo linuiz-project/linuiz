@@ -107,6 +107,7 @@ pub mod local {
     }
 
     impl Stopwatch {
+        #[inline]
         pub const fn new() -> Self {
             Self {
                 start_tick: None,
@@ -114,6 +115,7 @@ pub mod local {
             }
         }
 
+        #[inline]
         pub fn start_new() -> Self {
             Self {
                 start_tick: Some(get_ticks()),
@@ -121,11 +123,13 @@ pub mod local {
             }
         }
 
+        #[inline]
         pub fn start(&mut self) {
             self.stop_tick = None;
             self.start_tick = Some(get_ticks());
         }
 
+        #[inline]
         pub fn stop(&mut self) {
             match self.start_tick {
                 Some(_) => self.stop_tick = Some(get_ticks()),
@@ -133,11 +137,15 @@ pub mod local {
             }
         }
 
-        pub fn elapsed_ticks(&self) -> u64 {
-            let start_tick = self.start_tick.expect("no start tick");
-            let stop_tick = self.stop_tick.expect("no stop tick");
+        #[inline]
+        pub fn restart(&mut self) {
+            self.start_tick = Some(get_ticks());
+            self.stop_tick = None;
+        }
 
-            stop_tick - start_tick
+        #[inline]
+        pub fn elapsed_ticks(&self) -> u64 {
+            self.start_tick.unwrap_or(0) - self.stop_tick.unwrap_or(0)
         }
     }
 }

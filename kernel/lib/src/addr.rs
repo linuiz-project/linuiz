@@ -1,19 +1,16 @@
-pub mod addr_ty {
-    pub trait AddressType {}
-
-    pub enum Physical {}
-    impl AddressType for Physical {}
-
-    pub enum Virtual {}
-    impl AddressType for Virtual {}
-}
-
-use crate::addr_ty::*;
 use core::marker::PhantomData;
 
 pub const VADDR_HW_MAX: usize = 0x1000000000000;
 
 // TODO possibly introduce an Address<Frame> type to represent frame addresses?
+
+pub trait AddressType {}
+
+pub enum Physical {}
+impl AddressType for Physical {}
+
+pub enum Virtual {}
+impl AddressType for Virtual {}
 
 #[repr(transparent)]
 pub struct Address<T: AddressType> {

@@ -1,13 +1,12 @@
 use core::{alloc::Layout, mem::size_of, num::NonZeroUsize};
 use lib::{
-    addr_ty::Physical,
     align_up_div,
     memory::{
         get_page_manager,
         malloc::{Alloc, AllocError, MemoryAllocator},
         Page, PageAttributes, FRAME_MANAGER,
     },
-    Address,
+    Address, Physical,
 };
 use spin::{RwLock, RwLockWriteGuard};
 

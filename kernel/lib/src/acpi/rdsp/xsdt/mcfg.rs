@@ -1,6 +1,6 @@
 use crate::{
     acpi::{rdsp::xsdt::SubTable, Checksum, SDTHeader, SizedACPITable},
-    addr_ty::Physical,
+    Physical,
     Address,
 };
 

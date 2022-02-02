@@ -6,7 +6,7 @@
 
 use bit_field::BitField;
 
-use crate::{addr_ty::Physical, Address};
+use crate::{Physical, Address};
 
 #[inline(always)]
 fn rdmsr(ecx: u32) -> u64 {

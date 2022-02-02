@@ -4,9 +4,8 @@ use core::{
     sync::atomic::{AtomicU16, Ordering},
 };
 use lib::{
-    addr_ty::{Physical, Virtual},
     memory::{malloc, volatile::VolatileCell},
-    Address, IndexRing, ReadWrite,
+    Address, IndexRing, ReadWrite, {Physical, Virtual},
 };
 
 #[repr(usize)]

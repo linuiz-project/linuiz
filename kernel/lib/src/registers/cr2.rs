@@ -1,4 +1,4 @@
-use crate::{addr_ty::Virtual, Address};
+use crate::{Virtual, Address};
 
 pub struct CR2;
 

@@ -5,11 +5,10 @@ use alloc::collections::BTreeMap;
 use bit_field::BitField;
 use core::{convert::TryFrom, fmt, marker::PhantomData, mem::MaybeUninit};
 use lib::{
-    addr_ty::Physical,
     io::pci::{standard::StandardRegister, PCIeDevice, Standard},
     memory::volatile::{Volatile, VolatileCell},
     sync::{SuccessSource, SuccessToken, ValuedSuccessToken},
-    volatile_bitfield_getter, volatile_bitfield_getter_ro, Address, ReadOnly, ReadWrite,
+    volatile_bitfield_getter, volatile_bitfield_getter_ro, Address, Physical, ReadOnly, ReadWrite,
 };
 use num_enum::TryFromPrimitive;
 use spin::{Mutex, MutexGuard};

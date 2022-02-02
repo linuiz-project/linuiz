@@ -9,7 +9,7 @@ pub struct AddressData {
     pub register_bit_width: u8,
     pub register_bit_offset: u8,
     resv0: u8,
-    pub address: crate::Address<crate::addr_ty::Physical>,
+    pub address: crate::Address<crate::Physical>,
 }
 
 #[repr(C, packed)]

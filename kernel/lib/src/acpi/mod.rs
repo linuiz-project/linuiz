@@ -1,6 +1,6 @@
 pub mod rdsp;
 
-use crate::{addr_ty::Physical, structures::GUID, Address};
+use crate::{Physical, structures::GUID, Address};
 
 pub const ACPI_GUID: GUID = GUID::new(
     0xeb9d2d30,

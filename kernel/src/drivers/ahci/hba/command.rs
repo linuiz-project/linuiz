@@ -12,7 +12,7 @@ impl PRDTEntry {
     bitfield_getter!(bits, u32, byte_count, 0..22);
     bitfield_getter!(bits, interrupt_on_completion, 31);
 
-    pub fn set_db_addr(&mut self, addr: lib::Address<lib::addr_ty::Virtual>) {
+    pub fn set_db_addr(&mut self, addr: lib::Address<lib::Virtual>) {
         let addr_usize = addr.as_usize();
 
         self.db_addr_lower = addr_usize as u32;

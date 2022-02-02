@@ -1,4 +1,4 @@
-use crate::{addr_ty::Physical, Address};
+use crate::{Physical, Address};
 use core::arch::asm;
 
 bitflags::bitflags! {

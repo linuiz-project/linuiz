@@ -359,8 +359,8 @@ impl DeviceRegister {
         }
     }
 
-    pub fn as_addr(&self) -> crate::Address<crate::addr_ty::Virtual> {
-        use crate::{addr_ty::Virtual, Address};
+    pub fn as_addr(&self) -> crate::Address<crate::Virtual> {
+        use crate::{Virtual, Address};
 
         Address::<Virtual>::new(match self {
             DeviceRegister::MemorySpace32(value, _) => (value & !0b1111) as usize,

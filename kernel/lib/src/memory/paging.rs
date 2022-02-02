@@ -1,4 +1,4 @@
-use crate::{addr_ty::Virtual, Address};
+use crate::{Address, Virtual};
 use core::fmt;
 use core::marker::PhantomData;
 

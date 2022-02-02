@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use crate::drivers::graphics::color::{Color8i, Colors};
-use lib::{addr_ty::Physical, Address, Size};
+use lib::{Address, Physical, Size};
 use spin::{Mutex, RwLock};
 
 #[repr(C)]

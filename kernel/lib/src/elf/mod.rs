@@ -6,7 +6,7 @@ pub use header::*;
 pub use section_header::*;
 pub use segment_header::*;
 
-use crate::{addr_ty::Virtual, Address};
+use crate::{Virtual, Address};
 
 pub const X86_64_RELATIVE: u64 = 0x00000008;
 

@@ -1,4 +1,4 @@
-use crate::{addr_ty::Physical, io::pci::DeviceVariant, Address};
+use crate::{Physical, io::pci::DeviceVariant, Address};
 use alloc::vec::Vec;
 
 pub struct PCIeBus {

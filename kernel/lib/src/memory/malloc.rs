@@ -1,5 +1,5 @@
 use crate::{
-    addr_ty::{Physical},
+    {Physical},
     Address,
 };
 use alloc::{boxed::Box, vec::Vec};

@@ -1,5 +1,5 @@
 use crate::{
-    addr_ty::{Physical, Virtual},
+    {Physical, Virtual},
     Address,
 };
 

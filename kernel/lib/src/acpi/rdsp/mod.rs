@@ -1,6 +1,6 @@
 pub mod xsdt;
 
-use crate::{acpi::Checksum, addr_ty::Physical, Address};
+use crate::{acpi::Checksum, Physical, Address};
 
 #[repr(C, packed)]
 pub struct RDSPDescriptor {

@@ -1,6 +1,6 @@
 use core::ops::RangeInclusive;
 
-use crate::{addr_ty::Physical, io::pci::PCIeBus, Address};
+use crate::{Physical, io::pci::PCIeBus, Address};
 use alloc::vec::Vec;
 
 #[derive(Debug)]

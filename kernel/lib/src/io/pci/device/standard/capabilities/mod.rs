@@ -1,7 +1,7 @@
 mod msix;
 pub use msix::*;
 
-use crate::{addr_ty::Virtual, memory::MMIO, Address};
+use crate::{Virtual, memory::MMIO, Address};
 
 /// An exaplanation of the acronyms used here can be inferred from:
 ///  https://lekensteyn.nl/files/docs/PCI_SPEV_V3_0.pdf table H-1

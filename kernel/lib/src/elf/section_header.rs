@@ -1,6 +1,6 @@
 #![allow(non_camel_case_types)]
 
-use crate::{addr_ty::Virtual, Address};
+use crate::{Virtual, Address};
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy)]

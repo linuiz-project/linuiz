@@ -88,8 +88,8 @@ impl FramebufferInfo {
         self.stride
     }
 
-    pub fn addr(&self) -> Address<addr_ty::Physical> {
-        Address::<addr_ty::Physical>::new(self.ptr as usize)
+    pub fn addr(&self) -> Address<Physical> {
+        Address::<Physical>::new(self.ptr as usize)
     }
 }
 

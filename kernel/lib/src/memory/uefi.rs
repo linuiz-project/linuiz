@@ -18,7 +18,8 @@ pub enum MemoryType {
     MMIO,
     MMIO_PORT_SPACE,
     PAL_CODE,
-    PERSISTENT_MEMORY,
+    PERSISTENT,
+    UNACCEPTED,
     KERNEL_CODE = 0xFFFFFF00,
     KERNEL_DATA = 0xFFFFFF01,
 }
@@ -45,8 +46,8 @@ bitflags::bitflags! {
 pub struct MemoryDescriptor {
     pub ty: MemoryType,
     ty_padding: u32,
-    pub phys_start: Address<crate::addr_ty::Physical>,
-    pub virt_start: Address<crate::addr_ty::Virtual>,
+    pub phys_start: Address<crate::Physical>,
+    pub virt_start: Address<crate::Virtual>,
     pub page_count: u64,
     pub att: MemoryAttributes,
 }
@@ -75,6 +76,7 @@ impl MemoryDescriptor {
                 | MemoryType::LOADER_CODE
                 | MemoryType::LOADER_DATA
                 | MemoryType::CONVENTIONAL
+                | MemoryType::PERSISTENT
         )
         // If this is a stack descriptor, it should be reserved.
         //

@@ -282,7 +282,7 @@ pub fn load_kernel(boot_services: &BootServices, mut kernel_file: RegularFile) -
 fn apply_relocations(
     kernel_file: &mut RegularFile,
     kernel_header: &ELFHeader64,
-    segment_virt_addr: lib::Address<lib::addr_ty::Virtual>,
+    segment_virt_addr: lib::Address<lib::Virtual>,
     segment_size: usize,
     segment_buffer: &mut [u8],
 ) {
