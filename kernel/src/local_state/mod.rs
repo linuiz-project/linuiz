@@ -5,7 +5,7 @@ pub use int_ctrl::*;
 use spin::{Mutex, MutexGuard};
 
 use crate::{clock::AtomicClock, scheduling::Scheduler};
-use core::sync::atomic::AtomicUsize;
+use core::{ops::Range, sync::atomic::AtomicUsize};
 use lib::registers::{msr, msr::GenericMSR};
 
 pub static INIT_COUNT: AtomicUsize = AtomicUsize::new(0);
@@ -16,55 +16,52 @@ pub fn is_bsp() -> bool {
 
 struct LocalStateRegister;
 
+/// Layout of LocalStateRegister:
+/// Bit 0       ID FLAG
+/// Bit 1..10   ID BITS
+/// Bit 10..13  RESERVED
+/// Bit 13..64  STRUCTURE PTR
 impl LocalStateRegister {
-    const ID_FLAG: u64 = 1 << 0;
-    const PTR_FLAG: u64 = 1 << 1;
-    const ID_BITS_SHFT: u64 = (Self::PTR_FLAG.trailing_zeros() as u64) + 1;
-    const ID_BITS: u64 = 0xFF << Self::ID_BITS_SHFT;
-    const DATA_MASK: u64 = Self::ID_BITS | Self::PTR_FLAG | Self::ID_FLAG;
+    const ID_SET_BIT: u64 = 0;
+    const ID_BITS: Range<usize> = 1..10;
+    const DATA_BITS: Range<usize> = 0..12;
+    const PTR_BITS: Range<usize> = Self::ID_BITS.end..64;
 
     #[inline]
     fn get_id() -> u8 {
         let gs_base = msr::IA32_GS_BASE::read();
-        if (gs_base & Self::ID_FLAG) == 0 {
+
+        if !gs_base.get_bit(0) {
             let cpuid_id = (lib::instructions::cpuid::exec(0x1, 0x0).unwrap().ebx() >> 24) as u64;
 
             unsafe {
                 msr::IA32_GS_BASE::write(
-                    msr::IA32_GS_BASE::read() | (cpuid_id << Self::ID_BITS_SHFT) | Self::ID_FLAG,
+                    *msr::IA32_GS_BASE::read().set_bits(Self::ID_BITS, cpuid_id),
                 )
             };
-
-            cpuid_id as u8
-        } else {
-            ((gs_base & Self::ID_BITS) >> Self::ID_BITS_SHFT) as u8
         }
+
+        gs_base.get_bits(Self::ID_BITS) as u8
     }
 
     fn try_get() -> Option<&'static LocalState> {
         unsafe {
-            let gs_base = msr::IA32_GS_BASE::read();
-            if (gs_base & Self::PTR_FLAG) > 0 {
-                ((gs_base & !Self::DATA_MASK) as *mut LocalState).as_ref()
-            } else {
-                None
-            }
+            ((*msr::IA32_GS_BASE::read().set_bits(Self::DATA_BITS, 0)) as *const LocalState)
+                .as_ref()
         }
     }
 
-    fn set_local_state_ptr(ptr: *mut LocalState) {
+    fn set_ptr(ptr: *mut LocalState) {
         let ptr_u64 = ptr as u64;
 
         assert_eq!(
-            ptr_u64 & Self::DATA_MASK,
+            ptr_u64.get_bits(Self::DATA_BITS),
             0,
-            "LocalState pointer cannot have data bits set."
+            "Local state pointer must be page-aligned (low 12 bits are data bits)."
         );
 
         unsafe {
-            msr::IA32_GS_BASE::write(
-                ptr_u64 | (msr::IA32_GS_BASE::read() & Self::DATA_MASK) | Self::PTR_FLAG,
-            )
+            msr::IA32_GS_BASE::write(ptr_u64 | msr::IA32_GS_BASE::read().get_bits(Self::DATA_BITS));
         };
     }
 }
@@ -95,8 +92,8 @@ pub fn init() {
         let lpu_ptr = lib::memory::malloc::get()
             .alloc(
                 core::mem::size_of::<LocalState>(),
-                // Invariantly asssumes LocalStateFlags bitfields will be packed.
-                core::num::NonZeroUsize::new((LocalStateRegister::DATA_MASK as usize) + 1),
+                // Local state register must be page-aligned.
+                core::num::NonZeroUsize::new(0x1000),
             )
             .unwrap()
             .cast::<LocalState>()
@@ -124,7 +121,7 @@ pub fn init() {
         }
 
         // Convert ptr to 64 bit representation, and write metadata into low bits.
-        LocalStateRegister::set_local_state_ptr(lpu_ptr);
+        LocalStateRegister::set_ptr(lpu_ptr);
         int_ctrl().sw_enable();
         int_ctrl().reload_timer(core::num::NonZeroU32::new(1));
     }

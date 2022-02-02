@@ -442,13 +442,12 @@ extern "C" fn _startup() -> ! {
         //     thread.set_enabled(true);
         // }
 
-        use scheduling::Thread;
-        let mut thread = local_state::lock_scheduler();
-        //thread.set_enabled(true);
-        thread.push_thread(Thread::new(255, task1, None, None));
-        thread.push_thread(Thread::new(255, task2, None, None));
+        // use scheduling::Thread;
+        // let mut thread = local_state::lock_scheduler();
+        // thread.set_enabled(true);
+        // thread.push_thread(Thread::new(255, task1, None, None));
+        // thread.push_thread(Thread::new(255, task2, None, None));
     }
-    // lib::instructions::hlt_indefinite()
 
     unsafe {
         use lib::registers::{msr, msr::GenericMSR};
@@ -499,10 +498,6 @@ fn task2() -> ! {
             clock::global::busy_wait_msec(1);
         }
     }
-}
-
-fn bsp_main(nvme: drivers::nvme::Controller) -> ! {
-    lib::instructions::hlt_indefinite()
 }
 
 fn kernel_main() -> ! {

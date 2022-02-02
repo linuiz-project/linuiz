@@ -19,10 +19,10 @@ impl AtomicClock {
 }
 
 pub mod global {
-    static PIT_CLOCK: SyncOnceCell<super::AtomicClock> = SyncOnceCell::new();
+    static GLOBAL_CLOCK: SyncOnceCell<super::AtomicClock> = SyncOnceCell::new();
 
     pub fn init() {
-        if let Ok(()) = PIT_CLOCK.set(super::AtomicClock::new()) {
+        if let Ok(()) = GLOBAL_CLOCK.set(super::AtomicClock::new()) {
             lib::instructions::interrupts::without_interrupts(|| {
                 use lib::structures::pic8259;
 
@@ -43,7 +43,7 @@ pub mod global {
     use lib::{cell::SyncOnceCell, structures::idt::InterruptStackFrame};
     extern "x86-interrupt" fn tick_handler(_: InterruptStackFrame) {
         unsafe {
-            PIT_CLOCK
+            GLOBAL_CLOCK
                 .get()
                 // This handler will only be called after GLOBAL_CLOCK is already initialized.
                 .unwrap_unchecked()
@@ -55,7 +55,9 @@ pub mod global {
     }
 
     pub fn get_ticks() -> Option<u64> {
-        PIT_CLOCK.get().map(|global_clock| global_clock.get_ticks())
+        GLOBAL_CLOCK
+            .get()
+            .map(|global_clock| global_clock.get_ticks())
     }
 
     pub fn busy_wait_msec(milliseconds: u64) {
@@ -65,10 +67,12 @@ pub mod global {
 }
 
 pub mod local {
+    #[inline(always)]
     pub fn get_ticks() -> u64 {
         crate::local_state::clock().get_ticks()
     }
 
+    #[inline(always)]
     pub fn sleep_msec(milliseconds: u64) {
         let target_ticks = get_ticks() + milliseconds;
 
