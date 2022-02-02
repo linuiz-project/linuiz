@@ -246,12 +246,6 @@ impl<'arr> FrameManager<'arr> {
             last_frame_end = start_index + frame_count;
         }
 
-        // TODO
-        // info!(
-        //     "BIOS has reserved {}MiB of usable memory.",
-        //     super::to_mibibytes(reserved_byte_count)
-        // );
-
         falloc
     }
 

@@ -76,6 +76,7 @@ impl MemoryDescriptor {
                 | MemoryType::LOADER_CODE
                 | MemoryType::LOADER_DATA
                 | MemoryType::CONVENTIONAL
+                // TODO possibly specify this memory separately?
                 | MemoryType::PERSISTENT
         )
         // If this is a stack descriptor, it should be reserved.
