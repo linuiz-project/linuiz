@@ -39,8 +39,7 @@ mod global_alloc {
 }
 
 use crate::{
-    addr_ty::{Physical, Virtual},
-    Address,
+    Address, {Physical, Virtual},
 };
 use core::{mem::MaybeUninit, ops::Range};
 
@@ -84,12 +83,12 @@ pub struct MMIO {
 impl MMIO {
     pub unsafe fn new(frame_index: usize, count: usize) -> Result<Self, malloc::AllocError> {
         for frame_index in frame_index..(frame_index + count) {
-            if let Err(FrameError::TypeConversion(from_type, to_type)) =
+            if let Err(FrameError::TypeConversion { from, to }) =
                 FRAME_MANAGER.try_modify_type(frame_index, FrameType::MMIO)
             {
                 panic!(
                     "Attempted to assign MMIO to Frame {}: {:?} into {:?}",
-                    frame_index, from_type, to_type
+                    frame_index, from, to
                 );
             }
         }

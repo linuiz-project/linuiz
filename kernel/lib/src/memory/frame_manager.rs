@@ -1,4 +1,4 @@
-use crate::{addr_ty::Virtual, memory::uefi, Address};
+use crate::{memory::uefi, Address, Virtual};
 use core::sync::atomic::{AtomicU32, Ordering};
 use num_enum::TryFromPrimitive;
 use spin::RwLock;
@@ -10,6 +10,8 @@ pub enum FrameType {
     Unusable,
     Reserved,
     MMIO,
+    // TODO possibly ACPI reclaim?
+    Kernel,
 }
 
 #[derive(Debug)]
@@ -18,10 +20,17 @@ struct Frame(AtomicU32);
 
 impl Frame {
     const REF_COUNT_MASK: u32 = 0xFFFF;
-    const LOCKED_SHIFT: u32 = 16;
-    const FRAME_TYPE_SHIFT: u32 = 17;
+    const PEEKED_BIT: u32 = 1 << 16;
+    const LOCKED_BIT: u32 = 1 << 17;
+    const FRAME_TYPE_SHIFT: u32 = 26;
+
+    #[inline]
+    const fn empty() -> Self {
+        Self(AtomicU32::new(0))
+    }
 
     /// 'Borrows' a frame, incrementing the reference counter.
+    #[inline]
     fn borrow(&self) {
         // REMARK: Possibly handle case where 2^16 references have been made to a single frame?
         //         That does seem particularly unlikely, however.
@@ -29,19 +38,36 @@ impl Frame {
     }
 
     /// 'Drops' a frame, decrementing the reference counter.
+    #[inline]
     fn drop(&self) {
         self.0.fetch_sub(1, Ordering::Relaxed);
     }
 
     /// Locks a frame, setting the `locked` bit.
+    #[inline]
     fn lock(&self) {
-        self.0.fetch_or(1 << Self::LOCKED_SHIFT, Ordering::AcqRel);
+        self.0.fetch_or(Self::LOCKED_BIT, Ordering::AcqRel);
     }
 
     /// Frees a frame, unsetting the `locked` bit.
+    #[inline]
     fn free(&self) {
-        self.0
-            .fetch_and(!(1 << Self::LOCKED_SHIFT), Ordering::AcqRel);
+        self.0.fetch_and(!Self::LOCKED_BIT, Ordering::AcqRel);
+    }
+
+    #[inline]
+    fn try_peek(&self) -> bool {
+        (self.0.fetch_or(Self::PEEKED_BIT, Ordering::AcqRel) & Self::PEEKED_BIT) == 0
+    }
+
+    #[inline]
+    fn peek(&self) {
+        while !self.try_peek() {}
+    }
+
+    #[inline]
+    fn unpeek(&self) {
+        self.0.fetch_and(!Self::PEEKED_BIT, Ordering::AcqRel);
     }
 
     /// Returns the frame data in a tuple.
@@ -50,14 +76,9 @@ impl Frame {
         let raw = self.0.load(Ordering::Relaxed);
 
         (
-            match raw >> Self::FRAME_TYPE_SHIFT {
-                0 => FrameType::Usable,
-                1 => FrameType::Unusable,
-                2 => FrameType::Reserved,
-                _ => panic!(""),
-            },
+            FrameType::try_from(raw >> Self::FRAME_TYPE_SHIFT).unwrap(),
             raw & Self::REF_COUNT_MASK,
-            ((raw >> Self::LOCKED_SHIFT) & 1) > 0,
+            (raw & Self::LOCKED_BIT) > 0,
         )
     }
 
@@ -69,10 +90,15 @@ impl Frame {
 
         if frame_type == new_type {
             Ok(())
-        } else if frame_type == FrameType::Usable
+        }
+        // If frame is already usable ...
+        else if frame_type == FrameType::Usable
+        // or if frame is not, but new type is MMIO ...
             || (new_type == FrameType::MMIO
                 && matches!(frame_type, FrameType::Unusable | FrameType::Reserved))
         {
+            // Change frame type.
+
             // Usable / Generic
             self.0.store(
                 ((new_type as u32) << Self::FRAME_TYPE_SHIFT)
@@ -82,7 +108,10 @@ impl Frame {
 
             Ok(())
         } else {
-            Err(FrameError::TypeConversion(frame_type, new_type))
+            Err(FrameError::TypeConversion {
+                from: frame_type,
+                to: new_type,
+            })
         }
     }
 }
@@ -95,13 +124,12 @@ pub enum FrameError {
     FrameNotBorrowed(usize),
     FrameNotLocked(usize),
     OutOfRange(usize),
-    TypeConversion(FrameType, FrameType),
+    TypeConversion { from: FrameType, to: FrameType },
     NoFreeFrames,
 }
 
 pub struct FrameManager<'arr> {
     map: RwLock<&'arr mut [Frame]>,
-    map_len: usize,
     total_memory: usize,
 }
 
@@ -134,93 +162,106 @@ impl<'arr> FrameManager<'arr> {
         // Find the best-fit descriptor for the falloc memory frames.
         let descriptor = memory_map
             .iter()
-            .filter(|descriptor| !descriptor.should_reserve())
+            .filter(|descriptor| {
+                matches!(
+                    descriptor.ty,
+                    uefi::MemoryType::CONVENTIONAL
+                        | uefi::MemoryType::BOOT_SERVICES_CODE
+                        | uefi::MemoryType::BOOT_SERVICES_DATA
+                        | uefi::MemoryType::LOADER_CODE
+                        | uefi::MemoryType::LOADER_DATA
+                )
+            })
             .filter(|descriptor| descriptor.page_count >= (req_falloc_memory_frames as u64))
             .min_by_key(|descriptor| descriptor.page_count)
             .expect("Failed to find viable memory descriptor for frame allocator");
-        let descriptor_ptr = descriptor.phys_start.as_usize() as *mut _;
         // Clear the memory of the chosen descriptor.
-        unsafe { core::ptr::write_bytes(descriptor_ptr, 0, total_system_frames) };
+        unsafe {
+            core::ptr::write_bytes(
+                descriptor.phys_start.as_usize() as *mut u8,
+                0,
+                req_falloc_memory,
+            )
+        };
 
         let falloc = Self {
             map: RwLock::new(unsafe {
-                core::slice::from_raw_parts_mut(descriptor_ptr, total_system_frames)
+                core::slice::from_raw_parts_mut(
+                    descriptor.phys_start.as_usize() as *mut _,
+                    total_system_frames,
+                )
             }),
-            map_len: total_system_frames,
             total_memory: total_system_memory,
         };
 
-        falloc.try_modify_type(0, FrameType::Unusable).unwrap();
-        let frame_range = descriptor.phys_start.frame_index()
+        let frame_ledger_range = descriptor.phys_start.frame_index()
             ..(descriptor.phys_start.frame_index() + req_falloc_memory_frames);
         debug!(
             "Locking frames {:?} to facilitate static frame allocator map.",
-            frame_range
+            frame_ledger_range
         );
-        for frame_index in frame_range {
+        for frame_index in frame_ledger_range {
             falloc
-                .try_modify_type(frame_index, FrameType::Reserved)
+                .try_modify_type(frame_index, FrameType::Kernel)
                 .unwrap();
             falloc.lock(frame_index).unwrap();
         }
 
-        debug!("Reserving requsite frames from BIOS memory map.");
+        // Modify the null frame to never be used.
+        falloc.try_modify_type(0, FrameType::Unusable).unwrap();
+
+        debug!("Reserving requsite system frames.");
         let mut last_frame_end = 0;
-        let mut reserved_byte_count = 0;
         for descriptor in memory_map
             .iter()
             .filter(|d| d.phys_start.is_frame_aligned())
         {
-            let frame_index = descriptor.phys_start.frame_index();
+            let start_index = descriptor.phys_start.frame_index();
             let frame_count = descriptor.page_count as usize;
 
             // Checks for 'holes' in system memory which we shouldn't try to allocate to.
-            for frame_index in last_frame_end..frame_index {
+            for frame_index in last_frame_end..start_index {
                 falloc
                     .try_modify_type(frame_index, FrameType::Unusable)
                     .unwrap();
             }
 
             if descriptor.should_reserve() {
-                falloc.lock_many(frame_index, frame_count).unwrap();
-
-                for frame_index in frame_index..(frame_index + frame_count) {
-                    if descriptor.ty == uefi::MemoryType::MMIO {
-                        falloc
-                            .try_modify_type(frame_index, FrameType::MMIO)
-                            .unwrap();
-                    } else {
-                        falloc
-                            .try_modify_type(frame_index, FrameType::Reserved)
-                            .unwrap();
-
-                        if matches!(
-                            descriptor.ty,
-                            uefi::MemoryType::RUNTIME_SERVICES_CODE
-                                | uefi::MemoryType::RUNTIME_SERVICES_DATA
-                        ) {
-                            reserved_byte_count += 0x1000;
-                        }
+                // Translate UEFI memory type to kernel frame type.
+                let frame_ty = match descriptor.ty {
+                    uefi::MemoryType::UNUSABLE => FrameType::Unusable,
+                    uefi::MemoryType::MMIO_PORT_SPACE | uefi::MemoryType::MMIO => FrameType::MMIO,
+                    uefi::MemoryType::KERNEL_CODE | uefi::MemoryType::KERNEL_DATA => {
+                        FrameType::Kernel
                     }
+                    _ => FrameType::Reserved,
+                };
+
+                for frame_index in start_index..(start_index + frame_count) {
+                    falloc.try_modify_type(frame_index, frame_ty).unwrap();
+                    falloc.lock(frame_index).unwrap();
                 }
             }
 
-            last_frame_end = frame_index + frame_count;
+            last_frame_end = start_index + frame_count;
         }
 
-        info!(
-            "BIOS has reserved {}MiB of usable memory.",
-            super::to_mibibytes(reserved_byte_count)
-        );
+        // TODO
+        // info!(
+        //     "BIOS has reserved {}MiB of usable memory.",
+        //     super::to_mibibytes(reserved_byte_count)
+        // );
 
         falloc
     }
 
     pub fn lock(&self, index: usize) -> Result<usize, FrameError> {
-        let frame = &mut self.map.write()[index];
+        let frame = &self.map.read()[index];
+        frame.peek();
+
         let (ty, ref_count, locked) = frame.data();
 
-        if ty == FrameType::Unusable {
+        let result = if ty == FrameType::Unusable {
             Err(FrameError::FrameUnusable(index))
         } else if ref_count > 0 {
             Err(FrameError::FrameBorrowed(index))
@@ -229,7 +270,10 @@ impl<'arr> FrameManager<'arr> {
         } else {
             frame.lock();
             Ok(index)
-        }
+        };
+
+        frame.unpeek();
+        result
     }
 
     pub fn lock_many(&self, index: usize, count: usize) -> Result<usize, FrameError> {
@@ -257,14 +301,19 @@ impl<'arr> FrameManager<'arr> {
 
     pub fn free(&self, index: usize) -> Result<(), FrameError> {
         let frame = &self.map.read()[index];
+        frame.peek();
+
         let (_, _, locked) = frame.data();
 
-        if !locked {
+        let result = if !locked {
             Err(FrameError::FrameNotLocked(index))
         } else {
             frame.free();
             Ok(())
-        }
+        };
+
+        frame.unpeek();
+        result
     }
 
     pub fn borrow(&self, index: usize) -> Result<usize, FrameError> {
@@ -299,11 +348,17 @@ impl<'arr> FrameManager<'arr> {
             .iter()
             .enumerate()
             .find_map(|(index, frame)| {
-                let (ty, ref_count, locked) = frame.data();
+                if frame.try_peek() {
+                    let (ty, ref_count, locked) = frame.data();
 
-                if ty == FrameType::Usable && ref_count == 0 && !locked {
-                    frame.lock();
-                    Some(index)
+                    if ty == FrameType::Usable && ref_count == 0 && !locked {
+                        frame.lock();
+                        frame.unpeek();
+                        Some(index)
+                    } else {
+                        frame.unpeek();
+                        None
+                    }
                 } else {
                     None
                 }
@@ -334,10 +389,9 @@ impl<'arr> FrameManager<'arr> {
         if current_run < count {
             Err(FrameError::NoFreeFrames)
         } else {
-            map.iter()
-                .skip(start_index)
-                .take(count)
-                .for_each(|frame| frame.lock());
+            map.iter().skip(start_index).take(count).for_each(|frame| {
+                frame.lock();
+            });
 
             Ok(start_index)
         }
@@ -362,13 +416,12 @@ impl<'arr> FrameManager<'arr> {
     }
 
     pub fn total_frame_count(&self) -> usize {
-        self.map_len
+        self.map.read().len()
     }
 
     pub fn iter<'outer>(&'arr self) -> FrameIterator<'outer, 'arr> {
         FrameIterator {
             map: &self.map,
-            map_len: self.map_len,
             cur_index: 0,
         }
     }
@@ -376,7 +429,6 @@ impl<'arr> FrameManager<'arr> {
 
 pub struct FrameIterator<'lock, 'arr> {
     map: &'lock RwLock<&'arr mut [Frame]>,
-    map_len: usize,
     cur_index: usize,
 }
 
@@ -384,16 +436,23 @@ impl Iterator for FrameIterator<'_, '_> {
     type Item = (FrameType, u32, bool);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.cur_index < self.map_len {
+        let map_read = self.map.read();
+        if self.cur_index < map_read.len() {
             let cur_index = self.cur_index;
             self.cur_index += 1;
 
-            Some(self.map.read()[cur_index].data())
+            Some(map_read[cur_index].data())
         } else {
             None
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, Some(self.map.read().len()))
+    }
 }
+
+impl ExactSizeIterator for FrameIterator<'_, '_> {}
 
 lazy_static::lazy_static! {
     pub static ref FRAME_MANAGER: FrameManager<'static> = {

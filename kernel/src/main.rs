@@ -174,7 +174,6 @@ unsafe extern "efiapi" fn kernel_init(
 
             {
                 let page_manager = lib::memory::get_page_manager();
-
                 // TODO the addressors shouldn't mmap all reserved frames by default.
                 //  It is, for instance, useless in userland addressors, where ACPI tables
                 //  don't need to be mapped.
@@ -182,7 +181,7 @@ unsafe extern "efiapi" fn kernel_init(
                 FRAME_MANAGER
                     .iter()
                     .enumerate()
-                    .filter(|(_, (ty, _, _))| !ty.eq(&FrameType::Usable))
+                    .filter(|(_, (ty, _, _))| matches!(ty, FrameType::Kernel | FrameType::Reserved))
                     .for_each(|(index, _)| {
                         page_manager
                             .identity_map(
@@ -503,6 +502,22 @@ fn task2() -> ! {
 fn kernel_main() -> ! {
     debug!("Successfully entered `kernel_main()`.");
 
+    info!(
+        "TOTAL {} bytes",
+        lib::BOOT_INFO
+            .get()
+            .unwrap()
+            .memory_map()
+            .iter()
+            .filter_map(
+                |d| if d.ty.eq(&lib::memory::uefi::MemoryType::MMIO_PORT_SPACE) {
+                    Some(d.page_count * 0x1000)
+                } else {
+                    None
+                }
+            )
+            .sum::<u64>()
+    );
     unsafe { swap_ring3() };
 
     lib::instructions::hlt_indefinite()

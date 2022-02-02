@@ -1,6 +1,12 @@
 use alloc::{boxed::Box, collections::BinaryHeap};
 use core::{cmp, sync::atomic::AtomicU64};
-use lib::{registers::RFlags, structures::idt::InterruptStackFrame};
+use lib::{
+    registers::{CR3Flags, RFlags},
+    structures::idt::InterruptStackFrame,
+    Address, Physical,
+};
+
+use crate::clock::local::Stopwatch;
 
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
@@ -49,7 +55,7 @@ static CURRENT_THREAD_ID: AtomicU64 = AtomicU64::new(0);
 pub struct Thread {
     id: u64,
     prio: u8,
-    time: u64,
+    time: Stopwatch,
     pub rip: u64,
     pub cs: u64,
     pub rsp: u64,
@@ -57,6 +63,7 @@ pub struct Thread {
     pub rfl: RFlags,
     pub gprs: ThreadRegisters,
     pub stack: Box<[u8]>,
+    pub cr3: (Address<Physical>, CR3Flags),
 }
 
 impl Thread {
@@ -67,6 +74,7 @@ impl Thread {
         function: fn() -> !,
         stack: Option<Box<[u8]>>,
         flags: Option<RFlags>,
+        cr3: (Address<Physical>, CR3Flags),
     ) -> Self {
         let rip = function as u64;
         let stack = stack.unwrap_or_else(|| unsafe {
@@ -80,7 +88,7 @@ impl Thread {
         Self {
             id: CURRENT_THREAD_ID.fetch_add(1, core::sync::atomic::Ordering::AcqRel),
             prio: priority,
-            time: u64::MAX,
+            time: Stopwatch::new(),
             rip,
             cs: gdt::code() as u64,
             rsp: unsafe { stack.as_ptr().add(stack.len()) as u64 },
@@ -88,6 +96,7 @@ impl Thread {
             rfl: flags.unwrap_or(RFlags::minimal()),
             gprs: ThreadRegisters::empty(),
             stack,
+            cr3,
         }
     }
 }
@@ -95,19 +104,22 @@ impl Thread {
 impl Eq for Thread {}
 impl PartialEq for Thread {
     fn eq(&self, other: &Self) -> bool {
-        self.prio == other.prio && self.time == other.time
+        self.prio == other.prio && self.time.elapsed_ticks() == other.time.elapsed_ticks()
     }
 }
 
 impl Ord for Thread {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        if self.time < other.time {
+        let self_time = self.time.elapsed_ticks();
+        let other_time = other.time.elapsed_ticks();
+
+        if self_time < other_time {
             if self.prio > other.prio {
                 cmp::Ordering::Greater
             } else {
                 cmp::Ordering::Less
             }
-        } else if self.time == other.time {
+        } else if self_time == other_time {
             self.prio.cmp(&other.prio)
         } else {
             cmp::Ordering::Less
@@ -161,15 +173,19 @@ impl Scheduler {
             task.ss = stack_frame.stack_segment;
             task.rfl = RFlags::from_bits_truncate(stack_frame.cpu_flags);
             task.gprs = unsafe { cached_regs.read_volatile() };
-            task.time += 1;
+            task.time.stop();
 
             self.tasks.push(task);
         }
 
         // Move in new task if enabled.
         if self.enabled {
-            if let Some(next_task) = self.tasks.pop() {
+            if let Some(mut next_task) = self.tasks.pop() {
                 unsafe {
+                    // Restart the current task timer.
+                    next_task.time.restart();
+
+                    // Modify task frame to restore rsp & rip.
                     stack_frame
                         .as_mut()
                         .write(x86_64::structures::idt::InterruptStackFrameValue {
@@ -179,13 +195,19 @@ impl Scheduler {
                             stack_pointer: x86_64::VirtAddr::new_truncate(next_task.rsp),
                             stack_segment: next_task.ss,
                         });
+
+                    // Restore task registers.
                     cached_regs.write_volatile(next_task.gprs);
+
+                    // Set current page tables.
+                    lib::registers::CR3::write(next_task.cr3.0, next_task.cr3.1);
                 }
 
                 self.current_task = Some(next_task);
             }
         }
 
+        // Calculate next one-shot timer value.
         let total_tasks = self.tasks.len() + if self.current_task.is_some() { 1 } else { 0 };
         if total_tasks > 0 {
             (1000 / total_tasks).clamp(MIN_TIME_SLICE_MS, MAX_TIME_SLICE_MS)
