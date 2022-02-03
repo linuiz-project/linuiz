@@ -1,19 +1,27 @@
 use x86_64::{instructions::segmentation::Segment, structures::tss::TaskStateSegment};
 
-pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
+static DOUBLE_FAULT_IST: [u8; 0x1000] = [0u8; 0x1000];
+pub const DOUBLE_FAULT_IST_INDEX: u16 = 6;
+pub static mut TSS_STACK_PTRS: [Option<*const ()>; 7] = [
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    Some(DOUBLE_FAULT_IST.as_ptr() as *const ()),
+];
 
 lazy_static::lazy_static! {
     pub static ref TSS: TaskStateSegment = {
         let mut tss = TaskStateSegment::new();
-        tss.interrupt_stack_table[DOUBLE_FAULT_IST_INDEX as usize] = {
-            const STACK_SIZE: usize = 0x1000;
-            static STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
 
-            let stack_start = x86_64::VirtAddr::from_ptr(&STACK);
-            let stack_end = stack_start + STACK_SIZE;
-
-            stack_end
-        };
+        for (index, ptr) in unsafe {  TSS_STACK_PTRS }
+                .iter()
+                .enumerate()
+                .filter_map(|(index, ptr)| ptr.map(|ptr| (index, ptr))) {
+            tss.interrupt_stack_table[index] = x86_64::VirtAddr::from_ptr(ptr);
+        }
 
         tss
     };

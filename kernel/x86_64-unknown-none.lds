@@ -55,10 +55,6 @@ SECTIONS
     .bss : ALIGN(0x1000) {
         __bss_start = .;
 
-        __bsp_stack_bottom = .;
-        . += 0x2000;
-        __bsp_stack_top = .;
-
         *(.bss.*)
         *(.bss)
 

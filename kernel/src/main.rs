@@ -62,8 +62,6 @@ extern "C" {
     static __data_end: LinkerSymbol;
 
     static __bss_start: LinkerSymbol;
-    static __bsp_stack_bottom: LinkerSymbol;
-    static __bsp_stack_top: LinkerSymbol;
     static __bss_end: LinkerSymbol;
 
     static __user_code_start: LinkerSymbol;
@@ -73,9 +71,16 @@ extern "C" {
 #[export_name = "__ap_stack_pointers"]
 static mut AP_STACK_POINTERS: [*const (); 256] = [core::ptr::null(); 256];
 
-fn get_log_level() -> log::LevelFilter {
-    log::LevelFilter::Debug
+#[repr(C, align(16))]
+#[derive(Debug, Clone, Copy)]
+struct StackAlign(u8);
+impl StackAlign {
+    const ZERO: Self = Self(0);
 }
+
+#[no_mangle]
+static mut KERNEL_STACK: [StackAlign; 0x2000] = [StackAlign::ZERO; 0x2000];
+static mut ISR_STACK: [StackAlign; 0x100] = [StackAlign::ZERO; 0x100];
 
 static mut CON_OUT: drivers::stdout::Serial = drivers::stdout::Serial::new(drivers::stdout::COM1);
 static KERNEL_PAGE_MANAGER: SyncOnceCell<PageManager> = SyncOnceCell::new();
@@ -93,8 +98,8 @@ macro_rules! clear_bsp_stack {
             "Cannot clear AP stack pointers to BSP stack top."
         );
 
-        lib::registers::stack::RSP::write(__bsp_stack_top.as_ptr());
-        // Serializing instruction to clear pipeline of any dangling references (and order all instruction before / after).
+        lib::registers::stack::RSP::write(KERNEL_STACK.as_ptr().add(KERNEL_STACK.len()) as *const ());
+        // Serializing instruction to clear pipeline of any dangling references (and order all instructions before / after).
         lib::instructions::cpuid::exec(0x0, 0x0).unwrap();
     };
 }
@@ -115,12 +120,14 @@ unsafe extern "efiapi" fn kernel_init(
     /* INIT STDOUT */
     CON_OUT.init(drivers::stdout::SerialSpeed::S115200);
 
-    match drivers::stdout::set_stdout(&mut CON_OUT, get_log_level()) {
+    match drivers::stdout::set_stdout(&mut CON_OUT, log::LevelFilter::Debug) {
         Ok(()) => {
             info!("Successfully loaded into kernel, with logging enabled.");
         }
         Err(_) => lib::instructions::interrupts::breakpoint(),
     }
+
+    //lib::structures::gdt::TSS_STACK_PTRS[0] = Some(__bsp_stack_top.as_ptr());
 
     /* INIT GDT */
     __gdt
