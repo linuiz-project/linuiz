@@ -56,11 +56,21 @@ SECTIONS
         __bss_start = .;
 
         __bsp_stack_bottom = .;
-        __bsp_stack_top = . + 0x4000;
+        . += 0x2000;
+        __bsp_stack_top = .;
 
         *(.bss.*)
         *(.bss)
 
         __bss_end = .;
+    }
+
+    .user_code : ALIGN(0x1000) {
+        __user_code_start = .;
+
+        *(.user_code.*)
+        *(.user_code)
+
+        __user_code_end = .;
     }
 }
