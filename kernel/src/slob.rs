@@ -98,7 +98,14 @@ impl<'map> SLOB<'map> {
 
         if map_write.len() <= page.index() {
             if let Err(error) = self.grow(
-                usize::max(page.index() - map_write.len(), 1) * BlockPage::BLOCKS_PER,
+                usize::max(
+                    // page.index() + 1 to facilitate page indexes that are power-of-two, i.e.:
+                    //  page.index() =      2048
+                    //  map_write.len() =   1024
+                    //  Map grows to facilitate 2048 block pages, and page index 2048 is still out of bounds.
+                    (page.index() + 1) - map_write.len(),
+                    1,
+                ) * BlockPage::BLOCKS_PER,
                 &mut map_write,
             ) {
                 return Err(error);
