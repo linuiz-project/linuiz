@@ -143,19 +143,45 @@ unsafe extern "efiapi" fn kernel_init(
         __gdt_tss.as_u64() as u16,
     ));
 
-    // Enable use of the `GLOBAL` page attribute.
-    lib::registers::CR4::enable(lib::registers::CR4Flags::PGE);
+    // Set CR0 flags.
+    {
+        use lib::registers::control::{CR0Flags, CR0};
+
+        CR0::write(
+            CR0Flags::PE | CR0Flags::MP | CR0Flags::ET | CR0Flags::NE | CR0Flags::WP | CR0Flags::PG,
+        );
+    }
+
+    // Set CR4 flags.
+    {
+        use lib::registers::control::{CR4Flags, CR4};
+
+        CR4::write(
+            CR4Flags::DE
+                | CR4Flags::PAE
+                | CR4Flags::MCE
+                | CR4Flags::PGE
+                | CR4Flags::OSFXSR
+                | CR4Flags::OSXMMEXCPT,
+        );
+    }
 
     // Enable use of the `NO_EXECUTE` page attribute, if supported.
     if lib::cpu::FEATURES_EXT.contains(lib::cpu::FeaturesExt::NO_EXEC) {
         lib::registers::msr::IA32_EFER::set_nxe(true);
     }
 
-    debug!("CR3:                {:?}", lib::registers::CR3::read());
-    debug!("CR4:                {:?}", lib::registers::CR4::read());
-    debug!("CPU Vendor          {:?}", lib::cpu::VENDOR);
-    debug!("CPU Features        {:?}", lib::cpu::FEATURES);
-    debug!("CPU Features Ext    {:?}", lib::cpu::FEATURES_EXT);
+    // Write misc. CPU state to stdout.
+    {
+        use lib::{cpu, registers::control};
+
+        debug!("CPU Vendor          {:?}", cpu::VENDOR);
+        debug!("CPU Features        {:?}", cpu::FEATURES);
+        debug!("CPU Features Ext    {:?}", cpu::FEATURES_EXT);
+
+        debug!("CR0:                {:?}", control::CR0::read());
+        debug!("CR4:                {:?}", control::CR4::read());
+    }
 
     /* INIT KERNEL MEMORY */
     {
@@ -278,7 +304,7 @@ unsafe extern "efiapi" fn kernel_init(
                         .unwrap();
                 }
 
-                for page in kernel_data.chain(kernel_bss.clone()).chain(ap_data).chain(
+                for page in kernel_data.chain(kernel_bss).chain(ap_data).chain(
                     // Frame manager map frames/pages.
                     FRAME_MANAGER
                         .iter()
@@ -338,7 +364,7 @@ unsafe extern "efiapi" fn kernel_init(
         debug!("Moving the kernel PML4 mapping frame into the global processor reference.");
         __kernel_pml4
             .as_mut_ptr::<u32>()
-            .write(lib::registers::CR3::read().0.as_usize() as u32);
+            .write(lib::registers::control::CR3::read().0.as_usize() as u32);
 
         info!("Kernel memory initialized.");
     }
@@ -370,13 +396,6 @@ extern "C" fn _startup() -> ! {
     }
 
     // Initialize the processor-local state.
-    unsafe {
-        info!(
-            "{:?}",
-            lib::memory::get_page_manager()
-                .get_page_attribs(&lib::memory::Page::from_index(0x275000 / 0x1000))
-        );
-    }
     crate::local_state::init();
 
     // If this is the BSP, wake other cores.
