@@ -184,9 +184,12 @@ bitflags::bitflags! {
         const UNCACHEABLE = 1 << 4;
         const ACCESSED = 1 << 5;
         const DIRTY = 1 << 6;
-        const HUGE_PAGE = 1 << 7;
+        // We don't support huge pages for now.
+        // const HUGE_PAGE = 1 << 7;
         const GLOBAL = 1 << 8;
-        // 3 bits free for use by OS
+        //  9..=11 available
+        // 12..52 frame index
+        // 52..=58 available
         const NO_EXECUTE = 1 << 63;
 
         const DATA_BITS = Self::PRESENT.bits() | Self::WRITABLE.bits() | Self::NO_EXECUTE.bits();
@@ -372,7 +375,7 @@ impl<L: HeirarchicalLevel> PageTable<L> {
 
                 entry.set(
                     frame_index,
-                    PageAttributes::PRESENT | PageAttributes::WRITABLE,
+                    PageAttributes::PRESENT | PageAttributes::WRITABLE | PageAttributes::USERSPACE,
                 );
 
                 (frame_index, true)
