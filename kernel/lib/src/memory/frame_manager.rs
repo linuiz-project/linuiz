@@ -8,10 +8,12 @@ use spin::RwLock;
 pub enum FrameType {
     Usable = 0,
     Unusable,
+    ForceWrite,
     Reserved,
     MMIO,
     // TODO possibly ACPI reclaim?
     Kernel,
+    FrameMap,
 }
 
 #[derive(Debug)]
@@ -130,7 +132,6 @@ pub enum FrameError {
 
 pub struct FrameManager<'arr> {
     map: RwLock<&'arr mut [Frame]>,
-    total_memory: usize,
 }
 
 impl<'arr> FrameManager<'arr> {
@@ -191,7 +192,6 @@ impl<'arr> FrameManager<'arr> {
                     total_system_frames,
                 )
             }),
-            total_memory: total_system_memory,
         };
 
         let frame_ledger_range = descriptor.phys_start.frame_index()
@@ -202,7 +202,7 @@ impl<'arr> FrameManager<'arr> {
         );
         for frame_index in frame_ledger_range {
             falloc
-                .try_modify_type(frame_index, FrameType::Kernel)
+                .try_modify_type(frame_index, FrameType::FrameMap)
                 .unwrap();
             falloc.lock(frame_index).unwrap();
         }
@@ -406,11 +406,21 @@ impl<'arr> FrameManager<'arr> {
     /// Total memory of a given type represented by frame allocator. If `None` is
     ///  provided for type, the total of all memory types is returned instead.
     pub fn total_memory(&self) -> usize {
-        self.total_memory
+        self.map.read().len() * 0x1000
     }
 
-    pub fn total_frame_count(&self) -> usize {
+    pub fn total_frames(&self) -> usize {
         self.map.read().len()
+    }
+
+    pub fn map_pages(&self) -> core::ops::Range<super::Page> {
+        let map_read = self.map.read();
+        let ptr = map_read.as_ptr() as usize;
+
+        super::Page::range(
+            ptr / 0x1000,
+            (ptr + (map_read.len() * core::mem::size_of::<Frame>())) / 0x1000,
+        )
     }
 
     pub fn iter<'outer>(&'arr self) -> FrameIterator<'outer, 'arr> {
