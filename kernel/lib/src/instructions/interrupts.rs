@@ -32,10 +32,7 @@ pub fn are_enabled() -> bool {
 
 /// Executes given function with interrupts disabled, then
 /// re-enables interrupts if they were previously enabled.
-pub fn without_interrupts<F, R>(function: F) -> R
-where
-    F: FnOnce() -> R,
-{
+pub fn without_interrupts<R>(function: impl FnOnce() -> R) -> R {
     let interrupts_enabled = are_enabled();
 
     if interrupts_enabled {

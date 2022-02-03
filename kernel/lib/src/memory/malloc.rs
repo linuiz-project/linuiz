@@ -1,11 +1,9 @@
-use crate::{
-    {Physical},
-    Address,
-};
+use crate::{Address, Physical};
 use alloc::{boxed::Box, vec::Vec};
 use core::{
     alloc::Layout,
-    mem::{align_of, MaybeUninit}, panic,
+    mem::{align_of, MaybeUninit},
+    panic,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -23,6 +21,7 @@ pub struct Alloc<T> {
 }
 
 impl<T> Alloc<T> {
+    #[inline]
     pub const unsafe fn new(ptr: *mut T, len: usize) -> Self {
         Self { ptr, len }
     }
@@ -79,6 +78,7 @@ impl<T> Alloc<T> {
         Box::from_raw(core::ptr::slice_from_raw_parts_mut(self.ptr, self.len))
     }
 
+    #[inline]
     pub const fn into_parts(self) -> (*mut T, usize) {
         (self.ptr, self.len)
     }

@@ -179,7 +179,7 @@ bitflags::bitflags! {
     pub struct PageAttributes: usize {
         const PRESENT = 1 << 0;
         const WRITABLE = 1 << 1;
-        const USER_ACCESSIBLE = 1 << 2;
+        const USERSPACE = 1 << 2;
         const WRITE_THROUGH = 1 << 3;
         const UNCACHEABLE = 1 << 4;
         const ACCESSED = 1 << 5;
