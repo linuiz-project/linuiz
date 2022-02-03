@@ -2,9 +2,6 @@ extern _startup, __ap_stack_pointers
 
 section .ap_text
 
-global __kernel_pml4
-__kernel_pml4 dd 0
-
 bits 16
 realmode:
     cli
@@ -63,7 +60,12 @@ longmode:
     ; Jump to high-level code
     call _startup
 
+
 section .ap_data
+
+global __kernel_pml4
+__kernel_pml4 dd 0
+
 ; Access bits
 PRESENT        equ 1 << 7
 NOT_SYS        equ 1 << 4
