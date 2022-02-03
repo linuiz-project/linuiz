@@ -33,6 +33,8 @@ run: all $(debug)
 reset: clean
 	rm -f $(bootloader) $(kernel) $(ap_trampoline_out)
 
+rebuild: reset run
+
 clean:
 	cd ./boot/ && cargo clean
 	cd ./kernel/ && cargo clean
