@@ -3,6 +3,7 @@ use core::mem::MaybeUninit;
 use spin::RwLock;
 
 use crate::{
+    instructions::tlb,
     memory::{
         paging::{AttributeModify, Level4, PageAttributes, PageTable, PageTableEntry},
         Page, FRAME_MANAGER,
@@ -115,15 +116,17 @@ impl VirtualMapper {
     }
 
     pub unsafe fn modify_mapped_page(&mut self, page: Page) {
-        for frame_index in 0..FRAME_MANAGER.total_frame_count() {
+        for frame_index in 0..FRAME_MANAGER.total_frames() {
             let cur_page = page.forward(frame_index).unwrap();
+
+            //info!("{:?}", cur_page);
 
             self.get_page_entry_create(&cur_page).set(
                 frame_index,
                 PageAttributes::DATA_BITS | PageAttributes::GLOBAL,
             );
 
-            crate::instructions::tlb::invalidate(&cur_page);
+            tlb::invalidate(&cur_page);
         }
 
         self.mapped_page = page;
@@ -206,7 +209,7 @@ impl PageManager {
                 .get_page_entry_create(page)
                 .set(frame_index, attribs);
 
-            crate::instructions::tlb::invalidate(page);
+            tlb::invalidate(page);
         })
     }
 
@@ -227,7 +230,7 @@ impl PageManager {
                 }
 
                 // Invalidate the page in the TLB.
-                crate::instructions::tlb::invalidate(page);
+                tlb::invalidate(page);
             })
             .ok_or(MapError::NotMapped)
     }
@@ -253,7 +256,7 @@ impl PageManager {
             .ok_or(MapError::NotMapped)
             .map(|(attribs, frame_index)| {
                 self.map(map_to, frame_index, None, attribs).unwrap();
-                crate::instructions::tlb::invalidate(unmap_from);
+                tlb::invalidate(unmap_from);
             })
     }
 
@@ -313,6 +316,8 @@ impl PageManager {
             .write()
             .get_page_entry_mut(page)
             .map(|page_entry| page_entry.set_attributes(attributes, modify_mode));
+
+        tlb::invalidate(page);
     }
 
     pub unsafe fn modify_mapped_page(&self, page: Page) {
