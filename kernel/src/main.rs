@@ -34,10 +34,9 @@ use lib::{
 extern "C" {
     static __ap_text_start: LinkerSymbol;
     static __ap_text_end: LinkerSymbol;
-    static __ap_data_start: LinkerSymbol;
-    static __ap_data_end: LinkerSymbol;
-    static __kernel_pml4: LinkerSymbol;
 
+    static __ap_data_start: LinkerSymbol;
+    static __kernel_pml4: LinkerSymbol;
     static __gdt: LinkerSymbol;
     #[link_name = "__gdt.pointer"]
     static __gdt_pointer: LinkerSymbol;
@@ -51,9 +50,7 @@ extern "C" {
     static __gdt_udata: LinkerSymbol;
     #[link_name = "__gdt.tss"]
     static __gdt_tss: LinkerSymbol;
-
-    static __bsp_stack_bottom: LinkerSymbol;
-    static __bsp_stack_top: LinkerSymbol;
+    static __ap_data_end: LinkerSymbol;
 
     static __text_start: LinkerSymbol;
     static __text_end: LinkerSymbol;
@@ -65,7 +62,12 @@ extern "C" {
     static __data_end: LinkerSymbol;
 
     static __bss_start: LinkerSymbol;
+    static __bsp_stack_bottom: LinkerSymbol;
+    static __bsp_stack_top: LinkerSymbol;
     static __bss_end: LinkerSymbol;
+
+    static __user_code_start: LinkerSymbol;
+    static __user_code_end: LinkerSymbol;
 }
 
 #[export_name = "__ap_stack_pointers"]
@@ -141,12 +143,6 @@ unsafe extern "efiapi" fn kernel_init(
         __gdt_tss.as_u64() as u16,
     ));
 
-    debug!("CR3: {:?}", lib::registers::CR3::read());
-    debug!("CR4: {:?}", lib::registers::CR4::read());
-    debug!("CPU Vendor           {:?}", lib::cpu::VENDOR);
-    debug!("CPU Features         {:?}", lib::cpu::FEATURES);
-    debug!("CPU Features Ext     {:?}", lib::cpu::FEATURES_EXT);
-
     // Enable use of the `GLOBAL` page attribute.
     lib::registers::CR4::enable(lib::registers::CR4Flags::PGE);
 
@@ -154,6 +150,12 @@ unsafe extern "efiapi" fn kernel_init(
     if lib::cpu::FEATURES_EXT.contains(lib::cpu::FeaturesExt::NO_EXEC) {
         lib::registers::msr::IA32_EFER::set_nxe(true);
     }
+
+    debug!("CR3:                {:?}", lib::registers::CR3::read());
+    debug!("CR4:                {:?}", lib::registers::CR4::read());
+    debug!("CPU Vendor          {:?}", lib::cpu::VENDOR);
+    debug!("CPU Features        {:?}", lib::cpu::FEATURES);
+    debug!("CPU Features Ext    {:?}", lib::cpu::FEATURES_EXT);
 
     /* INIT KERNEL MEMORY */
     {
@@ -174,124 +176,136 @@ unsafe extern "efiapi" fn kernel_init(
 
             {
                 let page_manager = lib::memory::get_page_manager();
-                // TODO the addressors shouldn't mmap all reserved frames by default.
-                //  It is, for instance, useless in userland addressors, where ACPI tables
-                //  don't need to be mapped.
-                debug!("Identity mapping all reserved global memory frames...");
-                FRAME_MANAGER
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, (ty, _, _))| matches!(ty, FrameType::Kernel | FrameType::Reserved))
-                    .for_each(|(index, _)| {
-                        page_manager
-                            .identity_map(
-                                &Page::from_index(index),
-                                lib::memory::PageAttributes::PRESENT,
-                            )
-                            .unwrap();
-                    });
 
                 debug!("Configuring page table entries for kernel ELF sections.");
                 use lib::memory::{AttributeModify, PageAttributes};
 
                 // Set page attributes for UEFI descriptor pages.
                 for descriptor in lib::BOOT_INFO.get().unwrap().memory_map().iter() {
-                    let desc_attribs = descriptor.att;
                     let mut page_attribs = PageAttributes::empty();
 
-                    use lib::memory::uefi::MemoryAttributes;
-                    if desc_attribs.contains(MemoryAttributes::UNCACHEABLE) {
-                        page_attribs.insert(PageAttributes::UNCACHEABLE);
-                    }
+                    use lib::memory::uefi::{MemoryAttributes, MemoryType};
 
-                    if desc_attribs.contains(MemoryAttributes::WRITE_THROUGH) {
+                    if descriptor.att.contains(MemoryAttributes::WRITE_THROUGH) {
                         page_attribs.insert(PageAttributes::WRITABLE);
                         page_attribs.insert(PageAttributes::WRITE_THROUGH);
                     }
 
-                    if desc_attribs.contains(MemoryAttributes::WRITE_BACK) {
+                    if descriptor.att.contains(MemoryAttributes::WRITE_BACK) {
                         page_attribs.insert(PageAttributes::WRITABLE);
                         page_attribs.remove(PageAttributes::WRITE_THROUGH);
                     }
 
-                    if desc_attribs.contains(MemoryAttributes::EXEC_PROTECT) {
+                    if descriptor.att.contains(MemoryAttributes::EXEC_PROTECT) {
                         page_attribs.insert(PageAttributes::NO_EXECUTE);
                     }
 
-                    if desc_attribs.contains(MemoryAttributes::UNCACHEABLE) {
+                    if descriptor.att.contains(MemoryAttributes::UNCACHEABLE) {
                         page_attribs.insert(PageAttributes::UNCACHEABLE);
                     }
 
-                    if desc_attribs.contains(MemoryAttributes::READ_ONLY) {
+                    if descriptor.att.contains(MemoryAttributes::READ_ONLY) {
                         page_attribs.remove(PageAttributes::WRITABLE);
                         page_attribs.remove(PageAttributes::WRITE_THROUGH);
                     }
 
-                    for page in descriptor
-                        .frame_range()
-                        .map(|index| Page::from_index(index))
-                    {
-                        page_manager.set_page_attribs(
-                            &page,
-                            PageAttributes::PRESENT | page_attribs,
-                            AttributeModify::Set,
-                        )
+                    if !matches!(
+                        descriptor.ty,
+                        MemoryType::UNUSABLE
+                            | MemoryType::UNACCEPTED
+                            | MemoryType::KERNEL_CODE
+                            | MemoryType::KERNEL_DATA
+                    ) {
+                        for page in descriptor
+                            .frame_range()
+                            .map(|index| Page::from_index(index))
+                        {
+                            page_manager
+                                .identity_map(
+                                    &page,
+                                    PageAttributes::PRESENT | PageAttributes::GLOBAL | page_attribs,
+                                )
+                                .unwrap();
+                        }
                     }
+                }
 
-                    // Overwrite UEFI page attributes for kernel ELF sections.
-                    let kernel_text = Page::range(
-                        __text_start.as_usize() / 0x1000,
-                        __text_end.as_usize() / 0x1000,
-                    );
-                    let kernel_rodata = Page::range(
-                        __rodata_start.as_usize() / 0x1000,
-                        __rodata_end.as_usize() / 0x1000,
-                    );
-                    let kernel_data = Page::range(
-                        __data_start.as_usize() / 0x1000,
-                        __data_end.as_usize() / 0x1000,
-                    );
-                    let kernel_bss = Page::range(
-                        __bss_start.as_usize() / 0x1000,
-                        __bss_end.as_usize() / 0x1000,
-                    );
-                    let ap_text = Page::range(
-                        __ap_text_start.as_usize() / 0x1000,
-                        __ap_text_end.as_usize() / 0x1000,
-                    );
-                    let ap_data = Page::range(
-                        __ap_data_start.as_usize() / 0x1000,
-                        __ap_data_end.as_usize() / 0x1000,
-                    );
+                // Overwrite UEFI page attributes for kernel ELF sections.
+                use lib::{align_down_div, align_up_div};
+                let kernel_text = Page::range(
+                    align_down_div(__text_start.as_usize(), 0x1000),
+                    align_up_div(__text_end.as_usize(), 0x1000),
+                );
+                let kernel_rodata = Page::range(
+                    align_down_div(__rodata_start.as_usize(), 0x1000),
+                    align_up_div(__rodata_end.as_usize(), 0x1000),
+                );
+                let kernel_data = Page::range(
+                    align_down_div(__data_start.as_usize(), 0x1000),
+                    align_up_div(__data_end.as_usize(), 0x1000),
+                );
+                let kernel_bss = Page::range(
+                    align_down_div(__bss_start.as_usize(), 0x1000),
+                    align_up_div(__bss_end.as_usize(), 0x1000),
+                );
+                let ap_text = Page::range(
+                    align_down_div(__ap_text_start.as_usize(), 0x1000),
+                    align_up_div(__ap_text_end.as_usize(), 0x1000),
+                );
+                let ap_data = Page::range(
+                    align_down_div(__ap_data_start.as_usize(), 0x1000),
+                    align_up_div(__ap_data_end.as_usize(), 0x1000),
+                );
+                let user_code = Page::range(
+                    align_down_div(__user_code_start.as_usize(), 0x1000),
+                    align_up_div(__user_code_end.as_usize(), 0x1000),
+                );
 
-                    for page in kernel_text.chain(ap_text) {
-                        page_manager.set_page_attribs(
-                            &page,
-                            PageAttributes::PRESENT | PageAttributes::GLOBAL,
-                            AttributeModify::Set,
-                        );
-                    }
+                for page in kernel_text.chain(ap_text) {
+                    page_manager
+                        .identity_map(&page, PageAttributes::PRESENT | PageAttributes::GLOBAL)
+                        .unwrap();
+                }
 
-                    for page in kernel_rodata {
-                        page_manager.set_page_attribs(
+                for page in kernel_rodata {
+                    page_manager
+                        .identity_map(
                             &page,
                             PageAttributes::PRESENT
                                 | PageAttributes::GLOBAL
                                 | PageAttributes::NO_EXECUTE,
-                            AttributeModify::Set,
-                        );
-                    }
+                        )
+                        .unwrap();
+                }
 
-                    for page in kernel_data.chain(kernel_bss).chain(ap_data) {
-                        page_manager.set_page_attribs(
+                for page in kernel_data.chain(kernel_bss.clone()).chain(ap_data).chain(
+                    // Frame manager map frames/pages.
+                    FRAME_MANAGER
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(frame_index, (ty, _, _))| {
+                            if ty == FrameType::FrameMap {
+                                Some(Page::from_index(frame_index))
+                            } else {
+                                None
+                            }
+                        }),
+                ) {
+                    page_manager
+                        .identity_map(
                             &page,
                             PageAttributes::PRESENT
                                 | PageAttributes::GLOBAL
                                 | PageAttributes::NO_EXECUTE
                                 | PageAttributes::WRITABLE,
-                            AttributeModify::Set,
-                        );
-                    }
+                        )
+                        .unwrap();
+                }
+
+                for page in user_code {
+                    page_manager
+                        .identity_map(&page, PageAttributes::PRESENT | PageAttributes::USERSPACE)
+                        .unwrap();
                 }
 
                 // Since we're using physical offset mapping for our page table modification
@@ -310,7 +324,7 @@ unsafe extern "efiapi" fn kernel_init(
             FRAME_MANAGER
                 .iter()
                 .enumerate()
-                .filter(|(_, (ty, _, _))| !ty.eq(&FrameType::Usable))
+                .filter(|(_, (ty, _, _))| !matches!(ty, FrameType::Usable))
                 .for_each(|(index, _)| {
                     slob.reserve_page(&Page::from_index(index)).unwrap();
                 });
@@ -356,6 +370,13 @@ extern "C" fn _startup() -> ! {
     }
 
     // Initialize the processor-local state.
+    unsafe {
+        info!(
+            "{:?}",
+            lib::memory::get_page_manager()
+                .get_page_attribs(&lib::memory::Page::from_index(0x275000 / 0x1000))
+        );
+    }
     crate::local_state::init();
 
     // If this is the BSP, wake other cores.
@@ -477,8 +498,9 @@ unsafe fn swap_ring3() {
     );
 }
 
+#[link_section = ".user_code"]
 fn test_user_function() {
-    lib::instructions::hlt_indefinite();
+    loop {}
 }
 
 fn task1() -> ! {
@@ -502,22 +524,6 @@ fn task2() -> ! {
 fn kernel_main() -> ! {
     debug!("Successfully entered `kernel_main()`.");
 
-    info!(
-        "TOTAL {} bytes",
-        lib::BOOT_INFO
-            .get()
-            .unwrap()
-            .memory_map()
-            .iter()
-            .filter_map(
-                |d| if d.ty.eq(&lib::memory::uefi::MemoryType::MMIO_PORT_SPACE) {
-                    Some(d.page_count * 0x1000)
-                } else {
-                    None
-                }
-            )
-            .sum::<u64>()
-    );
     unsafe { swap_ring3() };
 
     lib::instructions::hlt_indefinite()
