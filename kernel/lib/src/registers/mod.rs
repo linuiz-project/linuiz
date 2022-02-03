@@ -1,13 +1,8 @@
-mod cr2;
-mod cr3;
-mod cr4;
 mod rflags;
 mod tsc;
 
-pub use cr4::*;
+pub mod control;
 pub mod msr;
-pub use cr2::*;
-pub use cr3::*;
 pub use rflags::*;
 pub use tsc::*;
 

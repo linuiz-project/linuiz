@@ -1,7 +1,7 @@
 use alloc::{boxed::Box, collections::BinaryHeap};
 use core::{cmp, sync::atomic::AtomicU64};
 use lib::{
-    registers::{CR3Flags, RFlags},
+    registers::{control::CR3Flags, RFlags},
     structures::idt::InterruptStackFrame,
     Address, Physical,
 };
@@ -200,7 +200,7 @@ impl Scheduler {
                     cached_regs.write_volatile(next_task.gprs);
 
                     // Set current page tables.
-                    lib::registers::CR3::write(next_task.cr3.0, next_task.cr3.1);
+                    lib::registers::control::CR3::write(next_task.cr3.0, next_task.cr3.1);
                 }
 
                 self.current_task = Some(next_task);

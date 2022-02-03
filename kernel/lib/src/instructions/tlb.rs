@@ -9,5 +9,5 @@ pub fn invalidate(page: &Page) {
 
 #[inline]
 pub fn invalidate_all() {
-    crate::registers::CR3::refresh();
+    crate::registers::control::CR3::refresh();
 }
