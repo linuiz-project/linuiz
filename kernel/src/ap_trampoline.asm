@@ -32,14 +32,14 @@ realmode:
 
     ; Set GDT & long-jump to long mode
     lgdt [__gdt.pointer]
-    jmp __gdt.kcode:longmode
+    jmp 0x08:longmode
 
 bits 64
 longmode:
     cli
 
     ; Update segment registers  
-    mov ax, __gdt.kdata
+    mov ax, 0x10
     mov ds, ax
     mov es, ax
     mov fs, ax
@@ -63,8 +63,8 @@ longmode:
 
 section .ap_data
 
-global __kernel_pml4
-__kernel_pml4 dd 0
+global __kernel_pml4, __gdt
+
 
 ; Access bits
 PRESENT        equ 1 << 7
@@ -82,39 +82,39 @@ GRAN_4K       equ 1 << 7
 SZ_32         equ 1 << 6
 LONG_MODE     equ 1 << 5
 
-global __gdt, __gdt.kcode, __gdt.kdata, __gdt.ucode, __gdt.udata, __gdt.tss, __gdt.pointer
-
+__kernel_pml4 dd 0
 __gdt:
-    .null: equ $ - __gdt
-        dq 0
-    .kcode: equ $ - __gdt
-        dd 0xFFFF                           ; Limit & Base (low)
-        db 0                                ; Base (mid)
-        db PRESENT | NOT_SYS | EXEC | RW    ; Access
-        db GRAN_4K | LONG_MODE | 0xF        ; Flags
-        db 0                                ; Base (high)
-    .kdata: equ $ - __gdt
-        dd 0xFFFF                           ; Limit & Base (low)
-        db 0                                ; Base (mid)
-        db PRESENT | NOT_SYS | RW           ; Access
-        db GRAN_4K | SZ_32 | 0xF            ; Flags
-        db 0                                ; Base (high)
-    .udata: equ $ - __gdt
-        dd 0xFFFF                           ; Limit & Base (low)
-        db 0                                ; Base (mid)
-        db PRESENT | NOT_SYS | RW | USER    ; Access
-        db GRAN_4K | SZ_32 | 0xF            ; Flags
-        db 0                                ; Base (high)
-    .ucode: equ $ - __gdt
-        dd 0xFFFF                                   ; Limit & Base (low)
-        db 0                                        ; Base (mid)
-        db PRESENT | NOT_SYS | EXEC | RW | USER     ; Access
-        db GRAN_4K | LONG_MODE | 0xF                ; Flags
-        db 0                                        ; Base (high)
-    .tss: equ $ - __gdt
-        dq 0x0
-        dq 0x0
+    resq 7
+    
     .pointer:
         dw $ - __gdt - 1
         dq __gdt
+
+    ; .null: equ $ - __gdt
+    ;     dq 0
+    ; .kcode: equ $ - __gdt
+    ;     dd 0xFFFF                           ; Limit & Base (low)
+    ;     db 0                                ; Base (mid)
+    ;     db PRESENT | NOT_SYS | EXEC         ; Access
+    ;     db GRAN_4K | LONG_MODE | 0xF        ; Flags
+    ;     db 0                                ; Base (high)
+    ; .kdata: equ $ - __gdt
+    ;     dd 0xFFFF                           ; Limit & Base (low)
+    ;     db 0                                ; Base (mid)
+    ;     db PRESENT | NOT_SYS | RW           ; Access
+    ;     db GRAN_4K | SZ_32 | 0xF            ; Flags
+    ;     db 0                                ; Base (high)
+    ; .udata: equ $ - __gdt
+    ;     dd 0xFFFF                           ; Limit & Base (low)
+    ;     db 0                                ; Base (mid)
+    ;     db PRESENT | NOT_SYS | RW | USER    ; Access
+    ;     db GRAN_4K | SZ_32 | 0xF            ; Flags
+    ;     db 0                                ; Base (high)
+    ; .ucode: equ $ - __gdt
+    ;     dd 0xFFFF                                   ; Limit & Base (low)
+    ;     db 0                                        ; Base (mid)
+    ;     db PRESENT | NOT_SYS | EXEC | USER          ; Access
+    ;     db GRAN_4K | LONG_MODE | 0xF                ; Flags
+    ;     db 0                                        ; Base (high)
+    ; .tss: equ $ - __gdt
 

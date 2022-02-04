@@ -193,7 +193,7 @@ pub fn load() {
     GDT.0.load();
 
     unsafe {
-        crate::instructions::init_segment_registers(data());
+        crate::instructions::set_data_registers(data());
         x86_64::instructions::segmentation::CS::set_reg(core::mem::transmute(code()));
         // crate::instructions::segmentation::ltr(tss());
     }

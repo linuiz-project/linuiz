@@ -5,6 +5,7 @@
 //!           going to ignore that. :)
 
 use bit_field::BitField;
+use x86_64::registers::segmentation::SegmentSelector;
 
 use crate::{Physical, Address};
 
@@ -146,11 +147,11 @@ impl IA32_STAR {
     /// > Stack segment —                   IA32_STAR[63:48] + 8
     /// > ...
     #[inline(always)]
-    pub fn set_selectors(low_selector: u16, high_selector: u16) {
+    pub fn set_selectors(low_selector: SegmentSelector, high_selector: SegmentSelector) {
         unsafe {
             wrmsr(
                 0xC0000081,
-                (high_selector as u64) << 48 | (low_selector as u64) << 32,
+                (high_selector.index() as u64) << 51 | (low_selector.index() as u64) << 35,
             )
         };
     }

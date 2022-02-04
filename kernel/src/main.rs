@@ -30,6 +30,10 @@ use lib::{
     memory::{uefi, PageManager},
     BootInfo, LinkerSymbol,
 };
+use x86_64::{
+    registers::segmentation::SegmentSelector, structures::gdt::GlobalDescriptorTable,
+    PrivilegeLevel,
+};
 
 extern "C" {
     static __ap_text_start: LinkerSymbol;
@@ -38,18 +42,18 @@ extern "C" {
     static __ap_data_start: LinkerSymbol;
     static __kernel_pml4: LinkerSymbol;
     static __gdt: LinkerSymbol;
-    #[link_name = "__gdt.pointer"]
-    static __gdt_pointer: LinkerSymbol;
-    #[link_name = "__gdt.kcode"]
-    static __gdt_kcode: LinkerSymbol;
-    #[link_name = "__gdt.kdata"]
-    static __gdt_kdata: LinkerSymbol;
-    #[link_name = "__gdt.ucode"]
-    static __gdt_ucode: LinkerSymbol;
-    #[link_name = "__gdt.udata"]
-    static __gdt_udata: LinkerSymbol;
-    #[link_name = "__gdt.tss"]
-    static __gdt_tss: LinkerSymbol;
+    // #[link_name = "__gdt.pointer"]
+    // static __gdt_pointer: LinkerSymbol;
+    // #[link_name = "__gdt.kcode"]
+    // static __gdt_kcode: LinkerSymbol;
+    // #[link_name = "__gdt.kdata"]
+    // static __gdt_kdata: LinkerSymbol;
+    // #[link_name = "__gdt.ucode"]
+    // static __gdt_ucode: LinkerSymbol;
+    // #[link_name = "__gdt.udata"]
+    // static __gdt_udata: LinkerSymbol;
+    // #[link_name = "__gdt.tss"]
+    // static __gdt_tss: LinkerSymbol;
     static __ap_data_end: LinkerSymbol;
 
     static __text_start: LinkerSymbol;
@@ -75,6 +79,30 @@ static mut AP_STACK_POINTERS: [*const (); 256] = [core::ptr::null(); 256];
 static mut CON_OUT: drivers::stdout::Serial = drivers::stdout::Serial::new(drivers::stdout::COM1);
 static KERNEL_PAGE_MANAGER: SyncOnceCell<PageManager> = SyncOnceCell::new();
 static KERNEL_MALLOCATOR: SyncOnceCell<slob::SLOB> = SyncOnceCell::new();
+
+lazy_static::lazy_static! {
+    static ref GDT: GlobalDescriptorTable = unsafe {
+        use x86_64::structures::gdt::Descriptor;
+
+        let mut gdt = GlobalDescriptorTable::from_raw_slice(core::slice::from_raw_parts(__gdt.as_ptr(), 1 /* Null Seg */));
+
+        KCODE_SELECTOR.set(gdt.add_entry(Descriptor::kernel_code_segment())).unwrap();
+        KDATA_SELECTOR.set(gdt.add_entry(Descriptor::kernel_data_segment())).unwrap();
+        UCODE_SELECTOR.set(gdt.add_entry(Descriptor::user_code_segment())).unwrap();
+        UDATA_SELECTOR.set(gdt.add_entry(Descriptor::user_data_segment())).unwrap();
+        TSS_SELECTOR.set(gdt.add_entry(Descriptor::tss_segment(
+            &lib::structures::gdt::TSS,
+        ))).unwrap();
+
+        gdt
+    };
+}
+
+static mut KCODE_SELECTOR: SyncOnceCell<SegmentSelector> = SyncOnceCell::new();
+static mut KDATA_SELECTOR: SyncOnceCell<SegmentSelector> = SyncOnceCell::new();
+static mut UCODE_SELECTOR: SyncOnceCell<SegmentSelector> = SyncOnceCell::new();
+static mut UDATA_SELECTOR: SyncOnceCell<SegmentSelector> = SyncOnceCell::new();
+static mut TSS_SELECTOR: SyncOnceCell<SegmentSelector> = SyncOnceCell::new();
 
 /// Clears the kernel stack by resetting `RSP`.
 ///
@@ -121,25 +149,18 @@ unsafe extern "efiapi" fn kernel_init(
     lib::structures::gdt::TSS_STACK_PTRS[0] = Some(__isr_stack.as_mut_ptr());
 
     /* INIT GDT */
-    __gdt
-        .as_mut_ptr::<u8>()
-        .add(__gdt_tss.as_usize())
-        .cast::<lib::structures::gdt::TSSEntry>()
-        .write_volatile(lib::structures::gdt::TSS.as_gdt_entry());
-    lib::instructions::segmentation::lgdt(
-        __gdt_pointer
-            .as_ptr::<lib::structures::gdt::DescriptorTablePointer>()
-            .as_ref()
-            .unwrap(),
-    );
-    lib::instructions::init_segment_registers(__gdt_kdata.as_usize() as u16);
-    use x86_64::instructions::segmentation::Segment;
-    x86_64::instructions::segmentation::CS::set_reg(core::mem::transmute(
-        __gdt_kcode.as_usize() as u16
-    ));
-    x86_64::instructions::tables::load_tss(x86_64::registers::segmentation::SegmentSelector(
-        __gdt_tss.as_u64() as u16,
-    ));
+    {
+        GDT.load();
+
+        use x86_64::instructions::{
+            segmentation::{Segment, CS, DS, SS},
+            tables::load_tss,
+        };
+        DS::set_reg(*KDATA_SELECTOR.get().unwrap());
+        SS::set_reg(*KDATA_SELECTOR.get().unwrap());
+        CS::set_reg(*KCODE_SELECTOR.get().unwrap());
+        load_tss(*TSS_SELECTOR.get().unwrap());
+    }
 
     // Set CR0 flags.
     {
@@ -492,7 +513,10 @@ extern "C" fn _startup() -> ! {
         // Enable `syscall`/`sysret`.
         msr::IA32_EFER::set_sce(true);
         // Configure system call environment registers.
-        msr::IA32_STAR::set_selectors(__gdt_kcode.as_u64() as u16, __gdt_kdata.as_u64() as u16);
+        msr::IA32_STAR::set_selectors(
+            *KCODE_SELECTOR.get().unwrap(),
+            *KDATA_SELECTOR.get().unwrap(),
+        );
         msr::IA32_SFMASK::write(u64::MAX);
         // MSR::IA32_LSTAR.write(0x0);
     }

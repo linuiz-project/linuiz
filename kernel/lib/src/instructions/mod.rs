@@ -21,7 +21,7 @@ pub fn hlt_indefinite() -> ! {
 }
 
 #[inline]
-pub unsafe fn init_segment_registers(value: u16) {
+pub unsafe fn set_data_registers(value: u16) {
     asm!(
         "mov ds, ax",
         "mov es, ax",
