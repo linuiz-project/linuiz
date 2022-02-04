@@ -67,8 +67,8 @@ pub mod stack {
     pub struct RSP;
     impl RSP {
         #[inline(always)]
-        pub unsafe fn write(ptr: *const ()) {
-            core::arch::asm!(concat!("mov rsp, {}"), in(reg) ptr, options(nomem));
+        pub unsafe fn write(ptr: *mut ()) {
+            core::arch::asm!("mov rsp, {}", in(reg) ptr, options(nomem));
         }
 
         #[inline(always)]

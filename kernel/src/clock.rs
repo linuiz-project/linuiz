@@ -33,8 +33,11 @@ pub mod global {
                     tick_handler,
                 );
 
+                lib::structures::idt::print_idt(
+                    crate::local_state::InterruptVector::LocalTimer as u8,
+                );
                 debug!("Global clock configured at 1000Hz.");
-            })
+            });
         } else {
             panic!("Global clock already configured.");
         }

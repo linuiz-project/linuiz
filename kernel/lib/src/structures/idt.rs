@@ -1,4 +1,4 @@
-use x86_64::structures::idt::InterruptDescriptorTable;
+use x86_64::structures::idt::{InterruptDescriptorTable, Entry};
 pub use x86_64::structures::idt::InterruptStackFrame;
 
 /* FAULT INTERRUPT HANDLERS */
@@ -240,6 +240,15 @@ pub unsafe fn load_unchecked() {
 
 pub fn set_handler_fn(vector: u8, handler: extern "x86-interrupt" fn(InterruptStackFrame)) {
     crate::instructions::interrupts::without_interrupts(|| {
-        IDT.lock()[vector as usize].set_handler_fn(handler);
+        unsafe {
+            IDT.lock()[vector as usize]
+                .set_handler_fn(handler)
+                .set_stack_index(0)
+        };
     });
+}
+
+pub fn print_idt(vector: u8)  {
+    let idt = IDT.lock();
+    info!("{:?}", idt[vector as usize]);
 }
