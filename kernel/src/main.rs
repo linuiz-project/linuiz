@@ -30,10 +30,7 @@ use lib::{
     memory::{uefi, PageManager},
     BootInfo, LinkerSymbol,
 };
-use x86_64::{
-    registers::segmentation::SegmentSelector, structures::gdt::GlobalDescriptorTable,
-    PrivilegeLevel,
-};
+use x86_64::{registers::segmentation::SegmentSelector, structures::gdt::GlobalDescriptorTable};
 
 extern "C" {
     static __ap_text_start: LinkerSymbol;
@@ -42,18 +39,6 @@ extern "C" {
     static __ap_data_start: LinkerSymbol;
     static __kernel_pml4: LinkerSymbol;
     static __gdt: LinkerSymbol;
-    // #[link_name = "__gdt.pointer"]
-    // static __gdt_pointer: LinkerSymbol;
-    // #[link_name = "__gdt.kcode"]
-    // static __gdt_kcode: LinkerSymbol;
-    // #[link_name = "__gdt.kdata"]
-    // static __gdt_kdata: LinkerSymbol;
-    // #[link_name = "__gdt.ucode"]
-    // static __gdt_ucode: LinkerSymbol;
-    // #[link_name = "__gdt.udata"]
-    // static __gdt_udata: LinkerSymbol;
-    // #[link_name = "__gdt.tss"]
-    // static __gdt_tss: LinkerSymbol;
     static __ap_data_end: LinkerSymbol;
 
     static __text_start: LinkerSymbol;
@@ -153,11 +138,14 @@ unsafe extern "efiapi" fn kernel_init(
         GDT.load();
 
         use x86_64::instructions::{
-            segmentation::{Segment, CS, DS, SS},
+            segmentation::{Segment, CS, DS, ES, FS, GS, SS},
             tables::load_tss,
         };
         DS::set_reg(*KDATA_SELECTOR.get().unwrap());
         SS::set_reg(*KDATA_SELECTOR.get().unwrap());
+        ES::set_reg(*KDATA_SELECTOR.get().unwrap());
+        FS::set_reg(*KDATA_SELECTOR.get().unwrap());
+        GS::set_reg(*KDATA_SELECTOR.get().unwrap());
         CS::set_reg(*KCODE_SELECTOR.get().unwrap());
         load_tss(*TSS_SELECTOR.get().unwrap());
     }

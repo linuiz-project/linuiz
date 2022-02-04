@@ -7,7 +7,7 @@
 use bit_field::BitField;
 use x86_64::registers::segmentation::SegmentSelector;
 
-use crate::{Physical, Address};
+use crate::{Address, Physical};
 
 #[inline(always)]
 fn rdmsr(ecx: u32) -> u64 {
@@ -142,9 +142,9 @@ impl IA32_STAR {
     /// Usage (from the IA32 specification):
     /// > When SYSRET transfers control to 64-bit mode user code using REX.W, the processor gets the privilege level 3
     /// > target code segment, instruction pointer, stack segment, and flags as follows:
-    /// > Target code segment —             Reads a non-NULL selector from IA32_STAR[63:48] + 16.
+    /// > Target code segment:       Reads a non-NULL selector from IA32_STAR[63:48] + 16.
     /// > ...
-    /// > Stack segment —                   IA32_STAR[63:48] + 8
+    /// > Target stack segment:      IA32_STAR[63:48] + 8
     /// > ...
     #[inline(always)]
     pub fn set_selectors(low_selector: SegmentSelector, high_selector: SegmentSelector) {

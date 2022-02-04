@@ -1,4 +1,4 @@
-use x86_64::structures::idt::{InterruptDescriptorTable, Entry};
+use x86_64::structures::idt::InterruptDescriptorTable;
 pub use x86_64::structures::idt::InterruptStackFrame;
 
 /* FAULT INTERRUPT HANDLERS */
@@ -129,7 +129,7 @@ extern "x86-interrupt" fn general_protection_fault_handler(
     let selector_index = (error_code >> 3) & 0x1FFF;
 
     panic!(
-        "CPU EXCEPTION: GENERAL PROTECTION FAULT:\n External: {}\n IndexType: {:?}\n Index: {}\n {:#?}",
+        "CPU EXCEPTION: GENERAL PROTECTION FAULT:\n External: {}\n IndexType: {:?}\n Index: 0x{:X}\n {:#?}",
         external, selector_index_type, selector_index, stack_frame
     );
 }
@@ -248,7 +248,7 @@ pub fn set_handler_fn(vector: u8, handler: extern "x86-interrupt" fn(InterruptSt
     });
 }
 
-pub fn print_idt(vector: u8)  {
+pub fn print_idt(vector: u8) {
     let idt = IDT.lock();
     info!("{:?}", idt[vector as usize]);
 }

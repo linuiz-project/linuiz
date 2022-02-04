@@ -44,7 +44,7 @@ pub mod global {
     }
 
     use lib::{cell::SyncOnceCell, structures::idt::InterruptStackFrame};
-    extern "x86-interrupt" fn tick_handler(_: InterruptStackFrame) {
+    extern "x86-interrupt" fn tick_handler(isf: InterruptStackFrame) {
         unsafe {
             GLOBAL_CLOCK
                 .get()
