@@ -247,8 +247,3 @@ pub fn set_handler_fn(vector: u8, handler: extern "x86-interrupt" fn(InterruptSt
         };
     });
 }
-
-pub fn print_idt(vector: u8) {
-    let idt = IDT.lock();
-    info!("{:?}", idt[vector as usize]);
-}

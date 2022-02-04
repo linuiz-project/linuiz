@@ -73,8 +73,8 @@ lazy_static::lazy_static! {
 
         KCODE_SELECTOR.set(gdt.add_entry(Descriptor::kernel_code_segment())).unwrap();
         KDATA_SELECTOR.set(gdt.add_entry(Descriptor::kernel_data_segment())).unwrap();
-        UCODE_SELECTOR.set(gdt.add_entry(Descriptor::user_code_segment())).unwrap();
         UDATA_SELECTOR.set(gdt.add_entry(Descriptor::user_data_segment())).unwrap();
+        UCODE_SELECTOR.set(gdt.add_entry(Descriptor::user_code_segment())).unwrap();
         TSS_SELECTOR.set(gdt.add_entry(Descriptor::tss_segment(
             &lib::structures::gdt::TSS,
         ))).unwrap();
@@ -496,7 +496,7 @@ extern "C" fn _startup() -> ! {
     }
 
     unsafe {
-        use lib::registers::{msr, msr::GenericMSR};
+        use lib::registers::{msr, msr::Generic};
 
         // Enable `syscall`/`sysret`.
         msr::IA32_EFER::set_sce(true);

@@ -6,7 +6,7 @@ use spin::{Mutex, MutexGuard};
 
 use crate::{clock::AtomicClock, scheduling::Scheduler};
 use core::{ops::Range, sync::atomic::AtomicUsize};
-use lib::registers::{msr, msr::GenericMSR};
+use lib::registers::{msr, msr::Generic};
 
 pub static INIT_COUNT: AtomicUsize = AtomicUsize::new(0);
 

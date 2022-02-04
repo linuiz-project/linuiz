@@ -33,9 +33,6 @@ pub mod global {
                     tick_handler,
                 );
 
-                lib::structures::idt::print_idt(
-                    crate::local_state::InterruptVector::LocalTimer as u8,
-                );
                 debug!("Global clock configured at 1000Hz.");
             });
         } else {
@@ -55,6 +52,10 @@ pub mod global {
 
         use lib::structures::pic8259;
         pic8259::end_of_interrupt(pic8259::InterruptOffset::Timer);
+        info!("0b{:b}", {
+            use lib::registers::msr::Generic;
+            lib::registers::msr::IA32_GS_BASE::read()
+        });
     }
 
     pub fn get_ticks() -> Option<u64> {

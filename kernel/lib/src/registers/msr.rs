@@ -38,7 +38,7 @@ unsafe fn wrmsr(ecx: u32, value: u64) {
     );
 }
 
-pub trait GenericMSR {
+pub trait Generic {
     const ECX: u32;
 
     #[inline(always)]
@@ -158,26 +158,26 @@ impl IA32_STAR {
 }
 
 pub struct IA32_LSTAR;
-impl GenericMSR for IA32_LSTAR {
+impl Generic for IA32_LSTAR {
     const ECX: u32 = 0xC0000082;
 }
 
 pub struct IA32_CSTAR;
-impl GenericMSR for IA32_CSTAR {
+impl Generic for IA32_CSTAR {
     const ECX: u32 = 0xC0000083;
 }
 
 pub struct IA32_SFMASK;
-impl GenericMSR for IA32_SFMASK {
+impl Generic for IA32_SFMASK {
     const ECX: u32 = 0xC0000084;
 }
 
 pub struct IA32_FS_BASE;
-impl GenericMSR for IA32_FS_BASE {
+impl Generic for IA32_FS_BASE {
     const ECX: u32 = 0xC0000100;
 }
 
 pub struct IA32_GS_BASE;
-impl GenericMSR for IA32_GS_BASE {
+impl Generic for IA32_GS_BASE {
     const ECX: u32 = 0xC0000101;
 }
