@@ -1,3 +1,10 @@
+use lib::cell::SyncOnceCell;
+use x86_64::{registers::segmentation::SegmentSelector, structures::gdt::GlobalDescriptorTable};
+
+extern "C" {
+    static __gdt: lib::LinkerSymbol;
+}
+
 lazy_static::lazy_static! {
     static ref GDT: GlobalDescriptorTable = unsafe {
         use x86_64::structures::gdt::Descriptor;

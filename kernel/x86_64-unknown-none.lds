@@ -54,7 +54,17 @@ SECTIONS
         __kernel_stack = .;
 
         . += 0x1000;
+        __exception_stack = .;
+
+        . += 0x1000;
+        __double_fault_stack = .;
+
+        . += 0x1000;
         __isr_stack = .;
+
+        . += 0x1000;
+        __syscall_stack = .;
+
 
         *(.bss.* .bss)
 

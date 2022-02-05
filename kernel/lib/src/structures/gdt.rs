@@ -1,16 +1,6 @@
 use x86_64::{instructions::segmentation::Segment, structures::tss::TaskStateSegment};
 
-static DOUBLE_FAULT_IST: [u8; 0x1000] = [0u8; 0x1000];
-pub const DOUBLE_FAULT_IST_INDEX: u16 = 6;
-pub static mut TSS_STACK_PTRS: [Option<*const ()>; 7] = [
-    None,
-    None,
-    None,
-    None,
-    None,
-    None,
-    Some(DOUBLE_FAULT_IST.as_ptr() as *const ()),
-];
+pub static mut TSS_STACK_PTRS: [Option<*const ()>; 7] = [None; 7];
 
 lazy_static::lazy_static! {
     pub static ref TSS: TaskStateSegment = {

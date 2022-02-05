@@ -24,6 +24,7 @@ mod local_state;
 mod logging;
 mod scheduling;
 mod slob;
+mod syscall;
 
 use lib::{
     acpi::SystemConfigTableEntry,
@@ -31,7 +32,6 @@ use lib::{
     memory::{uefi, PageManager},
     BootInfo, LinkerSymbol,
 };
-use x86_64::{registers::segmentation::SegmentSelector, structures::gdt::GlobalDescriptorTable};
 
 extern "C" {
     static __ap_text_start: LinkerSymbol;
@@ -39,7 +39,6 @@ extern "C" {
 
     static __ap_data_start: LinkerSymbol;
     static __kernel_pml4: LinkerSymbol;
-    static __gdt: LinkerSymbol;
     static __ap_data_end: LinkerSymbol;
 
     static __text_start: LinkerSymbol;
@@ -53,6 +52,8 @@ extern "C" {
 
     static __bss_start: LinkerSymbol;
     static __kernel_stack: LinkerSymbol;
+    static __exception_stack: LinkerSymbol;
+    static __double_fault_stack: LinkerSymbol;
     static __isr_stack: LinkerSymbol;
     static __bss_end: LinkerSymbol;
 
@@ -108,14 +109,24 @@ unsafe extern "efiapi" fn kernel_init(
     }
 
     // Set up TSS stacks.
-    lib::structures::gdt::TSS_STACK_PTRS[0] = Some(__isr_stack.as_mut_ptr());
+    {
+        use lib::structures::idt;
+
+        lib::structures::gdt::TSS_STACK_PTRS[idt::EXCEPTION_IST_INDEX as usize] =
+            Some(__exception_stack.as_mut_ptr());
+        lib::structures::gdt::TSS_STACK_PTRS[idt::DOUBLE_FAULT_IST_INDEX as usize] =
+            Some(__double_fault_stack.as_mut_ptr());
+        info!("{:?}", __isr_stack.as_ptr::<()>());
+        lib::structures::gdt::TSS_STACK_PTRS[idt::ISR_IST_INDEX as usize] =
+            Some(__isr_stack.as_mut_ptr());
+    }
 
     gdt::init();
 
     // Set CR0 flags.
     {
         use lib::registers::control::{CR0Flags, CR0};
-        
+
         CR0::write(
             CR0Flags::PE | CR0Flags::MP | CR0Flags::ET | CR0Flags::NE | CR0Flags::WP | CR0Flags::PG,
         );
@@ -467,33 +478,19 @@ extern "C" fn _startup() -> ! {
         msr::IA32_EFER::set_sce(true);
         // Configure system call environment registers.
         msr::IA32_STAR::set_selectors(
-            *KCODE_SELECTOR.get().unwrap(),
-            *KDATA_SELECTOR.get().unwrap(),
+            *gdt::KCODE_SELECTOR.get().unwrap(),
+            *gdt::KDATA_SELECTOR.get().unwrap(),
         );
+        msr::IA32_LSTAR::write(syscall::syscall_entry as u64);
         msr::IA32_SFMASK::write(u64::MAX);
-        // MSR::IA32_LSTAR.write(0x0);
     }
 
     kernel_main()
 }
 
-#[naked]
-unsafe fn swap_ring3() {
-    core::arch::asm!(
-    "
-        lea rcx, {}
-        mov r11, {}
-
-        sysretq
-    ",
-    sym test_user_function,
-    const lib::registers::RFlags::INTERRUPT_FLAG.bits(),
-    options(noreturn)
-    );
-}
-
 #[link_section = ".user_code"]
 fn test_user_function() {
+    unsafe { core::arch::asm!("syscall", options(nostack, nomem)) };
     loop {}
 }
 
@@ -518,7 +515,7 @@ fn task2() -> ! {
 fn kernel_main() -> ! {
     debug!("Successfully entered `kernel_main()`.");
 
-    unsafe { swap_ring3() };
+    unsafe { lib::cpu::ring3_enter(test_user_function, lib::registers::RFlags::INTERRUPT_FLAG) };
 
     lib::instructions::hlt_indefinite()
 }

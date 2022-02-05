@@ -6,7 +6,7 @@ qemu-system-x86_64 \
     -cpu qemu64 \
     -smp 1 \
     -m 64M \
-    -serial stdio \
+    -serial mon:stdio \
     -display none \
     -net none \
     -bios ./ovmf.fd \
