@@ -181,3 +181,8 @@ pub struct IA32_GS_BASE;
 impl Generic for IA32_GS_BASE {
     const ECX: u32 = 0xC0000101;
 }
+
+pub struct IA32_KERNEL_GS_BASE;
+impl Generic for IA32_KERNEL_GS_BASE {
+    const ECX: u32 = 0xC0000102;
+}

@@ -19,6 +19,7 @@ extern crate lib;
 
 mod clock;
 mod drivers;
+mod gdt;
 mod local_state;
 mod logging;
 mod scheduling;
@@ -65,30 +66,6 @@ static mut CON_OUT: drivers::stdout::Serial = drivers::stdout::Serial::new(drive
 static KERNEL_PAGE_MANAGER: SyncOnceCell<PageManager> = SyncOnceCell::new();
 static KERNEL_MALLOCATOR: SyncOnceCell<slob::SLOB> = SyncOnceCell::new();
 
-lazy_static::lazy_static! {
-    static ref GDT: GlobalDescriptorTable = unsafe {
-        use x86_64::structures::gdt::Descriptor;
-
-        let mut gdt = GlobalDescriptorTable::from_raw_slice(core::slice::from_raw_parts(__gdt.as_ptr(), 1 /* Null Seg */));
-
-        KCODE_SELECTOR.set(gdt.add_entry(Descriptor::kernel_code_segment())).unwrap();
-        KDATA_SELECTOR.set(gdt.add_entry(Descriptor::kernel_data_segment())).unwrap();
-        UDATA_SELECTOR.set(gdt.add_entry(Descriptor::user_data_segment())).unwrap();
-        UCODE_SELECTOR.set(gdt.add_entry(Descriptor::user_code_segment())).unwrap();
-        TSS_SELECTOR.set(gdt.add_entry(Descriptor::tss_segment(
-            &lib::structures::gdt::TSS,
-        ))).unwrap();
-
-        gdt
-    };
-}
-
-static mut KCODE_SELECTOR: SyncOnceCell<SegmentSelector> = SyncOnceCell::new();
-static mut KDATA_SELECTOR: SyncOnceCell<SegmentSelector> = SyncOnceCell::new();
-static mut UCODE_SELECTOR: SyncOnceCell<SegmentSelector> = SyncOnceCell::new();
-static mut UDATA_SELECTOR: SyncOnceCell<SegmentSelector> = SyncOnceCell::new();
-static mut TSS_SELECTOR: SyncOnceCell<SegmentSelector> = SyncOnceCell::new();
-
 /// Clears the kernel stack by resetting `RSP`.
 ///
 /// SAFETY: This method does *extreme* damage to the stack. It should only ever be used when
@@ -133,27 +110,12 @@ unsafe extern "efiapi" fn kernel_init(
     // Set up TSS stacks.
     lib::structures::gdt::TSS_STACK_PTRS[0] = Some(__isr_stack.as_mut_ptr());
 
-    /* INIT GDT */
-    {
-        GDT.load();
-
-        use x86_64::instructions::{
-            segmentation::{Segment, CS, DS, ES, FS, GS, SS},
-            tables::load_tss,
-        };
-        DS::set_reg(*KDATA_SELECTOR.get().unwrap());
-        SS::set_reg(*KDATA_SELECTOR.get().unwrap());
-        ES::set_reg(*KDATA_SELECTOR.get().unwrap());
-        FS::set_reg(*KDATA_SELECTOR.get().unwrap());
-        GS::set_reg(*KDATA_SELECTOR.get().unwrap());
-        CS::set_reg(*KCODE_SELECTOR.get().unwrap());
-        load_tss(*TSS_SELECTOR.get().unwrap());
-    }
+    gdt::init();
 
     // Set CR0 flags.
     {
         use lib::registers::control::{CR0Flags, CR0};
-
+        
         CR0::write(
             CR0Flags::PE | CR0Flags::MP | CR0Flags::ET | CR0Flags::NE | CR0Flags::WP | CR0Flags::PG,
         );
@@ -242,6 +204,7 @@ unsafe extern "efiapi" fn kernel_init(
                         page_attribs.remove(PageAttributes::WRITE_THROUGH);
                     }
 
+                    // If the descriptor type is not unusable...
                     if !matches!(
                         descriptor.ty,
                         MemoryType::UNUSABLE
@@ -249,6 +212,9 @@ unsafe extern "efiapi" fn kernel_init(
                             | MemoryType::KERNEL_CODE
                             | MemoryType::KERNEL_DATA
                     ) {
+                        // ... then iterate its pages and identity map them.
+                        //     This specific approach allows the memory usage to be decreased overall,
+                        //      since unused/unusable pages or descriptors will not be mapped.
                         for page in descriptor
                             .frame_range()
                             .map(|index| Page::from_index(index))
@@ -398,7 +364,6 @@ extern "C" fn _startup() -> ! {
         idt::set_handler_fn(InterruptVector::Error as u8, handlers::error_handler);
 
         // Initialize global clock (PIT).
-        // TODO possible move to using HPET as global clock?
         crate::clock::global::init();
     }
 

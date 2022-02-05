@@ -12,17 +12,19 @@ macro_rules! basic_register_raw {
 
         impl $register_ident {
             #[inline(always)]
-            pub unsafe fn write(value: usize) {
+            pub unsafe fn write(value: u64) {
                 core::arch::asm!(concat!("mov ", stringify!($register_ident), ", {}"), in(reg) value, options(nomem, nostack));
             }
 
             #[inline(always)]
-            pub fn read() -> usize {
-                let value: usize;
+            pub fn read() -> u64 {
+                let value: u64;
+
                 unsafe {
                     core::arch::asm!(concat!("mov {}, ", stringify!($register_ident)), out(reg) value, options(nomem, nostack));
-                    value as usize
                 }
+
+                value
             }
         }
     }

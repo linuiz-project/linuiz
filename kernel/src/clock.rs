@@ -41,7 +41,7 @@ pub mod global {
     }
 
     use lib::{cell::SyncOnceCell, structures::idt::InterruptStackFrame};
-    extern "x86-interrupt" fn tick_handler(isf: InterruptStackFrame) {
+    extern "x86-interrupt" fn tick_handler(_: InterruptStackFrame) {
         unsafe {
             GLOBAL_CLOCK
                 .get()
@@ -52,10 +52,6 @@ pub mod global {
 
         use lib::structures::pic8259;
         pic8259::end_of_interrupt(pic8259::InterruptOffset::Timer);
-        info!("0b{:b}", {
-            use lib::registers::msr::Generic;
-            lib::registers::msr::IA32_GS_BASE::read()
-        });
     }
 
     pub fn get_ticks() -> Option<u64> {

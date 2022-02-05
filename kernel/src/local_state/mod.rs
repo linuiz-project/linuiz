@@ -22,16 +22,16 @@ struct LocalStateRegister;
 /// Bit 10..13  RESERVED
 /// Bit 13..64  STRUCTURE PTR
 impl LocalStateRegister {
-    const ID_SET_BIT: u64 = 0;
+    const ID_SET_BIT: usize = 0;
     const ID_BITS: Range<usize> = 1..10;
     const DATA_BITS: Range<usize> = 0..12;
-    const PTR_BITS: Range<usize> = Self::ID_BITS.end..64;
+    const PTR_BITS: Range<usize> = 12..64;
 
     #[inline]
     fn get_id() -> u8 {
         let gs_base = msr::IA32_GS_BASE::read();
 
-        if !gs_base.get_bit(0) {
+        if !gs_base.get_bit(Self::ID_SET_BIT) {
             let cpuid_id = (lib::instructions::cpuid::exec(0x1, 0x0).unwrap().ebx() >> 24) as u64;
 
             unsafe {
