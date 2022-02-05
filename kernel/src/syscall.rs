@@ -4,10 +4,10 @@ extern "C" {
     static __syscall_stack: lib::LinkerSymbol;
 }
 
-static SYSCALL_FUNCTIONS: [extern "sysv64" fn(); 1] = [worked];
+static SYSCALL_FUNCTIONS: [extern "sysv64" fn(); 1] = [test];
 
 pub enum SyscallID {
-    Worked,
+    Test,
 }
 
 /// Syscalls use the x64 SysV ABI, with these caveats:
@@ -41,11 +41,9 @@ pub(crate) unsafe extern "C" fn syscall_entry() {
         push r11
 
         /* Syscall stack */
-        push rsp
+        /* Here on, `rax` will store the user `rsp` */
+        mov r11, rsp
         lea rsp, {0}
-
-        rep:
-            jmp rep
 
         /* SysV64 preserve */
         push rbx
@@ -73,7 +71,7 @@ pub(crate) unsafe extern "C" fn syscall_entry() {
         pop rbx
         
         /* Return stack */
-        pop rsp
+        mov rsp, r11
 
         /* syscall restore */
         pop r11
@@ -86,6 +84,6 @@ pub(crate) unsafe extern "C" fn syscall_entry() {
     );
 }
 
-extern "sysv64" fn worked() {
+extern "sysv64" fn test() {
     info!("worked");
 }

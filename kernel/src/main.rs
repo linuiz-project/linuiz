@@ -116,7 +116,6 @@ unsafe extern "efiapi" fn kernel_init(
             Some(__exception_stack.as_mut_ptr());
         lib::structures::gdt::TSS_STACK_PTRS[idt::DOUBLE_FAULT_IST_INDEX as usize] =
             Some(__double_fault_stack.as_mut_ptr());
-        info!("{:?}", __isr_stack.as_ptr::<()>());
         lib::structures::gdt::TSS_STACK_PTRS[idt::ISR_IST_INDEX as usize] =
             Some(__isr_stack.as_mut_ptr());
     }
