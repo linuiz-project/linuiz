@@ -26,6 +26,8 @@ mod scheduling;
 mod slob;
 mod syscall;
 
+use core::sync::atomic::AtomicBool;
+
 use lib::{
     acpi::SystemConfigTableEntry,
     cell::SyncOnceCell,
@@ -524,7 +526,9 @@ fn kernel_main() -> ! {
             AttributeModify::Set,
         );
 
-        let stack_top = stack.as_mut_ptr().add(stack.len() - 1);
+        let stack_top = stack.as_mut_ptr().add(stack.len());
+
+        info!("Userspace stack {:?} 0x{:X}", stack_top, stack.len());
         lib::registers::stack::RSP::write(stack_top as *mut _);
         lib::cpu::ring3_enter(test_user_function, lib::registers::RFlags::INTERRUPT_FLAG);
     }

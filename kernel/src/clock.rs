@@ -52,13 +52,6 @@ pub mod global {
 
         use lib::structures::pic8259;
         pic8259::end_of_interrupt(pic8259::InterruptOffset::Timer);
-
-        unsafe {
-            lib::registers::debug::DR0::write(isf.instruction_pointer.as_u64());
-            lib::registers::debug::DR1::write(isf.code_segment);
-            lib::registers::debug::DR2::write(isf.stack_pointer.as_u64());
-            lib::registers::debug::DR3::write(isf.stack_segment);
-        }
     }
 
     pub fn get_ticks() -> Option<u64> {

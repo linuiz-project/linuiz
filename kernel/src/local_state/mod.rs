@@ -101,6 +101,8 @@ pub fn init() {
             .into_parts()
             .0;
 
+        debug!("CPU local state pointer: {:?}", lpu_ptr);
+
         {
             let clock = AtomicClock::new();
             let int_ctrl = InterruptController::create();

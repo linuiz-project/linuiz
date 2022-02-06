@@ -140,9 +140,7 @@ impl Display for VENDOR {
 #[no_mangle]
 pub unsafe fn ring3_enter(target_func: fn(), rflags: crate::registers::RFlags) {
     core::arch::asm!(
-    "
-        sysretq
-    ",
+    "sysretq",
     in("rcx") target_func,
     in("r11") rflags.bits(),
     options(noreturn)

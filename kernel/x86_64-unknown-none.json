@@ -19,7 +19,7 @@
   "disable-redzone": true,
   "relocation-model": "static",
   "executables": true,
-  "code-model": "small",
+  "code-model": "kernel",
   "os": "none",
   "exe-suffix": ".elf"
 }

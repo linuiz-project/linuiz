@@ -31,10 +31,10 @@ pub(crate) unsafe extern "C" fn syscall_enter() {
 
         /* Push fake stack frame for scheduling compatibility. */
         push 0x0 /* Push empty stack seg value. */
-        push rcx /* Push `rsp` value. */
+        push r12 /* Push `rsp` value. */
         push r11 /* Push `rflags` value. */
         push 0x0 /* Push empty code seg value. */
-        push r12 /* Push `rip` value. */
+        push rcx /* Push `rip` value. */
 
         /* Push all gprs to the stack. */
         push r15
@@ -58,18 +58,14 @@ pub(crate) unsafe extern "C" fn syscall_enter() {
         add rcx, 15 * 8 /* ISF will be just before the 14 registers we pushed. */
         /* Move cached gprs pointer into second parameter. */
         mov rdx, rsp
-        
+
         cld
 
         /* Load the function pointer. */
-        lea rbx, {1}
-        /* Calculate the absolute address of the desired handler. */
-        mov rax, $0x8
-        mul r10
-        add rax, rbx    /* Absolute address of handler pointer. */
-        mov rax, [rax]  /* Absolute address of handler. */
+        lea r10, [r10 * 8]
+        lea rbx, [r10 + {1}]
 
-        call rax
+        call [rbx]
 
         /* Restore general purpose registers. */
         pop rax
@@ -89,17 +85,16 @@ pub(crate) unsafe extern "C" fn syscall_enter() {
         pop r15
 
         /* Pop fake stack frame. */
-        pop r12 /* Pop cached `rip` value. */
-        pop r12 /* Pop empty code seg value. */
+        pop rcx /* Pop cached `rip` value. */
+        add rsp, 0x8 /* Pop empty code seg value. */
         pop r11 /* Pop cached `rflags` value. */
-        pop rcx /* Pop cached `rsp` value. */
-        pop rcx /* Pop empty stack seg value. */
-
+        pop r12 /* Pop cached `rsp` value. */
+        add rsp, 0x8 /* Pop empty stack seg value. */
 
         /* Restore previous stack. */
         mov rsp, r12
         
-        sysret
+        sysretq
         ",
         sym __syscall_stack,
         sym SYSCALL_FUNCTIONS,

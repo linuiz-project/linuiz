@@ -42,6 +42,8 @@ impl VirtualMapper {
             .lock_next()
             .expect("Failed to lock frame for virtual addressor's PML4");
 
+        debug!("Page manager created: PML4 Idx {}", pml4_index);
+
         // Clear PML4 frame.
         core::ptr::write_bytes(
             mapped_page.forward(pml4_index).unwrap().as_mut_ptr::<u8>(),
