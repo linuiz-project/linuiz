@@ -59,62 +59,15 @@ longmode:
 
     ; Jump to high-level code
     call _startup
-    
+
 
 section .ap_data
 
 global __kernel_pml4, __gdt
-
-
-; Access bits
-PRESENT        equ 1 << 7
-NOT_SYS        equ 1 << 4
-EXEC           equ 1 << 3
-DC             equ 1 << 2
-RW             equ 1 << 1
-USER           equ 3 << 5
-ACCESSED       equ 1 << 0
-
-; Flags bits
-GRAN_4K       equ 1 << 7
-; This flag should not be present with LONG_MODE flag.
-; They are mutually excuslive.
-SZ_32         equ 1 << 6
-LONG_MODE     equ 1 << 5
-
-__kernel_pml4 dd 0
+__kernel_pml4 resd 1
 __gdt:
     resq 7
     
     .pointer:
         dw $ - __gdt - 1
         dq __gdt
-
-    ; .null: equ $ - __gdt
-    ;     dq 0
-    ; .kcode: equ $ - __gdt
-    ;     dd 0xFFFF                           ; Limit & Base (low)
-    ;     db 0                                ; Base (mid)
-    ;     db PRESENT | NOT_SYS | EXEC         ; Access
-    ;     db GRAN_4K | LONG_MODE | 0xF        ; Flags
-    ;     db 0                                ; Base (high)
-    ; .kdata: equ $ - __gdt
-    ;     dd 0xFFFF                           ; Limit & Base (low)
-    ;     db 0                                ; Base (mid)
-    ;     db PRESENT | NOT_SYS | RW           ; Access
-    ;     db GRAN_4K | SZ_32 | 0xF            ; Flags
-    ;     db 0                                ; Base (high)
-    ; .udata: equ $ - __gdt
-    ;     dd 0xFFFF                           ; Limit & Base (low)
-    ;     db 0                                ; Base (mid)
-    ;     db PRESENT | NOT_SYS | RW | USER    ; Access
-    ;     db GRAN_4K | SZ_32 | 0xF            ; Flags
-    ;     db 0                                ; Base (high)
-    ; .ucode: equ $ - __gdt
-    ;     dd 0xFFFF                                   ; Limit & Base (low)
-    ;     db 0                                        ; Base (mid)
-    ;     db PRESENT | NOT_SYS | EXEC | USER          ; Access
-    ;     db GRAN_4K | LONG_MODE | 0xF                ; Flags
-    ;     db 0                                        ; Base (high)
-    ; .tss: equ $ - __gdt
-

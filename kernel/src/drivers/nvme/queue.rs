@@ -46,7 +46,7 @@ impl<'q> CompletionQueue<'q> {
 
         unsafe {
             let (phys_addr, mut alloc) = lib::memory::malloc::get()
-                .alloc_contiguous(size_in_frames)
+                .alloc_pages(size_in_frames)
                 .expect(
                     "Failed to allocate contiguous memory for an administrative completion queue.",
                 );
@@ -136,7 +136,7 @@ impl<'q> SubmissionQueue<'q> {
 
         unsafe {
             let (phys_addr, mut alloc) = lib::memory::malloc::get()
-                .alloc_contiguous(size_in_frames)
+                .alloc_pages(size_in_frames)
                 .expect(
                     "Failed to allocate contiguous memory for an administrative completion queue.",
                 );

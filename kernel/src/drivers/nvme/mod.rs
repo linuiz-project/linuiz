@@ -508,7 +508,7 @@ impl<'dev> Controller<'dev> {
             AdminCommand::Identify { ctrl_id } => {
                 // Allocate the necessary memory for returning the command value.
                 let (phys_addr, alloc) =
-                    unsafe { lib::memory::malloc::get().alloc_contiguous(1).unwrap() };
+                    unsafe { lib::memory::malloc::get().alloc_pages(1).unwrap() };
 
                 // Construct the command with the provided data.
                 let command = Command {

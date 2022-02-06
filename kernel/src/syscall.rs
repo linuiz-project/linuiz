@@ -95,6 +95,8 @@ pub(crate) unsafe extern "C" fn syscall_enter() {
         pop rcx /* Pop empty code seg value. */
         pop rcx /* Pop cached `rip` value. */
         
+        r: jmp r
+
         /* Restore previous stack. */
         mov rsp, r12
         

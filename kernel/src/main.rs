@@ -183,7 +183,7 @@ unsafe extern "efiapi" fn kernel_init(
                 let page_manager = lib::memory::get_page_manager();
 
                 debug!("Configuring page table entries for kernel ELF sections.");
-                use lib::memory::{AttributeModify, PageAttributes};
+                use lib::memory::PageAttributes;
 
                 // Set page attributes for UEFI descriptor pages.
                 for descriptor in lib::BOOT_INFO.get().unwrap().memory_map().iter() {
@@ -470,7 +470,7 @@ extern "C" fn _startup() -> ! {
     }
 
     unsafe {
-        use lib::registers::{msr, msr::Generic};
+        use lib::registers::msr;
 
         // Enable `syscall`/`sysret`.
         msr::IA32_EFER::set_sce(true);
@@ -484,24 +484,6 @@ extern "C" fn _startup() -> ! {
     }
 
     kernel_main()
-}
-
-#[link_section = ".user_code"]
-fn test_user_function() {
-    unsafe {
-        core::arch::asm!(
-            "mov r10, $0",
-            "mov r8,   0x1F1F1FA1",
-            "mov r9,   0x1F1F1FA2",
-            "mov r13,   0x1F1F1FA3",
-            "mov r14,   0x1F1F1FA4",
-            "mov r15,   0x1F1F1FA5",
-            "syscall",
-            out("r10") _,
-            options(nostack, nomem)
-        )
-    };
-    loop {}
 }
 
 fn task1() -> ! {
@@ -525,7 +507,48 @@ fn task2() -> ! {
 fn kernel_main() -> ! {
     debug!("Successfully entered `kernel_main()`.");
 
-    unsafe { lib::cpu::ring3_enter(test_user_function, lib::registers::RFlags::INTERRUPT_FLAG) };
+    unsafe {
+        use lib::memory::{AttributeModify, PageAttributes};
+        let mut stack = lib::memory::malloc::get()
+            .alloc_pages(1)
+            .unwrap()
+            .1
+            .into_uninit_slice();
+
+        lib::memory::get_page_manager().set_page_attribs(
+            &lib::memory::Page::from_ptr(stack.as_ptr()),
+            PageAttributes::PRESENT
+                | PageAttributes::WRITABLE
+                | PageAttributes::USERSPACE
+                | PageAttributes::NO_EXECUTE,
+            AttributeModify::Set,
+        );
+
+        let stack_top = stack.as_mut_ptr().add(stack.len() - 1);
+        lib::registers::stack::RSP::write(stack_top as *mut _);
+        lib::cpu::ring3_enter(test_user_function, lib::registers::RFlags::INTERRUPT_FLAG);
+    }
 
     lib::instructions::hlt_indefinite()
+}
+
+#[link_section = ".user_code"]
+fn test_user_function() {
+    unsafe {
+        core::arch::asm!(
+            "mov r10, $0",
+            // "mov r8,   0x1F1F1FA1",
+            // "mov r9,   0x1F1F1FA2",
+            // "mov r13,   0x1F1F1FA3",
+            // "mov r14,   0x1F1F1FA4",
+            // "mov r15,   0x1F1F1FA5",
+            "syscall",
+            out("rcx") _,
+            out("r10") _,
+            out("r11") _,
+            out("r12") _,
+        )
+    };
+
+    loop {}
 }

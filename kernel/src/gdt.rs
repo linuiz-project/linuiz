@@ -43,7 +43,6 @@ pub fn init() {
             tables::load_tss,
         };
         CS::set_reg(*KCODE_SELECTOR.get().unwrap());
-        DS::set_reg(*KDATA_SELECTOR.get().unwrap());
         SS::set_reg(*KDATA_SELECTOR.get().unwrap());
 
         // Because this is x86, everything is complicated. It's important we load the extra
@@ -56,6 +55,7 @@ pub fn init() {
         // process-local state.
         let null_selector = SegmentSelector::new(0x0, x86_64::PrivilegeLevel::Ring0);
         ES::set_reg(null_selector);
+        DS::set_reg(null_selector);
         FS::set_reg(null_selector);
         GS::set_reg(null_selector);
         load_tss(*TSS_SELECTOR.get().unwrap());

@@ -196,43 +196,29 @@ lazy_static::lazy_static! {
     static ref IDT: spin::Mutex<InterruptDescriptorTable> = {
         let mut idt = InterruptDescriptorTable::new();
 
-        unsafe {
-        // fault interrupts
+    unsafe {
         idt.divide_error.set_handler_fn(divide_error_handler).set_stack_index(EXCEPTION_IST_INDEX);
         idt.debug.set_handler_fn(debug_handler).set_stack_index(EXCEPTION_IST_INDEX);
-        idt.non_maskable_interrupt
-            .set_handler_fn(non_maskable_interrupt_handler).set_stack_index(EXCEPTION_IST_INDEX);
+        idt.non_maskable_interrupt.set_handler_fn(non_maskable_interrupt_handler).set_stack_index(EXCEPTION_IST_INDEX);
         idt.breakpoint.set_handler_fn(breakpoint_handler).set_stack_index(EXCEPTION_IST_INDEX);
         idt.overflow.set_handler_fn(overflow_handler).set_stack_index(EXCEPTION_IST_INDEX);
-        idt.bound_range_exceeded
-            .set_handler_fn(bound_range_exceeded_handler).set_stack_index(EXCEPTION_IST_INDEX);
+        idt.bound_range_exceeded.set_handler_fn(bound_range_exceeded_handler).set_stack_index(EXCEPTION_IST_INDEX);
         idt.invalid_opcode.set_handler_fn(invalid_opcode_handler).set_stack_index(EXCEPTION_IST_INDEX);
-        idt.device_not_available
-            .set_handler_fn(device_not_available_handler).set_stack_index(EXCEPTION_IST_INDEX);
-        unsafe {
-            idt.double_fault
-                .set_handler_fn(double_fault_handler)
-                .set_stack_index(DOUBLE_FAULT_IST_INDEX)
-        };
+        idt.device_not_available.set_handler_fn(device_not_available_handler).set_stack_index(EXCEPTION_IST_INDEX);
+        idt.double_fault.set_handler_fn(double_fault_handler).set_stack_index(DOUBLE_FAULT_IST_INDEX);
         idt.invalid_tss.set_handler_fn(invalid_tss_handler).set_stack_index(EXCEPTION_IST_INDEX);
-        idt.segment_not_present
-            .set_handler_fn(segment_not_present_handler).set_stack_index(EXCEPTION_IST_INDEX);
-        idt.stack_segment_fault
-            .set_handler_fn(stack_segment_handler).set_stack_index(EXCEPTION_IST_INDEX);
-        idt.general_protection_fault
-            .set_handler_fn(general_protection_fault_handler).set_stack_index(EXCEPTION_IST_INDEX);
+        idt.segment_not_present.set_handler_fn(segment_not_present_handler).set_stack_index(EXCEPTION_IST_INDEX);
+        idt.stack_segment_fault.set_handler_fn(stack_segment_handler).set_stack_index(EXCEPTION_IST_INDEX);
+        idt.general_protection_fault.set_handler_fn(general_protection_fault_handler).set_stack_index(EXCEPTION_IST_INDEX);
         idt.page_fault.set_handler_fn(page_fault_handler).set_stack_index(EXCEPTION_IST_INDEX);
         // --- reserved 15
-        idt.x87_floating_point
-            .set_handler_fn(x87_floating_point_handler).set_stack_index(EXCEPTION_IST_INDEX);
+        idt.x87_floating_point.set_handler_fn(x87_floating_point_handler).set_stack_index(EXCEPTION_IST_INDEX);
         idt.alignment_check.set_handler_fn(alignment_check_handler).set_stack_index(EXCEPTION_IST_INDEX);
         // --- machine check (platform specific, not required)
-        idt.simd_floating_point
-            .set_handler_fn(simd_floating_point_handler).set_stack_index(EXCEPTION_IST_INDEX);
+        idt.simd_floating_point.set_handler_fn(simd_floating_point_handler).set_stack_index(EXCEPTION_IST_INDEX);
         idt.virtualization.set_handler_fn(virtualization_handler).set_stack_index(EXCEPTION_IST_INDEX);
         // --- reserved 21-29
-        idt.security_exception
-            .set_handler_fn(security_exception_handler).set_stack_index(EXCEPTION_IST_INDEX);
+        idt.security_exception.set_handler_fn(security_exception_handler).set_stack_index(EXCEPTION_IST_INDEX);
         // --- triple fault (can't handle)
     }
 

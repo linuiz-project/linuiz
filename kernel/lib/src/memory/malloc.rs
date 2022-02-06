@@ -107,7 +107,7 @@ pub trait MemoryAllocator {
         align: Option<core::num::NonZeroUsize>,
     ) -> Result<Alloc<u8>, AllocError>;
 
-    unsafe fn alloc_contiguous(
+    unsafe fn alloc_pages(
         &self,
         count: usize,
     ) -> Result<(Address<Physical>, Alloc<u8>), AllocError>;

@@ -305,7 +305,7 @@ impl MemoryAllocator for SLOB<'_> {
         ))
     }
 
-    unsafe fn alloc_contiguous(
+    unsafe fn alloc_pages(
         &self,
         count: usize,
     ) -> Result<(Address<Physical>, Alloc<u8>), AllocError> {
