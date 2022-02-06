@@ -21,18 +21,18 @@ lazy_static::lazy_static! {
         UDATA_SELECTOR.set(gdt.add_entry(Descriptor::user_data_segment())).unwrap();
         UCODE_SELECTOR.set(gdt.add_entry(Descriptor::user_code_segment())).unwrap();
         TSS_SELECTOR.set(gdt.add_entry(Descriptor::tss_segment(
-            &lib::structures::gdt::TSS,
+            &crate::tables::tss::TSS,
         ))).unwrap();
 
         gdt
     };
 }
 
-pub static mut KCODE_SELECTOR: SyncOnceCell<SegmentSelector> = SyncOnceCell::new();
-pub static mut KDATA_SELECTOR: SyncOnceCell<SegmentSelector> = SyncOnceCell::new();
-pub static mut UCODE_SELECTOR: SyncOnceCell<SegmentSelector> = SyncOnceCell::new();
-pub static mut UDATA_SELECTOR: SyncOnceCell<SegmentSelector> = SyncOnceCell::new();
-pub static mut TSS_SELECTOR: SyncOnceCell<SegmentSelector> = SyncOnceCell::new();
+pub static KCODE_SELECTOR: SyncOnceCell<SegmentSelector> = SyncOnceCell::new();
+pub static KDATA_SELECTOR: SyncOnceCell<SegmentSelector> = SyncOnceCell::new();
+pub static UCODE_SELECTOR: SyncOnceCell<SegmentSelector> = SyncOnceCell::new();
+pub static UDATA_SELECTOR: SyncOnceCell<SegmentSelector> = SyncOnceCell::new();
+pub static TSS_SELECTOR: SyncOnceCell<SegmentSelector> = SyncOnceCell::new();
 
 pub fn init() {
     unsafe {

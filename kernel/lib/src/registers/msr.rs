@@ -104,7 +104,7 @@ impl IA32_EFER {
 
     /// Sets the IA32_EFER.SCE (syscall/syret enable) bit.
     #[inline(always)]
-    pub fn set_sce(set: bool) {
+    pub unsafe fn set_sce(set: bool) {
         unsafe { wrmsr(0xC0000080, *rdmsr(0xC0000080).set_bit(0, set)) };
     }
 
@@ -116,7 +116,7 @@ impl IA32_EFER {
 
     /// Sets the IA32_EFER.LME (long-mode enable) bit.
     #[inline(always)]
-    pub fn set_lme(set: bool) {
+    pub unsafe fn set_lme(set: bool) {
         unsafe { wrmsr(0xC0000080, *rdmsr(0xC0000080).set_bit(8, set)) };
     }
 
@@ -128,7 +128,7 @@ impl IA32_EFER {
 
     /// Sets the IA32_EFER.NXE (no-execute enable) bit.
     #[inline(always)]
-    pub fn set_nxe(set: bool) {
+    pub unsafe fn set_nxe(set: bool) {
         assert!(crate::cpu::FEATURES_EXT.contains(crate::cpu::FeaturesExt::NO_EXEC), "Cannot enable IA32_EFER.NXE if CPU does not support it (CPUID.80000001H:EDX.NX [bit 20]).");
 
         unsafe { wrmsr(0xC0000080, *rdmsr(0xC0000080).set_bit(11, set)) };
@@ -146,8 +146,10 @@ impl IA32_STAR {
     /// > ...
     /// > Target stack segment:      IA32_STAR[63:48] + 8
     /// > ...
+    ///
+    /// SAFETY: This function is unsafe because the caller must ensure the low and high selectors are valid.
     #[inline(always)]
-    pub fn set_selectors(low_selector: SegmentSelector, high_selector: SegmentSelector) {
+    pub unsafe fn set_selectors(low_selector: SegmentSelector, high_selector: SegmentSelector) {
         unsafe {
             wrmsr(
                 0xC0000081,
@@ -159,8 +161,12 @@ impl IA32_STAR {
 
 pub struct IA32_LSTAR;
 impl IA32_LSTAR {
+    /// Sets the `rip` value that's jumped to when the `syscall` instruction is executed.
+    /// 
+    /// SAFETY: This function is unsafe because the caller must ensure the given function pointer
+    ///         is valid for a syscall instruction point.
     #[inline(always)]
-    pub fn set_syscall(func: unsafe extern "C" fn()) {
+    pub unsafe fn set_syscall(func: unsafe extern "C" fn()) {
         unsafe { wrmsr(0xC0000082, func as u64) };
     }
 }
@@ -172,6 +178,10 @@ impl Generic for IA32_CSTAR {
 
 pub struct IA32_SFMASK;
 impl IA32_SFMASK {
+    /// Sets `rflags` upon a `syscall` based on masking the bits in the given value.
+    /// 
+    /// SAFETY: This function is unsafe because the caller must ensure the function jumped to upon
+    ///         a `syscall` can correctly handle the provided RFlags.
     #[inline(always)]
     pub fn set_rflags_mask(rflags: super::RFlags) {
         unsafe { wrmsr(0xC0000084, rflags.bits()) };

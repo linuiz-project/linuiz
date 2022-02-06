@@ -28,7 +28,7 @@ pub mod global {
 
                 pic8259::enable(pic8259::InterruptLines::TIMER);
                 pic8259::pit::set_timer_freq(1000, pic8259::pit::OperatingMode::RateGenerator);
-                lib::structures::idt::set_handler_fn(
+                crate::tables::idt::set_handler_fn(
                     crate::local_state::InterruptVector::GlobalTimer as u8,
                     tick_handler,
                 );
@@ -40,8 +40,8 @@ pub mod global {
         }
     }
 
-    use lib::{cell::SyncOnceCell, structures::idt::InterruptStackFrame};
-    extern "x86-interrupt" fn tick_handler(isf: InterruptStackFrame) {
+    use lib::cell::SyncOnceCell;
+    extern "x86-interrupt" fn tick_handler(_: crate::tables::idt::InterruptStackFrame) {
         unsafe {
             GLOBAL_CLOCK
                 .get()

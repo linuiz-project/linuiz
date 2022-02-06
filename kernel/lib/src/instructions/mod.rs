@@ -1,7 +1,6 @@
 pub mod cpuid;
 pub mod interrupts;
 pub mod pwm;
-pub mod segmentation;
 pub mod tlb;
 
 use core::arch::asm;

@@ -19,14 +19,12 @@ extern crate lib;
 
 mod clock;
 mod drivers;
-mod gdt;
 mod local_state;
 mod logging;
 mod scheduling;
 mod slob;
 mod syscall;
-
-use core::sync::atomic::AtomicBool;
+mod tables;
 
 use lib::{
     acpi::SystemConfigTableEntry,
@@ -110,19 +108,18 @@ unsafe extern "efiapi" fn kernel_init(
         Err(_) => lib::instructions::interrupts::breakpoint(),
     }
 
-    // Set up TSS stacks.
+    // Initialize GDT.
     {
-        use lib::structures::idt;
+        use crate::tables::{gdt, idt, tss};
 
-        lib::structures::gdt::TSS_STACK_PTRS[idt::EXCEPTION_IST_INDEX as usize] =
+        tss::TSS_STACK_PTRS[idt::EXCEPTION_IST_INDEX as usize] =
             Some(__exception_stack.as_mut_ptr());
-        lib::structures::gdt::TSS_STACK_PTRS[idt::DOUBLE_FAULT_IST_INDEX as usize] =
+        tss::TSS_STACK_PTRS[idt::DOUBLE_FAULT_IST_INDEX as usize] =
             Some(__double_fault_stack.as_mut_ptr());
-        lib::structures::gdt::TSS_STACK_PTRS[idt::ISR_IST_INDEX as usize] =
-            Some(__isr_stack.as_mut_ptr());
-    }
+        tss::TSS_STACK_PTRS[idt::ISR_IST_INDEX as usize] = Some(__isr_stack.as_mut_ptr());
 
-    gdt::init();
+        gdt::init();
+    }
 
     // Set CR0 flags.
     {
@@ -362,11 +359,13 @@ unsafe extern "efiapi" fn kernel_init(
 #[no_mangle]
 extern "C" fn _startup() -> ! {
     // Ensure we load the IDT as early as possible in startup sequence.
-    unsafe { lib::structures::idt::load_unchecked() };
+    unsafe { crate::tables::idt::load_unchecked() };
 
     if crate::local_state::is_bsp() {
-        use lib::structures::idt;
-        use local_state::{handlers, InterruptVector};
+        use crate::{
+            local_state::{handlers, InterruptVector},
+            tables::idt,
+        };
 
         // This is where we'll configure the kernel-static IDT entries.
         idt::set_handler_fn(InterruptVector::LocalTimer as u8, handlers::apit_handler);
@@ -472,6 +471,7 @@ extern "C" fn _startup() -> ! {
     }
 
     unsafe {
+        use crate::tables::gdt;
         use lib::registers::msr;
 
         // Enable `syscall`/`sysret`.

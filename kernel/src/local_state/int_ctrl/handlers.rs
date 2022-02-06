@@ -1,5 +1,4 @@
-use crate::scheduling::ThreadRegisters;
-use lib::structures::idt::InterruptStackFrame;
+use crate::{scheduling::ThreadRegisters, tables::idt::InterruptStackFrame};
 
 #[naked]
 pub extern "x86-interrupt" fn apit_handler(_: InterruptStackFrame) {

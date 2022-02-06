@@ -1,12 +1,10 @@
+use crate::{clock::local::Stopwatch, tables::idt::InterruptStackFrame};
 use alloc::{boxed::Box, collections::BinaryHeap};
 use core::{cmp, sync::atomic::AtomicU64};
 use lib::{
     registers::{control::CR3Flags, RFlags},
-    structures::idt::InterruptStackFrame,
     Address, Physical,
 };
-
-use crate::clock::local::Stopwatch;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -57,9 +55,9 @@ pub struct Thread {
     prio: u8,
     time: Stopwatch,
     pub rip: u64,
-    pub cs: u64,
+    pub cs: u16,
     pub rsp: u64,
-    pub ss: u64,
+    pub ss: u16,
     pub rfl: RFlags,
     pub gprs: ThreadRegisters,
     pub stack: Box<[u8]>,
@@ -84,15 +82,15 @@ impl Thread {
                 .into_slice()
         });
 
-        use lib::structures::gdt;
+        use crate::tables::gdt;
         Self {
             id: CURRENT_THREAD_ID.fetch_add(1, core::sync::atomic::Ordering::AcqRel),
             prio: priority,
             time: Stopwatch::new(),
             rip,
-            cs: gdt::code() as u64,
+            cs: gdt::UCODE_SELECTOR.get().unwrap().0,
             rsp: unsafe { stack.as_ptr().add(stack.len()) as u64 },
-            ss: gdt::data() as u64,
+            ss: gdt::UDATA_SELECTOR.get().unwrap().0,
             rfl: flags.unwrap_or(RFlags::minimal()),
             gprs: ThreadRegisters::empty(),
             stack,
@@ -168,9 +166,9 @@ impl Scheduler {
         // Move out old task.
         if let Some(mut task) = self.current_task.take() {
             task.rip = stack_frame.instruction_pointer.as_u64();
-            task.cs = stack_frame.code_segment;
+            task.cs = stack_frame.code_segment as u16;
             task.rsp = stack_frame.stack_pointer.as_u64();
-            task.ss = stack_frame.stack_segment;
+            task.ss = stack_frame.stack_segment as u16;
             task.rfl = RFlags::from_bits_truncate(stack_frame.cpu_flags);
             task.gprs = unsafe { cached_regs.read_volatile() };
             task.time.stop();
@@ -190,10 +188,10 @@ impl Scheduler {
                         .as_mut()
                         .write(x86_64::structures::idt::InterruptStackFrameValue {
                             instruction_pointer: x86_64::VirtAddr::new_truncate(next_task.rip),
-                            code_segment: next_task.cs,
+                            code_segment: next_task.cs as u64,
                             cpu_flags: next_task.rfl.bits(),
                             stack_pointer: x86_64::VirtAddr::new_truncate(next_task.rsp),
-                            stack_segment: next_task.ss,
+                            stack_segment: next_task.ss as u64,
                         });
 
                     // Restore task registers.

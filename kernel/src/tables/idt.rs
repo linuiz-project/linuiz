@@ -140,7 +140,7 @@ extern "x86-interrupt" fn page_fault_handler(
 ) {
     panic!(
         "CPU EXCEPTION: PAGE FAULT\nCR2: {:?}\n{:?}\n{:#?}",
-        crate::registers::control::CR2::read(),
+        lib::registers::control::CR2::read(),
         error_code,
         stack_frame
     );
@@ -232,7 +232,7 @@ pub unsafe fn load_unchecked() {
 }
 
 pub fn set_handler_fn(vector: u8, handler: extern "x86-interrupt" fn(InterruptStackFrame)) {
-    crate::instructions::interrupts::without_interrupts(|| {
+    lib::instructions::interrupts::without_interrupts(|| {
         unsafe {
             IDT.lock()[vector as usize]
                 .set_handler_fn(handler)
