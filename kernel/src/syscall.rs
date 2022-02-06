@@ -29,7 +29,7 @@ pub(crate) unsafe extern "C" fn syscall_enter() {
         mov r12, rsp
         lea rsp, {0}
 
-        /* Push fake stack frame. */
+        /* Push fake stack frame for scheduling compatibility. */
         push 0x0 /* Push empty stack seg value. */
         push rcx /* Push `rsp` value. */
         push r11 /* Push `rflags` value. */
