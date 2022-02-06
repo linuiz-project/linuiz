@@ -89,13 +89,12 @@ pub(crate) unsafe extern "C" fn syscall_enter() {
         pop r15
 
         /* Pop fake stack frame. */
-        pop r12 /* Pop empty stack seg value. */
-        pop r12 /* Pop cached `rsp` value. */
+        pop r12 /* Pop cached `rip` value. */
+        pop r12 /* Pop empty code seg value. */
         pop r11 /* Pop cached `rflags` value. */
-        pop rcx /* Pop empty code seg value. */
-        pop rcx /* Pop cached `rip` value. */
-        
-        r: jmp r
+        pop rcx /* Pop cached `rsp` value. */
+        pop rcx /* Pop empty stack seg value. */
+
 
         /* Restore previous stack. */
         mov rsp, r12
@@ -113,5 +112,5 @@ unsafe extern "win64" fn syscall_test(
     stack_frame: &mut InterruptStackFrame,
     cached_regs: *mut ThreadRegisters,
 ) {
-    info!("{:#?}\n{:#?}", stack_frame, cached_regs.read_volatile());
+    info!("{:#?}\n{:?}", stack_frame, cached_regs.read_volatile());
 }

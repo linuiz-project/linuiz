@@ -40,7 +40,9 @@ longmode:
 
     ; Update segment registers  
     mov ax, 0x10
-    mov ds, ax
+    mov ss, ax
+    ; Clear unused segments
+    xor ax, ax
     mov es, ax
     mov fs, ax
     mov gs, ax
