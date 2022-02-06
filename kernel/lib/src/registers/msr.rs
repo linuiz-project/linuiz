@@ -158,8 +158,11 @@ impl IA32_STAR {
 }
 
 pub struct IA32_LSTAR;
-impl Generic for IA32_LSTAR {
-    const ECX: u32 = 0xC0000082;
+impl IA32_LSTAR {
+    #[inline(always)]
+    pub fn set_syscall(func: unsafe extern "C" fn()) {
+        unsafe { wrmsr(0xC0000082, func as u64) };
+    }
 }
 
 pub struct IA32_CSTAR;
@@ -168,8 +171,11 @@ impl Generic for IA32_CSTAR {
 }
 
 pub struct IA32_SFMASK;
-impl Generic for IA32_SFMASK {
-    const ECX: u32 = 0xC0000084;
+impl IA32_SFMASK {
+    #[inline(always)]
+    pub fn set_rflags_mask(rflags: super::RFlags) {
+        unsafe { wrmsr(0xC0000084, rflags.bits()) };
+    }
 }
 
 pub struct IA32_FS_BASE;
