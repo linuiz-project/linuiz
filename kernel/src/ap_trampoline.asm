@@ -59,7 +59,7 @@ longmode:
 
     ; Jump to high-level code
     call _startup
-
+    
 
 section .ap_data
 

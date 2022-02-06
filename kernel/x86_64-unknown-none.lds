@@ -51,7 +51,7 @@ SECTIONS
         PROVIDE(__bss_start = .);
 
         . += 0x2000;
-        __kernel_stack = .;
+        __bsp_stack = .;
 
         . += 0x1000;
         __exception_stack = .;

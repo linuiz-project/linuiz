@@ -8,7 +8,7 @@ use lib::{
 
 use crate::clock::local::Stopwatch;
 
-#[repr(C, packed)]
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct ThreadRegisters {
     pub rax: u64,

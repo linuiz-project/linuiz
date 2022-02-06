@@ -51,7 +51,7 @@ extern "C" {
     static __data_end: LinkerSymbol;
 
     static __bss_start: LinkerSymbol;
-    static __kernel_stack: LinkerSymbol;
+    static __bsp_stack: LinkerSymbol;
     static __exception_stack: LinkerSymbol;
     static __double_fault_stack: LinkerSymbol;
     static __isr_stack: LinkerSymbol;
@@ -79,7 +79,7 @@ macro_rules! clear_bsp_stack {
             "Cannot clear AP stack pointers to BSP stack top."
         );
 
-        lib::registers::stack::RSP::write(__kernel_stack.as_mut_ptr());
+        lib::registers::stack::RSP::write(__bsp_stack.as_mut_ptr());
         // Serializing instruction to clear pipeline of any dangling references (and order all instructions before / after).
         lib::instructions::cpuid::exec(0x0, 0x0).unwrap();
     };
@@ -352,9 +352,8 @@ unsafe extern "efiapi" fn kernel_init(
         info!("Kernel memory initialized.");
     }
 
-    clear_bsp_stack!();
-
     /* COMMON KERNEL START (prepare local state and AP processors) */
+    clear_bsp_stack!();
     _startup()
 }
 
@@ -480,8 +479,8 @@ extern "C" fn _startup() -> ! {
             *gdt::KCODE_SELECTOR.get().unwrap(),
             *gdt::KDATA_SELECTOR.get().unwrap(),
         );
-        msr::IA32_LSTAR::write(syscall::syscall_entry as u64);
-        msr::IA32_SFMASK::write(u64::MAX);
+        msr::IA32_LSTAR::set_syscall(syscall::syscall_enter);
+        msr::IA32_SFMASK::set_rflags_mask(lib::registers::RFlags::all());
     }
 
     kernel_main()
@@ -489,7 +488,19 @@ extern "C" fn _startup() -> ! {
 
 #[link_section = ".user_code"]
 fn test_user_function() {
-    unsafe { core::arch::asm!("syscall", options(nostack, nomem)) };
+    unsafe {
+        core::arch::asm!(
+            "mov r10, $0",
+            "mov r8,   0x1F1F1FA1",
+            "mov r9,   0x1F1F1FA2",
+            "mov r13,   0x1F1F1FA3",
+            "mov r14,   0x1F1F1FA4",
+            "mov r15,   0x1F1F1FA5",
+            "syscall",
+            out("r10") _,
+            options(nostack, nomem)
+        )
+    };
     loop {}
 }
 
