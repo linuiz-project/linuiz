@@ -25,7 +25,7 @@ impl CR0 {
             core::arch::asm!(
                 "mov {}, cr0",
                 out(reg) value,
-                options(nostack, nomem)
+                options(nostack, nomem, preserves_flags)
             );
         }
 
@@ -35,9 +35,9 @@ impl CR0 {
     #[inline(always)]
     pub unsafe fn write(value: CR0Flags) {
         core::arch::asm!(
-            "mov cr4, {}",
+            "mov cr0, {}",
             in(reg) value.bits(),
-            options(nostack, nomem)
+            options(nostack, nomem, preserves_flags)
         );
     }
 

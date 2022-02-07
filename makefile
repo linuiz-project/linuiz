@@ -28,12 +28,13 @@ debug = .debug
 all: $(nvme_img) $(rootfs_img) $(bootloader) $(kernel)
 
 run: all $(debug)
+	objdump -d -D .hdd/image/EFI/gsai/kernel.elf > .debug/kernel_disasm
 	./run.sh
 
 reset: clean
 	rm -f $(bootloader) $(kernel) $(ap_trampoline_out)
 
-rebuild: reset run
+rebuild: reset all
 
 clean:
 	cd ./boot/ && cargo clean
@@ -56,7 +57,7 @@ $(ap_trampoline_out): $(ap_trampoline_src)
 		nasm -f elf64 -o $(ap_trampoline_out) $(ap_trampoline_src)
 
 $(kernel): $(ap_trampoline_out) $(kernel_deps) $(kernel_linker_args)
-	cd ./kernel/ && cargo fmt && cargo build --profile $(PROFILE) -Z unstable-options && rm -f $(ap_trampoline_out)
+	cd ./kernel/ && cargo fmt && cargo build --profile $(PROFILE) -Z unstable-options
 
 $(nvme_img): $(hdd)
 	qemu-img create -f raw $(nvme_img) 256M

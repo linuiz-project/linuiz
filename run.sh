@@ -4,7 +4,7 @@ qemu-system-x86_64 \
     -no-reboot \
     -machine q35 \
     -cpu qemu64 \
-    -smp 1 \
+    -smp 2 \
     -m 64M \
     -serial mon:stdio \
     -display none \

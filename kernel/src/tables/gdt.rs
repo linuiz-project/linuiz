@@ -1,15 +1,11 @@
 use lib::cell::SyncOnceCell;
 use x86_64::{registers::segmentation::SegmentSelector, structures::gdt::GlobalDescriptorTable};
 
-extern "C" {
-    static __gdt: lib::LinkerSymbol;
-}
-
 lazy_static::lazy_static! {
-    static ref GDT: GlobalDescriptorTable = unsafe {
+    static ref GDT: GlobalDescriptorTable = {
         use x86_64::structures::gdt::Descriptor;
 
-        let mut gdt = GlobalDescriptorTable::from_raw_slice(core::slice::from_raw_parts(__gdt.as_ptr(), 1 /* Null Seg */));
+        let mut gdt = GlobalDescriptorTable::new();
 
         // This GDT layout is very specific, due to the behaviour of the IA32_STAR MSR and its
         // affect on syscalls. Do not change this, or if it is changed, ensure it follows the requisite

@@ -1,6 +1,7 @@
 use crate::{scheduling::ThreadRegisters, tables::idt::InterruptStackFrame};
 
 #[naked]
+#[allow(named_asm_labels)]
 pub extern "x86-interrupt" fn apit_handler(_: InterruptStackFrame) {
     unsafe {
         core::arch::asm!(
@@ -25,8 +26,7 @@ pub extern "x86-interrupt" fn apit_handler(_: InterruptStackFrame) {
             cld
 
             /* Move stack frame into first parameter. */
-            mov rcx, rsp
-            add rcx, 15 * 8 /* ISF will be just before the 14 registers we pushed. */
+            lea rcx, [rsp + (15 * 8)]
             /* Move cached gprs pointer into second parameter. */
             mov rdx, rsp
 
@@ -47,6 +47,7 @@ pub extern "x86-interrupt" fn apit_handler(_: InterruptStackFrame) {
             pop r13
             pop r14
             pop r15
+
 
             iretq
             ",

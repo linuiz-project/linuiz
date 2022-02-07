@@ -1,6 +1,4 @@
-use crate::{memory::volatile::VolatileCell, ReadWrite, InterruptDeliveryMode};
-
-
+use crate::{memory::volatile::VolatileCell, InterruptDeliveryMode, ReadWrite};
 
 #[repr(u32)]
 pub enum DestinationMode {
@@ -22,14 +20,20 @@ pub struct InterruptCommandRegister<'v> {
 }
 
 impl<'v> InterruptCommandRegister<'v> {
-    pub(super) const fn new(
+    pub const unsafe fn new(
         low: &'v VolatileCell<u32, ReadWrite>,
         high: &'v VolatileCell<u32, ReadWrite>,
     ) -> Self {
         Self { low, high }
     }
 
-    pub fn send_init(&self, apic_id: u8) {
+    /// Send the INIT IPI sequence to the specified processor.
+    /// 
+    /// SAFETY: It appears that on some models of CPUs, an INIT sequence will hard
+    ///         reset the processor. This is obviously undesirable in most cases, so
+    ///         it is advised to ensure that the INIT sequence is only ever sent to
+    ///         each core a single time.
+    pub unsafe fn send_init(&self, apic_id: u8) {
         self.send(
             0,
             InterruptDeliveryMode::INIT,
@@ -40,6 +44,11 @@ impl<'v> InterruptCommandRegister<'v> {
         );
     }
 
+    /// Send the Startup IPI to the specified core, with the specified vector.
+    /// 
+    /// SAFETY: It should be mentioned that, given the behaviour of multiple INIT IPIs,
+    ///         processors seem to simply ignore multiple SIPIs. So, it is seemingly safe
+    ///         to accidentally issue extra SIPI IPIs.
     pub fn send_sipi(&self, vector: u8, apic_id: u8) {
         self.send(
             vector,
