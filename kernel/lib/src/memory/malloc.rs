@@ -101,32 +101,21 @@ impl<T> core::fmt::Debug for Alloc<T> {
 }
 
 pub trait MemoryAllocator {
-    unsafe fn alloc(
+    fn alloc(
         &self,
         size: usize,
         align: Option<core::num::NonZeroUsize>,
     ) -> Result<Alloc<u8>, AllocError>;
 
-    unsafe fn alloc_pages(
-        &self,
-        count: usize,
-    ) -> Result<(Address<Physical>, Alloc<u8>), AllocError>;
+    fn alloc_pages(&self, count: usize) -> Result<(Address<Physical>, Alloc<u8>), AllocError>;
 
-    unsafe fn alloc_against(
-        &self,
-        frame_index: usize,
-        count: usize,
-    ) -> Result<Alloc<u8>, AllocError>;
+    fn alloc_against(&self, frame_index: usize, count: usize) -> Result<Alloc<u8>, AllocError>;
 
     /// Attempts to allocate a 1:1 mapping of virtual memory to its physical memory.
     ///
     /// REMARK:
     ///     This function is required only to offer the same guarantees as `VirtualAddressor::identity_map()`.
-    unsafe fn alloc_identity(
-        &self,
-        frame_index: usize,
-        count: usize,
-    ) -> Result<Alloc<u8>, AllocError>;
+    fn alloc_identity(&self, frame_index: usize, count: usize) -> Result<Alloc<u8>, AllocError>;
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout);
 

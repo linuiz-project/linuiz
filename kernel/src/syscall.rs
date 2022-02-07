@@ -9,7 +9,7 @@ extern "C" {
     static __syscall_stack: lib::LinkerSymbol;
 }
 
-#[export_name = "__syscall_functions"]
+pub static mut STACK_POINTERS: [*const (); 256] = [core::ptr::null(); 256];
 static mut SYSCALL_FUNCTIONS: [unsafe extern "win64" fn(
     &mut InterruptStackFrame,
     *mut ThreadRegisters,
@@ -21,7 +21,6 @@ pub enum SyscallID {
 }
 
 #[naked]
-#[no_mangle]
 pub(crate) unsafe extern "C" fn syscall_enter() {
     asm!(
         "
@@ -102,7 +101,6 @@ pub(crate) unsafe extern "C" fn syscall_enter() {
     );
 }
 
-#[no_mangle]
 unsafe extern "win64" fn syscall_test(
     stack_frame: &mut InterruptStackFrame,
     cached_regs: *mut ThreadRegisters,
