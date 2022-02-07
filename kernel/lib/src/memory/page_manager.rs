@@ -311,9 +311,15 @@ impl PageManager {
     pub unsafe fn set_page_attribs(
         &self,
         page: &Page,
-        attributes: PageAttributes,
+        mut attributes: PageAttributes,
         modify_mode: AttributeModify,
     ) {
+        if !crate::registers::msr::IA32_EFER::get_nxe() {
+            // This bit is reserved if the above bit in IA32_EFER is not set.
+            // For now, this means silently removing it for compatability.
+            attributes.remove(PageAttributes::NO_EXECUTE);
+        }
+
         self.virtual_mapper
             .write()
             .get_page_entry_mut(page)
