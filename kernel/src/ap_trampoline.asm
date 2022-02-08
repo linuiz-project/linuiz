@@ -102,8 +102,6 @@ longmode:
         ; Load absolute address of pointer
         mov rsp, [rsp]
 
-    ;.r: jmp .r
-
     ; Jump to high-level code
     call _startup
 
