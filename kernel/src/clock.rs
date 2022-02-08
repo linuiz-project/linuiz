@@ -28,10 +28,12 @@ pub mod global {
 
                 pic8259::enable(pic8259::InterruptLines::TIMER);
                 pic8259::pit::set_timer_freq(1000, pic8259::pit::OperatingMode::RateGenerator);
-                crate::tables::idt::set_handler_fn(
-                    crate::local_state::InterruptVector::GlobalTimer as u8,
-                    tick_handler,
-                );
+                unsafe {
+                    crate::tables::idt::set_handler_fn(
+                        crate::local_state::InterruptVector::GlobalTimer as u8,
+                        tick_handler,
+                    )
+                };
 
                 debug!("Global clock configured at 1000Hz.");
             });

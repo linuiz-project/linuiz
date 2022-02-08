@@ -20,13 +20,13 @@ realmode:
     mov eax, 0x80000001
     cpuid
     and edx, 1 << 20    ; Check if EFER.NXE bit is available
-    jz nxe_enable_fail  ; If not, skip setting it in IA32_EFER.
+    jz .nxe_enable_fail  ; If not, skip setting it in IA32_EFER.
     mov ecx, 0xC0000080
     rdmsr
     or eax, 1 << 11     ; NXE bit in IA32_EFER
     wrmsr               
 
-    nxe_enable_fail:
+    .nxe_enable_fail:
 
     ; Enable long mode
     mov ecx, 0xC0000080     ; IA32_EFER MSR
@@ -51,6 +51,8 @@ extern __bsp_init_complete
 
 bits 64
 longmode:
+    cli
+
     ; Update segment registers  
     mov ax, __gdt.data
     mov ss, ax
@@ -61,44 +63,46 @@ longmode:
     mov fs, ax
     mov gs, ax
 
-    x2_apic_id:
-        ; Test for support (eax > 0)
+    .x2_apic_id:
         mov eax, 0x1F
         cpuid
+        ; Test all registers to see if any bits are set
         or eax, ebx
         or eax, ecx
         or eax, edx
         test eax, eax
-        ; If CPUID not supported, try next leaf.
-        jz x2_apic_id_backup
+        ; If CPUID leaf not supported, try next source.
+        jz .x2_apic_id_backup
         ; Otherwise, APIC ID is stored in `edx`.
-        jmp set_rsp
-    x2_apic_id_backup:
+        jmp .set_rsp
+    .x2_apic_id_backup:
         mov eax, 0xB
         cpuid
+        ; Test all registers to see if any bits are set
         or eax, ebx
         or eax, ecx
         or eax, edx
         test eax, eax
-        ; If CPUID not supported, try next leaf.
-        jz apic_id_legacy
+        ; If CPUID leaf not supported, try next source.
+        jz .apic_id_legacy
         ; Otherwise, APIC ID is stored in `edx`.
-        jmp set_rsp
-    apic_id_legacy:
+        jmp .set_rsp
+    .apic_id_legacy:
         ; No advanced APIC IDs are available, so rely on legacy 8-bit ID.
         mov eax, 0x1
         cpuid
         shr ebx, 24     ; APIC ID is in bits 24..32
         and ebx, 0xFF   ; `ebx` or `bl` now contains the APIC ID, so truncate any sign-extended bits
-        mov ebx, edx
-        jmp set_rsp
+        mov edx, ebx
+        jmp .set_rsp
 
+    .set_rsp:
+        ; Load effective address of pointer
+        lea rsp, [__ap_stack_pointers + (rdx * 8)]
+        ; Load absolute address of pointer
+        mov rsp, [rsp]
 
-
-    set_rsp:
-        lea rcx, [__ap_stack_pointers + (rdx * 8)]
-        mov rsp, [rcx]
-
+    ;.r: jmp .r
 
     ; Jump to high-level code
     call _startup

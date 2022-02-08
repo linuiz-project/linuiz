@@ -54,6 +54,7 @@ pub fn init() {
         DS::set_reg(null_selector);
         FS::set_reg(null_selector);
         GS::set_reg(null_selector);
+        info!("{:?}", TSS_SELECTOR.get().unwrap());
         load_tss(*TSS_SELECTOR.get().unwrap());
     }
 }

@@ -1,7 +1,6 @@
 use crate::{scheduling::ThreadRegisters, tables::idt::InterruptStackFrame};
 
 #[naked]
-#[allow(named_asm_labels)]
 pub extern "x86-interrupt" fn apit_handler(_: InterruptStackFrame) {
     unsafe {
         core::arch::asm!(
@@ -48,17 +47,12 @@ pub extern "x86-interrupt" fn apit_handler(_: InterruptStackFrame) {
             pop r14
             pop r15
 
-
             iretq
             ",
             sym apit_handler_inner,
             options(noreturn)
         )
     };
-}
-
-pub extern "x86-interrupt" fn storage_handler(_: InterruptStackFrame) {
-    crate::local_state::int_ctrl().end_of_interrupt();
 }
 
 extern "win64" fn apit_handler_inner(
@@ -91,7 +85,14 @@ pub extern "x86-interrupt" fn error_handler(_: InterruptStackFrame) {
     apic.end_of_interrupt();
 }
 
+pub extern "x86-interrupt" fn storage_handler(_: InterruptStackFrame) {
+    crate::local_state::int_ctrl().end_of_interrupt();
+}
+
+pub extern "x86-interrupt" fn default_handler(_: InterruptStackFrame) {
+    crate::local_state::int_ctrl().end_of_interrupt();
+}
+
 pub extern "x86-interrupt" fn spurious_handler(_: InterruptStackFrame) {
     // Perhaps don't need to EOI spurious interrupts?
-    // crate::lpu::try_get().unwrap().int_ctrl().end_of_interrupt();
 }

@@ -59,10 +59,14 @@ impl InterruptController {
         let per_ms = (u32::MAX - per_10ms) / 10;
         trace!("APIT frequency: {}Hz", per_10ms * 100);
 
-        // Configure timer.
+        // Configure timer vector.
         apic.timer().set_vector(InterruptVector::LocalTimer as u8);
         apic.timer().set_masked(false);
+        // Configure error vector.
+        apic.error().set_vector(InterruptVector::Error as u8);
+        apic.error().set_masked(false);
         // Set default vectors.
+        // REMARK: Any of these left masked are not currently supported.
         apic.cmci().set_vector(InterruptVector::CMCI as u8);
         apic.performance()
             .set_vector(InterruptVector::Performance as u8);
@@ -70,9 +74,6 @@ impl InterruptController {
             .set_vector(InterruptVector::ThermalSensor as u8);
         apic.lint0().set_vector(InterruptVector::LINT0 as u8);
         apic.lint1().set_vector(InterruptVector::LINT1 as u8);
-        // Configure error register.
-        apic.error().set_vector(InterruptVector::Error as u8);
-        apic.error().set_masked(false);
 
         trace!("Core-local APIC configured.");
 

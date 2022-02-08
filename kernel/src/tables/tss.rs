@@ -4,11 +4,12 @@ lazy_static::lazy_static! {
     pub static ref TSS: x86_64::structures::tss::TaskStateSegment = {
         let mut tss = x86_64::structures::tss::TaskStateSegment::new();
 
-        for (index, virt_addr) in unsafe { TSS_STACK_PTRS }
-                .iter()
-                .enumerate()
-                .filter_map(|(index, ptr)| ptr.map(|ptr| (index, x86_64::VirtAddr::from_ptr(ptr)))) {
-            tss.interrupt_stack_table[index] = virt_addr;
+        unsafe {
+            for (index, stack_ptr) in TSS_STACK_PTRS.iter().enumerate() {
+                if let Some(stack_ptr) = stack_ptr {
+                    tss.interrupt_stack_table[index] = x86_64::VirtAddr::from_ptr(stack_ptr);
+                }
+            }
         }
 
         tss
