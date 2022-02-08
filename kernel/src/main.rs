@@ -26,8 +26,6 @@ mod slob;
 mod syscall;
 mod tables;
 
-use core::sync::atomic::AtomicBool;
-
 use lib::{
     acpi::SystemConfigTableEntry,
     cell::SyncOnceCell,
@@ -67,8 +65,6 @@ static mut CON_OUT: drivers::stdout::Serial = drivers::stdout::Serial::new(drive
 
 #[export_name = "__ap_stack_pointers"]
 static mut AP_STACK_POINTERS: [*const (); 256] = [core::ptr::null(); 256];
-#[export_name = "__bsp_init_complete"]
-static BSP_INIT_COMPLETE: AtomicBool = AtomicBool::new(false);
 
 static KERNEL_PAGE_MANAGER: SyncOnceCell<PageManager> = SyncOnceCell::new();
 static KERNEL_MALLOCATOR: SyncOnceCell<slob::SLOB> = SyncOnceCell::new();
@@ -84,6 +80,8 @@ macro_rules! reset_bsp_stack_ptr {
             $crate::local_state::is_bsp(),
             "Cannot clear AP stack pointers to BSP stack top."
         );
+
+        // TODO implement shadow stacks (?) and research them
 
         lib::registers::stack::RSP::write(__bsp_stack.as_mut_ptr());
         // Serializing instruction to clear pipeline of any dangling references (and order all instructions before / after).
@@ -112,26 +110,6 @@ unsafe extern "efiapi" fn kernel_init(
         Err(_) => lib::instructions::interrupts::breakpoint(),
     }
 
-    /* INIT TABLE STRUCTURES */
-    {
-        use crate::{
-            local_state::{handlers, InterruptVector},
-            tables::{idt, tss},
-        };
-
-        tss::TSS_STACK_PTRS[idt::EXCEPTION_IST_INDEX as usize] =
-            Some(__exception_stack.as_mut_ptr());
-        tss::TSS_STACK_PTRS[idt::DOUBLE_FAULT_IST_INDEX as usize] =
-            Some(__double_fault_stack.as_mut_ptr());
-        tss::TSS_STACK_PTRS[idt::ISR_IST_INDEX as usize] = Some(__isr_stack.as_mut_ptr());
-
-        // This is where we'll configure the kernel-static IDT entries.
-        idt::set_handler_fn(InterruptVector::LocalTimer as u8, handlers::apit_handler);
-        idt::set_handler_fn(InterruptVector::Storage as u8, handlers::storage_handler);
-        idt::set_handler_fn(InterruptVector::Spurious as u8, handlers::spurious_handler);
-        idt::set_handler_fn(InterruptVector::Error as u8, handlers::error_handler);
-    }
-
     // Write misc. CPU state to stdout (This also lazy initializes them).
     {
         debug!("CPU Vendor          {:?}", lib::cpu::VENDOR);
@@ -142,6 +120,49 @@ unsafe extern "efiapi" fn kernel_init(
     /* COMMON KERNEL START (prepare local state and AP processors) */
     reset_bsp_stack_ptr!();
     _startup()
+}
+
+fn load_tables() {
+    // Always initialize GDT prior to configuring IDT.
+    crate::tables::gdt::init();
+
+    if crate::local_state::is_bsp() {
+        use crate::{
+            local_state::{handlers, InterruptVector},
+            tables::{idt, tss},
+        };
+
+        unsafe {
+            tss::TSS_STACK_PTRS[idt::DOUBLE_FAULT_IST_INDEX as usize] =
+                Some(__double_fault_stack.as_mut_ptr());
+
+            // Due to the fashion in which the x86_64 crate initializes the IDT entries,
+            // it must be ensured that the handlers are set only *after* the GDT has been
+            // properly initialized and loaded.
+            //
+            // Otherwise, the `CS` value of the IDT entries is incorrect, and this causes
+            // very confusing GPFs.
+            idt::init();
+            // This is where we'll configure the kernel-static IDT entries.
+            idt::set_handler_fn(InterruptVector::LocalTimer as u8, handlers::apit_handler);
+            idt::set_handler_fn(InterruptVector::CMCI as u8, handlers::default_handler);
+            idt::set_handler_fn(
+                InterruptVector::Performance as u8,
+                handlers::default_handler,
+            );
+            idt::set_handler_fn(
+                InterruptVector::ThermalSensor as u8,
+                handlers::default_handler,
+            );
+            idt::set_handler_fn(InterruptVector::LINT0 as u8, handlers::default_handler);
+            idt::set_handler_fn(InterruptVector::LINT1 as u8, handlers::default_handler);
+            idt::set_handler_fn(InterruptVector::Error as u8, handlers::error_handler);
+            idt::set_handler_fn(InterruptVector::Storage as u8, handlers::storage_handler);
+            idt::set_handler_fn(InterruptVector::Spurious as u8, handlers::spurious_handler);
+        }
+    }
+
+    crate::tables::idt::load();
 }
 
 unsafe fn init_memory() {
@@ -357,8 +378,8 @@ unsafe fn wake_aps() {
                     )
                 {
                     debug!("Waking core ID {}.", ap_lapic.id());
-                    // Mark the AP_STACK_POINTER as err'd and in need of stack creation after memory init.
-                    //AP_STACK_POINTERS[lapic.id() as usize] = __double_fault_stack.as_ptr() /* alloc_stack(1, false) */;
+
+                    AP_STACK_POINTERS[ap_lapic.id() as usize] = alloc_stack(1, false);
 
                     // Reset target processor.
                     trace!("Sending INIT interrupt to: {}", ap_lapic.id());
@@ -403,8 +424,7 @@ unsafe extern "win64" fn _startup() -> ! {
         lib::registers::msr::IA32_EFER::set_nxe(true);
     }
 
-    crate::tables::gdt::init();
-    crate::tables::idt::load_unchecked();
+    load_tables();
 
     if is_bsp() {
         init_memory();
