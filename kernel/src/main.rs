@@ -77,7 +77,7 @@ static KERNEL_MALLOCATOR: SyncOnceCell<slob::SLOB> = SyncOnceCell::new();
 macro_rules! reset_bsp_stack_ptr {
     () => {
         assert!(
-            $crate::local_state::is_bsp(),
+            lib::cpu::is_bsp(),
             "Cannot clear AP stack pointers to BSP stack top."
         );
 
@@ -126,7 +126,7 @@ fn load_tables() {
     // Always initialize GDT prior to configuring IDT.
     crate::tables::gdt::init();
 
-    if crate::local_state::is_bsp() {
+    if lib::cpu::is_bsp() {
         use crate::{
             local_state::{handlers, InterruptVector},
             tables::{idt, tss},
@@ -163,6 +163,44 @@ fn load_tables() {
     }
 
     crate::tables::idt::load();
+}
+
+fn load_tss() {
+    use x86_64::{
+        structures::{
+            gdt::{Descriptor, GlobalDescriptorTable},
+            tss::TaskStateSegment,
+        },
+        VirtAddr,
+    };
+
+    let tss_0_stack = alloc_stack(1, false);
+    let double_fault_stack = alloc_stack(1, false);
+    let mut tss = unsafe {
+        lib::memory::malloc::get()
+            .alloc(
+                core::mem::size_of::<TaskStateSegment>(),
+                core::num::NonZeroUsize::new(core::mem::align_of::<TaskStateSegment>()),
+            )
+            .unwrap()
+            .cast::<TaskStateSegment>()
+            .unwrap()
+            .into_parts()
+            .0
+            .as_mut()
+            .unwrap()
+    };
+    tss.interrupt_stack_table[local_state::StackIndex::TSS0 as usize] =
+        VirtAddr::from_ptr(tss_0_stack);
+    tss.interrupt_stack_table[local_state::StackIndex::DoubleFault as usize] =
+        VirtAddr::from_ptr(double_fault_stack);
+
+    let temp_gdt = GlobalDescriptorTable::new();
+    temp_gdt.add_entry(Descriptor::kernel_code_segment());
+    temp_gdt.add_entry(Descriptor::kernel_data_segment());
+    let tss_selector = temp_gdt.add_entry(Descriptor::tss_segment(&tss));
+
+    unsafe { x86_64::instructions::tables::load_tss(tss_selector) };
 }
 
 unsafe fn init_memory() {
@@ -355,13 +393,14 @@ unsafe fn init_memory() {
 }
 
 /// TODO document why we need to do this before mmeory is initialized.
+/// This method assumes the `gs` segment has a valid base for kernel local state.
 unsafe fn wake_aps() {
     use lib::acpi::rdsp::xsdt::{
         madt::{InterruptDevice, MADT},
         XSDT,
     };
 
-    let lapic_id = crate::local_state::processor_id();
+    let lapic_id = crate::local_state::id() as u8 /* possibly don't cast to u8? */;
     let icr = crate::local_state::int_ctrl().icr();
     let ap_text_page_index = (__ap_text_start.as_usize() / 0x1000) as u8;
 
@@ -402,7 +441,7 @@ unsafe fn wake_aps() {
 
 #[no_mangle]
 unsafe extern "win64" fn _startup() -> ! {
-    use crate::local_state::is_bsp;
+    use lib::cpu::is_bsp;
 
     // Set CR0 flags.
     use lib::registers::control::{CR0Flags, CR0};
@@ -433,8 +472,17 @@ unsafe extern "win64" fn _startup() -> ! {
         crate::clock::global::init();
     }
 
+    load_tss();
+
     // Initialize the processor-local state (always before waking APs, for access to ICR).
-    crate::local_state::init();
+    local_state::init();
+
+    // Configure interrupts...
+    {
+        let int_ctrl = local_state::int_ctrl();
+        int_ctrl.sw_enable();
+        int_ctrl.reload_timer(core::num::NonZeroU32::new(1));
+    }
 
     if is_bsp() {
         wake_aps();
@@ -453,7 +501,9 @@ unsafe extern "win64" fn _startup() -> ! {
     msr::IA32_LSTAR::set_syscall(syscall::syscall_enter);
     msr::IA32_SFMASK::set_rflags_mask(lib::registers::RFlags::all());
 
-    if crate::local_state::is_bsp() {
+    loop {}
+
+    if is_bsp() {
         lib::registers::stack::RSP::write(alloc_stack(2, true));
         lib::cpu::ring3_enter(test_user_function, lib::registers::RFlags::INTERRUPT_FLAG);
     }

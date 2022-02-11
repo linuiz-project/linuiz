@@ -391,7 +391,7 @@ impl<'dev> Controller<'dev> {
         nvme.msix.set_enable(true);
         nvme.msix.set_function_mask(false);
         nvme.msix[0].configure(
-            crate::local_state::processor_id(),
+            unsafe { crate::local_state::id() as u8 },
             crate::local_state::InterruptVector::Storage as u8,
             lib::InterruptDeliveryMode::Fixed,
         );

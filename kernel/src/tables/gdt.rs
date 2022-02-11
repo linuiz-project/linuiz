@@ -1,8 +1,9 @@
 use lib::cell::SyncOnceCell;
+use spin::Mutex;
 use x86_64::{registers::segmentation::SegmentSelector, structures::gdt::GlobalDescriptorTable};
 
 lazy_static::lazy_static! {
-    static ref GDT: GlobalDescriptorTable = {
+    static ref GDT: Mutex<GlobalDescriptorTable> = {
         use x86_64::structures::gdt::Descriptor;
 
         let mut gdt = GlobalDescriptorTable::new();
@@ -20,7 +21,7 @@ lazy_static::lazy_static! {
             &crate::tables::tss::TSS,
         ))).unwrap();
 
-        gdt
+        Mutex::new(gdt)
     };
 }
 
@@ -32,12 +33,15 @@ pub static TSS_SELECTOR: SyncOnceCell<SegmentSelector> = SyncOnceCell::new();
 
 pub fn init() {
     unsafe {
-        GDT.load();
+        let gdt = GDT.lock();
+
+        gdt.load();
 
         use x86_64::instructions::{
             segmentation::{Segment, CS, DS, ES, FS, GS, SS},
             tables::load_tss,
         };
+
         CS::set_reg(*KCODE_SELECTOR.get().unwrap());
         SS::set_reg(*KDATA_SELECTOR.get().unwrap());
 
@@ -52,9 +56,9 @@ pub fn init() {
         let null_selector = SegmentSelector::new(0x0, x86_64::PrivilegeLevel::Ring0);
         ES::set_reg(null_selector);
         DS::set_reg(null_selector);
+        // It should be noted that Intel (not AMD) clears the FS/GS.base when loading a null selector.
         FS::set_reg(null_selector);
         GS::set_reg(null_selector);
-        info!("{:?}", TSS_SELECTOR.get().unwrap());
-        load_tss(*TSS_SELECTOR.get().unwrap());
+        //load_tss(*TSS_SELECTOR.get().unwrap());
     }
 }

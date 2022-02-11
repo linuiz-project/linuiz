@@ -1,99 +1,44 @@
 mod int_ctrl;
 
-use bit_field::BitField;
 pub use int_ctrl::*;
-use spin::{Mutex, MutexGuard};
+use x86_64::structures::tss::TaskStateSegment;
 
 use crate::{clock::AtomicClock, scheduling::Scheduler};
-use core::{ops::Range, sync::atomic::AtomicUsize};
-use lib::registers::{msr, msr::Generic};
+use lib::registers::msr::{Generic, IA32_KERNEL_GS_BASE};
+use spin::{Mutex, MutexGuard};
 
-pub static INIT_COUNT: AtomicUsize = AtomicUsize::new(0);
-
-pub fn is_bsp() -> bool {
-    msr::IA32_APIC_BASE::is_bsp()
+#[repr(usize)]
+pub enum StackIndex {
+    TSS0,
+    DoubleFault,
+    Syscall,
+    ExtINT,
 }
 
-struct LocalStateRegister;
-
-/// Layout of LocalStateRegister:
-/// Bit 0       ID FLAG
-/// Bit 1..10   ID BITS
-/// Bit 10..13  RESERVED
-/// Bit 13..64  STRUCTURE PTR
-impl LocalStateRegister {
-    const ID_SET_BIT: usize = 0;
-    const ID_BITS: Range<usize> = 1..10;
-    const DATA_BITS: Range<usize> = 0..12;
-    const PTR_BITS: Range<usize> = 12..64;
-
-    #[inline]
-    fn get_id() -> u8 {
-        let gs_base = msr::IA32_GS_BASE::read();
-
-        if !gs_base.get_bit(Self::ID_SET_BIT) {
-            let cpuid_id = (lib::instructions::cpuid::exec(0x1, 0x0).unwrap().ebx() >> 24) as u64;
-
-            unsafe {
-                msr::IA32_GS_BASE::write(
-                    *msr::IA32_GS_BASE::read().set_bits(Self::ID_BITS, cpuid_id),
-                )
-            };
-        }
-
-        gs_base.get_bits(Self::ID_BITS) as u8
-    }
-
-    fn try_get() -> Option<&'static LocalState> {
-        unsafe {
-            ((*msr::IA32_GS_BASE::read().set_bits(Self::DATA_BITS, 0)) as *const LocalState)
-                .as_ref()
-        }
-    }
-
-    fn set_ptr(ptr: *mut LocalState) {
-        let ptr_u64 = ptr as u64;
-
-        assert_eq!(
-            ptr_u64.get_bits(Self::DATA_BITS),
-            0,
-            "Local state pointer must be page-aligned (low 12 bits are data bits)."
-        );
-
-        unsafe {
-            msr::IA32_GS_BASE::write(ptr_u64 | msr::IA32_GS_BASE::read().get_bits(Self::DATA_BITS));
-        };
-    }
-}
-
-struct LocalState {
+struct LocalState<'a> {
+    self_ptr: *mut Self,
+    id: u32,
     clock: AtomicClock,
     int_ctrl: InterruptController,
-    thread: Mutex<Scheduler>,
+    scheduler: Mutex<Scheduler>,
 }
 
 pub fn init() {
-    assert!(
-        !LocalStateRegister::try_get().is_some(),
+    assert_eq!(
+        IA32_KERNEL_GS_BASE::read(),
+        0,
         "Local state register has already been configured."
     );
 
-    INIT_COUNT.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+    let id = lib::cpu::get_id();
 
-    let cpuid_id = {
-        lib::instructions::cpuid::exec(0x1, 0x0)
-            .unwrap()
-            .ebx()
-            .get_bits(24..) as u8
-    };
-
-    trace!("Configuring local state: {}.", cpuid_id);
+    trace!("Configuring local state: {}.", id);
     unsafe {
-        let lpu_ptr = lib::memory::malloc::get()
+        let ptr = lib::memory::malloc::get()
             .alloc(
                 core::mem::size_of::<LocalState>(),
                 // Local state register must be page-aligned.
-                core::num::NonZeroUsize::new(0x1000),
+                core::num::NonZeroUsize::new(core::mem::align_of::<LocalState>()),
             )
             .unwrap()
             .cast::<LocalState>()
@@ -101,58 +46,77 @@ pub fn init() {
             .into_parts()
             .0;
 
-        trace!("Local state pointer: {:?}", lpu_ptr);
+        trace!("Local state pointer: {:?}", ptr);
 
         {
             let clock = AtomicClock::new();
             let int_ctrl = InterruptController::create();
-            let thread = Mutex::new(Scheduler::new());
+            let scheduler = Mutex::new(Scheduler::new());
+
+            let tss = TaskStateSegment::new();
 
             assert_eq!(
-                cpuid_id,
-                int_ctrl.apic_id(),
+                id,
+                int_ctrl.apic_id() as u32,
                 "CPUID processor ID does not match APIC ID."
             );
 
             // Write the LPU structure into memory.
-            lpu_ptr.write(LocalState {
+            ptr.write(LocalState {
+                self_ptr: ptr,
+                id,
                 clock,
                 int_ctrl,
-                thread,
+                scheduler,
             });
         }
 
         // Convert ptr to 64 bit representation, and write metadata into low bits.
-        LocalStateRegister::set_ptr(lpu_ptr);
-        int_ctrl().sw_enable();
-        int_ctrl().reload_timer(core::num::NonZeroU32::new(1));
+        IA32_KERNEL_GS_BASE::write(ptr as u64);
     }
 }
 
-static LOCAL_STATE_NO_INIT: &str = "Processor local state has not been initialized";
-
-pub fn processor_id() -> u8 {
-    LocalStateRegister::get_id()
+/// Enables the LocalState structure.
+pub unsafe fn enable() {
+    // The `enable()` and `disable()` currently do the exact same thing, but
+    // there may be some validation done in the future, to ensure proper usage
+    // of `swapgs`.
+    x86_64::registers::segmentation::GS::swap()
 }
 
-pub fn clock() -> &'static AtomicClock {
-    LocalStateRegister::try_get()
-        .map(|ls| &ls.clock)
-        .expect(LOCAL_STATE_NO_INIT)
+/// Disables the local state structure.
+pub unsafe fn disable() {
+    x86_64::registers::segmentation::GS::swap()
 }
 
-pub fn int_ctrl() -> &'static InterruptController {
-    LocalStateRegister::try_get()
-        .map(|ls| &ls.int_ctrl)
-        .expect(LOCAL_STATE_NO_INIT)
+pub unsafe fn get() -> &'static LocalState<'static> {
+    let self_ptr: *const LocalState;
+
+    core::arch::asm!(
+        "mov {}, gs:0x0",
+        out(reg) self_ptr,
+        options(pure, nomem)
+    );
+
+    self_ptr.as_ref().expect("Local state not initialized")
 }
 
-pub fn lock_scheduler() -> MutexGuard<'static, Scheduler> {
-    LocalStateRegister::try_get()
-        .map(|ls| ls.thread.lock())
-        .expect(LOCAL_STATE_NO_INIT)
+pub unsafe fn id() -> u32 {
+    get().id
 }
 
-pub fn try_lock_scheduler() -> Option<MutexGuard<'static, Scheduler>> {
-    LocalStateRegister::try_get().and_then(|ls| ls.thread.try_lock())
+pub unsafe fn clock() -> &'static AtomicClock {
+    &get().clock
+}
+
+pub unsafe fn int_ctrl() -> &'static InterruptController {
+    &get().int_ctrl
+}
+
+pub unsafe fn lock_scheduler() -> MutexGuard<'static, Scheduler> {
+    get().scheduler.lock()
+}
+
+pub unsafe fn try_lock_scheduler() -> Option<MutexGuard<'static, Scheduler>> {
+    get().scheduler.try_lock()
 }
