@@ -19,8 +19,7 @@ impl log::Log for KernelLogger {
         if self.enabled(record.metadata()) {
             if self.modes.contains(LoggingModes::SERIAL) {
                 crate::println!(
-                    "[{}>{} {}] {}",
-                    crate::local_state::processor_id(),
+                    "[{} {}] {}",
                     record.level(),
                     record.module_path().unwrap_or("*"),
                     record.args()

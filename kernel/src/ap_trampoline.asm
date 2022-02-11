@@ -19,13 +19,17 @@ realmode:
     ; Check for NXE support.
     mov eax, 0x80000001
     cpuid
-    and edx, 1 << 20    ; Check if EFER.NXE bit is available
-    jz .nxe_enable_fail  ; If not, skip setting it in IA32_EFER.
-    mov ecx, 0xC0000080
+    and edx, 1 << 20        ; Check if EFER.NXE bit is available
+    jz .nxe_enable_fail     ; If not, skip setting it in IA32_EFER.
+    mov ecx, 0xC0000080     ; IA32_EFER MSR
     rdmsr
-    or eax, 1 << 11     ; NXE bit in IA32_EFER
-    wrmsr               
+    or eax, 1 << 11         ; NXE bit in IA32_EFER
+    wrmsr
 
+    ; If NXE enable fails, we hope to god nothing went wrong and
+    ; the BSP / kernel *also* decided NXE isn't supported, otherwise,
+    ; a confusing `RESERVED_WRITE` PF is generated as soon as the AP does
+    ; a page table walk over an NXE page table entry.
     .nxe_enable_fail:
 
     ; Enable long mode

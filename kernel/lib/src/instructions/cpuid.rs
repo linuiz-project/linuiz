@@ -42,7 +42,7 @@ pub fn exec(leaf: u32, subleaf: u32) -> Option<Registers> {
         )
     }
 
-    if eax > 0 || ebx > 0 || ecx > 0 || edx > 0 {
+    if (eax | ebx | ecx | edx) > 0 {
         Some(Registers { eax, ebx, ecx, edx })
     } else {
         None

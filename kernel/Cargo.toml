@@ -13,5 +13,5 @@ bitflags = "*"
 num_enum = { version = "*", default-features = false }
 spin = "*"
 paste = "*"
-x86_64 = "*"
+x86_64 = { path = "../../x86_64" }
 lazy_static = "*"

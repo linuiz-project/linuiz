@@ -146,3 +146,26 @@ pub unsafe fn ring3_enter(target_func: fn(), rflags: crate::registers::RFlags) {
     options(noreturn)
     );
 }
+
+pub fn is_bsp() -> bool {
+    crate::registers::msr::IA32_APIC_BASE::is_bsp()
+}
+
+/// Enumerates the most-recent available CPUID leaf for the core ID.
+pub fn get_id() -> u32 {
+    if let Some(registers) =
+        // IA32 SDM instructs to enumerate this leaf first...
+        exec(0x1F, 0x0)
+            // ... this leaf second ...
+            .or_else(|| exec(0xB, 0x0))
+    {
+        registers.edx()
+    } else if let Some(registers) =
+        // ... and finally, this leaf as an absolute fallback.
+        exec(0x1, 0x0)
+    {
+        registers.ebx() >> 24
+    } else {
+        panic!("CPUID ID enumeration failed.");
+    }
+}

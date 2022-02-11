@@ -259,6 +259,6 @@ pub unsafe fn set_handler_fn(vector: u8, handler: extern "x86-interrupt" fn(Inte
     );
 
     lib::instructions::interrupts::without_interrupts(|| {
-        unsafe { IDT.lock()[vector as usize].set_handler_fn(handler) };
+        IDT.lock()[vector as usize].set_handler_fn(handler);
     });
 }

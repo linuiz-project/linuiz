@@ -94,6 +94,11 @@ impl Page {
             None
         }
     }
+
+    /// Clears the 4KiB region from this page's start to its end.
+    pub unsafe fn clear_memory(&self) {
+        core::ptr::write_bytes(self.as_mut_ptr::<u8>(), 0, 0x1000);
+    }
 }
 
 impl core::iter::Step for Page {
@@ -211,7 +216,10 @@ pub struct PageTableEntry(usize);
 
 impl PageTableEntry {
     const FRAME_INDEX_MASK: usize = 0x000FFFFF_FFFFF000;
-    pub const UNUSED: Self = Self(0);
+
+    pub const fn empty() -> Self {
+        Self(0)
+    }
 
     pub const fn set(&mut self, frame_index: usize, attributes: PageAttributes) {
         self.0 = (frame_index * 0x1000) | attributes.bits();
@@ -303,13 +311,13 @@ pub struct PageTable<L: TableLevel> {
 impl<L: TableLevel> PageTable<L> {
     pub const fn new() -> Self {
         Self {
-            entries: [PageTableEntry::UNUSED; 512],
+            entries: [PageTableEntry::empty(); 512],
             level: PhantomData,
         }
     }
 
     pub unsafe fn clear(&mut self) {
-        core::ptr::write_bytes(self as *mut _ as *mut u8, 0, 0x1000);
+        self.entries.fill(PageTableEntry::empty());
     }
 
     pub fn get_entry(&self, index: usize) -> &PageTableEntry {
@@ -382,17 +390,16 @@ impl<L: HeirarchicalLevel> PageTable<L> {
             }
         };
 
-        let sub_table: &mut PageTable<L::NextLevel> = phys_mapping_page
-            .forward(frame_index)
-            .unwrap()
-            .as_mut_ptr::<PageTable<L::NextLevel>>()
-            .as_mut()
-            .unwrap();
+        let sub_table_page = phys_mapping_page.forward(frame_index).unwrap();
 
+        // If we created the page, clear it to a known initial state.
         if created {
-            sub_table.clear();
+            sub_table_page.clear_memory();
         }
 
-        sub_table
+        sub_table_page
+            .as_mut_ptr::<PageTable<L::NextLevel>>()
+            .as_mut()
+            .unwrap()
     }
 }
