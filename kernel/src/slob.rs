@@ -286,7 +286,10 @@ impl MemoryAllocator for SLOB<'_> {
                 end_block_index - block_index,
                 (block_index_floor + BlockPage::BLOCKS_PER) - block_index,
             );
-            let mask_bits = ((1 as u64) << remaining_blocks_in_slice).wrapping_sub(1);
+            let mask_bits = (1 as u64)
+                .checked_shl(remaining_blocks_in_slice as u32)
+                .unwrap_or(u64::MAX)
+                .wrapping_sub(1);
 
             *block_page.value_mut() |= mask_bits << low_offset;
             block_index += remaining_blocks_in_slice;

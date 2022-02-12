@@ -421,8 +421,8 @@ unsafe fn wake_aps() {
         XSDT,
     };
 
-    let lapic_id = crate::local_state::id() as u8 /* possibly don't cast to u8? */;
-    let icr = crate::local_state::int_ctrl().icr();
+    let lapic_id = lib::cpu::get_id() as u8 /* possibly don't cast to u8? */;
+    let icr = crate::local_state::int_ctrl().unwrap().icr();
     let ap_text_page_index = (__ap_text_start.as_usize() / 0x1000) as u8;
 
     if let Some(madt) = XSDT.find_sub_table::<MADT>() {
@@ -471,14 +471,21 @@ unsafe extern "win64" fn _startup() -> ! {
         init_memory();
     }
 
-    load_tss();
-
-    // Initialize the processor-local state (always before waking APs, for access to ICR).
     local_state::init();
     local_state::enable();
 
+    if is_bsp() {
+        clock::global::start();
+    }
+
+    load_tss();
+
+    // Initialize the processor-local state (always before waking APs, for access to ICR).
     {
-        let int_ctrl = local_state::int_ctrl();
+        local_state::create_scheduler();
+        local_state::create_int_ctrl();
+
+        let int_ctrl = local_state::int_ctrl().unwrap();
         int_ctrl.sw_enable();
         int_ctrl.reload_timer(core::num::NonZeroU32::new(1));
     }
@@ -500,12 +507,8 @@ unsafe extern "win64" fn _startup() -> ! {
     msr::IA32_LSTAR::set_syscall(syscall::syscall_enter);
     msr::IA32_SFMASK::set_rflags_mask(lib::registers::RFlags::all());
 
-    local_state::disable();
-
-    if is_bsp() {
-        lib::registers::stack::RSP::write(alloc_stack(2, true));
-        lib::cpu::ring3_enter(test_user_function, lib::registers::RFlags::INTERRUPT_FLAG);
-    }
+    lib::registers::stack::RSP::write(alloc_stack(2, true));
+    lib::cpu::ring3_enter(test_user_function, lib::registers::RFlags::INTERRUPT_FLAG);
 
     kernel_main()
 }

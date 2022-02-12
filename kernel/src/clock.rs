@@ -19,29 +19,31 @@ impl AtomicClock {
 }
 
 pub mod global {
-    lazy_static::lazy_static! {
-        static ref GLOBAL_CLOCK: super::AtomicClock = {
-            lib::instructions::interrupts::without_interrupts(|| {
-                use lib::structures::pic8259;
+    static GLOBAL_CLOCK: super::AtomicClock = super::AtomicClock::new();
 
-                pic8259::enable(pic8259::InterruptLines::TIMER);
-                pic8259::pit::set_timer_freq(1000, pic8259::pit::OperatingMode::RateGenerator);
-                unsafe {
-                    crate::tables::idt::set_handler_fn(
-                        crate::local_state::InterruptVector::GlobalTimer as u8,
-                        tick_handler,
-                    )
-                };
-            });
+    pub fn start() {
+        lib::instructions::interrupts::without_interrupts(|| {
+            use lib::structures::pic8259;
 
-            super::AtomicClock::new()
-        };
+            pic8259::enable(pic8259::InterruptLines::TIMER);
+            pic8259::pit::set_timer_freq(1000, pic8259::pit::OperatingMode::RateGenerator);
+            unsafe {
+                crate::tables::idt::set_handler_fn(
+                    crate::local_state::InterruptVector::GlobalTimer as u8,
+                    tick_handler,
+                )
+            };
+        });
     }
 
     fn tick_handler(
         _: &mut crate::tables::idt::InterruptStackFrame,
         _: *mut crate::scheduling::ThreadRegisters,
     ) {
+        if lib::registers::msr::IA32_EFER::get_sce() {
+            loop {}
+        }
+
         GLOBAL_CLOCK.tick();
 
         use lib::structures::pic8259;
@@ -62,7 +64,7 @@ pub mod local {
     #[inline(always)]
     pub fn get_ticks() -> u64 {
         // TODO this is fucked in userland ?? swapgs sucks
-        unsafe { crate::local_state::clock() }.get_ticks()
+        unsafe { crate::local_state::clock().unwrap().get_ticks() }
     }
 
     #[inline(always)]

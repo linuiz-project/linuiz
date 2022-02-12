@@ -198,10 +198,19 @@ extern "x86-interrupt" fn irq_common(_: InterruptStackFrame) {
     unsafe {
         asm!(
         "
-        # ISF should begin here on the stack.
+        # (QWORD) ISF should begin here on the stack. 
+        # (QWORD) IRQ vector is here.
+        # (QWORD) `call` return instruction pointer is here.
+        
 
-        # IRQ vector is here
-    
+        push rcx        # Preserve scratch register.
+        mov rcx, rsp    # Preserve old stack pointer.
+
+        mov rsp, gs:{} # Jump to new stack.
+
+        push rcx        # Push address of old stack.
+        mov rcx, [rcx]  # Restore scratch registers.
+
         # Push all gprs to the stack.
         push r15
         push r14
@@ -220,19 +229,19 @@ extern "x86-interrupt" fn irq_common(_: InterruptStackFrame) {
         push rax
     
         cld
-    
-        # Keeping in mind here that `rip` is going to be at the
-        # top of this function's stack, because of the `call` instruction.
+
+        # `r9` will contain address of old stack
+        mov r9, [rsp + (15 * 8)]
 
         # Move stack frame into first parameter.
-        lea rcx, [rsp + (17 * 8)]
+        lea rcx, [r9 + (3 * 8)]
         # Move IRQ vector into third parameter
-        mov r8, [rsp + (16 * 8)]
+        mov r8, [r9 + (2 * 8)]
         # Move cached gprs pointer into second parameter.
         mov rdx, rsp
     
         call {}
-    
+        
         # Send EOI to APIC ...
         # IRQ may not originate from APIC, but this should not have any
         # knock-on side effects (hopefully?).
@@ -253,11 +262,13 @@ extern "x86-interrupt" fn irq_common(_: InterruptStackFrame) {
         pop r13
         pop r14
         pop r15
-        # Get rid of IRQ vector and `rip`
-        add rsp, 16
-    
+
+        pop rsp         # Restore preserved stack pointer.
+        add rsp, 0x18   # 'Pop' old `rcx`, IRQ vector, and `rip`
+
         iretq
         ",
+        const crate::local_state::Offset::TrapStackPtr as u64,
         sym interrupt_handler,
         options(noreturn)
         );

@@ -1,4 +1,4 @@
-use core::{num::NonZeroU32, sync::atomic::AtomicU64};
+use core::num::NonZeroU32;
 use lib::structures::apic::APIC;
 
 #[repr(u8)]
@@ -20,12 +20,9 @@ pub enum InterruptVector {
 pub struct InterruptController {
     apic: APIC,
     per_ms: u32,
-    counters: [AtomicU64; 256],
 }
 
 impl InterruptController {
-    const ATOMIC_ZERO: AtomicU64 = AtomicU64::new(0);
-
     pub fn create() -> Self {
         use lib::structures::apic::*;
 
@@ -75,11 +72,7 @@ impl InterruptController {
 
         trace!("Core-local APIC configured.");
 
-        Self {
-            apic,
-            per_ms,
-            counters: [Self::ATOMIC_ZERO; 256],
-        }
+        Self { apic, per_ms }
     }
 
     #[inline]

@@ -28,8 +28,7 @@ pub(crate) unsafe extern "C" fn syscall_enter() {
 
         swapgs
         
-        mov rdx, gs:{}
-        lea rsp, [rdx + ({} * {})]
+        mov rsp, gs:{}
 
         /* Push fake stack frame for scheduling compatibility. */
         push 0x0 /* Push empty stack seg value. */
@@ -100,9 +99,7 @@ pub(crate) unsafe extern "C" fn syscall_enter() {
 
         sysretq
         ",
-        const crate::local_state::LOCAL_STATE_STACKS_OFFSET,
-        const crate::local_state::StackIndex::Syscall as usize,
-        const crate::local_state::STACK_SIZE,
+        const crate::local_state::Offset::SyscallStackPtr as u64,
         sym SYSCALL_FUNCTIONS,
         options(noreturn),
     );

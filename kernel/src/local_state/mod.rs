@@ -6,27 +6,18 @@ use crate::{clock::AtomicClock, scheduling::Scheduler};
 use core::num::NonZeroUsize;
 use lib::registers::msr::{Generic, IA32_KERNEL_GS_BASE};
 use spin::{Mutex, MutexGuard};
-use x86_64::structures::tss::TaskStateSegment;
-
-pub const LOCAL_STATE_STACKS_OFFSET: usize = memoffset::offset_of!(LocalState, stacks);
-pub const STACK_SIZE: usize = 0x2000;
 
 #[repr(usize)]
-pub enum StackIndex {
-    Syscall,
+pub enum Offset {
+    ID = 0x0,
+    Clock = 0x10,
+    IntCtrl = 0x20,
+    Scheduler = 0x60,
+    SyscallStackPtr = 0x100,
+    TrapStackPtr = 0x110,
 }
 
-#[repr(C, align(16))]
-struct LocalState<'a> {
-    self_ptr: *mut Self,
-    id: u32,
-    clock: AtomicClock,
-    int_ctrl: InterruptController,
-    scheduler: Mutex<Scheduler>,
-    stacks: [*const u8; 1],
-}
-
-pub fn init() {
+pub unsafe fn init() {
     assert_eq!(
         IA32_KERNEL_GS_BASE::read(),
         0,
@@ -36,44 +27,58 @@ pub fn init() {
     unsafe {
         let ptr = lib::memory::malloc::get()
             .alloc(
-                core::mem::size_of::<LocalState>(),
+                0x1000,
                 // Local state register must be page-aligned.
-                NonZeroUsize::new(core::mem::align_of::<LocalState>()),
+                NonZeroUsize::new(0x1000),
             )
-            .unwrap()
-            .cast::<LocalState>()
             .unwrap()
             .into_parts()
             .0;
 
-        {
-            let id = lib::cpu::get_id();
-            let clock = AtomicClock::new();
-            let int_ctrl = InterruptController::create();
-            let scheduler = Mutex::new(Scheduler::new());
-            let syscall_stack = {
+        ptr.add(Offset::ID as usize)
+            .cast::<u32>()
+            .write(lib::cpu::get_id());
+        ptr.add(Offset::SyscallStackPtr as usize)
+            .cast::<*const u8>()
+            .write({
                 let (ptr, len) = lib::memory::malloc::get()
-                    .alloc(STACK_SIZE, NonZeroUsize::new(16))
+                    .alloc(0x1000, NonZeroUsize::new(16))
                     .unwrap()
                     .into_parts();
 
                 ptr.add(len)
-            };
-
-            // Write the LPU structure into memory.
-            ptr.write(LocalState {
-                self_ptr: ptr,
-                id,
-                clock,
-                int_ctrl,
-                scheduler,
-                stacks: [syscall_stack],
             });
-        }
+        ptr.add(Offset::TrapStackPtr as usize)
+            .cast::<*const u8>()
+            .write({
+                let (ptr, len) = lib::memory::malloc::get()
+                    .alloc(0x1000, NonZeroUsize::new(16))
+                    .unwrap()
+                    .into_parts();
+
+                ptr.add(len)
+            });
 
         // Convert ptr to 64 bit representation, and write metadata into low bits.
         IA32_KERNEL_GS_BASE::write(ptr as u64);
     }
+}
+
+pub unsafe fn create_int_ctrl() {
+    let ptr = IA32_KERNEL_GS_BASE::read() as *mut u8;
+    ptr.add(Offset::Clock as usize)
+        .cast::<AtomicClock>()
+        .write(AtomicClock::new());
+    ptr.add(Offset::IntCtrl as usize)
+        .cast::<InterruptController>()
+        .write(InterruptController::create());
+}
+
+pub unsafe fn create_scheduler() {
+    (IA32_KERNEL_GS_BASE::read() as *mut u8)
+        .add(Offset::Scheduler as usize)
+        .cast::<Mutex<Scheduler>>()
+        .write(Mutex::new(Scheduler::new()));
 }
 
 /// Enables the LocalState structure.
@@ -89,8 +94,8 @@ pub unsafe fn disable() {
     x86_64::registers::segmentation::GS::swap()
 }
 
-unsafe fn get() -> &'static LocalState<'static> {
-    let self_ptr: *const LocalState;
+unsafe fn get() -> *const u8 {
+    let self_ptr: *const u8;
 
     core::arch::asm!(
         "mov {}, gs:0x0",
@@ -98,25 +103,39 @@ unsafe fn get() -> &'static LocalState<'static> {
         options(pure, nomem)
     );
 
-    self_ptr.as_ref().expect("Local state not initialized")
+    self_ptr
 }
 
 pub unsafe fn id() -> u32 {
-    get().id
+    get().add(Offset::ID as usize).cast::<u32>().read()
 }
 
-pub unsafe fn clock() -> &'static AtomicClock {
-    &get().clock
+pub unsafe fn clock() -> Option<&'static AtomicClock> {
+    get()
+        .add(Offset::Clock as usize)
+        .cast::<AtomicClock>()
+        .as_ref()
 }
 
-pub unsafe fn int_ctrl() -> &'static InterruptController {
-    &get().int_ctrl
+pub unsafe fn int_ctrl() -> Option<&'static InterruptController> {
+    get()
+        .add(Offset::IntCtrl as usize)
+        .cast::<InterruptController>()
+        .as_ref()
 }
 
-pub unsafe fn lock_scheduler() -> MutexGuard<'static, Scheduler> {
-    get().scheduler.lock()
+pub unsafe fn lock_scheduler() -> Option<MutexGuard<'static, Scheduler>> {
+    get()
+        .add(Offset::Scheduler as usize)
+        .cast::<Mutex<Scheduler>>()
+        .as_ref()
+        .map(|scheduler| scheduler.lock())
 }
 
 pub unsafe fn try_lock_scheduler() -> Option<MutexGuard<'static, Scheduler>> {
-    get().scheduler.try_lock()
+    get()
+        .add(Offset::Scheduler as usize)
+        .cast::<Mutex<Scheduler>>()
+        .as_ref()
+        .and_then(|scheduler| scheduler.try_lock())
 }
