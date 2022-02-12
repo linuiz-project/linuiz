@@ -151,19 +151,11 @@ fn load_tables() {
     gdt::init();
 
     if lib::cpu::is_bsp() {
-        unsafe {
-            // Due to the fashion in which the x86_64 crate initializes the IDT entries,
-            // it must be ensured that the handlers are set only *after* the GDT has been
-            // properly initialized and loaded.
-            //
-            // Otherwise, the `CS` value of the IDT entries is incorrect, and this causes
-            // very confusing GPFs.
-            idt::init();
-
-            for vector in 32..=255 {
-                idt::set_handler_fn(vector, local_state::handlers::scheduler_trap);
-            }
-        }
+        // Due to the fashion in which the x86_64 crate initializes the IDT entries,
+        // it must be ensured that the handlers are set only *after* the GDT has been
+        // properly initialized and loaded—otherwise, the `CS` value for the IDT entries
+        // is incorrect, and this causes very confusing GPFs.
+        idt::init();
     }
 
     crate::tables::idt::load();

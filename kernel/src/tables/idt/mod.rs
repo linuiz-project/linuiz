@@ -1,5 +1,10 @@
+mod irq_stubs;
+
+use core::arch::asm;
 use x86_64::structures::idt::InterruptDescriptorTable;
 pub use x86_64::structures::idt::InterruptStackFrame;
+
+use crate::scheduling::ThreadRegisters;
 
 /* FAULT INTERRUPT HANDLERS */
 extern "x86-interrupt" fn divide_error_handler(stack_frame: InterruptStackFrame) {
@@ -187,6 +192,88 @@ extern "x86-interrupt" fn security_exception_handler(
 // reserved 31
 // --- triple fault (can't handle)
 
+#[naked]
+#[no_mangle]
+extern "x86-interrupt" fn irq_common(_: InterruptStackFrame) {
+    unsafe {
+        asm!(
+        "
+        # ISF should begin here on the stack.
+
+        # IRQ vector is here
+    
+        # Push all gprs to the stack.
+        push r15
+        push r14
+        push r13
+        push r12
+        push r11
+        push r10
+        push r9
+        push r8
+        push rbp
+        push rdi
+        push rsi
+        push rdx
+        push rcx
+        push rbx
+        push rax
+    
+        cld
+    
+        # Keeping in mind here that `rip` is going to be at the
+        # top of this function's stack, because of the `call` instruction.
+
+        # Move stack frame into first parameter.
+        lea rcx, [rsp + (17 * 8)]
+        # Move IRQ vector into third parameter
+        mov r8, [rsp + (16 * 8)]
+        # Move cached gprs pointer into second parameter.
+        mov rdx, rsp
+    
+        call {}
+    
+        # Send EOI to APIC ...
+        # IRQ may not originate from APIC, but this should not have any
+        # knock-on side effects (hopefully?).
+        mov qword ptr [0xFFFE00B0], $0x0
+    
+        pop rax
+        pop rbx
+        pop rcx
+        pop rdx
+        pop rsi
+        pop rdi
+        pop rbp
+        pop r8
+        pop r9
+        pop r10
+        pop r11
+        pop r12
+        pop r13
+        pop r14
+        pop r15
+        # Get rid of IRQ vector and `rip`
+        add rsp, 16
+    
+        iretq
+        ",
+        sym interrupt_handler,
+        options(noreturn)
+        );
+    }
+}
+
+extern "win64" fn interrupt_handler(
+    isf: &mut InterruptStackFrame,
+    cached_regs: *mut ThreadRegisters,
+    irq_vector: u64,
+) {
+    if let Some(handler) = INTERRUPT_HANDLERS.read()[irq_vector as usize] {
+        handler(isf, cached_regs);
+    }
+}
+
 pub const DOUBLE_FAULT_IST_INDEX: u16 = 1;
 
 lazy_static::lazy_static! {
@@ -236,6 +323,8 @@ pub fn init() {
         idt.security_exception
             .set_handler_fn(security_exception_handler);
         // --- triple fault (can't handle)
+
+        irq_stubs::apply_stubs(&mut idt);
     }
 }
 
@@ -247,18 +336,22 @@ pub fn load() {
     }
 }
 
+pub type HandlerFunc = fn(&mut InterruptStackFrame, *mut ThreadRegisters);
+
+static INTERRUPT_HANDLERS: spin::RwLock<[Option<HandlerFunc>; 256]> =
+    spin::RwLock::new([None; 256]);
+
 /// Sets the interrupt handler function for the given vector.
 ///
 /// SAFETY: This function is unsafe because any (including malformed or buggy) handler can  be
 ///         specifid. The caller of this function must ensure the handler is correctly formed,
 ///         and properly handles the interrupt it is being assigned to.  
-pub unsafe fn set_handler_fn(vector: u8, handler: extern "x86-interrupt" fn(InterruptStackFrame)) {
+pub unsafe fn set_handler_fn(vector: u8, handler: HandlerFunc) {
     assert!(
         super::gdt::KCODE_SELECTOR.get().is_some(),
         "Cannot initialize IDT before GDT (IDT entries use GDT kernel code segment selector)."
     );
-
     lib::instructions::interrupts::without_interrupts(|| {
-        IDT.lock()[vector as usize].set_handler_fn(handler);
+        INTERRUPT_HANDLERS.write()[vector as usize] = Some(handler);
     });
 }

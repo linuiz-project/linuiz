@@ -26,22 +26,22 @@ pub mod global {
 
                 pic8259::enable(pic8259::InterruptLines::TIMER);
                 pic8259::pit::set_timer_freq(1000, pic8259::pit::OperatingMode::RateGenerator);
-                // TODO use new interrupt gate mechanism
-                // unsafe {
-                //     crate::tables::idt::set_handler_fn(
-                //         crate::local_state::InterruptVector::GlobalTimer as u8,
-                //         tick_handler,
-                //     )
-                // };
-
-                debug!("Global clock configured at 1000Hz.");
+                unsafe {
+                    crate::tables::idt::set_handler_fn(
+                        crate::local_state::InterruptVector::GlobalTimer as u8,
+                        tick_handler,
+                    )
+                };
             });
 
             super::AtomicClock::new()
         };
     }
 
-    extern "x86-interrupt" fn tick_handler(_: crate::tables::idt::InterruptStackFrame) {
+    fn tick_handler(
+        _: &mut crate::tables::idt::InterruptStackFrame,
+        _: *mut crate::scheduling::ThreadRegisters,
+    ) {
         GLOBAL_CLOCK.tick();
 
         use lib::structures::pic8259;

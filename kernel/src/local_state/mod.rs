@@ -51,7 +51,6 @@ pub fn init() {
             let clock = AtomicClock::new();
             let int_ctrl = InterruptController::create();
             let scheduler = Mutex::new(Scheduler::new());
-            let tss = TaskStateSegment::new();
             let syscall_stack = {
                 let (ptr, len) = lib::memory::malloc::get()
                     .alloc(STACK_SIZE, NonZeroUsize::new(16))
