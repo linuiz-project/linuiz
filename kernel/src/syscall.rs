@@ -26,7 +26,11 @@ pub(crate) unsafe extern "C" fn syscall_enter() {
         "
         /* Move to syscall stack. */
         mov r12, rsp
-        lea rsp, {0}
+
+        swapgs
+        
+        mov rdx, gs:{}
+        lea rsp, [rdx + ({} * {})]
 
         /* Push fake stack frame for scheduling compatibility. */
         push 0x0 /* Push empty stack seg value. */
@@ -47,7 +51,7 @@ pub(crate) unsafe extern "C" fn syscall_enter() {
         push rbp
         push rdi
         push rsi
-        push rdx
+        push rdx /* segment loader */
         push rcx /* sysret rip */
         push rbx
         push rax
@@ -62,7 +66,7 @@ pub(crate) unsafe extern "C" fn syscall_enter() {
 
         /* Load the function pointer. */
         lea r10, [r10 * 8]
-        lea rbx, [r10 + {1}]
+        lea rbx, [r10 + {}]
 
         call [rbx]
 
@@ -90,12 +94,16 @@ pub(crate) unsafe extern "C" fn syscall_enter() {
         pop r12 /* Pop cached `rsp` value. */
         add rsp, 0x8 /* Pop empty stack seg value. */
 
+        swapgs
+        
         /* Restore previous stack. */
         mov rsp, r12
         
         sysretq
         ",
-        sym __syscall_stack,
+        const crate::local_state::LOCAL_STATE_STACKS_OFFSET,
+        const crate::local_state::StackIndex::Syscall as usize,
+        const crate::local_state::STACK_SIZE,
         sym SYSCALL_FUNCTIONS,
         options(noreturn),
     );

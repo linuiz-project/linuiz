@@ -1,9 +1,8 @@
 use lib::cell::SyncOnceCell;
-use spin::Mutex;
 use x86_64::{registers::segmentation::SegmentSelector, structures::gdt::GlobalDescriptorTable};
 
 lazy_static::lazy_static! {
-    static ref GDT: Mutex<GlobalDescriptorTable> = {
+    static ref GDT: GlobalDescriptorTable = {
         use x86_64::structures::gdt::Descriptor;
 
         let mut gdt = GlobalDescriptorTable::new();
@@ -21,7 +20,7 @@ lazy_static::lazy_static! {
             &crate::tables::tss::TSS,
         ))).unwrap();
 
-        Mutex::new(gdt)
+        gdt
     };
 }
 
@@ -33,14 +32,9 @@ pub static TSS_SELECTOR: SyncOnceCell<SegmentSelector> = SyncOnceCell::new();
 
 pub fn init() {
     unsafe {
-        let gdt = GDT.lock();
+        GDT.load();
 
-        gdt.load();
-
-        use x86_64::instructions::{
-            segmentation::{Segment, CS, DS, ES, FS, GS, SS},
-            tables::load_tss,
-        };
+        use x86_64::instructions::segmentation::{Segment, CS, DS, ES, FS, GS, SS};
 
         CS::set_reg(*KCODE_SELECTOR.get().unwrap());
         SS::set_reg(*KDATA_SELECTOR.get().unwrap());

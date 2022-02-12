@@ -187,7 +187,7 @@ extern "x86-interrupt" fn security_exception_handler(
 // reserved 31
 // --- triple fault (can't handle)
 
-pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
+pub const DOUBLE_FAULT_IST_INDEX: u16 = 1;
 
 lazy_static::lazy_static! {
     static ref IDT: spin::Mutex<InterruptDescriptorTable> = spin::Mutex::new(InterruptDescriptorTable::new());

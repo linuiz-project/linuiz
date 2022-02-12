@@ -9,7 +9,9 @@
     const_option_ext,
     naked_functions,
     asm_sym,
-    asm_const
+    asm_const,
+    const_ptr_offset_from,
+    const_refs_to_cell
 )]
 
 #[macro_use]
@@ -52,9 +54,6 @@ extern "C" {
 
     static __bss_start: LinkerSymbol;
     static __bsp_stack: LinkerSymbol;
-    static __exception_stack: LinkerSymbol;
-    static __double_fault_stack: LinkerSymbol;
-    static __isr_stack: LinkerSymbol;
     static __bss_end: LinkerSymbol;
 
     static __user_code_start: LinkerSymbol;
@@ -90,8 +89,7 @@ macro_rules! reset_bsp_stack_ptr {
 }
 
 #[no_mangle]
-#[export_name = "_entry"]
-unsafe extern "efiapi" fn kernel_init(
+unsafe extern "efiapi" fn _entry(
     boot_info: BootInfo<uefi::MemoryDescriptor, SystemConfigTableEntry>,
 ) -> ! {
     /* PRE-INIT (no environment prepared) */
@@ -122,20 +120,38 @@ unsafe extern "efiapi" fn kernel_init(
     _startup()
 }
 
+fn load_registers() {
+    unsafe {
+        // Set CR0 flags.
+        use lib::registers::control::{CR0Flags, CR0};
+        CR0::write(
+            CR0Flags::PE | CR0Flags::MP | CR0Flags::ET | CR0Flags::NE | CR0Flags::WP | CR0Flags::PG,
+        );
+        // Set CR4 flags.
+        use lib::registers::control::{CR4Flags, CR4};
+        CR4::write(
+            CR4Flags::DE
+                | CR4Flags::PAE
+                | CR4Flags::MCE
+                | CR4Flags::PGE
+                | CR4Flags::OSFXSR
+                | CR4Flags::OSXMMEXCPT,
+        );
+        // Enable use of the `NO_EXECUTE` page attribute, if supported.
+        if lib::cpu::FEATURES_EXT.contains(lib::cpu::FeaturesExt::NO_EXEC) {
+            lib::registers::msr::IA32_EFER::set_nxe(true);
+        }
+    }
+}
+
 fn load_tables() {
+    use tables::{gdt, idt};
+
     // Always initialize GDT prior to configuring IDT.
-    crate::tables::gdt::init();
+    gdt::init();
 
     if lib::cpu::is_bsp() {
-        use crate::{
-            local_state::{handlers, InterruptVector},
-            tables::{idt, tss},
-        };
-
         unsafe {
-            tss::TSS_STACK_PTRS[idt::DOUBLE_FAULT_IST_INDEX as usize] =
-                Some(__double_fault_stack.as_mut_ptr());
-
             // Due to the fashion in which the x86_64 crate initializes the IDT entries,
             // it must be ensured that the handlers are set only *after* the GDT has been
             // properly initialized and loaded.
@@ -143,22 +159,10 @@ fn load_tables() {
             // Otherwise, the `CS` value of the IDT entries is incorrect, and this causes
             // very confusing GPFs.
             idt::init();
-            // This is where we'll configure the kernel-static IDT entries.
-            idt::set_handler_fn(InterruptVector::LocalTimer as u8, handlers::apit_handler);
-            idt::set_handler_fn(InterruptVector::CMCI as u8, handlers::default_handler);
-            idt::set_handler_fn(
-                InterruptVector::Performance as u8,
-                handlers::default_handler,
-            );
-            idt::set_handler_fn(
-                InterruptVector::ThermalSensor as u8,
-                handlers::default_handler,
-            );
-            idt::set_handler_fn(InterruptVector::LINT0 as u8, handlers::default_handler);
-            idt::set_handler_fn(InterruptVector::LINT1 as u8, handlers::default_handler);
-            idt::set_handler_fn(InterruptVector::Error as u8, handlers::error_handler);
-            idt::set_handler_fn(InterruptVector::Storage as u8, handlers::storage_handler);
-            idt::set_handler_fn(InterruptVector::Spurious as u8, handlers::spurious_handler);
+
+            for vector in 32..=255 {
+                idt::set_handler_fn(vector, local_state::handlers::scheduler_trap);
+            }
         }
     }
 
@@ -166,41 +170,67 @@ fn load_tables() {
 }
 
 fn load_tss() {
+    use core::num::NonZeroUsize;
+    use lib::memory::malloc;
     use x86_64::{
+        instructions::tables,
         structures::{
             gdt::{Descriptor, GlobalDescriptorTable},
             tss::TaskStateSegment,
         },
-        VirtAddr,
     };
 
-    let tss_0_stack = alloc_stack(1, false);
-    let double_fault_stack = alloc_stack(1, false);
-    let mut tss = unsafe {
-        lib::memory::malloc::get()
+    unsafe {
+        let tss_ptr = malloc::get()
             .alloc(
                 core::mem::size_of::<TaskStateSegment>(),
-                core::num::NonZeroUsize::new(core::mem::align_of::<TaskStateSegment>()),
+                NonZeroUsize::new(core::mem::align_of::<TaskStateSegment>()),
             )
             .unwrap()
             .cast::<TaskStateSegment>()
             .unwrap()
             .into_parts()
-            .0
-            .as_mut()
-            .unwrap()
-    };
-    tss.interrupt_stack_table[local_state::StackIndex::TSS0 as usize] =
-        VirtAddr::from_ptr(tss_0_stack);
-    tss.interrupt_stack_table[local_state::StackIndex::DoubleFault as usize] =
-        VirtAddr::from_ptr(double_fault_stack);
+            .0;
 
-    let temp_gdt = GlobalDescriptorTable::new();
-    temp_gdt.add_entry(Descriptor::kernel_code_segment());
-    temp_gdt.add_entry(Descriptor::kernel_data_segment());
-    let tss_selector = temp_gdt.add_entry(Descriptor::tss_segment(&tss));
+        use x86_64::VirtAddr;
+        tss_ptr.as_mut().unwrap().interrupt_stack_table[0] =
+            VirtAddr::from_ptr(alloc_stack(1, false));
+        tss_ptr.as_mut().unwrap().interrupt_stack_table
+            [crate::tables::idt::DOUBLE_FAULT_IST_INDEX as usize] =
+            VirtAddr::from_ptr(alloc_stack(1, false));
 
-    unsafe { x86_64::instructions::tables::load_tss(tss_selector) };
+        let tss_descriptor = {
+            use bit_field::BitField;
+
+            let tss_ptr_u64 = tss_ptr as u64;
+
+            let mut low = x86_64::structures::gdt::DescriptorFlags::PRESENT.bits();
+            // base
+            low.set_bits(16..40, tss_ptr_u64.get_bits(0..24));
+            low.set_bits(56..64, tss_ptr_u64.get_bits(24..32));
+            // limit (the `-1` in needed since the bound is inclusive)
+            low.set_bits(0..16, (core::mem::size_of::<TaskStateSegment>() - 1) as u64);
+            // type (0b1001 = available 64-bit tss)
+            low.set_bits(40..44, 0b1001);
+
+            let mut high = 0;
+            high.set_bits(0..32, tss_ptr_u64.get_bits(32..64));
+
+            Descriptor::SystemSegment(low, high)
+        };
+
+        let cur_gdt = tables::sgdt();
+        let mut temp_gdt = GlobalDescriptorTable::new();
+        temp_gdt.add_entry(Descriptor::kernel_code_segment());
+        temp_gdt.add_entry(Descriptor::kernel_data_segment());
+        let tss_selector = temp_gdt.add_entry(tss_descriptor);
+        temp_gdt.load_unsafe();
+
+        // Load TSS from temporary GDT.
+        tables::load_tss(tss_selector);
+        // Restore cached GDT.
+        tables::lgdt(&cur_gdt);
+    }
 }
 
 unsafe fn init_memory() {
@@ -392,7 +422,6 @@ unsafe fn init_memory() {
     info!("Kernel memory initialized.");
 }
 
-/// TODO document why we need to do this before mmeory is initialized.
 /// This method assumes the `gs` segment has a valid base for kernel local state.
 unsafe fn wake_aps() {
     use lib::acpi::rdsp::xsdt::{
@@ -443,41 +472,19 @@ unsafe fn wake_aps() {
 unsafe extern "win64" fn _startup() -> ! {
     use lib::cpu::is_bsp;
 
-    // Set CR0 flags.
-    use lib::registers::control::{CR0Flags, CR0};
-    CR0::write(
-        CR0Flags::PE | CR0Flags::MP | CR0Flags::ET | CR0Flags::NE | CR0Flags::WP | CR0Flags::PG,
-    );
-    // Set CR4 flags.
-    use lib::registers::control::{CR4Flags, CR4};
-    CR4::write(
-        CR4Flags::DE
-            | CR4Flags::PAE
-            | CR4Flags::MCE
-            | CR4Flags::PGE
-            | CR4Flags::OSFXSR
-            | CR4Flags::OSXMMEXCPT,
-    );
-    // Enable use of the `NO_EXECUTE` page attribute, if supported.
-    if lib::cpu::FEATURES_EXT.contains(lib::cpu::FeaturesExt::NO_EXEC) {
-        lib::registers::msr::IA32_EFER::set_nxe(true);
-    }
-
+    load_registers();
     load_tables();
 
     if is_bsp() {
         init_memory();
-
-        // Initialize global clock prior to local state to allow APIT window measurement.
-        crate::clock::global::init();
     }
 
     load_tss();
 
     // Initialize the processor-local state (always before waking APs, for access to ICR).
     local_state::init();
+    local_state::enable();
 
-    // Configure interrupts...
     {
         let int_ctrl = local_state::int_ctrl();
         int_ctrl.sw_enable();
@@ -501,7 +508,7 @@ unsafe extern "win64" fn _startup() -> ! {
     msr::IA32_LSTAR::set_syscall(syscall::syscall_enter);
     msr::IA32_SFMASK::set_rflags_mask(lib::registers::RFlags::all());
 
-    loop {}
+    local_state::disable();
 
     if is_bsp() {
         lib::registers::stack::RSP::write(alloc_stack(2, true));
@@ -564,6 +571,7 @@ fn test_user_function() {
             // "mov r15,   0x1F1F1FA5",
             "syscall",
             out("rcx") _,
+            out("rdx") _,
             out("r10") _,
             out("r11") _,
             out("r12") _,

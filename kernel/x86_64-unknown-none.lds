@@ -54,9 +54,6 @@ SECTIONS
         __bsp_stack = .;
 
         . += 0x1000;
-        __double_fault_stack = .;
-
-        . += 0x1000;
         __syscall_stack = .;
 
 

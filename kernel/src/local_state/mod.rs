@@ -1,26 +1,29 @@
 mod int_ctrl;
 
 pub use int_ctrl::*;
-use x86_64::structures::tss::TaskStateSegment;
 
 use crate::{clock::AtomicClock, scheduling::Scheduler};
+use core::num::NonZeroUsize;
 use lib::registers::msr::{Generic, IA32_KERNEL_GS_BASE};
 use spin::{Mutex, MutexGuard};
+use x86_64::structures::tss::TaskStateSegment;
+
+pub const LOCAL_STATE_STACKS_OFFSET: usize = memoffset::offset_of!(LocalState, stacks);
+pub const STACK_SIZE: usize = 0x2000;
 
 #[repr(usize)]
 pub enum StackIndex {
-    TSS0,
-    DoubleFault,
     Syscall,
-    ExtINT,
 }
 
+#[repr(C, align(16))]
 struct LocalState<'a> {
     self_ptr: *mut Self,
     id: u32,
     clock: AtomicClock,
     int_ctrl: InterruptController,
     scheduler: Mutex<Scheduler>,
+    stacks: [*const u8; 1],
 }
 
 pub fn init() {
@@ -30,15 +33,12 @@ pub fn init() {
         "Local state register has already been configured."
     );
 
-    let id = lib::cpu::get_id();
-
-    trace!("Configuring local state: {}.", id);
     unsafe {
         let ptr = lib::memory::malloc::get()
             .alloc(
                 core::mem::size_of::<LocalState>(),
                 // Local state register must be page-aligned.
-                core::num::NonZeroUsize::new(core::mem::align_of::<LocalState>()),
+                NonZeroUsize::new(core::mem::align_of::<LocalState>()),
             )
             .unwrap()
             .cast::<LocalState>()
@@ -46,20 +46,20 @@ pub fn init() {
             .into_parts()
             .0;
 
-        trace!("Local state pointer: {:?}", ptr);
-
         {
+            let id = lib::cpu::get_id();
             let clock = AtomicClock::new();
             let int_ctrl = InterruptController::create();
             let scheduler = Mutex::new(Scheduler::new());
-
             let tss = TaskStateSegment::new();
+            let syscall_stack = {
+                let (ptr, len) = lib::memory::malloc::get()
+                    .alloc(STACK_SIZE, NonZeroUsize::new(16))
+                    .unwrap()
+                    .into_parts();
 
-            assert_eq!(
-                id,
-                int_ctrl.apic_id() as u32,
-                "CPUID processor ID does not match APIC ID."
-            );
+                ptr.add(len)
+            };
 
             // Write the LPU structure into memory.
             ptr.write(LocalState {
@@ -68,6 +68,7 @@ pub fn init() {
                 clock,
                 int_ctrl,
                 scheduler,
+                stacks: [syscall_stack],
             });
         }
 
@@ -89,7 +90,7 @@ pub unsafe fn disable() {
     x86_64::registers::segmentation::GS::swap()
 }
 
-pub unsafe fn get() -> &'static LocalState<'static> {
+unsafe fn get() -> &'static LocalState<'static> {
     let self_ptr: *const LocalState;
 
     core::arch::asm!(

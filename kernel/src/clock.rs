@@ -19,59 +19,50 @@ impl AtomicClock {
 }
 
 pub mod global {
-    static GLOBAL_CLOCK: SyncOnceCell<super::AtomicClock> = SyncOnceCell::new();
-
-    pub fn init() {
-        if let Ok(()) = GLOBAL_CLOCK.set(super::AtomicClock::new()) {
+    lazy_static::lazy_static! {
+        static ref GLOBAL_CLOCK: super::AtomicClock = {
             lib::instructions::interrupts::without_interrupts(|| {
                 use lib::structures::pic8259;
 
                 pic8259::enable(pic8259::InterruptLines::TIMER);
                 pic8259::pit::set_timer_freq(1000, pic8259::pit::OperatingMode::RateGenerator);
-                unsafe {
-                    crate::tables::idt::set_handler_fn(
-                        crate::local_state::InterruptVector::GlobalTimer as u8,
-                        tick_handler,
-                    )
-                };
+                // TODO use new interrupt gate mechanism
+                // unsafe {
+                //     crate::tables::idt::set_handler_fn(
+                //         crate::local_state::InterruptVector::GlobalTimer as u8,
+                //         tick_handler,
+                //     )
+                // };
 
                 debug!("Global clock configured at 1000Hz.");
             });
-        } else {
-            panic!("Global clock already configured.");
-        }
+
+            super::AtomicClock::new()
+        };
     }
 
-    use lib::cell::SyncOnceCell;
     extern "x86-interrupt" fn tick_handler(_: crate::tables::idt::InterruptStackFrame) {
-        unsafe {
-            GLOBAL_CLOCK
-                .get()
-                // This handler will only be called after GLOBAL_CLOCK is already initialized.
-                .unwrap_unchecked()
-        }
-        .tick();
+        GLOBAL_CLOCK.tick();
 
         use lib::structures::pic8259;
         pic8259::end_of_interrupt(pic8259::InterruptOffset::Timer);
     }
 
-    pub fn get_ticks() -> Option<u64> {
-        GLOBAL_CLOCK
-            .get()
-            .map(|global_clock| global_clock.get_ticks())
+    pub fn get_ticks() -> u64 {
+        GLOBAL_CLOCK.get_ticks()
     }
 
     pub fn busy_wait_msec(milliseconds: u64) {
-        let target_ticks = get_ticks().unwrap() + milliseconds;
-        while get_ticks().unwrap() <= target_ticks {}
+        let target_ticks = get_ticks() + milliseconds;
+        while get_ticks() <= target_ticks {}
     }
 }
 
 pub mod local {
     #[inline(always)]
     pub fn get_ticks() -> u64 {
-        crate::local_state::clock().get_ticks()
+        // TODO this is fucked in userland ?? swapgs sucks
+        unsafe { crate::local_state::clock() }.get_ticks()
     }
 
     #[inline(always)]
