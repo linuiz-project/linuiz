@@ -54,7 +54,7 @@ $(bootloader): $(bootloader_deps)
 	cd ./boot/ && cargo fmt && cargo build --profile $(PROFILE) -Z unstable-options
 
 $(ap_trampoline_out): $(ap_trampoline_src)
-		nasm -f elf64 -o $(ap_trampoline_out) $(ap_trampoline_src)
+	nasm -f elf64 -o $(ap_trampoline_out) $(ap_trampoline_src)
 
 $(kernel): $(ap_trampoline_out) $(kernel_deps) $(kernel_linker_args)
 	cd ./kernel/ && cargo fmt && cargo build --profile $(PROFILE) -Z unstable-options

@@ -9,7 +9,6 @@ extern "C" {
     static __syscall_stack: lib::LinkerSymbol;
 }
 
-pub static mut STACK_POINTERS: [*const (); 256] = [core::ptr::null(); 256];
 static mut SYSCALL_FUNCTIONS: [unsafe extern "win64" fn(
     &mut InterruptStackFrame,
     *mut ThreadRegisters,
@@ -98,7 +97,7 @@ pub(crate) unsafe extern "C" fn syscall_enter() {
         
         /* Restore previous stack. */
         mov rsp, r12
-        
+
         sysretq
         ",
         const crate::local_state::LOCAL_STATE_STACKS_OFFSET,

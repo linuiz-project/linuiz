@@ -1,5 +1,3 @@
-pub(crate) mod handlers;
-
 use core::{num::NonZeroU32, sync::atomic::AtomicU64};
 use lib::structures::apic::APIC;
 
