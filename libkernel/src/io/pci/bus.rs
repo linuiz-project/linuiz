@@ -1,4 +1,4 @@
-use crate::{Physical, io::pci::DeviceVariant, Address};
+use crate::{io::pci::DeviceVariant, Address, Physical};
 use alloc::vec::Vec;
 
 pub struct PCIeBus {
@@ -6,25 +6,21 @@ pub struct PCIeBus {
 }
 
 impl PCIeBus {
-    pub unsafe fn new(base_addr: Address<Physical>) -> Self {
+    pub unsafe fn new(base_addr: Address<Physical>, page_manager: Option<&crate::memory::PageManager>) -> Self {
         let devices: Vec<DeviceVariant> = (0..32)
             .filter_map(|device_index| {
                 let offset_addr = base_addr + (device_index << 15);
-                let vendor_id = (crate::memory::get_page_manager().mapped_addr()
-                    + offset_addr.as_usize())
-                .as_ptr::<u16>()
-                .read();
+                let mmio = crate::memory::MMIO::new((offset_addr).frame_index(), 1)
+                    .expect("Allocation error occurred attempting to create MMIO for PCIeBus");
+
+                let vendor_id = mmio.read::<u16>(0).assume_init();
 
                 if vendor_id == u16::MAX || vendor_id == u16::MIN {
                     None
                 } else {
-                    trace!("Configuring PCIe device at {:?}", offset_addr);
+                    trace!("Configuring PCIe bus: @{:?}", offset_addr);
 
-                    Some(crate::io::pci::new_device(
-                        crate::memory::MMIO::new(offset_addr.frame_index(), 1).expect(
-                            "Allocation error occurred attempting to create MMIO for PCIeBus",
-                        ),
-                    ))
+                    Some(crate::io::pci::new_device(mmio,None))
                 }
             })
             .collect();

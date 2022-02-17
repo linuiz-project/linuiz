@@ -1,8 +1,8 @@
+use crate::memory::PAGE_MANAGER;
 use core::{alloc::Layout, mem::size_of, num::NonZeroUsize};
 use libkernel::{
     align_up_div,
     memory::{
-        get_page_manager,
         malloc::{Alloc, AllocError, MemoryAllocator},
         Page, PageAttributes, FRAME_MANAGER,
     },
@@ -68,7 +68,7 @@ impl<'map> SLOB<'map> {
     pub const BLOCK_SIZE: usize = 0x1000 / BlockPage::BLOCKS_PER;
 
     #[allow(const_item_mutation)]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         const EMPTY: [BlockPage; 0] = [];
 
         Self {
@@ -182,7 +182,7 @@ impl<'map> SLOB<'map> {
 
         trace!("Copy mapping current map to new pages.");
         for page_offset in 0..cur_map_pages {
-            get_page_manager()
+            PAGE_MANAGER
                 .copy_by_map(
                     &cur_map_page.forward(page_offset).unwrap(),
                     &new_map_page.forward(page_offset).unwrap(),
@@ -195,7 +195,7 @@ impl<'map> SLOB<'map> {
         for page_offset in cur_map_pages..req_map_pages {
             let mut new_page = new_map_page.forward(page_offset).unwrap();
 
-            get_page_manager().auto_map(&new_page, PageAttributes::DATA_BITS);
+            PAGE_MANAGER.auto_map(&new_page, PageAttributes::DATA_BITS);
             // Clear the newly allocated map page.
             unsafe { new_page.mem_clear() };
         }
@@ -295,8 +295,7 @@ impl MemoryAllocator for SLOB<'_> {
             block_index += remaining_blocks_in_slice;
 
             if was_empty {
-                get_page_manager()
-                    .auto_map(&Page::from_index(map_index), PageAttributes::DATA_BITS);
+                PAGE_MANAGER.auto_map(&Page::from_index(map_index), PageAttributes::DATA_BITS);
             }
         }
 
@@ -345,7 +344,7 @@ impl MemoryAllocator for SLOB<'_> {
             let frame_index = frame_index + offset;
 
             map_write[page_index].set_full();
-            get_page_manager()
+            PAGE_MANAGER
                 .map(
                     &Page::from_index(page_index),
                     frame_index,
@@ -389,7 +388,7 @@ impl MemoryAllocator for SLOB<'_> {
             let frame_index = frame_index + offset;
 
             map_write[page_index].set_full();
-            get_page_manager()
+            PAGE_MANAGER
                 .map(
                     &Page::from_index(page_index),
                     frame_index,
@@ -416,13 +415,13 @@ impl MemoryAllocator for SLOB<'_> {
         for page_index in frame_index..(frame_index + count) {
             if map_write[page_index].is_empty() {
                 map_write[page_index].set_full();
-                get_page_manager()
+                PAGE_MANAGER
                     .identity_map(&Page::from_index(page_index), PageAttributes::DATA_BITS)
                     .unwrap();
             } else {
                 for page_index in frame_index..page_index {
                     map_write[page_index].set_empty();
-                    get_page_manager()
+                    PAGE_MANAGER
                         .unmap(&Page::from_index(page_index), false)
                         .unwrap();
                 }
@@ -472,7 +471,7 @@ impl MemoryAllocator for SLOB<'_> {
                 // This is wildly unsafe. There's no way to validate—without *only* going through
                 // the Rust global allocator—that the given page allocated a frame and wasn't a direct allocation
                 // of some sort.
-                get_page_manager()
+                PAGE_MANAGER
                     .unmap(&Page::from_index(map_index), true)
                     .unwrap();
             }

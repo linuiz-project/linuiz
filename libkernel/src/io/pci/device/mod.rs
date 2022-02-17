@@ -209,7 +209,7 @@ pub struct PCIeDevice<T: DeviceType> {
     phantom: PhantomData<T>,
 }
 
-pub fn new_device(mmio: MMIO) -> DeviceVariant {
+pub fn new_device(mmio: MMIO, page_manager: Option<&crate::memory::PageManager>) -> DeviceVariant {
     let type_malfunc = unsafe {
         mmio.read::<u8>(HeaderOffset::HeaderType.into())
             .assume_init()
@@ -217,7 +217,7 @@ pub fn new_device(mmio: MMIO) -> DeviceVariant {
 
     // mask off the multifunction bit
     match type_malfunc & !(1 << 7) {
-        0x0 => DeviceVariant::Standard(unsafe { PCIeDevice::<Standard>::new(mmio) }),
+        0x0 => DeviceVariant::Standard(unsafe { PCIeDevice::<Standard>::new(mmio, page_manager) }),
         0x1 => DeviceVariant::PCI2PCI(PCIeDevice {
             mmio,
             registers: Vec::new(),
@@ -360,7 +360,7 @@ impl DeviceRegister {
     }
 
     pub fn as_addr(&self) -> crate::Address<crate::Virtual> {
-        use crate::{Virtual, Address};
+        use crate::{Address, Virtual};
 
         Address::<Virtual>::new(match self {
             DeviceRegister::MemorySpace32(value, _) => (value & !0b1111) as usize,

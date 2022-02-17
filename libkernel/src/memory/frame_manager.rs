@@ -231,9 +231,7 @@ impl<'arr> FrameManager<'arr> {
                 let frame_ty = match descriptor.ty {
                     uefi::MemoryType::UNUSABLE => FrameType::Unusable,
                     uefi::MemoryType::MMIO_PORT_SPACE | uefi::MemoryType::MMIO => FrameType::MMIO,
-                    uefi::MemoryType::KERNEL_CODE | uefi::MemoryType::KERNEL_DATA => {
-                        FrameType::Kernel
-                    }
+                    uefi::MemoryType::KERNEL => FrameType::Kernel,
                     _ => FrameType::Reserved,
                 };
 

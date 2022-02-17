@@ -80,6 +80,20 @@ pub struct MMIO {
     len: usize,
 }
 
+impl Drop for MMIO {
+    fn drop(&mut self) {
+        // Possibly reset frame_range? We don't want to forever lose the pointed-to frames, especially if
+        // the frames were locked MMIO in error.
+
+        unsafe {
+            crate::memory::malloc::get().dealloc(
+                self.ptr,
+                core::alloc::Layout::from_size_align(self.len, 1).unwrap(),
+            )
+        };
+    }
+}
+
 impl MMIO {
     pub unsafe fn new(frame_index: usize, count: usize) -> Result<Self, malloc::AllocError> {
         for frame_index in frame_index..(frame_index + count) {

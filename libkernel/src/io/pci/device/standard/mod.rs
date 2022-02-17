@@ -20,7 +20,7 @@ pub enum StandardRegister {
 }
 
 impl PCIeDevice<Standard> {
-    pub unsafe fn new(mmio: MMIO) -> Self {
+    pub unsafe fn new(mmio: MMIO, page_manager: Option<&crate::memory::PageManager>) -> Self {
         assert_eq!(
             (mmio
                 .read::<u8>(crate::io::pci::HeaderOffset::HeaderType.into())
@@ -56,16 +56,22 @@ impl PCIeDevice<Standard> {
                     DeviceRegister::MemorySpace64(value, _) => (value & 0b1000) > 0,
                     _ => false,
                 } {
-                    trace!("\tRegister is prefetchable, so enabling WRITE_THROUGH bit on page.");
-                    // Optimize page attributes to enable write-through if it wasn't previously enabled.
-                    for page in register_mmio.pages() {
-                        use crate::memory::paging::{AttributeModify, PageAttributes};
+                    if let Some(page_manager) = page_manager {
+                        trace!("\tRegister is prefetchable; setting WRITE_THROUGH on MMIO page.");
 
-                        crate::memory::get_page_manager().set_page_attribs(
-                            &page,
-                            PageAttributes::WRITE_THROUGH,
-                            AttributeModify::Insert,
-                        );
+                        for page in register_mmio.pages() {
+                            use crate::memory::paging::{AttributeModify, PageAttributes};
+
+                            page_manager.set_page_attribs(
+                                &page,
+                                PageAttributes::PRESENT
+                                    | PageAttributes::WRITABLE
+                                    | PageAttributes::WRITE_THROUGH
+                                    | PageAttributes::UNCACHEABLE
+                                    | PageAttributes::NO_EXECUTE,
+                                AttributeModify::Insert,
+                            );
+                        }
                     }
                 }
 

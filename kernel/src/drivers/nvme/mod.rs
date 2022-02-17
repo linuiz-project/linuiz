@@ -593,9 +593,8 @@ pub enum PendingCommand {
 pub fn exec_driver() {
     use libkernel::io::pci;
 
-    let bridges = pci::BRIDGES.lock();
+    let bridges = pci::get_host_bridges(Some(&*crate::memory::PAGE_MANAGER));
     let nvme: Controller = bridges
-        .iter()
         .flat_map(|bridge| bridge.iter())
         .flat_map(|bus| bus.iter())
         .find_map(|device_variant| match device_variant {

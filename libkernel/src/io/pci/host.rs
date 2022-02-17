@@ -1,6 +1,6 @@
 use core::ops::RangeInclusive;
 
-use crate::{Physical, io::pci::PCIeBus, Address};
+use crate::{io::pci::PCIeBus, Address, Physical};
 use alloc::vec::Vec;
 
 #[derive(Debug)]
@@ -16,16 +16,22 @@ pub struct PCIeHostBridge {
 }
 
 impl PCIeHostBridge {
-    pub fn new(base_addr: Address<Physical>, bus_range: RangeInclusive<u8>) -> Self {
+    pub fn new(
+        base_addr: Address<Physical>,
+        bus_range: RangeInclusive<u8>,
+        page_manager: Option<&crate::memory::PageManager>,
+    ) -> Self {
         Self {
             busses: bus_range
                 .filter_map(|bus_index| {
-                    let bus = unsafe { PCIeBus::new(base_addr + ((bus_index as usize) << 20)) };
+                    let bus = unsafe {
+                        PCIeBus::new(base_addr + ((bus_index as usize) << 20), page_manager)
+                    };
 
-                    if !bus.has_devices() {
-                        None
-                    } else {
+                    if bus.has_devices() {
                         Some(bus)
+                    } else {
+                        None
                     }
                 })
                 .collect(),
@@ -39,6 +45,7 @@ impl PCIeHostBridge {
 
 pub fn configure_host_bridge(
     entry: &crate::acpi::rdsp::xsdt::mcfg::Entry,
+    page_manager: Option<&crate::memory::PageManager>,
 ) -> Result<PCIeHostBridge, PCIeHostBridgeError> {
     debug!(
         "Configuring PCIe host bridge for bus range: {:?}",
@@ -46,8 +53,6 @@ pub fn configure_host_bridge(
     );
 
     if !entry.base_addr().is_canonical() {
-        error!("Failed to configure PCIe host bridge: non-canonical base address");
-
         Err(PCIeHostBridgeError::NonCanonicalBaseAddress(
             entry.base_addr(),
         ))
@@ -55,6 +60,7 @@ pub fn configure_host_bridge(
         let bridge = PCIeHostBridge::new(
             entry.base_addr(),
             entry.start_pci_bus()..=entry.end_pci_bus(),
+            page_manager,
         );
 
         trace!(
