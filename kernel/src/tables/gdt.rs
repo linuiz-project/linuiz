@@ -1,4 +1,4 @@
-use lib::cell::SyncOnceCell;
+use libkernel::cell::SyncOnceCell;
 use x86_64::{registers::segmentation::SegmentSelector, structures::gdt::GlobalDescriptorTable};
 
 lazy_static::lazy_static! {

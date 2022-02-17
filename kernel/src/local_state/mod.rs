@@ -4,7 +4,7 @@ pub use int_ctrl::*;
 
 use crate::{clock::AtomicClock, scheduling::Scheduler};
 use core::num::NonZeroUsize;
-use lib::registers::msr::{Generic, IA32_KERNEL_GS_BASE};
+use libkernel::registers::msr::{Generic, IA32_KERNEL_GS_BASE};
 use spin::{Mutex, MutexGuard};
 
 #[repr(usize)]
@@ -25,7 +25,7 @@ pub unsafe fn init() {
     );
 
     unsafe {
-        let ptr = lib::memory::malloc::get()
+        let ptr = libkernel::memory::malloc::get()
             .alloc(
                 0x1000,
                 // Local state register must be page-aligned.
@@ -37,11 +37,11 @@ pub unsafe fn init() {
 
         ptr.add(Offset::ID as usize)
             .cast::<u32>()
-            .write(lib::cpu::get_id());
+            .write(libkernel::cpu::get_id());
         ptr.add(Offset::SyscallStackPtr as usize)
             .cast::<*const u8>()
             .write({
-                let (ptr, len) = lib::memory::malloc::get()
+                let (ptr, len) = libkernel::memory::malloc::get()
                     .alloc(0x1000, NonZeroUsize::new(16))
                     .unwrap()
                     .into_parts();
@@ -51,7 +51,7 @@ pub unsafe fn init() {
         ptr.add(Offset::TrapStackPtr as usize)
             .cast::<*const u8>()
             .write({
-                let (ptr, len) = lib::memory::malloc::get()
+                let (ptr, len) = libkernel::memory::malloc::get()
                     .alloc(0x1000, NonZeroUsize::new(16))
                     .unwrap()
                     .into_parts();

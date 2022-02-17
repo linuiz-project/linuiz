@@ -1,5 +1,5 @@
 use core::{alloc::Layout, mem::size_of, num::NonZeroUsize};
-use lib::{
+use libkernel::{
     align_up_div,
     memory::{
         get_page_manager,
@@ -137,12 +137,12 @@ impl<'map> SLOB<'map> {
         let cur_map_len = map_write.len();
         // Required length of our map, in indexes.
         let req_map_len = (map_write.len()
-            + lib::align_up_div(required_blocks, BlockPage::BLOCKS_PER))
+            + libkernel::align_up_div(required_blocks, BlockPage::BLOCKS_PER))
         .next_power_of_two();
         // Current page count of our map (i.e. how many pages the slice requires)
-        let cur_map_pages = lib::align_up_div(cur_map_len * size_of::<BlockPage>(), 0x1000);
+        let cur_map_pages = libkernel::align_up_div(cur_map_len * size_of::<BlockPage>(), 0x1000);
         // Required page count of our map.
-        let req_map_pages = lib::align_up_div(req_map_len * size_of::<BlockPage>(), 0x1000);
+        let req_map_pages = libkernel::align_up_div(req_map_len * size_of::<BlockPage>(), 0x1000);
 
         trace!(
             "Growth parameters: len {} => {}, pages {} => {}",
@@ -204,7 +204,7 @@ impl<'map> SLOB<'map> {
         **map_write = unsafe {
             core::slice::from_raw_parts_mut(
                 new_map_page.as_mut_ptr(),
-                lib::align_up(req_map_len, 0x1000 / size_of::<BlockPage>()),
+                libkernel::align_up(req_map_len, 0x1000 / size_of::<BlockPage>()),
             )
         };
 
@@ -233,7 +233,7 @@ impl MemoryAllocator for SLOB<'_> {
         }
 
         let align_mask = usize::max(align / Self::BLOCK_SIZE, 1) - 1;
-        let size_in_blocks = lib::align_up_div(size, Self::BLOCK_SIZE);
+        let size_in_blocks = libkernel::align_up_div(size, Self::BLOCK_SIZE);
         let mut map_write = self.map.write();
 
         let end_map_index;

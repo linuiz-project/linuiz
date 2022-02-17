@@ -6,12 +6,12 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-uefi = { version = "*", features = ["exts"] }
-uefi-services = { git = "https://github.com/rust-osdev/uefi-rs" }
-uefi-macros = "*"
-log = { version = "*", default-features = false }
 rlibc = "*"
-lib = { path = "../kernel/lib", default-features = false }
+uefi = { version = "*", features = ["exts"] }
+uefi-services = { version = "*" }
+uefi-macros = { version = "*" }
+log = { version = "*", default-features = false }
+libkernel = { path = "../libkernel/", default-features = false }
 
 [[bin]]
 name = "BOOTX64"

@@ -1,5 +1,5 @@
 use core::mem::size_of;
-use lib::elf::{ELFHeader64, SegmentHeader, SegmentType};
+use libkernel::elf::{ELFHeader64, SegmentHeader, SegmentType};
 use uefi::proto::media::file::RegularFile;
 
 pub fn allocate_segments(
@@ -36,16 +36,16 @@ pub fn allocate_segments(
                 if (segment_header.virt_addr.as_usize() % segment_header.align) == 0 {
                     // Align the address of the segment to page boundaries.
                     let page_aligned_addr =
-                        lib::align_down(segment_header.virt_addr.as_usize(), 0x1000);
+                        libkernel::align_down(segment_header.virt_addr.as_usize(), 0x1000);
                     let alignment_offset = segment_header.virt_addr.as_usize() - page_aligned_addr;
                     let aligned_size = alignment_offset + segment_header.mem_size;
 
                     let buffer = crate::allocate_pages(
                         boot_services,
                         uefi::table::boot::AllocateType::Address(page_aligned_addr),
-                        crate::KERNEL_CODE,
+                        crate::KERNEL,
                         // Determine how many pages the segment covers.
-                        lib::align_up_div(aligned_size, 0x1000),
+                        libkernel::align_up_div(aligned_size, 0x1000),
                     );
 
                     // Handle any internal page offsets (i.e. segment has a non-page alignment).

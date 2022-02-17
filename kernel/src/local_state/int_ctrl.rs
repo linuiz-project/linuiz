@@ -1,5 +1,5 @@
 use core::num::NonZeroU32;
-use lib::structures::apic::APIC;
+use libkernel::structures::apic::APIC;
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -24,10 +24,10 @@ pub struct InterruptController {
 
 impl InterruptController {
     pub fn create() -> Self {
-        use lib::structures::apic::*;
+        use libkernel::structures::apic::*;
 
         // Ensure interrupts are enabled.
-        lib::instructions::interrupts::enable();
+        libkernel::instructions::interrupts::enable();
 
         trace!("Configuring APIC & APIT.");
         let apic = APIC::from_msr().expect("APIC has already been configured on this core");
@@ -91,7 +91,7 @@ impl InterruptController {
     }
 
     #[inline]
-    pub fn icr(&self) -> lib::structures::apic::icr::InterruptCommandRegister {
+    pub fn icr(&self) -> libkernel::structures::apic::icr::InterruptCommandRegister {
         self.apic.interrupt_command()
     }
 
@@ -100,7 +100,7 @@ impl InterruptController {
         const NON_ZERO_U32_ONE: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(1) };
 
         self.apic.write_register(
-            lib::structures::apic::Register::TimerInitialCount,
+            libkernel::structures::apic::Register::TimerInitialCount,
             ms_multiplier.unwrap_or(NON_ZERO_U32_ONE).get() * self.per_ms,
         );
     }

@@ -16,7 +16,7 @@ use core::{
     mem::{size_of, transmute},
     slice,
 };
-use lib::{elf::*, FramebufferInfo};
+use libkernel::{elf::*, FramebufferInfo};
 use uefi::{
     prelude::BootServices,
     proto::{
@@ -30,12 +30,9 @@ use uefi::{
     },
     Handle, ResultExt, Status,
 };
-use uefi_macros::entry;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
-const MINIMUM_MEMORY: usize = 0xF424000; // 256MB
-const KERNEL_CODE: MemoryType = MemoryType::custom(0xFFFFFF00);
-const KERNEL_DATA: MemoryType = MemoryType::custom(0xFFFFFF01);
+const KERNEL: MemoryType = MemoryType::custom(0xFFFFFF00);
 const PAGE_SIZE: usize = 0x1000;
 
 #[cfg(debug_assertions)]
@@ -121,7 +118,7 @@ pub fn free_pool(boot_services: &BootServices, buffer: &mut [u8]) {
 pub fn free_pages(boot_services: &BootServices, buffer: &mut [u8]) {
     match boot_services.free_pages(
         buffer.as_ptr() as u64,
-        lib::align_up_div(buffer.len(), 0x1000),
+        libkernel::align_up_div(buffer.len(), 0x1000),
     ) {
         Ok(completion) => completion.unwrap(),
         Err(error) => panic!("{:?}", error),
@@ -150,16 +147,16 @@ pub fn read_file(file: &mut RegularFile, position: u64, buffer: &mut [u8]) {
         .expect_success("failed to read file into memory");
 }
 
-#[entry]
+#[uefi_macros::entry]
 fn efi_main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
-    uefi_services::init(&mut system_table).expect_success("failed to unwrap UEFI services");
+    uefi_services::init(&mut system_table).expect_success("Failed to initialize UEFI services");
     info!("Loaded Gsai UEFI bootloader v{}.", VERSION);
 
     configure_log_level();
     info!("Configured log level to '{:?}'.", log::max_level());
     info!("Configuring bootloader environment.");
 
-    // this ugly little hack is to sever the boot_services' lifetime from the system_table, allowing us
+    // This ugly little hack is to sever the boot_services' lifetime from the system_table, allowing us
     // to later move the system_table into `kernel_transfer()`
     let boot_services = unsafe {
         (system_table.boot_services() as *const BootServices)
@@ -167,9 +164,6 @@ fn efi_main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status
             .unwrap()
     };
     info!("Acquired boot services from UEFI firmware.");
-
-    // test to see how much memory we're working with
-    ensure_enough_memory(boot_services);
 
     // Acquire kernel entry point.
     let kernel_entry_point = {
@@ -197,7 +191,7 @@ fn efi_main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status
             let mode_info = mode.info();
             info!("Selected graphics mode: {:?}", mode_info);
             let resolution = mode_info.resolution();
-            let size = lib::Size::new(resolution.0, resolution.1);
+            let size = libkernel::Size::new(resolution.0, resolution.1);
 
             Some(FramebufferInfo::new(ptr, size, mode_info.stride()))
         }
@@ -208,32 +202,6 @@ fn efi_main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status
     };
 
     kernel_transfer(image_handle, system_table, kernel_entry_point, framebuffer)
-}
-
-fn ensure_enough_memory(boot_services: &BootServices) {
-    let mmap_size_bytes =
-        boot_services.memory_map_size().map_size + (size_of::<MemoryDescriptor>() * 2);
-    let mmap_buffer = allocate_pool(boot_services, MemoryType::LOADER_DATA, mmap_size_bytes);
-    let total_memory: usize = match boot_services.memory_map(mmap_buffer) {
-        Ok(completion) => completion.unwrap().1,
-        Err(error) => panic!("{:?}", error),
-    }
-    .map(|descriptor| (descriptor.page_count as usize) * PAGE_SIZE)
-    .sum::<usize>();
-
-    if total_memory < MINIMUM_MEMORY {
-        panic!(
-            "system does not have the minimum required {}MB of RAM.",
-            MINIMUM_MEMORY / (1024 * 1024)
-        );
-    } else {
-        info!(
-            "Verified minimum system memory: {}MB",
-            MINIMUM_MEMORY / (1024 * 1024)
-        );
-    }
-
-    free_pool(boot_services, mmap_buffer);
 }
 
 fn select_graphics_mode(graphics_output: &mut GraphicsOutput) -> Mode {
@@ -282,7 +250,7 @@ pub fn load_kernel(boot_services: &BootServices, mut kernel_file: RegularFile) -
 fn apply_relocations(
     kernel_file: &mut RegularFile,
     kernel_header: &ELFHeader64,
-    segment_virt_addr: lib::Address<lib::Virtual>,
+    segment_virt_addr: libkernel::Address<libkernel::Virtual>,
     segment_size: usize,
     segment_buffer: &mut [u8],
 ) {
@@ -325,7 +293,7 @@ fn apply_relocations(
                 debug!("Processing relocation: {:?}", rela);
 
                 match rela.info {
-                    lib::elf::X86_64_RELATIVE => {
+                    libkernel::elf::X86_64_RELATIVE => {
                         if (segment_virt_addr..=(segment_virt_addr + segment_size + 8))
                             .contains(&rela.addr)
                         {
@@ -368,7 +336,7 @@ fn kernel_transfer(
         let mmap_size = boot_services.memory_map_size();
         let mmap_alloc_size = mmap_size.map_size + (4 * size_of::<MemoryDescriptor>());
         let alloc_ptr = boot_services
-            .allocate_pool(KERNEL_DATA, mmap_alloc_size)
+            .allocate_pool(KERNEL, mmap_alloc_size)
             .expect_success("Failed to allocate space for kernel memory map slice.");
 
         (alloc_ptr, mmap_alloc_size)
@@ -401,9 +369,9 @@ fn kernel_transfer(
     memory_map.sort_unstable_by(|d1, d2| d1.phys_start.cmp(&d2.phys_start));
 
     // Finally, drop into the kernel.
-    let kernel_main: lib::KernelMain<MemoryDescriptor, uefi::table::cfg::ConfigTableEntry> =
+    let kernel_main: libkernel::KernelMain<MemoryDescriptor, uefi::table::cfg::ConfigTableEntry> =
         unsafe { transmute(kernel_entry_point) };
-    let boot_info = lib::BootInfo::new(
+    let boot_info = libkernel::BootInfo::new(
         unsafe { memory_map.align_to().1 },
         runtime_table.config_table(),
         framebuffer,

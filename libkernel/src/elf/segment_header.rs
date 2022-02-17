@@ -1,7 +1,14 @@
 use crate::{
-    {Physical, Virtual},
-    Address,
+    Address, {Physical, Virtual},
 };
+
+bitflags::bitflags! {
+    pub struct SegmentFlags : u32 {
+        const EXECUTABLE    = 1 << 0;
+        const WRITABLE      = 1 << 1;
+        const READABLE      = 1 << 1;
+    }
+}
 
 #[repr(u32)]
 #[allow(dead_code, non_camel_case_types)]
@@ -25,7 +32,7 @@ pub enum SegmentType {
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct SegmentHeader {
     pub ty: SegmentType,
-    pub flags: u32,
+    pub flags: SegmentFlags,
     pub offset: usize,
     pub virt_addr: Address<Virtual>,
     pub phys_addr: Address<Physical>,

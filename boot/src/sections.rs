@@ -2,7 +2,7 @@
 
 use core::mem::size_of;
 
-use lib::elf::{ELFHeader64, Rela64, SectionAttributes, SectionHeader, SectionType};
+use libkernel::elf::{ELFHeader64, Rela64, SectionAttributes, SectionHeader, SectionType};
 use uefi::proto::media::file::RegularFile;
 
 struct SectionIterator<'k> {
@@ -59,7 +59,7 @@ fn allocate_sections(
         .iter()
         .filter_map(|section| {
             if section.attribs.contains(SectionAttributes::ALLOC) {
-                Some(lib::align_up(section.size, section.addr_align))
+                Some(libkernel::align_up(section.size, section.addr_align))
             } else {
                 None
             }
@@ -70,7 +70,7 @@ fn allocate_sections(
         boot_services,
         uefi::table::boot::AllocateType::Address(0x0),
         uefi::table::boot::MemoryType::RESERVED,
-        lib::align_up_div(total_memory_size, 0x1000),
+        libkernel::align_up_div(total_memory_size, 0x1000),
     );
     let buffer_base = buffer.as_ptr() as usize;
 
@@ -98,7 +98,7 @@ fn allocate_sections(
                     crate::read_file(kernel_file, section_header.offset as u64, &mut rela_buffer);
                     let rela: &Rela64 = unsafe { &core::mem::transmute(rela_buffer) };
 
-                    if rela.info == lib::elf::X86_64_RELATIVE
+                    if rela.info == libkernel::elf::X86_64_RELATIVE
                         && (buffer_base..=(buffer_base + total_memory_size))
                             .contains(&rela.addr.as_usize())
                     {

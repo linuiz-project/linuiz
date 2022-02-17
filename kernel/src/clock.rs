@@ -22,8 +22,8 @@ pub mod global {
     static GLOBAL_CLOCK: super::AtomicClock = super::AtomicClock::new();
 
     pub fn start() {
-        lib::instructions::interrupts::without_interrupts(|| {
-            use lib::structures::pic8259;
+        libkernel::instructions::interrupts::without_interrupts(|| {
+            use libkernel::structures::pic8259;
 
             pic8259::enable(pic8259::InterruptLines::TIMER);
             pic8259::pit::set_timer_freq(1000, pic8259::pit::OperatingMode::RateGenerator);
@@ -40,13 +40,13 @@ pub mod global {
         _: &mut crate::tables::idt::InterruptStackFrame,
         _: *mut crate::scheduling::ThreadRegisters,
     ) {
-        if lib::registers::msr::IA32_EFER::get_sce() {
+        if libkernel::registers::msr::IA32_EFER::get_sce() {
             loop {}
         }
 
         GLOBAL_CLOCK.tick();
 
-        use lib::structures::pic8259;
+        use libkernel::structures::pic8259;
         pic8259::end_of_interrupt(pic8259::InterruptOffset::Timer);
     }
 
@@ -72,7 +72,7 @@ pub mod local {
         let target_ticks = get_ticks() + milliseconds;
 
         while get_ticks() <= target_ticks {
-            lib::instructions::hlt();
+            libkernel::instructions::hlt();
         }
     }
 

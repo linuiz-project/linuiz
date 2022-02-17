@@ -145,7 +145,7 @@ extern "x86-interrupt" fn page_fault_handler(
 ) {
     panic!(
         "CPU EXCEPTION: PAGE FAULT\nCR2: {:?}\n{:?}\n{:#?}",
-        lib::registers::control::CR2::read(),
+        libkernel::registers::control::CR2::read(),
         error_code,
         stack_frame
     );
@@ -362,7 +362,7 @@ pub unsafe fn set_handler_fn(vector: u8, handler: HandlerFunc) {
         super::gdt::KCODE_SELECTOR.get().is_some(),
         "Cannot initialize IDT before GDT (IDT entries use GDT kernel code segment selector)."
     );
-    lib::instructions::interrupts::without_interrupts(|| {
+    libkernel::instructions::interrupts::without_interrupts(|| {
         INTERRUPT_HANDLERS.write()[vector as usize] = Some(handler);
     });
 }

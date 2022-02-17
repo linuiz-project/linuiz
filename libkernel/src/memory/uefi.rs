@@ -20,8 +20,7 @@ pub enum MemoryType {
     PAL_CODE,
     PERSISTENT,
     UNACCEPTED,
-    KERNEL_CODE = 0xFFFFFF00,
-    KERNEL_DATA = 0xFFFFFF01,
+    KERNEL = 0xFFFFFF00,
 }
 
 bitflags::bitflags! {

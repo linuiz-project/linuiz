@@ -1,7 +1,7 @@
 use crate::{clock::local::Stopwatch, tables::idt::InterruptStackFrame};
 use alloc::{boxed::Box, collections::BinaryHeap};
 use core::{cmp, sync::atomic::AtomicU64};
-use lib::{
+use libkernel::{
     registers::{control::CR3Flags, RFlags},
     Address, Physical,
 };
@@ -76,7 +76,7 @@ impl Thread {
     ) -> Self {
         let rip = function as u64;
         let stack = stack.unwrap_or_else(|| unsafe {
-            lib::memory::malloc::get()
+            libkernel::memory::malloc::get()
                 .alloc(Self::DEFAULT_STACK_SIZE, None)
                 .unwrap()
                 .into_slice()
@@ -198,7 +198,7 @@ impl Scheduler {
                     cached_regs.write_volatile(next_task.gprs);
 
                     // Set current page tables.
-                    lib::registers::control::CR3::write(next_task.cr3.0, next_task.cr3.1);
+                    libkernel::registers::control::CR3::write(next_task.cr3.0, next_task.cr3.1);
                 }
 
                 self.current_task = Some(next_task);
