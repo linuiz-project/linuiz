@@ -6,7 +6,7 @@ pub struct PCIeBus {
 }
 
 impl PCIeBus {
-    pub unsafe fn new(base_addr: Address<Physical>, page_manager: Option<&crate::memory::PageManager>) -> Self {
+    pub unsafe fn new(base_addr: Address<Physical>) -> Self {
         let devices: Vec<DeviceVariant> = (0..32)
             .filter_map(|device_index| {
                 let offset_addr = base_addr + (device_index << 15);
@@ -20,7 +20,7 @@ impl PCIeBus {
                 } else {
                     trace!("Configuring PCIe bus: @{:?}", offset_addr);
 
-                    Some(crate::io::pci::new_device(mmio,None))
+                    Some(crate::io::pci::new_device(mmio, None))
                 }
             })
             .collect();

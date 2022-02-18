@@ -593,10 +593,8 @@ pub enum PendingCommand {
 pub fn exec_driver() {
     use libkernel::io::pci;
 
-    let bridges = pci::get_host_bridges(Some(&*crate::memory::PAGE_MANAGER));
-    let nvme: Controller = bridges
-        .flat_map(|bridge| bridge.iter())
-        .flat_map(|bus| bus.iter())
+    let nvme: Controller = crate::PCIE_DEVICES
+        .iter()
         .find_map(|device_variant| match device_variant {
             pci::DeviceVariant::Standard(device)
                 if device.class() == pci::DeviceClass::MassStorageController

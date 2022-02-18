@@ -29,6 +29,7 @@ mod slob;
 mod syscall;
 mod tables;
 
+use alloc::vec::Vec;
 use libkernel::{acpi::SystemConfigTableEntry, memory::uefi, BootInfo, LinkerSymbol};
 
 extern "C" {
@@ -39,6 +40,25 @@ static mut CON_OUT: drivers::stdout::Serial = drivers::stdout::Serial::new(drive
 
 #[export_name = "__ap_stack_pointers"]
 static mut AP_STACK_POINTERS: [*const (); 256] = [core::ptr::null(); 256];
+
+use libkernel::io::pci;
+pub struct Devices<'a>(Vec<pci::DeviceVariant>, &'a core::marker::PhantomData<()>);
+unsafe impl Send for Devices<'_> {}
+unsafe impl Sync for Devices<'_> {}
+
+impl Devices<'_> {
+    pub fn iter(&self) -> core::slice::Iter<pci::DeviceVariant> {
+        self.0.iter()
+    }
+}
+
+lazy_static::lazy_static! {
+    pub static ref PCIE_DEVICES: Devices<'static> =
+        Devices(
+            libkernel::io::pci::get_pcie_devices(Some(&*crate::memory::PAGE_MANAGER)).collect(),
+            &core::marker::PhantomData
+        );
+}
 
 /// Clears the kernel stack by resetting `RSP`.
 ///
@@ -80,11 +100,15 @@ unsafe extern "efiapi" fn _entry(
         Err(_) => libkernel::instructions::interrupts::breakpoint(),
     }
 
+    if libkernel::cpu::has_feature(libkernel::cpu::Feature::ACPI) {
+        loop {}
+    }
+
     // Write misc. CPU state to stdout (This also lazy initializes them).
     {
         debug!("CPU Vendor          {:?}", libkernel::cpu::VENDOR);
-        debug!("CPU Features        {:?}", libkernel::cpu::FEATURES);
-        debug!("CPU Features Ext    {:?}", libkernel::cpu::FEATURES_EXT);
+        debug!("CPU Features        {:?}", libkernel::cpu::FeatureFmt);
+        // debug!("CPU Features Ext    {:?}", libkernel::cpu::FEATURES_EXT);
     }
 
     /* COMMON KERNEL START (prepare local state and AP processors) */
@@ -107,10 +131,13 @@ fn load_registers() {
                 | CR4Flags::MCE
                 | CR4Flags::PGE
                 | CR4Flags::OSFXSR
-                | CR4Flags::OSXMMEXCPT,
+                | CR4Flags::OSXMMEXCPT
+                | CR4Flags::UMIP
+                // Possibly need to check for support of this? But QEMU doesn't seem to support CPUID.07H ..
+                | CR4Flags::FSGSBASE,
         );
         // Enable use of the `NO_EXECUTE` page attribute, if supported.
-        if libkernel::cpu::FEATURES_EXT.contains(libkernel::cpu::FeaturesExt::NO_EXEC) {
+        if libkernel::cpu::has_feature(libkernel::cpu::Feature::NXE) {
             libkernel::registers::msr::IA32_EFER::set_nxe(true);
         }
     }
@@ -133,7 +160,11 @@ fn load_tables() {
     crate::tables::idt::load();
 }
 
-fn load_tss() {
+/// Loads the TSS for the current core.
+///
+/// SAFETY: This function invariantly assumes the following:
+///             - This function has not been called before on this core.
+unsafe fn load_tss() {
     use core::num::NonZeroUsize;
     use libkernel::memory::malloc;
     use x86_64::{
@@ -144,57 +175,72 @@ fn load_tss() {
         },
     };
 
-    unsafe {
-        let tss_ptr = malloc::get()
-            .alloc(
-                core::mem::size_of::<TaskStateSegment>(),
-                NonZeroUsize::new(core::mem::align_of::<TaskStateSegment>()),
-            )
-            .unwrap()
-            .cast::<TaskStateSegment>()
-            .unwrap()
-            .into_parts()
-            .0;
+    let tss_ptr = malloc::get()
+        .alloc(
+            core::mem::size_of::<TaskStateSegment>(),
+            NonZeroUsize::new(core::mem::align_of::<TaskStateSegment>()),
+        )
+        .unwrap()
+        .cast::<TaskStateSegment>()
+        .unwrap()
+        .into_parts()
+        .0;
 
-        use x86_64::VirtAddr;
-        tss_ptr.as_mut().unwrap().interrupt_stack_table[0] =
-            VirtAddr::from_ptr(alloc_stack(1, false));
-        tss_ptr.as_mut().unwrap().interrupt_stack_table
-            [crate::tables::idt::DOUBLE_FAULT_IST_INDEX as usize] =
-            VirtAddr::from_ptr(alloc_stack(1, false));
+    use libkernel::registers::msr::Generic;
+    use x86_64::VirtAddr;
+    let kernel_gs_base = libkernel::registers::msr::IA32_KERNEL_GS_BASE::read() as *const *const u8;
+    tss_ptr.as_mut().unwrap().interrupt_stack_table[0] = VirtAddr::from_ptr(
+        kernel_gs_base
+            .add(local_state::Offset::TrapStackPtr as usize >> 4)
+            .read(),
+    );
+    tss_ptr.as_mut().unwrap().interrupt_stack_table[1] = VirtAddr::from_ptr(
+        kernel_gs_base
+            .add(local_state::Offset::DoubleTrapStackPtr as usize >> 4)
+            .read(),
+    );
+    tss_ptr.as_mut().unwrap().interrupt_stack_table[2] = VirtAddr::from_ptr(
+        kernel_gs_base
+            .add(local_state::Offset::PriorityTrapStackPtr as usize >> 4)
+            .read(),
+    );
+    tss_ptr.as_mut().unwrap().interrupt_stack_table[3] = VirtAddr::from_ptr(
+        kernel_gs_base
+            .add(local_state::Offset::ExceptionStackPtr as usize >> 4)
+            .read(),
+    );
 
-        let tss_descriptor = {
-            use bit_field::BitField;
+    let tss_descriptor = {
+        use bit_field::BitField;
 
-            let tss_ptr_u64 = tss_ptr as u64;
+        let tss_ptr_u64 = tss_ptr as u64;
 
-            let mut low = x86_64::structures::gdt::DescriptorFlags::PRESENT.bits();
-            // base
-            low.set_bits(16..40, tss_ptr_u64.get_bits(0..24));
-            low.set_bits(56..64, tss_ptr_u64.get_bits(24..32));
-            // limit (the `-1` in needed since the bound is inclusive)
-            low.set_bits(0..16, (core::mem::size_of::<TaskStateSegment>() - 1) as u64);
-            // type (0b1001 = available 64-bit tss)
-            low.set_bits(40..44, 0b1001);
+        let mut low = x86_64::structures::gdt::DescriptorFlags::PRESENT.bits();
+        // base
+        low.set_bits(16..40, tss_ptr_u64.get_bits(0..24));
+        low.set_bits(56..64, tss_ptr_u64.get_bits(24..32));
+        // limit (the `-1` in needed since the bound is inclusive)
+        low.set_bits(0..16, (core::mem::size_of::<TaskStateSegment>() - 1) as u64);
+        // type (0b1001 = available 64-bit tss)
+        low.set_bits(40..44, 0b1001);
 
-            let mut high = 0;
-            high.set_bits(0..32, tss_ptr_u64.get_bits(32..64));
+        let mut high = 0;
+        high.set_bits(0..32, tss_ptr_u64.get_bits(32..64));
 
-            Descriptor::SystemSegment(low, high)
-        };
+        Descriptor::SystemSegment(low, high)
+    };
 
-        let cur_gdt = tables::sgdt();
-        let mut temp_gdt = GlobalDescriptorTable::new();
-        temp_gdt.add_entry(Descriptor::kernel_code_segment());
-        temp_gdt.add_entry(Descriptor::kernel_data_segment());
-        let tss_selector = temp_gdt.add_entry(tss_descriptor);
-        temp_gdt.load_unsafe();
+    let cur_gdt = tables::sgdt();
+    let mut temp_gdt = GlobalDescriptorTable::new();
+    temp_gdt.add_entry(Descriptor::kernel_code_segment());
+    temp_gdt.add_entry(Descriptor::kernel_data_segment());
+    let tss_selector = temp_gdt.add_entry(tss_descriptor);
+    temp_gdt.load_unsafe();
 
-        // Load TSS from temporary GDT.
-        tables::load_tss(tss_selector);
-        // Restore cached GDT.
-        tables::lgdt(&cur_gdt);
-    }
+    // Load TSS from temporary GDT.
+    tables::load_tss(tss_selector);
+    // Restore cached GDT.
+    tables::lgdt(&cur_gdt);
 }
 
 /// This method assumes the `gs` segment has a valid base for kernel local state.
@@ -255,18 +301,28 @@ unsafe extern "win64" fn _startup() -> ! {
     }
 
     local_state::init();
+    local_state::get_ptr();
     local_state::enable();
+    loop {}
+
+    local_state::get_ptr();
+    local_state::disable();
+    local_state::get_ptr();
 
     if is_bsp() {
         clock::global::start();
+        local_state::get_ptr();
     }
 
     load_tss();
+    local_state::get_ptr();
 
     // Initialize the processor-local state (always before waking APs, for access to ICR).
     {
         local_state::create_scheduler();
+        local_state::get_ptr();
         local_state::create_int_ctrl();
+        local_state::get_ptr();
 
         let int_ctrl = local_state::int_ctrl().unwrap();
         int_ctrl.sw_enable();

@@ -195,7 +195,7 @@ impl<'map> SLOB<'map> {
         for page_offset in cur_map_pages..req_map_pages {
             let mut new_page = new_map_page.forward(page_offset).unwrap();
 
-            PAGE_MANAGER.auto_map(&new_page, PageAttributes::DATA_BITS);
+            PAGE_MANAGER.auto_map(&new_page, PageAttributes::DATA);
             // Clear the newly allocated map page.
             unsafe { new_page.mem_clear() };
         }
@@ -295,7 +295,7 @@ impl MemoryAllocator for SLOB<'_> {
             block_index += remaining_blocks_in_slice;
 
             if was_empty {
-                PAGE_MANAGER.auto_map(&Page::from_index(map_index), PageAttributes::DATA_BITS);
+                PAGE_MANAGER.auto_map(&Page::from_index(map_index), PageAttributes::DATA);
             }
         }
 
@@ -349,7 +349,7 @@ impl MemoryAllocator for SLOB<'_> {
                     &Page::from_index(page_index),
                     frame_index,
                     None,
-                    PageAttributes::DATA_BITS,
+                    PageAttributes::DATA,
                 )
                 .unwrap();
         }
@@ -393,7 +393,7 @@ impl MemoryAllocator for SLOB<'_> {
                     &Page::from_index(page_index),
                     frame_index,
                     None,
-                    PageAttributes::DATA_BITS,
+                    PageAttributes::DATA,
                 )
                 .unwrap();
         }
@@ -416,7 +416,7 @@ impl MemoryAllocator for SLOB<'_> {
             if map_write[page_index].is_empty() {
                 map_write[page_index].set_full();
                 PAGE_MANAGER
-                    .identity_map(&Page::from_index(page_index), PageAttributes::DATA_BITS)
+                    .identity_map(&Page::from_index(page_index), PageAttributes::DATA)
                     .unwrap();
             } else {
                 for page_index in frame_index..page_index {

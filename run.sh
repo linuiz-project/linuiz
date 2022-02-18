@@ -1,9 +1,10 @@
 #!/bin/bash
 
 qemu-system-x86_64 \
+    -accel kvm \
     -no-reboot \
     -machine q35 \
-    -cpu qemu64 \
+    -cpu host \
     -smp 2 \
     -m 64M \
     -serial mon:stdio \

@@ -223,6 +223,7 @@ impl APIC {
     }
 
     pub unsafe fn reset(&self) {
+        self.hw_disable();
         self.sw_disable();
         self.write_register(Register::DFR, u32::MAX);
         let mut ldr = self.read_register(Register::LDR);
@@ -238,6 +239,7 @@ impl APIC {
         self.performance().set_masked(true);
         self.thermal_sensor().set_masked(true);
         self.error().set_masked(true);
+        self.hw_enable();
         // Don't mask the LINT0&1 vectors, as they're used for external interrupts (PIC, SMIs, NMIs).
     }
 }

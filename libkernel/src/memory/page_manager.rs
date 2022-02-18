@@ -125,7 +125,7 @@ impl VirtualMapper {
 
             self.get_page_entry_create(&cur_page).set(
                 frame_index,
-                PageAttributes::DATA_BITS | PageAttributes::GLOBAL,
+                PageAttributes::DATA | PageAttributes::GLOBAL,
             );
 
             tlb::invalidate(&cur_page);

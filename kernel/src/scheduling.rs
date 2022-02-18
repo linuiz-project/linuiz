@@ -158,11 +158,15 @@ impl Scheduler {
     }
 
     // TODO this needs to be a decision, not an always-switch
-    pub fn run_next(
+    pub fn try_run_next(
         &mut self,
         stack_frame: &mut InterruptStackFrame,
         cached_regs: *mut ThreadRegisters,
-    ) -> usize {
+    ) -> Option<usize> {
+        if !self.enabled {
+            return None;
+        }
+
         // Move out old task.
         if let Some(mut task) = self.current_task.take() {
             task.rip = stack_frame.instruction_pointer.as_u64();
@@ -208,10 +212,10 @@ impl Scheduler {
         // Calculate next one-shot timer value.
         let total_tasks = self.tasks.len() + if self.current_task.is_some() { 1 } else { 0 };
         if total_tasks > 0 {
-            (1000 / total_tasks).clamp(MIN_TIME_SLICE_MS, MAX_TIME_SLICE_MS)
+            Some((1000 / total_tasks).clamp(MIN_TIME_SLICE_MS, MAX_TIME_SLICE_MS))
         } else {
             // If only one task, no time slice is required.
-            0
+            None
         }
     }
 }

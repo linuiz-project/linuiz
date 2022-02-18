@@ -42,6 +42,11 @@ pub fn exec(leaf: u32, subleaf: u32) -> Option<Registers> {
         )
     }
 
+    info!(
+        "{:#X?} {:#X?} {:#X?} {:#X?} {:#X?} ",
+        leaf, eax, ebx, ecx, edx
+    );
+
     if (eax | ebx | ecx | edx) > 0 {
         Some(Registers { eax, ebx, ecx, edx })
     } else {

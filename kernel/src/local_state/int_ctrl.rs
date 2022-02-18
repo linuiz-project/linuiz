@@ -31,10 +31,7 @@ impl InterruptController {
 
         trace!("Configuring APIC & APIT.");
         let apic = APIC::from_msr().expect("APIC has already been configured on this core");
-        unsafe {
-            apic.reset();
-            apic.hw_enable();
-        }
+        unsafe { apic.reset() };
         apic.write_register(Register::TimerDivisor, TimerDivisor::Div1 as u32);
         apic.timer().set_mode(TimerMode::OneShot);
 
@@ -97,11 +94,12 @@ impl InterruptController {
 
     #[inline]
     pub fn reload_timer(&self, ms_multiplier: Option<NonZeroU32>) {
-        const NON_ZERO_U32_ONE: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(1) };
-
         self.apic.write_register(
             libkernel::structures::apic::Register::TimerInitialCount,
-            ms_multiplier.unwrap_or(NON_ZERO_U32_ONE).get() * self.per_ms,
+            ms_multiplier
+                .unwrap_or(unsafe { NonZeroU32::new_unchecked(1) })
+                .get()
+                * self.per_ms,
         );
     }
 

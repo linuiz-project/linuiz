@@ -197,7 +197,8 @@ bitflags::bitflags! {
         // 52..=58 available
         const NO_EXECUTE = 1 << 63;
 
-        const DATA_BITS = Self::PRESENT.bits() | Self::WRITABLE.bits() | Self::NO_EXECUTE.bits();
+        const DATA = Self::PRESENT.bits() | Self::WRITABLE.bits() | Self::NO_EXECUTE.bits();
+        const MMIO = Self::PRESENT.bits() | Self::WRITABLE.bits() | Self::WRITE_THROUGH.bits() | Self::UNCACHEABLE.bits() | Self::NO_EXECUTE.bits();
     }
 }
 
