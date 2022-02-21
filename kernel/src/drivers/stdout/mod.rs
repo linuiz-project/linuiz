@@ -3,7 +3,7 @@ mod serial;
 pub use serial::*;
 
 use core::fmt::Write;
-use libkernel::{cell::SyncRefCell, io::port::WriteOnlyPort};
+use libkernel::io::port::WriteOnlyPort;
 use spin::Mutex;
 
 pub struct QEMUE9(WriteOnlyPort<u8>);

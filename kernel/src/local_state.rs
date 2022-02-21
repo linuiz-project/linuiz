@@ -57,10 +57,11 @@ pub unsafe fn init() {
 
     core::ptr::write_bytes(ptr, 0x0, size);
 
-    let alloc_stack = |size| {
+    let alloc_stack = |page_count| {
         let (ptr, len) = libkernel::memory::malloc::get()
-            .alloc(size, NonZeroUsize::new(16))
+            .alloc_pages(page_count)
             .unwrap()
+            .1
             .into_parts();
 
         ptr.add(len)
@@ -82,10 +83,10 @@ pub unsafe fn init() {
         });
     ptr.add(Offset::SyscallStackPtr as usize)
         .cast::<*const u8>()
-        .write(alloc_stack(0x1000));
+        .write(alloc_stack(2));
     ptr.add(Offset::PrivilegeStackPtr as usize)
         .cast::<*const u8>()
-        .write(alloc_stack(0x1000));
+        .write(alloc_stack(2));
 
     // Convert ptr to 64 bit representation, and write metadata into low bits.
     IA32_KERNEL_GS_BASE::write(ptr as u64);

@@ -111,8 +111,58 @@ unsafe extern "efiapi" fn _entry(
     _startup()
 }
 
-fn load_registers() {
-    unsafe {
+/// This method assumes the `gs` segment has a valid base for kernel local state.
+unsafe fn wake_aps() {
+    use libkernel::acpi::rdsp::xsdt::{
+        madt::{InterruptDevice, MADT},
+        XSDT,
+    };
+
+    let lapic_id = libkernel::cpu::get_id() as u8 /* possibly don't cast to u8? */;
+    let icr = libkernel::structures::apic::APIC::interrupt_command_register();
+    let ap_text_page_index = (memory::__ap_text_start.as_usize() / 0x1000) as u8;
+
+    if let Some(madt) = XSDT.find_sub_table::<MADT>() {
+        info!("Beginning wake-up sequence for enabled processors.");
+        for interrupt_device in madt.iter() {
+            // Filter out non-lapic devices.
+            if let InterruptDevice::LocalAPIC(ap_lapic) = interrupt_device {
+                use libkernel::acpi::rdsp::xsdt::madt::LocalAPICFlags;
+                // Filter out invalid lapic devices.
+                if lapic_id != ap_lapic.id()
+                    && ap_lapic.flags().intersects(
+                        LocalAPICFlags::PROCESSOR_ENABLED | LocalAPICFlags::ONLINE_CAPABLE,
+                    )
+                {
+                    debug!("Waking core ID {}.", ap_lapic.id());
+
+                    AP_STACK_POINTERS[ap_lapic.id() as usize] = alloc_stack(2, false);
+
+                    info!("{:?}", AP_STACK_POINTERS[ap_lapic.id() as usize]);
+
+                    // Reset target processor.
+                    trace!("Sending INIT interrupt to: {}", ap_lapic.id());
+                    icr.send_init(ap_lapic.id());
+                    icr.wait_pending();
+                    // REMARK: IA32 spec indicates that doing this twice, as so, ensures the interrupt is received.
+                    trace!("Sending SIPI x1 interrupt to: {}", ap_lapic.id());
+                    icr.send_sipi(ap_text_page_index, ap_lapic.id());
+                    icr.wait_pending();
+                    trace!("Sending SIPI x2 interrupt to: {}", ap_lapic.id());
+                    icr.send_sipi(ap_text_page_index, ap_lapic.id());
+                    icr.wait_pending();
+                }
+            }
+        }
+    }
+}
+
+#[no_mangle]
+#[inline(never)]
+unsafe extern "win64" fn _startup() -> ! {
+    use libkernel::cpu::is_bsp;
+    /* LOAD REGISTERS */
+    {
         use libkernel::cpu::{has_feature, Feature};
 
         // Set CR0 flags.
@@ -142,148 +192,59 @@ fn load_registers() {
             libkernel::registers::msr::IA32_EFER::set_nxe(true);
         }
     }
-}
 
-fn load_tables() {
-    use tables::{gdt, idt};
-
-    // Always initialize GDT prior to configuring IDT.
-    gdt::init();
-
-    if libkernel::cpu::is_bsp() {
-        // Due to the fashion in which the x86_64 crate initializes the IDT entries,
-        // it must be ensured that the handlers are set only *after* the GDT has been
-        // properly initialized and loaded—otherwise, the `CS` value for the IDT entries
-        // is incorrect, and this causes very confusing GPFs.
-        idt::init();
-
-        fn apit_empty(
-            _: &mut x86_64::structures::idt::InterruptStackFrame,
-            _: *mut scheduling::ThreadRegisters,
-        ) {
-            libkernel::structures::apic::APIC::end_of_interrupt();
-        }
-
-        unsafe { idt::set_handler_fn(local_state::InterruptVector::LINT0 as u8, apit_empty) };
-        unsafe { idt::set_handler_fn(local_state::InterruptVector::LINT1 as u8, apit_empty) };
-    }
-
-    crate::tables::idt::load();
-}
-
-/// Loads the TSS for the current core.
-///
-/// SAFETY: This function invariantly assumes the following:
-///             - This function has not been called before on this core.
-unsafe fn load_tss() {
-    use x86_64::{
-        instructions::tables,
-        structures::{
-            gdt::{Descriptor, GlobalDescriptorTable},
-            tss::TaskStateSegment,
-        },
-    };
-
-    let tss_ptr = libkernel::alloc_obj!(TaskStateSegment);
-
+    /* LOAD TABLES */
     {
-        use crate::local_state::Offset;
-        use x86_64::VirtAddr;
+        use tables::{gdt, idt};
 
-        (&mut *tss_ptr).privilege_stack_table[0] =
-            VirtAddr::from_ptr(crate::rdgsval!(*const (), Offset::PrivilegeStackPtr));
-    }
+        // Always initialize GDT prior to configuring IDT.
+        gdt::init();
 
-    let tss_descriptor = {
-        use bit_field::BitField;
+        if libkernel::cpu::is_bsp() {
+            // Due to the fashion in which the x86_64 crate initializes the IDT entries,
+            // it must be ensured that the handlers are set only *after* the GDT has been
+            // properly initialized and loaded—otherwise, the `CS` value for the IDT entries
+            // is incorrect, and this causes very confusing GPFs.
+            idt::init();
 
-        let tss_ptr_u64 = tss_ptr as u64;
-
-        let mut low = x86_64::structures::gdt::DescriptorFlags::PRESENT.bits();
-        // base
-        low.set_bits(16..40, tss_ptr_u64.get_bits(0..24));
-        low.set_bits(56..64, tss_ptr_u64.get_bits(24..32));
-        // limit (the `-1` in needed since the bound is inclusive)
-        low.set_bits(0..16, (core::mem::size_of::<TaskStateSegment>() - 1) as u64);
-        // type (0b1001 = available 64-bit tss)
-        low.set_bits(40..44, 0b1001);
-
-        let mut high = 0;
-        high.set_bits(0..32, tss_ptr_u64.get_bits(32..64));
-
-        Descriptor::SystemSegment(low, high)
-    };
-
-    // Store current GDT pointer to restore later.
-    let cur_gdt = tables::sgdt();
-    // Create temporary kernel GDT to avoid a GPF on switching to it.
-    let mut temp_gdt = GlobalDescriptorTable::new();
-    temp_gdt.add_entry(Descriptor::kernel_code_segment());
-    temp_gdt.add_entry(Descriptor::kernel_data_segment());
-    let tss_selector = temp_gdt.add_entry(tss_descriptor);
-    // Load temp GDT ...
-    temp_gdt.load_unsafe();
-    // ... load TSS from temporary GDT ...
-    tables::load_tss(tss_selector);
-    // ... and restore cached GDT.
-    tables::lgdt(&cur_gdt);
-}
-
-/// This method assumes the `gs` segment has a valid base for kernel local state.
-unsafe fn wake_aps() {
-    use libkernel::acpi::rdsp::xsdt::{
-        madt::{InterruptDevice, MADT},
-        XSDT,
-    };
-
-    let lapic_id = libkernel::cpu::get_id() as u8 /* possibly don't cast to u8? */;
-    let icr = libkernel::structures::apic::APIC::interrupt_command_register();
-    let ap_text_page_index = (memory::__ap_text_start.as_usize() / 0x1000) as u8;
-
-    if let Some(madt) = XSDT.find_sub_table::<MADT>() {
-        info!("Beginning wake-up sequence for enabled processors.");
-        for interrupt_device in madt.iter() {
-            // Filter out non-lapic devices.
-            if let InterruptDevice::LocalAPIC(ap_lapic) = interrupt_device {
-                use libkernel::acpi::rdsp::xsdt::madt::LocalAPICFlags;
-                // Filter out invalid lapic devices.
-                if lapic_id != ap_lapic.id()
-                    && ap_lapic.flags().intersects(
-                        LocalAPICFlags::PROCESSOR_ENABLED | LocalAPICFlags::ONLINE_CAPABLE,
-                    )
-                {
-                    debug!("Waking core ID {}.", ap_lapic.id());
-
-                    AP_STACK_POINTERS[ap_lapic.id() as usize] = alloc_stack(2, false);
-
-                    // Reset target processor.
-                    trace!("Sending INIT interrupt to: {}", ap_lapic.id());
-                    icr.send_init(ap_lapic.id());
-                    icr.wait_pending();
-                    // REMARK: IA32 spec indicates that doing this twice, as so, ensures the interrupt is received.
-                    trace!("Sending SIPI x1 interrupt to: {}", ap_lapic.id());
-                    icr.send_sipi(ap_text_page_index, ap_lapic.id());
-                    icr.wait_pending();
-                    trace!("Sending SIPI x2 interrupt to: {}", ap_lapic.id());
-                    icr.send_sipi(ap_text_page_index, ap_lapic.id());
-                    icr.wait_pending();
-                }
+            fn apit_empty(
+                _: &mut x86_64::structures::idt::InterruptStackFrame,
+                _: *mut scheduling::ThreadRegisters,
+            ) {
+                libkernel::structures::apic::APIC::end_of_interrupt();
             }
+
+            idt::set_handler_fn(local_state::InterruptVector::LINT0 as u8, apit_empty);
+            idt::set_handler_fn(local_state::InterruptVector::LINT1 as u8, apit_empty);
         }
+
+        crate::tables::idt::load();
     }
 
-    // At this point, none of the APs have a stack, so they will wait at the beginning of _startup for memory to initialize and stacks to be doled out.
-}
-
-#[no_mangle]
-unsafe extern "win64" fn _startup() -> ! {
-    use libkernel::cpu::is_bsp;
-
-    load_registers();
-    load_tables();
-
+    /* INIT MEMORY */
     if is_bsp() {
+        use libkernel::{
+            memory::{
+                malloc, AttributeModify, FrameError, FrameType, Page, PageAttributes, FRAME_MANAGER,
+            },
+            registers::msr::IA32_APIC_BASE,
+        };
+
+        // ... modify known frame types ...
+        FRAME_MANAGER
+            .try_modify_type(
+                IA32_APIC_BASE::get_base_addr().frame_index(),
+                FrameType::MMIO,
+            )
+            .ok();
+        // ... initialize memory ...
         memory::init(libkernel::BOOT_INFO.get().unwrap().memory_map());
+        // ... modify all page attributes ...
+        crate::memory::PAGE_MANAGER.set_page_attribs(
+            &Page::from_index(IA32_APIC_BASE::get_base_addr().frame_index()),
+            PageAttributes::MMIO,
+            AttributeModify::Set,
+        );
     }
 
     local_state::init();
@@ -293,28 +254,87 @@ unsafe extern "win64" fn _startup() -> ! {
         clock::global::start();
     }
 
-    load_tss();
+    /* LOAD TSS */
+    {
+        use x86_64::{
+            instructions::tables,
+            structures::{
+                gdt::{Descriptor, GlobalDescriptorTable},
+                tss::TaskStateSegment,
+            },
+        };
 
-    // Initialize the processor-local state (always before waking APs, for access to ICR).
-    local_state::init_local_apic();
-    local_state::reload_timer(core::num::NonZeroU32::new(1));
+        let tss_ptr = libkernel::alloc_obj!(TaskStateSegment);
 
+        {
+            use crate::local_state::Offset;
+            use x86_64::VirtAddr;
+
+            (&mut *tss_ptr).privilege_stack_table[0] =
+                VirtAddr::from_ptr(crate::rdgsval!(*const (), Offset::PrivilegeStackPtr));
+        }
+
+        let tss_descriptor = {
+            use bit_field::BitField;
+
+            let tss_ptr_u64 = tss_ptr as u64;
+
+            let mut low = x86_64::structures::gdt::DescriptorFlags::PRESENT.bits();
+            // base
+            low.set_bits(16..40, tss_ptr_u64.get_bits(0..24));
+            low.set_bits(56..64, tss_ptr_u64.get_bits(24..32));
+            // limit (the `-1` in needed since the bound is inclusive)
+            low.set_bits(0..16, (core::mem::size_of::<TaskStateSegment>() - 1) as u64);
+            // type (0b1001 = available 64-bit tss)
+            low.set_bits(40..44, 0b1001);
+
+            let mut high = 0;
+            high.set_bits(0..32, tss_ptr_u64.get_bits(32..64));
+
+            Descriptor::SystemSegment(low, high)
+        };
+
+        // Store current GDT pointer to restore later.
+        let cur_gdt = tables::sgdt();
+        // Create temporary kernel GDT to avoid a GPF on switching to it.
+        let mut temp_gdt = GlobalDescriptorTable::new();
+        temp_gdt.add_entry(Descriptor::kernel_code_segment());
+        temp_gdt.add_entry(Descriptor::kernel_data_segment());
+        let tss_selector = temp_gdt.add_entry(tss_descriptor);
+        // Load temp GDT ...
+        temp_gdt.load_unsafe();
+        // ... load TSS from temporary GDT ...
+        tables::load_tss(tss_selector);
+        // ... and restore cached GDT.
+        tables::lgdt(&cur_gdt);
+    }
+
+    /* INIT APIC */
+    {
+        local_state::init_local_apic();
+        // local_state::reload_timer(core::num::NonZeroU32::new(1));
+    }
     if is_bsp() {
         wake_aps();
     }
 
-    use crate::tables::gdt;
-    use libkernel::registers::msr;
+    loop {}
 
-    // Enable `syscall`/`sysret`.
-    msr::IA32_EFER::set_sce(true);
-    // Configure system call environment registers.
-    msr::IA32_STAR::set_selectors(
-        *gdt::KCODE_SELECTOR.get().unwrap(),
-        *gdt::KDATA_SELECTOR.get().unwrap(),
-    );
-    msr::IA32_LSTAR::set_syscall(syscall::syscall_enter);
-    msr::IA32_SFMASK::set_rflags_mask(libkernel::registers::RFlags::all());
+    /* ENABLE SYSCALL */
+    {
+        use crate::tables::gdt;
+        use libkernel::registers::msr;
+
+        // Enable `syscall`/`sysret`.
+        msr::IA32_EFER::set_sce(true);
+        // Configure system call environment registers.
+        msr::IA32_STAR::set_selectors(
+            *gdt::KCODE_SELECTOR.get().unwrap(),
+            *gdt::KDATA_SELECTOR.get().unwrap(),
+        );
+        msr::IA32_LSTAR::set_syscall(syscall::syscall_enter);
+        msr::IA32_SFMASK::set_rflags_mask(libkernel::registers::RFlags::all());
+    }
 
     libkernel::registers::stack::RSP::write(alloc_stack(1, true));
     libkernel::cpu::ring3_enter(test_user_function, libkernel::registers::RFlags::empty());
@@ -385,4 +405,6 @@ fn test_user_function() {
     // };
 
     libkernel::instructions::interrupts::breakpoint();
+
+    loop {}
 }

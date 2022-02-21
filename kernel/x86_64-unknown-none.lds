@@ -59,12 +59,8 @@ SECTIONS
     .bss : ALIGN(0x1000) {
         PROVIDE(__bss_start = .);
 
-        . += 0x160000;
+        . += 0x16000;
         __bsp_stack = .;
-
-        . += 0x1000;
-        __syscall_stack = .;
-
 
         *(.bss.* .bss)
 

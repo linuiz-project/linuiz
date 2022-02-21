@@ -139,6 +139,7 @@ impl MMIO {
         })
     }
 
+    /// SAFETY: Caller must ensure the frame range is valid for MMIO.
     #[inline]
     pub const unsafe fn new_unsafe(frame_index: usize, count: usize) -> Self {
         Self {

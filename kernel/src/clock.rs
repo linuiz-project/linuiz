@@ -21,6 +21,8 @@ impl AtomicClock {
 }
 
 pub mod global {
+    use core::fmt::Write;
+
     static GLOBAL_CLOCK: super::AtomicClock = super::AtomicClock::new();
 
     pub fn start() {
@@ -43,7 +45,11 @@ pub mod global {
         _: &mut crate::tables::idt::InterruptStackFrame,
         _: *mut crate::scheduling::ThreadRegisters,
     ) {
-        GLOBAL_CLOCK.tick();
+        unsafe {
+            crate::CON_OUT
+                .write_fmt(format_args!(" {} ", GLOBAL_CLOCK.tick()))
+                .unwrap()
+        };
 
         use libkernel::structures::pic8259;
         pic8259::end_of_interrupt(pic8259::InterruptOffset::Timer);
@@ -57,7 +63,7 @@ pub mod global {
     pub fn busy_wait_msec(milliseconds: u64) {
         let target_ticks = get_ticks() + milliseconds;
         while get_ticks() <= target_ticks {
-            info!("{} <= {}", get_ticks(), target_ticks);
+            libkernel::instructions::pause();
         }
     }
 }

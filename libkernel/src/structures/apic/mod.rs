@@ -1,7 +1,7 @@
 pub mod icr;
 
 use crate::{
-    cell::SyncRefCell,
+    cell::SyncCell,
     memory::{volatile::VolatileCell, MMIO},
     registers::msr::IA32_APIC_BASE,
     InterruptDeliveryMode, ReadWrite,
@@ -78,29 +78,12 @@ bitflags::bitflags! {
     }
 }
 
-pub struct APIC(MMIO);
+pub struct APIC;
 
 lazy_static::lazy_static! {
-    static ref APIC_MMIO: SyncRefCell<MMIO> = SyncRefCell::new({
-        let apic_frame_index = IA32_APIC_BASE::get_base_addr().frame_index();
-
-        use crate::memory::{FRAME_MANAGER, FrameType, FrameError, malloc};
-        match FRAME_MANAGER.try_modify_type(apic_frame_index, FrameType::MMIO) {
-            Ok(_) | Err(FrameError::OutOfRange(_)) => {},
-            Err(err) => {
-                panic!("Failed to modify APIC mmio frame: {:?}", err)
-            }
-        }
-        match FRAME_MANAGER.borrow(apic_frame_index) {
-            Ok(_) | Err(FrameError::OutOfRange(_)) => {},
-            Err(err) => {
-                panic!("Failed to borrow APIC mmio frame: {:?}", err)
-            }
-        }
-        malloc::get().alloc_identity(apic_frame_index, 1).expect("Frame used by local APIC is allocated");
-
-        unsafe { MMIO::new_unsafe(apic_frame_index, 1) }
-    });
+    static ref APIC_MMIO: SyncCell<MMIO> = SyncCell::new(
+        unsafe { MMIO::new_unsafe(IA32_APIC_BASE::get_base_addr().frame_index(), 1) }
+    );
 }
 
 impl APIC {

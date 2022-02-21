@@ -223,12 +223,12 @@ extern "x86-interrupt" fn irq_common(_: InterruptStackFrame) {
     
         cld
 
-        # Move stack frame into first parameter.
-        lea rcx, [rsp + (17 * 8)]
-        # Move cached gprs pointer into second parameter.
-        mov rdx, rsp
-        # Move IRQ vector into third parameter
-        mov r8, [rsp + (16 * 8)]
+        # Move IRQ vector into first parameter
+        mov rcx, [rsp + (16 * 8)]
+        # Move stack frame into second parameter.
+        lea rdx, [rsp + (17 * 8)]
+        # Move cached gprs pointer into third parameter.
+        mov r8, rsp
     
         call {}
     
@@ -259,9 +259,9 @@ extern "x86-interrupt" fn irq_common(_: InterruptStackFrame) {
 }
 
 extern "win64" fn interrupt_handler(
+    irq_vector: u64,
     isf: &mut InterruptStackFrame,
     cached_regs: *mut ThreadRegisters,
-    irq_vector: u64,
 ) {
     if let Some(handler) = INTERRUPT_HANDLERS.read()[irq_vector as usize] {
         handler(isf, cached_regs);

@@ -5,21 +5,26 @@ pub mod tlb;
 
 use core::arch::asm;
 
-#[inline]
+#[inline(always)]
+pub fn pause() {
+    unsafe { asm!("pause", options(nostack, nomem, preserves_flags)) };
+}
+
+#[inline(always)]
 pub fn hlt() {
     unsafe {
         asm!("hlt", options(nomem, nostack));
     }
 }
 
-#[inline]
+#[inline(always)]
 pub fn hlt_indefinite() -> ! {
     loop {
         hlt();
     }
 }
 
-#[inline]
+#[inline(always)]
 pub unsafe fn set_data_registers(value: u16) {
     asm!(
         "mov ds, ax",

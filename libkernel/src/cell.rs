@@ -1,16 +1,16 @@
 use core::cell::UnsafeCell;
 
-pub struct SyncRefCell<T>(UnsafeCell<T>);
+pub struct SyncCell<T>(UnsafeCell<T>);
 
-unsafe impl<T> Send for SyncRefCell<T> {}
-unsafe impl<T> Sync for SyncRefCell<T> {}
-impl<T> SyncRefCell<T> {
+unsafe impl<T> Send for SyncCell<T> {}
+unsafe impl<T> Sync for SyncCell<T> {}
+impl<T> SyncCell<T> {
     pub const fn new(val: T) -> Self {
         Self(UnsafeCell::new(val))
     }
 }
 
-impl<T> core::ops::Deref for SyncRefCell<T> {
+impl<T> core::ops::Deref for SyncCell<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
