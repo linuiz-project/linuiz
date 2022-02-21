@@ -1,30 +1,20 @@
 use core::cell::UnsafeCell;
 
-pub struct SyncRefCell<T> {
-    cell: UnsafeCell<Option<T>>,
-}
+pub struct SyncRefCell<T>(UnsafeCell<T>);
 
 unsafe impl<T> Send for SyncRefCell<T> {}
 unsafe impl<T> Sync for SyncRefCell<T> {}
 impl<T> SyncRefCell<T> {
-    pub const fn empty() -> Self {
-        Self {
-            cell: UnsafeCell::new(None),
-        }
+    pub const fn new(val: T) -> Self {
+        Self(UnsafeCell::new(val))
     }
+}
 
-    pub const fn new(obj: T) -> Self {
-        Self {
-            cell: UnsafeCell::new(Some(obj)),
-        }
-    }
+impl<T> core::ops::Deref for SyncRefCell<T> {
+    type Target = T;
 
-    pub fn set(&self, obj: T) {
-        unsafe { *self.cell.get() = Some(obj) }
-    }
-
-    pub fn borrow<'a>(&'a self) -> Option<&'a T> {
-        unsafe { self.cell.get().as_ref().unwrap().as_ref() }
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*self.0.get() }
     }
 }
 

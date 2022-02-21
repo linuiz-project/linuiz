@@ -139,6 +139,15 @@ impl MMIO {
         })
     }
 
+    #[inline]
+    pub const unsafe fn new_unsafe(frame_index: usize, count: usize) -> Self {
+        Self {
+            frame_range: frame_index..(frame_index + count),
+            ptr: (frame_index * 0x1000) as _,
+            len: count * 0x1000,
+        }
+    }
+
     pub fn frames(&self) -> &Range<usize> {
         &self.frame_range
     }

@@ -248,24 +248,27 @@ impl<'arr> FrameManager<'arr> {
     }
 
     pub fn lock(&self, index: usize) -> Result<usize, FrameError> {
-        let frame = &self.map.read()[index];
-        frame.peek();
+        if let Some(frame) = self.map.read().get(index) {
+            frame.peek();
 
-        let (ty, ref_count, locked) = frame.data();
+            let (ty, ref_count, locked) = frame.data();
 
-        let result = if ty == FrameType::Unusable {
-            Err(FrameError::FrameUnusable(index))
-        } else if ref_count > 0 {
-            Err(FrameError::FrameBorrowed(index))
-        } else if locked {
-            Err(FrameError::FrameLocked(index))
+            let result = if ty == FrameType::Unusable {
+                Err(FrameError::FrameUnusable(index))
+            } else if ref_count > 0 {
+                Err(FrameError::FrameBorrowed(index))
+            } else if locked {
+                Err(FrameError::FrameLocked(index))
+            } else {
+                frame.lock();
+                Ok(index)
+            };
+
+            frame.unpeek();
+            result
         } else {
-            frame.lock();
-            Ok(index)
-        };
-
-        frame.unpeek();
-        result
+            Err(FrameError::OutOfRange(index))
+        }
     }
 
     pub fn lock_many(&self, index: usize, count: usize) -> Result<usize, FrameError> {
@@ -292,45 +295,54 @@ impl<'arr> FrameManager<'arr> {
     }
 
     pub fn free(&self, index: usize) -> Result<(), FrameError> {
-        let frame = &self.map.read()[index];
-        frame.peek();
+        if let Some(frame) = self.map.read().get(index) {
+            frame.peek();
 
-        let (_, _, locked) = frame.data();
+            let (_, _, locked) = frame.data();
 
-        let result = if !locked {
-            Err(FrameError::FrameNotLocked(index))
+            let result = if !locked {
+                Err(FrameError::FrameNotLocked(index))
+            } else {
+                frame.free();
+                Ok(())
+            };
+
+            frame.unpeek();
+            result
         } else {
-            frame.free();
-            Ok(())
-        };
-
-        frame.unpeek();
-        result
+            Err(FrameError::OutOfRange(index))
+        }
     }
 
     pub fn borrow(&self, index: usize) -> Result<usize, FrameError> {
-        let frame = &self.map.read()[index];
-        let (ty, _, locked) = frame.data();
+        if let Some(frame) = self.map.read().get(index) {
+            let (ty, _, locked) = frame.data();
 
-        if ty == FrameType::Unusable {
-            Err(FrameError::FrameUnusable(index))
-        } else if locked {
-            Err(FrameError::FrameLocked(index))
+            if ty == FrameType::Unusable {
+                Err(FrameError::FrameUnusable(index))
+            } else if locked {
+                Err(FrameError::FrameLocked(index))
+            } else {
+                frame.borrow();
+                Ok(index)
+            }
         } else {
-            frame.borrow();
-            Ok(index)
+            Err(FrameError::OutOfRange(index))
         }
     }
 
     pub fn drop(&self, index: usize) -> Result<(), FrameError> {
-        let frame = &self.map.read()[index];
-        let (_, ref_count, _) = frame.data();
+        if let Some(frame) = self.map.read().get(index) {
+            let (_, ref_count, _) = frame.data();
 
-        if ref_count == 0 {
-            Err(FrameError::FrameNotBorrowed(index))
+            if ref_count == 0 {
+                Err(FrameError::FrameNotBorrowed(index))
+            } else {
+                frame.drop();
+                Ok(())
+            }
         } else {
-            frame.drop();
-            Ok(())
+            Err(FrameError::OutOfRange(index))
         }
     }
 

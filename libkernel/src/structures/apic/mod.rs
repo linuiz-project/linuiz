@@ -1,6 +1,7 @@
 pub mod icr;
 
 use crate::{
+    cell::SyncRefCell,
     memory::{volatile::VolatileCell, MMIO},
     registers::msr::IA32_APIC_BASE,
     InterruptDeliveryMode, ReadWrite,
@@ -77,97 +78,94 @@ bitflags::bitflags! {
     }
 }
 
-#[derive(Debug)]
-pub struct APICExistsError;
-
 pub struct APIC(MMIO);
 
-impl APIC {
-    pub const SPR: usize = 0xF0;
-    pub const ERRST: usize = 0x280;
-    pub const EOI: usize = 0xB0;
+lazy_static::lazy_static! {
+    static ref APIC_MMIO: SyncRefCell<MMIO> = SyncRefCell::new({
+        let apic_frame_index = IA32_APIC_BASE::get_base_addr().frame_index();
 
-    /// SAFETY: Caller must ensure this method is called only once per core.
-    pub unsafe fn from_msr(page_manager: Option<&crate::memory::PageManager>) -> Self {
-        unsafe {
-            let mmio = MMIO::new(IA32_APIC_BASE::get_base_addr().frame_index(), 1).unwrap();
-
-            mmio.write(
-                Self::SPR,
-                *mmio
-                    .read::<u32>(Self::SPR)
-                    .assume_init()
-                    .set_bits(0..8, u8::MAX as u32),
-            );
-
-            if let Some(page_manager) = page_manager {
-                for page in mmio.pages() {
-                    use crate::memory::PageAttributes;
-
-                    page_manager.set_page_attribs(
-                        &page,
-                        PageAttributes::PRESENT
-                            | PageAttributes::WRITABLE
-                            | PageAttributes::WRITE_THROUGH
-                            | PageAttributes::UNCACHEABLE
-                            | PageAttributes::NO_EXECUTE,
-                        crate::memory::AttributeModify::Set,
-                    );
-                }
+        use crate::memory::{FRAME_MANAGER, FrameType, FrameError, malloc};
+        match FRAME_MANAGER.try_modify_type(apic_frame_index, FrameType::MMIO) {
+            Ok(_) | Err(FrameError::OutOfRange(_)) => {},
+            Err(err) => {
+                panic!("Failed to modify APIC mmio frame: {:?}", err)
             }
-
-            Self(mmio)
         }
-    }
+        match FRAME_MANAGER.borrow(apic_frame_index) {
+            Ok(_) | Err(FrameError::OutOfRange(_)) => {},
+            Err(err) => {
+                panic!("Failed to borrow APIC mmio frame: {:?}", err)
+            }
+        }
+        malloc::get().alloc_identity(apic_frame_index, 1).expect("Frame used by local APIC is allocated");
 
-    #[inline]
-    pub fn read_register(&self, register: Register) -> u32 {
-        unsafe { self.0.read_unchecked::<u32>(register as usize) }
-    }
+        unsafe { MMIO::new_unsafe(apic_frame_index, 1) }
+    });
+}
 
-    #[inline]
-    pub fn write_register(&self, register: Register, value: u32) {
-        unsafe { self.0.write_unchecked(register as usize, value) }
-    }
+impl APIC {
+    const SPR: usize = 0xF0;
+    const EOI: usize = 0xB0;
+    const ERRST: usize = 0x280;
 
-    #[inline]
-    pub fn is_hw_enabled(&self) -> bool {
-        IA32_APIC_BASE::get_hw_enable()
-    }
-
-    #[inline]
-    pub unsafe fn hw_enable(&self) {
-        IA32_APIC_BASE::set_hw_enable(true);
-    }
-
-    #[inline]
-    pub unsafe fn hw_disable(&self) {
-        IA32_APIC_BASE::set_hw_enable(false);
-    }
-
-    #[inline]
-    pub unsafe fn sw_enable(&self) {
-        self.0.write_unchecked(
+    ///
+    pub unsafe fn configure_spurious() {
+        APIC_MMIO.write(
             Self::SPR,
-            *self.0.read_unchecked::<u32>(Self::SPR).set_bit(8, true),
+            *APIC_MMIO
+                .read::<u32>(Self::SPR)
+                .assume_init()
+                .set_bits(0..8, u8::MAX as u32),
         );
     }
 
     #[inline]
-    pub unsafe fn sw_disable(&self) {
-        self.0.write_unchecked(
+    pub fn read_register(register: Register) -> u32 {
+        unsafe { APIC_MMIO.read_unchecked::<u32>(register as usize) }
+    }
+
+    #[inline]
+    pub fn write_register(register: Register, value: u32) {
+        unsafe { APIC_MMIO.write_unchecked(register as usize, value) }
+    }
+
+    #[inline]
+    pub fn is_hw_enabled() -> bool {
+        IA32_APIC_BASE::get_hw_enable()
+    }
+
+    #[inline]
+    pub unsafe fn hw_enable() {
+        IA32_APIC_BASE::set_hw_enable(true);
+    }
+
+    #[inline]
+    pub unsafe fn hw_disable() {
+        IA32_APIC_BASE::set_hw_enable(false);
+    }
+
+    #[inline]
+    pub unsafe fn sw_enable() {
+        APIC_MMIO.write_unchecked(
             Self::SPR,
-            *self.0.read_unchecked::<u32>(Self::SPR).set_bit(8, false),
+            *APIC_MMIO.read_unchecked::<u32>(Self::SPR).set_bit(8, true),
+        );
+    }
+
+    #[inline]
+    pub unsafe fn sw_disable() {
+        APIC_MMIO.write_unchecked(
+            Self::SPR,
+            *APIC_MMIO.read_unchecked::<u32>(Self::SPR).set_bit(8, false),
         );
     }
 
     #[inline]
     pub fn set_eoi_broadcast_suppression(&self, suppress: bool) {
         unsafe {
-            self.0.write_unchecked(
+            APIC_MMIO.write_unchecked(
                 Self::SPR,
-                *self
-                    .0
+                *APIC_MMIO
                     .read_unchecked::<u32>(Self::SPR)
                     .set_bit(12, suppress),
             )
@@ -175,82 +173,81 @@ impl APIC {
     }
 
     #[inline]
-    pub fn end_of_interrupt(&self) {
-        unsafe { self.0.write_unchecked(Self::EOI, 0) };
+    pub fn end_of_interrupt() {
+        unsafe { APIC_MMIO.write_unchecked(Self::EOI, 0) };
     }
 
-    pub fn id(&self) -> u8 {
-        self.read_register(Register::ID).get_bits(24..) as u8
+    pub fn id() -> u8 {
+        Self::read_register(Register::ID).get_bits(24..) as u8
     }
 
-    pub fn version(&self) -> u8 {
-        self.read_register(Register::Version).get_bits(0..8) as u8
+    pub fn version() -> u8 {
+        Self::read_register(Register::Version).get_bits(0..8) as u8
     }
 
-    pub fn error_status(&self) -> ErrorStatusFlags {
-        ErrorStatusFlags::from_bits_truncate(unsafe { self.0.read(Self::ERRST).assume_init() })
+    pub fn error_status() -> ErrorStatusFlags {
+        ErrorStatusFlags::from_bits_truncate(unsafe { APIC_MMIO.read(Self::ERRST).assume_init() })
     }
 
-    pub fn interrupt_command(&self) -> icr::InterruptCommandRegister {
+    pub fn interrupt_command_register() -> icr::InterruptCommandRegister<'static> {
         unsafe {
             icr::InterruptCommandRegister::new(
-                self.0.borrow(Register::ICRL as usize),
-                self.0.borrow(Register::ICRH as usize),
+                APIC_MMIO.borrow(Register::ICRL as usize),
+                APIC_MMIO.borrow(Register::ICRH as usize),
             )
         }
     }
 
     #[inline]
-    pub const fn cmci(&self) -> &LocalVector<Generic> {
-        unsafe { self.0.borrow(0x2F0) }
+    pub fn cmci() -> &'static LocalVector<Generic> {
+        unsafe { APIC_MMIO.borrow(0x2F0) }
     }
 
     #[inline]
-    pub const fn timer(&self) -> &LocalVector<Timer> {
-        unsafe { self.0.borrow(0x320) }
+    pub fn timer() -> &'static LocalVector<Timer> {
+        unsafe { APIC_MMIO.borrow(0x320) }
     }
 
     #[inline]
-    pub const fn thermal_sensor(&self) -> &LocalVector<Generic> {
-        unsafe { self.0.borrow(0x330) }
+    pub fn thermal_sensor() -> &'static LocalVector<Generic> {
+        unsafe { APIC_MMIO.borrow(0x330) }
     }
 
     #[inline]
-    pub const fn performance(&self) -> &LocalVector<Generic> {
-        unsafe { self.0.borrow(0x340) }
+    pub fn performance() -> &'static LocalVector<Generic> {
+        unsafe { APIC_MMIO.borrow(0x340) }
     }
 
     #[inline]
-    pub const fn lint0(&self) -> &LocalVector<LINT> {
-        unsafe { self.0.borrow(0x350) }
+    pub fn lint0() -> &'static LocalVector<LINT> {
+        unsafe { APIC_MMIO.borrow(0x350) }
     }
 
     #[inline]
-    pub const fn lint1(&self) -> &LocalVector<LINT> {
-        unsafe { self.0.borrow(0x360) }
+    pub fn lint1() -> &'static LocalVector<LINT> {
+        unsafe { APIC_MMIO.borrow(0x360) }
     }
 
     #[inline]
-    pub const fn error(&self) -> &LocalVector<Error> {
-        unsafe { self.0.borrow(0x370) }
+    pub fn err() -> &'static LocalVector<Error> {
+        unsafe { APIC_MMIO.borrow(0x370) }
     }
 
-    pub unsafe fn reset(&self) {
-        self.sw_disable();
-        self.write_register(Register::DFR, u32::MAX);
-        let mut ldr = self.read_register(Register::LDR);
+    pub unsafe fn reset() {
+        Self::sw_disable();
+        Self::write_register(Register::DFR, u32::MAX);
+        let mut ldr = Self::read_register(Register::LDR);
         ldr &= 0xFFFFFF;
         ldr = (ldr & !0xFF) | ((ldr & 0xFF) | 1);
-        self.performance()
-            .set_delivery_mode(InterruptDeliveryMode::NMI);
-        self.write_register(Register::LDR, ldr);
-        self.write_register(Register::TaskPriority, 0);
-        self.write_register(Register::TimerInitialCount, 0);
-        self.cmci().set_masked(true);
-        self.timer().set_masked(true);
-        self.performance().set_masked(true);
-        self.thermal_sensor().set_masked(true);
-        self.error().set_masked(true);
+        Self::performance().set_delivery_mode(InterruptDeliveryMode::NMI);
+        Self::write_register(Register::LDR, ldr);
+        Self::write_register(Register::TaskPriority, 0);
+        Self::write_register(Register::TimerInitialCount, 0);
+        Self::cmci().set_masked(true);
+        Self::timer().set_masked(true);
+        Self::performance().set_masked(true);
+        Self::thermal_sensor().set_masked(true);
+        Self::err().set_masked(true);
         // Don't mask the LINT0&1 vectors, as they're used for external interrupts (PIC, SMIs, NMIs).
     }
 }
