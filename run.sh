@@ -1,11 +1,10 @@
 #!/bin/bash
 
 qemu-system-x86_64 \
-    -accel kvm \
     -no-reboot \
     -machine q35 \
-    -cpu host \
-    -smp 2 \
+    -cpu Westmere \
+    -smp $(nproc) \
     -m 64M \
     -serial mon:stdio \
     -display none \
@@ -16,3 +15,4 @@ qemu-system-x86_64 \
     -device nvme,drive=nvm,serial=deadbeef \
     -D .debug/qemu_debug.log \
     -d int,guest_errors
+

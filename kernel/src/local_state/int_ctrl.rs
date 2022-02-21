@@ -30,14 +30,16 @@ impl InterruptController {
         libkernel::instructions::interrupts::enable();
 
         trace!("Configuring APIC & APIT.");
-        let apic = APIC::from_msr().expect("APIC has already been configured on this core");
+        let apic = unsafe { APIC::from_msr(Some(&*crate::memory::PAGE_MANAGER)) };
         unsafe { apic.reset() };
+        libkernel::asm_marker!(0x1FAAA);
         apic.write_register(Register::TimerDivisor, TimerDivisor::Div1 as u32);
+        libkernel::asm_marker!(0x1FAAB);
         apic.timer().set_mode(TimerMode::OneShot);
+        libkernel::asm_marker!(0x1FAAC);
 
         let per_10ms = {
-            trace!("Determining APIT frequency.");
-
+            //trace!("Determining APIT frequency.");
             // Wait on the global timer, to ensure we're starting the count on the rising edge of each millisecond.
             crate::clock::global::busy_wait_msec(1);
             // 'Enable' the APIT to begin counting down in `Register::TimerCurrentCount`
@@ -47,6 +49,7 @@ impl InterruptController {
 
             apic.read_register(Register::TimerCurrentCount)
         };
+        libkernel::asm_marker!(0x1FAAE);
 
         let per_ms = (u32::MAX - per_10ms) / 10;
         trace!("APIT frequency: {}Hz", per_10ms * 100);

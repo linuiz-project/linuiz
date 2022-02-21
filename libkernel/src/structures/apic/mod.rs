@@ -87,24 +87,36 @@ impl APIC {
     pub const ERRST: usize = 0x280;
     pub const EOI: usize = 0xB0;
 
-    pub fn from_msr() -> Result<Self, APICExistsError> {
+    /// SAFETY: Caller must ensure this method is called only once per core.
+    pub unsafe fn from_msr(page_manager: Option<&crate::memory::PageManager>) -> Self {
         unsafe {
             let mmio = MMIO::new(IA32_APIC_BASE::get_base_addr().frame_index(), 1).unwrap();
 
-            // Validate that APIC hasn't been created already.
-            if mmio.read::<u32>(Register::DFR as usize).assume_init() == u32::MAX {
-                mmio.write(
-                    Self::SPR,
-                    *mmio
-                        .read::<u32>(Self::SPR)
-                        .assume_init()
-                        .set_bits(0..8, u8::MAX as u32),
-                );
+            mmio.write(
+                Self::SPR,
+                *mmio
+                    .read::<u32>(Self::SPR)
+                    .assume_init()
+                    .set_bits(0..8, u8::MAX as u32),
+            );
 
-                Ok(Self(mmio))
-            } else {
-                Err(APICExistsError)
+            if let Some(page_manager) = page_manager {
+                for page in mmio.pages() {
+                    use crate::memory::PageAttributes;
+
+                    page_manager.set_page_attribs(
+                        &page,
+                        PageAttributes::PRESENT
+                            | PageAttributes::WRITABLE
+                            | PageAttributes::WRITE_THROUGH
+                            | PageAttributes::UNCACHEABLE
+                            | PageAttributes::NO_EXECUTE,
+                        crate::memory::AttributeModify::Set,
+                    );
+                }
             }
+
+            Self(mmio)
         }
     }
 
@@ -149,6 +161,7 @@ impl APIC {
         );
     }
 
+    #[inline]
     pub fn set_eoi_broadcast_suppression(&self, suppress: bool) {
         unsafe {
             self.0.write_unchecked(
@@ -178,7 +191,7 @@ impl APIC {
         ErrorStatusFlags::from_bits_truncate(unsafe { self.0.read(Self::ERRST).assume_init() })
     }
 
-    pub const fn interrupt_command(&self) -> icr::InterruptCommandRegister {
+    pub fn interrupt_command(&self) -> icr::InterruptCommandRegister {
         unsafe {
             icr::InterruptCommandRegister::new(
                 self.0.borrow(Register::ICRL as usize),
@@ -223,7 +236,6 @@ impl APIC {
     }
 
     pub unsafe fn reset(&self) {
-        self.hw_disable();
         self.sw_disable();
         self.write_register(Register::DFR, u32::MAX);
         let mut ldr = self.read_register(Register::LDR);
@@ -239,7 +251,6 @@ impl APIC {
         self.performance().set_masked(true);
         self.thermal_sensor().set_masked(true);
         self.error().set_masked(true);
-        self.hw_enable();
         // Don't mask the LINT0&1 vectors, as they're used for external interrupts (PIC, SMIs, NMIs).
     }
 }
@@ -313,11 +324,10 @@ impl<T: LocalVectorVariant> core::fmt::Debug for LocalVector<T> {
 impl LocalVector<Timer> {
     #[inline]
     pub fn set_mode(&self, mode: TimerMode) {
-        if mode == TimerMode::TSC_Deadline
-            && !crate::cpu::FEATURES.contains(crate::cpu::Features::TSC_DL)
-        {
-            panic!("TSC deadline is not supported on this CPU.")
-        }
+        assert!(
+            mode != TimerMode::TSC_Deadline || crate::cpu::has_feature(crate::cpu::Feature::TSC_DL),
+            "TSC deadline is not supported on this CPU."
+        );
 
         self.vol
             .write(*self.vol.read().set_bits(17..19, mode as u32));

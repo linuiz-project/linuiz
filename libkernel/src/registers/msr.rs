@@ -129,7 +129,7 @@ impl IA32_EFER {
     /// Sets the IA32_EFER.NXE (no-execute enable) bit.
     #[inline(always)]
     pub unsafe fn set_nxe(set: bool) {
-        assert!(crate::cpu::FEATURES_EXT.contains(crate::cpu::FeaturesExt::NO_EXEC), "Cannot enable IA32_EFER.NXE if CPU does not support it (CPUID.80000001H:EDX.NX [bit 20]).");
+        assert!(crate::cpu::has_feature(crate::cpu::Feature::NXE), "Cannot enable IA32_EFER.NXE if CPU does not support it (CPUID.80000001H:EDX.NX [bit 20]).");
 
         wrmsr(0xC0000080, *rdmsr(0xC0000080).set_bit(11, set));
     }

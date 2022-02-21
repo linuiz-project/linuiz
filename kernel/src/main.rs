@@ -100,15 +100,10 @@ unsafe extern "efiapi" fn _entry(
         Err(_) => libkernel::instructions::interrupts::breakpoint(),
     }
 
-    if libkernel::cpu::has_feature(libkernel::cpu::Feature::ACPI) {
-        loop {}
-    }
-
     // Write misc. CPU state to stdout (This also lazy initializes them).
     {
-        debug!("CPU Vendor          {:?}", libkernel::cpu::VENDOR);
+        debug!("CPU Vendor          {}", libkernel::cpu::VENDOR);
         debug!("CPU Features        {:?}", libkernel::cpu::FeatureFmt);
-        // debug!("CPU Features Ext    {:?}", libkernel::cpu::FEATURES_EXT);
     }
 
     /* COMMON KERNEL START (prepare local state and AP processors) */
@@ -118,6 +113,8 @@ unsafe extern "efiapi" fn _entry(
 
 fn load_registers() {
     unsafe {
+        use libkernel::cpu::{has_feature, Feature};
+
         // Set CR0 flags.
         use libkernel::registers::control::{CR0Flags, CR0};
         CR0::write(
@@ -133,11 +130,15 @@ fn load_registers() {
                 | CR4Flags::OSFXSR
                 | CR4Flags::OSXMMEXCPT
                 | CR4Flags::UMIP
-                // Possibly need to check for support of this? But QEMU doesn't seem to support CPUID.07H ..
-                | CR4Flags::FSGSBASE,
+                | if has_feature(Feature::FSGSBASE) {
+                    CR4Flags::FSGSBASE
+                } else {
+                    CR4Flags::empty()
+                },
         );
+
         // Enable use of the `NO_EXECUTE` page attribute, if supported.
-        if libkernel::cpu::has_feature(libkernel::cpu::Feature::NXE) {
+        if has_feature(Feature::NXE) {
             libkernel::registers::msr::IA32_EFER::set_nxe(true);
         }
     }
@@ -186,29 +187,21 @@ unsafe fn load_tss() {
         .into_parts()
         .0;
 
-    use libkernel::registers::msr::Generic;
-    use x86_64::VirtAddr;
-    let kernel_gs_base = libkernel::registers::msr::IA32_KERNEL_GS_BASE::read() as *const *const u8;
-    tss_ptr.as_mut().unwrap().interrupt_stack_table[0] = VirtAddr::from_ptr(
-        kernel_gs_base
-            .add(local_state::Offset::TrapStackPtr as usize >> 4)
-            .read(),
-    );
-    tss_ptr.as_mut().unwrap().interrupt_stack_table[1] = VirtAddr::from_ptr(
-        kernel_gs_base
-            .add(local_state::Offset::DoubleTrapStackPtr as usize >> 4)
-            .read(),
-    );
-    tss_ptr.as_mut().unwrap().interrupt_stack_table[2] = VirtAddr::from_ptr(
-        kernel_gs_base
-            .add(local_state::Offset::PriorityTrapStackPtr as usize >> 4)
-            .read(),
-    );
-    tss_ptr.as_mut().unwrap().interrupt_stack_table[3] = VirtAddr::from_ptr(
-        kernel_gs_base
-            .add(local_state::Offset::ExceptionStackPtr as usize >> 4)
-            .read(),
-    );
+    {
+        use local_state::Offset;
+        use x86_64::VirtAddr;
+
+        let tss = tss_ptr.as_mut().unwrap();
+
+        tss.interrupt_stack_table[0] =
+            VirtAddr::from_ptr(crate::rdgsval!(*const (), Offset::TrapStackPtr));
+        tss.interrupt_stack_table[1] =
+            VirtAddr::from_ptr(crate::rdgsval!(*const (), Offset::DoubleTrapStackPtr));
+        tss.interrupt_stack_table[2] =
+            VirtAddr::from_ptr(crate::rdgsval!(*const (), Offset::PriorityTrapStackPtr));
+        tss.interrupt_stack_table[3] =
+            VirtAddr::from_ptr(crate::rdgsval!(*const (), Offset::ExceptionStackPtr));
+    }
 
     let tss_descriptor = {
         use bit_field::BitField;
@@ -230,16 +223,18 @@ unsafe fn load_tss() {
         Descriptor::SystemSegment(low, high)
     };
 
+    // Store current GDT pointer to restore later.
     let cur_gdt = tables::sgdt();
+    // Create temporary kernel GDT to avoid a GPF on switching to it.
     let mut temp_gdt = GlobalDescriptorTable::new();
     temp_gdt.add_entry(Descriptor::kernel_code_segment());
     temp_gdt.add_entry(Descriptor::kernel_data_segment());
     let tss_selector = temp_gdt.add_entry(tss_descriptor);
+    // Load temp GDT ...
     temp_gdt.load_unsafe();
-
-    // Load TSS from temporary GDT.
+    // ... load TSS from temporary GDT ...
     tables::load_tss(tss_selector);
-    // Restore cached GDT.
+    // ... and restore cached GDT.
     tables::lgdt(&cur_gdt);
 }
 
@@ -268,7 +263,7 @@ unsafe fn wake_aps() {
                 {
                     debug!("Waking core ID {}.", ap_lapic.id());
 
-                    AP_STACK_POINTERS[ap_lapic.id() as usize] = alloc_stack(1, false);
+                    AP_STACK_POINTERS[ap_lapic.id() as usize] = alloc_stack(2, false);
 
                     // Reset target processor.
                     trace!("Sending INIT interrupt to: {}", ap_lapic.id());
@@ -301,31 +296,21 @@ unsafe extern "win64" fn _startup() -> ! {
     }
 
     local_state::init();
-    local_state::get_ptr();
     local_state::enable();
-    loop {}
-
-    local_state::get_ptr();
-    local_state::disable();
-    local_state::get_ptr();
 
     if is_bsp() {
         clock::global::start();
-        local_state::get_ptr();
     }
 
     load_tss();
-    local_state::get_ptr();
 
     // Initialize the processor-local state (always before waking APs, for access to ICR).
     {
         local_state::create_scheduler();
-        local_state::get_ptr();
         local_state::create_int_ctrl();
-        local_state::get_ptr();
 
         let int_ctrl = local_state::int_ctrl().unwrap();
-        int_ctrl.sw_enable();
+        //int_ctrl.sw_enable();
         int_ctrl.reload_timer(core::num::NonZeroU32::new(1));
     }
 
@@ -346,13 +331,12 @@ unsafe extern "win64" fn _startup() -> ! {
     msr::IA32_LSTAR::set_syscall(syscall::syscall_enter);
     msr::IA32_SFMASK::set_rflags_mask(libkernel::registers::RFlags::all());
 
-    libkernel::registers::stack::RSP::write(alloc_stack(2, true));
-    libkernel::cpu::ring3_enter(
-        test_user_function,
-        libkernel::registers::RFlags::INTERRUPT_FLAG,
-    );
+    libkernel::registers::stack::RSP::write(alloc_stack(1, true));
+    libkernel::cpu::ring3_enter(test_user_function, libkernel::registers::RFlags::empty());
 
-    kernel_main()
+    debug!("Failed to enter ring 3.");
+
+    libkernel::instructions::hlt_indefinite()
 }
 
 fn alloc_stack(pages: usize, is_userspace: bool) -> *mut () {
@@ -398,22 +382,22 @@ fn kernel_main() -> ! {
 
 #[link_section = ".user_code"]
 fn test_user_function() {
-    unsafe {
-        core::arch::asm!(
-            "mov r10, $0",
-            // "mov r8,   0x1F1F1FA1",
-            // "mov r9,   0x1F1F1FA2",
-            // "mov r13,   0x1F1F1FA3",
-            // "mov r14,   0x1F1F1FA4",
-            // "mov r15,   0x1F1F1FA5",
-            "syscall",
-            out("rcx") _,
-            out("rdx") _,
-            out("r10") _,
-            out("r11") _,
-            out("r12") _,
-        )
-    };
+    // unsafe {
+    //     core::arch::asm!(
+    //         "mov r10, $0",
+    //         "mov r8,   0x1F1F1FA1",
+    //         "mov r9,   0x1F1F1FA2",
+    //         "mov r13,   0x1F1F1FA3",
+    //         "mov r14,   0x1F1F1FA4",
+    //         "mov r15,   0x1F1F1FA5",
+    //         "syscall",
+    //         out("rcx") _,
+    //         out("rdx") _,
+    //         out("r10") _,
+    //         out("r11") _,
+    //         out("r12") _,
+    //     )
+    // };
 
     loop {}
 }

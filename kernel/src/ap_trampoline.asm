@@ -12,7 +12,7 @@ realmode:
     or eax, 1 << 7 ; Enable PGE 
     mov cr4, eax
 
-    ; Set PML4 address
+    ; Set PML4 address.
     mov eax, [__kernel_pml4]
     mov cr3, eax
 
@@ -43,10 +43,10 @@ realmode:
     or eax, 1 << 31 | 1 << 0
     mov cr0, eax
 
-    ; Serialize pipeline after mode switch
+    ; Serialize pipeline after mode switch.
     cpuid
 
-    ; Set GDT & long-jump to long mode
+    ; Set GDT & long-jump to long mode.
     lgdt [__gdt.pointer]
     jmp __gdt.code:longmode
 
@@ -67,46 +67,46 @@ longmode:
     mov fs, ax
     mov gs, ax
 
-    .x2_apic_id:
-        mov eax, 0x1F
-        cpuid
-        ; Test all registers to see if any bits are set
-        or eax, ebx
-        or eax, ecx
-        or eax, edx
-        test eax, eax
-        ; If CPUID leaf not supported, try next source.
-        jz .x2_apic_id_backup
-        ; Otherwise, APIC ID is stored in `edx`.
-        jmp .set_rsp
+    ; For some reason, QEMU doesn't handle this correctly.
+    ; .x2_apic_id:
+    ;     mov eax, 0x1F
+    ;     xor ecx, ecx
+    ;     cpuid
+    ;     ; Test all registers to see if any bits are set.
+    ;     or eax, ebx
+    ;     or eax, ecx
+    ;     or eax, edx
+    ;     ; If CPUID leaf not supported, try next source.
+    ;     jz .x2_apic_id_backup
+    ;     ; Otherwise, APIC ID is stored in `edx`.
+    ;     jmp .set_rsp
     .x2_apic_id_backup:
-        mov eax, 0xB
+        mov eax, 0x0B
+        xor ecx, ecx
         cpuid
-        ; Test all registers to see if any bits are set
+        ; Test all registers to see if any bits are set.
         or eax, ebx
         or eax, ecx
         or eax, edx
-        test eax, eax
         ; If CPUID leaf not supported, try next source.
-        jz .apic_id_legacy
+        jz .legacy_apic_id
         ; Otherwise, APIC ID is stored in `edx`.
         jmp .set_rsp
-    .apic_id_legacy:
+    .legacy_apic_id:
         ; No advanced APIC IDs are available, so rely on legacy 8-bit ID.
-        mov eax, 0x1
+        mov eax, 0x01
+        xor ecx, ecx
         cpuid
         shr ebx, 24     ; APIC ID is in bits 24..32
-        and ebx, 0xFF   ; `ebx` or `bl` now contains the APIC ID, so truncate any sign-extended bits
-        mov edx, ebx
+        mov dl, bl
         jmp .set_rsp
 
     .set_rsp:
-        ; Load effective address of pointer
-        lea rsp, [__ap_stack_pointers + (rdx * 8)]
-        ; Load absolute address of pointer
-        mov rsp, [rsp]
+        ; Load absolute address of stack.
+        mov rsp, [__ap_stack_pointers + (rdx * 8)]
 
-    ; Jump to high-level code
+
+    ; Jump to high-level code.
     call _startup
 
 section .ap_data

@@ -69,7 +69,7 @@ impl PCIeDevice<Standard> {
                                     | PageAttributes::WRITE_THROUGH
                                     | PageAttributes::UNCACHEABLE
                                     | PageAttributes::NO_EXECUTE,
-                                AttributeModify::Insert,
+                                AttributeModify::Set,
                             );
                         }
                     }

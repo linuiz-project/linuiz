@@ -68,16 +68,37 @@ macro_rules! alloc {
 #[macro_export]
 macro_rules! alloc_to {
     ($frame_index:expr, $count:expr) => {
-        $crate::memory::malloc::get()
-            .unwrap()
-            .alloc_against($frame_index, $count)
+        $crate::memory::malloc::get().alloc_against($frame_index, $count)
     };
+}
+
+#[macro_export]
+macro_rules! alloc_obj {
+    () => {
+        $crate::memory::alloc_obj()
+    };
+    ($ty:ty) => {
+        $crate::memory::alloc_obj::<$ty>()
+    };
+}
+
+pub fn alloc_obj<T>() -> *mut T {
+    crate::memory::malloc::get()
+        .alloc(
+            core::mem::size_of::<T>(),
+            core::num::NonZeroUsize::new(core::mem::align_of::<T>()),
+        )
+        .unwrap()
+        .cast::<T>()
+        .unwrap()
+        .into_parts()
+        .0
 }
 
 pub struct MMIO {
     frame_range: Range<usize>,
-    ptr: *mut u8,
-    len: usize,
+    pub ptr: *mut u8,
+    pub len: usize,
 }
 
 impl Drop for MMIO {

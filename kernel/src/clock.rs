@@ -9,10 +9,12 @@ impl AtomicClock {
         Self(AtomicU64::new(0))
     }
 
+    #[inline]
     pub fn tick(&self) -> u64 {
         self.0.fetch_add(1, Ordering::Relaxed)
     }
 
+    #[inline]
     pub fn get_ticks(&self) -> u64 {
         self.0.load(Ordering::Relaxed)
     }
@@ -40,16 +42,13 @@ pub mod global {
         _: &mut crate::tables::idt::InterruptStackFrame,
         _: *mut crate::scheduling::ThreadRegisters,
     ) {
-        if libkernel::registers::msr::IA32_EFER::get_sce() {
-            loop {}
-        }
-
         GLOBAL_CLOCK.tick();
 
         use libkernel::structures::pic8259;
         pic8259::end_of_interrupt(pic8259::InterruptOffset::Timer);
     }
 
+    #[inline]
     pub fn get_ticks() -> u64 {
         GLOBAL_CLOCK.get_ticks()
     }
@@ -64,7 +63,7 @@ pub mod local {
     #[inline(always)]
     pub fn get_ticks() -> u64 {
         // TODO this is fucked in userland ?? swapgs sucks
-        unsafe { crate::local_state::clock().unwrap().get_ticks() }
+        unsafe { crate::local_state::clock().get_ticks() }
     }
 
     #[inline(always)]
