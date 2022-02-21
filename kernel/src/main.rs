@@ -156,6 +156,16 @@ fn load_tables() {
         // properly initialized and loaded—otherwise, the `CS` value for the IDT entries
         // is incorrect, and this causes very confusing GPFs.
         idt::init();
+
+        fn apit_empty(
+            _: &mut x86_64::structures::idt::InterruptStackFrame,
+            _: *mut scheduling::ThreadRegisters,
+        ) {
+            libkernel::structures::apic::APIC::end_of_interrupt();
+        }
+
+        unsafe { idt::set_handler_fn(local_state::InterruptVector::LINT0 as u8, apit_empty) };
+        unsafe { idt::set_handler_fn(local_state::InterruptVector::LINT1 as u8, apit_empty) };
     }
 
     crate::tables::idt::load();
@@ -166,8 +176,6 @@ fn load_tables() {
 /// SAFETY: This function invariantly assumes the following:
 ///             - This function has not been called before on this core.
 unsafe fn load_tss() {
-    use core::num::NonZeroUsize;
-    use libkernel::memory::malloc;
     use x86_64::{
         instructions::tables,
         structures::{
@@ -176,31 +184,14 @@ unsafe fn load_tss() {
         },
     };
 
-    let tss_ptr = malloc::get()
-        .alloc(
-            core::mem::size_of::<TaskStateSegment>(),
-            NonZeroUsize::new(core::mem::align_of::<TaskStateSegment>()),
-        )
-        .unwrap()
-        .cast::<TaskStateSegment>()
-        .unwrap()
-        .into_parts()
-        .0;
+    let tss_ptr = libkernel::alloc_obj!(TaskStateSegment);
 
     {
-        use local_state::Offset;
+        use crate::local_state::Offset;
         use x86_64::VirtAddr;
 
-        let tss = tss_ptr.as_mut().unwrap();
-
-        tss.interrupt_stack_table[0] =
-            VirtAddr::from_ptr(crate::rdgsval!(*const (), Offset::TrapStackPtr));
-        tss.interrupt_stack_table[1] =
-            VirtAddr::from_ptr(crate::rdgsval!(*const (), Offset::DoubleTrapStackPtr));
-        tss.interrupt_stack_table[2] =
-            VirtAddr::from_ptr(crate::rdgsval!(*const (), Offset::PriorityTrapStackPtr));
-        tss.interrupt_stack_table[3] =
-            VirtAddr::from_ptr(crate::rdgsval!(*const (), Offset::ExceptionStackPtr));
+        (&mut *tss_ptr).privilege_stack_table[0] =
+            VirtAddr::from_ptr(crate::rdgsval!(*const (), Offset::PrivilegeStackPtr));
     }
 
     let tss_descriptor = {
@@ -246,7 +237,7 @@ unsafe fn wake_aps() {
     };
 
     let lapic_id = libkernel::cpu::get_id() as u8 /* possibly don't cast to u8? */;
-    let icr = crate::local_state::int_ctrl().unwrap().icr();
+    let icr = libkernel::structures::apic::APIC::interrupt_command_register();
     let ap_text_page_index = (memory::__ap_text_start.as_usize() / 0x1000) as u8;
 
     if let Some(madt) = XSDT.find_sub_table::<MADT>() {
@@ -305,14 +296,8 @@ unsafe extern "win64" fn _startup() -> ! {
     load_tss();
 
     // Initialize the processor-local state (always before waking APs, for access to ICR).
-    {
-        local_state::create_scheduler();
-        local_state::create_int_ctrl();
-
-        let int_ctrl = local_state::int_ctrl().unwrap();
-        //int_ctrl.sw_enable();
-        int_ctrl.reload_timer(core::num::NonZeroU32::new(1));
-    }
+    local_state::init_local_apic();
+    local_state::reload_timer(core::num::NonZeroU32::new(1));
 
     if is_bsp() {
         wake_aps();
@@ -399,5 +384,5 @@ fn test_user_function() {
     //     )
     // };
 
-    loop {}
+    libkernel::instructions::interrupts::breakpoint();
 }

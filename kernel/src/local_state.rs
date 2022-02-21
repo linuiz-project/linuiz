@@ -1,24 +1,39 @@
-mod int_ctrl;
-
-pub use int_ctrl::*;
-
 use crate::{clock::AtomicClock, scheduling::Scheduler};
-use core::{arch::asm, num::NonZeroUsize};
-use libkernel::registers::msr::{Generic, IA32_KERNEL_GS_BASE};
+use core::{
+    arch::asm,
+    num::{NonZeroU32, NonZeroUsize},
+};
+use libkernel::{
+    registers::msr::{Generic, IA32_KERNEL_GS_BASE},
+    structures::apic::APIC,
+};
 use spin::{Mutex, MutexGuard};
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum InterruptVector {
+    GlobalTimer = 32,
+    LocalTimer = 48,
+    CMCI = 49,
+    Performance = 50,
+    ThermalSensor = 51,
+    LINT0 = 52,
+    LINT1 = 53,
+    Error = 54,
+    Storage = 55,
+    // APIC spurious interrupt is default mapped to 255.
+    Spurious = u8::MAX,
+}
 
 #[repr(usize)]
 pub enum Offset {
     SelfPtr = 0x0,
     ID = 0x10,
     Clock = 0x20,
-    IntCtrlPtr = 0x30,
+    LocalTimerPerMs = 0x30,
     SchedulerPtr = 0x40,
     SyscallStackPtr = 0x50,
-    TrapStackPtr = 0x60,
-    DoubleTrapStackPtr = 0x70,
-    PriorityTrapStackPtr = 0x80,
-    ExceptionStackPtr = 0x90,
+    PrivilegeStackPtr = 0x60,
 }
 
 /// Initializes the core-local state structure.
@@ -58,19 +73,17 @@ pub unsafe fn init() {
     ptr.add(Offset::Clock as usize)
         .cast::<AtomicClock>()
         .write(AtomicClock::new());
+    ptr.add(Offset::SchedulerPtr as usize)
+        .cast::<*const Mutex<Scheduler>>()
+        .write({
+            let scheduler_ptr = libkernel::alloc_obj!(Mutex<Scheduler>);
+            scheduler_ptr.write(Mutex::new(Scheduler::new()));
+            scheduler_ptr
+        });
     ptr.add(Offset::SyscallStackPtr as usize)
         .cast::<*const u8>()
         .write(alloc_stack(0x1000));
-    ptr.add(Offset::TrapStackPtr as usize)
-        .cast::<*const u8>()
-        .write(alloc_stack(0x1000));
-    ptr.add(Offset::DoubleTrapStackPtr as usize)
-        .cast::<*const u8>()
-        .write(alloc_stack(0x1000));
-    ptr.add(Offset::PriorityTrapStackPtr as usize)
-        .cast::<*const u8>()
-        .write(alloc_stack(0x1000));
-    ptr.add(Offset::ExceptionStackPtr as usize)
+    ptr.add(Offset::PrivilegeStackPtr as usize)
         .cast::<*const u8>()
         .write(alloc_stack(0x1000));
 
@@ -158,38 +171,54 @@ macro_rules! gs_ptr {
     };
 }
 
-/// Creates the core-local interrupt controller.
-pub fn create_int_ctrl() {
+pub fn init_local_apic() {
+    use libkernel::structures::apic::*;
+
+    // Ensure interrupts are enabled.
+    libkernel::instructions::interrupts::enable();
+
+    trace!("Configuring APIC & APIT.");
     unsafe {
-        assert_eq!(
-            rdgsval!(*mut InterruptController, Offset::IntCtrlPtr),
-            core::ptr::null_mut(),
-            "Interrupt controller can only be created once."
-        );
-
-        // Create the interrupt controller.
-        let int_ctrl_ptr = libkernel::alloc_obj!(InterruptController);
-        int_ctrl_ptr.write(InterruptController::create());
-
-        // Write the interrupt controller pointer.
-        wrgsval!(Offset::IntCtrlPtr, int_ctrl_ptr);
+        APIC::configure_spurious();
+        APIC::reset();
     }
-}
 
-/// Creates the core-local scheduler.
-pub fn create_scheduler() {
+    APIC::write_register(Register::TimerDivisor, TimerDivisor::Div1 as u32);
+    APIC::timer().set_mode(TimerMode::OneShot);
+
+    let per_10ms = {
+        //trace!("Determining APIT frequency.");
+        // Wait on the global timer, to ensure we're starting the count on the rising edge of each millisecond.
+        crate::clock::global::busy_wait_msec(1);
+        // 'Enable' the APIT to begin counting down in `Register::TimerCurrentCount`
+        APIC::write_register(Register::TimerInitialCount, u32::MAX);
+        // Wait for 10ms to get good average tickrate.
+        crate::clock::global::busy_wait_msec(10);
+
+        APIC::read_register(Register::TimerCurrentCount)
+    };
+
+    let per_ms = (u32::MAX - per_10ms) / 10;
     unsafe {
-        assert_eq!(
-            rdgsval!(*mut Mutex<Scheduler>, Offset::IntCtrlPtr),
-            core::ptr::null_mut(),
-            "Scheduler can only be created once."
-        );
-
-        let scheduler_ptr = libkernel::alloc_obj!(Mutex<Scheduler>);
-        scheduler_ptr.write(Mutex::new(Scheduler::new()));
-
-        wrgsval!(Offset::SchedulerPtr, scheduler_ptr);
+        wrgsval!(Offset::LocalTimerPerMs, per_ms as u64);
     }
+    trace!("APIT frequency: {}Hz", per_10ms * 100);
+
+    // Configure timer vector.
+    APIC::timer().set_vector(InterruptVector::LocalTimer as u8);
+    APIC::timer().set_masked(false);
+    // Configure error vector.
+    APIC::err().set_vector(InterruptVector::Error as u8);
+    APIC::err().set_masked(false);
+    // Set default vectors.
+    // REMARK: Any of these left masked are not currently supported.
+    APIC::cmci().set_vector(InterruptVector::CMCI as u8);
+    APIC::performance().set_vector(InterruptVector::Performance as u8);
+    APIC::thermal_sensor().set_vector(InterruptVector::ThermalSensor as u8);
+    APIC::lint0().set_vector(InterruptVector::LINT0 as u8);
+    APIC::lint1().set_vector(InterruptVector::LINT1 as u8);
+
+    trace!("Core-local APIC configured.");
 }
 
 /// SAFETY: Caller must ensure kernel `gs` base is swapped in.
@@ -204,10 +233,16 @@ pub unsafe fn clock() -> &'static AtomicClock {
     &*(gs_ptr!(AtomicClock, Offset::Clock))
 }
 
-/// SAFETY: Caller must ensure kernel `gs` base is swapped in.
-#[inline]
-pub unsafe fn int_ctrl() -> Option<&'static InterruptController> {
-    rdgsval!(*const InterruptController, Offset::IntCtrlPtr).as_ref()
+/// SAFETY: Caller is expected to only reload timer when appropriate.
+pub unsafe fn reload_timer(ms_multiplier: Option<NonZeroU32>) {
+    let per_ms = rdgsval!(u64, Offset::LocalTimerPerMs) as u32;
+
+    assert_ne!(per_ms, 0, "Kernel GS base is likely not swapped in.");
+
+    APIC::write_register(
+        libkernel::structures::apic::Register::TimerInitialCount,
+        ms_multiplier.unwrap_or(NonZeroU32::new_unchecked(1)).get() * per_ms,
+    );
 }
 
 /// SAFETY: Caller must ensure kernel `gs` base is swapped in.

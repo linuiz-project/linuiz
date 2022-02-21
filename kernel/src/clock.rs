@@ -29,6 +29,7 @@ pub mod global {
 
             pic8259::enable(pic8259::InterruptLines::TIMER);
             pic8259::pit::set_timer_freq(1000, pic8259::pit::OperatingMode::RateGenerator);
+
             unsafe {
                 crate::tables::idt::set_handler_fn(
                     crate::local_state::InterruptVector::GlobalTimer as u8,
@@ -55,7 +56,9 @@ pub mod global {
 
     pub fn busy_wait_msec(milliseconds: u64) {
         let target_ticks = get_ticks() + milliseconds;
-        while get_ticks() <= target_ticks {}
+        while get_ticks() <= target_ticks {
+            info!("{} <= {}", get_ticks(), target_ticks);
+        }
     }
 }
 
