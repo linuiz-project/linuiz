@@ -1,10 +1,12 @@
+mod frame_manager;
+mod page_manager;
+
+pub use frame_manager::*;
+pub use page_manager::*;
+
 use crate::slob::SLOB;
-use core::ops::Range;
-use libkernel::{
-    align_down_div, align_up_div,
-    memory::{Page, PageManager},
-    LinkerSymbol,
-};
+use core::{mem::MaybeUninit, ops::Range};
+use libkernel::{align_down_div, align_up_div, cell::SyncOnceCell, memory::Page, LinkerSymbol};
 
 extern "C" {
     pub static __kernel_pml4: LinkerSymbol;
@@ -105,11 +107,15 @@ pub fn user_code() -> Range<Page> {
     }
 }
 
+pub static FRAME_MANAGER: SyncOnceCell<FrameManager> = SyncOnceCell::new();
+
 /// Initialize kernel memory (frame manager, page manager, etc.)
-pub unsafe fn init(memory_map: &[libkernel::memory::uefi::MemoryDescriptor]) {
+pub unsafe fn init(
+    memory_map: &[libkernel::memory::uefi::MemoryDescriptor],
+    page_manager: &PageManager,
+) {
     // Configure and use page manager.
     {
-        use libkernel::memory::{FrameType, FRAME_MANAGER};
         info!("Initializing kernel SLOB allocator.");
 
         {
@@ -156,7 +162,7 @@ pub unsafe fn init(memory_map: &[libkernel::memory::uefi::MemoryDescriptor]) {
                         .frame_range()
                         .map(|index| Page::from_index(index))
                     {
-                        PAGE_MANAGER
+                        page_manager
                             .identity_map(
                                 &page,
                                 PageAttributes::PRESENT | PageAttributes::GLOBAL | page_attribs,
@@ -168,13 +174,13 @@ pub unsafe fn init(memory_map: &[libkernel::memory::uefi::MemoryDescriptor]) {
 
             // Overwrite UEFI page attributes for kernel ELF sections.
             for page in kernel_text().chain(ap_text()) {
-                PAGE_MANAGER
+                page_manager
                     .identity_map(&page, PageAttributes::PRESENT | PageAttributes::GLOBAL)
                     .unwrap();
             }
 
             for page in kernel_rodata() {
-                PAGE_MANAGER
+                page_manager
                     .identity_map(
                         &page,
                         PageAttributes::PRESENT
@@ -186,7 +192,7 @@ pub unsafe fn init(memory_map: &[libkernel::memory::uefi::MemoryDescriptor]) {
 
             for page in kernel_data().chain(kernel_bss()).chain(ap_data()).chain(
                 // Frame manager map frames/pages.
-                FRAME_MANAGER
+                page_manager
                     .iter()
                     .enumerate()
                     .filter_map(|(frame_index, (ty, _, _))| {
@@ -197,7 +203,7 @@ pub unsafe fn init(memory_map: &[libkernel::memory::uefi::MemoryDescriptor]) {
                         }
                     }),
             ) {
-                PAGE_MANAGER
+                page_manager
                     .identity_map(
                         &page,
                         PageAttributes::PRESENT
@@ -209,7 +215,7 @@ pub unsafe fn init(memory_map: &[libkernel::memory::uefi::MemoryDescriptor]) {
             }
 
             for page in user_code() {
-                PAGE_MANAGER
+                page_manager
                     .identity_map(&page, PageAttributes::PRESENT | PageAttributes::USERSPACE)
                     .unwrap();
             }
@@ -218,15 +224,17 @@ pub unsafe fn init(memory_map: &[libkernel::memory::uefi::MemoryDescriptor]) {
             //  strategy, the memory needs to be identity mapped at the correct offset.
             use libkernel::memory::virtual_map_offset;
             debug!("Mapping physical memory: @{:?}", virtual_map_offset());
-            PAGE_MANAGER.modify_mapped_page(Page::from_addr(virtual_map_offset()));
+            page_manager.modify_mapped_page(Page::from_addr(virtual_map_offset()));
 
             info!("Writing kernel addressor's PML4 to the CR3 register.");
-            PAGE_MANAGER.write_cr3();
+            page_manager.write_cr3();
         }
 
         // Configure SLOB allocator.
         debug!("Allocating reserved physical memory frames...");
         FRAME_MANAGER
+            .get()
+            .unwrap()
             .iter()
             .enumerate()
             .filter(|(_, (ty, _, _))| !matches!(ty, FrameType::Usable))

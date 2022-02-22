@@ -1,8 +1,3 @@
-mod frame_manager;
-mod page_manager;
-
-pub use frame_manager::*;
-pub use page_manager::*;
 pub use paging::*;
 pub mod malloc;
 pub mod paging;
@@ -96,7 +91,6 @@ pub fn alloc_obj<T>() -> *mut T {
 }
 
 pub struct MMIO {
-    frame_range: Range<usize>,
     pub ptr: *mut u8,
     pub len: usize,
 }
@@ -116,7 +110,7 @@ impl Drop for MMIO {
 }
 
 impl MMIO {
-    pub unsafe fn new(frame_index: usize, count: usize) -> Result<Self, malloc::AllocError> {
+    pub unsafe fn new(pages: core::ops::Range<Page>) -> Result<Self, malloc::AllocError> {
         for frame_index in frame_index..(frame_index + count) {
             if let Err(FrameError::TypeConversion { from, to }) =
                 FRAME_MANAGER.try_modify_type(frame_index, FrameType::MMIO)
@@ -133,8 +127,8 @@ impl MMIO {
 
             Self {
                 frame_range: frame_index..(frame_index + count),
-                ptr: parts.0,
-                len: parts.1,
+                ptr: pages.start.as_mut_ptr(),
+                len: pages.count() * 0x1000,
             }
         })
     }
@@ -165,7 +159,7 @@ impl MMIO {
         let base_page = paging::Page::from_addr(self.mapped_addr());
         paging::PageIterator::new(
             &base_page,
-            &base_page.forward(self.frame_range.len()).unwrap(),
+            &base_page.forward_checked(self.frame_range.len()).unwrap(),
         )
     }
 

@@ -1,5 +1,8 @@
-use crate::{memory::uefi, Address, Virtual};
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::{
+    mem::MaybeUninit,
+    sync::atomic::{AtomicU32, Ordering},
+};
+use libkernel::{memory::uefi, Address, Virtual};
 use num_enum::TryFromPrimitive;
 use spin::RwLock;
 
@@ -134,6 +137,9 @@ pub struct FrameManager<'arr> {
     map: RwLock<&'arr mut [Frame]>,
 }
 
+unsafe impl Send for FrameManager<'_> {}
+unsafe impl Sync for FrameManager<'_> {}
+
 impl<'arr> FrameManager<'arr> {
     fn new(memory_map: &[uefi::MemoryDescriptor]) -> Self {
         // Calculates total (usable) system memory.
@@ -245,6 +251,10 @@ impl<'arr> FrameManager<'arr> {
         }
 
         falloc
+    }
+
+    pub fn virtual_map_offset(&self) -> Address<Virtual> {
+        Address::<Virtual>::new(libkernel::VADDR_HW_MAX - self.total_memory())
     }
 
     pub fn lock(&self, index: usize) -> Result<usize, FrameError> {
@@ -467,13 +477,3 @@ impl Iterator for FrameIterator<'_, '_> {
 }
 
 impl ExactSizeIterator for FrameIterator<'_, '_> {}
-
-lazy_static::lazy_static! {
-    pub static ref FRAME_MANAGER: FrameManager<'static> = {
-        FrameManager::new(crate::BOOT_INFO.get().expect("`BOOT_INFO` invalid, cannot construct FrameManager").memory_map())
-    };
-}
-
-pub fn virtual_map_offset() -> Address<Virtual> {
-    Address::<Virtual>::new(crate::VADDR_HW_MAX - FRAME_MANAGER.total_memory())
-}

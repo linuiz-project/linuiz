@@ -76,23 +76,20 @@ impl Page {
     }
 
     pub fn to(&self, count: usize) -> Option<PageIterator> {
-        self.forward(count).map(|end| PageIterator::new(self, &end))
+        self.forward_checked(count)
+            .map(|end| PageIterator::new(self, &end))
     }
 
-    pub const fn forward(&self, count: usize) -> Option<Self> {
-        if self.index() <= (usize::MAX - count) {
-            Some(Page::from_index(self.index() + count))
-        } else {
-            None
-        }
+    pub fn forward_checked(&self, count: usize) -> Option<Self> {
+        self.index()
+            .checked_add(count)
+            .map(|new_index| Self::from_index(new_index))
     }
 
-    pub const fn backward(&self, count: usize) -> Option<Self> {
-        if self.index() > (usize::MIN + count) {
-            Some(Page::from_index(self.index() - count))
-        } else {
-            None
-        }
+    pub fn backward_checked(&self, count: usize) -> Option<Self> {
+        self.index()
+            .checked_sub(count)
+            .map(|new_index| Self::from_index(new_index))
     }
 
     /// Clears the 4KiB region from this page's start to its end.
@@ -103,11 +100,11 @@ impl Page {
 
 impl core::iter::Step for Page {
     fn forward_checked(start: Self, count: usize) -> Option<Self> {
-        start.forward(count)
+        start.forward_checked(count)
     }
 
     fn backward_checked(start: Self, count: usize) -> Option<Self> {
-        start.backward(count)
+        start.backward_checked(count)
     }
 
     fn steps_between(start: &Self, end: &Self) -> Option<usize> {
@@ -346,7 +343,7 @@ impl<L: HeirarchicalLevel> PageTable<L> {
     ) -> Option<&PageTable<L::NextLevel>> {
         self.get_entry(index).get_frame_index().map(|frame_index| {
             phys_mapped_page
-                .forward(frame_index)
+                .forward_checked(frame_index)
                 .unwrap()
                 .as_ptr::<PageTable<L::NextLevel>>()
                 .as_ref()
@@ -363,7 +360,7 @@ impl<L: HeirarchicalLevel> PageTable<L> {
             .get_frame_index()
             .map(|frame_index| {
                 phys_mapped_page
-                    .forward(frame_index)
+                    .forward_checked(frame_index)
                     .unwrap()
                     .as_mut_ptr::<PageTable<L::NextLevel>>()
                     .as_mut()
@@ -375,12 +372,13 @@ impl<L: HeirarchicalLevel> PageTable<L> {
         &mut self,
         index: usize,
         phys_mapping_page: Page,
+        frame_manager: super::FrameManager,
     ) -> &mut PageTable<L::NextLevel> {
         let entry = self.get_entry_mut(index);
         let (frame_index, created) = match entry.get_frame_index() {
             Some(frame_index) => (frame_index, false),
             None => {
-                let frame_index = crate::memory::FRAME_MANAGER.lock_next().unwrap();
+                let frame_index = frame_manager.lock_next().unwrap();
 
                 entry.set(
                     frame_index,
@@ -391,7 +389,7 @@ impl<L: HeirarchicalLevel> PageTable<L> {
             }
         };
 
-        let sub_table_page = phys_mapping_page.forward(frame_index).unwrap();
+        let sub_table_page = phys_mapping_page.forward_checked(frame_index).unwrap();
 
         // If we created the page, clear it to a known initial state.
         if created {
