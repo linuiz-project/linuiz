@@ -1,3 +1,10 @@
+mod frame_manager;
+mod page_manager;
+
+use core::mem::MaybeUninit;
+
+pub use frame_manager::*;
+pub use page_manager::*;
 pub use paging::*;
 pub mod malloc;
 pub mod paging;
@@ -32,11 +39,6 @@ mod global_alloc {
     #[global_allocator]
     static GLOBAL_ALLOCATOR: DefaultAllocatorProxy = DefaultAllocatorProxy::new();
 }
-
-use crate::{
-    Address, {Physical, Virtual},
-};
-use core::{mem::MaybeUninit, ops::Range};
 
 pub const KIBIBYTE: usize = 0x400; // 1024
 pub const MIBIBYTE: usize = KIBIBYTE * KIBIBYTE;
@@ -91,8 +93,8 @@ pub fn alloc_obj<T>() -> *mut T {
 }
 
 pub struct MMIO {
-    pub ptr: *mut u8,
-    pub len: usize,
+    ptr: *mut u8,
+    len: usize,
 }
 
 impl Drop for MMIO {
@@ -110,10 +112,17 @@ impl Drop for MMIO {
 }
 
 impl MMIO {
-    pub unsafe fn new(pages: core::ops::Range<Page>) -> Result<Self, malloc::AllocError> {
+    pub unsafe fn new_alloc(
+        frame_index: usize,
+        count: usize,
+        is_mem_writable: bool,
+        frame_manager: &'static FrameManager,
+        page_manager: &PageManager,
+        malloc: &impl malloc::MemoryAllocator,
+    ) -> Result<Self, malloc::AllocError> {
         for frame_index in frame_index..(frame_index + count) {
             if let Err(FrameError::TypeConversion { from, to }) =
-                FRAME_MANAGER.try_modify_type(frame_index, FrameType::MMIO)
+                frame_manager.try_modify_type(frame_index, FrameType::MMIO)
             {
                 panic!(
                     "Attempted to assign MMIO to Frame {}: {:?} into {:?}",
@@ -122,45 +131,49 @@ impl MMIO {
             }
         }
 
-        malloc::get().alloc_against(frame_index, count).map(|data| {
+        malloc.alloc_against(frame_index, count).map(|data| {
             let parts = data.into_parts();
+            let base_index = (parts.0 as usize) / 0x1000;
+
+            for offset in 0..count {
+                page_manager.set_page_attribs(
+                    &Page::from_index(base_index + offset),
+                    PageAttributes::PRESENT
+                        | PageAttributes::UNCACHEABLE
+                        | PageAttributes::NO_EXECUTE
+                        | if is_mem_writable {
+                            PageAttributes::WRITABLE | PageAttributes::WRITE_THROUGH
+                        } else {
+                            PageAttributes::empty()
+                        },
+                    AttributeModify::Set,
+                )
+            }
 
             Self {
-                frame_range: frame_index..(frame_index + count),
-                ptr: pages.start.as_mut_ptr(),
-                len: pages.count() * 0x1000,
+                ptr: parts.0,
+                len: parts.1,
             }
         })
     }
 
-    /// SAFETY: Caller must ensure the frame range is valid for MMIO.
-    #[inline]
-    pub const unsafe fn new_unsafe(frame_index: usize, count: usize) -> Self {
+    pub unsafe fn new(pages: core::ops::Range<Page>) -> Self {
         Self {
-            frame_range: frame_index..(frame_index + count),
-            ptr: (frame_index * 0x1000) as _,
-            len: count * 0x1000,
+            ptr: pages.start.as_mut_ptr(),
+            len: pages.count() * 0x1000,
         }
     }
 
-    pub fn frames(&self) -> &Range<usize> {
-        &self.frame_range
+    pub fn mapped_addr(&self) -> crate::Address<crate::Virtual> {
+        crate::Address::<crate::Virtual>::from_ptr(self.ptr)
     }
 
-    pub fn phys_addr(&self) -> Address<Physical> {
-        Address::<Physical>::new(self.frame_range.start * 0x1000)
-    }
-
-    pub fn mapped_addr(&self) -> Address<Virtual> {
-        Address::<Virtual>::from_ptr(self.ptr)
-    }
-
-    pub fn pages(&self) -> paging::PageIterator {
-        let base_page = paging::Page::from_addr(self.mapped_addr());
-        paging::PageIterator::new(
-            &base_page,
-            &base_page.forward_checked(self.frame_range.len()).unwrap(),
-        )
+    pub fn pages(&self) -> core::ops::Range<Page> {
+        let base_page = paging::Page::from_index((self.ptr as usize) / 0x1000);
+        base_page
+            ..(base_page
+                .forward_checked(crate::align_up_div(self.len, 0x1000))
+                .unwrap())
     }
 
     #[inline]
@@ -219,7 +232,6 @@ impl core::fmt::Debug for MMIO {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
             .debug_struct("MMIO")
-            .field("Frames", &self.frame_range)
             .field("Virtual Base", &self.ptr)
             .field("Length", &self.len)
             .finish()

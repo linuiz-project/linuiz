@@ -1,8 +1,7 @@
 use core::{
-    mem::MaybeUninit,
     sync::atomic::{AtomicU32, Ordering},
 };
-use libkernel::{memory::uefi, Address, Virtual};
+use crate::{memory::uefi, Address, Virtual};
 use num_enum::TryFromPrimitive;
 use spin::RwLock;
 
@@ -11,7 +10,6 @@ use spin::RwLock;
 pub enum FrameType {
     Usable = 0,
     Unusable,
-    ForceWrite,
     Reserved,
     MMIO,
     // TODO possibly ACPI reclaim?
@@ -254,7 +252,7 @@ impl<'arr> FrameManager<'arr> {
     }
 
     pub fn virtual_map_offset(&self) -> Address<Virtual> {
-        Address::<Virtual>::new(libkernel::VADDR_HW_MAX - self.total_memory())
+        Address::<Virtual>::new(crate::VADDR_HW_MAX - self.total_memory())
     }
 
     pub fn lock(&self, index: usize) -> Result<usize, FrameError> {

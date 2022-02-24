@@ -1,6 +1,5 @@
 use crate::{Address, Virtual};
-use core::fmt;
-use core::marker::PhantomData;
+use core::{fmt, marker::PhantomData};
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -195,7 +194,6 @@ bitflags::bitflags! {
         const NO_EXECUTE = 1 << 63;
 
         const DATA = Self::PRESENT.bits() | Self::WRITABLE.bits() | Self::NO_EXECUTE.bits();
-        const MMIO = Self::PRESENT.bits() | Self::WRITABLE.bits() | Self::WRITE_THROUGH.bits() | Self::UNCACHEABLE.bits() | Self::NO_EXECUTE.bits();
     }
 }
 
@@ -372,7 +370,7 @@ impl<L: HeirarchicalLevel> PageTable<L> {
         &mut self,
         index: usize,
         phys_mapping_page: Page,
-        frame_manager: super::FrameManager,
+        frame_manager: &'static super::FrameManager,
     ) -> &mut PageTable<L::NextLevel> {
         let entry = self.get_entry_mut(index);
         let (frame_index, created) = match entry.get_frame_index() {

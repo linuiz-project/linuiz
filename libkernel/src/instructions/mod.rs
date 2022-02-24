@@ -36,3 +36,46 @@ pub unsafe fn set_data_registers(value: u16) {
         options(readonly, nostack, preserves_flags)
     );
 }
+
+/// Reads a cryptographically secure, deterministic random number from hardware.
+///
+/// Return value indicates various success and failure states of the operation.
+/// These are detailed as follows:
+///     — `None` indicates no support for the `rdrand` instruction.
+///     — `Some(Err(_))` indicates `rdrand` has encountered a hard failure, and will not generate
+///         anymore valid numbers.
+///     — `Some(Ok(_))` returns the successfully generated random number.
+pub fn rdrand() -> Option<Result<u64, ()>> {
+    // Check to ensure the instruction is supported.
+    if crate::cpu::has_feature(crate::cpu::Feature::RDRAND) {
+        // In the case of a hard failure for random number generation, a retry limit is employed
+        // to stop software from entering a busy loop due to bad `rdrand` values.
+        for _ in 0..22 {
+            let mut result: u64;
+
+            unsafe {
+                asm!(
+                    "rdrand {}",
+                    out(reg) result,
+                    options(nostack, nomem)
+                );
+            }
+
+            // IA32 Software Developer's Manual specifies it is possible (rarely) for `rdrand` to return
+            // bad data in the destination register. If this is the case—and additionally if demand for random
+            // number generation is too high—the CF bit in `rflags` will not be set, and in the latter case (troughput),
+            // zero will be returned in the destination register.
+            if result > 0
+                && crate::registers::RFlags::read().contains(crate::registers::RFlags::CARRY_FLAG)
+            {
+                return Some(Ok(result));
+            } else {
+                pause();
+            }
+        }
+
+        Some(Err(()))
+    } else {
+        None
+    }
+}

@@ -174,7 +174,7 @@ impl<MM, CTE> BootInfo<MM, CTE> {
         }
     }
 
-    pub fn config_table(&self) -> &[CTE] {
+    pub fn config_table(&self) -> &'static [CTE] {
         unsafe {
             core::ptr::slice_from_raw_parts(self.config_table_ptr, self.config_table_len)
                 .as_ref()
@@ -196,10 +196,6 @@ impl<MM, CTE> BootInfo<MM, CTE> {
 }
 
 pub type KernelMain<MM, CTE> = extern "efiapi" fn(crate::BootInfo<MM, CTE>) -> !;
-
-pub static BOOT_INFO: cell::SyncOnceCell<
-    BootInfo<memory::uefi::MemoryDescriptor, acpi::SystemConfigTableEntry>,
-> = cell::SyncOnceCell::new();
 
 #[inline(always)]
 pub const fn align_up(value: usize, alignment: usize) -> usize {

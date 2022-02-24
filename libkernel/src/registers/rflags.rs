@@ -63,26 +63,38 @@ impl RFlags {
         Self::INTERRUPT_FLAG
     }
 
+    #[inline(always)]
     pub fn read() -> Self {
         Self::from_bits_truncate(Self::read_raw())
     }
 
+    #[inline(always)]
     fn read_raw() -> u64 {
         let result: u64;
 
         unsafe {
-            core::arch::asm!("pushf", "pop {}", out(reg) result, options(nostack, nomem));
+            core::arch::asm!(
+                "pushf",
+                "pop {}",
+                out(reg) result,
+                options(nostack, nomem, preserves_flags)
+            );
         }
 
         result
     }
 
+    #[inline(always)]
     pub unsafe fn write(flags: Self, set: bool) {
-        let reserved_bits = Self::read_raw() & !Self::all().bits();
-        let mut old_flags = Self::read();
+        // using `from_bits_unchecked` should retain reserved bits.
+        let mut old_flags = Self::from_bits_unchecked(Self::read_raw());
         old_flags.set(flags, set);
-        let rflags_bits = old_flags.bits() | reserved_bits;
 
-        core::arch::asm!("push {}", "popf", in(reg) rflags_bits, options(preserves_flags));
+        core::arch::asm!(
+            "push {}",
+            "popf",
+            in(reg) old_flags.bits(),
+            options(nostack, nomem, preserves_flags)
+        );
     }
 }

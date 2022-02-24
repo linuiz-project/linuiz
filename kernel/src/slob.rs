@@ -1,10 +1,10 @@
-use crate::memory::PAGE_MANAGER;
+use crate::memory::{FRAME_MANAGER, PAGE_MANAGER};
 use core::{alloc::Layout, mem::size_of, num::NonZeroUsize};
 use libkernel::{
     align_up_div,
     memory::{
-        malloc::{Alloc, AllocError, MemoryAllocator},
-        Page, PageAttributes, FRAME_MANAGER,
+        malloc::{AllocError, MemoryAllocator, SafePtr},
+        Page, PageAttributes,
     },
     Address, Physical,
 };
@@ -184,8 +184,8 @@ impl<'map> SLOB<'map> {
         for page_offset in 0..cur_map_pages {
             PAGE_MANAGER
                 .copy_by_map(
-                    &cur_map_page.forward(page_offset).unwrap(),
-                    &new_map_page.forward(page_offset).unwrap(),
+                    &cur_map_page.forward_checked(page_offset).unwrap(),
+                    &new_map_page.forward_checked(page_offset).unwrap(),
                     None,
                 )
                 .unwrap();
@@ -193,9 +193,13 @@ impl<'map> SLOB<'map> {
 
         trace!("Allocating and mapping remaining pages of map.");
         for page_offset in cur_map_pages..req_map_pages {
-            let mut new_page = new_map_page.forward(page_offset).unwrap();
+            let mut new_page = new_map_page.forward_checked(page_offset).unwrap();
 
-            PAGE_MANAGER.auto_map(&new_page, PageAttributes::DATA);
+            PAGE_MANAGER.auto_map(
+                &new_page,
+                PageAttributes::DATA,
+                FRAME_MANAGER.get().unwrap(),
+            );
             // Clear the newly allocated map page.
             unsafe { new_page.mem_clear() };
         }
@@ -224,7 +228,7 @@ impl<'map> SLOB<'map> {
 }
 
 impl MemoryAllocator for SLOB<'_> {
-    fn alloc(&self, size: usize, align: Option<NonZeroUsize>) -> Result<Alloc<u8>, AllocError> {
+    fn alloc(&self, size: usize, align: Option<NonZeroUsize>) -> Result<SafePtr<u8>, AllocError> {
         let align = align
             .unwrap_or(unsafe { NonZeroUsize::new_unchecked(1) })
             .get();
@@ -295,12 +299,16 @@ impl MemoryAllocator for SLOB<'_> {
             block_index += remaining_blocks_in_slice;
 
             if was_empty {
-                PAGE_MANAGER.auto_map(&Page::from_index(map_index), PageAttributes::DATA);
+                PAGE_MANAGER.auto_map(
+                    &Page::from_index(map_index),
+                    PageAttributes::DATA,
+                    FRAME_MANAGER.get().unwrap(),
+                );
             }
         }
 
         Ok(unsafe {
-            Alloc::new(
+            SafePtr::new(
                 (start_block_index * Self::BLOCK_SIZE) as *mut _,
                 size_in_blocks * Self::BLOCK_SIZE,
             )
@@ -308,9 +316,9 @@ impl MemoryAllocator for SLOB<'_> {
     }
 
     // TODO this should not allocate contiguous frames
-    fn alloc_pages(&self, count: usize) -> Result<(Address<Physical>, Alloc<u8>), AllocError> {
+    fn alloc_pages(&self, count: usize) -> Result<(Address<Physical>, SafePtr<u8>), AllocError> {
         let mut map_write = self.map.write();
-        let frame_index = match FRAME_MANAGER.lock_next_many(count) {
+        let frame_index = match FRAME_MANAGER.get().unwrap().lock_next_many(count) {
             Ok(frame_index) => frame_index,
             Err(falloc_err) => {
                 return Err(AllocError::FallocError(falloc_err));
@@ -355,11 +363,11 @@ impl MemoryAllocator for SLOB<'_> {
         }
 
         Ok((Address::<Physical>::new(frame_index * 0x1000), unsafe {
-            Alloc::new((start_index * 0x1000) as *mut _, count * 0x1000)
+            SafePtr::new((start_index * 0x1000) as *mut _, count * 0x1000)
         }))
     }
 
-    fn alloc_against(&self, frame_index: usize, count: usize) -> Result<Alloc<u8>, AllocError> {
+    fn alloc_against(&self, frame_index: usize, count: usize) -> Result<SafePtr<u8>, AllocError> {
         let mut map_write = self.map.write();
         let mut start_index = 0;
         'outer: loop {
@@ -398,10 +406,10 @@ impl MemoryAllocator for SLOB<'_> {
                 .unwrap();
         }
 
-        Ok(unsafe { Alloc::new((start_index * 0x1000) as *mut _, count * 0x1000) })
+        Ok(unsafe { SafePtr::new((start_index * 0x1000) as *mut _, count * 0x1000) })
     }
 
-    fn alloc_identity(&self, frame_index: usize, count: usize) -> Result<Alloc<u8>, AllocError> {
+    fn alloc_identity(&self, frame_index: usize, count: usize) -> Result<SafePtr<u8>, AllocError> {
         let mut map_write = self.map.write();
 
         if map_write.len() < (frame_index + count) {
@@ -430,7 +438,7 @@ impl MemoryAllocator for SLOB<'_> {
             }
         }
 
-        Ok(unsafe { Alloc::new((frame_index * 0x1000) as *mut _, count * 0x1000) })
+        Ok(unsafe { SafePtr::new((frame_index * 0x1000) as *mut _, count * 0x1000) })
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {

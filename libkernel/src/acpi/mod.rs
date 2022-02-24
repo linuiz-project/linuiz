@@ -1,6 +1,6 @@
 pub mod rdsp;
 
-use crate::{Physical, structures::GUID, Address};
+use crate::{cell::SyncOnceCell, structures::GUID, Address, Physical};
 
 pub const ACPI_GUID: GUID = GUID::new(
     0xeb9d2d30,
@@ -111,15 +111,6 @@ impl core::fmt::Debug for SDTHeader {
     }
 }
 
-pub fn get_system_config_table_entry(guid: GUID) -> Option<&'static SystemConfigTableEntry> {
-    crate::BOOT_INFO
-        .get()
-        .unwrap()
-        .config_table()
-        .iter()
-        .find(|entry| entry.guid() == guid)
-}
-
 #[repr(C)]
 #[derive(Debug)]
 pub struct SystemConfigTableEntry {
@@ -142,4 +133,20 @@ impl SystemConfigTableEntry {
     pub unsafe fn as_mut_ref<T>(&self) -> &mut T {
         (self.addr().as_usize() as *mut T).as_mut().unwrap()
     }
+}
+
+static SYSTEM_CONFIG_TABLE: SyncOnceCell<&[SystemConfigTableEntry]> = SyncOnceCell::new();
+
+pub fn set_system_config_table(system_config_table: &'static [SystemConfigTableEntry]) {
+    SYSTEM_CONFIG_TABLE
+        .set(system_config_table)
+        .expect("System configuration table has already been set");
+}
+
+pub fn get_system_config_table_entry(guid: GUID) -> Option<&'static SystemConfigTableEntry> {
+    SYSTEM_CONFIG_TABLE.get().and_then(|system_config_table| {
+        system_config_table
+            .iter()
+            .find(|entry| entry.guid() == guid)
+    })
 }

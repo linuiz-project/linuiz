@@ -209,7 +209,7 @@ pub struct PCIeDevice<T: DeviceType> {
     phantom: PhantomData<T>,
 }
 
-pub fn new_device(mmio: MMIO, page_manager: Option<&crate::memory::PageManager>) -> DeviceVariant {
+pub fn new_device(mmio: MMIO, frame_manager: &'static crate::memory::FrameManager, page_manager: &crate::memory::PageManager, malloc: &impl crate::memory::malloc::MemoryAllocator) -> DeviceVariant {
     let type_malfunc = unsafe {
         mmio.read::<u8>(HeaderOffset::HeaderType.into())
             .assume_init()
@@ -217,7 +217,7 @@ pub fn new_device(mmio: MMIO, page_manager: Option<&crate::memory::PageManager>)
 
     // mask off the multifunction bit
     match type_malfunc & !(1 << 7) {
-        0x0 => DeviceVariant::Standard(unsafe { PCIeDevice::<Standard>::new(mmio, page_manager) }),
+        0x0 => DeviceVariant::Standard(unsafe { PCIeDevice::<Standard>::new(mmio, frame_manager, page_manager, malloc) }),
         0x1 => DeviceVariant::PCI2PCI(PCIeDevice {
             mmio,
             registers: Vec::new(),
@@ -229,11 +229,7 @@ pub fn new_device(mmio: MMIO, page_manager: Option<&crate::memory::PageManager>)
             phantom: PhantomData,
         }),
         invalid_type => {
-            panic!(
-                "header type is invalid (must be 0..=2): {}, mmio addr: {:?}",
-                invalid_type,
-                mmio.phys_addr()
-            )
+            panic!("Header type is invalid (must be 0..=2): {}", invalid_type,)
         }
     }
 }

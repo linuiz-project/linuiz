@@ -1,9 +1,8 @@
-use super::FrameManager;
-use libkernel::{
+use crate::{
     instructions::tlb,
     memory::{
         paging::{AttributeModify, Level4, PageAttributes, PageTable, PageTableEntry},
-        Page,
+        FrameManager, Page,
     },
     Address, {Physical, Virtual},
 };
@@ -34,7 +33,10 @@ impl VirtualMapper {
 
         // Clear PML4 frame.
         core::ptr::write_bytes(
-            mapped_page.forward(pml4_index).unwrap().as_mut_ptr::<u8>(),
+            mapped_page
+                .forward_checked(pml4_index)
+                .unwrap()
+                .as_mut_ptr::<u8>(),
             0,
             0x1000,
         );
@@ -54,7 +56,7 @@ impl VirtualMapper {
     /* ACQUIRE STATE */
 
     fn pml4_page(&self) -> Page {
-        self.mapped_page.forward(self.pml4_frame).unwrap()
+        self.mapped_page.forward_checked(self.pml4_frame).unwrap()
     }
 
     fn pml4(&self) -> Option<&PageTable<Level4>> {
@@ -94,7 +96,7 @@ impl VirtualMapper {
     fn get_page_entry_create(
         &mut self,
         page: &Page,
-        frame_manager: &FrameManager,
+        frame_manager: &'static FrameManager,
     ) -> &mut PageTableEntry {
         let mapped_page = self.mapped_page;
         let addr = page.base_addr();
@@ -111,14 +113,9 @@ impl VirtualMapper {
         }
     }
 
-    unsafe fn modify_mapped_page(
-        &mut self,
-        mapped_page: Page,
-        count: usize,
-        frame_manager: &FrameManager,
-    ) {
+    unsafe fn modify_mapped_page(&mut self, base_page: Page, frame_manager: &'static FrameManager) {
         for frame_index in 0..frame_manager.total_frames() {
-            let cur_page = page.forward(frame_index).unwrap();
+            let cur_page = base_page.forward_checked(frame_index).unwrap();
 
             self.get_page_entry_create(&cur_page, frame_manager)
                 .set(frame_index, PageAttributes::DATA | PageAttributes::GLOBAL);
@@ -126,18 +123,18 @@ impl VirtualMapper {
             tlb::invalidate(&cur_page);
         }
 
-        self.mapped_page = page;
+        self.mapped_page = base_page;
     }
 
     /// Returns `true` if the current CR3 address matches the addressor's PML4 frame, and `false` otherwise.
     fn is_active(&self) -> bool {
-        libkernel::registers::control::CR3::read().0.frame_index() == self.pml4_frame
+        crate::registers::control::CR3::read().0.frame_index() == self.pml4_frame
     }
 
     pub unsafe fn write_cr3(&self) {
-        libkernel::registers::control::CR3::write(
+        crate::registers::control::CR3::write(
             Address::<Physical>::new(self.pml4_frame * 0x1000),
-            libkernel::registers::control::CR3Flags::empty(),
+            crate::registers::control::CR3Flags::empty(),
         );
     }
 
@@ -160,7 +157,7 @@ impl VirtualMapper {
 }
 
 pub struct PageManager {
-    frame_manager: &'static FrameManager,
+    frame_manager: &'static FrameManager<'static>,
     virtual_mapper: spin::RwLock<VirtualMapper>,
 }
 
@@ -253,7 +250,12 @@ impl PageManager {
             })
     }
 
-    pub fn auto_map(&self, page: &Page, attribs: PageAttributes, frame_manager: &FrameManager) {
+    pub fn auto_map(
+        &self,
+        page: &Page,
+        attribs: PageAttributes,
+        frame_manager: &'static FrameManager,
+    ) {
         self.map(page, frame_manager.lock_next().unwrap(), None, attribs)
             .unwrap();
     }
@@ -301,7 +303,7 @@ impl PageManager {
         mut attributes: PageAttributes,
         modify_mode: AttributeModify,
     ) {
-        if !libkernel::registers::msr::IA32_EFER::get_nxe() {
+        if !crate::registers::msr::IA32_EFER::get_nxe() {
             // This bit is reserved if the above bit in IA32_EFER is not set.
             // For now, this means silently removing it for compatability.
             attributes.remove(PageAttributes::NO_EXECUTE);
@@ -315,7 +317,7 @@ impl PageManager {
         tlb::invalidate(page);
     }
 
-    pub unsafe fn modify_mapped_page(&self, page: Page, frame_manager: &FrameManager) {
+    pub unsafe fn modify_mapped_page(&self, page: Page) {
         self.virtual_mapper
             .write()
             .modify_mapped_page(page, self.frame_manager);

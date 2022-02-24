@@ -1,12 +1,11 @@
-mod frame_manager;
-mod page_manager;
-
-pub use frame_manager::*;
-pub use page_manager::*;
-
 use crate::slob::SLOB;
 use core::{mem::MaybeUninit, ops::Range};
-use libkernel::{align_down_div, align_up_div, cell::SyncOnceCell, memory::Page, LinkerSymbol};
+use libkernel::{
+    align_down_div, align_up_div,
+    cell::SyncOnceCell,
+    memory::{FrameManager, Page, PageManager},
+    LinkerSymbol,
+};
 
 extern "C" {
     pub static __kernel_pml4: LinkerSymbol;
@@ -37,7 +36,7 @@ lazy_static::lazy_static! {
     /// Kernel page manager.
     ///
     /// This page manager invariantly assumes 0x0-based identity mapping by default.
-    pub static ref PAGE_MANAGER: PageManager = unsafe { PageManager::new(&Page::null()) };
+    pub static ref PAGE_MANAGER: PageManager = unsafe { PageManager::new(&Page::null(), FRAME_MANAGER.get().unwrap()) };
 }
 
 lazy_static::lazy_static! {
@@ -107,7 +106,12 @@ pub fn user_code() -> Range<Page> {
     }
 }
 
-pub static FRAME_MANAGER: SyncOnceCell<FrameManager> = SyncOnceCell::new();
+static FRAME_MANAGER: SyncOnceCell<FrameManager> = SyncOnceCell::new();
+
+pub fn init_frame_manager(memory_map: &[libkernel::memory::uefi::MemoryDescriptor]) {
+    let frame_manager = FrameManager::new(memory_map);
+}
+
 
 /// Initialize kernel memory (frame manager, page manager, etc.)
 pub unsafe fn init(
@@ -192,16 +196,15 @@ pub unsafe fn init(
 
             for page in kernel_data().chain(kernel_bss()).chain(ap_data()).chain(
                 // Frame manager map frames/pages.
-                page_manager
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(frame_index, (ty, _, _))| {
-                        if ty == FrameType::FrameMap {
+                FRAME_MANAGER.get().unwrap().iter().enumerate().filter_map(
+                    |(frame_index, (ty, _, _))| {
+                        if ty == libkernel::memory::FrameType::FrameMap {
                             Some(Page::from_index(frame_index))
                         } else {
                             None
                         }
-                    }),
+                    },
+                ),
             ) {
                 page_manager
                     .identity_map(
@@ -222,9 +225,14 @@ pub unsafe fn init(
 
             // Since we're using physical offset mapping for our page table modification
             //  strategy, the memory needs to be identity mapped at the correct offset.
-            use libkernel::memory::virtual_map_offset;
-            debug!("Mapping physical memory: @{:?}", virtual_map_offset());
-            page_manager.modify_mapped_page(Page::from_addr(virtual_map_offset()));
+            // todo PASS FRAME_MANAGER IN PARAMS
+            debug!(
+                "Mapping physical memory: @{:?}",
+                FRAME_MANAGER.get().unwrap().virtual_map_offset()
+            );
+            page_manager.modify_mapped_page(Page::from_addr(
+                FRAME_MANAGER.get().unwrap().virtual_map_offset(),
+            ));
 
             info!("Writing kernel addressor's PML4 to the CR3 register.");
             page_manager.write_cr3();
@@ -237,7 +245,7 @@ pub unsafe fn init(
             .unwrap()
             .iter()
             .enumerate()
-            .filter(|(_, (ty, _, _))| !matches!(ty, FrameType::Usable))
+            .filter(|(_, (ty, _, _))| !matches!(ty, libkernel::memory::FrameType::Usable))
             .for_each(|(index, _)| {
                 KMALLOC.reserve_page(&Page::from_index(index)).unwrap();
             });

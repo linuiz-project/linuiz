@@ -80,9 +80,20 @@ bitflags::bitflags! {
 
 pub struct APIC;
 
+// TODO this needs to be some sort of `init`, because assuming identity mapping for a 
+//      persistent structure seems... bad.
 lazy_static::lazy_static! {
     static ref APIC_MMIO: SyncCell<MMIO> = SyncCell::new(
-        unsafe { MMIO::new_unsafe(IA32_APIC_BASE::get_base_addr().frame_index(), 1) }
+        unsafe {
+            MMIO::new({
+                use crate::memory::Page;
+
+                let start_page = Page::from_index(IA32_APIC_BASE::get_base_addr().frame_index());
+                let end_page = start_page.forward_checked(1).unwrap();
+
+                start_page..end_page
+            })
+        }
     );
 }
 

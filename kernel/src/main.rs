@@ -55,7 +55,7 @@ impl Devices<'_> {
 lazy_static::lazy_static! {
     pub static ref PCIE_DEVICES: Devices<'static> =
         Devices(
-            libkernel::io::pci::get_pcie_devices(Some(&*crate::memory::PAGE_MANAGER)).collect(),
+            libkernel::io::pci::get_pcie_devices(memory::FRAME_MANAGER.get().unwrap(), &*crate::memory::PAGE_MANAGER, &*crate::memory::KMALLOC).collect(),
             &core::marker::PhantomData
         );
 }
@@ -86,9 +86,9 @@ unsafe extern "efiapi" fn _entry(
 ) -> ! {
     /* PRE-INIT (no environment prepared) */
     boot_info.validate_magic();
-    if let Err(_) = libkernel::BOOT_INFO.set(boot_info) {
-        panic!("`BOOT_INFO` already set.");
-    }
+    // if let Err(_) = libkernel::BOOT_INFO.set(boot_info) {
+    //     panic!("`BOOT_INFO` already set.");
+    // }
 
     /* INIT STDOUT */
     CON_OUT.init(drivers::stdout::SerialSpeed::S115200);
@@ -106,9 +106,21 @@ unsafe extern "efiapi" fn _entry(
         debug!("CPU Features        {:?}", libkernel::cpu::FeatureFmt);
     }
 
-    /* COMMON KERNEL START (prepare local state and AP processors) */
-    reset_bsp_stack_ptr!();
-    _startup()
+    // Set system configuration table, so ACPI can be used.
+    // TODO possibly move ACPI structure instances out of libkernel?
+    libkernel::acpi::set_system_config_table(boot_info.config_table());
+
+    // Update to kernel stack, jump to `_startup` with `boot_info` as a parameter.
+    core::arch::asm!(
+        "
+        lea rsp, {}
+        jmp {}
+        ",
+        sym __bsp_stack,
+        sym _startup,
+        in("rcx") &raw const boot_info,
+        options(nomem, noreturn)
+    );
 }
 
 /// This method assumes the `gs` segment has a valid base for kernel local state.
@@ -159,7 +171,12 @@ unsafe fn wake_aps() {
 
 #[no_mangle]
 #[inline(never)]
-unsafe extern "win64" fn _startup() -> ! {
+unsafe extern "win64" fn _startup(
+    boot_info: &BootInfo<uefi::MemoryDescriptor, SystemConfigTableEntry>,
+) -> ! {
+    // Re-validate magic to ensure boot info is still valid.
+    boot_info.validate_magic();
+
     use libkernel::cpu::is_bsp;
     /* LOAD REGISTERS */
     {
@@ -224,27 +241,12 @@ unsafe extern "win64" fn _startup() -> ! {
     /* INIT MEMORY */
     if is_bsp() {
         use libkernel::{
-            memory::{
-                malloc, AttributeModify, FrameError, FrameType, Page, PageAttributes, FRAME_MANAGER,
-            },
+            memory::{malloc, AttributeModify, FrameError, FrameType, Page, PageAttributes},
             registers::msr::IA32_APIC_BASE,
         };
 
-        // ... modify known frame types ...
-        FRAME_MANAGER
-            .try_modify_type(
-                IA32_APIC_BASE::get_base_addr().frame_index(),
-                FrameType::MMIO,
-            )
-            .ok();
-        // ... initialize memory ...
-        memory::init(libkernel::BOOT_INFO.get().unwrap().memory_map());
-        // ... modify all page attributes ...
-        crate::memory::PAGE_MANAGER.set_page_attribs(
-            &Page::from_index(IA32_APIC_BASE::get_base_addr().frame_index()),
-            PageAttributes::MMIO,
-            AttributeModify::Set,
-        );
+            // TODO INIT MEMORY
+
     }
 
     local_state::init();

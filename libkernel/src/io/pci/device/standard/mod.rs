@@ -20,9 +20,14 @@ pub enum StandardRegister {
 }
 
 impl PCIeDevice<Standard> {
-    pub unsafe fn new(mmio: MMIO, page_manager: Option<&crate::memory::PageManager>) -> Self {
+    pub unsafe fn new(
+        device_mmio: MMIO,
+        frame_manager: &'static crate::memory::FrameManager,
+        page_manager: &crate::memory::PageManager,
+        malloc: &impl crate::memory::malloc::MemoryAllocator,
+    ) -> Self {
         assert_eq!(
-            (mmio
+            (device_mmio
                 .read::<u8>(crate::io::pci::HeaderOffset::HeaderType.into())
                 .assume_init())
                 & !(1 << 7),
@@ -33,7 +38,7 @@ impl PCIeDevice<Standard> {
         let mut register_num = 0;
         let mut registers = alloc::vec![None, None, None, None, None, None];
         for register in DeviceRegisterIterator::new(
-            (mmio.mapped_addr() + 0x10).as_mut_ptr::<u32>(),
+            (device_mmio.mapped_addr() + 0x10).as_mut_ptr::<u32>(),
             Standard::REGISTER_COUNT,
         ) {
             if !register.is_unused() {
@@ -48,30 +53,35 @@ impl PCIeDevice<Standard> {
                     frame_usage
                 );
 
-                let register_mmio = crate::memory::MMIO::new(frame_index, frame_usage)
-                    .expect("failed to create MMIO object");
+                let register_mmio = crate::memory::MMIO::new_alloc(
+                    frame_index,
+                    frame_usage,
+                    true,
+                    frame_manager,
+                    page_manager,
+                    malloc,
+                )
+                .expect("failed to create MMIO object");
 
                 if match register {
                     DeviceRegister::MemorySpace32(value, _) => (value & 0b1000) > 0,
                     DeviceRegister::MemorySpace64(value, _) => (value & 0b1000) > 0,
                     _ => false,
                 } {
-                    if let Some(page_manager) = page_manager {
-                        trace!("\tRegister is prefetchable; setting WRITE_THROUGH on MMIO page.");
+                    trace!("\tRegister is prefetchable; setting WRITE_THROUGH on MMIO page.");
 
-                        for page in register_mmio.pages() {
-                            use crate::memory::paging::{AttributeModify, PageAttributes};
+                    for page in register_mmio.pages() {
+                        use crate::memory::paging::{AttributeModify, PageAttributes};
 
-                            page_manager.set_page_attribs(
-                                &page,
-                                PageAttributes::PRESENT
-                                    | PageAttributes::WRITABLE
-                                    | PageAttributes::WRITE_THROUGH
-                                    | PageAttributes::UNCACHEABLE
-                                    | PageAttributes::NO_EXECUTE,
-                                AttributeModify::Set,
-                            );
-                        }
+                        page_manager.set_page_attribs(
+                            &page,
+                            PageAttributes::PRESENT
+                                | PageAttributes::WRITABLE
+                                | PageAttributes::WRITE_THROUGH
+                                | PageAttributes::UNCACHEABLE
+                                | PageAttributes::NO_EXECUTE,
+                            AttributeModify::Set,
+                        );
                     }
                 }
 
@@ -85,7 +95,7 @@ impl PCIeDevice<Standard> {
         }
 
         Self {
-            mmio,
+            mmio: device_mmio,
             registers,
             phantom: core::marker::PhantomData,
         }
