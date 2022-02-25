@@ -109,12 +109,17 @@ pub fn user_code() -> Range<Page> {
 static FRAME_MANAGER: SyncOnceCell<FrameManager> = SyncOnceCell::new();
 
 pub fn init_frame_manager(memory_map: &[libkernel::memory::uefi::MemoryDescriptor]) {
-    let frame_manager = FrameManager::new(memory_map);
+    if let Err(_) = FRAME_MANAGER.set(FrameManager::from_mmap(memory_map)) {
+        panic!("Failed to initialize frame manager: already exists");
+    }
 }
 
+pub fn get_frame_manager() -> &'static FrameManager<'static> {
+    FRAME_MANAGER.get().unwrap()
+}
 
 /// Initialize kernel memory (frame manager, page manager, etc.)
-pub unsafe fn init(
+pub unsafe fn init_paging(
     memory_map: &[libkernel::memory::uefi::MemoryDescriptor],
     page_manager: &PageManager,
 ) {

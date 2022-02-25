@@ -139,7 +139,7 @@ unsafe impl Send for FrameManager<'_> {}
 unsafe impl Sync for FrameManager<'_> {}
 
 impl<'arr> FrameManager<'arr> {
-    fn new(memory_map: &[uefi::MemoryDescriptor]) -> Self {
+    pub fn from_mmap(memory_map: &[uefi::MemoryDescriptor]) -> Self {
         // Calculates total (usable) system memory.
         let total_usable_memory = memory_map
             .iter()
@@ -212,7 +212,7 @@ impl<'arr> FrameManager<'arr> {
         }
 
         // Modify the null frame to never be used.
-        falloc.try_modify_type(0, FrameType::Unusable).unwrap();
+        falloc.try_modify_type(0, FrameType::Reserved).unwrap();
 
         debug!("Reserving requsite system frames.");
         let mut last_frame_end = 0;

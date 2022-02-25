@@ -1,4 +1,4 @@
-use crate::memory::{FRAME_MANAGER, PAGE_MANAGER};
+use crate::memory::{get_frame_manager, PAGE_MANAGER};
 use core::{alloc::Layout, mem::size_of, num::NonZeroUsize};
 use libkernel::{
     align_up_div,
@@ -195,11 +195,7 @@ impl<'map> SLOB<'map> {
         for page_offset in cur_map_pages..req_map_pages {
             let mut new_page = new_map_page.forward_checked(page_offset).unwrap();
 
-            PAGE_MANAGER.auto_map(
-                &new_page,
-                PageAttributes::DATA,
-                FRAME_MANAGER.get().unwrap(),
-            );
+            PAGE_MANAGER.auto_map(&new_page, PageAttributes::DATA, get_frame_manager());
             // Clear the newly allocated map page.
             unsafe { new_page.mem_clear() };
         }
@@ -302,7 +298,7 @@ impl MemoryAllocator for SLOB<'_> {
                 PAGE_MANAGER.auto_map(
                     &Page::from_index(map_index),
                     PageAttributes::DATA,
-                    FRAME_MANAGER.get().unwrap(),
+                    get_frame_manager(),
                 );
             }
         }
@@ -318,7 +314,7 @@ impl MemoryAllocator for SLOB<'_> {
     // TODO this should not allocate contiguous frames
     fn alloc_pages(&self, count: usize) -> Result<(Address<Physical>, SafePtr<u8>), AllocError> {
         let mut map_write = self.map.write();
-        let frame_index = match FRAME_MANAGER.get().unwrap().lock_next_many(count) {
+        let frame_index = match get_frame_manager().lock_next_many(count) {
             Ok(frame_index) => frame_index,
             Err(falloc_err) => {
                 return Err(AllocError::FallocError(falloc_err));

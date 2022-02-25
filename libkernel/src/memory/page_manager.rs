@@ -250,13 +250,8 @@ impl PageManager {
             })
     }
 
-    pub fn auto_map(
-        &self,
-        page: &Page,
-        attribs: PageAttributes,
-        frame_manager: &'static FrameManager,
-    ) {
-        self.map(page, frame_manager.lock_next().unwrap(), None, attribs)
+    pub fn auto_map(&self, page: &Page, attribs: PageAttributes) {
+        self.map(page, self.frame_manager.lock_next().unwrap(), None, attribs)
             .unwrap();
     }
 

@@ -55,10 +55,12 @@ impl Devices<'_> {
 lazy_static::lazy_static! {
     pub static ref PCIE_DEVICES: Devices<'static> =
         Devices(
-            libkernel::io::pci::get_pcie_devices(memory::FRAME_MANAGER.get().unwrap(), &*crate::memory::PAGE_MANAGER, &*crate::memory::KMALLOC).collect(),
+            libkernel::io::pci::get_pcie_devices(memory::get_frame_manager(), &*crate::memory::PAGE_MANAGER, &*crate::memory::KMALLOC).collect(),
             &core::marker::PhantomData
         );
 }
+
+const LOCAL_STATE_PTR: *const () = 0x773594000000 as *const ();
 
 /// Clears the kernel stack by resetting `RSP`.
 ///
@@ -241,13 +243,21 @@ unsafe extern "win64" fn _startup(
     /* INIT MEMORY */
     if is_bsp() {
         use libkernel::{
-            memory::{malloc, AttributeModify, FrameError, FrameType, Page, PageAttributes},
+            memory::{
+                malloc, AttributeModify, FrameError, FrameType, Page, PageAttributes, PageManager,
+            },
             registers::msr::IA32_APIC_BASE,
         };
 
-            // TODO INIT MEMORY
-
+        memory::init_frame_manager(&boot_info.memory_map());
+        memory::init_paging(&boot_info.memory_map(), &*memory::PAGE_MANAGER);
+        memory::PAGE_MANAGER.auto_map(
+            &Page::from_ptr(LOCAL_STATE_PTR),
+            PageAttributes::PRESENT | PageAttributes::WRITABLE | PageAttributes::NO_EXECUTE,
+        );
     }
+
+    loop {}
 
     local_state::init();
     local_state::enable();
