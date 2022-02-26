@@ -1,11 +1,16 @@
-use crate::{clock::AtomicClock, scheduling::Scheduler};
+use crate::{
+    clock::{local, AtomicClock},
+    scheduling::Scheduler,
+};
 use core::{
     arch::asm,
     num::{NonZeroU32, NonZeroUsize},
+    sync::atomic::{AtomicU32, AtomicU64},
 };
 use libkernel::{
     registers::msr::{Generic, IA32_KERNEL_GS_BASE},
     structures::apic::APIC,
+    Address, Virtual,
 };
 use spin::{Mutex, MutexGuard};
 
@@ -27,46 +32,60 @@ pub enum InterruptVector {
 
 #[repr(usize)]
 pub enum Offset {
-    SelfPtr = 0x0,
-    ID = 0x10,
-    Clock = 0x20,
-    LocalTimerPerMs = 0x30,
-    SchedulerPtr = 0x40,
-    SyscallStackPtr = 0x50,
-    PrivilegeStackPtr = 0x60,
+    ID = 0x100,
+    Clock = 0x110,
+    LocalTimerPerMs = 0x120,
+    SchedulerPtr = 0x130,
+    SyscallStackPtr = 0x140,
+    PrivilegeStackPtr = 0x150,
 }
+
+const BASE_ADDR: Address<Virtual> = unsafe { Address::<Virtual>::new_unsafe(0x773594000000) };
+static BASE_ADDR_SLIDE: AtomicU64 = AtomicU64::new(0);
 
 /// Initializes the core-local state structure.
 ///
 /// SAFETY: This function invariantly assumes it will only be called once.
 pub unsafe fn init() {
-    assert_eq!(
-        IA32_KERNEL_GS_BASE::read(),
-        0,
-        "Local state register has already been configured."
-    );
+    let ptr_base = BASE_ADDR_SLIDE
+        .compare_exchange(
+            0,
+            {
+                let mut rdrand = libkernel::instructions::rdrand().unwrap_or(Ok(0)).unwrap()
+                    // Page-align the random offset.
+                    & !0xFFF;
 
-    let (ptr, size) = libkernel::memory::malloc::get()
-        .alloc(
-            0x1000,
-            // Local state register must be page-aligned.
-            NonZeroUsize::new(0x1000),
+                while rdrand > 512000000000 {
+                    rdrand /= 2;
+                }
+
+                rdrand
+            },
+            core::sync::atomic::Ordering::AcqRel,
+            core::sync::atomic::Ordering::Acquire,
         )
-        .unwrap()
-        .into_parts();
+        .unwrap_unchecked();
 
-    core::ptr::write_bytes(ptr, 0x0, size);
+    let ptr = (BASE_ADDR + (ptr_base as usize)).as_mut_ptr::<u8>();
 
-    let alloc_stack = |page_count| {
-        let (ptr, len) = libkernel::memory::malloc::get()
-            .alloc_pages(page_count)
-            .unwrap()
-            .1
-            .into_parts();
+    ptr.cast::<libkernel::memory::PageManager>().write({
+        let page_manager = libkernel::memory::PageManager::new(
+            &crate::memory::global_mapped_page(),
+            crate::memory::get_frame_manager(),
+            Some(crate::memory::copy_global_pml4()),
+        );
 
-        ptr.add(len)
-    };
+        page_manager.auto_map(&libkernel::memory::Page::from_ptr(ptr), {
+            use libkernel::memory::PageAttributes;
 
+            PageAttributes::PRESENT | PageAttributes::WRITABLE | PageAttributes::NO_EXECUTE
+        });
+        page_manager.write_cr3();
+
+        core::ptr::write_bytes(ptr, 0x0, 0x1000);
+
+        page_manager
+    });
     ptr.cast::<*const u8>().write(ptr);
     ptr.add(Offset::ID as usize)
         .cast::<u32>()
@@ -81,95 +100,12 @@ pub unsafe fn init() {
             scheduler_ptr.write(Mutex::new(Scheduler::new()));
             scheduler_ptr
         });
-    ptr.add(Offset::SyscallStackPtr as usize)
-        .cast::<*const u8>()
-        .write(alloc_stack(2));
-    ptr.add(Offset::PrivilegeStackPtr as usize)
-        .cast::<*const u8>()
-        .write(alloc_stack(2));
-
-    // Convert ptr to 64 bit representation, and write metadata into low bits.
-    IA32_KERNEL_GS_BASE::write(ptr as u64);
-}
-
-/// Enables the core-local state structure.
-#[inline]
-pub unsafe fn enable() {
-    // The `enable()` and `disable()` currently do the exact same thing, but
-    // there may be some validation done in the future, to ensure proper usage
-    // of `swapgs`.
-    x86_64::registers::segmentation::GS::swap()
-}
-
-/// Disables the core-local state structure.
-#[inline]
-pub unsafe fn disable() {
-    x86_64::registers::segmentation::GS::swap()
-}
-
-#[macro_export]
-macro_rules! rdgsval {
-    ($ty:ty, $offset:expr) => {
-        {
-            let val: $ty;
-
-            core::arch::asm!(
-                "mov {}, gs:{}",
-                out(reg) val,
-                const $offset as usize,
-                options(nostack, nomem, preserves_flags)
-            );
-
-            val
-        }
-    };
-
-    ($ty:ty, $offset:expr, $reg_size:ident) => {
-        {
-            let val: $ty;
-
-            core::arch::asm!(
-                concat!("mov {:", stringify!($reg_size), "}, gs:{}"),
-                out(reg) val,
-                const $offset as usize,
-                options(nostack, nomem, preserves_flags)
-            );
-
-            val
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! wrgsval {
-    ($offset:expr, $val:expr) => {
-        core::arch::asm!(
-            "mov gs:{}, {}",
-            const $offset as usize,
-            in(reg) $val,
-            options(nostack, nomem, preserves_flags)
-        );
-    };
-}
-
-#[macro_export]
-macro_rules! gs_ptr {
-    ($ptr_ty:ty, $offset:expr) => {
-        {
-            let ptr: *const $ptr_ty;
-
-            asm!(
-                "mov {0}, gs:{1}",
-                "add {0}, {2}",
-                out(reg) ptr,
-                const Offset::SelfPtr as usize,
-                const $offset as usize,
-                options(nostack, nomem)
-            );
-
-            ptr
-        }
-    };
+    // ptr.add(Offset::SyscallStackPtr as usize)
+    //     .cast::<*const u8>()
+    //     .write(alloc_stack(2));
+    // ptr.add(Offset::PrivilegeStackPtr as usize)
+    //     .cast::<*const u8>()
+    //     .write(alloc_stack(2));
 }
 
 pub fn init_local_apic() {
@@ -200,9 +136,7 @@ pub fn init_local_apic() {
     };
 
     let per_ms = (u32::MAX - per_10ms) / 10;
-    unsafe {
-        wrgsval!(Offset::LocalTimerPerMs, per_ms as u64);
-    }
+    unsafe { get_ptr(Offset::LocalTimerPerMs).cast::<u32>().write(per_ms) };
     trace!("APIT frequency: {}Hz", per_10ms * 100);
 
     // Configure timer vector.
@@ -222,21 +156,33 @@ pub fn init_local_apic() {
     trace!("Core-local APIC configured.");
 }
 
+fn get_ptr(offset: Offset) -> *mut () {
+    unsafe {
+        (BASE_ADDR
+            + ((BASE_ADDR_SLIDE.load(core::sync::atomic::Ordering::Acquire) + (offset as u64))
+                as usize))
+            .as_mut_ptr::<()>()
+    }
+}
+
 /// SAFETY: Caller must ensure kernel `gs` base is swapped in.
 #[inline]
 pub unsafe fn id() -> u32 {
-    rdgsval!(u32, Offset::ID, e)
+    get_ptr(Offset::ID).cast::<u32>().read()
 }
 
 /// SAFETY: Caller must ensure kernel `gs` base is swapped in.
 #[inline]
 pub unsafe fn clock() -> &'static AtomicClock {
-    &*(gs_ptr!(AtomicClock, Offset::Clock))
+    get_ptr(Offset::Clock)
+        .cast::<AtomicClock>()
+        .as_ref()
+        .unwrap()
 }
 
 /// SAFETY: Caller is expected to only reload timer when appropriate.
 pub unsafe fn reload_timer(ms_multiplier: Option<NonZeroU32>) {
-    let per_ms = rdgsval!(u64, Offset::LocalTimerPerMs) as u32;
+    let per_ms = get_ptr(Offset::LocalTimerPerMs).cast::<u32>().read();
 
     assert_ne!(per_ms, 0, "Kernel GS base is likely not swapped in.");
 
@@ -249,7 +195,8 @@ pub unsafe fn reload_timer(ms_multiplier: Option<NonZeroU32>) {
 /// SAFETY: Caller must ensure kernel `gs` base is swapped in.
 #[inline]
 pub unsafe fn lock_scheduler() -> Option<MutexGuard<'static, Scheduler>> {
-    rdgsval!(*const Mutex<Scheduler>, Offset::SchedulerPtr)
+    get_ptr(Offset::SchedulerPtr)
+        .cast::<Mutex<Scheduler>>()
         .as_ref()
         .map(|scheduler| scheduler.lock())
 }
@@ -257,7 +204,8 @@ pub unsafe fn lock_scheduler() -> Option<MutexGuard<'static, Scheduler>> {
 /// SAFETY: Caller must ensure kernel `gs` base is swapped in.
 #[inline]
 pub unsafe fn try_lock_scheduler() -> Option<MutexGuard<'static, Scheduler>> {
-    rdgsval!(*const Mutex<Scheduler>, Offset::SchedulerPtr)
+    get_ptr(Offset::SchedulerPtr)
+        .cast::<Mutex<Scheduler>>()
         .as_ref()
         .and_then(|scheduler| scheduler.try_lock())
 }

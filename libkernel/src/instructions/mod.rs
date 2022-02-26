@@ -51,13 +51,21 @@ pub fn rdrand() -> Option<Result<u64, ()>> {
         // In the case of a hard failure for random number generation, a retry limit is employed
         // to stop software from entering a busy loop due to bad `rdrand` values.
         for _ in 0..22 {
-            let mut result: u64;
+            let result: u64;
+            let rflags: u64;
 
             unsafe {
                 asm!(
-                    "rdrand {}",
+                    "
+                    pushfq      # Save original `rflags`
+                    rdrand {}
+                    pushfq      # Save `rdrand` `rflags`
+                    pop {}      # Pop `rflags` into local variable
+                    popfq       # Restore original `rflags`
+                    ",
                     out(reg) result,
-                    options(nostack, nomem)
+                    out(reg) rflags,
+                    options(pure, nomem, preserves_flags)
                 );
             }
 
@@ -65,9 +73,8 @@ pub fn rdrand() -> Option<Result<u64, ()>> {
             // bad data in the destination register. If this is the case—and additionally if demand for random
             // number generation is too high—the CF bit in `rflags` will not be set, and in the latter case (troughput),
             // zero will be returned in the destination register.
-            if result > 0
-                && crate::registers::RFlags::read().contains(crate::registers::RFlags::CARRY_FLAG)
-            {
+            use crate::registers::RFlags;
+            if result > 0 && RFlags::from_bits_truncate(rflags).contains(RFlags::CARRY_FLAG) {
                 return Some(Ok(result));
             } else {
                 pause();

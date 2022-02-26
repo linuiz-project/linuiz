@@ -1,7 +1,5 @@
-use core::{
-    sync::atomic::{AtomicU32, Ordering},
-};
 use crate::{memory::uefi, Address, Virtual};
+use core::sync::atomic::{AtomicU32, Ordering};
 use num_enum::TryFromPrimitive;
 use spin::RwLock;
 
@@ -441,7 +439,7 @@ impl<'arr> FrameManager<'arr> {
         )
     }
 
-    pub fn iter<'outer>(&'arr self) -> FrameIterator<'outer, 'arr> {
+    pub fn iter(&'arr self) -> FrameIterator<'arr> {
         FrameIterator {
             map: &self.map,
             cur_index: 0,
@@ -449,12 +447,12 @@ impl<'arr> FrameManager<'arr> {
     }
 }
 
-pub struct FrameIterator<'lock, 'arr> {
-    map: &'lock RwLock<&'arr mut [Frame]>,
+pub struct FrameIterator<'arr> {
+    map: &'arr RwLock<&'arr mut [Frame]>,
     cur_index: usize,
 }
 
-impl Iterator for FrameIterator<'_, '_> {
+impl Iterator for FrameIterator<'_> {
     type Item = (FrameType, u32, bool);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -474,4 +472,4 @@ impl Iterator for FrameIterator<'_, '_> {
     }
 }
 
-impl ExactSizeIterator for FrameIterator<'_, '_> {}
+impl ExactSizeIterator for FrameIterator<'_> {}

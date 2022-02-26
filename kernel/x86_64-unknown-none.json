@@ -15,6 +15,7 @@
       "./ap_trampoline.o"
     ]
   },
+  "eh-frame-header": false,
   "panic-strategy": "abort",
   "disable-redzone": true,
   "relocation-model": "static",

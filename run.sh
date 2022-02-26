@@ -3,7 +3,7 @@
 qemu-system-x86_64 \
     -no-reboot \
     -machine q35 \
-    -cpu Westmere \
+    -cpu max \
     -smp 2 \
     -m 64M \
     -serial mon:stdio \

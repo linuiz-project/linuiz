@@ -144,6 +144,10 @@ impl<'map> SLOB<'map> {
         // Required page count of our map.
         let req_map_pages = libkernel::align_up_div(req_map_len * size_of::<BlockPage>(), 0x1000);
 
+        if (req_map_len * 0x1000) >= 0x773594000000 {
+            panic!("Out of memory!");
+        }
+
         trace!(
             "Growth parameters: len {} => {}, pages {} => {}",
             cur_map_len,
@@ -195,7 +199,7 @@ impl<'map> SLOB<'map> {
         for page_offset in cur_map_pages..req_map_pages {
             let mut new_page = new_map_page.forward_checked(page_offset).unwrap();
 
-            PAGE_MANAGER.auto_map(&new_page, PageAttributes::DATA, get_frame_manager());
+            PAGE_MANAGER.auto_map(&new_page, PageAttributes::DATA);
             // Clear the newly allocated map page.
             unsafe { new_page.mem_clear() };
         }
@@ -295,11 +299,7 @@ impl MemoryAllocator for SLOB<'_> {
             block_index += remaining_blocks_in_slice;
 
             if was_empty {
-                PAGE_MANAGER.auto_map(
-                    &Page::from_index(map_index),
-                    PageAttributes::DATA,
-                    get_frame_manager(),
-                );
+                PAGE_MANAGER.auto_map(&Page::from_index(map_index), PageAttributes::DATA);
             }
         }
 

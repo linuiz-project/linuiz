@@ -26,21 +26,7 @@ impl VirtualMapper {
     /// SAFETY: This method is unsafe because `mapped_page` can be any value; that is, not necessarily
     ///         a valid address in which physical memory is already mapped. The expectation is that `mapped_page`
     ///         is a proper starting page for the current physical memory mapping.
-    pub unsafe fn new(mapped_page: &Page, frame_manager: &FrameManager) -> Self {
-        let pml4_index = frame_manager
-            .lock_next()
-            .expect("Failed to lock frame for virtual addressor's PML4");
-
-        // Clear PML4 frame.
-        core::ptr::write_bytes(
-            mapped_page
-                .forward_checked(pml4_index)
-                .unwrap()
-                .as_mut_ptr::<u8>(),
-            0,
-            0x1000,
-        );
-
+    pub unsafe fn new(mapped_page: &Page, pml4_index: usize) -> Self {
         Self {
             // We don't know where physical memory is mapped at this point,
             // so rely on what the caller specifies for us.
@@ -131,6 +117,7 @@ impl VirtualMapper {
         crate::registers::control::CR3::read().0.frame_index() == self.pml4_frame
     }
 
+    #[inline(always)]
     pub unsafe fn write_cr3(&self) {
         crate::registers::control::CR3::write(
             Address::<Physical>::new(self.pml4_frame * 0x1000),
@@ -161,12 +148,44 @@ pub struct PageManager {
     virtual_mapper: spin::RwLock<VirtualMapper>,
 }
 
+unsafe impl Send for PageManager {}
+unsafe impl Sync for PageManager {}
+
 impl PageManager {
     /// SAFETY: Refer to `VirtualMapper::new()`.
-    pub unsafe fn new(mapped_page: &Page, frame_manager: &'static FrameManager) -> Self {
+    pub unsafe fn new(
+        mapped_page: &Page,
+        frame_manager: &'static FrameManager,
+        pml4: Option<PageTable<Level4>>,
+    ) -> Self {
         Self {
             frame_manager,
-            virtual_mapper: spin::RwLock::new(VirtualMapper::new(mapped_page, frame_manager)),
+            virtual_mapper: spin::RwLock::new({
+                let pml4_index = frame_manager
+                    .lock_next()
+                    .expect("Failed to lock frame for virtual addressor's PML4");
+
+                if let Some(pml4) = pml4 {
+                    // Write existing PML4.
+                    mapped_page
+                        .forward_checked(pml4_index)
+                        .unwrap()
+                        .as_mut_ptr::<PageTable<Level4>>()
+                        .write(pml4);
+                } else {
+                    // Clear PML4 frame.
+                    core::ptr::write_bytes(
+                        mapped_page
+                            .forward_checked(pml4_index)
+                            .unwrap()
+                            .as_mut_ptr::<u8>(),
+                        0,
+                        0x1000,
+                    );
+                }
+
+                VirtualMapper::new(mapped_page, pml4_index)
+            }),
         }
     }
 
@@ -318,11 +337,23 @@ impl PageManager {
             .modify_mapped_page(page, self.frame_manager);
     }
 
-    pub fn mapped_addr(&self) -> Address<Virtual> {
-        self.virtual_mapper.read().mapped_page.base_addr()
+    pub fn mapped_page(&self) -> Page {
+        self.virtual_mapper.read().mapped_page
     }
 
     pub unsafe fn write_cr3(&self) {
         self.virtual_mapper.read().write_cr3();
+    }
+
+    pub fn copy_pml4(&self) -> PageTable<Level4> {
+        let vmap = self.virtual_mapper.read();
+
+        unsafe {
+            vmap.mapped_page
+                .forward_checked(vmap.pml4_frame)
+                .unwrap()
+                .as_ptr::<PageTable<Level4>>()
+                .read()
+        }
     }
 }

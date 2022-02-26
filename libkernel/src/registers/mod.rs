@@ -70,14 +70,14 @@ pub mod stack {
     impl RSP {
         #[inline(always)]
         pub unsafe fn write(ptr: *mut ()) {
-            core::arch::asm!("mov rsp, {}", in(reg) ptr, options(nomem));
+            core::arch::asm!("mov rsp, {}", in(reg) ptr, options(nostack, nomem, preserves_flags));
         }
 
         #[inline(always)]
         pub fn read() -> *const () {
             let ptr: *const ();
             unsafe {
-                core::arch::asm!("mov {}, rsp", out(reg) ptr, options(nomem, nostack));
+                core::arch::asm!("mov {}, rsp", out(reg) ptr, options(pure, nomem));
                 ptr
             }
         }

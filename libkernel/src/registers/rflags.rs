@@ -3,7 +3,7 @@ use bitflags::bitflags;
 bitflags! {
     #[repr(transparent)]
     pub struct RFlags: u64 {
-        /// Set by hardware if the last arithmetic operation generated a carry out of the mos-significant
+        /// Set by hardware if the last arithmetic operation generated a carry out of the most-significant
         /// bit of the result.
         const CARRY_FLAG = 1 << 0;
         /// Set by hardware if the last result has an even number of 1 bits (only for some operations).
@@ -77,7 +77,7 @@ impl RFlags {
                 "pushf",
                 "pop {}",
                 out(reg) result,
-                options(nostack, nomem, preserves_flags)
+                options(pure, nomem, preserves_flags)
             );
         }
 

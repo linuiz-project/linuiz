@@ -25,7 +25,6 @@ mod local_state;
 mod logging;
 mod memory;
 mod scheduling;
-mod slob;
 mod syscall;
 mod tables;
 
@@ -52,35 +51,13 @@ impl Devices<'_> {
     }
 }
 
-lazy_static::lazy_static! {
-    pub static ref PCIE_DEVICES: Devices<'static> =
-        Devices(
-            libkernel::io::pci::get_pcie_devices(memory::get_frame_manager(), &*crate::memory::PAGE_MANAGER, &*crate::memory::KMALLOC).collect(),
-            &core::marker::PhantomData
-        );
-}
-
-const LOCAL_STATE_PTR: *const () = 0x773594000000 as *const ();
-
-/// Clears the kernel stack by resetting `RSP`.
-///
-/// SAFETY: This method does *extreme* damage to the stack. It should only ever be used when
-///         ABSOLUTELY NO dangling references to the old stack will exist (i.e. calling a
-///         no-argument non-returning function directly after).
-macro_rules! reset_bsp_stack_ptr {
-    () => {
-        assert!(
-            libkernel::cpu::is_bsp(),
-            "Cannot clear AP stack pointers to BSP stack top."
-        );
-
-        // TODO implement shadow stacks (?) and research them
-
-        libkernel::registers::stack::RSP::write(__bsp_stack.as_mut_ptr());
-        // Serializing instruction to clear pipeline of any dangling references (and order all instructions before / after).
-        libkernel::instructions::cpuid::exec(0x0, 0x0).unwrap();
-    };
-}
+// lazy_static::lazy_static! {
+//     pub static ref PCIE_DEVICES: Devices<'static> =
+//         Devices(
+//             libkernel::io::pci::get_pcie_devices(memory::get_frame_manager(), &*crate::memory::PAGE_MANAGER, &*crate::memory::KMALLOC).collect(),
+//             &core::marker::PhantomData
+//         );
+// }
 
 #[no_mangle]
 unsafe extern "efiapi" fn _entry(
@@ -88,9 +65,6 @@ unsafe extern "efiapi" fn _entry(
 ) -> ! {
     /* PRE-INIT (no environment prepared) */
     boot_info.validate_magic();
-    // if let Err(_) = libkernel::BOOT_INFO.set(boot_info) {
-    //     panic!("`BOOT_INFO` already set.");
-    // }
 
     /* INIT STDOUT */
     CON_OUT.init(drivers::stdout::SerialSpeed::S115200);
@@ -112,20 +86,19 @@ unsafe extern "efiapi" fn _entry(
     // TODO possibly move ACPI structure instances out of libkernel?
     libkernel::acpi::set_system_config_table(boot_info.config_table());
 
+    // Init global memory state.
+    memory::init_frame_manager(&boot_info.memory_map());
+    memory::init_paging(&boot_info.memory_map());
+
     // Update to kernel stack, jump to `_startup` with `boot_info` as a parameter.
     core::arch::asm!(
-        "
-        lea rsp, {}
-        jmp {}
-        ",
+        "lea rsp, {}",
         sym __bsp_stack,
-        sym _startup,
-        in("rcx") &raw const boot_info,
-        options(nomem, noreturn)
+        options(nostack, nomem, preserves_flags)
     );
+    _startup()
 }
 
-/// This method assumes the `gs` segment has a valid base for kernel local state.
 unsafe fn wake_aps() {
     use libkernel::acpi::rdsp::xsdt::{
         madt::{InterruptDevice, MADT},
@@ -173,13 +146,9 @@ unsafe fn wake_aps() {
 
 #[no_mangle]
 #[inline(never)]
-unsafe extern "win64" fn _startup(
-    boot_info: &BootInfo<uefi::MemoryDescriptor, SystemConfigTableEntry>,
-) -> ! {
-    // Re-validate magic to ensure boot info is still valid.
-    boot_info.validate_magic();
-
+unsafe extern "C" fn _startup() -> ! {
     use libkernel::cpu::is_bsp;
+
     /* LOAD REGISTERS */
     {
         use libkernel::cpu::{has_feature, Feature};
@@ -240,27 +209,11 @@ unsafe extern "win64" fn _startup(
         crate::tables::idt::load();
     }
 
-    /* INIT MEMORY */
-    if is_bsp() {
-        use libkernel::{
-            memory::{
-                malloc, AttributeModify, FrameError, FrameType, Page, PageAttributes, PageManager,
-            },
-            registers::msr::IA32_APIC_BASE,
-        };
-
-        memory::init_frame_manager(&boot_info.memory_map());
-        memory::init_paging(&boot_info.memory_map(), &*memory::PAGE_MANAGER);
-        memory::PAGE_MANAGER.auto_map(
-            &Page::from_ptr(LOCAL_STATE_PTR),
-            PageAttributes::PRESENT | PageAttributes::WRITABLE | PageAttributes::NO_EXECUTE,
-        );
-    }
-
-    loop {}
+    memory::write_global_cr3();
 
     local_state::init();
-    local_state::enable();
+
+    loop {}
 
     if is_bsp() {
         clock::global::start();
@@ -282,8 +235,8 @@ unsafe extern "win64" fn _startup(
             use crate::local_state::Offset;
             use x86_64::VirtAddr;
 
-            (&mut *tss_ptr).privilege_stack_table[0] =
-                VirtAddr::from_ptr(crate::rdgsval!(*const (), Offset::PrivilegeStackPtr));
+            // (&mut *tss_ptr).privilege_stack_table[0] =
+            //     VirtAddr::from_ptr(crate::rdgsval!(*const (), Offset::PrivilegeStackPtr));
         }
 
         let tss_descriptor = {
@@ -368,23 +321,24 @@ fn alloc_stack(pages: usize, is_userspace: bool) -> *mut () {
         {
             use libkernel::memory::{AttributeModify, Page, PageAttributes};
 
-            for page in Page::range(
-                (stack_bottom as usize) / 0x1000,
-                (stack_top as usize) / 0x1000,
-            ) {
-                memory::PAGE_MANAGER.set_page_attribs(
-                    &page,
-                    PageAttributes::PRESENT
-                        | PageAttributes::WRITABLE
-                        | PageAttributes::NO_EXECUTE
-                        | if is_userspace {
-                            PageAttributes::USERSPACE
-                        } else {
-                            PageAttributes::empty()
-                        },
-                    AttributeModify::Set,
-                );
-            }
+            // TODO
+            // for page in Page::range(
+            //     (stack_bottom as usize) / 0x1000,
+            //     (stack_top as usize) / 0x1000,
+            // ) {
+            //     memory::PAGE_MANAGER.set_page_attribs(
+            //         &page,
+            //         PageAttributes::PRESENT
+            //             | PageAttributes::WRITABLE
+            //             | PageAttributes::NO_EXECUTE
+            //             | if is_userspace {
+            //                 PageAttributes::USERSPACE
+            //             } else {
+            //                 PageAttributes::empty()
+            //             },
+            //         AttributeModify::Set,
+            //     );
+            // }
         }
 
         stack_top as *mut ()
