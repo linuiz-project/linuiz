@@ -103,9 +103,9 @@ impl Drop for MMIO {
         // the frames were locked MMIO in error.
 
         unsafe {
-            crate::memory::malloc::get().dealloc(
+            alloc::alloc::dealloc(
                 self.ptr,
-                core::alloc::Layout::from_size_align(self.len, 1).unwrap(),
+                core::alloc::Layout::from_size_align(self.len, 0x1000).unwrap(),
             )
         };
     }
