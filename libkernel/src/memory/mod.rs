@@ -13,31 +13,85 @@ pub mod volatile;
 
 #[cfg(feature = "global_allocator")]
 mod global_alloc {
-    struct DefaultAllocatorProxy;
+    use core::{
+        cell::{Cell, RefCell},
+        lazy::OnceCell,
+    };
 
-    impl DefaultAllocatorProxy {
+    use super::MemoryAllocator;
+    use crate::cell::SyncCell;
+
+    struct GlobalAllocator<'m>(OnceCell<&'m dyn MemoryAllocator>);
+
+    impl GlobalAllocator {
         pub const fn new() -> Self {
-            Self
+            Self(OnceCell::new())
         }
     }
 
-    unsafe impl core::alloc::GlobalAlloc for DefaultAllocatorProxy {
+    unsafe impl GlobalAlloc for GlobalAllocator {
         unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
-            match super::malloc::get()
+            (*self)
                 .alloc(layout.size(), core::num::NonZeroUsize::new(layout.align()))
-            {
-                Ok(alloc) => alloc.into_parts().0 as *mut _,
-                Err(_) => core::ptr::null_mut(),
-            }
+                .unwrap()
+                .into_parts()
+                .0
         }
 
         unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
-            super::malloc::get().dealloc(ptr, layout);
+            (*self).dealloc(ptr, layout);
+        }
+    }
+
+    impl core::ops::Deref for GlobalAllocator {
+        type Target = dyn MemoryAllocator;
+
+        fn deref(&self) -> &Self::Target {
+            self.0.get().expect("no global allocator")
         }
     }
 
     #[global_allocator]
-    static GLOBAL_ALLOCATOR: DefaultAllocatorProxy = DefaultAllocatorProxy::new();
+    static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator::new();
+
+    pub unsafe fn set(malloc: &'static dyn MemoryAllocator) {
+        GLOBAL_ALLOCATOR
+            .0
+            .set(malloc)
+            .expect("mallocator already set");
+    }
+
+    pub(super) unsafe fn get() -> &'static GlobalAllocator {
+        &GLOBAL_ALLOCATOR
+    }
+}
+
+fn alloc(
+    &self,
+    size: usize,
+    align: Option<core::num::NonZeroUsize>,
+) -> Result<SafePtr<u8>, AllocError> {
+    unsafe { global_alloc::get() }.alloc(size, align)
+}
+
+fn alloc_pages(&self, count: usize) -> Result<(Address<Physical>, SafePtr<u8>), AllocError> {
+    unsafe { global_alloc::get() }.alloc_pages(count)
+}
+
+fn alloc_against(&self, frame_index: usize, count: usize) -> Result<SafePtr<u8>, AllocError> {
+    unsafe { global_alloc::get() }.alloc_against(frame_index, count)
+}
+
+fn alloc_identity(&self, frame_index: usize, count: usize) -> Result<SafePtr<u8>, AllocError> {
+    unsafe { global_alloc::get() }.alloc_identity(frame_index, count)
+}
+
+unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+    unsafe { global_alloc::get() }.dealloc(ptr, layout);
+}
+
+fn get_page_state(&self, page_index: usize) -> Option<bool> {
+    unsafe { global_alloc::get() }.get_page_state(page_index)
 }
 
 pub const KIBIBYTE: usize = 0x400; // 1024
@@ -69,27 +123,39 @@ macro_rules! alloc_to {
     };
 }
 
-#[macro_export]
-macro_rules! alloc_obj {
-    () => {
-        $crate::memory::alloc_obj()
-    };
-    ($ty:ty) => {
-        $crate::memory::alloc_obj::<$ty>()
-    };
+pub trait MemoryAllocator {
+    fn alloc(
+        &self,
+        size: usize,
+        align: Option<core::num::NonZeroUsize>,
+    ) -> Result<SafePtr<u8>, AllocError>;
+
+    fn alloc_pages(&self, count: usize) -> Result<(Address<Physical>, SafePtr<u8>), AllocError>;
+
+    fn alloc_against(&self, frame_index: usize, count: usize) -> Result<SafePtr<u8>, AllocError>;
+
+    /// Attempts to allocate a 1:1 mapping of virtual memory to its physical memory.
+    ///
+    /// REMARK:
+    ///     This function is required only to offer the same guarantees as `VirtualAddressor::identity_map()`.
+    fn alloc_identity(&self, frame_index: usize, count: usize) -> Result<SafePtr<u8>, AllocError>;
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout);
+
+    // Returns the page state of the given page index.
+    // Option is whether it is mapped
+    // `bool` is whether it is allocated to
+    fn get_page_state(&self, page_index: usize) -> Option<bool>;
 }
 
-pub fn alloc_obj<T>() -> *mut T {
-    crate::memory::malloc::get()
-        .alloc(
-            core::mem::size_of::<T>(),
-            core::num::NonZeroUsize::new(core::mem::align_of::<T>()),
-        )
-        .unwrap()
-        .cast::<T>()
-        .unwrap()
-        .into_parts()
-        .0
+impl core::alloc::Allocator for MemoryAllocator {
+    fn allocate(&self, layout: core::alloc::Layout) -> Result<core::ptr::NonNull<[u8]>, core::alloc::AllocError> {
+        self.alloc(layout.size(), )
+    }
+
+    unsafe fn deallocate(&self, ptr: core::ptr::NonNull<u8>, layout: core::alloc::Layout) {
+        todo!()
+    }
 }
 
 pub struct MMIO {

@@ -2,6 +2,7 @@ use crate::{
     clock::{local, AtomicClock},
     scheduling::Scheduler,
 };
+use alloc::boxed::Box;
 use core::{
     arch::asm,
     num::{NonZeroU32, NonZeroUsize},
@@ -47,7 +48,7 @@ static BASE_ADDR_SLIDE: AtomicU64 = AtomicU64::new(0);
 ///
 /// SAFETY: This function invariantly assumes it will only be called once.
 pub unsafe fn init() {
-    let ptr_base = BASE_ADDR_SLIDE
+    let ptr_slide = BASE_ADDR_SLIDE
         .compare_exchange(
             0,
             {
@@ -66,7 +67,7 @@ pub unsafe fn init() {
         )
         .unwrap_unchecked();
 
-    let ptr = (BASE_ADDR + (ptr_base as usize)).as_mut_ptr::<u8>();
+    let ptr = (BASE_ADDR + (ptr_slide as usize)).as_mut_ptr::<u8>();
 
     ptr.cast::<libkernel::memory::PageManager>().write({
         let page_manager = libkernel::memory::PageManager::new(
@@ -96,8 +97,8 @@ pub unsafe fn init() {
     ptr.add(Offset::SchedulerPtr as usize)
         .cast::<*const Mutex<Scheduler>>()
         .write({
-            let scheduler_ptr = libkernel::alloc_obj!(Mutex<Scheduler>);
-            scheduler_ptr.write(Mutex::new(Scheduler::new()));
+            let scheduler_ptr = Box::leak(Box::new_in(Mutex::new(Scheduler::new()))) as *mut _;
+            scheduler_ptr.write();
             scheduler_ptr
         });
     // ptr.add(Offset::SyscallStackPtr as usize)
