@@ -55,8 +55,6 @@ update:
 $(bootloader): $(bootloader_deps) $(bootloader_cfg)
 	cd ./limine/ && make
 	cp ./limine/bin/BOOTX64.EFI ./.hdd/image/EFI/BOOT/
-
-$(bootloader_cfg): ./limine.cfg
 	cp ./limine.cfg $(bootloader_cfg)
 
 $(ap_trampoline_out): $(ap_trampoline_src)
