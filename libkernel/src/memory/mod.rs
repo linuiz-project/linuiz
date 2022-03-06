@@ -53,6 +53,9 @@ pub mod global_alloc {
 
 use crate::cell::SyncOnceCell;
 
+pub const PHYS_MEM_START: crate::Address<crate::Virtual> =
+    crate::Address::<crate::Virtual>::new(0x800000000000);
+
 static FRAME_MANAGER: SyncOnceCell<FrameManager> = SyncOnceCell::new();
 static PAGE_MANAGER: SyncOnceCell<PageManager> = SyncOnceCell::new();
 
@@ -169,9 +172,9 @@ pub fn finalize_paging() {
 
         debug!(
             "Physical memory offset: @{:?}",
-            frame_manager.phys_mem_offset()
+            crate::memory::PHYS_MEM_START
         );
-        page_manager.modify_mapped_page(Page::from_addr(frame_manager.phys_mem_offset()));
+        page_manager.modify_mapped_page(Page::from_addr(crate::memory::PHYS_MEM_START));
         debug!("Writing baseline kernel PML4 to CR3.");
         page_manager.write_cr3();
         debug!("Successfully wrote to CR3.");
@@ -262,10 +265,7 @@ impl MMIO {
         }
 
         let page_manager = global_pgmr();
-        let ptr = frame_manager
-            .phys_mem_offset()
-            .as_mut_ptr::<u8>()
-            .add(frame_index * 0x1000) as *mut u8;
+        let ptr = (crate::memory::PHYS_MEM_START + (frame_index * 0x1000)).as_mut_ptr::<u8>();
 
         for offset in 0..count {
             page_manager.set_page_attribs(

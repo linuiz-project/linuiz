@@ -51,6 +51,8 @@ extern "C" {
     static __data_end: LinkerSymbol;
 
     static __bss_start: LinkerSymbol;
+    pub static __local_state_start: LinkerSymbol;
+    static __local_state_end: LinkerSymbol;
     static __bss_end: LinkerSymbol;
 
     static __user_code_start: LinkerSymbol;

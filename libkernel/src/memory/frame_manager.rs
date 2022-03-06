@@ -249,10 +249,6 @@ impl<'arr> FrameManager<'arr> {
         falloc
     }
 
-    pub fn phys_mem_offset(&self) -> Address<Virtual> {
-        Address::<Virtual>::new(crate::VADDR_HW_MAX - self.total_memory())
-    }
-
     pub fn lock(&self, index: usize) -> Result<usize, FrameError> {
         if let Some(frame) = self.map.read().get(index) {
             frame.peek();

@@ -40,7 +40,7 @@ pub enum Offset {
     PrivilegeStackPtr = 0x150,
 }
 
-const BASE_ADDR: Address<Virtual> = unsafe { Address::<Virtual>::new_unsafe(0x773594000000) };
+const BASE_ADDR: Address<Virtual> = unsafe { Address::<Virtual>::new_unsafe(0x808000000000) };
 static BASE_ADDR_SLIDE: AtomicU64 = AtomicU64::new(0);
 
 /// Initializes the core-local state structure.

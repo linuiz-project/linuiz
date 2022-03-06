@@ -12,14 +12,10 @@ PHDRS {
 
 SECTIONS
 {
-    /* Place kernel inside the 257th PML4 entry. */
-    . = 0x101000000000000;
+    /* Place kernel in the last 2GB of virtual memory. */
+    . = 0xffffffff80200000;
 
-    .stive2hdr : {
-        KEEP(*(.stivale2hdr))
-    } : rodata
-
-    .text : ALIGN(0x1000) {
+    .text : AT(0x200000) {
         __text_start = .;
 
         __ap_text_start = .;
@@ -35,6 +31,8 @@ SECTIONS
         __rodata_start = .;
 
         *(.rodata.* .rodata)
+
+        *(.stivale2hdr)
 
         __rodata_end = .;
     } : rodata
@@ -53,6 +51,12 @@ SECTIONS
 
     .bss : ALIGN(0x1000) {
         __bss_start = .;
+
+        /* Make sure local state is page-aligned. */
+        . = ALIGN(0x1000);  
+        __local_state_start = .;
+        . += 0x1000;
+        __local_state_end = .;
 
         *(.bss.* .bss)
 
