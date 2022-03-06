@@ -5,7 +5,7 @@ qemu-system-x86_64 \
     -machine q35 \
     -cpu max \
     -smp 2 \
-    -m 64M \
+    -m 8G \
     -serial mon:stdio \
     -net none \
     -bios ./resources/ovmf.fd \

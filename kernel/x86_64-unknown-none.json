@@ -10,8 +10,7 @@
   "pre-link-args": {
     "gcc": [
       "-T/home/semiv/git/gsai_os/kernel/x86_64-unknown-none.lds",
-      "./ap_trampoline.o",
-      "-fPIE"
+      "./ap_trampoline.o"
     ]
   },
   "eh-frame-header": false,

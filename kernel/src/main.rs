@@ -62,6 +62,9 @@ extern "C" {
 
 static mut BSP_STACK: [u8; 0x4000] = [0u8; 0x4000];
 
+#[used]
+#[no_mangle]
+#[link_section = ".stivale2hdr"]
 static STIVALE_HEADER: stivale::StivaleHeader =
     stivale::StivaleHeader::new(unsafe { BSP_STACK.as_ptr().add(BSP_STACK.len()) });
 

@@ -29,7 +29,7 @@ debug = .debug
 
 all: $(nvme_img) $(rootfs_img) $(bootloader) $(kernel)
 	mkdir -p .debug
-	objdump -d -D .hdd/image/EFI/gsai/kernel.elf > .debug/kernel_disasm
+	objdump -d -D .hdd/image/gsai/kernel.elf > .debug/kernel_disasm
 
 run: all $(debug)
 	./run.sh

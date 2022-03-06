@@ -21,3 +21,9 @@ default = ["panic_handler", "alloc_error_handler"]
 panic_handler = []
 alloc_error_handler = []
 global_allocator = []
+
+[profile.dev]
+opt-level = 0
+
+[profile.release]
+opt-level = "s"
