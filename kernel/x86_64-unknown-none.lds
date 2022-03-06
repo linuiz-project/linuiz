@@ -12,7 +12,7 @@ PHDRS {
 
 SECTIONS
 {
-    /* Place kernel around inside the 257th L4 PML4 entry. */
+    /* Place kernel inside the 257th PML4 entry. */
     . = 0x101000000000000;
 
     .stive2hdr : {
