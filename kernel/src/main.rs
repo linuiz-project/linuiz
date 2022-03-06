@@ -23,8 +23,8 @@ mod clock;
 mod drivers;
 mod local_state;
 mod logging;
-mod memory;
 mod scheduling;
+mod slob;
 mod syscall;
 mod tables;
 
@@ -32,13 +32,39 @@ use alloc::vec::Vec;
 use libkernel::{acpi::SystemConfigTableEntry, memory::uefi, BootInfo, LinkerSymbol};
 
 extern "C" {
+    static __kernel_pml4: LinkerSymbol;
+
+    static __ap_text_start: LinkerSymbol;
+    static __ap_text_end: LinkerSymbol;
+
+    static __ap_data_start: LinkerSymbol;
+    static __ap_data_end: LinkerSymbol;
+
+    static __text_start: LinkerSymbol;
+    static __text_end: LinkerSymbol;
+
+    static __rodata_start: LinkerSymbol;
+    static __rodata_end: LinkerSymbol;
+
+    static __data_start: LinkerSymbol;
+    static __data_end: LinkerSymbol;
+
+    static __bss_start: LinkerSymbol;
     static __bsp_stack: LinkerSymbol;
+    static __bss_end: LinkerSymbol;
+
+    static __user_code_start: LinkerSymbol;
+    static __user_code_end: LinkerSymbol;
+
 }
 
 static mut CON_OUT: drivers::stdout::Serial = drivers::stdout::Serial::new(drivers::stdout::COM1);
-
 #[export_name = "__ap_stack_pointers"]
 static mut AP_STACK_POINTERS: [*const (); 256] = [core::ptr::null(); 256];
+
+lazy_static::lazy_static! {
+    pub static ref KMALLOC: slob::SLOB<'static> = slob::SLOB::new();
+}
 
 use libkernel::io::pci;
 pub struct Devices<'a>(Vec<pci::DeviceVariant>, &'a core::marker::PhantomData<()>);
@@ -86,9 +112,8 @@ unsafe extern "efiapi" fn _entry(
     // TODO possibly move ACPI structure instances out of libkernel?
     libkernel::acpi::set_system_config_table(boot_info.config_table());
 
-    // Init global memory state.
-    memory::init_frame_manager(&boot_info.memory_map());
-    memory::init_paging(&boot_info.memory_map());
+    // Initialize global memory state.
+    init_memory(boot_info.memory_map());
 
     // Update to kernel stack, jump to `_startup` with `boot_info` as a parameter.
     core::arch::asm!(
@@ -99,49 +124,99 @@ unsafe extern "efiapi" fn _entry(
     _startup()
 }
 
-unsafe fn wake_aps() {
-    use libkernel::acpi::rdsp::xsdt::{
-        madt::{InterruptDevice, MADT},
-        XSDT,
+unsafe fn init_memory(memory_map: &[libkernel::memory::uefi::MemoryDescriptor]) {
+    use libkernel::{align_down_div, align_up_div, memory::Page};
+
+    libkernel::memory::init(memory_map);
+
+    debug!("Global mapping kernel ELF sections.");
+    let kernel_text = unsafe {
+        Page::range(
+            align_down_div(__text_start.as_usize(), 0x1000),
+            align_up_div(__text_end.as_usize(), 0x1000),
+        )
     };
 
-    let lapic_id = libkernel::cpu::get_id() as u8 /* possibly don't cast to u8? */;
-    let icr = libkernel::structures::apic::APIC::interrupt_command_register();
-    let ap_text_page_index = (memory::__ap_text_start.as_usize() / 0x1000) as u8;
+    let kernel_rodata = unsafe {
+        Page::range(
+            align_down_div(__rodata_start.as_usize(), 0x1000),
+            align_up_div(__rodata_end.as_usize(), 0x1000),
+        )
+    };
 
-    if let Some(madt) = XSDT.find_sub_table::<MADT>() {
-        info!("Beginning wake-up sequence for enabled processors.");
-        for interrupt_device in madt.iter() {
-            // Filter out non-lapic devices.
-            if let InterruptDevice::LocalAPIC(ap_lapic) = interrupt_device {
-                use libkernel::acpi::rdsp::xsdt::madt::LocalAPICFlags;
-                // Filter out invalid lapic devices.
-                if lapic_id != ap_lapic.id()
-                    && ap_lapic.flags().intersects(
-                        LocalAPICFlags::PROCESSOR_ENABLED | LocalAPICFlags::ONLINE_CAPABLE,
-                    )
-                {
-                    debug!("Waking core ID {}.", ap_lapic.id());
+    let kernel_data = unsafe {
+        Page::range(
+            align_down_div(__data_start.as_usize(), 0x1000),
+            align_up_div(__data_end.as_usize(), 0x1000),
+        )
+    };
 
-                    AP_STACK_POINTERS[ap_lapic.id() as usize] = alloc_stack(2, false);
+    let kernel_bss = unsafe {
+        Page::range(
+            align_down_div(__bss_start.as_usize(), 0x1000),
+            align_up_div(__bss_end.as_usize(), 0x1000),
+        )
+    };
 
-                    info!("{:?}", AP_STACK_POINTERS[ap_lapic.id() as usize]);
+    let ap_text = unsafe {
+        Page::range(
+            align_down_div(__ap_text_start.as_usize(), 0x1000),
+            align_up_div(__ap_text_end.as_usize(), 0x1000),
+        )
+    };
 
-                    // Reset target processor.
-                    trace!("Sending INIT interrupt to: {}", ap_lapic.id());
-                    icr.send_init(ap_lapic.id());
-                    icr.wait_pending();
-                    // REMARK: IA32 spec indicates that doing this twice, as so, ensures the interrupt is received.
-                    trace!("Sending SIPI x1 interrupt to: {}", ap_lapic.id());
-                    icr.send_sipi(ap_text_page_index, ap_lapic.id());
-                    icr.wait_pending();
-                    trace!("Sending SIPI x2 interrupt to: {}", ap_lapic.id());
-                    icr.send_sipi(ap_text_page_index, ap_lapic.id());
-                    icr.wait_pending();
-                }
-            }
-        }
+    let ap_data = unsafe {
+        Page::range(
+            align_down_div(__ap_data_start.as_usize(), 0x1000),
+            align_up_div(__ap_data_end.as_usize(), 0x1000),
+        )
+    };
+
+    let user_code = unsafe {
+        Page::range(
+            align_down_div(__user_code_start.as_usize(), 0x1000),
+            align_up_div(__user_code_end.as_usize(), 0x1000),
+        )
+    };
+
+    use libkernel::memory::PageAttributes;
+
+    let page_manager = libkernel::memory::global_pgmr();
+    for page in kernel_text.chain(ap_text) {
+        page_manager
+            .identity_map(&page, PageAttributes::PRESENT | PageAttributes::GLOBAL)
+            .unwrap();
     }
+
+    for page in kernel_rodata {
+        page_manager
+            .identity_map(
+                &page,
+                PageAttributes::PRESENT | PageAttributes::NO_EXECUTE | PageAttributes::GLOBAL,
+            )
+            .unwrap();
+    }
+
+    for page in kernel_data.chain(kernel_bss).chain(ap_data) {
+        page_manager
+            .identity_map(
+                &page,
+                PageAttributes::PRESENT
+                    | PageAttributes::WRITABLE
+                    | PageAttributes::NO_EXECUTE
+                    | PageAttributes::GLOBAL,
+            )
+            .unwrap();
+    }
+
+    for page in user_code {
+        page_manager
+            .identity_map(&page, PageAttributes::PRESENT | PageAttributes::USERSPACE)
+            .unwrap();
+    }
+
+    libkernel::memory::finalize_paging();
+    libkernel::memory::global_alloc::set(&*KMALLOC);
 }
 
 #[no_mangle]
@@ -189,7 +264,7 @@ unsafe extern "C" fn _startup() -> ! {
         gdt::init();
 
         if libkernel::cpu::is_bsp() {
-            // Due to the fashion in which the x86_64 crate initializes the IDT entries,
+            // Due to the fashion in which the `x86_64` crate initializes the IDT entries,
             // it must be ensured that the handlers are set only *after* the GDT has been
             // properly initialized and loaded—otherwise, the `CS` value for the IDT entries
             // is incorrect, and this causes very confusing GPFs.
@@ -209,8 +284,6 @@ unsafe extern "C" fn _startup() -> ! {
         crate::tables::idt::load();
     }
 
-    memory::write_global_cr3();
-
     local_state::init();
 
     loop {}
@@ -229,12 +302,16 @@ unsafe extern "C" fn _startup() -> ! {
             },
         };
 
-        let tss_ptr = libkernel::alloc_obj!(TaskStateSegment);
+        let tss_ptr = {
+            use alloc::boxed::Box;
+            Box::leak(Box::new(TaskStateSegment::new())) as *mut TaskStateSegment
+        };
 
         {
             use crate::local_state::Offset;
             use x86_64::VirtAddr;
 
+            // TODO
             // (&mut *tss_ptr).privilege_stack_table[0] =
             //     VirtAddr::from_ptr(crate::rdgsval!(*const (), Offset::PrivilegeStackPtr));
         }
@@ -301,7 +378,7 @@ unsafe extern "C" fn _startup() -> ! {
         msr::IA32_SFMASK::set_rflags_mask(libkernel::registers::RFlags::all());
     }
 
-    libkernel::registers::stack::RSP::write(alloc_stack(1, true));
+    libkernel::registers::stack::RSP::write(libkernel::memory::alloc_stack(1, true));
     libkernel::cpu::ring3_enter(test_user_function, libkernel::registers::RFlags::empty());
 
     debug!("Failed to enter ring 3.");
@@ -309,39 +386,49 @@ unsafe extern "C" fn _startup() -> ! {
     libkernel::instructions::hlt_indefinite()
 }
 
-fn alloc_stack(pages: usize, is_userspace: bool) -> *mut () {
-    unsafe {
-        let (stack_bottom, stack_len) = libkernel::memory::malloc::get()
-            .alloc_pages(pages)
-            .unwrap()
-            .1
-            .into_parts();
-        let stack_top = stack_bottom.add(stack_len);
+unsafe fn wake_aps() {
+    use libkernel::acpi::rdsp::xsdt::{
+        madt::{InterruptDevice, MADT},
+        XSDT,
+    };
 
-        {
-            use libkernel::memory::{AttributeModify, Page, PageAttributes};
+    let lapic_id = libkernel::cpu::get_id() as u8 /* possibly don't cast to u8? */;
+    let icr = libkernel::structures::apic::APIC::interrupt_command_register();
+    let ap_text_page_index = (__ap_text_start.as_usize() / 0x1000) as u8;
 
-            // TODO
-            // for page in Page::range(
-            //     (stack_bottom as usize) / 0x1000,
-            //     (stack_top as usize) / 0x1000,
-            // ) {
-            //     memory::PAGE_MANAGER.set_page_attribs(
-            //         &page,
-            //         PageAttributes::PRESENT
-            //             | PageAttributes::WRITABLE
-            //             | PageAttributes::NO_EXECUTE
-            //             | if is_userspace {
-            //                 PageAttributes::USERSPACE
-            //             } else {
-            //                 PageAttributes::empty()
-            //             },
-            //         AttributeModify::Set,
-            //     );
-            // }
+    if let Some(madt) = XSDT.find_sub_table::<MADT>() {
+        info!("Beginning wake-up sequence for enabled processors.");
+        for interrupt_device in madt.iter() {
+            // Filter out non-lapic devices.
+            if let InterruptDevice::LocalAPIC(ap_lapic) = interrupt_device {
+                use libkernel::acpi::rdsp::xsdt::madt::LocalAPICFlags;
+                // Filter out invalid lapic devices.
+                if lapic_id != ap_lapic.id()
+                    && ap_lapic.flags().intersects(
+                        LocalAPICFlags::PROCESSOR_ENABLED | LocalAPICFlags::ONLINE_CAPABLE,
+                    )
+                {
+                    debug!("Waking core ID {}.", ap_lapic.id());
+
+                    AP_STACK_POINTERS[ap_lapic.id() as usize] =
+                        libkernel::memory::alloc_stack(2, false);
+
+                    info!("{:?}", AP_STACK_POINTERS[ap_lapic.id() as usize]);
+
+                    // Reset target processor.
+                    trace!("Sending INIT interrupt to: {}", ap_lapic.id());
+                    icr.send_init(ap_lapic.id());
+                    icr.wait_pending();
+                    // REMARK: IA32 spec indicates that doing this twice, as so, ensures the interrupt is received.
+                    trace!("Sending SIPI x1 interrupt to: {}", ap_lapic.id());
+                    icr.send_sipi(ap_text_page_index, ap_lapic.id());
+                    icr.wait_pending();
+                    trace!("Sending SIPI x2 interrupt to: {}", ap_lapic.id());
+                    icr.send_sipi(ap_text_page_index, ap_lapic.id());
+                    icr.wait_pending();
+                }
+            }
         }
-
-        stack_top as *mut ()
     }
 }
 

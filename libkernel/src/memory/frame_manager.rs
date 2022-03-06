@@ -159,7 +159,7 @@ impl<'arr> FrameManager<'arr> {
 
         info!(
             "Frame allocator will manage {} MiB of system memory.",
-            crate::memory::to_mibibytes(total_usable_memory)
+            crate::to_mibibytes(total_usable_memory)
         );
 
         // Find the best-fit descriptor for the falloc memory frames.
@@ -249,7 +249,7 @@ impl<'arr> FrameManager<'arr> {
         falloc
     }
 
-    pub fn virtual_map_offset(&self) -> Address<Virtual> {
+    pub fn phys_mem_offset(&self) -> Address<Virtual> {
         Address::<Virtual>::new(crate::VADDR_HW_MAX - self.total_memory())
     }
 

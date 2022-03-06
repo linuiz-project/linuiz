@@ -37,6 +37,11 @@ pub unsafe fn set_data_registers(value: u16) {
     );
 }
 
+pub enum RdRandError {
+    NotSupported,
+    HardFailure,
+}
+
 /// Reads a cryptographically secure, deterministic random number from hardware.
 ///
 /// Return value indicates various success and failure states of the operation.
@@ -45,7 +50,7 @@ pub unsafe fn set_data_registers(value: u16) {
 ///     — `Some(Err(_))` indicates `rdrand` has encountered a hard failure, and will not generate
 ///         anymore valid numbers.
 ///     — `Some(Ok(_))` returns the successfully generated random number.
-pub fn rdrand() -> Option<Result<u64, ()>> {
+pub fn rdrand() -> Result<u64, RdRandError> {
     // Check to ensure the instruction is supported.
     if crate::cpu::has_feature(crate::cpu::Feature::RDRAND) {
         // In the case of a hard failure for random number generation, a retry limit is employed
@@ -75,14 +80,14 @@ pub fn rdrand() -> Option<Result<u64, ()>> {
             // zero will be returned in the destination register.
             use crate::registers::RFlags;
             if result > 0 && RFlags::from_bits_truncate(rflags).contains(RFlags::CARRY_FLAG) {
-                return Some(Ok(result));
+                return Ok(result);
             } else {
                 pause();
             }
         }
 
-        Some(Err(()))
+        Err(RdRandError::HardFailure)
     } else {
-        None
+        Err(RdRandError::NotSupported)
     }
 }

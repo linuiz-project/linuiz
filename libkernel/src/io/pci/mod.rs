@@ -2,11 +2,7 @@ mod device;
 
 pub use device::*;
 
-pub fn get_pcie_devices<'a>(
-    frame_manager: &'static crate::memory::FrameManager,
-    page_manager: &'a crate::memory::PageManager,
-    malloc: &'a impl crate::memory::malloc::MemoryAllocator,
-) -> impl Iterator<Item = DeviceVariant> + 'a {
+pub fn get_pcie_devices<'a>() -> impl Iterator<Item = DeviceVariant> + 'a {
     crate::acpi::rdsp::xsdt::XSDT
         .find_sub_table::<crate::acpi::rdsp::xsdt::mcfg::MCFG>()
         .expect("XSDT does not contain an MCFG table")
@@ -26,21 +22,14 @@ pub fn get_pcie_devices<'a>(
             (0..32).map(move |device_index| bus_base_addr + (device_index << 15))
         })
         .filter_map(move |device_base_addr| unsafe {
-            let mmio = crate::memory::MMIO::new_alloc(
-                (device_base_addr).frame_index(),
-                1,
-                true,
-                frame_manager,
-                page_manager,
-                malloc,
-            )
-            .expect("Allocation error occurred attempting to create MMIO for PCIeBus");
+            let mmio = crate::memory::MMIO::new((device_base_addr).frame_index(), 1);
 
             let vendor_id = mmio.read::<u16>(0).assume_init();
 
             if vendor_id > u16::MIN && vendor_id < u16::MAX {
                 trace!("Configuring PCIe bus: @{:?}", device_base_addr);
 
+                let page_manager = crate::memory::global_pgmr();
                 for page in mmio.pages() {
                     page_manager.set_page_attribs(
                         &page,
@@ -58,6 +47,6 @@ pub fn get_pcie_devices<'a>(
                 }
             }
 
-            Some(crate::io::pci::new_device(mmio, frame_manager, page_manager, malloc))
+            Some(crate::io::pci::new_device(mmio))
         })
 }

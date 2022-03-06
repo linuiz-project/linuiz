@@ -209,7 +209,9 @@ pub struct PCIeDevice<T: DeviceType> {
     phantom: PhantomData<T>,
 }
 
-pub fn new_device(mmio: MMIO, frame_manager: &'static crate::memory::FrameManager, page_manager: &crate::memory::PageManager, malloc: &impl crate::memory::malloc::MemoryAllocator) -> DeviceVariant {
+// TODO move frame_manager and page_manager into libkernel ... again
+
+pub fn new_device(mmio: MMIO) -> DeviceVariant {
     let type_malfunc = unsafe {
         mmio.read::<u8>(HeaderOffset::HeaderType.into())
             .assume_init()
@@ -217,7 +219,7 @@ pub fn new_device(mmio: MMIO, frame_manager: &'static crate::memory::FrameManage
 
     // mask off the multifunction bit
     match type_malfunc & !(1 << 7) {
-        0x0 => DeviceVariant::Standard(unsafe { PCIeDevice::<Standard>::new(mmio, frame_manager, page_manager, malloc) }),
+        0x0 => DeviceVariant::Standard(unsafe { PCIeDevice::<Standard>::new(mmio) }),
         0x1 => DeviceVariant::PCI2PCI(PCIeDevice {
             mmio,
             registers: Vec::new(),

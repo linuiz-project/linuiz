@@ -197,6 +197,19 @@ impl<MM, CTE> BootInfo<MM, CTE> {
 
 pub type KernelMain<MM, CTE> = extern "efiapi" fn(crate::BootInfo<MM, CTE>) -> !;
 
+pub const KIBIBYTE: usize = 0x400; // 1024
+pub const MIBIBYTE: usize = KIBIBYTE * KIBIBYTE;
+
+#[inline(always)]
+pub const fn to_kibibytes(value: usize) -> usize {
+    value / KIBIBYTE
+}
+
+#[inline(always)]
+pub const fn to_mibibytes(value: usize) -> usize {
+    value / MIBIBYTE
+}
+
 #[inline(always)]
 pub const fn align_up(value: usize, alignment: usize) -> usize {
     let alignment_mask = alignment - 1;

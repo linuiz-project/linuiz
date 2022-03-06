@@ -2,7 +2,6 @@ use crate::{
     clock::{local, AtomicClock},
     scheduling::Scheduler,
 };
-use alloc::boxed::Box;
 use core::{
     arch::asm,
     num::{NonZeroU32, NonZeroUsize},
@@ -52,7 +51,7 @@ pub unsafe fn init() {
         .compare_exchange(
             0,
             {
-                let mut rdrand = libkernel::instructions::rdrand().unwrap_or(Ok(0)).unwrap()
+                let mut rdrand = libkernel::instructions::rdrand().unwrap_or(0)
                     // Page-align the random offset.
                     & !0xFFF;
 
@@ -70,15 +69,14 @@ pub unsafe fn init() {
     let ptr = (BASE_ADDR + (ptr_slide as usize)).as_mut_ptr::<u8>();
 
     ptr.cast::<libkernel::memory::PageManager>().write({
+        let global_page_manager = libkernel::memory::global_pgmr();
         let page_manager = libkernel::memory::PageManager::new(
-            &crate::memory::global_mapped_page(),
-            crate::memory::get_frame_manager(),
-            Some(crate::memory::copy_global_pml4()),
+            &global_page_manager.mapped_page(),
+            Some(global_page_manager.copy_pml4()),
         );
 
         page_manager.auto_map(&libkernel::memory::Page::from_ptr(ptr), {
             use libkernel::memory::PageAttributes;
-
             PageAttributes::PRESENT | PageAttributes::WRITABLE | PageAttributes::NO_EXECUTE
         });
         page_manager.write_cr3();
@@ -97,9 +95,8 @@ pub unsafe fn init() {
     ptr.add(Offset::SchedulerPtr as usize)
         .cast::<*const Mutex<Scheduler>>()
         .write({
-            let scheduler_ptr = Box::leak(Box::new_in(Mutex::new(Scheduler::new()))) as *mut _;
-            scheduler_ptr.write();
-            scheduler_ptr
+            use alloc::boxed::Box;
+            Box::leak(Box::new(Mutex::new(Scheduler::new()))) as *mut _
         });
     // ptr.add(Offset::SyscallStackPtr as usize)
     //     .cast::<*const u8>()

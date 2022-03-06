@@ -1,160 +1,223 @@
 mod frame_manager;
 mod page_manager;
 
-use core::mem::MaybeUninit;
-
 pub use frame_manager::*;
 pub use page_manager::*;
 pub use paging::*;
-pub mod malloc;
+
 pub mod paging;
 pub mod uefi;
 pub mod volatile;
 
 #[cfg(feature = "global_allocator")]
-mod global_alloc {
-    use core::{
-        cell::{Cell, RefCell},
-        lazy::OnceCell,
-    };
+pub mod global_alloc {
+    use core::{alloc::GlobalAlloc, lazy::OnceCell};
 
-    use super::MemoryAllocator;
-    use crate::cell::SyncCell;
+    struct GlobalAllocator<'m>(OnceCell<&'m dyn GlobalAlloc>);
 
-    struct GlobalAllocator<'m>(OnceCell<&'m dyn MemoryAllocator>);
-
-    impl GlobalAllocator {
+    impl GlobalAllocator<'_> {
         pub const fn new() -> Self {
             Self(OnceCell::new())
         }
     }
 
-    unsafe impl GlobalAlloc for GlobalAllocator {
+    unsafe impl Send for GlobalAllocator<'_> {}
+    unsafe impl Sync for GlobalAllocator<'_> {}
+
+    unsafe impl GlobalAlloc for GlobalAllocator<'_> {
         unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
-            (*self)
-                .alloc(layout.size(), core::num::NonZeroUsize::new(layout.align()))
-                .unwrap()
-                .into_parts()
-                .0
+            self.0.get().expect("no global allocator").alloc(layout)
         }
 
         unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
-            (*self).dealloc(ptr, layout);
-        }
-    }
-
-    impl core::ops::Deref for GlobalAllocator {
-        type Target = dyn MemoryAllocator;
-
-        fn deref(&self) -> &Self::Target {
-            self.0.get().expect("no global allocator")
+            self.0
+                .get()
+                .expect("no global allocator")
+                .dealloc(ptr, layout);
         }
     }
 
     #[global_allocator]
     static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator::new();
 
-    pub unsafe fn set(malloc: &'static dyn MemoryAllocator) {
+    pub unsafe fn set(galloc: &'static dyn GlobalAlloc) {
         GLOBAL_ALLOCATOR
             .0
-            .set(malloc)
-            .expect("mallocator already set");
+            .set(galloc)
+            .map_err(|_| {
+                panic!("global allocator already set");
+            })
+            .unwrap();
+    }
+}
+
+use crate::cell::SyncOnceCell;
+
+static FRAME_MANAGER: SyncOnceCell<FrameManager> = SyncOnceCell::new();
+static PAGE_MANAGER: SyncOnceCell<PageManager> = SyncOnceCell::new();
+
+/// Initializes global memory structures (frame & page managers).
+///
+/// This function *does not* swap the current page table. To commit the page manager
+/// to CR3 and map physical memory at the correct offset, call `finalize_paging()`.
+pub fn init(memory_map: &[uefi::MemoryDescriptor]) {
+    FRAME_MANAGER
+        .set(FrameManager::from_mmap(memory_map))
+        .map_err(|_| {
+            panic!("frame manager has already been initialized");
+        })
+        .unwrap();
+
+    let frame_manager = FRAME_MANAGER.get().unwrap();
+    let page_manager = unsafe { PageManager::new(&Page::null(), None) };
+
+    // Set page attributes for UEFI descriptor pages.
+    for descriptor in memory_map.iter().skip(memory_map.len()) {
+        if descriptor.range().contains(&0x3f07540) {
+            info!("{:?}", descriptor);
+        }
+
+        continue;
+
+        let mut page_attribs = PageAttributes::empty();
+
+        use crate::memory::uefi::{MemoryAttributes, MemoryType};
+
+        if descriptor.att.contains(MemoryAttributes::WRITE_THROUGH) {
+            page_attribs.insert(PageAttributes::WRITABLE);
+            page_attribs.insert(PageAttributes::WRITE_THROUGH);
+        }
+
+        if descriptor.att.contains(MemoryAttributes::WRITE_BACK) {
+            page_attribs.insert(PageAttributes::WRITABLE);
+            page_attribs.remove(PageAttributes::WRITE_THROUGH);
+        }
+
+        if descriptor.att.contains(MemoryAttributes::EXEC_PROTECT) {
+            page_attribs.insert(PageAttributes::NO_EXECUTE);
+        }
+
+        if descriptor.att.contains(MemoryAttributes::UNCACHEABLE) {
+            page_attribs.insert(PageAttributes::UNCACHEABLE);
+        }
+
+        if descriptor.att.contains(MemoryAttributes::READ_ONLY) {
+            page_attribs.remove(PageAttributes::WRITABLE);
+            page_attribs.remove(PageAttributes::WRITE_THROUGH);
+        }
+
+        // If the descriptor type is not unusable...
+        if !matches!(
+            descriptor.ty,
+            MemoryType::UNUSABLE | MemoryType::UNACCEPTED | MemoryType::KERNEL
+        ) {
+            // ... then iterate its pages and identity map them.
+            //     This specific approach allows the memory usage to be decreased overall,
+            //     since unused/unusable pages or descriptors will not be mapped.
+            for page in descriptor
+                .frame_range()
+                .map(|index| Page::from_index(index))
+            {
+                page_manager
+                    .identity_map(
+                        &page,
+                        PageAttributes::PRESENT | PageAttributes::GLOBAL | page_attribs,
+                    )
+                    .unwrap();
+            }
+        }
     }
 
-    pub(super) unsafe fn get() -> &'static GlobalAllocator {
-        &GLOBAL_ALLOCATOR
+    for page in frame_manager
+        .iter()
+        .enumerate()
+        .filter_map(|(frame_index, (ty, _, _))| {
+            if ty == FrameType::FrameMap {
+                Some(Page::from_index(frame_index))
+            } else {
+                None
+            }
+        })
+    {
+        page_manager
+            .identity_map(
+                &page,
+                PageAttributes::PRESENT
+                    | PageAttributes::GLOBAL
+                    | PageAttributes::NO_EXECUTE
+                    | PageAttributes::WRITABLE,
+            )
+            .unwrap();
+    }
+
+    PAGE_MANAGER
+        .set(page_manager)
+        .map_err(|_| {
+            panic!("page manager has already been initialized");
+        })
+        .unwrap();
+}
+
+/// Finalizes the kernel paging structure, and writes it to CR3. Call this
+/// after all relevant changes have been made to the global page manager.
+///
+/// This function should always be called *after* `init()`.
+pub fn finalize_paging() {
+    unsafe {
+        let frame_manager = global_fmgr();
+        let page_manager = global_pgmr();
+
+        debug!(
+            "Physical memory offset: @{:?}",
+            frame_manager.phys_mem_offset()
+        );
+        page_manager.modify_mapped_page(Page::from_addr(frame_manager.phys_mem_offset()));
+        debug!("Writing baseline kernel PML4 to CR3.");
+        page_manager.write_cr3();
+        debug!("Successfully wrote to CR3.");
     }
 }
 
-fn alloc(
-    &self,
-    size: usize,
-    align: Option<core::num::NonZeroUsize>,
-) -> Result<SafePtr<u8>, AllocError> {
-    unsafe { global_alloc::get() }.alloc(size, align)
+pub fn global_fmgr() -> &'static FrameManager<'static> {
+    FRAME_MANAGER
+        .get()
+        .expect("kernel frame manager has not been initialized")
 }
 
-fn alloc_pages(&self, count: usize) -> Result<(Address<Physical>, SafePtr<u8>), AllocError> {
-    unsafe { global_alloc::get() }.alloc_pages(count)
+pub fn global_pgmr() -> &'static PageManager {
+    PAGE_MANAGER
+        .get()
+        .expect("kernel page manager has not been initialized")
 }
 
-fn alloc_against(&self, frame_index: usize, count: usize) -> Result<SafePtr<u8>, AllocError> {
-    unsafe { global_alloc::get() }.alloc_against(frame_index, count)
-}
+pub fn alloc_stack(page_count: usize, is_userspace: bool) -> *mut () {
+    unsafe {
+        let stack_len = page_count * 0x1000;
+        let stack_bottom = alloc::alloc::alloc_zeroed(
+            core::alloc::Layout::from_size_align(stack_len, 0x1000).unwrap(),
+        );
+        let stack_top = stack_bottom.add(stack_len);
 
-fn alloc_identity(&self, frame_index: usize, count: usize) -> Result<SafePtr<u8>, AllocError> {
-    unsafe { global_alloc::get() }.alloc_identity(frame_index, count)
-}
+        let page_manager = global_pgmr();
+        for page in Page::range(
+            (stack_bottom as usize) / 0x1000,
+            (stack_top as usize) / 0x1000,
+        ) {
+            page_manager.set_page_attribs(
+                &page,
+                PageAttributes::PRESENT
+                    | PageAttributes::WRITABLE
+                    | PageAttributes::NO_EXECUTE
+                    | if is_userspace {
+                        PageAttributes::USERSPACE
+                    } else {
+                        PageAttributes::empty()
+                    },
+                AttributeModify::Set,
+            );
+        }
 
-unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-    unsafe { global_alloc::get() }.dealloc(ptr, layout);
-}
-
-fn get_page_state(&self, page_index: usize) -> Option<bool> {
-    unsafe { global_alloc::get() }.get_page_state(page_index)
-}
-
-pub const KIBIBYTE: usize = 0x400; // 1024
-pub const MIBIBYTE: usize = KIBIBYTE * KIBIBYTE;
-
-pub const fn to_kibibytes(value: usize) -> usize {
-    value / KIBIBYTE
-}
-
-pub const fn to_mibibytes(value: usize) -> usize {
-    value / MIBIBYTE
-}
-
-#[macro_export]
-macro_rules! alloc {
-    ($size:expr) => {
-        crate::memory::malloc::get().alloc(size, None)
-    };
-
-    ($size:expr, $align:expr) => {
-        crate::memory::malloc::get().alloc(size, align)
-    };
-}
-
-#[macro_export]
-macro_rules! alloc_to {
-    ($frame_index:expr, $count:expr) => {
-        $crate::memory::malloc::get().alloc_against($frame_index, $count)
-    };
-}
-
-pub trait MemoryAllocator {
-    fn alloc(
-        &self,
-        size: usize,
-        align: Option<core::num::NonZeroUsize>,
-    ) -> Result<SafePtr<u8>, AllocError>;
-
-    fn alloc_pages(&self, count: usize) -> Result<(Address<Physical>, SafePtr<u8>), AllocError>;
-
-    fn alloc_against(&self, frame_index: usize, count: usize) -> Result<SafePtr<u8>, AllocError>;
-
-    /// Attempts to allocate a 1:1 mapping of virtual memory to its physical memory.
-    ///
-    /// REMARK:
-    ///     This function is required only to offer the same guarantees as `VirtualAddressor::identity_map()`.
-    fn alloc_identity(&self, frame_index: usize, count: usize) -> Result<SafePtr<u8>, AllocError>;
-
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout);
-
-    // Returns the page state of the given page index.
-    // Option is whether it is mapped
-    // `bool` is whether it is allocated to
-    fn get_page_state(&self, page_index: usize) -> Option<bool>;
-}
-
-impl core::alloc::Allocator for MemoryAllocator {
-    fn allocate(&self, layout: core::alloc::Layout) -> Result<core::ptr::NonNull<[u8]>, core::alloc::AllocError> {
-        self.alloc(layout.size(), )
-    }
-
-    unsafe fn deallocate(&self, ptr: core::ptr::NonNull<u8>, layout: core::alloc::Layout) {
-        todo!()
+        stack_top as *mut ()
     }
 }
 
@@ -178,15 +241,16 @@ impl Drop for MMIO {
 }
 
 impl MMIO {
-    pub unsafe fn new_alloc(
-        frame_index: usize,
-        count: usize,
-        is_mem_writable: bool,
-        frame_manager: &'static FrameManager,
-        page_manager: &PageManager,
-        malloc: &impl malloc::MemoryAllocator,
-    ) -> Result<Self, malloc::AllocError> {
+    /// Creates a new MMIO structure wrapping the given region.
+    ///
+    /// SAFETY: The caller must ensure that the indicated memory region passed as parameters
+    ///         `frame_index` and `count` is valid for MMIO.
+    pub unsafe fn new(frame_index: usize, count: usize) -> Self {
+        let frame_manager = global_fmgr();
+
         for frame_index in frame_index..(frame_index + count) {
+            info!("{:?}", frame_manager.map_pages().nth(frame_index));
+
             if let Err(FrameError::TypeConversion { from, to }) =
                 frame_manager.try_modify_type(frame_index, FrameType::MMIO)
             {
@@ -197,36 +261,23 @@ impl MMIO {
             }
         }
 
-        malloc.alloc_against(frame_index, count).map(|data| {
-            let parts = data.into_parts();
-            let base_index = (parts.0 as usize) / 0x1000;
+        let page_manager = global_pgmr();
+        let ptr = frame_manager
+            .phys_mem_offset()
+            .as_mut_ptr::<u8>()
+            .add(frame_index * 0x1000) as *mut u8;
 
-            for offset in 0..count {
-                page_manager.set_page_attribs(
-                    &Page::from_index(base_index + offset),
-                    PageAttributes::PRESENT
-                        | PageAttributes::UNCACHEABLE
-                        | PageAttributes::NO_EXECUTE
-                        | if is_mem_writable {
-                            PageAttributes::WRITABLE | PageAttributes::WRITE_THROUGH
-                        } else {
-                            PageAttributes::empty()
-                        },
-                    AttributeModify::Set,
-                )
-            }
+        for offset in 0..count {
+            page_manager.set_page_attribs(
+                &Page::from_ptr(ptr.add(offset * 0x1000)),
+                PageAttributes::UNCACHEABLE,
+                AttributeModify::Insert,
+            )
+        }
 
-            Self {
-                ptr: parts.0,
-                len: parts.1,
-            }
-        })
-    }
-
-    pub unsafe fn new(pages: core::ops::Range<Page>) -> Self {
         Self {
-            ptr: pages.start.as_mut_ptr(),
-            len: pages.count() * 0x1000,
+            ptr,
+            len: count * 0x1000,
         }
     }
 
@@ -256,8 +307,11 @@ impl MMIO {
     }
 
     #[inline]
-    pub fn read<T>(&self, offset: usize) -> MaybeUninit<T> {
-        unsafe { self.offset::<MaybeUninit<T>>(offset).read_volatile() }
+    pub fn read<T>(&self, offset: usize) -> core::mem::MaybeUninit<T> {
+        unsafe {
+            self.offset::<core::mem::MaybeUninit<T>>(offset)
+                .read_volatile()
+        }
     }
 
     #[inline]

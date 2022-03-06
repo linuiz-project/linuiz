@@ -1,8 +1,9 @@
 use crate::{
     instructions::tlb,
     memory::{
+        global_fmgr,
         paging::{AttributeModify, Level4, PageAttributes, PageTable, PageTableEntry},
-        FrameManager, Page,
+        Page,
     },
     Address, {Physical, Virtual},
 };
@@ -79,11 +80,7 @@ impl VirtualMapper {
         }
     }
 
-    fn get_page_entry_create(
-        &mut self,
-        page: &Page,
-        frame_manager: &'static FrameManager,
-    ) -> &mut PageTableEntry {
+    fn get_page_entry_create(&mut self, page: &Page) -> &mut PageTableEntry {
         let mapped_page = self.mapped_page;
         let addr = page.base_addr();
 
@@ -92,19 +89,25 @@ impl VirtualMapper {
         unsafe {
             self.pml4_mut()
                 .unwrap()
-                .sub_table_create(addr.p4_index(), mapped_page, frame_manager)
-                .sub_table_create(addr.p3_index(), mapped_page, frame_manager)
-                .sub_table_create(addr.p2_index(), mapped_page, frame_manager)
+                .sub_table_create(addr.p4_index(), mapped_page)
+                .sub_table_create(addr.p3_index(), mapped_page)
+                .sub_table_create(addr.p2_index(), mapped_page)
                 .get_entry_mut(addr.p1_index())
         }
     }
 
-    unsafe fn modify_mapped_page(&mut self, base_page: Page, frame_manager: &'static FrameManager) {
-        for frame_index in 0..frame_manager.total_frames() {
+    unsafe fn modify_mapped_page(&mut self, base_page: Page) {
+        for frame_index in 0..global_fmgr().total_frames() {
             let cur_page = base_page.forward_checked(frame_index).unwrap();
 
-            self.get_page_entry_create(&cur_page, frame_manager)
-                .set(frame_index, PageAttributes::DATA | PageAttributes::GLOBAL);
+            self.get_page_entry_create(&cur_page).set(
+                frame_index,
+                PageAttributes::PRESENT
+                    | PageAttributes::WRITABLE
+                    | PageAttributes::WRITE_THROUGH
+                    | PageAttributes::NO_EXECUTE
+                    | PageAttributes::GLOBAL,
+            );
 
             tlb::invalidate(&cur_page);
         }
@@ -127,8 +130,8 @@ impl VirtualMapper {
 
     // TODO
     // fn copy_physical_memory_entries(page_manager: &mut PageManager) {
-    //     let k_vmap = PAGE_MANAGER.virtual_mapper.read();
-    //     let mut cur_vmap = page_manager.virtual_mapper.write();
+    //     let k_vmap = PAGE_MANAGER.0.read();
+    //     let mut cur_vmap = page_manager.0.write();
 
     //     let k_pml4 = k_vmap
     //         .pml4()
@@ -143,25 +146,17 @@ impl VirtualMapper {
     // }
 }
 
-pub struct PageManager {
-    frame_manager: &'static FrameManager<'static>,
-    virtual_mapper: spin::RwLock<VirtualMapper>,
-}
+pub struct PageManager(spin::RwLock<VirtualMapper>);
 
 unsafe impl Send for PageManager {}
 unsafe impl Sync for PageManager {}
 
 impl PageManager {
     /// SAFETY: Refer to `VirtualMapper::new()`.
-    pub unsafe fn new(
-        mapped_page: &Page,
-        frame_manager: &'static FrameManager,
-        pml4: Option<PageTable<Level4>>,
-    ) -> Self {
+    pub unsafe fn new(mapped_page: &Page, pml4: Option<PageTable<Level4>>) -> Self {
         Self {
-            frame_manager,
-            virtual_mapper: spin::RwLock::new({
-                let pml4_index = frame_manager
+            0: spin::RwLock::new({
+                let pml4_index = global_fmgr()
                     .lock_next()
                     .expect("Failed to lock frame for virtual addressor's PML4");
 
@@ -205,17 +200,17 @@ impl PageManager {
     ) -> Result<(), MapError> {
         // Attempt to acquire the requisite frame, following the outlined parsing of `lock_frame`.
         match lock_frame {
-            Some(true) => self.frame_manager.lock(frame_index),
-            Some(false) => self.frame_manager.borrow(frame_index),
+            Some(true) => global_fmgr().lock(frame_index),
+            Some(false) => global_fmgr().borrow(frame_index),
             None => Ok(frame_index),
         }
         // If the acquisition of the frame fails, transform the error.
         .map_err(|falloc_err| MapError::FrameError(falloc_err))
         // If acquisition of the frame is successful, map the page to the frame index.
         .map(|frame_index| {
-            self.virtual_mapper
+            self.0
                 .write()
-                .get_page_entry_create(page, self.frame_manager)
+                .get_page_entry_create(page)
                 .set(frame_index, attribs);
 
             tlb::invalidate(page);
@@ -223,7 +218,7 @@ impl PageManager {
     }
 
     pub fn unmap(&self, page: &Page, locked: bool) -> Result<(), MapError> {
-        self.virtual_mapper
+        self.0
             .write()
             .get_page_entry_mut(page)
             .map(|entry| {
@@ -232,9 +227,9 @@ impl PageManager {
                 // Drop pointed frame since the entry is no longer present.
                 unsafe {
                     if locked {
-                        self.frame_manager.free(entry.take_frame_index()).unwrap();
+                        global_fmgr().free(entry.take_frame_index()).unwrap();
                     } else {
-                        self.frame_manager.drop(entry.take_frame_index()).unwrap();
+                        global_fmgr().drop(entry.take_frame_index()).unwrap();
                     }
                 }
 
@@ -251,14 +246,11 @@ impl PageManager {
         new_attribs: Option<PageAttributes>,
     ) -> Result<(), MapError> {
         let frame_index = {
-            self.virtual_mapper
-                .write()
-                .get_page_entry_mut(unmap_from)
-                .map(|entry| {
-                    let attribs = new_attribs.unwrap_or_else(|| entry.get_attribs());
-                    entry.set_attributes(PageAttributes::empty(), AttributeModify::Set);
-                    unsafe { (attribs, entry.take_frame_index()) }
-                })
+            self.0.write().get_page_entry_mut(unmap_from).map(|entry| {
+                let attribs = new_attribs.unwrap_or_else(|| entry.get_attribs());
+                entry.set_attributes(PageAttributes::empty(), AttributeModify::Set);
+                unsafe { (attribs, entry.take_frame_index()) }
+            })
         };
 
         frame_index
@@ -270,7 +262,7 @@ impl PageManager {
     }
 
     pub fn auto_map(&self, page: &Page, attribs: PageAttributes) {
-        self.map(page, self.frame_manager.lock_next().unwrap(), None, attribs)
+        self.map(page, global_fmgr().lock_next().unwrap(), None, attribs)
             .unwrap();
     }
 
@@ -287,7 +279,7 @@ impl PageManager {
     /* STATE QUERYING */
 
     pub fn is_mapped(&self, virt_addr: Address<Virtual>) -> Option<usize> {
-        self.virtual_mapper
+        self.0
             .read()
             .get_page_entry(&Page::containing_addr(virt_addr))
             .filter(|entry| entry.get_attribs().contains(PageAttributes::PRESENT))
@@ -295,7 +287,7 @@ impl PageManager {
     }
 
     pub fn is_mapped_to(&self, page: &Page, frame_index: usize) -> bool {
-        self.virtual_mapper
+        self.0
             .read()
             .get_page_entry(page)
             .and_then(|entry| entry.get_frame_index())
@@ -305,7 +297,7 @@ impl PageManager {
     /* STATE CHANGING */
 
     pub fn get_page_attribs(&self, page: &Page) -> Option<PageAttributes> {
-        self.virtual_mapper
+        self.0
             .read()
             .get_page_entry(page)
             .map(|page_entry| page_entry.get_attribs())
@@ -323,7 +315,7 @@ impl PageManager {
             attributes.remove(PageAttributes::NO_EXECUTE);
         }
 
-        self.virtual_mapper
+        self.0
             .write()
             .get_page_entry_mut(page)
             .map(|page_entry| page_entry.set_attributes(attributes, modify_mode));
@@ -332,21 +324,19 @@ impl PageManager {
     }
 
     pub unsafe fn modify_mapped_page(&self, page: Page) {
-        self.virtual_mapper
-            .write()
-            .modify_mapped_page(page, self.frame_manager);
+        self.0.write().modify_mapped_page(page);
     }
 
     pub fn mapped_page(&self) -> Page {
-        self.virtual_mapper.read().mapped_page
+        self.0.read().mapped_page
     }
 
     pub unsafe fn write_cr3(&self) {
-        self.virtual_mapper.read().write_cr3();
+        self.0.read().write_cr3();
     }
 
     pub fn copy_pml4(&self) -> PageTable<Level4> {
-        let vmap = self.virtual_mapper.read();
+        let vmap = self.0.read();
 
         unsafe {
             vmap.mapped_page
