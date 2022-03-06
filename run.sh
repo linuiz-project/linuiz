@@ -7,9 +7,8 @@ qemu-system-x86_64 \
     -smp 2 \
     -m 64M \
     -serial mon:stdio \
-    -display none \
     -net none \
-    -bios ./ovmf.fd \
+    -bios ./resources/ovmf.fd \
     -drive format=raw,file=fat:rw:./.hdd/image/ \
     -drive format=raw,file=./.hdd/nvme.img,id=nvm,if=none \
     -device nvme,drive=nvm,serial=deadbeef \

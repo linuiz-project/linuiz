@@ -7,7 +7,6 @@ PROFILE=release
 
 bootloader = ./.hdd/image/EFI/BOOT/BOOTX64.EFI
 bootloader_deps = $(shell find ./limine/common/ -type f -name "*")
-bootloader_cfg = ./.hdd/image/EFI/BOOT/limine.cfg
 
 libkernel_deps = $(shell find ./libkernel/ -type f -name "*.rs")
 
@@ -29,6 +28,7 @@ debug = .debug
 ## Commands
 
 all: $(nvme_img) $(rootfs_img) $(bootloader) $(kernel)
+	mkdir -p .debug
 	objdump -d -D .hdd/image/EFI/gsai/kernel.elf > .debug/kernel_disasm
 
 run: all $(debug)
@@ -52,10 +52,10 @@ update:
 
 ## Dependency paths
 
-$(bootloader): $(bootloader_deps) $(bootloader_cfg)
-	cd ./limine/ && make
-	cp ./limine/bin/BOOTX64.EFI ./.hdd/image/EFI/BOOT/
-	cp ./limine.cfg $(bootloader_cfg)
+$(bootloader): ./resources/BOOTX64.EFI ./resources/limine.cfg
+	mkdir -p ./.hdd/image/EFI/BOOT/
+	cp ./resources/BOOTX64.EFI ./.hdd/image/EFI/BOOT/
+	cp ./resources/limine.cfg ./.hdd/image/EFI/BOOT/
 
 $(ap_trampoline_out): $(ap_trampoline_src)
 	nasm -f elf64 -o $(ap_trampoline_out) $(ap_trampoline_src)
