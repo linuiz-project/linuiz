@@ -55,7 +55,7 @@ pub unsafe fn init() {
                     // Page-align the random offset.
                     & !0xFFF;
 
-                while rdrand > 512000000000 {
+                while rdrand > libkernel::PT_L4_ENTRY_MEM {
                     rdrand /= 2;
                 }
 

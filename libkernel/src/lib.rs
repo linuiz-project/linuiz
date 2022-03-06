@@ -199,6 +199,8 @@ pub type KernelMain<MM, CTE> = extern "efiapi" fn(crate::BootInfo<MM, CTE>) -> !
 
 pub const KIBIBYTE: usize = 0x400; // 1024
 pub const MIBIBYTE: usize = KIBIBYTE * KIBIBYTE;
+pub const GIBIBYTE: usize = MIBIBYTE * MIBIBYTE;
+pub const PT_L4_ENTRY_MEM: u64 = 1 << 9 << 9 << 9 << 12;
 
 #[inline(always)]
 pub const fn to_kibibytes(value: usize) -> usize {

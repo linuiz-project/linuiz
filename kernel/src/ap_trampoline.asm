@@ -1,6 +1,6 @@
 extern _startup, __ap_stack_pointers
 
-section .ap_text
+section .ap_trampoline
 
 bits 16
 realmode:
@@ -50,8 +50,6 @@ realmode:
     lgdt [__gdt.pointer]
     jmp __gdt.code:longmode
 
-
-extern __bsp_init_complete
 
 bits 64
 longmode:
@@ -109,10 +107,9 @@ longmode:
     ; Jump to high-level code.
     call _startup
 
-section .ap_data
 
 global __kernel_pml4
-__kernel_pml4 resd 1
+__kernel_pml4 resq 0x0
 
 ; Access bits
 PRESENT        equ 1 << 7

@@ -50,7 +50,6 @@ extern "C" {
     static __data_end: LinkerSymbol;
 
     static __bss_start: LinkerSymbol;
-    static __bsp_stack: LinkerSymbol;
     static __bss_end: LinkerSymbol;
 
     static __user_code_start: LinkerSymbol;
@@ -58,6 +57,7 @@ extern "C" {
 
 }
 
+static mut BSP_STACK: [u8; 0x4000] = [0u8; 0x4000];
 static mut CON_OUT: drivers::stdout::Serial = drivers::stdout::Serial::new(drivers::stdout::COM1);
 #[export_name = "__ap_stack_pointers"]
 static mut AP_STACK_POINTERS: [*const (); 256] = [core::ptr::null(); 256];
@@ -115,12 +115,8 @@ unsafe extern "efiapi" fn _entry(
     // Initialize global memory state.
     init_memory(boot_info.memory_map());
 
-    // Update to kernel stack, jump to `_startup` with `boot_info` as a parameter.
-    core::arch::asm!(
-        "lea rsp, {}",
-        sym __bsp_stack,
-        options(nostack, nomem, preserves_flags)
-    );
+    // Update to kernel stack, jump to `_startup`.
+    libkernel::registers::stack::RSP::write(BSP_STACK.as_ptr().add(BSP_STACK.len()) as *mut _);
     _startup()
 }
 

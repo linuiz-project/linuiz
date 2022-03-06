@@ -5,8 +5,9 @@ PROFILE=release
 
 ## Dependencies
 
-bootloader = ./.hdd/image/EFI/BOOT/BOOTX64.efi
-bootloader_deps = $(shell find ./boot/ -type f -name "*.rs")
+bootloader = ./.hdd/image/EFI/BOOT/BOOTX64.EFI
+bootloader_deps = $(shell find ./limine/common/ -type f -name "*")
+bootloader_cfg = ./.hdd/image/EFI/BOOT/limine.cfg
 
 libkernel_deps = $(shell find ./libkernel/ -type f -name "*.rs")
 
@@ -44,6 +45,7 @@ clean:
 	cd ./libkernel/ && cargo clean
 
 update:
+	cd ./limine/ && git pull
 	rustup update
 	cd ./boot/ && cargo update
 	cd ./kernel/ && cargo update
@@ -52,8 +54,12 @@ update:
 
 ## Dependency paths
 
-$(bootloader): $(bootloader_deps) $(libkernel_deps) 
-	cd ./boot/ && cargo fmt && cargo build --profile $(PROFILE) -Z unstable-options
+$(bootloader): $(bootloader_deps) $(bootloader_cfg)
+	cd ./limine/ && make
+	cp ./limine/bin/BOOTX64.EFI ./.hdd/image/EFI/BOOT/
+
+$(bootloader_cfg): ./limine.cfg
+	cp ./limine.cfg $(bootloader_cfg)
 
 $(ap_trampoline_out): $(ap_trampoline_src)
 	nasm -f elf64 -o $(ap_trampoline_out) $(ap_trampoline_src)

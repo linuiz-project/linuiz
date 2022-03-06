@@ -6,20 +6,21 @@
   "target-endian": "little",
   "target-pointer-width": "64",
   "target-c-int-width": "32",
-  "linker": "rust-lld",
-  "linker-flavor": "ld.lld",
-  "linker-is-gnu": false,
+  "linker": "gcc",
   "pre-link-args": {
-    "ld.lld": [
-      "--script=x86_64-unknown-none.lds",
-      "./ap_trampoline.o"
+    "gcc": [
+      "-T/home/semiv/git/gsai_os/kernel/x86_64-unknown-none.lds",
+      "./ap_trampoline.o",
+      "-fPIE"
     ]
   },
   "eh-frame-header": false,
   "panic-strategy": "abort",
   "disable-redzone": true,
-  "relocation-model": "static",
+  "relocation-model": "pie",
   "executables": true,
+  "position-independent-executables": true,
+  "static-position-independent-executables": true,
   "code-model": "kernel",
   "os": "none",
   "exe-suffix": ".elf"
