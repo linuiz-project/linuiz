@@ -1,6 +1,8 @@
+default rel
 extern _startup, __ap_stack_pointers
 
-section .ap_trampoline
+
+section .ap_text
 
 bits 16
 realmode:
@@ -13,7 +15,8 @@ realmode:
     mov cr4, eax
 
     ; Set PML4 address.
-    mov eax, [__kernel_pml4]
+    lea eax, [__kernel_pml4]
+
     mov cr3, eax
 
     ; Check for NXE support.
@@ -56,7 +59,7 @@ longmode:
     cli
 
     ; Update segment registers  
-    mov ax, __gdt.data
+    lea ax, [__gdt.data]
     mov ss, ax
     ; Clear unused segments
     xor ax, ax
@@ -101,12 +104,14 @@ longmode:
 
     .set_rsp:
         ; Load absolute address of stack.
-        mov rsp, [__ap_stack_pointers + (rdx * 8)]
+        lea rsp, [__ap_stack_pointers + (rdx * 8)]
 
 
     ; Jump to high-level code.
     call _startup
 
+
+section .ap_data
 
 global __kernel_pml4
 __kernel_pml4 resq 0x0

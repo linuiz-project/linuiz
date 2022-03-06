@@ -6,9 +6,11 @@
   "target-endian": "little",
   "target-pointer-width": "64",
   "target-c-int-width": "32",
-  "linker": "gcc",
+  "max-atomic-width": "64",
+  "linker": "ld.lld",
+  "linker-flavor": "ld.lld",
   "pre-link-args": {
-    "gcc": [
+    "ld.lld": [
       "-T/home/semiv/git/gsai_os/kernel/x86_64-unknown-none.lds",
       "./ap_trampoline.o"
     ]
@@ -20,6 +22,8 @@
   "executables": true,
   "position-independent-executables": true,
   "static-position-independent-executables": true,
+  "relax-elf-relocations": true,
+  "relro-level": "partial",
   "code-model": "kernel",
   "os": "none",
   "exe-suffix": ".elf"

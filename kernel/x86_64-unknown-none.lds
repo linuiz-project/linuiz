@@ -22,7 +22,7 @@ SECTIONS
         __text_start = .;
 
         __ap_text_start = .;
-        *(.ap_text*)
+        KEEP(*(.ap_text*))
         __ap_text_end = .;
         
         *(.text*)
@@ -48,7 +48,7 @@ SECTIONS
         __data_start = .;
 
         __ap_data_start = .;
-        *(.ap_data*)
+        KEEP(*(.ap_data*))
         __ap_data_end = .;
 
         *(.data*)
