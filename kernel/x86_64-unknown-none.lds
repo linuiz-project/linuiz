@@ -1,15 +1,24 @@
-ENTRY(_entry)
 OUTPUT_FORMAT(elf64-x86-64)
+OUTPUT_ARCH(i386:x86-64)
+
+ENTRY(_entry)
 
 PHDRS {
-    text       PT_LOAD FLAGS(0x1);
-    rodata     PT_LOAD FLAGS(0x4);
-    data       PT_LOAD FLAGS(0x6);
-    user_code  PT_LOAD FLAGS(0x1);
+    null        PT_NULL     FLAGS(0x0);
+    text        PT_LOAD     FLAGS(0x1);
+    rodata      PT_LOAD     FLAGS(0x4);
+    data        PT_LOAD     FLAGS(0x6);
 }
 
 SECTIONS
 {
+    /* Place kernel around inside the 257th L4 PML4 entry. */
+    . = 0x101000000000000;
+
+    .stive2hdr : {
+        KEEP(*(.stivale2hdr))
+    } : rodata
+
     .text : ALIGN(0x1000) {
         __text_start = .;
 

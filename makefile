@@ -40,14 +40,12 @@ reset: clean
 rebuild: reset all
 
 clean:
-	cd ./boot/ && cargo clean
 	cd ./kernel/ && cargo clean
 	cd ./libkernel/ && cargo clean
 
 update:
 	cd ./limine/ && git pull
 	rustup update
-	cd ./boot/ && cargo update
 	cd ./kernel/ && cargo update
 	cd ./libkernel/ && cargo update
 

@@ -11,7 +11,8 @@
     asm_sym,
     asm_const,
     const_ptr_offset_from,
-    const_refs_to_cell
+    const_refs_to_cell,
+    const_ptr_offset
 )]
 
 #[macro_use]
@@ -58,6 +59,10 @@ extern "C" {
 }
 
 static mut BSP_STACK: [u8; 0x4000] = [0u8; 0x4000];
+
+static STIVALE_HEADER: stivale::StivaleHeader =
+    stivale::StivaleHeader::new(unsafe { BSP_STACK.as_ptr().add(BSP_STACK.len()) });
+
 static mut CON_OUT: drivers::stdout::Serial = drivers::stdout::Serial::new(drivers::stdout::COM1);
 #[export_name = "__ap_stack_pointers"]
 static mut AP_STACK_POINTERS: [*const (); 256] = [core::ptr::null(); 256];
@@ -86,11 +91,15 @@ impl Devices<'_> {
 // }
 
 #[no_mangle]
-unsafe extern "efiapi" fn _entry(
-    boot_info: BootInfo<uefi::MemoryDescriptor, SystemConfigTableEntry>,
-) -> ! {
+unsafe extern "sysv64" fn _entry(stivale_struct: *const stivale::StivaleStructure) -> ! {
     /* PRE-INIT (no environment prepared) */
-    boot_info.validate_magic();
+    core::arch::asm!(
+        "mov rax, 0x1F1F1FDE",
+        "mov rcx, {}",
+        in(reg) stivale_struct,
+        options(nomem, nostack)
+    );
+    loop {}
 
     /* INIT STDOUT */
     CON_OUT.init(drivers::stdout::SerialSpeed::S115200);
@@ -110,13 +119,13 @@ unsafe extern "efiapi" fn _entry(
 
     // Set system configuration table, so ACPI can be used.
     // TODO possibly move ACPI structure instances out of libkernel?
-    libkernel::acpi::set_system_config_table(boot_info.config_table());
+    // libkernel::acpi::set_system_config_table(boot_info.config_table());
 
     // Initialize global memory state.
-    init_memory(boot_info.memory_map());
+    // init_memory(boot_info.memory_map());
 
     // Update to kernel stack, jump to `_startup`.
-    libkernel::registers::stack::RSP::write(BSP_STACK.as_ptr().add(BSP_STACK.len()) as *mut _);
+    // libkernel::registers::stack::RSP::write(BSP_STACK.as_ptr().add(BSP_STACK.len()) as *mut _);
     _startup()
 }
 
