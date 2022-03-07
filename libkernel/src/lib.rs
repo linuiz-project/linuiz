@@ -43,8 +43,6 @@ pub mod structures;
 pub mod sync;
 pub use addr::*;
 
-pub const SYSTEM_SLICE_SIZE: usize = 0x10000000000;
-
 #[cfg(feature = "panic_handler")]
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
@@ -222,6 +220,7 @@ pub const fn align_up(value: usize, alignment: usize) -> usize {
     }
 }
 
+// TODO use u64 for these alignment functions
 #[inline(always)]
 pub const fn align_up_div(value: usize, alignment: usize) -> usize {
     ((value + alignment) - 1) / alignment

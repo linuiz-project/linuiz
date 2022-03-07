@@ -15,6 +15,7 @@ paste = "*"
 num_enum = { version = "*", default-features = false }
 x86_64 = "*"
 spin = "*"
+stivale-boot = "*"
 
 [features]
 default = ["panic_handler", "alloc_error_handler"]

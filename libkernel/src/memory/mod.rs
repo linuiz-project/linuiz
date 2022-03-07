@@ -63,7 +63,9 @@ static PAGE_MANAGER: SyncOnceCell<PageManager> = SyncOnceCell::new();
 ///
 /// This function *does not* swap the current page table. To commit the page manager
 /// to CR3 and map physical memory at the correct offset, call `finalize_paging()`.
-pub fn init(memory_map: &[uefi::MemoryDescriptor]) {
+pub fn init(memory_map: &[stivale_boot::v2::StivaleMemoryMapEntry]) {
+    info!("Initializing kernel frame and page managers.");
+
     FRAME_MANAGER
         .set(FrameManager::from_mmap(memory_map))
         .map_err(|_| {
@@ -71,90 +73,8 @@ pub fn init(memory_map: &[uefi::MemoryDescriptor]) {
         })
         .unwrap();
 
-    let frame_manager = FRAME_MANAGER.get().unwrap();
-    let page_manager = unsafe { PageManager::new(&Page::null(), None) };
-
-    // Set page attributes for UEFI descriptor pages.
-    for descriptor in memory_map.iter().skip(memory_map.len()) {
-        if descriptor.range().contains(&0x3f07540) {
-            info!("{:?}", descriptor);
-        }
-
-        continue;
-
-        let mut page_attribs = PageAttributes::empty();
-
-        use crate::memory::uefi::{MemoryAttributes, MemoryType};
-
-        if descriptor.att.contains(MemoryAttributes::WRITE_THROUGH) {
-            page_attribs.insert(PageAttributes::WRITABLE);
-            page_attribs.insert(PageAttributes::WRITE_THROUGH);
-        }
-
-        if descriptor.att.contains(MemoryAttributes::WRITE_BACK) {
-            page_attribs.insert(PageAttributes::WRITABLE);
-            page_attribs.remove(PageAttributes::WRITE_THROUGH);
-        }
-
-        if descriptor.att.contains(MemoryAttributes::EXEC_PROTECT) {
-            page_attribs.insert(PageAttributes::NO_EXECUTE);
-        }
-
-        if descriptor.att.contains(MemoryAttributes::UNCACHEABLE) {
-            page_attribs.insert(PageAttributes::UNCACHEABLE);
-        }
-
-        if descriptor.att.contains(MemoryAttributes::READ_ONLY) {
-            page_attribs.remove(PageAttributes::WRITABLE);
-            page_attribs.remove(PageAttributes::WRITE_THROUGH);
-        }
-
-        // If the descriptor type is not unusable...
-        if !matches!(
-            descriptor.ty,
-            MemoryType::UNUSABLE | MemoryType::UNACCEPTED | MemoryType::KERNEL
-        ) {
-            // ... then iterate its pages and identity map them.
-            //     This specific approach allows the memory usage to be decreased overall,
-            //     since unused/unusable pages or descriptors will not be mapped.
-            for page in descriptor
-                .frame_range()
-                .map(|index| Page::from_index(index))
-            {
-                page_manager
-                    .identity_map(
-                        &page,
-                        PageAttributes::PRESENT | PageAttributes::GLOBAL | page_attribs,
-                    )
-                    .unwrap();
-            }
-        }
-    }
-
-    for page in frame_manager
-        .iter()
-        .enumerate()
-        .filter_map(|(frame_index, (ty, _, _))| {
-            if ty == FrameType::FrameMap {
-                Some(Page::from_index(frame_index))
-            } else {
-                None
-            }
-        })
-    {
-        page_manager
-            .identity_map(
-                &page,
-                PageAttributes::PRESENT
-                    | PageAttributes::GLOBAL
-                    | PageAttributes::NO_EXECUTE
-                    | PageAttributes::WRITABLE,
-            )
-            .unwrap();
-    }
-
     PAGE_MANAGER
-        .set(page_manager)
+        .set(unsafe { PageManager::new(&Page::null(), None) })
         .map_err(|_| {
             panic!("page manager has already been initialized");
         })
@@ -165,7 +85,11 @@ pub fn init(memory_map: &[uefi::MemoryDescriptor]) {
 /// after all relevant changes have been made to the global page manager.
 ///
 /// This function should always be called *after* `init()`.
-pub fn finalize_paging() {
+///
+/// SAFETY: This function makes no promises about overwriting the old CR3
+///         value being safe. This, if called at the wrong time, can do
+///         unrecoverable damage to kernel memory.
+pub unsafe fn finalize_paging() {
     unsafe {
         let frame_manager = global_fmgr();
         let page_manager = global_pgmr();
@@ -174,7 +98,11 @@ pub fn finalize_paging() {
             "Physical memory offset: @{:?}",
             crate::memory::PHYS_MEM_START
         );
-        page_manager.modify_mapped_page(Page::from_addr(crate::memory::PHYS_MEM_START));
+        unsafe {
+            page_manager.modify_mapped_page(Page::from_addr(crate::memory::PHYS_MEM_START));
+            frame_manager.slide_map_base(crate::memory::PHYS_MEM_START.as_usize());
+        }
+
         debug!("Writing baseline kernel PML4 to CR3.");
         page_manager.write_cr3();
         debug!("Successfully wrote to CR3.");

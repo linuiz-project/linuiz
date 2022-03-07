@@ -16,14 +16,10 @@ SECTIONS
     /* Place kernel in the last 2GB of virtual memory. */
     . = 0xffffffff80200000;
 
-
+    __kernel_start = .;
 
     .text : ALIGN(0x1000) {
         __text_start = .;
-
-        __ap_text_start = .;
-        KEEP(*(.ap_text*))
-        __ap_text_end = .;
         
         *(.text*)
 
@@ -47,10 +43,6 @@ SECTIONS
     .data : ALIGN(0x1000) {
         __data_start = .;
 
-        __ap_data_start = .;
-        KEEP(*(.ap_data*))
-        __ap_data_end = .;
-
         *(.data*)
 
         __data_end = .;
@@ -71,6 +63,8 @@ SECTIONS
     } :data
 
     .dynamic : { *(.dynamic) } :data :dynamic
+
+    __kernel_end = .;
 
     /* 
     .user_code : ALIGN(0x1000) {

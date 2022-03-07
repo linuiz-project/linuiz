@@ -11,8 +11,7 @@
   "linker-flavor": "ld.lld",
   "pre-link-args": {
     "ld.lld": [
-      "-T/home/semiv/git/gsai_os/kernel/x86_64-unknown-none.lds",
-      "./ap_trampoline.o"
+      "-T/home/semiv/git/gsai_os/kernel/x86_64-unknown-none.lds"
     ]
   },
   "eh-frame-header": false,

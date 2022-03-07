@@ -33,13 +33,8 @@ use alloc::vec::Vec;
 use libkernel::{acpi::SystemConfigTableEntry, memory::uefi, BootInfo, LinkerSymbol};
 
 extern "C" {
-    static __kernel_pml4: LinkerSymbol;
-
-    static __ap_text_start: LinkerSymbol;
-    static __ap_text_end: LinkerSymbol;
-
-    static __ap_data_start: LinkerSymbol;
-    static __ap_data_end: LinkerSymbol;
+    static __kernel_start: LinkerSymbol;
+    static __kernel_end: LinkerSymbol;
 
     static __text_start: LinkerSymbol;
     static __text_end: LinkerSymbol;
@@ -55,20 +50,33 @@ extern "C" {
     static __local_state_end: LinkerSymbol;
     static __bss_end: LinkerSymbol;
 
-    static __user_code_start: LinkerSymbol;
-    static __user_code_end: LinkerSymbol;
-
 }
 
-static mut BSP_STACK: [u8; 0x4000] = [0u8; 0x4000];
+static mut BSP_STACK: [u8; 0x8000] = [0u8; 0x8000];
+
+use stivale_boot::v2::{
+    StivaleFramebufferHeaderTag, StivaleHeader, StivaleMtrrHeaderTag, StivaleSmpHeaderTag,
+    StivaleSmpHeaderTagFlags, StivaleStruct, StivaleUnmapNullHeaderTag,
+};
 
 #[used]
 #[no_mangle]
 #[link_section = ".stivale2hdr"]
-static STIVALE_HEADER: stivale::StivaleHeader = {
-    stivale::StivaleHeader::new(unsafe { BSP_STACK.as_ptr().add(BSP_STACK.len()) })
-        .flags(stivale::StivaleHeaderFlags::KASLR)
+static STIVALE_HEADER: StivaleHeader = {
+    StivaleHeader::new()
+        .stack(unsafe { BSP_STACK.as_ptr().add(BSP_STACK.len()) })
+        .flags(0b11100)
+        .tags((&raw const STIVALE_FB_TAG) as *const ())
 };
+
+static STIVALE_FB_TAG: StivaleFramebufferHeaderTag =
+    StivaleFramebufferHeaderTag::new().next((&raw const STIVALE_MTRR_TAG) as *const ());
+static STIVALE_MTRR_TAG: StivaleMtrrHeaderTag =
+    StivaleMtrrHeaderTag::new().next((&raw const STIVALE_UNMAP_NULL_TAG) as *const ());
+static STIVALE_UNMAP_NULL_TAG: StivaleUnmapNullHeaderTag =
+    StivaleUnmapNullHeaderTag::new().next((&raw const STIVALE_SMP_TAG) as *const ());
+static STIVALE_SMP_TAG: StivaleSmpHeaderTag =
+    StivaleSmpHeaderTag::new().flags(StivaleSmpHeaderTagFlags::from_bits_truncate(0b11));
 
 static mut CON_OUT: drivers::stdout::Serial = drivers::stdout::Serial::new(drivers::stdout::COM1);
 #[export_name = "__ap_stack_pointers"]
@@ -98,19 +106,8 @@ impl Devices<'_> {
 // }
 
 #[no_mangle]
-unsafe extern "sysv64" fn _entry(stivale_struct: *const stivale::StivaleStructure) -> ! {
-    /* PRE-INIT (no environment prepared) */
-    core::arch::asm!(
-        "mov rax, 0x1F1F1FDE",
-        "mov rcx, {}",
-        in(reg) stivale_struct,
-        options(nomem, nostack)
-    );
-    loop {}
-
-    /* INIT STDOUT */
+unsafe extern "sysv64" fn _entry(stivale_struct: *const StivaleStruct) -> ! {
     CON_OUT.init(drivers::stdout::SerialSpeed::S115200);
-
     match drivers::stdout::set_stdout(&mut CON_OUT, log::LevelFilter::Debug) {
         Ok(()) => {
             info!("Successfully loaded into kernel, with logging enabled.");
@@ -118,117 +115,125 @@ unsafe extern "sysv64" fn _entry(stivale_struct: *const stivale::StivaleStructur
         Err(_) => libkernel::instructions::interrupts::breakpoint(),
     }
 
-    // Write misc. CPU state to stdout (This also lazy initializes them).
-    {
-        debug!("CPU Vendor          {}", libkernel::cpu::VENDOR);
-        debug!("CPU Features        {:?}", libkernel::cpu::FeatureFmt);
+    let stivale_struct = stivale_struct.as_ref().unwrap();
+
+    info!(
+        "Bootloader Info     {} {}",
+        stivale_struct.bootloader_brand(),
+        stivale_struct.bootloader_version()
+    );
+    info!("CPU Vendor          {}", libkernel::cpu::VENDOR);
+    info!("CPU Features        {:?}", libkernel::cpu::FeatureFmt);
+
+    if let Some(memory_map) = stivale_struct.memory_map() {
+        use libkernel::{align_down_div, align_up_div, memory::Page};
+
+        // TODO get accurate kernel base physical address
+
+        libkernel::memory::init(memory_map.as_slice());
+
+        info!("{:?}", __kernel_start.as_ptr::<()>());
+        info!("{:?}", __text_start.as_ptr::<()>());
+
+        debug!("Global mapping kernel ELF sections.");
+        let kernel_text = unsafe {
+            Page::range(
+                align_down_div(__text_start.as_usize(), 0x1000),
+                align_up_div(__text_end.as_usize(), 0x1000),
+            )
+        };
+
+        let kernel_rodata = unsafe {
+            Page::range(
+                align_down_div(__rodata_start.as_usize(), 0x1000),
+                align_up_div(__rodata_end.as_usize(), 0x1000),
+            )
+        };
+
+        let kernel_data = unsafe {
+            Page::range(
+                align_down_div(__data_start.as_usize(), 0x1000),
+                align_up_div(__data_end.as_usize(), 0x1000),
+            )
+        };
+
+        let kernel_bss = unsafe {
+            Page::range(
+                align_down_div(__bss_start.as_usize(), 0x1000),
+                align_up_div(__bss_end.as_usize(), 0x1000),
+            )
+        };
+
+        use libkernel::memory::PageAttributes;
+
+        let page_manager = libkernel::memory::global_pgmr();
+        for page in kernel_text {
+            page_manager
+                .map(
+                    &page,
+                    page.index() - __kernel_start.as_usize(),
+                    None, // Frame should already be locked from fmgr init.
+                    PageAttributes::PRESENT | PageAttributes::GLOBAL,
+                )
+                .unwrap();
+        }
+
+        for page in kernel_rodata {
+            page_manager
+                .map(
+                    &page,
+                    page.index() - __kernel_start.as_usize(),
+                    None, // Frame should already be locked from fmgr init.
+                    PageAttributes::PRESENT | PageAttributes::NO_EXECUTE | PageAttributes::GLOBAL,
+                )
+                .unwrap();
+        }
+
+        for page in kernel_data.chain(kernel_bss) {
+            page_manager
+                .map(
+                    &page,
+                    page.index() - __kernel_start.as_usize(),
+                    None, // Frame should already be locked from fmgr init.
+                    PageAttributes::PRESENT
+                        | PageAttributes::WRITABLE
+                        | PageAttributes::NO_EXECUTE
+                        | PageAttributes::GLOBAL,
+                )
+                .unwrap();
+        }
+
+        libkernel::memory::finalize_paging();
+
+        loop {}
+
+        libkernel::memory::global_alloc::set(&*KMALLOC);
+    } else {
+        panic!("No memory map has been provided by bootloader.");
     }
 
-    // Set system configuration table, so ACPI can be used.
-    // TODO possibly move ACPI structure instances out of libkernel?
-    // libkernel::acpi::set_system_config_table(boot_info.config_table());
+    if let Some(system_table) = stivale_struct.efi_system_table() {
+        let system_table_ptr = system_table.system_table_addr as *const SystemConfigTableEntry;
 
-    // Initialize global memory state.
-    // init_memory(boot_info.memory_map());
+        let mut system_table_len = 0;
+        while let Some(system_config_entry) = system_table_ptr.add(system_table_len).as_ref() {
+            // REMARK: There may be a better way to check for the end of the system table? I'm not sure this is always valid.
+            if system_config_entry.addr().is_null() {
+                break;
+            } else {
+                system_table_len += 1;
+            }
+        }
 
-    // Update to kernel stack, jump to `_startup`.
-    // libkernel::registers::stack::RSP::write(BSP_STACK.as_ptr().add(BSP_STACK.len()) as *mut _);
+        // Set system configuration table, so ACPI can be used.
+        // TODO possibly move ACPI structure instances out of libkernel?
+        libkernel::acpi::set_system_config_table(core::slice::from_raw_parts(
+            system_table_ptr,
+            system_table_len,
+        ));
+    }
+
     _startup()
-}
-
-unsafe fn init_memory(memory_map: &[libkernel::memory::uefi::MemoryDescriptor]) {
-    use libkernel::{align_down_div, align_up_div, memory::Page};
-
-    libkernel::memory::init(memory_map);
-
-    debug!("Global mapping kernel ELF sections.");
-    let kernel_text = unsafe {
-        Page::range(
-            align_down_div(__text_start.as_usize(), 0x1000),
-            align_up_div(__text_end.as_usize(), 0x1000),
-        )
-    };
-
-    let kernel_rodata = unsafe {
-        Page::range(
-            align_down_div(__rodata_start.as_usize(), 0x1000),
-            align_up_div(__rodata_end.as_usize(), 0x1000),
-        )
-    };
-
-    let kernel_data = unsafe {
-        Page::range(
-            align_down_div(__data_start.as_usize(), 0x1000),
-            align_up_div(__data_end.as_usize(), 0x1000),
-        )
-    };
-
-    let kernel_bss = unsafe {
-        Page::range(
-            align_down_div(__bss_start.as_usize(), 0x1000),
-            align_up_div(__bss_end.as_usize(), 0x1000),
-        )
-    };
-
-    let ap_text = unsafe {
-        Page::range(
-            align_down_div(__ap_text_start.as_usize(), 0x1000),
-            align_up_div(__ap_text_end.as_usize(), 0x1000),
-        )
-    };
-
-    let ap_data = unsafe {
-        Page::range(
-            align_down_div(__ap_data_start.as_usize(), 0x1000),
-            align_up_div(__ap_data_end.as_usize(), 0x1000),
-        )
-    };
-
-    let user_code = unsafe {
-        Page::range(
-            align_down_div(__user_code_start.as_usize(), 0x1000),
-            align_up_div(__user_code_end.as_usize(), 0x1000),
-        )
-    };
-
-    use libkernel::memory::PageAttributes;
-
-    let page_manager = libkernel::memory::global_pgmr();
-    for page in kernel_text.chain(ap_text) {
-        page_manager
-            .identity_map(&page, PageAttributes::PRESENT | PageAttributes::GLOBAL)
-            .unwrap();
-    }
-
-    for page in kernel_rodata {
-        page_manager
-            .identity_map(
-                &page,
-                PageAttributes::PRESENT | PageAttributes::NO_EXECUTE | PageAttributes::GLOBAL,
-            )
-            .unwrap();
-    }
-
-    for page in kernel_data.chain(kernel_bss).chain(ap_data) {
-        page_manager
-            .identity_map(
-                &page,
-                PageAttributes::PRESENT
-                    | PageAttributes::WRITABLE
-                    | PageAttributes::NO_EXECUTE
-                    | PageAttributes::GLOBAL,
-            )
-            .unwrap();
-    }
-
-    for page in user_code {
-        page_manager
-            .identity_map(&page, PageAttributes::PRESENT | PageAttributes::USERSPACE)
-            .unwrap();
-    }
-
-    libkernel::memory::finalize_paging();
-    libkernel::memory::global_alloc::set(&*KMALLOC);
 }
 
 #[no_mangle]
@@ -369,7 +374,7 @@ unsafe extern "C" fn _startup() -> ! {
         // local_state::reload_timer(core::num::NonZeroU32::new(1));
     }
     if is_bsp() {
-        wake_aps();
+        // TODO wake_aps();
     }
 
     loop {}
@@ -398,51 +403,51 @@ unsafe extern "C" fn _startup() -> ! {
     libkernel::instructions::hlt_indefinite()
 }
 
-unsafe fn wake_aps() {
-    use libkernel::acpi::rdsp::xsdt::{
-        madt::{InterruptDevice, MADT},
-        XSDT,
-    };
+// unsafe fn wake_aps() {
+//     use libkernel::acpi::rdsp::xsdt::{
+//         madt::{InterruptDevice, MADT},
+//         XSDT,
+//     };
 
-    let lapic_id = libkernel::cpu::get_id() as u8 /* possibly don't cast to u8? */;
-    let icr = libkernel::structures::apic::APIC::interrupt_command_register();
-    let ap_text_page_index = (__ap_text_start.as_usize() / 0x1000) as u8;
+//     let lapic_id = libkernel::cpu::get_id() as u8 /* possibly don't cast to u8? */;
+//     let icr = libkernel::structures::apic::APIC::interrupt_command_register();
+//     let ap_text_page_index = (__ap_text_start.as_usize() / 0x1000) as u8;
 
-    if let Some(madt) = XSDT.find_sub_table::<MADT>() {
-        info!("Beginning wake-up sequence for enabled processors.");
-        for interrupt_device in madt.iter() {
-            // Filter out non-lapic devices.
-            if let InterruptDevice::LocalAPIC(ap_lapic) = interrupt_device {
-                use libkernel::acpi::rdsp::xsdt::madt::LocalAPICFlags;
-                // Filter out invalid lapic devices.
-                if lapic_id != ap_lapic.id()
-                    && ap_lapic.flags().intersects(
-                        LocalAPICFlags::PROCESSOR_ENABLED | LocalAPICFlags::ONLINE_CAPABLE,
-                    )
-                {
-                    debug!("Waking core ID {}.", ap_lapic.id());
+//     if let Some(madt) = XSDT.find_sub_table::<MADT>() {
+//         info!("Beginning wake-up sequence for enabled processors.");
+//         for interrupt_device in madt.iter() {
+//             // Filter out non-lapic devices.
+//             if let InterruptDevice::LocalAPIC(ap_lapic) = interrupt_device {
+//                 use libkernel::acpi::rdsp::xsdt::madt::LocalAPICFlags;
+//                 // Filter out invalid lapic devices.
+//                 if lapic_id != ap_lapic.id()
+//                     && ap_lapic.flags().intersects(
+//                         LocalAPICFlags::PROCESSOR_ENABLED | LocalAPICFlags::ONLINE_CAPABLE,
+//                     )
+//                 {
+//                     debug!("Waking core ID {}.", ap_lapic.id());
 
-                    AP_STACK_POINTERS[ap_lapic.id() as usize] =
-                        libkernel::memory::alloc_stack(2, false);
+//                     AP_STACK_POINTERS[ap_lapic.id() as usize] =
+//                         libkernel::memory::alloc_stack(2, false);
 
-                    info!("{:?}", AP_STACK_POINTERS[ap_lapic.id() as usize]);
+//                     info!("{:?}", AP_STACK_POINTERS[ap_lapic.id() as usize]);
 
-                    // Reset target processor.
-                    trace!("Sending INIT interrupt to: {}", ap_lapic.id());
-                    icr.send_init(ap_lapic.id());
-                    icr.wait_pending();
-                    // REMARK: IA32 spec indicates that doing this twice, as so, ensures the interrupt is received.
-                    trace!("Sending SIPI x1 interrupt to: {}", ap_lapic.id());
-                    icr.send_sipi(ap_text_page_index, ap_lapic.id());
-                    icr.wait_pending();
-                    trace!("Sending SIPI x2 interrupt to: {}", ap_lapic.id());
-                    icr.send_sipi(ap_text_page_index, ap_lapic.id());
-                    icr.wait_pending();
-                }
-            }
-        }
-    }
-}
+//                     // Reset target processor.
+//                     trace!("Sending INIT interrupt to: {}", ap_lapic.id());
+//                     icr.send_init(ap_lapic.id());
+//                     icr.wait_pending();
+//                     // REMARK: IA32 spec indicates that doing this twice, as so, ensures the interrupt is received.
+//                     trace!("Sending SIPI x1 interrupt to: {}", ap_lapic.id());
+//                     icr.send_sipi(ap_text_page_index, ap_lapic.id());
+//                     icr.wait_pending();
+//                     trace!("Sending SIPI x2 interrupt to: {}", ap_lapic.id());
+//                     icr.send_sipi(ap_text_page_index, ap_lapic.id());
+//                     icr.wait_pending();
+//                 }
+//             }
+//         }
+//     }
+// }
 
 fn kernel_main() -> ! {
     debug!("Successfully entered `kernel_main()`.");

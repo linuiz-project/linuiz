@@ -14,9 +14,6 @@ kernel = ./.hdd/image/EFI/gsai/kernel.elf
 kernel_deps = $(shell find ./kernel/ -type f -name "*.rs")
 kernel_linker_args = ./kernel/x86_64-unknown-none.json ./kernel/x86_64-unknown-none.lds
 
-ap_trampoline_src = ./kernel/src/ap_trampoline.asm
-ap_trampoline_out = ./kernel/ap_trampoline.o
-
 hdd = .hdd
 nvme_img = $(hdd)/nvme.img
 rootfs_img = $(hdd)/rootfs.img
@@ -57,10 +54,7 @@ $(bootloader): ./resources/BOOTX64.EFI ./resources/limine.cfg
 	cp ./resources/BOOTX64.EFI ./.hdd/image/EFI/BOOT/
 	cp ./resources/limine.cfg ./.hdd/image/EFI/BOOT/
 
-$(ap_trampoline_out): $(ap_trampoline_src)
-	nasm -f elf64 -o $(ap_trampoline_out) $(ap_trampoline_src)
-
-$(kernel): $(ap_trampoline_out) $(kernel_deps) $(libkernel_deps) $(kernel_linker_args)
+$(kernel): $(kernel_deps) $(libkernel_deps) $(kernel_linker_args)
 	cd ./kernel/ && cargo fmt && cargo build --profile $(PROFILE) -Z unstable-options
 
 $(nvme_img): $(hdd)

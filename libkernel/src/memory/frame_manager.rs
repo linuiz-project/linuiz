@@ -137,116 +137,125 @@ unsafe impl Send for FrameManager<'_> {}
 unsafe impl Sync for FrameManager<'_> {}
 
 impl<'arr> FrameManager<'arr> {
-    pub fn from_mmap(memory_map: &[uefi::MemoryDescriptor]) -> Self {
-        // Calculates total (usable) system memory.
-        let total_usable_memory = memory_map
-            .iter()
-            .filter(|descriptor| descriptor.ty != crate::memory::uefi::MemoryType::UNUSABLE)
-            .map(|descriptor| descriptor.page_count * 0x1000)
-            .sum::<u64>() as usize;
+    pub fn from_mmap(memory_map: &[stivale_boot::v2::StivaleMemoryMapEntry]) -> Self {
+        use stivale_boot::v2::StivaleMemoryMapEntryType;
+
         // Calculates total system memory.
         let total_system_memory = memory_map
             .iter()
-            .max_by_key(|descriptor| descriptor.phys_start)
-            .map(|descriptor| {
-                descriptor.phys_start.as_usize() + ((descriptor.page_count * 0x1000) as usize)
-            })
+            .max_by_key(|entry| entry.base)
+            .map(|entry| entry.base + entry.length)
             .unwrap();
         // Memory required to represent all system frames.
-        let total_system_frames = crate::align_up_div(total_system_memory, 0x1000);
+        let total_system_frames = crate::align_up_div(total_system_memory as usize, 0x1000);
         let req_falloc_memory = total_system_frames * core::mem::size_of::<Frame>();
-        let req_falloc_memory_frames = crate::align_up_div(req_falloc_memory, 0x1000);
+        let req_falloc_memory_frames = crate::align_up_div(req_falloc_memory as usize, 0x1000);
+        let req_falloc_memory_aligned = req_falloc_memory_frames * 0x1000;
 
-        info!(
-            "Frame allocator will manage {} MiB of system memory.",
-            crate::to_mibibytes(total_usable_memory)
+        debug!(
+            "Required frame manager map memory: {:#X} bytes",
+            req_falloc_memory_aligned
         );
 
         // Find the best-fit descriptor for the falloc memory frames.
-        let descriptor = memory_map
+        let map_entry = memory_map
             .iter()
-            .filter(|descriptor| {
+            .filter(|entry| {
                 matches!(
-                    descriptor.ty,
-                    uefi::MemoryType::CONVENTIONAL
-                        | uefi::MemoryType::BOOT_SERVICES_CODE
-                        | uefi::MemoryType::BOOT_SERVICES_DATA
-                        | uefi::MemoryType::LOADER_CODE
-                        | uefi::MemoryType::LOADER_DATA
+                    entry.entry_type,
+                    StivaleMemoryMapEntryType::BootloaderReclaimable
+                        | StivaleMemoryMapEntryType::Usable
                 )
             })
-            .filter(|descriptor| descriptor.page_count >= (req_falloc_memory_frames as u64))
-            .min_by_key(|descriptor| descriptor.page_count)
+            .find(|entry| entry.length >= (req_falloc_memory_aligned as u64))
             .expect("Failed to find viable memory descriptor for frame allocator");
+
+        debug!("Found entry for frame manager map: {:?}", map_entry);
+
         // Clear the memory of the chosen descriptor.
-        unsafe {
-            core::ptr::write_bytes(
-                descriptor.phys_start.as_usize() as *mut u8,
-                0,
-                req_falloc_memory,
-            )
-        };
+        unsafe { core::ptr::write_bytes(map_entry.base as *mut u8, 0, req_falloc_memory_aligned) };
 
         let falloc = Self {
             map: RwLock::new(unsafe {
-                core::slice::from_raw_parts_mut(
-                    descriptor.phys_start.as_usize() as *mut _,
-                    total_system_frames,
-                )
+                core::slice::from_raw_parts_mut(map_entry.base as *mut _, total_system_frames)
             }),
         };
 
-        let frame_ledger_range = descriptor.phys_start.frame_index()
-            ..(descriptor.phys_start.frame_index() + req_falloc_memory_frames);
+        let frame_ledger_range = (map_entry.base / 0x1000)
+            ..((map_entry.base / 0x1000) + (req_falloc_memory_frames as u64));
         debug!(
             "Locking frames {:?} to facilitate static frame allocator map.",
             frame_ledger_range
         );
         for frame_index in frame_ledger_range {
             falloc
-                .try_modify_type(frame_index, FrameType::FrameMap)
+                .try_modify_type(frame_index as usize, FrameType::FrameMap)
                 .unwrap();
-            falloc.lock(frame_index).unwrap();
+            falloc.lock(frame_index as usize).unwrap();
         }
-
-        // Modify the null frame to never be used.
-        falloc.try_modify_type(0, FrameType::Reserved).unwrap();
 
         debug!("Reserving requsite system frames.");
         let mut last_frame_end = 0;
-        for descriptor in memory_map
-            .iter()
-            .filter(|d| d.phys_start.is_frame_aligned())
-        {
-            let start_index = descriptor.phys_start.frame_index();
-            let frame_count = descriptor.page_count as usize;
+        for entry in memory_map {
+            assert_eq!(
+                entry.base & 0xFFF,
+                0,
+                "Memory map entry is not page-aligned: {:?}",
+                entry
+            );
+
+            let start_index = entry.base / 0x1000;
+            let frame_count = entry.length / 0x1000;
 
             // Checks for 'holes' in system memory which we shouldn't try to allocate to.
             for frame_index in last_frame_end..start_index {
                 falloc
-                    .try_modify_type(frame_index, FrameType::Unusable)
+                    .try_modify_type(frame_index as usize, FrameType::Unusable)
                     .unwrap();
             }
 
-            if descriptor.should_reserve() {
-                // Translate UEFI memory type to kernel frame type.
-                let frame_ty = match descriptor.ty {
-                    uefi::MemoryType::UNUSABLE => FrameType::Unusable,
-                    uefi::MemoryType::MMIO_PORT_SPACE | uefi::MemoryType::MMIO => FrameType::MMIO,
-                    uefi::MemoryType::KERNEL => FrameType::Kernel,
-                    _ => FrameType::Reserved,
-                };
+            // Translate UEFI memory type to kernel frame type.
+            let frame_ty = match entry.entry_type {
+                StivaleMemoryMapEntryType::Usable
+                | StivaleMemoryMapEntryType::BootloaderReclaimable => FrameType::Usable,
 
+                StivaleMemoryMapEntryType::Kernel => FrameType::Kernel,
+
+                StivaleMemoryMapEntryType::Reserved
+                | StivaleMemoryMapEntryType::AcpiReclaimable => FrameType::Reserved,
+
+                StivaleMemoryMapEntryType::AcpiNvs | StivaleMemoryMapEntryType::Framebuffer => {
+                    FrameType::MMIO
+                }
+
+                StivaleMemoryMapEntryType::BadMemory => FrameType::Unusable,
+            };
+
+            if frame_ty != FrameType::Usable {
                 for frame_index in start_index..(start_index + frame_count) {
-                    falloc.try_modify_type(frame_index, frame_ty).unwrap();
-                    falloc.lock(frame_index).unwrap();
+                    falloc
+                        .try_modify_type(frame_index as usize, frame_ty)
+                        .unwrap();
+                    falloc.lock(frame_index as usize).unwrap();
                 }
             }
 
             last_frame_end = start_index + frame_count;
         }
 
+        debug!("Successfully configured frame manager.");
+
         falloc
+    }
+
+    pub unsafe fn slide_map_base(&self, slide: usize) {
+        let mut map_write = self.map.write();
+        let new_map_base = map_write
+            .as_mut_ptr()
+            .cast::<u8>()
+            .add(slide)
+            .cast::<Frame>();
+        *map_write = core::slice::from_raw_parts_mut(new_map_base, map_write.len());
     }
 
     pub fn lock(&self, index: usize) -> Result<usize, FrameError> {
