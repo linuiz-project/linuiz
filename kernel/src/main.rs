@@ -52,7 +52,9 @@ extern "C" {
 
 }
 
-static mut BSP_STACK: [u8; 0x8000] = [0u8; 0x8000];
+#[repr(C, align(0x10))]
+struct BSPStack([u8; 0x8000]);
+static mut BSP_STACK: BSPStack = BSPStack([0u8; 0x8000]);
 
 use stivale_boot::v2::{
     StivaleFramebufferHeaderTag, StivaleHeader, StivaleMtrrHeaderTag, StivaleSmpHeaderTag,
@@ -64,7 +66,7 @@ use stivale_boot::v2::{
 #[link_section = ".stivale2hdr"]
 static STIVALE_HEADER: StivaleHeader = {
     StivaleHeader::new()
-        .stack(unsafe { BSP_STACK.as_ptr().add(BSP_STACK.len()) })
+        .stack(unsafe { BSP_STACK.0.as_ptr().add(BSP_STACK.0.len()) })
         .flags(0b11100)
         .tags((&raw const STIVALE_FB_TAG) as *const ())
 };
@@ -105,144 +107,8 @@ impl Devices<'_> {
 //         );
 // }
 
-#[no_mangle]
-unsafe extern "sysv64" fn _entry(stivale_struct: *const StivaleStruct) -> ! {
-    CON_OUT.init(drivers::stdout::SerialSpeed::S115200);
-    match drivers::stdout::set_stdout(&mut CON_OUT, log::LevelFilter::Debug) {
-        Ok(()) => {
-            info!("Successfully loaded into kernel, with logging enabled.");
-        }
-        Err(_) => libkernel::instructions::interrupts::breakpoint(),
-    }
-
-    let stivale_struct = stivale_struct.as_ref().unwrap();
-
-    info!(
-        "Bootloader Info     {} {}",
-        stivale_struct.bootloader_brand(),
-        stivale_struct.bootloader_version()
-    );
-    info!("CPU Vendor          {}", libkernel::cpu::VENDOR);
-    info!("CPU Features        {:?}", libkernel::cpu::FeatureFmt);
-
-    if let Some(memory_map) = stivale_struct.memory_map() {
-        use libkernel::{align_down_div, align_up_div, memory::Page};
-
-        // TODO get accurate kernel base physical address
-
-        libkernel::memory::init(memory_map.as_slice());
-
-        info!("{:?}", __kernel_start.as_ptr::<()>());
-        info!("{:?}", __text_start.as_ptr::<()>());
-
-        debug!("Global mapping kernel ELF sections.");
-        let kernel_text = unsafe {
-            Page::range(
-                align_down_div(__text_start.as_usize(), 0x1000),
-                align_up_div(__text_end.as_usize(), 0x1000),
-            )
-        };
-
-        let kernel_rodata = unsafe {
-            Page::range(
-                align_down_div(__rodata_start.as_usize(), 0x1000),
-                align_up_div(__rodata_end.as_usize(), 0x1000),
-            )
-        };
-
-        let kernel_data = unsafe {
-            Page::range(
-                align_down_div(__data_start.as_usize(), 0x1000),
-                align_up_div(__data_end.as_usize(), 0x1000),
-            )
-        };
-
-        let kernel_bss = unsafe {
-            Page::range(
-                align_down_div(__bss_start.as_usize(), 0x1000),
-                align_up_div(__bss_end.as_usize(), 0x1000),
-            )
-        };
-
-        use libkernel::memory::PageAttributes;
-
-        let page_manager = libkernel::memory::global_pgmr();
-        for page in kernel_text {
-            page_manager
-                .map(
-                    &page,
-                    page.index() - __kernel_start.as_usize(),
-                    None, // Frame should already be locked from fmgr init.
-                    PageAttributes::PRESENT | PageAttributes::GLOBAL,
-                )
-                .unwrap();
-        }
-
-        for page in kernel_rodata {
-            page_manager
-                .map(
-                    &page,
-                    page.index() - __kernel_start.as_usize(),
-                    None, // Frame should already be locked from fmgr init.
-                    PageAttributes::PRESENT | PageAttributes::NO_EXECUTE | PageAttributes::GLOBAL,
-                )
-                .unwrap();
-        }
-
-        for page in kernel_data.chain(kernel_bss) {
-            page_manager
-                .map(
-                    &page,
-                    page.index() - __kernel_start.as_usize(),
-                    None, // Frame should already be locked from fmgr init.
-                    PageAttributes::PRESENT
-                        | PageAttributes::WRITABLE
-                        | PageAttributes::NO_EXECUTE
-                        | PageAttributes::GLOBAL,
-                )
-                .unwrap();
-        }
-
-        libkernel::memory::finalize_paging();
-
-        loop {}
-
-        libkernel::memory::global_alloc::set(&*KMALLOC);
-    } else {
-        panic!("No memory map has been provided by bootloader.");
-    }
-
-    if let Some(system_table) = stivale_struct.efi_system_table() {
-        let system_table_ptr = system_table.system_table_addr as *const SystemConfigTableEntry;
-
-        let mut system_table_len = 0;
-        while let Some(system_config_entry) = system_table_ptr.add(system_table_len).as_ref() {
-            // REMARK: There may be a better way to check for the end of the system table? I'm not sure this is always valid.
-            if system_config_entry.addr().is_null() {
-                break;
-            } else {
-                system_table_len += 1;
-            }
-        }
-
-        // Set system configuration table, so ACPI can be used.
-        // TODO possibly move ACPI structure instances out of libkernel?
-        libkernel::acpi::set_system_config_table(core::slice::from_raw_parts(
-            system_table_ptr,
-            system_table_len,
-        ));
-    }
-
-    _startup()
-}
-
-#[no_mangle]
-#[inline(never)]
-unsafe extern "C" fn _startup() -> ! {
-    use libkernel::cpu::is_bsp;
-
-    /* LOAD REGISTERS */
-    {
+fn load_registers() {
+    unsafe {
         use libkernel::cpu::{has_feature, Feature};
 
         // Set CR0 flags.
@@ -272,9 +138,10 @@ unsafe extern "C" fn _startup() -> ! {
             libkernel::registers::msr::IA32_EFER::set_nxe(true);
         }
     }
+}
 
-    /* LOAD TABLES */
-    {
+fn load_tables() {
+    unsafe {
         use tables::{gdt, idt};
 
         // Always initialize GDT prior to configuring IDT.
@@ -300,8 +167,178 @@ unsafe extern "C" fn _startup() -> ! {
 
         crate::tables::idt::load();
     }
+}
+
+#[no_mangle]
+unsafe extern "sysv64" fn _entry(stivale_struct: *const StivaleStruct) -> ! {
+    CON_OUT.init(drivers::stdout::SerialSpeed::S115200);
+    match drivers::stdout::set_stdout(&mut CON_OUT, log::LevelFilter::Debug) {
+        Ok(()) => {
+            info!("Successfully loaded into kernel, with logging enabled.");
+        }
+        Err(_) => libkernel::instructions::interrupts::breakpoint(),
+    }
+
+    // Load registers and tables before executing any real code.
+    load_registers();
+    load_tables();
+
+    info!("CPU Vendor          {}", libkernel::cpu::VENDOR);
+    info!("CPU Features        {:?}", libkernel::cpu::FeatureFmt);
+
+    let stivale_struct = stivale_struct.as_ref().unwrap();
+
+    info!(
+        "Bootloader Info     {} {}",
+        stivale_struct.bootloader_brand(),
+        stivale_struct.bootloader_version()
+    );
+
+    /* LOAD EFI SYSTEM TABLE */
+    if let Some(system_table) = stivale_struct.efi_system_table() {
+        debug!("Loading EFI system configuration table...");
+        let system_table_ptr = system_table.system_table_addr as *const SystemConfigTableEntry;
+
+        let mut system_table_len = 0;
+        while let Some(system_config_entry) = system_table_ptr.add(system_table_len).as_ref() {
+            // REMARK: There may be a better way to check for the end of the system table? I'm not sure this is always valid.
+            if system_config_entry.addr().is_null() {
+                break;
+            } else {
+                system_table_len += 1;
+            }
+        }
+
+        // Set system configuration table, so ACPI can be used.
+        // TODO possibly move ACPI structure instances out of libkernel?
+        libkernel::acpi::set_system_config_table(core::slice::from_raw_parts(
+            system_table_ptr,
+            system_table_len,
+        ));
+    } else {
+        warn!("No EFI system configuration table found.");
+    }
+
+    /* LOAD MEMORY */
+    if let Some(memory_map) = stivale_struct.memory_map() {
+        use libkernel::{align_down_div, align_up_div, memory::Page};
+
+        libkernel::memory::init(memory_map.as_slice());
+
+        debug!("Global mapping kernel ELF sections.");
+
+        let kernel = unsafe {
+            Page::range(
+                align_down_div(__kernel_start.as_usize(), 0x1000),
+                align_up_div(__kernel_end.as_usize(), 0x1000),
+            )
+        };
+        let kernel_text = unsafe {
+            Page::range(
+                align_down_div(__text_start.as_usize(), 0x1000),
+                align_up_div(__text_end.as_usize(), 0x1000),
+            )
+        };
+        let kernel_rodata = unsafe {
+            Page::range(
+                align_down_div(__rodata_start.as_usize(), 0x1000),
+                align_up_div(__rodata_end.as_usize(), 0x1000),
+            )
+        };
+        let kernel_data = unsafe {
+            Page::range(
+                align_down_div(__data_start.as_usize(), 0x1000),
+                align_up_div(__data_end.as_usize(), 0x1000),
+            )
+        };
+        let kernel_bss = unsafe {
+            Page::range(
+                align_down_div(__bss_start.as_usize(), 0x1000),
+                align_up_div(__bss_end.as_usize(), 0x1000),
+            )
+        };
+        use libkernel::memory::{AttributeModify, PageAttributes};
+
+        let boot_page_manager =
+            libkernel::memory::PageManager::from_current(&libkernel::memory::Page::null());
+        let page_manager = libkernel::memory::global_pgmr();
+        for page in kernel {
+            page_manager
+                .map(
+                    &page,
+                    boot_page_manager.get_mapped_to(&page).unwrap(),
+                    None, // Frame should already be locked from fmgr init.
+                    PageAttributes::PRESENT | PageAttributes::WRITABLE | PageAttributes::GLOBAL,
+                )
+                .unwrap();
+        }
+
+        for page in kernel_text {
+            page_manager.set_page_attribs(
+                &page,
+                PageAttributes::PRESENT | PageAttributes::GLOBAL,
+                AttributeModify::Set,
+            );
+        }
+
+        for page in kernel_rodata {
+            page_manager.set_page_attribs(
+                &page,
+                PageAttributes::PRESENT | PageAttributes::NO_EXECUTE | PageAttributes::GLOBAL,
+                AttributeModify::Set,
+            );
+        }
+
+        for page in kernel_data.chain(kernel_bss) {
+            page_manager.set_page_attribs(
+                &page,
+                PageAttributes::PRESENT
+                    | PageAttributes::WRITABLE
+                    | PageAttributes::NO_EXECUTE
+                    | PageAttributes::GLOBAL,
+                AttributeModify::Set,
+            );
+        }
+
+        libkernel::memory::finalize_paging();
+        // Make sure we reclaim the bootloader memory (it contained the page tables).
+        {
+            let frame_manager = libkernel::memory::global_fmgr();
+            for (index, (ty, _, _)) in frame_manager.iter().enumerate() {
+                if ty == libkernel::memory::FrameType::BootReclaim {
+                    frame_manager
+                        .try_modify_type(index, libkernel::memory::FrameType::Usable)
+                        .unwrap();
+                }
+            }
+        }
+
+        /* AT THIS POINT, `stivale_struct` IS NO LONGER VALID (the memory it would point to via tags is unallocated). */
+
+        libkernel::memory::global_alloc::set(&*KMALLOC);
+
+        info!("Swapped memory control to kernel.");
+    } else {
+        panic!("No memory map has been provided by bootloader.");
+    }
+
+    _startup()
+}
+
+#[no_mangle]
+#[inline(never)]
+unsafe extern "C" fn _startup() -> ! {
+    use libkernel::cpu::is_bsp;
+
+    // BSP should have already loaded these.
+    if !is_bsp() {
+        load_registers();
+        load_tables();
+    }
 
     local_state::init();
+
+    info!("{}", local_state::id());
 
     loop {}
 
@@ -370,7 +407,8 @@ unsafe extern "C" fn _startup() -> ! {
 
     /* INIT APIC */
     {
-        local_state::init_local_apic();
+        // TODO
+        // local_state::init_local_apic();
         // local_state::reload_timer(core::num::NonZeroU32::new(1));
     }
     if is_bsp() {

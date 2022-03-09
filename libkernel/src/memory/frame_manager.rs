@@ -10,9 +10,17 @@ pub enum FrameType {
     Unusable,
     Reserved,
     MMIO,
-    // TODO possibly ACPI reclaim?
     Kernel,
     FrameMap,
+    BootReclaim,
+    ACPIReclaim,
+}
+
+impl FrameType {
+    #[inline]
+    const fn is_reclaimable(&self) -> bool {
+        matches!(self, Self::BootReclaim | Self::ACPIReclaim)
+    }
 }
 
 #[derive(Debug)]
@@ -97,10 +105,10 @@ impl Frame {
         // or if frame is not, but new type is MMIO ...
             || (new_type == FrameType::MMIO
                 && matches!(frame_type, FrameType::Unusable | FrameType::Reserved))
+            || (new_type == FrameType::Usable 
+                && matches!(frame_type, FrameType::BootReclaim | FrameType::ACPIReclaim))
         {
             // Change frame type.
-
-            // Usable / Generic
             self.0.store(
                 ((new_type as u32) << Self::FRAME_TYPE_SHIFT)
                     | (raw & ((1 << Self::FRAME_TYPE_SHIFT) - 1)),
@@ -142,8 +150,7 @@ impl<'arr> FrameManager<'arr> {
 
         // Calculates total system memory.
         let total_system_memory = memory_map
-            .iter()
-            .max_by_key(|entry| entry.base)
+            .last()
             .map(|entry| entry.base + entry.length)
             .unwrap();
         // Memory required to represent all system frames.
@@ -153,7 +160,7 @@ impl<'arr> FrameManager<'arr> {
         let req_falloc_memory_aligned = req_falloc_memory_frames * 0x1000;
 
         debug!(
-            "Required frame manager map memory: {:#X} bytes",
+            "Required frame manager map memory: {:#X}",
             req_falloc_memory_aligned
         );
 
@@ -216,13 +223,15 @@ impl<'arr> FrameManager<'arr> {
 
             // Translate UEFI memory type to kernel frame type.
             let frame_ty = match entry.entry_type {
-                StivaleMemoryMapEntryType::Usable
-                | StivaleMemoryMapEntryType::BootloaderReclaimable => FrameType::Usable,
+                StivaleMemoryMapEntryType::Usable => FrameType::Usable,
+
+                StivaleMemoryMapEntryType::BootloaderReclaimable => FrameType::BootReclaim,
+
+                StivaleMemoryMapEntryType::AcpiReclaimable => FrameType::ACPIReclaim,
 
                 StivaleMemoryMapEntryType::Kernel => FrameType::Kernel,
 
-                StivaleMemoryMapEntryType::Reserved
-                | StivaleMemoryMapEntryType::AcpiReclaimable => FrameType::Reserved,
+                StivaleMemoryMapEntryType::Reserved => FrameType::Reserved,
 
                 StivaleMemoryMapEntryType::AcpiNvs | StivaleMemoryMapEntryType::Framebuffer => {
                     FrameType::MMIO

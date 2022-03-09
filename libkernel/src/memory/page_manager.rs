@@ -153,35 +153,40 @@ unsafe impl Sync for PageManager {}
 
 impl PageManager {
     /// SAFETY: Refer to `VirtualMapper::new()`.
-    pub unsafe fn new(mapped_page: &Page, pml4: Option<PageTable<Level4>>) -> Self {
-        Self {
-            0: spin::RwLock::new({
-                let pml4_index = global_fmgr()
-                    .lock_next()
-                    .expect("Failed to lock frame for virtual addressor's PML4");
+    pub unsafe fn new(mapped_page: &Page, pml4_copy: Option<PageTable<Level4>>) -> Self {
+        Self(spin::RwLock::new({
+            let pml4_index = global_fmgr()
+                .lock_next()
+                .expect("Failed to lock frame for virtual addressor's PML4");
 
-                if let Some(pml4) = pml4 {
-                    // Write existing PML4.
+            if let Some(pml4) = pml4_copy {
+                // Write existing PML4.
+                mapped_page
+                    .forward_checked(pml4_index)
+                    .unwrap()
+                    .as_mut_ptr::<PageTable<Level4>>()
+                    .write(pml4);
+            } else {
+                // Clear PML4 frame.
+                core::ptr::write_bytes(
                     mapped_page
                         .forward_checked(pml4_index)
                         .unwrap()
-                        .as_mut_ptr::<PageTable<Level4>>()
-                        .write(pml4);
-                } else {
-                    // Clear PML4 frame.
-                    core::ptr::write_bytes(
-                        mapped_page
-                            .forward_checked(pml4_index)
-                            .unwrap()
-                            .as_mut_ptr::<u8>(),
-                        0,
-                        0x1000,
-                    );
-                }
+                        .as_mut_ptr::<u8>(),
+                    0,
+                    0x1000,
+                );
+            }
 
-                VirtualMapper::new(mapped_page, pml4_index)
-            }),
-        }
+            VirtualMapper::new(mapped_page, pml4_index)
+        }))
+    }
+
+    pub unsafe fn from_current(mapped_page: &Page) -> Self {
+        Self(spin::RwLock::new(VirtualMapper::new(
+            mapped_page,
+            crate::registers::control::CR3::read().0.frame_index(),
+        )))
     }
 
     /* MAP / UNMAP */
@@ -278,12 +283,12 @@ impl PageManager {
 
     /* STATE QUERYING */
 
-    pub fn is_mapped(&self, virt_addr: Address<Virtual>) -> Option<usize> {
+    pub fn is_mapped(&self, virt_addr: Address<Virtual>) -> bool {
         self.0
             .read()
             .get_page_entry(&Page::containing_addr(virt_addr))
             .filter(|entry| entry.get_attribs().contains(PageAttributes::PRESENT))
-            .and_then(|entry| entry.get_frame_index())
+            .is_some()
     }
 
     pub fn is_mapped_to(&self, page: &Page, frame_index: usize) -> bool {
@@ -292,6 +297,13 @@ impl PageManager {
             .get_page_entry(page)
             .and_then(|entry| entry.get_frame_index())
             .map_or(false, |entry_frame_index| frame_index == entry_frame_index)
+    }
+
+    pub fn get_mapped_to(&self, page: &Page) -> Option<usize> {
+        self.0
+            .read()
+            .get_page_entry(page)
+            .and_then(|entry| entry.get_frame_index())
     }
 
     /* STATE CHANGING */
