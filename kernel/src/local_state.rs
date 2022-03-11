@@ -78,15 +78,19 @@ fn local_state() -> &'static mut LocalState {
 pub unsafe fn init() {
     LOCAL_STATE_PTR.compare_exchange(
         0,
-        ((PML4_LOCAL_STATE_ENTRY_INDEX * libkernel::memory::PML4_ENTRY_MEM_SIZE)
-            + (libkernel::instructions::rdrand32().unwrap() as usize))
-            & !0xFFF,
+        // Cosntruct the local state pointer (with slide) via the `Address` struct, to
+        // automatically sign extend.
+        Address::<Virtual>::new(
+            ((PML4_LOCAL_STATE_ENTRY_INDEX * libkernel::memory::PML4_ENTRY_MEM_SIZE)
+                + (libkernel::instructions::rdrand32().unwrap() as usize))
+                & !0xFFF,
+        )
+        .as_usize(),
         Ordering::AcqRel,
         Ordering::Relaxed,
     );
 
     let local_state_ptr = LOCAL_STATE_PTR.load(Ordering::Relaxed) as *mut LocalState;
-    info!("{:?}", local_state_ptr);
 
     let page_manager = {
         let global_page_manager = libkernel::memory::global_pgmr();
