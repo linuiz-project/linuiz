@@ -4,4 +4,4 @@ build-std-features = ["compiler-builtins-mem"]
 
 [build]
 target = "x86_64-unknown-none.json"
-out-dir = "../.hdd/image/gsai/"
+out-dir = "../.hdd/image/linuiz/"

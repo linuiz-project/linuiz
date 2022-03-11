@@ -5,7 +5,7 @@ use crate::{
 use core::{
     arch::asm,
     num::{NonZeroU32, NonZeroUsize},
-    sync::atomic::{AtomicU32, AtomicU64, AtomicUsize},
+    sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering},
 };
 use libkernel::{
     memory::PageManager,
@@ -55,38 +55,38 @@ struct LocalState {
 
 impl LocalState {
     const MAGIC: u64 = 0xFFFF_D3ADC0DE_FFFF;
+
+    fn validate_init(&self) {
+        debug_assert!(self.magic == LocalState::MAGIC);
+    }
 }
 
 const PML4_LOCAL_STATE_ENTRY_INDEX: usize = 510;
 static LOCAL_STATE_PTR: AtomicUsize = AtomicUsize::new(0);
 
-union LocalStateAccess {
-    uninit: [u8; 0],
-    init: core::mem::ManuallyDrop<LocalState>,
-}
-
-impl LocalStateAccess {
-    fn validate_init(&self) {
-        debug_assert!(unsafe { LOCAL_STATE.init.magic } == LocalState::MAGIC);
+fn local_state() -> &'static mut LocalState {
+    unsafe {
+        (LOCAL_STATE_PTR.load(Ordering::Relaxed) as *mut LocalState)
+            .as_mut()
+            .unwrap()
     }
 }
-
-static mut LOCAL_STATE: LocalStateAccess = LocalStateAccess { uninit: [] };
 
 /// Initializes the core-local state structure.
 ///
 /// SAFETY: This function invariantly assumes it will only be called once.
 pub unsafe fn init() {
-    let local_state_ptr = LOCAL_STATE_PTR
-        .compare_exchange(
-            0,
-            ((PML4_LOCAL_STATE_ENTRY_INDEX * libkernel::memory::PML4_ENTRY_MEM_SIZE)
-                + (libkernel::instructions::rdrand32() as usize))
-                & !0xFFF,
-            core::sync::atomic::Ordering::AcqRel,
-            core::sync::atomic::Ordering::Relaxed,
-        )
-        .unwrap_unchecked() as *mut LocalState;
+    LOCAL_STATE_PTR.compare_exchange(
+        0,
+        ((PML4_LOCAL_STATE_ENTRY_INDEX * libkernel::memory::PML4_ENTRY_MEM_SIZE)
+            + (libkernel::instructions::rdrand32().unwrap() as usize))
+            & !0xFFF,
+        Ordering::AcqRel,
+        Ordering::Relaxed,
+    );
+
+    let local_state_ptr = LOCAL_STATE_PTR.load(Ordering::Relaxed) as *mut LocalState;
+    info!("{:?}", local_state_ptr);
 
     let page_manager = {
         let global_page_manager = libkernel::memory::global_pgmr();
@@ -99,7 +99,7 @@ pub unsafe fn init() {
             Some(copy_pml4),
         );
 
-        page_manager.auto_map(&libkernel::memory::Page::from_ptr(LOCAL_STATE), {
+        page_manager.auto_map(&libkernel::memory::Page::from_ptr(local_state_ptr), {
             use libkernel::memory::PageAttributes;
             PageAttributes::PRESENT | PageAttributes::WRITABLE | PageAttributes::NO_EXECUTE
         });
@@ -108,18 +108,16 @@ pub unsafe fn init() {
         page_manager
     };
 
-    LOCAL_STATE = LocalStateAccess {
-        init: core::mem::ManuallyDrop::new(LocalState {
-            magic: LocalState::MAGIC,
-            page_manager,
-            id: libkernel::cpu::get_id(),
-            clock: AtomicClock::new(),
-            scheduler: Mutex::new(Scheduler::new()),
-            syscall_stack_ptr: 0x0 as *const (),   // TODO
-            privilege_stack_ptr: 0x0 as *const (), // TODO
-            local_timer_per_ms: None,
-        }),
-    };
+    local_state_ptr.write(LocalState {
+        magic: LocalState::MAGIC,
+        page_manager,
+        id: libkernel::cpu::get_id(),
+        clock: AtomicClock::new(),
+        scheduler: Mutex::new(Scheduler::new()),
+        syscall_stack_ptr: 0x0 as *const (),   // TODO
+        privilege_stack_ptr: 0x0 as *const (), // TODO
+        local_timer_per_ms: None,
+    });
 
     // ptr.add(Offset::SyscallStackPtr as usize)
     //     .cast::<*const u8>()
@@ -180,16 +178,16 @@ pub unsafe fn init() {
 #[inline]
 pub fn id() -> u32 {
     unsafe {
-        LOCAL_STATE.validate_init();
-        LOCAL_STATE.init.id
+        local_state().validate_init();
+        local_state().id
     }
 }
 
 #[inline]
 pub fn clock() -> &'static AtomicClock {
     unsafe {
-        LOCAL_STATE.validate_init();
-        &LOCAL_STATE.init.clock
+        local_state().validate_init();
+        &local_state().clock
     }
 }
 
@@ -208,15 +206,15 @@ pub fn clock() -> &'static AtomicClock {
 #[inline]
 pub fn lock_scheduler() -> MutexGuard<'static, Scheduler> {
     unsafe {
-        LOCAL_STATE.validate_init();
-        LOCAL_STATE.init.scheduler.lock()
+        local_state().validate_init();
+        local_state().scheduler.lock()
     }
 }
 
 #[inline]
 pub fn try_lock_scheduler() -> Option<MutexGuard<'static, Scheduler>> {
     unsafe {
-        LOCAL_STATE.validate_init();
-        LOCAL_STATE.init.scheduler.try_lock()
+        local_state().validate_init();
+        local_state().scheduler.try_lock()
     }
 }

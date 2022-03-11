@@ -181,8 +181,6 @@ unsafe extern "sysv64" fn _entry(stivale_struct: *const StivaleStruct) -> ! {
     }
 
     // Load registers and tables before executing any real code.
-    load_registers();
-    load_tables();
 
     let stivale_struct = stivale_struct.as_ref().unwrap();
 
@@ -353,10 +351,9 @@ unsafe extern "C" fn _startup() -> ! {
     use libkernel::cpu::is_bsp;
 
     // BSP should have already loaded these.
-    if !is_bsp() {
-        load_registers();
-        load_tables();
-    }
+
+    load_registers();
+    load_tables();
 
     local_state::init();
     libkernel::instructions::interrupts::enable();

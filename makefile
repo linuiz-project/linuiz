@@ -10,7 +10,7 @@ bootloader_deps = $(shell find ./limine/common/ -type f -name "*")
 
 libkernel_deps = $(shell find ./libkernel/ -type f -name "*.rs")
 
-kernel = ./.hdd/image/EFI/gsai/kernel.elf
+kernel = ./.hdd/image/EFI/linuiz/kernel.elf
 kernel_deps = $(shell find ./kernel/ -type f -name "*.rs")
 kernel_linker_args = ./kernel/x86_64-unknown-none.json ./kernel/x86_64-unknown-none.lds
 
@@ -26,7 +26,7 @@ debug = .debug
 
 all: $(nvme_img) $(rootfs_img) $(bootloader) $(kernel)
 	mkdir -p .debug
-	objdump -d -D .hdd/image/gsai/kernel.elf > .debug/kernel_disasm
+	objdump -d -D .hdd/image/linuiz/kernel.elf > .debug/kernel_disasm
 
 run: all $(debug)
 	./run.sh

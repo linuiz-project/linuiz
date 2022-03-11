@@ -37,6 +37,7 @@ pub unsafe fn set_data_registers(value: u16) {
     );
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum RdRandError {
     NotSupported,
     HardFailure,
