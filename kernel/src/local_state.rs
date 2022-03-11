@@ -5,7 +5,7 @@ use crate::{
 use core::{
     arch::asm,
     num::{NonZeroU32, NonZeroUsize},
-    sync::atomic::{AtomicU32, AtomicU64},
+    sync::atomic::{AtomicU32, AtomicU64, AtomicUsize},
 };
 use libkernel::{
     memory::PageManager,
@@ -57,6 +57,9 @@ impl LocalState {
     const MAGIC: u64 = 0xFFFF_D3ADC0DE_FFFF;
 }
 
+const PML4_LOCAL_STATE_ENTRY_INDEX: usize = 510;
+static LOCAL_STATE_PTR: AtomicUsize = AtomicUsize::new(0);
+
 union LocalStateAccess {
     uninit: [u8; 0],
     init: core::mem::ManuallyDrop<LocalState>,
@@ -74,31 +77,37 @@ static mut LOCAL_STATE: LocalStateAccess = LocalStateAccess { uninit: [] };
 ///
 /// SAFETY: This function invariantly assumes it will only be called once.
 pub unsafe fn init() {
-    debug!("0");
+    let local_state_ptr = LOCAL_STATE_PTR
+        .compare_exchange(
+            0,
+            ((PML4_LOCAL_STATE_ENTRY_INDEX * libkernel::memory::PML4_ENTRY_MEM_SIZE)
+                + (libkernel::instructions::rdrand32() as usize))
+                & !0xFFF,
+            core::sync::atomic::Ordering::AcqRel,
+            core::sync::atomic::Ordering::Relaxed,
+        )
+        .unwrap_unchecked() as *mut LocalState;
+
     let page_manager = {
         let global_page_manager = libkernel::memory::global_pgmr();
+        let mut copy_pml4 = global_page_manager.copy_pml4();
+        copy_pml4
+            .get_entry_mut(PML4_LOCAL_STATE_ENTRY_INDEX)
+            .clear();
         let page_manager = libkernel::memory::PageManager::new(
             &global_page_manager.mapped_page(),
-            Some(global_page_manager.copy_pml4()),
+            Some(copy_pml4),
         );
-        let local_state_ptr = &raw mut LOCAL_STATE;
 
-        debug!("1 {:?}", local_state_ptr);
-        page_manager.auto_map(&libkernel::memory::Page::from_ptr(local_state_ptr), {
+        page_manager.auto_map(&libkernel::memory::Page::from_ptr(LOCAL_STATE), {
             use libkernel::memory::PageAttributes;
             PageAttributes::PRESENT | PageAttributes::WRITABLE | PageAttributes::NO_EXECUTE
         });
-        debug!("2");
         page_manager.write_cr3();
-
-        assert!(page_manager.is_mapped(Address::<Virtual>::from_ptr(local_state_ptr)));
-
-        core::ptr::write_bytes(local_state_ptr, 0x0, core::mem::size_of::<LocalState>());
 
         page_manager
     };
 
-    debug!("4");
     LOCAL_STATE = LocalStateAccess {
         init: core::mem::ManuallyDrop::new(LocalState {
             magic: LocalState::MAGIC,
@@ -111,7 +120,6 @@ pub unsafe fn init() {
             local_timer_per_ms: None,
         }),
     };
-    debug!("5");
 
     // ptr.add(Offset::SyscallStackPtr as usize)
     //     .cast::<*const u8>()

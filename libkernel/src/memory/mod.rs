@@ -54,7 +54,9 @@ pub mod global_alloc {
 use crate::cell::SyncOnceCell;
 
 pub const PHYS_MEM_START: crate::Address<crate::Virtual> =
-    crate::Address::<crate::Virtual>::new(1 << 9 << 9 << 9 << 12);
+    crate::Address::<crate::Virtual>::new(256 * PML4_ENTRY_MEM_SIZE);
+
+pub const PML4_ENTRY_MEM_SIZE: usize = 1 << 9 << 9 << 9 << 12;
 
 static FRAME_MANAGER: SyncOnceCell<FrameManager> = SyncOnceCell::new();
 static PAGE_MANAGER: SyncOnceCell<PageManager> = SyncOnceCell::new();

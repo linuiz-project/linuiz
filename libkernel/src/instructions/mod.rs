@@ -50,7 +50,7 @@ pub enum RdRandError {
 ///     — `Some(Err(_))` indicates `rdrand` has encountered a hard failure, and will not generate
 ///         anymore valid numbers.
 ///     — `Some(Ok(_))` returns the successfully generated random number.
-pub fn rdrand() -> Result<u64, RdRandError> {
+pub fn rdrand64() -> Result<u64, RdRandError> {
     // Check to ensure the instruction is supported.
     if crate::cpu::has_feature(crate::cpu::Feature::RDRAND) {
         // In the case of a hard failure for random number generation, a retry limit is employed
@@ -90,4 +90,40 @@ pub fn rdrand() -> Result<u64, RdRandError> {
     } else {
         Err(RdRandError::NotSupported)
     }
+}
+
+/// All documentation is identical to the `rdrand64` function variant.
+pub fn rdrand32() -> Result<u32, RdRandError> {
+        if crate::cpu::has_feature(crate::cpu::Feature::RDRAND) {
+            for _ in 0..22 {
+                let result: u32;
+                let rflags: u64;
+    
+                unsafe {
+                    asm!(
+                        "
+                        pushfq      # Save original `rflags`
+                        rdrand {:e}
+                        pushfq      # Save `rdrand` `rflags`
+                        pop {}    # Pop `rflags` into local variable
+                        popfq       # Restore original `rflags`
+                        ",
+                        out(reg) result,
+                        out(reg) rflags,
+                        options(pure, nomem, preserves_flags)
+                    );
+                }
+    
+                use crate::registers::RFlags;
+                if result > 0 && RFlags::from_bits_truncate(rflags).contains(RFlags::CARRY_FLAG) {
+                    return Ok(result);
+                } else {
+                    pause();
+                }
+            }
+    
+            Err(RdRandError::HardFailure)
+        } else {
+            Err(RdRandError::NotSupported)
+        }
 }

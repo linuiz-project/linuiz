@@ -152,6 +152,10 @@ unsafe impl Send for PageManager {}
 unsafe impl Sync for PageManager {}
 
 impl PageManager {
+        pub fn cr3(&self) -> usize {
+            self.0.read().pml4_frame * 0x1000
+        }
+
     /// SAFETY: Refer to `VirtualMapper::new()`.
     pub unsafe fn new(mapped_page: &Page, pml4_copy: Option<PageTable<Level4>>) -> Self {
         Self(spin::RwLock::new({

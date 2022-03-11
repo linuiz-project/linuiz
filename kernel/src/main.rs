@@ -89,6 +89,7 @@ lazy_static::lazy_static! {
 }
 
 use libkernel::io::pci;
+use x86_64::structures::paging::OffsetPageTable;
 pub struct Devices<'a>(Vec<pci::DeviceVariant>, &'a core::marker::PhantomData<()>);
 unsafe impl Send for Devices<'_> {}
 unsafe impl Sync for Devices<'_> {}
@@ -183,9 +184,6 @@ unsafe extern "sysv64" fn _entry(stivale_struct: *const StivaleStruct) -> ! {
     load_registers();
     load_tables();
 
-    info!("CPU Vendor          {}", libkernel::cpu::VENDOR);
-    info!("CPU Features        {:?}", libkernel::cpu::FeatureFmt);
-
     let stivale_struct = stivale_struct.as_ref().unwrap();
 
     info!(
@@ -193,6 +191,9 @@ unsafe extern "sysv64" fn _entry(stivale_struct: *const StivaleStruct) -> ! {
         stivale_struct.bootloader_brand(),
         stivale_struct.bootloader_version()
     );
+    debug!("Kernel base:        {:?}", __text_start.as_ptr::<()>());
+    info!("CPU Vendor          {}", libkernel::cpu::VENDOR);
+    info!("CPU Features        {:?}", libkernel::cpu::FeatureFmt);
 
     /* LOAD EFI SYSTEM TABLE */
     if let Some(system_table) = stivale_struct.efi_system_table() {
@@ -301,6 +302,27 @@ unsafe extern "sysv64" fn _entry(stivale_struct: *const StivaleStruct) -> ! {
         }
 
         libkernel::memory::finalize_paging();
+
+        // Make sure global PML4 has all L4 entries mapped to a frame (so core-local
+        // PML4 copies share parity of address space).
+        {
+            let pml4 = unsafe {
+                (libkernel::registers::control::CR3::read().0.as_u64() as *mut u8)
+                    .add(page_manager.mapped_page().index() * 0x1000)
+                    .cast::<libkernel::memory::PageTable<libkernel::memory::Level4>>()
+                    .as_mut()
+                    .unwrap()
+            };
+
+            let frame_manager = libkernel::memory::global_fmgr();
+            for (idx, entry) in pml4.iter_mut().enumerate().take(256) {
+                entry.set(
+                    frame_manager.lock_next().unwrap(),
+                    PageAttributes::PRESENT | PageAttributes::WRITABLE | PageAttributes::USERSPACE,
+                );
+            }
+        }
+
         // Make sure we reclaim the bootloader memory (it contained the page tables).
         {
             let frame_manager = libkernel::memory::global_fmgr();
@@ -337,14 +359,13 @@ unsafe extern "C" fn _startup() -> ! {
     }
 
     local_state::init();
-
-    info!("{}", local_state::id());
-
-    loop {}
+    libkernel::instructions::interrupts::enable();
 
     if is_bsp() {
         clock::global::start();
     }
+
+    loop {}
 
     /* LOAD TSS */
     {
