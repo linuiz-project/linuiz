@@ -5,9 +5,10 @@ qemu-system-x86_64 \
     -machine q35 \
     -cpu max \
     -smp 2 \
-    -m 8G \
+    -m 2G \
     -serial mon:stdio \
     -net none \
+    -display none \
     -bios ./resources/ovmf.fd \
     -drive format=raw,file=fat:rw:./.hdd/image/ \
     -drive format=raw,file=./.hdd/nvme.img,id=nvm,if=none \
