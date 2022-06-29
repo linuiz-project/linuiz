@@ -1,4 +1,3 @@
-use crate::{memory::uefi, Address, Virtual};
 use core::sync::atomic::{AtomicU32, Ordering};
 use num_enum::TryFromPrimitive;
 use spin::RwLock;
@@ -16,13 +15,6 @@ pub enum FrameType {
     ACPIReclaim,
 }
 
-impl FrameType {
-    #[inline]
-    const fn is_reclaimable(&self) -> bool {
-        matches!(self, Self::BootReclaim | Self::ACPIReclaim)
-    }
-}
-
 #[derive(Debug)]
 #[repr(transparent)]
 struct Frame(AtomicU32);
@@ -32,11 +24,6 @@ impl Frame {
     const PEEKED_BIT: u32 = 1 << 16;
     const LOCKED_BIT: u32 = 1 << 17;
     const FRAME_TYPE_SHIFT: u32 = 26;
-
-    #[inline]
-    const fn empty() -> Self {
-        Self(AtomicU32::new(0))
-    }
 
     /// 'Borrows' a frame, incrementing the reference counter.
     #[inline]

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::instructions::cpuid::exec;
 use core::fmt::{Debug, Display, Formatter, Result};
 use lazy_static::lazy_static;

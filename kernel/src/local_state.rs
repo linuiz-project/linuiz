@@ -1,12 +1,5 @@
-use crate::{
-    clock::{local, AtomicClock},
-    scheduling::Scheduler,
-};
-use core::{
-    arch::asm,
-    num::{NonZeroU32, NonZeroUsize},
-    sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering},
-};
+use crate::{clock::AtomicClock, scheduling::Scheduler};
+use core::sync::atomic::{AtomicUsize, Ordering};
 use libkernel::{
     memory::PageManager,
     registers::msr::{Generic, IA32_KERNEL_GS_BASE},
@@ -48,9 +41,9 @@ struct LocalState {
     id: u32,
     clock: AtomicClock,
     scheduler: Mutex<Scheduler>,
-    syscall_stack_ptr: *const (),
-    privilege_stack_ptr: *const (),
     local_timer_per_ms: Option<u32>,
+    syscall_stack_ptr: [u8; 16384],
+    privilege_stack_ptr: [u8; 16384],
 }
 
 impl LocalState {
@@ -74,8 +67,21 @@ fn local_state() -> &'static mut LocalState {
 
 /// Initializes the core-local state structure.
 ///
+/// The local state structure is created via the following process:
+///     1.  Compute the address of the structure within the `PML4_LOCAL_STATE_ENTRY_INDEX` page index,
+///         along with a randomized slide to ensure the structure cannot be arbitrarily accessed.
+///
+///     2.  The computed address is map the `PML4_LOCAL_STATE_ENTRY_INDEX` page index base to the given address in
+///         a fresh PML4 table for the local core. This fresh PML4 is then written to CR3 to begin constructing the
+///         local state.
+///
+///     3.  The local state is constructed with requisite default values.
+///
+/// It must be noted that at this point, the local state is still not *initialized*, i.e. the local APIC is not functioning
+/// (thus no core-local clock).
+///
 /// SAFETY: This function invariantly assumes it will only be called once.
-pub unsafe fn init() {
+pub unsafe fn create() {
     LOCAL_STATE_PTR.compare_exchange(
         0,
         // Cosntruct the local state pointer (with slide) via the `Address` struct, to
@@ -118,17 +124,10 @@ pub unsafe fn init() {
         id: libkernel::cpu::get_id(),
         clock: AtomicClock::new(),
         scheduler: Mutex::new(Scheduler::new()),
-        syscall_stack_ptr: 0x0 as *const (),   // TODO
-        privilege_stack_ptr: 0x0 as *const (), // TODO
         local_timer_per_ms: None,
+        syscall_stack_ptr: [0u8; 16384],
+        privilege_stack_ptr: [0u8; 16384],
     });
-
-    // ptr.add(Offset::SyscallStackPtr as usize)
-    //     .cast::<*const u8>()
-    //     .write(alloc_stack(2));
-    // ptr.add(Offset::PrivilegeStackPtr as usize)
-    //     .cast::<*const u8>()
-    //     .write(alloc_stack(2));
 }
 
 // pub fn init_local_apic() {

@@ -355,7 +355,7 @@ unsafe extern "C" fn _startup() -> ! {
     load_registers();
     load_tables();
 
-    local_state::init();
+    local_state::create();
     libkernel::instructions::interrupts::enable();
 
     if is_bsp() {
@@ -383,7 +383,6 @@ unsafe extern "C" fn _startup() -> ! {
             use crate::local_state::Offset;
             use x86_64::VirtAddr;
 
-            // TODO
             // (&mut *tss_ptr).privilege_stack_table[0] =
             //     VirtAddr::from_ptr(crate::rdgsval!(*const (), Offset::PrivilegeStackPtr));
         }
@@ -397,11 +396,12 @@ unsafe extern "C" fn _startup() -> ! {
             // base
             low.set_bits(16..40, tss_ptr_u64.get_bits(0..24));
             low.set_bits(56..64, tss_ptr_u64.get_bits(24..32));
-            // limit (the `-1` in needed since the bound is inclusive)
+            // limit (the `-1` is needed since the bound is inclusive, not exclusive)
             low.set_bits(0..16, (core::mem::size_of::<TaskStateSegment>() - 1) as u64);
             // type (0b1001 = available 64-bit tss)
             low.set_bits(40..44, 0b1001);
 
+            // high 32 bits of base
             let mut high = 0;
             high.set_bits(0..32, tss_ptr_u64.get_bits(32..64));
 

@@ -92,23 +92,20 @@ pub fn init(memory_map: &[stivale_boot::v2::StivaleMemoryMapEntry]) {
 ///         value being safe. This, if called at the wrong time, can do
 ///         unrecoverable damage to kernel memory.
 pub unsafe fn finalize_paging() {
-    unsafe {
-        let frame_manager = global_fmgr();
-        let page_manager = global_pgmr();
+    let frame_manager = global_fmgr();
+    let page_manager = global_pgmr();
 
-        debug!(
-            "Physical memory offset: @{:?}",
-            crate::memory::PHYS_MEM_START
-        );
-        unsafe {
-            page_manager.modify_mapped_page(Page::from_addr(crate::memory::PHYS_MEM_START));
-            frame_manager.slide_map_base(crate::memory::PHYS_MEM_START.as_usize());
-        }
+    debug!(
+        "Physical memory offset: @{:?}",
+        crate::memory::PHYS_MEM_START
+    );
 
-        debug!("Writing baseline kernel PML4 to CR3.");
-        page_manager.write_cr3();
-        debug!("Successfully wrote to CR3.");
-    }
+    page_manager.modify_mapped_page(Page::from_addr(crate::memory::PHYS_MEM_START));
+    frame_manager.slide_map_base(crate::memory::PHYS_MEM_START.as_usize());
+
+    debug!("Writing baseline kernel PML4 to CR3.");
+    page_manager.write_cr3();
+    debug!("Successfully wrote to CR3.");
 }
 
 pub fn global_fmgr() -> &'static FrameManager<'static> {

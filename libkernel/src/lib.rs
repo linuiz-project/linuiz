@@ -8,8 +8,6 @@
     panic_info_message,
     alloc_error_handler,
     const_mut_refs,
-    const_ptr_offset,
-    const_fn_trait_bound,
     exclusive_range_pattern,
     extern_types,
     ptr_as_uninit,
