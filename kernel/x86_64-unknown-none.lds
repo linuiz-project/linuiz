@@ -43,16 +43,23 @@ SECTIONS
     __ro_end            = .;
 
     . = ALIGN(CONSTANT(MAXPAGESIZE));
-    __rw_start          = .;
-    /* relro sections */
+    __relro_start       = .;
     .eh_frame           : { KEEP(*(.eh_frame)) }
     .gcc_except_table   : { KEEP(*(.gcc_except_table)) }
     .tdata              : { *(.tdata .tdata.*) }
     .tbss               : { *(.tbss .tbss.*) }
+    .data.rel.ro            :
+    {
+        *(.data.rel.ro.local .data.rel.ro.local.*)
+        *(.data.rel.ro .data.rel.ro.*)
+    }
     .dynamic            : { *(.dynamic) }
     .got                : { *(.got) *(.igot) }
-    .                   = ALIGN(CONSTANT(MAXPAGESIZE));
+    __relro_end         = .;
     .                   = DATA_SEGMENT_RELRO_END(0, .);
+
+    . = ALIGN(CONSTANT(MAXPAGESIZE));
+    __rw_start          = .;
     /* data sections */
     .got.plt            : { *(.got.plt) *(.igot.plt) }
     .data               : { *(.data .data.*) }
