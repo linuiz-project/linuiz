@@ -72,7 +72,7 @@ pub mod local {
     #[inline(always)]
     pub fn get_ticks() -> u64 {
         // TODO this is fucked in userland ?? swapgs sucks
-        unsafe { crate::local_state::clock().get_ticks() }
+        crate::local_state::clock().get_ticks()
     }
 
     #[inline(always)]

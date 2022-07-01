@@ -23,7 +23,7 @@ impl<T> core::ops::Deref for SyncCell<T> {
 }
 
 pub struct SyncOnceCell<T> {
-    inner_cell: core::lazy::OnceCell<T>,
+    inner_cell: core::cell::OnceCell<T>,
 }
 
 unsafe impl<T> Send for SyncOnceCell<T> {}
@@ -32,7 +32,7 @@ impl<T> SyncOnceCell<T> {
     #[inline]
     pub const fn new() -> Self {
         Self {
-            inner_cell: core::lazy::OnceCell::new(),
+            inner_cell: core::cell::OnceCell::new(),
         }
     }
 

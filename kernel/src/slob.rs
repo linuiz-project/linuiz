@@ -1,8 +1,7 @@
-use core::{alloc::Layout, mem::size_of, num::NonZeroUsize};
+use core::{alloc::Layout, mem::size_of};
 use libkernel::{
     align_up_div,
     memory::{Page, PageAttributes},
-    Address, Physical,
 };
 use spin::{RwLock, RwLockWriteGuard};
 
@@ -149,7 +148,7 @@ impl<'map> SLOB<'map> {
         // Attempt to find a run of already-mapped pages within our allocator
         // that can contain our required slice length.
         let mut current_run = 0;
-        let start_index = core::lazy::OnceCell::new();
+        let start_index = core::cell::OnceCell::new();
         for (index, block_page) in map_write.iter().enumerate() {
             if block_page.is_empty() {
                 current_run += 1;

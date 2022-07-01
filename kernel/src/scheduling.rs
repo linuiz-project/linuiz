@@ -75,7 +75,7 @@ impl Thread {
         cr3: (Address<Physical>, CR3Flags),
     ) -> Self {
         let rip = function as u64;
-        let stack = stack.unwrap_or_else(|| unsafe { Box::new([0u8; Self::DEFAULT_STACK_SIZE]) });
+        let stack = stack.unwrap_or_else(|| Box::new([0u8; Self::DEFAULT_STACK_SIZE]));
 
         use crate::tables::gdt;
         Self {

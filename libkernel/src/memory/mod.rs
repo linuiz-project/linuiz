@@ -6,12 +6,11 @@ pub use page_manager::*;
 pub use paging::*;
 
 pub mod paging;
-pub mod uefi;
 pub mod volatile;
 
 #[cfg(feature = "global_allocator")]
 pub mod global_alloc {
-    use core::{alloc::GlobalAlloc, lazy::OnceCell};
+    use core::{alloc::GlobalAlloc, cell::OnceCell};
 
     struct GlobalAllocator<'m>(OnceCell<&'m dyn GlobalAlloc>);
 
@@ -65,7 +64,7 @@ static PAGE_MANAGER: SyncOnceCell<PageManager> = SyncOnceCell::new();
 ///
 /// This function *does not* swap the current page table. To commit the page manager
 /// to CR3 and map physical memory at the correct offset, call `finalize_paging()`.
-pub fn init(memory_map: &[stivale_boot::v2::StivaleMemoryMapEntry]) {
+pub fn init(memory_map: &[limine::LimineMemmapEntry]) {
     info!("Initializing kernel frame and page managers.");
 
     FRAME_MANAGER

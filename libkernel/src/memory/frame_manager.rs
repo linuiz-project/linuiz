@@ -132,14 +132,15 @@ unsafe impl Send for FrameManager<'_> {}
 unsafe impl Sync for FrameManager<'_> {}
 
 impl<'arr> FrameManager<'arr> {
-    pub fn from_mmap(memory_map: &[stivale_boot::v2::StivaleMemoryMapEntry]) -> Self {
-        use stivale_boot::v2::StivaleMemoryMapEntryType;
+    pub fn from_mmap(memory_map: &[limine::LimineMemmapEntry]) -> Self {
+        use limine::LimineMemoryMapEntryType;
 
         // Calculates total system memory.
         let total_system_memory = memory_map
             .last()
-            .map(|entry| entry.base + entry.length)
+            .map(|entry| entry.base + entry.len)
             .unwrap();
+        debug!("Total system memory: {:#X} bytes", total_system_memory);
         // Memory required to represent all system frames.
         let total_system_frames = crate::align_up_div(total_system_memory as usize, 0x1000);
         let req_falloc_memory = total_system_frames * core::mem::size_of::<Frame>();
@@ -156,12 +157,12 @@ impl<'arr> FrameManager<'arr> {
             .iter()
             .filter(|entry| {
                 matches!(
-                    entry.entry_type,
-                    StivaleMemoryMapEntryType::BootloaderReclaimable
-                        | StivaleMemoryMapEntryType::Usable
+                    entry.typ,
+                    LimineMemoryMapEntryType::BootloaderReclaimable
+                        | LimineMemoryMapEntryType::Usable
                 )
             })
-            .find(|entry| entry.length >= (req_falloc_memory_aligned as u64))
+            .find(|entry| entry.len >= (req_falloc_memory_aligned as u64))
             .expect("Failed to find viable memory descriptor for frame allocator");
 
         debug!("Found entry for frame manager map: {:?}", map_entry);
@@ -199,7 +200,7 @@ impl<'arr> FrameManager<'arr> {
             );
 
             let start_index = entry.base / 0x1000;
-            let frame_count = entry.length / 0x1000;
+            let frame_count = entry.len / 0x1000;
 
             // Checks for 'holes' in system memory which we shouldn't try to allocate to.
             for frame_index in last_frame_end..start_index {
@@ -209,22 +210,16 @@ impl<'arr> FrameManager<'arr> {
             }
 
             // Translate UEFI memory type to kernel frame type.
-            let frame_ty = match entry.entry_type {
-                StivaleMemoryMapEntryType::Usable => FrameType::Usable,
-
-                StivaleMemoryMapEntryType::BootloaderReclaimable => FrameType::BootReclaim,
-
-                StivaleMemoryMapEntryType::AcpiReclaimable => FrameType::ACPIReclaim,
-
-                StivaleMemoryMapEntryType::Kernel => FrameType::Kernel,
-
-                StivaleMemoryMapEntryType::Reserved => FrameType::Reserved,
-
-                StivaleMemoryMapEntryType::AcpiNvs | StivaleMemoryMapEntryType::Framebuffer => {
+            let frame_ty = match entry.typ {
+                LimineMemoryMapEntryType::Usable => FrameType::Usable,
+                LimineMemoryMapEntryType::BootloaderReclaimable => FrameType::BootReclaim,
+                LimineMemoryMapEntryType::AcpiReclaimable => FrameType::ACPIReclaim,
+                LimineMemoryMapEntryType::KernelAndModules => FrameType::Kernel,
+                LimineMemoryMapEntryType::Reserved => FrameType::Reserved,
+                LimineMemoryMapEntryType::AcpiNvs | LimineMemoryMapEntryType::Framebuffer => {
                     FrameType::MMIO
                 }
-
-                StivaleMemoryMapEntryType::BadMemory => FrameType::Unusable,
+                LimineMemoryMapEntryType::BadMemory => FrameType::Unusable,
             };
 
             if frame_ty != FrameType::Usable {

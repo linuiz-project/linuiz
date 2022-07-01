@@ -1,11 +1,6 @@
 use crate::{clock::AtomicClock, scheduling::Scheduler};
 use core::sync::atomic::{AtomicUsize, Ordering};
-use libkernel::{
-    memory::PageManager,
-    registers::msr::{Generic, IA32_KERNEL_GS_BASE},
-    structures::apic::APIC,
-    Address, Virtual,
-};
+use libkernel::{memory::PageManager, Address, Virtual};
 use spin::{Mutex, MutexGuard};
 
 #[repr(u8)]
@@ -118,6 +113,8 @@ pub unsafe fn create() {
         page_manager
     };
 
+    debug!("LOCAL STATE PTR {:?}", local_state_ptr);
+
     local_state_ptr.write(LocalState {
         magic: LocalState::MAGIC,
         page_manager,
@@ -180,18 +177,14 @@ pub unsafe fn create() {
 
 #[inline]
 pub fn id() -> u32 {
-    unsafe {
-        local_state().validate_init();
-        local_state().id
-    }
+    local_state().validate_init();
+    local_state().id
 }
 
 #[inline]
 pub fn clock() -> &'static AtomicClock {
-    unsafe {
-        local_state().validate_init();
-        &local_state().clock
-    }
+    local_state().validate_init();
+    &local_state().clock
 }
 
 /// SAFETY: Caller is expected to only reload timer when appropriate.
@@ -208,16 +201,12 @@ pub fn clock() -> &'static AtomicClock {
 
 #[inline]
 pub fn lock_scheduler() -> MutexGuard<'static, Scheduler> {
-    unsafe {
-        local_state().validate_init();
-        local_state().scheduler.lock()
-    }
+    local_state().validate_init();
+    local_state().scheduler.lock()
 }
 
 #[inline]
 pub fn try_lock_scheduler() -> Option<MutexGuard<'static, Scheduler>> {
-    unsafe {
-        local_state().validate_init();
-        local_state().scheduler.try_lock()
-    }
+    local_state().validate_init();
+    local_state().scheduler.try_lock()
 }

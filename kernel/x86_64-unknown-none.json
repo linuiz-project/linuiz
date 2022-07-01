@@ -1,5 +1,6 @@
 {
   "arch": "x86_64",
+  "cpu": "x86-64",
   "llvm-target": "x86_64-unknown-none",
   "data-layout": "e-m:e-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128",
   "features": "-mmx,-sse,+soft-float",
@@ -14,16 +15,14 @@
       "-Tx86_64-unknown-none.lds"
     ]
   },
+  "executables": true,
+  "position-independent-executables": true,
+  "static-position-independent-executables": true,
+  "os": "none",
+  "code-model": "kernel",
   "eh-frame-header": false,
   "panic-strategy": "abort",
   "disable-redzone": true,
   "relocation-model": "pie",
-  "executables": true,
-  "position-independent-executables": true,
-  "static-position-independent-executables": true,
-  "relax-elf-relocations": true,
-  "relro-level": "partial",
-  "code-model": "kernel",
-  "os": "none",
   "exe-suffix": ".elf"
 }

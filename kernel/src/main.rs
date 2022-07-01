@@ -12,7 +12,7 @@
     asm_const,
     const_ptr_offset_from,
     const_refs_to_cell,
-    const_ptr_offset
+    core_c_str
 )]
 
 #[macro_use]
@@ -30,66 +30,45 @@ mod syscall;
 mod tables;
 
 use alloc::vec::Vec;
-use libkernel::{acpi::SystemConfigTableEntry, memory::uefi, BootInfo, LinkerSymbol};
+use libkernel::memory::{Page, PageManager};
+use libkernel::{acpi::SystemConfigTableEntry, LinkerSymbol};
 
 extern "C" {
-    static __kernel_start: LinkerSymbol;
-    static __kernel_end: LinkerSymbol;
+    static __code_start: LinkerSymbol;
+    static __code_end: LinkerSymbol;
 
-    static __text_start: LinkerSymbol;
-    static __text_end: LinkerSymbol;
+    static __ro_start: LinkerSymbol;
+    static __ro_end: LinkerSymbol;
 
-    static __rodata_start: LinkerSymbol;
-    static __rodata_end: LinkerSymbol;
-
-    static __data_start: LinkerSymbol;
-    static __data_end: LinkerSymbol;
-
-    static __bss_start: LinkerSymbol;
-    pub static __local_state_start: LinkerSymbol;
-    static __local_state_end: LinkerSymbol;
-    static __bss_end: LinkerSymbol;
-
+    static __rw_start: LinkerSymbol;
+    static __bsp_top: LinkerSymbol;
+    static __rw_end: LinkerSymbol;
 }
 
-#[repr(C, align(0x10))]
-struct BSPStack([u8; 0x8000]);
-static mut BSP_STACK: BSPStack = BSPStack([0u8; 0x8000]);
-
-use stivale_boot::v2::{
-    StivaleFramebufferHeaderTag, StivaleHeader, StivaleMtrrHeaderTag, StivaleSmpHeaderTag,
-    StivaleSmpHeaderTagFlags, StivaleStruct, StivaleUnmapNullHeaderTag,
-};
-
+const LIMINE_REV: u64 = 0;
 #[used]
-#[no_mangle]
-#[link_section = ".stivale2hdr"]
-static STIVALE_HEADER: StivaleHeader = {
-    StivaleHeader::new()
-        .stack(unsafe { BSP_STACK.0.as_ptr().add(BSP_STACK.0.len()) })
-        .flags(0b11100)
-        .tags((&raw const STIVALE_FB_TAG) as *const ())
-};
-
-static STIVALE_FB_TAG: StivaleFramebufferHeaderTag =
-    StivaleFramebufferHeaderTag::new().next((&raw const STIVALE_MTRR_TAG) as *const ());
-static STIVALE_MTRR_TAG: StivaleMtrrHeaderTag =
-    StivaleMtrrHeaderTag::new().next((&raw const STIVALE_UNMAP_NULL_TAG) as *const ());
-static STIVALE_UNMAP_NULL_TAG: StivaleUnmapNullHeaderTag =
-    StivaleUnmapNullHeaderTag::new().next((&raw const STIVALE_SMP_TAG) as *const ());
-static STIVALE_SMP_TAG: StivaleSmpHeaderTag =
-    StivaleSmpHeaderTag::new().flags(StivaleSmpHeaderTagFlags::from_bits_truncate(0b11));
+static LIMINE_INF: limine::LimineBootInfoRequest = limine::LimineBootInfoRequest::new(LIMINE_REV);
+#[used]
+static LIMINE_FB: limine::LimineFramebufferRequest =
+    limine::LimineFramebufferRequest::new(LIMINE_REV);
+#[used]
+static LIMINE_SMP: limine::LimineSmpRequest = limine::LimineSmpRequest::new(LIMINE_REV);
+#[used]
+static LIMINE_SYS_TBL: limine::LimineEfiSystemTableRequest =
+    limine::LimineEfiSystemTableRequest::new(LIMINE_REV);
+#[used]
+static LIMINE_MMAP: limine::LimineMmapRequest = limine::LimineMmapRequest::new(LIMINE_REV);
+#[used]
+static LIMINE_KBASE: limine::LimineKernelAddressRequest =
+    limine::LimineKernelAddressRequest::new(LIMINE_REV);
 
 static mut CON_OUT: drivers::stdout::Serial = drivers::stdout::Serial::new(drivers::stdout::COM1);
-#[export_name = "__ap_stack_pointers"]
-static mut AP_STACK_POINTERS: [*const (); 256] = [core::ptr::null(); 256];
 
 lazy_static::lazy_static! {
     pub static ref KMALLOC: slob::SLOB<'static> = slob::SLOB::new();
 }
 
 use libkernel::io::pci;
-use x86_64::structures::paging::OffsetPageTable;
 pub struct Devices<'a>(Vec<pci::DeviceVariant>, &'a core::marker::PhantomData<()>);
 unsafe impl Send for Devices<'_> {}
 unsafe impl Sync for Devices<'_> {}
@@ -171,7 +150,15 @@ fn load_tables() {
 }
 
 #[no_mangle]
-unsafe extern "sysv64" fn _entry(stivale_struct: *const StivaleStruct) -> ! {
+unsafe extern "sysv64" fn _entry() -> ! {
+    // Load the pre-reserved BSP stack (lies within the kernel's .bss, so is loaded by program segments).
+    libkernel::registers::stack::RSP::write(__bsp_top.as_mut_ptr());
+
+    // Drop into initialization function, to completely invalidate any previous stack state.
+    init()
+}
+
+unsafe fn init() -> ! {
     CON_OUT.init(drivers::stdout::SerialSpeed::S115200);
     match drivers::stdout::set_stdout(&mut CON_OUT, log::LevelFilter::Debug) {
         Ok(()) => {
@@ -180,23 +167,44 @@ unsafe extern "sysv64" fn _entry(stivale_struct: *const StivaleStruct) -> ! {
         Err(_) => libkernel::instructions::interrupts::breakpoint(),
     }
 
-    // Load registers and tables before executing any real code.
-
-    let stivale_struct = stivale_struct.as_ref().unwrap();
-
-    info!(
-        "Bootloader Info     {} {}",
-        stivale_struct.bootloader_brand(),
-        stivale_struct.bootloader_version()
+    debug!(
+        "Kernel base:        {:#X}",
+        LIMINE_KBASE.get_response().get().unwrap().virtual_base
     );
-    debug!("Kernel base:        {:?}", __text_start.as_ptr::<()>());
+
+    let pg_mgr = PageManager::from_current(&Page::null());
+
+    for page_index in (0x0..0xffffffffffffffff).step_by(0x1000).map(|i| i >> 12) {
+        if let Some(attribs) = pg_mgr.get_page_attribs(&Page::from_index(page_index)) {
+            if !attribs.is_empty() {
+                println!("{} > {:?}", page_index, attribs);
+            }
+        }
+    }
+
+    let boot_info = LIMINE_INF
+        .get_response()
+        .get()
+        .expect("bootloader provided no info");
+    info!(
+        "Bootloader Info     {:?} (rev {:?}) {:?}",
+        core::ffi::CStr::from_ptr(boot_info.name.as_ptr().unwrap() as *const _),
+        boot_info.revision,
+        core::ffi::CStr::from_ptr(boot_info.version.as_ptr().unwrap() as *const _)
+    );
     info!("CPU Vendor          {}", libkernel::cpu::VENDOR);
     info!("CPU Features        {:?}", libkernel::cpu::FeatureFmt);
 
+    // Load registers and tables before executing any real code.
+
     /* LOAD EFI SYSTEM TABLE */
-    if let Some(system_table) = stivale_struct.efi_system_table() {
+    if let Some(system_table_ptr) = LIMINE_SYS_TBL
+        .get_response()
+        .get()
+        .and_then(|resp| resp.address.as_ptr())
+    {
         debug!("Loading EFI system configuration table...");
-        let system_table_ptr = system_table.system_table_addr as *const SystemConfigTableEntry;
+        let system_table_ptr = system_table_ptr as *const SystemConfigTableEntry;
 
         let mut system_table_len = 0;
         while let Some(system_config_entry) = system_table_ptr.add(system_table_len).as_ref() {
@@ -208,8 +216,8 @@ unsafe extern "sysv64" fn _entry(stivale_struct: *const StivaleStruct) -> ! {
             }
         }
 
+        // TODO Possibly move ACPI structure instances out of libkernel?
         // Set system configuration table, so ACPI can be used.
-        // TODO possibly move ACPI structure instances out of libkernel?
         libkernel::acpi::set_system_config_table(core::slice::from_raw_parts(
             system_table_ptr,
             system_table_len,
@@ -219,60 +227,45 @@ unsafe extern "sysv64" fn _entry(stivale_struct: *const StivaleStruct) -> ! {
     }
 
     /* LOAD MEMORY */
-    if let Some(memory_map) = stivale_struct.memory_map() {
+    if let Some(memory_map) = LIMINE_MMAP
+        .get_response()
+        .get()
+        .and_then(|resp| resp.mmap())
+    {
         use libkernel::{align_down_div, align_up_div, memory::Page};
 
-        libkernel::memory::init(memory_map.as_slice());
+        let stack_addr = libkernel::registers::stack::RSP::read() as u64;
+        for item in memory_map.iter() {
+            let addr_range = item.base..(item.base + item.len);
+            if addr_range.contains(&stack_addr) {
+                info!("STACK ITEM: {:?}", item);
+                libkernel::instructions::hlt_indefinite();
+            }
+        }
+
+        libkernel::memory::init(memory_map);
 
         debug!("Global mapping kernel ELF sections.");
 
-        let kernel = unsafe {
-            Page::range(
-                align_down_div(__kernel_start.as_usize(), 0x1000),
-                align_up_div(__kernel_end.as_usize(), 0x1000),
-            )
-        };
-        let kernel_text = unsafe {
-            Page::range(
-                align_down_div(__text_start.as_usize(), 0x1000),
-                align_up_div(__text_end.as_usize(), 0x1000),
-            )
-        };
-        let kernel_rodata = unsafe {
-            Page::range(
-                align_down_div(__rodata_start.as_usize(), 0x1000),
-                align_up_div(__rodata_end.as_usize(), 0x1000),
-            )
-        };
-        let kernel_data = unsafe {
-            Page::range(
-                align_down_div(__data_start.as_usize(), 0x1000),
-                align_up_div(__data_end.as_usize(), 0x1000),
-            )
-        };
-        let kernel_bss = unsafe {
-            Page::range(
-                align_down_div(__bss_start.as_usize(), 0x1000),
-                align_up_div(__bss_end.as_usize(), 0x1000),
-            )
-        };
+        let kernel_code = Page::range(
+            align_down_div(__code_start.as_usize(), 0x1000),
+            align_up_div(__code_end.as_usize(), 0x1000),
+        );
+        let kernel_ro = Page::range(
+            align_down_div(__ro_start.as_usize(), 0x1000),
+            align_up_div(__ro_end.as_usize(), 0x1000),
+        );
+        let kernel_rw = Page::range(
+            align_down_div(__rw_start.as_usize(), 0x1000),
+            align_up_div(__rw_end.as_usize(), 0x1000),
+        );
         use libkernel::memory::{AttributeModify, PageAttributes};
 
         let boot_page_manager =
             libkernel::memory::PageManager::from_current(&libkernel::memory::Page::null());
         let page_manager = libkernel::memory::global_pgmr();
-        for page in kernel {
-            page_manager
-                .map(
-                    &page,
-                    boot_page_manager.get_mapped_to(&page).unwrap(),
-                    None, // Frame should already be locked from fmgr init.
-                    PageAttributes::PRESENT | PageAttributes::WRITABLE | PageAttributes::GLOBAL,
-                )
-                .unwrap();
-        }
 
-        for page in kernel_text {
+        for page in kernel_code {
             page_manager.set_page_attribs(
                 &page,
                 PageAttributes::PRESENT | PageAttributes::GLOBAL,
@@ -280,7 +273,7 @@ unsafe extern "sysv64" fn _entry(stivale_struct: *const StivaleStruct) -> ! {
             );
         }
 
-        for page in kernel_rodata {
+        for page in kernel_ro {
             page_manager.set_page_attribs(
                 &page,
                 PageAttributes::PRESENT | PageAttributes::NO_EXECUTE | PageAttributes::GLOBAL,
@@ -288,7 +281,7 @@ unsafe extern "sysv64" fn _entry(stivale_struct: *const StivaleStruct) -> ! {
             );
         }
 
-        for page in kernel_data.chain(kernel_bss) {
+        for page in kernel_rw {
             page_manager.set_page_attribs(
                 &page,
                 PageAttributes::PRESENT
@@ -304,16 +297,14 @@ unsafe extern "sysv64" fn _entry(stivale_struct: *const StivaleStruct) -> ! {
         // Make sure global PML4 has all L4 entries mapped to a frame (so core-local
         // PML4 copies share parity of address space).
         {
-            let pml4 = unsafe {
-                (libkernel::registers::control::CR3::read().0.as_u64() as *mut u8)
-                    .add(page_manager.mapped_page().index() * 0x1000)
-                    .cast::<libkernel::memory::PageTable<libkernel::memory::Level4>>()
-                    .as_mut()
-                    .unwrap()
-            };
+            let pml4 = (libkernel::registers::control::CR3::read().0.as_u64() as *mut u8)
+                .add(page_manager.mapped_page().index() * 0x1000)
+                .cast::<libkernel::memory::PageTable<libkernel::memory::Level4>>()
+                .as_mut()
+                .unwrap();
 
             let frame_manager = libkernel::memory::global_fmgr();
-            for (idx, entry) in pml4.iter_mut().enumerate().take(256) {
+            for entry in pml4.iter_mut().take(256) {
                 entry.set(
                     frame_manager.lock_next().unwrap(),
                     PageAttributes::PRESENT | PageAttributes::WRITABLE | PageAttributes::USERSPACE,
@@ -332,8 +323,6 @@ unsafe extern "sysv64" fn _entry(stivale_struct: *const StivaleStruct) -> ! {
                 }
             }
         }
-
-        /* AT THIS POINT, `stivale_struct` IS NO LONGER VALID (the memory it would point to via tags is unallocated). */
 
         libkernel::memory::global_alloc::set(&*KMALLOC);
 
@@ -379,13 +368,13 @@ unsafe extern "C" fn _startup() -> ! {
             Box::leak(Box::new(TaskStateSegment::new())) as *mut TaskStateSegment
         };
 
-        {
-            use crate::local_state::Offset;
-            use x86_64::VirtAddr;
+        // {
+        //     use crate::local_state::Offset;
+        //     use x86_64::VirtAddr;
 
-            // (&mut *tss_ptr).privilege_stack_table[0] =
-            //     VirtAddr::from_ptr(crate::rdgsval!(*const (), Offset::PrivilegeStackPtr));
-        }
+        //     (&mut *tss_ptr).privilege_stack_table[0] =
+        //         VirtAddr::from_ptr(crate::rdgsval!(*const (), Offset::PrivilegeStackPtr));
+        // }
 
         let tss_descriptor = {
             use bit_field::BitField;
