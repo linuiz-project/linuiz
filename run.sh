@@ -5,7 +5,7 @@ qemu-system-x86_64 \
     -machine q35 \
     -cpu max \
     -smp 2 \
-    -m 2G \
+    -m 512M \
     -serial mon:stdio \
     -net none \
     -display none \
