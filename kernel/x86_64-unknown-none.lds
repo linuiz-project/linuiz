@@ -59,7 +59,7 @@ SECTIONS
     .bss                : { *(.bss .bss.*) }
     /* bsp stack */
     .                   = ALIGN(0x10);
-    .                   += 0x16000;
+    .                   += BSP_STACK_SIZE;
     __bsp_top           = .;
     __rw_end            = .;
     .                   = DATA_SEGMENT_END(.);
