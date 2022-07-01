@@ -32,7 +32,7 @@ run: all $(debug)
 	./run.sh
 
 reset: clean
-	rm -f $(bootloader) $(kernel) $(ap_trampoline_out)
+	rm -f $(bootloader) $(kernel)
 
 rebuild: reset all
 
@@ -56,6 +56,7 @@ $(bootloader): ./resources/BOOTX64.EFI ./resources/limine.cfg
 
 $(kernel): $(kernel_deps) $(libkernel_deps) $(kernel_linker_args)
 	cd ./kernel/ && cargo fmt && cargo build --profile $(PROFILE) -Z unstable-options
+	objdump -D .hdd/image/linuiz/kernel.elf > .debug/kernel_disasm
 
 $(nvme_img): $(hdd)
 	qemu-img create -f raw $(nvme_img) 256M
