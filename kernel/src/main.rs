@@ -225,16 +225,26 @@ unsafe fn init() -> ! {
         .get()
         .and_then(|resp| resp.mmap())
     {
-        use libkernel::{align_down_div, align_up_div, memory::Page};
+        use libkernel::{
+            align_down_div, align_up_div,
+            memory::{AttributeModify, Page, PageAttributes},
+        };
 
-        // TODO you shouldn't need to initialize memory ???
-        libkernel::memory::init(memory_map);
+        // We always ensure the frame manager is initialized first—all other memory structures
+        // rely on its validity.
+        libkernel::memory::init_frame_manager(memory_map);
 
         debug!("Global mapping kernel ELF pages.");
 
         let boot_pmgr =
             libkernel::memory::PageManager::from_current(&libkernel::memory::Page::null());
         let global_pmgr = libkernel::memory::global_pgmr();
+        // Create ranges of pages, using pre-defined linker symbols to demarkate what memory zones
+        // need to be mapped in the kernel's page manager.
+        //
+        // The bootloader will (generally) do KASLR, so it cannot be relied upon that static executable
+        // compilation will run successfully; thus, the kernel is compiled PIE, and the linker file
+        // provides a method by which the kernel can continue to manage its own sections.
         let kernel_code = Page::range(
             align_down_div(__code_start.as_usize(), 0x1000),
             align_up_div(__code_end.as_usize(), 0x1000),
@@ -252,36 +262,30 @@ unsafe fn init() -> ! {
             align_up_div(__rw_end.as_usize(), 0x1000),
         );
 
-        {
-            use libkernel::memory::{AttributeModify, PageAttributes};
+        for page in kernel_code {
+            global_pmgr
+                .map(
+                    &page,
+                    boot_pmgr
+                        .get_mapped_to(&page)
+                        .expect("kernel page not mapped in bootloader page tables"),
+                    None,
+                    PageAttributes::PRESENT | PageAttributes::GLOBAL,
+                )
+                .unwrap();
+        }
 
-            for page in kernel_code {
-                global_pmgr
-                    .map(
-                        &page,
-                        boot_pmgr
-                            .get_mapped_to(&page)
-                            .expect("kernel page not mapped in bootloader page tables"),
-                        None,
-                        PageAttributes::PRESENT | PageAttributes::GLOBAL,
-                    )
-                    .unwrap();
-            }
-
-            for page in kernel_ro {
-                global_pmgr
-                    .map(
-                        &page,
-                        boot_pmgr
-                            .get_mapped_to(&page)
-                            .expect("kernel page not mapped in bootloader page tables"),
-                        None,
-                        PageAttributes::PRESENT
-                            | PageAttributes::NO_EXECUTE
-                            | PageAttributes::GLOBAL,
-                    )
-                    .unwrap();
-            }
+        for page in kernel_ro {
+            global_pmgr
+                .map(
+                    &page,
+                    boot_pmgr
+                        .get_mapped_to(&page)
+                        .expect("kernel page not mapped in bootloader page tables"),
+                    None,
+                    PageAttributes::PRESENT | PageAttributes::NO_EXECUTE | PageAttributes::GLOBAL,
+                )
+                .unwrap();
 
             for page in kernel_rw.chain(kernel_relro) {
                 global_pmgr

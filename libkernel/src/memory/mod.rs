@@ -50,7 +50,7 @@ pub mod global_alloc {
     }
 }
 
-use crate::{cell::SyncOnceCell, asm_marker};
+use crate::{asm_marker, cell::SyncOnceCell};
 
 pub const PHYS_MEM_START: crate::Address<crate::Virtual> =
     crate::Address::<crate::Virtual>::new(256 * PML4_ENTRY_MEM_SIZE);
@@ -58,26 +58,21 @@ pub const PHYS_MEM_START: crate::Address<crate::Virtual> =
 pub const PML4_ENTRY_MEM_SIZE: usize = 1 << 9 << 9 << 9 << 12;
 
 static FRAME_MANAGER: SyncOnceCell<FrameManager> = SyncOnceCell::new();
-static PAGE_MANAGER: SyncOnceCell<PageManager> = SyncOnceCell::new();
+lazy_static::lazy_static! {
+    static ref PAGE_MANAGER: PageManager = unsafe { PageManager::new(&Page::null(), None) };
+}
 
 /// Initializes global memory structures (frame & page managers).
 ///
 /// This function *does not* swap the current page table. To commit the page manager
 /// to CR3 and map physical memory at the correct offset, call `finalize_paging()`.
-pub fn init(memory_map: &[limine::LimineMemmapEntry]) {
+pub fn init_frame_manager(memory_map: &[limine::LimineMemmapEntry]) {
     info!("Initializing kernel frame and page managers.");
 
     FRAME_MANAGER
         .set(FrameManager::from_mmap(memory_map))
         .map_err(|_| {
             panic!("frame manager has already been initialized");
-        })
-        .unwrap();
-
-    PAGE_MANAGER
-        .set(unsafe { PageManager::new(&Page::null(), None) })
-        .map_err(|_| {
-            panic!("page manager has already been initialized");
         })
         .unwrap();
 }
@@ -99,7 +94,10 @@ pub unsafe fn finalize_paging() {
         crate::memory::PHYS_MEM_START
     );
 
-    info!("IS MAPPED (0xffffffff8001444e) {:?}", page_manager.is_mapped(crate::Address::<crate::Virtual>::new(0xffffffff8001444e)));
+    info!(
+        "IS MAPPED (0xffffffff8001444e) {:?}",
+        page_manager.is_mapped(crate::Address::<crate::Virtual>::new(0xffffffff8001444e))
+    );
     page_manager.modify_mapped_page(Page::from_addr(crate::memory::PHYS_MEM_START));
     frame_manager.slide_map_base(crate::memory::PHYS_MEM_START.as_usize());
     debug!("Writing baseline kernel PML4 to CR3.");
@@ -114,9 +112,7 @@ pub fn global_fmgr() -> &'static FrameManager<'static> {
 }
 
 pub fn global_pgmr() -> &'static PageManager {
-    PAGE_MANAGER
-        .get()
-        .expect("kernel page manager has not been initialized")
+    &*PAGE_MANAGER
 }
 
 pub fn alloc_stack(page_count: usize, is_userspace: bool) -> *mut () {
