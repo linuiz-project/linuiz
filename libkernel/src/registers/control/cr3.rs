@@ -1,4 +1,4 @@
-use crate::{Physical, Address};
+use crate::{Address, Physical};
 use core::arch::asm;
 
 bitflags::bitflags! {
@@ -12,10 +12,11 @@ pub struct CR3;
 
 impl CR3 {
     pub unsafe fn write(addr: Address<Physical>, flags: CR3Flags) {
-        assert!(
+        debug_assert!(
             addr.is_frame_aligned(),
-            "CR3 address must be frame-aligned (4096)."
+            "CR3 address must be frame-aligned (low 12 bits empty)."
         );
+
         asm!("mov cr3, {}", in(reg) addr.as_usize() | flags.bits(), options(nostack));
     }
 

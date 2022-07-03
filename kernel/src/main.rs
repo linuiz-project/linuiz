@@ -40,6 +40,9 @@ extern "C" {
     static __ro_start: LinkerSymbol;
     static __ro_end: LinkerSymbol;
 
+    static __relro_start: LinkerSymbol;
+    static __relro_end: LinkerSymbol;
+
     static __rw_start: LinkerSymbol;
     static __bsp_top: LinkerSymbol;
     static __rw_end: LinkerSymbol;
@@ -154,7 +157,7 @@ unsafe extern "sysv64" fn _entry() -> ! {
     // Load the pre-reserved BSP stack (lies within the kernel's .bss, so is loaded by program segments).
     libkernel::registers::stack::RSP::write(__bsp_top.as_mut_ptr());
 
-    // Drop into initialization function, to completely invalidate any previous stack state.
+    // Drop into initialization function to completely invalidate any previous stack state.
     init()
 }
 
@@ -169,18 +172,8 @@ unsafe fn init() -> ! {
 
     debug!(
         "Kernel base:        {:#X}",
-        LIMINE_KBASE.get_response().get().unwrap().virtual_base
+        LIMINE_KBASE.get_response().get().unwrap().physical_base
     );
-
-    let pg_mgr = PageManager::from_current(&Page::null());
-
-    for page_index in (0x0..0xffffffffffffffff).step_by(0x1000).map(|i| i >> 12) {
-        if let Some(attribs) = pg_mgr.get_page_attribs(&Page::from_index(page_index)) {
-            if !attribs.is_empty() {
-                println!("{} > {:?}", page_index, attribs);
-            }
-        }
-    }
 
     let boot_info = LIMINE_INF
         .get_response()
@@ -234,19 +227,14 @@ unsafe fn init() -> ! {
     {
         use libkernel::{align_down_div, align_up_div, memory::Page};
 
-        let stack_addr = libkernel::registers::stack::RSP::read() as u64;
-        for item in memory_map.iter() {
-            let addr_range = item.base..(item.base + item.len);
-            if addr_range.contains(&stack_addr) {
-                info!("STACK ITEM: {:?}", item);
-                libkernel::instructions::hlt_indefinite();
-            }
-        }
-
+        // TODO you shouldn't need to initialize memory ???
         libkernel::memory::init(memory_map);
 
-        debug!("Global mapping kernel ELF sections.");
+        debug!("Global mapping kernel ELF pages.");
 
+        let boot_pmgr =
+            libkernel::memory::PageManager::from_current(&libkernel::memory::Page::null());
+        let global_pmgr = libkernel::memory::global_pgmr();
         let kernel_code = Page::range(
             align_down_div(__code_start.as_usize(), 0x1000),
             align_up_div(__code_end.as_usize(), 0x1000),
@@ -255,41 +243,61 @@ unsafe fn init() -> ! {
             align_down_div(__ro_start.as_usize(), 0x1000),
             align_up_div(__ro_end.as_usize(), 0x1000),
         );
+        let kernel_relro = Page::range(
+            align_down_div(__relro_start.as_usize(), 0x1000),
+            align_up_div(__relro_end.as_usize(), 0x1000),
+        );
         let kernel_rw = Page::range(
             align_down_div(__rw_start.as_usize(), 0x1000),
             align_up_div(__rw_end.as_usize(), 0x1000),
         );
-        use libkernel::memory::{AttributeModify, PageAttributes};
 
-        let boot_page_manager =
-            libkernel::memory::PageManager::from_current(&libkernel::memory::Page::null());
-        let page_manager = libkernel::memory::global_pgmr();
+        {
+            use libkernel::memory::{AttributeModify, PageAttributes};
 
-        for page in kernel_code {
-            page_manager.set_page_attribs(
-                &page,
-                PageAttributes::PRESENT | PageAttributes::GLOBAL,
-                AttributeModify::Set,
-            );
-        }
+            for page in kernel_code {
+                global_pmgr
+                    .map(
+                        &page,
+                        boot_pmgr
+                            .get_mapped_to(&page)
+                            .expect("kernel page not mapped in bootloader page tables"),
+                        None,
+                        PageAttributes::PRESENT | PageAttributes::GLOBAL,
+                    )
+                    .unwrap();
+            }
 
-        for page in kernel_ro {
-            page_manager.set_page_attribs(
-                &page,
-                PageAttributes::PRESENT | PageAttributes::NO_EXECUTE | PageAttributes::GLOBAL,
-                AttributeModify::Set,
-            );
-        }
+            for page in kernel_ro {
+                global_pmgr
+                    .map(
+                        &page,
+                        boot_pmgr
+                            .get_mapped_to(&page)
+                            .expect("kernel page not mapped in bootloader page tables"),
+                        None,
+                        PageAttributes::PRESENT
+                            | PageAttributes::NO_EXECUTE
+                            | PageAttributes::GLOBAL,
+                    )
+                    .unwrap();
+            }
 
-        for page in kernel_rw {
-            page_manager.set_page_attribs(
-                &page,
-                PageAttributes::PRESENT
-                    | PageAttributes::WRITABLE
-                    | PageAttributes::NO_EXECUTE
-                    | PageAttributes::GLOBAL,
-                AttributeModify::Set,
-            );
+            for page in kernel_rw.chain(kernel_relro) {
+                global_pmgr
+                    .map(
+                        &page,
+                        boot_pmgr
+                            .get_mapped_to(&page)
+                            .expect("kernel page not mapped in bootloader page tables"),
+                        None,
+                        PageAttributes::PRESENT
+                            | PageAttributes::WRITABLE
+                            | PageAttributes::NO_EXECUTE
+                            | PageAttributes::GLOBAL,
+                    )
+                    .unwrap();
+            }
         }
 
         libkernel::memory::finalize_paging();
@@ -298,7 +306,7 @@ unsafe fn init() -> ! {
         // PML4 copies share parity of address space).
         {
             let pml4 = (libkernel::registers::control::CR3::read().0.as_u64() as *mut u8)
-                .add(page_manager.mapped_page().index() * 0x1000)
+                .add(global_pmgr.mapped_page().index() * 0x1000)
                 .cast::<libkernel::memory::PageTable<libkernel::memory::Level4>>()
                 .as_mut()
                 .unwrap();

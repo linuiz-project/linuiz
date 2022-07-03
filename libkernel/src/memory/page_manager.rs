@@ -121,7 +121,7 @@ impl VirtualMapper {
     }
 
     #[inline(always)]
-    pub unsafe fn write_cr3(&self) {
+    pub unsafe fn write_cr3(&mut self) {        
         crate::registers::control::CR3::write(
             Address::<Physical>::new(self.pml4_frame * 0x1000),
             crate::registers::control::CR3Flags::empty(),
@@ -347,8 +347,9 @@ impl PageManager {
         self.0.read().mapped_page
     }
 
+    #[inline(always)]
     pub unsafe fn write_cr3(&self) {
-        self.0.read().write_cr3();
+        self.0.write().write_cr3();
     }
 
     pub fn copy_pml4(&self) -> PageTable<Level4> {

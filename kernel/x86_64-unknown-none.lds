@@ -63,11 +63,13 @@ SECTIONS
     /* data sections */
     .got.plt            : { *(.got.plt) *(.igot.plt) }
     .data               : { *(.data .data.*) }
-    .bss                : { *(.bss .bss.*) }
-    /* bsp stack */
-    .                   = ALIGN(0x10);
-    .                   += BSP_STACK_SIZE;
-    __bsp_top           = .;
+    .bss                :
+    {
+        *(.bss .bss.*)
+        .               = ALIGN(0x10);
+        .               += BSP_STACK_SIZE;
+        __bsp_top       = .;
+    }
     __rw_end            = .;
     .                   = DATA_SEGMENT_END(.);
 

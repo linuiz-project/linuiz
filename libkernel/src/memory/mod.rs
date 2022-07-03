@@ -50,7 +50,7 @@ pub mod global_alloc {
     }
 }
 
-use crate::cell::SyncOnceCell;
+use crate::{cell::SyncOnceCell, asm_marker};
 
 pub const PHYS_MEM_START: crate::Address<crate::Virtual> =
     crate::Address::<crate::Virtual>::new(256 * PML4_ENTRY_MEM_SIZE);
@@ -99,9 +99,9 @@ pub unsafe fn finalize_paging() {
         crate::memory::PHYS_MEM_START
     );
 
+    info!("IS MAPPED (0xffffffff8001444e) {:?}", page_manager.is_mapped(crate::Address::<crate::Virtual>::new(0xffffffff8001444e)));
     page_manager.modify_mapped_page(Page::from_addr(crate::memory::PHYS_MEM_START));
     frame_manager.slide_map_base(crate::memory::PHYS_MEM_START.as_usize());
-
     debug!("Writing baseline kernel PML4 to CR3.");
     page_manager.write_cr3();
     debug!("Successfully wrote to CR3.");
