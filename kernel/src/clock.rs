@@ -20,53 +20,47 @@ impl AtomicClock {
     }
 }
 
-pub mod global {
-    use core::fmt::Write;
+// pub mod global {
+//     use core::fmt::Write;
 
-    static GLOBAL_CLOCK: super::AtomicClock = super::AtomicClock::new();
+//     static GLOBAL_CLOCK: super::AtomicClock = super::AtomicClock::new();
 
-    pub fn start() {
-        libkernel::instructions::interrupts::without_interrupts(|| {
-            use libkernel::structures::pic8259;
+//     pub fn start() {
+//         libkernel::instructions::interrupts::without_interrupts(|| {
+//             use libkernel::structures::pic8259;
 
-            pic8259::enable(pic8259::InterruptLines::TIMER);
-            pic8259::pit::set_timer_freq(1000, pic8259::pit::OperatingMode::RateGenerator);
+//             pic8259::enable(pic8259::InterruptLines::TIMER);
+//             pic8259::pit::set_timer_freq(1000, pic8259::pit::OperatingMode::RateGenerator);
 
-            unsafe {
-                crate::tables::idt::set_handler_fn(
-                    crate::local_state::InterruptVector::GlobalTimer as u8,
-                    tick_handler,
-                )
-            };
-        });
-    }
+//             unsafe {
+//                 crate::tables::idt::set_handler_fn(
+//                     crate::local_state::InterruptVector::GlobalTimer as u8,
+//                     tick_handler,
+//                 )
+//             };
+//         });
+//     }
 
-    fn tick_handler(
-        _: &mut crate::tables::idt::InterruptStackFrame,
-        _: *mut crate::scheduling::ThreadRegisters,
-    ) {
-        unsafe {
-            crate::CON_OUT
-                .write_fmt(format_args!(" {} ", GLOBAL_CLOCK.tick()))
-                .unwrap()
-        };
+//     fn tick_handler(
+//         _: &mut crate::tables::idt::InterruptStackFrame,
+//         _: *mut crate::scheduling::ThreadRegisters,
+//     ) {
+//         use libkernel::structures::pic8259;
+//         pic8259::end_of_interrupt(pic8259::InterruptOffset::Timer);
+//     }
 
-        use libkernel::structures::pic8259;
-        pic8259::end_of_interrupt(pic8259::InterruptOffset::Timer);
-    }
+//     #[inline]
+//     pub fn get_ticks() -> u64 {
+//         GLOBAL_CLOCK.get_ticks()
+//     }
 
-    #[inline]
-    pub fn get_ticks() -> u64 {
-        GLOBAL_CLOCK.get_ticks()
-    }
-
-    pub fn busy_wait_msec(milliseconds: u64) {
-        let target_ticks = get_ticks() + milliseconds;
-        while get_ticks() <= target_ticks {
-            libkernel::instructions::pause();
-        }
-    }
-}
+//     pub fn busy_wait_msec(milliseconds: u64) {
+//         let target_ticks = get_ticks() + milliseconds;
+//         while get_ticks() <= target_ticks {
+//             libkernel::instructions::pause();
+//         }
+//     }
+// }
 
 pub mod local {
     #[inline(always)]

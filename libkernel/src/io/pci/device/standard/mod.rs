@@ -57,17 +57,15 @@ impl PCIeDevice<Standard> {
                 } {
                     trace!("\tRegister is prefetchable; setting WRITE_THROUGH on MMIO page.");
 
-                    let page_manager = crate::memory::global_pgmr();
+                    let page_manager = crate::memory::global_pmgr();
                     for page in register_mmio.pages() {
                         use crate::memory::paging::{AttributeModify, PageAttributes};
 
                         page_manager.set_page_attribs(
                             &page,
-                            PageAttributes::PRESENT
-                                | PageAttributes::WRITABLE
+                            PageAttributes::DATA
                                 | PageAttributes::WRITE_THROUGH
-                                | PageAttributes::UNCACHEABLE
-                                | PageAttributes::NO_EXECUTE,
+                                | PageAttributes::UNCACHEABLE,
                             AttributeModify::Set,
                         );
                     }

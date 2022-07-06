@@ -52,6 +52,22 @@ pub mod global_alloc {
 
 use crate::{asm_marker, cell::SyncOnceCell};
 
+/*
+    
+    OVERALL L4 INDEX ASSIGNMENTS
+    ----------------------------------------
+    | 0-255   | Userspace                   |
+    ----------------------------------------
+    | 256-inf | Physical memory mapping     |
+    ----------------------------------------
+    | 510     | Kernel core-local state     |
+    ----------------------------------------
+    | 511     | Kernel ELF memory mappings  |
+    ----------------------------------------
+
+ */
+
+
 pub const PHYS_MEM_START: crate::Address<crate::Virtual> =
     crate::Address::<crate::Virtual>::new(256 * PML4_ENTRY_MEM_SIZE);
 
@@ -87,17 +103,13 @@ pub fn init_frame_manager(memory_map: &[limine::LimineMemmapEntry]) {
 ///         unrecoverable damage to kernel memory.
 pub unsafe fn finalize_paging() {
     let frame_manager = global_fmgr();
-    let page_manager = global_pgmr();
+    let page_manager = global_pmgr();
 
     debug!(
         "Physical memory offset: @{:?}",
         crate::memory::PHYS_MEM_START
     );
-
-    info!(
-        "IS MAPPED (0xffffffff8001444e) {:?}",
-        page_manager.is_mapped(crate::Address::<crate::Virtual>::new(0xffffffff8001444e))
-    );
+    
     page_manager.modify_mapped_page(Page::from_addr(crate::memory::PHYS_MEM_START));
     frame_manager.slide_map_base(crate::memory::PHYS_MEM_START.as_usize());
     debug!("Writing baseline kernel PML4 to CR3.");
@@ -111,7 +123,7 @@ pub fn global_fmgr() -> &'static FrameManager<'static> {
         .expect("kernel frame manager has not been initialized")
 }
 
-pub fn global_pgmr() -> &'static PageManager {
+pub fn global_pmgr() -> &'static PageManager {
     &*PAGE_MANAGER
 }
 
@@ -123,16 +135,14 @@ pub fn alloc_stack(page_count: usize, is_userspace: bool) -> *mut () {
         );
         let stack_top = stack_bottom.add(stack_len);
 
-        let page_manager = global_pgmr();
+        let page_manager = global_pmgr();
         for page in Page::range(
             (stack_bottom as usize) / 0x1000,
             (stack_top as usize) / 0x1000,
         ) {
             page_manager.set_page_attribs(
                 &page,
-                PageAttributes::PRESENT
-                    | PageAttributes::WRITABLE
-                    | PageAttributes::NO_EXECUTE
+                PageAttributes::DATA
                     | if is_userspace {
                         PageAttributes::USERSPACE
                     } else {
@@ -186,7 +196,7 @@ impl MMIO {
             }
         }
 
-        let page_manager = global_pgmr();
+        let page_manager = global_pmgr();
         let ptr = (crate::memory::PHYS_MEM_START + (frame_index * 0x1000)).as_mut_ptr::<u8>();
 
         for offset in 0..count {

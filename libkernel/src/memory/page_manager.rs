@@ -121,7 +121,7 @@ impl VirtualMapper {
     }
 
     #[inline(always)]
-    pub unsafe fn write_cr3(&mut self) {        
+    pub unsafe fn write_cr3(&mut self) {
         crate::registers::control::CR3::write(
             Address::<Physical>::new(self.pml4_frame * 0x1000),
             crate::registers::control::CR3Flags::empty(),
@@ -152,9 +152,9 @@ unsafe impl Send for PageManager {}
 unsafe impl Sync for PageManager {}
 
 impl PageManager {
-        pub fn cr3(&self) -> usize {
-            self.0.read().pml4_frame * 0x1000
-        }
+    pub fn cr3(&self) -> usize {
+        self.0.read().pml4_frame * 0x1000
+    }
 
     /// SAFETY: Refer to `VirtualMapper::new()`.
     pub unsafe fn new(mapped_page: &Page, pml4_copy: Option<PageTable<Level4>>) -> Self {
@@ -169,7 +169,7 @@ impl PageManager {
                     .forward_checked(pml4_index)
                     .unwrap()
                     .as_mut_ptr::<PageTable<Level4>>()
-                    .write(pml4);
+                    .write_volatile(pml4);
             } else {
                 // Clear PML4 frame.
                 core::ptr::write_bytes(
@@ -204,6 +204,7 @@ impl PageManager {
         &self,
         page: &Page,
         frame_index: usize,
+        // TODO create FrameLock enum to replace Option<bool>
         lock_frame: Option<bool>,
         attribs: PageAttributes,
     ) -> Result<(), MapError> {
@@ -254,19 +255,23 @@ impl PageManager {
         map_to: &Page,
         new_attribs: Option<PageAttributes>,
     ) -> Result<(), MapError> {
-        let frame_index = {
-            self.0.write().get_page_entry_mut(unmap_from).map(|entry| {
+        let maybe_attribs_frame_index = {
+            let mut map_write = self.0.write();
+            map_write.get_page_entry_mut(unmap_from).map(|entry| {
                 let attribs = new_attribs.unwrap_or_else(|| entry.get_attribs());
                 entry.set_attributes(PageAttributes::empty(), AttributeModify::Set);
+                
                 unsafe { (attribs, entry.take_frame_index()) }
             })
         };
 
-        frame_index
+        maybe_attribs_frame_index
             .ok_or(MapError::NotMapped)
             .map(|(attribs, frame_index)| {
                 self.map(map_to, frame_index, None, attribs).unwrap();
                 tlb::invalidate(unmap_from);
+
+                ()
             })
     }
 
@@ -360,7 +365,7 @@ impl PageManager {
                 .forward_checked(vmap.pml4_frame)
                 .unwrap()
                 .as_ptr::<PageTable<Level4>>()
-                .read()
+                .read_volatile()
         }
     }
 }

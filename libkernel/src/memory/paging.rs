@@ -193,6 +193,8 @@ bitflags::bitflags! {
         // 52..=58 available
         const NO_EXECUTE = 1 << 63;
 
+        const CODE = Self::PRESENT.bits();
+        const RODATA = Self::PRESENT.bits() | Self::NO_EXECUTE.bits();
         const DATA = Self::PRESENT.bits() | Self::WRITABLE.bits() | Self::NO_EXECUTE.bits();
     }
 }

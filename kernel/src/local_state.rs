@@ -1,4 +1,4 @@
-use crate::{clock::AtomicClock, scheduling::Scheduler};
+use crate::{clock::AtomicClock, println, scheduling::Scheduler};
 use core::sync::atomic::{AtomicUsize, Ordering};
 use libkernel::{memory::PageManager, Address, Virtual};
 use spin::{Mutex, MutexGuard};
@@ -32,13 +32,12 @@ pub enum Offset {
 #[repr(align(0x1000))]
 struct LocalState {
     magic: u64,
-    page_manager: PageManager,
     id: u32,
     clock: AtomicClock,
     scheduler: Mutex<Scheduler>,
     local_timer_per_ms: Option<u32>,
-    syscall_stack_ptr: [u8; 16384],
-    privilege_stack_ptr: [u8; 16384],
+    syscall_stack: [u8; 0x4000],
+    privilege_stack: [u8; 0x4000],
 }
 
 impl LocalState {
@@ -50,14 +49,23 @@ impl LocalState {
 }
 
 const PML4_LOCAL_STATE_ENTRY_INDEX: usize = 510;
-static LOCAL_STATE_PTR: AtomicUsize = AtomicUsize::new(0);
+static LOCAL_STATE_PTR_BASE: AtomicUsize = AtomicUsize::new(0);
+
+/// Returns the pointer to the local state structure.
+///
+/// SAFETY: It is important that, prior to utilizing the value returned by
+///         this function, it is ensured that the memory it refers to is
+///         actually mapped via the virtual memory manager. No guarantees
+///         are made as to whether this has been done or not.
+#[inline(always)]
+unsafe fn get_local_state_ptr() -> *mut LocalState {
+    (LOCAL_STATE_PTR_BASE.load(Ordering::Relaxed) as *mut LocalState)
+        // TODO move to a core-local PML4 copy with an L4 local state mapping
+        .add(libkernel::cpu::get_id() as usize)
+}
 
 fn local_state() -> &'static mut LocalState {
-    unsafe {
-        (LOCAL_STATE_PTR.load(Ordering::Relaxed) as *mut LocalState)
-            .as_mut()
-            .unwrap()
-    }
+    unsafe { get_local_state_ptr().as_mut().unwrap() }
 }
 
 /// Initializes the core-local state structure.
@@ -77,7 +85,7 @@ fn local_state() -> &'static mut LocalState {
 ///
 /// SAFETY: This function invariantly assumes it will only be called once.
 pub unsafe fn create() {
-    LOCAL_STATE_PTR.compare_exchange(
+    LOCAL_STATE_PTR_BASE.compare_exchange(
         0,
         // Cosntruct the local state pointer (with slide) via the `Address` struct, to
         // automatically sign extend.
@@ -91,39 +99,30 @@ pub unsafe fn create() {
         Ordering::Relaxed,
     );
 
-    let local_state_ptr = LOCAL_STATE_PTR.load(Ordering::Relaxed) as *mut LocalState;
+    let local_state_ptr = get_local_state_ptr();
 
-    let page_manager = {
-        let global_page_manager = libkernel::memory::global_pgmr();
-        let mut copy_pml4 = global_page_manager.copy_pml4();
-        copy_pml4
-            .get_entry_mut(PML4_LOCAL_STATE_ENTRY_INDEX)
-            .clear();
-        let page_manager = libkernel::memory::PageManager::new(
-            &global_page_manager.mapped_page(),
-            Some(copy_pml4),
-        );
+    {
+        use libkernel::memory::Page;
 
-        page_manager.auto_map(&libkernel::memory::Page::from_ptr(local_state_ptr), {
-            use libkernel::memory::PageAttributes;
-            PageAttributes::PRESENT | PageAttributes::WRITABLE | PageAttributes::NO_EXECUTE
-        });
-        page_manager.write_cr3();
+        // Map the pages this local state will utilize.
+        let page_manager = libkernel::memory::global_pmgr();
+        let base_page = Page::from_ptr(local_state_ptr);
+        let end_page = Page::from_ptr(local_state_ptr.add(libkernel::align_up_div(
+            core::mem::size_of::<LocalState>(),
+            0x1000,
+        )));
+        (base_page..end_page)
+            .for_each(|page| page_manager.auto_map(&page, libkernel::memory::PageAttributes::DATA));
+    }
 
-        page_manager
-    };
-
-    debug!("LOCAL STATE PTR {:?}", local_state_ptr);
-
-    local_state_ptr.write(LocalState {
+    local_state_ptr.write_volatile(LocalState {
         magic: LocalState::MAGIC,
-        page_manager,
         id: libkernel::cpu::get_id(),
         clock: AtomicClock::new(),
         scheduler: Mutex::new(Scheduler::new()),
         local_timer_per_ms: None,
-        syscall_stack_ptr: [0u8; 16384],
-        privilege_stack_ptr: [0u8; 16384],
+        syscall_stack: [0u8; 0x4000],
+        privilege_stack: [0u8; 0x4000],
     });
 }
 
@@ -209,4 +208,14 @@ pub fn lock_scheduler() -> MutexGuard<'static, Scheduler> {
 pub fn try_lock_scheduler() -> Option<MutexGuard<'static, Scheduler>> {
     local_state().validate_init();
     local_state().scheduler.try_lock()
+}
+
+pub fn syscall_stack() -> &'static [u8] {
+    local_state().validate_init();
+    &local_state().syscall_stack
+}
+
+pub fn privilege_stack() -> &'static [u8] {
+    local_state().validate_init();
+    &local_state().privilege_stack
 }

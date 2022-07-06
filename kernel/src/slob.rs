@@ -88,116 +88,97 @@ impl<'map> SLOB<'map> {
         )
     }
 
-    fn grow(&self, required_blocks: usize, map_write: &mut RwLockWriteGuard<&mut [BlockPage]>) {
+    fn grow(&self, required_blocks: usize, table_write: &mut RwLockWriteGuard<&mut [BlockPage]>) {
         assert!(required_blocks > 0, "calls to grow must be nonzero");
 
-        debug!(
-            "Allocator map requires growth: {} blocks required.",
-            required_blocks
-        );
-
         // Current length of our map, in indexes.
-        let cur_map_len = map_write.len();
+        let cur_table_len = table_write.len();
         // Required length of our map, in indexes.
-        let req_map_len =
-            // Ensure we add 1 required BlockPage in the map to account for skipping the null page.
-            (map_write.len() + libkernel::align_up_div(required_blocks, BlockPage::BLOCKS_PER) + 1)
-                .next_power_of_two();
+        let req_table_len = (table_write.len()
+            + libkernel::align_up_div(required_blocks, BlockPage::BLOCKS_PER))
+        .next_power_of_two();
         // Current page count of our map (i.e. how many pages the slice requires)
-        let cur_map_page_count =
-            // When calculating, 1 is subtracted to account for null page.
-            libkernel::align_up_div(cur_map_len * size_of::<BlockPage>(), 0x1000) - 1;
+        let cur_table_page_count =
+            libkernel::align_up_div(cur_table_len * size_of::<BlockPage>(), 0x1000);
         // Required page count of our map.
-        let req_map_page_count =
-            libkernel::align_up_div(req_map_len * size_of::<BlockPage>(), 0x1000);
+        let req_table_page_count =
+            libkernel::align_up_div(req_table_len * size_of::<BlockPage>(), 0x1000);
 
-        assert!((req_map_len * 0x1000) < 0x773594000000, "Out of memory!");
-
-        debug!(
-            "Growth parameters: len {} => {}, pages {} => {}",
-            cur_map_len, req_map_len, cur_map_page_count, req_map_page_count
-        );
+        assert!((req_table_len * 0x1000) < 0x773594000000, "Out of memory!");
 
         let page_manager = libkernel::memory::global_pmgr();
-        let cur_map_page = Page::from_index((map_write.as_ptr() as usize) / 0x1000);
-        let new_map_page = core::cell::OnceCell::new();
 
-        // If the map consists of more than just a null page, a check is done to determine whether the
-        // map can contain its new extent within itself. If so, the existing pages are copied by replacing
-        // their mappings. If not, the new map is simply placed at the beginning of its new extent.
-        if cur_map_len > 1 {
-            // Attempt to find a run of already-mapped pages within our allocator that can contain
-            // the required slice length.
-            let mut current_run = 0;
-            let start_index = core::cell::OnceCell::new();
-            for (index, block_page) in map_write.iter().enumerate() {
-                if block_page.is_empty() {
-                    current_run += 1;
+        // Attempt to find a run of already-mapped pages within our allocator that can contain
+        // the required slice length.
+        let mut current_run = 0;
+        let start_index = core::cell::OnceCell::new();
+        for (index, block_page) in table_write.iter().enumerate() {
+            if block_page.is_empty() {
+                current_run += 1;
 
-                    if current_run == req_map_page_count {
-                        start_index.set(index - (current_run - 1)).unwrap();
-                        break;
-                    }
-                } else {
-                    current_run = 0;
-                }
-            }
-
-            if let Some(start_index) = start_index.get() {
-                let local_new_map_page = Page::from_index(*start_index);
-                new_map_page.set(local_new_map_page).unwrap();
-
-                debug!("Copy mapping current map to new pages.");
-                for page_offset in 0..cur_map_page_count {
-                    page_manager
-                        .copy_by_map(
-                            &cur_map_page.forward_checked(page_offset).unwrap(),
-                            &local_new_map_page.forward_checked(page_offset).unwrap(),
-                            None,
-                        )
-                        .unwrap();
+                if current_run == req_table_page_count {
+                    start_index.set(index - (current_run - 1)).unwrap();
+                    break;
                 }
             } else {
-                // If there is no space within our already allocated pages to fit this new map, then place
-                // the new map at the end of existing mapped pages ( / the beginning of the new page mappings).
-                new_map_page.set(Page::from_index(cur_map_len)).unwrap();
+                current_run = 0;
             }
-        } else {
-            // In this case, we have only our null page, so we place the map directly after it.
-            new_map_page.set(Page::from_index(1)).unwrap();
         }
 
-        let new_map_page = new_map_page.get().unwrap();
-        let start_page = if new_map_page.index() > 1 {
-            cur_map_page_count
+        let cur_table_base_page = Page::from_index((table_write.as_ptr() as usize) / 0x1000);
+        let new_table_base_page = Page::from_index(*start_index.get_or_init(|| cur_table_len));
+        // If the only page is the null page, we effectively want to avoid trying to copy anything.
+        let (copy_start_index, map_start_offset) = if new_table_base_page.index() > 1 {
+            // If we've already managed to initial null-block-page-only scenario, then simply
+            // start at the 0th table page and copy up to the last one to the new mappings.
+            //
+            // Additionally, our map new pages offset will be equal to the end of the current
+            // table's mapped pages.
+            (0, cur_table_page_count)
         } else {
-            0
+            // Elsewise, skip copying and map from the 0th page offset up to the required page count.
+            (cur_table_page_count, 0)
         };
-        debug!("Allocating and mapping remaining pages of map.");
-        for page_offset in start_page..req_map_page_count {
-            let mut new_page = new_map_page.forward_checked(page_offset).unwrap();
+        // Copy the existing table's pages by simply remapping the pages to point to the
+        // existing frames.
+        for page_offset in copy_start_index..cur_table_page_count {
+            page_manager
+                .copy_by_map(
+                    &cur_table_base_page.forward_checked(page_offset).unwrap(),
+                    &new_table_base_page.forward_checked(page_offset).unwrap(),
+                    None,
+                )
+                .unwrap();
+        }
+        // For the remainder of the table's pages (pages that didn't exist prior), create new auto mappings.
+        for page_offset in map_start_offset..req_table_page_count {
+            let mut new_page = new_table_base_page.forward_checked(page_offset).unwrap();
             page_manager.auto_map(&new_page, PageAttributes::DATA);
-            // Clear the newly allocated map page.
+            // Clear the newly allocated table page.
             unsafe { new_page.mem_clear() };
         }
 
         // Point to new map.
-        **map_write = unsafe {
+        **table_write = unsafe {
             core::slice::from_raw_parts_mut(
-                new_map_page.as_mut_ptr(),
-                libkernel::align_up(req_map_len, 0x1000 / size_of::<BlockPage>()),
+                new_table_base_page.as_mut_ptr(),
+                libkernel::align_up(req_table_len, 0x1000 / size_of::<BlockPage>()),
             )
         };
-
-        map_write
+        // Always set the 0th (null) page to full by default.
+        // Helps avoid some erros.
+        table_write[0].set_full();
+        // Mark the current table's pages as full within the table.
+        table_write
             .iter_mut()
-            .skip(new_map_page.index())
-            .take(req_map_page_count)
+            .skip(new_table_base_page.index())
+            .take(req_table_page_count)
             .for_each(|block_page| block_page.set_full());
-        map_write
+        // Mark the old table's pages as empty within the table.
+        table_write
             .iter_mut()
-            .skip(cur_map_page.index())
-            .take(cur_map_page_count)
+            .skip(cur_table_base_page.index())
+            .take(cur_table_page_count)
             .for_each(|block_page| block_page.set_empty());
     }
 }
@@ -206,9 +187,9 @@ unsafe impl core::alloc::GlobalAlloc for SLOB<'_> {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let align_mask = usize::max(layout.align() / Self::BLOCK_SIZE, 1) - 1;
         let size_in_blocks = libkernel::align_up_div(layout.size(), Self::BLOCK_SIZE);
-        let mut map_write = self.map.write();
 
-        let end_map_index;
+        let mut table_write = self.map.write();
+        let end_table_index;
         let mut block_index;
         let mut current_run;
 
@@ -216,7 +197,7 @@ unsafe impl core::alloc::GlobalAlloc for SLOB<'_> {
             block_index = 0;
             current_run = 0;
 
-            for (map_index, block_page) in map_write.iter().enumerate() {
+            for (table_index, block_page) in table_write.iter().enumerate() {
                 if block_page.is_full() {
                     current_run = 0;
                     block_index += BlockPage::BLOCKS_PER;
@@ -228,7 +209,7 @@ unsafe impl core::alloc::GlobalAlloc for SLOB<'_> {
                             current_run += 1;
 
                             if current_run == size_in_blocks {
-                                end_map_index = map_index + 1;
+                                end_table_index = table_index + 1;
                                 break 'outer;
                             }
                         }
@@ -239,19 +220,19 @@ unsafe impl core::alloc::GlobalAlloc for SLOB<'_> {
             }
 
             // No properly sized region was found, so grow list.
-            self.grow(size_in_blocks, &mut map_write);
+            self.grow(size_in_blocks, &mut table_write);
         }
 
         let end_block_index = block_index + 1;
         block_index -= current_run - 1;
         let start_block_index = block_index;
-        let start_map_index = start_block_index / BlockPage::BLOCKS_PER;
+        let start_table_index = start_block_index / BlockPage::BLOCKS_PER;
         let page_manager = libkernel::memory::global_pmgr();
-        for map_index in start_map_index..end_map_index {
-            let block_page = &mut map_write[map_index];
+        for table_index in start_table_index..end_table_index {
+            let block_page = &mut table_write[table_index];
             let was_empty = block_page.is_empty();
 
-            let block_index_floor = map_index * BlockPage::BLOCKS_PER;
+            let block_index_floor = table_index * BlockPage::BLOCKS_PER;
             let low_offset = block_index - block_index_floor;
             let remaining_blocks_in_slice = usize::min(
                 end_block_index - block_index,
@@ -266,13 +247,11 @@ unsafe impl core::alloc::GlobalAlloc for SLOB<'_> {
             block_index += remaining_blocks_in_slice;
 
             if was_empty {
-                page_manager.auto_map(&Page::from_index(map_index), PageAttributes::DATA);
+                page_manager.auto_map(&Page::from_index(table_index), PageAttributes::DATA);
             }
         }
 
-        let ptr = (start_block_index * Self::BLOCK_SIZE) as *mut u8;
-        crate::println!("{:?}", ptr);
-        ptr
+        (start_block_index * Self::BLOCK_SIZE) as *mut u8
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
@@ -285,13 +264,13 @@ unsafe impl core::alloc::GlobalAlloc for SLOB<'_> {
             end_block_index
         );
 
-        let start_map_index = start_block_index / BlockPage::BLOCKS_PER;
-        let end_map_index = align_up_div(end_block_index, BlockPage::BLOCKS_PER);
-        let mut map_write = self.map.write();
+        let start_table_index = start_block_index / BlockPage::BLOCKS_PER;
+        let end_table_index = align_up_div(end_block_index, BlockPage::BLOCKS_PER);
+        let mut table_write = self.map.write();
         let page_manager = libkernel::memory::global_pmgr();
-        for map_index in start_map_index..end_map_index {
+        for map_index in start_table_index..end_table_index {
             let (had_bits, has_bits) = {
-                let block_page = &mut map_write[map_index];
+                let block_page = &mut table_write[map_index];
 
                 let had_bits = !block_page.is_empty();
 

@@ -12,7 +12,7 @@ bit_field = "*"
 bitflags = "*"
 num_enum = { version = "*", default-features = false }
 spin = "*"
-paste = "*"
+paste = "*" 
 x86_64 = "*"
 lazy_static = "*"
 limine = "*"

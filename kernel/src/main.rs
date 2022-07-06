@@ -32,6 +32,7 @@ mod tables;
 use alloc::vec::Vec;
 use libkernel::memory::{Page, PageManager};
 use libkernel::{acpi::SystemConfigTableEntry, LinkerSymbol};
+use libkernel::{Address, Virtual};
 
 extern "C" {
     static __code_start: LinkerSymbol;
@@ -61,9 +62,6 @@ static LIMINE_SYS_TBL: limine::LimineEfiSystemTableRequest =
     limine::LimineEfiSystemTableRequest::new(LIMINE_REV);
 #[used]
 static LIMINE_MMAP: limine::LimineMmapRequest = limine::LimineMmapRequest::new(LIMINE_REV);
-#[used]
-static LIMINE_KBASE: limine::LimineKernelAddressRequest =
-    limine::LimineKernelAddressRequest::new(LIMINE_REV);
 
 static mut CON_OUT: drivers::stdout::Serial = drivers::stdout::Serial::new(drivers::stdout::COM1);
 
@@ -119,6 +117,8 @@ fn load_registers() {
         // Enable use of the `NO_EXECUTE` page attribute, if supported.
         if has_feature(Feature::NXE) {
             libkernel::registers::msr::IA32_EFER::set_nxe(true);
+        } else {
+            warn!("PC does not support the NX bit; system security will be compromised (this warning is purely informational).")
         }
     }
 }
@@ -161,36 +161,7 @@ unsafe extern "sysv64" fn _entry() -> ! {
     init()
 }
 
-unsafe fn init() -> ! {
-    CON_OUT.init(drivers::stdout::SerialSpeed::S115200);
-    match drivers::stdout::set_stdout(&mut CON_OUT, log::LevelFilter::Debug) {
-        Ok(()) => {
-            info!("Successfully loaded into kernel, with logging enabled.");
-        }
-        Err(_) => libkernel::instructions::interrupts::breakpoint(),
-    }
-
-    debug!(
-        "Kernel base:        {:#X}",
-        LIMINE_KBASE.get_response().get().unwrap().physical_base
-    );
-
-    let boot_info = LIMINE_INF
-        .get_response()
-        .get()
-        .expect("bootloader provided no info");
-    info!(
-        "Bootloader Info     {:?} (rev {:?}) {:?}",
-        core::ffi::CStr::from_ptr(boot_info.name.as_ptr().unwrap() as *const _),
-        boot_info.revision,
-        core::ffi::CStr::from_ptr(boot_info.version.as_ptr().unwrap() as *const _)
-    );
-    info!("CPU Vendor          {}", libkernel::cpu::VENDOR);
-    info!("CPU Features        {:?}", libkernel::cpu::FeatureFmt);
-
-    // Load registers and tables before executing any real code.
-
-    /* LOAD EFI SYSTEM TABLE */
+unsafe fn load_system_table() {
     if let Some(system_table_ptr) = LIMINE_SYS_TBL
         .get_response()
         .get()
@@ -218,8 +189,9 @@ unsafe fn init() -> ! {
     } else {
         warn!("No EFI system configuration table found.");
     }
+}
 
-    /* LOAD MEMORY */
+unsafe fn init_memory() {
     if let Some(memory_map) = LIMINE_MMAP
         .get_response()
         .get()
@@ -238,7 +210,7 @@ unsafe fn init() -> ! {
 
         let boot_pmgr =
             libkernel::memory::PageManager::from_current(&libkernel::memory::Page::null());
-        let global_pmgr = libkernel::memory::global_pgmr();
+        let global_pmgr = libkernel::memory::global_pmgr();
         // Create ranges of pages, using pre-defined linker symbols to demarkate what memory zones
         // need to be mapped in the kernel's page manager.
         //
@@ -268,9 +240,9 @@ unsafe fn init() -> ! {
                     &page,
                     boot_pmgr
                         .get_mapped_to(&page)
-                        .expect("kernel page not mapped in bootloader page tables"),
+                        .expect("kernel code page not mapped in bootloader page tables"),
                     None,
-                    PageAttributes::PRESENT | PageAttributes::GLOBAL,
+                    PageAttributes::CODE | PageAttributes::GLOBAL,
                 )
                 .unwrap();
         }
@@ -281,58 +253,48 @@ unsafe fn init() -> ! {
                     &page,
                     boot_pmgr
                         .get_mapped_to(&page)
-                        .expect("kernel page not mapped in bootloader page tables"),
+                        .expect("kernel readonly page not mapped in bootloader page tables"),
                     None,
-                    PageAttributes::PRESENT | PageAttributes::NO_EXECUTE | PageAttributes::GLOBAL,
+                    PageAttributes::RODATA | PageAttributes::GLOBAL,
                 )
                 .unwrap();
+        }
 
-            for page in kernel_rw.chain(kernel_relro) {
-                global_pmgr
-                    .map(
-                        &page,
-                        boot_pmgr
-                            .get_mapped_to(&page)
-                            .expect("kernel page not mapped in bootloader page tables"),
-                        None,
-                        PageAttributes::PRESENT
-                            | PageAttributes::WRITABLE
-                            | PageAttributes::NO_EXECUTE
-                            | PageAttributes::GLOBAL,
-                    )
-                    .unwrap();
-            }
+        for page in kernel_rw.chain(kernel_relro) {
+            global_pmgr
+                .map(
+                    &page,
+                    boot_pmgr
+                        .get_mapped_to(&page)
+                        .expect("kernel rw/relro page not mapped in bootloader page tables"),
+                    None,
+                    PageAttributes::DATA | PageAttributes::GLOBAL,
+                )
+                .unwrap();
         }
 
         libkernel::memory::finalize_paging();
 
+        let frame_manager = libkernel::memory::global_fmgr();
         // Make sure global PML4 has all L4 entries mapped to a frame (so core-local
         // PML4 copies share parity of address space).
-        {
-            let pml4 = (libkernel::registers::control::CR3::read().0.as_u64() as *mut u8)
-                .add(global_pmgr.mapped_page().index() * 0x1000)
-                .cast::<libkernel::memory::PageTable<libkernel::memory::Level4>>()
-                .as_mut()
-                .unwrap();
-
-            let frame_manager = libkernel::memory::global_fmgr();
-            for entry in pml4.iter_mut().take(256) {
-                entry.set(
-                    frame_manager.lock_next().unwrap(),
-                    PageAttributes::PRESENT | PageAttributes::WRITABLE | PageAttributes::USERSPACE,
-                );
-            }
+        let pml4 = (libkernel::registers::control::CR3::read().0.as_u64() as *mut u8)
+            .add(global_pmgr.mapped_page().index() * 0x1000)
+            .cast::<libkernel::memory::PageTable<libkernel::memory::Level4>>()
+            .as_mut()
+            .unwrap();
+        for entry in pml4.iter_mut().take(256) {
+            entry.set(
+                frame_manager.lock_next().unwrap(),
+                PageAttributes::PRESENT | PageAttributes::WRITABLE | PageAttributes::USERSPACE,
+            );
         }
-
-        // Make sure we reclaim the bootloader memory (it contained the page tables).
-        {
-            let frame_manager = libkernel::memory::global_fmgr();
-            for (index, (ty, _, _)) in frame_manager.iter().enumerate() {
-                if ty == libkernel::memory::FrameType::BootReclaim {
-                    frame_manager
-                        .try_modify_type(index, libkernel::memory::FrameType::Usable)
-                        .unwrap();
-                }
+        // Reclaim bootloader memory.
+        for (index, (ty, _, _)) in frame_manager.iter().enumerate() {
+            if ty == libkernel::memory::FrameType::BootReclaim {
+                frame_manager
+                    .try_modify_type(index, libkernel::memory::FrameType::Usable)
+                    .unwrap();
             }
         }
 
@@ -342,6 +304,32 @@ unsafe fn init() -> ! {
     } else {
         panic!("No memory map has been provided by bootloader.");
     }
+}
+
+unsafe fn init() -> ! {
+    CON_OUT.init(drivers::stdout::SerialSpeed::S115200);
+    match drivers::stdout::set_stdout(&mut CON_OUT, log::LevelFilter::Debug) {
+        Ok(()) => {
+            info!("Successfully loaded into kernel, with logging enabled.");
+        }
+        Err(_) => libkernel::instructions::interrupts::breakpoint(),
+    }
+
+    let boot_info = LIMINE_INF
+        .get_response()
+        .get()
+        .expect("bootloader provided no info");
+    info!(
+        "Bootloader Info     {:?} (rev {:?}) {:?}",
+        core::ffi::CStr::from_ptr(boot_info.name.as_ptr().unwrap() as *const _),
+        boot_info.revision,
+        core::ffi::CStr::from_ptr(boot_info.version.as_ptr().unwrap() as *const _)
+    );
+    info!("CPU Vendor          {}", libkernel::cpu::VENDOR);
+    info!("CPU Features        {:?}", libkernel::cpu::FeatureFmt);
+
+    load_system_table();
+    init_memory();
 
     _startup()
 }
@@ -357,13 +345,6 @@ unsafe extern "C" fn _startup() -> ! {
     load_tables();
 
     local_state::create();
-    libkernel::instructions::interrupts::enable();
-
-    if is_bsp() {
-        clock::global::start();
-    }
-
-    loop {}
 
     /* LOAD TSS */
     {
@@ -380,13 +361,8 @@ unsafe extern "C" fn _startup() -> ! {
             Box::leak(Box::new(TaskStateSegment::new())) as *mut TaskStateSegment
         };
 
-        // {
-        //     use crate::local_state::Offset;
-        //     use x86_64::VirtAddr;
-
-        //     (&mut *tss_ptr).privilege_stack_table[0] =
-        //         VirtAddr::from_ptr(crate::rdgsval!(*const (), Offset::PrivilegeStackPtr));
-        // }
+        tss_ptr.as_mut().unwrap().privilege_stack_table[0] =
+            x86_64::VirtAddr::from_ptr(crate::local_state::privilege_stack().as_ptr());
 
         let tss_descriptor = {
             use bit_field::BitField;
