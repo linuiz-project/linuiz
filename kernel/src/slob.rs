@@ -55,19 +55,39 @@ impl core::fmt::Debug for BlockPage {
 /// Allocator utilizing blocks of memory, in size of 64 bytes per block, to
 ///  easily and efficiently allocate.
 pub struct SLOB<'map> {
-    map: RwLock<&'map mut [BlockPage]>,
+    table: RwLock<&'map mut [BlockPage]>,
 }
 
 impl<'map> SLOB<'map> {
     /// The size of an allocator block.
     pub const BLOCK_SIZE: usize = 0x1000 / BlockPage::BLOCKS_PER;
 
-    #[allow(const_item_mutation)]
-    pub fn new() -> Self {
-        static mut NULL_PAGE: [BlockPage; 1] = [BlockPage(u64::MAX)];
+    pub unsafe fn new() -> Self {
+        let initial_alloc_table_page = Page::from_index(1);
+        let alloc_table_len = 0x1000 / core::mem::size_of::<BlockPage>();
+        let global_pmgr = libkernel::memory::global_pmgr();
+
+        // Map all of the pages in the allocation table.
+        for page_offset in 0..(alloc_table_len /* we don't map null page */ - 1) {
+            global_pmgr.auto_map(
+                &initial_alloc_table_page
+                    .forward_checked(page_offset)
+                    .unwrap(),
+                PageAttributes::DATA,
+            );
+        }
+
+        let alloc_table = core::slice::from_raw_parts_mut(
+            initial_alloc_table_page.as_mut_ptr::<BlockPage>(),
+            alloc_table_len,
+        );
+        // Always fill the 'null' page.
+        alloc_table[0].set_full();
+        // Additionally, fill the allocator table's page.
+        alloc_table[initial_alloc_table_page.index()].set_full();
 
         Self {
-            map: RwLock::new(unsafe { &mut NULL_PAGE }),
+            table: RwLock::new(alloc_table),
         }
     }
 
@@ -104,7 +124,7 @@ impl<'map> SLOB<'map> {
         let req_table_page_count =
             libkernel::align_up_div(req_table_len * size_of::<BlockPage>(), 0x1000);
 
-        assert!((req_table_len * 0x1000) < 0x773594000000, "Out of memory!");
+        assert!((req_table_len * 0x1000) < 0x746A52880000 /* 128TB */, "Out of memory!");
 
         let page_manager = libkernel::memory::global_pmgr();
 
@@ -127,21 +147,8 @@ impl<'map> SLOB<'map> {
 
         let cur_table_base_page = Page::from_index((table_write.as_ptr() as usize) / 0x1000);
         let new_table_base_page = Page::from_index(*start_index.get_or_init(|| cur_table_len));
-        // If the only page is the null page, we effectively want to avoid trying to copy anything.
-        let (copy_start_index, map_start_offset) = if new_table_base_page.index() > 1 {
-            // If we've already managed to initial null-block-page-only scenario, then simply
-            // start at the 0th table page and copy up to the last one to the new mappings.
-            //
-            // Additionally, our map new pages offset will be equal to the end of the current
-            // table's mapped pages.
-            (0, cur_table_page_count)
-        } else {
-            // Elsewise, skip copying and map from the 0th page offset up to the required page count.
-            (cur_table_page_count, 0)
-        };
-        // Copy the existing table's pages by simply remapping the pages to point to the
-        // existing frames.
-        for page_offset in copy_start_index..cur_table_page_count {
+        // Copy the existing table's pages by simply remapping the pages to point to the existing frames.
+        for page_offset in 0..cur_table_page_count {
             page_manager
                 .copy_by_map(
                     &cur_table_base_page.forward_checked(page_offset).unwrap(),
@@ -151,7 +158,7 @@ impl<'map> SLOB<'map> {
                 .unwrap();
         }
         // For the remainder of the table's pages (pages that didn't exist prior), create new auto mappings.
-        for page_offset in map_start_offset..req_table_page_count {
+        for page_offset in cur_table_page_count..req_table_page_count {
             let mut new_page = new_table_base_page.forward_checked(page_offset).unwrap();
             page_manager.auto_map(&new_page, PageAttributes::DATA);
             // Clear the newly allocated table page.
@@ -188,7 +195,7 @@ unsafe impl core::alloc::GlobalAlloc for SLOB<'_> {
         let align_mask = usize::max(layout.align() / Self::BLOCK_SIZE, 1) - 1;
         let size_in_blocks = libkernel::align_up_div(layout.size(), Self::BLOCK_SIZE);
 
-        let mut table_write = self.map.write();
+        let mut table_write = self.table.write();
         let end_table_index;
         let mut block_index;
         let mut current_run;
@@ -266,7 +273,7 @@ unsafe impl core::alloc::GlobalAlloc for SLOB<'_> {
 
         let start_table_index = start_block_index / BlockPage::BLOCKS_PER;
         let end_table_index = align_up_div(end_block_index, BlockPage::BLOCKS_PER);
-        let mut table_write = self.map.write();
+        let mut table_write = self.table.write();
         let page_manager = libkernel::memory::global_pmgr();
         for map_index in start_table_index..end_table_index {
             let (had_bits, has_bits) = {

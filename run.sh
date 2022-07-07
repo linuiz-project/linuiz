@@ -3,7 +3,7 @@
 qemu-system-x86_64 \
     -no-reboot \
     -machine q35 \
-    -cpu max \
+    -cpu max,+x2apic \
     -smp 2 \
     -m 512M \
     -serial mon:stdio \

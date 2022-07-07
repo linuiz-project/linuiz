@@ -126,53 +126,53 @@ pub unsafe fn create() {
     });
 }
 
-// pub fn init_local_apic() {
-//     use libkernel::structures::apic::*;
+pub fn init_local_apic() {
+    use libkernel::structures::apic::*;
 
-//     // Ensure interrupts are enabled.
-//     libkernel::instructions::interrupts::enable();
+    // Ensure interrupts are enabled.
+    libkernel::instructions::interrupts::enable();
 
-//     trace!("Configuring APIC & APIT.");
-//     unsafe {
-//         APIC::configure_spurious();
-//         APIC::reset();
-//     }
+    trace!("Configuring APIC & APIT.");
+    unsafe {
+        APIC::configure_spurious();
+        APIC::reset();
+    }
 
-//     APIC::write_register(Register::TimerDivisor, TimerDivisor::Div1 as u32);
-//     APIC::timer().set_mode(TimerMode::OneShot);
+    APIC::write_register(Register::TimerDivisor, TimerDivisor::Div1 as u32);
+    APIC::timer().set_mode(TimerMode::OneShot);
 
-//     let per_10ms = {
-//         //trace!("Determining APIT frequency.");
-//         // Wait on the global timer, to ensure we're starting the count on the rising edge of each millisecond.
-//         crate::clock::global::busy_wait_msec(1);
-//         // 'Enable' the APIT to begin counting down in `Register::TimerCurrentCount`
-//         APIC::write_register(Register::TimerInitialCount, u32::MAX);
-//         // Wait for 10ms to get good average tickrate.
-//         crate::clock::global::busy_wait_msec(10);
+    let per_10ms = {
+        //trace!("Determining APIT frequency.");
+        // Wait on the global timer, to ensure we're starting the count on the rising edge of each millisecond.
+        crate::clock::global::busy_wait_msec(1);
+        // 'Enable' the APIT to begin counting down in `Register::TimerCurrentCount`
+        APIC::write_register(Register::TimerInitialCount, u32::MAX);
+        // Wait for 10ms to get good average tickrate.
+        crate::clock::global::busy_wait_msec(10);
 
-//         APIC::read_register(Register::TimerCurrentCount)
-//     };
+        APIC::read_register(Register::TimerCurrentCount)
+    };
 
-//     let per_ms = (u32::MAX - per_10ms) / 10;
-//     unsafe { get_ptr(Offset::LocalTimerPerMs).cast::<u32>().write(per_ms) };
-//     trace!("APIT frequency: {}Hz", per_10ms * 100);
+    let per_ms = (u32::MAX - per_10ms) / 10;
+    unsafe { get_ptr(Offset::LocalTimerPerMs).cast::<u32>().write(per_ms) };
+    trace!("APIT frequency: {}Hz", per_10ms * 100);
 
-//     // Configure timer vector.
-//     APIC::timer().set_vector(InterruptVector::LocalTimer as u8);
-//     APIC::timer().set_masked(false);
-//     // Configure error vector.
-//     APIC::err().set_vector(InterruptVector::Error as u8);
-//     APIC::err().set_masked(false);
-//     // Set default vectors.
-//     // REMARK: Any of these left masked are not currently supported.
-//     APIC::cmci().set_vector(InterruptVector::CMCI as u8);
-//     APIC::performance().set_vector(InterruptVector::Performance as u8);
-//     APIC::thermal_sensor().set_vector(InterruptVector::ThermalSensor as u8);
-//     APIC::lint0().set_vector(InterruptVector::LINT0 as u8);
-//     APIC::lint1().set_vector(InterruptVector::LINT1 as u8);
+    // Configure timer vector.
+    APIC::timer().set_vector(InterruptVector::LocalTimer as u8);
+    APIC::timer().set_masked(false);
+    // Configure error vector.
+    APIC::err().set_vector(InterruptVector::Error as u8);
+    APIC::err().set_masked(false);
+    // Set default vectors.
+    // REMARK: Any of these left masked are not currently supported.
+    APIC::cmci().set_vector(InterruptVector::CMCI as u8);
+    APIC::performance().set_vector(InterruptVector::Performance as u8);
+    APIC::thermal_sensor().set_vector(InterruptVector::ThermalSensor as u8);
+    APIC::lint0().set_vector(InterruptVector::LINT0 as u8);
+    APIC::lint1().set_vector(InterruptVector::LINT1 as u8);
 
-//     trace!("Core-local APIC configured.");
-// }
+    trace!("Core-local APIC configured.");
+}
 
 #[inline]
 pub fn id() -> u32 {

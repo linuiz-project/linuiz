@@ -66,7 +66,10 @@ static LIMINE_MMAP: limine::LimineMmapRequest = limine::LimineMmapRequest::new(L
 static mut CON_OUT: drivers::stdout::Serial = drivers::stdout::Serial::new(drivers::stdout::COM1);
 
 lazy_static::lazy_static! {
-    pub static ref KMALLOC: slob::SLOB<'static> = slob::SLOB::new();
+    /// We must take care not to call any allocating functions, or reference KMALLOC itself,
+    /// prior to initializing memory (frame/page manager). The SLOB *immtediately* configures
+    /// its own allocation table, utilizing both of the aforementioned managers.
+    pub static ref KMALLOC: slob::SLOB<'static> = unsafe { slob::SLOB::new() };
 }
 
 use libkernel::io::pci;
@@ -327,6 +330,7 @@ unsafe fn init() -> ! {
     );
     info!("CPU Vendor          {}", libkernel::cpu::VENDOR);
     info!("CPU Features        {:?}", libkernel::cpu::FeatureFmt);
+    info!("CPU Features        {:?}", libkernel::cpu::FeatureFmt);
 
     load_system_table();
     init_memory();
@@ -400,11 +404,13 @@ unsafe extern "C" fn _startup() -> ! {
         tables::lgdt(&cur_gdt);
     }
 
+    info!("Loaded TSS.");
+
     /* INIT APIC */
     {
         // TODO
-        // local_state::init_local_apic();
-        // local_state::reload_timer(core::num::NonZeroU32::new(1));
+        local_state::init_local_apic();
+        local_state::reload_timer(core::num::NonZeroU32::new(1));
     }
     if is_bsp() {
         // TODO wake_aps();
