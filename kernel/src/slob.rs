@@ -124,7 +124,10 @@ impl<'map> SLOB<'map> {
         let req_table_page_count =
             libkernel::align_up_div(req_table_len * size_of::<BlockPage>(), 0x1000);
 
-        assert!((req_table_len * 0x1000) < 0x746A52880000 /* 128TB */, "Out of memory!");
+        assert!(
+            (req_table_len * 0x1000) < 0x746A52880000, /* 128TB */
+            "Out of memory!"
+        );
 
         let page_manager = libkernel::memory::global_pmgr();
 

@@ -144,7 +144,7 @@ fn load_tables() {
                 _: &mut x86_64::structures::idt::InterruptStackFrame,
                 _: *mut scheduling::ThreadRegisters,
             ) {
-                libkernel::structures::apic::APIC::end_of_interrupt();
+                libkernel::structures::apic::end_of_interrupt();
             }
 
             idt::set_handler_fn(local_state::InterruptVector::LINT0 as u8, apit_empty);
@@ -330,7 +330,6 @@ unsafe fn init() -> ! {
     );
     info!("CPU Vendor          {}", libkernel::cpu::VENDOR);
     info!("CPU Features        {:?}", libkernel::cpu::FeatureFmt);
-    info!("CPU Features        {:?}", libkernel::cpu::FeatureFmt);
 
     load_system_table();
     init_memory();
@@ -409,8 +408,8 @@ unsafe extern "C" fn _startup() -> ! {
     /* INIT APIC */
     {
         // TODO
-        local_state::init_local_apic();
-        local_state::reload_timer(core::num::NonZeroU32::new(1));
+        // local_state::init_local_apic();
+        // local_state::reload_timer(core::num::NonZeroU32::new(1));
     }
     if is_bsp() {
         // TODO wake_aps();

@@ -641,7 +641,7 @@ pub unsafe fn ring3_enter(target_func: fn(), rflags: crate::registers::RFlags) {
 }
 
 pub fn is_bsp() -> bool {
-    crate::registers::msr::IA32_APIC_BASE::is_bsp()
+    crate::registers::msr::IA32_APIC_BASE::get_is_bsp()
 }
 
 /// Enumerates the most-recent available CPUID leaf for the core ID.

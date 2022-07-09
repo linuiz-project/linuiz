@@ -1,33 +1,16 @@
-pub mod icr;
+#![allow(non_camel_case_types)]
 
-use crate::{
-    cell::SyncCell,
-    memory::{volatile::VolatileCell, MMIO},
-    registers::msr::IA32_APIC_BASE,
-    InterruptDeliveryMode, ReadWrite,
-};
+mod x2apic;
+mod xapic;
+
+pub use x2apic::*;
+pub use xapic::*;
+
+use crate::{registers::msr::IA32_APIC_BASE, InterruptDeliveryMode};
 use bit_field::BitField;
 use core::marker::PhantomData;
 
-#[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(non_camel_case_types)]
-pub enum Register {
-    ID = 0x20,
-    Version = 0x30,
-    TaskPriority = 0x80,
-    LDR = 0xD0,
-    DFR = 0xE0,
-    Spurious = 0xF0,
-    ICRL = 0x300,
-    ICRH = 0x310,
-    TimerInitialCount = 0x380,
-    TimerCurrentCount = 0x390,
-    TimerDivisor = 0x3E0,
-    Last = 0x38F,
-}
-
-#[repr(u32)]
+#[repr(u64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
 pub enum TimerMode {
@@ -78,184 +61,271 @@ bitflags::bitflags! {
     }
 }
 
-pub struct APIC;
+pub struct InterruptCommand(u64);
 
-// TODO this needs to be some sort of `init`, because assuming identity mapping for a
-//      persistent structure seems... bad.
+impl InterruptCommand {
+    pub const fn new(
+        vector: u8,
+        apic_id: u32,
+        delivery_mode: InterruptDeliveryMode,
+        is_logical: bool,
+        is_assert: bool,
+    ) -> Self {
+        Self(
+            (vector as u64)
+                | ((delivery_mode as u64) << 8)
+                | ((is_logical as u64) << 11)
+                | ((is_assert as u64) << 14)
+                | ((apic_id as u64) << 32),
+        )
+    }
+
+    pub const fn new_init(apic_id: u32) -> Self {
+        Self::new(0, apic_id, crate::InterruptDeliveryMode::INIT, false, true)
+    }
+
+    pub const fn new_sipi(vector: u8, apic_id: u32) -> Self {
+        Self::new(vector, apic_id, InterruptDeliveryMode::StartUp, false, true)
+    }
+
+    pub const fn get_raw(&self) -> u64 {
+        self.0
+    }
+}
+
 lazy_static::lazy_static! {
-    static ref APIC_MMIO: SyncCell<MMIO> = SyncCell::new(
-        unsafe { MMIO::new(IA32_APIC_BASE::get_base_addr().frame_index(), 1) }
+    static ref VERSION: Version = {
+        if crate::cpu::has_feature(crate::cpu::Feature::X2APIC) {
+            IA32_APIC_BASE::set_hw_enable(true);
+            IA32_APIC_BASE::set_x2_mode(true);
+
+            Version::x2APIC
+        } else {
+            IA32_APIC_BASE::set_hw_enable(true);
+
+            Version::xAPIC
+        }
+    };
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Version {
+    xAPIC,
+    x2APIC,
+}
+
+#[repr(usize)]
+pub enum Offset {
+    ID = 0x2,
+    VERSION = 0x3,
+    TPR = 0x8,
+    PPR = 0xA,
+    EOI = 0xB,
+    LDR = 0xD,
+    DFR = 0xE,
+    SPURIOUS = 0xF,
+    ISR0 = 0x10,
+    ISR32 = 0x11,
+    ISR64 = 0x12,
+    ISR96 = 0x13,
+    ISR128 = 0x14,
+    ISR160 = 0x15,
+    ISR192 = 0x16,
+    ISR224 = 0x17,
+    TMR0 = 0x18,
+    TMR32 = 0x19,
+    TMR64 = 0x1A,
+    TMR96 = 0x1B,
+    TMR128 = 0x1C,
+    TMR160 = 0x1D,
+    TMR192 = 0x1E,
+    TMR224 = 0x1F,
+    IRR0 = 0x20,
+    IRR32 = 0x21,
+    IRR64 = 0x22,
+    IRR96 = 0x23,
+    IRR128 = 0x24,
+    IRR160 = 0x25,
+    IRR192 = 0x26,
+    IRR224 = 0x27,
+    ERR = 0x28,
+    ICR = 0x30,
+    LVT_TIMER = 0x32,
+    LVT_THERMAL = 0x33,
+    LVT_PERF = 0x34,
+    LVT_LINT0 = 0x35,
+    LVT_LINT1 = 0x36,
+    LVT_ERR = 0x37,
+    TIMER_INT_CNT = 0x38,
+    TIMER_CUR_CNT = 0x39,
+    DIVIDE_CONF = 0x3E,
+    SELF_IPI = 0x3F,
+}
+
+pub(self) trait APIC {
+    fn read_offset(offset: Offset) -> u64;
+    unsafe fn write_offset(offset: Offset, value: u64);
+    unsafe fn send_int_cmd(int_cmd: InterruptCommand);
+}
+
+macro_rules! with_apic {
+    (|$apic:ident| $code:block) => {
+        match *VERSION {
+            Version::xAPIC => {
+                type $apic = xAPIC;
+                $code
+            }
+            Version::x2APIC => {
+                type $apic = x2APIC;
+                $code
+            }
+        }
+    };
+}
+
+macro_rules! read_offset {
+    ($offset:expr) => {
+        match *VERSION {
+            Version::xAPIC => xAPIC::read_offset($offset),
+            Version::x2APIC => x2APIC::read_offset($offset),
+        }
+    };
+}
+
+macro_rules! write_offset {
+    ($offset:expr, $value:expr) => {
+        match *VERSION {
+            Version::xAPIC => xAPIC::write_offset($offset, $value),
+            Version::x2APIC => x2APIC::write_offset($offset, $value),
+        }
+    };
+}
+
+pub unsafe fn sw_enable() {
+    write_offset!(
+        Offset::SPURIOUS,
+        *read_offset!(Offset::SPURIOUS).set_bit(8, true)
     );
 }
 
-impl APIC {
-    const SPR: usize = 0xF0;
-    const EOI: usize = 0xB0;
-    const ERRST: usize = 0x280;
-
-    ///
-    pub unsafe fn configure_spurious() {
-        APIC_MMIO.write(
-            Self::SPR,
-            *APIC_MMIO
-                .read::<u32>(Self::SPR)
-                .assume_init()
-                .set_bits(0..8, u8::MAX as u32),
-        );
-    }
-
-    #[inline]
-    pub fn read_register(register: Register) -> u32 {
-        unsafe { APIC_MMIO.read_unchecked::<u32>(register as usize) }
-    }
-
-    #[inline]
-    pub fn write_register(register: Register, value: u32) {
-        unsafe { APIC_MMIO.write_unchecked(register as usize, value) }
-    }
-
-    #[inline]
-    pub fn is_hw_enabled() -> bool {
-        IA32_APIC_BASE::get_hw_enable()
-    }
-
-    #[inline]
-    pub unsafe fn hw_enable() {
-        IA32_APIC_BASE::set_hw_enable(true);
-    }
-
-    #[inline]
-    pub unsafe fn hw_disable() {
-        IA32_APIC_BASE::set_hw_enable(false);
-    }
-
-    #[inline]
-    pub unsafe fn sw_enable() {
-        APIC_MMIO.write_unchecked(
-            Self::SPR,
-            *APIC_MMIO.read_unchecked::<u32>(Self::SPR).set_bit(8, true),
-        );
-    }
-
-    #[inline]
-    pub unsafe fn sw_disable() {
-        APIC_MMIO.write_unchecked(
-            Self::SPR,
-            *APIC_MMIO.read_unchecked::<u32>(Self::SPR).set_bit(8, false),
-        );
-    }
-
-    #[inline]
-    pub fn set_eoi_broadcast_suppression(&self, suppress: bool) {
-        unsafe {
-            APIC_MMIO.write_unchecked(
-                Self::SPR,
-                *APIC_MMIO
-                    .read_unchecked::<u32>(Self::SPR)
-                    .set_bit(12, suppress),
-            )
-        };
-    }
-
-    #[inline]
-    pub fn end_of_interrupt() {
-        unsafe { APIC_MMIO.write_unchecked(Self::EOI, 0) };
-    }
-
-    pub fn id() -> u8 {
-        Self::read_register(Register::ID).get_bits(24..) as u8
-    }
-
-    pub fn version() -> u8 {
-        Self::read_register(Register::Version).get_bits(0..8) as u8
-    }
-
-    pub fn error_status() -> ErrorStatusFlags {
-        ErrorStatusFlags::from_bits_truncate(unsafe { APIC_MMIO.read(Self::ERRST).assume_init() })
-    }
-
-    pub fn interrupt_command_register() -> icr::InterruptCommandRegister<'static> {
-        unsafe {
-            icr::InterruptCommandRegister::new(
-                APIC_MMIO.borrow(Register::ICRL as usize),
-                APIC_MMIO.borrow(Register::ICRH as usize),
-            )
-        }
-    }
-
-    #[inline]
-    pub fn cmci() -> &'static LocalVector<Generic> {
-        unsafe { APIC_MMIO.borrow(0x2F0) }
-    }
-
-    #[inline]
-    pub fn timer() -> &'static LocalVector<Timer> {
-        unsafe { APIC_MMIO.borrow(0x320) }
-    }
-
-    #[inline]
-    pub fn thermal_sensor() -> &'static LocalVector<Generic> {
-        unsafe { APIC_MMIO.borrow(0x330) }
-    }
-
-    #[inline]
-    pub fn performance() -> &'static LocalVector<Generic> {
-        unsafe { APIC_MMIO.borrow(0x340) }
-    }
-
-    #[inline]
-    pub fn lint0() -> &'static LocalVector<LINT> {
-        unsafe { APIC_MMIO.borrow(0x350) }
-    }
-
-    #[inline]
-    pub fn lint1() -> &'static LocalVector<LINT> {
-        unsafe { APIC_MMIO.borrow(0x360) }
-    }
-
-    #[inline]
-    pub fn err() -> &'static LocalVector<Error> {
-        unsafe { APIC_MMIO.borrow(0x370) }
-    }
-
-    pub unsafe fn reset() {
-        Self::sw_disable();
-        Self::write_register(Register::DFR, u32::MAX);
-        let mut ldr = Self::read_register(Register::LDR);
-        ldr &= 0xFFFFFF;
-        ldr = (ldr & !0xFF) | ((ldr & 0xFF) | 1);
-        Self::performance().set_delivery_mode(InterruptDeliveryMode::NMI);
-        Self::write_register(Register::LDR, ldr);
-        Self::write_register(Register::TaskPriority, 0);
-        Self::write_register(Register::TimerInitialCount, 0);
-        Self::cmci().set_masked(true);
-        Self::timer().set_masked(true);
-        Self::performance().set_masked(true);
-        Self::thermal_sensor().set_masked(true);
-        Self::err().set_masked(true);
-        // Don't mask the LINT0&1 vectors, as they're used for external interrupts (PIC, SMIs, NMIs).
-    }
+pub unsafe fn sw_disable() {
+    write_offset!(
+        Offset::SPURIOUS,
+        *read_offset!(Offset::SPURIOUS).set_bit(8, false)
+    );
 }
 
-pub trait LocalVectorVariant {}
+pub fn get_id() -> u32 {
+    read_offset!(Offset::ID) as u32
+}
+
+pub fn get_version() -> u32 {
+    read_offset!(Offset::VERSION) as u32
+}
+
+pub fn end_of_interrupt() {
+    unsafe { write_offset!(Offset::EOI, 0x0) };
+}
+
+pub fn get_error_status() -> ErrorStatusFlags {
+    ErrorStatusFlags::from_bits_truncate(read_offset!(Offset::ERR) as u8)
+}
+
+pub unsafe fn send_int_cmd(int_cmd: InterruptCommand) {
+    with_apic!(|APIC| { APIC::send_int_cmd(int_cmd) })
+}
+
+pub unsafe fn reset() {
+    sw_disable();
+    if *VERSION != Version::x2APIC {
+        write_offset!(Offset::DFR, u32::MAX as u64);
+    }
+    let mut ldr = read_offset!(Offset::LDR);
+    ldr &= 0xFFFFFF;
+    ldr = (ldr & !0xFF) | ((ldr & 0xFF) | 1);
+    get_performance().set_delivery_mode(InterruptDeliveryMode::NMI);
+    write_offset!(Offset::LDR, ldr);
+    write_offset!(Offset::TPR, 0x0);
+    write_offset!(Offset::TIMER_INT_CNT, 0x0);
+    get_timer().set_masked(true);
+    get_performance().set_masked(true);
+    get_thermal_sensor().set_masked(true);
+    get_error().set_masked(true);
+    // Don't mask the LINT0&1 vectors, as they're used for external interrupts (PIC, SMIs, NMIs).
+}
+
+pub fn get_timer() -> LocalVector<Timer> {
+    LocalVector(PhantomData)
+}
+
+pub fn get_lint0() -> LocalVector<LINT0> {
+    LocalVector(PhantomData)
+}
+
+pub fn get_lint1() -> LocalVector<LINT1> {
+    LocalVector(PhantomData)
+}
+
+pub fn get_performance() -> LocalVector<Performance> {
+    LocalVector(PhantomData)
+}
+
+pub fn get_thermal_sensor() -> LocalVector<Thermal> {
+    LocalVector(PhantomData)
+}
+
+pub fn get_error() -> LocalVector<Error> {
+    LocalVector(PhantomData)
+}
+
+/*
+
+   LOCAL VECTOR TABLE TYPES
+
+*/
+
+pub trait LocalVectorVariant {
+    const OFFSET: Offset;
+}
+
+pub trait GenericVectorVariant: LocalVectorVariant {}
 
 pub enum Timer {}
-impl LocalVectorVariant for Timer {}
+impl LocalVectorVariant for Timer {
+    const OFFSET: Offset = Offset::LVT_TIMER;
+}
 
-pub enum Generic {}
-impl LocalVectorVariant for Generic {}
+pub enum LINT0 {}
+impl LocalVectorVariant for LINT0 {
+    const OFFSET: Offset = Offset::LVT_LINT0;
+}
+impl GenericVectorVariant for LINT0 {}
 
-pub enum LINT {}
-impl LocalVectorVariant for LINT {}
+pub enum LINT1 {}
+impl LocalVectorVariant for LINT1 {
+    const OFFSET: Offset = Offset::LVT_LINT1;
+}
+impl GenericVectorVariant for LINT1 {}
+
+pub enum Performance {}
+impl LocalVectorVariant for Performance {
+    const OFFSET: Offset = Offset::LVT_PERF;
+}
+impl GenericVectorVariant for Performance {}
+
+pub enum Thermal {}
+impl LocalVectorVariant for Thermal {
+    const OFFSET: Offset = Offset::LVT_THERMAL;
+}
+impl GenericVectorVariant for Thermal {}
 
 pub enum Error {}
-impl LocalVectorVariant for Error {}
+impl LocalVectorVariant for Error {
+    const OFFSET: Offset = Offset::LVT_ERR;
+}
 
 #[repr(transparent)]
-pub struct LocalVector<T: LocalVectorVariant> {
-    vol: VolatileCell<u32, ReadWrite>,
-    phantom: PhantomData<T>,
-}
+pub struct LocalVector<T: LocalVectorVariant>(PhantomData<T>);
 
 impl<T: LocalVectorVariant> crate::memory::volatile::Volatile for LocalVector<T> {}
 
@@ -265,32 +335,36 @@ impl<T: LocalVectorVariant> LocalVector<T> {
 
     #[inline]
     pub fn get_interrupted(&self) -> bool {
-        self.vol.read().get_bit(Self::INTERRUPTED_OFFSET)
+        read_offset!(T::OFFSET).get_bit(Self::INTERRUPTED_OFFSET)
     }
 
     #[inline]
     pub fn get_masked(&self) -> bool {
-        self.vol.read().get_bit(Self::MASKED_OFFSET)
+        read_offset!(T::OFFSET).get_bit(Self::MASKED_OFFSET)
     }
 
     #[inline]
-    pub fn set_masked(&self, masked: bool) {
-        self.vol
-            .write(*self.vol.read().set_bit(Self::MASKED_OFFSET, masked));
+    pub unsafe fn set_masked(&self, masked: bool) {
+        write_offset!(
+            T::OFFSET,
+            *read_offset!(T::OFFSET).set_bit(Self::MASKED_OFFSET, masked)
+        );
     }
 
     #[inline]
     pub fn get_vector(&self) -> Option<u8> {
-        match self.vol.read().get_bits(0..8) {
+        match read_offset!(T::OFFSET).get_bits(0..8) {
             0..32 => None,
             vector => Some(vector as u8),
         }
     }
 
     #[inline]
-    pub fn set_vector(&self, vector: u8) {
-        self.vol
-            .write(*self.vol.read().set_bits(0..8, vector as u32));
+    pub unsafe fn set_vector(&self, vector: u8) {
+        write_offset!(
+            T::OFFSET,
+            *read_offset!(T::OFFSET).set_bits(0..8, vector as u64)
+        );
     }
 }
 
@@ -298,28 +372,32 @@ impl<T: LocalVectorVariant> core::fmt::Debug for LocalVector<T> {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
             .debug_tuple("Local Vector")
-            .field(&format_args!("0b{:b}", self.vol.read()))
+            .field(&format_args!("0b{:b}", &read_offset!(T::OFFSET)))
             .finish()
+    }
+}
+
+impl<T: GenericVectorVariant> LocalVector<T> {
+    #[inline]
+    pub unsafe fn set_delivery_mode(&self, mode: InterruptDeliveryMode) {
+        write_offset!(
+            T::OFFSET,
+            *read_offset!(T::OFFSET).set_bits(8..11, mode as u64)
+        );
     }
 }
 
 impl LocalVector<Timer> {
     #[inline]
-    pub fn set_mode(&self, mode: TimerMode) {
+    pub unsafe fn set_mode(&self, mode: TimerMode) {
         assert!(
             mode != TimerMode::TSC_Deadline || crate::cpu::has_feature(crate::cpu::Feature::TSC_DL),
             "TSC deadline is not supported on this CPU."
         );
 
-        self.vol
-            .write(*self.vol.read().set_bits(17..19, mode as u32));
-    }
-}
-
-impl LocalVector<Generic> {
-    #[inline]
-    pub fn set_delivery_mode(&self, mode: InterruptDeliveryMode) {
-        self.vol
-            .write(*self.vol.read().set_bits(8..11, mode as u32));
+        write_offset!(
+            <Timer as LocalVectorVariant>::OFFSET,
+            *read_offset!(<Timer as LocalVectorVariant>::OFFSET).set_bits(17..19, mode as u64)
+        );
     }
 }

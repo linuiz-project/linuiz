@@ -8,6 +8,9 @@ pub use paging::*;
 pub mod paging;
 pub mod volatile;
 
+use crate::{ cell::SyncOnceCell};
+
+
 #[cfg(feature = "global_allocator")]
 pub mod global_alloc {
     use core::{alloc::GlobalAlloc, cell::OnceCell};
@@ -50,7 +53,6 @@ pub mod global_alloc {
     }
 }
 
-use crate::{asm_marker, cell::SyncOnceCell};
 
 /*
     
