@@ -6,9 +6,6 @@ lazy_static::lazy_static! {
     };
 }
 
-const ICRL: usize = 0x300;
-const ICRH: usize = 0x310;
-
 pub struct xAPIC;
 impl super::APIC for xAPIC {
     fn read_offset(offset: super::Offset) -> u64 {
@@ -21,6 +18,9 @@ impl super::APIC for xAPIC {
 
     unsafe fn send_int_cmd(int_cmd: super::InterruptCommand) {
         use bit_field::BitField;
+
+        const ICRL: usize = 0x300;
+        const ICRH: usize = 0x310;
 
         assert!(
             !APIC_MMIO.read_unchecked::<u32>(ICRL as usize).get_bit(12),

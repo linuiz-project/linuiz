@@ -4,7 +4,6 @@ OUTPUT_ARCH(i386:x86-64)
 ENTRY(_entry)
 
 KERN_BASE = 0xffffffff80000000;
-BSP_STACK_SIZE = 0x16000;
 
 SECTIONS
 {
@@ -31,19 +30,14 @@ SECTIONS
     .rela.plt           : { *(.rela.plt) *(.rela.iplt) }
 
     . = ALIGN(CONSTANT(MAXPAGESIZE));
-    __code_start        = .;
     .plt                : { *(.plt) *(.iplt) }
     .text               : { *(.text .text.*) }
-    __code_end          = .;
-
+    
     . = ALIGN(CONSTANT(MAXPAGESIZE));
-    __ro_start          = .;
     .rodata             : { *(.rodata .rodata.*) }
     .eh_frame_hdr       : { *(.eh_frame_hdr) }
-    __ro_end            = .;
-
+    
     . = ALIGN(CONSTANT(MAXPAGESIZE));
-    __relro_start       = .;
     .eh_frame           : { KEEP(*(.eh_frame)) }
     .gcc_except_table   : { KEEP(*(.gcc_except_table)) }
     .tdata              : { *(.tdata .tdata.*) }
@@ -55,22 +49,12 @@ SECTIONS
     }
     .dynamic            : { *(.dynamic) }
     .got                : { *(.got) *(.igot) }
-    __relro_end         = .;
     .                   = DATA_SEGMENT_RELRO_END(0, .);
 
     . = ALIGN(CONSTANT(MAXPAGESIZE));
-    __rw_start          = .;
-    /* data sections */
     .got.plt            : { *(.got.plt) *(.igot.plt) }
     .data               : { *(.data .data.*) }
-    .bss                :
-    {
-        *(.bss .bss.*)
-        .               = ALIGN(0x10);
-        .               += BSP_STACK_SIZE;
-        __bsp_top       = .;
-    }
-    __rw_end            = .;
+    .bss                : { *(.bss .bss.*) }
     .                   = DATA_SEGMENT_END(.);
 
     .comment              0 : { *(.comment) }

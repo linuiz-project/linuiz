@@ -166,8 +166,6 @@ impl MMIO {
         let frame_manager = global_fmgr();
 
         for frame_index in frame_index..(frame_index + count) {
-            info!("{:?}", frame_manager.map_pages().nth(frame_index));
-
             if let Err(FrameError::TypeConversion { from, to }) =
                 frame_manager.try_modify_type(frame_index, FrameType::MMIO)
             {

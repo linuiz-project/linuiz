@@ -95,14 +95,15 @@ impl InterruptCommand {
 
 lazy_static::lazy_static! {
     static ref VERSION: Version = {
-        if crate::cpu::has_feature(crate::cpu::Feature::X2APIC) {
-            IA32_APIC_BASE::set_hw_enable(true);
-            IA32_APIC_BASE::set_x2_mode(true);
+        IA32_APIC_BASE::set_hw_enable(true);
 
+        // REMARK:  The Intel SDM indicates software should rarely set the
+        //          x2APIC bit—instead, relying on the bootloader or BIOS to
+        //          set it, based on overall support. So, we simply hope that
+        //          firmware has handled this competently.
+        if IA32_APIC_BASE::get_x2_mode() {
             Version::x2APIC
         } else {
-            IA32_APIC_BASE::set_hw_enable(true);
-
             Version::xAPIC
         }
     };
