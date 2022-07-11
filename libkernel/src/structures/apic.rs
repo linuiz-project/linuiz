@@ -1,12 +1,6 @@
 #![allow(non_camel_case_types)]
 
-mod x2apic;
-mod xapic;
-
-pub use x2apic::*;
-pub use xapic::*;
-
-use crate::{registers::msr::IA32_APIC_BASE, InterruptDeliveryMode};
+use crate::InterruptDeliveryMode;
 use bit_field::BitField;
 use core::marker::PhantomData;
 
@@ -93,184 +87,126 @@ impl InterruptCommand {
     }
 }
 
-lazy_static::lazy_static! {
-    static ref VERSION: Version = {
-        IA32_APIC_BASE::set_hw_enable(true);
-
-        // REMARK:  The Intel SDM indicates software should rarely set the
-        //          x2APIC bit—instead, relying on the bootloader or BIOS to
-        //          set it, based on overall support. So, we simply hope that
-        //          firmware has handled this competently.
-        if IA32_APIC_BASE::get_x2_mode() {
-            Version::x2APIC
-        } else {
-            Version::xAPIC
-        }
-    };
+#[repr(u32)]
+pub enum Register {
+    ID = 0x802,
+    VERSION = 0x803,
+    TPR = 0x808,
+    PPR = 0x80A,
+    EOI = 0x80B,
+    LDR = 0x80C,
+    SPURIOUS = 0x80F,
+    ISR0 = 0x810,
+    ISR32 = 0x811,
+    ISR64 = 0x812,
+    ISR96 = 0x813,
+    ISR128 = 0x814,
+    ISR160 = 0x815,
+    ISR192 = 0x816,
+    ISR224 = 0x817,
+    TMR0 = 0x818,
+    TMR32 = 0x819,
+    TMR64 = 0x81A,
+    TMR96 = 0x81B,
+    TMR128 = 0x81C,
+    TMR160 = 0x81D,
+    TMR192 = 0x81E,
+    TMR224 = 0x81F,
+    IRR0 = 0x820,
+    IRR32 = 0x821,
+    IRR64 = 0x822,
+    IRR96 = 0x823,
+    IRR128 = 0x824,
+    IRR160 = 0x825,
+    IRR192 = 0x826,
+    IRR224 = 0x827,
+    ERR = 0x828,
+    ICR = 0x830,
+    LVT_TIMER = 0x832,
+    LVT_THERMAL = 0x833,
+    LVT_PERF = 0x834,
+    LVT_LINT0 = 0x835,
+    LVT_LINT1 = 0x836,
+    LVT_ERR = 0x837,
+    TIMER_INT_CNT = 0x838,
+    TIMER_CUR_CNT = 0x839,
+    TIMER_DIVISOR = 0x83E,
+    SELF_IPI = 0x83F,
 }
 
-#[derive(Debug, PartialEq, Eq)]
-enum Version {
-    xAPIC,
-    x2APIC,
+fn read_register(register: Register) -> u64 {
+    unsafe { crate::registers::msr::rdmsr(register as u32) }
 }
 
-#[repr(usize)]
-pub enum Offset {
-    ID = 0x2,
-    VERSION = 0x3,
-    TPR = 0x8,
-    PPR = 0xA,
-    EOI = 0xB,
-    /// Logical Destination Register
-    LDR = 0xD,
-    /// Destinaton Format Register
-    /// REMARK: GPF when writing in x2APIC mode.
-    DFR = 0xE,
-    SPURIOUS = 0xF,
-    ISR0 = 0x10,
-    ISR32 = 0x11,
-    ISR64 = 0x12,
-    ISR96 = 0x13,
-    ISR128 = 0x14,
-    ISR160 = 0x15,
-    ISR192 = 0x16,
-    ISR224 = 0x17,
-    TMR0 = 0x18,
-    TMR32 = 0x19,
-    TMR64 = 0x1A,
-    TMR96 = 0x1B,
-    TMR128 = 0x1C,
-    TMR160 = 0x1D,
-    TMR192 = 0x1E,
-    TMR224 = 0x1F,
-    IRR0 = 0x20,
-    IRR32 = 0x21,
-    IRR64 = 0x22,
-    IRR96 = 0x23,
-    IRR128 = 0x24,
-    IRR160 = 0x25,
-    IRR192 = 0x26,
-    IRR224 = 0x27,
-    ERR = 0x28,
-    ICR = 0x30,
-    LVT_TIMER = 0x32,
-    LVT_THERMAL = 0x33,
-    LVT_PERF = 0x34,
-    LVT_LINT0 = 0x35,
-    LVT_LINT1 = 0x36,
-    LVT_ERR = 0x37,
-    TIMER_INT_CNT = 0x38,
-    TIMER_CUR_CNT = 0x39,
-    TIMER_DIVISOR = 0x3E,
-    SELF_IPI = 0x3F,
+unsafe fn write_register(register: Register, value: u64) {
+    crate::registers::msr::wrmsr(register as u32, value);
 }
 
-pub(self) trait APIC {
-    fn read_offset(offset: Offset) -> u64;
-    unsafe fn write_offset(offset: Offset, value: u64);
-    unsafe fn send_int_cmd(int_cmd: InterruptCommand);
-}
+/*
 
-macro_rules! with_apic {
-    (|$apic:ident| $code:block) => {
-        match *VERSION {
-            Version::xAPIC => {
-                type $apic = xAPIC;
-                $code
-            }
-            Version::x2APIC => {
-                type $apic = x2APIC;
-                $code
-            }
-        }
-    };
-}
+   APIC FUNCTIONS
 
-macro_rules! read_offset {
-    ($offset:expr) => {
-        match *VERSION {
-            Version::xAPIC => xAPIC::read_offset($offset),
-            Version::x2APIC => x2APIC::read_offset($offset),
-        }
-    };
-}
-
-macro_rules! write_offset {
-    ($offset:expr, $value:expr) => {
-        match *VERSION {
-            Version::xAPIC => xAPIC::write_offset($offset, $value),
-            Version::x2APIC => x2APIC::write_offset($offset, $value),
-        }
-    };
-}
+*/
 
 pub unsafe fn sw_enable() {
-    write_offset!(
-        Offset::SPURIOUS,
-        *read_offset!(Offset::SPURIOUS).set_bit(8, true)
+    write_register(
+        Register::SPURIOUS,
+        *read_register(Register::SPURIOUS).set_bit(8, true),
     );
 }
 
 pub unsafe fn sw_disable() {
-    write_offset!(
-        Offset::SPURIOUS,
-        *read_offset!(Offset::SPURIOUS).set_bit(8, false)
+    write_register(
+        Register::SPURIOUS,
+        *read_register(Register::SPURIOUS).set_bit(8, false),
     );
 }
 
 pub fn get_id() -> u32 {
-    read_offset!(Offset::ID) as u32
+    read_register(Register::ID) as u32
 }
 
 pub fn get_version() -> u32 {
-    read_offset!(Offset::VERSION) as u32
+    read_register(Register::VERSION) as u32
 }
 
 pub fn end_of_interrupt() {
-    unsafe { write_offset!(Offset::EOI, 0x0) };
+    unsafe { write_register(Register::EOI, 0x0) };
 }
 
 pub fn get_error_status() -> ErrorStatusFlags {
-    ErrorStatusFlags::from_bits_truncate(read_offset!(Offset::ERR) as u8)
+    ErrorStatusFlags::from_bits_truncate(read_register(Register::ERR) as u8)
 }
 
 pub unsafe fn send_int_cmd(int_cmd: InterruptCommand) {
-    with_apic!(|APIC| { APIC::send_int_cmd(int_cmd) })
+    write_register(Register::ICR, int_cmd.get_raw());
 }
 
 pub unsafe fn configure_spurious(vector: u8) {
     assert!(vector >= 32, "interrupt vectors 0..32 are reserved");
 
-    write_offset!(
-        Offset::SPURIOUS,
-        *read_offset!(Offset::SPURIOUS).set_bits(0..8, vector as u64)
+    write_register(
+        Register::SPURIOUS,
+        *read_register(Register::SPURIOUS).set_bits(0..8, vector as u64),
     );
 }
 
 pub unsafe fn set_timer_divisor(divisor: TimerDivisor) {
-    write_offset!(Offset::TIMER_DIVISOR, divisor.as_divide_value());
+    write_register(Register::TIMER_DIVISOR, divisor.as_divide_value());
 }
 
 pub unsafe fn set_timer_initial_count(count: u32) {
-    write_offset!(Offset::TIMER_INT_CNT, count as u64);
+    write_register(Register::TIMER_INT_CNT, count as u64);
 }
 
 pub fn get_timer_current_count() -> u32 {
-    read_offset!(Offset::TIMER_CUR_CNT) as u32
+    read_register(Register::TIMER_CUR_CNT) as u32
 }
 
 pub unsafe fn reset() {
     sw_disable();
-    if *VERSION != Version::x2APIC {
-        write_offset!(Offset::DFR, u32::MAX as u64);
-    }
-    let mut ldr = read_offset!(Offset::LDR);
-    ldr &= 0xFFFFFF;
-    ldr = (ldr & !0xFF) | ((ldr & 0xFF) | 1);
-    write_offset!(Offset::LDR, ldr);
-    write_offset!(Offset::TPR, 0x0);
-    write_offset!(Offset::TIMER_INT_CNT, 0x0);
+    write_register(Register::TPR, 0x0);
+    write_register(Register::TIMER_INT_CNT, 0x0);
     get_timer().set_masked(true);
     get_performance().set_masked(true);
     get_performance().set_delivery_mode(InterruptDeliveryMode::NMI);
@@ -310,43 +246,43 @@ pub fn get_error() -> LocalVector<Error> {
 */
 
 pub trait LocalVectorVariant {
-    const OFFSET: Offset;
+    const REGISTER: Register;
 }
 
 pub trait GenericVectorVariant: LocalVectorVariant {}
 
 pub enum Timer {}
 impl LocalVectorVariant for Timer {
-    const OFFSET: Offset = Offset::LVT_TIMER;
+    const REGISTER: Register = Register::LVT_TIMER;
 }
 
 pub enum LINT0 {}
 impl LocalVectorVariant for LINT0 {
-    const OFFSET: Offset = Offset::LVT_LINT0;
+    const REGISTER: Register = Register::LVT_LINT0;
 }
 impl GenericVectorVariant for LINT0 {}
 
 pub enum LINT1 {}
 impl LocalVectorVariant for LINT1 {
-    const OFFSET: Offset = Offset::LVT_LINT1;
+    const REGISTER: Register = Register::LVT_LINT1;
 }
 impl GenericVectorVariant for LINT1 {}
 
 pub enum Performance {}
 impl LocalVectorVariant for Performance {
-    const OFFSET: Offset = Offset::LVT_PERF;
+    const REGISTER: Register = Register::LVT_PERF;
 }
 impl GenericVectorVariant for Performance {}
 
 pub enum Thermal {}
 impl LocalVectorVariant for Thermal {
-    const OFFSET: Offset = Offset::LVT_THERMAL;
+    const REGISTER: Register = Register::LVT_THERMAL;
 }
 impl GenericVectorVariant for Thermal {}
 
 pub enum Error {}
 impl LocalVectorVariant for Error {
-    const OFFSET: Offset = Offset::LVT_ERR;
+    const REGISTER: Register = Register::LVT_ERR;
 }
 
 #[repr(transparent)]
@@ -360,25 +296,25 @@ impl<T: LocalVectorVariant> LocalVector<T> {
 
     #[inline]
     pub fn get_interrupted(&self) -> bool {
-        read_offset!(T::OFFSET).get_bit(Self::INTERRUPTED_OFFSET)
+        read_register(T::REGISTER).get_bit(Self::INTERRUPTED_OFFSET)
     }
 
     #[inline]
     pub fn get_masked(&self) -> bool {
-        read_offset!(T::OFFSET).get_bit(Self::MASKED_OFFSET)
+        read_register(T::REGISTER).get_bit(Self::MASKED_OFFSET)
     }
 
     #[inline]
     pub unsafe fn set_masked(&self, masked: bool) {
-        write_offset!(
-            T::OFFSET,
-            *read_offset!(T::OFFSET).set_bit(Self::MASKED_OFFSET, masked)
+        write_register(
+            T::REGISTER,
+            *read_register(T::REGISTER).set_bit(Self::MASKED_OFFSET, masked),
         );
     }
 
     #[inline]
     pub fn get_vector(&self) -> Option<u8> {
-        match read_offset!(T::OFFSET).get_bits(0..8) {
+        match read_register(T::REGISTER).get_bits(0..8) {
             0..32 => None,
             vector => Some(vector as u8),
         }
@@ -388,9 +324,9 @@ impl<T: LocalVectorVariant> LocalVector<T> {
     pub unsafe fn set_vector(&self, vector: u8) {
         assert!(vector >= 32, "interrupt vectors 0..32 are reserved");
 
-        write_offset!(
-            T::OFFSET,
-            *read_offset!(T::OFFSET).set_bits(0..8, vector as u64)
+        write_register(
+            T::REGISTER,
+            *read_register(T::REGISTER).set_bits(0..8, vector as u64),
         );
     }
 }
@@ -399,7 +335,7 @@ impl<T: LocalVectorVariant> core::fmt::Debug for LocalVector<T> {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
             .debug_tuple("Local Vector")
-            .field(&format_args!("0b{:b}", &read_offset!(T::OFFSET)))
+            .field(&format_args!("0b{:b}", &read_register(T::REGISTER)))
             .finish()
     }
 }
@@ -407,9 +343,9 @@ impl<T: LocalVectorVariant> core::fmt::Debug for LocalVector<T> {
 impl<T: GenericVectorVariant> LocalVector<T> {
     #[inline]
     pub unsafe fn set_delivery_mode(&self, mode: InterruptDeliveryMode) {
-        write_offset!(
-            T::OFFSET,
-            *read_offset!(T::OFFSET).set_bits(8..11, mode as u64)
+        write_register(
+            T::REGISTER,
+            *read_register(T::REGISTER).set_bits(8..11, mode as u64),
         );
     }
 }
@@ -422,9 +358,9 @@ impl LocalVector<Timer> {
             "TSC deadline is not supported on this CPU."
         );
 
-        write_offset!(
-            <Timer as LocalVectorVariant>::OFFSET,
-            *read_offset!(<Timer as LocalVectorVariant>::OFFSET).set_bits(17..19, mode as u64)
+        write_register(
+            <Timer as LocalVectorVariant>::REGISTER,
+            *read_register(<Timer as LocalVectorVariant>::REGISTER).set_bits(17..19, mode as u64),
         );
     }
 }

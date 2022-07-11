@@ -52,6 +52,7 @@ SECTIONS
     .                   = DATA_SEGMENT_RELRO_END(0, .);
 
     . = ALIGN(CONSTANT(MAXPAGESIZE));
+    /* data sections */
     .got.plt            : { *(.got.plt) *(.igot.plt) }
     .data               : { *(.data .data.*) }
     .bss                : { *(.bss .bss.*) }

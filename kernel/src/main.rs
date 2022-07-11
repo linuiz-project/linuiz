@@ -55,7 +55,11 @@ const LIMINE_REV: u64 = 0;
 static LIMINE_INF: limine::LimineBootInfoRequest = limine::LimineBootInfoRequest::new(LIMINE_REV);
 static LIMINE_FB: limine::LimineFramebufferRequest =
     limine::LimineFramebufferRequest::new(LIMINE_REV);
-static LIMINE_SMP: limine::LimineSmpRequest = limine::LimineSmpRequest::new(LIMINE_REV);
+static LIMINE_SMP: limine::LimineSmpRequest = {
+    let mut req = limine::LimineSmpRequest::new(LIMINE_REV);
+    req.flags = 0b1; // Enable x2APIC.
+    req
+};
 static LIMINE_SYS_TBL: limine::LimineEfiSystemTableRequest =
     limine::LimineEfiSystemTableRequest::new(LIMINE_REV);
 static LIMINE_MMAP: limine::LimineMmapRequest = limine::LimineMmapRequest::new(LIMINE_REV);
@@ -117,6 +121,23 @@ unsafe extern "sysv64" fn _entry() -> ! {
         info!("CPU Features        {:?}", libkernel::cpu::FeatureFmt);
     }
 
+    /* prepare APs for startup */
+    {
+        let smp_response = LIMINE_SMP
+            .get_response()
+            .as_mut_ptr()
+            .expect("received no SMP response from bootloader")
+            .as_mut()
+            .unwrap();
+        if let Some(cpus) = smp_response.cpus() {
+            debug!("Detected {} processors.", cpus.len());
+
+            for cpu_info in cpus {
+                cpu_info.goto_address = _cpu_entry as u64;
+            }
+        }
+    }
+
     /* load EFI system table */
     {
         let system_table_ptr = LIMINE_SYS_TBL
@@ -174,7 +195,7 @@ unsafe extern "sysv64" fn _entry() -> ! {
         // frame manager uses the HHDM base.
         libkernel::memory::global_fmgr().slide_table_base(hhdm_offset);
 
-        debug!("Unmapping lower half identity mappings.");
+        trace!("Unmapping lower half identity mappings.");
         let global_pmgr = libkernel::memory::global_pmgr();
         for entry in memory_map.iter() {
             for page in (entry.base..(entry.base + entry.len))
@@ -199,24 +220,6 @@ unsafe extern "sysv64" fn _entry() -> ! {
         //             .unwrap();
         //     }
         // }
-    }
-
-    /* prepare APs for startup */
-    {
-        let lapic_id = libkernel::structures::apic::get_id();
-        let smp_response = LIMINE_SMP
-            .get_response()
-            .as_mut_ptr()
-            .expect("received no SMP response from bootloader")
-            .as_mut()
-            .unwrap();
-        if let Some(cpus) = smp_response.cpus() {
-            debug!("Detected {} processors.", cpus.len());
-
-            for cpu_info in cpus {
-                cpu_info.goto_address = _cpu_entry as u64;
-            }
-        }
     }
 
     // Configre and enable the global clock (PIT). This will be
