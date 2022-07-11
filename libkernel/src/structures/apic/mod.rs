@@ -34,7 +34,7 @@ pub enum TimerDivisor {
 }
 
 impl TimerDivisor {
-    pub const fn as_divide_value(self) -> u32 {
+    pub const fn as_divide_value(self) -> u64 {
         match self {
             TimerDivisor::Div2 => 2,
             TimerDivisor::Div4 => 4,
@@ -121,7 +121,10 @@ pub enum Offset {
     TPR = 0x8,
     PPR = 0xA,
     EOI = 0xB,
+    /// Logical Destination Register
     LDR = 0xD,
+    /// Destinaton Format Register
+    /// REMARK: GPF when writing in x2APIC mode.
     DFR = 0xE,
     SPURIOUS = 0xF,
     ISR0 = 0x10,
@@ -158,7 +161,7 @@ pub enum Offset {
     LVT_ERR = 0x37,
     TIMER_INT_CNT = 0x38,
     TIMER_CUR_CNT = 0x39,
-    DIVIDE_CONF = 0x3E,
+    TIMER_DIVISOR = 0x3E,
     SELF_IPI = 0x3F,
 }
 
@@ -235,6 +238,27 @@ pub unsafe fn send_int_cmd(int_cmd: InterruptCommand) {
     with_apic!(|APIC| { APIC::send_int_cmd(int_cmd) })
 }
 
+pub unsafe fn configure_spurious(vector: u8) {
+    assert!(vector >= 32, "interrupt vectors 0..32 are reserved");
+
+    write_offset!(
+        Offset::SPURIOUS,
+        *read_offset!(Offset::SPURIOUS).set_bits(0..8, vector as u64)
+    );
+}
+
+pub unsafe fn set_timer_divisor(divisor: TimerDivisor) {
+    write_offset!(Offset::TIMER_DIVISOR, divisor.as_divide_value());
+}
+
+pub unsafe fn set_timer_initial_count(count: u32) {
+    write_offset!(Offset::TIMER_INT_CNT, count as u64);
+}
+
+pub fn get_timer_current_count() -> u32 {
+    read_offset!(Offset::TIMER_CUR_CNT) as u32
+}
+
 pub unsafe fn reset() {
     sw_disable();
     if *VERSION != Version::x2APIC {
@@ -243,12 +267,12 @@ pub unsafe fn reset() {
     let mut ldr = read_offset!(Offset::LDR);
     ldr &= 0xFFFFFF;
     ldr = (ldr & !0xFF) | ((ldr & 0xFF) | 1);
-    get_performance().set_delivery_mode(InterruptDeliveryMode::NMI);
     write_offset!(Offset::LDR, ldr);
     write_offset!(Offset::TPR, 0x0);
     write_offset!(Offset::TIMER_INT_CNT, 0x0);
     get_timer().set_masked(true);
     get_performance().set_masked(true);
+    get_performance().set_delivery_mode(InterruptDeliveryMode::NMI);
     get_thermal_sensor().set_masked(true);
     get_error().set_masked(true);
     // Don't mask the LINT0&1 vectors, as they're used for external interrupts (PIC, SMIs, NMIs).
@@ -361,6 +385,8 @@ impl<T: LocalVectorVariant> LocalVector<T> {
 
     #[inline]
     pub unsafe fn set_vector(&self, vector: u8) {
+        assert!(vector >= 32, "interrupt vectors 0..32 are reserved");
+
         write_offset!(
             T::OFFSET,
             *read_offset!(T::OFFSET).set_bits(0..8, vector as u64)

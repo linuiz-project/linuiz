@@ -24,11 +24,11 @@ lazy_static::lazy_static! {
     };
 }
 
-pub static KCODE_SELECTOR: SyncOnceCell<SegmentSelector> = SyncOnceCell::new();
-pub static KDATA_SELECTOR: SyncOnceCell<SegmentSelector> = SyncOnceCell::new();
-pub static UCODE_SELECTOR: SyncOnceCell<SegmentSelector> = SyncOnceCell::new();
-pub static UDATA_SELECTOR: SyncOnceCell<SegmentSelector> = SyncOnceCell::new();
-pub static TSS_SELECTOR: SyncOnceCell<SegmentSelector> = SyncOnceCell::new();
+pub static KCODE_SELECTOR: SyncOnceCell<SegmentSelector> = unsafe { SyncOnceCell::new() };
+pub static KDATA_SELECTOR: SyncOnceCell<SegmentSelector> = unsafe { SyncOnceCell::new() };
+pub static UCODE_SELECTOR: SyncOnceCell<SegmentSelector> = unsafe { SyncOnceCell::new() };
+pub static UDATA_SELECTOR: SyncOnceCell<SegmentSelector> = unsafe { SyncOnceCell::new() };
+pub static TSS_SELECTOR: SyncOnceCell<SegmentSelector> = unsafe { SyncOnceCell::new() };
 
 pub fn init() {
     unsafe {

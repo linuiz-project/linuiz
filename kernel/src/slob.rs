@@ -300,7 +300,10 @@ unsafe impl core::alloc::GlobalAlloc for SLOB<'_> {
 
             if had_bits && !has_bits {
                 page_manager
-                    .unmap(&Page::from_index(map_index), true)
+                    .unmap(
+                        &Page::from_index(map_index),
+                        libkernel::memory::FrameOwnership::Locked,
+                    )
                     .unwrap();
             }
         }

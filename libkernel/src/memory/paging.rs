@@ -339,7 +339,7 @@ impl<L: HeirarchicalLevel> PageTable<L> {
     pub unsafe fn sub_table(
         &self,
         index: usize,
-        phys_mapped_page: Page,
+        phys_mapped_page: &Page,
     ) -> Option<&PageTable<L::NextLevel>> {
         self.get_entry(index).get_frame_index().map(|frame_index| {
             phys_mapped_page
@@ -354,7 +354,7 @@ impl<L: HeirarchicalLevel> PageTable<L> {
     pub unsafe fn sub_table_mut(
         &mut self,
         index: usize,
-        phys_mapped_page: Page,
+        phys_mapped_page: &Page,
     ) -> Option<&mut PageTable<L::NextLevel>> {
         self.get_entry_mut(index)
             .get_frame_index()
@@ -371,7 +371,7 @@ impl<L: HeirarchicalLevel> PageTable<L> {
     pub unsafe fn sub_table_create(
         &mut self,
         index: usize,
-        phys_mapping_page: Page,
+        phys_mapping_page: &Page,
     ) -> &mut PageTable<L::NextLevel> {
         let entry = self.get_entry_mut(index);
         let (frame_index, created) = match entry.get_frame_index() {

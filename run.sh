@@ -3,10 +3,10 @@
 qemu-system-x86_64 \
     -no-reboot \
     -machine q35,accel=kvm \
-    -cpu max \
+    -cpu host \
     -smp 2 \
     -m 512M \
-    -serial mon:stdio \
+    -serial stdio \
     -net none \
     -display none \
     -bios ./resources/ovmf.fd \

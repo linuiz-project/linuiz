@@ -8,8 +8,7 @@ pub use paging::*;
 pub mod paging;
 pub mod volatile;
 
-use crate::{ cell::SyncOnceCell};
-
+use crate::cell::SyncOnceCell;
 
 #[cfg(feature = "global_allocator")]
 pub mod global_alloc {
@@ -53,80 +52,61 @@ pub mod global_alloc {
     }
 }
 
-
 /*
-    
-    OVERALL L4 INDEX ASSIGNMENTS
-    ----------------------------------------
-    | 0-255   | Userspace                   |
-    ----------------------------------------
-    | 256-inf | Physical memory mapping     |
-    ----------------------------------------
-    | 510     | Kernel core-local state     |
-    ----------------------------------------
-    | 511     | Kernel ELF memory mappings  |
-    ----------------------------------------
 
- */
+   OVERALL L4 INDEX ASSIGNMENTS
+   ----------------------------------------
+   | 0-255   | Userspace                   |
+   ----------------------------------------
+   | 256-inf | Physical memory mapping     |
+   ----------------------------------------
+   | 510     | Kernel core-local state     |
+   ----------------------------------------
+   | 511     | Kernel ELF memory mappings  |
+   ----------------------------------------
 
+*/
 
 pub const PHYS_MEM_START: crate::Address<crate::Virtual> =
     crate::Address::<crate::Virtual>::new(256 * PML4_ENTRY_MEM_SIZE);
 
 pub const PML4_ENTRY_MEM_SIZE: usize = 1 << 9 << 9 << 9 << 12;
 
-static FRAME_MANAGER: SyncOnceCell<FrameManager> = SyncOnceCell::new();
-lazy_static::lazy_static! {
-    static ref PAGE_MANAGER: PageManager = unsafe { PageManager::new(&Page::null(), None) };
-}
+static FRAME_MANAGER: SyncOnceCell<FrameManager> = unsafe { SyncOnceCell::new() };
+static PAGE_MANAGER: SyncOnceCell<PageManager> = unsafe { SyncOnceCell::new() };
 
 /// Initializes global memory structures (frame & page managers).
 ///
 /// This function *does not* swap the current page table. To commit the page manager
 /// to CR3 and map physical memory at the correct offset, call `finalize_paging()`.
 pub fn init_frame_manager(memory_map: &[limine::LimineMemmapEntry]) {
-    info!("Initializing kernel frame and page managers.");
-
-    FRAME_MANAGER
-        .set(FrameManager::from_mmap(memory_map))
-        .map_err(|_| {
-            panic!("frame manager has already been initialized");
-        })
-        .unwrap();
+    if let Err(_) = FRAME_MANAGER.set(FrameManager::from_mmap(memory_map)) {
+        panic!("global frame manager has already been initialized");
+    }
 }
 
-/// Finalizes the kernel paging structure, and writes it to CR3. Call this
-/// after all relevant changes have been made to the global page manager.
-///
-/// This function should always be called *after* `init()`.
-///
-/// SAFETY: This function makes no promises about overwriting the old CR3
-///         value being safe. This, if called at the wrong time, can do
-///         unrecoverable damage to kernel memory.
-pub unsafe fn finalize_paging() {
-    let frame_manager = global_fmgr();
-    let page_manager = global_pmgr();
-
-    debug!(
-        "Physical memory offset: @{:?}",
-        crate::memory::PHYS_MEM_START
-    );
-    
-    page_manager.modify_mapped_page(Page::from_addr(crate::memory::PHYS_MEM_START));
-    frame_manager.slide_map_base(crate::memory::PHYS_MEM_START.as_usize());
-    debug!("Writing baseline kernel PML4 to CR3.");
-    page_manager.write_cr3();
-    debug!("Successfully wrote to CR3.");
+pub fn init_page_manager(mapped_page: &Page, new_pml4: bool) {
+    if let Err(_) = PAGE_MANAGER.set(unsafe {
+        if new_pml4 {
+            PageManager::new(mapped_page, None)
+        } else {
+            PageManager::from_current(mapped_page)
+        }
+    }) {
+        panic!("global page manager has already been initialized")
+    }
 }
 
 pub fn global_fmgr() -> &'static FrameManager<'static> {
     FRAME_MANAGER
         .get()
-        .expect("kernel frame manager has not been initialized")
+        .expect("global frame manager has not been initialized")
 }
 
 pub fn global_pmgr() -> &'static PageManager {
-    &*PAGE_MANAGER
+    PAGE_MANAGER
+        .get()
+        .expect("global page manager has not been initialize")
 }
 
 pub fn alloc_stack(page_count: usize, is_userspace: bool) -> *mut () {

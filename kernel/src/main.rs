@@ -29,13 +29,15 @@ mod slob;
 mod syscall;
 mod tables;
 
+use core::borrow::Borrow;
+use core::sync::atomic::AtomicBool;
+
 use alloc::vec::Vec;
-use libkernel::memory::{Page, PageManager};
 use libkernel::{acpi::SystemConfigTableEntry, LinkerSymbol};
-use libkernel::{Address, Virtual};
 
 extern "C" {
     static __code_start: LinkerSymbol;
+    static __startup_start: LinkerSymbol;
     static __code_end: LinkerSymbol;
 
     static __ro_start: LinkerSymbol;
@@ -50,18 +52,14 @@ extern "C" {
 }
 
 const LIMINE_REV: u64 = 0;
-#[used]
 static LIMINE_INF: limine::LimineBootInfoRequest = limine::LimineBootInfoRequest::new(LIMINE_REV);
-#[used]
 static LIMINE_FB: limine::LimineFramebufferRequest =
     limine::LimineFramebufferRequest::new(LIMINE_REV);
-#[used]
 static LIMINE_SMP: limine::LimineSmpRequest = limine::LimineSmpRequest::new(LIMINE_REV);
-#[used]
 static LIMINE_SYS_TBL: limine::LimineEfiSystemTableRequest =
     limine::LimineEfiSystemTableRequest::new(LIMINE_REV);
-#[used]
 static LIMINE_MMAP: limine::LimineMmapRequest = limine::LimineMmapRequest::new(LIMINE_REV);
+static LIMINE_HHDM: limine::LimineHhdmRequest = limine::LimineHhdmRequest::new(LIMINE_REV);
 
 static mut CON_OUT: drivers::stdout::Serial = drivers::stdout::Serial::new(drivers::stdout::COM1);
 
@@ -155,22 +153,126 @@ fn load_tables() {
     }
 }
 
+fn load_tss() {
+    use x86_64::{
+        instructions::tables,
+        structures::{
+            gdt::{Descriptor, GlobalDescriptorTable},
+            tss::TaskStateSegment,
+        },
+    };
+
+    let tss_ptr = {
+        use alloc::boxed::Box;
+        Box::leak(Box::new(TaskStateSegment::new())) as *mut TaskStateSegment
+    };
+
+    unsafe {
+        tss_ptr.as_mut().unwrap().privilege_stack_table[0] =
+            x86_64::VirtAddr::from_ptr(crate::local_state::privilege_stack().as_ptr())
+    };
+
+    let tss_descriptor = {
+        use bit_field::BitField;
+
+        let tss_ptr_u64 = tss_ptr as u64;
+
+        let mut low = x86_64::structures::gdt::DescriptorFlags::PRESENT.bits();
+        // base
+        low.set_bits(16..40, tss_ptr_u64.get_bits(0..24));
+        low.set_bits(56..64, tss_ptr_u64.get_bits(24..32));
+        // limit (the `-1` is needed since the bound is inclusive, not exclusive)
+        low.set_bits(0..16, (core::mem::size_of::<TaskStateSegment>() - 1) as u64);
+        // type (0b1001 = available 64-bit tss)
+        low.set_bits(40..44, 0b1001);
+
+        // high 32 bits of base
+        let mut high = 0;
+        high.set_bits(0..32, tss_ptr_u64.get_bits(32..64));
+
+        Descriptor::SystemSegment(low, high)
+    };
+
+    // Store current GDT pointer to restore later.
+    let cur_gdt = tables::sgdt();
+    // Create temporary kernel GDT to avoid a GPF on switching to it.
+    let mut temp_gdt = GlobalDescriptorTable::new();
+    temp_gdt.add_entry(Descriptor::kernel_code_segment());
+    temp_gdt.add_entry(Descriptor::kernel_data_segment());
+    let tss_selector = temp_gdt.add_entry(tss_descriptor);
+
+    unsafe {
+        // Load temp GDT ...
+        temp_gdt.load_unsafe();
+        // ... load TSS from temporary GDT ...
+        tables::load_tss(tss_selector);
+        // ... and restore cached GDT.
+        tables::lgdt(&cur_gdt);
+    }
+}
+
 #[no_mangle]
 unsafe extern "sysv64" fn _entry() -> ! {
     // Load the pre-reserved BSP stack (lies within the kernel's .bss, so is loaded by program segments).
-    libkernel::registers::stack::RSP::write(__bsp_top.as_mut_ptr());
+    // libkernel::registers::stack::RSP::write(__bsp_top.as_mut_ptr());
 
     // Drop into initialization function to completely invalidate any previous stack state.
-    init()
+    kernel_setup()
 }
 
-unsafe fn load_system_table() {
-    if let Some(system_table_ptr) = LIMINE_SYS_TBL
-        .get_response()
-        .get()
-        .and_then(|resp| resp.address.as_ptr())
+unsafe fn kernel_setup() -> ! {
+    CON_OUT.init(drivers::stdout::SerialSpeed::S115200);
+    match drivers::stdout::set_stdout(&mut CON_OUT, log::LevelFilter::Debug) {
+        Ok(()) => {
+            info!("Successfully loaded into kernel, with logging enabled.");
+        }
+        Err(_) => libkernel::instructions::interrupts::breakpoint(),
+    }
+
+    /* log boot info */
     {
-        debug!("Loading EFI system configuration table...");
+        let boot_info = LIMINE_INF
+            .get_response()
+            .get()
+            .expect("bootloader provided no info");
+        info!(
+            "Bootloader Info     {:?} (rev {:?}) {:?}",
+            unsafe { core::ffi::CStr::from_ptr(boot_info.name.as_ptr().unwrap() as *const _) },
+            boot_info.revision,
+            unsafe { core::ffi::CStr::from_ptr(boot_info.version.as_ptr().unwrap() as *const _) }
+        );
+        info!("CPU Vendor          {}", libkernel::cpu::VENDOR);
+        info!("CPU Features        {:?}", libkernel::cpu::FeatureFmt);
+    }
+
+    /* prepare APs for startup */
+    {
+        let lapic_id = libkernel::structures::apic::get_id();
+        let smp_response = LIMINE_SMP
+            .get_response()
+            .as_mut_ptr()
+            .expect("received no SMP response from bootloader")
+            .as_mut()
+            .unwrap();
+        // TODO check smp_response.flags for x2apic enablement, rather than CPUID (trust bootloader implicitly?)
+        if let Some(cpus) = smp_response.cpus() {
+            debug!("Detected {} processors.", cpus.len());
+
+            for cpu_info in cpus {
+                cpu_info.goto_address = _cpu_entry as u64;
+            }
+        }
+    }
+
+    /* load EFI system table */
+    {
+        let system_table_ptr = LIMINE_SYS_TBL
+            .get_response()
+            .get()
+            .and_then(|resp| resp.address.as_ptr())
+            .expect("bootloader provided no EFI system table");
+
+        trace!("Loading EFI system configuration table...");
         let system_table_ptr = system_table_ptr as *const SystemConfigTableEntry;
 
         let mut system_table_len = 0;
@@ -189,157 +291,85 @@ unsafe fn load_system_table() {
             system_table_ptr,
             system_table_len,
         ));
-    } else {
-        warn!("No EFI system configuration table found.");
     }
-}
 
-unsafe fn init_memory() {
-    if let Some(memory_map) = LIMINE_MMAP
-        .get_response()
-        .get()
-        .and_then(|resp| resp.mmap())
+    /* init memory */
     {
         use libkernel::{
             align_down_div, align_up_div,
-            memory::{AttributeModify, Page, PageAttributes},
+            memory::{Page, PageAttributes},
         };
 
-        // We always ensure the frame manager is initialized first—all other memory structures
-        // rely on its validity.
+        let memory_map = LIMINE_MMAP
+            .get_response()
+            .get()
+            .and_then(|resp| resp.mmap())
+            .expect("no memory map has been provided by bootloader");
+
+        trace!("Initializing memory managers.");
+        // Frame manager is always initialized first, so memory structures may allocate frames.
         libkernel::memory::init_frame_manager(memory_map);
+        let hhdm_offset = LIMINE_HHDM
+            .get_response()
+            .get()
+            .expect("bootloader did not provide a higher half direct mapping")
+            .offset as usize;
+        let hhdm_page = Page::from_index(hhdm_offset / 0x1000);
+        libkernel::memory::init_page_manager(&hhdm_page, false);
+        // The frame manager's allocation table is allocated with identity mapping assumed,
+        // so before we unmap the lower half virtual memory mapping, we must ensure the
+        // frame manager uses the HHDM base.
+        libkernel::memory::global_fmgr().slide_table_base(hhdm_offset);
 
-        debug!("Global mapping kernel ELF pages.");
-
-        let boot_pmgr =
-            libkernel::memory::PageManager::from_current(&libkernel::memory::Page::null());
+        trace!("Unmapping lower half identity mappings.");
         let global_pmgr = libkernel::memory::global_pmgr();
-        // Create ranges of pages, using pre-defined linker symbols to demarkate what memory zones
-        // need to be mapped in the kernel's page manager.
-        //
-        // The bootloader will (generally) do KASLR, so it cannot be relied upon that static executable
-        // compilation will run successfully; thus, the kernel is compiled PIE, and the linker file
-        // provides a method by which the kernel can continue to manage its own sections.
-        let kernel_code = Page::range(
-            align_down_div(__code_start.as_usize(), 0x1000),
-            align_up_div(__code_end.as_usize(), 0x1000),
-        );
-        let kernel_ro = Page::range(
-            align_down_div(__ro_start.as_usize(), 0x1000),
-            align_up_div(__ro_end.as_usize(), 0x1000),
-        );
-        let kernel_relro = Page::range(
-            align_down_div(__relro_start.as_usize(), 0x1000),
-            align_up_div(__relro_end.as_usize(), 0x1000),
-        );
-        let kernel_rw = Page::range(
-            align_down_div(__rw_start.as_usize(), 0x1000),
-            align_up_div(__rw_end.as_usize(), 0x1000),
-        );
-
-        for page in kernel_code {
-            global_pmgr
-                .map(
-                    &page,
-                    boot_pmgr
-                        .get_mapped_to(&page)
-                        .expect("kernel code page not mapped in bootloader page tables"),
-                    None,
-                    PageAttributes::CODE | PageAttributes::GLOBAL,
-                )
-                .unwrap();
-        }
-
-        for page in kernel_ro {
-            global_pmgr
-                .map(
-                    &page,
-                    boot_pmgr
-                        .get_mapped_to(&page)
-                        .expect("kernel readonly page not mapped in bootloader page tables"),
-                    None,
-                    PageAttributes::RODATA | PageAttributes::GLOBAL,
-                )
-                .unwrap();
-        }
-
-        for page in kernel_rw.chain(kernel_relro) {
-            global_pmgr
-                .map(
-                    &page,
-                    boot_pmgr
-                        .get_mapped_to(&page)
-                        .expect("kernel rw/relro page not mapped in bootloader page tables"),
-                    None,
-                    PageAttributes::DATA | PageAttributes::GLOBAL,
-                )
-                .unwrap();
-        }
-
-        libkernel::memory::finalize_paging();
-
-        let frame_manager = libkernel::memory::global_fmgr();
-        // Make sure global PML4 has all L4 entries mapped to a frame (so core-local
-        // PML4 copies share parity of address space).
-        let pml4 = (libkernel::registers::control::CR3::read().0.as_u64() as *mut u8)
-            .add(global_pmgr.mapped_page().index() * 0x1000)
-            .cast::<libkernel::memory::PageTable<libkernel::memory::Level4>>()
-            .as_mut()
-            .unwrap();
-        for entry in pml4.iter_mut().take(256) {
-            entry.set(
-                frame_manager.lock_next().unwrap(),
-                PageAttributes::PRESENT | PageAttributes::WRITABLE | PageAttributes::USERSPACE,
-            );
-        }
-        // Reclaim bootloader memory.
-        for (index, (ty, _, _)) in frame_manager.iter().enumerate() {
-            if ty == libkernel::memory::FrameType::BootReclaim {
-                frame_manager
-                    .try_modify_type(index, libkernel::memory::FrameType::Usable)
-                    .unwrap();
+        for entry in memory_map.iter() {
+            for page in (entry.base..(entry.base + entry.len))
+                .step_by(0x1000)
+                .map(|base| Page::from_index((base / 0x1000) as usize))
+            {
+                global_pmgr.unmap(&page, libkernel::memory::FrameOwnership::None);
             }
         }
 
+        // TODO cleanup bootloader reclaimable memory
+        // trace!("Reclaiming bootloader memory.");
+        // for (index, (ty, _, _)) in global_fmgr.iter().enumerate() {
+        //     if ty == libkernel::memory::FrameType::BootReclaim {
+        //         global_fmgr
+        //             .try_modify_type(index, libkernel::memory::FrameType::Usable)
+        //             .unwrap();
+        //     }
+        // }
+
         libkernel::memory::global_alloc::set(&*KMALLOC);
-
-        info!("Swapped memory control to kernel.");
-    } else {
-        panic!("No memory map has been provided by bootloader.");
-    }
-}
-
-unsafe fn init() -> ! {
-    CON_OUT.init(drivers::stdout::SerialSpeed::S115200);
-    match drivers::stdout::set_stdout(&mut CON_OUT, log::LevelFilter::Debug) {
-        Ok(()) => {
-            info!("Successfully loaded into kernel, with logging enabled.");
-        }
-        Err(_) => libkernel::instructions::interrupts::breakpoint(),
     }
 
-    let boot_info = LIMINE_INF
-        .get_response()
-        .get()
-        .expect("bootloader provided no info");
-    info!(
-        "Bootloader Info     {:?} (rev {:?}) {:?}",
-        core::ffi::CStr::from_ptr(boot_info.name.as_ptr().unwrap() as *const _),
-        boot_info.revision,
-        core::ffi::CStr::from_ptr(boot_info.version.as_ptr().unwrap() as *const _)
-    );
-    info!("CPU Vendor          {}", libkernel::cpu::VENDOR);
-    info!("CPU Features        {:?}", libkernel::cpu::FeatureFmt);
-
-    load_system_table();
-    init_memory();
-
-    _startup()
+    SMP_MEMORY_READY.store(true, core::sync::atomic::Ordering::Relaxed);
+    _cpu_entry()
 }
 
-#[no_mangle]
+static SMP_MEMORY_READY: AtomicBool = AtomicBool::new(false);
+
 #[inline(never)]
-unsafe extern "C" fn _startup() -> ! {
+unsafe extern "C" fn _cpu_entry() -> ! {
+    while !SMP_MEMORY_READY.load(core::sync::atomic::Ordering::Relaxed) {}
+
+    loop {}
+
+    {
+        use alloc::boxed::Box;
+        let new_stack = Box::leak(Box::new([0u8; 0x4000]));
+        let stack_top = new_stack.as_mut_ptr().add(new_stack.len());
+
+        libkernel::registers::stack::RSP::write(stack_top as _);
+    }
+
+    cpu_setup()
+}
+
+#[inline(never)]
+unsafe fn cpu_setup() -> ! {
     use libkernel::cpu::is_bsp;
 
     // BSP should have already loaded these.
@@ -349,70 +379,18 @@ unsafe extern "C" fn _startup() -> ! {
 
     local_state::create();
 
-    /* LOAD TSS */
-    {
-        use x86_64::{
-            instructions::tables,
-            structures::{
-                gdt::{Descriptor, GlobalDescriptorTable},
-                tss::TaskStateSegment,
-            },
-        };
-
-        let tss_ptr = {
-            use alloc::boxed::Box;
-            Box::leak(Box::new(TaskStateSegment::new())) as *mut TaskStateSegment
-        };
-
-        tss_ptr.as_mut().unwrap().privilege_stack_table[0] =
-            x86_64::VirtAddr::from_ptr(crate::local_state::privilege_stack().as_ptr());
-
-        let tss_descriptor = {
-            use bit_field::BitField;
-
-            let tss_ptr_u64 = tss_ptr as u64;
-
-            let mut low = x86_64::structures::gdt::DescriptorFlags::PRESENT.bits();
-            // base
-            low.set_bits(16..40, tss_ptr_u64.get_bits(0..24));
-            low.set_bits(56..64, tss_ptr_u64.get_bits(24..32));
-            // limit (the `-1` is needed since the bound is inclusive, not exclusive)
-            low.set_bits(0..16, (core::mem::size_of::<TaskStateSegment>() - 1) as u64);
-            // type (0b1001 = available 64-bit tss)
-            low.set_bits(40..44, 0b1001);
-
-            // high 32 bits of base
-            let mut high = 0;
-            high.set_bits(0..32, tss_ptr_u64.get_bits(32..64));
-
-            Descriptor::SystemSegment(low, high)
-        };
-
-        // Store current GDT pointer to restore later.
-        let cur_gdt = tables::sgdt();
-        // Create temporary kernel GDT to avoid a GPF on switching to it.
-        let mut temp_gdt = GlobalDescriptorTable::new();
-        temp_gdt.add_entry(Descriptor::kernel_code_segment());
-        temp_gdt.add_entry(Descriptor::kernel_data_segment());
-        let tss_selector = temp_gdt.add_entry(tss_descriptor);
-        // Load temp GDT ...
-        temp_gdt.load_unsafe();
-        // ... load TSS from temporary GDT ...
-        tables::load_tss(tss_selector);
-        // ... and restore cached GDT.
-        tables::lgdt(&cur_gdt);
+    if is_bsp() {
+        crate::clock::global::configure_and_enable();
     }
-
-    info!("Loaded TSS.");
 
     /* INIT APIC */
-    {
-        // TODO
-        // local_state::init_local_apic();
-        // local_state::reload_timer(core::num::NonZeroU32::new(1));
-    }
+    // {
+    //     local_state::init_local_apic();
+    //     local_state::reload_timer(core::num::NonZeroU32::new(1));
+    // }
+
     if is_bsp() {
-        // TODO wake_aps();
+        wake_aps();
     }
 
     loop {}
@@ -441,51 +419,66 @@ unsafe extern "C" fn _startup() -> ! {
     libkernel::instructions::hlt_indefinite()
 }
 
-// unsafe fn wake_aps() {
-//     use libkernel::acpi::rdsp::xsdt::{
-//         madt::{InterruptDevice, MADT},
-//         XSDT,
-//     };
+unsafe fn wake_aps() {
+    use libkernel::acpi::rdsp::xsdt::{
+        madt::{InterruptDevice, MADT},
+        XSDT,
+    };
 
-//     let lapic_id = libkernel::cpu::get_id() as u8 /* possibly don't cast to u8? */;
-//     let icr = libkernel::structures::apic::APIC::interrupt_command_register();
-//     let ap_text_page_index = (__ap_text_start.as_usize() / 0x1000) as u8;
+    let lapic_id = libkernel::structures::apic::get_id();
+    // let int_cmd = libkernel::structures::apic::InterruptCommand::new_sipi(vector, apic_id)
+    let ap_text_page_index = (__startup_start.as_usize() / 0x1000) as u8;
 
-//     if let Some(madt) = XSDT.find_sub_table::<MADT>() {
-//         info!("Beginning wake-up sequence for enabled processors.");
-//         for interrupt_device in madt.iter() {
-//             // Filter out non-lapic devices.
-//             if let InterruptDevice::LocalAPIC(ap_lapic) = interrupt_device {
-//                 use libkernel::acpi::rdsp::xsdt::madt::LocalAPICFlags;
-//                 // Filter out invalid lapic devices.
-//                 if lapic_id != ap_lapic.id()
-//                     && ap_lapic.flags().intersects(
-//                         LocalAPICFlags::PROCESSOR_ENABLED | LocalAPICFlags::ONLINE_CAPABLE,
-//                     )
-//                 {
-//                     debug!("Waking core ID {}.", ap_lapic.id());
+    let smp_response = LIMINE_SMP
+        .get_response()
+        .get()
+        .expect("received no SMP response from bootloader");
+    info!("{:?}", smp_response);
+    // TODO check smp_response.flags for x2apic enablement, rather than CPUID (trust bootloader implicitly?)
+    info!(
+        "Bootloader reports: {} enabled processors",
+        smp_response.cpu_count
+    );
 
-//                     AP_STACK_POINTERS[ap_lapic.id() as usize] =
-//                         libkernel::memory::alloc_stack(2, false);
+    // if let Some(cpus) = smp_response.cpus() {
+    //     for cpu_info in cpus {}
+    // }
 
-//                     info!("{:?}", AP_STACK_POINTERS[ap_lapic.id() as usize]);
+    // if let Some(madt) = XSDT.find_sub_table::<MADT>() {
+    //     info!("Beginning wake-up sequence for enabled processors.");
+    //     for interrupt_device in madt.iter() {
+    //         // Filter out non-lapic devices.
+    //         if let InterruptDevice::LocalAPIC(ap_lapic) = interrupt_device {
+    //             use libkernel::acpi::rdsp::xsdt::madt::LocalAPICFlags;
+    //             // Filter out invalid lapic devices.
+    //             if lapic_id != ap_lapic.id()
+    //                 && ap_lapic.flags().intersects(
+    //                     LocalAPICFlags::PROCESSOR_ENABLED | LocalAPICFlags::ONLINE_CAPABLE,
+    //                 )
+    //             {
+    //                 debug!("Waking core ID {}.", ap_lapic.id());
 
-//                     // Reset target processor.
-//                     trace!("Sending INIT interrupt to: {}", ap_lapic.id());
-//                     icr.send_init(ap_lapic.id());
-//                     icr.wait_pending();
-//                     // REMARK: IA32 spec indicates that doing this twice, as so, ensures the interrupt is received.
-//                     trace!("Sending SIPI x1 interrupt to: {}", ap_lapic.id());
-//                     icr.send_sipi(ap_text_page_index, ap_lapic.id());
-//                     icr.wait_pending();
-//                     trace!("Sending SIPI x2 interrupt to: {}", ap_lapic.id());
-//                     icr.send_sipi(ap_text_page_index, ap_lapic.id());
-//                     icr.wait_pending();
-//                 }
-//             }
-//         }
-//     }
-// }
+    //                 AP_STACK_POINTERS[ap_lapic.id() as usize] =
+    //                     libkernel::memory::alloc_stack(2, false);
+
+    //                 info!("{:?}", AP_STACK_POINTERS[ap_lapic.id() as usize]);
+
+    //                 // Reset target processor.
+    //                 trace!("Sending INIT interrupt to: {}", ap_lapic.id());
+    //                 icr.send_init(ap_lapic.id());
+    //                 icr.wait_pending();
+    //                 // REMARK: IA32 spec indicates that doing this twice, as so, ensures the interrupt is received.
+    //                 trace!("Sending SIPI x1 interrupt to: {}", ap_lapic.id());
+    //                 icr.send_sipi(ap_text_page_index, ap_lapic.id());
+    //                 icr.wait_pending();
+    //                 trace!("Sending SIPI x2 interrupt to: {}", ap_lapic.id());
+    //                 icr.send_sipi(ap_text_page_index, ap_lapic.id());
+    //                 icr.wait_pending();
+    //             }
+    //         }
+    //     }
+    // }
+}
 
 fn kernel_main() -> ! {
     debug!("Successfully entered `kernel_main()`.");

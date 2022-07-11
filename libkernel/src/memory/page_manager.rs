@@ -1,6 +1,7 @@
 use crate::{
     instructions::tlb,
     memory::{
+        frame_manager::FrameOwnership,
         global_fmgr,
         paging::{AttributeModify, Level4, PageAttributes, PageTable, PageTableEntry},
         Page,
@@ -60,9 +61,9 @@ impl VirtualMapper {
 
         unsafe {
             self.pml4()
-                .and_then(|p4| p4.sub_table(addr.p4_index(), mapped_page))
-                .and_then(|p3| p3.sub_table(addr.p3_index(), mapped_page))
-                .and_then(|p2| p2.sub_table(addr.p2_index(), mapped_page))
+                .and_then(|p4| p4.sub_table(addr.p4_index(), &mapped_page))
+                .and_then(|p3| p3.sub_table(addr.p3_index(), &mapped_page))
+                .and_then(|p2| p2.sub_table(addr.p2_index(), &mapped_page))
                 .and_then(|p1| Some(p1.get_entry(addr.p1_index())))
         }
     }
@@ -73,9 +74,9 @@ impl VirtualMapper {
 
         unsafe {
             self.pml4_mut()
-                .and_then(|p4| p4.sub_table_mut(addr.p4_index(), mapped_page))
-                .and_then(|p3| p3.sub_table_mut(addr.p3_index(), mapped_page))
-                .and_then(|p2| p2.sub_table_mut(addr.p2_index(), mapped_page))
+                .and_then(|p4| p4.sub_table_mut(addr.p4_index(), &mapped_page))
+                .and_then(|p3| p3.sub_table_mut(addr.p3_index(), &mapped_page))
+                .and_then(|p2| p2.sub_table_mut(addr.p2_index(), &mapped_page))
                 .and_then(|p1| Some(p1.get_entry_mut(addr.p1_index())))
         }
     }
@@ -89,9 +90,9 @@ impl VirtualMapper {
         unsafe {
             self.pml4_mut()
                 .unwrap()
-                .sub_table_create(addr.p4_index(), mapped_page)
-                .sub_table_create(addr.p3_index(), mapped_page)
-                .sub_table_create(addr.p2_index(), mapped_page)
+                .sub_table_create(addr.p4_index(), &mapped_page)
+                .sub_table_create(addr.p3_index(), &mapped_page)
+                .sub_table_create(addr.p2_index(), &mapped_page)
                 .get_entry_mut(addr.p1_index())
         }
     }
@@ -204,15 +205,14 @@ impl PageManager {
         &self,
         page: &Page,
         frame_index: usize,
-        // TODO create FrameLock enum to replace Option<bool>
-        lock_frame: Option<bool>,
+        ownership: FrameOwnership,
         attribs: PageAttributes,
     ) -> Result<(), MapError> {
         // Attempt to acquire the requisite frame, following the outlined parsing of `lock_frame`.
-        match lock_frame {
-            Some(true) => global_fmgr().lock(frame_index),
-            Some(false) => global_fmgr().borrow(frame_index),
-            None => Ok(frame_index),
+        match ownership {
+            FrameOwnership::None => Ok(frame_index),
+            FrameOwnership::Borrowed => global_fmgr().borrow(frame_index),
+            FrameOwnership::Locked => global_fmgr().lock(frame_index),
         }
         // If the acquisition of the frame fails, transform the error.
         .map_err(|falloc_err| MapError::FrameError(falloc_err))
@@ -227,19 +227,23 @@ impl PageManager {
         })
     }
 
-    pub fn unmap(&self, page: &Page, locked: bool) -> Result<(), MapError> {
+    pub fn unmap(&self, page: &Page, ownership: FrameOwnership) -> Result<(), MapError> {
         self.0
             .write()
             .get_page_entry_mut(page)
             .map(|entry| {
                 entry.set_attributes(PageAttributes::PRESENT, AttributeModify::Remove);
 
-                // Drop pointed frame since the entry is no longer present.
+                // Handle frame permissions to keep them updated.
                 unsafe {
-                    if locked {
-                        global_fmgr().free(entry.take_frame_index()).unwrap();
-                    } else {
-                        global_fmgr().drop(entry.take_frame_index()).unwrap();
+                    match ownership {
+                        FrameOwnership::None => {}
+                        FrameOwnership::Borrowed => {
+                            global_fmgr().drop(entry.take_frame_index()).unwrap()
+                        }
+                        FrameOwnership::Locked => {
+                            global_fmgr().free(entry.take_frame_index()).unwrap()
+                        }
                     }
                 }
 
@@ -260,7 +264,7 @@ impl PageManager {
             map_write.get_page_entry_mut(unmap_from).map(|entry| {
                 let attribs = new_attribs.unwrap_or_else(|| entry.get_attribs());
                 entry.set_attributes(PageAttributes::empty(), AttributeModify::Set);
-                
+
                 unsafe { (attribs, entry.take_frame_index()) }
             })
         };
@@ -268,7 +272,7 @@ impl PageManager {
         maybe_attribs_frame_index
             .ok_or(MapError::NotMapped)
             .map(|(attribs, frame_index)| {
-                self.map(map_to, frame_index, None, attribs).unwrap();
+                self.map(map_to, frame_index, FrameOwnership::None, attribs).unwrap();
                 tlb::invalidate(unmap_from);
 
                 ()
@@ -276,7 +280,7 @@ impl PageManager {
     }
 
     pub fn auto_map(&self, page: &Page, attribs: PageAttributes) {
-        self.map(page, global_fmgr().lock_next().unwrap(), None, attribs)
+        self.map(page, global_fmgr().lock_next().unwrap(), FrameOwnership::None, attribs)
             .unwrap();
     }
 
@@ -287,7 +291,7 @@ impl PageManager {
     ///         A) a valid lock or borrow
     ///         B) not required for the mapping
     pub fn identity_map(&self, page: &Page, attribs: PageAttributes) -> Result<(), MapError> {
-        self.map(page, page.index(), None, attribs)
+        self.map(page, page.index(), FrameOwnership::None, attribs)
     }
 
     /* STATE QUERYING */

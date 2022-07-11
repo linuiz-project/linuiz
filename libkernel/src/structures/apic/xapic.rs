@@ -1,9 +1,9 @@
 use crate::{cell::SyncCell, memory::MMIO};
 
 lazy_static::lazy_static! {
-    static ref APIC_MMIO: SyncCell<MMIO> = SyncCell::new(
-        unsafe { MMIO::new(crate::registers::msr::IA32_APIC_BASE::get_base_addr().frame_index(), 1) }
-    );
+    static ref APIC_MMIO: SyncCell<MMIO> = unsafe {
+        SyncCell::new(MMIO::new(crate::registers::msr::IA32_APIC_BASE::get_base_addr().frame_index(), 1))
+    };
 }
 
 const ICRL: usize = 0x300;
@@ -37,6 +37,4 @@ impl super::APIC for xAPIC {
         // Wait for pending bit to be cleared.
         while APIC_MMIO.read_unchecked::<u32>(ICRL as usize).get_bit(12) {}
     }
-
-
 }

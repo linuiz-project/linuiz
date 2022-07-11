@@ -135,7 +135,8 @@ impl SystemConfigTableEntry {
     }
 }
 
-static SYSTEM_CONFIG_TABLE: SyncOnceCell<&[SystemConfigTableEntry]> = SyncOnceCell::new();
+static SYSTEM_CONFIG_TABLE: SyncOnceCell<&[SystemConfigTableEntry]> =
+    unsafe { SyncOnceCell::new() };
 
 pub fn set_system_config_table(system_config_table: &'static [SystemConfigTableEntry]) {
     SYSTEM_CONFIG_TABLE

@@ -2,6 +2,13 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use num_enum::TryFromPrimitive;
 use spin::RwLock;
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum FrameOwnership {
+    None,
+    Borrowed,
+    Locked
+}
+
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
 pub enum FrameType {
@@ -140,14 +147,14 @@ impl<'arr> FrameManager<'arr> {
             .last()
             .map(|entry| entry.base + entry.len)
             .unwrap();
-        debug!("Total system memory: {:#X} bytes", total_system_memory);
+        trace!("Total system memory: {:#X} bytes", total_system_memory);
         // Memory required to represent all system frames.
         let total_system_frames = crate::align_up_div(total_system_memory as usize, 0x1000);
         let req_falloc_memory = total_system_frames * core::mem::size_of::<Frame>();
         let req_falloc_memory_frames = crate::align_up_div(req_falloc_memory as usize, 0x1000);
         let req_falloc_memory_aligned = req_falloc_memory_frames * 0x1000;
 
-        debug!(
+        trace!(
             "Required frame manager map memory: {:#X}",
             req_falloc_memory_aligned
         );
@@ -165,7 +172,7 @@ impl<'arr> FrameManager<'arr> {
             .find(|entry| entry.len >= (req_falloc_memory_aligned as u64))
             .expect("Failed to find viable memory descriptor for frame allocator");
 
-        debug!("Found entry for frame manager map: {:?}", map_entry);
+            trace!("Found entry for frame manager map: {:?}", map_entry);
 
         // Clear the memory of the chosen descriptor.
         unsafe { core::ptr::write_bytes(map_entry.base as *mut u8, 0, req_falloc_memory_aligned) };
@@ -178,7 +185,7 @@ impl<'arr> FrameManager<'arr> {
 
         let frame_ledger_range = (map_entry.base / 0x1000)
             ..((map_entry.base / 0x1000) + (req_falloc_memory_frames as u64));
-        debug!(
+            trace!(
             "Locking frames {:?} to facilitate static frame allocator map.",
             frame_ledger_range
         );
@@ -189,7 +196,7 @@ impl<'arr> FrameManager<'arr> {
             falloc.lock(frame_index as usize).unwrap();
         }
 
-        debug!("Reserving requsite system frames.");
+        trace!("Reserving requsite system frames.");
         let mut last_frame_end = 0;
         for entry in memory_map {
             assert_eq!(
@@ -234,12 +241,12 @@ impl<'arr> FrameManager<'arr> {
             last_frame_end = start_index + frame_count;
         }
 
-        debug!("Successfully configured frame manager.");
+        trace!("Successfully configured frame manager.");
 
         falloc
     }
 
-    pub unsafe fn slide_map_base(&self, slide: usize) {
+    pub unsafe fn slide_table_base(&self, slide: usize) {
         let mut map_write = self.map.write();
         let new_map_base = map_write
             .as_mut_ptr()
@@ -413,6 +420,14 @@ impl<'arr> FrameManager<'arr> {
             .get(index)
             .ok_or(FrameError::OutOfRange(index))
             .and_then(|frame| frame.modify_type(new_type))
+    }
+
+    pub fn force_modify_type(&self, index: usize, new_type: FrameType) -> core::result::Result<(), FrameError> {
+        self.map
+        .read()
+        .get(index)
+        .ok_or(FrameError::OutOfRange(index))
+        .and_then(|frame| frame.modify_type(new_type))
     }
 
     /// Total memory of a given type represented by frame allocator. If `None` is
