@@ -26,13 +26,11 @@ mod local_state;
 mod logging;
 mod scheduling;
 mod slob;
-mod syscall;
+// mod syscall;
 mod tables;
 
-use core::borrow::Borrow;
-use core::sync::atomic::{AtomicBool, AtomicUsize};
-
 use alloc::vec::Vec;
+use core::sync::atomic::AtomicBool;
 use libkernel::{acpi::SystemConfigTableEntry, LinkerSymbol};
 
 extern "C" {
@@ -113,11 +111,19 @@ unsafe extern "sysv64" fn _entry() -> ! {
             .expect("bootloader provided no info");
         info!(
             "Bootloader Info     {:?} (rev {:?}) {:?}",
-            unsafe { core::ffi::CStr::from_ptr(boot_info.name.as_ptr().unwrap() as *const _) },
+            core::ffi::CStr::from_ptr(boot_info.name.as_ptr().unwrap() as *const _),
             boot_info.revision,
-            unsafe { core::ffi::CStr::from_ptr(boot_info.version.as_ptr().unwrap() as *const _) }
+            core::ffi::CStr::from_ptr(boot_info.version.as_ptr().unwrap() as *const _)
         );
         info!("CPU Vendor          {}", libkernel::cpu::VENDOR);
+        info!(
+            "CPU x2APIC          {}",
+            if libkernel::registers::msr::IA32_APIC_BASE::is_x2_mode() {
+                "Yes"
+            } else {
+                "No"
+            }
+        );
         info!("CPU Features        {:?}", libkernel::cpu::FeatureFmt);
     }
 
@@ -129,10 +135,19 @@ unsafe extern "sysv64" fn _entry() -> ! {
             .expect("received no SMP response from bootloader")
             .as_mut()
             .unwrap();
+
+        if (smp_response.flags & 0b1) == 0 {
+            panic!("x2APIC mode has failed to enable. Kernel does not support xAPIC mode.");
+        }
+
         if let Some(cpus) = smp_response.cpus() {
             debug!("Detected {} processors.", cpus.len());
 
             for cpu_info in cpus {
+                debug!(
+                    "Starting processor: PID{}/LID{}",
+                    cpu_info.processor_id, cpu_info.lapic_id
+                );
                 cpu_info.goto_address = _cpu_entry as u64;
             }
         }
@@ -169,10 +184,7 @@ unsafe extern "sysv64" fn _entry() -> ! {
 
     /* init memory */
     {
-        use libkernel::{
-            align_down_div, align_up_div,
-            memory::{Page, PageAttributes},
-        };
+        use libkernel::memory::Page;
 
         let memory_map = LIMINE_MMAP
             .get_response()
@@ -202,7 +214,9 @@ unsafe extern "sysv64" fn _entry() -> ! {
                 .step_by(0x1000)
                 .map(|base| Page::from_index((base / 0x1000) as usize))
             {
-                global_pmgr.unmap(&page, libkernel::memory::FrameOwnership::None);
+                global_pmgr
+                    .unmap(&page, libkernel::memory::FrameOwnership::None)
+                    .ok();
             }
         }
 
@@ -222,9 +236,7 @@ unsafe extern "sysv64" fn _entry() -> ! {
         // }
     }
 
-    // Configre and enable the global clock (PIT). This will be
-    // used to measure the APIC timer frequency.
-
+    SMP_MEMORY_READY.store(true, core::sync::atomic::Ordering::Relaxed);
     debug!("Finished initial kernel setup.");
     _cpu_entry()
 }
@@ -234,7 +246,7 @@ unsafe extern "C" fn _cpu_entry() -> ! {
     while !SMP_MEMORY_READY.load(core::sync::atomic::Ordering::Relaxed) {}
 
     /* load registers */
-    unsafe {
+    {
         use libkernel::cpu::{has_feature, Feature};
 
         // Set CR0 flags.
@@ -265,10 +277,12 @@ unsafe extern "C" fn _cpu_entry() -> ! {
         } else {
             warn!("PC does not support the NX bit; system security will be compromised (this warning is purely informational).")
         }
+
+        libkernel::instructions::interrupts::enable();
     }
 
     /* load tables */
-    unsafe {
+    {
         use tables::{gdt, idt};
 
         // Always initialize GDT prior to configuring IDT.
@@ -288,12 +302,28 @@ unsafe extern "C" fn _cpu_entry() -> ! {
                 libkernel::structures::apic::end_of_interrupt();
             }
 
-            idt::set_handler_fn(local_state::InterruptVector::LINT0 as u8, apit_empty);
-            idt::set_handler_fn(local_state::InterruptVector::LINT1 as u8, apit_empty);
+            idt::set_handler_fn(libkernel::structures::apic::LINT0_VECTOR, apit_empty);
+            idt::set_handler_fn(libkernel::structures::apic::LINT1_VECTOR, apit_empty);
         }
 
         crate::tables::idt::load();
     }
+
+    if libkernel::cpu::is_bsp() {
+        crate::clock::global::configure_and_enable();
+    }
+
+    // TODO allocate a new stack for each core
+    // {
+    //     use alloc::boxed::Box;
+    //     let new_stack = Box::leak(Box::new([0u8; 0x4000]));
+    //     let stack_top = new_stack.as_mut_ptr().add(new_stack.len());
+
+    //     libkernel::registers::stack::RSP::write(stack_top as _);
+    // }
+
+    local_state::create();
+    local_state::init_local_apic();
 
     /* load tss */
     {
@@ -310,10 +340,8 @@ unsafe extern "C" fn _cpu_entry() -> ! {
             Box::leak(Box::new(TaskStateSegment::new())) as *mut TaskStateSegment
         };
 
-        unsafe {
-            tss_ptr.as_mut().unwrap().privilege_stack_table[0] =
-                x86_64::VirtAddr::from_ptr(crate::local_state::privilege_stack().as_ptr())
-        };
+        tss_ptr.as_mut().unwrap().privilege_stack_table[0] =
+            x86_64::VirtAddr::from_ptr(crate::local_state::privilege_stack().as_ptr());
 
         let tss_descriptor = {
             use bit_field::BitField;
@@ -344,62 +372,39 @@ unsafe extern "C" fn _cpu_entry() -> ! {
         temp_gdt.add_entry(Descriptor::kernel_data_segment());
         let tss_selector = temp_gdt.add_entry(tss_descriptor);
 
-        unsafe {
-            // Load temp GDT ...
-            temp_gdt.load_unsafe();
-            // ... load TSS from temporary GDT ...
-            tables::load_tss(tss_selector);
-            // ... and restore cached GDT.
-            tables::lgdt(&cur_gdt);
-        }
+        // Load temp GDT ...
+        temp_gdt.load_unsafe();
+        // ... load TSS from temporary GDT ...
+        tables::load_tss(tss_selector);
+        // ... and restore cached GDT.
+        tables::lgdt(&cur_gdt);
     }
-
-    if libkernel::cpu::is_bsp() {
-        crate::clock::global::configure_and_enable();
-
-        SMP_MEMORY_READY.store(true, core::sync::atomic::Ordering::Relaxed);
-    }
-
-    // TODO allocate a new stack for each core
-    // {
-    //     use alloc::boxed::Box;
-    //     let new_stack = Box::leak(Box::new([0u8; 0x4000]));
-    //     let stack_top = new_stack.as_mut_ptr().add(new_stack.len());
-
-    //     libkernel::registers::stack::RSP::write(stack_top as _);
-    // }
-
-    local_state::create();
-    local_state::init_local_apic();
-    local_state::reload_timer(core::num::NonZeroU32::new(1));
 
     cpu_setup()
 }
 
 #[inline(never)]
 unsafe fn cpu_setup() -> ! {
-    use libkernel::cpu::is_bsp;
-
-    loop {}
+    libkernel::instructions::hlt_indefinite();
 
     /* ENABLE SYSCALL */
-    {
-        use crate::tables::gdt;
-        use libkernel::registers::msr;
+    // {
+    //     use crate::tables::gdt;
+    //     use libkernel::registers::msr;
 
-        // Enable `syscall`/`sysret`.
-        msr::IA32_EFER::set_sce(true);
-        // Configure system call environment registers.
-        msr::IA32_STAR::set_selectors(
-            *gdt::KCODE_SELECTOR.get().unwrap(),
-            *gdt::KDATA_SELECTOR.get().unwrap(),
-        );
-        msr::IA32_LSTAR::set_syscall(syscall::syscall_enter);
-        msr::IA32_SFMASK::set_rflags_mask(libkernel::registers::RFlags::all());
-    }
+    //     // Enable `syscall`/`sysret`.
+    //     msr::IA32_EFER::set_sce(true);
+    //     // Configure system call environment registers.
+    //     msr::IA32_STAR::set_selectors(
+    //         *gdt::KCODE_SELECTOR.get().unwrap(),
+    //         *gdt::KDATA_SELECTOR.get().unwrap(),
+    //     );
+    //     msr::IA32_LSTAR::set_syscall(syscall::syscall_enter);
+    //     msr::IA32_SFMASK::set_rflags_mask(libkernel::registers::RFlags::all());
+    // }
 
-    libkernel::registers::stack::RSP::write(libkernel::memory::alloc_stack(1, true));
-    libkernel::cpu::ring3_enter(test_user_function, libkernel::registers::RFlags::empty());
+    // libkernel::registers::stack::RSP::write(libkernel::memory::alloc_stack(1, true));
+    // libkernel::cpu::ring3_enter(test_user_function, libkernel::registers::RFlags::empty());
 
     debug!("Failed to enter ring 3.");
 

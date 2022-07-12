@@ -134,10 +134,16 @@ pub enum Register {
     SELF_IPI = 0x83F,
 }
 
+pub const LINT0_VECTOR: u8 = 253;
+pub const LINT1_VECTOR: u8 = 254;
+pub const SPURIOUS_VECTOR: u8 = 255;
+
+#[inline]
 fn read_register(register: Register) -> u64 {
     unsafe { crate::registers::msr::rdmsr(register as u32) }
 }
 
+#[inline]
 unsafe fn write_register(register: Register, value: u64) {
     crate::registers::msr::wrmsr(register as u32, value);
 }
@@ -148,6 +154,7 @@ unsafe fn write_register(register: Register, value: u64) {
 
 */
 
+#[inline]
 pub unsafe fn sw_enable() {
     write_register(
         Register::SPURIOUS,
@@ -155,6 +162,7 @@ pub unsafe fn sw_enable() {
     );
 }
 
+#[inline]
 pub unsafe fn sw_disable() {
     write_register(
         Register::SPURIOUS,
@@ -162,79 +170,100 @@ pub unsafe fn sw_disable() {
     );
 }
 
+#[inline]
 pub fn get_id() -> u32 {
     read_register(Register::ID) as u32
 }
 
+#[inline]
 pub fn get_version() -> u32 {
     read_register(Register::VERSION) as u32
 }
 
+#[inline]
 pub fn end_of_interrupt() {
     unsafe { write_register(Register::EOI, 0x0) };
 }
 
+#[inline]
 pub fn get_error_status() -> ErrorStatusFlags {
     ErrorStatusFlags::from_bits_truncate(read_register(Register::ERR) as u8)
 }
 
+#[inline]
 pub unsafe fn send_int_cmd(int_cmd: InterruptCommand) {
     write_register(Register::ICR, int_cmd.get_raw());
 }
 
-pub unsafe fn configure_spurious(vector: u8) {
-    assert!(vector >= 32, "interrupt vectors 0..32 are reserved");
-
-    write_register(
-        Register::SPURIOUS,
-        *read_register(Register::SPURIOUS).set_bits(0..8, vector as u64),
-    );
-}
-
+#[inline]
 pub unsafe fn set_timer_divisor(divisor: TimerDivisor) {
     write_register(Register::TIMER_DIVISOR, divisor.as_divide_value());
 }
 
+#[inline]
 pub unsafe fn set_timer_initial_count(count: u32) {
     write_register(Register::TIMER_INT_CNT, count as u64);
 }
 
+#[inline]
 pub fn get_timer_current_count() -> u32 {
     read_register(Register::TIMER_CUR_CNT) as u32
 }
 
-pub unsafe fn reset() {
+/// Resets the APIC module. The APIC module state is configured as follows:
+///     - Module is software disabled, then enabled at function end.
+///     - TPR and TIMER_INT_CNT are zeroed.
+///     - Timer, Performance, Thermal, and Error local vectors are masked.
+///     - LINT0 & LINT1 are unmasked and assigned to the `LINT0_VECTOR` (253) and `LINT1_VECTOR` (254), respectively.
+///     - The spurious register is configured with the `SPURIOUS_VECTOR` (255).
+///
+/// SAFETY: The caller must guarantee that software is in a state that is ready to accept
+///         the APIC doing a software reset. No state checks are done within this method,
+///         it is purely for executing a software reset. You have been warned.
+pub unsafe fn software_reset() {
     sw_disable();
+
     write_register(Register::TPR, 0x0);
     write_register(Register::TIMER_INT_CNT, 0x0);
-    get_timer().set_masked(true);
-    get_performance().set_masked(true);
-    get_performance().set_delivery_mode(InterruptDeliveryMode::NMI);
-    get_thermal_sensor().set_masked(true);
-    get_error().set_masked(true);
-    // Don't mask the LINT0&1 vectors, as they're used for external interrupts (PIC, SMIs, NMIs).
+    write_register(
+        Register::SPURIOUS,
+        *read_register(Register::SPURIOUS).set_bits(0..8, SPURIOUS_VECTOR as u64),
+    );
+
+    sw_enable();
+
+    // IA32 SDM specifies that after a software disable, all local vectors
+    // are masked, so we need to re-enable the LINT local vectors.
+    get_lint0().set_masked(false).set_vector(LINT0_VECTOR);
+    get_lint1().set_masked(false).set_vector(LINT1_VECTOR);
 }
 
+#[inline]
 pub fn get_timer() -> LocalVector<Timer> {
     LocalVector(PhantomData)
 }
 
+#[inline]
 pub fn get_lint0() -> LocalVector<LINT0> {
     LocalVector(PhantomData)
 }
 
+#[inline]
 pub fn get_lint1() -> LocalVector<LINT1> {
     LocalVector(PhantomData)
 }
 
+#[inline]
 pub fn get_performance() -> LocalVector<Performance> {
     LocalVector(PhantomData)
 }
 
+#[inline]
 pub fn get_thermal_sensor() -> LocalVector<Thermal> {
     LocalVector(PhantomData)
 }
 
+#[inline]
 pub fn get_error() -> LocalVector<Error> {
     LocalVector(PhantomData)
 }
@@ -305,11 +334,13 @@ impl<T: LocalVectorVariant> LocalVector<T> {
     }
 
     #[inline]
-    pub unsafe fn set_masked(&self, masked: bool) {
+    pub unsafe fn set_masked(&self, masked: bool) -> &Self {
         write_register(
             T::REGISTER,
             *read_register(T::REGISTER).set_bit(Self::MASKED_OFFSET, masked),
         );
+
+        self
     }
 
     #[inline]
@@ -321,13 +352,15 @@ impl<T: LocalVectorVariant> LocalVector<T> {
     }
 
     #[inline]
-    pub unsafe fn set_vector(&self, vector: u8) {
+    pub unsafe fn set_vector(&self, vector: u8) -> &Self {
         assert!(vector >= 32, "interrupt vectors 0..32 are reserved");
 
         write_register(
             T::REGISTER,
             *read_register(T::REGISTER).set_bits(0..8, vector as u64),
         );
+
+        self
     }
 }
 
@@ -342,17 +375,18 @@ impl<T: LocalVectorVariant> core::fmt::Debug for LocalVector<T> {
 
 impl<T: GenericVectorVariant> LocalVector<T> {
     #[inline]
-    pub unsafe fn set_delivery_mode(&self, mode: InterruptDeliveryMode) {
+    pub unsafe fn set_delivery_mode(&self, mode: InterruptDeliveryMode) -> &Self {
         write_register(
             T::REGISTER,
             *read_register(T::REGISTER).set_bits(8..11, mode as u64),
         );
+
+        self
     }
 }
 
 impl LocalVector<Timer> {
-    #[inline]
-    pub unsafe fn set_mode(&self, mode: TimerMode) {
+    pub unsafe fn set_mode(&self, mode: TimerMode) -> &Self {
         assert!(
             mode != TimerMode::TSC_Deadline || crate::cpu::has_feature(crate::cpu::Feature::TSC_DL),
             "TSC deadline is not supported on this CPU."
@@ -362,5 +396,7 @@ impl LocalVector<Timer> {
             <Timer as LocalVectorVariant>::REGISTER,
             *read_register(<Timer as LocalVectorVariant>::REGISTER).set_bits(17..19, mode as u64),
         );
+
+        self
     }
 }

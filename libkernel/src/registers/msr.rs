@@ -65,7 +65,7 @@ impl IA32_APIC_BASE {
     }
 
     /// Gets the 10th bit of the IA32_APIC_BASE MSR, indicating the enabled state of x2 APIC mode.
-    pub fn get_x2_mode() -> bool {
+    pub fn is_x2_mode() -> bool {
         unsafe { rdmsr(0x1B).get_bit(10) }
     }
 

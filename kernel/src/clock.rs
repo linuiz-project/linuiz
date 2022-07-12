@@ -27,8 +27,8 @@ pub mod global {
 
     pub fn configure_and_enable() {
         libkernel::instructions::interrupts::without_interrupts(|| {
-            pic8259::enable(pic8259::InterruptLines::TIMER);
             pic8259::pit::set_timer_freq(1000, pic8259::pit::OperatingMode::RateGenerator);
+            pic8259::enable(pic8259::InterruptLines::TIMER);
 
             unsafe {
                 crate::tables::idt::set_handler_fn(
@@ -43,6 +43,8 @@ pub mod global {
         _: &mut crate::tables::idt::InterruptStackFrame,
         _: *mut crate::scheduling::ThreadRegisters,
     ) {
+        GLOBAL_CLOCK.tick();
+
         pic8259::end_of_interrupt(pic8259::InterruptOffset::Timer);
     }
 
@@ -92,7 +94,9 @@ pub mod local {
 
         pub fn wait(&self) {
             let end_tick = self.ticks + get_ticks();
-            while get_ticks() < end_tick {}
+            while get_ticks() < end_tick {
+                libkernel::instructions::pause();
+            }
         }
     }
 

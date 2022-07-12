@@ -4,9 +4,9 @@ qemu-system-x86_64 \
     -no-reboot \
     -machine q35,accel=kvm \
     -cpu host \
-    -smp 2 \
+    -smp 4 \
     -m 512M \
-    -serial mon:stdio \
+    -serial stdio \
     -net none \
     -display none \
     -bios ./resources/ovmf.fd \

@@ -11,22 +11,8 @@ pub enum InterruptVector {
     CMCI = 49,
     Performance = 50,
     ThermalSensor = 51,
-    LINT0 = 52,
-    LINT1 = 53,
     Error = 54,
     Storage = 55,
-    // APIC spurious interrupt is default mapped to 255.
-    Spurious = u8::MAX,
-}
-
-#[repr(usize)]
-pub enum Offset {
-    ID = 0x100,
-    Clock = 0x110,
-    LocalTimerPerMs = 0x120,
-    SchedulerPtr = 0x130,
-    SyscallStackPtr = 0x140,
-    PrivilegeStackPtr = 0x150,
 }
 
 #[repr(align(0x1000))]
@@ -48,8 +34,7 @@ impl LocalState {
     }
 }
 
-const PML4_LOCAL_STATE_ENTRY_INDEX: usize = 510;
-static LOCAL_STATE_PTR_BASE: AtomicUsize = AtomicUsize::new(0);
+static LOCAL_STATE_PTRS_BASE: AtomicUsize = AtomicUsize::new(0);
 
 /// Returns the pointer to the local state structure.
 ///
@@ -59,11 +44,12 @@ static LOCAL_STATE_PTR_BASE: AtomicUsize = AtomicUsize::new(0);
 ///         are made as to whether this has been done or not.
 #[inline(always)]
 unsafe fn get_local_state_ptr() -> *mut LocalState {
-    (LOCAL_STATE_PTR_BASE.load(Ordering::Relaxed) as *mut LocalState)
+    (LOCAL_STATE_PTRS_BASE.load(Ordering::Relaxed) as *mut LocalState)
         // TODO move to a core-local PML4 copy with an L4 local state mapping
         .add(libkernel::structures::apic::get_id() as usize)
 }
 
+#[inline]
 fn local_state() -> &'static mut LocalState {
     unsafe { get_local_state_ptr().as_mut().unwrap() }
 }
@@ -85,19 +71,21 @@ fn local_state() -> &'static mut LocalState {
 ///
 /// SAFETY: This function invariantly assumes it will only be called once.
 pub unsafe fn create() {
-    LOCAL_STATE_PTR_BASE.compare_exchange(
-        0,
-        // Cosntruct the local state pointer (with slide) via the `Address` struct, to
-        // automatically sign extend.
-        Address::<Virtual>::new(
-            ((PML4_LOCAL_STATE_ENTRY_INDEX * libkernel::memory::PML4_ENTRY_MEM_SIZE)
-                + (libkernel::instructions::rdrand32().unwrap() as usize))
-                & !0xFFF,
+    LOCAL_STATE_PTRS_BASE
+        .compare_exchange(
+            0,
+            // Cosntruct the local state pointer (with slide) via the `Address` struct, to
+            // automatically sign extend.
+            Address::<Virtual>::new(
+                ((510 * libkernel::memory::PML4_ENTRY_MEM_SIZE)
+                    + (libkernel::instructions::rdrand32().unwrap() as usize))
+                    & !0xFFF,
+            )
+            .as_usize(),
+            Ordering::AcqRel,
+            Ordering::Relaxed,
         )
-        .as_usize(),
-        Ordering::AcqRel,
-        Ordering::Relaxed,
-    );
+        .ok();
 
     let local_state_ptr = get_local_state_ptr();
 
@@ -131,10 +119,8 @@ pub unsafe fn create() {
 pub fn init_local_apic() {
     use libkernel::structures::apic;
 
-    trace!("Configuring APIC & APIT.");
     unsafe {
-        apic::configure_spurious(InterruptVector::Spurious as u8);
-        apic::reset();
+        apic::software_reset();
         apic::set_timer_divisor(apic::TimerDivisor::Div1);
         apic::get_timer().set_mode(apic::TimerMode::OneShot);
     }
@@ -143,35 +129,42 @@ pub fn init_local_apic() {
     libkernel::instructions::interrupts::enable();
 
     let per_10ms = {
-        //trace!("Determining APIT frequency.");
-        // Wait on the global timer, to ensure we're starting the count on the rising edge of each millisecond.
-        crate::clock::global::busy_wait_msec(1);
-        unsafe { apic::set_timer_initial_count(u32::MAX) };
-        crate::clock::global::busy_wait_msec(10);
+        if let Some(registers) = libkernel::instructions::cpuid::exec(0x15, 0x0)
+            .and_then(|result| if result.ebx() > 0 { Some(result) } else { None })
+        // Attempt to calculate a concrete frequency via CPUID.
+        {
+            registers.ecx() * (registers.ebx() / registers.eax())
+        } else
+        // Otherwise, determine frequency with external measurements.
+        {
+            // Wait on the global timer, to ensure we're starting the count
+            // on the rising edge of each millisecond.
+            crate::clock::global::busy_wait_msec(1);
+            unsafe { apic::set_timer_initial_count(u32::MAX) };
+            crate::clock::global::busy_wait_msec(10);
 
-        apic::get_timer_current_count()
+            apic::get_timer_current_count()
+        }
     };
 
     let per_ms = (u32::MAX - per_10ms) / 10;
     local_state().local_timer_per_ms = Some(per_ms);
-    trace!("APIT frequency: {}Hz", per_10ms * 100);
 
     unsafe {
         // Configure timer vector.
-        apic::get_timer().set_vector(InterruptVector::LocalTimer as u8);
-        apic::get_timer().set_masked(false);
+        apic::get_timer()
+            .set_vector(InterruptVector::LocalTimer as u8)
+            .set_masked(false);
         // Configure error vector.
-        apic::get_error().set_vector(InterruptVector::Error as u8);
-        apic::get_error().set_masked(false);
+        apic::get_error()
+            .set_vector(InterruptVector::Error as u8)
+            .set_masked(false);
         // Set default vectors.
         // REMARK: Any of these left masked are not currently supported.
         apic::get_performance().set_vector(InterruptVector::Performance as u8);
         apic::get_thermal_sensor().set_vector(InterruptVector::ThermalSensor as u8);
-        apic::get_lint0().set_vector(InterruptVector::LINT0 as u8);
-        apic::get_lint1().set_vector(InterruptVector::LINT1 as u8);
+        // LINT0&1 should be configured by the APIC reset.
     }
-
-    trace!("Core-local APIC configured.");
 }
 
 #[inline]
