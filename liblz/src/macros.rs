@@ -102,7 +102,7 @@ macro_rules! atomic_bitfield_getter {
 
     ($field:ident, $field_ty:ty, $var_name:ident, $bit_range:expr) => {
         paste::paste! {
-            libkernel::atomic_bitfield_getter_ro!($field, $field_ty, $var_name, $bit_range);
+            liblz::atomic_bitfield_getter_ro!($field, $field_ty, $var_name, $bit_range);
 
             pub fn [<set_ $var_name>](&mut self, value: $field_ty) {
                 use core::sync::atomic::Ordering;

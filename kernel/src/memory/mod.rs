@@ -15,7 +15,7 @@
     //         .unwrap()
     //         .iter()
     //         .enumerate()
-    //         .filter(|(_, (ty, _, _))| !matches!(ty, libkernel::memory::FrameType::Usable))
+    //         .filter(|(_, (ty, _, _))| !matches!(ty, liblz::memory::FrameType::Usable))
     //         .for_each(|(index, _)| {
     //             KMALLOC.reserve_page(&Page::from_index(index)).unwrap();
     //         });
@@ -24,11 +24,11 @@
     // }
 
     // debug!("Setting newly-configured default allocator.");
-    // libkernel::memory::malloc::set(&*KMALLOC);
+    // liblz::memory::malloc::set(&*KMALLOC);
     // // TODO somehow ensure the PML4 frame is within the first 32KiB for the AP trampoline
     // debug!("Moving the kernel PML4 mapping frame into the global processor reference.");
     // __kernel_pml4
     //     .as_mut_ptr::<u32>()
-    //     .write(libkernel::registers::control::CR3::read().0.as_usize() as u32);
+    //     .write(liblz::registers::control::CR3::read().0.as_usize() as u32);
 
     // info!("Kernel memory initialized.");

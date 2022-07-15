@@ -6,7 +6,7 @@ use x86_64::structures::idt::InterruptStackFrame;
 
 extern "C" {
     // TODO syscall stack per-cpu
-    static __syscall_stack: libkernel::LinkerSymbol;
+    static __syscall_stack: liblz::LinkerSymbol;
 }
 
 static mut SYSCALL_FUNCTIONS: [unsafe extern "win64" fn(

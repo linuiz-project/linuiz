@@ -209,7 +209,7 @@ pub struct PCIeDevice<T: DeviceType> {
     phantom: PhantomData<T>,
 }
 
-// TODO move frame_manager and page_manager into libkernel ... again
+// TODO move frame_manager and page_manager into liblz ... again
 
 pub fn new_device(mmio: MMIO) -> DeviceVariant {
     let type_malfunc = unsafe {

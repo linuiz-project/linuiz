@@ -1,7 +1,7 @@
 use crate::{clock::local::Stopwatch, tables::idt::InterruptStackFrame};
 use alloc::{boxed::Box, collections::BinaryHeap};
 use core::{cmp, sync::atomic::AtomicU64};
-use libkernel::{
+use liblz::{
     registers::{control::CR3Flags, RFlags},
     Address, Physical,
 };
@@ -197,7 +197,7 @@ impl Scheduler {
                     cached_regs.write_volatile(next_task.gprs);
 
                     // Set current page tables.
-                    libkernel::registers::control::CR3::write(next_task.cr3.0, next_task.cr3.1);
+                    liblz::registers::control::CR3::write(next_task.cr3.0, next_task.cr3.1);
                 }
 
                 self.current_task = Some(next_task);

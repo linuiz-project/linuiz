@@ -1,6 +1,6 @@
 use crate::{clock::AtomicClock, scheduling::Scheduler};
 use core::sync::atomic::{AtomicUsize, Ordering};
-use libkernel::{Address, Virtual};
+use liblz::{Address, Virtual};
 use spin::{Mutex, MutexGuard};
 
 #[repr(u8)]
@@ -46,7 +46,7 @@ static LOCAL_STATE_PTRS_BASE: AtomicUsize = AtomicUsize::new(0);
 unsafe fn get_local_state_ptr() -> *mut LocalState {
     (LOCAL_STATE_PTRS_BASE.load(Ordering::Relaxed) as *mut LocalState)
         // TODO move to a core-local PML4 copy with an L4 local state mapping
-        .add(libkernel::structures::apic::get_id() as usize)
+        .add(liblz::structures::apic::get_id() as usize)
 }
 
 #[inline]
@@ -77,8 +77,8 @@ pub unsafe fn create() {
             // Cosntruct the local state pointer (with slide) via the `Address` struct, to
             // automatically sign extend.
             Address::<Virtual>::new(
-                ((510 * libkernel::memory::PML4_ENTRY_MEM_SIZE)
-                    + (libkernel::instructions::rdrand32().unwrap() as usize))
+                ((510 * liblz::memory::PML4_ENTRY_MEM_SIZE)
+                    + (liblz::instructions::rdrand32().unwrap() as usize))
                     & !0xFFF,
             )
             .as_usize(),
@@ -90,22 +90,22 @@ pub unsafe fn create() {
     let local_state_ptr = get_local_state_ptr();
 
     {
-        use libkernel::memory::Page;
+        use liblz::memory::Page;
 
         // Map the pages this local state will utilize.
-        let page_manager = libkernel::memory::global_pmgr();
+        let page_manager = liblz::memory::global_pmgr();
         let base_page = Page::from_ptr(local_state_ptr);
-        let end_page = Page::from_ptr(local_state_ptr.add(libkernel::align_up_div(
+        let end_page = Page::from_ptr(local_state_ptr.add(liblz::align_up_div(
             core::mem::size_of::<LocalState>(),
             0x1000,
         )));
         (base_page..end_page)
-            .for_each(|page| page_manager.auto_map(&page, libkernel::memory::PageAttributes::DATA));
+            .for_each(|page| page_manager.auto_map(&page, liblz::memory::PageAttributes::DATA));
     }
 
     local_state_ptr.write_volatile(LocalState {
         magic: LocalState::MAGIC,
-        id: libkernel::cpu::get_id(),
+        id: liblz::cpu::get_id(),
         clock: AtomicClock::new(),
         scheduler: Mutex::new(Scheduler::new()),
         local_timer_per_ms: None,
@@ -117,7 +117,7 @@ pub unsafe fn create() {
 }
 
 pub fn init_local_apic() {
-    use libkernel::structures::apic;
+    use liblz::structures::apic;
 
     unsafe {
         apic::software_reset();
@@ -126,35 +126,34 @@ pub fn init_local_apic() {
     }
 
     // Ensure interrupts are enabled after APIC is reset.
-    libkernel::instructions::interrupts::enable();
+    liblz::instructions::interrupts::enable();
 
-    let per_10ms = {
-        if let Some(registers) = libkernel::instructions::cpuid::exec(0x15, 0x0)
-            .and_then(|result| if result.ebx() > 0 { Some(result) } else { None })
-        // Attempt to calculate a concrete frequency via CPUID.
+    let per_10ms =
         {
-            registers.ecx() * (registers.ebx() / registers.eax())
-        } else
-        // Otherwise, determine frequency with external measurements.
-        {
-            // Wait on the global timer, to ensure we're starting the count
-            // on the rising edge of each millisecond.
-            crate::clock::global::busy_wait_msec(1);
-            unsafe { apic::set_timer_initial_count(u32::MAX) };
-            crate::clock::global::busy_wait_msec(10);
+            if let Some(registers) = liblz::instructions::cpuid::exec(0x15, 0x0)
+                .and_then(|result| if result.ebx() > 0 { Some(result) } else { None })
+            // Attempt to calculate a concrete frequency via CPUID.
+            {
+                registers.ecx() * (registers.ebx() / registers.eax())
+            } else
+            // Otherwise, determine frequency with external measurements.
+            {
+                // Wait on the global timer, to ensure we're starting the count
+                // on the rising edge of each millisecond.
+                crate::clock::global::busy_wait_msec(1);
+                unsafe { apic::set_timer_initial_count(u32::MAX) };
+                crate::clock::global::busy_wait_msec(10);
 
-            apic::get_timer_current_count()
-        }
-    };
+                apic::get_timer_current_count()
+            }
+        };
 
     let per_ms = (u32::MAX - per_10ms) / 10;
     local_state().local_timer_per_ms = Some(per_ms);
 
     unsafe {
         // Configure timer vector.
-        apic::get_timer()
-            .set_vector(InterruptVector::LocalTimer as u8)
-            .set_masked(false);
+        apic::get_timer().set_vector(InterruptVector::LocalTimer as u8);
         // Configure error vector.
         apic::get_error()
             .set_vector(InterruptVector::Error as u8)
@@ -179,7 +178,7 @@ pub fn clock() -> &'static AtomicClock {
 
 /// SAFETY: Caller is expected to only reload timer when appropriate.
 pub unsafe fn reload_timer(ms_multiplier: Option<core::num::NonZeroU32>) {
-    libkernel::structures::apic::set_timer_initial_count(
+    liblz::structures::apic::set_timer_initial_count(
         ms_multiplier
             .unwrap_or(core::num::NonZeroU32::new_unchecked(1))
             .get()

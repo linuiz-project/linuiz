@@ -18,7 +18,7 @@
 #[macro_use]
 extern crate log;
 extern crate alloc;
-extern crate libkernel;
+extern crate liblz;
 
 mod clock;
 mod drivers;
@@ -26,12 +26,11 @@ mod local_state;
 mod logging;
 mod scheduling;
 mod slob;
-// mod syscall;
 mod tables;
 
 use alloc::vec::Vec;
 use core::sync::atomic::AtomicBool;
-use libkernel::{acpi::SystemConfigTableEntry, LinkerSymbol};
+use liblz::{acpi::SystemConfigTableEntry, LinkerSymbol};
 
 extern "C" {
     static __code_start: LinkerSymbol;
@@ -74,7 +73,7 @@ lazy_static::lazy_static! {
     pub static ref KMALLOC: slob::SLOB<'static> = unsafe { slob::SLOB::new() };
 }
 
-use libkernel::io::pci;
+use liblz::io::pci;
 pub struct Devices<'a>(Vec<pci::DeviceVariant>, &'a core::marker::PhantomData<()>);
 unsafe impl Send for Devices<'_> {}
 unsafe impl Sync for Devices<'_> {}
@@ -88,7 +87,7 @@ impl Devices<'_> {
 // lazy_static::lazy_static! {
 //     pub static ref PCIE_DEVICES: Devices<'static> =
 //         Devices(
-//             libkernel::io::pci::get_pcie_devices(memory::get_frame_manager(), &*crate::memory::PAGE_MANAGER, &*crate::memory::KMALLOC).collect(),
+//             liblz::io::pci::get_pcie_devices(memory::get_frame_manager(), &*crate::memory::PAGE_MANAGER, &*crate::memory::KMALLOC).collect(),
 //             &core::marker::PhantomData
 //         );
 // }
@@ -100,7 +99,7 @@ unsafe extern "sysv64" fn _entry() -> ! {
         Ok(()) => {
             info!("Successfully loaded into kernel, with logging enabled.");
         }
-        Err(_) => libkernel::instructions::interrupts::breakpoint(),
+        Err(_) => liblz::instructions::interrupts::breakpoint(),
     }
 
     /* log boot info */
@@ -115,16 +114,16 @@ unsafe extern "sysv64" fn _entry() -> ! {
             boot_info.revision,
             core::ffi::CStr::from_ptr(boot_info.version.as_ptr().unwrap() as *const _)
         );
-        info!("CPU Vendor          {}", libkernel::cpu::VENDOR);
+        info!("CPU Vendor          {}", liblz::cpu::VENDOR);
         info!(
             "CPU x2APIC          {}",
-            if libkernel::registers::msr::IA32_APIC_BASE::is_x2_mode() {
+            if liblz::registers::msr::IA32_APIC_BASE::is_x2_mode() {
                 "Yes"
             } else {
                 "No"
             }
         );
-        info!("CPU Features        {:?}", libkernel::cpu::FeatureFmt);
+        info!("CPU Features        {:?}", liblz::cpu::FeatureFmt);
     }
 
     /* prepare APs for startup */
@@ -174,9 +173,9 @@ unsafe extern "sysv64" fn _entry() -> ! {
             }
         }
 
-        // TODO Possibly move ACPI structure instances out of libkernel?
+        // TODO Possibly move ACPI structure instances out of liblz?
         // Set system configuration table, so ACPI can be used.
-        libkernel::acpi::set_system_config_table(core::slice::from_raw_parts(
+        liblz::acpi::set_system_config_table(core::slice::from_raw_parts(
             system_table_ptr,
             system_table_len,
         ));
@@ -184,7 +183,7 @@ unsafe extern "sysv64" fn _entry() -> ! {
 
     /* init memory */
     {
-        use libkernel::memory::Page;
+        use liblz::memory::Page;
 
         let memory_map = LIMINE_MMAP
             .get_response()
@@ -194,28 +193,28 @@ unsafe extern "sysv64" fn _entry() -> ! {
 
         trace!("Initializing memory managers.");
         // Frame manager is always initialized first, so memory structures may allocate frames.
-        libkernel::memory::init_frame_manager(memory_map);
+        liblz::memory::init_frame_manager(memory_map);
         let hhdm_offset = LIMINE_HHDM
             .get_response()
             .get()
             .expect("bootloader did not provide a higher half direct mapping")
             .offset as usize;
         let hhdm_page = Page::from_index(hhdm_offset / 0x1000);
-        libkernel::memory::init_page_manager(&hhdm_page, false);
+        liblz::memory::init_page_manager(&hhdm_page, false);
         // The frame manager's allocation table is allocated with identity mapping assumed,
         // so before we unmap the lower half virtual memory mapping, we must ensure the
         // frame manager uses the HHDM base.
-        libkernel::memory::global_fmgr().slide_table_base(hhdm_offset);
+        liblz::memory::global_fmgr().slide_table_base(hhdm_offset);
 
         trace!("Unmapping lower half identity mappings.");
-        let global_pmgr = libkernel::memory::global_pmgr();
+        let global_pmgr = liblz::memory::global_pmgr();
         for entry in memory_map.iter() {
             for page in (entry.base..(entry.base + entry.len))
                 .step_by(0x1000)
                 .map(|base| Page::from_index((base / 0x1000) as usize))
             {
                 global_pmgr
-                    .unmap(&page, libkernel::memory::FrameOwnership::None)
+                    .unmap(&page, liblz::memory::FrameOwnership::None)
                     .ok();
             }
         }
@@ -223,14 +222,14 @@ unsafe extern "sysv64" fn _entry() -> ! {
         // The global kernel allocator must be set AFTER the upper half
         // identity mappings are purged, so that the allocation table
         // isn't unmapped.
-        libkernel::memory::global_alloc::set(&*KMALLOC);
+        liblz::memory::global_alloc::set(&*KMALLOC);
 
         // TODO cleanup bootloader reclaimable memory
         // trace!("Reclaiming bootloader memory.");
         // for (index, (ty, _, _)) in global_fmgr.iter().enumerate() {
-        //     if ty == libkernel::memory::FrameType::BootReclaim {
+        //     if ty == liblz::memory::FrameType::BootReclaim {
         //         global_fmgr
-        //             .try_modify_type(index, libkernel::memory::FrameType::Usable)
+        //             .try_modify_type(index, liblz::memory::FrameType::Usable)
         //             .unwrap();
         //     }
         // }
@@ -247,15 +246,15 @@ unsafe extern "C" fn _cpu_entry() -> ! {
 
     /* load registers */
     {
-        use libkernel::cpu::{has_feature, Feature};
+        use liblz::cpu::{has_feature, Feature};
 
         // Set CR0 flags.
-        use libkernel::registers::control::{CR0Flags, CR0};
+        use liblz::registers::control::{CR0Flags, CR0};
         CR0::write(
             CR0Flags::PE | CR0Flags::MP | CR0Flags::ET | CR0Flags::NE | CR0Flags::WP | CR0Flags::PG,
         );
         // Set CR4 flags.
-        use libkernel::registers::control::{CR4Flags, CR4};
+        use liblz::registers::control::{CR4Flags, CR4};
         CR4::write(
             CR4Flags::DE
                 | CR4Flags::PAE
@@ -273,12 +272,12 @@ unsafe extern "C" fn _cpu_entry() -> ! {
 
         // Enable use of the `NO_EXECUTE` page attribute, if supported.
         if has_feature(Feature::NXE) {
-            libkernel::registers::msr::IA32_EFER::set_nxe(true);
+            liblz::registers::msr::IA32_EFER::set_nxe(true);
         } else {
             warn!("PC does not support the NX bit; system security will be compromised (this warning is purely informational).")
         }
 
-        libkernel::instructions::interrupts::enable();
+        liblz::instructions::interrupts::enable();
     }
 
     /* load tables */
@@ -288,7 +287,7 @@ unsafe extern "C" fn _cpu_entry() -> ! {
         // Always initialize GDT prior to configuring IDT.
         gdt::init();
 
-        if libkernel::cpu::is_bsp() {
+        if liblz::cpu::is_bsp() {
             // Due to the fashion in which the `x86_64` crate initializes the IDT entries,
             // it must be ensured that the handlers are set only *after* the GDT has been
             // properly initialized and loaded—otherwise, the `CS` value for the IDT entries
@@ -299,17 +298,17 @@ unsafe extern "C" fn _cpu_entry() -> ! {
                 _: &mut x86_64::structures::idt::InterruptStackFrame,
                 _: *mut scheduling::ThreadRegisters,
             ) {
-                libkernel::structures::apic::end_of_interrupt();
+                liblz::structures::apic::end_of_interrupt();
             }
 
-            idt::set_handler_fn(libkernel::structures::apic::LINT0_VECTOR, apit_empty);
-            idt::set_handler_fn(libkernel::structures::apic::LINT1_VECTOR, apit_empty);
+            idt::set_handler_fn(liblz::structures::apic::LINT0_VECTOR, apit_empty);
+            idt::set_handler_fn(liblz::structures::apic::LINT1_VECTOR, apit_empty);
         }
 
         crate::tables::idt::load();
     }
 
-    if libkernel::cpu::is_bsp() {
+    if liblz::cpu::is_bsp() {
         crate::clock::global::configure_and_enable();
     }
 
@@ -319,11 +318,24 @@ unsafe extern "C" fn _cpu_entry() -> ! {
     //     let new_stack = Box::leak(Box::new([0u8; 0x4000]));
     //     let stack_top = new_stack.as_mut_ptr().add(new_stack.len());
 
-    //     libkernel::registers::stack::RSP::write(stack_top as _);
+    //     liblz::registers::stack::RSP::write(stack_top as _);
     // }
 
     local_state::create();
+    fn local_apic_tick(
+        _: &mut x86_64::structures::idt::InterruptStackFrame,
+        _: *mut crate::scheduling::ThreadRegisters,
+    ) {
+        crate::print!("{}", local_state::clock().tick());
+        liblz::structures::apic::end_of_interrupt();
+    }
+
+    crate::tables::idt::set_handler_fn(
+        crate::local_state::InterruptVector::LocalTimer as u8,
+        local_apic_tick,
+    );
     local_state::init_local_apic();
+    liblz::structures::apic::get_timer().set_masked(false);
 
     /* load tss */
     {
@@ -385,12 +397,12 @@ unsafe extern "C" fn _cpu_entry() -> ! {
 
 #[inline(never)]
 unsafe fn cpu_setup() -> ! {
-    libkernel::instructions::hlt_indefinite();
+    liblz::instructions::hlt_indefinite();
 
     /* ENABLE SYSCALL */
     // {
     //     use crate::tables::gdt;
-    //     use libkernel::registers::msr;
+    //     use liblz::registers::msr;
 
     //     // Enable `syscall`/`sysret`.
     //     msr::IA32_EFER::set_sce(true);
@@ -400,21 +412,21 @@ unsafe fn cpu_setup() -> ! {
     //         *gdt::KDATA_SELECTOR.get().unwrap(),
     //     );
     //     msr::IA32_LSTAR::set_syscall(syscall::syscall_enter);
-    //     msr::IA32_SFMASK::set_rflags_mask(libkernel::registers::RFlags::all());
+    //     msr::IA32_SFMASK::set_rflags_mask(liblz::registers::RFlags::all());
     // }
 
-    // libkernel::registers::stack::RSP::write(libkernel::memory::alloc_stack(1, true));
-    // libkernel::cpu::ring3_enter(test_user_function, libkernel::registers::RFlags::empty());
+    // liblz::registers::stack::RSP::write(liblz::memory::alloc_stack(1, true));
+    // liblz::cpu::ring3_enter(test_user_function, liblz::registers::RFlags::empty());
 
     debug!("Failed to enter ring 3.");
 
-    libkernel::instructions::hlt_indefinite()
+    liblz::instructions::hlt_indefinite()
 }
 
 fn kernel_main() -> ! {
     debug!("Successfully entered `kernel_main()`.");
 
-    libkernel::instructions::hlt_indefinite()
+    liblz::instructions::hlt_indefinite()
 }
 
 #[link_section = ".user_code"]
@@ -436,7 +448,7 @@ fn test_user_function() {
     //     )
     // };
 
-    libkernel::instructions::interrupts::breakpoint();
+    liblz::instructions::interrupts::breakpoint();
 
     loop {}
 }

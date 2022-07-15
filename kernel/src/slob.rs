@@ -1,5 +1,5 @@
 use core::{alloc::Layout, mem::size_of};
-use libkernel::{
+use liblz::{
     align_up_div,
     memory::{Page, PageAttributes},
 };
@@ -65,7 +65,7 @@ impl<'map> SLOB<'map> {
     pub unsafe fn new() -> Self {
         let initial_alloc_table_page = Page::from_index(1);
         let alloc_table_len = 0x1000 / core::mem::size_of::<BlockPage>();
-        let global_pmgr = libkernel::memory::global_pmgr();
+        let global_pmgr = liblz::memory::global_pmgr();
 
         // Map all of the pages in the allocation table.
         for page_offset in 0..(alloc_table_len /* we don't map null page */ - 1) {
@@ -115,21 +115,21 @@ impl<'map> SLOB<'map> {
         let cur_table_len = table_write.len();
         // Required length of our map, in indexes.
         let req_table_len = (table_write.len()
-            + libkernel::align_up_div(required_blocks, BlockPage::BLOCKS_PER))
+            + liblz::align_up_div(required_blocks, BlockPage::BLOCKS_PER))
         .next_power_of_two();
         // Current page count of our map (i.e. how many pages the slice requires)
         let cur_table_page_count =
-            libkernel::align_up_div(cur_table_len * size_of::<BlockPage>(), 0x1000);
+            liblz::align_up_div(cur_table_len * size_of::<BlockPage>(), 0x1000);
         // Required page count of our map.
         let req_table_page_count =
-            libkernel::align_up_div(req_table_len * size_of::<BlockPage>(), 0x1000);
+            liblz::align_up_div(req_table_len * size_of::<BlockPage>(), 0x1000);
 
         assert!(
             (req_table_len * 0x1000) < 0x746A52880000, /* 128TB */
             "Out of memory!"
         );
 
-        let page_manager = libkernel::memory::global_pmgr();
+        let page_manager = liblz::memory::global_pmgr();
 
         // Attempt to find a run of already-mapped pages within our allocator that can contain
         // the required slice length.
@@ -172,7 +172,7 @@ impl<'map> SLOB<'map> {
         **table_write = unsafe {
             core::slice::from_raw_parts_mut(
                 new_table_base_page.as_mut_ptr(),
-                libkernel::align_up(req_table_len, 0x1000 / size_of::<BlockPage>()),
+                liblz::align_up(req_table_len, 0x1000 / size_of::<BlockPage>()),
             )
         };
         // Always set the 0th (null) page to full by default.
@@ -196,7 +196,7 @@ impl<'map> SLOB<'map> {
 unsafe impl core::alloc::GlobalAlloc for SLOB<'_> {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let align_mask = usize::max(layout.align() / Self::BLOCK_SIZE, 1) - 1;
-        let size_in_blocks = libkernel::align_up_div(layout.size(), Self::BLOCK_SIZE);
+        let size_in_blocks = liblz::align_up_div(layout.size(), Self::BLOCK_SIZE);
 
         let mut table_write = self.table.write();
         let end_table_index;
@@ -237,7 +237,7 @@ unsafe impl core::alloc::GlobalAlloc for SLOB<'_> {
         block_index -= current_run - 1;
         let start_block_index = block_index;
         let start_table_index = start_block_index / BlockPage::BLOCKS_PER;
-        let page_manager = libkernel::memory::global_pmgr();
+        let page_manager = liblz::memory::global_pmgr();
         for table_index in start_table_index..end_table_index {
             let block_page = &mut table_write[table_index];
             let was_empty = block_page.is_empty();
@@ -277,7 +277,7 @@ unsafe impl core::alloc::GlobalAlloc for SLOB<'_> {
         let start_table_index = start_block_index / BlockPage::BLOCKS_PER;
         let end_table_index = align_up_div(end_block_index, BlockPage::BLOCKS_PER);
         let mut table_write = self.table.write();
-        let page_manager = libkernel::memory::global_pmgr();
+        let page_manager = liblz::memory::global_pmgr();
         for map_index in start_table_index..end_table_index {
             let (had_bits, has_bits) = {
                 let block_page = &mut table_write[map_index];
@@ -302,7 +302,7 @@ unsafe impl core::alloc::GlobalAlloc for SLOB<'_> {
                 page_manager
                     .unmap(
                         &Page::from_index(map_index),
-                        libkernel::memory::FrameOwnership::Locked,
+                        liblz::memory::FrameOwnership::Locked,
                     )
                     .unwrap();
             }

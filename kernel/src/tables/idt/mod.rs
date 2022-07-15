@@ -145,7 +145,7 @@ extern "x86-interrupt" fn page_fault_handler(
 ) {
     panic!(
         "CPU EXCEPTION: PAGE FAULT\nCR2: {:?}\n{:?}\n{:#?}",
-        libkernel::registers::control::CR2::read(),
+        liblz::registers::control::CR2::read(),
         error_code,
         stack_frame
     );
@@ -198,7 +198,7 @@ extern "x86-interrupt" fn security_exception_handler(
 #[no_mangle]
 extern "x86-interrupt" fn irq_common(_: InterruptStackFrame) {
     unsafe {
-        asm!(
+        core::arch::asm!(
         "
         # (QWORD) ISF should begin here on the stack. 
         # (QWORD) IRQ vector is here.
@@ -339,7 +339,7 @@ pub unsafe fn set_handler_fn(vector: u8, handler: HandlerFunc) {
         super::gdt::KCODE_SELECTOR.get().is_some(),
         "Cannot initialize IDT before GDT (IDT entries use GDT kernel code segment selector)."
     );
-    libkernel::instructions::interrupts::without_interrupts(|| {
+    liblz::instructions::interrupts::without_interrupts(|| {
         INTERRUPT_HANDLERS.write()[vector as usize] = Some(handler);
     });
 }

@@ -3,7 +3,7 @@ use core::{
     mem::MaybeUninit,
     sync::atomic::{AtomicU16, Ordering},
 };
-use libkernel::{
+use liblz::{
     memory::{malloc, volatile::VolatileCell},
     Address, IndexRing, ReadWrite, {Physical, Virtual},
 };
@@ -37,15 +37,15 @@ pub(super) struct CompletionQueue<'q> {
 
 impl<'q> CompletionQueue<'q> {
     pub fn new(
-        reg0: &'q libkernel::memory::MMIO,
+        reg0: &'q liblz::memory::MMIO,
         queue_id: u16, /* may need a way to dynamically select this? */
         entry_count: u16,
     ) -> Self {
         let size_in_bytes = (entry_count as usize) * core::mem::size_of::<Completion>();
-        let size_in_frames = libkernel::align_up_div(size_in_bytes, 0x1000);
+        let size_in_frames = liblz::align_up_div(size_in_bytes, 0x1000);
 
         unsafe {
-            let (phys_addr, mut alloc) = libkernel::memory::malloc::get()
+            let (phys_addr, mut alloc) = liblz::memory::malloc::get()
                 .alloc_pages(size_in_frames)
                 .expect(
                     "Failed to allocate contiguous memory for an administrative completion queue.",
@@ -128,14 +128,14 @@ pub(super) struct SubmissionQueue<'q> {
 }
 
 impl<'q> SubmissionQueue<'q> {
-    pub fn new(reg0: &'q libkernel::memory::MMIO, queue_id: u16, entry_count: u16) -> Self {
+    pub fn new(reg0: &'q liblz::memory::MMIO, queue_id: u16, entry_count: u16) -> Self {
         // TODO somehow validate entry size?
 
         let size_in_bytes = (entry_count as usize) * core::mem::size_of::<Command>();
-        let size_in_frames = libkernel::align_up_div(size_in_bytes, 0x1000);
+        let size_in_frames = liblz::align_up_div(size_in_bytes, 0x1000);
 
         unsafe {
-            let (phys_addr, mut alloc) = libkernel::memory::malloc::get()
+            let (phys_addr, mut alloc) = liblz::memory::malloc::get()
                 .alloc_pages(size_in_frames)
                 .expect(
                     "Failed to allocate contiguous memory for an administrative completion queue.",

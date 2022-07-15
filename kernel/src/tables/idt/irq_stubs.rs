@@ -1,6 +1,3 @@
-use super::InterruptStackFrame;
-use core::arch::asm;
-
 pub fn apply_stubs(idt: &mut spin::MutexGuard<super::InterruptDescriptorTable>) {
     idt[32].set_handler_fn(irq_32);
     idt[33].set_handler_fn(irq_33);
@@ -228,1347 +225,248 @@ pub fn apply_stubs(idt: &mut spin::MutexGuard<super::InterruptDescriptorTable>) 
     idt[255].set_handler_fn(irq_255);
 }
 
-#[naked]
-extern "x86-interrupt" fn irq_32(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $32", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_33(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $33", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_34(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $34", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_35(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $35", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_36(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $36", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_37(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $37", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_38(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $38", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_39(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $39", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_40(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $40", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_41(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $41", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_42(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $42", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_43(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $43", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_44(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $44", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_45(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $45", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_46(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $46", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_47(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $47", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_48(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $48", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_49(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $49", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_50(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $50", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_51(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $51", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_52(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $52", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_53(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $53", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_54(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $54", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_55(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $55", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_56(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $56", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_57(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $57", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_58(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $58", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_59(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $59", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_60(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $60", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_61(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $61", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_62(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $62", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_63(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $63", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_64(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $64", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_65(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $65", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_66(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $66", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_67(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $67", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_68(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $68", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_69(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $69", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_70(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $70", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_71(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $71", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_72(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $72", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_73(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $73", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_74(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $74", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_75(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $75", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_76(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $76", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_77(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $77", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_78(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $78", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_79(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $79", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_80(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $80", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_81(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $81", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_82(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $82", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_83(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $83", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_84(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $84", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_85(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $85", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_86(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $86", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_87(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $87", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_88(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $88", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_89(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $89", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_90(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $90", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_91(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $91", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_92(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $92", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_93(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $93", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_94(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $94", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_95(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $95", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_96(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $96", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_97(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $97", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_98(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $98", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_99(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $99", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_100(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $100", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_101(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $101", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_102(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $102", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_103(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $103", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_104(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $104", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_105(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $105", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_106(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $106", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_107(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $107", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_108(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $108", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_109(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $109", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_110(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $110", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_111(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $111", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_112(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $112", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_113(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $113", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_114(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $114", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_115(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $115", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_116(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $116", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_117(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $117", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_118(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $118", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_119(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $119", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_120(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $120", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_121(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $121", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_122(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $122", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_123(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $123", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_124(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $124", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_125(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $125", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_126(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $126", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_127(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $127", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_128(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $128", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_129(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $129", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_130(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $130", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_131(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $131", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_132(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $132", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_133(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $133", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_134(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $134", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_135(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $135", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_136(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $136", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_137(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $137", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_138(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $138", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_139(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $139", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_140(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $140", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_141(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $141", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_142(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $142", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_143(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $143", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_144(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $144", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_145(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $145", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_146(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $146", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_147(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $147", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_148(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $148", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_149(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $149", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_150(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $150", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_151(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $151", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_152(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $152", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_153(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $153", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_154(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $154", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_155(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $155", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_156(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $156", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_157(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $157", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_158(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $158", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_159(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $159", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_160(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $160", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_161(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $161", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_162(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $162", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_163(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $163", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_164(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $164", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_165(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $165", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_166(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $166", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_167(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $167", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_168(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $168", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_169(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $169", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_170(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $170", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_171(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $171", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_172(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $172", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_173(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $173", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_174(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $174", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_175(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $175", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_176(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $176", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_177(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $177", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_178(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $178", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_179(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $179", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_180(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $180", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_181(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $181", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_182(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $182", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_183(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $183", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_184(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $184", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_185(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $185", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_186(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $186", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_187(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $187", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_188(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $188", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_189(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $189", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_190(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $190", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_191(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $191", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_192(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $192", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_193(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $193", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_194(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $194", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_195(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $195", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_196(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $196", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_197(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $197", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_198(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $198", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_199(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $199", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_200(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $200", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_201(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $201", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_202(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $202", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_203(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $203", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_204(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $204", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_205(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $205", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_206(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $206", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_207(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $207", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_208(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $208", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_209(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $209", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_210(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $210", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_211(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $211", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_212(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $212", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_213(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $213", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_214(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $214", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_215(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $215", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_216(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $216", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_217(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $217", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_218(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $218", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_219(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $219", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_220(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $220", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_221(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $221", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_222(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $222", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_223(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $223", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_224(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $224", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_225(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $225", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_226(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $226", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_227(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $227", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_228(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $228", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_229(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $229", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_230(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $230", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_231(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $231", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_232(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $232", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_233(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $233", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_234(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $234", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_235(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $235", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_236(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $236", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_237(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $237", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_238(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $238", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_239(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $239", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_240(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $240", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_241(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $241", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_242(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $242", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_243(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $243", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_244(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $244", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_245(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $245", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_246(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $246", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_247(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $247", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_248(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $248", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_249(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $249", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_250(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $250", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_251(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $251", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_252(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $252", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_253(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $253", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_254(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $254", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
-#[naked]
-extern "x86-interrupt" fn irq_255(_: InterruptStackFrame) {
-    unsafe {
-        asm!("push $255", "call {}", sym super::irq_common, options(noreturn));
-    }
-}
+#[macro_export]
+macro_rules! irq_stub {
+    ($irq_index:literal) => {
+        paste::paste! {
+            #[naked]
+            extern "x86-interrupt" fn [<irq_ $irq_index>](_: super::InterruptStackFrame) {
+                unsafe {
+                    core::arch::asm!(
+                        "push {}",
+                        "call {}",
+                        const $irq_index,
+                        sym super::irq_common,
+                        options(noreturn)
+                    );
+                }
+            }
+        }
+    };
+}
+
+use crate::irq_stub;
+irq_stub!(32);
+irq_stub!(33);
+irq_stub!(34);
+irq_stub!(35);
+irq_stub!(36);
+irq_stub!(37);
+irq_stub!(38);
+irq_stub!(39);
+irq_stub!(40);
+irq_stub!(41);
+irq_stub!(42);
+irq_stub!(43);
+irq_stub!(44);
+irq_stub!(45);
+irq_stub!(46);
+irq_stub!(47);
+irq_stub!(48);
+irq_stub!(49);
+irq_stub!(50);
+irq_stub!(51);
+irq_stub!(52);
+irq_stub!(53);
+irq_stub!(54);
+irq_stub!(55);
+irq_stub!(56);
+irq_stub!(57);
+irq_stub!(58);
+irq_stub!(59);
+irq_stub!(60);
+irq_stub!(61);
+irq_stub!(62);
+irq_stub!(63);
+irq_stub!(64);
+irq_stub!(65);
+irq_stub!(66);
+irq_stub!(67);
+irq_stub!(68);
+irq_stub!(69);
+irq_stub!(70);
+irq_stub!(71);
+irq_stub!(72);
+irq_stub!(73);
+irq_stub!(74);
+irq_stub!(75);
+irq_stub!(76);
+irq_stub!(77);
+irq_stub!(78);
+irq_stub!(79);
+irq_stub!(80);
+irq_stub!(81);
+irq_stub!(82);
+irq_stub!(83);
+irq_stub!(84);
+irq_stub!(85);
+irq_stub!(86);
+irq_stub!(87);
+irq_stub!(88);
+irq_stub!(89);
+irq_stub!(90);
+irq_stub!(91);
+irq_stub!(92);
+irq_stub!(93);
+irq_stub!(94);
+irq_stub!(95);
+irq_stub!(96);
+irq_stub!(97);
+irq_stub!(98);
+irq_stub!(99);
+irq_stub!(100);
+irq_stub!(101);
+irq_stub!(102);
+irq_stub!(103);
+irq_stub!(104);
+irq_stub!(105);
+irq_stub!(106);
+irq_stub!(107);
+irq_stub!(108);
+irq_stub!(109);
+irq_stub!(110);
+irq_stub!(111);
+irq_stub!(112);
+irq_stub!(113);
+irq_stub!(114);
+irq_stub!(115);
+irq_stub!(116);
+irq_stub!(117);
+irq_stub!(118);
+irq_stub!(119);
+irq_stub!(120);
+irq_stub!(121);
+irq_stub!(122);
+irq_stub!(123);
+irq_stub!(124);
+irq_stub!(125);
+irq_stub!(126);
+irq_stub!(127);
+irq_stub!(128);
+irq_stub!(129);
+irq_stub!(130);
+irq_stub!(131);
+irq_stub!(132);
+irq_stub!(133);
+irq_stub!(134);
+irq_stub!(135);
+irq_stub!(136);
+irq_stub!(137);
+irq_stub!(138);
+irq_stub!(139);
+irq_stub!(140);
+irq_stub!(141);
+irq_stub!(142);
+irq_stub!(143);
+irq_stub!(144);
+irq_stub!(145);
+irq_stub!(146);
+irq_stub!(147);
+irq_stub!(148);
+irq_stub!(149);
+irq_stub!(150);
+irq_stub!(151);
+irq_stub!(152);
+irq_stub!(153);
+irq_stub!(154);
+irq_stub!(155);
+irq_stub!(156);
+irq_stub!(157);
+irq_stub!(158);
+irq_stub!(159);
+irq_stub!(160);
+irq_stub!(161);
+irq_stub!(162);
+irq_stub!(163);
+irq_stub!(164);
+irq_stub!(165);
+irq_stub!(166);
+irq_stub!(167);
+irq_stub!(168);
+irq_stub!(169);
+irq_stub!(170);
+irq_stub!(171);
+irq_stub!(172);
+irq_stub!(173);
+irq_stub!(174);
+irq_stub!(175);
+irq_stub!(176);
+irq_stub!(177);
+irq_stub!(178);
+irq_stub!(179);
+irq_stub!(180);
+irq_stub!(181);
+irq_stub!(182);
+irq_stub!(183);
+irq_stub!(184);
+irq_stub!(185);
+irq_stub!(186);
+irq_stub!(187);
+irq_stub!(188);
+irq_stub!(189);
+irq_stub!(190);
+irq_stub!(191);
+irq_stub!(192);
+irq_stub!(193);
+irq_stub!(194);
+irq_stub!(195);
+irq_stub!(196);
+irq_stub!(197);
+irq_stub!(198);
+irq_stub!(199);
+irq_stub!(200);
+irq_stub!(201);
+irq_stub!(202);
+irq_stub!(203);
+irq_stub!(204);
+irq_stub!(205);
+irq_stub!(206);
+irq_stub!(207);
+irq_stub!(208);
+irq_stub!(209);
+irq_stub!(210);
+irq_stub!(211);
+irq_stub!(212);
+irq_stub!(213);
+irq_stub!(214);
+irq_stub!(215);
+irq_stub!(216);
+irq_stub!(217);
+irq_stub!(218);
+irq_stub!(219);
+irq_stub!(220);
+irq_stub!(221);
+irq_stub!(222);
+irq_stub!(223);
+irq_stub!(224);
+irq_stub!(225);
+irq_stub!(226);
+irq_stub!(227);
+irq_stub!(228);
+irq_stub!(229);
+irq_stub!(230);
+irq_stub!(231);
+irq_stub!(232);
+irq_stub!(233);
+irq_stub!(234);
+irq_stub!(235);
+irq_stub!(236);
+irq_stub!(237);
+irq_stub!(238);
+irq_stub!(239);
+irq_stub!(240);
+irq_stub!(241);
+irq_stub!(242);
+irq_stub!(243);
+irq_stub!(244);
+irq_stub!(245);
+irq_stub!(246);
+irq_stub!(247);
+irq_stub!(248);
+irq_stub!(249);
+irq_stub!(250);
+irq_stub!(251);
+irq_stub!(252);
+irq_stub!(253);
+irq_stub!(254);
+irq_stub!(255);
