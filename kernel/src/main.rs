@@ -312,30 +312,10 @@ unsafe extern "C" fn _cpu_entry() -> ! {
         crate::clock::global::configure_and_enable();
     }
 
-    // TODO allocate a new stack for each core
-    // {
-    //     use alloc::boxed::Box;
-    //     let new_stack = Box::leak(Box::new([0u8; 0x4000]));
-    //     let stack_top = new_stack.as_mut_ptr().add(new_stack.len());
-
-    //     liblz::registers::stack::RSP::write(stack_top as _);
-    // }
-
     local_state::create();
-    fn local_apic_tick(
-        _: &mut x86_64::structures::idt::InterruptStackFrame,
-        _: *mut crate::scheduling::ThreadRegisters,
-    ) {
-        crate::print!("{}", local_state::clock().tick());
-        liblz::structures::apic::end_of_interrupt();
-    }
-
-    crate::tables::idt::set_handler_fn(
-        crate::local_state::InterruptVector::LocalTimer as u8,
-        local_apic_tick,
-    );
     local_state::init_local_apic();
     liblz::structures::apic::get_timer().set_masked(false);
+    local_state::reload_timer(core::num::NonZeroU32::new(1));
 
     /* load tss */
     {

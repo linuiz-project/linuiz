@@ -122,48 +122,70 @@ pub fn init_local_apic() {
     unsafe {
         apic::software_reset();
         apic::set_timer_divisor(apic::TimerDivisor::Div1);
-        apic::get_timer().set_mode(apic::TimerMode::OneShot);
+        apic::get_timer()
+            .set_mode(apic::TimerMode::OneShot)
+            .set_vector(InterruptVector::LocalTimer as u8);
+        apic::get_error()
+            .set_vector(InterruptVector::Error as u8)
+            .set_masked(false);
+        crate::tables::idt::set_handler_fn(InterruptVector::LocalTimer as u8, local_clock_tick);
+        apic::get_performance().set_vector(InterruptVector::Performance as u8);
+        apic::get_thermal_sensor().set_vector(InterruptVector::ThermalSensor as u8);
+        // LINT0&1 should be configured by the APIC reset.
+
+        // Ensure interrupts are completely enabled after APIC is reset.
+        liblz::registers::msr::IA32_APIC_BASE::set_hw_enable(true);
+        liblz::instructions::interrupts::enable();
+        liblz::structures::apic::sw_enable();
     }
 
-    // Ensure interrupts are enabled after APIC is reset.
-    liblz::instructions::interrupts::enable();
-
-    let per_10ms =
+    let per_ms =
         {
             if let Some(registers) = liblz::instructions::cpuid::exec(0x15, 0x0)
                 .and_then(|result| if result.ebx() > 0 { Some(result) } else { None })
             // Attempt to calculate a concrete frequency via CPUID.
             {
-                registers.ecx() * (registers.ebx() / registers.eax())
+                let per_ms = registers.ecx() * (registers.ebx() / registers.eax());
+                trace!("CPU clock frequency reporting: {} Hz", per_ms);
+                per_ms
             } else
             // Otherwise, determine frequency with external measurements.
             {
+                trace!("CPU does not support clock frequency reporting via CPUID.");
+
+                const MS_WINDOW: u32 = 10;
                 // Wait on the global timer, to ensure we're starting the count
                 // on the rising edge of each millisecond.
                 crate::clock::global::busy_wait_msec(1);
                 unsafe { apic::set_timer_initial_count(u32::MAX) };
-                crate::clock::global::busy_wait_msec(10);
+                crate::clock::global::busy_wait_msec(MS_WINDOW as u64);
 
-                apic::get_timer_current_count()
+                let per_ms = (u32::MAX - apic::get_timer_current_count()) / MS_WINDOW;
+                trace!(
+                    "CPU clock frequency measurement: {} Hz",
+                    per_ms * (1000 / MS_WINDOW)
+                );
+                per_ms
             }
         };
 
-    let per_ms = (u32::MAX - per_10ms) / 10;
     local_state().local_timer_per_ms = Some(per_ms);
+}
 
-    unsafe {
-        // Configure timer vector.
-        apic::get_timer().set_vector(InterruptVector::LocalTimer as u8);
-        // Configure error vector.
-        apic::get_error()
-            .set_vector(InterruptVector::Error as u8)
-            .set_masked(false);
-        // Set default vectors.
-        // REMARK: Any of these left masked are not currently supported.
-        apic::get_performance().set_vector(InterruptVector::Performance as u8);
-        apic::get_thermal_sensor().set_vector(InterruptVector::ThermalSensor as u8);
-        // LINT0&1 should be configured by the APIC reset.
-    }
+fn local_clock_tick(
+    isf: &mut x86_64::structures::idt::InterruptStackFrame,
+    regs: *mut crate::scheduling::ThreadRegisters,
+) {
+    crate::print!(".");
+    // let next_wait_mult = if let Some(scheduler) = try_lock_scheduler() {
+    //     scheduler.try_run_next(&mut isf, regs)
+    // } else {
+    //     1
+    // };
+
+    // unsafe { reload_timer(new_wait_mult) };
+    unsafe { reload_timer(core::num::NonZeroU32::new(1)) };
+    liblz::structures::apic::end_of_interrupt();
 }
 
 #[inline]

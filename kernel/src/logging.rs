@@ -22,13 +22,13 @@ impl log::Log for KernelLogger {
                 let whole_time = ticks / 1000;
                 let frac_time = ticks % 1000;
 
+                // TODO possibly only log CPU# in debug builds
                 crate::println!(
-                    "[{:wwidth$}.{:0fwidth$}][CPU{}][{} {}] {}",
+                    "[{:wwidth$}.{:0fwidth$}][CPU{}][{}] {}",
                     whole_time,
                     frac_time,
                     liblz::structures::apic::get_id(),
                     record.level(),
-                    record.module_path().unwrap_or("*"),
                     record.args(),
                     wwidth = 4,
                     fwidth = 4
