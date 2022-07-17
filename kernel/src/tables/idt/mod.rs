@@ -1,6 +1,5 @@
 mod irq_stubs;
 
-use core::arch::asm;
 use x86_64::structures::idt::InterruptDescriptorTable;
 pub use x86_64::structures::idt::InterruptStackFrame;
 

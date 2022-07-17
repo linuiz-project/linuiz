@@ -3,8 +3,8 @@ mod device;
 pub use device::*;
 
 pub fn get_pcie_devices<'a>() -> impl Iterator<Item = DeviceVariant> + 'a {
-    crate::acpi::rdsp::xsdt::XSDT
-        .find_sub_table::<crate::acpi::rdsp::xsdt::mcfg::MCFG>()
+    crate::acpi::xsdt::get_xsdt()
+        .find_sub_table::<crate::acpi::xsdt::mcfg::MCFG>()
         .expect("XSDT does not contain an MCFG table")
         .iter()
         .filter_map(move |entry| {

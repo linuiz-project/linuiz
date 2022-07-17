@@ -1,8 +1,8 @@
-pub mod rdsp;
+pub mod xsdt;
 
 use crate::{cell::SyncOnceCell, structures::GUID, Address, Physical};
 
-pub const ACPI_GUID: GUID = GUID::new(
+const ACPI_GUID: GUID = GUID::new(
     0xeb9d2d30,
     0x2d88,
     0x11d3,
@@ -10,7 +10,7 @@ pub const ACPI_GUID: GUID = GUID::new(
     [0x00, 0x90, 0x27, 0x3f, 0xc1, 0x4d],
 );
 
-pub const ACPI2_GUID: GUID = GUID::new(
+const ACPI2_GUID: GUID = GUID::new(
     0x8868e871,
     0xe4f1,
     0x11d3,
@@ -113,7 +113,7 @@ impl core::fmt::Debug for SDTHeader {
 
 #[repr(C)]
 #[derive(Debug)]
-pub struct SystemConfigTableEntry {
+struct SystemConfigTableEntry {
     guid: GUID,
     addr: Address<Physical>,
 }
@@ -135,19 +135,83 @@ impl SystemConfigTableEntry {
     }
 }
 
-static SYSTEM_CONFIG_TABLE: SyncOnceCell<&[SystemConfigTableEntry]> =
-    unsafe { SyncOnceCell::new() };
+// static SYSTEM_CONFIG_TABLE: SyncOnceCell<&[SystemConfigTableEntry]> =
+//     unsafe { SyncOnceCell::new() };
 
-pub fn set_system_config_table(system_config_table: &'static [SystemConfigTableEntry]) {
-    SYSTEM_CONFIG_TABLE
-        .set(system_config_table)
-        .expect("System configuration table has already been set");
+// pub fn set_system_config_table(system_config_table: &'static [SystemConfigTableEntry]) {
+//     SYSTEM_CONFIG_TABLE
+//         .set(system_config_table)
+//         .expect("System configuration table has already been set");
+// }
+
+// pub fn get_system_config_table_entry(guid: GUID) -> Option<&'static SystemConfigTableEntry> {
+//     SYSTEM_CONFIG_TABLE.get().and_then(|system_config_table| {
+//         system_config_table
+//             .iter()
+//             .find(|entry| entry.guid() == guid)
+//     })
+// }
+
+#[repr(C, packed)]
+struct RDSPDescriptor {
+    signature: [u8; 8],
+    checksum: u8,
+    oem_id: [u8; 6],
+    revision: u8,
+    rsdt_addr: u32,
 }
 
-pub fn get_system_config_table_entry(guid: GUID) -> Option<&'static SystemConfigTableEntry> {
-    SYSTEM_CONFIG_TABLE.get().and_then(|system_config_table| {
-        system_config_table
-            .iter()
-            .find(|entry| entry.guid() == guid)
-    })
+impl RDSPDescriptor {
+    pub fn signature(&self) -> &str {
+        core::str::from_utf8(&self.signature).expect("invalid ascii sequence for signature")
+    }
+
+    pub fn oem_id(&self) -> &str {
+        core::str::from_utf8(&self.oem_id).expect("invalid ascii sequence for OEM id")
+    }
+}
+
+impl Checksum for RDSPDescriptor {}
+
+#[repr(C, packed)]
+pub struct RSDP {
+    base: RDSPDescriptor,
+    len: u32,
+    xsdt_addr: Address<Physical>,
+    ext_checksum: u8,
+    reserved: [u8; 3],
+}
+
+impl RSDP {
+    pub fn signature(&self) -> &str {
+        self.base.signature()
+    }
+
+    pub fn oem_id(&self) -> &str {
+        self.base.oem_id()
+    }
+
+    pub fn xsdt_addr(&self) -> Address<Physical> {
+        self.xsdt_addr
+    }
+}
+
+impl Checksum for RSDP {}
+
+static RSDP_PTR: SyncOnceCell<*const RSDP> = unsafe { SyncOnceCell::new() };
+
+pub fn get_rsdp() -> &'static RSDP {
+    unsafe {
+        RSDP_PTR
+            .get()
+            .expect("RSDP pointer has not been set")
+            .as_ref()
+            .unwrap()
+    }
+}
+
+pub unsafe fn set_rsdp_ptr(ptr: *const RSDP) {
+    RSDP_PTR
+        .set(ptr)
+        .expect("RSDP pointer has already been set");
 }

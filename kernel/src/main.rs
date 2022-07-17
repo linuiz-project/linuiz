@@ -30,7 +30,7 @@ mod tables;
 
 use alloc::vec::Vec;
 use core::sync::atomic::AtomicBool;
-use liblz::{acpi::SystemConfigTableEntry, LinkerSymbol};
+use liblz::LinkerSymbol;
 
 extern "C" {
     static __code_start: LinkerSymbol;
@@ -57,8 +57,7 @@ static LIMINE_SMP: limine::LimineSmpRequest = {
     req.flags = 0b1; // Enable x2APIC.
     req
 };
-static LIMINE_SYS_TBL: limine::LimineEfiSystemTableRequest =
-    limine::LimineEfiSystemTableRequest::new(LIMINE_REV);
+static LIMINE_RSDP: limine::LimineRsdpRequest = limine::LimineRsdpRequest::new(LIMINE_REV);
 static LIMINE_MMAP: limine::LimineMmapRequest = limine::LimineMmapRequest::new(LIMINE_REV);
 static LIMINE_HHDM: limine::LimineHhdmRequest = limine::LimineHhdmRequest::new(LIMINE_REV);
 
@@ -152,33 +151,19 @@ unsafe extern "sysv64" fn _entry() -> ! {
         }
     }
 
-    /* load EFI system table */
+    /* load RSDP pointer */
     {
-        let system_table_ptr = LIMINE_SYS_TBL
-            .get_response()
-            .get()
-            .and_then(|resp| resp.address.as_ptr())
-            .expect("bootloader provided no EFI system table");
-
-        trace!("Loading EFI system configuration table...");
-        let system_table_ptr = system_table_ptr as *const SystemConfigTableEntry;
-
-        let mut system_table_len = 0;
-        while let Some(system_config_entry) = system_table_ptr.add(system_table_len).as_ref() {
-            // REMARK: There may be a better way to check for the end of the system table? I'm not sure this is always valid.
-            if system_config_entry.addr().is_null() {
-                break;
-            } else {
-                system_table_len += 1;
-            }
-        }
-
         // TODO Possibly move ACPI structure instances out of liblz?
-        // Set system configuration table, so ACPI can be used.
-        liblz::acpi::set_system_config_table(core::slice::from_raw_parts(
-            system_table_ptr,
-            system_table_len,
-        ));
+        // Set RSDP pointer, so ACPI can be used.
+        liblz::acpi::set_rsdp_ptr(
+            LIMINE_RSDP
+                .get_response()
+                .get()
+                .expect("bootloader provided to RSDP pointer (no ACPI support)")
+                .address
+                .as_ptr()
+                .unwrap() as *const _,
+        );
     }
 
     /* init memory */

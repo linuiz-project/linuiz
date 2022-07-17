@@ -1,4 +1,4 @@
-use crate::acpi::rdsp::xsdt;
+use crate::acpi::xsdt;
 use core::fmt::{Debug, Formatter, Result};
 
 #[repr(C, packed)]

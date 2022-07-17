@@ -31,11 +31,11 @@ impl<T: SubTable> ACPITable for T {
 }
 
 #[repr(C)]
-pub struct XSDTData {
+pub struct XSDT {
     header: SDTHeader,
 }
 
-impl XSDTData {
+impl XSDT {
     pub fn header(&self) -> &SDTHeader {
         &self.header
     }
@@ -62,24 +62,26 @@ impl XSDTData {
     }
 }
 
-impl SizedACPITable<SDTHeader, *const SDTHeader> for XSDTData {}
+impl SizedACPITable<SDTHeader, *const SDTHeader> for XSDT {}
 
-impl ACPITable for XSDTData {
+impl ACPITable for XSDT {
     fn body_len(&self) -> usize {
         (self.header().table_len() as usize) - core::mem::size_of::<SDTHeader>()
     }
 }
 
-impl Checksum for XSDTData {
+impl Checksum for XSDT {
     fn bytes_len(&self) -> usize {
         self.header().table_len() as usize
     }
 }
 
-lazy_static::lazy_static! {
-    pub static ref XSDT: &'static XSDTData = unsafe {
-            let xsdt = (crate::acpi::rdsp::LAZY_RDSP2.xsdt_addr().as_usize() as *const XSDTData).as_ref().unwrap();
-            xsdt.validate_checksum();
-            xsdt
+pub fn get_xsdt() -> &'static XSDT {
+    let xsdt = unsafe {
+        (crate::acpi::get_rsdp().xsdt_addr().as_usize() as *const XSDT)
+            .as_ref()
+            .unwrap()
     };
+    xsdt.validate_checksum();
+    xsdt
 }

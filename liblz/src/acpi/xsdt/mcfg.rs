@@ -1,5 +1,5 @@
 use crate::{
-    acpi::{rdsp::xsdt::SubTable, Checksum, SDTHeader, SizedACPITable},
+    acpi::{xsdt::SubTable, Checksum, SDTHeader, SizedACPITable},
     Physical,
     Address,
 };

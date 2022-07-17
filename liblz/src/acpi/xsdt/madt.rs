@@ -1,5 +1,5 @@
 use crate::{
-    acpi::{rdsp::xsdt, ACPITable, UnsizedACPITable},
+    acpi::{xsdt, ACPITable, UnsizedACPITable},
     Physical,
     Address,
 };

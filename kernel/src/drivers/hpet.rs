@@ -293,7 +293,7 @@ impl HPET {
     const TIMERS_BASE: usize = 0x100;
 
     pub unsafe fn new_from_acpi_table() -> Option<Self> {
-        use liblz::acpi::rdsp::xsdt;
+        use liblz::acpi::xsdt;
 
         xsdt::XSDT.find_sub_table::<xsdt::hpet::HPET>().map(|hpet| {
             let mut hpet_driver = Self {

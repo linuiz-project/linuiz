@@ -218,8 +218,7 @@ pub fn get_timer_current_count() -> u32 {
 ///     - The spurious register is configured with the `SPURIOUS_VECTOR` (255).
 ///
 /// SAFETY: The caller must guarantee that software is in a state that is ready to accept
-///         the APIC doing a software reset. No state checks are done within this method,
-///         it is purely for executing a software reset. You have been warned.
+///         the APIC performing a software reset.
 pub unsafe fn software_reset() {
     sw_disable();
 
