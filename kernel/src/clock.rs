@@ -125,7 +125,10 @@ pub mod local {
         #[inline]
         pub fn start(&mut self) {
             self.stop_tick = None;
-            self.start_tick = Some(get_ticks());
+
+            if let None = self.start_tick {
+                self.start_tick = Some(get_ticks());
+            }
         }
 
         #[inline]
@@ -144,7 +147,7 @@ pub mod local {
 
         #[inline]
         pub fn elapsed_ticks(&self) -> u64 {
-            self.start_tick.unwrap_or(0) - self.stop_tick.unwrap_or(0)
+            self.stop_tick.unwrap_or(0) - self.start_tick.unwrap_or(0)
         }
     }
 }

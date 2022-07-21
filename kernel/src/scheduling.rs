@@ -1,10 +1,12 @@
-use crate::{clock::local::Stopwatch, tables::idt::InterruptStackFrame};
-use alloc::{boxed::Box, collections::BinaryHeap};
-use core::{cmp, sync::atomic::AtomicU64};
+use crate::tables::idt::InterruptStackFrame;
+use alloc::{boxed::Box, collections::VecDeque};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use crossbeam_queue::SegQueue;
 use liblz::{
     registers::{control::CR3Flags, RFlags},
     Address, Physical,
 };
+use x86_64::registers::segmentation::SegmentSelector;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -48,12 +50,30 @@ impl ThreadRegisters {
     }
 }
 
-static CURRENT_THREAD_ID: AtomicU64 = AtomicU64::new(0);
+static NEXT_THREAD_ID: AtomicU64 = AtomicU64::new(1);
 
-pub struct Thread {
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy)]
+pub struct TaskPriority(u8);
+
+impl TaskPriority {
+    #[inline(always)]
+    pub const fn new(priority: u8) -> Option<Self> {
+        match priority {
+            1..17 => Some(Self(priority)),
+            _ => None,
+        }
+    }
+
+    #[inline(always)]
+    pub fn get(&self) -> u8 {
+        self.0
+    }
+}
+
+pub struct Task {
     id: u64,
-    prio: u8,
-    time: Stopwatch,
+    prio: TaskPriority,
     pub rip: u64,
     pub cs: u16,
     pub rsp: u64,
@@ -64,153 +84,86 @@ pub struct Thread {
     pub cr3: (Address<Physical>, CR3Flags),
 }
 
-impl Thread {
+impl Task {
     const DEFAULT_STACK_SIZE: usize = 0x1000;
 
     pub fn new(
-        priority: u8,
+        priority: TaskPriority,
         function: fn() -> !,
         stack: Option<Box<[u8]>>,
-        flags: Option<RFlags>,
+        rfl: RFlags,
+        cs: SegmentSelector,
+        ss: SegmentSelector,
         cr3: (Address<Physical>, CR3Flags),
     ) -> Self {
         let rip = function as u64;
         let stack = stack.unwrap_or_else(|| Box::new([0u8; Self::DEFAULT_STACK_SIZE]));
 
-        use crate::tables::gdt;
         Self {
-            id: CURRENT_THREAD_ID.fetch_add(1, core::sync::atomic::Ordering::AcqRel),
+            id: NEXT_THREAD_ID.fetch_add(1, core::sync::atomic::Ordering::AcqRel),
             prio: priority,
-            time: Stopwatch::new(),
             rip,
-            cs: gdt::UCODE_SELECTOR.get().unwrap().0,
+            cs: cs.0,
             rsp: unsafe { stack.as_ptr().add(stack.len()) as u64 },
-            ss: gdt::UDATA_SELECTOR.get().unwrap().0,
-            rfl: flags.unwrap_or(RFlags::minimal()),
+            ss: ss.0,
+            rfl,
             gprs: ThreadRegisters::empty(),
             stack,
             cr3,
         }
     }
-}
 
-impl Eq for Thread {}
-impl PartialEq for Thread {
-    fn eq(&self, other: &Self) -> bool {
-        self.prio == other.prio && self.time.elapsed_ticks() == other.time.elapsed_ticks()
+    pub fn prio(&self) -> TaskPriority {
+        self.prio
+    }
+}
+impl core::fmt::Debug for Task {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("Task")
+            .field("Priority", &self.prio)
+            .finish()
     }
 }
 
-impl Ord for Thread {
-    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        let self_time = self.time.elapsed_ticks();
-        let other_time = other.time.elapsed_ticks();
-
-        if self_time < other_time {
-            if self.prio > other.prio {
-                cmp::Ordering::Greater
-            } else {
-                cmp::Ordering::Less
-            }
-        } else if self_time == other_time {
-            self.prio.cmp(&other.prio)
-        } else {
-            cmp::Ordering::Less
-        }
-    }
+lazy_static::lazy_static! {
+    pub static ref SCHEDULER: Scheduler = Scheduler {
+        enabled: AtomicBool::new(false),
+        tasks: SegQueue::new()
+    };
 }
-
-impl PartialOrd for Thread {
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        Some(self.cmp(&other))
-    }
-}
-
-const MAX_TIME_SLICE_MS: usize = 50;
-const MIN_TIME_SLICE_MS: usize = 4;
 
 pub struct Scheduler {
-    enabled: bool,
-    tasks: BinaryHeap<Thread>,
-    current_task: Option<Thread>,
+    enabled: AtomicBool,
+    tasks: SegQueue<Task>,
 }
 
 impl Scheduler {
-    pub fn new() -> Self {
-        Self {
-            enabled: false,
-            tasks: BinaryHeap::new(),
-            current_task: None,
-        }
+    /// Enables the scheduler to pop tasks.
+    #[inline(always)]
+    pub fn enable(&self) {
+        self.enabled.store(true, Ordering::Release);
     }
 
-    pub fn push_thread(&mut self, task: Thread) {
-        self.tasks.push(task)
+    /// Disables scheduler from popping tasks.
+    ///
+    /// REMARK: Any task pops which are already in-flight will not be cancelled.
+    #[inline(always)]
+    pub fn disable(&self) {
+        self.enabled.store(false, Ordering::Release);
     }
 
-    pub fn set_enabled(&mut self, enabled: bool) {
-        self.enabled = enabled;
+    /// Pushes a new task to the scheduling queue.
+    pub fn push_task(&self, task: Task) {
+        self.tasks.push(task);
     }
 
-    // TODO this needs to be a decision, not an always-switch
-    pub fn try_run_next(
-        &mut self,
-        stack_frame: &mut InterruptStackFrame,
-        cached_regs: *mut ThreadRegisters,
-    ) -> Option<usize> {
-        if !self.enabled {
-            return None;
-        }
-
-        // Move out old task.
-        if let Some(mut task) = self.current_task.take() {
-            task.rip = stack_frame.instruction_pointer.as_u64();
-            task.cs = stack_frame.code_segment as u16;
-            task.rsp = stack_frame.stack_pointer.as_u64();
-            task.ss = stack_frame.stack_segment as u16;
-            task.rfl = RFlags::from_bits_truncate(stack_frame.cpu_flags);
-            task.gprs = unsafe { cached_regs.read_volatile() };
-            task.time.stop();
-
-            self.tasks.push(task);
-        }
-
-        // Move in new task if enabled.
-        if self.enabled {
-            if let Some(mut next_task) = self.tasks.pop() {
-                unsafe {
-                    // Restart the current task timer.
-                    next_task.time.restart();
-
-                    // Modify task frame to restore rsp & rip.
-                    stack_frame
-                        .as_mut()
-                        .write(x86_64::structures::idt::InterruptStackFrameValue {
-                            instruction_pointer: x86_64::VirtAddr::new_truncate(next_task.rip),
-                            code_segment: next_task.cs as u64,
-                            cpu_flags: next_task.rfl.bits(),
-                            stack_pointer: x86_64::VirtAddr::new_truncate(next_task.rsp),
-                            stack_segment: next_task.ss as u64,
-                        });
-
-                    // Restore task registers.
-                    cached_regs.write_volatile(next_task.gprs);
-
-                    // Set current page tables.
-                    liblz::registers::control::CR3::write(next_task.cr3.0, next_task.cr3.1);
-                }
-
-                self.current_task = Some(next_task);
-            }
-        }
-
-        // Calculate next one-shot timer value.
-        let total_tasks = self.tasks.len() + if self.current_task.is_some() { 1 } else { 0 };
-        if total_tasks > 0 {
-            Some((1000 / total_tasks).clamp(MIN_TIME_SLICE_MS, MAX_TIME_SLICE_MS))
-        } else {
-            // If only one task, no time slice is required.
-            None
+    /// If the scheduler is enabled, attempts to return a new task from
+    /// the task queue. Returns `None` if the queue is empty.
+    pub fn pop_task(&self) -> Option<Task> {
+        match self.enabled.load(Ordering::Relaxed) {
+            true => self.tasks.pop(),
+            false => None,
         }
     }
 }

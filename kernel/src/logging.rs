@@ -31,7 +31,7 @@ impl log::Log for KernelLogger {
                     record.level(),
                     record.args(),
                     wwidth = 4,
-                    fwidth = 4
+                    fwidth = 3
                 );
             }
 

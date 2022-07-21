@@ -1,6 +1,13 @@
-use crate::{clock::AtomicClock, scheduling::Scheduler};
+use crate::{
+    clock::{local, AtomicClock},
+    scheduling::{Task, TaskPriority},
+};
 use core::sync::atomic::{AtomicUsize, Ordering};
-use liblz::{Address, Virtual};
+use liblz::{
+    cell::SyncOnceCell,
+    registers::{control::CR3, RFlags},
+    Address, Virtual,
+};
 use spin::{Mutex, MutexGuard};
 
 #[repr(u8)]
@@ -20,8 +27,9 @@ struct LocalState {
     magic: u64,
     id: u32,
     clock: AtomicClock,
-    scheduler: Mutex<Scheduler>,
-    local_timer_per_ms: Option<u32>,
+    default_task: Task,
+    cur_task: Option<Task>,
+    local_timer_per_ms: u32,
     syscall_stack: [u8; 0x4000],
     privilege_stack: [u8; 0x4000],
 }
@@ -55,19 +63,6 @@ fn local_state() -> &'static mut LocalState {
 }
 
 /// Initializes the core-local state structure.
-///
-/// The local state structure is created via the following process:
-///     1.  Compute the address of the structure within the `PML4_LOCAL_STATE_ENTRY_INDEX` page index,
-///         along with a randomized slide to ensure the structure cannot be arbitrarily accessed.
-///
-///     2.  The computed address is map the `PML4_LOCAL_STATE_ENTRY_INDEX` page index base to the given address in
-///         a fresh PML4 table for the local core. This fresh PML4 is then written to CR3 to begin constructing the
-///         local state.
-///
-///     3.  The local state is constructed with requisite default values.
-///
-/// It must be noted that at this point, the local state is still not *initialized*, i.e. the local APIC is not functioning
-/// (thus no core-local clock).
 ///
 /// SAFETY: This function invariantly assumes it will only be called once.
 pub unsafe fn create() {
@@ -103,41 +98,26 @@ pub unsafe fn create() {
             .for_each(|page| page_manager.auto_map(&page, liblz::memory::PageAttributes::DATA));
     }
 
-    local_state_ptr.write_volatile(LocalState {
-        magic: LocalState::MAGIC,
-        id: liblz::cpu::get_id(),
-        clock: AtomicClock::new(),
-        scheduler: Mutex::new(Scheduler::new()),
-        local_timer_per_ms: None,
-        syscall_stack: [0u8; 0x4000],
-        privilege_stack: [0u8; 0x4000],
-    });
-
-    local_state().validate_init();
-}
-
-pub fn init_local_apic() {
+    /* CONFIGURE APIC */
     use liblz::structures::apic;
 
-    unsafe {
-        apic::software_reset();
-        apic::set_timer_divisor(apic::TimerDivisor::Div1);
-        apic::get_timer()
-            .set_mode(apic::TimerMode::OneShot)
-            .set_vector(InterruptVector::LocalTimer as u8);
-        apic::get_error()
-            .set_vector(InterruptVector::Error as u8)
-            .set_masked(false);
-        crate::tables::idt::set_handler_fn(InterruptVector::LocalTimer as u8, local_clock_tick);
-        apic::get_performance().set_vector(InterruptVector::Performance as u8);
-        apic::get_thermal_sensor().set_vector(InterruptVector::ThermalSensor as u8);
-        // LINT0&1 should be configured by the APIC reset.
+    apic::software_reset();
+    apic::set_timer_divisor(apic::TimerDivisor::Div1);
+    apic::get_timer()
+        .set_mode(apic::TimerMode::OneShot)
+        .set_vector(InterruptVector::LocalTimer as u8);
+    apic::get_error()
+        .set_vector(InterruptVector::Error as u8)
+        .set_masked(false);
+    crate::tables::idt::set_handler_fn(InterruptVector::LocalTimer as u8, local_clock_tick);
+    apic::get_performance().set_vector(InterruptVector::Performance as u8);
+    apic::get_thermal_sensor().set_vector(InterruptVector::ThermalSensor as u8);
+    // LINT0&1 should be configured by the APIC reset.
 
-        // Ensure interrupts are completely enabled after APIC is reset.
-        liblz::registers::msr::IA32_APIC_BASE::set_hw_enable(true);
-        liblz::instructions::interrupts::enable();
-        liblz::structures::apic::sw_enable();
-    }
+    // Ensure interrupts are completely enabled after APIC is reset.
+    liblz::registers::msr::IA32_APIC_BASE::set_hw_enable(true);
+    liblz::instructions::interrupts::enable();
+    liblz::structures::apic::sw_enable();
 
     let per_ms =
         {
@@ -157,7 +137,7 @@ pub fn init_local_apic() {
                 // Wait on the global timer, to ensure we're starting the count
                 // on the rising edge of each millisecond.
                 crate::clock::global::busy_wait_msec(1);
-                unsafe { apic::set_timer_initial_count(u32::MAX) };
+                apic::set_timer_initial_count(u32::MAX);
                 crate::clock::global::busy_wait_msec(MS_WINDOW as u64);
 
                 let per_ms = (u32::MAX - apic::get_timer_current_count()) / MS_WINDOW;
@@ -169,23 +149,95 @@ pub fn init_local_apic() {
             }
         };
 
-    local_state().local_timer_per_ms = Some(per_ms);
+    local_state_ptr.write_volatile(LocalState {
+        magic: LocalState::MAGIC,
+        id: liblz::cpu::get_id(),
+        clock: AtomicClock::new(),
+        default_task: Task::new(
+            TaskPriority::new(1).unwrap(),
+            liblz::instructions::hlt_indefinite,
+            None,
+            RFlags::INTERRUPT_FLAG,
+            *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
+            *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
+            CR3::read(),
+        ),
+        cur_task: None,
+        local_timer_per_ms: per_ms,
+        syscall_stack: [0u8; 0x4000],
+        privilege_stack: [0u8; 0x4000],
+    });
+    local_state().validate_init();
 }
 
 fn local_clock_tick(
-    isf: &mut x86_64::structures::idt::InterruptStackFrame,
-    regs: *mut crate::scheduling::ThreadRegisters,
+    stack_frame: &mut x86_64::structures::idt::InterruptStackFrame,
+    cached_regs: *mut crate::scheduling::ThreadRegisters,
 ) {
-    crate::print!(".");
-    // let next_wait_mult = if let Some(scheduler) = try_lock_scheduler() {
-    //     scheduler.try_run_next(&mut isf, regs)
-    // } else {
-    //     1
-    // };
+    use crate::scheduling::SCHEDULER;
 
-    // unsafe { reload_timer(new_wait_mult) };
-    unsafe { reload_timer(core::num::NonZeroU32::new(1)) };
-    liblz::structures::apic::end_of_interrupt();
+    const MIN_TIME_SLICE_MS: u32 = 1;
+    const PRIO_TIME_SLICE_MS: u32 = 2;
+
+    let local_state = local_state();
+    local_state.clock.tick();
+
+    if let Some(mut cur_task) = local_state.cur_task.take() {
+        cur_task.rip = stack_frame.instruction_pointer.as_u64();
+        cur_task.cs = stack_frame.code_segment as u16;
+        cur_task.rsp = stack_frame.stack_pointer.as_u64();
+        cur_task.ss = stack_frame.stack_segment as u16;
+        cur_task.rfl = RFlags::from_bits_truncate(stack_frame.cpu_flags);
+        cur_task.gprs = unsafe { cached_regs.read_volatile() };
+        cur_task.cr3 = CR3::read();
+
+        SCHEDULER.push_task(cur_task);
+    }
+
+    unsafe {
+        if let Some(next_task) = crate::scheduling::SCHEDULER.pop_task() {
+            // Modify task frame to restore rsp & rip.
+            stack_frame
+                .as_mut()
+                .write(x86_64::structures::idt::InterruptStackFrameValue {
+                    instruction_pointer: x86_64::VirtAddr::new_truncate(next_task.rip),
+                    code_segment: next_task.cs as u64,
+                    cpu_flags: next_task.rfl.bits(),
+                    stack_pointer: x86_64::VirtAddr::new_truncate(next_task.rsp),
+                    stack_segment: next_task.ss as u64,
+                });
+
+            // Restore task registers.
+            cached_regs.write_volatile(next_task.gprs);
+
+            // Set current page tables.
+            CR3::write(next_task.cr3.0, next_task.cr3.1);
+
+            let next_timer_ms = (next_task.prio().get() as u32) * PRIO_TIME_SLICE_MS;
+            local_state.cur_task = Some(next_task);
+
+            reload_timer(core::num::NonZeroU32::new(next_timer_ms).unwrap());
+            liblz::structures::apic::end_of_interrupt();
+        } else {
+            let default_task = &local_state.default_task;
+
+            stack_frame
+                .as_mut()
+                .write(x86_64::structures::idt::InterruptStackFrameValue {
+                    instruction_pointer: x86_64::VirtAddr::new_truncate(default_task.rip),
+                    code_segment: default_task.cs as u64,
+                    cpu_flags: default_task.rfl.bits(),
+                    stack_pointer: x86_64::VirtAddr::new_truncate(default_task.rsp),
+                    stack_segment: default_task.ss as u64,
+                });
+
+            // Set current page tables.
+            CR3::write(default_task.cr3.0, default_task.cr3.1);
+
+            reload_timer(core::num::NonZeroU32::new(MIN_TIME_SLICE_MS).unwrap());
+            liblz::structures::apic::end_of_interrupt();
+        }
+    }
 }
 
 #[inline]
@@ -199,23 +251,10 @@ pub fn clock() -> &'static AtomicClock {
 }
 
 /// SAFETY: Caller is expected to only reload timer when appropriate.
-pub unsafe fn reload_timer(ms_multiplier: Option<core::num::NonZeroU32>) {
+pub unsafe fn reload_timer(ms_multiplier: core::num::NonZeroU32) {
     liblz::structures::apic::set_timer_initial_count(
-        ms_multiplier
-            .unwrap_or(core::num::NonZeroU32::new_unchecked(1))
-            .get()
-            * local_state().local_timer_per_ms.unwrap(),
+        ms_multiplier.get() * local_state().local_timer_per_ms,
     );
-}
-
-#[inline]
-pub fn lock_scheduler() -> MutexGuard<'static, Scheduler> {
-    local_state().scheduler.lock()
-}
-
-#[inline]
-pub fn try_lock_scheduler() -> Option<MutexGuard<'static, Scheduler>> {
-    local_state().scheduler.try_lock()
 }
 
 pub fn syscall_stack() -> &'static [u8] {

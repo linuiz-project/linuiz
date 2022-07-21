@@ -12,7 +12,9 @@
     asm_const,
     const_ptr_offset_from,
     const_refs_to_cell,
-    core_c_str
+    core_c_str,
+    exclusive_range_pattern,
+    raw_vec_internals
 )]
 
 #[macro_use]
@@ -220,8 +222,8 @@ unsafe extern "sysv64" fn _entry() -> ! {
         // }
     }
 
-    SMP_MEMORY_READY.store(true, core::sync::atomic::Ordering::Relaxed);
     debug!("Finished initial kernel setup.");
+    SMP_MEMORY_READY.store(true, core::sync::atomic::Ordering::Relaxed);
     _cpu_entry()
 }
 
@@ -298,9 +300,8 @@ unsafe extern "C" fn _cpu_entry() -> ! {
     }
 
     local_state::create();
-    local_state::init_local_apic();
     liblz::structures::apic::get_timer().set_masked(false);
-    local_state::reload_timer(core::num::NonZeroU32::new(1));
+    local_state::reload_timer(core::num::NonZeroU32::new(1).unwrap());
 
     /* load tss */
     {
@@ -360,8 +361,48 @@ unsafe extern "C" fn _cpu_entry() -> ! {
     cpu_setup()
 }
 
+fn one() -> ! {
+    loop {
+        info!("TEST1");
+
+        clock::global::busy_wait_msec(500);
+    }
+}
+
+fn two() -> ! {
+    loop {
+        info!("TEST2");
+        clock::global::busy_wait_msec(500);
+    }
+}
+
 #[inline(never)]
 unsafe fn cpu_setup() -> ! {
+    if liblz::cpu::is_bsp() {
+        use liblz::registers::RFlags;
+        use scheduling::{Task, TaskPriority, SCHEDULER};
+
+        SCHEDULER.push_task(Task::new(
+            TaskPriority::new(5).unwrap(),
+            one,
+            None,
+            RFlags::INTERRUPT_FLAG,
+            *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
+            *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
+            liblz::registers::control::CR3::read(),
+        ));
+        // SCHEDULER.push_task(Task::new(
+        //     TaskPriority::new(7).unwrap(),
+        //     two,
+        //     None,
+        //     RFlags::INTERRUPT_FLAG,
+        //     *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
+        //     *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
+        //     liblz::registers::control::CR3::read(),
+        // ));
+        SCHEDULER.enable();
+    }
+
     liblz::instructions::hlt_indefinite();
 
     /* ENABLE SYSCALL */

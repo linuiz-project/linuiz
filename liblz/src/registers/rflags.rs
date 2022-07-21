@@ -58,11 +58,6 @@ bitflags! {
 }
 
 impl RFlags {
-    #[inline]
-    pub const fn minimal() -> Self {
-        Self::INTERRUPT_FLAG
-    }
-
     #[inline(always)]
     pub fn read() -> Self {
         Self::from_bits_truncate(Self::read_raw())

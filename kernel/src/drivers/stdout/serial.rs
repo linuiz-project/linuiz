@@ -140,8 +140,14 @@ impl Serial {
         LineStatus::from_bits_truncate(self.line_status.read()).contains(status)
     }
 
+    pub unsafe fn write_raw(&mut self, byte: u8) {
+        self.data.write(byte);
+    }
+
     pub fn write(&mut self, byte: u8) {
         // This ensures we don't overwrite pending data.
+        //
+        // REMARK: This does not enure we don't overwrite data asychronously.
         while !self.line_status(LineStatus::TRANSMITTER_EMPTY) {}
 
         self.data.write(byte);

@@ -4,9 +4,9 @@ qemu-system-x86_64 \
     -no-reboot \
     -machine q35,accel=kvm \
     -cpu host \
-    -smp 2 \
+    -smp 4 \
     -m 512M \
-    -serial stdio \
+    -serial mon:stdio \
     -net none \
     -display none \
     -bios ./resources/ovmf.fd \
@@ -14,5 +14,5 @@ qemu-system-x86_64 \
     -drive format=raw,file=./.hdd/nvme.img,id=nvm,if=none \
     -device nvme,drive=nvm,serial=deadbeef \
     -D .debug/qemu_debug.log \
-    -d int
+    -d int,guest_errors
 
