@@ -18,7 +18,8 @@
     const_option,
     const_slice_from_raw_parts,
     const_ptr_is_null,
-    naked_functions
+    naked_functions,
+    allocator_api
 )]
 
 #[macro_use]

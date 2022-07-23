@@ -52,6 +52,10 @@ impl core::fmt::Debug for BlockPage {
     }
 }
 
+pub enum AllocError {
+    OutOfMemory,
+}
+
 /// Allocator utilizing blocks of memory, in size of 64 bytes per block, to
 ///  easily and efficiently allocate.
 pub struct SLOB<'map> {
@@ -108,14 +112,16 @@ impl<'map> SLOB<'map> {
         )
     }
 
-    fn grow(&self, required_blocks: usize, table_write: &mut RwLockWriteGuard<&mut [BlockPage]>) {
-        assert!(required_blocks > 0, "calls to grow must be nonzero");
-
+    fn grow(
+        &self,
+        required_blocks: core::num::NonZeroUsize,
+        table_write: &mut RwLockWriteGuard<&mut [BlockPage]>,
+    ) -> Result<(), AllocError> {
         // Current length of our map, in indexes.
         let cur_table_len = table_write.len();
         // Required length of our map, in indexes.
         let req_table_len = (table_write.len()
-            + liblz::align_up_div(required_blocks, BlockPage::BLOCKS_PER))
+            + liblz::align_up_div(required_blocks.get(), BlockPage::BLOCKS_PER))
         .next_power_of_two();
         // Current page count of our map (i.e. how many pages the slice requires)
         let cur_table_page_count =
@@ -124,10 +130,9 @@ impl<'map> SLOB<'map> {
         let req_table_page_count =
             liblz::align_up_div(req_table_len * size_of::<BlockPage>(), 0x1000);
 
-        assert!(
-            (req_table_len * 0x1000) < 0x746A52880000, /* 128TB */
-            "Out of memory!"
-        );
+        if (req_table_len * 0x1000) >= 0x746A52880000 {
+            return Err(AllocError::OutOfMemory);
+        }
 
         let page_manager = liblz::memory::global_pmgr();
 
@@ -190,11 +195,16 @@ impl<'map> SLOB<'map> {
             .skip(cur_table_base_page.index())
             .take(cur_table_page_count)
             .for_each(|block_page| block_page.set_empty());
+
+        Ok(())
     }
 }
 
-unsafe impl core::alloc::GlobalAlloc for SLOB<'_> {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+unsafe impl core::alloc::Allocator for SLOB<'_> {
+    fn allocate(
+        &self,
+        layout: Layout,
+    ) -> Result<core::ptr::NonNull<[u8]>, core::alloc::AllocError> {
         let align_mask = usize::max(layout.align() / Self::BLOCK_SIZE, 1) - 1;
         let size_in_blocks = liblz::align_up_div(layout.size(), Self::BLOCK_SIZE);
 
@@ -230,7 +240,12 @@ unsafe impl core::alloc::GlobalAlloc for SLOB<'_> {
             }
 
             // No properly sized region was found, so grow list.
-            self.grow(size_in_blocks, &mut table_write);
+            if let Err(alloc_err) = self.grow(
+                core::num::NonZeroUsize::new(size_in_blocks).unwrap(),
+                &mut table_write,
+            ) {
+                return Err(core::alloc::AllocError);
+            }
         }
 
         let end_block_index = block_index + 1;
@@ -261,11 +276,17 @@ unsafe impl core::alloc::GlobalAlloc for SLOB<'_> {
             }
         }
 
-        (start_block_index * Self::BLOCK_SIZE) as *mut u8
+        unsafe {
+            core::ptr::NonNull::new(core::slice::from_raw_parts_mut(
+                (start_block_index * Self::BLOCK_SIZE) as *mut u8,
+                layout.size(),
+            ))
+            .ok_or(core::alloc::AllocError)
+        }
     }
 
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        let start_block_index = (ptr as usize) / Self::BLOCK_SIZE;
+    unsafe fn deallocate(&self, ptr: core::ptr::NonNull<u8>, layout: Layout) {
+        let start_block_index = ptr.addr().get() / Self::BLOCK_SIZE;
         let end_block_index = start_block_index + align_up_div(layout.size(), Self::BLOCK_SIZE);
         let mut block_index = start_block_index;
         trace!(
@@ -310,141 +331,19 @@ unsafe impl core::alloc::GlobalAlloc for SLOB<'_> {
     }
 }
 
-// impl MemoryAllocator for SLOB<'_> {
-//     fn alloc(&self, size: usize, align: Option<NonZeroUsize>) -> Result<SafePtr<u8>, AllocError> {}
+unsafe impl core::alloc::GlobalAlloc for SLOB<'_> {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        match <Self as core::alloc::Allocator>::allocate(&self, layout) {
+            Ok(non_null) => non_null.as_mut_ptr(),
+            Err(_) => core::ptr::null_mut(),
+        }
+    }
 
-//     // TODO this should not allocate contiguous frames
-//     fn alloc_pages(&self, count: usize) -> Result<(Address<Physical>, SafePtr<u8>), AllocError> {
-//         let mut map_write = self.map.write();
-//         let frame_index = match get_frame_manager().lock_next_many(count) {
-//             Ok(frame_index) => frame_index,
-//             Err(falloc_err) => {
-//                 return Err(AllocError::FallocError(falloc_err));
-//             }
-//         };
-
-//         let mut start_index = 0;
-//         'outer: loop {
-//             let mut current_run = 0;
-
-//             for (map_index, block_page) in map_write.iter_mut().enumerate().skip(start_index) {
-//                 if !block_page.is_empty() {
-//                     current_run = 0;
-//                     start_index = map_index + 1;
-//                 } else {
-//                     current_run += 1;
-
-//                     if current_run == count {
-//                         break 'outer;
-//                     }
-//                 }
-//             }
-
-//             if let Err(alloc_err) = self.grow(count * BlockPage::BLOCKS_PER, &mut map_write) {
-//                 return Err(alloc_err);
-//             }
-//         }
-
-//         for offset in 0..count {
-//             let page_index = start_index + offset;
-//             let frame_index = frame_index + offset;
-
-//             map_write[page_index].set_full();
-//             PAGE_MANAGER
-//                 .map(
-//                     &Page::from_index(page_index),
-//                     frame_index,
-//                     None,
-//                     PageAttributes::DATA,
-//                 )
-//                 .unwrap();
-//         }
-
-//         Ok((Address::<Physical>::new(frame_index * 0x1000), unsafe {
-//             SafePtr::new((start_index * 0x1000) as *mut _, count * 0x1000)
-//         }))
-//     }
-
-//     fn alloc_against(&self, frame_index: usize, count: usize) -> Result<SafePtr<u8>, AllocError> {
-//         let mut map_write = self.map.write();
-//         let mut start_index = 0;
-//         'outer: loop {
-//             let mut current_run = 0;
-
-//             for (map_index, block_page) in map_write.iter_mut().enumerate().skip(start_index) {
-//                 if !block_page.is_empty() {
-//                     current_run = 0;
-//                     start_index = map_index + 1;
-//                 } else {
-//                     current_run += 1;
-
-//                     if current_run == count {
-//                         break 'outer;
-//                     }
-//                 }
-//             }
-
-//             if let Err(alloc_err) = self.grow(count * BlockPage::BLOCKS_PER, &mut map_write) {
-//                 return Err(alloc_err);
-//             }
-//         }
-
-//         for offset in 0..count {
-//             let page_index = start_index + offset;
-//             let frame_index = frame_index + offset;
-
-//             map_write[page_index].set_full();
-//             PAGE_MANAGER
-//                 .map(
-//                     &Page::from_index(page_index),
-//                     frame_index,
-//                     None,
-//                     PageAttributes::DATA,
-//                 )
-//                 .unwrap();
-//         }
-
-//         Ok(unsafe { SafePtr::new((start_index * 0x1000) as *mut _, count * 0x1000) })
-//     }
-
-//     fn alloc_identity(&self, frame_index: usize, count: usize) -> Result<SafePtr<u8>, AllocError> {
-//         let mut map_write = self.map.write();
-
-//         if map_write.len() < (frame_index + count) {
-//             self.grow(
-//                 (frame_index + count) * BlockPage::BLOCKS_PER,
-//                 &mut map_write,
-//             )
-//             .unwrap();
-//         }
-
-//         for page_index in frame_index..(frame_index + count) {
-//             if map_write[page_index].is_empty() {
-//                 map_write[page_index].set_full();
-//                 PAGE_MANAGER
-//                     .identity_map(&Page::from_index(page_index), PageAttributes::DATA)
-//                     .unwrap();
-//             } else {
-//                 for page_index in frame_index..page_index {
-//                     map_write[page_index].set_empty();
-//                     PAGE_MANAGER
-//                         .unmap(&Page::from_index(page_index), false)
-//                         .unwrap();
-//                 }
-
-//                 return Err(AllocError::IdentityMappingOverlaps);
-//             }
-//         }
-
-//         Ok(unsafe { SafePtr::new((frame_index * 0x1000) as *mut _, count * 0x1000) })
-//     }
-
-//     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {}
-
-//     fn get_page_state(&self, page_index: usize) -> Option<bool> {
-//         self.map
-//             .read()
-//             .get(page_index)
-//             .map(|block_page| !block_page.is_empty())
-//     }
-// }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        <Self as core::alloc::Allocator>::deallocate(
+            &self,
+            core::ptr::NonNull::new(ptr).unwrap(),
+            layout,
+        )
+    }
+}
