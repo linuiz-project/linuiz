@@ -645,7 +645,7 @@ pub fn is_bsp() -> bool {
 }
 
 /// Enumerates the most-recent available CPUID leaf for the core ID.
-pub fn get_id() -> u32 {
+pub fn get_id_cpuid() -> u32 {
     if let Some(registers) =
         // IA32 SDM instructs to enumerate this leaf first...
         exec(0x1F, 0x0)
@@ -661,4 +661,9 @@ pub fn get_id() -> u32 {
     } else {
         panic!("CPUID ID enumeration failed.");
     }
+}
+
+/// Simple convenience wrapper function for retrieving x2/xAPIC ID.
+pub fn get_id() -> u32 {
+    crate::structures::apic::get_id()
 }

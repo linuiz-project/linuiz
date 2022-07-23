@@ -1,14 +1,12 @@
 use crate::{
-    clock::{local, AtomicClock},
+    clock::AtomicClock,
     scheduling::{Task, TaskPriority},
 };
 use core::sync::atomic::{AtomicUsize, Ordering};
 use liblz::{
-    cell::SyncOnceCell,
     registers::{control::CR3, RFlags},
     Address, Virtual,
 };
-use spin::{Mutex, MutexGuard};
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -25,7 +23,6 @@ pub enum InterruptVector {
 #[repr(align(0x1000))]
 struct LocalState {
     magic: u64,
-    id: u32,
     clock: AtomicClock,
     default_task: Task,
     cur_task: Option<Task>,
@@ -151,7 +148,6 @@ pub unsafe fn create() {
 
     local_state_ptr.write_volatile(LocalState {
         magic: LocalState::MAGIC,
-        id: liblz::cpu::get_id(),
         clock: AtomicClock::new(),
         default_task: Task::new(
             TaskPriority::new(1).unwrap(),
@@ -238,11 +234,6 @@ fn local_clock_tick(
             liblz::structures::apic::end_of_interrupt();
         }
     }
-}
-
-#[inline]
-pub fn id() -> u32 {
-    local_state().id
 }
 
 #[inline]

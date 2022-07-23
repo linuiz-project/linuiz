@@ -1,5 +1,4 @@
-use crate::tables::idt::InterruptStackFrame;
-use alloc::{boxed::Box, collections::VecDeque};
+use alloc::boxed::Box;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use crossbeam_queue::SegQueue;
 use liblz::{
