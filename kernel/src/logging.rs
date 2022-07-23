@@ -1,3 +1,40 @@
+pub struct LogMessage {
+    cpu: u32,
+    timestamp: u64,
+    level: log::Level,
+    body: alloc::string::String,
+}
+
+static LOG_MESSAGES_ENABLED: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(false);
+static LOG_MESSAGES: crossbeam_queue::SegQueue<LogMessage> = crossbeam_queue::SegQueue::new();
+
+pub fn flush_log_messages_indefinite() -> ! {
+    LOG_MESSAGES_ENABLED.store(true, core::sync::atomic::Ordering::Relaxed);
+
+    loop {
+        if let Some(log_message) = LOG_MESSAGES.pop() {
+            let whole_time = log_message.timestamp / 1000;
+            let frac_time = log_message.timestamp % 1000;
+
+            // TODO possibly only log CPU# in debug builds
+            crate::println!(
+                "[{:wwidth$}.{:0fwidth$}][CPU{}][{}] {}",
+                whole_time,
+                frac_time,
+                log_message.cpu,
+                log_message.level,
+                log_message.body,
+                wwidth = 4,
+                fwidth = 3
+            );
+        }
+
+        // TODO this shouldn't be a busy wait, probably
+        crate::clock::global::busy_wait_msec(1);
+    }
+}
+
 bitflags::bitflags! {
     pub struct LoggingModes : u8 {
         const NONE = 0;
@@ -17,7 +54,14 @@ impl log::Log for KernelLogger {
 
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
-            if self.modes.contains(LoggingModes::SERIAL) {
+            if LOG_MESSAGES_ENABLED.load(core::sync::atomic::Ordering::Relaxed) {
+                LOG_MESSAGES.push(LogMessage {
+                    cpu: liblz::structures::apic::get_id(),
+                    timestamp: crate::clock::global::get_ticks(),
+                    level: record.level(),
+                    body: alloc::format!("{}", record.args()),
+                });
+            } else {
                 let ticks = crate::clock::global::get_ticks();
                 let whole_time = ticks / 1000;
                 let frac_time = ticks % 1000;
@@ -33,10 +77,6 @@ impl log::Log for KernelLogger {
                     wwidth = 4,
                     fwidth = 3
                 );
-            }
-
-            if self.modes.contains(LoggingModes::GRAPHIC) {
-                panic!("no graphics logging implemented!");
             }
         }
     }
