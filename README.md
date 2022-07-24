@@ -14,4 +14,4 @@ In order to build and run Linuiz OS, you'll require a few things:
 Some additional requirements:
 - Current, xAPIC support is nonexitent. It's been removed in favor of x2APIC. Specifically, this means true hardware virtualization must be used, usually via KVM. QEMU's TCG emulator will not work.
 
-Once you've met those requirements——open a terminal, navigate to the root working direcotry of the project, and type  `make run`. GNUMake should do the rest!
+Once you've met those requirements——open a terminal, navigate to the root working directory of the project, and type  `make run`. GNUMake should do the rest!
