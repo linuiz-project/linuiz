@@ -1,9 +1,4 @@
-mod irq_stubs;
-
-use x86_64::structures::idt::InterruptDescriptorTable;
-pub use x86_64::structures::idt::InterruptStackFrame;
-
-use crate::scheduling::ThreadRegisters;
+use x86_64::structures::idt::InterruptStackFrame;
 
 /* FAULT INTERRUPT HANDLERS */
 extern "x86-interrupt" fn divide_error_handler(stack_frame: InterruptStackFrame) {
@@ -193,92 +188,7 @@ extern "x86-interrupt" fn security_exception_handler(
 // reserved 31
 // --- triple fault (can't handle)
 
-#[naked]
-#[no_mangle]
-extern "x86-interrupt" fn irq_common(_: InterruptStackFrame) {
-    unsafe {
-        core::arch::asm!(
-        "
-        # (QWORD) ISF should begin here on the stack. 
-        # (QWORD) IRQ vector is here.
-        # (QWORD) `call` return instruction pointer is here.
-
-        # Push all gprs to the stack.
-        push r15
-        push r14
-        push r13
-        push r12
-        push r11
-        push r10
-        push r9
-        push r8
-        push rbp
-        push rdi
-        push rsi
-        push rdx
-        push rcx
-        push rbx
-        push rax
-    
-        cld
-
-        # Move IRQ vector into first parameter
-        mov rcx, [rsp + (16 * 8)]
-        # Move stack frame into second parameter.
-        lea rdx, [rsp + (17 * 8)]
-        # Move cached gprs pointer into third parameter.
-        mov r8, rsp
-    
-        call {}
-    
-        pop rax
-        pop rbx
-        pop rcx
-        pop rdx
-        pop rsi
-        pop rdi
-        pop rbp
-        pop r8
-        pop r9
-        pop r10
-        pop r11
-        pop r12
-        pop r13
-        pop r14
-        pop r15
-
-        add rsp, 0x10
-
-        iretq
-        ",
-        sym interrupt_handler,
-        options(noreturn)
-        );
-    }
-}
-
-extern "win64" fn interrupt_handler(
-    irq_vector: u64,
-    isf: &mut InterruptStackFrame,
-    cached_regs: *mut ThreadRegisters,
-) {
-    if let Some(handler) = INTERRUPT_HANDLERS.read()[irq_vector as usize] {
-        handler(isf, cached_regs);
-    }
-}
-
-lazy_static::lazy_static! {
-    static ref IDT: spin::Mutex<InterruptDescriptorTable> = spin::Mutex::new(InterruptDescriptorTable::new());
-}
-
-pub fn init() {
-    assert!(
-        super::gdt::KCODE_SELECTOR.get().is_some(),
-        "Cannot initialize IDT before GDT (IDT entries use GDT kernel code segment selector)."
-    );
-
-    let mut idt = IDT.lock();
-
+pub fn set_exception_handlers(idt: &mut x86_64::structures::idt::InterruptDescriptorTable) {
     idt.divide_error.set_handler_fn(divide_error_handler);
     idt.debug.set_handler_fn(debug_handler);
     idt.non_maskable_interrupt
@@ -311,34 +221,4 @@ pub fn init() {
     idt.security_exception
         .set_handler_fn(security_exception_handler);
     // --- triple fault (can't handle)
-
-    irq_stubs::apply_stubs(&mut idt);
-}
-
-/// Loads the static, lazily-initialized IDT in the kernel.
-pub fn load() {
-    unsafe {
-        let idt = IDT.lock();
-        idt.load_unsafe()
-    }
-}
-
-pub type HandlerFunc = fn(&mut InterruptStackFrame, *mut ThreadRegisters);
-
-static INTERRUPT_HANDLERS: spin::RwLock<[Option<HandlerFunc>; 256]> =
-    spin::RwLock::new([None; 256]);
-
-/// Sets the interrupt handler function for the given vector.
-///
-/// SAFETY: This function is unsafe because any (including a malformed or buggy) handler can be
-///         specifid. The caller of this function must ensure the handler is correctly formed,
-///         and properly handles the interrupt it is being assigned to.  
-pub unsafe fn set_handler_fn(vector: u8, handler: HandlerFunc) {
-    assert!(
-        super::gdt::KCODE_SELECTOR.get().is_some(),
-        "Cannot initialize IDT before GDT (IDT entries use GDT kernel code segment selector)."
-    );
-    liblz::instructions::interrupts::without_interrupts(|| {
-        INTERRUPT_HANDLERS.write()[vector as usize] = Some(handler);
-    });
 }

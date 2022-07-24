@@ -8,18 +8,6 @@ use liblz::{
     Address, Virtual,
 };
 
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum InterruptVector {
-    GlobalTimer = 32,
-    LocalTimer = 48,
-    CMCI = 49,
-    Performance = 50,
-    ThermalSensor = 51,
-    Error = 54,
-    Storage = 55,
-}
-
 #[repr(align(0x1000))]
 struct LocalState {
     magic: u64,
@@ -96,19 +84,20 @@ pub unsafe fn create() {
     }
 
     /* CONFIGURE APIC */
+    use crate::interrupts::Vector;
     use liblz::structures::apic;
 
     apic::software_reset();
     apic::set_timer_divisor(apic::TimerDivisor::Div1);
     apic::get_timer()
         .set_mode(apic::TimerMode::OneShot)
-        .set_vector(InterruptVector::LocalTimer as u8);
+        .set_vector(Vector::LocalTimer as u8);
     apic::get_error()
-        .set_vector(InterruptVector::Error as u8)
+        .set_vector(Vector::Error as u8)
         .set_masked(false);
-    crate::tables::idt::set_handler_fn(InterruptVector::LocalTimer as u8, local_clock_tick);
-    apic::get_performance().set_vector(InterruptVector::Performance as u8);
-    apic::get_thermal_sensor().set_vector(InterruptVector::ThermalSensor as u8);
+    crate::interrupts::set_handler_fn(Vector::LocalTimer, local_clock_tick);
+    apic::get_performance().set_vector(Vector::Performance as u8);
+    apic::get_thermal_sensor().set_vector(Vector::ThermalSensor as u8);
     // LINT0&1 should be configured by the APIC reset.
 
     // Ensure interrupts are completely enabled after APIC is reset.
@@ -191,7 +180,7 @@ fn local_clock_tick(
     }
 
     unsafe {
-        if let Some(next_task) = crate::scheduling::SCHEDULER.pop_task() {
+        let next_timer_ms = if let Some(next_task) = crate::scheduling::SCHEDULER.pop_task() {
             // Modify task frame to restore rsp & rip.
             stack_frame
                 .as_mut()
@@ -212,8 +201,7 @@ fn local_clock_tick(
             let next_timer_ms = (next_task.prio().get() as u32) * PRIO_TIME_SLICE_MS;
             local_state.cur_task = Some(next_task);
 
-            reload_timer(core::num::NonZeroU32::new(next_timer_ms).unwrap());
-            liblz::structures::apic::end_of_interrupt();
+            next_timer_ms
         } else {
             let default_task = &local_state.default_task;
 
@@ -230,9 +218,11 @@ fn local_clock_tick(
             // Set current page tables.
             CR3::write(default_task.cr3.0, default_task.cr3.1);
 
-            reload_timer(core::num::NonZeroU32::new(MIN_TIME_SLICE_MS).unwrap());
-            liblz::structures::apic::end_of_interrupt();
-        }
+            MIN_TIME_SLICE_MS
+        };
+
+        reload_timer(core::num::NonZeroU32::new(next_timer_ms).unwrap());
+        liblz::structures::apic::end_of_interrupt();
     }
 }
 

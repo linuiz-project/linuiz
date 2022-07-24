@@ -31,8 +31,8 @@ pub mod global {
             pic8259::enable(pic8259::InterruptLines::TIMER);
 
             unsafe {
-                crate::tables::idt::set_handler_fn(
-                    crate::local_state::InterruptVector::GlobalTimer as u8,
+                crate::interrupts::set_handler_fn(
+                    crate::interrupts::Vector::GlobalTimer,
                     tick_handler,
                 )
             };
@@ -40,7 +40,7 @@ pub mod global {
     }
 
     fn tick_handler(
-        _: &mut crate::tables::idt::InterruptStackFrame,
+        _: &mut x86_64::structures::idt::InterruptStackFrame,
         _: *mut crate::scheduling::ThreadRegisters,
     ) {
         GLOBAL_CLOCK.tick();

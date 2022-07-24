@@ -1,4 +1,4 @@
-pub fn apply_stubs(idt: &mut spin::MutexGuard<super::InterruptDescriptorTable>) {
+pub fn set_stub_handlers(idt: &mut x86_64::structures::idt::InterruptDescriptorTable) {
     idt[32].set_handler_fn(irq_32);
     idt[33].set_handler_fn(irq_33);
     idt[34].set_handler_fn(irq_34);
@@ -230,7 +230,7 @@ macro_rules! irq_stub {
     ($irq_index:literal) => {
         paste::paste! {
             #[naked]
-            extern "x86-interrupt" fn [<irq_ $irq_index>](_: super::InterruptStackFrame) {
+            extern "x86-interrupt" fn [<irq_ $irq_index>](_: x86_64::structures::idt::InterruptStackFrame) {
                 unsafe {
                     core::arch::asm!(
                         "push {}",

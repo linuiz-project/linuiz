@@ -28,10 +28,11 @@ extern crate liblz;
 
 mod clock;
 mod drivers;
+mod interrupts;
 mod local_state;
 mod logging;
+mod memory;
 mod scheduling;
-mod slob;
 mod tables;
 
 use alloc::vec::Vec;
@@ -75,7 +76,7 @@ lazy_static::lazy_static! {
     /// We must take care not to call any allocating functions, or reference KMALLOC itself,
     /// prior to initializing memory (frame/page manager). The SLOB *immtediately* configures
     /// its own allocation table, utilizing both of the aforementioned managers.
-    pub static ref KMALLOC: slob::SLOB<'static> = unsafe { slob::SLOB::new() };
+    pub static ref KMALLOC: memory::SLOB<'static> = unsafe { memory::SLOB::new() };
 }
 
 use liblz::io::pci;
@@ -274,17 +275,15 @@ unsafe extern "C" fn _cpu_entry() -> ! {
 
     /* load tables */
     {
-        use tables::{gdt, idt};
-
         // Always initialize GDT prior to configuring IDT.
-        gdt::init();
+        tables::gdt::init();
 
         if liblz::cpu::is_bsp() {
             // Due to the fashion in which the `x86_64` crate initializes the IDT entries,
             // it must be ensured that the handlers are set only *after* the GDT has been
             // properly initialized and loaded—otherwise, the `CS` value for the IDT entries
             // is incorrect, and this causes very confusing GPFs.
-            idt::init();
+            interrupts::init_idt();
 
             fn apit_empty(
                 _: &mut x86_64::structures::idt::InterruptStackFrame,
@@ -293,11 +292,11 @@ unsafe extern "C" fn _cpu_entry() -> ! {
                 liblz::structures::apic::end_of_interrupt();
             }
 
-            idt::set_handler_fn(liblz::structures::apic::LINT0_VECTOR, apit_empty);
-            idt::set_handler_fn(liblz::structures::apic::LINT1_VECTOR, apit_empty);
+            interrupts::set_handler_fn(interrupts::Vector::LINT0_VECTOR, apit_empty);
+            interrupts::set_handler_fn(interrupts::Vector::LINT1_VECTOR, apit_empty);
         }
 
-        crate::tables::idt::load();
+        interrupts::load_idt();
     }
 
     if liblz::cpu::is_bsp() {

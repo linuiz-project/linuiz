@@ -402,7 +402,11 @@ impl<'dev> Controller<'dev> {
         nvme.msix.set_function_mask(false);
         nvme.msix[0].configure(
             unsafe { liblz::cpu::get_id() as u8 },
-            crate::local_state::InterruptVector::Storage as u8,
+            // Specific vector should be dynamically selected
+            // TODO possibly dynamically selected with special attributes per vector?
+            //      i.e. separate interrupts for completions, DMA, etc.
+            //      or a single interrupts per device? ***** this seems limiting
+            crate::interrupts::Vector::Storage0 as u8,
             liblz::InterruptDeliveryMode::Fixed,
         );
         nvme.msix[0].set_masked(false);
