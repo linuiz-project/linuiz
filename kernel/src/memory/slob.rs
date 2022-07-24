@@ -240,7 +240,7 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
             }
 
             // No properly sized region was found, so grow list.
-            if let Err(alloc_err) = self.grow(
+            if let Err(_) = self.grow(
                 core::num::NonZeroUsize::new(size_in_blocks).unwrap(),
                 &mut table_write,
             ) {

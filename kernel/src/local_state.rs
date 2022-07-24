@@ -201,6 +201,8 @@ fn local_clock_tick(
             let next_timer_ms = (next_task.prio().get() as u32) * PRIO_TIME_SLICE_MS;
             local_state.cur_task = Some(next_task);
 
+            //crate::print!(".");
+
             next_timer_ms
         } else {
             let default_task = &local_state.default_task;
@@ -218,6 +220,7 @@ fn local_clock_tick(
             // Set current page tables.
             CR3::write(default_task.cr3.0, default_task.cr3.1);
 
+            //crate::print!("!");
             MIN_TIME_SLICE_MS
         };
 

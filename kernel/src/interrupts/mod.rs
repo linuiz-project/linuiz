@@ -77,7 +77,7 @@ extern "win64" fn irq_common_handoff(
     }
 }
 
-static IDT: spin::Mutex<InterruptDescriptorTable> =
+static mut IDT: spin::Mutex<InterruptDescriptorTable> =
     spin::Mutex::new(InterruptDescriptorTable::new());
 
 pub type HandlerFunc = fn(&mut InterruptStackFrame, *mut crate::scheduling::ThreadRegisters);
@@ -91,7 +91,7 @@ pub fn init_idt() {
         "Cannot initialize IDT before GDT (IDT entries use GDT kernel code segment selector)."
     );
 
-    let mut idt = IDT.lock();
+    let mut idt = unsafe { IDT.lock() };
 
     exceptions::set_exception_handlers(&mut *idt);
     stubs::set_stub_handlers(&mut *idt);
@@ -99,7 +99,7 @@ pub fn init_idt() {
 
 /// Loads the global IDT using `lidt`.
 pub fn load_idt() {
-    let idt = IDT.lock();
+    let idt = unsafe { IDT.lock() };
     unsafe { idt.load_unsafe() };
 }
 
@@ -107,9 +107,9 @@ pub fn load_idt() {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
 pub enum Vector {
+    GlobalTimer = 32,
     Error = 64,
-    GlobalTimer = 65,
-    LocalTimer = 66,
+    LocalTimer = 65,
     Performance = 70,
     ThermalSensor = 71,
     Storage0 = 128,

@@ -38,6 +38,7 @@ mod tables;
 use alloc::vec::Vec;
 use core::sync::atomic::AtomicBool;
 use liblz::LinkerSymbol;
+use local_state::clock;
 
 extern "C" {
     static __code_start: LinkerSymbol;
@@ -383,17 +384,9 @@ extern "C" fn new_nvme_handler(device_index: usize) -> ! {
     liblz::instructions::hlt_indefinite()
 }
 
-fn one() -> ! {
+fn logging_test() -> ! {
     loop {
-        info!("TEST1");
-
-        clock::global::busy_wait_msec(500);
-    }
-}
-
-fn two() -> ! {
-    loop {
-        info!("TEST2");
+        info!("TEST");
         clock::global::busy_wait_msec(500);
     }
 }
@@ -413,15 +406,20 @@ unsafe fn cpu_setup() -> ! {
             *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
             liblz::registers::control::CR3::read(),
         ));
-        SCHEDULER.push_task(Task::new(
-            TaskPriority::new(7).unwrap(),
-            two,
-            None,
-            RFlags::INTERRUPT_FLAG,
-            *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
-            *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
-            liblz::registers::control::CR3::read(),
-        ));
+
+        // Add a number of test tasks to get kernel output, test scheduling, and test logging.
+        for _ in 0..1 {
+            SCHEDULER.push_task(Task::new(
+                TaskPriority::new(7).unwrap(),
+                logging_test,
+                None,
+                RFlags::INTERRUPT_FLAG,
+                *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
+                *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
+                liblz::registers::control::CR3::read(),
+            ));
+        }
+
         SCHEDULER.enable();
     }
 
@@ -445,38 +443,4 @@ unsafe fn cpu_setup() -> ! {
 
     // liblz::registers::stack::RSP::write(liblz::memory::alloc_stack(1, true));
     // liblz::cpu::ring3_enter(test_user_function, liblz::registers::RFlags::empty());
-
-    debug!("Failed to enter ring 3.");
-
-    liblz::instructions::hlt_indefinite()
-}
-
-fn kernel_main() -> ! {
-    debug!("Successfully entered `kernel_main()`.");
-
-    liblz::instructions::hlt_indefinite()
-}
-
-#[link_section = ".user_code"]
-fn test_user_function() {
-    // unsafe {
-    //     core::arch::asm!(
-    //         "mov r10, $0",
-    //         "mov r8,   0x1F1F1FA1",
-    //         "mov r9,   0x1F1F1FA2",
-    //         "mov r13,   0x1F1F1FA3",
-    //         "mov r14,   0x1F1F1FA4",
-    //         "mov r15,   0x1F1F1FA5",
-    //         "syscall",
-    //         out("rcx") _,
-    //         out("rdx") _,
-    //         out("r10") _,
-    //         out("r11") _,
-    //         out("r12") _,
-    //     )
-    // };
-
-    liblz::instructions::interrupts::breakpoint();
-
-    loop {}
 }
