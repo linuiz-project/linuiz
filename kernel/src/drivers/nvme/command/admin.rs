@@ -66,7 +66,7 @@ impl AdminCommand {
 //     }
 // }
 
-#[repr(C)]
+#[repr(C, align(0x1000))]
 pub struct Identify {
     vendor_id: u16,
     subsys_vendor_id: u16,

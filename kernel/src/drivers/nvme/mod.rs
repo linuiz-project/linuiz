@@ -1,12 +1,16 @@
 pub mod command;
 pub mod queue;
 
-use alloc::collections::BTreeMap;
+use alloc::{boxed::Box, collections::BTreeMap};
 use bit_field::BitField;
-use core::{convert::TryFrom, fmt, marker::PhantomData, mem::MaybeUninit};
+use core::{convert::TryFrom, fmt, marker::PhantomData, mem::MaybeUninit, sync::atomic::AtomicU16};
 use liblz::{
     io::pci::{standard::StandardRegister, PCIeDevice, Standard},
-    memory::volatile::{Volatile, VolatileCell},
+    memory::{
+        page_aligned_allocator,
+        volatile::{Volatile, VolatileCell},
+        PageAlignedBox,
+    },
     sync::{SuccessSource, SuccessToken, ValuedSuccessToken},
     volatile_bitfield_getter, volatile_bitfield_getter_ro, Address, Physical, ReadOnly, ReadWrite,
 };
@@ -325,8 +329,10 @@ pub enum ControllerEnableError {
 pub struct Controller<'dev> {
     device: &'dev PCIeDevice<Standard>,
     msix: liblz::io::pci::standard::MSIX<'dev>,
-    admin_sub: Mutex<queue::SubmissionQueue<'dev>>,
-    admin_com: Mutex<queue::CompletionQueue<'dev>>,
+    next_sub_queue_id: AtomicU16,
+    next_com_queue_id: AtomicU16,
+    admin_sub: Mutex<queue::Queue<'dev, queue::Submission>>,
+    admin_com: Mutex<queue::Queue<'dev, queue::Completion>>,
     pending_cmds: Mutex<BTreeMap<u16, SuccessSource>>,
 }
 
@@ -341,7 +347,7 @@ impl<'dev> Controller<'dev> {
     const ASQ: usize = 0x28;
     const ACQ: usize = 0x30;
 
-    pub fn from_device(
+    pub fn from_device_and_configure(
         device: &'dev PCIeDevice<Standard>,
         sub_entry_count: u16,
         com_entry_count: u16,
@@ -349,10 +355,10 @@ impl<'dev> Controller<'dev> {
         let nvme = {
             let reg0 = device.get_register(StandardRegister::Register0).unwrap();
 
-            let admin_sub = queue::SubmissionQueue::new(reg0, 0, sub_entry_count);
-            let admin_com = queue::CompletionQueue::new(reg0, 0, com_entry_count);
-            reg0.write(Self::ASQ, admin_sub.phys_addr().as_u64());
-            reg0.write(Self::ACQ, admin_com.phys_addr().as_u64());
+            let admin_sub = queue::Queue::<queue::Submission>::new(reg0, 0, sub_entry_count);
+            let admin_com = queue::Queue::<queue::Completion>::new(reg0, 0, com_entry_count);
+            reg0.write(Self::ASQ, admin_sub.get_phys_addr().as_u64());
+            reg0.write(Self::ACQ, admin_com.get_phys_addr().as_u64());
             reg0.write(
                 Self::AQA,
                 ((com_entry_count as u32) << 16) | (sub_entry_count as u32),
@@ -362,7 +368,9 @@ impl<'dev> Controller<'dev> {
                 device,
                 msix: device
                     .find_msix()
-                    .expect("MSIX is required for NVMe controller creation."),
+                    .expect("MSI-X is required for NVMe controller creation."),
+                next_sub_queue_id: AtomicU16::new(1),
+                next_com_queue_id: AtomicU16::new(1),
                 admin_sub: Mutex::new(admin_sub),
                 admin_com: Mutex::new(admin_com),
                 pending_cmds: Mutex::new(BTreeMap::new()),
@@ -383,15 +391,17 @@ impl<'dev> Controller<'dev> {
         cc.set_iocqes(4); // 16 bytes (2^4)
 
         // Configure MSI-X for admin completion queue.
-        // REMARK: This needs to be before the enable, as QEMU tracks
-        //         driver message IRQ usage internally, and doesn't
-        //         'use' the first interrupt message if MSI-X isn't
-        //         enabled when the controller starts.
+        // REMARK:  This needs to be before the enable, as QEMU tracks
+        //          driver message IRQ usage internally, and doesn't
+        //          'use' the first interrupt message if MSI-X isn't
+        //          enabled when the controller starts.
+        //
+        //          I'm unsure what behaviour exists on real hardware.
 
         nvme.msix.set_enable(true);
         nvme.msix.set_function_mask(false);
         nvme.msix[0].configure(
-            unsafe { crate::local_state::id() as u8 },
+            unsafe { liblz::cpu::get_id() as u8 },
             crate::local_state::InterruptVector::Storage as u8,
             liblz::InterruptDeliveryMode::Fixed,
         );
@@ -507,8 +517,12 @@ impl<'dev> Controller<'dev> {
         match command {
             AdminCommand::Identify { ctrl_id } => {
                 // Allocate the necessary memory for returning the command value.
-                let (phys_addr, alloc) =
-                    unsafe { liblz::memory::malloc::get().alloc_pages(1).unwrap() };
+                let memory = PageAlignedBox::<Identify>::new_uninit_in(page_aligned_allocator());
+                let phys_addr = Address::<Physical>::new(
+                    liblz::memory::global_pmgr()
+                        .get_mapped_to(&liblz::memory::Page::from_ptr(memory.as_ptr()))
+                        .unwrap(),
+                );
 
                 // Construct the command with the provided data.
                 let command = Command {
@@ -529,9 +543,7 @@ impl<'dev> Controller<'dev> {
                 };
 
                 // Create the success synchronization.
-                let (success_source, success_token) = SuccessSource::new_valued(unsafe {
-                    alloc.cast::<Identify>().unwrap().into_value().unwrap()
-                });
+                let (success_source, success_token) = SuccessSource::new_valued(unsafe { memory });
 
                 // Pend command success synchronization, and submit.
                 pending_cmds.insert(command_id, success_source);
@@ -542,23 +554,19 @@ impl<'dev> Controller<'dev> {
         }
     }
 
-    pub fn flush_admin_commands(&mut self) {
-        self.admin_sub.lock().flush_commands();
-    }
-
     // TODO submit_command to use lpu::processor_id to index the submission and completion queues
 
     pub fn run(&self) -> ! {
         loop {
             let mut admin_com = self.admin_com.lock();
-            if let Some(completion) = admin_com.next_completion() {
+            if let Some(cmd_result) = admin_com.next_cmd_result() {
                 let mut pending_cmds = self.pending_cmds.lock();
                 let success_source = pending_cmds
-                    .remove(&completion.get_command_id())
+                    .remove(&cmd_result.get_command_id())
                     .expect("NVMe completion provided unknown command ID");
 
                 use command::{GenericStatus, StatusCode};
-                match completion.get_status().status_code() {
+                match cmd_result.get_status().status_code() {
                     StatusCode::Generic(GenericStatus::SuccessfulCompletion) => {
                         success_source.complete(true)
                     }
@@ -586,7 +594,7 @@ impl fmt::Debug for Controller<'_> {
 }
 
 pub enum PendingCommand {
-    Identify(ValuedSuccessToken<alloc::boxed::Box<command::admin::Identify>>),
+    Identify(ValuedSuccessToken<PageAlignedBox<MaybeUninit<command::admin::Identify>>>),
     Generic(SuccessToken),
 }
 
@@ -600,7 +608,7 @@ pub fn exec_driver() {
                 if device.class() == pci::DeviceClass::MassStorageController
                     && device.subclass() == 0x08 =>
             {
-                Some(Controller::from_device(&device, 4, 4))
+                Some(Controller::from_device_and_configure(&device, 4, 4))
             }
             _ => None,
         })

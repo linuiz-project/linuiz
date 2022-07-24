@@ -9,6 +9,8 @@ use liblz::{
 };
 use num_enum::TryFromPrimitive;
 
+pub trait QueueEntry: Copy {}
+
 #[repr(u8)]
 #[derive(TryFromPrimitive)]
 pub enum FuseOperation {
@@ -34,6 +36,7 @@ pub enum DataTransfer {
 }
 
 #[repr(C)]
+#[derive(Debug, Clone, Copy)]
 pub struct DataPointer(u64, u64);
 
 impl DataPointer {
@@ -48,6 +51,9 @@ impl DataPointer {
 
 #[repr(C)]
 // TODO make this pub(super) and remove Q
+//      ^^^^^^^^^^^^^^^^^^^^^^^^^
+//      what does this even mean?
+#[derive(Clone, Copy)]
 pub struct Command {
     pub opcode: u8,
     pub fuse_psdt: u8,
@@ -65,6 +71,7 @@ pub struct Command {
     pub cdw15: u32,
 }
 
+impl QueueEntry for Command {}
 impl Command {
     pub const fn opcode(&self) -> u8 {
         self.opcode
@@ -145,14 +152,15 @@ impl fmt::Debug for CompletionStatus {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct Completion {
+pub struct CommandResult {
     dw0: u32,
     dw1: u32,
     dw2: u32,
     dw3: u32,
 }
 
-impl Completion {
+impl QueueEntry for CommandResult {}
+impl CommandResult {
     pub fn get_sub_queue_id(&self) -> u16 {
         self.dw2.get_bits(16..32) as u16
     }
@@ -170,7 +178,7 @@ impl Completion {
     }
 }
 
-impl fmt::Debug for Completion {
+impl fmt::Debug for CommandResult {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("NVMe Command Completed")

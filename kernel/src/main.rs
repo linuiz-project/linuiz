@@ -14,7 +14,11 @@
     const_refs_to_cell,
     core_c_str,
     exclusive_range_pattern,
-    raw_vec_internals
+    raw_vec_internals,
+    allocator_api,
+    strict_provenance,
+    slice_ptr_get,
+    new_uninit
 )]
 
 #[macro_use]
@@ -85,13 +89,14 @@ impl Devices<'_> {
     }
 }
 
-// lazy_static::lazy_static! {
-//     pub static ref PCIE_DEVICES: Devices<'static> =
-//         Devices(
-//             liblz::io::pci::get_pcie_devices(memory::get_frame_manager(), &*crate::memory::PAGE_MANAGER, &*crate::memory::KMALLOC).collect(),
-//             &core::marker::PhantomData
-//         );
-// }
+// This might need to be in `liblz`? Or some.. more semantic access method
+lazy_static::lazy_static! {
+    pub static ref PCIE_DEVICES: Devices<'static> =
+        Devices(
+            liblz::io::pci::get_pcie_devices().collect(),
+            &core::marker::PhantomData
+        );
+}
 
 #[no_mangle]
 unsafe extern "sysv64" fn _entry() -> ! {
@@ -361,6 +366,24 @@ unsafe extern "C" fn _cpu_entry() -> ! {
     cpu_setup()
 }
 
+extern "C" fn new_nvme_handler(device_index: usize) -> ! {
+    if let liblz::io::pci::DeviceVariant::Standard(pcie_device) = &PCIE_DEVICES.0[device_index] {
+        let nvme_controller =
+            drivers::nvme::Controller::from_device_and_configure(pcie_device, 8, 8);
+
+        use drivers::nvme::command::admin::*;
+        nvme_controller.submit_admin_command(AdminCommand::Identify { ctrl_id: 0 });
+        nvme_controller.run()
+    } else {
+        error!(
+            "Given PCI device index was invalid for NVMe controller (index {}).",
+            device_index
+        );
+    }
+
+    liblz::instructions::hlt_indefinite()
+}
+
 fn one() -> ! {
     loop {
         info!("TEST1");
@@ -384,22 +407,22 @@ unsafe fn cpu_setup() -> ! {
 
         SCHEDULER.push_task(Task::new(
             TaskPriority::new(5).unwrap(),
-            one,
+            logging::flush_log_messages_indefinite,
             None,
             RFlags::INTERRUPT_FLAG,
             *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
             *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
             liblz::registers::control::CR3::read(),
         ));
-        // SCHEDULER.push_task(Task::new(
-        //     TaskPriority::new(7).unwrap(),
-        //     two,
-        //     None,
-        //     RFlags::INTERRUPT_FLAG,
-        //     *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
-        //     *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
-        //     liblz::registers::control::CR3::read(),
-        // ));
+        SCHEDULER.push_task(Task::new(
+            TaskPriority::new(7).unwrap(),
+            two,
+            None,
+            RFlags::INTERRUPT_FLAG,
+            *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
+            *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
+            liblz::registers::control::CR3::read(),
+        ));
         SCHEDULER.enable();
     }
 
