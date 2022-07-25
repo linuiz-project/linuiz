@@ -177,6 +177,7 @@ impl ExactSizeIterator for PageIterator {
 }
 
 bitflags::bitflags! {
+    #[repr(transparent)]
     pub struct PageAttributes: usize {
         const PRESENT = 1 << 0;
         const WRITABLE = 1 << 1;

@@ -3,6 +3,7 @@ use crate::{
 };
 
 bitflags::bitflags! {
+    #[repr(transparent)]
     pub struct SegmentFlags : u32 {
         const EXECUTABLE    = 1 << 0;
         const WRITABLE      = 1 << 1;

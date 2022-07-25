@@ -26,6 +26,7 @@ pub enum SectionType {
 }
 
 bitflags::bitflags! {
+    #[repr(transparent)]
     pub struct SectionAttributes : usize {
         const WRITE = 1 << 0;
         const ALLOC = 1 << 1;

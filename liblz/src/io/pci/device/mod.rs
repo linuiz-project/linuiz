@@ -8,7 +8,6 @@ use crate::{
     volatile_bitfield_getter, volatile_bitfield_getter_ro, ReadWrite,
 };
 use alloc::vec::Vec;
-use bitflags::bitflags;
 use core::{convert::TryFrom, fmt, marker::PhantomData};
 use num_enum::TryFromPrimitive;
 
@@ -94,7 +93,8 @@ pub enum DEVSELTiming {
     Slow = 0b10,
 }
 
-bitflags! {
+bitflags::bitflags! {
+    #[repr(transparent)]
     pub struct StatusRegister: u16 {
         const INTERRUPT_STATUS = 1 << 3;
         const CAPABILITIES = 1 << 4;

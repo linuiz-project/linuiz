@@ -29,7 +29,7 @@ impl CR0 {
             );
         }
 
-        CR0Flags::from_bits_truncate(value)
+        unsafe { CR0Flags::from_bits_unchecked(value) }
     }
 
     #[inline(always)]

@@ -27,6 +27,7 @@ pub enum ControllerPowerScope {
 }
 
 bitflags::bitflags! {
+    #[repr(transparent)]
     pub struct CommandSetsSupported: u8 {
         const NVM = 1 << 0;
         const IO = 1 << 6;
@@ -478,7 +479,7 @@ impl<'dev> Controller<'dev> {
         while csts.get_rdy() != enabled && !csts.get_cfs() && msec_waited < max_wait {
             const SLEEP_INTERVAL: u64 = 100;
 
-            crate::clock::global::busy_wait_msec(SLEEP_INTERVAL);
+            crate::clock::busy_wait_msec(SLEEP_INTERVAL);
             msec_waited += SLEEP_INTERVAL;
         }
 

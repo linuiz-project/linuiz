@@ -40,7 +40,7 @@ impl CR4 {
             );
         }
 
-        CR4Flags::from_bits_truncate(value)
+        unsafe { CR4Flags::from_bits_unchecked(value) }
     }
 
     #[inline(always)]

@@ -33,6 +33,7 @@ pub const MODEM_STATUS: u16 = 0x6;
 pub const SCRATCH: u16 = 0x7;
 
 bitflags::bitflags! {
+    #[repr(transparent)]
     pub struct LineStatus : u8 {
         const DATA_RECEIVED = 1 << 0;
         const OVERRUN_ERROR = 1 << 1;
@@ -46,6 +47,7 @@ bitflags::bitflags! {
 }
 
 bitflags::bitflags! {
+    #[repr(transparent)]
     pub struct LineControlFlags : u8 {
         const DATA_0 = 1 << 0;
         const DATA_1 = 1 << 1;

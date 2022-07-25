@@ -5,6 +5,7 @@ use crate::{
 };
 
 bitflags::bitflags! {
+    #[repr(transparent)]
     pub struct Flags: u32 {
         const PCAT_COMPAT = 1 << 0;
     }
@@ -127,6 +128,7 @@ impl core::fmt::Debug for InterruptDevice<'_> {
 }
 
 bitflags::bitflags! {
+    #[repr(transparent)]
     pub struct LocalAPICFlags: u8 {
         const PROCESSOR_ENABLED = 1 << 0;
         const ONLINE_CAPABLE = 1 << 1;

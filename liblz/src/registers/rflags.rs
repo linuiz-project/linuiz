@@ -60,7 +60,7 @@ bitflags! {
 impl RFlags {
     #[inline(always)]
     pub fn read() -> Self {
-        Self::from_bits_truncate(Self::read_raw())
+        unsafe { Self::from_bits_unchecked(Self::read_raw()) }
     }
 
     #[inline(always)]
@@ -81,8 +81,7 @@ impl RFlags {
 
     #[inline(always)]
     pub unsafe fn write(flags: Self, set: bool) {
-        // using `from_bits_unchecked` should retain reserved bits.
-        let mut old_flags = Self::from_bits_unchecked(Self::read_raw());
+        let mut old_flags = Self::read();
         old_flags.set(flags, set);
 
         core::arch::asm!(
