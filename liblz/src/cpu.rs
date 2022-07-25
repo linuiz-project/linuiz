@@ -664,6 +664,7 @@ pub fn get_id_cpuid() -> u32 {
 }
 
 /// Simple convenience wrapper function for retrieving x2/xAPIC ID.
+#[inline(always)]
 pub fn get_id() -> u32 {
     crate::structures::apic::get_id()
 }

@@ -38,7 +38,6 @@ mod tables;
 use alloc::vec::Vec;
 use core::sync::atomic::AtomicBool;
 use liblz::LinkerSymbol;
-use local_state::clock;
 
 extern "C" {
     static __code_start: LinkerSymbol;
@@ -151,11 +150,14 @@ unsafe extern "sysv64" fn _entry() -> ! {
             debug!("Detected {} processors.", cpus.len());
 
             for cpu_info in cpus {
-                debug!(
-                    "Starting processor: PID{}/LID{}",
-                    cpu_info.processor_id, cpu_info.lapic_id
-                );
-                cpu_info.goto_address = _cpu_entry as u64;
+                // Ensure we don't try to 'start' the BSP.
+                if cpu_info.lapic_id != smp_response.bsp_lapic_id {
+                    debug!(
+                        "Starting processor: PID{}/LID{}",
+                        cpu_info.processor_id, cpu_info.lapic_id
+                    );
+                    cpu_info.goto_address = _cpu_entry as u64;
+                }
             }
         }
     }
@@ -301,10 +303,10 @@ unsafe extern "C" fn _cpu_entry() -> ! {
     }
 
     if liblz::cpu::is_bsp() {
-        crate::clock::global::configure_and_enable();
+        crate::clock::configure_and_enable();
     }
 
-    local_state::create();
+    local_state::init();
     liblz::structures::apic::get_timer().set_masked(false);
     local_state::reload_timer(core::num::NonZeroU32::new(1).unwrap());
 
@@ -323,8 +325,11 @@ unsafe extern "C" fn _cpu_entry() -> ! {
             Box::leak(Box::new(TaskStateSegment::new())) as *mut TaskStateSegment
         };
 
-        tss_ptr.as_mut().unwrap().privilege_stack_table[0] =
-            x86_64::VirtAddr::from_ptr(crate::local_state::privilege_stack().as_ptr());
+        tss_ptr.as_mut().unwrap().privilege_stack_table[0] = x86_64::VirtAddr::from_ptr(
+            crate::local_state::privilege_stack()
+                .expect("cannot get privilege stack for TSS, local state has not been initialized")
+                .as_ptr(),
+        );
 
         let tss_descriptor = {
             use bit_field::BitField;
@@ -387,7 +392,7 @@ extern "C" fn new_nvme_handler(device_index: usize) -> ! {
 fn logging_test() -> ! {
     loop {
         info!("TEST");
-        clock::global::busy_wait_msec(500);
+        clock::busy_wait_msec(500);
     }
 }
 
@@ -430,8 +435,6 @@ unsafe fn cpu_setup() -> ! {
     //     use crate::tables::gdt;
     //     use liblz::registers::msr;
 
-    //     // Enable `syscall`/`sysret`.
-    //     msr::IA32_EFER::set_sce(true);
     //     // Configure system call environment registers.
     //     msr::IA32_STAR::set_selectors(
     //         *gdt::KCODE_SELECTOR.get().unwrap(),
@@ -439,6 +442,8 @@ unsafe fn cpu_setup() -> ! {
     //     );
     //     msr::IA32_LSTAR::set_syscall(syscall::syscall_enter);
     //     msr::IA32_SFMASK::set_rflags_mask(liblz::registers::RFlags::all());
+    //     // Enable `syscall`/`sysret`.
+    //     msr::IA32_EFER::set_sce(true);
     // }
 
     // liblz::registers::stack::RSP::write(liblz::memory::alloc_stack(1, true));

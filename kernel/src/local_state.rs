@@ -5,20 +5,30 @@ use liblz::{
     Address, Virtual,
 };
 
-#[repr(align(0x1000))]
+#[repr(C, align(0x1000))]
 pub(crate) struct LocalState {
+    // Stacks must go at the beginning of the structure to
+    // ensure their alignment is proper.
+    //
+    // Additionally, stack sizes must have the low 4 bits clear to
+    // ensure the next stack's alignment is proper.
+    privilege_stack: [u8; 0x100000],
+    db_stack: [u8; 0x4000],
+    nmi_stack: [u8; 0x4000],
+    df_stack: [u8; 0x4000],
+    mc_stack: [u8; 0x4000],
+    idle_stack: [u8; 0x100],
     magic: u32,
     default_task: Task,
     cur_task: Option<Task>,
     local_timer_per_ms: u32,
-    privilege_stack: [u8; 0x100000],
 }
 
 impl LocalState {
     const MAGIC: u32 = 0xD3ADC0DE;
 
     fn validate_init(&self) {
-        debug_assert!(self.magic == LocalState::MAGIC);
+        assert!(self.magic == LocalState::MAGIC);
     }
 }
 
@@ -33,7 +43,7 @@ static LOCAL_STATES_BASE: AtomicUsize = AtomicUsize::new(0);
 #[inline(always)]
 unsafe fn get_local_state_ptr() -> *mut LocalState {
     (LOCAL_STATES_BASE.load(Ordering::Relaxed) as *mut LocalState)
-        // TODO move to a core-local PML4 copy with an L4 local state mapping
+        // TODO move to a core-local PML4 copy with an L4 local state mapping ?? or maybe not
         .add(liblz::cpu::get_id() as usize)
 }
 
@@ -58,29 +68,23 @@ pub unsafe fn init() {
             )
             .as_usize(),
             Ordering::AcqRel,
-            Ordering::Relaxed,
+            Ordering::Acquire,
         )
         .ok();
 
     let local_state_ptr = get_local_state_ptr();
-
-    info!("1");
     {
         use liblz::memory::Page;
 
         // Map the pages this local state will utilize.
         let page_manager = liblz::memory::global_pmgr();
         let base_page = Page::from_ptr(local_state_ptr);
-        let end_page = Page::from_ptr(local_state_ptr.add(liblz::align_up_div(
-            core::mem::size_of::<LocalState>(),
-            0x1000,
-        )));
-
-        for page in base_page..end_page {
-            page_manager.auto_map(&page, liblz::memory::PageAttributes::DATA)
-        }
+        let end_page = base_page
+            .forward_checked(core::mem::size_of::<LocalState>() / 0x1000)
+            .unwrap();
+        (base_page..end_page)
+            .for_each(|page| page_manager.auto_map(&page, liblz::memory::PageAttributes::DATA));
     }
-    info!("2");
 
     /* CONFIGURE APIC */
     use crate::interrupts::Vector;
@@ -133,9 +137,14 @@ pub unsafe fn init() {
                 per_ms
             }
         };
-    info!("4");
 
-    local_state_ptr.write_volatile(LocalState {
+    local_state_ptr.write(LocalState {
+        privilege_stack: [0u8; 0x100000],
+        db_stack: [0u8; 0x4000],
+        nmi_stack: [0u8; 0x4000],
+        df_stack: [0u8; 0x4000],
+        mc_stack: [0u8; 0x4000],
+        idle_stack: [0u8; 0x100],
         magic: LocalState::MAGIC,
         default_task: Task::new(
             TaskPriority::new(1).unwrap(),
@@ -148,7 +157,6 @@ pub unsafe fn init() {
         ),
         cur_task: None,
         local_timer_per_ms: per_ms,
-        privilege_stack: [0u8; 0x100000],
     });
     local_state().unwrap().validate_init();
 }

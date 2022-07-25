@@ -1,6 +1,8 @@
 mod exceptions;
 mod stubs;
 
+//pub mod syscall;
+
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
 
 #[naked]
@@ -38,7 +40,7 @@ extern "x86-interrupt" fn irq_common(_: InterruptStackFrame) {
         lea rdx, [rsp + (17 * 8)]
         # Move cached gprs pointer into third parameter.
         mov r8, rsp
-    
+
         call {}
     
         pop rax
@@ -57,17 +59,18 @@ extern "x86-interrupt" fn irq_common(_: InterruptStackFrame) {
         pop r14
         pop r15
 
+        # 'Pop' interrupt vector and return pointer
         add rsp, 0x10
 
         iretq
         ",
-        sym irq_common_handoff,
+        sym irq_handoff,
         options(noreturn)
         );
     }
 }
 
-extern "win64" fn irq_common_handoff(
+extern "win64" fn irq_handoff(
     irq_vector: u8,
     isf: &mut InterruptStackFrame,
     cached_regs: *mut crate::scheduling::ThreadRegisters,
@@ -138,3 +141,8 @@ pub unsafe fn set_handler_fn(vector: Vector, handler: HandlerFunc) {
         INTERRUPT_HANDLERS.write()[vector as usize] = Some(handler);
     });
 }
+
+pub unsafe fn set_db_handler() {}
+pub unsafe fn set_nmi_handler() {}
+pub unsafe fn set_df_handler() {}
+pub unsafe fn set_mc_handler() {}

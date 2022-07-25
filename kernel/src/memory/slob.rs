@@ -181,7 +181,7 @@ impl<'map> SLOB<'map> {
             )
         };
         // Always set the 0th (null) page to full by default.
-        // Helps avoid some erros.
+        // Helps avoid some errors.
         table_write[0].set_full();
         // Mark the current table's pages as full within the table.
         table_write
@@ -277,7 +277,7 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
         }
 
         unsafe {
-            core::ptr::NonNull::new(core::slice::from_raw_parts_mut(
+            core::ptr::NonNull::new(core::ptr::slice_from_raw_parts_mut(
                 (start_block_index * Self::BLOCK_SIZE) as *mut u8,
                 layout.size(),
             ))

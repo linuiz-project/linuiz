@@ -4,7 +4,7 @@ qemu-system-x86_64 \
     -no-reboot \
     -machine q35,accel=kvm \
     -cpu host \
-    -smp 4 \
+    -smp 1 \
     -m 512M \
     -serial mon:stdio \
     -net none \
