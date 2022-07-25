@@ -325,11 +325,24 @@ unsafe extern "C" fn _cpu_entry() -> ! {
             Box::leak(Box::new(TaskStateSegment::new())) as *mut TaskStateSegment
         };
 
-        tss_ptr.as_mut().unwrap().privilege_stack_table[0] = x86_64::VirtAddr::from_ptr(
-            crate::local_state::privilege_stack()
-                .expect("cannot get privilege stack for TSS, local state has not been initialized")
-                .as_ptr(),
-        );
+        {
+            use x86_64::VirtAddr;
+
+            let tss = tss_ptr.as_mut().unwrap();
+
+            tss.privilege_stack_table[0] =
+                VirtAddr::from_ptr(local_state::privilege_stack_ptr().unwrap());
+
+            use interrupts::StackTableIndex;
+            tss.interrupt_stack_table[StackTableIndex::Debug as usize] =
+                VirtAddr::from_ptr(local_state::db_stack_ptr().unwrap());
+            tss.interrupt_stack_table[StackTableIndex::NonMaskable as usize] =
+                VirtAddr::from_ptr(local_state::nmi_stack_ptr().unwrap());
+            tss.interrupt_stack_table[StackTableIndex::DoubleFault as usize] =
+                VirtAddr::from_ptr(local_state::df_stack_ptr().unwrap());
+            tss.interrupt_stack_table[StackTableIndex::MachineCheck as usize] =
+                VirtAddr::from_ptr(local_state::mc_stack_ptr().unwrap());
+        }
 
         let tss_descriptor = {
             use bit_field::BitField;

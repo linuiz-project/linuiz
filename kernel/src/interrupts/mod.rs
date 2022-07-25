@@ -142,7 +142,11 @@ pub unsafe fn set_handler_fn(vector: Vector, handler: HandlerFunc) {
     });
 }
 
-pub unsafe fn set_db_handler() {}
-pub unsafe fn set_nmi_handler() {}
-pub unsafe fn set_df_handler() {}
-pub unsafe fn set_mc_handler() {}
+#[repr(usize)]
+#[derive(Debug, Clone, Copy)]
+pub enum StackTableIndex {
+    Debug = 0,
+    NonMaskable = 1,
+    DoubleFault = 2,
+    MachineCheck = 3,
+}

@@ -232,7 +232,11 @@ fn local_timer_handler(
     }
 }
 
+/// Reloads the local APIC timer with the given millisecond multiplier.
+///
 /// SAFETY: Caller is expected to only reload timer when appropriate.
+///
+/// REMARK: This function will panic if the local state structure is uninitialized.
 pub unsafe fn reload_timer(ms_multiplier: core::num::NonZeroU32) {
     liblz::structures::apic::set_timer_initial_count(
         ms_multiplier.get()
@@ -242,6 +246,27 @@ pub unsafe fn reload_timer(ms_multiplier: core::num::NonZeroU32) {
     );
 }
 
-pub fn privilege_stack() -> Option<&'static [u8]> {
-    local_state().map(|local_state| local_state.privilege_stack.as_ref())
+/// Returns a pointer to the top of the privilege stack, or `None` if local state is uninitialized.
+pub fn privilege_stack_ptr() -> Option<*const ()> {
+    local_state().map(|local_state| local_state.privilege_stack.as_ptr() as *const _)
+}
+
+/// Returns a pointer to the top of the #DB stack table, or `None` if local state is uninitialized.
+pub fn db_stack_ptr() -> Option<*const ()> {
+    local_state().map(|local_state| local_state.db_stack.as_ptr() as *const _)
+}
+
+/// Returns a pointer to the top of the #NMI stack, or `None` if local state is uninitialized.
+pub fn nmi_stack_ptr() -> Option<*const ()> {
+    local_state().map(|local_state| local_state.nmi_stack.as_ptr() as *const _)
+}
+
+/// Returns a pointer to the top of the #DF stack, or `None` if local state is uninitialized.
+pub fn df_stack_ptr() -> Option<*const ()> {
+    local_state().map(|local_state| local_state.df_stack.as_ptr() as *const _)
+}
+
+/// Returns a pointer to the top of the #MC stack, or `None` if local state is uninitialized.
+pub fn mc_stack_ptr() -> Option<*const ()> {
+    local_state().map(|local_state| local_state.mc_stack.as_ptr() as *const _)
 }

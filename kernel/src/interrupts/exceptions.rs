@@ -189,10 +189,24 @@ extern "x86-interrupt" fn security_exception_handler(
 // --- triple fault (can't handle)
 
 pub fn set_exception_handlers(idt: &mut x86_64::structures::idt::InterruptDescriptorTable) {
+    unsafe {
+        use super::StackTableIndex;
+
+        idt.debug
+            .set_handler_fn(debug_handler)
+            .set_stack_index(StackTableIndex::Debug as u16);
+        idt.non_maskable_interrupt
+            .set_handler_fn(non_maskable_interrupt_handler)
+            .set_stack_index(StackTableIndex::NonMaskable as u16);
+        idt.double_fault
+            .set_handler_fn(double_fault_handler)
+            .set_stack_index(StackTableIndex::DoubleFault as u16);
+        idt.machine_check
+            .set_handler_fn(machine_check_handler)
+            .set_stack_index(StackTableIndex::MachineCheck as u16);
+    }
+
     idt.divide_error.set_handler_fn(divide_error_handler);
-    idt.debug.set_handler_fn(debug_handler);
-    idt.non_maskable_interrupt
-        .set_handler_fn(non_maskable_interrupt_handler);
     idt.breakpoint.set_handler_fn(breakpoint_handler);
     idt.overflow.set_handler_fn(overflow_handler);
     idt.bound_range_exceeded
@@ -200,7 +214,6 @@ pub fn set_exception_handlers(idt: &mut x86_64::structures::idt::InterruptDescri
     idt.invalid_opcode.set_handler_fn(invalid_opcode_handler);
     idt.device_not_available
         .set_handler_fn(device_not_available_handler);
-    idt.double_fault.set_handler_fn(double_fault_handler);
     idt.invalid_tss.set_handler_fn(invalid_tss_handler);
     idt.segment_not_present
         .set_handler_fn(segment_not_present_handler);
@@ -213,7 +226,6 @@ pub fn set_exception_handlers(idt: &mut x86_64::structures::idt::InterruptDescri
     idt.x87_floating_point
         .set_handler_fn(x87_floating_point_handler);
     idt.alignment_check.set_handler_fn(alignment_check_handler);
-    idt.machine_check.set_handler_fn(machine_check_handler);
     idt.simd_floating_point
         .set_handler_fn(simd_floating_point_handler);
     idt.virtualization.set_handler_fn(virtualization_handler);
