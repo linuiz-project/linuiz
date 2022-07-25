@@ -413,12 +413,12 @@ fn logging_test() -> ! {
 unsafe fn cpu_setup() -> ! {
     if liblz::cpu::is_bsp() {
         use liblz::registers::RFlags;
-        use scheduling::{Task, TaskPriority, SCHEDULER};
+        use scheduling::*;
 
         SCHEDULER.push_task(Task::new(
             TaskPriority::new(5).unwrap(),
             logging::flush_log_messages_indefinite,
-            None,
+            TaskStackOption::AutoAllocate,
             RFlags::INTERRUPT_FLAG,
             *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
             *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
@@ -430,7 +430,7 @@ unsafe fn cpu_setup() -> ! {
             SCHEDULER.push_task(Task::new(
                 TaskPriority::new(7).unwrap(),
                 logging_test,
-                None,
+                TaskStackOption::AutoAllocate,
                 RFlags::INTERRUPT_FLAG,
                 *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
                 *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),

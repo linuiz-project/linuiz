@@ -12,12 +12,11 @@ pub(crate) struct LocalState {
     //
     // Additionally, stack sizes must have the low 4 bits clear to
     // ensure the next stack's alignment is proper.
-    privilege_stack: [u8; 0x100000],
-    db_stack: [u8; 0x4000],
-    nmi_stack: [u8; 0x4000],
-    df_stack: [u8; 0x4000],
-    mc_stack: [u8; 0x4000],
-    idle_stack: [u8; 0x100],
+    privilege_stack: [u8; 0x4000],
+    db_stack: [u8; 0x1000],
+    nmi_stack: [u8; 0x1000],
+    df_stack: [u8; 0x1000],
+    mc_stack: [u8; 0x1000],
     magic: u32,
     default_task: Task,
     cur_task: Option<Task>,
@@ -139,17 +138,16 @@ pub unsafe fn init() {
         };
 
     local_state_ptr.write(LocalState {
-        privilege_stack: [0u8; 0x100000],
-        db_stack: [0u8; 0x4000],
-        nmi_stack: [0u8; 0x4000],
-        df_stack: [0u8; 0x4000],
-        mc_stack: [0u8; 0x4000],
-        idle_stack: [0u8; 0x100],
+        privilege_stack: [0u8; 0x4000],
+        db_stack: [0u8; 0x1000],
+        nmi_stack: [0u8; 0x1000],
+        df_stack: [0u8; 0x1000],
+        mc_stack: [0u8; 0x1000],
         magic: LocalState::MAGIC,
         default_task: Task::new(
             TaskPriority::new(1).unwrap(),
             liblz::instructions::hlt_indefinite,
-            None,
+            crate::scheduling::TaskStackOption::AutoAllocate,
             RFlags::INTERRUPT_FLAG,
             *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
             *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),

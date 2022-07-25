@@ -95,36 +95,36 @@ pub fn rdrand64() -> Result<u64, RdRandError> {
 
 /// All documentation is identical to the `rdrand64` function variant.
 pub fn rdrand32() -> Result<u32, RdRandError> {
-        if crate::cpu::has_feature(crate::cpu::Feature::RDRAND) {
-            for _ in 0..22 {
-                let result: u32;
-                let rflags: u64;
-    
-                unsafe {
-                    asm!(
-                        "
+    if crate::cpu::has_feature(crate::cpu::Feature::RDRAND) {
+        for _ in 0..22 {
+            let result: u32;
+            let rflags: u64;
+
+            unsafe {
+                asm!(
+                    "
                         pushfq      # Save original `rflags`
                         rdrand {:e}
                         pushfq      # Save `rdrand` `rflags`
                         pop {}    # Pop `rflags` into local variable
                         popfq       # Restore original `rflags`
                         ",
-                        out(reg) result,
-                        out(reg) rflags,
-                        options(pure, nomem, preserves_flags)
-                    );
-                }
-    
-                use crate::registers::RFlags;
-                if result > 0 && RFlags::from_bits_truncate(rflags).contains(RFlags::CARRY_FLAG) {
-                    return Ok(result);
-                } else {
-                    pause();
-                }
+                    out(reg) result,
+                    out(reg) rflags,
+                    options(pure, nomem, preserves_flags)
+                );
             }
-    
-            Err(RdRandError::HardFailure)
-        } else {
-            Err(RdRandError::NotSupported)
+
+            use crate::registers::RFlags;
+            if result > 0 && RFlags::from_bits_truncate(rflags).contains(RFlags::CARRY_FLAG) {
+                return Ok(result);
+            } else {
+                pause();
+            }
         }
+
+        Err(RdRandError::HardFailure)
+    } else {
+        Err(RdRandError::NotSupported)
+    }
 }

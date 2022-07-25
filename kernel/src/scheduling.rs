@@ -1,7 +1,11 @@
 use alloc::boxed::Box;
-use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use core::{
+    mem::MaybeUninit,
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
+};
 use crossbeam_queue::SegQueue;
 use liblz::{
+    memory::StackAlignedBox,
     registers::{control::CR3Flags, RFlags},
     Address, Physical,
 };
@@ -70,6 +74,12 @@ impl TaskPriority {
     }
 }
 
+pub enum TaskStackOption {
+    AutoAllocate,
+    AllocateSized(usize),
+    Preallocated(StackAlignedBox<[MaybeUninit<u8>]>),
+}
+
 pub struct Task {
     id: u64,
     prio: TaskPriority,
@@ -79,24 +89,36 @@ pub struct Task {
     pub ss: u16,
     pub rfl: RFlags,
     pub gprs: ThreadRegisters,
-    pub stack: Box<[u8]>,
+    pub stack: StackAlignedBox<[MaybeUninit<u8>]>,
     pub cr3: (Address<Physical>, CR3Flags),
 }
 
 impl Task {
-    const DEFAULT_STACK_SIZE: usize = 0x1000;
+    const DEFAULT_STACK_SIZE: usize = 0x4000;
 
     pub fn new(
         priority: TaskPriority,
         function: fn() -> !,
-        stack: Option<Box<[u8]>>,
+        stack: TaskStackOption,
         rfl: RFlags,
         cs: SegmentSelector,
         ss: SegmentSelector,
         cr3: (Address<Physical>, CR3Flags),
     ) -> Self {
         let rip = function as u64;
-        let stack = stack.unwrap_or_else(|| Box::new([0u8; Self::DEFAULT_STACK_SIZE]));
+
+        let stack = match stack {
+            TaskStackOption::AutoAllocate => StackAlignedBox::new_uninit_slice_in(
+                Self::DEFAULT_STACK_SIZE,
+                liblz::memory::stack_aligned_allocator(),
+            ),
+
+            TaskStackOption::AllocateSized(len) => {
+                StackAlignedBox::new_uninit_slice_in(len, liblz::memory::stack_aligned_allocator())
+            }
+
+            TaskStackOption::Preallocated(stack) => stack,
+        };
 
         Self {
             id: NEXT_THREAD_ID.fetch_add(1, core::sync::atomic::Ordering::AcqRel),

@@ -298,5 +298,11 @@ pub fn page_aligned_allocator() -> AlignedAllocator<0x1000, alloc::alloc::Global
     AlignedAllocator::<0x1000, _>(alloc::alloc::Global)
 }
 
+pub fn stack_aligned_allocator() -> AlignedAllocator<0x10, alloc::alloc::Global> {
+    AlignedAllocator::<0x10, _>(alloc::alloc::Global)
+}
+
 /// Simple type alias for a page-aligned `Box<T>`.
 pub type PageAlignedBox<T> = alloc::boxed::Box<T, AlignedAllocator<0x1000, alloc::alloc::Global>>;
+
+pub type StackAlignedBox<T> = alloc::boxed::Box<T, AlignedAllocator<0x10, alloc::alloc::Global>>;
