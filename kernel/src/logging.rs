@@ -31,11 +31,12 @@ pub fn flush_log_messages_indefinite() -> ! {
         }
 
         // TODO this shouldn't be a busy wait, probably
-        crate::clock::global::busy_wait_msec(1);
+        crate::clock::busy_wait_msec(1);
     }
 }
 
 bitflags::bitflags! {
+    #[repr(transparent)]
     pub struct LoggingModes : u8 {
         const NONE = 0;
         const SERIAL = 1 << 0;
@@ -57,12 +58,12 @@ impl log::Log for KernelLogger {
             if LOG_MESSAGES_ENABLED.load(core::sync::atomic::Ordering::Relaxed) {
                 LOG_MESSAGES.push(LogMessage {
                     cpu: liblz::structures::apic::get_id(),
-                    timestamp: crate::clock::global::get_ticks(),
+                    timestamp: crate::clock::get_ticks(),
                     level: record.level(),
                     body: alloc::format!("{}", record.args()),
                 });
             } else {
-                let ticks = crate::clock::global::get_ticks();
+                let ticks = crate::clock::get_ticks();
                 let whole_time = ticks / 1000;
                 let frac_time = ticks % 1000;
 

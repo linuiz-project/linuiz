@@ -1,7 +1,4 @@
-use crate::{
-    clock::AtomicClock,
-    scheduling::{Task, TaskPriority},
-};
+use crate::scheduling::{Task, TaskPriority};
 use core::sync::atomic::{AtomicUsize, Ordering};
 use liblz::{
     registers::{control::CR3, RFlags},
@@ -9,25 +6,23 @@ use liblz::{
 };
 
 #[repr(align(0x1000))]
-struct LocalState {
-    magic: u64,
-    clock: AtomicClock,
+pub(crate) struct LocalState {
+    magic: u32,
     default_task: Task,
     cur_task: Option<Task>,
     local_timer_per_ms: u32,
-    syscall_stack: [u8; 0x4000],
-    privilege_stack: [u8; 0x4000],
+    privilege_stack: [u8; 0x100000],
 }
 
 impl LocalState {
-    const MAGIC: u64 = 0xFFFF_D3ADC0DE_FFFF;
+    const MAGIC: u32 = 0xD3ADC0DE;
 
     fn validate_init(&self) {
         debug_assert!(self.magic == LocalState::MAGIC);
     }
 }
 
-static LOCAL_STATE_PTRS_BASE: AtomicUsize = AtomicUsize::new(0);
+static LOCAL_STATES_BASE: AtomicUsize = AtomicUsize::new(0);
 
 /// Returns the pointer to the local state structure.
 ///
@@ -37,21 +32,21 @@ static LOCAL_STATE_PTRS_BASE: AtomicUsize = AtomicUsize::new(0);
 ///         are made as to whether this has been done or not.
 #[inline(always)]
 unsafe fn get_local_state_ptr() -> *mut LocalState {
-    (LOCAL_STATE_PTRS_BASE.load(Ordering::Relaxed) as *mut LocalState)
+    (LOCAL_STATES_BASE.load(Ordering::Relaxed) as *mut LocalState)
         // TODO move to a core-local PML4 copy with an L4 local state mapping
-        .add(liblz::structures::apic::get_id() as usize)
+        .add(liblz::cpu::get_id() as usize)
 }
 
 #[inline]
-fn local_state() -> &'static mut LocalState {
-    unsafe { get_local_state_ptr().as_mut().unwrap() }
+fn local_state() -> Option<&'static mut LocalState> {
+    unsafe { get_local_state_ptr().as_mut() }
 }
 
 /// Initializes the core-local state structure.
 ///
 /// SAFETY: This function invariantly assumes it will only be called once.
-pub unsafe fn create() {
-    LOCAL_STATE_PTRS_BASE
+pub unsafe fn init() {
+    LOCAL_STATES_BASE
         .compare_exchange(
             0,
             // Cosntruct the local state pointer (with slide) via the `Address` struct, to
@@ -69,6 +64,7 @@ pub unsafe fn create() {
 
     let local_state_ptr = get_local_state_ptr();
 
+    info!("1");
     {
         use liblz::memory::Page;
 
@@ -79,9 +75,12 @@ pub unsafe fn create() {
             core::mem::size_of::<LocalState>(),
             0x1000,
         )));
-        (base_page..end_page)
-            .for_each(|page| page_manager.auto_map(&page, liblz::memory::PageAttributes::DATA));
+
+        for page in base_page..end_page {
+            page_manager.auto_map(&page, liblz::memory::PageAttributes::DATA)
+        }
     }
+    info!("2");
 
     /* CONFIGURE APIC */
     use crate::interrupts::Vector;
@@ -95,7 +94,7 @@ pub unsafe fn create() {
     apic::get_error()
         .set_vector(Vector::Error as u8)
         .set_masked(false);
-    crate::interrupts::set_handler_fn(Vector::LocalTimer, local_clock_tick);
+    crate::interrupts::set_handler_fn(Vector::LocalTimer, local_timer_handler);
     apic::get_performance().set_vector(Vector::Performance as u8);
     apic::get_thermal_sensor().set_vector(Vector::ThermalSensor as u8);
     // LINT0&1 should be configured by the APIC reset.
@@ -122,9 +121,9 @@ pub unsafe fn create() {
                 const MS_WINDOW: u32 = 10;
                 // Wait on the global timer, to ensure we're starting the count
                 // on the rising edge of each millisecond.
-                crate::clock::global::busy_wait_msec(1);
+                crate::clock::busy_wait_msec(1);
                 apic::set_timer_initial_count(u32::MAX);
-                crate::clock::global::busy_wait_msec(MS_WINDOW as u64);
+                crate::clock::busy_wait_msec(MS_WINDOW as u64);
 
                 let per_ms = (u32::MAX - apic::get_timer_current_count()) / MS_WINDOW;
                 trace!(
@@ -134,10 +133,10 @@ pub unsafe fn create() {
                 per_ms
             }
         };
+    info!("4");
 
     local_state_ptr.write_volatile(LocalState {
         magic: LocalState::MAGIC,
-        clock: AtomicClock::new(),
         default_task: Task::new(
             TaskPriority::new(1).unwrap(),
             liblz::instructions::hlt_indefinite,
@@ -149,13 +148,12 @@ pub unsafe fn create() {
         ),
         cur_task: None,
         local_timer_per_ms: per_ms,
-        syscall_stack: [0u8; 0x4000],
-        privilege_stack: [0u8; 0x4000],
+        privilege_stack: [0u8; 0x100000],
     });
-    local_state().validate_init();
+    local_state().unwrap().validate_init();
 }
 
-fn local_clock_tick(
+fn local_timer_handler(
     stack_frame: &mut x86_64::structures::idt::InterruptStackFrame,
     cached_regs: *mut crate::scheduling::ThreadRegisters,
 ) {
@@ -164,15 +162,15 @@ fn local_clock_tick(
     const MIN_TIME_SLICE_MS: u32 = 1;
     const PRIO_TIME_SLICE_MS: u32 = 2;
 
-    let local_state = local_state();
-    local_state.clock.tick();
+    let local_state =
+        local_state().expect("local timer handler called before local state initialization");
 
     if let Some(mut cur_task) = local_state.cur_task.take() {
         cur_task.rip = stack_frame.instruction_pointer.as_u64();
         cur_task.cs = stack_frame.code_segment as u16;
         cur_task.rsp = stack_frame.stack_pointer.as_u64();
         cur_task.ss = stack_frame.stack_segment as u16;
-        cur_task.rfl = RFlags::from_bits_truncate(stack_frame.cpu_flags);
+        cur_task.rfl = unsafe { RFlags::from_bits_unchecked(stack_frame.cpu_flags) };
         cur_task.gprs = unsafe { cached_regs.read_volatile() };
         cur_task.cr3 = CR3::read();
 
@@ -201,8 +199,6 @@ fn local_clock_tick(
             let next_timer_ms = (next_task.prio().get() as u32) * PRIO_TIME_SLICE_MS;
             local_state.cur_task = Some(next_task);
 
-            //crate::print!(".");
-
             next_timer_ms
         } else {
             let default_task = &local_state.default_task;
@@ -220,7 +216,6 @@ fn local_clock_tick(
             // Set current page tables.
             CR3::write(default_task.cr3.0, default_task.cr3.1);
 
-            //crate::print!("!");
             MIN_TIME_SLICE_MS
         };
 
@@ -229,22 +224,16 @@ fn local_clock_tick(
     }
 }
 
-#[inline]
-pub fn clock() -> &'static AtomicClock {
-    &local_state().clock
-}
-
 /// SAFETY: Caller is expected to only reload timer when appropriate.
 pub unsafe fn reload_timer(ms_multiplier: core::num::NonZeroU32) {
     liblz::structures::apic::set_timer_initial_count(
-        ms_multiplier.get() * local_state().local_timer_per_ms,
+        ms_multiplier.get()
+            * local_state()
+                .expect("reload timer called for uninitialized local state")
+                .local_timer_per_ms,
     );
 }
 
-pub fn syscall_stack() -> &'static [u8] {
-    &local_state().syscall_stack
-}
-
-pub fn privilege_stack() -> &'static [u8] {
-    &local_state().privilege_stack
+pub fn privilege_stack() -> Option<&'static [u8]> {
+    local_state().map(|local_state| local_state.privilege_stack.as_ref())
 }
