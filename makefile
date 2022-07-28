@@ -8,7 +8,7 @@ PROFILE=release
 bootloader = ./.hdd/image/EFI/BOOT/BOOTX64.EFI
 bootloader_deps = $(shell find ./limine/common/ -type f -name "*")
 
-liblz_deps = $(shell find ./liblz/ -type f -name "*.rs")
+libkernel_deps = $(shell find ./libkernel/ -type f -name "*.rs")
 
 kernel = ./.hdd/image/EFI/linuiz/kernel.elf
 kernel_deps = $(shell find ./kernel/ -type f -name "*.rs")
@@ -38,13 +38,13 @@ rebuild: reset all
 
 clean:
 	cd ./kernel/ && cargo clean
-	cd ./liblz/ && cargo clean
+	cd ./libkernel/ && cargo clean
 
 update:
 	cd ./limine/ && git pull
 	rustup update
 	cd ./kernel/ && cargo update
-	cd ./liblz/ && cargo update
+	cd ./libkernel/ && cargo update
 
 
 ## Dependency paths
@@ -54,7 +54,7 @@ $(bootloader): ./resources/BOOTX64.EFI ./resources/limine.cfg
 	cp ./resources/BOOTX64.EFI ./.hdd/image/EFI/BOOT/
 	cp ./resources/limine.cfg ./.hdd/image/EFI/BOOT/
 
-$(kernel): $(kernel_deps) $(liblz_deps) $(kernel_linker_args)
+$(kernel): $(kernel_deps) $(libkernel_deps) $(kernel_linker_args)
 	cd ./kernel/ && cargo fmt && cargo build --profile $(PROFILE) -Z unstable-options
 	objdump -D .hdd/image/linuiz/kernel.elf > .debug/kernel_disasm
 

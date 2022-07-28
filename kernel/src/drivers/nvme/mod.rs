@@ -4,7 +4,7 @@ pub mod queue;
 use alloc::{boxed::Box, collections::BTreeMap};
 use bit_field::BitField;
 use core::{convert::TryFrom, fmt, marker::PhantomData, mem::MaybeUninit, sync::atomic::AtomicU16};
-use liblz::{
+use libkernel::{
     io::pci::{standard::StandardRegister, PCIeDevice, Standard},
     memory::{
         page_aligned_allocator,
@@ -329,7 +329,7 @@ pub enum ControllerEnableError {
 
 pub struct Controller<'dev> {
     device: &'dev PCIeDevice<Standard>,
-    msix: liblz::io::pci::standard::MSIX<'dev>,
+    msix: libkernel::io::pci::standard::MSIX<'dev>,
     next_sub_queue_id: AtomicU16,
     next_com_queue_id: AtomicU16,
     admin_sub: Mutex<queue::Queue<'dev, queue::Submission>>,
@@ -402,13 +402,13 @@ impl<'dev> Controller<'dev> {
         nvme.msix.set_enable(true);
         nvme.msix.set_function_mask(false);
         nvme.msix[0].configure(
-            unsafe { liblz::cpu::get_id() as u8 },
+            unsafe { libkernel::cpu::get_id() as u8 },
             // Specific vector should be dynamically selected
             // TODO possibly dynamically selected with special attributes per vector?
             //      i.e. separate interrupts for completions, DMA, etc.
             //      or a single interrupts per device? ***** this seems limiting
             crate::interrupts::Vector::Storage0 as u8,
-            liblz::InterruptDeliveryMode::Fixed,
+            libkernel::InterruptDeliveryMode::Fixed,
         );
         nvme.msix[0].set_masked(false);
 
@@ -524,8 +524,8 @@ impl<'dev> Controller<'dev> {
                 // Allocate the necessary memory for returning the command value.
                 let memory = PageAlignedBox::<Identify>::new_uninit_in(page_aligned_allocator());
                 let phys_addr = Address::<Physical>::new(
-                    liblz::memory::global_pmgr()
-                        .get_mapped_to(&liblz::memory::Page::from_ptr(memory.as_ptr()))
+                    libkernel::memory::global_pmgr()
+                        .get_mapped_to(&libkernel::memory::Page::from_ptr(memory.as_ptr()))
                         .unwrap(),
                 );
 
@@ -604,7 +604,7 @@ pub enum PendingCommand {
 }
 
 pub fn exec_driver() {
-    use liblz::io::pci;
+    use libkernel::io::pci;
 
     let nvme: Controller = crate::PCIE_DEVICES
         .iter()

@@ -22,7 +22,7 @@ pub fn syscall_interrupt_handler(
 ) {
     let control_ptr = gprs.rdi as *mut Control;
 
-    if !liblz::memory::global_pmgr()
+    if !crate::memory::global_pmgr()
         .is_mapped(crate::Address::<crate::Virtual>::from_ptr(control_ptr))
     {
         gprs.rsi = Error::ControlNotMapped as u64;

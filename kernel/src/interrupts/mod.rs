@@ -71,7 +71,7 @@ extern "x86-interrupt" fn irq_common(_: InterruptStackFrame) {
 extern "win64" fn irq_handoff(
     irq_vector: u8,
     isf: &mut InterruptStackFrame,
-    cached_regs: &mut crate::scheduling::ThreadRegisters,
+    cached_regs: &mut libkernel::ThreadRegisters,
 ) {
     if let Some(handler) = INTERRUPT_HANDLERS.read()[irq_vector as usize] {
         handler(isf, cached_regs);
@@ -81,7 +81,7 @@ extern "win64" fn irq_handoff(
 static mut IDT: spin::Mutex<InterruptDescriptorTable> =
     spin::Mutex::new(InterruptDescriptorTable::new());
 
-pub type HandlerFunc = fn(&mut InterruptStackFrame, &mut crate::scheduling::ThreadRegisters);
+pub type HandlerFunc = fn(&mut InterruptStackFrame, &mut libkernel::ThreadRegisters);
 static INTERRUPT_HANDLERS: spin::RwLock<[Option<HandlerFunc>; 256]> =
     spin::RwLock::new([None; 256]);
 
@@ -136,7 +136,7 @@ pub unsafe fn set_handler_fn(vector: Vector, handler: HandlerFunc) {
         "Cannot assign IDT handlers before GDT init (IDT entries use GDT kernel code segment selector)."
     );
 
-    liblz::instructions::interrupts::without_interrupts(|| {
+    libkernel::instructions::interrupts::without_interrupts(|| {
         INTERRUPT_HANDLERS.write()[vector as usize] = Some(handler);
     });
 }

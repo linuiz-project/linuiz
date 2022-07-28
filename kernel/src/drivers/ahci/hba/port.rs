@@ -1,6 +1,6 @@
 use bit_field::BitField;
 use core::convert::TryFrom;
-use liblz::{
+use libkernel::{
     memory::volatile::{Volatile, VolatileCell, VolatileSplitPtr},
     volatile_bitfield_getter, volatile_bitfield_getter_ro, Address, ReadOnly, ReadWrite,
 };
@@ -306,7 +306,7 @@ impl Port {
 
         let cmd_list_byte_len = core::mem::size_of::<super::Command>() * 32;
         let cmd_list_ptr = unsafe {
-            liblz::memory::malloc::get()
+            libkernel::memory::malloc::get()
                 .alloc(cmd_list_byte_len, core::num::NonZeroUsize::new(128))
                 .unwrap()
                 .into_parts()
@@ -319,7 +319,7 @@ impl Port {
 
         let fis_byte_len = 1024;
         let fis_base = unsafe {
-            liblz::memory::malloc::get()
+            libkernel::memory::malloc::get()
                 .alloc(cmd_list_byte_len, core::num::NonZeroUsize::new(128))
                 .unwrap()
                 .into_parts()
@@ -395,4 +395,4 @@ impl Port {
     // pub fn write(&mut self, sector_base: usize, data: &[u8]) {}
 }
 
-impl liblz::memory::volatile::Volatile for Port {}
+impl libkernel::memory::volatile::Volatile for Port {}

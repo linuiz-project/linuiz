@@ -20,12 +20,12 @@ impl AtomicClock {
     }
 }
 
-use liblz::structures::pic8259;
+use libkernel::structures::pic8259;
 
 static GLOBAL_CLOCK: AtomicClock = AtomicClock::new();
 
 pub fn configure_and_enable() {
-    liblz::instructions::interrupts::without_interrupts(|| {
+    libkernel::instructions::interrupts::without_interrupts(|| {
         pic8259::pit::set_timer_freq(1000, pic8259::pit::OperatingMode::RateGenerator);
         pic8259::enable(pic8259::InterruptLines::TIMER);
 
@@ -40,7 +40,7 @@ pub fn configure_and_enable() {
 
 fn global_timer_handler(
     _: &mut x86_64::structures::idt::InterruptStackFrame,
-    _: &mut crate::scheduling::ThreadRegisters,
+    _: &mut libkernel::ThreadRegisters,
 ) {
     GLOBAL_CLOCK.tick();
 
@@ -56,6 +56,6 @@ pub fn get_ticks() -> u64 {
 pub fn busy_wait_msec(milliseconds: u64) {
     let target_ticks = get_ticks() + milliseconds;
     while get_ticks() <= target_ticks {
-        liblz::instructions::pause();
+        libkernel::instructions::pause();
     }
 }

@@ -4,11 +4,10 @@ use core::{
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use crossbeam_queue::SegQueue;
-use liblz::{
-    ThreadRegisters,
+use libkernel::{
     memory::StackAlignedBox,
     registers::{control::CR3Flags, RFlags},
-    Address, Physical,
+    Address, Physical, ThreadRegisters,
 };
 use x86_64::registers::segmentation::SegmentSelector;
 
@@ -69,12 +68,13 @@ impl Task {
         let stack = match stack {
             TaskStackOption::AutoAllocate => StackAlignedBox::new_uninit_slice_in(
                 Self::DEFAULT_STACK_SIZE,
-                liblz::memory::stack_aligned_allocator(),
+                libkernel::memory::stack_aligned_allocator(),
             ),
 
-            TaskStackOption::AllocateSized(len) => {
-                StackAlignedBox::new_uninit_slice_in(len, liblz::memory::stack_aligned_allocator())
-            }
+            TaskStackOption::AllocateSized(len) => StackAlignedBox::new_uninit_slice_in(
+                len,
+                libkernel::memory::stack_aligned_allocator(),
+            ),
 
             TaskStackOption::Preallocated(stack) => stack,
         };

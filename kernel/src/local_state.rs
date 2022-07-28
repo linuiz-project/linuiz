@@ -1,6 +1,6 @@
 use crate::scheduling::{Task, TaskPriority};
 use core::sync::atomic::{AtomicUsize, Ordering};
-use liblz::{
+use libkernel::{
     registers::{control::CR3, RFlags},
     Address, Virtual,
 };
@@ -43,7 +43,7 @@ static LOCAL_STATES_BASE: AtomicUsize = AtomicUsize::new(0);
 unsafe fn get_local_state_ptr() -> *mut LocalState {
     (LOCAL_STATES_BASE.load(Ordering::Relaxed) as *mut LocalState)
         // TODO move to a core-local PML4 copy with an L4 local state mapping ?? or maybe not
-        .add(liblz::cpu::get_id() as usize)
+        .add(libkernel::cpu::get_id() as usize)
 }
 
 #[inline]
@@ -61,8 +61,8 @@ pub unsafe fn init() {
             // Cosntruct the local state pointer (with slide) via the `Address` struct, to
             // automatically sign extend.
             Address::<Virtual>::new(
-                ((510 * liblz::memory::PML4_ENTRY_MEM_SIZE)
-                    + (liblz::instructions::rdrand32().unwrap() as usize))
+                ((510 * libkernel::memory::PML4_ENTRY_MEM_SIZE)
+                    + (libkernel::instructions::rdrand32().unwrap() as usize))
                     & !0xFFF,
             )
             .as_usize(),
@@ -73,21 +73,21 @@ pub unsafe fn init() {
 
     let local_state_ptr = get_local_state_ptr();
     {
-        use liblz::memory::Page;
+        use libkernel::memory::Page;
 
         // Map the pages this local state will utilize.
-        let page_manager = liblz::memory::global_pmgr();
+        let page_manager = libkernel::memory::global_pmgr();
         let base_page = Page::from_ptr(local_state_ptr);
         let end_page = base_page
             .forward_checked(core::mem::size_of::<LocalState>() / 0x1000)
             .unwrap();
         (base_page..end_page)
-            .for_each(|page| page_manager.auto_map(&page, liblz::memory::PageAttributes::DATA));
+            .for_each(|page| page_manager.auto_map(&page, libkernel::memory::PageAttributes::DATA));
     }
 
     /* CONFIGURE APIC */
     use crate::interrupts::Vector;
-    use liblz::structures::apic;
+    use libkernel::structures::apic;
 
     apic::software_reset();
     apic::set_timer_divisor(apic::TimerDivisor::Div1);
@@ -103,39 +103,38 @@ pub unsafe fn init() {
     // LINT0&1 should be configured by the APIC reset.
 
     // Ensure interrupts are completely enabled after APIC is reset.
-    liblz::registers::msr::IA32_APIC_BASE::set_hw_enable(true);
-    liblz::instructions::interrupts::enable();
-    liblz::structures::apic::sw_enable();
+    libkernel::registers::msr::IA32_APIC_BASE::set_hw_enable(true);
+    libkernel::instructions::interrupts::enable();
+    libkernel::structures::apic::sw_enable();
 
-    let per_ms =
+    let per_ms = {
+        if let Some(registers) = libkernel::instructions::cpuid::exec(0x15, 0x0)
+            .and_then(|result| if result.ebx() > 0 { Some(result) } else { None })
+        // Attempt to calculate a concrete frequency via CPUID.
         {
-            if let Some(registers) = liblz::instructions::cpuid::exec(0x15, 0x0)
-                .and_then(|result| if result.ebx() > 0 { Some(result) } else { None })
-            // Attempt to calculate a concrete frequency via CPUID.
-            {
-                let per_ms = registers.ecx() * (registers.ebx() / registers.eax());
-                trace!("CPU clock frequency reporting: {} Hz", per_ms);
-                per_ms
-            } else
-            // Otherwise, determine frequency with external measurements.
-            {
-                trace!("CPU does not support clock frequency reporting via CPUID.");
+            let per_ms = registers.ecx() * (registers.ebx() / registers.eax());
+            trace!("CPU clock frequency reporting: {} Hz", per_ms);
+            per_ms
+        } else
+        // Otherwise, determine frequency with external measurements.
+        {
+            trace!("CPU does not support clock frequency reporting via CPUID.");
 
-                const MS_WINDOW: u32 = 10;
-                // Wait on the global timer, to ensure we're starting the count
-                // on the rising edge of each millisecond.
-                crate::clock::busy_wait_msec(1);
-                apic::set_timer_initial_count(u32::MAX);
-                crate::clock::busy_wait_msec(MS_WINDOW as u64);
+            const MS_WINDOW: u32 = 10;
+            // Wait on the global timer, to ensure we're starting the count
+            // on the rising edge of each millisecond.
+            crate::clock::busy_wait_msec(1);
+            apic::set_timer_initial_count(u32::MAX);
+            crate::clock::busy_wait_msec(MS_WINDOW as u64);
 
-                let per_ms = (u32::MAX - apic::get_timer_current_count()) / MS_WINDOW;
-                trace!(
-                    "CPU clock frequency measurement: {} Hz",
-                    per_ms * (1000 / MS_WINDOW)
-                );
-                per_ms
-            }
-        };
+            let per_ms = (u32::MAX - apic::get_timer_current_count()) / MS_WINDOW;
+            trace!(
+                "CPU clock frequency measurement: {} Hz",
+                per_ms * (1000 / MS_WINDOW)
+            );
+            per_ms
+        }
+    };
 
     local_state_ptr.write(LocalState {
         privilege_stack: [0u8; 0x4000],
@@ -146,7 +145,7 @@ pub unsafe fn init() {
         magic: LocalState::MAGIC,
         default_task: Task::new(
             TaskPriority::new(1).unwrap(),
-            liblz::instructions::hlt_indefinite,
+            libkernel::instructions::hlt_indefinite,
             crate::scheduling::TaskStackOption::AutoAllocate,
             RFlags::INTERRUPT_FLAG,
             *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
@@ -161,7 +160,7 @@ pub unsafe fn init() {
 
 fn local_timer_handler(
     stack_frame: &mut x86_64::structures::idt::InterruptStackFrame,
-    cached_regs: &mut crate::scheduling::ThreadRegisters,
+    cached_regs: &mut libkernel::ThreadRegisters,
 ) {
     use crate::scheduling::SCHEDULER;
 
@@ -226,7 +225,7 @@ fn local_timer_handler(
         };
 
         reload_timer(core::num::NonZeroU32::new(next_timer_ms).unwrap());
-        liblz::structures::apic::end_of_interrupt();
+        libkernel::structures::apic::end_of_interrupt();
     }
 }
 
@@ -236,7 +235,7 @@ fn local_timer_handler(
 ///
 /// REMARK: This function will panic if the local state structure is uninitialized.
 pub unsafe fn reload_timer(ms_multiplier: core::num::NonZeroU32) {
-    liblz::structures::apic::set_timer_initial_count(
+    libkernel::structures::apic::set_timer_initial_count(
         ms_multiplier.get()
             * local_state()
                 .expect("reload timer called for uninitialized local state")

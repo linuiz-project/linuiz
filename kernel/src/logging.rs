@@ -57,7 +57,7 @@ impl log::Log for KernelLogger {
         if self.enabled(record.metadata()) {
             if LOG_MESSAGES_ENABLED.load(core::sync::atomic::Ordering::Relaxed) {
                 LOG_MESSAGES.push(LogMessage {
-                    cpu: liblz::structures::apic::get_id(),
+                    cpu: libkernel::structures::apic::get_id(),
                     timestamp: crate::clock::get_ticks(),
                     level: record.level(),
                     body: alloc::format!("{}", record.args()),
@@ -72,7 +72,7 @@ impl log::Log for KernelLogger {
                     "[{:wwidth$}.{:0fwidth$}][CPU{}][{}] {}",
                     whole_time,
                     frac_time,
-                    liblz::structures::apic::get_id(),
+                    libkernel::structures::apic::get_id(),
                     record.level(),
                     record.args(),
                     wwidth = 4,

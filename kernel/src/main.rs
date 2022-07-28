@@ -24,7 +24,7 @@
 #[macro_use]
 extern crate log;
 extern crate alloc;
-extern crate liblz;
+extern crate libkernel;
 
 mod clock;
 mod drivers;
@@ -37,7 +37,7 @@ mod tables;
 
 use alloc::vec::Vec;
 use core::sync::atomic::AtomicBool;
-use liblz::LinkerSymbol;
+use libkernel::LinkerSymbol;
 
 extern "C" {
     static __code_start: LinkerSymbol;
@@ -79,7 +79,7 @@ lazy_static::lazy_static! {
     pub static ref KMALLOC: memory::SLOB<'static> = unsafe { memory::SLOB::new() };
 }
 
-use liblz::io::pci;
+use libkernel::io::pci;
 pub struct Devices<'a>(Vec<pci::DeviceVariant>, &'a core::marker::PhantomData<()>);
 unsafe impl Send for Devices<'_> {}
 unsafe impl Sync for Devices<'_> {}
@@ -90,11 +90,11 @@ impl Devices<'_> {
     }
 }
 
-// This might need to be in `liblz`? Or some.. more semantic access method
+// This might need to be in `libkernel`? Or some.. more semantic access method
 lazy_static::lazy_static! {
     pub static ref PCIE_DEVICES: Devices<'static> =
         Devices(
-            liblz::io::pci::get_pcie_devices().collect(),
+            libkernel::io::pci::get_pcie_devices().collect(),
             &core::marker::PhantomData
         );
 }
@@ -106,7 +106,7 @@ unsafe extern "sysv64" fn _entry() -> ! {
         Ok(()) => {
             info!("Successfully loaded into kernel, with logging enabled.");
         }
-        Err(_) => liblz::instructions::interrupts::breakpoint(),
+        Err(_) => libkernel::instructions::interrupts::breakpoint(),
     }
 
     /* log boot info */
@@ -121,16 +121,16 @@ unsafe extern "sysv64" fn _entry() -> ! {
             boot_info.revision,
             core::ffi::CStr::from_ptr(boot_info.version.as_ptr().unwrap() as *const _)
         );
-        info!("CPU Vendor          {}", liblz::cpu::VENDOR);
+        info!("CPU Vendor          {}", libkernel::cpu::VENDOR);
         info!(
             "CPU x2APIC          {}",
-            if liblz::registers::msr::IA32_APIC_BASE::is_x2_mode() {
+            if libkernel::registers::msr::IA32_APIC_BASE::is_x2_mode() {
                 "Yes"
             } else {
                 "No"
             }
         );
-        info!("CPU Features        {:?}", liblz::cpu::FeatureFmt);
+        info!("CPU Features        {:?}", libkernel::cpu::FeatureFmt);
     }
 
     /* prepare APs for startup */
@@ -165,9 +165,9 @@ unsafe extern "sysv64" fn _entry() -> ! {
 
     /* load RSDP pointer */
     {
-        // TODO Possibly move ACPI structure instances out of liblz?
+        // TODO Possibly move ACPI structure instances out of libkernel?
         // Set RSDP pointer, so ACPI can be used.
-        liblz::acpi::set_rsdp_ptr(
+        libkernel::acpi::set_rsdp_ptr(
             LIMINE_RSDP
                 .get_response()
                 .get()
@@ -180,7 +180,7 @@ unsafe extern "sysv64" fn _entry() -> ! {
 
     /* init memory */
     {
-        use liblz::memory::Page;
+        use libkernel::memory::Page;
 
         let memory_map = LIMINE_MMAP
             .get_response()
@@ -190,28 +190,28 @@ unsafe extern "sysv64" fn _entry() -> ! {
 
         trace!("Initializing memory managers.");
         // Frame manager is always initialized first, so memory structures may allocate frames.
-        liblz::memory::init_frame_manager(memory_map);
+        libkernel::memory::init_frame_manager(memory_map);
         let hhdm_offset = LIMINE_HHDM
             .get_response()
             .get()
             .expect("bootloader did not provide a higher half direct mapping")
             .offset as usize;
         let hhdm_page = Page::from_index(hhdm_offset / 0x1000);
-        liblz::memory::init_page_manager(&hhdm_page, false);
+        libkernel::memory::init_page_manager(&hhdm_page, false);
         // The frame manager's allocation table is allocated with identity mapping assumed,
         // so before we unmap the lower half virtual memory mapping, we must ensure the
         // frame manager uses the HHDM base.
-        liblz::memory::global_fmgr().slide_table_base(hhdm_offset);
+        libkernel::memory::global_fmgr().slide_table_base(hhdm_offset);
 
         trace!("Unmapping lower half identity mappings.");
-        let global_pmgr = liblz::memory::global_pmgr();
+        let global_pmgr = libkernel::memory::global_pmgr();
         for entry in memory_map.iter() {
             for page in (entry.base..(entry.base + entry.len))
                 .step_by(0x1000)
                 .map(|base| Page::from_index((base / 0x1000) as usize))
             {
                 global_pmgr
-                    .unmap(&page, liblz::memory::FrameOwnership::None)
+                    .unmap(&page, libkernel::memory::FrameOwnership::None)
                     .ok();
             }
         }
@@ -219,7 +219,7 @@ unsafe extern "sysv64" fn _entry() -> ! {
         // The global kernel allocator must be set AFTER the upper half
         // identity mappings are purged, so that the allocation table
         // isn't unmapped.
-        liblz::memory::global_alloc::set(&*KMALLOC);
+        libkernel::memory::global_alloc::set(&*KMALLOC);
     }
 
     debug!("Finished initial kernel setup.");
@@ -233,15 +233,15 @@ unsafe extern "C" fn _cpu_entry() -> ! {
 
     /* load registers */
     {
-        use liblz::cpu::{has_feature, Feature};
+        use libkernel::cpu::{has_feature, Feature};
 
         // Set CR0 flags.
-        use liblz::registers::control::{CR0Flags, CR0};
+        use libkernel::registers::control::{CR0Flags, CR0};
         CR0::write(
             CR0Flags::PE | CR0Flags::MP | CR0Flags::ET | CR0Flags::NE | CR0Flags::WP | CR0Flags::PG,
         );
         // Set CR4 flags.
-        use liblz::registers::control::{CR4Flags, CR4};
+        use libkernel::registers::control::{CR4Flags, CR4};
         CR4::write(
             CR4Flags::DE
                 | CR4Flags::PAE
@@ -259,12 +259,12 @@ unsafe extern "C" fn _cpu_entry() -> ! {
 
         // Enable use of the `NO_EXECUTE` page attribute, if supported.
         if has_feature(Feature::NXE) {
-            liblz::registers::msr::IA32_EFER::set_nxe(true);
+            libkernel::registers::msr::IA32_EFER::set_nxe(true);
         } else {
             warn!("PC does not support the NX bit; system security will be compromised (this warning is purely informational).")
         }
 
-        liblz::instructions::interrupts::enable();
+        libkernel::instructions::interrupts::enable();
     }
 
     /* load tables */
@@ -272,7 +272,7 @@ unsafe extern "C" fn _cpu_entry() -> ! {
         // Always initialize GDT prior to configuring IDT.
         tables::gdt::init();
 
-        if liblz::cpu::is_bsp() {
+        if libkernel::cpu::is_bsp() {
             // Due to the fashion in which the `x86_64` crate initializes the IDT entries,
             // it must be ensured that the handlers are set only *after* the GDT has been
             // properly initialized and loaded—otherwise, the `CS` value for the IDT entries
@@ -281,28 +281,28 @@ unsafe extern "C" fn _cpu_entry() -> ! {
 
             fn apit_empty(
                 _: &mut x86_64::structures::idt::InterruptStackFrame,
-                _: &mut scheduling::ThreadRegisters,
+                _: &mut libkernel::ThreadRegisters,
             ) {
-                liblz::structures::apic::end_of_interrupt();
+                libkernel::structures::apic::end_of_interrupt();
             }
 
             interrupts::set_handler_fn(interrupts::Vector::LINT0_VECTOR, apit_empty);
             interrupts::set_handler_fn(interrupts::Vector::LINT1_VECTOR, apit_empty);
             interrupts::set_handler_fn(
                 interrupts::Vector::Syscall,
-                interrupts::syscall::syscall_interrupt_handler,
+                libkernel::syscall::syscall_interrupt_handler,
             );
         }
 
         interrupts::load_idt();
     }
 
-    if liblz::cpu::is_bsp() {
+    if libkernel::cpu::is_bsp() {
         crate::clock::configure_and_enable();
     }
 
     local_state::init();
-    liblz::structures::apic::get_timer().set_masked(false);
+    libkernel::structures::apic::get_timer().set_masked(false);
     local_state::reload_timer(core::num::NonZeroU32::new(1).unwrap());
 
     /* load tss */
@@ -380,7 +380,8 @@ unsafe extern "C" fn _cpu_entry() -> ! {
 }
 
 extern "C" fn new_nvme_handler(device_index: usize) -> ! {
-    if let liblz::io::pci::DeviceVariant::Standard(pcie_device) = &PCIE_DEVICES.0[device_index] {
+    if let libkernel::io::pci::DeviceVariant::Standard(pcie_device) = &PCIE_DEVICES.0[device_index]
+    {
         let nvme_controller =
             drivers::nvme::Controller::from_device_and_configure(pcie_device, 8, 8);
 
@@ -394,7 +395,7 @@ extern "C" fn new_nvme_handler(device_index: usize) -> ! {
         );
     }
 
-    liblz::instructions::hlt_indefinite()
+    libkernel::instructions::hlt_indefinite()
 }
 
 fn logging_test() -> ! {
@@ -405,9 +406,9 @@ fn logging_test() -> ! {
 }
 
 fn syscall_test() -> ! {
-    use interrupts::syscall::*;
-    let control = interrupts::syscall::Control {
-        id: ID::Test,
+    use libkernel::syscall;
+    let control = syscall::Control {
+        id: syscall::ID::Test,
         blah: 0xD3ADC0D3,
     };
 
@@ -432,8 +433,8 @@ fn syscall_test() -> ! {
 
 #[inline(never)]
 unsafe fn cpu_setup() -> ! {
-    if liblz::cpu::is_bsp() {
-        use liblz::registers::RFlags;
+    if libkernel::cpu::is_bsp() {
+        use libkernel::registers::RFlags;
         use scheduling::*;
 
         SCHEDULER.push_task(Task::new(
@@ -443,7 +444,7 @@ unsafe fn cpu_setup() -> ! {
             RFlags::INTERRUPT_FLAG,
             *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
             *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
-            liblz::registers::control::CR3::read(),
+            libkernel::registers::control::CR3::read(),
         ));
 
         SCHEDULER.push_task(Task::new(
@@ -453,7 +454,7 @@ unsafe fn cpu_setup() -> ! {
             RFlags::INTERRUPT_FLAG,
             *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
             *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
-            liblz::registers::control::CR3::read(),
+            libkernel::registers::control::CR3::read(),
         ));
 
         // Add a number of test tasks to get kernel output, test scheduling, and test logging.
@@ -465,19 +466,19 @@ unsafe fn cpu_setup() -> ! {
                 RFlags::INTERRUPT_FLAG,
                 *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
                 *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
-                liblz::registers::control::CR3::read(),
+                libkernel::registers::control::CR3::read(),
             ));
         }
 
         SCHEDULER.enable();
     }
 
-    liblz::instructions::hlt_indefinite();
+    libkernel::instructions::hlt_indefinite();
 
     /* ENABLE SYSCALL */
     // {
     //     use crate::tables::gdt;
-    //     use liblz::registers::msr;
+    //     use libkernel::registers::msr;
 
     //     // Configure system call environment registers.
     //     msr::IA32_STAR::set_selectors(
@@ -485,11 +486,11 @@ unsafe fn cpu_setup() -> ! {
     //         *gdt::KDATA_SELECTOR.get().unwrap(),
     //     );
     //     msr::IA32_LSTAR::set_syscall(syscall::syscall_enter);
-    //     msr::IA32_SFMASK::set_rflags_mask(liblz::registers::RFlags::all());
+    //     msr::IA32_SFMASK::set_rflags_mask(libkernel::registers::RFlags::all());
     //     // Enable `syscall`/`sysret`.
     //     msr::IA32_EFER::set_sce(true);
     // }
 
-    // liblz::registers::stack::RSP::write(liblz::memory::alloc_stack(1, true));
-    // liblz::cpu::ring3_enter(test_user_function, liblz::registers::RFlags::empty());
+    // libkernel::registers::stack::RSP::write(libkernel::memory::alloc_stack(1, true));
+    // libkernel::cpu::ring3_enter(test_user_function, libkernel::registers::RFlags::empty());
 }
