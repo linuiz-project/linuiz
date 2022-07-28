@@ -281,7 +281,7 @@ unsafe extern "C" fn _cpu_entry() -> ! {
 
             fn apit_empty(
                 _: &mut x86_64::structures::idt::InterruptStackFrame,
-                _: &mut libkernel::ThreadRegisters,
+                _: &mut crate::scheduling::ThreadRegisters,
             ) {
                 libkernel::structures::apic::end_of_interrupt();
             }

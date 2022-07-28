@@ -71,7 +71,7 @@ extern "x86-interrupt" fn irq_common(_: InterruptStackFrame) {
 extern "win64" fn irq_handoff(
     irq_vector: u8,
     isf: &mut InterruptStackFrame,
-    cached_regs: &mut libkernel::ThreadRegisters,
+    cached_regs: &mut crate::scheduling::ThreadRegisters,
 ) {
     if let Some(handler) = INTERRUPT_HANDLERS.read()[irq_vector as usize] {
         handler(isf, cached_regs);
@@ -81,7 +81,7 @@ extern "win64" fn irq_handoff(
 static mut IDT: spin::Mutex<InterruptDescriptorTable> =
     spin::Mutex::new(InterruptDescriptorTable::new());
 
-pub type HandlerFunc = fn(&mut InterruptStackFrame, &mut libkernel::ThreadRegisters);
+pub type HandlerFunc = fn(&mut InterruptStackFrame, &mut crate::scheduling::ThreadRegisters);
 static INTERRUPT_HANDLERS: spin::RwLock<[Option<HandlerFunc>; 256]> =
     spin::RwLock::new([None; 256]);
 
@@ -148,4 +148,20 @@ pub enum StackTableIndex {
     NonMaskable = 1,
     DoubleFault = 2,
     MachineCheck = 3,
+}
+
+pub fn syscall_interrupt_handler(
+    isf: &mut x86_64::structures::idt::InterruptStackFrame,
+    gprs: &mut crate::scheduling::ThreadRegisters,
+) {
+    let control_ptr = gprs.rdi as *mut Control;
+
+    if !libkernel::memory::global_pmgr().is_mapped(
+        libkernel::Address::<libkernel::Virtual>::from_ptr(control_ptr),
+    ) {
+        gprs.rsi = libkernel::syscall::Error::ControlNotMapped as u64;
+        return;
+    }
+
+    gprs.rsi = 0xD3ADC0DA;
 }

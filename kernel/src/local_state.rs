@@ -160,7 +160,7 @@ pub unsafe fn init() {
 
 fn local_timer_handler(
     stack_frame: &mut x86_64::structures::idt::InterruptStackFrame,
-    cached_regs: &mut libkernel::ThreadRegisters,
+    cached_regs: &mut crate::scheduling::ThreadRegisters,
 ) {
     use crate::scheduling::SCHEDULER;
 
