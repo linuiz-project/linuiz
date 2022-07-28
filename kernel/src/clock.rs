@@ -40,7 +40,7 @@ pub fn configure_and_enable() {
 
 fn global_timer_handler(
     _: &mut x86_64::structures::idt::InterruptStackFrame,
-    _: *mut crate::scheduling::ThreadRegisters,
+    _: &mut crate::scheduling::ThreadRegisters,
 ) {
     GLOBAL_CLOCK.tick();
 

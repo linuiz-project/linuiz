@@ -1,8 +1,6 @@
 mod exceptions;
 mod stubs;
 
-//pub mod syscall;
-
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
 
 #[naked]
@@ -73,7 +71,7 @@ extern "x86-interrupt" fn irq_common(_: InterruptStackFrame) {
 extern "win64" fn irq_handoff(
     irq_vector: u8,
     isf: &mut InterruptStackFrame,
-    cached_regs: *mut crate::scheduling::ThreadRegisters,
+    cached_regs: &mut crate::scheduling::ThreadRegisters,
 ) {
     if let Some(handler) = INTERRUPT_HANDLERS.read()[irq_vector as usize] {
         handler(isf, cached_regs);
@@ -83,7 +81,7 @@ extern "win64" fn irq_handoff(
 static mut IDT: spin::Mutex<InterruptDescriptorTable> =
     spin::Mutex::new(InterruptDescriptorTable::new());
 
-pub type HandlerFunc = fn(&mut InterruptStackFrame, *mut crate::scheduling::ThreadRegisters);
+pub type HandlerFunc = fn(&mut InterruptStackFrame, &mut crate::scheduling::ThreadRegisters);
 static INTERRUPT_HANDLERS: spin::RwLock<[Option<HandlerFunc>; 256]> =
     spin::RwLock::new([None; 256]);
 
@@ -110,15 +108,16 @@ pub fn load_idt() {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
 pub enum Vector {
-    GlobalTimer = 32,
-    Error = 64,
-    LocalTimer = 65,
-    Performance = 70,
-    ThermalSensor = 71,
-    Storage0 = 128,
-    Storage1 = 129,
-    Storage2 = 130,
-    Storage3 = 131,
+    GlobalTimer = 0x20,
+    Error = 0x40,
+    LocalTimer = 0x41,
+    Performance = 0x46,
+    ThermalSensor = 0x47,
+    Storage0 = 0x50,
+    Storage1 = 0x51,
+    Storage2 = 0x52,
+
+    Syscall = 0x80,
 
     /* CANNOT BE CHANGED — DEFAULT FROM APIC */
     LINT0_VECTOR = 253,

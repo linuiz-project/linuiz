@@ -161,7 +161,7 @@ pub unsafe fn init() {
 
 fn local_timer_handler(
     stack_frame: &mut x86_64::structures::idt::InterruptStackFrame,
-    cached_regs: *mut crate::scheduling::ThreadRegisters,
+    cached_regs: &mut crate::scheduling::ThreadRegisters,
 ) {
     use crate::scheduling::SCHEDULER;
 
@@ -177,7 +177,7 @@ fn local_timer_handler(
         cur_task.rsp = stack_frame.stack_pointer.as_u64();
         cur_task.ss = stack_frame.stack_segment as u16;
         cur_task.rfl = unsafe { RFlags::from_bits_unchecked(stack_frame.cpu_flags) };
-        cur_task.gprs = unsafe { cached_regs.read_volatile() };
+        cur_task.gprs = unsafe { *cached_regs };
         cur_task.cr3 = CR3::read();
 
         SCHEDULER.push_task(cur_task);
@@ -197,7 +197,7 @@ fn local_timer_handler(
                 });
 
             // Restore task registers.
-            cached_regs.write_volatile(next_task.gprs);
+            *cached_regs = next_task.gprs;
 
             // Set current page tables.
             CR3::write(next_task.cr3.0, next_task.cr3.1);

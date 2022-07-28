@@ -134,6 +134,7 @@ unsafe extern "sysv64" fn _entry() -> ! {
     }
 
     /* prepare APs for startup */
+    // TODO add a kernel parameter for SMP
     {
         let smp_response = LIMINE_SMP
             .get_response()
@@ -147,7 +148,7 @@ unsafe extern "sysv64" fn _entry() -> ! {
         }
 
         if let Some(cpus) = smp_response.cpus() {
-            debug!("Detected {} processors.", cpus.len());
+            debug!("Detected {} APs.", cpus.len() - 1);
 
             for cpu_info in cpus {
                 // Ensure we don't try to 'start' the BSP.
@@ -219,16 +220,6 @@ unsafe extern "sysv64" fn _entry() -> ! {
         // identity mappings are purged, so that the allocation table
         // isn't unmapped.
         liblz::memory::global_alloc::set(&*KMALLOC);
-
-        // TODO cleanup bootloader reclaimable memory
-        // trace!("Reclaiming bootloader memory.");
-        // for (index, (ty, _, _)) in global_fmgr.iter().enumerate() {
-        //     if ty == liblz::memory::FrameType::BootReclaim {
-        //         global_fmgr
-        //             .try_modify_type(index, liblz::memory::FrameType::Usable)
-        //             .unwrap();
-        //     }
-        // }
     }
 
     debug!("Finished initial kernel setup.");
@@ -290,13 +281,17 @@ unsafe extern "C" fn _cpu_entry() -> ! {
 
             fn apit_empty(
                 _: &mut x86_64::structures::idt::InterruptStackFrame,
-                _: *mut scheduling::ThreadRegisters,
+                _: &mut scheduling::ThreadRegisters,
             ) {
                 liblz::structures::apic::end_of_interrupt();
             }
 
             interrupts::set_handler_fn(interrupts::Vector::LINT0_VECTOR, apit_empty);
             interrupts::set_handler_fn(interrupts::Vector::LINT1_VECTOR, apit_empty);
+            interrupts::set_handler_fn(
+                interrupts::Vector::Syscall,
+                interrupts::syscall::syscall_interrupt_handler,
+            );
         }
 
         interrupts::load_idt();
@@ -409,6 +404,32 @@ fn logging_test() -> ! {
     }
 }
 
+fn syscall_test() -> ! {
+    use interrupts::syscall::*;
+    let control = interrupts::syscall::Control {
+        id: ID::Test,
+        blah: 0xD3ADC0D3,
+    };
+
+    loop {
+        let result: u64;
+
+        unsafe {
+            core::arch::asm!(
+                "
+            int 0x80
+            ",
+                in("rdi") &raw const control,
+                out("rsi") result
+            );
+        }
+
+        info!("{:#X}", result);
+
+        clock::busy_wait_msec(500);
+    }
+}
+
 #[inline(never)]
 unsafe fn cpu_setup() -> ! {
     if liblz::cpu::is_bsp() {
@@ -425,8 +446,18 @@ unsafe fn cpu_setup() -> ! {
             liblz::registers::control::CR3::read(),
         ));
 
+        SCHEDULER.push_task(Task::new(
+            TaskPriority::new(7).unwrap(),
+            syscall_test,
+            TaskStackOption::AutoAllocate,
+            RFlags::INTERRUPT_FLAG,
+            *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
+            *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
+            liblz::registers::control::CR3::read(),
+        ));
+
         // Add a number of test tasks to get kernel output, test scheduling, and test logging.
-        for _ in 0..1 {
+        for _ in 0..0 {
             SCHEDULER.push_task(Task::new(
                 TaskPriority::new(7).unwrap(),
                 logging_test,

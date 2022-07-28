@@ -11,8 +11,8 @@ qemu-system-x86_64 \
     -display none \
     -bios ./resources/ovmf.fd \
     -drive format=raw,file=fat:rw:./.hdd/image/ \
-    -drive format=raw,file=./.hdd/nvme.img,id=nvm,if=none \
-    -device nvme,drive=nvm,serial=deadbeef \
+    -drive format=raw,file=./.hdd/nvme.img,id=root,if=none \
+    -device virtio-blk-pci,drive=root,serial=deadbeef \
     -D .debug/qemu_debug.log \
     -d int,guest_errors
 
