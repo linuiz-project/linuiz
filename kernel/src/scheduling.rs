@@ -1,4 +1,3 @@
-use alloc::boxed::Box;
 use core::{
     mem::MaybeUninit,
     sync::atomic::{AtomicBool, AtomicU64, Ordering},

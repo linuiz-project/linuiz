@@ -276,13 +276,11 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
             }
         }
 
-        unsafe {
-            core::ptr::NonNull::new(core::ptr::slice_from_raw_parts_mut(
-                (start_block_index * Self::BLOCK_SIZE) as *mut u8,
-                layout.size(),
-            ))
-            .ok_or(core::alloc::AllocError)
-        }
+        core::ptr::NonNull::new(core::ptr::slice_from_raw_parts_mut(
+            (start_block_index * Self::BLOCK_SIZE) as *mut u8,
+            layout.size(),
+        ))
+        .ok_or(core::alloc::AllocError)
     }
 
     unsafe fn deallocate(&self, ptr: core::ptr::NonNull<u8>, layout: Layout) {

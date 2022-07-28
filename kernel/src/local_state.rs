@@ -176,7 +176,7 @@ fn local_timer_handler(
         cur_task.rsp = stack_frame.stack_pointer.as_u64();
         cur_task.ss = stack_frame.stack_segment as u16;
         cur_task.rfl = unsafe { RFlags::from_bits_unchecked(stack_frame.cpu_flags) };
-        cur_task.gprs = unsafe { *cached_regs };
+        cur_task.gprs = *cached_regs;
         cur_task.cr3 = CR3::read();
 
         SCHEDULER.push_task(cur_task);
