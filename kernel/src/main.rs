@@ -430,8 +430,8 @@ fn syscall_test() -> ! {
         unsafe {
             core::arch::asm!(
                 "
-            int 0x80
-            ",
+                int 0x80
+                ",
                 in("rdi") &raw const control,
                 out("rsi") result
             );
@@ -470,7 +470,7 @@ unsafe fn cpu_setup() -> ! {
         ));
 
         // Add a number of test tasks to get kernel output, test scheduling, and test logging.
-        for _ in 0..0 {
+        for _ in 0..1 {
             SCHEDULER.push_task(Task::new(
                 TaskPriority::new(7).unwrap(),
                 logging_test,
