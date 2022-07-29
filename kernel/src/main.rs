@@ -35,7 +35,6 @@ mod memory;
 mod scheduling;
 mod tables;
 
-use alloc::vec::Vec;
 use core::sync::atomic::AtomicBool;
 use libkernel::LinkerSymbol;
 
@@ -79,25 +78,25 @@ lazy_static::lazy_static! {
     pub static ref KMALLOC: memory::SLOB<'static> = unsafe { memory::SLOB::new() };
 }
 
-use libkernel::io::pci;
-pub struct Devices<'a>(Vec<pci::DeviceVariant>, &'a core::marker::PhantomData<()>);
-unsafe impl Send for Devices<'_> {}
-unsafe impl Sync for Devices<'_> {}
+// use libkernel::io::pci;
+// pub struct Devices<'a>(Vec<pci::DeviceVariant>, &'a core::marker::PhantomData<()>);
+// unsafe impl Send for Devices<'_> {}
+// unsafe impl Sync for Devices<'_> {}
 
-impl Devices<'_> {
-    pub fn iter(&self) -> core::slice::Iter<pci::DeviceVariant> {
-        self.0.iter()
-    }
-}
+// impl Devices<'_> {
+//     pub fn iter(&self) -> core::slice::Iter<pci::DeviceVariant> {
+//         self.0.iter()
+//     }
+// }
 
 // This might need to be in `libkernel`? Or some.. more semantic access method
-lazy_static::lazy_static! {
-    pub static ref PCIE_DEVICES: Devices<'static> =
-        Devices(
-            libkernel::io::pci::get_pcie_devices().collect(),
-            &core::marker::PhantomData
-        );
-}
+// lazy_static::lazy_static! {
+//     pub static ref PCIE_DEVICES: Devices<'static> =
+//         Devices(
+//             libkernel::io::pci::get_pcie_devices().collect(),
+//             &core::marker::PhantomData
+//         );
+// }
 
 #[no_mangle]
 unsafe extern "sysv64" fn _entry() -> ! {
@@ -182,43 +181,56 @@ unsafe extern "sysv64" fn _entry() -> ! {
     {
         use libkernel::memory::Page;
 
+        trace!("Initializing memory managers.");
+
         let memory_map = LIMINE_MMAP
             .get_response()
             .get()
             .and_then(|resp| resp.mmap())
             .expect("no memory map has been provided by bootloader");
 
-        trace!("Initializing memory managers.");
-        // Frame manager is always initialized first, so memory structures may allocate frames.
-        libkernel::memory::init_frame_manager(memory_map);
-        let hhdm_offset = LIMINE_HHDM
-            .get_response()
-            .get()
-            .expect("bootloader did not provide a higher half direct mapping")
-            .offset as usize;
-        let hhdm_page = Page::from_index(hhdm_offset / 0x1000);
-        libkernel::memory::init_page_manager(&hhdm_page, false);
-        // The frame manager's allocation table is allocated with identity mapping assumed,
-        // so before we unmap the lower half virtual memory mapping, we must ensure the
-        // frame manager uses the HHDM base.
-        libkernel::memory::global_fmgr().slide_table_base(hhdm_offset);
+        // Frame manager is always initialized first, so virtual structures may allocate frames.
+        crate::memory::init_kernel_frame_manager(memory_map);
 
+        // Next, we create the kernel page manager, utilizing the bootloader's higher-half direct
+        // mapping for virtual offset mapping.
+        let hhdm_addr = libkernel::Address::<libkernel::Virtual>::new(
+            LIMINE_HHDM
+                .get_response()
+                .get()
+                .expect("bootloader did not provide a higher half direct mapping")
+                .offset as usize,
+        );
+        trace!("Higher half identity mapping base: {:?}", hhdm_addr);
+        crate::memory::init_kernel_page_manager(hhdm_addr);
+
+        let frame_manager = crate::memory::get_kernel_frame_manager().unwrap();
+        // The frame manager's allocation table is allocated with identity mapping assumed,
+        // so before we unmap the lower half virtual memory mapping (for kernel heap), we
+        // must ensure the frame manager uses the HHDM base.
+        frame_manager.slide_table_base(hhdm_addr.as_usize());
+
+        let page_manager = crate::memory::get_kernel_page_manager().unwrap();
         trace!("Unmapping lower half identity mappings.");
-        let global_pmgr = libkernel::memory::global_pmgr();
         for entry in memory_map.iter() {
             for page in (entry.base..(entry.base + entry.len))
                 .step_by(0x1000)
                 .map(|base| Page::from_index((base / 0x1000) as usize))
             {
-                global_pmgr
-                    .unmap(&page, libkernel::memory::FrameOwnership::None)
+                page_manager
+                    .unmap(
+                        &page,
+                        libkernel::memory::FrameOwnership::None,
+                        frame_manager,
+                    )
                     .ok();
             }
         }
 
         // The global kernel allocator must be set AFTER the upper half
         // identity mappings are purged, so that the allocation table
-        // isn't unmapped.
+        // (which will reside in the lower half) isn't unmapped.
+        trace!("Assigning libkernel global allocator.");
         libkernel::memory::global_alloc::set(&*KMALLOC);
     }
 
@@ -290,7 +302,7 @@ unsafe extern "C" fn _cpu_entry() -> ! {
             interrupts::set_handler_fn(interrupts::Vector::LINT1_VECTOR, apit_empty);
             interrupts::set_handler_fn(
                 interrupts::Vector::Syscall,
-                libkernel::syscall::syscall_interrupt_handler,
+                crate::interrupts::syscall_interrupt_handler,
             );
         }
 
@@ -379,24 +391,24 @@ unsafe extern "C" fn _cpu_entry() -> ! {
     cpu_setup()
 }
 
-extern "C" fn new_nvme_handler(device_index: usize) -> ! {
-    if let libkernel::io::pci::DeviceVariant::Standard(pcie_device) = &PCIE_DEVICES.0[device_index]
-    {
-        let nvme_controller =
-            drivers::nvme::Controller::from_device_and_configure(pcie_device, 8, 8);
+// extern "C" fn new_nvme_handler(device_index: usize) -> ! {
+//     if let libkernel::io::pci::DeviceVariant::Standard(pcie_device) = &PCIE_DEVICES.0[device_index]
+//     {
+//         let nvme_controller =
+//             drivers::nvme::Controller::from_device_and_configure(pcie_device, 8, 8);
 
-        use drivers::nvme::command::admin::*;
-        nvme_controller.submit_admin_command(AdminCommand::Identify { ctrl_id: 0 });
-        nvme_controller.run()
-    } else {
-        error!(
-            "Given PCI device index was invalid for NVMe controller (index {}).",
-            device_index
-        );
-    }
+//         use drivers::nvme::command::admin::*;
+//         nvme_controller.submit_admin_command(AdminCommand::Identify { ctrl_id: 0 });
+//         nvme_controller.run()
+//     } else {
+//         error!(
+//             "Given PCI device index was invalid for NVMe controller (index {}).",
+//             device_index
+//         );
+//     }
 
-    libkernel::instructions::hlt_indefinite()
-}
+//     libkernel::instructions::hlt_indefinite()
+// }
 
 fn logging_test() -> ! {
     loop {

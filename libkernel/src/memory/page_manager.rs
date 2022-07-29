@@ -1,8 +1,7 @@
 use crate::{
     instructions::tlb,
     memory::{
-        frame_manager::FrameOwnership,
-        global_fmgr,
+        frame_manager::{FrameManager, FrameOwnership},
         paging::{AttributeModify, Level4, PageAttributes, PageTable, PageTableEntry},
         Page,
     },
@@ -81,7 +80,11 @@ impl VirtualMapper {
         }
     }
 
-    fn get_page_entry_create(&mut self, page: &Page) -> &mut PageTableEntry {
+    fn get_page_entry_create(
+        &mut self,
+        page: &Page,
+        frame_manager: &'static FrameManager<'_>,
+    ) -> &mut PageTableEntry {
         let mapped_page = self.mapped_page;
         let addr = page.base_addr();
 
@@ -90,18 +93,18 @@ impl VirtualMapper {
         unsafe {
             self.pml4_mut()
                 .unwrap()
-                .sub_table_create(addr.p4_index(), &mapped_page)
-                .sub_table_create(addr.p3_index(), &mapped_page)
-                .sub_table_create(addr.p2_index(), &mapped_page)
+                .sub_table_create(addr.p4_index(), &mapped_page, frame_manager)
+                .sub_table_create(addr.p3_index(), &mapped_page, frame_manager)
+                .sub_table_create(addr.p2_index(), &mapped_page, frame_manager)
                 .get_entry_mut(addr.p1_index())
         }
     }
 
-    unsafe fn modify_mapped_page(&mut self, base_page: Page) {
-        for frame_index in 0..global_fmgr().total_frames() {
+    unsafe fn modify_mapped_page(&mut self, base_page: Page, frame_manager: &'static FrameManager) {
+        for frame_index in 0..frame_manager.total_frames() {
             let cur_page = base_page.forward_checked(frame_index).unwrap();
 
-            self.get_page_entry_create(&cur_page).set(
+            self.get_page_entry_create(&cur_page, frame_manager).set(
                 frame_index,
                 PageAttributes::PRESENT
                     | PageAttributes::WRITABLE
@@ -128,70 +131,63 @@ impl VirtualMapper {
             crate::registers::control::CR3Flags::empty(),
         );
     }
-
-    // TODO
-    // fn copy_physical_memory_entries(page_manager: &mut PageManager) {
-    //     let k_vmap = PAGE_MANAGER.0.read();
-    //     let mut cur_vmap = page_manager.0.write();
-
-    //     let k_pml4 = k_vmap
-    //         .pml4()
-    //         .expect("Kernel page manager has no valid PML4.");
-    //     let cur_pml4 = cur_vmap
-    //         .pml4_mut()
-    //         .expect("Provided page manager has no valid PML4.");
-
-    //     for entry_index in k_vmap.mapped_offset().p4_index()..512 {
-    //         *cur_pml4.get_entry_mut(entry_index) = *k_pml4.get_entry(entry_index);
-    //     }
-    // }
 }
 
-pub struct PageManager(spin::RwLock<VirtualMapper>);
+pub struct PageManager {
+    virtual_map: spin::RwLock<VirtualMapper>,
+}
 
 unsafe impl Send for PageManager {}
 unsafe impl Sync for PageManager {}
 
 impl PageManager {
-    pub fn cr3(&self) -> usize {
-        self.0.read().pml4_frame * 0x1000
-    }
-
     /// SAFETY: Refer to `VirtualMapper::new()`.
-    pub unsafe fn new(mapped_page: &Page, pml4_copy: Option<PageTable<Level4>>) -> Self {
-        Self(spin::RwLock::new({
-            let pml4_index = global_fmgr()
-                .lock_next()
-                .expect("Failed to lock frame for virtual addressor's PML4");
+    pub unsafe fn new(
+        frame_manager: &'static FrameManager<'_>,
+        mapped_page: &Page,
+        pml4_copy: Option<PageTable<Level4>>,
+    ) -> Self {
+        Self {
+            virtual_map: spin::RwLock::new({
+                let pml4_index = frame_manager
+                    .lock_next()
+                    .expect("Failed to lock frame for virtual addressor's PML4");
 
-            if let Some(pml4) = pml4_copy {
-                // Write existing PML4.
-                mapped_page
-                    .forward_checked(pml4_index)
-                    .unwrap()
-                    .as_mut_ptr::<PageTable<Level4>>()
-                    .write_volatile(pml4);
-            } else {
-                // Clear PML4 frame.
-                core::ptr::write_bytes(
+                if let Some(pml4) = pml4_copy {
+                    // Write existing PML4.
                     mapped_page
                         .forward_checked(pml4_index)
                         .unwrap()
-                        .as_mut_ptr::<u8>(),
-                    0,
-                    0x1000,
-                );
-            }
+                        .as_mut_ptr::<PageTable<Level4>>()
+                        .write_volatile(pml4);
+                } else {
+                    // Clear PML4 frame.
+                    core::ptr::write_bytes(
+                        mapped_page
+                            .forward_checked(pml4_index)
+                            .unwrap()
+                            .as_mut_ptr::<u8>(),
+                        0,
+                        0x1000,
+                    );
+                }
 
-            VirtualMapper::new(mapped_page, pml4_index)
-        }))
+                VirtualMapper::new(mapped_page, pml4_index)
+            }),
+        }
+    }
+
+    pub fn cr3(&self) -> usize {
+        self.virtual_map.read().pml4_frame * 0x1000
     }
 
     pub unsafe fn from_current(mapped_page: &Page) -> Self {
-        Self(spin::RwLock::new(VirtualMapper::new(
-            mapped_page,
-            crate::registers::control::CR3::read().0.frame_index(),
-        )))
+        Self {
+            virtual_map: spin::RwLock::new(VirtualMapper::new(
+                mapped_page,
+                crate::registers::control::CR3::read().0.frame_index(),
+            )),
+        }
     }
 
     /* MAP / UNMAP */
@@ -207,28 +203,34 @@ impl PageManager {
         frame_index: usize,
         ownership: FrameOwnership,
         attribs: PageAttributes,
+        frame_manager: &'static FrameManager<'_>,
     ) -> Result<(), MapError> {
         // Attempt to acquire the requisite frame, following the outlined parsing of `lock_frame`.
         match ownership {
             FrameOwnership::None => Ok(frame_index),
-            FrameOwnership::Borrowed => global_fmgr().borrow(frame_index),
-            FrameOwnership::Locked => global_fmgr().lock(frame_index),
+            FrameOwnership::Borrowed => frame_manager.borrow(frame_index),
+            FrameOwnership::Locked => frame_manager.lock(frame_index),
         }
         // If the acquisition of the frame fails, transform the error.
         .map_err(|falloc_err| MapError::FrameError(falloc_err))
         // If acquisition of the frame is successful, map the page to the frame index.
         .map(|frame_index| {
-            self.0
+            self.virtual_map
                 .write()
-                .get_page_entry_create(page)
+                .get_page_entry_create(page, frame_manager)
                 .set(frame_index, attribs);
 
             tlb::invalidate(page);
         })
     }
 
-    pub fn unmap(&self, page: &Page, ownership: FrameOwnership) -> Result<(), MapError> {
-        self.0
+    pub fn unmap(
+        &self,
+        page: &Page,
+        ownership: FrameOwnership,
+        frame_manager: &'static FrameManager<'_>,
+    ) -> Result<(), MapError> {
+        self.virtual_map
             .write()
             .get_page_entry_mut(page)
             .map(|entry| {
@@ -239,10 +241,10 @@ impl PageManager {
                     match ownership {
                         FrameOwnership::None => {}
                         FrameOwnership::Borrowed => {
-                            global_fmgr().drop(entry.take_frame_index()).unwrap()
+                            frame_manager.drop(entry.take_frame_index()).unwrap()
                         }
                         FrameOwnership::Locked => {
-                            global_fmgr().free(entry.take_frame_index()).unwrap()
+                            frame_manager.free(entry.take_frame_index()).unwrap()
                         }
                     }
                 }
@@ -258,9 +260,10 @@ impl PageManager {
         unmap_from: &Page,
         map_to: &Page,
         new_attribs: Option<PageAttributes>,
+        frame_manager: &'static FrameManager<'_>,
     ) -> Result<(), MapError> {
         let maybe_attribs_frame_index = {
-            let mut map_write = self.0.write();
+            let mut map_write = self.virtual_map.write();
             map_write.get_page_entry_mut(unmap_from).map(|entry| {
                 let attribs = new_attribs.unwrap_or_else(|| entry.get_attribs());
                 entry.set_attributes(PageAttributes::empty(), AttributeModify::Set);
@@ -269,35 +272,46 @@ impl PageManager {
             })
         };
 
-        maybe_attribs_frame_index
-            .ok_or(MapError::NotMapped)
-            .map(|(attribs, frame_index)| {
-                self.map(map_to, frame_index, FrameOwnership::None, attribs).unwrap();
-                tlb::invalidate(unmap_from);
+        match maybe_attribs_frame_index.ok_or(MapError::NotMapped) {
+            Ok((attribs, frame_index)) => {
+                let result = self.map(
+                    map_to,
+                    frame_index,
+                    FrameOwnership::None,
+                    attribs,
+                    frame_manager,
+                );
 
-                ()
-            })
+                if result.is_ok() {
+                    tlb::invalidate(unmap_from);
+                }
+
+                result
+            }
+            Err(err) => Err(err),
+        }
     }
 
-    pub fn auto_map(&self, page: &Page, attribs: PageAttributes) {
-        self.map(page, global_fmgr().lock_next().unwrap(), FrameOwnership::None, attribs)
-            .unwrap();
-    }
-
-    /// Attempts to create a 1:1 mapping between a virual memory page and its physical counterpart.
-    ///
-    /// REMARK:
-    ///     This function assumes the frame for the identity mapping is:
-    ///         A) a valid lock or borrow
-    ///         B) not required for the mapping
-    pub fn identity_map(&self, page: &Page, attribs: PageAttributes) -> Result<(), MapError> {
-        self.map(page, page.index(), FrameOwnership::None, attribs)
+    pub fn auto_map(
+        &self,
+        page: &Page,
+        attribs: PageAttributes,
+        frame_manager: &'static FrameManager<'_>,
+    ) {
+        self.map(
+            page,
+            frame_manager.lock_next().unwrap(),
+            FrameOwnership::None,
+            attribs,
+            frame_manager,
+        )
+        .unwrap();
     }
 
     /* STATE QUERYING */
 
     pub fn is_mapped(&self, virt_addr: Address<Virtual>) -> bool {
-        self.0
+        self.virtual_map
             .read()
             .get_page_entry(&Page::containing_addr(virt_addr))
             .filter(|entry| entry.get_attribs().contains(PageAttributes::PRESENT))
@@ -305,7 +319,7 @@ impl PageManager {
     }
 
     pub fn is_mapped_to(&self, page: &Page, frame_index: usize) -> bool {
-        self.0
+        self.virtual_map
             .read()
             .get_page_entry(page)
             .and_then(|entry| entry.get_frame_index())
@@ -313,7 +327,7 @@ impl PageManager {
     }
 
     pub fn get_mapped_to(&self, page: &Page) -> Option<usize> {
-        self.0
+        self.virtual_map
             .read()
             .get_page_entry(page)
             .and_then(|entry| entry.get_frame_index())
@@ -322,7 +336,7 @@ impl PageManager {
     /* STATE CHANGING */
 
     pub fn get_page_attribs(&self, page: &Page) -> Option<PageAttributes> {
-        self.0
+        self.virtual_map
             .read()
             .get_page_entry(page)
             .map(|page_entry| page_entry.get_attribs())
@@ -340,7 +354,7 @@ impl PageManager {
             attributes.remove(PageAttributes::NO_EXECUTE);
         }
 
-        self.0
+        self.virtual_map
             .write()
             .get_page_entry_mut(page)
             .map(|page_entry| page_entry.set_attributes(attributes, modify_mode));
@@ -348,21 +362,23 @@ impl PageManager {
         tlb::invalidate(page);
     }
 
-    pub unsafe fn modify_mapped_page(&self, page: Page) {
-        self.0.write().modify_mapped_page(page);
+    pub unsafe fn modify_mapped_page(&self, page: Page, frame_manager: &'static FrameManager<'_>) {
+        self.virtual_map
+            .write()
+            .modify_mapped_page(page, frame_manager);
     }
 
     pub fn mapped_page(&self) -> Page {
-        self.0.read().mapped_page
+        self.virtual_map.read().mapped_page
     }
 
     #[inline(always)]
     pub unsafe fn write_cr3(&self) {
-        self.0.write().write_cr3();
+        self.virtual_map.write().write_cr3();
     }
 
     pub fn copy_pml4(&self) -> PageTable<Level4> {
-        let vmap = self.0.read();
+        let vmap = self.virtual_map.read();
 
         unsafe {
             vmap.mapped_page

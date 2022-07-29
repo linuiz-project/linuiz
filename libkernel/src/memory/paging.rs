@@ -373,12 +373,13 @@ impl<L: HeirarchicalLevel> PageTable<L> {
         &mut self,
         index: usize,
         phys_mapping_page: &Page,
+        frame_manager: &'static crate::memory::FrameManager<'_>,
     ) -> &mut PageTable<L::NextLevel> {
         let entry = self.get_entry_mut(index);
         let (frame_index, created) = match entry.get_frame_index() {
             Some(frame_index) => (frame_index, false),
             None => {
-                let frame_index = super::global_fmgr().lock_next().unwrap();
+                let frame_index = frame_manager.lock_next().unwrap();
 
                 entry.set(
                     frame_index,

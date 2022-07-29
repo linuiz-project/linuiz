@@ -4,7 +4,6 @@ use core::sync::atomic::{AtomicBool, Ordering};
 pub struct SuccessSource(Arc<AtomicBool>, Arc<AtomicBool>);
 
 impl SuccessSource {
-    // TODO maybe offer a constructor that doesn't return a valued token
     pub fn new() -> (Self, SuccessToken) {
         let complete = Arc::new(AtomicBool::new(false));
         let success = Arc::new(AtomicBool::new(false));

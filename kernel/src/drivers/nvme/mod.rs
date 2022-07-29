@@ -524,7 +524,7 @@ impl<'dev> Controller<'dev> {
                 // Allocate the necessary memory for returning the command value.
                 let memory = PageAlignedBox::<Identify>::new_uninit_in(page_aligned_allocator());
                 let phys_addr = Address::<Physical>::new(
-                    libkernel::memory::global_pmgr()
+                    crate::memory::get_kernel_page_manager()
                         .get_mapped_to(&libkernel::memory::Page::from_ptr(memory.as_ptr()))
                         .unwrap(),
                 );

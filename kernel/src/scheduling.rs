@@ -6,7 +6,7 @@ use crossbeam_queue::SegQueue;
 use libkernel::{
     memory::StackAlignedBox,
     registers::{control::CR3Flags, RFlags},
-    Address, Physical, ThreadRegisters,
+    Address, Physical,
 };
 use x86_64::registers::segmentation::SegmentSelector;
 

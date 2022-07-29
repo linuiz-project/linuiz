@@ -69,15 +69,19 @@ impl<'map> SLOB<'map> {
     pub unsafe fn new() -> Self {
         let initial_alloc_table_page = Page::from_index(1);
         let alloc_table_len = 0x1000 / core::mem::size_of::<BlockPage>();
-        let global_pmgr = libkernel::memory::global_pmgr();
+        let current_page_manager = libkernel::memory::PageManager::from_current(&Page::from_addr(
+            crate::memory::get_kernel_hhdm_addr().unwrap(),
+        ));
+        let kernel_frame_manager = crate::memory::get_kernel_frame_manager().unwrap();
 
         // Map all of the pages in the allocation table.
         for page_offset in 0..(alloc_table_len /* we don't map null page */ - 1) {
-            global_pmgr.auto_map(
+            current_page_manager.auto_map(
                 &initial_alloc_table_page
                     .forward_checked(page_offset)
                     .unwrap(),
                 PageAttributes::DATA,
+                kernel_frame_manager,
             );
         }
 
@@ -134,7 +138,12 @@ impl<'map> SLOB<'map> {
             return Err(AllocError::OutOfMemory);
         }
 
-        let page_manager = libkernel::memory::global_pmgr();
+        let frame_manager = crate::memory::get_kernel_frame_manager().unwrap();
+        let page_manager = unsafe {
+            libkernel::memory::PageManager::from_current(&Page::from_addr(
+                crate::memory::get_kernel_hhdm_addr().unwrap(),
+            ))
+        };
 
         // Attempt to find a run of already-mapped pages within our allocator that can contain
         // the required slice length.
@@ -162,13 +171,14 @@ impl<'map> SLOB<'map> {
                     &cur_table_base_page.forward_checked(page_offset).unwrap(),
                     &new_table_base_page.forward_checked(page_offset).unwrap(),
                     None,
+                    frame_manager,
                 )
                 .unwrap();
         }
         // For the remainder of the table's pages (pages that didn't exist prior), create new auto mappings.
         for page_offset in cur_table_page_count..req_table_page_count {
             let mut new_page = new_table_base_page.forward_checked(page_offset).unwrap();
-            page_manager.auto_map(&new_page, PageAttributes::DATA);
+            page_manager.auto_map(&new_page, PageAttributes::DATA, frame_manager);
             // Clear the newly allocated table page.
             unsafe { new_page.mem_clear() };
         }
@@ -252,7 +262,12 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
         block_index -= current_run - 1;
         let start_block_index = block_index;
         let start_table_index = start_block_index / BlockPage::BLOCKS_PER;
-        let page_manager = libkernel::memory::global_pmgr();
+        let frame_manager = crate::memory::get_kernel_frame_manager().unwrap();
+        let page_manager = unsafe {
+            libkernel::memory::PageManager::from_current(&Page::from_addr(
+                crate::memory::get_kernel_hhdm_addr().unwrap(),
+            ))
+        };
         for table_index in start_table_index..end_table_index {
             let block_page = &mut table_write[table_index];
             let was_empty = block_page.is_empty();
@@ -272,7 +287,11 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
             block_index += remaining_blocks_in_slice;
 
             if was_empty {
-                page_manager.auto_map(&Page::from_index(table_index), PageAttributes::DATA);
+                page_manager.auto_map(
+                    &Page::from_index(table_index),
+                    PageAttributes::DATA,
+                    frame_manager,
+                );
             }
         }
 
@@ -296,7 +315,10 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
         let start_table_index = start_block_index / BlockPage::BLOCKS_PER;
         let end_table_index = align_up_div(end_block_index, BlockPage::BLOCKS_PER);
         let mut table_write = self.table.write();
-        let page_manager = libkernel::memory::global_pmgr();
+        let frame_manager = crate::memory::get_kernel_frame_manager().unwrap();
+        let page_manager = libkernel::memory::PageManager::from_current(&Page::from_addr(
+            crate::memory::get_kernel_hhdm_addr().unwrap(),
+        ));
         for map_index in start_table_index..end_table_index {
             let (had_bits, has_bits) = {
                 let block_page = &mut table_write[map_index];
@@ -322,6 +344,7 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
                     .unmap(
                         &Page::from_index(map_index),
                         libkernel::memory::FrameOwnership::Locked,
+                        frame_manager,
                     )
                     .unwrap();
             }

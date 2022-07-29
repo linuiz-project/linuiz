@@ -151,14 +151,17 @@ pub enum StackTableIndex {
 }
 
 pub fn syscall_interrupt_handler(
-    isf: &mut x86_64::structures::idt::InterruptStackFrame,
+    _: &mut x86_64::structures::idt::InterruptStackFrame,
     gprs: &mut crate::scheduling::ThreadRegisters,
 ) {
-    let control_ptr = gprs.rdi as *mut Control;
+    let control_ptr = gprs.rdi as *mut libkernel::syscall::Control;
 
-    if !libkernel::memory::global_pmgr().is_mapped(
-        libkernel::Address::<libkernel::Virtual>::from_ptr(control_ptr),
-    ) {
+    if !crate::memory::get_kernel_page_manager()
+        .unwrap()
+        .is_mapped(libkernel::Address::<libkernel::Virtual>::from_ptr(
+            control_ptr,
+        ))
+    {
         gprs.rsi = libkernel::syscall::Error::ControlNotMapped as u64;
         return;
     }

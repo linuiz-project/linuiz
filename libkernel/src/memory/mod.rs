@@ -8,8 +8,6 @@ pub use paging::*;
 pub mod paging;
 pub mod volatile;
 
-use crate::cell::SyncOnceCell;
-
 #[cfg(feature = "global_allocator")]
 pub mod global_alloc {
     use core::{alloc::GlobalAlloc, cell::OnceCell};
@@ -27,14 +25,11 @@ pub mod global_alloc {
 
     unsafe impl GlobalAlloc for GlobalAllocator<'_> {
         unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
-            self.0.get().expect("no global allocator").alloc(layout)
+            self.0.get().unwrap().alloc(layout)
         }
 
         unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
-            self.0
-                .get()
-                .expect("no global allocator")
-                .dealloc(ptr, layout);
+            self.0.get().unwrap().dealloc(ptr, layout);
         }
     }
 
@@ -42,13 +37,10 @@ pub mod global_alloc {
     static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator::new();
 
     pub unsafe fn set(galloc: &'static dyn GlobalAlloc) {
-        GLOBAL_ALLOCATOR
-            .0
-            .set(galloc)
-            .map_err(|_| {
-                panic!("global allocator already set");
-            })
-            .unwrap();
+        if let Err(_) = GLOBAL_ALLOCATOR.0.set(galloc) {
+            error!("Global allocator is already set.");
+            crate::instructions::hlt_indefinite();
+        }
     }
 }
 
@@ -58,7 +50,7 @@ pub mod global_alloc {
    ----------------------------------------
    | 0-255   | Userspace                   |
    ----------------------------------------
-   | 256-inf | Physical memory mapping     |
+   | 256-*** | Physical memory mapping     |
    ----------------------------------------
    | 510     | Kernel core-local state     |
    ----------------------------------------
@@ -67,75 +59,29 @@ pub mod global_alloc {
 
 */
 
-pub const PHYS_MEM_START: crate::Address<crate::Virtual> =
-    crate::Address::<crate::Virtual>::new(256 * PML4_ENTRY_MEM_SIZE);
-
 pub const PML4_ENTRY_MEM_SIZE: usize = 1 << 9 << 9 << 9 << 12;
 
-static FRAME_MANAGER: SyncOnceCell<FrameManager> = unsafe { SyncOnceCell::new() };
-static PAGE_MANAGER: SyncOnceCell<PageManager> = unsafe { SyncOnceCell::new() };
+// static FRAME_MANAGER: SyncOnceCell<FrameManager> = unsafe { SyncOnceCell::new() };
 
-/// Initializes global memory structures (frame & page managers).
-///
-/// This function *does not* swap the current page table. To commit the page manager
-/// to CR3 and map physical memory at the correct offset, call `finalize_paging()`.
-pub fn init_frame_manager(memory_map: &[limine::LimineMemmapEntry]) {
-    if let Err(_) = FRAME_MANAGER.set(FrameManager::from_mmap(memory_map)) {
-        panic!("global frame manager has already been initialized");
-    }
-}
+// pub struct GlobalFrameManagerExistsError;
 
-pub fn init_page_manager(mapped_page: &Page, new_pml4: bool) {
-    if let Err(_) = PAGE_MANAGER.set(unsafe {
-        if new_pml4 {
-            PageManager::new(mapped_page, None)
-        } else {
-            PageManager::from_current(mapped_page)
-        }
-    }) {
-        panic!("global page manager has already been initialized")
-    }
-}
+// pub unsafe fn set_global_frame_manager(
+//     frame_mgr: &'static FrameManager,
+// ) -> Result<(), GlobalFrameManagerExistsError> {
+//     FRAME_MANAGER
+//         .set(frame_mgr)
+//         .map_err(|_| GlobalFrameManagerExistsError)
+// }
 
-pub fn global_fmgr() -> &'static FrameManager<'static> {
-    FRAME_MANAGER
-        .get()
-        .expect("global frame manager has not been initialized")
-}
+// pub fn get_global_frame_mgr() -> &'static FrameManager<'static> {
+//     FRAME_MANAGER
+//         .get()
+//         .expect("global frame manager has not been initialized")
+// }
 
-pub fn global_pmgr() -> &'static PageManager {
-    PAGE_MANAGER
-        .get()
-        .expect("global page manager has not been initialize")
-}
-
-pub fn alloc_stack(page_count: usize, is_userspace: bool) -> *mut () {
-    unsafe {
-        let stack_len = page_count * 0x1000;
-        let stack_bottom = alloc::alloc::alloc_zeroed(
-            core::alloc::Layout::from_size_align(stack_len, 0x1000).unwrap(),
-        );
-        let stack_top = stack_bottom.add(stack_len);
-
-        let page_manager = global_pmgr();
-        for page in Page::range(
-            (stack_bottom as usize) / 0x1000,
-            (stack_top as usize) / 0x1000,
-        ) {
-            page_manager.set_page_attribs(
-                &page,
-                PageAttributes::DATA
-                    | if is_userspace {
-                        PageAttributes::USERSPACE
-                    } else {
-                        PageAttributes::empty()
-                    },
-                AttributeModify::Set,
-            );
-        }
-
-        stack_top as *mut ()
-    }
+pub enum MMIOError {
+    FramesNotMMIO,
+    FailedFrameTypeModify,
 }
 
 pub struct MMIO {
@@ -143,66 +89,53 @@ pub struct MMIO {
     len: usize,
 }
 
-impl Drop for MMIO {
-    fn drop(&mut self) {
-        // Possibly reset frame_range? We don't want to forever lose the pointed-to frames, especially if
-        // the frames were locked MMIO in error.
-
-        unsafe {
-            alloc::alloc::dealloc(
-                self.ptr,
-                core::alloc::Layout::from_size_align(self.len, 0x1000).unwrap(),
-            )
-        };
-    }
-}
-
 impl MMIO {
     /// Creates a new MMIO structure wrapping the given region.
     ///
     /// SAFETY: The caller must ensure that the indicated memory region passed as parameters
     ///         `frame_index` and `count` is valid for MMIO.
-    pub unsafe fn new(frame_index: usize, count: usize) -> Self {
-        let frame_manager = global_fmgr();
+    pub unsafe fn new(
+        frames: impl ExactSizeIterator<Item = usize>,
+        frame_manager: &'static FrameManager,
+        page_manager: &PageManager,
+    ) -> Result<Self, MMIOError> {
+        let phys_mem_start_page = page_manager.mapped_page();
+        let initial_page_address = core::cell::OnceCell::new();
+        let mut page_count = 0;
 
-        for frame_index in frame_index..(frame_index + count) {
+        for frame_index in frames {
+            // Current page pointing to higher-half direct mapped memory.
+            let current_phys_mem_page = phys_mem_start_page.forward_checked(frame_index).unwrap();
+            page_count += 1;
+
+            // If we haven't set our initial address, set it.
+            if let None = initial_page_address.get() {
+                initial_page_address.set(current_phys_mem_page).unwrap();
+            }
+
+            // Attempt to alter the pointed frames type to MMIO.
             if let Err(FrameError::TypeConversion { from, to }) =
                 frame_manager.try_modify_type(frame_index, FrameType::MMIO)
             {
-                panic!(
-                    "Attempted to assign MMIO to Frame {}: {:?} into {:?}",
-                    frame_index, from, to
-                );
+                return Err(MMIOError::FailedFrameTypeModify);
             }
-        }
 
-        let page_manager = global_pmgr();
-        let ptr = (crate::memory::PHYS_MEM_START + (frame_index * 0x1000)).as_mut_ptr::<u8>();
-
-        for offset in 0..count {
+            // Set the correct page attributes for MMIO virtual memory.
             page_manager.set_page_attribs(
-                &Page::from_ptr(ptr.add(offset * 0x1000)),
-                PageAttributes::UNCACHEABLE,
+                &current_phys_mem_page,
+                PageAttributes::UNCACHEABLE | PageAttributes::WRITE_THROUGH,
                 AttributeModify::Insert,
-            )
+            );
         }
 
-        Self {
-            ptr,
-            len: count * 0x1000,
-        }
+        Ok(Self {
+            ptr: (initial_page_address.get().unwrap().index() * 0x1000) as *mut _,
+            len: page_count * 0x1000,
+        })
     }
 
     pub fn mapped_addr(&self) -> crate::Address<crate::Virtual> {
         crate::Address::<crate::Virtual>::from_ptr(self.ptr)
-    }
-
-    pub fn pages(&self) -> core::ops::Range<Page> {
-        let base_page = paging::Page::from_index((self.ptr as usize) / 0x1000);
-        base_page
-            ..(base_page
-                .forward_checked(crate::align_up_div(self.len, 0x1000))
-                .unwrap())
     }
 
     #[inline]

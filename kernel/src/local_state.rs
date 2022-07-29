@@ -76,13 +76,19 @@ pub unsafe fn init() {
         use libkernel::memory::Page;
 
         // Map the pages this local state will utilize.
-        let page_manager = libkernel::memory::global_pmgr();
+        let frame_manager = crate::memory::get_kernel_frame_manager().unwrap();
+        let page_manager = crate::memory::get_kernel_page_manager().unwrap();
         let base_page = Page::from_ptr(local_state_ptr);
         let end_page = base_page
             .forward_checked(core::mem::size_of::<LocalState>() / 0x1000)
             .unwrap();
-        (base_page..end_page)
-            .for_each(|page| page_manager.auto_map(&page, libkernel::memory::PageAttributes::DATA));
+        (base_page..end_page).for_each(|page| {
+            page_manager.auto_map(
+                &page,
+                libkernel::memory::PageAttributes::DATA,
+                frame_manager,
+            )
+        });
     }
 
     /* CONFIGURE APIC */
