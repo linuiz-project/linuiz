@@ -43,14 +43,7 @@ pub enum RdRandError {
     HardFailure,
 }
 
-/// Reads a cryptographically secure, deterministic random number from hardware.
-///
-/// Return value indicates various success and failure states of the operation.
-/// These are detailed as follows:
-///     — `None` indicates no support for the `rdrand` instruction.
-///     — `Some(Err(_))` indicates `rdrand` has encountered a hard failure, and will not generate
-///         anymore valid numbers.
-///     — `Some(Ok(_))` returns the successfully generated random number.
+/// Reads a (hopefully) cryptographically secure, deterministic random number from hardware.
 pub fn rdrand64() -> Result<u64, RdRandError> {
     // Check to ensure the instruction is supported.
     if crate::cpu::has_feature(crate::cpu::Feature::RDRAND) {
@@ -75,9 +68,9 @@ pub fn rdrand64() -> Result<u64, RdRandError> {
                 );
             }
 
-            // IA32 Software Developer's Manual specifies it is possible (rarely) for `rdrand` to return
+            // IA32 Software Developer's Manual specifies it is (rarely) possible for `rdrand` to return
             // bad data in the destination register. If this is the case—and additionally if demand for random
-            // number generation is too high—the CF bit in `rflags` will not be set, and in the latter case (troughput),
+            // number generation is too high—the CF bit in `rflags` will not be set, and in the latter case (throughput),
             // zero will be returned in the destination register.
             use crate::registers::RFlags;
             if result > 0 && RFlags::from_bits_truncate(rflags).contains(RFlags::CARRY_FLAG) {
@@ -127,4 +120,9 @@ pub fn rdrand32() -> Result<u32, RdRandError> {
     } else {
         Err(RdRandError::NotSupported)
     }
+}
+
+#[inline]
+pub fn mfence() {
+    unsafe { core::arch::asm!("mfence", options(nostack, nomem, preserves_flags)) };
 }

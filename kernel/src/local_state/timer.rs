@@ -1,6 +1,6 @@
 use crate::interrupts::Vector;
 use alloc::boxed::Box;
-use libkernel::{cpu, registers::trace, structures::apic};
+use libkernel::{cpu, structures::apic};
 
 const MS_WINDOW: u64 = 10;
 

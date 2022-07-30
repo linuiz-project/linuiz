@@ -113,7 +113,7 @@ impl VirtualMapper {
                     | PageAttributes::GLOBAL,
             );
 
-            tlb::invalidate(&cur_page);
+            tlb::invlpg(&cur_page);
         }
 
         self.mapped_page = base_page;
@@ -220,7 +220,7 @@ impl PageManager {
                 .get_page_entry_create(page, frame_manager)
                 .set(frame_index, attribs);
 
-            tlb::invalidate(page);
+            tlb::invlpg(page);
         })
     }
 
@@ -250,7 +250,7 @@ impl PageManager {
                 }
 
                 // Invalidate the page in the TLB.
-                tlb::invalidate(page);
+                tlb::invlpg(page);
             })
             .ok_or(MapError::NotMapped)
     }
@@ -283,7 +283,7 @@ impl PageManager {
                 );
 
                 if result.is_ok() {
-                    tlb::invalidate(unmap_from);
+                    tlb::invlpg(unmap_from);
                 }
 
                 result
@@ -359,7 +359,7 @@ impl PageManager {
             .get_page_entry_mut(page)
             .map(|page_entry| page_entry.set_attributes(attributes, modify_mode));
 
-        tlb::invalidate(page);
+        tlb::invlpg(page);
     }
 
     pub unsafe fn modify_mapped_page(&self, page: Page, frame_manager: &'static FrameManager<'_>) {
