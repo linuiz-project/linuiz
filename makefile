@@ -41,7 +41,6 @@ clean:
 	cd ./libkernel/ && cargo clean
 
 update:
-	cd ./limine/ && git pull
 	rustup update
 	cd ./kernel/ && cargo update
 	cd ./libkernel/ && cargo update
