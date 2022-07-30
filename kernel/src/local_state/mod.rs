@@ -1,11 +1,13 @@
 mod timer;
 
-use crate::scheduling::{Task, TaskPriority};
+use crate::scheduling::{Scheduler, Task, TaskPriority};
 use core::sync::atomic::{AtomicUsize, Ordering};
 use libkernel::{
     registers::{control::CR3, RFlags},
     Address, Virtual,
 };
+
+static ACTIVE_CPUS: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
 
 #[repr(C, align(0x1000))]
 pub(crate) struct LocalState {
@@ -20,9 +22,10 @@ pub(crate) struct LocalState {
     df_stack: [u8; 0x1000],
     mc_stack: [u8; 0x1000],
     magic: u32,
+    timer: alloc::boxed::Box<dyn timer::Timer>,
+    scheduler: Scheduler,
     default_task: Task,
     cur_task: Option<Task>,
-    timer: alloc::boxed::Box<dyn timer::Timer>,
 }
 
 impl LocalState {
@@ -64,7 +67,7 @@ pub unsafe fn init() {
             // automatically sign extend.
             Address::<Virtual>::new(
                 ((510 * libkernel::memory::PML4_ENTRY_MEM_SIZE)
-                    + (libkernel::instructions::rdrand32().unwrap() as usize))
+                    + (libkernel::rand(0..(u32::MAX as u64)).unwrap_or(0) as usize))
                     & !0xFFF,
             )
             .as_usize(),
@@ -122,6 +125,8 @@ pub unsafe fn init() {
         df_stack: [0u8; 0x1000],
         mc_stack: [0u8; 0x1000],
         magic: LocalState::MAGIC,
+        timer,
+        scheduler: Scheduler::new(false),
         default_task: Task::new(
             TaskPriority::new(1).unwrap(),
             libkernel::instructions::hlt_indefinite,
@@ -132,17 +137,16 @@ pub unsafe fn init() {
             CR3::read(),
         ),
         cur_task: None,
-        timer,
     });
     local_state().unwrap().validate_init();
+
+    ACTIVE_CPUS.fetch_add(1, Ordering::Relaxed);
 }
 
 fn local_timer_handler(
     stack_frame: &mut x86_64::structures::idt::InterruptStackFrame,
     cached_regs: &mut crate::scheduling::ThreadRegisters,
 ) {
-    use crate::scheduling::SCHEDULER;
-
     const MIN_TIME_SLICE_MS: u32 = 1;
     const PRIO_TIME_SLICE_MS: u32 = 2;
 
@@ -158,11 +162,85 @@ fn local_timer_handler(
         cur_task.gprs = *cached_regs;
         cur_task.cr3 = CR3::read();
 
-        SCHEDULER.push_task(cur_task);
+        local_state.scheduler.push_task(cur_task);
     }
 
+    // Take all tasks from the global queue.
+    while let Some(task) = unsafe { crate::scheduling::GLOBAL_TASK_QUEUE.pop() } {
+        local_state.scheduler.push_task(task);
+    }
+
+    {
+        let page_manager = crate::memory::get_kernel_page_manager().unwrap();
+
+        for local_state_index in 0..ACTIVE_CPUS.load(Ordering::Relaxed) {
+            let other_ptr = unsafe {
+                (LOCAL_STATES_BASE.load(Ordering::Relaxed) as *mut LocalState)
+                    .add(local_state_index)
+            };
+
+            if !page_manager.is_mapped(Address::<Virtual>::from_ptr(other_ptr)) {
+                continue;
+            }
+
+            let other = unsafe { other_ptr.as_mut().unwrap() };
+            let other_avg_prio = other.scheduler.get_avg_prio();
+            let self_avg_prio = local_state.scheduler.get_avg_prio();
+            let avg_prio_diff = self_avg_prio.abs_diff(other_avg_prio);
+        }
+    }
+
+    // load balance tasks
+    // {
+    //     let rand_index = libkernel::rand(0..ACTIVE_CPUS.load(Ordering::Relaxed)).expect(
+    //         "hardware random number generation must be supported for load-balanced scheduling",
+    //     ) as usize;
+    //     crate::print!(
+    //         "rand {:?} {}",
+    //         0..ACTIVE_CPUS.load(Ordering::Relaxed),
+    //         rand_index
+    //     );
+
+    //     let other_ptr = unsafe {
+    //         (LOCAL_STATES_BASE.load(Ordering::Relaxed) as *mut LocalState).add(rand_index)
+    //     };
+
+    //     if crate::memory::get_kernel_page_manager()
+    //         .unwrap()
+    //         .is_mapped(Address::<Virtual>::from_ptr(other_ptr))
+    //     {
+    //         crate::print!("mapped");
+
+    //         let other = unsafe { other_ptr.as_mut().unwrap() };
+
+    //         let self_avg_prio = local_state.scheduler.get_avg_prio();
+    //         let other_avg_prio = other.scheduler.get_avg_prio();
+    //         const MAX_PRIO_DIFF: u64 = (TaskPriority::MAX + TaskPriority::MIN) as u64;
+
+    //         if self_avg_prio.abs_diff(other_avg_prio) >= MAX_PRIO_DIFF {
+    //             while self_avg_prio > other_avg_prio {
+    //                 other.scheduler.push_task(
+    //                     local_state
+    //                         .scheduler
+    //                         .pop_task()
+    //                         .expect("local scheduler failed to pop task for load balancing"),
+    //                 );
+    //             }
+
+    //             while self_avg_prio < other_avg_prio {
+    //                 local_state.scheduler.push_task(
+    //                     other
+    //                         .scheduler
+    //                         .pop_task()
+    //                         .expect("other scheduler failed to pop task for load balancing"),
+    //                 );
+    //             }
+    //         }
+    //     }
+    // }
+
     unsafe {
-        let next_timer_ms = if let Some(next_task) = crate::scheduling::SCHEDULER.pop_task() {
+        let next_timer_ms = if let Some(next_task) = local_state.scheduler.pop_task() {
             // Modify task frame to restore rsp & rip.
             stack_frame
                 .as_mut()
@@ -243,4 +321,8 @@ pub fn df_stack_ptr() -> Option<*const ()> {
 /// Returns a pointer to the top of the #MC stack, or `None` if local state is uninitialized.
 pub fn mc_stack_ptr() -> Option<*const ()> {
     local_state().map(|local_state| local_state.mc_stack.as_ptr() as *const _)
+}
+
+pub unsafe fn get_scheduler() -> Option<&'static Scheduler> {
+    local_state().map(|local_state| &local_state.scheduler)
 }

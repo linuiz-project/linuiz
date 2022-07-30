@@ -12,7 +12,6 @@
     asm_const,
     const_ptr_offset_from,
     const_refs_to_cell,
-    core_c_str,
     exclusive_range_pattern,
     raw_vec_internals,
     allocator_api,
@@ -453,12 +452,14 @@ fn syscall_test() -> ! {
 
 #[inline(never)]
 unsafe fn cpu_setup() -> ! {
+    let scheduler = crate::local_state::get_scheduler().unwrap();
+
     if libkernel::cpu::is_bsp() {
         use libkernel::registers::RFlags;
         use scheduling::*;
 
-        SCHEDULER.push_task(Task::new(
-            TaskPriority::new(5).unwrap(),
+        scheduler.push_task(Task::new(
+            TaskPriority::new(16).unwrap(),
             logging::flush_log_messages_indefinite,
             TaskStackOption::AutoAllocate,
             RFlags::INTERRUPT_FLAG,
@@ -467,8 +468,8 @@ unsafe fn cpu_setup() -> ! {
             libkernel::registers::control::CR3::read(),
         ));
 
-        SCHEDULER.push_task(Task::new(
-            TaskPriority::new(7).unwrap(),
+        scheduler.push_task(Task::new(
+            TaskPriority::new(16).unwrap(),
             syscall_test,
             TaskStackOption::AutoAllocate,
             RFlags::INTERRUPT_FLAG,
@@ -479,8 +480,8 @@ unsafe fn cpu_setup() -> ! {
 
         // Add a number of test tasks to get kernel output, test scheduling, and test logging.
         for _ in 0..1 {
-            SCHEDULER.push_task(Task::new(
-                TaskPriority::new(7).unwrap(),
+            scheduler.push_task(Task::new(
+                TaskPriority::new(1).unwrap(),
                 logging_test,
                 TaskStackOption::AutoAllocate,
                 RFlags::INTERRUPT_FLAG,
@@ -489,9 +490,9 @@ unsafe fn cpu_setup() -> ! {
                 libkernel::registers::control::CR3::read(),
             ));
         }
-
-        SCHEDULER.enable();
     }
+
+    scheduler.enable();
 
     libkernel::instructions::hlt_indefinite();
 

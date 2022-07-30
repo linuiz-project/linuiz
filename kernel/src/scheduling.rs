@@ -1,9 +1,11 @@
+use alloc::{boxed::Box, collections::VecDeque};
 use core::{
     mem::MaybeUninit,
-    sync::atomic::{AtomicBool, AtomicU64, Ordering},
+    sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
 };
 use crossbeam_queue::SegQueue;
 use libkernel::{
+    instructions::tlb::pcid::*,
     memory::StackAlignedBox,
     registers::{control::CR3Flags, RFlags},
     Address, Physical,
@@ -59,10 +61,13 @@ impl ThreadRegisters {
 pub struct TaskPriority(u8);
 
 impl TaskPriority {
+    pub const MIN: u8 = 1;
+    pub const MAX: u8 = 16;
+
     #[inline(always)]
     pub const fn new(priority: u8) -> Option<Self> {
         match priority {
-            1..17 => Some(Self(priority)),
+            Self::MIN..=Self::MAX => Some(Self(priority)),
             _ => None,
         }
     }
@@ -82,6 +87,7 @@ pub enum TaskStackOption {
 pub struct Task {
     id: u64,
     prio: TaskPriority,
+    //pcid: Option<PCID>,
     pub rip: u64,
     pub cs: u16,
     pub rsp: u64,
@@ -138,6 +144,7 @@ impl Task {
         self.prio
     }
 }
+
 impl core::fmt::Debug for Task {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
@@ -147,23 +154,27 @@ impl core::fmt::Debug for Task {
     }
 }
 
-lazy_static::lazy_static! {
-    pub static ref SCHEDULER: Scheduler = Scheduler {
-        enabled: AtomicBool::new(false),
-        tasks: SegQueue::new()
-    };
-}
+pub static mut GLOBAL_TASK_QUEUE: SegQueue<Task> = SegQueue::new();
 
 pub struct Scheduler {
     enabled: AtomicBool,
     tasks: SegQueue<Task>,
+    total_priority: AtomicU64,
 }
 
 impl Scheduler {
+    pub fn new(enabled: bool) -> Self {
+        Self {
+            enabled: AtomicBool::new(enabled),
+            tasks: SegQueue::new(),
+            total_priority: AtomicU64::new(0),
+        }
+    }
+
     /// Enables the scheduler to pop tasks.
     #[inline(always)]
     pub fn enable(&self) {
-        self.enabled.store(true, Ordering::Release);
+        self.enabled.store(true, Ordering::Relaxed);
     }
 
     /// Disables scheduler from popping tasks.
@@ -171,11 +182,13 @@ impl Scheduler {
     /// REMARK: Any task pops which are already in-flight will not be cancelled.
     #[inline(always)]
     pub fn disable(&self) {
-        self.enabled.store(false, Ordering::Release);
+        self.enabled.store(false, Ordering::Relaxed);
     }
 
     /// Pushes a new task to the scheduling queue.
     pub fn push_task(&self, task: Task) {
+        self.total_priority
+            .fetch_add(task.prio().get() as u64, Ordering::Relaxed);
         self.tasks.push(task);
     }
 
@@ -183,8 +196,20 @@ impl Scheduler {
     /// the task queue. Returns `None` if the queue is empty.
     pub fn pop_task(&self) -> Option<Task> {
         match self.enabled.load(Ordering::Relaxed) {
-            true => self.tasks.pop(),
+            true => self.tasks.pop().map(|task| {
+                self.total_priority
+                    .fetch_sub(task.prio().get() as u64, Ordering::Relaxed);
+
+                task
+            }),
             false => None,
         }
+    }
+
+    pub fn get_avg_prio(&self) -> u64 {
+        self.total_priority
+            .load(Ordering::Relaxed)
+            .checked_div(self.tasks.len() as u64)
+            .unwrap_or(0)
     }
 }
