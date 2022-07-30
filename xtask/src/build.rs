@@ -49,6 +49,16 @@ pub fn build(options: Options) -> Result<(), xshell::Error> {
 
     /* build */
     {
+        { // limine
+            { // `make` the project
+                let _dir = shell.push_dir("submodules/limine/");
+                cmd!(shell, "make").run()?;
+            }
+
+            // copy the resultant EFI binary
+            cmd!(shell, "cp submodules/limine/bin/BOOTX64.EFI .hdd/image/EFI/BOOT/").run()?;
+        }
+
         {
             // libkernel
             let _dir = shell.push_dir("src/libkernel/");
