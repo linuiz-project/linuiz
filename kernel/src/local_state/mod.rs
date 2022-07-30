@@ -1,3 +1,5 @@
+mod timer;
+
 use crate::scheduling::{Task, TaskPriority};
 use core::sync::atomic::{AtomicUsize, Ordering};
 use libkernel::{
@@ -20,7 +22,7 @@ pub(crate) struct LocalState {
     magic: u32,
     default_task: Task,
     cur_task: Option<Task>,
-    local_timer_per_ms: u32,
+    timer: alloc::boxed::Box<dyn timer::Timer>,
 }
 
 impl LocalState {
@@ -97,13 +99,9 @@ pub unsafe fn init() {
 
     apic::software_reset();
     apic::set_timer_divisor(apic::TimerDivisor::Div1);
-    apic::get_timer()
-        .set_mode(apic::TimerMode::OneShot)
-        .set_vector(Vector::LocalTimer as u8);
     apic::get_error()
         .set_vector(Vector::Error as u8)
         .set_masked(false);
-    crate::interrupts::set_handler_fn(Vector::LocalTimer, local_timer_handler);
     apic::get_performance().set_vector(Vector::Performance as u8);
     apic::get_thermal_sensor().set_vector(Vector::ThermalSensor as u8);
     // LINT0&1 should be configured by the APIC reset.
@@ -113,34 +111,9 @@ pub unsafe fn init() {
     libkernel::instructions::interrupts::enable();
     libkernel::structures::apic::sw_enable();
 
-    let per_ms = {
-        if let Some(registers) = libkernel::instructions::cpuid::exec(0x15, 0x0)
-            .and_then(|result| if result.ebx() > 0 { Some(result) } else { None })
-        // Attempt to calculate a concrete frequency via CPUID.
-        {
-            let per_ms = registers.ecx() * (registers.ebx() / registers.eax());
-            trace!("CPU clock frequency reporting: {} Hz", per_ms);
-            per_ms
-        } else
-        // Otherwise, determine frequency with external measurements.
-        {
-            trace!("CPU does not support clock frequency reporting via CPUID.");
-
-            const MS_WINDOW: u32 = 10;
-            // Wait on the global timer, to ensure we're starting the count
-            // on the rising edge of each millisecond.
-            crate::clock::busy_wait_msec(1);
-            apic::set_timer_initial_count(u32::MAX);
-            crate::clock::busy_wait_msec(MS_WINDOW as u64);
-
-            let per_ms = (u32::MAX - apic::get_timer_current_count()) / MS_WINDOW;
-            trace!(
-                "CPU clock frequency measurement: {} Hz",
-                per_ms * (1000 / MS_WINDOW)
-            );
-            per_ms
-        }
-    };
+    crate::interrupts::set_handler_fn(Vector::LocalTimer, local_timer_handler);
+    let mut timer = timer::get_best_timer();
+    timer.set_frequency(1000);
 
     local_state_ptr.write(LocalState {
         privilege_stack: [0u8; 0x4000],
@@ -159,7 +132,7 @@ pub unsafe fn init() {
             CR3::read(),
         ),
         cur_task: None,
-        local_timer_per_ms: per_ms,
+        timer,
     });
     local_state().unwrap().validate_init();
 }
@@ -241,12 +214,10 @@ fn local_timer_handler(
 ///
 /// REMARK: This function will panic if the local state structure is uninitialized.
 pub unsafe fn reload_timer(ms_multiplier: core::num::NonZeroU32) {
-    libkernel::structures::apic::set_timer_initial_count(
-        ms_multiplier.get()
-            * local_state()
-                .expect("reload timer called for uninitialized local state")
-                .local_timer_per_ms,
-    );
+    local_state()
+        .expect("reload timer called for uninitialized local state")
+        .timer
+        .reload(ms_multiplier.get());
 }
 
 /// Returns a pointer to the top of the privilege stack, or `None` if local state is uninitialized.

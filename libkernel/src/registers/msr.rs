@@ -201,3 +201,15 @@ pub struct IA32_KERNEL_GS_BASE;
 impl Generic for IA32_KERNEL_GS_BASE {
     const ECX: u32 = 0xC0000102;
 }
+
+pub struct IA32_TSC_DEADLINE;
+impl IA32_TSC_DEADLINE {
+    /// Sets the timestamp counter deadline.
+    ///
+    /// SAFETY: Caller must ensure setting the deadline will not adversely
+    ///         affect software execution.
+    #[inline(always)]
+    pub unsafe fn set(value: u64) {
+        wrmsr(0x6E0, value);
+    }
+}

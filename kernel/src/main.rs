@@ -18,7 +18,8 @@
     allocator_api,
     strict_provenance,
     slice_ptr_get,
-    new_uninit
+    new_uninit,
+    inline_const
 )]
 
 #[macro_use]
@@ -263,7 +264,14 @@ unsafe extern "C" fn _cpu_entry() -> ! {
                 | CR4Flags::OSXMMEXCPT
                 | CR4Flags::UMIP
                 | if has_feature(Feature::FSGSBASE) {
+                    trace!("Detected support for CPL3 FS/GS base usage.");
                     CR4Flags::FSGSBASE
+                } else {
+                    CR4Flags::empty()
+                }
+                | if has_feature(Feature::PCID) && has_feature(Feature::INVPCID) {
+                    trace!("Detected support for Process Context IDs.");
+                    CR4Flags::PCIDE
                 } else {
                     CR4Flags::empty()
                 },

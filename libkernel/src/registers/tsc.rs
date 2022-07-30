@@ -7,11 +7,13 @@ impl TSC {
 
         unsafe {
             core::arch::asm!(
-                "push rax",
-                "rdtsc",
-                "shl rdx, 32",
-                "or rdx, rax",
-                "pop rax",
+                "
+                push rax
+                rdtsc
+                shl rdx, 32
+                or rdx, rax
+                pop rax
+                ",
                 out("rdx") value,
                 options(nostack, nomem)
             )

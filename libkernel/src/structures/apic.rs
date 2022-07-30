@@ -386,8 +386,10 @@ impl<T: GenericVectorVariant> LocalVector<T> {
 
 impl LocalVector<Timer> {
     pub unsafe fn set_mode(&self, mode: TimerMode) -> &Self {
+        use crate::cpu::{has_feature, Feature};
+
         assert!(
-            mode != TimerMode::TSC_Deadline || crate::cpu::has_feature(crate::cpu::Feature::TSC_DL),
+            mode != TimerMode::TSC_Deadline || has_feature(Feature::TSC_DL),
             "TSC deadline is not supported on this CPU."
         );
 
@@ -395,6 +397,12 @@ impl LocalVector<Timer> {
             <Timer as LocalVectorVariant>::REGISTER,
             *read_register(<Timer as LocalVectorVariant>::REGISTER).set_bits(17..19, mode as u64),
         );
+
+        if has_feature(Feature::TSC_DL) {
+            // IA32 SDM instructs utilizing the `mfence` instruction to ensure all writes to the IA32_TSC_DEADLINE
+            // MSR are serialized *after* the APIC timer mode switch (`wrmsr` to `IA32_TSC_DEADLINE` is non-serializing).
+            crate::instructions::mfence();
+        }
 
         self
     }
