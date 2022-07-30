@@ -1,0 +1,4 @@
+[submodule "limine"]
+	path = submodules/limine
+	url = https://github.com/limine-bootloader/limine
+	branch = trunk
