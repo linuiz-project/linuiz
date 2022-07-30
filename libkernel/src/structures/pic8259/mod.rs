@@ -13,7 +13,7 @@ use crate::io::port::{ReadWritePort, WriteOnlyPort};
 
 const CMD_INIT: u8 = 0x11;
 const CMD_END_OF_INTERRUPT: u8 = 0x20;
-const MODE_8806: u8 = 0x01;
+const MODE_8086: u8 = 0x01;
 pub const TICK_RATE: u32 = 1193182;
 
 #[repr(u8)]
@@ -156,9 +156,9 @@ impl PIC8259 {
         io_wait();
 
         // Inform the PIC of what mode we'll be using them in.
-        self.pics[0].data.write(MODE_8806);
+        self.pics[0].data.write(MODE_8086);
         io_wait();
-        self.pics[1].data.write(MODE_8806);
+        self.pics[1].data.write(MODE_8086);
         io_wait();
 
         // Write masks to data port, specifying which interrupts are ignored.
