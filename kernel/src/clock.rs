@@ -51,6 +51,6 @@ pub fn get_ticks() -> u64 {
 pub fn busy_wait_msec(milliseconds: u64) {
     let target_ticks = get_ticks() + milliseconds;
     while get_ticks() <= target_ticks {
-        libkernel::instructions::pause();
+        libarch::instructions::pause();
     }
 }

@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
-use crate::instructions::cpuid::exec;
 use core::fmt::{Debug, Display, Formatter, Result};
 use lazy_static::lazy_static;
+use libarch::instructions::x86_64::cpuid::exec;
 
 const FEATURES_01H: usize = 0 << 16;
 const FEATURES_07H: usize = 1 << 16;
@@ -640,13 +640,4 @@ pub unsafe fn ring3_enter(target_func: fn(), rflags: crate::registers::RFlags) {
 #[inline(always)]
 pub fn is_bsp() -> bool {
     crate::registers::msr::IA32_APIC_BASE::get_is_bsp()
-}
-
-/// Simple convenience wrapper function for retrieving x2/xAPIC ID.
-///
-/// REMARK: Given [`crate::structures::apic::get_id()`] will panic if not
-///         initialized, this function can panic under the same conditions.
-#[inline(always)]
-pub fn get_id() -> u32 {
-    crate::structures::apic::get_id()
 }

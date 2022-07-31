@@ -1,4 +1,3 @@
-pub mod cpuid;
 pub mod tlb;
 
 use core::arch::asm;
@@ -66,7 +65,7 @@ pub fn rdrand() -> Result<u64, RandError> {
             if result > 0 && RFlags::from_bits_truncate(rflags).contains(RFlags::CARRY_FLAG) {
                 return Ok(result);
             } else {
-                pause();
+                libarch::instructions::pause();
             }
         }
 
@@ -109,7 +108,7 @@ pub fn rdseed() -> Result<u64, RandError> {
             if result > 0 && RFlags::from_bits_truncate(rflags).contains(RFlags::CARRY_FLAG) {
                 return Ok(result);
             } else {
-                pause();
+                libarch::instructions::pause();
             }
         }
 

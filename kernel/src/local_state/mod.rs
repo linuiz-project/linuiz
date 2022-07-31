@@ -23,6 +23,7 @@ pub(crate) struct LocalState {
     df_stack: [u8; 0x1000],
     mc_stack: [u8; 0x1000],
     magic: u32,
+    core_id: u32,
     timer: alloc::boxed::Box<dyn timer::Timer>,
     scheduler: Scheduler,
     default_task: Task,
@@ -73,9 +74,10 @@ pub unsafe fn init() {
         )
         .ok();
 
+    let core_id = libarch::cpu::get_id();
+
     // Ensure we load the local state pointer via `cpuid` to avoid using the APIC before it is initialized.
-    let local_state_ptr = (LOCAL_STATES_BASE.load(Ordering::Relaxed) as *mut LocalState)
-        .add(libkernel::instructions::cpuid::get_id() as usize);
+    let local_state_ptr = (LOCAL_STATES_BASE.load(Ordering::Relaxed) as *mut LocalState).add(core_id as usize);
 
     {
         use libkernel::memory::Page;
@@ -111,7 +113,6 @@ pub unsafe fn init() {
     timer.set_frequency(1000);
 
     let page = libkernel::memory::Page::from_ptr(local_state_ptr);
-    info!("{:?}: {:?}", &page, crate::memory::get_kernel_page_manager().unwrap().get_page_attribs(&page));
 
     local_state_ptr.write(LocalState {
         privilege_stack: [0u8; 0x4000],
@@ -120,11 +121,12 @@ pub unsafe fn init() {
         df_stack: [0u8; 0x1000],
         mc_stack: [0u8; 0x1000],
         magic: LocalState::MAGIC,
+        core_id,
         timer,
         scheduler: Scheduler::new(false),
         default_task: Task::new(
             TaskPriority::new(1).unwrap(),
-            libkernel::instructions::hlt_indefinite,
+            libarch::instructions::interrupts::wait_indefinite,
             crate::scheduling::TaskStackOption::AutoAllocate,
             RFlags::INTERRUPT_FLAG,
             *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),

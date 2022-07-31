@@ -2,6 +2,8 @@
 pub fn get_id() -> u32 {
     #[cfg(target_arch = "x86_64")]
     {
+        use crate::instructions::x86_64::cpuid::exec;
+
         if let Some(registers) =
             // IA32 SDM instructs to enumerate this leaf first...
             exec(0x1F, 0x0)
@@ -15,7 +17,8 @@ pub fn get_id() -> u32 {
         {
             registers.ebx() >> 24
         } else {
-            panic!("CPUID ID enumeration failed.");
+            // TODO possibly don't just panic and fail here?
+            panic!("CPUID ID enumeration failed.")
         }
     }
 }

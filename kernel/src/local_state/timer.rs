@@ -99,7 +99,7 @@ impl Timer for TSCTimer {
     unsafe fn set_frequency(&mut self, set_freq: u64) {
         let freq = {
             // Attempt to calculate a concrete frequency via CPUID.
-            if let Some(registers) = libkernel::instructions::cpuid::exec(0x15, 0x0).and_then(|result| {
+            if let Some(registers) = libarch::instructions::x86_64::cpuid::exec(0x15, 0x0).and_then(|result| {
                 if result.ebx() > 0 {
                     Some(result)
                 } else {

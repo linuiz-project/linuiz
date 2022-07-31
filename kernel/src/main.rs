@@ -97,10 +97,8 @@ lazy_static::lazy_static! {
 unsafe extern "sysv64" fn _entry() -> ! {
     CON_OUT.init(drivers::stdout::SerialSpeed::S115200);
     match drivers::stdout::set_stdout(&mut CON_OUT, log::LevelFilter::Trace) {
-        Ok(()) => {
-            info!("Successfully loaded into kernel, with logging enabled.");
-        }
-        Err(_) => libkernel::instructions::interrupts::breakpoint(),
+        Ok(()) => info!("Successfully loaded into kernel."),
+        Err(_) => libarch::instructions::interrupts::wait_indefinite(),
     }
 
     /* log boot info */
@@ -444,7 +442,7 @@ unsafe fn cpu_setup() -> ! {
 
     scheduler.enable();
 
-    libkernel::instructions::hlt_indefinite();
+    libarch::instructions::interrupts::wait_indefinite()
 
     /* ENABLE SYSCALL */
     // {

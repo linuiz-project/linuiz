@@ -39,7 +39,7 @@ pub mod global_alloc {
     pub unsafe fn set(galloc: &'static dyn GlobalAlloc) {
         if let Err(_) = GLOBAL_ALLOCATOR.0.set(galloc) {
             error!("Global allocator is already set.");
-            crate::instructions::hlt_indefinite();
+            libarch::instructions::interrupts::wait_indefinite();
         }
     }
 }
