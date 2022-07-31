@@ -1,20 +1,7 @@
 pub mod build;
 pub mod runner;
 
-use clap::{clap_derive::ArgEnum, AppSettings, Parser};
-
-#[derive(ArgEnum, Clone, Copy)]
-pub enum Simulator {
-    KVM,
-    TCG,
-}
-
-#[derive(ArgEnum, Clone, Copy)]
-pub enum BlockDriver {
-    AHCI,
-    NVMe,
-    VirtIO,
-}
+use clap::{AppSettings, Parser};
 
 #[derive(Parser)]
 #[clap(rename_all = "snake_case", setting = AppSettings::DisableVersionFlag)]

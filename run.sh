@@ -9,10 +9,10 @@ qemu-system-x86_64 \
     -serial mon:stdio \
     -net none \
     -display none \
-    -bios ./resources/ovmf.fd \
-    -drive format=raw,file=fat:rw:./.hdd/image/ \
-    -drive format=raw,file=./.hdd/nvme.img,id=root,if=none \
-    -device virtio-blk-pci,drive=root,serial=deadbeef \
+    -bios resources/OVMF.fd \
+    -drive format=raw,file=fat:rw:./.hdd/root/ \
+    -drive format=raw,file=./.hdd/disk.img,id=disk,if=none \
+    -device virtio-blk-pci,drive=disk,serial=deadbeef \
     -D .debug/qemu_debug.log \
     -d int,guest_errors
 

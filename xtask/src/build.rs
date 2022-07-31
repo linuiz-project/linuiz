@@ -2,19 +2,10 @@ use clap::{clap_derive::ArgEnum, Parser};
 use std::path::PathBuf;
 use xshell::{cmd, Shell};
 
-#[derive(Clone, Copy, ArgEnum)]
+#[derive(Debug, Clone, Copy, ArgEnum)]
 pub enum Profile {
     Release,
     Debug,
-}
-
-impl core::fmt::Debug for Profile {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(match self {
-            Profile::Release => "release",
-            Profile::Debug => "dev",
-        })
-    }
 }
 
 #[derive(Parser)]
@@ -42,36 +33,53 @@ pub fn build(options: Options) -> Result<(), xshell::Error> {
             }
         }
 
-        if !shell.path_exists(".hdd/disk.img") {
-            cmd!(shell, "qemu-img create -f raw .hdd/disk.img 256M").run()?;
+        if !shell.path_exists(".hdd/disk0.img") {
+            cmd!(shell, "qemu-img create -f raw .hdd/disk0.img 256M").run()?;
         }
     }
 
     /* build */
     {
-        { // limine
-            { // `make` the project
-                let _dir = shell.push_dir("submodules/limine/");
-                cmd!(shell, "make").run()?;
-            }
-
+        /* limine */
+        {
+            // update the submodule to ensure latest version
+            cmd!(shell, "git submodule update").run()?;
             // copy the resultant EFI binary
-            cmd!(shell, "cp submodules/limine/bin/BOOTX64.EFI .hdd/image/EFI/BOOT/").run()?;
+            cmd!(shell, "cp submodules/limine/BOOTX64.EFI .hdd/root/EFI/BOOT/").run()?;
         }
 
+        /* libkernel */
         {
-            // libkernel
             let _dir = shell.push_dir("src/libkernel/");
             cmd!(shell, "cargo fmt").run()?;
         }
 
+        /* kernel */
         {
-            //kernel
             let _dir = shell.push_dir("src/kernel/");
-            let profile_str = format!("{:?}", options.profile);
+            let profile_str = format!(
+                "{}",
+                match options.profile {
+                    Profile::Release => "release",
+                    Profile::Debug => "dev",
+                }
+            );
 
             cmd!(shell, "cargo fmt").run()?;
-            cmd!(shell, "cargo build --profile {profile_str} -Z unstable-options").run()?;
+            cmd!(
+                shell,
+                "
+                cargo build
+                    --profile {profile_str}
+                    --target x86_64-unknown-none.json
+                    -Z unstable-options
+                "
+            )
+            .run()?;
+
+            // Copy kernel binary to root hdd
+            let out_path_str = format!("target/x86_64-unknown-none/{:?}/kernel.elf", options.profile).to_lowercase();
+            cmd!(shell, "cp {out_path_str} ../../.hdd/root/linuiz/").run()?;
         }
     }
 
