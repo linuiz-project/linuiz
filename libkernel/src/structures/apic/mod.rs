@@ -1,21 +1,52 @@
-#![allow(non_camel_case_types)]
+#![allow(non_camel_case_types, non_upper_case_globals)]
+
+mod x;
+mod x2;
 
 use crate::InterruptDeliveryMode;
+use alloc::boxed::Box;
 use bit_field::BitField;
 use core::marker::PhantomData;
 
+/// Wrapper trait for easily supporting both xAPIC and x2APIC.
+pub(self) trait APIC: Send + Sync {
+    /// Reads the given register's value from the local APIC.
+    ///
+    /// SAFETY: Caller is tasked with ensuring a read to the provided register will not
+    ///         result in disruptive control flow.
+    unsafe fn read_register(&self, register: Register) -> u64;
+
+    /// Writes the given value to the given register on the local APIC.
+    ///
+    /// SAFETY: Caller is tasked with ensuring a write to the provided register will not
+    ///         result in disruptive control flow.
+    unsafe fn write_register(&self, register: Register, value: u64);
+}
+
+lazy_static::lazy_static! {
+    static ref LAPIC: Box<dyn APIC> = {
+        if crate::registers::msr::IA32_APIC_BASE::is_x2_mode() {
+            Box::new(x2::x2APIC)
+        } else if crate::cpu::has_feature(crate::cpu::Feature::xAPIC) {
+            Box::new(x::xAPIC)
+        } else {
+            panic!("CPU does not support core-local APIC!");
+        }
+    };
+}
+
+/// Various valid modes for APIC timer to operate in.
 #[repr(u64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(non_camel_case_types)]
 pub enum TimerMode {
     OneShot = 0b00,
     Periodic = 0b01,
     TSC_Deadline = 0b10,
 }
 
+/// Divisor for APIC timer to use when not in [TimerMode::TSC_Deadline].
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(non_camel_case_types)]
 pub enum TimerDivisor {
     Div2 = 0b0000,
     Div4 = 0b0001,
@@ -28,6 +59,7 @@ pub enum TimerDivisor {
 }
 
 impl TimerDivisor {
+    /// Converts the given [TimerDivisor] to its numeric counterpart.
     pub const fn as_divide_value(self) -> u64 {
         match self {
             TimerDivisor::Div2 => 2,
@@ -89,49 +121,49 @@ impl InterruptCommand {
 
 #[repr(u32)]
 pub enum Register {
-    ID = 0x802,
-    VERSION = 0x803,
-    TPR = 0x808,
-    PPR = 0x80A,
-    EOI = 0x80B,
-    LDR = 0x80C,
-    SPURIOUS = 0x80F,
-    ISR0 = 0x810,
-    ISR32 = 0x811,
-    ISR64 = 0x812,
-    ISR96 = 0x813,
-    ISR128 = 0x814,
-    ISR160 = 0x815,
-    ISR192 = 0x816,
-    ISR224 = 0x817,
-    TMR0 = 0x818,
-    TMR32 = 0x819,
-    TMR64 = 0x81A,
-    TMR96 = 0x81B,
-    TMR128 = 0x81C,
-    TMR160 = 0x81D,
-    TMR192 = 0x81E,
-    TMR224 = 0x81F,
-    IRR0 = 0x820,
-    IRR32 = 0x821,
-    IRR64 = 0x822,
-    IRR96 = 0x823,
-    IRR128 = 0x824,
-    IRR160 = 0x825,
-    IRR192 = 0x826,
-    IRR224 = 0x827,
-    ERR = 0x828,
-    ICR = 0x830,
-    LVT_TIMER = 0x832,
-    LVT_THERMAL = 0x833,
-    LVT_PERF = 0x834,
-    LVT_LINT0 = 0x835,
-    LVT_LINT1 = 0x836,
-    LVT_ERR = 0x837,
-    TIMER_INT_CNT = 0x838,
-    TIMER_CUR_CNT = 0x839,
-    TIMER_DIVISOR = 0x83E,
-    SELF_IPI = 0x83F,
+    ID = 0x02,
+    VERSION = 0x03,
+    TPR = 0x08,
+    PPR = 0x0A,
+    EOI = 0x0B,
+    LDR = 0x0C,
+    SPURIOUS = 0x0F,
+    ISR0 = 0x10,
+    ISR32 = 0x11,
+    ISR64 = 0x12,
+    ISR96 = 0x13,
+    ISR128 = 0x14,
+    ISR160 = 0x15,
+    ISR192 = 0x16,
+    ISR224 = 0x17,
+    TMR0 = 0x18,
+    TMR32 = 0x19,
+    TMR64 = 0x1A,
+    TMR96 = 0x1B,
+    TMR128 = 0x1C,
+    TMR160 = 0x1D,
+    TMR192 = 0x1E,
+    TMR224 = 0x1F,
+    IRR0 = 0x20,
+    IRR32 = 0x21,
+    IRR64 = 0x22,
+    IRR96 = 0x23,
+    IRR128 = 0x24,
+    IRR160 = 0x25,
+    IRR192 = 0x26,
+    IRR224 = 0x27,
+    ERR = 0x28,
+    ICR = 0x30,
+    LVT_TIMER = 0x32,
+    LVT_THERMAL = 0x33,
+    LVT_PERF = 0x34,
+    LVT_LINT0 = 0x35,
+    LVT_LINT1 = 0x36,
+    LVT_ERR = 0x37,
+    TIMER_INT_CNT = 0x38,
+    TIMER_CUR_CNT = 0x39,
+    TIMER_DIVISOR = 0x3E,
+    SELF_IPI = 0x3F,
 }
 
 pub const LINT0_VECTOR: u8 = 253;
@@ -139,13 +171,13 @@ pub const LINT1_VECTOR: u8 = 254;
 pub const SPURIOUS_VECTOR: u8 = 255;
 
 #[inline]
-fn read_register(register: Register) -> u64 {
-    unsafe { crate::registers::msr::rdmsr(register as u32) }
+unsafe fn read_register(register: Register) -> u64 {
+    LAPIC.read_register(register)
 }
 
 #[inline]
 unsafe fn write_register(register: Register, value: u64) {
-    crate::registers::msr::wrmsr(register as u32, value);
+    LAPIC.write_register(register, value);
 }
 
 /*
@@ -166,12 +198,12 @@ pub unsafe fn sw_disable() {
 
 #[inline]
 pub fn get_id() -> u32 {
-    read_register(Register::ID) as u32
+    unsafe { read_register(Register::ID) as u32 }
 }
 
 #[inline]
 pub fn get_version() -> u32 {
-    read_register(Register::VERSION) as u32
+    unsafe { read_register(Register::VERSION) as u32 }
 }
 
 #[inline]
@@ -181,7 +213,7 @@ pub fn end_of_interrupt() {
 
 #[inline]
 pub fn get_error_status() -> ErrorStatusFlags {
-    ErrorStatusFlags::from_bits_truncate(read_register(Register::ERR) as u8)
+    ErrorStatusFlags::from_bits_truncate(unsafe { read_register(Register::ERR) as u8 })
 }
 
 #[inline]
@@ -201,7 +233,7 @@ pub unsafe fn set_timer_initial_count(count: u32) {
 
 #[inline]
 pub fn get_timer_current_count() -> u32 {
-    read_register(Register::TIMER_CUR_CNT) as u32
+    unsafe { read_register(Register::TIMER_CUR_CNT) as u32 }
 }
 
 /// Resets the APIC module. The APIC module state is configured as follows:
@@ -315,12 +347,12 @@ impl<T: LocalVectorVariant> LocalVector<T> {
 
     #[inline]
     pub fn get_interrupted(&self) -> bool {
-        read_register(T::REGISTER).get_bit(Self::INTERRUPTED_OFFSET)
+        unsafe { read_register(T::REGISTER).get_bit(Self::INTERRUPTED_OFFSET) }
     }
 
     #[inline]
     pub fn get_masked(&self) -> bool {
-        read_register(T::REGISTER).get_bit(Self::MASKED_OFFSET)
+        unsafe { read_register(T::REGISTER).get_bit(Self::MASKED_OFFSET) }
     }
 
     #[inline]
@@ -332,7 +364,7 @@ impl<T: LocalVectorVariant> LocalVector<T> {
 
     #[inline]
     pub fn get_vector(&self) -> Option<u8> {
-        match read_register(T::REGISTER).get_bits(0..8) {
+        match unsafe { read_register(T::REGISTER).get_bits(0..8) } {
             0..32 => None,
             vector => Some(vector as u8),
         }
@@ -350,7 +382,10 @@ impl<T: LocalVectorVariant> LocalVector<T> {
 
 impl<T: LocalVectorVariant> core::fmt::Debug for LocalVector<T> {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter.debug_tuple("Local Vector").field(&format_args!("0b{:b}", &read_register(T::REGISTER))).finish()
+        formatter
+            .debug_tuple("Local Vector")
+            .field(&format_args!("0b{:b}", unsafe { &read_register(T::REGISTER) }))
+            .finish()
     }
 }
 

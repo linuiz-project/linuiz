@@ -57,7 +57,7 @@ pub enum Feature {
     DCA                 = FEATURES_01H | ECX | 18,
     SSE41               = FEATURES_01H | ECX | 19,
     SSE42               = FEATURES_01H | ECX | 20,
-    X2APIC              = FEATURES_01H | ECX | 21,
+    x2APIC              = FEATURES_01H | ECX | 21,
     MOVBE               = FEATURES_01H | ECX | 22,
     POPCNT              = FEATURES_01H | ECX | 23,
     TSC_DL              = FEATURES_01H | ECX | 24,
@@ -77,7 +77,7 @@ pub enum Feature {
     PAE                 = FEATURES_01H | EDX | 6,
     MCE                 = FEATURES_01H | EDX | 7,
     CX8                 = FEATURES_01H | EDX | 8,
-    APIC                = FEATURES_01H | EDX | 9,
+    xAPIC               = FEATURES_01H | EDX | 9,
     SEP                 = FEATURES_01H | EDX | 11,
     MTRR                = FEATURES_01H | EDX | 12,
     PGE                 = FEATURES_01H | EDX | 13,
@@ -258,8 +258,8 @@ impl core::fmt::Debug for FeatureFmt {
         if has_feature(Feature::SSE42) {
             cpu_features_fmt.entry(&Feature::SSE42);
         }
-        if has_feature(Feature::X2APIC) {
-            cpu_features_fmt.entry(&Feature::X2APIC);
+        if has_feature(Feature::x2APIC) {
+            cpu_features_fmt.entry(&Feature::x2APIC);
         }
         if has_feature(Feature::MOVBE) {
             cpu_features_fmt.entry(&Feature::MOVBE);
@@ -315,8 +315,8 @@ impl core::fmt::Debug for FeatureFmt {
         if has_feature(Feature::CX8) {
             cpu_features_fmt.entry(&Feature::CX8);
         }
-        if has_feature(Feature::APIC) {
-            cpu_features_fmt.entry(&Feature::APIC);
+        if has_feature(Feature::xAPIC) {
+            cpu_features_fmt.entry(&Feature::xAPIC);
         }
         if has_feature(Feature::SEP) {
             cpu_features_fmt.entry(&Feature::SEP);

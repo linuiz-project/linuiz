@@ -16,7 +16,6 @@
     const_transmute_copy,
     const_ptr_as_ref,
     const_option,
-    const_slice_from_raw_parts,
     const_ptr_is_null,
     naked_functions,
     allocator_api

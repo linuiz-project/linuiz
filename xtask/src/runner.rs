@@ -19,6 +19,7 @@ impl core::fmt::Debug for Simulator {
 #[derive(ArgEnum, Debug, Clone, Copy)]
 pub enum CPU {
     Host,
+    Max,
     KVM64,
 }
 
@@ -42,11 +43,11 @@ impl core::fmt::Debug for BlockDriver {
 #[derive(Parser)]
 pub struct Options {
     /// Which simulator to use when executing the binary.
-    #[clap(arg_enum, long, default_value = "kvm")]
+    #[clap(arg_enum, long, default_value = "tcg")]
     machine: Simulator,
 
     /// CPU type to emulate.
-    #[clap(arg_enum, long, default_value = "host")]
+    #[clap(arg_enum, long, default_value = "max")]
     cpu: CPU,
 
     /// Number of CPUs to emulate.
@@ -62,7 +63,7 @@ pub struct Options {
     log: bool,
 
     /// Which type of block driver to use for root drive.
-    #[clap(arg_enum, long)]
+    #[clap(arg_enum, long, default_value = "virt-io")]
     block_driver: BlockDriver,
 }
 
