@@ -171,7 +171,6 @@ impl PIC8259 {
             // If the interrupt belongs to the slave PIC, we send the EOI command to it.
             if self.pics[1].handles_interrupt(interrupt_id) {
                 self.pics[1].end_of_interrupt();
-                trace!("Signalled EOI for Slave: {}", interrupt_id);
             }
 
             // No matter which PIC the interrupt belongs to, the EOI command must be sent
@@ -179,7 +178,6 @@ impl PIC8259 {
             // This is because the slave PIC is chained through the master PIC, so any interrupts
             // raise on the master as well.
             self.pics[0].end_of_interrupt();
-            trace!("Signalled EOI for Master: {}", interrupt_id);
         } else {
             trace!("Invalid EOI request: {}", interrupt_id);
         }

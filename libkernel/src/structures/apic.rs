@@ -9,11 +9,12 @@ use core::{marker::PhantomData, sync::atomic::Ordering};
 // with the page-aligned repr), so a `usize` is employed. It should *never*
 // be read, it's *only* to force the compiler to provide padding.
 #[repr(C, align(0x1000))]
-struct xAPIC([u8; 0x1000]);
+struct xAPIC(core::mem::MaybeUninit<usize>);
 unsafe impl Send for xAPIC {}
 unsafe impl Sync for xAPIC {}
 
-static xLAPIC: core::cell::SyncUnsafeCell<xAPIC> = core::cell::SyncUnsafeCell::new(xAPIC([0u8; 0x1000]));
+static xLAPIC: core::cell::SyncUnsafeCell<xAPIC> =
+    core::cell::SyncUnsafeCell::new(xAPIC(core::mem::MaybeUninit::new(0)));
 static xLAPIC_ENABLED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 /// Initializes the core-local APIC in the most advanced mode possible, and hardware-enables it.

@@ -93,7 +93,7 @@ pub fn run(options: Options) -> Result<(), xshell::Error> {
             -cpu {cpu_str}
             -smp {smp_str}
             -m {ram_str}M
-            -serial stdio
+            -serial mon:stdio
             -net none
             -drive format=raw,file=fat:rw:.hdd/root/
             -drive format=raw,file=.hdd/disk0.img,id=disk1,if=none

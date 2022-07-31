@@ -33,7 +33,7 @@ static LIMINE_DEFAULT_CFG: &str = "
     PROTOCOL=limine
     RESOLUTION=800x600x16
     KERNEL_PATH=boot:///linuiz/kernel.elf
-    KASLR=no
+    KASLR=yes
     ";
 
 pub fn build(options: Options) -> Result<(), xshell::Error> {

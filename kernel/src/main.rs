@@ -96,7 +96,7 @@ lazy_static::lazy_static! {
 #[no_mangle]
 unsafe extern "sysv64" fn _entry() -> ! {
     CON_OUT.init(drivers::stdout::SerialSpeed::S115200);
-    match drivers::stdout::set_stdout(&mut CON_OUT, log::LevelFilter::Debug) {
+    match drivers::stdout::set_stdout(&mut CON_OUT, log::LevelFilter::Trace) {
         Ok(()) => {
             info!("Successfully loaded into kernel, with logging enabled.");
         }
@@ -216,27 +216,24 @@ unsafe extern "C" fn _cpu_entry() -> ! {
         CR0::write(CR0Flags::PE | CR0Flags::MP | CR0Flags::ET | CR0Flags::NE | CR0Flags::WP | CR0Flags::PG);
         // Set CR4 flags.
         use libkernel::registers::control::{CR4Flags, CR4};
-        CR4::write(
-            CR4Flags::DE
-                | CR4Flags::PAE
-                | CR4Flags::MCE
-                | CR4Flags::PGE
-                | CR4Flags::OSFXSR
-                | CR4Flags::OSXMMEXCPT
-                | CR4Flags::UMIP
-                | if has_feature(Feature::FSGSBASE) {
-                    trace!("Detected support for CPL3 FS/GS base usage.");
-                    CR4Flags::FSGSBASE
-                } else {
-                    CR4Flags::empty()
-                }
-                | if has_feature(Feature::PCID) && has_feature(Feature::INVPCID) {
-                    trace!("Detected support for Process Context IDs.");
-                    CR4Flags::PCIDE
-                } else {
-                    CR4Flags::empty()
-                },
-        );
+        let mut flags = CR4Flags::DE
+            | CR4Flags::PAE
+            | CR4Flags::MCE
+            | CR4Flags::PGE
+            | CR4Flags::OSFXSR
+            | CR4Flags::OSXMMEXCPT
+            | CR4Flags::UMIP;
+
+        if has_feature(Feature::FSGSBASE) {
+            trace!("Detected support for CPL3 FS/GS base usage.");
+            flags.insert(CR4Flags::FSGSBASE);
+        }
+        if has_feature(Feature::PCID) && has_feature(Feature::INVPCID) {
+            trace!("Detected support for Process Context IDs.");
+            flags.insert(CR4Flags::PCIDE);
+        }
+
+        CR4::write(flags);
 
         // Enable use of the `NO_EXECUTE` page attribute, if supported.
         if has_feature(Feature::NXE) {

@@ -68,11 +68,9 @@ impl log::Log for KernelLogger {
 
                 // TODO possibly only log CPU# in debug builds
                 crate::println!(
-                    "[{:wwidth$}.{:0fwidth$}][{}] {}",
-                    whole_time,
-                    frac_time,
-                    record.level(),
-                    record.args(),
+                    "[{whole_time:wwidth$}.{frac_time:0fwidth$}][{level}] {args}",
+                    level = record.level(),
+                    args = record.args(),
                     wwidth = 4,
                     fwidth = 3
                 );
