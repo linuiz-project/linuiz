@@ -9,11 +9,11 @@ use core::{marker::PhantomData, sync::atomic::Ordering};
 // with the page-aligned repr), so a `usize` is employed. It should *never*
 // be read, it's *only* to force the compiler to provide padding.
 #[repr(C, align(0x1000))]
-struct xAPIC(usize);
+struct xAPIC([u8; 0x1000]);
 unsafe impl Send for xAPIC {}
 unsafe impl Sync for xAPIC {}
 
-static xLAPIC: core::cell::SyncUnsafeCell<xAPIC> = core::cell::SyncUnsafeCell::new(xAPIC(0));
+static xLAPIC: core::cell::SyncUnsafeCell<xAPIC> = core::cell::SyncUnsafeCell::new(xAPIC([0u8; 0x1000]));
 static xLAPIC_ENABLED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 /// Initializes the core-local APIC in the most advanced mode possible, and hardware-enables it.
@@ -29,13 +29,13 @@ pub unsafe fn init(
         let xlapic_old_frame_index = page_manager.get_mapped_to(&xlapic_page).unwrap();
         let xlapic_new_frame_index = xAPIC_BASE_ADDR / 0x1000;
 
-        trace!("Locking xAPIC frame ({:#X}).", xAPIC_BASE_ADDR);
+        debug!("Locking xAPIC frame ({:#X}).", xAPIC_BASE_ADDR);
         // We don't know if the xAPIC base address lies within physical memory (or is out of range), so
         // all of the frame manipulation must be done manually (rather than automatically by the page manager).
         frame_manager.lock(xlapic_new_frame_index).ok();
         frame_manager.try_modify_type(xlapic_new_frame_index, crate::memory::FrameType::MMIO).ok();
 
-        trace!("Mapping kernel page {:?} to xAPIC frame.", xlapic_page);
+        debug!("Mapping kernel page {:?} to xAPIC frame.", xlapic_page);
         // Map the xAPIC frames into the kernel higher-half address space.
         //
         // REMARK: All CPU cores share the same higher-half page tables, so this mapping will be globally utilized.

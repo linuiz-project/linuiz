@@ -45,16 +45,12 @@ static LOCAL_STATES_BASE: AtomicUsize = AtomicUsize::new(0);
 ///         this function, it is ensured that the memory it refers to is
 ///         actually mapped via the virtual memory manager. No guarantees
 ///         are made as to whether this has been done or not.
-#[inline(always)]
-unsafe fn get_local_state_ptr() -> *mut LocalState {
+#[inline]
+unsafe fn get_local_state() -> Option<&'static mut LocalState> {
     (LOCAL_STATES_BASE.load(Ordering::Relaxed) as *mut LocalState)
         // TODO move to a core-local PML4 copy with an L4 local state mapping ?? or maybe not
         .add(libkernel::structures::apic::get_id() as usize)
-}
-
-#[inline]
-fn local_state() -> Option<&'static mut LocalState> {
-    unsafe { get_local_state_ptr().as_mut() }
+        .as_mut()
 }
 
 /// Initializes the core-local state structure.
@@ -114,6 +110,9 @@ pub unsafe fn init() {
     let mut timer = timer::get_best_timer();
     timer.set_frequency(1000);
 
+    let page = libkernel::memory::Page::from_ptr(local_state_ptr);
+    info!("{:?}: {:?}", &page, crate::memory::get_kernel_page_manager().unwrap().get_page_attribs(&page));
+
     local_state_ptr.write(LocalState {
         privilege_stack: [0u8; 0x4000],
         db_stack: [0u8; 0x1000],
@@ -135,7 +134,7 @@ pub unsafe fn init() {
         cur_task: None,
     });
     info!(".");
-    local_state().unwrap().validate_init();
+    get_local_state().unwrap().validate_init();
     info!(".");
 
     let mut active_cpus_list = ACTIVE_CPUS_LIST.write();
@@ -149,7 +148,8 @@ fn local_timer_handler(
     const MIN_TIME_SLICE_MS: u32 = 1;
     const PRIO_TIME_SLICE_MS: u32 = 2;
 
-    let local_state = local_state().expect("local timer handler called before local state initialization");
+    let local_state =
+        unsafe { get_local_state() }.expect("local timer handler called before local state initialization");
 
     if let Some(mut cur_task) = local_state.cur_task.take() {
         cur_task.rip = stack_frame.instruction_pointer.as_u64();
@@ -281,34 +281,34 @@ fn local_timer_handler(
 ///
 /// REMARK: This function will panic if the local state structure is uninitialized.
 pub unsafe fn reload_timer(ms_multiplier: core::num::NonZeroU32) {
-    local_state().expect("reload timer called for uninitialized local state").timer.reload(ms_multiplier.get());
+    get_local_state().expect("reload timer called for uninitialized local state").timer.reload(ms_multiplier.get());
 }
 
 /// Returns a pointer to the top of the privilege stack, or `None` if local state is uninitialized.
 pub fn privilege_stack_ptr() -> Option<*const ()> {
-    local_state().map(|local_state| local_state.privilege_stack.as_ptr() as *const _)
+    unsafe { get_local_state() }.map(|local_state| local_state.privilege_stack.as_ptr() as *const _)
 }
 
 /// Returns a pointer to the top of the #DB stack table, or `None` if local state is uninitialized.
 pub fn db_stack_ptr() -> Option<*const ()> {
-    local_state().map(|local_state| local_state.db_stack.as_ptr() as *const _)
+    unsafe { get_local_state() }.map(|local_state| local_state.db_stack.as_ptr() as *const _)
 }
 
 /// Returns a pointer to the top of the #NMI stack, or `None` if local state is uninitialized.
 pub fn nmi_stack_ptr() -> Option<*const ()> {
-    local_state().map(|local_state| local_state.nmi_stack.as_ptr() as *const _)
+    unsafe { get_local_state() }.map(|local_state| local_state.nmi_stack.as_ptr() as *const _)
 }
 
 /// Returns a pointer to the top of the #DF stack, or `None` if local state is uninitialized.
 pub fn df_stack_ptr() -> Option<*const ()> {
-    local_state().map(|local_state| local_state.df_stack.as_ptr() as *const _)
+    unsafe { get_local_state() }.map(|local_state| local_state.df_stack.as_ptr() as *const _)
 }
 
 /// Returns a pointer to the top of the #MC stack, or `None` if local state is uninitialized.
 pub fn mc_stack_ptr() -> Option<*const ()> {
-    local_state().map(|local_state| local_state.mc_stack.as_ptr() as *const _)
+    unsafe { get_local_state() }.map(|local_state| local_state.mc_stack.as_ptr() as *const _)
 }
 
 pub unsafe fn get_scheduler() -> Option<&'static Scheduler> {
-    local_state().map(|local_state| &local_state.scheduler)
+    get_local_state().map(|local_state| &local_state.scheduler)
 }
