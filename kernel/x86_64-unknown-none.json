@@ -8,7 +8,6 @@
   "target-pointer-width": "64",
   "target-c-int-width": "32",
   "max-atomic-width": "64",
-  "linker": "ld.lld",
   "linker-flavor": "ld.lld",
   "pre-link-args": {
     "ld.lld": [
