@@ -88,14 +88,13 @@ pub fn run(options: Options) -> Result<(), xshell::Error> {
         "
         qemu-system-x86_64
             -no-reboot
-            -bios /usr/share/ovmf/OVMF.fd
+            -bios resources/OVMF.fd
             -machine {machine_str}
             -cpu {cpu_str}
             -smp {smp_str}
             -m {ram_str}M
-            -serial mon:stdio
+            -serial stdio
             -net none
-            -display none
             -drive format=raw,file=fat:rw:.hdd/root/
             -drive format=raw,file=.hdd/disk0.img,id=disk1,if=none
             -device {block_driver_str},drive=disk1,serial=deadbeef

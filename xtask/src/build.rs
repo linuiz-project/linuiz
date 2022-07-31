@@ -17,9 +17,24 @@ pub struct Options {
     /// Whether to produce a disassembly file.
     #[clap(long)]
     disassemble: bool,
+
+    // Whether to output the result of `readelf` to a file.
+    #[clap(long)]
+    readelf: bool,
 }
 
-static REQUIRED_ROOT_DIRS: [&str; 2] = [".hdd/", ".debug/"];
+static REQUIRED_ROOT_DIRS: [&str; 5] = ["resources/", ".hdd/", ".hdd/root/EFI/BOOT/", ".hdd/root/linuiz/", ".debug/"];
+
+static LIMINE_DEFAULT_CFG: &str = "
+    TIMEOUT=3
+
+    :Linuiz (limine)
+    COMMENT=Load Linuiz OS using the Stivale2 boot protocol.
+    PROTOCOL=limine
+    RESOLUTION=800x600x16
+    KERNEL_PATH=boot:///linuiz/kernel.elf
+    KASLR=no
+    ";
 
 pub fn build(options: Options) -> Result<(), xshell::Error> {
     let shell = Shell::new()?;
@@ -42,10 +57,24 @@ pub fn build(options: Options) -> Result<(), xshell::Error> {
     {
         /* limine */
         {
+            let limine_cfg_path = PathBuf::from("resources/limine.cfg");
+            // create default configuration file if none are present
+            if !shell.path_exists(limine_cfg_path.clone()) {
+                shell.write_file(limine_cfg_path.clone(), LIMINE_DEFAULT_CFG)?;
+            }
+            // copy configuration to EFI image
+            shell.copy_file(limine_cfg_path.clone(), PathBuf::from(".hdd/root/EFI/BOOT/"))?;
+
+            // initialize git submodule if it hasn't been
+            let bootx64_efi_path = PathBuf::from("submodules/limine/BOOTX64.EFI");
+            if !shell.path_exists(bootx64_efi_path.clone()) {
+                cmd!(shell, "git submodule init").run()?;
+            }
+
             // update the submodule to ensure latest version
             cmd!(shell, "git submodule update").run()?;
             // copy the resultant EFI binary
-            shell.copy_file(PathBuf::from("submodules/limine/BOOTX64.EFI"), PathBuf::from(".hdd/root/EFI/BOOT/"))?;
+            shell.copy_file(bootx64_efi_path.clone(), PathBuf::from(".hdd/root/EFI/BOOT/"))?;
         }
 
         /* libkernel */
@@ -93,6 +122,11 @@ pub fn build(options: Options) -> Result<(), xshell::Error> {
     if options.disassemble {
         let output = cmd!(shell, "objdump -D .hdd/root/linuiz/kernel.elf").output()?;
         shell.write_file(PathBuf::from(".debug/disassembly"), output.stdout)?;
+    }
+
+    if options.readelf {
+        let output = cmd!(shell, "readelf -hlS .hdd/root/linuiz/kernel.elf").output()?;
+        shell.write_file(PathBuf::from(".debug/readelf"), output.stdout)?;
     }
 
     Ok(())
