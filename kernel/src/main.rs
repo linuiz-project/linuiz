@@ -57,11 +57,7 @@ extern "C" {
 const LIMINE_REV: u64 = 0;
 static LIMINE_INF: limine::LimineBootInfoRequest = limine::LimineBootInfoRequest::new(LIMINE_REV);
 static LIMINE_FB: limine::LimineFramebufferRequest = limine::LimineFramebufferRequest::new(LIMINE_REV);
-static LIMINE_SMP: limine::LimineSmpRequest = {
-    let mut req = limine::LimineSmpRequest::new(LIMINE_REV);
-    req.flags = 0b1; // Enable x2APIC.
-    req
-};
+static LIMINE_SMP: limine::LimineSmpRequest = limine::LimineSmpRequest::new(LIMINE_REV);
 static LIMINE_RSDP: limine::LimineRsdpRequest = limine::LimineRsdpRequest::new(LIMINE_REV);
 static LIMINE_MMAP: limine::LimineMmapRequest = limine::LimineMmapRequest::new(LIMINE_REV);
 static LIMINE_HHDM: limine::LimineHhdmRequest = limine::LimineHhdmRequest::new(LIMINE_REV);
@@ -111,16 +107,12 @@ unsafe extern "sysv64" fn _entry() -> ! {
     {
         let boot_info = LIMINE_INF.get_response().get().expect("bootloader provided no info");
         info!(
-            "Bootloader Info     {:?} (rev {:?}) {:?}",
-            core::ffi::CStr::from_ptr(boot_info.name.as_ptr().unwrap() as *const _),
+            "Bootloader Info     {} v{} (rev {:?})",
+            core::ffi::CStr::from_ptr(boot_info.name.as_ptr().unwrap() as *const _).to_str().unwrap(),
             boot_info.revision,
-            core::ffi::CStr::from_ptr(boot_info.version.as_ptr().unwrap() as *const _)
+            core::ffi::CStr::from_ptr(boot_info.version.as_ptr().unwrap() as *const _).to_str().unwrap()
         );
         info!("CPU Vendor          {}", libkernel::cpu::VENDOR);
-        info!(
-            "CPU x2APIC          {}",
-            if libkernel::registers::msr::IA32_APIC_BASE::is_x2_mode() { "Yes" } else { "No" }
-        );
         info!("CPU Features        {:?}", libkernel::cpu::FeatureFmt);
     }
 
@@ -129,10 +121,6 @@ unsafe extern "sysv64" fn _entry() -> ! {
     {
         let smp_response =
             LIMINE_SMP.get_response().as_mut_ptr().expect("received no SMP response from bootloader").as_mut().unwrap();
-
-        if (smp_response.flags & 0b1) == 0 {
-            panic!("x2APIC mode has failed to enable. Kernel does not support xAPIC mode.");
-        }
 
         if let Some(cpus) = smp_response.cpus() {
             debug!("Detected {} APs.", cpus.len() - 1);

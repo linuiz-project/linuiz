@@ -23,16 +23,44 @@ pub(self) trait APIC: Send + Sync {
     unsafe fn write_register(&self, register: Register, value: u64);
 }
 
-lazy_static::lazy_static! {
-    static ref LAPIC: Box<dyn APIC> = {
-        if crate::registers::msr::IA32_APIC_BASE::is_x2_mode() {
-            Box::new(x2::x2APIC)
-        } else if crate::cpu::has_feature(crate::cpu::Feature::xAPIC) {
-            Box::new(x::xAPIC)
-        } else {
-            panic!("CPU does not support core-local APIC!");
-        }
-    };
+static LAPIC: crate::cell::SyncOnceCell<Box<dyn APIC>> = unsafe { crate::cell::SyncOnceCell::new() };
+
+/// Error indicating the local APIC has already been initialized.
+#[derive(Debug)]
+pub struct AlreadyInitError;
+
+/// Initializes the APIC in the most advanced mode possible, and hardware enables the APIC via
+/// [crate::registers::msr::IA32_APIC_BASE].
+///
+/// REMARK: `frame_manager` and `page_manager` must be provided in case there is no hardware
+///         support for x2APIC mode. Regardless of whether these arguments are provided,
+///         if x2APIC mode is available, it will be enabled and selected.
+pub fn init(
+    frame_manager: &'static crate::memory::FrameManager,
+    page_manager: &'static crate::memory::PageManager,
+) -> Result<(), AlreadyInitError> {
+    LAPIC
+        .set({
+            use crate::cpu;
+
+            if cpu::has_feature(cpu::Feature::x2APIC) {
+                crate::registers::msr::IA32_APIC_BASE::set(true, true);
+                Box::new(x2::x2APIC)
+            } else if cpu::has_feature(cpu::Feature::xAPIC) {
+                crate::registers::msr::IA32_APIC_BASE::set(true, false);
+                Box::new(x::xAPIC(unsafe {
+                    crate::memory::MMIO::new(
+                        (x::BASE_PTR as usize)..((x::BASE_PTR as usize) + 1),
+                        frame_manager,
+                        page_manager,
+                    )
+                    .unwrap()
+                }))
+            } else {
+                panic!("CPU does not support core-local APIC!");
+            }
+        })
+        .map_err(|_| AlreadyInitError)
 }
 
 /// Various valid modes for APIC timer to operate in.
@@ -170,14 +198,22 @@ pub const LINT0_VECTOR: u8 = 253;
 pub const LINT1_VECTOR: u8 = 254;
 pub const SPURIOUS_VECTOR: u8 = 255;
 
-#[inline]
 unsafe fn read_register(register: Register) -> u64 {
-    LAPIC.read_register(register)
+    if let Some(lapic) = LAPIC.get() {
+        lapic.read_register(register)
+    } else {
+        // Fall back to identity-mapped APIC register reading
+        x::BASE_PTR.add((register as usize) << 4).read_volatile()
+    }
 }
 
-#[inline]
 unsafe fn write_register(register: Register, value: u64) {
-    LAPIC.write_register(register, value);
+    if let Some(lapic) = LAPIC.get() {
+        lapic.write_register(register, value);
+    } else {
+        // Fall back to identity-mapped APIC register reading.
+        x::BASE_PTR.add((register as usize) << 4).write_volatile(value);
+    }
 }
 
 /*

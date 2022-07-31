@@ -87,6 +87,9 @@ pub unsafe fn init() {
         let end_page = base_page.forward_checked(core::mem::size_of::<LocalState>() / 0x1000).unwrap();
         (base_page..end_page)
             .for_each(|page| page_manager.auto_map(&page, libkernel::memory::PageAttributes::DATA, frame_manager));
+
+        // Initialize the local APIC in the most advanced mode.
+        libkernel::structures::apic::init(frame_manager, page_manager).unwrap();
     }
 
     /* CONFIGURE APIC */

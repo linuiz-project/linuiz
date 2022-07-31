@@ -61,24 +61,7 @@ pub mod global_alloc {
 
 pub const PML4_ENTRY_MEM_SIZE: usize = 1 << 9 << 9 << 9 << 12;
 
-// static FRAME_MANAGER: SyncOnceCell<FrameManager> = unsafe { SyncOnceCell::new() };
-
-// pub struct GlobalFrameManagerExistsError;
-
-// pub unsafe fn set_global_frame_manager(
-//     frame_mgr: &'static FrameManager,
-// ) -> Result<(), GlobalFrameManagerExistsError> {
-//     FRAME_MANAGER
-//         .set(frame_mgr)
-//         .map_err(|_| GlobalFrameManagerExistsError)
-// }
-
-// pub fn get_global_frame_mgr() -> &'static FrameManager<'static> {
-//     FRAME_MANAGER
-//         .get()
-//         .expect("global frame manager has not been initialized")
-// }
-
+#[derive(Debug)]
 pub enum MMIOError {
     FramesNotMMIO,
     FailedFrameTypeModify,
@@ -92,8 +75,9 @@ pub struct MMIO {
 impl MMIO {
     /// Creates a new MMIO structure wrapping the given region.
     ///
-    /// SAFETY: The caller must ensure that the indicated memory region passed as parameters
-    ///         `frame_index` and `count` is valid for MMIO.
+    /// `frames` is an [ExactSizeIterator] of frame indexes that this MMIO instance covers.
+    ///
+    /// SAFETY: The caller must ensure that the given frame indexes are valid to be mapped as MMIO.
     pub unsafe fn new(
         frames: impl ExactSizeIterator<Item = usize>,
         frame_manager: &'static FrameManager,

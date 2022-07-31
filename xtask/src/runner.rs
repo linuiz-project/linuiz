@@ -2,16 +2,16 @@ use clap::{clap_derive::ArgEnum, Parser};
 use xshell::cmd;
 
 #[derive(ArgEnum, Clone, Copy)]
-pub enum Simulator {
+pub enum Accelerator {
     KVM,
-    TCG,
+    None,
 }
 
-impl core::fmt::Debug for Simulator {
+impl core::fmt::Debug for Accelerator {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            Simulator::KVM => "q35,accel=kvm",
-            Simulator::TCG => "q35",
+            Accelerator::KVM => "q35,accel=kvm",
+            Accelerator::None => "q35",
         })
     }
 }
@@ -43,11 +43,11 @@ impl core::fmt::Debug for BlockDriver {
 #[derive(Parser)]
 pub struct Options {
     /// Which simulator to use when executing the binary.
-    #[clap(arg_enum, long, default_value = "tcg")]
-    machine: Simulator,
+    #[clap(arg_enum, long, default_value = "none")]
+    accel: Accelerator,
 
     /// CPU type to emulate.
-    #[clap(arg_enum, long, default_value = "max")]
+    #[clap(arg_enum, long, default_value = "kvm64")]
     cpu: CPU,
 
     /// Number of CPUs to emulate.
@@ -70,7 +70,7 @@ pub struct Options {
 pub fn run(options: Options) -> Result<(), xshell::Error> {
     let shell = xshell::Shell::new()?;
 
-    let machine_str = format!("q35{}", if let Simulator::KVM = options.machine { ",accel=kvm" } else { "" });
+    let machine_str = format!("q35{}", if let Accelerator::KVM = options.accel { ",accel=kvm" } else { "" });
     let cpu_str = format!("{:?}", options.cpu).to_lowercase();
     let smp_str = format!("{}", options.cpus);
     let ram_str = format!("{}", options.ram);
