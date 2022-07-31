@@ -1,66 +1,75 @@
 #![allow(non_camel_case_types, non_upper_case_globals)]
 
-mod x;
-mod x2;
-
-use crate::InterruptDeliveryMode;
+use crate::{cpu, registers::msr::IA32_APIC_BASE, InterruptDeliveryMode};
 use alloc::boxed::Box;
 use bit_field::BitField;
-use core::marker::PhantomData;
+use core::{marker::PhantomData, sync::atomic::Ordering};
 
-/// Wrapper trait for easily supporting both xAPIC and x2APIC.
-pub(self) trait APIC: Send + Sync {
-    /// Reads the given register's value from the local APIC.
-    ///
-    /// SAFETY: Caller is tasked with ensuring a read to the provided register will not
-    ///         result in disruptive control flow.
-    unsafe fn read_register(&self, register: Register) -> u64;
+// xAPIC needs a sized field to avoid being optimized to zero-sized (even
+// with the page-aligned repr), so a `usize` is employed. It should *never*
+// be read, it's *only* to force the compiler to provide padding.
+#[repr(C, align(0x1000))]
+struct xAPIC(usize);
+unsafe impl Send for xAPIC {}
+unsafe impl Sync for xAPIC {}
 
-    /// Writes the given value to the given register on the local APIC.
-    ///
-    /// SAFETY: Caller is tasked with ensuring a write to the provided register will not
-    ///         result in disruptive control flow.
-    unsafe fn write_register(&self, register: Register, value: u64);
-}
+static xLAPIC: core::cell::SyncUnsafeCell<xAPIC> = core::cell::SyncUnsafeCell::new(xAPIC(0));
+static xLAPIC_ENABLED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
-static LAPIC: crate::cell::SyncOnceCell<Box<dyn APIC>> = unsafe { crate::cell::SyncOnceCell::new() };
-
-/// Error indicating the local APIC has already been initialized.
-#[derive(Debug)]
-pub struct AlreadyInitError;
-
-/// Initializes the APIC in the most advanced mode possible, and hardware enables the APIC via
-/// [crate::registers::msr::IA32_APIC_BASE].
+/// Initializes the core-local APIC in the most advanced mode possible, and hardware-enables it.
 ///
-/// REMARK: `frame_manager` and `page_manager` must be provided in case there is no hardware
-///         support for x2APIC mode. Regardless of whether these arguments are provided,
-///         if x2APIC mode is available, it will be enabled and selected.
-pub fn init(
+/// SAFETY: Caller must ensure this method is called only once per core.
+pub unsafe fn init(
     frame_manager: &'static crate::memory::FrameManager,
     page_manager: &'static crate::memory::PageManager,
-) -> Result<(), AlreadyInitError> {
-    LAPIC
-        .set({
-            use crate::cpu;
+) {
+    if crate::cpu::is_bsp() {
+        trace!("Configuring memory mappings for xAPIC.");
+        let xlapic_page = crate::memory::Page::from_ptr(xLAPIC.get());
+        let xlapic_old_frame_index = page_manager.get_mapped_to(&xlapic_page).unwrap();
+        let xlapic_new_frame_index = xAPIC_BASE_ADDR / 0x1000;
 
-            if cpu::has_feature(cpu::Feature::x2APIC) {
-                crate::registers::msr::IA32_APIC_BASE::set(true, true);
-                Box::new(x2::x2APIC)
-            } else if cpu::has_feature(cpu::Feature::xAPIC) {
-                crate::registers::msr::IA32_APIC_BASE::set(true, false);
-                Box::new(x::xAPIC(unsafe {
-                    crate::memory::MMIO::new(
-                        (x::BASE_PTR as usize)..((x::BASE_PTR as usize) + 1),
-                        frame_manager,
-                        page_manager,
-                    )
-                    .unwrap()
-                }))
-            } else {
-                panic!("CPU does not support core-local APIC!");
-            }
-        })
-        .map_err(|_| AlreadyInitError)
+        trace!("Locking xAPIC frame ({:#X}).", xAPIC_BASE_ADDR);
+        // We don't know if the xAPIC base address lies within physical memory (or is out of range), so
+        // all of the frame manipulation must be done manually (rather than automatically by the page manager).
+        frame_manager.lock(xlapic_new_frame_index).ok();
+        frame_manager.try_modify_type(xlapic_new_frame_index, crate::memory::FrameType::MMIO).ok();
+
+        trace!("Mapping kernel page {:?} to xAPIC frame.", xlapic_page);
+        // Map the xAPIC frames into the kernel higher-half address space.
+        //
+        // REMARK: All CPU cores share the same higher-half page tables, so this mapping will be globally utilized.
+        page_manager
+            .map(
+                &xlapic_page,
+                xlapic_new_frame_index,
+                crate::memory::FrameOwnership::None,
+                crate::memory::PageAttributes::MMIO,
+                frame_manager,
+            )
+            .unwrap();
+
+        trace!("Freeing old xLAPIC kernel frame.");
+        // Ensure we free the old xLAPIC frame for use.
+        frame_manager.free(xlapic_old_frame_index).ok();
+
+        // Finally, allow the xLAPIC to be used.
+        xLAPIC_ENABLED.store(true, Ordering::Relaxed);
+    }
+
+    // Wait until the xAPIC has been mapped into the kernel.
+    while !xLAPIC_ENABLED.load(Ordering::Relaxed) {}
+
+    trace!("Hardware enabling the local APIC.");
+    if cpu::has_feature(cpu::Feature::x2APIC) {
+        IA32_APIC_BASE::set(true, true);
+    } else if cpu::has_feature(cpu::Feature::xAPIC) {
+        IA32_APIC_BASE::set(true, false);
+    } else {
+        panic!("CPU does not support core-local any APIC!");
+    }
+
+    trace!("Local APIC has been put into a valid enable state.");
 }
 
 /// Various valid modes for APIC timer to operate in.
@@ -198,21 +207,42 @@ pub const LINT0_VECTOR: u8 = 253;
 pub const LINT1_VECTOR: u8 = 254;
 pub const SPURIOUS_VECTOR: u8 = 255;
 
+const xAPIC_BASE_ADDR: usize = 0xFEE00000;
+const x2APIC_BASE_MSR_ADDR: u32 = 0x800;
+
+/// Reads the given register from the local APIC. Panics if APIC is not properly initialized.
 unsafe fn read_register(register: Register) -> u64 {
-    if let Some(lapic) = LAPIC.get() {
-        lapic.read_register(register)
+    if IA32_APIC_BASE::get_hw_enabled() {
+        if IA32_APIC_BASE::get_is_x2_mode() {
+            crate::registers::msr::rdmsr(x2APIC_BASE_MSR_ADDR + (register as u32))
+        } else if xLAPIC_ENABLED.load(Ordering::Relaxed) {
+            crate::asm_marker!(0x1FEF3F);
+
+            let xlapic_addr = xLAPIC.get() as usize;
+            let xlapic_register_addr = xlapic_addr + ((register as usize) << 4);
+            (xlapic_register_addr as *mut u32).read_volatile() as u64
+        } else {
+            panic!("core-local APIC is in invalid state (cannot read registers, but is hardware enabled)")
+        }
     } else {
-        // Fall back to identity-mapped APIC register reading
-        x::BASE_PTR.add((register as usize) << 4).read_volatile()
+        panic!("core-local APIC is not hardware enabled")
     }
 }
 
+/// Reads the given register from the local APIC. Panics if APIC is not properly initialized.
 unsafe fn write_register(register: Register, value: u64) {
-    if let Some(lapic) = LAPIC.get() {
-        lapic.write_register(register, value);
+    if IA32_APIC_BASE::get_hw_enabled() {
+        if IA32_APIC_BASE::get_is_x2_mode() {
+            crate::registers::msr::wrmsr(x2APIC_BASE_MSR_ADDR + (register as u32), value);
+        } else if xLAPIC_ENABLED.load(Ordering::Relaxed) {
+            let xlapic_addr = xLAPIC.get() as usize;
+            let xlapic_register_addr = xlapic_addr + ((register as usize) << 4);
+            (xlapic_register_addr as *mut u32).write_volatile(value as u32);
+        } else {
+            panic!("core-local APIC is in invalid state (cannot write registers, but is hardware enabled)")
+        }
     } else {
-        // Fall back to identity-mapped APIC register reading.
-        x::BASE_PTR.add((register as usize) << 4).write_volatile(value);
+        panic!("core-local APIC is not hardware enabled")
     }
 }
 
