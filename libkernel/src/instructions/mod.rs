@@ -1,26 +1,13 @@
 pub mod cpuid;
-pub mod interrupts;
-pub mod pwm;
 pub mod tlb;
 
 use core::arch::asm;
 
+/// Calls a breakpoint exception.
 #[inline(always)]
-pub fn pause() {
-    unsafe { asm!("pause", options(nostack, nomem, preserves_flags)) };
-}
-
-#[inline(always)]
-pub fn hlt() {
+pub fn breakpoint() {
     unsafe {
-        asm!("hlt", options(nomem, nostack));
-    }
-}
-
-#[inline(always)]
-pub fn hlt_indefinite() -> ! {
-    loop {
-        hlt();
+        asm!("int3");
     }
 }
 
@@ -42,6 +29,9 @@ pub enum RandError {
     NotSupported,
     HardFailure,
 }
+
+// TODO `rand` function should be generalized in `libarch`, probably. For ARM, it's often a hardware device, for instance.
+//      This creates a somnewhat natural incompatability with instruction-based rand, like on x64.
 
 /// Reads a (hopefully) cryptographically secure, deterministic random number from hardware using the `rdrand` instruction.
 pub fn rdrand() -> Result<u64, RandError> {

@@ -25,7 +25,7 @@ use libkernel::structures::pic8259;
 static GLOBAL_CLOCK: AtomicClock = AtomicClock::new();
 
 pub fn configure_and_enable() {
-    libkernel::instructions::interrupts::without_interrupts(|| {
+    libarch::instructions::interrupts::without_interrupts(|| {
         pic8259::pit::set_timer_freq(1000, pic8259::pit::OperatingMode::RateGenerator);
         pic8259::enable(pic8259::InterruptLines::TIMER);
 

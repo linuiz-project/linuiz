@@ -6,7 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-libkernel = { path = "../libkernel", features = [ "global_allocator" ] }
+libkernel = { path = "../libkernel/", features = [ "global_allocator" ] }
+libarch = { path = "../libarch/" }
 log = { version = "*", default-features = false }
 bit_field = "*"
 bitflags = "*"

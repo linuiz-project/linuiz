@@ -48,7 +48,7 @@ pub use addr::*;
 fn panic(info: &core::panic::PanicInfo) -> ! {
     error!("KERNEL PANIC (at {}): {}", info.location().unwrap(), info.message().unwrap());
 
-    crate::instructions::hlt_indefinite()
+    libarch::instructions::interrupts::wait_indefinite()
 }
 
 #[cfg(feature = "alloc_error_handler")]
@@ -56,7 +56,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 fn alloc_error(error: core::alloc::Layout) -> ! {
     error!("KERNEL ALLOCATOR PANIC: {:?}", error);
 
-    crate::instructions::hlt_indefinite()
+    libarch::instructions::interrupts::wait_indefinite()
 }
 
 pub enum ReadOnly {}

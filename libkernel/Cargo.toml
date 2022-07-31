@@ -16,6 +16,7 @@ num_enum = { version = "*", default-features = false }
 x86_64 = "*"
 spin = "*"
 limine = "*"
+libarch = { path = "../libarch/" }
 
 [features]
 default = ["panic_handler", "alloc_error_handler"]

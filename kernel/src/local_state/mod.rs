@@ -104,7 +104,7 @@ pub unsafe fn init() {
     // LINT0&1 should be configured by the APIC reset.
 
     // Ensure interrupts are enabled after APIC is reset.
-    libkernel::instructions::interrupts::enable();
+    libarch::instructions::interrupts::enable();
 
     crate::interrupts::set_handler_fn(Vector::LocalTimer, local_timer_handler);
     let mut timer = timer::get_best_timer();
@@ -168,20 +168,20 @@ fn local_timer_handler(
         local_state.scheduler.push_task(task);
     }
 
-    {
-        let active_cpus_list = ACTIVE_CPUS_LIST.read();
+    // {
+    //     let active_cpus_list = ACTIVE_CPUS_LIST.read();
 
-        for local_state_index in active_cpus_list.iter() {
-            let other_ptr = unsafe {
-                (LOCAL_STATES_BASE.load(Ordering::Relaxed) as *mut LocalState).add(*local_state_index as usize)
-            };
+    //     for local_state_index in active_cpus_list.iter() {
+    //         let other_ptr = unsafe {
+    //             (LOCAL_STATES_BASE.load(Ordering::Relaxed) as *mut LocalState).add(*local_state_index as usize)
+    //         };
 
-            let other = unsafe { other_ptr.as_mut().unwrap() };
-            let other_avg_prio = other.scheduler.get_avg_prio();
-            let self_avg_prio = local_state.scheduler.get_avg_prio();
-            let avg_prio_diff = self_avg_prio.abs_diff(other_avg_prio);
-        }
-    }
+    //         let other = unsafe { other_ptr.as_mut().unwrap() };
+    //         let other_avg_prio = other.scheduler.get_avg_prio();
+    //         let self_avg_prio = local_state.scheduler.get_avg_prio();
+    //         let avg_prio_diff = self_avg_prio.abs_diff(other_avg_prio);
+    //     }
+    // }
 
     // load balance tasks
     // {
