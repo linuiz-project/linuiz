@@ -206,14 +206,16 @@ unsafe extern "C" fn _cpu_entry() -> ! {
     while !SMP_MEMORY_READY.load(core::sync::atomic::Ordering::Relaxed) {}
 
     /* load registers */
+    #[cfg(target_arch = "x86_64")]
     {
         use libkernel::cpu::{has_feature, Feature};
 
         // Set CR0 flags.
-        use libkernel::registers::control::{CR0Flags, CR0};
+        use libarch::registers::control::{CR0Flags, CR0};
         CR0::write(CR0Flags::PE | CR0Flags::MP | CR0Flags::ET | CR0Flags::NE | CR0Flags::WP | CR0Flags::PG);
+
         // Set CR4 flags.
-        use libkernel::registers::control::{CR4Flags, CR4};
+        use libarch::registers::control::{CR4Flags, CR4};
         let mut flags = CR4Flags::DE
             | CR4Flags::PAE
             | CR4Flags::MCE
