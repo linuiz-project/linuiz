@@ -1,13 +1,14 @@
 mod timer;
 
 use crate::scheduling::{Scheduler, Task, TaskPriority};
+use alloc::vec::Vec;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use libkernel::{
     registers::{control::CR3, RFlags},
     Address, Virtual,
 };
 
-static ACTIVE_CPUS: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+static ACTIVE_CPUS_LIST: spin::RwLock<Vec<u32>> = spin::RwLock::new(Vec::new());
 
 #[repr(C, align(0x1000))]
 pub(crate) struct LocalState {
@@ -48,7 +49,7 @@ static LOCAL_STATES_BASE: AtomicUsize = AtomicUsize::new(0);
 unsafe fn get_local_state_ptr() -> *mut LocalState {
     (LOCAL_STATES_BASE.load(Ordering::Relaxed) as *mut LocalState)
         // TODO move to a core-local PML4 copy with an L4 local state mapping ?? or maybe not
-        .add(libkernel::cpu::get_id() as usize)
+        .add(libkernel::structures::apic::get_id() as usize)
 }
 
 #[inline]
@@ -76,7 +77,10 @@ pub unsafe fn init() {
         )
         .ok();
 
-    let local_state_ptr = get_local_state_ptr();
+    // Ensure we load the local state pointer via `cpuid` to avoid using the APIC before it is initialized.
+    let local_state_ptr = (LOCAL_STATES_BASE.load(Ordering::Relaxed) as *mut LocalState)
+        .add(libkernel::instructions::cpuid::get_id() as usize);
+
     {
         use libkernel::memory::Page;
 
@@ -89,7 +93,7 @@ pub unsafe fn init() {
             .for_each(|page| page_manager.auto_map(&page, libkernel::memory::PageAttributes::DATA, frame_manager));
 
         // Initialize the local APIC in the most advanced mode.
-        libkernel::structures::apic::init(frame_manager, page_manager).unwrap();
+        libkernel::structures::apic::init(frame_manager, page_manager);
     }
 
     /* CONFIGURE APIC */
@@ -103,10 +107,8 @@ pub unsafe fn init() {
     apic::get_thermal_sensor().set_vector(Vector::ThermalSensor as u8);
     // LINT0&1 should be configured by the APIC reset.
 
-    // Ensure interrupts are completely enabled after APIC is reset.
-    libkernel::registers::msr::IA32_APIC_BASE::set_hw_enable(true);
+    // Ensure interrupts are enabled after APIC is reset.
     libkernel::instructions::interrupts::enable();
-    libkernel::structures::apic::sw_enable();
 
     crate::interrupts::set_handler_fn(Vector::LocalTimer, local_timer_handler);
     let mut timer = timer::get_best_timer();
@@ -132,9 +134,12 @@ pub unsafe fn init() {
         ),
         cur_task: None,
     });
+    info!(".");
     local_state().unwrap().validate_init();
+    info!(".");
 
-    ACTIVE_CPUS.fetch_add(1, Ordering::Relaxed);
+    let mut active_cpus_list = ACTIVE_CPUS_LIST.write();
+    active_cpus_list.push(libkernel::structures::apic::get_id());
 }
 
 fn local_timer_handler(
@@ -164,15 +169,12 @@ fn local_timer_handler(
     }
 
     {
-        let page_manager = crate::memory::get_kernel_page_manager().unwrap();
+        let active_cpus_list = ACTIVE_CPUS_LIST.read();
 
-        for local_state_index in 0..ACTIVE_CPUS.load(Ordering::Relaxed) {
-            let other_ptr =
-                unsafe { (LOCAL_STATES_BASE.load(Ordering::Relaxed) as *mut LocalState).add(local_state_index) };
-
-            if !page_manager.is_mapped(Address::<Virtual>::from_ptr(other_ptr)) {
-                continue;
-            }
+        for local_state_index in active_cpus_list.iter() {
+            let other_ptr = unsafe {
+                (LOCAL_STATES_BASE.load(Ordering::Relaxed) as *mut LocalState).add(*local_state_index as usize)
+            };
 
             let other = unsafe { other_ptr.as_mut().unwrap() };
             let other_avg_prio = other.scheduler.get_avg_prio();

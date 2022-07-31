@@ -27,12 +27,13 @@ impl CR3 {
         (Address::<Physical>::new(value & !CR3Flags::all().bits()), CR3Flags::from_bits_truncate(value))
     }
 
+    #[inline(always)]
     pub fn refresh() {
         let value: usize;
 
         unsafe {
-            asm!("mov {0}, cr3", out(reg) value, options(nostack));
-            asm!("mov cr3, {0}", in(reg) value, options(nostack));
+            asm!("mov {0}, cr3", out(reg) value, options(nostack, preserves_flags));
+            asm!("mov cr3, {0}", in(reg) value, options(nostack, preserves_flags));
         }
     }
 }

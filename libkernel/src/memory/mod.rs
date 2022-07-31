@@ -88,7 +88,7 @@ impl MMIO {
         let mut page_count = 0;
 
         for frame_index in frames {
-            // Current page pointing to higher-half direct mapped memory.
+            // Current frame index in higher-half direct mapped memory.
             let current_phys_mem_page = phys_mem_start_page.forward_checked(frame_index).unwrap();
             page_count += 1;
 

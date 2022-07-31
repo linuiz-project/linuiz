@@ -52,7 +52,7 @@ pub struct Options {
 
     /// Number of CPUs to emulate.
     #[clap(long, default_value = "4")]
-    cpus: usize,
+    smp: usize,
 
     // RAM size in MB.
     #[clap(long, default_value = "512")]
@@ -64,7 +64,7 @@ pub struct Options {
 
     /// Which type of block driver to use for root drive.
     #[clap(arg_enum, long, default_value = "virt-io")]
-    block_driver: BlockDriver,
+    block: BlockDriver,
 }
 
 pub fn run(options: Options) -> Result<(), xshell::Error> {
@@ -72,9 +72,9 @@ pub fn run(options: Options) -> Result<(), xshell::Error> {
 
     let machine_str = format!("q35{}", if let Accelerator::KVM = options.accel { ",accel=kvm" } else { "" });
     let cpu_str = format!("{:?}", options.cpu).to_lowercase();
-    let smp_str = format!("{}", options.cpus);
+    let smp_str = format!("{}", options.smp);
     let ram_str = format!("{}", options.ram);
-    let block_driver_str = format!("{:?}", options.block_driver);
+    let block_driver_str = format!("{:?}", options.block);
     let mut log_str = vec![];
     if options.log {
         log_str.push(String::from("-d"));

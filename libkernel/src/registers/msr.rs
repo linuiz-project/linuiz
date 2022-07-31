@@ -1,16 +1,22 @@
 #![allow(non_camel_case_types)]
 
-//! UNSAFETY: It is *possible* that the current CPU doesn't support the MSR
-//!           feature. In this case, well... all of this fails. And we're
-//!           going to ignore that. :)
+//! UNSAFETY:   It is *possible* that the current CPU doesn't support the MSR
+//!             feature. In this case, well... all of this fails. And we're
+//!             going to ignore that. :)
+//!
+//! TODO:       Don't just fail; respect the MSR feature.
 
+use crate::{Address, Physical};
 use bit_field::BitField;
 use x86_64::registers::segmentation::SegmentSelector;
 
-use crate::{Address, Physical};
+#[derive(Debug)]
+pub struct NotSupported;
 
 #[inline(always)]
 pub unsafe fn rdmsr(ecx: u32) -> u64 {
+    // TODO check the CPUID MSR feature bit
+
     let value: u64;
     core::arch:: asm!(
         "
@@ -60,19 +66,19 @@ impl IA32_APIC_BASE {
         unsafe { rdmsr(0x1B).get_bit(8) }
     }
 
-    /// Gets the 11th bit of the IA32_APIC_BASE MSR, getting the enable state of the APIC.
-    #[inline(always)]
-    pub fn get_hw_enable() -> bool {
-        unsafe { rdmsr(0x1B).get_bit(11) }
-    }
-
     /// Gets the 10th bit of the IA32_APIC_BASE MSR, indicating the enabled state of x2 APIC mode.
-    pub fn is_x2_mode() -> bool {
+    pub fn get_is_x2_mode() -> bool {
         unsafe { rdmsr(0x1B).get_bit(10) }
     }
 
-    /// Gets bits 12..36 of the IA32_APIC_BASE MSR, representing the base address of the APIC.
+    /// Gets the 11th bit of the IA32_APIC_BASE MSR, getting the enable state of the APIC.
     #[inline(always)]
+    pub fn get_hw_enabled() -> bool {
+        unsafe { rdmsr(0x1B).get_bit(11) }
+    }
+
+    /// Gets bits 12..36 of the IA32_APIC_BASE MSR, representing the base address of the APIC.
+    #[inline]
     pub fn get_base_addr() -> Address<Physical> {
         Address::<Physical>::new((unsafe { rdmsr(0x1B) } & 0xFFFFFF000) as usize)
     }
@@ -84,12 +90,12 @@ impl IA32_APIC_BASE {
         unsafe { wrmsr(0x1B, new_value) };
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn set_hw_enable(enable: bool) {
         unsafe { wrmsr(0x1B, *rdmsr(0x1B).set_bit(11, enable)) };
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn set_x2_mode(enable: bool) {
         unsafe { wrmsr(0x1B, *rdmsr(0x1B).set_bit(10, enable)) };
     }

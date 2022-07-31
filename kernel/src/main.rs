@@ -107,10 +107,10 @@ unsafe extern "sysv64" fn _entry() -> ! {
     {
         let boot_info = LIMINE_INF.get_response().get().expect("bootloader provided no info");
         info!(
-            "Bootloader Info     {} v{} (rev {:?})",
+            "Bootloader Info     {} v{} (rev {})",
             core::ffi::CStr::from_ptr(boot_info.name.as_ptr().unwrap() as *const _).to_str().unwrap(),
+            core::ffi::CStr::from_ptr(boot_info.version.as_ptr().unwrap() as *const _).to_str().unwrap(),
             boot_info.revision,
-            core::ffi::CStr::from_ptr(boot_info.version.as_ptr().unwrap() as *const _).to_str().unwrap()
         );
         info!("CPU Vendor          {}", libkernel::cpu::VENDOR);
         info!("CPU Features        {:?}", libkernel::cpu::FeatureFmt);
@@ -244,8 +244,6 @@ unsafe extern "C" fn _cpu_entry() -> ! {
         } else {
             warn!("PC does not support the NX bit; system security will be compromised (this warning is purely informational).")
         }
-
-        libkernel::instructions::interrupts::enable();
     }
 
     /* load tables */

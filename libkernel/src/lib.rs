@@ -18,7 +18,8 @@
     const_option,
     const_ptr_is_null,
     naked_functions,
-    allocator_api
+    allocator_api,
+    sync_unsafe_cell
 )]
 
 #[macro_use]

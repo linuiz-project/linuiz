@@ -1,15 +1,15 @@
 use crate::memory::Page;
 
 /// Invalidates a single page from the TLB.
-#[inline]
+#[inline(always)]
 pub fn invlpg(page: &Page) {
     unsafe {
-        core::arch::asm!("invlpg [{}]", in(reg) page.base_addr().as_usize(), options(nostack));
+        core::arch::asm!("invlpg [{}]", in(reg) page.index() * 0x1000, options(nostack, preserves_flags));
     }
 }
 
 /// Switches the current CR3 register in and out, causing all TLB entries to be invalidated.
-#[inline]
+#[inline(always)]
 pub fn invlpg_all() {
     crate::registers::control::CR3::refresh();
 }

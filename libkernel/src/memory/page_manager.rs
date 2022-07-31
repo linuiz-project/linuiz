@@ -197,19 +197,25 @@ impl PageManager {
         frame_manager: &'static FrameManager<'_>,
     ) -> Result<(), MapError> {
         // Attempt to acquire the requisite frame, following the outlined parsing of `lock_frame`.
-        match ownership {
+        let frame_result = match ownership {
             FrameOwnership::None => Ok(frame_index),
             FrameOwnership::Borrowed => frame_manager.borrow(frame_index),
             FrameOwnership::Locked => frame_manager.lock(frame_index),
-        }
-        // If the acquisition of the frame fails, transform the error.
-        .map_err(|falloc_err| MapError::FrameError(falloc_err))
-        // If acquisition of the frame is successful, map the page to the frame index.
-        .map(|frame_index| {
-            self.virtual_map.write().get_page_entry_create(page, frame_manager).set(frame_index, attribs);
+        };
 
-            tlb::invlpg(page);
-        })
+        match frame_result {
+            // If acquisition of the frame is successful, map the page to the frame index.
+            Ok(frame_index) => {
+                self.virtual_map.write().get_page_entry_create(page, frame_manager).set(frame_index, attribs);
+
+                tlb::invlpg(page);
+
+                Ok(())
+            }
+
+            // If the acquisition of the frame fails, return the error.
+            Err(err) => Err(MapError::FrameError(err)),
+        }
     }
 
     pub fn unmap(

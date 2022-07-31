@@ -57,6 +57,7 @@ SECTIONS
     }
     .dynamic            : { *(.dynamic) }
     .got                : { *(.got) *(.igot) }
+    .bss                : { *(.bss .bss.*) }
     __bss_end           = .;
     .                   = DATA_SEGMENT_RELRO_END(0, .);
 
@@ -65,8 +66,7 @@ SECTIONS
     __data_start        = .;
     .got.plt            : { *(.got.plt) *(.igot.plt) }
     .data               : { *(.data .data.*) }
-    .bss                : { *(.bss .bss.*) }
-    __rodata_end        = .;
+    __data_end          = .;
     .                   = DATA_SEGMENT_END(.);
 
     .comment              0 : { *(.comment) }
