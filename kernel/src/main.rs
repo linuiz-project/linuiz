@@ -112,9 +112,9 @@ unsafe extern "sysv64" fn _entry() -> ! {
         );
 
         if let Some(vendor_str) = libarch::cpu::get_vendor() {
-            info!("CPU Vendor          {}", vendor_str);
+            info!("Vendor              {}", vendor_str);
         } else {
-            info!("CPU Vendor          None");
+            info!("Vendor              None");
         }
     }
 
@@ -222,22 +222,40 @@ unsafe fn cpu_setup(is_bsp: bool) -> ! {
         CR0::write(CR0Flags::PE | CR0Flags::MP | CR0Flags::ET | CR0Flags::NE | CR0Flags::WP | CR0Flags::PG);
 
         // Set CR4 flags.
-        use libarch::registers::x86_64::control::{CR4Flags, CR4};
-        let mut flags = CR4Flags::DE
-            | CR4Flags::PAE
-            | CR4Flags::MCE
-            | CR4Flags::PGE
-            | CR4Flags::OSFXSR
-            | CR4Flags::OSXMMEXCPT
-            | CR4Flags::UMIP;
+        use libarch::{
+            cpu::x86_64::{EXT_FEATURE_INFO, EXT_FUNCTION_INFO, FEATURE_INFO},
+            registers::x86_64::control::{CR4Flags, CR4},
+        };
 
-        if libarch::cpu::x86_64::EXT_FEATURE_INFO.as_ref().map(|info| info.has_fsgsbase()).unwrap_or(false) {
+        let mut flags = CR4Flags::PAE | CR4Flags::PGE | CR4Flags::OSXMMEXCPT;
+
+        if FEATURE_INFO.as_ref().map(|info| info.has_de()).unwrap_or(false) {
+            trace!("Detected support for debugging extensions.");
+            flags.insert(CR4Flags::DE);
+        }
+
+        if FEATURE_INFO.as_ref().map(|info| info.has_fxsave_fxstor()).unwrap_or(false) {
+            trace!("Detected support for `fxsave` and `fxstor` instructions.");
+            flags.insert(CR4Flags::OSFXSR);
+        }
+
+        if FEATURE_INFO.as_ref().map(|info| info.has_mce()).unwrap_or(false) {
+            trace!("Detected support for machine check exceptions.")
+        }
+
+        if FEATURE_INFO.as_ref().map(|info| info.has_pcid()).unwrap_or(false) {
+            trace!("Detected support for process context IDs.");
+            flags.insert(CR4Flags::PCIDE);
+        }
+
+        if EXT_FEATURE_INFO.as_ref().map(|info| info.has_umip()).unwrap_or(false) {
+            trace!("Detected support for usermode instruction prevention.");
+            flags.insert(CR4Flags::UMIP);
+        }
+
+        if EXT_FEATURE_INFO.as_ref().map(|info| info.has_fsgsbase()).unwrap_or(false) {
             trace!("Detected support for CPL3 FS/GS base usage.");
             flags.insert(CR4Flags::FSGSBASE);
-        }
-        if libarch::cpu::x86_64::FEATURE_INFO.as_ref().map(|info| info.has_pcid()).unwrap_or(false) {
-            trace!("Detected support for Process Context IDs.");
-            flags.insert(CR4Flags::PCIDE);
         }
 
         CR4::write(flags);
