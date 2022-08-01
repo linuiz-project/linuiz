@@ -1,4 +1,3 @@
-use crate::interrupts::Vector;
 use alloc::boxed::Box;
 use libkernel::structures::apic;
 
@@ -33,7 +32,7 @@ impl APICTimer {
     ///         a proper handler.
     pub unsafe fn new() -> Option<Self> {
         if *apic::xAPIC_SUPPORT || *apic::x2APIC_SUPPORT {
-            apic::get_timer().set_mode(apic::TimerMode::OneShot).set_vector(Vector::LocalTimer as u8);
+            apic::get_timer().set_mode(apic::TimerMode::OneShot);
             Some(Self(0))
         } else {
             None
@@ -48,6 +47,9 @@ impl Timer for APICTimer {
             "interval frequency cannot be greater than maximum one-shot timer value ({})",
             u32::MAX
         );
+        // TODO perhaps check the state of APIC timer LVT? It should be asserted that the below will always work.
+        //      Really, in general, the state of the APIC timer should be more carefully controlled. Perhaps this
+        //      can be done when the interrupt device is abstracted out into `libarch`.
 
         let freq = {
             // Wait on the global timer, to ensure we're starting the count
@@ -92,7 +94,7 @@ impl TSCTimer {
     pub unsafe fn new() -> Option<Self> {
         if *apic::xAPIC_SUPPORT || *apic::x2APIC_SUPPORT {
             libarch::cpu::x86_64::FEATURE_INFO.as_ref().filter(|info| info.has_tsc_deadline()).map(|_| {
-                apic::get_timer().set_mode(apic::TimerMode::TSC_Deadline).set_vector(Vector::LocalTimer as u8);
+                apic::get_timer().set_mode(apic::TimerMode::TSC_Deadline);
                 Self(0)
             })
         } else {

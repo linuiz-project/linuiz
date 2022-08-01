@@ -35,7 +35,6 @@ mod memory;
 mod scheduling;
 mod tables;
 
-use core::sync::atomic::AtomicBool;
 use libkernel::LinkerSymbol;
 
 extern "C" {
@@ -64,7 +63,7 @@ static LIMINE_HHDM: limine::LimineHhdmRequest = limine::LimineHhdmRequest::new(L
 
 static mut CON_OUT: drivers::stdout::Serial = drivers::stdout::Serial::new(drivers::stdout::COM1);
 
-static SMP_MEMORY_READY: AtomicBool = AtomicBool::new(false);
+static SMP_MEMORY_READY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 lazy_static::lazy_static! {
     /// We must take care not to call any allocating functions, or reference KMALLOC itself,
@@ -223,7 +222,7 @@ unsafe fn cpu_setup(is_bsp: bool) -> ! {
 
         // Set CR4 flags.
         use libarch::{
-            cpu::x86_64::{EXT_FEATURE_INFO, EXT_FUNCTION_INFO, FEATURE_INFO},
+            cpu::x86_64::{EXT_FEATURE_INFO, FEATURE_INFO},
             registers::x86_64::control::{CR4Flags, CR4},
         };
 
@@ -280,6 +279,8 @@ unsafe fn cpu_setup(is_bsp: bool) -> ! {
 
     /* load tables */
     {
+        trace!("Configuring local tables (IDT, GDT).");
+
         // Always initialize GDT prior to configuring IDT.
         tables::gdt::init();
 
@@ -306,12 +307,11 @@ unsafe fn cpu_setup(is_bsp: bool) -> ! {
     }
 
     if is_bsp {
+        debug!("Configuring global wall clock.");
         crate::clock::configure_and_enable();
     }
 
     local_state::init();
-    libkernel::structures::apic::get_timer().set_masked(false);
-    local_state::reload_timer(core::num::NonZeroU32::new(1).unwrap());
 
     /* load tss */
     {
@@ -323,29 +323,11 @@ unsafe fn cpu_setup(is_bsp: bool) -> ! {
             },
         };
 
-        let tss_ptr = {
-            use alloc::boxed::Box;
-            Box::leak(Box::new(TaskStateSegment::new())) as *mut TaskStateSegment
-        };
+        trace!("Configuring new TSS and loading via temp GDT.");
 
-        {
-            use x86_64::VirtAddr;
+        let tss_ptr = alloc::boxed::Box::leak(crate::local_state::generate_tss().unwrap()) as *mut TaskStateSegment;
 
-            let tss = tss_ptr.as_mut().unwrap();
-
-            tss.privilege_stack_table[0] = VirtAddr::from_ptr(local_state::privilege_stack_ptr().unwrap());
-
-            use interrupts::StackTableIndex;
-            tss.interrupt_stack_table[StackTableIndex::Debug as usize] =
-                VirtAddr::from_ptr(local_state::db_stack_ptr().unwrap());
-            tss.interrupt_stack_table[StackTableIndex::NonMaskable as usize] =
-                VirtAddr::from_ptr(local_state::nmi_stack_ptr().unwrap());
-            tss.interrupt_stack_table[StackTableIndex::DoubleFault as usize] =
-                VirtAddr::from_ptr(local_state::df_stack_ptr().unwrap());
-            tss.interrupt_stack_table[StackTableIndex::MachineCheck as usize] =
-                VirtAddr::from_ptr(local_state::mc_stack_ptr().unwrap());
-        }
-
+        trace!("Configuring TSS descriptor for temp GDT.");
         let tss_descriptor = {
             use bit_field::BitField;
 
@@ -367,6 +349,7 @@ unsafe fn cpu_setup(is_bsp: bool) -> ! {
             Descriptor::SystemSegment(low, high)
         };
 
+        trace!("Loading in temp GDT to `ltr` the TSS.");
         // Store current GDT pointer to restore later.
         let cur_gdt = tables::sgdt();
         // Create temporary kernel GDT to avoid a GPF on switching to it.
@@ -381,9 +364,12 @@ unsafe fn cpu_setup(is_bsp: bool) -> ! {
         tables::load_tss(tss_selector);
         // ... and restore cached GDT.
         tables::lgdt(&cur_gdt);
+
+        trace!("TSS loaded.");
     }
 
-    run(is_bsp)
+    trace!("Core-local setup complete. Running kernel thread.");
+    run_kernel(is_bsp)
 }
 
 // extern "C" fn new_nvme_handler(device_index: usize) -> ! {
@@ -421,9 +407,7 @@ fn syscall_test() -> ! {
 
         unsafe {
             core::arch::asm!(
-                "
-                int 0x80
-                ",
+                "int 0x80",
                 in("rdi") &raw const control,
                 out("rsi") result
             );
@@ -436,14 +420,12 @@ fn syscall_test() -> ! {
 }
 
 #[inline(never)]
-unsafe fn run(is_bsp: bool) -> ! {
-    let scheduler = crate::local_state::get_scheduler().unwrap();
-
+unsafe fn run_kernel(is_bsp: bool) -> ! {
     if is_bsp {
+        use crate::{local_state::try_push_task, scheduling::*};
         use libarch::registers::x86_64::RFlags;
-        use scheduling::*;
 
-        scheduler.push_task(Task::new(
+        try_push_task(Task::new(
             TaskPriority::new(16).unwrap(),
             logging::flush_log_messages_indefinite,
             TaskStackOption::AutoAllocate,
@@ -451,9 +433,10 @@ unsafe fn run(is_bsp: bool) -> ! {
             *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
             *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
             libarch::registers::x86_64::control::CR3::read(),
-        ));
+        ))
+        .unwrap();
 
-        scheduler.push_task(Task::new(
+        try_push_task(Task::new(
             TaskPriority::new(16).unwrap(),
             syscall_test,
             TaskStackOption::AutoAllocate,
@@ -461,11 +444,12 @@ unsafe fn run(is_bsp: bool) -> ! {
             *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
             *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
             libarch::registers::x86_64::control::CR3::read(),
-        ));
+        ))
+        .unwrap();
 
         // Add a number of test tasks to get kernel output, test scheduling, and test logging.
         for _ in 0..1 {
-            scheduler.push_task(Task::new(
+            try_push_task(Task::new(
                 TaskPriority::new(1).unwrap(),
                 logging_test,
                 TaskStackOption::AutoAllocate,
@@ -473,12 +457,12 @@ unsafe fn run(is_bsp: bool) -> ! {
                 *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
                 *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
                 libarch::registers::x86_64::control::CR3::read(),
-            ));
+            ))
+            .unwrap();
         }
     }
 
-    scheduler.enable();
-
+    crate::local_state::try_begin_scheduling();
     libarch::instructions::interrupts::wait_indefinite()
 
     /* ENABLE SYSCALL */

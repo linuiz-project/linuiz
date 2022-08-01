@@ -2,7 +2,7 @@ mod serial;
 
 pub use serial::*;
 
-use core::fmt::Write;
+use core::{borrow::BorrowMut, fmt::Write};
 use libkernel::io::port::WriteOnlyPort;
 use spin::Mutex;
 
@@ -44,12 +44,10 @@ pub fn set_stdout(std_out: &'static mut dyn Write, minimum_level: log::LevelFilt
 
 #[doc(hidden)]
 pub fn __std_out(args: core::fmt::Arguments) {
-    let mut std_out = STD_OUT.lock();
-
-    match &mut *std_out {
-        Some(std_out) => std_out.write_fmt(args).unwrap(),
-        None => panic!("STD_OUT has not been configured."),
-    };
+    libarch::instructions::interrupts::without_interrupts(|| {
+        let mut std_out = &mut *STD_OUT.lock();
+        std_out.as_mut().expect("standard out has not been configured").write_fmt(args).unwrap();
+    });
 }
 
 #[macro_export]

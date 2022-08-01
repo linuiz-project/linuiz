@@ -36,22 +36,35 @@ impl LocalState {
     fn validate_init(&self) {
         assert!(self.magic == LocalState::MAGIC);
     }
+
+    fn is_valid_magic(&self) -> bool {
+        self.magic == LocalState::MAGIC
+    }
 }
 
 static LOCAL_STATES_BASE: AtomicUsize = AtomicUsize::new(0);
 
 /// Returns the pointer to the local state structure.
-///
-/// SAFETY: It is important that, prior to utilizing the value returned by
-///         this function, it is ensured that the memory it refers to is
-///         actually mapped via the virtual memory manager. No guarantees
-///         are made as to whether this has been done or not.
 #[inline]
-unsafe fn get_local_state() -> Option<&'static mut LocalState> {
-    (LOCAL_STATES_BASE.load(Ordering::Relaxed) as *mut LocalState)
-        // TODO move to a core-local PML4 copy with an L4 local state mapping ?? or maybe not
-        .add(libkernel::structures::apic::get_id() as usize)
-        .as_mut()
+fn get_local_state() -> Option<&'static mut LocalState> {
+    unsafe {
+        //if let Ok(page_manager) = crate::memory::get_kernel_page_manager() {
+        let local_state_ptr = (LOCAL_STATES_BASE.load(Ordering::Relaxed) as *mut LocalState)
+            .add(libkernel::structures::apic::get_id() as usize);
+
+        match local_state_ptr.as_mut() {
+                Some(local_state)
+                    if //page_manager.is_mapped(Address::<Virtual>::from_ptr(local_state_ptr)) &&
+                         local_state.is_valid_magic() =>
+                {
+                    Some(local_state)
+                }
+                _ => None,
+            }
+        //} else {
+        //    None
+        //}
+    }
 }
 
 /// Initializes the core-local state structure.
@@ -100,6 +113,7 @@ pub unsafe fn init() {
 
     apic::software_reset();
     apic::set_timer_divisor(apic::TimerDivisor::Div1);
+    apic::get_timer().set_vector(Vector::LocalTimer as u8).set_masked(false);
     apic::get_error().set_vector(Vector::Error as u8).set_masked(false);
     apic::get_performance().set_vector(Vector::Performance as u8);
     apic::get_thermal_sensor().set_vector(Vector::ThermalSensor as u8);
@@ -108,10 +122,12 @@ pub unsafe fn init() {
     // Ensure interrupts are enabled after APIC is reset.
     libarch::instructions::interrupts::enable();
 
+    trace!("Configuring core-local timer.");
     crate::interrupts::set_handler_fn(Vector::LocalTimer, local_timer_handler);
     let mut timer = timer::get_best_timer();
     timer.set_frequency(1000);
 
+    trace!("Writing local state struct out to memory.");
     local_state_ptr.write(LocalState {
         privilege_stack: [0u8; 0x4000],
         db_stack: [0u8; 0x1000],
@@ -134,6 +150,7 @@ pub unsafe fn init() {
         cur_task: None,
     });
     get_local_state().unwrap().validate_init();
+    trace!("Local state structure written to memory and validated.");
 
     let mut active_cpus_list = ACTIVE_CPUS_LIST.write();
     active_cpus_list.push(libkernel::structures::apic::get_id());
@@ -146,9 +163,9 @@ fn local_timer_handler(
     const MIN_TIME_SLICE_MS: u32 = 1;
     const PRIO_TIME_SLICE_MS: u32 = 2;
 
-    let local_state =
-        unsafe { get_local_state() }.expect("local timer handler called before local state initialization");
+    let local_state = get_local_state().expect("local state is uninitialized");
 
+    // Move the current task, if any, back into the scheduler queue.
     if let Some(mut cur_task) = local_state.cur_task.take() {
         cur_task.rip = stack_frame.instruction_pointer.as_u64();
         cur_task.cs = stack_frame.code_segment as u16;
@@ -161,10 +178,11 @@ fn local_timer_handler(
         local_state.scheduler.push_task(cur_task);
     }
 
-    // Take all tasks from the global queue.
-    while let Some(task) = unsafe { crate::scheduling::GLOBAL_TASK_QUEUE.pop() } {
-        local_state.scheduler.push_task(task);
-    }
+    // Take all tasks from the global queue. Every core will be doing this, so we'll load
+    // balance the tasks later.
+    // while let Some(task) = unsafe { crate::scheduling::GLOBAL_TASK_QUEUE.pop() } {
+    //     local_state.scheduler.push_task(task);
+    // }
 
     // {
     //     let active_cpus_list = ACTIVE_CPUS_LIST.read();
@@ -276,37 +294,58 @@ fn local_timer_handler(
 /// Reloads the local APIC timer with the given millisecond multiplier.
 ///
 /// SAFETY: Caller is expected to only reload timer when appropriate.
-///
-/// REMARK: This function will panic if the local state structure is uninitialized.
-pub unsafe fn reload_timer(ms_multiplier: core::num::NonZeroU32) {
-    get_local_state().expect("reload timer called for uninitialized local state").timer.reload(ms_multiplier.get());
+unsafe fn reload_timer(freq_multiplier: core::num::NonZeroU32) {
+    get_local_state().expect("reload timer called for uninitialized local state").timer.reload(freq_multiplier.get());
 }
 
-/// Returns a pointer to the top of the privilege stack, or `None` if local state is uninitialized.
-pub fn privilege_stack_ptr() -> Option<*const ()> {
-    unsafe { get_local_state() }.map(|local_state| local_state.privilege_stack.as_ptr() as *const _)
+/// Attempts to begin scheduling tasks on the current thread. If the scheduler has already been
+/// enabled, or local state has not been initialized, this function does nothing.
+pub fn try_begin_scheduling() {
+    if let Some(local_state) = get_local_state() {
+        let scheduler = &mut local_state.scheduler;
+
+        if !scheduler.is_enabled() {
+            scheduler.enable();
+
+            unsafe { reload_timer(core::num::NonZeroU32::new_unchecked(1)) };
+        }
+    }
 }
 
-/// Returns a pointer to the top of the #DB stack table, or `None` if local state is uninitialized.
-pub fn db_stack_ptr() -> Option<*const ()> {
-    unsafe { get_local_state() }.map(|local_state| local_state.db_stack.as_ptr() as *const _)
+/// Generates a [`x86_64::structures::tss::TaskStateSegment`], loaded with the pre-allocated stacks from core-local state.
+pub fn generate_tss() -> Option<alloc::boxed::Box<x86_64::structures::tss::TaskStateSegment>> {
+    use crate::interrupts::StackTableIndex;
+    use x86_64::VirtAddr;
+
+    get_local_state().map(|local_state| {
+        let mut tss = alloc::boxed::Box::new(x86_64::structures::tss::TaskStateSegment::new());
+
+        unsafe {
+            tss.privilege_stack_table[0] =
+                VirtAddr::from_ptr(local_state.privilege_stack.as_ptr().add(local_state.privilege_stack.len()));
+
+            tss.interrupt_stack_table[StackTableIndex::Debug as usize] =
+                VirtAddr::from_ptr(local_state.db_stack.as_ptr().add(local_state.db_stack.len()));
+            tss.interrupt_stack_table[StackTableIndex::NonMaskable as usize] =
+                VirtAddr::from_ptr(local_state.nmi_stack.as_ptr().add(local_state.nmi_stack.len()));
+            tss.interrupt_stack_table[StackTableIndex::DoubleFault as usize] =
+                VirtAddr::from_ptr(local_state.df_stack.as_ptr().add(local_state.df_stack.len()));
+            tss.interrupt_stack_table[StackTableIndex::MachineCheck as usize] =
+                VirtAddr::from_ptr(local_state.mc_stack.as_ptr().add(local_state.mc_stack.len()));
+        }
+
+        tss
+    })
 }
 
-/// Returns a pointer to the top of the #NMI stack, or `None` if local state is uninitialized.
-pub fn nmi_stack_ptr() -> Option<*const ()> {
-    unsafe { get_local_state() }.map(|local_state| local_state.nmi_stack.as_ptr() as *const _)
-}
-
-/// Returns a pointer to the top of the #DF stack, or `None` if local state is uninitialized.
-pub fn df_stack_ptr() -> Option<*const ()> {
-    unsafe { get_local_state() }.map(|local_state| local_state.df_stack.as_ptr() as *const _)
-}
-
-/// Returns a pointer to the top of the #MC stack, or `None` if local state is uninitialized.
-pub fn mc_stack_ptr() -> Option<*const ()> {
-    unsafe { get_local_state() }.map(|local_state| local_state.mc_stack.as_ptr() as *const _)
-}
-
-pub unsafe fn get_scheduler() -> Option<&'static Scheduler> {
-    get_local_state().map(|local_state| &local_state.scheduler)
+/// Attempts to push a task to the core-local scheduler directly. If the core-local state is not
+/// initialized, then the task is returned as an `Err(Task)`.
+pub fn try_push_task(task: Task) -> Result<(), Task> {
+    match get_local_state() {
+        Some(local_state) => {
+            local_state.scheduler.push_task(task);
+            Ok(())
+        }
+        None => Err(task),
+    }
 }

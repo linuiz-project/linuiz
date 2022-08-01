@@ -18,3 +18,4 @@ x86_64 = "*"
 lazy_static = "*"
 limine = "*"
 crossbeam-queue = { version = "*", default-features = false, features = ["alloc"] }
+

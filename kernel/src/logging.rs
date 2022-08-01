@@ -1,5 +1,5 @@
 pub struct LogMessage {
-    //cpu: u32,
+    cpu: u32,
     timestamp: u64,
     level: log::Level,
     body: alloc::string::String,
@@ -18,10 +18,10 @@ pub fn flush_log_messages_indefinite() -> ! {
 
             // TODO possibly only log CPU# in debug builds
             crate::println!(
-                "[{:wwidth$}.{:0fwidth$}][{}] {}",
+                "[{:wwidth$}.{:0fwidth$}][CPU{}[{}] {}",
                 whole_time,
                 frac_time,
-                //log_message.cpu,
+                log_message.cpu,
                 log_message.level,
                 log_message.body,
                 wwidth = 4,
@@ -56,7 +56,7 @@ impl log::Log for KernelLogger {
         if self.enabled(record.metadata()) {
             if LOG_MESSAGES_ENABLED.load(core::sync::atomic::Ordering::Relaxed) {
                 LOG_MESSAGES.push(LogMessage {
-                    //cpu: libkernel::structures::apic::get_id(),
+                    cpu: libarch::cpu::get_id(),
                     timestamp: crate::clock::get_ticks(),
                     level: record.level(),
                     body: alloc::format!("{}", record.args()),
@@ -66,9 +66,10 @@ impl log::Log for KernelLogger {
                 let whole_time = ticks / 1000;
                 let frac_time = ticks % 1000;
 
-                // TODO possibly only log CPU# in debug builds
+                // TODO possibly only log CPU# in debug builds (or debug/trace messages?)
                 crate::println!(
-                    "[{whole_time:wwidth$}.{frac_time:0fwidth$}][{level}] {args}",
+                    "[{whole_time:wwidth$}.{frac_time:0fwidth$}][CPU{cpu_id}][{level}] {args}",
+                    cpu_id = libarch::cpu::get_id(),
                     level = record.level(),
                     args = record.args(),
                     wwidth = 4,

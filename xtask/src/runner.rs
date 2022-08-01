@@ -21,6 +21,7 @@ pub enum CPU {
     Host,
     Max,
     KVM64,
+    QEMU64,
 }
 
 #[derive(ArgEnum, Clone, Copy)]
@@ -47,7 +48,7 @@ pub struct Options {
     accel: Accelerator,
 
     /// CPU type to emulate.
-    #[clap(arg_enum, long, default_value = "kvm64")]
+    #[clap(arg_enum, long, default_value = "qemu64")]
     cpu: CPU,
 
     /// Number of CPUs to emulate.

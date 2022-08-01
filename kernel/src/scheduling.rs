@@ -162,7 +162,7 @@ impl Scheduler {
     }
 
     /// Enables the scheduler to pop tasks.
-    #[inline(always)]
+    #[inline]
     pub fn enable(&self) {
         self.enabled.store(true, Ordering::Relaxed);
     }
@@ -170,9 +170,15 @@ impl Scheduler {
     /// Disables scheduler from popping tasks.
     ///
     /// REMARK: Any task pops which are already in-flight will not be cancelled.
-    #[inline(always)]
+    #[inline]
     pub fn disable(&self) {
         self.enabled.store(false, Ordering::Relaxed);
+    }
+
+    /// Indicates whether the scheduler is enabled.
+    #[inline]
+    pub fn is_enabled(&self) -> bool {
+        self.enabled.load(Ordering::Relaxed)
     }
 
     /// Pushes a new task to the scheduling queue.

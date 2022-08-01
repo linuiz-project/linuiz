@@ -35,13 +35,13 @@ pub unsafe fn init(
         let xlapic_old_frame_index = page_manager.get_mapped_to(&xlapic_page).unwrap();
         let xlapic_new_frame_index = xAPIC_BASE_ADDR / 0x1000;
 
-        debug!("Locking xAPIC frame ({:#X}).", xAPIC_BASE_ADDR);
+        trace!("Locking xAPIC frame ({:#X}).", xAPIC_BASE_ADDR);
         // We don't know if the xAPIC base address lies within physical memory (or is out of range), so
         // all of the frame manipulation must be done manually (rather than automatically by the page manager).
         frame_manager.lock(xlapic_new_frame_index).ok();
         frame_manager.try_modify_type(xlapic_new_frame_index, crate::memory::FrameType::MMIO).ok();
 
-        debug!("Mapping kernel page {:?} to xAPIC frame.", xlapic_page);
+        trace!("Mapping kernel page {:?} to xAPIC frame.", xlapic_page);
         // Map the xAPIC frames into the kernel higher-half address space.
         //
         // REMARK: All CPU cores share the same higher-half page tables, so this mapping will be globally utilized.
