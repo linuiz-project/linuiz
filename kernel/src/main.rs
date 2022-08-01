@@ -258,6 +258,16 @@ unsafe fn cpu_setup(is_bsp: bool) -> ! {
             flags.insert(CR4Flags::FSGSBASE);
         }
 
+        if EXT_FEATURE_INFO.as_ref().map(|info| info.has_smep()).unwrap_or(false) {
+            trace!("Detected support for supervisor mode execution prevention.");
+            flags.insert(CR4Flags::SMEP);
+        }
+
+        if EXT_FEATURE_INFO.as_ref().map(|info| info.has_smap()).unwrap_or(false) {
+            trace!("Detected support for supervisor mode access prevention.");
+            flags.insert(CR4Flags::SMAP);
+        }
+
         CR4::write(flags);
 
         // Enable use of the `NO_EXECUTE` page attribute, if supported.

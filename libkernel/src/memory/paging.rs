@@ -237,10 +237,12 @@ impl PageTableEntry {
             AttributeModify::Toggle => attribs.toggle(new_attribs),
         }
 
-        if !*crate::memory::paging::NXE_SUPPORT {
-            // This bit is reserved if NXE is not supported.
-            // For now, this means silently removing it for compatability.
-            attribs.remove(PageAttribute::NO_EXECUTE);
+        #[cfg(target_arch = "x86_64")]
+        {
+            if !*crate::memory::paging::NXE_SUPPORT {
+                // This bit is reserved if NXE is not supported. For now, this means silently removing it for compatability.
+                attribs.remove(PageAttribute::NO_EXECUTE);
+            }
         }
 
         self.0 = (self.0 & !PageAttribute::all().bits()) | attribs.bits();
