@@ -35,7 +35,7 @@ pub enum RandError {
 /// Reads a (hopefully) cryptographically secure, deterministic random number from hardware using the `rdrand` instruction.
 pub fn rdrand() -> Result<u64, RandError> {
     // Check to ensure the instruction is supported.
-    if crate::cpu::has_feature(crate::cpu::Feature::RDRAND) {
+    if libarch::cpu::x86_64::FEATURE_INFO.as_ref().map(|info| info.has_rdrand()).unwrap_or(false) {
         // In the case of a hard failure for random number generation, a retry limit is employed
         // to stop software from entering a busy loop due to bad `rdrand` values.
         for _ in 0..100 {
@@ -61,7 +61,7 @@ pub fn rdrand() -> Result<u64, RandError> {
             // bad data in the destination register. If this is the case—and additionally if demand for random
             // number generation is too high—the CF bit in `rflags` will not be set, and in the latter case (throughput),
             // zero will be returned in the destination register.
-            use crate::registers::RFlags;
+            use libarch::registers::x86_64::RFlags;
             if result > 0 && RFlags::from_bits_truncate(rflags).contains(RFlags::CARRY_FLAG) {
                 return Ok(result);
             } else {
@@ -78,7 +78,7 @@ pub fn rdrand() -> Result<u64, RandError> {
 /// Reads a (hopefully) cryptographically secure, deterministic random number from hardware using the `rdseed` instruction.
 pub fn rdseed() -> Result<u64, RandError> {
     // Check to ensure the instruction is supported.
-    if crate::cpu::has_feature(crate::cpu::Feature::RDSEED) {
+    if libarch::cpu::x86_64::EXT_FEATURE_INFO.as_ref().map(|info| info.has_rdseed()).unwrap_or(false) {
         // In the case of a hard failure for random number generation, a retry limit is employed
         // to stop software from entering a busy loop due to bad values.
         for _ in 0..100 {
@@ -104,7 +104,7 @@ pub fn rdseed() -> Result<u64, RandError> {
             // bad data in the destination register. If this is the case—and additionally if demand for random
             // number generation is too high—the CF bit in `rflags` will not be set, and in the latter case (throughput),
             // zero will be returned in the destination register.
-            use crate::registers::RFlags;
+            use libarch::registers::x86_64::RFlags;
             if result > 0 && RFlags::from_bits_truncate(rflags).contains(RFlags::CARRY_FLAG) {
                 return Ok(result);
             } else {
@@ -116,9 +116,4 @@ pub fn rdseed() -> Result<u64, RandError> {
     } else {
         Err(RandError::NotSupported)
     }
-}
-
-#[inline]
-pub fn mfence() {
-    unsafe { core::arch::asm!("mfence", options(nostack, nomem, preserves_flags)) };
 }

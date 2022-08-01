@@ -7,3 +7,6 @@ edition = "2021"
 
 [dependencies]
 bitflags = "*"
+lazy_static = "*"
+bit_field = "*"
+raw-cpuid = { path = "../../rust-cpuid" }

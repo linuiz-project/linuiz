@@ -110,8 +110,12 @@ unsafe extern "sysv64" fn _entry() -> ! {
             core::ffi::CStr::from_ptr(boot_info.version.as_ptr().unwrap() as *const _).to_str().unwrap(),
             boot_info.revision,
         );
-        info!("CPU Vendor          {}", libkernel::cpu::VENDOR);
-        info!("CPU Features        {:?}", libkernel::cpu::FeatureFmt);
+
+        if let Some(vendor_str) = libarch::cpu::get_vendor() {
+            info!("CPU Vendor          {}", vendor_str);
+        } else {
+            info!("CPU Vendor          None");
+        }
     }
 
     /* prepare APs for startup */
@@ -127,7 +131,7 @@ unsafe extern "sysv64" fn _entry() -> ! {
                 // Ensure we don't try to 'start' the BSP.
                 if cpu_info.lapic_id != smp_response.bsp_lapic_id {
                     debug!("Starting processor: PID{}/LID{}", cpu_info.processor_id, cpu_info.lapic_id);
-                    cpu_info.goto_address = _cpu_entry as u64;
+                    cpu_info.goto_address = _ap_entry as u64;
                 }
             }
         }
@@ -165,7 +169,7 @@ unsafe extern "sysv64" fn _entry() -> ! {
 
         // Next, we create the kernel page manager, utilizing the bootloader's higher-half direct
         // mapping for virtual offset mapping.
-        let hhdm_addr = libkernel::Address::<libkernel::Virtual>::new(
+        let hhdm_addr = libarch::Address::<libarch::Virtual>::new(
             LIMINE_HHDM.get_response().get().expect("bootloader did not provide a higher half direct mapping").offset
                 as usize,
         );
@@ -198,24 +202,27 @@ unsafe extern "sysv64" fn _entry() -> ! {
 
     debug!("Finished initial kernel setup.");
     SMP_MEMORY_READY.store(true, core::sync::atomic::Ordering::Relaxed);
-    _cpu_entry()
+    cpu_setup(true)
 }
 
+/// Entrypoint for AP processors.
 #[inline(never)]
-unsafe extern "C" fn _cpu_entry() -> ! {
+unsafe extern "C" fn _ap_entry() -> ! {
+    cpu_setup(false)
+}
+
+unsafe fn cpu_setup(is_bsp: bool) -> ! {
     while !SMP_MEMORY_READY.load(core::sync::atomic::Ordering::Relaxed) {}
 
     /* load registers */
     #[cfg(target_arch = "x86_64")]
     {
-        use libkernel::cpu::{has_feature, Feature};
-
         // Set CR0 flags.
-        use libarch::registers::control::{CR0Flags, CR0};
+        use libarch::registers::x86_64::control::{CR0Flags, CR0};
         CR0::write(CR0Flags::PE | CR0Flags::MP | CR0Flags::ET | CR0Flags::NE | CR0Flags::WP | CR0Flags::PG);
 
         // Set CR4 flags.
-        use libarch::registers::control::{CR4Flags, CR4};
+        use libarch::registers::x86_64::control::{CR4Flags, CR4};
         let mut flags = CR4Flags::DE
             | CR4Flags::PAE
             | CR4Flags::MCE
@@ -224,11 +231,11 @@ unsafe extern "C" fn _cpu_entry() -> ! {
             | CR4Flags::OSXMMEXCPT
             | CR4Flags::UMIP;
 
-        if has_feature(Feature::FSGSBASE) {
+        if libarch::cpu::x86_64::EXT_FEATURE_INFO.as_ref().map(|info| info.has_fsgsbase()).unwrap_or(false) {
             trace!("Detected support for CPL3 FS/GS base usage.");
             flags.insert(CR4Flags::FSGSBASE);
         }
-        if has_feature(Feature::PCID) && has_feature(Feature::INVPCID) {
+        if libarch::cpu::x86_64::FEATURE_INFO.as_ref().map(|info| info.has_pcid()).unwrap_or(false) {
             trace!("Detected support for Process Context IDs.");
             flags.insert(CR4Flags::PCIDE);
         }
@@ -236,8 +243,8 @@ unsafe extern "C" fn _cpu_entry() -> ! {
         CR4::write(flags);
 
         // Enable use of the `NO_EXECUTE` page attribute, if supported.
-        if has_feature(Feature::NXE) {
-            libkernel::registers::msr::IA32_EFER::set_nxe(true);
+        if *libkernel::memory::paging::NXE_SUPPORT {
+            libarch::registers::x86_64::msr::IA32_EFER::set_nxe(true);
         } else {
             warn!("PC does not support the NX bit; system security will be compromised (this warning is purely informational).")
         }
@@ -248,7 +255,7 @@ unsafe extern "C" fn _cpu_entry() -> ! {
         // Always initialize GDT prior to configuring IDT.
         tables::gdt::init();
 
-        if libkernel::cpu::is_bsp() {
+        if is_bsp {
             // Due to the fashion in which the `x86_64` crate initializes the IDT entries,
             // it must be ensured that the handlers are set only *after* the GDT has been
             // properly initialized and loaded—otherwise, the `CS` value for the IDT entries
@@ -270,7 +277,7 @@ unsafe extern "C" fn _cpu_entry() -> ! {
         interrupts::load_idt();
     }
 
-    if libkernel::cpu::is_bsp() {
+    if is_bsp {
         crate::clock::configure_and_enable();
     }
 
@@ -348,7 +355,7 @@ unsafe extern "C" fn _cpu_entry() -> ! {
         tables::lgdt(&cur_gdt);
     }
 
-    cpu_setup()
+    run(is_bsp)
 }
 
 // extern "C" fn new_nvme_handler(device_index: usize) -> ! {
@@ -401,11 +408,11 @@ fn syscall_test() -> ! {
 }
 
 #[inline(never)]
-unsafe fn cpu_setup() -> ! {
+unsafe fn run(is_bsp: bool) -> ! {
     let scheduler = crate::local_state::get_scheduler().unwrap();
 
-    if libkernel::cpu::is_bsp() {
-        use libkernel::registers::RFlags;
+    if is_bsp {
+        use libarch::registers::x86_64::RFlags;
         use scheduling::*;
 
         scheduler.push_task(Task::new(
@@ -415,7 +422,7 @@ unsafe fn cpu_setup() -> ! {
             RFlags::INTERRUPT_FLAG,
             *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
             *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
-            libkernel::registers::control::CR3::read(),
+            libarch::registers::x86_64::control::CR3::read(),
         ));
 
         scheduler.push_task(Task::new(
@@ -425,7 +432,7 @@ unsafe fn cpu_setup() -> ! {
             RFlags::INTERRUPT_FLAG,
             *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
             *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
-            libkernel::registers::control::CR3::read(),
+            libarch::registers::x86_64::control::CR3::read(),
         ));
 
         // Add a number of test tasks to get kernel output, test scheduling, and test logging.
@@ -437,7 +444,7 @@ unsafe fn cpu_setup() -> ! {
                 RFlags::INTERRUPT_FLAG,
                 *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
                 *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
-                libkernel::registers::control::CR3::read(),
+                libarch::registers::x86_64::control::CR3::read(),
             ));
         }
     }

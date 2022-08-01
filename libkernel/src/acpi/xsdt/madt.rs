@@ -1,7 +1,5 @@
-use crate::{
-    acpi::{xsdt, ACPITable, UnsizedACPITable},
-    Address, Physical,
-};
+use crate::acpi::{xsdt, ACPITable, UnsizedACPITable};
+use libarch::{Address, Physical};
 
 bitflags::bitflags! {
     #[repr(transparent)]

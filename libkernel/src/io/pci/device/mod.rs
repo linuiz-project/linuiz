@@ -357,7 +357,7 @@ impl DeviceRegister {
         }
     }
 
-    pub fn as_addr(&self) -> crate::Address<crate::Virtual> {
+    pub fn as_addr(&self) -> libarch::Address<libarch::Virtual> {
         use crate::{Address, Virtual};
 
         Address::<Virtual>::new(match self {

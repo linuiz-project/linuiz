@@ -1,9 +1,7 @@
 #[macro_export]
 macro_rules! asm_marker {
     ($marker:literal) => {
-        unsafe {
-            core::arch::asm!("push r8", concat!("mov r8, ", $marker), "pop r8", options(nostack, nomem));
-        }
+        core::arch::asm!("push r8", concat!("mov r8, ", $marker), "pop r8", options(nostack, nomem));
     };
 }
 

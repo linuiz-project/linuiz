@@ -1,6 +1,6 @@
 use crate::interrupts::Vector;
 use alloc::boxed::Box;
-use libkernel::{cpu, structures::apic};
+use libkernel::structures::apic;
 
 const MS_WINDOW: u64 = 10;
 
@@ -29,12 +29,15 @@ impl APICTimer {
     /// Creates a new APIC built-in clock timer, in one-shot mode.
     ///
     /// SAFETY: Caller must ensure that reconfiguring the APIC timer mode will not adversely
-    ///         affect software execution, and additionally that the [crate::interrupts::Vector::LocalTimer] has
+    ///         affect software execution, and additionally that the [`crate::interrupts::Vector::LocalTimer`] has
     ///         a proper handler.
-    pub unsafe fn new() -> Self {
-        apic::get_timer().set_mode(apic::TimerMode::OneShot).set_vector(Vector::LocalTimer as u8);
-
-        Self(0)
+    pub unsafe fn new() -> Option<Self> {
+        if *apic::xAPIC_SUPPORT || *apic::x2APIC_SUPPORT {
+            apic::get_timer().set_mode(apic::TimerMode::OneShot).set_vector(Vector::LocalTimer as u8);
+            Some(Self(0))
+        } else {
+            None
+        }
     }
 }
 
@@ -86,42 +89,38 @@ impl TSCTimer {
     /// SAFETY: Caller must ensure that reconfiguring the APIC timer mode will not adversely
     ///         affect software execution, and additionally that the [crate::interrupts::Vector::LocalTimer] vector has
     ///         a proper handler.
-    pub unsafe fn new() -> Self {
-        assert!(cpu::has_feature(cpu::Feature::TSC_DL), "TSC timer cannot be used without TSC_DL feature");
-
-        apic::get_timer().set_mode(apic::TimerMode::TSC_Deadline).set_vector(Vector::LocalTimer as u8);
-
-        Self(0)
+    pub unsafe fn new() -> Option<Self> {
+        if *apic::xAPIC_SUPPORT || *apic::x2APIC_SUPPORT {
+            libarch::cpu::x86_64::FEATURE_INFO.as_ref().filter(|info| info.has_tsc_deadline()).map(|_| {
+                apic::get_timer().set_mode(apic::TimerMode::TSC_Deadline).set_vector(Vector::LocalTimer as u8);
+                Self(0)
+            })
+        } else {
+            None
+        }
     }
 }
 
 impl Timer for TSCTimer {
     unsafe fn set_frequency(&mut self, set_freq: u64) {
-        let freq = {
-            // Attempt to calculate a concrete frequency via CPUID.
-            if let Some(registers) = libarch::instructions::x86_64::cpuid::exec(0x15, 0x0).and_then(|result| {
-                if result.ebx() > 0 {
-                    Some(result)
-                } else {
-                    None
-                }
-            }) {
-                (registers.ecx() as u64) * ((registers.ebx() as u64) / (registers.eax() as u64))
-            }
-            // Otherwise, determine frequency with external measurements.
-            else {
+        let freq = libarch::cpu::x86_64::CPUID
+            .get_processor_frequency_info()
+            .map(|info| {
+                (info.bus_frequency() as u64)
+                    / ((info.processor_base_frequency() as u64) * (info.processor_max_frequency() as u64))
+            })
+            .unwrap_or_else(|| {
                 trace!("CPU does not support clock frequency reporting via CPUID.");
 
                 // Wait on the global timer, to ensure we're starting the count
                 // on the rising edge of each millisecond.
                 crate::clock::busy_wait_msec(1);
-                let start_tsc = libkernel::registers::TSC::read();
+                let start_tsc = libarch::registers::x86_64::TSC::read();
                 crate::clock::busy_wait_msec(MS_WINDOW);
-                let end_tsc = libkernel::registers::TSC::read();
+                let end_tsc = libarch::registers::x86_64::TSC::read();
 
                 (end_tsc - start_tsc) * (1000 / MS_WINDOW)
-            }
-        };
+            });
 
         trace!("CPU TSC frequency: {} Hz", freq);
 
@@ -140,7 +139,7 @@ impl Timer for TSCTimer {
 
         let tsc_wait = self.0.checked_mul(interval_multiplier as u64).expect("timer interval multiplier overflowed");
 
-        libkernel::registers::msr::IA32_TSC_DEADLINE::set(libkernel::registers::TSC::read() + tsc_wait);
+        libarch::registers::x86_64::msr::IA32_TSC_DEADLINE::set(libarch::registers::x86_64::TSC::read() + tsc_wait);
     }
 }
 
@@ -149,9 +148,11 @@ impl Timer for TSCTimer {
 /// SAFETY: Caller must ensure that the local timer initializing itself
 ///         will not adversely affect regular control flow.
 pub unsafe fn get_best_timer() -> Box<dyn Timer> {
-    if cpu::has_feature(cpu::Feature::TSC_DL) {
-        Box::new(TSCTimer::new())
+    if let Some(tsc_timer) = TSCTimer::new() {
+        Box::new(tsc_timer)
+    } else if let Some(apic_timer) = APICTimer::new() {
+        Box::new(apic_timer)
     } else {
-        Box::new(APICTimer::new())
+        panic!("no timers available")
     }
 }

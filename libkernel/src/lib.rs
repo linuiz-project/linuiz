@@ -26,22 +26,18 @@
 extern crate log;
 extern crate alloc;
 
-mod addr;
 mod macros;
 
 pub mod acpi;
 pub mod cell;
 pub mod collections;
-pub mod cpu;
 pub mod elf;
 pub mod instructions;
 pub mod io;
 pub mod memory;
-pub mod registers;
 pub mod structures;
 pub mod sync;
 pub mod syscall;
-pub use addr::*;
 
 #[cfg(feature = "panic_handler")]
 #[panic_handler]

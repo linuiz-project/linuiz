@@ -25,7 +25,7 @@ pub fn disable() {
 pub fn get_enabled() -> bool {
     #[cfg(target_arch = "x86_64")]
     {
-        use crate::registers::RFlags;
+        use crate::registers::x86_64::RFlags;
 
         RFlags::read().contains(RFlags::INTERRUPT_FLAG)
     }

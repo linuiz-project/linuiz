@@ -6,9 +6,11 @@ pub const VADDR_HW_MAX: usize = 0x1000000000000;
 
 pub trait AddressType {}
 
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Physical {}
 impl AddressType for Physical {}
 
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Virtual {}
 impl AddressType for Virtual {}
 

@@ -2,10 +2,10 @@ mod slob;
 
 pub use slob::*;
 
+use libarch::{Address, Virtual};
 use libkernel::{
     cell::SyncOnceCell,
     memory::{FrameManager, PageManager},
-    Address, Virtual,
 };
 
 static KERNEL_FRAME_MANAGER: SyncOnceCell<FrameManager> = unsafe { SyncOnceCell::new() };

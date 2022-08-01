@@ -1,6 +1,4 @@
-use crate::{
-    Address, {Physical, Virtual},
-};
+use libarch::{Address, Physical, Virtual};
 
 bitflags::bitflags! {
     #[repr(transparent)]

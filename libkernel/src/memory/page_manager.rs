@@ -2,11 +2,11 @@ use crate::{
     instructions::tlb,
     memory::{
         frame_manager::{FrameManager, FrameOwnership},
-        paging::{AttributeModify, Level4, PageAttributes, PageTable, PageTableEntry},
+        paging::{AttributeModify, Level4, PageAttribute, PageTable, PageTableEntry},
         Page,
     },
-    Address, {Physical, Virtual},
 };
+use libarch::{Address, Physical, Virtual};
 
 #[derive(Debug, Clone, Copy)]
 pub enum MapError {
@@ -102,11 +102,11 @@ impl VirtualMapper {
 
             self.get_page_entry_create(&cur_page, frame_manager).set(
                 frame_index,
-                PageAttributes::PRESENT
-                    | PageAttributes::WRITABLE
-                    | PageAttributes::WRITE_THROUGH
-                    | PageAttributes::NO_EXECUTE
-                    | PageAttributes::GLOBAL,
+                PageAttribute::PRESENT
+                    | PageAttribute::WRITABLE
+                    | PageAttribute::WRITE_THROUGH
+                    | PageAttribute::NO_EXECUTE
+                    | PageAttribute::GLOBAL,
             );
 
             tlb::invlpg(&cur_page);
@@ -117,14 +117,14 @@ impl VirtualMapper {
 
     /// Returns `true` if the current CR3 address matches the addressor's PML4 frame, and `false` otherwise.
     fn is_active(&self) -> bool {
-        crate::registers::control::CR3::read().0.frame_index() == self.pml4_frame
+        libarch::registers::x86_64::control::CR3::read().0.frame_index() == self.pml4_frame
     }
 
     #[inline(always)]
     pub unsafe fn write_cr3(&mut self) {
-        crate::registers::control::CR3::write(
+        libarch::registers::x86_64::control::CR3::write(
             Address::<Physical>::new(self.pml4_frame * 0x1000),
-            crate::registers::control::CR3Flags::empty(),
+            libarch::registers::x86_64::control::CR3Flags::empty(),
         );
     }
 }
@@ -176,7 +176,7 @@ impl PageManager {
         Self {
             virtual_map: spin::RwLock::new(VirtualMapper::new(
                 mapped_page,
-                crate::registers::control::CR3::read().0.frame_index(),
+                libarch::registers::x86_64::control::CR3::read().0.frame_index(),
             )),
         }
     }
@@ -193,7 +193,7 @@ impl PageManager {
         page: &Page,
         frame_index: usize,
         ownership: FrameOwnership,
-        attribs: PageAttributes,
+        attribs: PageAttribute,
         frame_manager: &'static FrameManager<'_>,
     ) -> Result<(), MapError> {
         // Attempt to acquire the requisite frame, following the outlined parsing of `lock_frame`.
@@ -228,7 +228,7 @@ impl PageManager {
             .write()
             .get_page_entry_mut(page)
             .map(|entry| {
-                entry.set_attributes(PageAttributes::PRESENT, AttributeModify::Remove);
+                entry.set_attributes(PageAttribute::PRESENT, AttributeModify::Remove);
 
                 // Handle frame permissions to keep them updated.
                 unsafe {
@@ -249,14 +249,14 @@ impl PageManager {
         &self,
         unmap_from: &Page,
         map_to: &Page,
-        new_attribs: Option<PageAttributes>,
+        new_attribs: Option<PageAttribute>,
         frame_manager: &'static FrameManager<'_>,
     ) -> Result<(), MapError> {
         let maybe_attribs_frame_index = {
             let mut map_write = self.virtual_map.write();
             map_write.get_page_entry_mut(unmap_from).map(|entry| {
                 let attribs = new_attribs.unwrap_or_else(|| entry.get_attribs());
-                entry.set_attributes(PageAttributes::empty(), AttributeModify::Set);
+                entry.set_attributes(PageAttribute::empty(), AttributeModify::Set);
 
                 unsafe { (attribs, entry.take_frame_index()) }
             })
@@ -276,7 +276,7 @@ impl PageManager {
         }
     }
 
-    pub fn auto_map(&self, page: &Page, attribs: PageAttributes, frame_manager: &'static FrameManager<'_>) {
+    pub fn auto_map(&self, page: &Page, attribs: PageAttribute, frame_manager: &'static FrameManager<'_>) {
         self.map(page, frame_manager.lock_next().unwrap(), FrameOwnership::None, attribs, frame_manager).unwrap();
     }
 
@@ -286,7 +286,7 @@ impl PageManager {
         self.virtual_map
             .read()
             .get_page_entry(&Page::containing_addr(virt_addr))
-            .filter(|entry| entry.get_attribs().contains(PageAttributes::PRESENT))
+            .filter(|entry| entry.get_attribs().contains(PageAttribute::PRESENT))
             .is_some()
     }
 
@@ -304,17 +304,11 @@ impl PageManager {
 
     /* STATE CHANGING */
 
-    pub fn get_page_attribs(&self, page: &Page) -> Option<PageAttributes> {
+    pub fn get_page_attribs(&self, page: &Page) -> Option<PageAttribute> {
         self.virtual_map.read().get_page_entry(page).map(|page_entry| page_entry.get_attribs())
     }
 
-    pub unsafe fn set_page_attribs(&self, page: &Page, mut attributes: PageAttributes, modify_mode: AttributeModify) {
-        if !crate::registers::msr::IA32_EFER::get_nxe() {
-            // This bit is reserved if the above bit in IA32_EFER is not set.
-            // For now, this means silently removing it for compatability.
-            attributes.remove(PageAttributes::NO_EXECUTE);
-        }
-
+    pub unsafe fn set_page_attribs(&self, page: &Page, attributes: PageAttribute, modify_mode: AttributeModify) {
         self.virtual_map
             .write()
             .get_page_entry_mut(page)

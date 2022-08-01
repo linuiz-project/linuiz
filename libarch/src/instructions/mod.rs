@@ -1,8 +1,6 @@
-#[cfg(target_arch = "x86_64")]
-pub mod x86_64;
-
 pub mod interrupts;
 pub mod pwm;
+pub mod sync;
 
 /// Simple wait-one instruction.
 #[inline(always)]

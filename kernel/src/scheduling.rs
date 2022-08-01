@@ -1,15 +1,13 @@
-use alloc::{boxed::Box, collections::VecDeque};
 use core::{
     mem::MaybeUninit,
-    sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use crossbeam_queue::SegQueue;
-use libkernel::{
-    instructions::tlb::pcid::*,
-    memory::StackAlignedBox,
-    registers::{control::CR3Flags, RFlags},
+use libarch::{
+    registers::x86_64::{control::CR3Flags, RFlags},
     Address, Physical,
 };
+use libkernel::memory::StackAlignedBox;
 use x86_64::registers::segmentation::SegmentSelector;
 
 static NEXT_THREAD_ID: AtomicU64 = AtomicU64::new(1);

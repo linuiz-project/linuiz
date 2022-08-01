@@ -1,5 +1,10 @@
-use crate::{Address, Virtual};
 use core::{fmt, marker::PhantomData};
+use libarch::{Address, Virtual};
+
+lazy_static::lazy_static! {
+    #[cfg(target_arch = "x86_64")]
+    pub static ref NXE_SUPPORT: bool = libarch::registers::x86_64::msr::IA32_EFER::get_nxe();
+}
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -17,7 +22,7 @@ impl Page {
     }
 
     pub const fn from_addr(addr: Address<Virtual>) -> Self {
-        if addr.is_aligned(0x1000) {
+        if addr.is_aligned_to(0x1000) {
             Self { index: addr.page_index() }
         } else {
             panic!("page address is not page-aligned")
@@ -152,7 +157,7 @@ impl ExactSizeIterator for PageIterator {
 
 bitflags::bitflags! {
     #[repr(transparent)]
-    pub struct PageAttributes: usize {
+    pub struct PageAttribute: usize {
         const PRESENT = 1 << 0;
         const WRITABLE = 1 << 1;
         const USERSPACE = 1 << 2;
@@ -195,12 +200,12 @@ impl PageTableEntry {
         Self(0)
     }
 
-    pub const fn set(&mut self, frame_index: usize, attributes: PageAttributes) {
+    pub const fn set(&mut self, frame_index: usize, attributes: PageAttribute) {
         self.0 = (frame_index * 0x1000) | attributes.bits();
     }
 
     pub const fn get_frame_index(&self) -> Option<usize> {
-        if self.get_attribs().contains(PageAttributes::PRESENT) {
+        if self.get_attribs().contains(PageAttribute::PRESENT) {
             Some((self.0 & Self::FRAME_INDEX_MASK) / 0x1000)
         } else {
             None
@@ -208,7 +213,7 @@ impl PageTableEntry {
     }
 
     pub const fn set_frame_index(&mut self, frame_index: usize) {
-        self.0 = (self.0 & PageAttributes::all().bits()) | (frame_index * 0x1000);
+        self.0 = (self.0 & PageAttribute::all().bits()) | (frame_index * 0x1000);
     }
 
     // Takes this page table entry's frame, even if it is non-present.
@@ -218,12 +223,12 @@ impl PageTableEntry {
         frame_index
     }
 
-    pub const fn get_attribs(&self) -> PageAttributes {
-        PageAttributes::from_bits_truncate(self.0)
+    pub const fn get_attribs(&self) -> PageAttribute {
+        PageAttribute::from_bits_truncate(self.0)
     }
 
-    pub fn set_attributes(&mut self, new_attribs: PageAttributes, modify_mode: AttributeModify) {
-        let mut attribs = PageAttributes::from_bits_truncate(self.0);
+    pub fn set_attributes(&mut self, new_attribs: PageAttribute, modify_mode: AttributeModify) {
+        let mut attribs = PageAttribute::from_bits_truncate(self.0);
 
         match modify_mode {
             AttributeModify::Set => attribs = new_attribs,
@@ -232,7 +237,13 @@ impl PageTableEntry {
             AttributeModify::Toggle => attribs.toggle(new_attribs),
         }
 
-        self.0 = (self.0 & !PageAttributes::all().bits()) | attribs.bits();
+        if !*crate::memory::paging::NXE_SUPPORT {
+            // This bit is reserved if NXE is not supported.
+            // For now, this means silently removing it for compatability.
+            attribs.remove(PageAttribute::NO_EXECUTE);
+        }
+
+        self.0 = (self.0 & !PageAttribute::all().bits()) | attribs.bits();
     }
 
     pub const unsafe fn clear(&mut self) {
@@ -342,7 +353,7 @@ impl<L: HeirarchicalLevel> PageTable<L> {
             None => {
                 let frame_index = frame_manager.lock_next().unwrap();
 
-                entry.set(frame_index, PageAttributes::PRESENT | PageAttributes::WRITABLE | PageAttributes::USERSPACE);
+                entry.set(frame_index, PageAttribute::PRESENT | PageAttribute::WRITABLE | PageAttribute::USERSPACE);
 
                 (frame_index, true)
             }

@@ -98,7 +98,7 @@ impl MMIO {
             }
 
             // Attempt to alter the pointed frames type to MMIO.
-            if let Err(FrameError::TypeConversion { from, to }) =
+            if let Err(FrameError::TypeConversion { from: _, to: _ }) =
                 frame_manager.try_modify_type(frame_index, FrameType::MMIO)
             {
                 return Err(MMIOError::FailedFrameTypeModify);
@@ -107,7 +107,7 @@ impl MMIO {
             // Set the correct page attributes for MMIO virtual memory.
             page_manager.set_page_attribs(
                 &current_phys_mem_page,
-                PageAttributes::UNCACHEABLE | PageAttributes::WRITE_THROUGH,
+                PageAttribute::UNCACHEABLE | PageAttribute::WRITE_THROUGH,
                 AttributeModify::Insert,
             );
         }
@@ -115,8 +115,8 @@ impl MMIO {
         Ok(Self { ptr: (initial_page_address.get().unwrap().index() * 0x1000) as *mut _, len: page_count * 0x1000 })
     }
 
-    pub fn mapped_addr(&self) -> crate::Address<crate::Virtual> {
-        crate::Address::<crate::Virtual>::from_ptr(self.ptr)
+    pub fn mapped_addr(&self) -> libarch::Address<libarch::Virtual> {
+        libarch::Address::<libarch::Virtual>::from_ptr(self.ptr)
     }
 
     #[inline]

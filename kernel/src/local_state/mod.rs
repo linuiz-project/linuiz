@@ -3,8 +3,8 @@ mod timer;
 use crate::scheduling::{Scheduler, Task, TaskPriority};
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicUsize, Ordering};
-use libkernel::{
-    registers::{control::CR3, RFlags},
+use libarch::{
+    registers::x86_64::{control::CR3, RFlags},
     Address, Virtual,
 };
 
@@ -88,7 +88,7 @@ pub unsafe fn init() {
         let base_page = Page::from_ptr(local_state_ptr);
         let end_page = base_page.forward_checked(core::mem::size_of::<LocalState>() / 0x1000).unwrap();
         (base_page..end_page)
-            .for_each(|page| page_manager.auto_map(&page, libkernel::memory::PageAttributes::DATA, frame_manager));
+            .for_each(|page| page_manager.auto_map(&page, libkernel::memory::PageAttribute::DATA, frame_manager));
 
         // Initialize the local APIC in the most advanced mode.
         libkernel::structures::apic::init(frame_manager, page_manager);
@@ -112,8 +112,6 @@ pub unsafe fn init() {
     let mut timer = timer::get_best_timer();
     timer.set_frequency(1000);
 
-    let page = libkernel::memory::Page::from_ptr(local_state_ptr);
-
     local_state_ptr.write(LocalState {
         privilege_stack: [0u8; 0x4000],
         db_stack: [0u8; 0x1000],
@@ -135,9 +133,7 @@ pub unsafe fn init() {
         ),
         cur_task: None,
     });
-    info!(".");
     get_local_state().unwrap().validate_init();
-    info!(".");
 
     let mut active_cpus_list = ACTIVE_CPUS_LIST.write();
     active_cpus_list.push(libkernel::structures::apic::get_id());

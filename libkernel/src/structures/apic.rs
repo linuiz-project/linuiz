@@ -1,9 +1,14 @@
 #![allow(non_camel_case_types, non_upper_case_globals)]
 
-use crate::{cpu, registers::msr::IA32_APIC_BASE, InterruptDeliveryMode};
-use alloc::boxed::Box;
+use crate::InterruptDeliveryMode;
 use bit_field::BitField;
 use core::{marker::PhantomData, sync::atomic::Ordering};
+use libarch::registers::x86_64::msr::IA32_APIC_BASE;
+
+lazy_static::lazy_static! {
+    pub static ref xAPIC_SUPPORT: bool = libarch::cpu::x86_64::CPUID.get_feature_info().map(|info| info.has_apic()).unwrap_or(false);
+    pub static ref x2APIC_SUPPORT: bool = libarch::cpu::x86_64::CPUID.get_feature_info().map(|info| info.has_x2apic()).unwrap_or(false);
+}
 
 // xAPIC needs a sized field to avoid being optimized to zero-sized (even
 // with the page-aligned repr), so a `usize` is employed. It should *never*
@@ -24,7 +29,7 @@ pub unsafe fn init(
     frame_manager: &'static crate::memory::FrameManager,
     page_manager: &'static crate::memory::PageManager,
 ) {
-    if crate::cpu::is_bsp() {
+    if libarch::cpu::x86_64::is_bsp() {
         trace!("Configuring memory mappings for xAPIC.");
         let xlapic_page = crate::memory::Page::from_ptr(xLAPIC.get());
         let xlapic_old_frame_index = page_manager.get_mapped_to(&xlapic_page).unwrap();
@@ -45,7 +50,7 @@ pub unsafe fn init(
                 &xlapic_page,
                 xlapic_new_frame_index,
                 crate::memory::FrameOwnership::None,
-                crate::memory::PageAttributes::MMIO,
+                crate::memory::PageAttribute::MMIO,
                 frame_manager,
             )
             .unwrap();
@@ -62,12 +67,12 @@ pub unsafe fn init(
     while !xLAPIC_ENABLED.load(Ordering::Relaxed) {}
 
     trace!("Hardware enabling the local APIC.");
-    if cpu::has_feature(cpu::Feature::x2APIC) {
+    if *x2APIC_SUPPORT {
         IA32_APIC_BASE::set(true, true);
-    } else if cpu::has_feature(cpu::Feature::xAPIC) {
+    } else if *xAPIC_SUPPORT {
         IA32_APIC_BASE::set(true, false);
     } else {
-        panic!("CPU does not support core-local any APIC!");
+        panic!("CPU does not support core-local APIC!");
     }
 
     trace!("Local APIC has been put into a valid enable state.");
@@ -215,7 +220,7 @@ const x2APIC_BASE_MSR_ADDR: u32 = 0x800;
 unsafe fn read_register(register: Register) -> u64 {
     if IA32_APIC_BASE::get_hw_enabled() {
         if IA32_APIC_BASE::get_is_x2_mode() {
-            crate::registers::msr::rdmsr(x2APIC_BASE_MSR_ADDR + (register as u32))
+            libarch::registers::x86_64::msr::rdmsr(x2APIC_BASE_MSR_ADDR + (register as u32))
         } else if xLAPIC_ENABLED.load(Ordering::Relaxed) {
             crate::asm_marker!(0x1FEF3F);
 
@@ -234,7 +239,7 @@ unsafe fn read_register(register: Register) -> u64 {
 unsafe fn write_register(register: Register, value: u64) {
     if IA32_APIC_BASE::get_hw_enabled() {
         if IA32_APIC_BASE::get_is_x2_mode() {
-            crate::registers::msr::wrmsr(x2APIC_BASE_MSR_ADDR + (register as u32), value);
+            libarch::registers::x86_64::msr::wrmsr(x2APIC_BASE_MSR_ADDR + (register as u32), value);
         } else if xLAPIC_ENABLED.load(Ordering::Relaxed) {
             let xlapic_addr = xLAPIC.get() as usize;
             let xlapic_register_addr = xlapic_addr + ((register as usize) << 4);
@@ -467,22 +472,20 @@ impl<T: GenericVectorVariant> LocalVector<T> {
 
 impl LocalVector<Timer> {
     pub unsafe fn set_mode(&self, mode: TimerMode) -> &Self {
-        use crate::cpu::{has_feature, Feature};
+        let tsc_dl_support =
+            libarch::cpu::x86_64::CPUID.get_feature_info().map(|info| info.has_tsc_deadline()).unwrap_or(false);
 
-        assert!(
-            mode != TimerMode::TSC_Deadline || has_feature(Feature::TSC_DL),
-            "TSC deadline is not supported on this CPU."
-        );
+        assert!(mode != TimerMode::TSC_Deadline || tsc_dl_support, "TSC deadline is not supported on this CPU.");
 
         write_register(
             <Timer as LocalVectorVariant>::REGISTER,
             *read_register(<Timer as LocalVectorVariant>::REGISTER).set_bits(17..19, mode as u64),
         );
 
-        if has_feature(Feature::TSC_DL) {
+        if tsc_dl_support {
             // IA32 SDM instructs utilizing the `mfence` instruction to ensure all writes to the IA32_TSC_DEADLINE
             // MSR are serialized *after* the APIC timer mode switch (`wrmsr` to `IA32_TSC_DEADLINE` is non-serializing).
-            crate::instructions::mfence();
+            libarch::instructions::sync::mfence();
         }
 
         self
