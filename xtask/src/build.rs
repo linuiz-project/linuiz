@@ -1,18 +1,12 @@
-use clap::{clap_derive::ArgEnum, Parser};
+use clap::Parser;
 use std::path::PathBuf;
 use xshell::{cmd, Shell};
 
-#[derive(Debug, Clone, Copy, ArgEnum)]
-pub enum Profile {
-    Release,
-    Debug,
-}
-
 #[derive(Parser)]
 pub struct Options {
-    /// Whether the current build is debug mode or not.
-    #[clap(arg_enum, long, default_value = "debug")]
-    profile: Profile,
+    /// Whether the current build is a release build.
+    #[clap(long)]
+    release: bool,
 
     /// Whether to produce a disassembly file.
     #[clap(long)]
@@ -87,13 +81,7 @@ pub fn build(options: Options) -> Result<(), xshell::Error> {
         {
             {
                 let _dir = shell.push_dir("kernel/");
-                let profile_str = format!(
-                    "{}",
-                    match options.profile {
-                        Profile::Release => "release",
-                        Profile::Debug => "dev",
-                    }
-                );
+                let profile_str = format!("{}", if options.release { "release" } else { "dev" });
 
                 cmd!(shell, "cargo fmt").run()?;
                 cmd!(
@@ -111,7 +99,11 @@ pub fn build(options: Options) -> Result<(), xshell::Error> {
             // Copy kernel binary to root hdd
             shell.copy_file(
                 PathBuf::from(
-                    format!("kernel/target/x86_64-unknown-none/{:?}/kernel.elf", options.profile).to_lowercase(),
+                    format!(
+                        "kernel/target/x86_64-unknown-none/{}/kernel.elf",
+                        if options.release { "release" } else { "debug" }
+                    )
+                    .to_lowercase(),
                 ),
                 PathBuf::from(".hdd/root/linuiz/"),
             )?;
