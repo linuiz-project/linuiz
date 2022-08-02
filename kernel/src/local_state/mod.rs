@@ -48,12 +48,11 @@ static LOCAL_STATES_BASE: AtomicUsize = AtomicUsize::new(0);
 #[inline]
 fn get_local_state() -> Option<&'static mut LocalState> {
     unsafe {
-        //if let Ok(page_manager) = crate::memory::get_kernel_page_manager() {
         let local_state_ptr = (LOCAL_STATES_BASE.load(Ordering::Relaxed) as *mut LocalState)
             .add(libkernel::structures::apic::get_id() as usize);
 
-        match local_state_ptr.as_mut() {
-            Some(local_state)
+        match local_state_ptr.as_mut().zip(crate::memory::get_kernel_page_manager()) {
+            Some((local_state, page_manager))
                 if page_manager.is_mapped(Address::<Virtual>::from_ptr(local_state_ptr))
                     && local_state.is_valid_magic() =>
             {

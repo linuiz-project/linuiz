@@ -21,14 +21,9 @@ pub fn init_kernel_frame_manager(memory_map: &[limine::LimineMemmapEntry]) {
     }
 }
 
-#[derive(Debug)]
-pub struct KernelFrameManagerNotSet;
 /// Gets the kernel frame manager.
-pub fn get_kernel_frame_manager() -> Result<&'static FrameManager<'static>, KernelFrameManagerNotSet> {
-    match KERNEL_FRAME_MANAGER.get() {
-        Some(frame_manager) => Ok(frame_manager),
-        None => Err(KernelFrameManagerNotSet),
-    }
+pub fn get_kernel_frame_manager() -> Option<&'static FrameManager<'static>> {
+    KERNEL_FRAME_MANAGER.get()
 }
 
 static HHDM_ADDR: SyncOnceCell<Address<Virtual>> = unsafe { SyncOnceCell::new() };
@@ -51,19 +46,12 @@ pub fn init_kernel_page_manager(hhdm_addr: Address<Virtual>) {
     }
 }
 
-#[derive(Debug)]
-pub struct HHDMAddrNotSet;
 // Gets the kernel's higher half direct mapping page.
-pub fn get_kernel_hhdm_addr() -> Result<Address<Virtual>, HHDMAddrNotSet> {
-    HHDM_ADDR.get().map(|addr| *addr).ok_or(HHDMAddrNotSet)
+pub fn get_kernel_hhdm_addr() -> Option<Address<Virtual>> {
+    HHDM_ADDR.get().map(|addr| *addr)
 }
 
-#[derive(Debug)]
-pub struct KernelPageManagerNotSet;
 /// Gets the kernel page manager.
-pub fn get_kernel_page_manager() -> Result<&'static PageManager, KernelPageManagerNotSet> {
-    match KERNEL_PAGE_MANAGER.get() {
-        Some(page_manager) => Ok(page_manager),
-        None => Err(KernelPageManagerNotSet),
-    }
+pub fn get_kernel_page_manager() -> Option<&'static PageManager> {
+    KERNEL_PAGE_MANAGER.get()
 }
