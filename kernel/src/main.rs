@@ -305,7 +305,7 @@ unsafe fn cpu_setup(is_bsp: bool) -> ! {
 
             interrupts::set_handler_fn(interrupts::Vector::LINT0_VECTOR, apit_empty);
             interrupts::set_handler_fn(interrupts::Vector::LINT1_VECTOR, apit_empty);
-            interrupts::set_handler_fn(interrupts::Vector::Syscall, crate::interrupts::syscall_interrupt_handler);
+            interrupts::set_handler_fn(interrupts::Vector::Syscall, crate::interrupts::syscall::handler);
         }
 
         interrupts::load_idt();
@@ -396,12 +396,12 @@ unsafe fn cpu_setup(is_bsp: bool) -> ! {
 //     libkernel::instructions::hlt_indefinite()
 // }
 
-fn logging_test() -> ! {
-    loop {
-        info!("TEST");
-        clock::busy_wait_msec(500);
-    }
-}
+// fn logging_test() -> ! {
+//     loop {
+//         info!("TEST");
+//         clock::busy_wait_msec(500);
+//     }
+// }
 
 fn syscall_test() -> ! {
     use libkernel::syscall;
