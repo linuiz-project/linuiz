@@ -263,52 +263,26 @@ impl PageManager {
         frame_manager: &'static FrameManager<'_>,
     ) -> Result<(), MapError> {
         without_interrupts(|| {
-            // Lock virtual map first. See blurp about the same potential UB condition from `Self::map()`.
             let mut map_write = self.virtual_map.write();
 
-            let maybe_attribs_frame_index = {
-                map_write.get_page_entry_mut(unmap_from).map(|entry| {
-                    let attribs = new_attribs.unwrap_or_else(|| entry.get_attribs());
-                    entry.set_attributes(PageAttribute::empty(), AttributeModify::Set);
+            let maybe_new_pte_frame_index_attribs = map_write.get_page_entry_mut(unmap_from).map(|entry| {
+                // Get attributes from old frame if none are provided.
+                let attribs = new_attribs.unwrap_or_else(|| entry.get_attribs());
+                entry.set_attributes(PageAttribute::empty(), AttributeModify::Set);
 
-                    unsafe { (attribs, entry.take_frame_index()) }
+                (unsafe { entry.take_frame_index() }, attribs)
+            });
+
+            maybe_new_pte_frame_index_attribs
+                .map(|(new_pte_frame_index, new_pte_attribs)| {
+                    // Create the new page table entry with the old entry's data.
+                    map_write.get_page_entry_create(map_to, frame_manager).set(new_pte_frame_index, new_pte_attribs);
+
+                    // Invalidate both old and new pages in TLB.
+                    tlb::invlpg(map_to);
+                    tlb::invlpg(unmap_from);
                 })
-            };
-
-            match maybe_attribs_frame_index.ok_or(MapError::NotMapped) {
-                Ok((attribs, frame_index)) => {
-                    // Yes, we effectively completely re-implement the `Self::map()` function.
-                    // This is primarily to ensure the `Self::map()` implementation is kept clean, as this
-                    // function requires locking `self.virtual_map`, and so calling `Self::map()` would deadlock.
-                    //
-                    // Rather than add non-locking functionality to `Self::map()`, we keep intent clear here and
-                    // mostly re-implement the function, slightly modified.
-
-                    // Attempt to acquire the requisite frame, following the outlined parsing of `lock_frame`.
-                    let frame_result = match ownership {
-                        FrameOwnership::None => Ok(frame_index),
-                        FrameOwnership::Borrowed => frame_manager.borrow(frame_index),
-                        FrameOwnership::Locked => frame_manager.lock(frame_index),
-                    };
-
-                    match frame_result {
-                        // If acquisition of the frame is successful, map the page to the frame index and invalidate the TLB
-                        // entries for the to/from pages.
-                        Ok(frame_index) => {
-                            map_write.get_page_entry_create(map_to, frame_manager).set(frame_index, attribs);
-
-                            tlb::invlpg(map_to);
-                            tlb::invlpg(unmap_from);
-
-                            Ok(())
-                        }
-
-                        // If the acquisition of the frame fails, return the error.
-                        Err(err) => Err(MapError::FrameError(err)),
-                    }
-                }
-                Err(err) => Err(err),
-            }
+                .ok_or(MapError::NotMapped)
         })
     }
 
