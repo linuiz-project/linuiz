@@ -8,32 +8,35 @@ impl VolatileAccess for ReadOnly {}
 impl VolatileAccess for ReadWrite {}
 
 #[repr(transparent)]
-pub struct VolatileCell<T, V: VolatileAccess> {
-    inner: core::cell::UnsafeCell<T>,
-    phantom: PhantomData<V>,
-}
+pub struct VolatileCell<T, V: VolatileAccess>(core::cell::UnsafeCell<T>, PhantomData<V>);
 
 impl<T, V: VolatileAccess> VolatileCell<T, V> {
+    /// Returns a new `VolatileCell` containing the given value.
+    #[inline]
+    pub const fn new(value: T) -> Self {
+        Self(core::cell::UnsafeCell::new(value), PhantomData)
+    }
+
     #[inline]
     pub fn read(&self) -> T {
-        unsafe { self.inner.get().read_volatile() }
+        unsafe { self.0.get().read_volatile() }
     }
 
     #[inline]
     pub fn as_ptr(&self) -> *const T {
-        self.inner.get()
+        self.0.get()
     }
 }
 
 impl<T> VolatileCell<T, ReadWrite> {
     #[inline]
     pub fn write(&self, value: T) {
-        unsafe { self.inner.get().write_volatile(value) };
+        unsafe { self.0.get().write_volatile(value) };
     }
 
     #[inline]
     pub fn as_mut_ptr(&self) -> *mut T {
-        self.inner.get()
+        self.0.get()
     }
 }
 

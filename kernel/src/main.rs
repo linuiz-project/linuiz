@@ -92,6 +92,8 @@ lazy_static::lazy_static! {
 //         );
 // }
 
+const DEV_UNMAP_LOWER_HALF_IDMAP: bool = false;
+
 #[no_mangle]
 unsafe extern "sysv64" fn _entry() -> ! {
     CON_OUT.init(drivers::stdout::SerialSpeed::S115200);
@@ -181,15 +183,17 @@ unsafe extern "sysv64" fn _entry() -> ! {
         // must ensure the frame manager uses the HHDM base.
         frame_manager.slide_table_base(hhdm_addr.as_usize());
 
-        let page_manager = crate::memory::get_kernel_page_manager().unwrap();
-        trace!("Unmapping lower half identity mappings.");
-        for entry in memory_map.iter() {
-            for page in (entry.base..(entry.base + entry.len))
-                .step_by(0x1000)
-                .map(|base| Page::from_index((base / 0x1000) as usize))
-            {
-                // TODO maybe sometimes this fails? It did before, but isn't now. Could be because of an update to Limine.
-                page_manager.unmap(&page, libkernel::memory::FrameOwnership::None, frame_manager).unwrap();
+        if DEV_UNMAP_LOWER_HALF_IDMAP {
+            let page_manager = crate::memory::get_kernel_page_manager().unwrap();
+            trace!("Unmapping lower half identity mappings.");
+            for entry in memory_map.iter() {
+                for page in (entry.base..(entry.base + entry.len))
+                    .step_by(0x1000)
+                    .map(|base| Page::from_index((base / 0x1000) as usize))
+                {
+                    // TODO maybe sometimes this fails? It did before, but isn't now. Could be because of an update to Limine.
+                    page_manager.unmap(&page, libkernel::memory::FrameOwnership::None, frame_manager).unwrap();
+                }
             }
         }
 
@@ -422,45 +426,33 @@ fn syscall_test() -> ! {
 
 #[inline(never)]
 unsafe fn run_kernel(is_bsp: bool) -> ! {
-    if is_bsp {
-        use crate::{local_state::try_push_task, scheduling::*};
-        use libarch::registers::x86_64::RFlags;
+    //if is_bsp {
+    use crate::{local_state::try_push_task, scheduling::*};
+    use libarch::registers::x86_64::RFlags;
 
+    try_push_task(Task::new(
+        TaskPriority::new(3).unwrap(),
+        syscall_test,
+        TaskStackOption::Pages(1),
+        RFlags::INTERRUPT_FLAG,
+        *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
+        *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
+        libarch::registers::x86_64::control::CR3::read(),
+    ))
+    .unwrap();
+
+    // Add a number of test tasks to get kernel output, test scheduling, and test logging.
+    for _ in 0..1 {
         try_push_task(Task::new(
-            TaskPriority::new(15).unwrap(),
-            logging::flush_log_messages_indefinite,
-            TaskStackOption::AutoAllocate,
+            TaskPriority::new(1).unwrap(),
+            logging_test,
+            TaskStackOption::Pages(1),
             RFlags::INTERRUPT_FLAG,
             *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
             *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
             libarch::registers::x86_64::control::CR3::read(),
         ))
         .unwrap();
-
-        try_push_task(Task::new(
-            TaskPriority::new(3).unwrap(),
-            syscall_test,
-            TaskStackOption::AutoAllocate,
-            RFlags::INTERRUPT_FLAG,
-            *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
-            *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
-            libarch::registers::x86_64::control::CR3::read(),
-        ))
-        .unwrap();
-
-        // Add a number of test tasks to get kernel output, test scheduling, and test logging.
-        for _ in 0..1 {
-            try_push_task(Task::new(
-                TaskPriority::new(1).unwrap(),
-                logging_test,
-                TaskStackOption::AutoAllocate,
-                RFlags::INTERRUPT_FLAG,
-                *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
-                *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
-                libarch::registers::x86_64::control::CR3::read(),
-            ))
-            .unwrap();
-        }
     }
 
     crate::local_state::try_begin_scheduling();

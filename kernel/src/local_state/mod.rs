@@ -51,15 +51,10 @@ fn get_local_state() -> Option<&'static mut LocalState> {
         let local_state_ptr = (LOCAL_STATES_BASE.load(Ordering::Relaxed) as *mut LocalState)
             .add(libkernel::structures::apic::get_id() as usize);
 
-        match local_state_ptr.as_mut().zip(crate::memory::get_kernel_page_manager()) {
-            Some((local_state, page_manager))
-                if page_manager.is_mapped(Address::<Virtual>::from_ptr(local_state_ptr))
-                    && local_state.is_valid_magic() =>
-            {
-                Some(local_state)
-            }
-            _ => None,
-        }
+        crate::memory::get_kernel_page_manager()
+            .filter(|page_manager| page_manager.is_mapped(Address::<Virtual>::from_ptr(local_state_ptr)))
+            .and_then(|_| local_state_ptr.as_mut())
+            .filter(|local_state| local_state.is_valid_magic())
     }
 }
 
@@ -87,6 +82,9 @@ pub unsafe fn init() {
 
     // Ensure we load the local state pointer via `cpuid` to avoid using the APIC before it is initialized.
     let local_state_ptr = (LOCAL_STATES_BASE.load(Ordering::Relaxed) as *mut LocalState).add(core_id as usize);
+
+    debug!("SET Local state base: {:#X}", LOCAL_STATES_BASE.load(Ordering::Relaxed));
+    debug!("SET Local state pointer: {:?}", local_state_ptr);
 
     {
         use libkernel::memory::Page;
@@ -137,7 +135,7 @@ pub unsafe fn init() {
         default_task: Task::new(
             TaskPriority::new(1).unwrap(),
             libarch::instructions::interrupts::wait_indefinite,
-            crate::scheduling::TaskStackOption::AutoAllocate,
+            crate::scheduling::TaskStackOption::Auto,
             RFlags::INTERRUPT_FLAG,
             *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
             *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
@@ -262,14 +260,6 @@ fn local_timer_handler(
             CR3::write(next_task.cr3.0, next_task.cr3.1);
 
             let next_timer_ms = (next_task.priority().get() as u32) * PRIO_TIME_SLICE_MS;
-
-            trace!(
-                "Starting next task: ID {}  Priority {:?}\nStack Frame {:?}\nRegisters {:?}",
-                next_task.id(),
-                next_task.priority(),
-                stack_frame,
-                cached_regs
-            );
             local_state.cur_task = Some(next_task);
 
             next_timer_ms

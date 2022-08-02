@@ -7,7 +7,7 @@ use libarch::{
     registers::x86_64::{control::CR3Flags, RFlags},
     Address, Physical,
 };
-use libkernel::memory::StackAlignedBox;
+use libkernel::memory::PageAlignedBox;
 use x86_64::registers::segmentation::SegmentSelector;
 
 static NEXT_THREAD_ID: AtomicU64 = AtomicU64::new(1);
@@ -77,9 +77,8 @@ impl TaskPriority {
 }
 
 pub enum TaskStackOption {
-    AutoAllocate,
-    AllocateSized(usize),
-    Preallocated(StackAlignedBox<[MaybeUninit<u8>]>),
+    Auto,
+    Pages(usize),
 }
 
 pub struct Task {
@@ -92,12 +91,12 @@ pub struct Task {
     pub ss: u16,
     pub rfl: RFlags,
     pub gprs: ThreadRegisters,
-    pub stack: StackAlignedBox<[MaybeUninit<u8>]>,
+    pub stack: PageAlignedBox<[MaybeUninit<u8>]>,
     pub cr3: (Address<Physical>, CR3Flags),
 }
 
 impl Task {
-    const DEFAULT_STACK_SIZE: usize = 0x4000;
+    const DEFAULT_STACK_SIZE: usize = 0x5000;
 
     pub fn new(
         priority: TaskPriority,
@@ -111,17 +110,26 @@ impl Task {
         let rip = function as u64;
 
         let stack = match stack {
-            TaskStackOption::AutoAllocate => StackAlignedBox::new_uninit_slice_in(
+            TaskStackOption::Auto => PageAlignedBox::new_uninit_slice_in(
                 Self::DEFAULT_STACK_SIZE,
-                libkernel::memory::stack_aligned_allocator(),
+                libkernel::memory::page_aligned_allocator(),
             ),
 
-            TaskStackOption::AllocateSized(len) => {
-                StackAlignedBox::new_uninit_slice_in(len, libkernel::memory::stack_aligned_allocator())
-            }
-
-            TaskStackOption::Preallocated(stack) => stack,
+            TaskStackOption::Pages(page_count) => PageAlignedBox::new_uninit_slice_in(
+                (page_count + 1) * 0x1000,
+                libkernel::memory::page_aligned_allocator(),
+            ),
         };
+
+        // Unmap stack canary.
+        crate::memory::get_kernel_page_manager()
+            .unwrap()
+            .unmap(
+                &libkernel::memory::Page::from_ptr(stack.as_ptr()),
+                libkernel::memory::FrameOwnership::None,
+                crate::memory::get_kernel_frame_manager().unwrap(),
+            )
+            .unwrap();
 
         Self {
             id: NEXT_THREAD_ID.fetch_add(1, core::sync::atomic::Ordering::AcqRel),

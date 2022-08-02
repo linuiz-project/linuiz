@@ -193,120 +193,125 @@ impl<'map> SLOB<'map> {
 
 unsafe impl core::alloc::Allocator for SLOB<'_> {
     fn allocate(&self, layout: Layout) -> Result<core::ptr::NonNull<[u8]>, core::alloc::AllocError> {
-        let align_mask = usize::max(layout.align() / Self::BLOCK_SIZE, 1) - 1;
-        let size_in_blocks = libkernel::align_up_div(layout.size(), Self::BLOCK_SIZE);
+        libarch::instructions::interrupts::without_interrupts(|| {
+            let align_mask = usize::max(layout.align() / Self::BLOCK_SIZE, 1) - 1;
+            let size_in_blocks = libkernel::align_up_div(layout.size(), Self::BLOCK_SIZE);
 
-        let mut table_write = self.table.write();
-        let end_table_index;
-        let mut block_index;
-        let mut current_run;
+            let mut table_write = self.table.write();
+            let end_table_index;
+            let mut block_index;
+            let mut current_run;
 
-        'outer: loop {
-            block_index = 0;
-            current_run = 0;
+            'outer: loop {
+                block_index = 0;
+                current_run = 0;
 
-            for (table_index, block_page) in table_write.iter().enumerate() {
-                if block_page.is_full() {
-                    current_run = 0;
-                    block_index += BlockPage::BLOCKS_PER;
-                } else {
-                    for bit_shift in 0..BlockPage::BLOCKS_PER {
-                        if (block_page.value() & (1 << bit_shift)) > 0 {
-                            current_run = 0;
-                        } else if current_run > 0 || (bit_shift & align_mask) == 0 {
-                            current_run += 1;
+                for (table_index, block_page) in table_write.iter().enumerate() {
+                    if block_page.is_full() {
+                        current_run = 0;
+                        block_index += BlockPage::BLOCKS_PER;
+                    } else {
+                        for bit_shift in 0..BlockPage::BLOCKS_PER {
+                            if (block_page.value() & (1 << bit_shift)) > 0 {
+                                current_run = 0;
+                            } else if current_run > 0 || (bit_shift & align_mask) == 0 {
+                                current_run += 1;
 
-                            if current_run == size_in_blocks {
-                                end_table_index = table_index + 1;
-                                break 'outer;
+                                if current_run == size_in_blocks {
+                                    end_table_index = table_index + 1;
+                                    break 'outer;
+                                }
                             }
-                        }
 
-                        block_index += 1;
+                            block_index += 1;
+                        }
                     }
+                }
+
+                // No properly sized region was found, so grow list.
+                if let Err(_) = self.grow(core::num::NonZeroUsize::new(size_in_blocks).unwrap(), &mut table_write) {
+                    return Err(core::alloc::AllocError);
                 }
             }
 
-            // No properly sized region was found, so grow list.
-            if let Err(_) = self.grow(core::num::NonZeroUsize::new(size_in_blocks).unwrap(), &mut table_write) {
-                return Err(core::alloc::AllocError);
-            }
-        }
+            let end_block_index = block_index + 1;
+            block_index -= current_run - 1;
+            let start_block_index = block_index;
+            let start_table_index = start_block_index / BlockPage::BLOCKS_PER;
+            let frame_manager = crate::memory::get_kernel_frame_manager().unwrap();
+            let page_manager = unsafe {
+                libkernel::memory::PageManager::from_current(&Page::from_addr(
+                    crate::memory::get_kernel_hhdm_addr().unwrap(),
+                ))
+            };
+            for table_index in start_table_index..end_table_index {
+                let block_page = &mut table_write[table_index];
+                let was_empty = block_page.is_empty();
 
-        let end_block_index = block_index + 1;
-        block_index -= current_run - 1;
-        let start_block_index = block_index;
-        let start_table_index = start_block_index / BlockPage::BLOCKS_PER;
-        let frame_manager = crate::memory::get_kernel_frame_manager().unwrap();
-        let page_manager = unsafe {
-            libkernel::memory::PageManager::from_current(&Page::from_addr(
-                crate::memory::get_kernel_hhdm_addr().unwrap(),
+                let block_index_floor = table_index * BlockPage::BLOCKS_PER;
+                let low_offset = block_index - block_index_floor;
+                let remaining_blocks_in_slice = usize::min(
+                    end_block_index - block_index,
+                    (block_index_floor + BlockPage::BLOCKS_PER) - block_index,
+                );
+                let mask_bits =
+                    (1 as u64).checked_shl(remaining_blocks_in_slice as u32).unwrap_or(u64::MAX).wrapping_sub(1);
+
+                *block_page.value_mut() |= mask_bits << low_offset;
+                block_index += remaining_blocks_in_slice;
+
+                if was_empty {
+                    page_manager.auto_map(&Page::from_index(table_index), PageAttribute::DATA, frame_manager);
+                }
+            }
+
+            core::ptr::NonNull::new(core::ptr::slice_from_raw_parts_mut(
+                (start_block_index * Self::BLOCK_SIZE) as *mut u8,
+                layout.size(),
             ))
-        };
-        for table_index in start_table_index..end_table_index {
-            let block_page = &mut table_write[table_index];
-            let was_empty = block_page.is_empty();
-
-            let block_index_floor = table_index * BlockPage::BLOCKS_PER;
-            let low_offset = block_index - block_index_floor;
-            let remaining_blocks_in_slice =
-                usize::min(end_block_index - block_index, (block_index_floor + BlockPage::BLOCKS_PER) - block_index);
-            let mask_bits =
-                (1 as u64).checked_shl(remaining_blocks_in_slice as u32).unwrap_or(u64::MAX).wrapping_sub(1);
-
-            *block_page.value_mut() |= mask_bits << low_offset;
-            block_index += remaining_blocks_in_slice;
-
-            if was_empty {
-                page_manager.auto_map(&Page::from_index(table_index), PageAttribute::DATA, frame_manager);
-            }
-        }
-
-        core::ptr::NonNull::new(core::ptr::slice_from_raw_parts_mut(
-            (start_block_index * Self::BLOCK_SIZE) as *mut u8,
-            layout.size(),
-        ))
-        .ok_or(core::alloc::AllocError)
+            .ok_or(core::alloc::AllocError)
+        })
     }
 
     unsafe fn deallocate(&self, ptr: core::ptr::NonNull<u8>, layout: Layout) {
-        let start_block_index = ptr.addr().get() / Self::BLOCK_SIZE;
-        let end_block_index = start_block_index + align_up_div(layout.size(), Self::BLOCK_SIZE);
-        let mut block_index = start_block_index;
-        trace!("Deallocation requested: {}..{}", start_block_index, end_block_index);
+        libarch::instructions::interrupts::without_interrupts(|| {
+            let start_block_index = ptr.addr().get() / Self::BLOCK_SIZE;
+            let end_block_index = start_block_index + align_up_div(layout.size(), Self::BLOCK_SIZE);
+            let mut block_index = start_block_index;
 
-        let start_table_index = start_block_index / BlockPage::BLOCKS_PER;
-        let end_table_index = align_up_div(end_block_index, BlockPage::BLOCKS_PER);
-        let mut table_write = self.table.write();
-        let frame_manager = crate::memory::get_kernel_frame_manager().unwrap();
-        let page_manager = libkernel::memory::PageManager::from_current(&Page::from_addr(
-            crate::memory::get_kernel_hhdm_addr().unwrap(),
-        ));
-        for map_index in start_table_index..end_table_index {
-            let (had_bits, has_bits) = {
-                let block_page = &mut table_write[map_index];
+            let start_table_index = start_block_index / BlockPage::BLOCKS_PER;
+            let end_table_index = align_up_div(end_block_index, BlockPage::BLOCKS_PER);
+            let mut table_write = self.table.write();
+            let frame_manager = crate::memory::get_kernel_frame_manager().unwrap();
+            let page_manager = libkernel::memory::PageManager::from_current(&Page::from_addr(
+                crate::memory::get_kernel_hhdm_addr().unwrap(),
+            ));
+            for map_index in start_table_index..end_table_index {
+                let (had_bits, has_bits) = {
+                    let block_page = &mut table_write[map_index];
 
-                let had_bits = !block_page.is_empty();
+                    let had_bits = !block_page.is_empty();
 
-                let (bit_count, bit_mask) = Self::calculate_bit_fields(map_index, block_index, end_block_index);
-                assert_eq!(
-                    *block_page.value() & bit_mask,
-                    bit_mask,
-                    "attempting to deallocate blocks that are already deallocated"
-                );
+                    let (bit_count, bit_mask) = Self::calculate_bit_fields(map_index, block_index, end_block_index);
+                    assert_eq!(
+                        *block_page.value() & bit_mask,
+                        bit_mask,
+                        "attempting to deallocate blocks that are already deallocated"
+                    );
 
-                *block_page.value_mut() ^= bit_mask;
-                block_index += bit_count;
+                    *block_page.value_mut() ^= bit_mask;
+                    block_index += bit_count;
 
-                (had_bits, !block_page.is_empty())
-            };
+                    (had_bits, !block_page.is_empty())
+                };
 
-            if had_bits && !has_bits {
-                page_manager
-                    .unmap(&Page::from_index(map_index), libkernel::memory::FrameOwnership::Locked, frame_manager)
-                    .unwrap();
+                if had_bits && !has_bits {
+                    page_manager
+                        .unmap(&Page::from_index(map_index), libkernel::memory::FrameOwnership::Locked, frame_manager)
+                        .unwrap();
+                }
             }
-        }
+        })
     }
 }
 

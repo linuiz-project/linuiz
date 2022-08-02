@@ -38,7 +38,11 @@ pub unsafe fn init(
         trace!("Locking xAPIC frame ({:#X}).", xAPIC_BASE_ADDR);
         // We don't know if the xAPIC base address lies within physical memory (or is out of range), so
         // all of the frame manipulation must be done manually (rather than automatically by the page manager).
-        frame_manager.lock(xlapic_new_frame_index).ok();
+        use crate::memory::FrameError;
+        match frame_manager.lock(xlapic_new_frame_index) {
+            Ok(_) | Err(FrameError::OutOfRange(_)) => {}
+            Err(err) => panic!("encountered error while configuring xAPIC: {:?}", err),
+        }
         frame_manager.try_modify_type(xlapic_new_frame_index, crate::memory::FrameType::MMIO).ok();
 
         trace!("Mapping kernel page {:?} to xAPIC frame.", xlapic_page);
@@ -162,7 +166,8 @@ impl InterruptCommand {
     }
 }
 
-#[repr(u32)]
+/// Various APIC registers, valued as their base register index.
+#[repr(u8)]
 pub enum Register {
     ID = 0x02,
     VERSION = 0x03,
@@ -209,6 +214,20 @@ pub enum Register {
     SELF_IPI = 0x3F,
 }
 
+impl Register {
+    /// Translates this APIC register to its respective xAPIC memory offset.
+    #[inline(always)]
+    pub const fn as_xapic_offset(self) -> usize {
+        (self as usize) * 0x10
+    }
+
+    /// Translates this APIC register to its respective x2APIC MSR address.
+    #[inline(always)]
+    pub const fn as_x2apic_msr(self) -> u32 {
+        x2APIC_BASE_MSR_ADDR + (self as u32)
+    }
+}
+
 pub const LINT0_VECTOR: u8 = 253;
 pub const LINT1_VECTOR: u8 = 254;
 pub const SPURIOUS_VECTOR: u8 = 255;
@@ -216,39 +235,45 @@ pub const SPURIOUS_VECTOR: u8 = 255;
 const xAPIC_BASE_ADDR: usize = 0xFEE00000;
 const x2APIC_BASE_MSR_ADDR: u32 = 0x800;
 
-/// Reads the given register from the local APIC. Panics if APIC is not properly initialized.
-unsafe fn read_register(register: Register) -> u64 {
+/// Type for representing the mode of the core-local APIC.
+enum Mode {
+    xAPIC,
+    x2APIC,
+    None,
+}
+
+/// Returns the current mode of the core-local APIC.
+fn get_mode() -> Mode {
     if IA32_APIC_BASE::get_hw_enabled() {
         if IA32_APIC_BASE::get_is_x2_mode() {
-            libarch::registers::x86_64::msr::rdmsr(x2APIC_BASE_MSR_ADDR + (register as u32))
+            Mode::x2APIC
         } else if xLAPIC_ENABLED.load(Ordering::Relaxed) {
-            crate::asm_marker!(0x1FEF3F);
-
-            let xlapic_addr = xLAPIC.get() as usize;
-            let xlapic_register_addr = xlapic_addr + ((register as usize) << 4);
-            (xlapic_register_addr as *mut u32).read_volatile() as u64
+            Mode::xAPIC
         } else {
-            panic!("core-local APIC is in invalid state (cannot read registers, but is hardware enabled)")
+            Mode::None
         }
     } else {
-        panic!("core-local APIC is not hardware enabled")
+        Mode::None
+    }
+}
+
+/// Reads the given register from the local APIC. Panics if APIC is not properly initialized.
+unsafe fn read_register(register: Register) -> u64 {
+    match get_mode() {
+        Mode::xAPIC => (((xLAPIC.get() as usize) + register.as_xapic_offset()) as *mut u32).read_volatile() as u64,
+        Mode::x2APIC => libarch::registers::x86_64::msr::rdmsr(register.as_x2apic_msr()),
+        Mode::None => panic!("cannot write; core-local APIC is not in a valid mode"),
     }
 }
 
 /// Reads the given register from the local APIC. Panics if APIC is not properly initialized.
 unsafe fn write_register(register: Register, value: u64) {
-    if IA32_APIC_BASE::get_hw_enabled() {
-        if IA32_APIC_BASE::get_is_x2_mode() {
-            libarch::registers::x86_64::msr::wrmsr(x2APIC_BASE_MSR_ADDR + (register as u32), value);
-        } else if xLAPIC_ENABLED.load(Ordering::Relaxed) {
-            let xlapic_addr = xLAPIC.get() as usize;
-            let xlapic_register_addr = xlapic_addr + ((register as usize) << 4);
-            (xlapic_register_addr as *mut u32).write_volatile(value as u32);
-        } else {
-            panic!("core-local APIC is in invalid state (cannot write registers, but is hardware enabled)")
+    match get_mode() {
+        Mode::xAPIC => {
+            (((xLAPIC.get() as usize) + register.as_xapic_offset()) as *mut u32).write_volatile(value as u32)
         }
-    } else {
-        panic!("core-local APIC is not hardware enabled")
+        Mode::x2APIC => libarch::registers::x86_64::msr::wrmsr(register.as_x2apic_msr(), value),
+        Mode::None => panic!("cannot write; core-local APIC is not in a valid mode"),
     }
 }
 
@@ -268,9 +293,16 @@ pub unsafe fn sw_disable() {
     write_register(Register::SPURIOUS, *read_register(Register::SPURIOUS).set_bit(8, false));
 }
 
-#[inline]
 pub fn get_id() -> u32 {
-    unsafe { read_register(Register::ID) as u32 }
+    unsafe {
+        match get_mode() {
+            Mode::xAPIC => {
+                (((xLAPIC.get() as usize) + Register::ID.as_xapic_offset()) as *mut u32).read_volatile() >> 24
+            }
+            Mode::x2APIC => libarch::registers::x86_64::msr::rdmsr(Register::ID.as_x2apic_msr()) as u32,
+            Mode::None => panic!("cannot read ID; core-local APIC is not in a valid mode"),
+        }
+    }
 }
 
 #[inline]

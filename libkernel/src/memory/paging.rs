@@ -176,7 +176,8 @@ bitflags::bitflags! {
         const CODE = Self::PRESENT.bits();
         const RODATA = Self::PRESENT.bits() | Self::NO_EXECUTE.bits();
         const DATA = Self::PRESENT.bits() | Self::WRITABLE.bits() | Self::NO_EXECUTE.bits();
-        const MMIO = Self::DATA.bits() | Self::UNCACHEABLE.bits() | Self::WRITE_THROUGH.bits();
+        const MMIO = Self::DATA.bits() | Self::UNCACHEABLE.bits();
+        const FRAMEBUFFER = Self::DATA.bits();
     }
 }
 
