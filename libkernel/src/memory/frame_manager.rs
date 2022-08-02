@@ -2,6 +2,8 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use num_enum::TryFromPrimitive;
 use spin::RwLock;
 
+// TODO remove borrowing frames, it's useless
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum FrameOwnership {
     None,
@@ -343,36 +345,36 @@ impl<'arr> FrameManager<'arr> {
             .ok_or(FrameError::NoFreeFrames)
     }
 
-    pub fn lock_next_many(&self, count: usize) -> Result<usize, FrameError> {
-        let map = self.map.write();
+    // pub fn lock_next_many(&self, count: usize) -> Result<usize, FrameError> {
+    //     let map = self.map.write();
 
-        let mut start_index = 0;
-        let mut current_run = 0;
-        for (index, frame) in map.iter().enumerate() {
-            let (ty, ref_count, locked) = frame.data();
+    //     let mut start_index = 0;
+    //     let mut current_run = 0;
+    //     for (index, frame) in map.iter().enumerate() {
+    //         let (ty, ref_count, locked) = frame.data();
 
-            if ty == FrameType::Usable && ref_count == 0 && !locked {
-                current_run += 1;
+    //         if ty == FrameType::Usable && ref_count == 0 && !locked {
+    //             current_run += 1;
 
-                if current_run == count {
-                    break;
-                }
-            } else {
-                current_run = 0;
-                start_index = index + 1;
-            }
-        }
+    //             if current_run == count {
+    //                 break;
+    //             }
+    //         } else {
+    //             current_run = 0;
+    //             start_index = index + 1;
+    //         }
+    //     }
 
-        if current_run < count {
-            Err(FrameError::NoFreeFrames)
-        } else {
-            map.iter().skip(start_index).take(count).for_each(|frame| {
-                frame.lock();
-            });
+    //     if current_run < count {
+    //         Err(FrameError::NoFreeFrames)
+    //     } else {
+    //         map.iter().skip(start_index).take(count).for_each(|frame| {
+    //             frame.lock();
+    //         });
 
-            Ok(start_index)
-        }
-    }
+    //         Ok(start_index)
+    //     }
+    // }
 
     pub fn try_modify_type(&self, index: usize, new_type: FrameType) -> core::result::Result<(), FrameError> {
         self.map.read().get(index).ok_or(FrameError::OutOfRange(index)).and_then(|frame| frame.modify_type(new_type))
