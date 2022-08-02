@@ -6,7 +6,7 @@ use crate::{
         Page,
     },
 };
-use libarch::{Address, Physical, Virtual};
+use libarch::{instructions::interrupts::without_interrupts, Address, Physical, Virtual};
 
 #[derive(Debug, Clone, Copy)]
 pub enum MapError {
@@ -196,53 +196,63 @@ impl PageManager {
         attribs: PageAttribute,
         frame_manager: &'static FrameManager<'_>,
     ) -> Result<(), MapError> {
-        // Attempt to acquire the requisite frame, following the outlined parsing of `lock_frame`.
-        let frame_result = match ownership {
-            FrameOwnership::None => Ok(frame_index),
-            FrameOwnership::Borrowed => frame_manager.borrow(frame_index),
-            FrameOwnership::Locked => frame_manager.lock(frame_index),
-        };
+        without_interrupts(|| {
+            // Lock the virtual map first. This avoids a situation where the frame for this page is
+            // freed, an interrupt occurs, and then the page is memory referenced (and thus, a page
+            // pointing to a frame it doesn't own is accessed).
+            let mut map_write = self.virtual_map.write();
 
-        match frame_result {
-            // If acquisition of the frame is successful, map the page to the frame index.
-            Ok(frame_index) => {
-                self.virtual_map.write().get_page_entry_create(page, frame_manager).set(frame_index, attribs);
+            // Attempt to acquire the requisite frame, following the outlined parsing of `lock_frame`.
+            let frame_result = match ownership {
+                FrameOwnership::None => Ok(frame_index),
+                FrameOwnership::Borrowed => frame_manager.borrow(frame_index),
+                FrameOwnership::Locked => frame_manager.lock(frame_index),
+            };
 
-                tlb::invlpg(page);
+            match frame_result {
+                // If acquisition of the frame is successful, map the page to the frame index.
+                Ok(frame_index) => {
+                    map_write.get_page_entry_create(page, frame_manager).set(frame_index, attribs);
 
-                Ok(())
+                    tlb::invlpg(page);
+
+                    Ok(())
+                }
+
+                // If the acquisition of the frame fails, return the error.
+                Err(err) => Err(MapError::FrameError(err)),
             }
-
-            // If the acquisition of the frame fails, return the error.
-            Err(err) => Err(MapError::FrameError(err)),
-        }
+        })
     }
 
+    /// Unmaps the given page, optionally freeing / dropping the frame the page points to within the given [`FrameManager`].
     pub fn unmap(
         &self,
         page: &Page,
         ownership: FrameOwnership,
         frame_manager: &'static FrameManager<'_>,
     ) -> Result<(), MapError> {
-        self.virtual_map
-            .write()
-            .get_page_entry_mut(page)
-            .map(|entry| {
-                entry.set_attributes(PageAttribute::PRESENT, AttributeModify::Remove);
+        without_interrupts(|| {
+            self.virtual_map
+                .write()
+                .get_page_entry_mut(page)
+                .map(|entry| {
+                    entry.set_attributes(PageAttribute::PRESENT, AttributeModify::Remove);
 
-                // Handle frame permissions to keep them updated.
-                unsafe {
-                    match ownership {
-                        FrameOwnership::None => {}
-                        FrameOwnership::Borrowed => frame_manager.drop(entry.take_frame_index()).unwrap(),
-                        FrameOwnership::Locked => frame_manager.free(entry.take_frame_index()).unwrap(),
+                    // Handle frame permissions to keep them updated.
+                    unsafe {
+                        match ownership {
+                            FrameOwnership::None => {}
+                            FrameOwnership::Borrowed => frame_manager.drop(entry.take_frame_index()).unwrap(),
+                            FrameOwnership::Locked => frame_manager.free(entry.take_frame_index()).unwrap(),
+                        }
                     }
-                }
 
-                // Invalidate the page in the TLB.
-                tlb::invlpg(page);
-            })
-            .ok_or(MapError::NotMapped)
+                    // Invalidate the page in the TLB.
+                    tlb::invlpg(page);
+                })
+                .ok_or(MapError::NotMapped)
+        })
     }
 
     pub fn copy_by_map(
@@ -252,28 +262,54 @@ impl PageManager {
         new_attribs: Option<PageAttribute>,
         frame_manager: &'static FrameManager<'_>,
     ) -> Result<(), MapError> {
-        let maybe_attribs_frame_index = {
+        without_interrupts(|| {
+            // Lock virtual map first. See blurp about the same potential UB condition from `Self::map()`.
             let mut map_write = self.virtual_map.write();
-            map_write.get_page_entry_mut(unmap_from).map(|entry| {
-                let attribs = new_attribs.unwrap_or_else(|| entry.get_attribs());
-                entry.set_attributes(PageAttribute::empty(), AttributeModify::Set);
 
-                unsafe { (attribs, entry.take_frame_index()) }
-            })
-        };
+            let maybe_attribs_frame_index = {
+                map_write.get_page_entry_mut(unmap_from).map(|entry| {
+                    let attribs = new_attribs.unwrap_or_else(|| entry.get_attribs());
+                    entry.set_attributes(PageAttribute::empty(), AttributeModify::Set);
 
-        match maybe_attribs_frame_index.ok_or(MapError::NotMapped) {
-            Ok((attribs, frame_index)) => {
-                let result = self.map(map_to, frame_index, FrameOwnership::None, attribs, frame_manager);
+                    unsafe { (attribs, entry.take_frame_index()) }
+                })
+            };
 
-                if result.is_ok() {
-                    tlb::invlpg(unmap_from);
+            match maybe_attribs_frame_index.ok_or(MapError::NotMapped) {
+                Ok((attribs, frame_index)) => {
+                    // Yes, we effectively completely re-implement the `Self::map()` function.
+                    // This is primarily to ensure the `Self::map()` implementation is kept clean, as this
+                    // function requires locking `self.virtual_map`, and so calling `Self::map()` would deadlock.
+                    //
+                    // Rather than add non-locking functionality to `Self::map()`, we keep intent clear here and
+                    // mostly re-implement the function, slightly modified.
+
+                    // Attempt to acquire the requisite frame, following the outlined parsing of `lock_frame`.
+                    let frame_result = match ownership {
+                        FrameOwnership::None => Ok(frame_index),
+                        FrameOwnership::Borrowed => frame_manager.borrow(frame_index),
+                        FrameOwnership::Locked => frame_manager.lock(frame_index),
+                    };
+
+                    match frame_result {
+                        // If acquisition of the frame is successful, map the page to the frame index and invalidate the TLB
+                        // entries for the to/from pages.
+                        Ok(frame_index) => {
+                            map_write.get_page_entry_create(map_to, frame_manager).set(frame_index, attribs);
+
+                            tlb::invlpg(map_to);
+                            tlb::invlpg(unmap_from);
+
+                            Ok(())
+                        }
+
+                        // If the acquisition of the frame fails, return the error.
+                        Err(err) => Err(MapError::FrameError(err)),
+                    }
                 }
-
-                result
+                Err(err) => Err(err),
             }
-            Err(err) => Err(err),
-        }
+        })
     }
 
     pub fn auto_map(&self, page: &Page, attribs: PageAttribute, frame_manager: &'static FrameManager<'_>) {
@@ -283,42 +319,50 @@ impl PageManager {
     /* STATE QUERYING */
 
     pub fn is_mapped(&self, virt_addr: Address<Virtual>) -> bool {
-        self.virtual_map
-            .read()
-            .get_page_entry(&Page::containing_addr(virt_addr))
-            .filter(|entry| entry.get_attribs().contains(PageAttribute::PRESENT))
-            .is_some()
+        without_interrupts(|| {
+            self.virtual_map
+                .read()
+                .get_page_entry(&Page::containing_addr(virt_addr))
+                .filter(|entry| entry.get_attribs().contains(PageAttribute::PRESENT))
+                .is_some()
+        })
     }
 
     pub fn is_mapped_to(&self, page: &Page, frame_index: usize) -> bool {
-        self.virtual_map
-            .read()
-            .get_page_entry(page)
-            .and_then(|entry| entry.get_frame_index())
-            .map_or(false, |entry_frame_index| frame_index == entry_frame_index)
+        without_interrupts(|| {
+            self.virtual_map
+                .read()
+                .get_page_entry(page)
+                .and_then(|entry| entry.get_frame_index())
+                .map_or(false, |entry_frame_index| frame_index == entry_frame_index)
+        })
     }
 
     pub fn get_mapped_to(&self, page: &Page) -> Option<usize> {
-        self.virtual_map.read().get_page_entry(page).and_then(|entry| entry.get_frame_index())
+        without_interrupts(|| self.virtual_map.read().get_page_entry(page).and_then(|entry| entry.get_frame_index()))
     }
 
     /* STATE CHANGING */
 
     pub fn get_page_attribs(&self, page: &Page) -> Option<PageAttribute> {
-        self.virtual_map.read().get_page_entry(page).map(|page_entry| page_entry.get_attribs())
+        without_interrupts(|| self.virtual_map.read().get_page_entry(page).map(|page_entry| page_entry.get_attribs()))
     }
 
     pub unsafe fn set_page_attribs(&self, page: &Page, attributes: PageAttribute, modify_mode: AttributeModify) {
-        self.virtual_map
-            .write()
-            .get_page_entry_mut(page)
-            .map(|page_entry| page_entry.set_attributes(attributes, modify_mode));
+        without_interrupts(|| {
+            self.virtual_map
+                .write()
+                .get_page_entry_mut(page)
+                .map(|page_entry| page_entry.set_attributes(attributes, modify_mode));
 
-        tlb::invlpg(page);
+            tlb::invlpg(page);
+        })
     }
 
     pub unsafe fn modify_mapped_page(&self, page: Page, frame_manager: &'static FrameManager<'_>) {
-        self.virtual_map.write().modify_mapped_page(page, frame_manager);
+        without_interrupts(|| {
+            self.virtual_map.write().modify_mapped_page(page, frame_manager);
+        })
     }
 
     pub fn mapped_page(&self) -> Page {
@@ -327,14 +371,18 @@ impl PageManager {
 
     #[inline(always)]
     pub unsafe fn write_cr3(&self) {
-        self.virtual_map.write().write_cr3();
+        without_interrupts(|| {
+            self.virtual_map.write().write_cr3();
+        })
     }
 
     pub fn copy_pml4(&self) -> PageTable<Level4> {
-        let vmap = self.virtual_map.read();
+        without_interrupts(|| {
+            let vmap = self.virtual_map.read();
 
-        unsafe {
-            vmap.mapped_page.forward_checked(vmap.pml4_frame).unwrap().as_ptr::<PageTable<Level4>>().read_volatile()
-        }
+            unsafe {
+                vmap.mapped_page.forward_checked(vmap.pml4_frame).unwrap().as_ptr::<PageTable<Level4>>().read_volatile()
+            }
+        })
     }
 }
