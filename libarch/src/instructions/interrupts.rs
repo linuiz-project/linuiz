@@ -22,7 +22,7 @@ pub fn disable() {
 
 /// Returns whether or not interrupts are enabled for the current core.
 #[inline(always)]
-pub fn get_enabled() -> bool {
+pub fn are_enabled() -> bool {
     #[cfg(target_arch = "x86_64")]
     {
         use crate::registers::x86_64::RFlags;
@@ -33,7 +33,7 @@ pub fn get_enabled() -> bool {
 
 /// Disables interrupts, executes the given [`FnOnce`], and re-enables interrupts if they were prior.
 pub fn without_interrupts<R>(func: impl FnOnce() -> R) -> R {
-    let interrupts_enabled = get_enabled();
+    let interrupts_enabled = are_enabled();
 
     if interrupts_enabled {
         disable();

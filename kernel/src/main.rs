@@ -188,7 +188,8 @@ unsafe extern "sysv64" fn _entry() -> ! {
                 .step_by(0x1000)
                 .map(|base| Page::from_index((base / 0x1000) as usize))
             {
-                page_manager.unmap(&page, libkernel::memory::FrameOwnership::None, frame_manager).ok();
+                // TODO maybe sometimes this fails? It did before, but isn't now. Could be because of an update to Limine.
+                page_manager.unmap(&page, libkernel::memory::FrameOwnership::None, frame_manager).unwrap();
             }
         }
 
@@ -426,7 +427,7 @@ unsafe fn run_kernel(is_bsp: bool) -> ! {
         use libarch::registers::x86_64::RFlags;
 
         try_push_task(Task::new(
-            TaskPriority::new(16).unwrap(),
+            TaskPriority::new(15).unwrap(),
             logging::flush_log_messages_indefinite,
             TaskStackOption::AutoAllocate,
             RFlags::INTERRUPT_FLAG,
@@ -437,7 +438,7 @@ unsafe fn run_kernel(is_bsp: bool) -> ! {
         .unwrap();
 
         try_push_task(Task::new(
-            TaskPriority::new(16).unwrap(),
+            TaskPriority::new(3).unwrap(),
             syscall_test,
             TaskStackOption::AutoAllocate,
             RFlags::INTERRUPT_FLAG,

@@ -53,17 +53,14 @@ fn get_local_state() -> Option<&'static mut LocalState> {
             .add(libkernel::structures::apic::get_id() as usize);
 
         match local_state_ptr.as_mut() {
+            Some(local_state)
+                if page_manager.is_mapped(Address::<Virtual>::from_ptr(local_state_ptr))
+                    && local_state.is_valid_magic() =>
+            {
                 Some(local_state)
-                    if //page_manager.is_mapped(Address::<Virtual>::from_ptr(local_state_ptr)) &&
-                         local_state.is_valid_magic() =>
-                {
-                    Some(local_state)
-                }
-                _ => None,
             }
-        //} else {
-        //    None
-        //}
+            _ => None,
+        }
     }
 }
 
@@ -265,7 +262,15 @@ fn local_timer_handler(
             // Set current page tables.
             CR3::write(next_task.cr3.0, next_task.cr3.1);
 
-            let next_timer_ms = (next_task.prio().get() as u32) * PRIO_TIME_SLICE_MS;
+            let next_timer_ms = (next_task.priority().get() as u32) * PRIO_TIME_SLICE_MS;
+
+            trace!(
+                "Starting next task: ID {}  Priority {:?}\nStack Frame {:?}\nRegisters {:?}",
+                next_task.id(),
+                next_task.priority(),
+                stack_frame,
+                cached_regs
+            );
             local_state.cur_task = Some(next_task);
 
             next_timer_ms

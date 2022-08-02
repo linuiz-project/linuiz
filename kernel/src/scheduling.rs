@@ -137,7 +137,13 @@ impl Task {
         }
     }
 
-    pub fn prio(&self) -> TaskPriority {
+    /// Returns this task's ID.
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    /// Returns the [`TaskPriority`] struct for this task.
+    pub fn priority(&self) -> TaskPriority {
         self.prio
     }
 }
@@ -183,7 +189,7 @@ impl Scheduler {
 
     /// Pushes a new task to the scheduling queue.
     pub fn push_task(&self, task: Task) {
-        self.total_priority.fetch_add(task.prio().get() as u64, Ordering::Relaxed);
+        self.total_priority.fetch_add(task.priority().get() as u64, Ordering::Relaxed);
         self.tasks.push(task);
     }
 
@@ -192,7 +198,7 @@ impl Scheduler {
     pub fn pop_task(&self) -> Option<Task> {
         match self.enabled.load(Ordering::Relaxed) {
             true => self.tasks.pop().map(|task| {
-                self.total_priority.fetch_sub(task.prio().get() as u64, Ordering::Relaxed);
+                self.total_priority.fetch_sub(task.priority().get() as u64, Ordering::Relaxed);
 
                 task
             }),
