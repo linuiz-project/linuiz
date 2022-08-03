@@ -1,5 +1,6 @@
 #![no_std]
-#![feature(const_mut_refs)]
+#![feature(const_mut_refs,
+    step_trait)]
 
 mod addr;
 
@@ -8,6 +9,5 @@ pub mod cpu;
 pub mod instructions;
 pub mod io;
 pub mod registers;
-
-// TODO remove `control` registers from `libkernel`
-// TODO remove `addr` from `libkernel`
+//pub mod interrupts;
+pub mod memory;

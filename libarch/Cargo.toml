@@ -9,4 +9,5 @@ edition = "2021"
 bitflags = "*"
 lazy_static = "*"
 bit_field = "*"
-raw-cpuid = { path = "../../rust-cpuid" }
+raw-cpuid = "*"
+spin = "*"

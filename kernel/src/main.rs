@@ -97,7 +97,7 @@ const DEV_UNMAP_LOWER_HALF_IDMAP: bool = false;
 #[no_mangle]
 unsafe extern "sysv64" fn _entry() -> ! {
     CON_OUT.init(drivers::stdout::SerialSpeed::S115200);
-    match drivers::stdout::set_stdout(&mut CON_OUT, log::LevelFilter::Trace) {
+    match drivers::stdout::set_stdout(&mut CON_OUT, log::LevelFilter::Debug) {
         Ok(()) => info!("Successfully loaded into kernel."),
         Err(_) => libarch::instructions::interrupts::wait_indefinite(),
     }
@@ -443,16 +443,16 @@ unsafe fn run_kernel(is_bsp: bool) -> ! {
 
     // Add a number of test tasks to get kernel output, test scheduling, and test logging.
     for _ in 0..1 {
-        try_push_task(Task::new(
-            TaskPriority::new(1).unwrap(),
-            logging_test,
-            TaskStackOption::Pages(1),
-            RFlags::INTERRUPT_FLAG,
-            *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
-            *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
-            libarch::registers::x86_64::control::CR3::read(),
-        ))
-        .unwrap();
+        // try_push_task(Task::new(
+        //     TaskPriority::new(1).unwrap(),
+        //     logging_test,
+        //     TaskStackOption::Pages(1),
+        //     RFlags::INTERRUPT_FLAG,
+        //     *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
+        //     *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
+        //     libarch::registers::x86_64::control::CR3::read(),
+        // ))
+        // .unwrap();
     }
 
     crate::local_state::try_begin_scheduling();

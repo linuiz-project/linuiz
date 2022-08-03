@@ -83,9 +83,6 @@ pub unsafe fn init() {
     // Ensure we load the local state pointer via `cpuid` to avoid using the APIC before it is initialized.
     let local_state_ptr = (LOCAL_STATES_BASE.load(Ordering::Relaxed) as *mut LocalState).add(core_id as usize);
 
-    debug!("SET Local state base: {:#X}", LOCAL_STATES_BASE.load(Ordering::Relaxed));
-    debug!("SET Local state pointer: {:?}", local_state_ptr);
-
     {
         use libkernel::memory::Page;
 

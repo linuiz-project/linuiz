@@ -117,7 +117,7 @@ impl ELFHeader64 {
         }
     }
 
-    // todo add getters for all properties
+    // TODO add getters for all properties
 
     pub fn entry_address(&self) -> usize {
         self.entry

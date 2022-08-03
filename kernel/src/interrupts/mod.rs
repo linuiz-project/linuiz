@@ -148,4 +148,3 @@ pub enum StackTableIndex {
     DoubleFault = 2,
     MachineCheck = 3,
 }
-
