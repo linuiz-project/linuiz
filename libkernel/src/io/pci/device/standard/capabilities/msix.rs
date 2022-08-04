@@ -48,7 +48,7 @@ impl Message {
         self.mask.write(*self.mask.read().set_bit(0, masked));
     }
 
-    // TODO features gate this function behind x86, because it's contents are arch-specific
+    // TODO features gate this function behind x86, because its contents are arch-specific
     pub fn configure(&self, processor_id: u8, vector: u8, delivery_mode: InterruptDeliveryMode) {
         assert!(
             self.get_masked(),

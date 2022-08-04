@@ -1,18 +1,20 @@
 #![allow(non_camel_case_types, non_upper_case_globals)]
 
-use crate::InterruptDeliveryMode;
+use crate::{interrupts::x86_64::InterruptDeliveryMode, registers::x86_64::msr::IA32_APIC_BASE};
 use bit_field::BitField;
 use core::{marker::PhantomData, sync::atomic::Ordering};
-use libarch::registers::x86_64::msr::IA32_APIC_BASE;
 
 lazy_static::lazy_static! {
-    pub static ref xAPIC_SUPPORT: bool = libarch::cpu::x86_64::CPUID.get_feature_info().map(|info| info.has_apic()).unwrap_or(false);
-    pub static ref x2APIC_SUPPORT: bool = libarch::cpu::x86_64::CPUID.get_feature_info().map(|info| info.has_x2apic()).unwrap_or(false);
+    pub static ref xAPIC_SUPPORT: bool = crate::cpu::x86_64::CPUID.get_feature_info().map(|info| info.has_apic()).unwrap_or(false);
+    pub static ref x2APIC_SUPPORT: bool = crate::cpu::x86_64::CPUID.get_feature_info().map(|info| info.has_x2apic()).unwrap_or(false);
 }
 
 // xAPIC needs a sized field to avoid being optimized to zero-sized (even
-// with the page-aligned repr), so a `usize` is employed. It should *never*
+// with the repr alignment), so a `usize` is employed. It should *never*
 // be read, it's *only* to force the compiler to provide padding.
+//
+// Specifically, this behaviour is categorized as a bug. Hopefully the issues
+// with ZSTs are resolved some time.
 #[repr(C, align(0x1000))]
 struct xAPIC(core::mem::MaybeUninit<usize>);
 unsafe impl Send for xAPIC {}
@@ -31,7 +33,7 @@ pub unsafe fn init(
 ) {
     if libarch::cpu::x86_64::is_bsp() {
         trace!("Configuring memory mappings for xAPIC.");
-        let xlapic_page = libarch ::memory::Page::from_ptr(xLAPIC.get());
+        let xlapic_page = crate::memory::Page::from_ptr(xLAPIC.get());
         let xlapic_old_frame_index = page_manager.get_mapped_to(&xlapic_page).unwrap();
         let xlapic_new_frame_index = xAPIC_BASE_ADDR / 0x1000;
 
@@ -46,8 +48,6 @@ pub unsafe fn init(
         frame_manager.try_modify_type(xlapic_new_frame_index, crate::memory::FrameType::MMIO).ok();
 
         trace!("Mapping kernel page {:?} to xAPIC frame.", xlapic_page);
-        let attributes = 
-
         // Map the xAPIC frames into the kernel higher-half address space.
         //
         // REMARK: All CPU cores share the same higher-half page tables, so this mapping will be globally utilized.
@@ -55,12 +55,8 @@ pub unsafe fn init(
             .map(
                 &xlapic_page,
                 xlapic_new_frame_index,
-                crate::memory::FrameOwnership::None,{
-                    use libarch::memory::paging::PageAttributes;
-
-                #[cfg(target_arch = "x86_64")] {
-                    crate::memory::PageAttribute::RW,
-                }},
+                crate::memory::FrameOwnership::None,
+                crate::memory::PageAttribute::MMIO,
                 frame_manager,
             )
             .unwrap();

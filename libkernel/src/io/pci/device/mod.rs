@@ -209,8 +209,6 @@ pub struct PCIeDevice<T: DeviceType> {
     phantom: PhantomData<T>,
 }
 
-// TODO move frame_manager and page_manager into libkernel ... again
-
 pub fn new_device(mmio: MMIO) -> DeviceVariant {
     let type_malfunc = unsafe {
         mmio.read::<u8>(HeaderOffset::HeaderType.into())

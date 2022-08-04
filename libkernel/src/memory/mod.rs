@@ -3,9 +3,7 @@ mod page_manager;
 
 pub use frame_manager::*;
 pub use page_manager::*;
-pub use paging::*;
 
-pub mod paging;
 pub mod volatile;
 
 #[cfg(feature = "global_allocator")]

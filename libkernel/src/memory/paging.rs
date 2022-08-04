@@ -189,7 +189,6 @@ pub enum AttributeModify {
     Toggle,
 }
 
-// TODO use u64 here
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct PageTableEntry(usize);

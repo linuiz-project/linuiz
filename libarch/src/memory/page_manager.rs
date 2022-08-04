@@ -1,12 +1,8 @@
 use crate::{
-    instructions::tlb,
-    memory::{
-        frame_manager::{FrameManager, FrameOwnership},
-        paging::{AttributeModify, Level4, PageAttribute, PageTable, PageTableEntry},
-        Page,
-    },
+    instructions::interrupts::without_interrupts,
+    paging::{AttributeModify, Level4, Page, PageAttributes, PageTable, PageTableEntry},
+    Address, Physical, Virtual,
 };
-use libarch::{instructions::interrupts::without_interrupts, Address, Physical, Virtual};
 
 #[derive(Debug, Clone, Copy)]
 pub enum MapError {
@@ -17,7 +13,7 @@ pub enum MapError {
 
 struct VirtualMapper {
     mapped_page: Page,
-    pml4_frame: usize,
+    l4_frame_index: usize,
 }
 
 impl VirtualMapper {
@@ -27,12 +23,12 @@ impl VirtualMapper {
     /// SAFETY: This method is unsafe because `mapped_page` can be any value; that is, not necessarily
     ///         a valid address in which physical memory is already mapped. The expectation is that `mapped_page`
     ///         is a proper starting page for the current physical memory mapping.
-    pub unsafe fn new(mapped_page: &Page, pml4_index: usize) -> Self {
+    pub unsafe fn new(mapped_page: &Page, l4_frame_index: usize) -> Self {
         Self {
             // We don't know where physical memory is mapped at this point,
             // so rely on what the caller specifies for us.
             mapped_page: *mapped_page,
-            pml4_frame: pml4_index,
+            l4_frame_index,
         }
     }
 
@@ -43,7 +39,7 @@ impl VirtualMapper {
     /* ACQUIRE STATE */
 
     fn pml4_page(&self) -> Page {
-        self.mapped_page.forward_checked(self.pml4_frame).unwrap()
+        self.mapped_page.forward_checked(self.l4_frame_index).unwrap()
     }
 
     fn pml4(&self) -> Option<&PageTable<Level4>> {
@@ -98,14 +94,14 @@ impl VirtualMapper {
         for frame_index in 0..frame_manager.total_frames() {
             let cur_page = base_page.forward_checked(frame_index).unwrap();
 
-            self.get_page_entry_create(&cur_page, frame_manager).set(
-                frame_index,
-                PageAttribute::PRESENT
-                    | PageAttribute::WRITABLE
-                    | PageAttribute::WRITE_THROUGH
-                    | PageAttribute::NO_EXECUTE
-                    | PageAttribute::GLOBAL,
-            );
+            let attributes = {
+                #[cfg(target_arch = "x86_64")]
+                {
+                    PageAttributes::RW | PageAttributes::WRITE_THROUGH | PageAttributes::GLOBAL
+                }
+            };
+
+            self.get_page_entry_create(&cur_page, frame_manager).set(frame_index, attributes);
 
             tlb::invlpg(&cur_page);
         }
@@ -113,15 +109,10 @@ impl VirtualMapper {
         self.mapped_page = base_page;
     }
 
-    /// Returns `true` if the current CR3 address matches the addressor's PML4 frame, and `false` otherwise.
-    fn is_active(&self) -> bool {
-        libarch::registers::x86_64::control::CR3::read().0.frame_index() == self.pml4_frame
-    }
-
     #[inline(always)]
     pub unsafe fn write_cr3(&mut self) {
-        libarch::registers::x86_64::control::CR3::write(
-            Address::<Physical>::new(self.pml4_frame * 0x1000),
+        crate::registers::x86_64::control::CR3::write(
+            Address::<Physical>::new(self.l4_frame_index * 0x1000),
             libarch::registers::x86_64::control::CR3Flags::empty(),
         );
     }
@@ -166,10 +157,6 @@ impl PageManager {
         }
     }
 
-    pub fn cr3(&self) -> usize {
-        self.virtual_map.read().pml4_frame * 0x1000
-    }
-
     pub unsafe fn from_current(mapped_page: &Page) -> Self {
         Self {
             virtual_map: spin::RwLock::new(VirtualMapper::new(
@@ -182,16 +169,12 @@ impl PageManager {
     /* MAP / UNMAP */
 
     /// Maps the specified frame to the specified frame index.
-    ///
-    /// The `lock_frame` parameter is set as follows:
-    ///     `Some` or `None` indicates whether frame allocation is required,
-    ///         `true` or `false` in a `Some` indicates whether the frame is locked or merely referenced.
-    pub fn map(
+    fn map(
         &self,
         page: &Page,
         frame_index: usize,
         ownership: FrameOwnership,
-        attribs: PageAttribute,
+        attribs: PageAttributes,
         frame_manager: &'static FrameManager<'_>,
     ) -> Result<(), MapError> {
         without_interrupts(|| {
@@ -235,7 +218,7 @@ impl PageManager {
                 .write()
                 .get_page_entry_mut(page)
                 .map(|entry| {
-                    entry.set_attributes(PageAttribute::PRESENT, AttributeModify::Remove);
+                    entry.set_attributes(PageAttributes::PRESENT, AttributeModify::Remove);
 
                     // Handle frame permissions to keep them updated.
                     unsafe {
@@ -257,7 +240,7 @@ impl PageManager {
         &self,
         unmap_from: &Page,
         map_to: &Page,
-        new_attribs: Option<PageAttribute>,
+        new_attribs: Option<PageAttributes>,
         frame_manager: &'static FrameManager<'_>,
     ) -> Result<(), MapError> {
         without_interrupts(|| {
@@ -266,7 +249,7 @@ impl PageManager {
             let maybe_new_pte_frame_index_attribs = map_write.get_page_entry_mut(unmap_from).map(|entry| {
                 // Get attributes from old frame if none are provided.
                 let attribs = new_attribs.unwrap_or_else(|| entry.get_attribs());
-                entry.set_attributes(PageAttribute::empty(), AttributeModify::Set);
+                entry.set_attributes(PageAttributes::empty(), AttributeModify::Set);
 
                 (unsafe { entry.take_frame_index() }, attribs)
             });
@@ -284,7 +267,7 @@ impl PageManager {
         })
     }
 
-    pub fn auto_map(&self, page: &Page, attribs: PageAttribute, frame_manager: &'static FrameManager<'_>) {
+    pub fn auto_map(&self, page: &Page, attribs: PageAttributes, frame_manager: &'static FrameManager<'_>) {
         self.map(page, frame_manager.lock_next().unwrap(), FrameOwnership::None, attribs, frame_manager).unwrap();
     }
 
@@ -295,32 +278,28 @@ impl PageManager {
             self.virtual_map
                 .read()
                 .get_page_entry(&Page::containing_addr(virt_addr))
-                .filter(|entry| entry.get_attribs().contains(PageAttribute::PRESENT))
+                .filter(|entry| entry.get_attribs().contains(PageAttributes::PRESENT))
                 .is_some()
         })
     }
 
     pub fn is_mapped_to(&self, page: &Page, frame_index: usize) -> bool {
         without_interrupts(|| {
-            self.virtual_map
-                .read()
-                .get_page_entry(page)
-                .and_then(|entry| entry.get_frame_index())
-                .map_or(false, |entry_frame_index| frame_index == entry_frame_index)
+            self.virtual_map.read().get_page_entry(page).map_or(false, |entry| frame_index == entry.get_frame_index())
         })
     }
 
     pub fn get_mapped_to(&self, page: &Page) -> Option<usize> {
-        without_interrupts(|| self.virtual_map.read().get_page_entry(page).and_then(|entry| entry.get_frame_index()))
+        without_interrupts(|| self.virtual_map.read().get_page_entry(page).map(|entry| entry.get_frame_index()))
     }
 
     /* STATE CHANGING */
 
-    pub fn get_page_attribs(&self, page: &Page) -> Option<PageAttribute> {
+    pub fn get_page_attribs(&self, page: &Page) -> Option<PageAttributes> {
         without_interrupts(|| self.virtual_map.read().get_page_entry(page).map(|page_entry| page_entry.get_attribs()))
     }
 
-    pub unsafe fn set_page_attribs(&self, page: &Page, attributes: PageAttribute, modify_mode: AttributeModify) {
+    pub unsafe fn set_page_attribs(&self, page: &Page, attributes: PageAttributes, modify_mode: AttributeModify) {
         without_interrupts(|| {
             self.virtual_map
                 .write()
@@ -353,7 +332,11 @@ impl PageManager {
             let vmap = self.virtual_map.read();
 
             unsafe {
-                vmap.mapped_page.forward_checked(vmap.pml4_frame).unwrap().as_ptr::<PageTable<Level4>>().read_volatile()
+                vmap.mapped_page
+                    .forward_checked(vmap.l4_frame_index)
+                    .unwrap()
+                    .as_ptr::<PageTable<Level4>>()
+                    .read_volatile()
             }
         })
     }

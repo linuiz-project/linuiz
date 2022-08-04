@@ -1,1 +1,3 @@
-pub mod paging;
+mod paging;
+
+pub use paging::*;

@@ -2,8 +2,6 @@ use core::marker::PhantomData;
 
 pub const VADDR_HW_MAX: usize = 0x1000000000000;
 
-// TODO possibly introduce an Address<Frame> type to represent frame addresses?
-
 pub trait AddressType {}
 
 #[derive(Clone, Copy, PartialEq, Eq)]

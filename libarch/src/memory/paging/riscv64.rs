@@ -15,5 +15,6 @@ bitflags::bitflags! {
         const RO = Self::VALID.bits() | Self::READ.bits();
         const RW = Self::VALID.bits() | Self::READ.bits() | Self::WRITE.bits();
         const RX = Self::VALID.bits() | Self::READ.bits() | Self::EXECUTE.bits();
+        const MMIO = Self::VALID.bits() | Self::READ.bits() | Self::WRITE.bits();
     }
 }
