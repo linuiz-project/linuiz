@@ -1,10 +1,10 @@
-mod riscv64;
-mod x86_64;
+mod rv64;
+mod x64;
 
 #[cfg(target_arch = "x86_64")]
-pub use self::x86_64::*;
+pub use self::x64::*;
 #[cfg(target_arch = "riscv64")]
-pub use riscv64::*;
+pub use rv64::*;
 
 use crate::{Address, Virtual};
 use core::fmt;
@@ -235,7 +235,7 @@ impl PageTableEntry {
 
         #[cfg(target_arch = "x86_64")]
         {
-            if !crate::registers::x86_64::msr::IA32_EFER::get_nxe() {
+            if !crate::registers::x64::msr::IA32_EFER::get_nxe() {
                 // This bit is reserved if NXE is not supported. For now, this means silently removing it for compatability.
                 attributes.remove(PageAttributes::NO_EXECUTE);
             }

@@ -1,7 +1,5 @@
 pub mod cpuid {
     pub use raw_cpuid::*;
-
-    lazy_static::lazy_static! {}
 }
 
 lazy_static::lazy_static! {
@@ -15,5 +13,5 @@ lazy_static::lazy_static! {
 /// is the bootstrap processor.
 #[inline(always)]
 pub fn is_bsp() -> bool {
-    crate::registers::x86_64::msr::IA32_APIC_BASE::get_is_bsp()
+    crate::registers::x64::msr::IA32_APIC_BASE::get_is_bsp()
 }

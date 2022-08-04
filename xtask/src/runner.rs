@@ -22,6 +22,7 @@ pub enum CPU {
     Max,
     KVM64,
     QEMU64,
+    RV64,
 }
 
 #[derive(ArgEnum, Clone, Copy)]
@@ -71,32 +72,46 @@ pub struct Options {
 pub fn run(options: Options) -> Result<(), xshell::Error> {
     let shell = xshell::Shell::new()?;
 
-    let machine_str = format!("q35{}", if let Accelerator::KVM = options.accel { ",accel=kvm" } else { "" });
+    let qemu_exe_type = match options.cpu {
+        CPU::RV64 => "qemu-system-riscv64",
+        _ => "qemu-system-x86_64",
+    };
+    let machine_str = match options.cpu {
+        CPU::RV64 => {
+            if let Accelerator::KVM = options.accel {
+                panic!("cannot use KVM acceleration with rv64");
+            } else {
+                "virt".to_string()
+            }
+        }
+        _ => format!("q35{}", if let Accelerator::KVM = options.accel { ",accel=kvm" } else { "" }),
+    };
     let cpu_str = format!("{:?}", options.cpu).to_lowercase();
     let smp_str = format!("{}", options.smp);
     let ram_str = format!("{}", options.ram);
     let block_driver_str = format!("{:?}", options.block);
-    let mut log_str = vec![];
-    if options.log {
-        log_str.push(String::from("-d"));
-        log_str.push(String::from("int,guest_errors"));
-        log_str.push(String::from("-D"));
-        log_str.push(String::from(".debug/qemu.log"));
-    }
+    let log_str = if options.log { vec!["-d", "int,guest_errors", "-D", ".debug/qemu.log"] } else { vec![] };
+    let files_str = match options.cpu {
+        CPU::RV64 => {
+            vec!["-bios", "resources/fw_jump.fd", "-kernel", ".hdd/root/linuiz/kernel_rv64.elf"]
+        }
+        _ => {
+            vec!["-bios", "resources/OVMF.fd", "-drive", "format=raw,file=fat:rw:.hdd/root/"]
+        }
+    };
 
     cmd!(
         shell,
         "
-        qemu-system-x86_64
+        {qemu_exe_type}
             -no-reboot
-            -bios resources/OVMF.fd
+            {files_str...}
             -machine {machine_str}
             -cpu {cpu_str}
             -smp {smp_str}
             -m {ram_str}M
             -serial mon:stdio
             -net none
-            -drive format=raw,file=fat:rw:.hdd/root/
             -drive format=raw,file=.hdd/disk0.img,id=disk1,if=none
             -device {block_driver_str},drive=disk1,serial=deadbeef
             {log_str...}

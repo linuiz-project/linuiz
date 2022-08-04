@@ -6,15 +6,17 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-libkernel = { path = "../libkernel/", features = [ "global_allocator" ] }
+libkernel = { path = "../libkernel/", features = ["global_allocator"] }
 log = { version = "*", default-features = false }
 bit_field = "*"
 bitflags = "*"
 num_enum = { version = "*", default-features = false }
 spin = "*"
-paste = "*" 
-x86_64 = "*"
-lazy_static = "*"
-limine = "*"
 crossbeam-queue = { version = "*", default-features = false, features = ["alloc"] }
+paste = "*"
 
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+x86_64 = "*"
+limine = "*"
+raw-cpuid = "*"
+lazy_static = { version = "*", features = ["spin_no_std"] }

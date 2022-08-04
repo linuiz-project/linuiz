@@ -93,7 +93,7 @@ impl TSCTimer {
     ///         a proper handler.
     pub unsafe fn new() -> Option<Self> {
         if *apic::xAPIC_SUPPORT || *apic::x2APIC_SUPPORT {
-            libkernel::cpu::x86_64::FEATURE_INFO.as_ref().filter(|info| info.has_tsc_deadline()).map(|_| {
+            libkernel::cpu::x64::FEATURE_INFO.as_ref().filter(|info| info.has_tsc_deadline()).map(|_| {
                 apic::get_timer().set_mode(apic::TimerMode::TSC_Deadline);
                 Self(0)
             })
@@ -105,7 +105,7 @@ impl TSCTimer {
 
 impl Timer for TSCTimer {
     unsafe fn set_frequency(&mut self, set_freq: u64) {
-        let freq = libkernel::cpu::x86_64::CPUID
+        let freq = libkernel::cpu::x64::CPUID
             .get_processor_frequency_info()
             .map(|info| {
                 (info.bus_frequency() as u64)
@@ -117,9 +117,9 @@ impl Timer for TSCTimer {
                 // Wait on the global timer, to ensure we're starting the count
                 // on the rising edge of each millisecond.
                 crate::clock::busy_wait_msec(1);
-                let start_tsc = libkernel::registers::x86_64::TSC::read();
+                let start_tsc = libkernel::registers::x64::TSC::read();
                 crate::clock::busy_wait_msec(MS_WINDOW);
-                let end_tsc = libkernel::registers::x86_64::TSC::read();
+                let end_tsc = libkernel::registers::x64::TSC::read();
 
                 (end_tsc - start_tsc) * (1000 / MS_WINDOW)
             });
@@ -141,7 +141,7 @@ impl Timer for TSCTimer {
 
         let tsc_wait = self.0.checked_mul(interval_multiplier as u64).expect("timer interval multiplier overflowed");
 
-        libkernel::registers::x86_64::msr::IA32_TSC_DEADLINE::set(libkernel::registers::x86_64::TSC::read() + tsc_wait);
+        libkernel::registers::x64::msr::IA32_TSC_DEADLINE::set(libkernel::registers::x64::TSC::read() + tsc_wait);
     }
 }
 

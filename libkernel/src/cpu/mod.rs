@@ -1,8 +1,8 @@
-pub mod x86_64;
+pub mod x64;
 
 lazy_static::lazy_static! {
     #[cfg(target_arch = "x86_64")]
-    static ref VENDOR_INFO: Option<crate::cpu::x86_64::cpuid::VendorInfo> = crate::cpu::x86_64::CPUID.get_vendor_info();
+    static ref VENDOR_INFO: Option<crate::cpu::x64::cpuid::VendorInfo> = crate::cpu::x64::CPUID.get_vendor_info();
 }
 
 /// Gets the vendor of the CPU.
@@ -17,7 +17,7 @@ pub fn get_vendor() -> Option<&'static str> {
 pub fn get_id() -> u32 {
     #[cfg(target_arch = "x86_64")]
     {
-        use crate::cpu::x86_64::{CPUID, FEATURE_INFO};
+        use crate::cpu::x64::{CPUID, FEATURE_INFO};
 
         CPUID
             // IA32 SDM instructs to enumerate this leaf first...

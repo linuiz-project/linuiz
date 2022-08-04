@@ -22,6 +22,5 @@
   "eh-frame-header": false,
   "panic-strategy": "abort",
   "disable-redzone": true,
-  "relocation-model": "pie",
-  "exe-suffix": ".elf"
+  "relocation-model": "pie"
 }

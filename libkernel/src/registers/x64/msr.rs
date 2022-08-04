@@ -126,7 +126,7 @@ impl IA32_EFER {
     #[inline(always)]
     pub unsafe fn set_nxe(set: bool) {
         assert!(
-            crate::cpu::x86_64::EXT_FUNCTION_INFO
+            crate::cpu::x64::EXT_FUNCTION_INFO
                 .as_ref()
                 .map(|ext_func_info| ext_func_info.has_execute_disable())
                 .unwrap_or(false),

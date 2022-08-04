@@ -26,6 +26,7 @@ extern crate log;
 extern crate alloc;
 extern crate libkernel;
 
+mod boot;
 mod clock;
 mod drivers;
 mod interrupts;
@@ -52,18 +53,6 @@ extern "C" {
     static __bsp_top: LinkerSymbol;
     static __rw_end: LinkerSymbol;
 }
-
-const LIMINE_REV: u64 = 0;
-static LIMINE_INF: limine::LimineBootInfoRequest = limine::LimineBootInfoRequest::new(LIMINE_REV);
-static LIMINE_FB: limine::LimineFramebufferRequest = limine::LimineFramebufferRequest::new(LIMINE_REV);
-static LIMINE_SMP: limine::LimineSmpRequest = limine::LimineSmpRequest::new(LIMINE_REV);
-static LIMINE_RSDP: limine::LimineRsdpRequest = limine::LimineRsdpRequest::new(LIMINE_REV);
-static LIMINE_MMAP: limine::LimineMmapRequest = limine::LimineMmapRequest::new(LIMINE_REV);
-static LIMINE_HHDM: limine::LimineHhdmRequest = limine::LimineHhdmRequest::new(LIMINE_REV);
-
-static mut CON_OUT: drivers::stdout::Serial = drivers::stdout::Serial::new(drivers::stdout::COM1);
-
-static SMP_MEMORY_READY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 lazy_static::lazy_static! {
     /// We must take care not to call any allocating functions, or reference KMALLOC itself,
@@ -92,143 +81,18 @@ lazy_static::lazy_static! {
 //         );
 // }
 
-const DEV_UNMAP_LOWER_HALF_IDMAP: bool = false;
-
-#[no_mangle]
-unsafe extern "sysv64" fn _entry() -> ! {
-    CON_OUT.init(drivers::stdout::SerialSpeed::S115200);
-    match drivers::stdout::set_stdout(&mut CON_OUT, log::LevelFilter::Debug) {
-        Ok(()) => info!("Successfully loaded into kernel."),
-        Err(_) => libkernel::instructions::interrupts::wait_indefinite(),
-    }
-
-    /* log boot info */
-    {
-        let boot_info = LIMINE_INF.get_response().get().expect("bootloader provided no info");
-        info!(
-            "Bootloader Info     {} v{} (rev {})",
-            core::ffi::CStr::from_ptr(boot_info.name.as_ptr().unwrap() as *const _).to_str().unwrap(),
-            core::ffi::CStr::from_ptr(boot_info.version.as_ptr().unwrap() as *const _).to_str().unwrap(),
-            boot_info.revision,
-        );
-
-        if let Some(vendor_str) = libkernel::cpu::get_vendor() {
-            info!("Vendor              {}", vendor_str);
-        } else {
-            info!("Vendor              None");
-        }
-    }
-
-    /* prepare APs for startup */
-    // TODO add a kernel parameter for SMP
-    {
-        let smp_response =
-            LIMINE_SMP.get_response().as_mut_ptr().expect("received no SMP response from bootloader").as_mut().unwrap();
-
-        if let Some(cpus) = smp_response.cpus() {
-            debug!("Detected {} APs.", cpus.len() - 1);
-
-            for cpu_info in cpus {
-                // Ensure we don't try to 'start' the BSP.
-                if cpu_info.lapic_id != smp_response.bsp_lapic_id {
-                    debug!("Starting processor: PID{}/LID{}", cpu_info.processor_id, cpu_info.lapic_id);
-                    cpu_info.goto_address = _ap_entry as u64;
-                }
-            }
-        }
-    }
-
-    /* load RSDP pointer */
-    {
-        // TODO Possibly move ACPI structure instances out of libkernel?
-        // Set RSDP pointer, so ACPI can be used.
-        libkernel::acpi::set_rsdp_ptr(
-            LIMINE_RSDP
-                .get_response()
-                .get()
-                .expect("bootloader provided to RSDP pointer (no ACPI support)")
-                .address
-                .as_ptr()
-                .unwrap() as *const _,
-        );
-    }
-
-    /* init memory */
-    {
-        use libkernel::memory::Page;
-
-        trace!("Initializing memory managers.");
-
-        let memory_map = LIMINE_MMAP
-            .get_response()
-            .get()
-            .and_then(|resp| resp.mmap())
-            .expect("no memory map has been provided by bootloader");
-
-        // Frame manager is always initialized first, so virtual structures may allocate frames.
-        crate::memory::init_kernel_frame_manager(memory_map);
-
-        // Next, we create the kernel page manager, utilizing the bootloader's higher-half direct
-        // mapping for virtual offset mapping.
-        let hhdm_addr = libkernel::Address::<libkernel::Virtual>::new(
-            LIMINE_HHDM.get_response().get().expect("bootloader did not provide a higher half direct mapping").offset
-                as usize,
-        );
-        trace!("Higher half identity mapping base: {:?}", hhdm_addr);
-        crate::memory::init_kernel_page_manager(hhdm_addr);
-
-        let frame_manager = crate::memory::get_kernel_frame_manager().unwrap();
-        // The frame manager's allocation table is allocated with identity mapping assumed,
-        // so before we unmap the lower half virtual memory mapping (for kernel heap), we
-        // must ensure the frame manager uses the HHDM base.
-        frame_manager.slide_table_base(hhdm_addr.as_usize());
-
-        if DEV_UNMAP_LOWER_HALF_IDMAP {
-            let page_manager = crate::memory::get_kernel_page_manager().unwrap();
-            trace!("Unmapping lower half identity mappings.");
-            for entry in memory_map.iter() {
-                for page in (entry.base..(entry.base + entry.len))
-                    .step_by(0x1000)
-                    .map(|base| Page::from_index((base / 0x1000) as usize))
-                {
-                    // TODO maybe sometimes this fails? It did before, but isn't now. Could be because of an update to Limine.
-                    page_manager.unmap(&page, libkernel::memory::FrameOwnership::None, frame_manager).unwrap();
-                }
-            }
-        }
-
-        // The global kernel allocator must be set AFTER the upper half
-        // identity mappings are purged, so that the allocation table
-        // (which will reside in the lower half) isn't unmapped.
-        trace!("Assigning libkernel global allocator.");
-        libkernel::memory::global_alloc::set(&*KMALLOC);
-    }
-
-    debug!("Finished initial kernel setup.");
-    SMP_MEMORY_READY.store(true, core::sync::atomic::Ordering::Relaxed);
-    cpu_setup(true)
-}
-
-/// Entrypoint for AP processors.
-#[inline(never)]
-unsafe extern "C" fn _ap_entry() -> ! {
-    cpu_setup(false)
-}
-
-unsafe fn cpu_setup(is_bsp: bool) -> ! {
-    while !SMP_MEMORY_READY.load(core::sync::atomic::Ordering::Relaxed) {}
-
+pub unsafe fn cpu_setup(is_bsp: bool) -> ! {
     /* load registers */
     #[cfg(target_arch = "x86_64")]
     {
         // Set CR0 flags.
-        use libkernel::registers::x86_64::control::{CR0Flags, CR0};
+        use libkernel::registers::x64::control::{CR0Flags, CR0};
         CR0::write(CR0Flags::PE | CR0Flags::MP | CR0Flags::ET | CR0Flags::NE | CR0Flags::WP | CR0Flags::PG);
 
         // Set CR4 flags.
         use libkernel::{
-            cpu::x86_64::{EXT_FEATURE_INFO, FEATURE_INFO},
-            registers::x86_64::control::{CR4Flags, CR4},
+            cpu::x64::{EXT_FEATURE_INFO, FEATURE_INFO},
+            registers::x64::control::{CR4Flags, CR4},
         };
 
         let mut flags = CR4Flags::PAE | CR4Flags::PGE | CR4Flags::OSXMMEXCPT;
@@ -262,25 +126,29 @@ unsafe fn cpu_setup(is_bsp: bool) -> ! {
             flags.insert(CR4Flags::FSGSBASE);
         }
 
-        if EXT_FEATURE_INFO.as_ref().map(|info| info.has_smep()).unwrap_or(false) {
-            trace!("Detected support for supervisor mode execution prevention.");
-            flags.insert(CR4Flags::SMEP);
-        }
+        // TODO research SMAP/SMEP
+        // if EXT_FEATURE_INFO.as_ref().map(|info| info.has_smep()).unwrap_or(false) {
+        //     trace!("Detected support for supervisor mode execution prevention.");
+        //     flags.insert(CR4Flags::SMEP);
+        // }
 
-        if EXT_FEATURE_INFO.as_ref().map(|info| info.has_smap()).unwrap_or(false) {
-            trace!("Detected support for supervisor mode access prevention.");
-            flags.insert(CR4Flags::SMAP);
-        }
+        // if EXT_FEATURE_INFO.as_ref().map(|info| info.has_smap()).unwrap_or(false) {
+        //     trace!("Detected support for supervisor mode access prevention.");
+        //     flags.insert(CR4Flags::SMAP);
+        // }
 
         CR4::write(flags);
 
-        // TODO this
         // Enable use of the `NO_EXECUTE` page attribute, if supported.
-        // if libkernel::registers:: {
-        //     libkernel::registers::x86_64::msr::IA32_EFER::set_nxe(true);
-        // } else {
-        //     warn!("PC does not support the NX bit; system security will be compromised (this warning is purely informational).")
-        // }
+        if libkernel::cpu::x64::EXT_FUNCTION_INFO
+            .as_ref()
+            .map(|func_info| func_info.has_execute_disable())
+            .unwrap_or(false)
+        {
+            libkernel::registers::x64::msr::IA32_EFER::set_nxe(true);
+        } else {
+            warn!("PC does not support the NX bit; system security will be compromised (this warning is purely informational).")
+        }
     }
 
     /* load tables */
@@ -426,10 +294,10 @@ fn syscall_test() -> ! {
 }
 
 #[inline(never)]
-unsafe fn run_kernel(is_bsp: bool) -> ! {
+unsafe fn run_kernel(_is_bsp: bool) -> ! {
     //if is_bsp {
     use crate::{local_state::try_push_task, scheduling::*};
-    use libkernel::registers::x86_64::RFlags;
+    use libkernel::registers::x64::RFlags;
 
     try_push_task(Task::new(
         TaskPriority::new(3).unwrap(),
@@ -438,7 +306,7 @@ unsafe fn run_kernel(is_bsp: bool) -> ! {
         RFlags::INTERRUPT_FLAG,
         *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
         *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
-        libkernel::registers::x86_64::control::CR3::read(),
+        libkernel::registers::x64::control::CR3::read(),
     ))
     .unwrap();
 
@@ -449,7 +317,7 @@ unsafe fn run_kernel(is_bsp: bool) -> ! {
         //     logging_test,
         //     TaskStackOption::Pages(1),
         //     RFlags::INTERRUPT_FLAG,
-        //     *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
+        //     *crate::taregisters::x64SELECTOR.get().unwrap(),
         //     *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
         //     libkernel::registers::x86_64::control::CR3::read(),
         // ))

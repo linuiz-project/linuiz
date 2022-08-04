@@ -67,7 +67,6 @@ SECTIONS
     .got.plt            : { *(.got.plt) *(.igot.plt) }
     .data               : { *(.data .data.*) }
     __data_end          = .;
-    .                   = DATA_SEGMENT_END(.);
 
     .comment              0 : { *(.comment) }
     .debug                0 : { *(.debug) }

@@ -5,7 +5,7 @@ use core::{
 use crossbeam_queue::SegQueue;
 use libkernel::memory::PageAlignedBox;
 use libkernel::{
-    registers::x86_64::{control::CR3Flags, RFlags},
+    registers::x64::{control::CR3Flags, RFlags},
     Address, Physical,
 };
 use x86_64::registers::segmentation::SegmentSelector;
