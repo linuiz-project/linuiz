@@ -1,7 +1,60 @@
 mod portrw;
 
 use core::marker::PhantomData;
-use portrw::{PortRead, PortReadWrite, PortWrite};
+use portrw::*;
+
+pub trait PortRead {
+    unsafe fn read(port: u16) -> Self;
+}
+
+pub trait PortWrite {
+    unsafe fn write(port: u16, value: Self);
+}
+
+pub trait PortReadWrite: PortRead + PortWrite {}
+
+/* PORTREAD */
+impl PortRead for u8 {
+    unsafe fn read(port: u16) -> Self {
+        read8(port)
+    }
+}
+
+impl PortRead for u16 {
+    unsafe fn read(port: u16) -> Self {
+        read16(port)
+    }
+}
+
+impl PortRead for u32 {
+    unsafe fn read(port: u16) -> Self {
+        read32(port)
+    }
+}
+
+/* PORTWRITE */
+impl PortWrite for u8 {
+    unsafe fn write(port: u16, value: Self) {
+        write8(port, value)
+    }
+}
+
+impl PortWrite for u16 {
+    unsafe fn write(port: u16, value: Self) {
+        write16(port, value)
+    }
+}
+
+impl PortWrite for u32 {
+    unsafe fn write(port: u16, value: Self) {
+        write32(port, value)
+    }
+}
+
+/* PORT RW */
+impl PortReadWrite for u8 {}
+impl PortReadWrite for u16 {}
+impl PortReadWrite for u32 {}
 
 /* READ ONLY PORT */
 #[repr(transparent)]
@@ -37,6 +90,8 @@ pub struct WriteOnlyPort<T: PortWrite> {
 }
 
 impl<T: PortWrite> WriteOnlyPort<T> {
+    // TODO add a raw_write -esque function.
+
     /// Constructs a port wrapping the given address
     ///
     /// This method is unsafe because the caller must ensure the given port is a valid address

@@ -6,7 +6,6 @@ pub use tsc::*;
 pub mod control;
 pub mod msr;
 
-
 macro_rules! basic_raw_register {
     ($register_ident:ident) => {
         pub struct $register_ident;

@@ -38,7 +38,7 @@ static INTERRUPT_HANDLERS: spin::RwLock<[Option<HandlerFunc>; 256]> = spin::RwLo
 ///         specified. The caller of this function must ensure the handler is correctly formed,
 ///         and properly handles the interrupt it is being assigned to.  
 pub unsafe fn set_handler_fn(vector: Vector, handler: HandlerFunc) {
-    libarch::instructions::interrupts::without_interrupts(|| {
+    crate::instructions::interrupts::without_interrupts(|| {
         INTERRUPT_HANDLERS.write()[vector as usize] = Some(handler);
     });
 }

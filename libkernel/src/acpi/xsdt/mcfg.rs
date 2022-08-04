@@ -1,5 +1,5 @@
 use crate::acpi::{xsdt::SubTable, Checksum, SDTHeader, SizedACPITable};
-use libarch::{Address, Physical};
+use crate::{Address, Physical};
 
 #[repr(C, packed)]
 struct Header {

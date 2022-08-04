@@ -1,13 +1,13 @@
 #![allow(non_camel_case_types, non_upper_case_globals)]
 
+use crate::registers::x86_64::msr::IA32_APIC_BASE;
 use crate::InterruptDeliveryMode;
 use bit_field::BitField;
 use core::{marker::PhantomData, sync::atomic::Ordering};
-use libarch::registers::x86_64::msr::IA32_APIC_BASE;
 
 lazy_static::lazy_static! {
-    pub static ref xAPIC_SUPPORT: bool = libarch::cpu::x86_64::CPUID.get_feature_info().map(|info| info.has_apic()).unwrap_or(false);
-    pub static ref x2APIC_SUPPORT: bool = libarch::cpu::x86_64::CPUID.get_feature_info().map(|info| info.has_x2apic()).unwrap_or(false);
+    pub static ref xAPIC_SUPPORT: bool = crate::cpu::x86_64::CPUID.get_feature_info().map(|info| info.has_apic()).unwrap_or(false);
+    pub static ref x2APIC_SUPPORT: bool = crate::cpu::x86_64::CPUID.get_feature_info().map(|info| info.has_x2apic()).unwrap_or(false);
 }
 
 // xAPIC needs a sized field to avoid being optimized to zero-sized (even
@@ -29,9 +29,9 @@ pub unsafe fn init(
     frame_manager: &'static crate::memory::FrameManager,
     page_manager: &'static crate::memory::PageManager,
 ) {
-    if libarch::cpu::x86_64::is_bsp() {
+    if crate::cpu::x86_64::is_bsp() {
         trace!("Configuring memory mappings for xAPIC.");
-        let xlapic_page = libarch ::memory::Page::from_ptr(xLAPIC.get());
+        let xlapic_page = crate::memory::Page::from_ptr(xLAPIC.get());
         let xlapic_old_frame_index = page_manager.get_mapped_to(&xlapic_page).unwrap();
         let xlapic_new_frame_index = xAPIC_BASE_ADDR / 0x1000;
 
@@ -46,8 +46,6 @@ pub unsafe fn init(
         frame_manager.try_modify_type(xlapic_new_frame_index, crate::memory::FrameType::MMIO).ok();
 
         trace!("Mapping kernel page {:?} to xAPIC frame.", xlapic_page);
-        let attributes = 
-
         // Map the xAPIC frames into the kernel higher-half address space.
         //
         // REMARK: All CPU cores share the same higher-half page tables, so this mapping will be globally utilized.
@@ -55,12 +53,15 @@ pub unsafe fn init(
             .map(
                 &xlapic_page,
                 xlapic_new_frame_index,
-                crate::memory::FrameOwnership::None,{
-                    use libarch::memory::paging::PageAttributes;
+                crate::memory::FrameOwnership::None,
+                {
+                    use crate::memory::PageAttributes;
 
-                #[cfg(target_arch = "x86_64")] {
-                    crate::memory::PageAttribute::RW,
-                }},
+                    #[cfg(target_arch = "x86_64")]
+                    {
+                        PageAttributes::RW
+                    }
+                },
                 frame_manager,
             )
             .unwrap();
@@ -267,7 +268,7 @@ fn get_mode() -> Mode {
 unsafe fn read_register(register: Register) -> u64 {
     match get_mode() {
         Mode::xAPIC => (((xLAPIC.get() as usize) + register.as_xapic_offset()) as *mut u32).read_volatile() as u64,
-        Mode::x2APIC => libarch::registers::x86_64::msr::rdmsr(register.as_x2apic_msr()),
+        Mode::x2APIC => crate::registers::x86_64::msr::rdmsr(register.as_x2apic_msr()),
         Mode::None => panic!("cannot write; core-local APIC is not in a valid mode"),
     }
 }
@@ -278,7 +279,7 @@ unsafe fn write_register(register: Register, value: u64) {
         Mode::xAPIC => {
             (((xLAPIC.get() as usize) + register.as_xapic_offset()) as *mut u32).write_volatile(value as u32)
         }
-        Mode::x2APIC => libarch::registers::x86_64::msr::wrmsr(register.as_x2apic_msr(), value),
+        Mode::x2APIC => crate::registers::x86_64::msr::wrmsr(register.as_x2apic_msr(), value),
         Mode::None => panic!("cannot write; core-local APIC is not in a valid mode"),
     }
 }
@@ -305,7 +306,7 @@ pub fn get_id() -> u32 {
             Mode::xAPIC => {
                 (((xLAPIC.get() as usize) + Register::ID.as_xapic_offset()) as *mut u32).read_volatile() >> 24
             }
-            Mode::x2APIC => libarch::registers::x86_64::msr::rdmsr(Register::ID.as_x2apic_msr()) as u32,
+            Mode::x2APIC => crate::registers::x86_64::msr::rdmsr(Register::ID.as_x2apic_msr()) as u32,
             Mode::None => panic!("cannot read ID; core-local APIC is not in a valid mode"),
         }
     }
@@ -511,7 +512,7 @@ impl<T: GenericVectorVariant> LocalVector<T> {
 impl LocalVector<Timer> {
     pub unsafe fn set_mode(&self, mode: TimerMode) -> &Self {
         let tsc_dl_support =
-            libarch::cpu::x86_64::CPUID.get_feature_info().map(|info| info.has_tsc_deadline()).unwrap_or(false);
+            crate::cpu::x86_64::CPUID.get_feature_info().map(|info| info.has_tsc_deadline()).unwrap_or(false);
 
         assert!(mode != TimerMode::TSC_Deadline || tsc_dl_support, "TSC deadline is not supported on this CPU.");
 
@@ -523,7 +524,7 @@ impl LocalVector<Timer> {
         if tsc_dl_support {
             // IA32 SDM instructs utilizing the `mfence` instruction to ensure all writes to the IA32_TSC_DEADLINE
             // MSR are serialized *after* the APIC timer mode switch (`wrmsr` to `IA32_TSC_DEADLINE` is non-serializing).
-            libarch::instructions::sync::mfence();
+            crate::instructions::sync::mfence();
         }
 
         self

@@ -1,8 +1,6 @@
-use crate::memory::Page;
-
 /// Invalidates a single page from the TLB.
 #[inline(always)]
-pub fn invlpg(page: &Page) {
+pub fn invlpg(page: &crate::memory::Page) {
     unsafe {
         core::arch::asm!("invlpg [{}]", in(reg) page.index() * 0x1000, options(nostack, preserves_flags));
     }
@@ -11,10 +9,11 @@ pub fn invlpg(page: &Page) {
 /// Switches the current CR3 register in and out, causing all TLB entries to be invalidated.
 #[inline(always)]
 pub fn invlpg_all() {
-    libarch::registers::x86_64::control::CR3::refresh();
+    crate::registers::x86_64::control::CR3::refresh();
 }
 
 pub mod pcid {
+
     /// Error indicating a given PCID value is outside the 12 maximum allowed bits.
     #[repr(transparent)]
     #[derive(Debug)]

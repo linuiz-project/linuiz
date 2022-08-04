@@ -1,7 +1,7 @@
 pub mod xsdt;
 
 use crate::{cell::SyncOnceCell, structures::GUID};
-use libarch::{Address, Physical};
+use crate::{Address, Physical};
 
 const ACPI_GUID: GUID = GUID::new(0xeb9d2d30, 0x2d88, 0x11d3, 0x9a16, [0x00, 0x90, 0x27, 0x3f, 0xc1, 0x4d]);
 

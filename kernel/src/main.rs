@@ -99,7 +99,7 @@ unsafe extern "sysv64" fn _entry() -> ! {
     CON_OUT.init(drivers::stdout::SerialSpeed::S115200);
     match drivers::stdout::set_stdout(&mut CON_OUT, log::LevelFilter::Debug) {
         Ok(()) => info!("Successfully loaded into kernel."),
-        Err(_) => libarch::instructions::interrupts::wait_indefinite(),
+        Err(_) => libkernel::instructions::interrupts::wait_indefinite(),
     }
 
     /* log boot info */
@@ -112,7 +112,7 @@ unsafe extern "sysv64" fn _entry() -> ! {
             boot_info.revision,
         );
 
-        if let Some(vendor_str) = libarch::cpu::get_vendor() {
+        if let Some(vendor_str) = libkernel::cpu::get_vendor() {
             info!("Vendor              {}", vendor_str);
         } else {
             info!("Vendor              None");
@@ -170,7 +170,7 @@ unsafe extern "sysv64" fn _entry() -> ! {
 
         // Next, we create the kernel page manager, utilizing the bootloader's higher-half direct
         // mapping for virtual offset mapping.
-        let hhdm_addr = libarch::Address::<libarch::Virtual>::new(
+        let hhdm_addr = libkernel::Address::<libkernel::Virtual>::new(
             LIMINE_HHDM.get_response().get().expect("bootloader did not provide a higher half direct mapping").offset
                 as usize,
         );
@@ -222,11 +222,11 @@ unsafe fn cpu_setup(is_bsp: bool) -> ! {
     #[cfg(target_arch = "x86_64")]
     {
         // Set CR0 flags.
-        use libarch::registers::x86_64::control::{CR0Flags, CR0};
+        use libkernel::registers::x86_64::control::{CR0Flags, CR0};
         CR0::write(CR0Flags::PE | CR0Flags::MP | CR0Flags::ET | CR0Flags::NE | CR0Flags::WP | CR0Flags::PG);
 
         // Set CR4 flags.
-        use libarch::{
+        use libkernel::{
             cpu::x86_64::{EXT_FEATURE_INFO, FEATURE_INFO},
             registers::x86_64::control::{CR4Flags, CR4},
         };
@@ -274,12 +274,13 @@ unsafe fn cpu_setup(is_bsp: bool) -> ! {
 
         CR4::write(flags);
 
+        // TODO this
         // Enable use of the `NO_EXECUTE` page attribute, if supported.
-        if *libkernel::memory::paging::NXE_SUPPORT {
-            libarch::registers::x86_64::msr::IA32_EFER::set_nxe(true);
-        } else {
-            warn!("PC does not support the NX bit; system security will be compromised (this warning is purely informational).")
-        }
+        // if libkernel::registers:: {
+        //     libkernel::registers::x86_64::msr::IA32_EFER::set_nxe(true);
+        // } else {
+        //     warn!("PC does not support the NX bit; system security will be compromised (this warning is purely informational).")
+        // }
     }
 
     /* load tables */
@@ -428,7 +429,7 @@ fn syscall_test() -> ! {
 unsafe fn run_kernel(is_bsp: bool) -> ! {
     //if is_bsp {
     use crate::{local_state::try_push_task, scheduling::*};
-    use libarch::registers::x86_64::RFlags;
+    use libkernel::registers::x86_64::RFlags;
 
     try_push_task(Task::new(
         TaskPriority::new(3).unwrap(),
@@ -437,7 +438,7 @@ unsafe fn run_kernel(is_bsp: bool) -> ! {
         RFlags::INTERRUPT_FLAG,
         *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
         *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
-        libarch::registers::x86_64::control::CR3::read(),
+        libkernel::registers::x86_64::control::CR3::read(),
     ))
     .unwrap();
 
@@ -450,13 +451,13 @@ unsafe fn run_kernel(is_bsp: bool) -> ! {
         //     RFlags::INTERRUPT_FLAG,
         //     *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
         //     *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
-        //     libarch::registers::x86_64::control::CR3::read(),
+        //     libkernel::registers::x86_64::control::CR3::read(),
         // ))
         // .unwrap();
     }
 
     crate::local_state::try_begin_scheduling();
-    libarch::instructions::interrupts::wait_indefinite()
+    libkernel::instructions::interrupts::wait_indefinite()
 
     /* ENABLE SYSCALL */
     // {

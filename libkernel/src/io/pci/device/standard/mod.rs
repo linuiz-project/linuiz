@@ -59,13 +59,13 @@ impl PCIeDevice<Standard> {
 
                     let page_manager = crate::memory::global_pmgr();
                     for page in register_mmio.pages() {
-                        use crate::memory::paging::{AttributeModify, PageAttribute};
+                        use crate::memory::{AttributeModify, PageAttributes};
 
                         page_manager.set_page_attribs(
                             &page,
-                            PageAttribute::DATA
-                                | PageAttribute::WRITE_THROUGH
-                                | PageAttribute::UNCACHEABLE,
+                            PageAttributes::DATA
+                                | PageAttributes::WRITE_THROUGH
+                                | PageAttributes::UNCACHEABLE,
                             AttributeModify::Set,
                         );
                     }

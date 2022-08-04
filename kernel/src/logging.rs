@@ -32,7 +32,7 @@ impl log::Log for KernelLogger {
             // TODO possibly only log CPU# in debug builds (or debug/trace messages?)
             crate::println!(
                 "[{whole_time:wwidth$}.{frac_time:0fwidth$}][CPU{cpu_id}][{level}] {args}",
-                cpu_id = libarch::cpu::get_id(),
+                cpu_id = libkernel::cpu::get_id(),
                 level = record.level(),
                 args = record.args(),
                 wwidth = 4,

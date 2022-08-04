@@ -1,12 +1,11 @@
+use crate::{instructions::interrupts::without_interrupts, Address, Physical, Virtual};
 use crate::{
     instructions::tlb,
     memory::{
         frame_manager::{FrameManager, FrameOwnership},
-        paging::{AttributeModify, Level4, PageAttribute, PageTable, PageTableEntry},
-        Page,
+        paging::{AttributeModify, Level4, Page, PageAttributes, PageTable, PageTableEntry},
     },
 };
-use libarch::{instructions::interrupts::without_interrupts, Address, Physical, Virtual};
 
 #[derive(Debug, Clone, Copy)]
 pub enum MapError {
@@ -100,11 +99,11 @@ impl VirtualMapper {
 
             self.get_page_entry_create(&cur_page, frame_manager).set(
                 frame_index,
-                PageAttribute::PRESENT
-                    | PageAttribute::WRITABLE
-                    | PageAttribute::WRITE_THROUGH
-                    | PageAttribute::NO_EXECUTE
-                    | PageAttribute::GLOBAL,
+                PageAttributes::PRESENT
+                    | PageAttributes::WRITABLE
+                    | PageAttributes::WRITE_THROUGH
+                    | PageAttributes::NO_EXECUTE
+                    | PageAttributes::GLOBAL,
             );
 
             tlb::invlpg(&cur_page);
@@ -115,14 +114,14 @@ impl VirtualMapper {
 
     /// Returns `true` if the current CR3 address matches the addressor's PML4 frame, and `false` otherwise.
     fn is_active(&self) -> bool {
-        libarch::registers::x86_64::control::CR3::read().0.frame_index() == self.pml4_frame
+        crate::registers::x86_64::control::CR3::read().0.frame_index() == self.pml4_frame
     }
 
     #[inline(always)]
     pub unsafe fn write_cr3(&mut self) {
-        libarch::registers::x86_64::control::CR3::write(
+        crate::registers::x86_64::control::CR3::write(
             Address::<Physical>::new(self.pml4_frame * 0x1000),
-            libarch::registers::x86_64::control::CR3Flags::empty(),
+            crate::registers::x86_64::control::CR3Flags::empty(),
         );
     }
 }
@@ -174,7 +173,7 @@ impl PageManager {
         Self {
             virtual_map: spin::RwLock::new(VirtualMapper::new(
                 mapped_page,
-                libarch::registers::x86_64::control::CR3::read().0.frame_index(),
+                crate::registers::x86_64::control::CR3::read().0.frame_index(),
             )),
         }
     }
@@ -191,7 +190,7 @@ impl PageManager {
         page: &Page,
         frame_index: usize,
         ownership: FrameOwnership,
-        attribs: PageAttribute,
+        attribs: PageAttributes,
         frame_manager: &'static FrameManager<'_>,
     ) -> Result<(), MapError> {
         without_interrupts(|| {
@@ -235,7 +234,7 @@ impl PageManager {
                 .write()
                 .get_page_entry_mut(page)
                 .map(|entry| {
-                    entry.set_attributes(PageAttribute::PRESENT, AttributeModify::Remove);
+                    entry.set_attributes(PageAttributes::PRESENT, AttributeModify::Remove);
 
                     // Handle frame permissions to keep them updated.
                     unsafe {
@@ -257,7 +256,7 @@ impl PageManager {
         &self,
         unmap_from: &Page,
         map_to: &Page,
-        new_attribs: Option<PageAttribute>,
+        new_attribs: Option<PageAttributes>,
         frame_manager: &'static FrameManager<'_>,
     ) -> Result<(), MapError> {
         without_interrupts(|| {
@@ -265,8 +264,8 @@ impl PageManager {
 
             let maybe_new_pte_frame_index_attribs = map_write.get_page_entry_mut(unmap_from).map(|entry| {
                 // Get attributes from old frame if none are provided.
-                let attribs = new_attribs.unwrap_or_else(|| entry.get_attribs());
-                entry.set_attributes(PageAttribute::empty(), AttributeModify::Set);
+                let attribs = new_attribs.unwrap_or_else(|| entry.get_attributes());
+                entry.set_attributes(PageAttributes::empty(), AttributeModify::Set);
 
                 (unsafe { entry.take_frame_index() }, attribs)
             });
@@ -284,7 +283,7 @@ impl PageManager {
         })
     }
 
-    pub fn auto_map(&self, page: &Page, attribs: PageAttribute, frame_manager: &'static FrameManager<'_>) {
+    pub fn auto_map(&self, page: &Page, attribs: PageAttributes, frame_manager: &'static FrameManager<'_>) {
         self.map(page, frame_manager.lock_next().unwrap(), FrameOwnership::None, attribs, frame_manager).unwrap();
     }
 
@@ -295,32 +294,30 @@ impl PageManager {
             self.virtual_map
                 .read()
                 .get_page_entry(&Page::containing_addr(virt_addr))
-                .filter(|entry| entry.get_attribs().contains(PageAttribute::PRESENT))
+                .filter(|entry| entry.get_attributes().contains(PageAttributes::PRESENT))
                 .is_some()
         })
     }
 
     pub fn is_mapped_to(&self, page: &Page, frame_index: usize) -> bool {
         without_interrupts(|| {
-            self.virtual_map
-                .read()
-                .get_page_entry(page)
-                .and_then(|entry| entry.get_frame_index())
-                .map_or(false, |entry_frame_index| frame_index == entry_frame_index)
+            self.virtual_map.read().get_page_entry(page).map_or(false, |entry| frame_index == entry.get_frame_index())
         })
     }
 
     pub fn get_mapped_to(&self, page: &Page) -> Option<usize> {
-        without_interrupts(|| self.virtual_map.read().get_page_entry(page).and_then(|entry| entry.get_frame_index()))
+        without_interrupts(|| self.virtual_map.read().get_page_entry(page).map(|entry| entry.get_frame_index()))
     }
 
     /* STATE CHANGING */
 
-    pub fn get_page_attribs(&self, page: &Page) -> Option<PageAttribute> {
-        without_interrupts(|| self.virtual_map.read().get_page_entry(page).map(|page_entry| page_entry.get_attribs()))
+    pub fn get_page_attributes(&self, page: &Page) -> Option<PageAttributes> {
+        without_interrupts(|| {
+            self.virtual_map.read().get_page_entry(page).map(|page_entry| page_entry.get_attributes())
+        })
     }
 
-    pub unsafe fn set_page_attribs(&self, page: &Page, attributes: PageAttribute, modify_mode: AttributeModify) {
+    pub unsafe fn set_page_attributes(&self, page: &Page, attributes: PageAttributes, modify_mode: AttributeModify) {
         without_interrupts(|| {
             self.virtual_map
                 .write()

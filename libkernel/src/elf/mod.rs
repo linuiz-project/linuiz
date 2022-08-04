@@ -6,7 +6,7 @@ pub use header::*;
 pub use section_header::*;
 pub use segment_header::*;
 
-use libarch::{Address, Virtual};
+use crate::{Address, Virtual};
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

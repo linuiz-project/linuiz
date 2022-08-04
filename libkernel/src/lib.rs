@@ -26,15 +26,19 @@
 extern crate log;
 extern crate alloc;
 
+mod addr;
 mod macros;
 
+pub use addr::*;
 pub mod acpi;
 pub mod cell;
 pub mod collections;
+pub mod cpu;
 pub mod elf;
 pub mod instructions;
 pub mod io;
 pub mod memory;
+pub mod registers;
 pub mod structures;
 pub mod sync;
 pub mod syscall;
@@ -44,7 +48,7 @@ pub mod syscall;
 fn panic(info: &core::panic::PanicInfo) -> ! {
     error!("KERNEL PANIC (at {}): {}", info.location().unwrap(), info.message().unwrap());
 
-    libarch::instructions::interrupts::wait_indefinite()
+    crate::instructions::interrupts::wait_indefinite()
 }
 
 #[cfg(feature = "alloc_error_handler")]
@@ -52,7 +56,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 fn alloc_error(error: core::alloc::Layout) -> ! {
     error!("KERNEL ALLOCATOR PANIC: {:?}", error);
 
-    libarch::instructions::interrupts::wait_indefinite()
+    crate::instructions::interrupts::wait_indefinite()
 }
 
 pub enum ReadOnly {}

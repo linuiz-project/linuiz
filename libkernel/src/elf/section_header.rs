@@ -1,6 +1,6 @@
 #![allow(non_camel_case_types)]
 
-use libarch::{Address, Virtual};
+use crate::{Address, Virtual};
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy)]

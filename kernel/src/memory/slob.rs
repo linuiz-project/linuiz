@@ -1,7 +1,7 @@
 use core::{alloc::Layout, mem::size_of};
 use libkernel::{
     align_up_div,
-    memory::{Page, PageAttribute},
+    memory::{Page, PageAttributes},
 };
 use spin::{RwLock, RwLockWriteGuard};
 
@@ -75,7 +75,7 @@ impl<'map> SLOB<'map> {
         for page_offset in 0..(alloc_table_len /* we don't map null page */ - 1) {
             current_page_manager.auto_map(
                 &initial_alloc_table_page.forward_checked(page_offset).unwrap(),
-                PageAttribute::DATA,
+                PageAttributes::RW,
                 kernel_frame_manager,
             );
         }
@@ -159,7 +159,7 @@ impl<'map> SLOB<'map> {
         // For the remainder of the table's pages (pages that didn't exist prior), create new auto mappings.
         for page_offset in cur_table_page_count..req_table_page_count {
             let mut new_page = new_table_base_page.forward_checked(page_offset).unwrap();
-            page_manager.auto_map(&new_page, PageAttribute::DATA, frame_manager);
+            page_manager.auto_map(&new_page, PageAttributes::RW, frame_manager);
             // Clear the newly allocated table page.
             unsafe { new_page.mem_clear() };
         }
@@ -193,7 +193,7 @@ impl<'map> SLOB<'map> {
 
 unsafe impl core::alloc::Allocator for SLOB<'_> {
     fn allocate(&self, layout: Layout) -> Result<core::ptr::NonNull<[u8]>, core::alloc::AllocError> {
-        libarch::instructions::interrupts::without_interrupts(|| {
+        libkernel::instructions::interrupts::without_interrupts(|| {
             let align_mask = usize::max(layout.align() / Self::BLOCK_SIZE, 1) - 1;
             let size_in_blocks = libkernel::align_up_div(layout.size(), Self::BLOCK_SIZE);
 
@@ -261,7 +261,7 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
                 block_index += remaining_blocks_in_slice;
 
                 if was_empty {
-                    page_manager.auto_map(&Page::from_index(table_index), PageAttribute::DATA, frame_manager);
+                    page_manager.auto_map(&Page::from_index(table_index), PageAttributes::RW, frame_manager);
                 }
             }
 
@@ -274,7 +274,7 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
     }
 
     unsafe fn deallocate(&self, ptr: core::ptr::NonNull<u8>, layout: Layout) {
-        libarch::instructions::interrupts::without_interrupts(|| {
+        libkernel::instructions::interrupts::without_interrupts(|| {
             let start_block_index = ptr.addr().get() / Self::BLOCK_SIZE;
             let end_block_index = start_block_index + align_up_div(layout.size(), Self::BLOCK_SIZE);
             let mut block_index = start_block_index;

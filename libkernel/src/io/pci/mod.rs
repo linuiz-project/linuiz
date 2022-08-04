@@ -34,11 +34,11 @@ pub fn get_pcie_devices<'a>() -> impl Iterator<Item = DeviceVariant> + 'a {
                     page_manager.set_page_attribs(
                         &page,
                         {
-                            use crate::memory::PageAttribute;
+                            use crate::memory::PageAttributes;
 
-                            PageAttribute::DATA
-                                | PageAttribute::WRITE_THROUGH
-                                | PageAttribute::UNCACHEABLE
+                            PageAttributes::DATA
+                                | PageAttributes::WRITE_THROUGH
+                                | PageAttributes::UNCACHEABLE
                         },
                         crate::memory::AttributeModify::Set,
                     );

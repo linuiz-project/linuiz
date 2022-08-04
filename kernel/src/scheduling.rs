@@ -3,11 +3,11 @@ use core::{
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use crossbeam_queue::SegQueue;
-use libarch::{
+use libkernel::memory::PageAlignedBox;
+use libkernel::{
     registers::x86_64::{control::CR3Flags, RFlags},
     Address, Physical,
 };
-use libkernel::memory::PageAlignedBox;
 use x86_64::registers::segmentation::SegmentSelector;
 
 static NEXT_THREAD_ID: AtomicU64 = AtomicU64::new(1);

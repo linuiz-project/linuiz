@@ -1,8 +1,7 @@
 pub mod cpuid {
     pub use raw_cpuid::*;
 
-    lazy_static::lazy_static! {
-    }
+    lazy_static::lazy_static! {}
 }
 
 lazy_static::lazy_static! {

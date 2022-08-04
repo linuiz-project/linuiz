@@ -3,7 +3,7 @@ mod timer;
 use crate::scheduling::{Scheduler, Task, TaskPriority};
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicUsize, Ordering};
-use libarch::{
+use libkernel::{
     registers::x86_64::{control::CR3, RFlags},
     Address, Virtual,
 };
@@ -78,7 +78,7 @@ pub unsafe fn init() {
         )
         .ok();
 
-    let core_id = libarch::cpu::get_id();
+    let core_id = libkernel::cpu::get_id();
 
     // Ensure we load the local state pointer via `cpuid` to avoid using the APIC before it is initialized.
     let local_state_ptr = (LOCAL_STATES_BASE.load(Ordering::Relaxed) as *mut LocalState).add(core_id as usize);
@@ -92,7 +92,7 @@ pub unsafe fn init() {
         let base_page = Page::from_ptr(local_state_ptr);
         let end_page = base_page.forward_checked(core::mem::size_of::<LocalState>() / 0x1000).unwrap();
         (base_page..end_page)
-            .for_each(|page| page_manager.auto_map(&page, libkernel::memory::PageAttribute::DATA, frame_manager));
+            .for_each(|page| page_manager.auto_map(&page, libkernel::memory::PageAttributes::RW, frame_manager));
 
         // Initialize the local APIC in the most advanced mode.
         libkernel::structures::apic::init(frame_manager, page_manager);
@@ -111,7 +111,7 @@ pub unsafe fn init() {
     // LINT0&1 should be configured by the APIC reset.
 
     // Ensure interrupts are enabled after APIC is reset.
-    libarch::instructions::interrupts::enable();
+    libkernel::instructions::interrupts::enable();
 
     trace!("Configuring core-local timer.");
     crate::interrupts::set_handler_fn(Vector::LocalTimer, local_timer_handler);
@@ -131,7 +131,7 @@ pub unsafe fn init() {
         scheduler: Scheduler::new(false),
         default_task: Task::new(
             TaskPriority::new(1).unwrap(),
-            libarch::instructions::interrupts::wait_indefinite,
+            libkernel::instructions::interrupts::wait_indefinite,
             crate::scheduling::TaskStackOption::Auto,
             RFlags::INTERRUPT_FLAG,
             *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),

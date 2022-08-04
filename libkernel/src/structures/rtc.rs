@@ -13,7 +13,7 @@ pub fn configure(frequency_divider: u8) {
     assert!(frequency_divider > 2, "RTC encounters roll-over issues with frequency dividers less than 2.");
     assert!(frequency_divider < 16, "RTC does not support frequency dividers >15");
 
-    libarch::instructions::interrupts::without_interrupts(|| unsafe {
+    crate::instructions::interrupts::without_interrupts(|| unsafe {
         // Set frequency divider.
         SELECTOR.write(RTC_A | NMI_DISABLE);
         let prev = DATA.read();

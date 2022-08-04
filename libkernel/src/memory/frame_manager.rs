@@ -394,11 +394,11 @@ impl<'arr> FrameManager<'arr> {
         self.map.read().len()
     }
 
-    pub fn map_pages(&self) -> core::ops::Range<super::Page> {
+    pub fn map_pages(&self) -> core::ops::Range<crate::memory::Page> {
         let map_read = self.map.read();
         let ptr = map_read.as_ptr() as usize;
 
-        super::Page::range(ptr / 0x1000, (ptr + (map_read.len() * core::mem::size_of::<Frame>())) / 0x1000)
+        crate::memory::Page::range(ptr / 0x1000, (ptr + (map_read.len() * core::mem::size_of::<Frame>())) / 0x1000)
     }
 
     pub fn iter(&'arr self) -> FrameIterator<'arr> {

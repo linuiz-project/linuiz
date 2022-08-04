@@ -7,7 +7,6 @@ edition = "2021"
 
 [dependencies]
 libkernel = { path = "../libkernel/", features = [ "global_allocator" ] }
-libarch = { path = "../libarch/" }
 log = { version = "*", default-features = false }
 bit_field = "*"
 bitflags = "*"

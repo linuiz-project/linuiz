@@ -135,7 +135,7 @@ pub unsafe fn set_handler_fn(vector: Vector, handler: HandlerFunc) {
         "Cannot assign IDT handlers before GDT init (IDT entries use GDT kernel code segment selector)."
     );
 
-    libarch::instructions::interrupts::without_interrupts(|| {
+    libkernel::instructions::interrupts::without_interrupts(|| {
         INTERRUPT_HANDLERS.write()[vector as usize] = Some(handler);
     });
 }

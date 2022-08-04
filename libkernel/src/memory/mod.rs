@@ -1,8 +1,10 @@
 mod frame_manager;
 mod page_manager;
+mod paging;
 
 pub use frame_manager::*;
 pub use page_manager::*;
+pub use paging::*;
 
 pub mod volatile;
 
@@ -37,7 +39,7 @@ pub mod global_alloc {
     pub unsafe fn set(galloc: &'static dyn GlobalAlloc) {
         if let Err(_) = GLOBAL_ALLOCATOR.0.set(galloc) {
             error!("Global allocator is already set.");
-            libarch::instructions::interrupts::wait_indefinite();
+            crate::instructions::interrupts::wait_indefinite();
         }
     }
 }
@@ -103,18 +105,18 @@ impl MMIO {
             }
 
             // Set the correct page attributes for MMIO virtual memory.
-            page_manager.set_page_attribs(
+            page_manager.set_page_attributes(
                 &current_phys_mem_page,
-                PageAttribute::UNCACHEABLE | PageAttribute::WRITE_THROUGH,
-                AttributeModify::Insert,
+                crate::memory::PageAttributes::UNCACHEABLE | crate::memory::PageAttributes::WRITE_THROUGH,
+                crate::memory::AttributeModify::Insert,
             );
         }
 
         Ok(Self { ptr: (initial_page_address.get().unwrap().index() * 0x1000) as *mut _, len: page_count * 0x1000 })
     }
 
-    pub fn mapped_addr(&self) -> libarch::Address<libarch::Virtual> {
-        libarch::Address::<libarch::Virtual>::from_ptr(self.ptr)
+    pub fn mapped_addr(&self) -> crate::Address<crate::Virtual> {
+        crate::Address::<crate::Virtual>::from_ptr(self.ptr)
     }
 
     #[inline]
