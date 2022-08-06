@@ -121,7 +121,7 @@ unsafe extern "sysv64" fn _entry() -> ! {
 
     debug!("Finished initial kernel setup.");
     SMP_MEMORY_READY.store(true, core::sync::atomic::Ordering::Relaxed);
-    crate::cpu_setup(true)
+    arch_setup(true)
 }
 
 /// Entrypoint for AP processors.
@@ -130,5 +130,200 @@ unsafe extern "C" fn _smp_entry() -> ! {
     // Wait to ensure the machine is the correct state to execute cpu setup.
     while !SMP_MEMORY_READY.load(core::sync::atomic::Ordering::Relaxed) {}
 
-    crate::cpu_setup(false)
+    arch_setup(false)
+}
+
+/// SAFETY: This function invariantly assumes it will only be called once.
+unsafe fn arch_setup(is_bsp: bool) -> ! {
+    /* load registers */
+    {
+        // Set CR0 flags.
+        use libkernel::registers::x64::control::{CR0Flags, CR0};
+        CR0::write(CR0Flags::PE | CR0Flags::MP | CR0Flags::ET | CR0Flags::NE | CR0Flags::WP | CR0Flags::PG);
+
+        // Set CR4 flags.
+        use libkernel::{
+            cpu::x64::{EXT_FEATURE_INFO, FEATURE_INFO},
+            registers::x64::control::{CR4Flags, CR4},
+        };
+
+        let mut flags = CR4Flags::PAE | CR4Flags::PGE | CR4Flags::OSXMMEXCPT;
+
+        if FEATURE_INFO.as_ref().map(|info| info.has_de()).unwrap_or(false) {
+            trace!("Detected support for debugging extensions.");
+            flags.insert(CR4Flags::DE);
+        }
+
+        if FEATURE_INFO.as_ref().map(|info| info.has_fxsave_fxstor()).unwrap_or(false) {
+            trace!("Detected support for `fxsave` and `fxstor` instructions.");
+            flags.insert(CR4Flags::OSFXSR);
+        }
+
+        if FEATURE_INFO.as_ref().map(|info| info.has_mce()).unwrap_or(false) {
+            trace!("Detected support for machine check exceptions.")
+        }
+
+        if FEATURE_INFO.as_ref().map(|info| info.has_pcid()).unwrap_or(false) {
+            trace!("Detected support for process context IDs.");
+            flags.insert(CR4Flags::PCIDE);
+        }
+
+        if EXT_FEATURE_INFO.as_ref().map(|info| info.has_umip()).unwrap_or(false) {
+            trace!("Detected support for usermode instruction prevention.");
+            flags.insert(CR4Flags::UMIP);
+        }
+
+        if EXT_FEATURE_INFO.as_ref().map(|info| info.has_fsgsbase()).unwrap_or(false) {
+            trace!("Detected support for CPL3 FS/GS base usage.");
+            flags.insert(CR4Flags::FSGSBASE);
+        }
+
+        if EXT_FEATURE_INFO.as_ref().map(|info| info.has_smep()).unwrap_or(false) {
+            trace!("Detected support for supervisor mode execution prevention.");
+            flags.insert(CR4Flags::SMEP);
+        }
+
+        if EXT_FEATURE_INFO.as_ref().map(|info| info.has_smap()).unwrap_or(false) {
+            trace!("Detected support for supervisor mode access prevention.");
+            flags.insert(CR4Flags::SMAP);
+        }
+
+        CR4::write(flags);
+
+        // Enable use of the `NO_EXECUTE` page attribute, if supported.
+        if libkernel::cpu::x64::EXT_FUNCTION_INFO
+            .as_ref()
+            .map(|func_info| func_info.has_execute_disable())
+            .unwrap_or(false)
+        {
+            libkernel::registers::x64::msr::IA32_EFER::set_nxe(true);
+        } else {
+            warn!("PC does not support the NX bit; system security will be compromised (this warning is purely informational).")
+        }
+    }
+
+    /* load tables */
+    {
+        trace!("Configuring local tables (IDT, GDT).");
+
+        // Always initialize GDT prior to configuring IDT.
+        crate::tables::gdt::init();
+
+        if is_bsp {
+            // Due to the fashion in which the `x86_64` crate initializes the IDT entries,
+            // it must be ensured that the handlers are set only *after* the GDT has been
+            // properly initialized and loaded—otherwise, the `CS` value for the IDT entries
+            // is incorrect, and this causes very confusing GPFs.
+            crate::interrupts::init_idt();
+
+            fn apit_empty(
+                _: &mut x86_64::structures::idt::InterruptStackFrame,
+                _: &mut crate::scheduling::ThreadRegisters,
+            ) {
+                libkernel::structures::apic::end_of_interrupt();
+            }
+
+            crate::interrupts::set_handler_fn(crate::interrupts::Vector::LINT0_VECTOR, apit_empty);
+            crate::interrupts::set_handler_fn(crate::interrupts::Vector::LINT1_VECTOR, apit_empty);
+            crate::interrupts::set_handler_fn(crate::interrupts::Vector::Syscall, crate::interrupts::syscall::handler);
+        }
+
+        crate::interrupts::load_idt();
+
+        /* load tss */
+        use crate::interrupts::StackTableIndex;
+        use alloc::boxed::Box;
+        use libkernel::memory::{page_aligned_allocator, PageAlignedBox};
+        use x86_64::{
+            instructions::tables,
+            structures::{
+                gdt::{Descriptor, GlobalDescriptorTable},
+                tss::TaskStateSegment,
+            },
+            VirtAddr,
+        };
+
+        const PRIVILEGE_STACK_SIZE: usize = 0x5000;
+        const EXCEPTION_STACK_SIZE: usize = 0x2000;
+
+        let privilege_stack_ptr =
+            Box::leak(PageAlignedBox::<[u8]>::new_uninit_slice_in(PRIVILEGE_STACK_SIZE, page_aligned_allocator()))
+                .as_mut_ptr()
+                .add(PRIVILEGE_STACK_SIZE);
+        let db_stack_ptr =
+            Box::leak(PageAlignedBox::<[u8]>::new_uninit_slice_in(EXCEPTION_STACK_SIZE, page_aligned_allocator()))
+                .as_mut_ptr()
+                .add(EXCEPTION_STACK_SIZE);
+        let nmi_stack_ptr =
+            Box::leak(PageAlignedBox::<[u8]>::new_uninit_slice_in(EXCEPTION_STACK_SIZE, page_aligned_allocator()))
+                .as_mut_ptr()
+                .add(EXCEPTION_STACK_SIZE);
+        let df_stack_ptr =
+            Box::leak(PageAlignedBox::<[u8]>::new_uninit_slice_in(EXCEPTION_STACK_SIZE, page_aligned_allocator()))
+                .as_mut_ptr()
+                .add(EXCEPTION_STACK_SIZE);
+        let mc_stack_ptr =
+            Box::leak(PageAlignedBox::<[u8]>::new_uninit_slice_in(EXCEPTION_STACK_SIZE, page_aligned_allocator()))
+                .as_mut_ptr()
+                .add(EXCEPTION_STACK_SIZE);
+
+        trace!("Configuring new TSS and loading via temp GDT.");
+
+        let tss_ptr = Box::leak({
+            let mut tss = Box::new(x86_64::structures::tss::TaskStateSegment::new());
+
+            unsafe {
+                tss.privilege_stack_table[0] = VirtAddr::from_ptr(privilege_stack_ptr);
+                tss.interrupt_stack_table[StackTableIndex::Debug as usize] = VirtAddr::from_ptr(db_stack_ptr);
+                tss.interrupt_stack_table[StackTableIndex::NonMaskable as usize] = VirtAddr::from_ptr(nmi_stack_ptr);
+                tss.interrupt_stack_table[StackTableIndex::DoubleFault as usize] = VirtAddr::from_ptr(df_stack_ptr);
+                tss.interrupt_stack_table[StackTableIndex::MachineCheck as usize] = VirtAddr::from_ptr(mc_stack_ptr);
+            }
+
+            tss
+        }) as *mut _;
+
+        trace!("Configuring TSS descriptor for temp GDT.");
+        let tss_descriptor = {
+            use bit_field::BitField;
+
+            let tss_ptr_u64 = tss_ptr as u64;
+
+            let mut low = x86_64::structures::gdt::DescriptorFlags::PRESENT.bits();
+            // base
+            low.set_bits(16..40, tss_ptr_u64.get_bits(0..24));
+            low.set_bits(56..64, tss_ptr_u64.get_bits(24..32));
+            // limit (the `-1` is needed since the bound is inclusive, not exclusive)
+            low.set_bits(0..16, (core::mem::size_of::<TaskStateSegment>() - 1) as u64);
+            // type (0b1001 = available 64-bit tss)
+            low.set_bits(40..44, 0b1001);
+
+            // high 32 bits of base
+            let mut high = 0;
+            high.set_bits(0..32, tss_ptr_u64.get_bits(32..64));
+
+            Descriptor::SystemSegment(low, high)
+        };
+
+        trace!("Loading in temp GDT to `ltr` the TSS.");
+        // Store current GDT pointer to restore later.
+        let cur_gdt = tables::sgdt();
+        // Create temporary kernel GDT to avoid a GPF on switching to it.
+        let mut temp_gdt = GlobalDescriptorTable::new();
+        temp_gdt.add_entry(Descriptor::kernel_code_segment());
+        temp_gdt.add_entry(Descriptor::kernel_data_segment());
+        let tss_selector = temp_gdt.add_entry(tss_descriptor);
+
+        // Load temp GDT ...
+        temp_gdt.load_unsafe();
+        // ... load TSS from temporary GDT ...
+        tables::load_tss(tss_selector);
+        // ... and restore cached GDT.
+        tables::lgdt(&cur_gdt);
+
+        trace!("TSS loaded.");
+    }
+
+    trace!("Arch-specific local setup complete.");
+    crate::cpu_setup(is_bsp)
 }

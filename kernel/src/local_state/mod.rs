@@ -12,16 +12,6 @@ static ACTIVE_CPUS_LIST: spin::RwLock<Vec<u32>> = spin::RwLock::new(Vec::new());
 
 #[repr(C, align(0x1000))]
 pub(crate) struct LocalState {
-    // Stacks must go at the beginning of the structure to
-    // ensure their alignment is proper.
-    //
-    // Additionally, stack sizes must have the low 4 bits clear to
-    // ensure the next stack's alignment is proper.
-    privilege_stack: [u8; 0x4000],
-    db_stack: [u8; 0x1000],
-    nmi_stack: [u8; 0x1000],
-    df_stack: [u8; 0x1000],
-    mc_stack: [u8; 0x1000],
     magic: u32,
     core_id: u32,
     timer: alloc::boxed::Box<dyn timer::Timer>,
@@ -32,10 +22,6 @@ pub(crate) struct LocalState {
 
 impl LocalState {
     const MAGIC: u32 = 0xD3ADC0DE;
-
-    fn validate_init(&self) {
-        assert!(self.magic == LocalState::MAGIC);
-    }
 
     fn is_valid_magic(&self) -> bool {
         self.magic == LocalState::MAGIC
@@ -120,11 +106,6 @@ pub unsafe fn init() {
 
     trace!("Writing local state struct out to memory.");
     local_state_ptr.write(LocalState {
-        privilege_stack: [0u8; 0x4000],
-        db_stack: [0u8; 0x1000],
-        nmi_stack: [0u8; 0x1000],
-        df_stack: [0u8; 0x1000],
-        mc_stack: [0u8; 0x1000],
         magic: LocalState::MAGIC,
         core_id,
         timer,
@@ -140,7 +121,12 @@ pub unsafe fn init() {
         ),
         cur_task: None,
     });
-    get_local_state().unwrap().validate_init();
+
+    match get_local_state() {
+        Some(local_state) if local_state.is_valid_magic() => {}
+        _ => panic!("local state is invalid"),
+    }
+
     trace!("Local state structure written to memory and validated.");
 
     let mut active_cpus_list = ACTIVE_CPUS_LIST.write();
@@ -301,32 +287,6 @@ pub fn try_begin_scheduling() {
             unsafe { reload_timer(core::num::NonZeroU32::new_unchecked(1)) };
         }
     }
-}
-
-/// Generates a [`x86_64::structures::tss::TaskStateSegment`], loaded with the pre-allocated stacks from core-local state.
-pub fn generate_tss() -> Option<alloc::boxed::Box<x86_64::structures::tss::TaskStateSegment>> {
-    use crate::interrupts::StackTableIndex;
-    use x86_64::VirtAddr;
-
-    get_local_state().map(|local_state| {
-        let mut tss = alloc::boxed::Box::new(x86_64::structures::tss::TaskStateSegment::new());
-
-        unsafe {
-            tss.privilege_stack_table[0] =
-                VirtAddr::from_ptr(local_state.privilege_stack.as_ptr().add(local_state.privilege_stack.len()));
-
-            tss.interrupt_stack_table[StackTableIndex::Debug as usize] =
-                VirtAddr::from_ptr(local_state.db_stack.as_ptr().add(local_state.db_stack.len()));
-            tss.interrupt_stack_table[StackTableIndex::NonMaskable as usize] =
-                VirtAddr::from_ptr(local_state.nmi_stack.as_ptr().add(local_state.nmi_stack.len()));
-            tss.interrupt_stack_table[StackTableIndex::DoubleFault as usize] =
-                VirtAddr::from_ptr(local_state.df_stack.as_ptr().add(local_state.df_stack.len()));
-            tss.interrupt_stack_table[StackTableIndex::MachineCheck as usize] =
-                VirtAddr::from_ptr(local_state.mc_stack.as_ptr().add(local_state.mc_stack.len()));
-        }
-
-        tss
-    })
 }
 
 /// Attempts to push a task to the core-local scheduler directly. If the core-local state is not
