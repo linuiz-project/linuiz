@@ -25,7 +25,7 @@ pub(self) fn get_common_exception_handler() -> &'static ExceptionHandler {
 }
 
 /* NON-EXCEPTION IRQ HANDLING */
-type InterruptHandler = fn(u64, &mut InterruptStackFrame, &mut Context);
+type InterruptHandler = fn(u64, &mut InterruptStackFrame, &mut GeneralRegisters);
 static INTERRUPT_HANDLER: SyncUnsafeCell<InterruptHandler> =
     SyncUnsafeCell::new(|irq_num, _, _| panic!("IRQ{}: no common handler", irq_num));
 

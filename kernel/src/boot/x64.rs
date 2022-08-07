@@ -214,21 +214,13 @@ unsafe fn arch_setup(is_bsp: bool) -> ! {
             // it must be ensured that the handlers are set only *after* the GDT has been
             // properly initialized and loaded—otherwise, the `CS` value for the IDT entries
             // is incorrect, and this causes very confusing GPFs.
-            crate::interrupts::init_idt();
+            crate::tables::idt::init_idt();
+            libkernel::interrupts::set_common_interrupt_handler(crate::interrupts::common_interrupt_handler);
 
-            fn apit_empty(
-                _: &mut x86_64::structures::idt::InterruptStackFrame,
-                _: &mut crate::scheduling::ThreadRegisters,
-            ) {
-                libkernel::structures::apic::end_of_interrupt();
-            }
-
-            crate::interrupts::set_handler_fn(crate::interrupts::Vector::LINT0_VECTOR, apit_empty);
-            crate::interrupts::set_handler_fn(crate::interrupts::Vector::LINT1_VECTOR, apit_empty);
             crate::interrupts::set_handler_fn(crate::interrupts::Vector::Syscall, crate::interrupts::syscall::handler);
         }
 
-        crate::interrupts::load_idt();
+        crate::tables::idt::load_idt();
 
         /* load tss */
         use alloc::boxed::Box;

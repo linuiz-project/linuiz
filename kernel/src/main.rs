@@ -30,6 +30,7 @@ extern crate libkernel;
 mod boot;
 mod clock;
 mod drivers;
+mod interrupts;
 mod local_state;
 mod logging;
 mod memory;

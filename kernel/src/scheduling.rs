@@ -3,56 +3,15 @@ use core::{
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use crossbeam_queue::SegQueue;
-use libkernel::memory::PageAlignedBox;
 use libkernel::{
+    interrupts::GeneralRegisters,
+    memory::PageAlignedBox,
     registers::x64::{control::CR3Flags, RFlags},
     Address, Physical,
 };
 use x86_64::registers::segmentation::SegmentSelector;
 
 static NEXT_THREAD_ID: AtomicU64 = AtomicU64::new(1);
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy)]
-pub struct ThreadRegisters {
-    pub rax: u64,
-    pub rbx: u64,
-    pub rcx: u64,
-    pub rdx: u64,
-    pub rsi: u64,
-    pub rdi: u64,
-    pub rbp: u64,
-    pub r8: u64,
-    pub r9: u64,
-    pub r10: u64,
-    pub r11: u64,
-    pub r12: u64,
-    pub r13: u64,
-    pub r14: u64,
-    pub r15: u64,
-}
-
-impl ThreadRegisters {
-    pub const fn empty() -> Self {
-        Self {
-            rax: 0,
-            rbx: 0,
-            rcx: 0,
-            rdx: 0,
-            rsi: 0,
-            rdi: 0,
-            rbp: 0,
-            r8: 0,
-            r9: 0,
-            r10: 0,
-            r11: 0,
-            r12: 0,
-            r13: 0,
-            r14: 0,
-            r15: 0,
-        }
-    }
-}
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy)]
@@ -62,6 +21,7 @@ impl TaskPriority {
     pub const MIN: u8 = 1;
     pub const MAX: u8 = 16;
 
+    /// Safely constructs a new instance of this type, with range checking for the priority.
     #[inline(always)]
     pub const fn new(priority: u8) -> Option<Self> {
         match priority {
@@ -70,17 +30,20 @@ impl TaskPriority {
         }
     }
 
+    /// Gets the inner raw priority value.
     #[inline(always)]
     pub fn get(&self) -> u8 {
         self.0
     }
 }
 
+/// Represents a stack allocation strategy for a [`Task`].
 pub enum TaskStackOption {
     Auto,
     Pages(usize),
 }
 
+/// Representation object for different contexts of execution in the CPU.
 pub struct Task {
     id: u64,
     prio: TaskPriority,
@@ -90,7 +53,7 @@ pub struct Task {
     pub rsp: u64,
     pub ss: u16,
     pub rfl: RFlags,
-    pub gprs: ThreadRegisters,
+    pub gprs: GeneralRegisters,
     pub stack: PageAlignedBox<[MaybeUninit<u8>]>,
     pub cr3: (Address<Physical>, CR3Flags),
 }

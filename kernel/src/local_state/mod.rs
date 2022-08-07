@@ -90,7 +90,7 @@ pub unsafe fn init() {
 
     apic::software_reset();
     apic::set_timer_divisor(apic::TimerDivisor::Div1);
-    apic::get_timer().set_vector(Vector::LocalTimer as u8).set_masked(false);
+    apic::get_timer().set_vector(Vector::Timer as u8).set_masked(false);
     apic::get_error().set_vector(Vector::Error as u8).set_masked(false);
     apic::get_performance().set_vector(Vector::Performance as u8);
     apic::get_thermal_sensor().set_vector(Vector::ThermalSensor as u8);
@@ -124,7 +124,7 @@ pub unsafe fn init() {
 
     match get_local_state() {
         Some(local_state) if local_state.is_valid_magic() => {}
-        _ => panic!("local state is invalid"),
+        _ => panic!("local state is invalid after write"),
     }
 
     trace!("Local state structure written to memory and validated.");

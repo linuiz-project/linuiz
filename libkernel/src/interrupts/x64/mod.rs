@@ -21,12 +21,7 @@ pub(self) enum InterruptDeliveryMode {
 }
 
 #[repr(C)]
-pub struct Context {
-    pub rip: Address<Virtual>,
-    pub cs: u64,
-    pub rflags: u64,
-    pub rsp: Address<Virtual>,
-    pub ss: u64,
+pub struct GeneralRegisters {
     pub rax: u64,
     pub rbx: u64,
     pub rcx: u64,
@@ -109,6 +104,6 @@ pub(self) extern "x86-interrupt" fn irq_common(_: x86_64::structures::idt::Inter
     }
 }
 
-extern "sysv64" fn irq_handoff(irq_number: u64, stack_frame: &mut InterruptStackFrame, context: &mut Context) {
+extern "sysv64" fn irq_handoff(irq_number: u64, stack_frame: &mut InterruptStackFrame, context: &mut GeneralRegisters) {
     super::get_common_interrupt_handler()(irq_number, stack_frame, context);
 }
