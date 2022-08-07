@@ -20,7 +20,8 @@
     naked_functions,
     allocator_api,
     sync_unsafe_cell,
-    asm_sym
+    asm_sym,
+    asm_const
 )]
 
 #[macro_use]

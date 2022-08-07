@@ -18,7 +18,8 @@
     strict_provenance,
     slice_ptr_get,
     new_uninit,
-    inline_const
+    inline_const,
+    sync_unsafe_cell
 )]
 
 #[macro_use]
@@ -29,7 +30,6 @@ extern crate libkernel;
 mod boot;
 mod clock;
 mod drivers;
-mod interrupts;
 mod local_state;
 mod logging;
 mod memory;

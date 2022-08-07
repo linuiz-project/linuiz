@@ -231,9 +231,11 @@ unsafe fn arch_setup(is_bsp: bool) -> ! {
         crate::interrupts::load_idt();
 
         /* load tss */
-        use crate::interrupts::StackTableIndex;
         use alloc::boxed::Box;
-        use libkernel::memory::{page_aligned_allocator, PageAlignedBox};
+        use libkernel::{
+            interrupts::StackTableIndex,
+            memory::{page_aligned_allocator, PageAlignedBox},
+        };
         use x86_64::{
             instructions::tables,
             structures::{
