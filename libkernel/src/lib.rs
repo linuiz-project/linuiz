@@ -19,7 +19,8 @@
     const_ptr_is_null,
     naked_functions,
     allocator_api,
-    sync_unsafe_cell
+    sync_unsafe_cell,
+    asm_sym
 )]
 
 #[macro_use]
@@ -36,6 +37,7 @@ pub mod collections;
 pub mod cpu;
 pub mod elf;
 pub mod instructions;
+pub mod interrupts;
 pub mod io;
 pub mod memory;
 pub mod registers;

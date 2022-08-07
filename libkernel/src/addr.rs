@@ -122,7 +122,7 @@ impl core::ops::SubAssign<usize> for Address<Physical> {
 
 impl core::fmt::Debug for Address<Physical> {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter.debug_tuple("Address<Physical>").field(&&format_args!("0x{:#X}", self.0)).finish()
+        formatter.debug_tuple("Address<Physical>").field(&format_args!("{:#X}", self.0)).finish()
     }
 }
 
@@ -193,7 +193,7 @@ impl Address<Virtual> {
 
 impl core::fmt::Debug for Address<Virtual> {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter.debug_tuple("Address<Virtual>").field(&format_args!("0x{:#X}", self.0)).finish()
+        formatter.debug_tuple("Address<Virtual>").field(&format_args!("{:#X}", self.0)).finish()
     }
 }
 
