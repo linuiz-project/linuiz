@@ -49,7 +49,7 @@ pub enum RandError {
 /// Reads a (hopefully) cryptographically secure, deterministic random number from hardware using the `rdrand` instruction.
 pub fn rdrand() -> Result<u64, RandError> {
     // Check to ensure the instruction is supported.
-    if crate::cpu::x64::FEATURE_INFO.as_ref().map(|info| info.has_rdrand()).unwrap_or(false) {
+    if crate::cpu::FEATURE_INFO.as_ref().map(|info| info.has_rdrand()).unwrap_or(false) {
         // In the case of a hard failure for random number generation, a retry limit is employed
         // to stop software from entering a busy loop due to bad `rdrand` values.
         for _ in 0..100 {
@@ -92,7 +92,7 @@ pub fn rdrand() -> Result<u64, RandError> {
 /// Reads a (hopefully) cryptographically secure, deterministic random number from hardware using the `rdseed` instruction.
 pub fn rdseed() -> Result<u64, RandError> {
     // Check to ensure the instruction is supported.
-    if crate::cpu::x64::EXT_FEATURE_INFO.as_ref().map(|info| info.has_rdseed()).unwrap_or(false) {
+    if crate::cpu::EXT_FEATURE_INFO.as_ref().map(|info| info.has_rdseed()).unwrap_or(false) {
         // In the case of a hard failure for random number generation, a retry limit is employed
         // to stop software from entering a busy loop due to bad values.
         for _ in 0..100 {

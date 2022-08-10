@@ -20,8 +20,8 @@ pub fn init_idt() {
 
     let mut idt = get_idt().lock();
 
-    libkernel::interrupts::set_exception_handlers(&mut *idt);
-    libkernel::interrupts::set_stub_handlers(&mut *idt);
+    crate::interrupts::set_exception_handlers(&mut *idt);
+    crate::interrupts::set_stub_handlers(&mut *idt);
 }
 
 /// Loads the global IDT using `lidt`.

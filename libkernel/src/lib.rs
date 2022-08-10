@@ -38,7 +38,6 @@ pub mod collections;
 pub mod cpu;
 pub mod elf;
 pub mod instructions;
-pub mod interrupts;
 pub mod io;
 pub mod memory;
 pub mod registers;

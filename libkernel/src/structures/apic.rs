@@ -6,8 +6,8 @@ use bit_field::BitField;
 use core::{marker::PhantomData, sync::atomic::Ordering};
 
 lazy_static::lazy_static! {
-    pub static ref xAPIC_SUPPORT: bool = crate::cpu::x64::CPUID.get_feature_info().map(|info| info.has_apic()).unwrap_or(false);
-    pub static ref x2APIC_SUPPORT: bool = crate::cpu::x64::CPUID.get_feature_info().map(|info| info.has_x2apic()).unwrap_or(false);
+    pub static ref xAPIC_SUPPORT: bool = crate::cpu::CPUID.get_feature_info().map(|info| info.has_apic()).unwrap_or(false);
+    pub static ref x2APIC_SUPPORT: bool = crate::cpu::CPUID.get_feature_info().map(|info| info.has_x2apic()).unwrap_or(false);
 }
 
 // xAPIC needs a sized field to avoid being optimized to zero-sized (even
@@ -26,10 +26,11 @@ static xLAPIC_ENABLED: core::sync::atomic::AtomicBool = core::sync::atomic::Atom
 ///
 /// SAFETY: Caller must ensure this method is called only once per core.
 pub unsafe fn init(
+    is_bsp: bool,
     frame_manager: &'static crate::memory::FrameManager,
     page_manager: &'static crate::memory::PageManager,
 ) {
-    if crate::cpu::x64::is_bsp() {
+    if is_bsp {
         trace!("Configuring memory mappings for xAPIC.");
         let xlapic_page = crate::memory::Page::from_ptr(xLAPIC.get());
         let xlapic_old_frame_index = page_manager.get_mapped_to(&xlapic_page).unwrap();
@@ -511,8 +512,7 @@ impl<T: GenericVectorVariant> LocalVector<T> {
 
 impl LocalVector<Timer> {
     pub unsafe fn set_mode(&self, mode: TimerMode) -> &Self {
-        let tsc_dl_support =
-            crate::cpu::x64::CPUID.get_feature_info().map(|info| info.has_tsc_deadline()).unwrap_or(false);
+        let tsc_dl_support = crate::cpu::CPUID.get_feature_info().map(|info| info.has_tsc_deadline()).unwrap_or(false);
 
         assert!(mode != TimerMode::TSC_Deadline || tsc_dl_support, "TSC deadline is not supported on this CPU.");
 

@@ -4,7 +4,7 @@ use core::{
 };
 use crossbeam_queue::SegQueue;
 use libkernel::{
-    interrupts::GeneralRegisters,
+    cpu::GeneralRegisters,
     memory::PageAlignedBox,
     registers::x64::{control::CR3Flags, RFlags},
     Address, Physical,
@@ -102,7 +102,7 @@ impl Task {
             rsp: unsafe { stack.as_ptr().add(stack.len()) as u64 },
             ss: ss.0,
             rfl,
-            gprs: ThreadRegisters::empty(),
+            gprs: GeneralRegisters::empty(),
             stack,
             cr3,
         }

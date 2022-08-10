@@ -24,18 +24,19 @@ use libkernel::structures::pic8259;
 
 static GLOBAL_CLOCK: AtomicClock = AtomicClock::new();
 
+// TODO remove this, no more global timer
 pub fn configure_and_enable() {
     libkernel::instructions::interrupts::without_interrupts(|| {
         pic8259::pit::set_timer_freq(1000, pic8259::pit::OperatingMode::RateGenerator);
         pic8259::enable(pic8259::InterruptLines::TIMER);
 
-        unsafe { crate::interrupts::set_handler_fn(crate::interrupts::Vector::GlobalTimer, global_timer_handler) };
+        // unsafe { crate::interrupts::set_handler_fn(crate::interrupts::Vector::Timer, global_timer_handler) };
     });
 }
 
 fn global_timer_handler(
     _: &mut x86_64::structures::idt::InterruptStackFrame,
-    _: &mut crate::scheduling::ThreadRegisters,
+    _: &mut libkernel::cpu::GeneralRegisters,
 ) {
     GLOBAL_CLOCK.tick();
 

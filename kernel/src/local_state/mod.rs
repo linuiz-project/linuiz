@@ -12,7 +12,7 @@ static ACTIVE_CPUS_LIST: spin::RwLock<Vec<u32>> = spin::RwLock::new(Vec::new());
 
 #[repr(C, align(0x1000))]
 pub(crate) struct LocalState {
-    magic: u32,
+    magic: u64,
     core_id: u32,
     timer: alloc::boxed::Box<dyn timer::Timer>,
     scheduler: Scheduler,
@@ -21,7 +21,7 @@ pub(crate) struct LocalState {
 }
 
 impl LocalState {
-    const MAGIC: u32 = 0xD3ADC0DE;
+    const MAGIC: u64 = 0x0_411_B33F_D3ADC0DE;
 
     fn is_valid_magic(&self) -> bool {
         self.magic == LocalState::MAGIC
@@ -47,7 +47,7 @@ fn get_local_state() -> Option<&'static mut LocalState> {
 /// Initializes the core-local state structure.
 ///
 /// SAFETY: This function invariantly assumes it will only be called once.
-pub unsafe fn init() {
+pub unsafe fn init(is_bsp: bool) {
     LOCAL_STATES_BASE
         .compare_exchange(
             0,
@@ -81,10 +81,10 @@ pub unsafe fn init() {
             .for_each(|page| page_manager.auto_map(&page, libkernel::memory::PageAttributes::RW, frame_manager));
 
         // Initialize the local APIC in the most advanced mode.
-        libkernel::structures::apic::init(frame_manager, page_manager);
+        libkernel::structures::apic::init(is_bsp, frame_manager, page_manager);
     }
 
-    /* CONFIGURE APIC */
+    /* CONFIGURE TIMER */
     use crate::interrupts::Vector;
     use libkernel::structures::apic;
 
@@ -100,7 +100,7 @@ pub unsafe fn init() {
     libkernel::instructions::interrupts::enable();
 
     trace!("Configuring core-local timer.");
-    crate::interrupts::set_handler_fn(Vector::LocalTimer, local_timer_handler);
+    // TODO crate::interrupts::set_handler_fn(Vector::Timer, local_timer_handler);
     let mut timer = timer::get_best_timer();
     timer.set_frequency(1000);
 
@@ -135,7 +135,7 @@ pub unsafe fn init() {
 
 fn local_timer_handler(
     stack_frame: &mut x86_64::structures::idt::InterruptStackFrame,
-    cached_regs: &mut crate::scheduling::ThreadRegisters,
+    cached_regs: &mut libkernel::cpu::GeneralRegisters,
 ) {
     const MIN_TIME_SLICE_MS: u32 = 1;
     const PRIO_TIME_SLICE_MS: u32 = 2;
@@ -272,7 +272,10 @@ fn local_timer_handler(
 ///
 /// SAFETY: Caller is expected to only reload timer when appropriate.
 unsafe fn reload_timer(freq_multiplier: core::num::NonZeroU32) {
-    get_local_state().expect("reload timer called for uninitialized local state").timer.reload(freq_multiplier.get());
+    get_local_state()
+        .expect("reload timer called for uninitialized local state")
+        .timer
+        .set_next_wait(freq_multiplier.get());
 }
 
 /// Attempts to begin scheduling tasks on the current thread. If the scheduler has already been

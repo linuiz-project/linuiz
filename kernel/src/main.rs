@@ -137,7 +137,7 @@ pub(self) unsafe fn cpu_setup(is_bsp: bool) -> ! {
         crate::clock::configure_and_enable();
     }
 
-    local_state::init();
+    crate::local_state::init(is_bsp);
 
     //if is_bsp {
     use crate::{local_state::try_push_task, scheduling::*};

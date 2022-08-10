@@ -119,6 +119,11 @@ unsafe extern "sysv64" fn _entry() -> ! {
         libkernel::memory::global_alloc::set(&*crate::KMALLOC);
     }
 
+{
+    for entry in libkernel::acpi::xsdt::
+}
+
+
     debug!("Finished initial kernel setup.");
     SMP_MEMORY_READY.store(true, core::sync::atomic::Ordering::Relaxed);
     arch_setup(true)
@@ -143,7 +148,7 @@ unsafe fn arch_setup(is_bsp: bool) -> ! {
 
         // Set CR4 flags.
         use libkernel::{
-            cpu::x64::{EXT_FEATURE_INFO, FEATURE_INFO},
+            cpu::{EXT_FEATURE_INFO, FEATURE_INFO},
             registers::x64::control::{CR4Flags, CR4},
         };
 
@@ -191,10 +196,7 @@ unsafe fn arch_setup(is_bsp: bool) -> ! {
         CR4::write(flags);
 
         // Enable use of the `NO_EXECUTE` page attribute, if supported.
-        if libkernel::cpu::x64::EXT_FUNCTION_INFO
-            .as_ref()
-            .map(|func_info| func_info.has_execute_disable())
-            .unwrap_or(false)
+        if libkernel::cpu::EXT_FUNCTION_INFO.as_ref().map(|func_info| func_info.has_execute_disable()).unwrap_or(false)
         {
             libkernel::registers::x64::msr::IA32_EFER::set_nxe(true);
         } else {
@@ -215,19 +217,15 @@ unsafe fn arch_setup(is_bsp: bool) -> ! {
             // properly initialized and loaded—otherwise, the `CS` value for the IDT entries
             // is incorrect, and this causes very confusing GPFs.
             crate::tables::idt::init_idt();
-            libkernel::interrupts::set_common_interrupt_handler(crate::interrupts::common_interrupt_handler);
-
-            crate::interrupts::set_handler_fn(crate::interrupts::Vector::Syscall, crate::interrupts::syscall::handler);
+            crate::interrupts::set_common_interrupt_handler(crate::interrupts::common_interrupt_handler);
         }
 
         crate::tables::idt::load_idt();
 
         /* load tss */
+        use crate::interrupts::StackTableIndex;
         use alloc::boxed::Box;
-        use libkernel::{
-            interrupts::StackTableIndex,
-            memory::{page_aligned_allocator, PageAlignedBox},
-        };
+        use libkernel::memory::{page_aligned_allocator, PageAlignedBox};
         use x86_64::{
             instructions::tables,
             structures::{

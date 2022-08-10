@@ -2,11 +2,21 @@
 mod exceptions;
 mod stubs;
 
+pub mod pic8259;
+
 pub use exceptions::*;
 pub use stubs::*;
+
+use libkernel::{Address, Virtual};
 use x86_64::structures::idt::InterruptStackFrame;
 
-use crate::{Address, Virtual};
+const PIC_BASE: u8 = 0xE0;
+const PERFORMANCE: u8 = 0xF0;
+const THERMAL_SENSOR: u8 = 0xF1;
+const ERROR: u8 = 0xFC;
+const LINT0_VECTOR: u8 = 0xFD;
+const LINT1_VECTOR: u8 = 0xFE;
+const SPURIOUS_VECTOR: u8 = 0xFF;
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,25 +28,6 @@ pub(self) enum InterruptDeliveryMode {
     INIT = 0b101,
     StartUp = 0b110,
     ExtINT = 0b111,
-}
-
-#[repr(C)]
-pub struct GeneralRegisters {
-    pub rax: u64,
-    pub rbx: u64,
-    pub rcx: u64,
-    pub rdx: u64,
-    pub rsi: u64,
-    pub rdi: u64,
-    pub rbp: u64,
-    pub r8: u64,
-    pub r9: u64,
-    pub r10: u64,
-    pub r11: u64,
-    pub r12: u64,
-    pub r13: u64,
-    pub r14: u64,
-    pub r15: u64,
 }
 
 #[naked]
@@ -104,6 +95,10 @@ pub(self) extern "x86-interrupt" fn irq_common(_: x86_64::structures::idt::Inter
     }
 }
 
-extern "sysv64" fn irq_handoff(irq_number: u64, stack_frame: &mut InterruptStackFrame, context: &mut GeneralRegisters) {
+extern "sysv64" fn irq_handoff(
+    irq_number: u64,
+    stack_frame: &mut InterruptStackFrame,
+    context: &mut libkernel::cpu::GeneralRegisters,
+) {
     super::get_common_interrupt_handler()(irq_number, stack_frame, context);
 }

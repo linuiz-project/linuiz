@@ -39,23 +39,31 @@ pub unsafe fn wrmsr(ecx: u32, value: u64) {
         in("ecx") ecx,
         in("rax") value,
         in("rdx") value >> 32,
-        options(nostack, nomem)
+        options(nostack, nomem, preserves_flags)
     );
 }
 
-pub trait Generic {
-    const ECX: u32;
+macro_rules! generic_msr {
+    ($name:ident, $addr:expr) => {
+        pub struct $name;
 
-    #[inline(always)]
-    fn read() -> u64 {
-        unsafe { rdmsr(Self::ECX) }
-    }
+        impl $name {
+            #[inline(always)]
+            pub fn read() -> u64 {
+                unsafe { $crate::registers::x64::msr::rdmsr($addr) }
+            }
 
-    #[inline(always)]
-    unsafe fn write(value: u64) {
-        wrmsr(Self::ECX, value);
-    }
+            #[inline(always)]
+            pub unsafe fn write(value: u64) {
+                $crate::registers::x64::msr::wrmsr($addr, value);
+            }
+        }
+    };
 }
+
+generic_msr!(IA32_FS_BASE, 0xC0000100);
+generic_msr!(IA32_GS_BASE, 0xC0000101);
+generic_msr!(IA32_KERNEL_GS_BASE, 0xC0000102);
 
 pub struct IA32_APIC_BASE;
 impl IA32_APIC_BASE {
@@ -126,7 +134,7 @@ impl IA32_EFER {
     #[inline(always)]
     pub unsafe fn set_nxe(set: bool) {
         assert!(
-            crate::cpu::x64::EXT_FUNCTION_INFO
+            crate::cpu::EXT_FUNCTION_INFO
                 .as_ref()
                 .map(|ext_func_info| ext_func_info.has_execute_disable())
                 .unwrap_or(false),
@@ -147,21 +155,6 @@ impl IA32_SFMASK {
     pub unsafe fn set_rflags_mask(rflags: super::RFlags) {
         wrmsr(0xC0000084, rflags.bits());
     }
-}
-
-pub struct IA32_FS_BASE;
-impl Generic for IA32_FS_BASE {
-    const ECX: u32 = 0xC0000100;
-}
-
-pub struct IA32_GS_BASE;
-impl Generic for IA32_GS_BASE {
-    const ECX: u32 = 0xC0000101;
-}
-
-pub struct IA32_KERNEL_GS_BASE;
-impl Generic for IA32_KERNEL_GS_BASE {
-    const ECX: u32 = 0xC0000102;
 }
 
 pub struct IA32_TSC_DEADLINE;

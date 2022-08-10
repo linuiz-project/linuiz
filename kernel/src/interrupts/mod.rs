@@ -4,7 +4,40 @@ mod x64;
 pub use x64::*;
 
 use core::cell::SyncUnsafeCell;
+use libkernel::cpu::GeneralRegisters;
+use num_enum::TryFromPrimitive;
 use x86_64::structures::idt::InterruptStackFrame;
+
+#[repr(u64)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
+#[allow(non_camel_case_types)]
+pub enum Vector {
+    Syscall = 0x80,
+    Timer = 0xA0,
+
+    /* 224-256 ARCH SPECIFIC */
+}
+
+pub fn common_interrupt_handler(
+    irq_vector: u64,
+    stack_frame: &mut x86_64::structures::idt::InterruptStackFrame,
+    context: &mut GeneralRegisters,
+) {
+    match Vector::try_from(irq_vector) {
+        Ok(vector) => match vector {
+            Vector::Syscall => todo!(),
+            Vector::Timer => todo!(),
+            Vector::Performance => todo!(),
+            Vector::ThermalSensor => todo!(),
+            Vector::Error => todo!(),
+            Vector::LINT0_VECTOR | Vector::LINT1_VECTOR | Vector::SPURIOUS_VECTOR => {}
+        },
+        Err(vector_raw) => warn!("Unhandled IRQ vector: {:?}", vector_raw),
+    }
+
+    // TODO abstract this
+    libkernel::structures::apic::end_of_interrupt();
+}
 
 /* EXCEPTION HANDLING */
 type ExceptionHandler = fn(Exception);

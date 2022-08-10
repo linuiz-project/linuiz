@@ -1,5 +1,7 @@
-use crate::io::port::WriteOnlyPort;
 use bit_field::BitField;
+use libkernel::io::port::WriteOnlyPort;
+
+const TICK_RATE: u32 = 1193182;
 
 const fn get_data_port() -> WriteOnlyPort<u8> {
     unsafe { WriteOnlyPort::<u8>::new(0x40) }
@@ -61,12 +63,9 @@ pub fn send_command(command: Command) {
     unsafe { WriteOnlyPort::<u8>::new(0x43) }.write(command.as_u8());
 }
 
-pub fn set_timer_freq(frequency: u32, operating_mode: OperatingMode) {
-    use super::TICK_RATE;
-
-    if frequency > TICK_RATE {
-        panic!("PIT frequency cannot be greater than maximum tick rate ({}Hz)!", TICK_RATE);
-    }
+/// Sets the frequency of the programmable interrupt timer.
+pub unsafe fn set_timer_freq(frequency: u32, operating_mode: OperatingMode) {
+    assert!(frequency > TICK_RATE, "PIT frequency cannot be greater than maximum tick rate ({}Hz)!", TICK_RATE);
 
     trace!("Configuring 8259 PIT tick frequency.");
     send_command(Command::new(operating_mode, AccessMode::LowAndHighByte, Channel::Channel0));
