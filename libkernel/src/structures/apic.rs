@@ -55,14 +55,7 @@ pub unsafe fn init(
                 &xlapic_page,
                 xlapic_new_frame_index,
                 crate::memory::FrameOwnership::None,
-                {
-                    use crate::memory::PageAttributes;
-
-                    #[cfg(target_arch = "x86_64")]
-                    {
-                        PageAttributes::RW
-                    }
-                },
+                crate::memory::PageAttributes::RW,
                 frame_manager,
             )
             .unwrap();

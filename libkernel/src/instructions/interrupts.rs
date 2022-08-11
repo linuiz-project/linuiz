@@ -1,34 +1,29 @@
 /// Enables interrupts for the current core.
+///
+/// SAFETY: Enabling interrupts early can result in unexpected behaviour.
 #[inline(always)]
-pub fn enable() {
+pub unsafe fn enable() {
     unsafe {
-        #[cfg(target_arch = "x86_64")]
-        {
-            core::arch::asm!("sti", options(nostack, nomem));
-        }
+        core::arch::asm!("sti", options(nostack, nomem));
     }
 }
 
 /// Disables interrupts for the current core.
+///
+/// SAFETY: Disabling interrupts can cause the system to become unresponsive if they are not re-enabled.
 #[inline(always)]
-pub fn disable() {
+pub unsafe fn disable() {
     unsafe {
-        #[cfg(target_arch = "x86_64")]
-        {
-            core::arch::asm!("cli", options(nostack, nomem));
-        }
+        core::arch::asm!("cli", options(nostack, nomem));
     }
 }
 
 /// Returns whether or not interrupts are enabled for the current core.
 #[inline(always)]
 pub fn are_enabled() -> bool {
-    #[cfg(target_arch = "x86_64")]
-    {
-        use crate::registers::x64::RFlags;
+    use crate::registers::x64::RFlags;
 
-        RFlags::read().contains(RFlags::INTERRUPT_FLAG)
-    }
+    RFlags::read().contains(RFlags::INTERRUPT_FLAG)
 }
 
 /// Disables interrupts, executes the given [`FnOnce`], and re-enables interrupts if they were prior.
@@ -36,13 +31,13 @@ pub fn without_interrupts<R>(func: impl FnOnce() -> R) -> R {
     let interrupts_enabled = are_enabled();
 
     if interrupts_enabled {
-        disable();
+        unsafe { disable() };
     }
 
     let return_value = func();
 
     if interrupts_enabled {
-        enable();
+        unsafe { enable() };
     }
 
     return_value
@@ -52,10 +47,7 @@ pub fn without_interrupts<R>(func: impl FnOnce() -> R) -> R {
 #[inline(always)]
 pub fn wait() {
     unsafe {
-        #[cfg(target_arch = "x86_64")]
-        {
-            core::arch::asm!("hlt", options(nostack, nomem, preserves_flags));
-        }
+        core::arch::asm!("hlt", options(nostack, nomem, preserves_flags));
     }
 }
 

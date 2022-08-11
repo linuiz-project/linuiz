@@ -14,8 +14,6 @@ num_enum = { version = "*", default-features = false }
 spin = "*"
 crossbeam-queue = { version = "*", default-features = false, features = ["alloc"] }
 paste = "*"
-
-[target.'cfg(target_arch = "x86_64")'.dependencies]
 x86_64 = "*"
 limine = "*"
 raw-cpuid = "*"

@@ -238,7 +238,7 @@ macro_rules! irq_stub {
                         call {}
                         ",
                         const $irq_vector,
-                        sym super::irq_common,
+                        sym super::irq_save_context,
                         options(noreturn)
                     );
                 }

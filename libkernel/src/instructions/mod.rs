@@ -9,10 +9,7 @@ use core::arch::asm;
 #[inline(always)]
 pub fn pause() {
     unsafe {
-        #[cfg(target_arch = "x86_64")]
-        {
-            core::arch::asm!("pause", options(nostack, nomem, preserves_flags));
-        }
+        core::arch::asm!("pause", options(nostack, nomem, preserves_flags));
     }
 }
 
