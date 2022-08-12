@@ -9,7 +9,7 @@ pub fn invlpg(page: &crate::memory::Page) {
 /// Switches the current CR3 register in and out, causing all TLB entries to be invalidated.
 #[inline(always)]
 pub fn invlpg_all() {
-    crate::registers::x64::control::CR3::refresh();
+    crate::registers::control::CR3::refresh();
 }
 
 pub mod pcid {

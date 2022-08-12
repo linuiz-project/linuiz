@@ -50,12 +50,12 @@ macro_rules! generic_msr {
         impl $name {
             #[inline(always)]
             pub fn read() -> u64 {
-                unsafe { $crate::registers::x64::msr::rdmsr($addr) }
+                unsafe { $crate::registers::msr::rdmsr($addr) }
             }
 
             #[inline(always)]
             pub unsafe fn write(value: u64) {
-                $crate::registers::x64::msr::wrmsr($addr, value);
+                $crate::registers::msr::wrmsr($addr, value);
             }
         }
     };

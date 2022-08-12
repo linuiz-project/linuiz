@@ -7,14 +7,14 @@ lazy_static::lazy_static! {
     pub static ref FEATURE_INFO: cpuid::FeatureInfo = CPUID.get_feature_info().expect("no CPUID.01H support");
     pub static ref EXT_FEATURE_INFO: Option<cpuid::ExtendedFeatures> = CPUID.get_extended_feature_info();
     pub static ref EXT_FUNCTION_INFO: Option<cpuid::ExtendedProcessorFeatureIdentifiers> = CPUID.get_extended_processor_and_feature_identifiers();
-    pub static ref VENDOR_INFO: Option<cpuid::VendorInfo> = CPUID.get_vendor_info().expect("vendor info not supported");
+    pub static ref VENDOR_INFO: Option<cpuid::VendorInfo> = CPUID.get_vendor_info();
 }
 
 /// Reads [`crate::regisers::x86_64::msr::IA32_APIC_BASE`] to determine whether the current core
 /// is the bootstrap processor.
 #[inline(always)]
 pub fn is_bsp() -> bool {
-    crate::registers::x64::msr::IA32_APIC_BASE::get_is_bsp()
+    crate::registers::msr::IA32_APIC_BASE::get_is_bsp()
 }
 
 /// Gets the vendor of the CPU.
@@ -32,8 +32,7 @@ pub fn get_id() -> u32 {
         .and_then(|mut iter| iter.next())
         .map(|info| info.x2apic_id())
         // ... and finally, this leaf as an absolute fallback.
-        .or_else(|| FEATURE_INFO.as_ref().map(|info| info.initial_local_apic_id() as u32))
-        .expect("CPU does not support any ID-reporting CPUID leaves")
+        .unwrap_or_else(|| FEATURE_INFO.initial_local_apic_id() as u32)
 }
 
 #[repr(C)]

@@ -1,11 +1,3 @@
-mod rv64;
-mod x64;
-
-#[cfg(target_arch = "x86_64")]
-pub use self::x64::*;
-#[cfg(target_arch = "riscv64")]
-pub use rv64::*;
-
 use crate::{Address, Virtual};
 use core::fmt;
 
@@ -158,6 +150,31 @@ impl ExactSizeIterator for PageIterator {
     }
 }
 
+bitflags::bitflags! {
+    #[repr(transparent)]
+    pub struct PageAttributes: u64 {
+        const PRESENT = 1 << 0;
+        const WRITABLE = 1 << 1;
+        const USERSPACE = 1 << 2;
+        const WRITE_THROUGH = 1 << 3;
+        const UNCACHEABLE = 1 << 4;
+        const ACCESSED = 1 << 5;
+        const DIRTY = 1 << 6;
+        // We don't support huge pages for now.
+        // const HUGE_PAGE = 1 << 7;
+        const GLOBAL = 1 << 8;
+        //  9..=11 available
+        // 12..52 frame index
+        // 52..=58 available
+        const NO_EXECUTE = 1 << 63;
+
+        const RO = Self::PRESENT.bits() | Self::NO_EXECUTE.bits();
+        const RW = Self::PRESENT.bits() | Self::WRITABLE.bits() | Self::NO_EXECUTE.bits();
+        const RX = Self::PRESENT.bits();
+        const MMIO = Self::RW.bits() | Self::UNCACHEABLE.bits();
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttributeModify {
     Set,
@@ -235,7 +252,7 @@ impl PageTableEntry {
 
         #[cfg(target_arch = "x86_64")]
         {
-            if !crate::registers::x64::msr::IA32_EFER::get_nxe() {
+            if !crate::registers::msr::IA32_EFER::get_nxe() {
                 // This bit is reserved if NXE is not supported. For now, this means silently removing it for compatability.
                 attributes.remove(PageAttributes::NO_EXECUTE);
             }

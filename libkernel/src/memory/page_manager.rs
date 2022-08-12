@@ -114,14 +114,14 @@ impl VirtualMapper {
 
     /// Returns `true` if the current CR3 address matches the addressor's PML4 frame, and `false` otherwise.
     fn is_active(&self) -> bool {
-        crate::registers::x64::control::CR3::read().0.frame_index() == self.pml4_frame
+        crate::registers::control::CR3::read().0.frame_index() == self.pml4_frame
     }
 
     #[inline(always)]
     pub unsafe fn write_cr3(&mut self) {
-        crate::registers::x64::control::CR3::write(
+        crate::registers::control::CR3::write(
             Address::<Physical>::new(self.pml4_frame * 0x1000),
-            crate::registers::x64::control::CR3Flags::empty(),
+            crate::registers::control::CR3Flags::empty(),
         );
     }
 }
@@ -173,7 +173,7 @@ impl PageManager {
         Self {
             virtual_map: spin::RwLock::new(VirtualMapper::new(
                 mapped_page,
-                crate::registers::x64::control::CR3::read().0.frame_index(),
+                crate::registers::control::CR3::read().0.frame_index(),
             )),
         }
     }

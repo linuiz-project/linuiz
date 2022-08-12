@@ -126,6 +126,6 @@ impl Timer for TSCTimer {
 
         let tsc_wait = self.0.checked_mul(interval_multiplier as u64).expect("timer interval multiplier overflowed");
 
-        libkernel::registers::x64::msr::IA32_TSC_DEADLINE::set(libkernel::registers::x64::TSC::read() + tsc_wait);
+        libkernel::registers::msr::IA32_TSC_DEADLINE::set(libkernel::registers::TSC::read() + tsc_wait);
     }
 }

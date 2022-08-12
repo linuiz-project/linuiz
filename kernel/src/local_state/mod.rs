@@ -4,7 +4,7 @@ use crate::scheduling::{Scheduler, Task, TaskPriority};
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use libkernel::{
-    registers::x64::{control::CR3, RFlags},
+    registers::{control::CR3, RFlags},
     Address, Virtual,
 };
 

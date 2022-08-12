@@ -3,9 +3,7 @@
 /// SAFETY: Enabling interrupts early can result in unexpected behaviour.
 #[inline(always)]
 pub unsafe fn enable() {
-    unsafe {
-        core::arch::asm!("sti", options(nostack, nomem));
-    }
+    core::arch::asm!("sti", options(nostack, nomem));
 }
 
 /// Disables interrupts for the current core.
@@ -13,15 +11,13 @@ pub unsafe fn enable() {
 /// SAFETY: Disabling interrupts can cause the system to become unresponsive if they are not re-enabled.
 #[inline(always)]
 pub unsafe fn disable() {
-    unsafe {
-        core::arch::asm!("cli", options(nostack, nomem));
-    }
+    core::arch::asm!("cli", options(nostack, nomem));
 }
 
 /// Returns whether or not interrupts are enabled for the current core.
 #[inline(always)]
 pub fn are_enabled() -> bool {
-    use crate::registers::x64::RFlags;
+    use crate::registers::RFlags;
 
     RFlags::read().contains(RFlags::INTERRUPT_FLAG)
 }

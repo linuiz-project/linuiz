@@ -201,32 +201,32 @@ unsafe fn arch_setup(is_bsp: bool) -> ! {
     /* load registers */
     {
         // Set CR0 flags.
-        use libkernel::registers::x64::control::{CR0Flags, CR0};
+        use libkernel::registers::control::{CR0Flags, CR0};
         CR0::write(CR0Flags::PE | CR0Flags::MP | CR0Flags::ET | CR0Flags::NE | CR0Flags::WP | CR0Flags::PG);
 
         // Set CR4 flags.
         use libkernel::{
             cpu::{EXT_FEATURE_INFO, FEATURE_INFO},
-            registers::x64::control::{CR4Flags, CR4},
+            registers::control::{CR4Flags, CR4},
         };
 
         let mut flags = CR4Flags::PAE | CR4Flags::PGE | CR4Flags::OSXMMEXCPT;
 
-        if FEATURE_INFO.as_ref().map(|info| info.has_de()).unwrap_or(false) {
+        if FEATURE_INFO.has_de() {
             trace!("Detected support for debugging extensions.");
             flags.insert(CR4Flags::DE);
         }
 
-        if FEATURE_INFO.as_ref().map(|info| info.has_fxsave_fxstor()).unwrap_or(false) {
+        if FEATURE_INFO.has_fxsave_fxstor() {
             trace!("Detected support for `fxsave` and `fxstor` instructions.");
             flags.insert(CR4Flags::OSFXSR);
         }
 
-        if FEATURE_INFO.as_ref().map(|info| info.has_mce()).unwrap_or(false) {
+        if FEATURE_INFO.has_mce() {
             trace!("Detected support for machine check exceptions.")
         }
 
-        if FEATURE_INFO.as_ref().map(|info| info.has_pcid()).unwrap_or(false) {
+        if FEATURE_INFO.has_pcid() {
             trace!("Detected support for process context IDs.");
             flags.insert(CR4Flags::PCIDE);
         }
@@ -256,7 +256,7 @@ unsafe fn arch_setup(is_bsp: bool) -> ! {
         // Enable use of the `NO_EXECUTE` page attribute, if supported.
         if libkernel::cpu::EXT_FUNCTION_INFO.as_ref().map(|func_info| func_info.has_execute_disable()).unwrap_or(false)
         {
-            libkernel::registers::x64::msr::IA32_EFER::set_nxe(true);
+            libkernel::registers::msr::IA32_EFER::set_nxe(true);
         } else {
             warn!("PC does not support the NX bit; system security will be compromised (this warning is purely informational).")
         }
@@ -457,7 +457,7 @@ pub(self) unsafe fn cpu_setup(is_bsp: bool) -> ! {
 
     //if is_bsp {
     use crate::{local_state::try_push_task, scheduling::*};
-    use libkernel::registers::x64::RFlags;
+    use libkernel::registers::RFlags;
 
     try_push_task(Task::new(
         TaskPriority::new(3).unwrap(),
@@ -466,7 +466,7 @@ pub(self) unsafe fn cpu_setup(is_bsp: bool) -> ! {
         RFlags::INTERRUPT_FLAG,
         *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
         *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
-        libkernel::registers::x64::control::CR3::read(),
+        libkernel::registers::control::CR3::read(),
     ))
     .unwrap();
 
