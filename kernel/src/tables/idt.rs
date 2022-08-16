@@ -1,31 +1,18 @@
-use core::cell::SyncUnsafeCell;
-use spin::Mutex;
 use x86_64::structures::idt::InterruptDescriptorTable;
 
-static IDT: SyncUnsafeCell<Mutex<InterruptDescriptorTable>> =
-    SyncUnsafeCell::new(Mutex::new(InterruptDescriptorTable::new()));
-
-/// Helper function for immutably accessing the IDT mutex.
-#[inline]
-fn get_idt() -> &'static Mutex<InterruptDescriptorTable> {
-    unsafe { &*IDT.get() }
+/// Stores the given IDT in the interrupt descriptor table register.
+///
+/// SAFETY: This function leaks the memory that the IDT is stored within, so it
+///         is assumed the caller will only invoke this once per core.
+///
+/// TODO:   Move to per-core IDT.
+pub unsafe fn store(idt: alloc::boxed::Box<InterruptDescriptorTable>) {
+    let idt = alloc::boxed::Box::leak(idt);
+    idt.load_unsafe();
 }
 
-/// Initialize the global IDT's exception and stub handlers.
-pub fn init_idt() {
-    assert!(
-        crate::tables::gdt::KCODE_SELECTOR.get().is_some(),
-        "Cannot initialize IDT before GDT (IDT entries use GDT kernel code segment selector)."
-    );
-
-    let mut idt = get_idt().lock();
-
-    crate::interrupts::set_exception_handlers(&mut *idt);
-    crate::interrupts::set_stub_handlers(&mut *idt);
-}
-
-/// Loads the global IDT using `lidt`.
-pub fn load_idt() {
-    let idt = get_idt().lock();
-    unsafe { idt.load_unsafe() };
+/// Loads the IDT from the interrupt descriptor table register.
+pub unsafe fn load() -> Option<&'static mut InterruptDescriptorTable> {
+    let idt_pointer = x86_64::instructions::tables::sidt();
+    idt_pointer.base.as_mut_ptr::<InterruptDescriptorTable>().as_mut()
 }

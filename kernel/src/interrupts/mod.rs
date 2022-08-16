@@ -1,7 +1,8 @@
 mod exceptions;
 mod stubs;
 
-pub mod pic8259;
+pub mod apic;
+pub mod pic;
 pub use exceptions::*;
 pub use stubs::*;
 
@@ -14,30 +15,50 @@ use x86_64::structures::idt::InterruptStackFrame;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
 #[allow(non_camel_case_types)]
 pub enum Vector {
-    Syscall = 0x80,
-    Timer = 0xA0,
-    /* 224-256 ARCH SPECIFIC */
+    Clock = 0xE0,
+
+    Syscall = 0xF0,
+    Timer = 0xF1,
+    Thermal = 0xF2,
+    Performance = 0xF3,
+    /* 0xF4..0xFC free for use */
+    Error = 0xFC,
+    LINT0 = 0xFD,
+    LINT1 = 0xFE,
+    SPURIOUS = 0xFF,
 }
 
 pub fn common_interrupt_handler(
     irq_vector: u64,
     stack_frame: &mut x86_64::structures::idt::InterruptStackFrame,
-    context: &mut GeneralRegisters,
+    cached_regs: &mut GeneralRegisters,
 ) {
     match Vector::try_from(irq_vector) {
-        Ok(vector) => match vector {
-            Vector::Syscall => todo!(),
-            Vector::Timer => todo!(),
-            Vector::Performance => todo!(),
-            Vector::ThermalSensor => todo!(),
-            Vector::Error => todo!(),
-            Vector::LINT0_VECTOR | Vector::LINT1_VECTOR | Vector::SPURIOUS_VECTOR => {}
-        },
-        Err(vector_raw) => warn!("Unhandled IRQ vector: {:?}", vector_raw),
-    }
+        // Allow external and spurious interrupts to do nothing
+        Ok(vector) if vector == Vector::Timer => {
+            crate::local_state::schedule_next_task(stack_frame, cached_regs);
+            crate::interrupts::apic::end_of_interrupt();
+        }
 
-    // TODO abstract this
-    libkernel::structures::apic::end_of_interrupt();
+        Ok(vector) if vector == Vector::Syscall => {
+            let control_ptr = cached_regs.rdi as *mut libkernel::syscall::Control;
+
+            if !crate::memory::get_kernel_page_manager()
+                .is_mapped(libkernel::Address::<libkernel::Virtual>::from_ptr(control_ptr))
+            {
+                cached_regs.rsi = libkernel::syscall::Error::ControlNotMapped as u64;
+                return;
+            }
+
+            cached_regs.rsi = 0xDEADC0DE;
+        }
+
+        Ok(vector) if matches!(vector, Vector::LINT0 | Vector::LINT1 | Vector::SPURIOUS) => {}
+        vector_result => {
+            warn!("Unhandled IRQ vector: {:?}", vector_result);
+            crate::interrupts::apic::end_of_interrupt();
+        }
+    }
 }
 
 /* EXCEPTION HANDLING */
@@ -77,12 +98,6 @@ pub(self) fn get_common_interrupt_handler() -> &'static InterruptHandler {
 }
 
 const PIC_BASE: u8 = 0xE0;
-const PERFORMANCE: u8 = 0xF0;
-const THERMAL_SENSOR: u8 = 0xF1;
-const ERROR: u8 = 0xFC;
-const LINT0_VECTOR: u8 = 0xFD;
-const LINT1_VECTOR: u8 = 0xFE;
-const SPURIOUS_VECTOR: u8 = 0xFF;
 
 /// Delivery mode for IPIs.
 #[repr(u32)]
@@ -169,5 +184,5 @@ extern "sysv64" fn irq_handoff(
     stack_frame: &mut InterruptStackFrame,
     context: &mut libkernel::cpu::GeneralRegisters,
 ) {
-    super::get_common_interrupt_handler()(irq_number, stack_frame, context);
+    get_common_interrupt_handler()(irq_number, stack_frame, context);
 }

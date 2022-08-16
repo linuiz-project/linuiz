@@ -9,17 +9,15 @@ Information about the PIC can be found here: https://en.wikipedia.org/wiki/Intel
 
 pub mod pit;
 
-use core::cell::SyncUnsafeCell;
-
-use super::PIC_BASE;
 use libkernel::io::port::{ReadWritePort, WriteOnlyPort};
+use num_enum::TryFromPrimitive;
 
 const CMD_INIT: u8 = 0x11;
 const CMD_END_OF_INTERRUPT: u8 = 0x20;
 const MODE_8086: u8 = 0x01;
 
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
 pub enum InterruptOffset {
     Timer = 0,
     Keyboard = 1,
@@ -75,7 +73,7 @@ impl InterruptLines {
     /// All interrupt lines disabled.
     #[inline(always)]
     pub const fn disabled() -> Self {
-        Self(0)
+        Self::empty()
     }
 }
 
@@ -103,7 +101,7 @@ impl PIC {
 /// A pair of chained PIC controllers.
 ///
 /// REMARK: This is the standard setup on x86.
-struct PICS([PIC; 2]);
+pub struct PICS([PIC; 2]);
 
 impl PICS {
     /// Create a new interface for the standard PIC1 and PIC2 controllers, specifying the desired interrupt offsets.
@@ -134,9 +132,9 @@ impl PICS {
         io_wait();
 
         // Assign the relevant offsets to each PIC in the chain.
-        self.0[0].data.write(self.pics[0].offset);
+        self.0[0].data.write(self.0[0].offset);
         io_wait();
-        self.0[1].data.write(self.pics[1].offset);
+        self.0[1].data.write(self.0[1].offset);
         io_wait();
 
         // Configure chaining between PICs 1 & 2.
@@ -192,7 +190,7 @@ lazy_static::lazy_static! {
 ///
 /// SAFETY: Setting new enabled interrupt lines has the possibility of adversely affecting control flow
 ///         unrelated to this function, or even this core's context. It is thus the responsibility of the
-///         programmer to ensure modifying the enabled lines will not result in unwanted behaviour.
+///         caller to ensure modifying the enabled lines will not result in unwanted behaviour.
 pub unsafe fn set_enabled_lines(enabled_lines: InterruptLines) {
     PIC8259.lock().init(enabled_lines)
 }

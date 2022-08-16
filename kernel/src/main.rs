@@ -19,7 +19,8 @@
     slice_ptr_get,
     new_uninit,
     inline_const,
-    sync_unsafe_cell
+    sync_unsafe_cell,
+    if_let_guard
 )]
 
 #[macro_use]
@@ -27,7 +28,6 @@ extern crate log;
 extern crate alloc;
 extern crate libkernel;
 
-mod clock;
 mod drivers;
 mod interrupts;
 mod local_state;
@@ -35,6 +35,7 @@ mod logging;
 mod memory;
 mod scheduling;
 mod tables;
+mod time;
 
 use libkernel::LinkerSymbol;
 
@@ -61,12 +62,9 @@ lazy_static::lazy_static! {
     pub static ref KMALLOC: memory::SLOB<'static> = unsafe { memory::SLOB::new() };
 }
 
-const LIMINE_REV: u64 = 0;
+pub const LIMINE_REV: u64 = 0;
 static LIMINE_SMP: limine::LimineSmpRequest = limine::LimineSmpRequest::new(LIMINE_REV);
-static LIMINE_RSDP: limine::LimineRsdpRequest = limine::LimineRsdpRequest::new(LIMINE_REV);
-static LIMINE_INF: limine::LimineBootInfoRequest = limine::LimineBootInfoRequest::new(LIMINE_REV);
-static LIMINE_MMAP: limine::LimineMmapRequest = limine::LimineMmapRequest::new(LIMINE_REV);
-static LIMINE_HHDM: limine::LimineHhdmRequest = limine::LimineHhdmRequest::new(LIMINE_REV);
+static LIMINE_INFO: limine::LimineBootInfoRequest = limine::LimineBootInfoRequest::new(LIMINE_REV);
 
 const DEV_UNMAP_LOWER_HALF_IDMAP: bool = false;
 static mut CON_OUT: crate::drivers::stdout::Serial = crate::drivers::stdout::Serial::new(crate::drivers::stdout::COM1);
@@ -75,14 +73,14 @@ static SMP_MEMORY_READY: core::sync::atomic::AtomicBool = core::sync::atomic::At
 #[no_mangle]
 unsafe extern "sysv64" fn _entry() -> ! {
     CON_OUT.init(crate::drivers::stdout::SerialSpeed::S115200);
-    match crate::drivers::stdout::set_stdout(&mut CON_OUT, log::LevelFilter::Debug) {
+    match crate::drivers::stdout::set_stdout(&mut CON_OUT, log::LevelFilter::Trace) {
         Ok(()) => info!("Successfully loaded into kernel."),
         Err(_) => libkernel::instructions::interrupts::wait_indefinite(),
     }
 
     /* log boot info */
     {
-        let boot_info = LIMINE_INF.get_response().get().expect("bootloader provided no info");
+        let boot_info = LIMINE_INFO.get_response().get().expect("bootloader provided no info");
         info!(
             "Bootloader Info     {} v{} (rev {})",
             core::ffi::CStr::from_ptr(boot_info.name.as_ptr().unwrap() as *const _).to_str().unwrap(),
@@ -116,64 +114,34 @@ unsafe extern "sysv64" fn _entry() -> ! {
         }
     }
 
-    /* load RSDP pointer */
-    {
-        // TODO Possibly move ACPI structure instances out of libkernel?
-        // Set RSDP pointer, so ACPI can be used.
-        libkernel::acpi::set_rsdp_ptr(
-            LIMINE_RSDP
-                .get_response()
-                .get()
-                .expect("bootloader provided to RSDP pointer (no ACPI support)")
-                .address
-                .as_ptr()
-                .unwrap() as *const _,
-        );
-    }
-
     /* init memory */
     {
-        use libkernel::memory::Page;
-
-        trace!("Initializing memory managers.");
-
-        let memory_map = LIMINE_MMAP
-            .get_response()
-            .get()
-            .and_then(|resp| resp.mmap())
-            .expect("no memory map has been provided by bootloader");
-
-        // Frame manager is always initialized first, so virtual structures may allocate frames.
-        crate::memory::init_kernel_frame_manager(memory_map);
+        trace!("Configuring kernel memory.");
 
         // Next, we create the kernel page manager, utilizing the bootloader's higher-half direct
         // mapping for virtual offset mapping.
-        let hhdm_addr = libkernel::Address::<libkernel::Virtual>::new(
-            LIMINE_HHDM.get_response().get().expect("bootloader did not provide a higher half direct mapping").offset
-                as usize,
-        );
+        let hhdm_addr = crate::memory::get_kernel_hhdm_addr();
         trace!("Higher half identity mapping base: {:?}", hhdm_addr);
-        crate::memory::init_kernel_page_manager(hhdm_addr);
 
-        let frame_manager = crate::memory::get_kernel_frame_manager().unwrap();
+        let frame_manager = crate::memory::get_kernel_frame_manager();
         // The frame manager's allocation table is allocated with identity mapping assumed,
         // so before we unmap the lower half virtual memory mapping (for kernel heap), we
         // must ensure the frame manager uses the HHDM base.
         frame_manager.slide_table_base(hhdm_addr.as_usize());
 
-        if DEV_UNMAP_LOWER_HALF_IDMAP {
-            let page_manager = crate::memory::get_kernel_page_manager().unwrap();
-            trace!("Unmapping lower half identity mappings.");
-            for entry in memory_map.iter() {
-                for page in (entry.base..(entry.base + entry.len))
-                    .step_by(0x1000)
-                    .map(|base| Page::from_index((base / 0x1000) as usize))
-                {
-                    // TODO maybe sometimes this fails? It did before, but isn't now. Could be because of an update to Limine.
-                    page_manager.unmap(&page, libkernel::memory::FrameOwnership::None, frame_manager).unwrap();
-                }
-            }
-        }
+        // if DEV_UNMAP_LOWER_HALF_IDMAP {
+        //     let page_manager = crate::memory::get_kernel_page_manager();
+        //     trace!("Unmapping lower half identity mappings.");
+        //     for entry in memory_map.iter() {
+        //         for page in (entry.base..(entry.base + entry.len))
+        //             .step_by(0x1000)
+        //             .map(|base| Page::from_index((base / 0x1000) as usize))
+        //         {
+        //             // TODO maybe sometimes this fails? It did before, but isn't now. Could be because of an update to Limine.
+        //             page_manager.unmap(&page, libkernel::memory::FrameOwnership::None, frame_manager).unwrap();
+        //         }
+        //     }
+        // }
 
         // The global kernel allocator must be set AFTER the upper half
         // identity mappings are purged, so that the allocation table
@@ -184,7 +152,7 @@ unsafe extern "sysv64" fn _entry() -> ! {
 
     debug!("Finished initial kernel setup.");
     SMP_MEMORY_READY.store(true, core::sync::atomic::Ordering::Relaxed);
-    arch_setup(true)
+    core_setup(true)
 }
 
 /// Entrypoint for AP processors.
@@ -193,11 +161,11 @@ unsafe extern "C" fn _smp_entry() -> ! {
     // Wait to ensure the machine is the correct state to execute cpu setup.
     while !SMP_MEMORY_READY.load(core::sync::atomic::Ordering::Relaxed) {}
 
-    arch_setup(false)
+    core_setup(false)
 }
 
 /// SAFETY: This function invariantly assumes it will only be called once.
-unsafe fn arch_setup(is_bsp: bool) -> ! {
+unsafe fn core_setup(is_bsp: bool) -> ! {
     /* load registers */
     {
         // Set CR0 flags.
@@ -269,16 +237,15 @@ unsafe fn arch_setup(is_bsp: bool) -> ! {
         // Always initialize GDT prior to configuring IDT.
         crate::tables::gdt::init();
 
-        if is_bsp {
-            // Due to the fashion in which the `x86_64` crate initializes the IDT entries,
-            // it must be ensured that the handlers are set only *after* the GDT has been
-            // properly initialized and loaded—otherwise, the `CS` value for the IDT entries
-            // is incorrect, and this causes very confusing GPFs.
-            crate::tables::idt::init_idt();
-            crate::interrupts::set_common_interrupt_handler(crate::interrupts::common_interrupt_handler);
-        }
-
-        crate::tables::idt::load_idt();
+        crate::interrupts::set_common_interrupt_handler(crate::interrupts::common_interrupt_handler);
+        // Due to the fashion in which the `x86_64` crate initializes the IDT entries,
+        // it must be ensured that the handlers are set only *after* the GDT has been
+        // properly initialized and loaded—otherwise, the `CS` value for the IDT entries
+        // is incorrect, and this causes very confusing GPFs.
+        let mut idt = Box::new(x86_64::structures::idt::InterruptDescriptorTable::new());
+        crate::interrupts::set_exception_handlers(idt.as_mut());
+        crate::interrupts::set_stub_handlers(idt.as_mut());
+        crate::tables::idt::store(idt);
 
         /* load tss */
         use crate::interrupts::StackTableIndex;
@@ -322,13 +289,11 @@ unsafe fn arch_setup(is_bsp: bool) -> ! {
         let tss_ptr = Box::leak({
             let mut tss = Box::new(x86_64::structures::tss::TaskStateSegment::new());
 
-            unsafe {
-                tss.privilege_stack_table[0] = VirtAddr::from_ptr(privilege_stack_ptr);
-                tss.interrupt_stack_table[StackTableIndex::Debug as usize] = VirtAddr::from_ptr(db_stack_ptr);
-                tss.interrupt_stack_table[StackTableIndex::NonMaskable as usize] = VirtAddr::from_ptr(nmi_stack_ptr);
-                tss.interrupt_stack_table[StackTableIndex::DoubleFault as usize] = VirtAddr::from_ptr(df_stack_ptr);
-                tss.interrupt_stack_table[StackTableIndex::MachineCheck as usize] = VirtAddr::from_ptr(mc_stack_ptr);
-            }
+            tss.privilege_stack_table[0] = VirtAddr::from_ptr(privilege_stack_ptr);
+            tss.interrupt_stack_table[StackTableIndex::Debug as usize] = VirtAddr::from_ptr(db_stack_ptr);
+            tss.interrupt_stack_table[StackTableIndex::NonMaskable as usize] = VirtAddr::from_ptr(nmi_stack_ptr);
+            tss.interrupt_stack_table[StackTableIndex::DoubleFault as usize] = VirtAddr::from_ptr(df_stack_ptr);
+            tss.interrupt_stack_table[StackTableIndex::MachineCheck as usize] = VirtAddr::from_ptr(mc_stack_ptr);
 
             tss
         }) as *mut _;
@@ -371,7 +336,15 @@ unsafe fn arch_setup(is_bsp: bool) -> ! {
         // ... and restore cached GDT.
         tables::lgdt(&cur_gdt);
 
-        trace!("TSS loaded.");
+        trace!("TSS loaded, and temporary GDT trashed.");
+    }
+
+    /* global clock */
+    trace!("Loading ACPI timer as global system clock.");
+    {
+        crate::time::clock::set_system_clock(alloc::boxed::Box::new(
+            crate::time::clock::ACPIClock::load().expect("failed to load ACPI timer"),
+        ));
     }
 
     trace!("Arch-specific local setup complete.");
@@ -433,7 +406,7 @@ fn syscall_test() -> ! {
 
         unsafe {
             core::arch::asm!(
-                "int 0x80",
+                "int 0xF0",
                 in("rdi") &raw const control,
                 out("rsi") result
             );
@@ -441,21 +414,18 @@ fn syscall_test() -> ! {
 
         info!("{:#X}", result);
 
-        clock::busy_wait_msec(500);
+        use crate::time::clock;
+        let wait_window = (clock::get_frequency() / 1000) * 500;
+        let target_wait = clock::get_timestamp() + wait_window;
+        while clock::get_timestamp() < target_wait {}
     }
 }
 
 /// SAFETY: This function invariantly assumes it will be called only once per core.
 #[inline(never)]
 pub(self) unsafe fn cpu_setup(is_bsp: bool) -> ! {
-    if is_bsp {
-        debug!("Configuring global wall clock.");
-        crate::clock::configure_and_enable();
-    }
-
     crate::local_state::init(is_bsp);
 
-    //if is_bsp {
     use crate::{local_state::try_push_task, scheduling::*};
     use libkernel::registers::RFlags;
 
@@ -470,39 +440,6 @@ pub(self) unsafe fn cpu_setup(is_bsp: bool) -> ! {
     ))
     .unwrap();
 
-    // Add a number of test tasks to get kernel output, test scheduling, and test logging.
-    for _ in 0..1 {
-        // try_push_task(Task::new(
-        //     TaskPriority::new(1).unwrap(),
-        //     logging_test,
-        //     TaskStackOption::Pages(1),
-        //     RFlags::INTERRUPT_FLAG,
-        //     *crate::taregisters::x64SELECTOR.get().unwrap(),
-        //     *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
-        //     libkernel::registers::x86_64::control::CR3::read(),
-        // ))
-        // .unwrap();
-    }
-
     crate::local_state::try_begin_scheduling();
     libkernel::instructions::interrupts::wait_indefinite()
-
-    /* ENABLE SYSCALL */
-    // {
-    //     use crate::tables::gdt;
-    //     use libkernel::registers::msr;
-
-    //     // Configure system call environment registers.
-    //     msr::IA32_STAR::set_selectors(
-    //         *gdt::KCODE_SELECTOR.get().unwrap(),
-    //         *gdt::KDATA_SELECTOR.get().unwrap(),
-    //     );
-    //     msr::IA32_LSTAR::set_syscall(syscall::syscall_enter);
-    //     msr::IA32_SFMASK::set_rflags_mask(libkernel::registers::RFlags::all());
-    //     // Enable `syscall`/`sysret`.
-    //     msr::IA32_EFER::set_sce(true);
-    // }
-
-    // libkernel::registers::stack::RSP::write(libkernel::memory::alloc_stack(1, true));
-    // libkernel::cpu::ring3_enter(test_user_function, libkernel::registers::RFlags::empty());
 }

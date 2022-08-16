@@ -1,18 +1,19 @@
+use crate::interrupts::apic;
+use crate::time::clock;
 use alloc::boxed::Box;
-use libkernel::structures::apic;
 
 /// Gets the best (most precise) local timer available.
 ///
 /// SAFETY: This function initializes the APIC timer. The caller must ensure this will not cause
 ///         adverse effects throughout the rest of the program.
-pub unsafe fn configure_new_timer(freq: u16, busy_wait_ms: impl Fn(usize)) -> Box<dyn Timer> {
-    let timer = if let Some(tsc_timer) = TSCTimer::new(freq, busy_wait_ms) {
-        Box::new(tsc_timer as dyn Timer)
-    } else if let Some(apic_timer) = APICTimer::new(freq, busy_wait_ms) {
-        Box::new(apic_timer as dyn Timer)
+pub unsafe fn configure_new_timer(freq: u16) -> Box<dyn Timer> {
+    if let Some(tsc_timer) = TSCTimer::new(freq) {
+        Box::new(tsc_timer)
+    } else if let Some(apic_timer) = APICTimer::new(freq) {
+        Box::new(apic_timer)
     } else {
         panic!("no timers available! APIC is not supported?")
-    };
+    }
 }
 
 const MS_WINDOW: u64 = 10;
@@ -44,7 +45,7 @@ impl APICTimer {
     /// SAFETY: Caller must ensure that reconfiguring the APIC timer mode will not adversely
     ///         affect software execution, and additionally that the [`crate::interrupts::Vector::LocalTimer`] has
     ///         a proper handler.
-    pub unsafe fn new(set_freq: u16, busy_wait_ms: impl Fn(usize)) -> Option<Self> {
+    pub unsafe fn new(set_freq: u16) -> Option<Self> {
         if *apic::xAPIC_SUPPORT || *apic::x2APIC_SUPPORT {
             apic::get_timer().set_mode(apic::TimerMode::OneShot);
 
@@ -53,16 +54,17 @@ impl APICTimer {
             //      can be done when the interrupt device is abstracted out into `libkernel`.
 
             let freq = {
-                // Wait on the global timer, to ensure we're starting the count
-                // on the rising edge of each millisecond.
-                busy_wait_ms(1);
-                apic::set_timer_initial_count(u32::MAX);
-                busy_wait_ms(MS_WINDOW);
+                let wait_window = (clock::get_frequency() / 1000) * MS_WINDOW;
 
-                ((u32::MAX - apic::get_timer_current_count()) as u64) * (1000 / MS_WINDOW)
+                let target_wait = clock::get_timestamp() + wait_window;
+                apic::set_timer_initial_count(u32::MAX);
+                while clock::get_timestamp() < target_wait {}
+                let timer_count = apic::get_timer_current_count();
+
+                ((u32::MAX - timer_count) as u64) * (1000 / MS_WINDOW)
             };
 
-            Some(Self((freq / set_freq) as u32))
+            Some(Self((freq / (set_freq as u64)) as u32))
         } else {
             None
         }
@@ -70,10 +72,10 @@ impl APICTimer {
 }
 
 impl Timer for APICTimer {
-    unsafe fn set_next_wait(&mut self, interval_multiplier: u32) {
+    unsafe fn set_next_wait(&mut self, interval_multiplier: u16) {
         assert!(self.0 > 0, "timer frequency has not been configured");
 
-        let timer_wait = self.0.checked_mul(interval_multiplier).expect("timer interval multiplier overflowed");
+        let timer_wait = self.0.checked_mul(interval_multiplier as u32).expect("timer interval multiplier overflowed");
 
         apic::set_timer_initial_count(timer_wait);
     }
@@ -88,7 +90,7 @@ impl TSCTimer {
     /// SAFETY: Caller must ensure that reconfiguring the APIC timer mode will not adversely
     ///         affect software execution, and additionally that the [crate::interrupts::Vector::LocalTimer] vector has
     ///         a proper handler.
-    pub unsafe fn new(set_freq: u16, busy_wait_ms: impl Fn(usize)) -> Option<Self> {
+    pub unsafe fn new(set_freq: u16) -> Option<Self> {
         if (*apic::xAPIC_SUPPORT || *apic::x2APIC_SUPPORT)
             && libkernel::cpu::FEATURE_INFO.has_tsc()
             && libkernel::cpu::FEATURE_INFO.has_tsc_deadline()
@@ -104,16 +106,17 @@ impl TSCTimer {
                 .unwrap_or_else(|| {
                     trace!("CPU does not support TSC frequency reporting via CPUID.");
 
-                    // Wait on the timer, to ensure we're starting the count on the rising edge of a new millisecond.
-                    busy_wait_ms(1);
+                    let wait_window = (clock::get_frequency() / 1000) * MS_WINDOW;
+
+                    let target_wait = clock::get_timestamp() + wait_window;
                     let start_tsc = core::arch::x86_64::_rdtsc();
-                    busy_wait_ms(MS_WINDOW);
+                    while clock::get_timestamp() < target_wait {}
                     let end_tsc = core::arch::x86_64::_rdtsc();
 
                     (end_tsc - start_tsc) * (1000 / MS_WINDOW)
                 });
 
-            Some(freq / set_freq)
+            Some(Self(freq / (set_freq as u64)))
         } else {
             None
         }
@@ -121,7 +124,7 @@ impl TSCTimer {
 }
 
 impl Timer for TSCTimer {
-    unsafe fn set_next_wait(&mut self, interval_multiplier: u32) {
+    unsafe fn set_next_wait(&mut self, interval_multiplier: u16) {
         assert!(self.0 > 0, "timer frequency has not been configured");
 
         let tsc_wait = self.0.checked_mul(interval_multiplier as u64).expect("timer interval multiplier overflowed");

@@ -25,7 +25,7 @@ impl log::Log for KernelLogger {
 
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
-            let ticks = crate::clock::get_ticks();
+            let ticks = 0;
             let whole_time = ticks / 1000;
             let frac_time = ticks % 1000;
 

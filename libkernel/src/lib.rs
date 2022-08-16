@@ -32,7 +32,6 @@ mod addr;
 mod macros;
 
 pub use addr::*;
-pub mod acpi;
 pub mod cell;
 pub mod collections;
 pub mod cpu;
@@ -41,7 +40,6 @@ pub mod instructions;
 pub mod io;
 pub mod memory;
 pub mod registers;
-pub mod structures;
 pub mod sync;
 pub mod syscall;
 

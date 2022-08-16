@@ -2,56 +2,43 @@ mod slob;
 
 pub use slob::*;
 
-use libkernel::{
-    cell::SyncOnceCell,
-    memory::{FrameManager, PageManager},
-};
+use libkernel::memory::{FrameManager, PageManager};
 use libkernel::{Address, Virtual};
+use spin::Once;
 
-static KERNEL_FRAME_MANAGER: SyncOnceCell<FrameManager> = unsafe { SyncOnceCell::new() };
+static LIMINE_MMAP: limine::LimineMmapRequest = limine::LimineMmapRequest::new(crate::LIMINE_REV);
+static LIMINE_HHDM: limine::LimineHhdmRequest = limine::LimineHhdmRequest::new(crate::LIMINE_REV);
 
-/// Sets the kernel frame manager.
-pub fn init_kernel_frame_manager(memory_map: &[limine::LimineMemmapEntry]) {
-    // Explicitly ensure kernel frame manager has not been set, to avoid creating an entirely new
-    // FrameManager structure (which would be necessary for check if we used the `Result` from `.set()`).
-    if let None = KERNEL_FRAME_MANAGER.get() {
-        KERNEL_FRAME_MANAGER.set(FrameManager::from_mmap(memory_map)).ok();
-    } else {
-        panic!("Kernel frame manager already exists!");
-    }
-}
-
+static KERNEL_FRAME_MANAGER: Once<FrameManager> = Once::new();
 /// Gets the kernel frame manager.
-pub fn get_kernel_frame_manager() -> Option<&'static FrameManager<'static>> {
-    KERNEL_FRAME_MANAGER.get()
+pub fn get_kernel_frame_manager() -> &'static FrameManager<'static> {
+    KERNEL_FRAME_MANAGER.call_once(|| {
+        FrameManager::from_mmap(
+            LIMINE_MMAP
+                .get_response()
+                .get()
+                .expect("bootloader provided no memory map response")
+                .mmap()
+                .expect("bootloader provided no memory map entries"),
+        )
+    })
 }
 
-static HHDM_ADDR: SyncOnceCell<Address<Virtual>> = unsafe { SyncOnceCell::new() };
-static KERNEL_PAGE_MANAGER: SyncOnceCell<PageManager> = unsafe { SyncOnceCell::new() };
-
-/// Sets the kernel page manager.
-pub fn init_kernel_page_manager(hhdm_addr: Address<Virtual>) {
-    if let Err(_) = HHDM_ADDR.set(hhdm_addr) {
-        panic!("Kernel higher-half direct mapping address already set!");
-    }
-
-    // Explicitly ensure kernel page manager has not been set, to avoid creating an entirely new
-    // PageManager structure (which would be necessary for check if we used the `Result` from `.set()`).
-    if let None = KERNEL_PAGE_MANAGER.get() {
-        KERNEL_PAGE_MANAGER
-            .set(unsafe { PageManager::from_current(&libkernel::memory::Page::from_addr(hhdm_addr)) })
-            .ok();
-    } else {
-        panic!("Kernel page manager already exists.");
-    }
-}
-
+static HHDM_ADDR: Once<Address<Virtual>> = Once::new();
 // Gets the kernel's higher half direct mapping page.
-pub fn get_kernel_hhdm_addr() -> Option<Address<Virtual>> {
-    HHDM_ADDR.get().map(|addr| *addr)
+pub fn get_kernel_hhdm_addr() -> Address<Virtual> {
+    *HHDM_ADDR.call_once(|| {
+        Address::<Virtual>::new(
+            LIMINE_HHDM.get_response().get().expect("bootloader provided no higher-half direct mapping").offset
+                as usize,
+        )
+        .expect("bootloader provided an invalid higher-half direct mapping address")
+    })
 }
 
+static KERNEL_PAGE_MANAGER: Once<PageManager> = Once::new();
 /// Gets the kernel page manager.
-pub fn get_kernel_page_manager() -> Option<&'static PageManager> {
-    KERNEL_PAGE_MANAGER.get()
+pub fn get_kernel_page_manager() -> &'static PageManager {
+    KERNEL_PAGE_MANAGER
+        .call_once(|| unsafe { PageManager::from_current(&libkernel::memory::Page::from_addr(get_kernel_hhdm_addr())) })
 }

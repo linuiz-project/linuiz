@@ -1,5 +1,3 @@
-mod timer;
-
 use crate::scheduling::{Scheduler, Task, TaskPriority};
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicUsize, Ordering};
@@ -14,7 +12,7 @@ static ACTIVE_CPUS_LIST: spin::RwLock<Vec<u32>> = spin::RwLock::new(Vec::new());
 pub(crate) struct LocalState {
     magic: u64,
     core_id: u32,
-    timer: alloc::boxed::Box<dyn timer::Timer>,
+    timer: alloc::boxed::Box<dyn crate::time::timers::Timer>,
     scheduler: Scheduler,
     default_task: Task,
     cur_task: Option<Task>,
@@ -35,12 +33,14 @@ static LOCAL_STATES_BASE: AtomicUsize = AtomicUsize::new(0);
 fn get_local_state() -> Option<&'static mut LocalState> {
     unsafe {
         let local_state_ptr = (LOCAL_STATES_BASE.load(Ordering::Relaxed) as *mut LocalState)
-            .add(libkernel::structures::apic::get_id() as usize);
+            .add(crate::interrupts::apic::get_id() as usize);
 
-        crate::memory::get_kernel_page_manager()
-            .filter(|page_manager| page_manager.is_mapped(Address::<Virtual>::from_ptr(local_state_ptr)))
-            .and_then(|_| local_state_ptr.as_mut())
-            .filter(|local_state| local_state.is_valid_magic())
+        match crate::memory::get_kernel_page_manager().is_mapped(Address::<Virtual>::from_ptr(local_state_ptr)) {
+            true if let Some(local_state) = local_state_ptr.as_mut() && local_state.is_valid_magic() => {
+                Some(local_state)
+            },
+            _ => None
+        }
     }
 }
 
@@ -53,7 +53,7 @@ pub unsafe fn init(is_bsp: bool) {
             0,
             // Cosntruct the local state pointer (with slide) via the `Address` struct, to
             // automatically sign extend.
-            Address::<Virtual>::new(
+            Address::<Virtual>::new_truncate(
                 ((510 * libkernel::memory::PML4_ENTRY_MEM_SIZE)
                     + (libkernel::rand(0..(u32::MAX as u64)).unwrap_or(0) as usize))
                     & !0xFFF,
@@ -66,6 +66,8 @@ pub unsafe fn init(is_bsp: bool) {
 
     let core_id = libkernel::cpu::get_id();
 
+    trace!("Configuring local state for core: {:#X}", core_id);
+
     // Ensure we load the local state pointer via `cpuid` to avoid using the APIC before it is initialized.
     let local_state_ptr = (LOCAL_STATES_BASE.load(Ordering::Relaxed) as *mut LocalState).add(core_id as usize);
 
@@ -73,42 +75,37 @@ pub unsafe fn init(is_bsp: bool) {
         use libkernel::memory::Page;
 
         // Map the pages this local state will utilize.
-        let frame_manager = crate::memory::get_kernel_frame_manager().unwrap();
-        let page_manager = crate::memory::get_kernel_page_manager().unwrap();
+        let frame_manager = crate::memory::get_kernel_frame_manager();
+        let page_manager = crate::memory::get_kernel_page_manager();
         let base_page = Page::from_ptr(local_state_ptr);
         let end_page = base_page.forward_checked(core::mem::size_of::<LocalState>() / 0x1000).unwrap();
         (base_page..end_page)
             .for_each(|page| page_manager.auto_map(&page, libkernel::memory::PageAttributes::RW, frame_manager));
 
         // Initialize the local APIC in the most advanced mode.
-        libkernel::structures::apic::init(is_bsp, frame_manager, page_manager);
+        crate::interrupts::apic::init(frame_manager, page_manager);
     }
 
     /* CONFIGURE TIMER */
+    use crate::interrupts::apic;
     use crate::interrupts::Vector;
-    use libkernel::structures::apic;
 
     apic::software_reset();
     apic::set_timer_divisor(apic::TimerDivisor::Div1);
     apic::get_timer().set_vector(Vector::Timer as u8).set_masked(false);
     apic::get_error().set_vector(Vector::Error as u8).set_masked(false);
     apic::get_performance().set_vector(Vector::Performance as u8);
-    apic::get_thermal_sensor().set_vector(Vector::ThermalSensor as u8);
+    apic::get_thermal_sensor().set_vector(Vector::Thermal as u8);
     // LINT0&1 should be configured by the APIC reset.
 
     // Ensure interrupts are enabled after APIC is reset.
     libkernel::instructions::interrupts::enable();
 
-    trace!("Configuring core-local timer.");
-    // TODO crate::interrupts::set_handler_fn(Vector::Timer, local_timer_handler);
-    let mut timer = timer::get_best_timer();
-    timer.set_frequency(1000);
-
     trace!("Writing local state struct out to memory.");
     local_state_ptr.write(LocalState {
         magic: LocalState::MAGIC,
         core_id,
-        timer,
+        timer: crate::time::timers::configure_new_timer(1000),
         scheduler: Scheduler::new(false),
         default_task: Task::new(
             TaskPriority::new(1).unwrap(),
@@ -130,15 +127,16 @@ pub unsafe fn init(is_bsp: bool) {
     trace!("Local state structure written to memory and validated.");
 
     let mut active_cpus_list = ACTIVE_CPUS_LIST.write();
-    active_cpus_list.push(libkernel::structures::apic::get_id());
+    active_cpus_list.push(crate::interrupts::apic::get_id());
 }
 
-fn local_timer_handler(
+/// Attempts to schedule the next task in the local task queue.
+pub fn schedule_next_task(
     stack_frame: &mut x86_64::structures::idt::InterruptStackFrame,
     cached_regs: &mut libkernel::cpu::GeneralRegisters,
 ) {
-    const MIN_TIME_SLICE_MS: u32 = 1;
-    const PRIO_TIME_SLICE_MS: u32 = 2;
+    const MIN_TIME_SLICE_MS: u16 = 1;
+    const PRIO_TIME_SLICE_MS: u16 = 2;
 
     let local_state = get_local_state().expect("local state is uninitialized");
 
@@ -242,7 +240,7 @@ fn local_timer_handler(
             // Set current page tables.
             CR3::write(next_task.cr3.0, next_task.cr3.1);
 
-            let next_timer_ms = (next_task.priority().get() as u32) * PRIO_TIME_SLICE_MS;
+            let next_timer_ms = (next_task.priority().get() as u16) * PRIO_TIME_SLICE_MS;
             local_state.cur_task = Some(next_task);
 
             next_timer_ms
@@ -263,15 +261,15 @@ fn local_timer_handler(
             MIN_TIME_SLICE_MS
         };
 
-        reload_timer(core::num::NonZeroU32::new(next_timer_ms).unwrap());
-        libkernel::structures::apic::end_of_interrupt();
+        reload_timer(core::num::NonZeroU16::new(next_timer_ms).unwrap());
+        crate::interrupts::apic::end_of_interrupt();
     }
 }
 
 /// Reloads the local APIC timer with the given millisecond multiplier.
 ///
 /// SAFETY: Caller is expected to only reload timer when appropriate.
-unsafe fn reload_timer(freq_multiplier: core::num::NonZeroU32) {
+unsafe fn reload_timer(freq_multiplier: core::num::NonZeroU16) {
     get_local_state()
         .expect("reload timer called for uninitialized local state")
         .timer
@@ -287,7 +285,7 @@ pub fn try_begin_scheduling() {
         if !scheduler.is_enabled() {
             scheduler.enable();
 
-            unsafe { reload_timer(core::num::NonZeroU32::new_unchecked(1)) };
+            unsafe { reload_timer(core::num::NonZeroU16::new_unchecked(1)) };
         }
     }
 }

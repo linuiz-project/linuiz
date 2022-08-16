@@ -11,6 +11,6 @@ impl CR2 {
             core::arch::asm!("mov {}, cr2", out(reg) value, options(nomem, nostack, preserves_flags));
         }
 
-        Address::<Virtual>::new(value)
+        Address::<Virtual>::new_truncate(value)
     }
 }

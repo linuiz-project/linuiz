@@ -5,6 +5,7 @@
 use core::arch::asm;
 
 /* 8 BIT */
+#[inline(always)]
 pub unsafe fn read8(port: u16) -> u8 {
     let result: u8;
 
@@ -13,11 +14,13 @@ pub unsafe fn read8(port: u16) -> u8 {
     result
 }
 
+#[inline(always)]
 pub unsafe fn write8(port: u16, value: u8) {
     asm!("out dx, al", in("dx") port, in("al") value, options(nostack, nomem));
 }
 
 /* 16 BIT */
+#[inline(always)]
 pub unsafe fn read16(port: u16) -> u16 {
     let result: u16;
 
@@ -26,11 +29,13 @@ pub unsafe fn read16(port: u16) -> u16 {
     result
 }
 
+#[inline(always)]
 pub unsafe fn write16(port: u16, value: u16) {
     asm!("out dx, ax", in("dx") port, in("ax") value, options(nostack, nomem));
 }
 
 /* 32 BIT */
+#[inline(always)]
 pub unsafe fn read32(port: u16) -> u32 {
     let result: u32;
 
@@ -39,6 +44,7 @@ pub unsafe fn read32(port: u16) -> u32 {
     result
 }
 
+#[inline(always)]
 pub unsafe fn write32(port: u16, value: u32) {
     asm!("out dx, eax", in("dx") port, in("eax") value, options(nostack, nomem));
 }

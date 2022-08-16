@@ -68,14 +68,17 @@ impl<T: PortRead> ReadOnlyPort<T> {
     /// Constructs a port wrapping the given address
     ///
     /// This method is unsafe because the caller must ensure the given port is a valid address
+    #[inline(always)]
     pub const unsafe fn new(port: u16) -> Self {
         ReadOnlyPort { port, phantom: PhantomData }
     }
 
+    #[inline(always)]
     pub const fn port_num(&self) -> u16 {
         self.port
     }
 
+    #[inline(always)]
     pub fn read(&self) -> T {
         unsafe { T::read(self.port_num()) }
     }
@@ -95,14 +98,17 @@ impl<T: PortWrite> WriteOnlyPort<T> {
     /// Constructs a port wrapping the given address
     ///
     /// This method is unsafe because the caller must ensure the given port is a valid address
+    #[inline(always)]
     pub const unsafe fn new(port: u16) -> Self {
         WriteOnlyPort { port, phantom: PhantomData }
     }
 
+    #[inline(always)]
     pub const fn port_num(&self) -> u16 {
         self.port
     }
 
+    #[inline(always)]
     pub fn write(&mut self, value: T) {
         unsafe { T::write(self.port_num(), value) }
     }
@@ -120,18 +126,22 @@ impl<T: PortReadWrite> ReadWritePort<T> {
     /// Constructs a port wrapping the given address
     ///
     /// This method is unsafe because the caller must ensure the given port is a valid address
+    #[inline(always)]
     pub const unsafe fn new(port: u16) -> Self {
         ReadWritePort { port, phantom: PhantomData }
     }
 
+    #[inline(always)]
     pub const fn port_num(&self) -> u16 {
         self.port
     }
 
+    #[inline(always)]
     pub fn read(&self) -> T {
         unsafe { T::read(self.port_num()) }
     }
 
+    #[inline(always)]
     pub fn write(&mut self, value: T) {
         unsafe { T::write(self.port_num(), value) }
     }

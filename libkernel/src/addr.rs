@@ -127,11 +127,12 @@ impl core::fmt::Debug for Address<Physical> {
 }
 
 impl Address<Virtual> {
-    pub const fn new(addr: usize) -> Self {
+    /// Returns a safe instance of a virtual address, or `None` if the provided address is non-canonical.
+    pub const fn new(addr: usize) -> Option<Self> {
         match addr >> 47 {
-            0 | 0x1FFFF => Self(addr, PhantomData),
-            1 => Self::new_truncate(addr),
-            _ => panic!("given address is not canonical (bits 48..64 contain data)"),
+            0 | 0x1FFFF => Some(Self(addr, PhantomData)),
+            1 => Some(Self::new_truncate(addr)),
+            _ => None,
         }
     }
 
@@ -142,7 +143,7 @@ impl Address<Virtual> {
 
     #[inline]
     pub fn from_ptr<T>(ptr: *const T) -> Self {
-        Self::new(ptr as usize)
+        Self::new_truncate(ptr as usize)
     }
 
     #[inline]
@@ -201,7 +202,7 @@ impl core::ops::Add<Address<Virtual>> for Address<Virtual> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
-        Self::new(self.0 + rhs.0)
+        Self::new_truncate(self.0 + rhs.0)
     }
 }
 
@@ -209,7 +210,7 @@ impl core::ops::Add<usize> for Address<Virtual> {
     type Output = Self;
 
     fn add(self, rhs: usize) -> Self::Output {
-        Self::new(self.0 + rhs)
+        Self::new_truncate(self.0 + rhs)
     }
 }
 
@@ -223,7 +224,7 @@ impl core::ops::Sub<Address<Virtual>> for Address<Virtual> {
     type Output = Self;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        Self::new(self.0 - rhs.0)
+        Self::new_truncate(self.0 - rhs.0)
     }
 }
 
@@ -231,7 +232,7 @@ impl core::ops::Sub<usize> for Address<Virtual> {
     type Output = Self;
 
     fn sub(self, rhs: usize) -> Self::Output {
-        Self::new(self.0 - rhs)
+        Self::new_truncate(self.0 - rhs)
     }
 }
 

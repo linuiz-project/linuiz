@@ -1,51 +1,48 @@
 #![allow(non_camel_case_types, non_upper_case_globals)]
 
-use crate::{interrupts::x86_64::InterruptDeliveryMode, registers::msr::IA32_APIC_BASE};
 use bit_field::BitField;
 use core::{marker::PhantomData, sync::atomic::Ordering};
+use libkernel::registers::msr::IA32_APIC_BASE;
+use libkernel::InterruptDeliveryMode;
 
 lazy_static::lazy_static! {
-    pub static ref xAPIC_SUPPORT: bool = crate::cpu::CPUID.get_feature_info().map(|info| info.has_apic()).unwrap_or(false);
-    pub static ref x2APIC_SUPPORT: bool = crate::cpu::CPUID.get_feature_info().map(|info| info.has_x2apic()).unwrap_or(false);
+    pub static ref xAPIC_SUPPORT: bool = libkernel::cpu::CPUID.get_feature_info().map(|info| info.has_apic()).unwrap_or(false);
+    pub static ref x2APIC_SUPPORT: bool = libkernel::cpu::CPUID.get_feature_info().map(|info| info.has_x2apic()).unwrap_or(false);
 }
 
 // xAPIC needs a sized field to avoid being optimized to zero-sized (even
-// with the repr alignment), so a `usize` is employed. It should *never*
+// with the page-aligned repr), so a `usize` is employed. It should *never*
 // be read, it's *only* to force the compiler to provide padding.
-//
-// Specifically, this behaviour is categorized as a bug. Hopefully the issues
-// with ZSTs are resolved some time.
 #[repr(C, align(0x1000))]
-struct xAPIC(core::mem::MaybeUninit<usize>);
+struct xAPIC(usize);
 unsafe impl Send for xAPIC {}
 unsafe impl Sync for xAPIC {}
 
-static xLAPIC: core::cell::SyncUnsafeCell<xAPIC> =
-    core::cell::SyncUnsafeCell::new(xAPIC(core::mem::MaybeUninit::new(0)));
-static xLAPIC_ENABLED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+static xLAPIC: xAPIC = xAPIC(0);
+static xLAPIC_INITIALIZED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 /// Initializes the core-local APIC in the most advanced mode possible, and hardware-enables it.
 ///
 /// SAFETY: Caller must ensure this method is called only once per core.
 pub unsafe fn init(
-    frame_manager: &'static crate::memory::FrameManager,
-    page_manager: &'static crate::memory::PageManager,
+    frame_manager: &'static libkernel::memory::FrameManager,
+    page_manager: &'static libkernel::memory::PageManager,
 ) {
-    if crate::cpu::is_bsp() {
+    if xLAPIC_INITIALIZED.compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
         trace!("Configuring memory mappings for xAPIC.");
-        let xlapic_page = crate::memory::Page::from_ptr(xLAPIC.get());
+        let xlapic_page = libkernel::memory::Page::from_ptr(&raw const xLAPIC);
         let xlapic_old_frame_index = page_manager.get_mapped_to(&xlapic_page).unwrap();
         let xlapic_new_frame_index = xAPIC_BASE_ADDR / 0x1000;
 
         trace!("Locking xAPIC frame ({:#X}).", xAPIC_BASE_ADDR);
         // We don't know if the xAPIC base address lies within physical memory (or is out of range), so
         // all of the frame manipulation must be done manually (rather than automatically by the page manager).
-        use crate::memory::FrameError;
+        use libkernel::memory::FrameError;
         match frame_manager.lock(xlapic_new_frame_index) {
             Ok(_) | Err(FrameError::OutOfRange(_)) => {}
             Err(err) => panic!("encountered error while configuring xAPIC: {:?}", err),
         }
-        frame_manager.try_modify_type(xlapic_new_frame_index, crate::memory::FrameType::MMIO).ok();
+        frame_manager.try_modify_type(xlapic_new_frame_index, libkernel::memory::FrameType::MMIO).ok();
 
         trace!("Mapping kernel page {:?} to xAPIC frame.", xlapic_page);
         // Map the xAPIC frames into the kernel higher-half address space.
@@ -55,8 +52,8 @@ pub unsafe fn init(
             .map(
                 &xlapic_page,
                 xlapic_new_frame_index,
-                crate::memory::FrameOwnership::None,
-                crate::memory::PageAttributes::MMIO,
+                libkernel::memory::FrameOwnership::None,
+                libkernel::memory::PageAttributes::RW,
                 frame_manager,
             )
             .unwrap();
@@ -64,13 +61,7 @@ pub unsafe fn init(
         trace!("Freeing old xLAPIC kernel frame.");
         // Ensure we free the old xLAPIC frame for use.
         frame_manager.free(xlapic_old_frame_index).ok();
-
-        // Finally, allow the xLAPIC to be used.
-        xLAPIC_ENABLED.store(true, Ordering::Relaxed);
     }
-
-    // Wait until the xAPIC has been mapped into the kernel.
-    while !xLAPIC_ENABLED.load(Ordering::Relaxed) {}
 
     trace!("Hardware enabling the local APIC.");
     if *x2APIC_SUPPORT {
@@ -156,7 +147,7 @@ impl InterruptCommand {
     }
 
     pub const fn new_init(apic_id: u32) -> Self {
-        Self::new(0, apic_id, crate::InterruptDeliveryMode::INIT, false, true)
+        Self::new(0, apic_id, libkernel::InterruptDeliveryMode::INIT, false, true)
     }
 
     pub const fn new_sipi(vector: u8, apic_id: u32) -> Self {
@@ -249,7 +240,7 @@ fn get_mode() -> Mode {
     if IA32_APIC_BASE::get_hw_enabled() {
         if IA32_APIC_BASE::get_is_x2_mode() {
             Mode::x2APIC
-        } else if xLAPIC_ENABLED.load(Ordering::Relaxed) {
+        } else if xLAPIC_INITIALIZED.load(Ordering::Relaxed) {
             Mode::xAPIC
         } else {
             Mode::None
@@ -262,8 +253,10 @@ fn get_mode() -> Mode {
 /// Reads the given register from the local APIC. Panics if APIC is not properly initialized.
 unsafe fn read_register(register: Register) -> u64 {
     match get_mode() {
-        Mode::xAPIC => (((xLAPIC.get() as usize) + register.as_xapic_offset()) as *mut u32).read_volatile() as u64,
-        Mode::x2APIC => crate::registers::msr::rdmsr(register.as_x2apic_msr()),
+        Mode::xAPIC => {
+            ((((&raw const xLAPIC) as usize) + register.as_xapic_offset()) as *mut u32).read_volatile() as u64
+        }
+        Mode::x2APIC => libkernel::registers::msr::rdmsr(register.as_x2apic_msr()),
         Mode::None => panic!("cannot write; core-local APIC is not in a valid mode"),
     }
 }
@@ -272,9 +265,9 @@ unsafe fn read_register(register: Register) -> u64 {
 unsafe fn write_register(register: Register, value: u64) {
     match get_mode() {
         Mode::xAPIC => {
-            (((xLAPIC.get() as usize) + register.as_xapic_offset()) as *mut u32).write_volatile(value as u32)
+            ((((&raw const xLAPIC) as usize) + register.as_xapic_offset()) as *mut u32).write_volatile(value as u32)
         }
-        Mode::x2APIC => crate::registers::msr::wrmsr(register.as_x2apic_msr(), value),
+        Mode::x2APIC => libkernel::registers::msr::wrmsr(register.as_x2apic_msr(), value),
         Mode::None => panic!("cannot write; core-local APIC is not in a valid mode"),
     }
 }
@@ -299,9 +292,9 @@ pub fn get_id() -> u32 {
     unsafe {
         match get_mode() {
             Mode::xAPIC => {
-                (((xLAPIC.get() as usize) + Register::ID.as_xapic_offset()) as *mut u32).read_volatile() >> 24
+                ((((&raw const xLAPIC) as usize) + Register::ID.as_xapic_offset()) as *mut u32).read_volatile() >> 24
             }
-            Mode::x2APIC => crate::registers::msr::rdmsr(Register::ID.as_x2apic_msr()) as u32,
+            Mode::x2APIC => libkernel::registers::msr::rdmsr(Register::ID.as_x2apic_msr()) as u32,
             Mode::None => panic!("cannot read ID; core-local APIC is not in a valid mode"),
         }
     }
@@ -445,7 +438,7 @@ impl LocalVectorVariant for Error {
 #[repr(transparent)]
 pub struct LocalVector<T: LocalVectorVariant>(PhantomData<T>);
 
-impl<T: LocalVectorVariant> crate::memory::volatile::Volatile for LocalVector<T> {}
+impl<T: LocalVectorVariant> libkernel::memory::volatile::Volatile for LocalVector<T> {}
 
 impl<T: LocalVectorVariant> LocalVector<T> {
     const INTERRUPTED_OFFSET: usize = 12;
@@ -507,7 +500,7 @@ impl<T: GenericVectorVariant> LocalVector<T> {
 impl LocalVector<Timer> {
     pub unsafe fn set_mode(&self, mode: TimerMode) -> &Self {
         let tsc_dl_support =
-            crate::cpu::CPUID.get_feature_info().map(|info| info.has_tsc_deadline()).unwrap_or(false);
+            libkernel::cpu::CPUID.get_feature_info().map(|info| info.has_tsc_deadline()).unwrap_or(false);
 
         assert!(mode != TimerMode::TSC_Deadline || tsc_dl_support, "TSC deadline is not supported on this CPU.");
 
@@ -519,7 +512,7 @@ impl LocalVector<Timer> {
         if tsc_dl_support {
             // IA32 SDM instructs utilizing the `mfence` instruction to ensure all writes to the IA32_TSC_DEADLINE
             // MSR are serialized *after* the APIC timer mode switch (`wrmsr` to `IA32_TSC_DEADLINE` is non-serializing).
-            crate::instructions::sync::mfence();
+            libkernel::instructions::sync::mfence();
         }
 
         self
