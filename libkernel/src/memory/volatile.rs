@@ -1,10 +1,11 @@
-use crate::{ReadOnly, ReadWrite};
+use crate::{ReadOnly, ReadWrite, WriteOnly};
 use core::marker::PhantomData;
 
 pub trait Volatile {}
 
 pub trait VolatileAccess {}
 impl VolatileAccess for ReadOnly {}
+impl VolatileAccess for WriteOnly {}
 impl VolatileAccess for ReadWrite {}
 
 #[repr(transparent)]
@@ -16,7 +17,9 @@ impl<T, V: VolatileAccess> VolatileCell<T, V> {
     pub const fn new(value: T) -> Self {
         Self(core::cell::UnsafeCell::new(value), PhantomData)
     }
+}
 
+impl<T> VolatileCell<T, ReadOnly> {
     #[inline]
     pub fn read(&self) -> T {
         unsafe { self.0.get().read_volatile() }
@@ -28,10 +31,37 @@ impl<T, V: VolatileAccess> VolatileCell<T, V> {
     }
 }
 
-impl<T> VolatileCell<T, ReadWrite> {
+impl<T> VolatileCell<T, WriteOnly> {
     #[inline]
     pub fn write(&self, value: T) {
         unsafe { self.0.get().write_volatile(value) };
+    }
+
+    #[inline]
+    pub fn as_ptr(&self) -> *const T {
+        self.0.get()
+    }
+
+    #[inline]
+    pub fn as_mut_ptr(&self) -> *mut T {
+        self.0.get()
+    }
+}
+
+impl<T> VolatileCell<T, ReadWrite> {
+    #[inline]
+    pub fn read(&self) -> T {
+        unsafe { self.0.get().read_volatile() }
+    }
+
+    #[inline]
+    pub fn write(&self, value: T) {
+        unsafe { self.0.get().write_volatile(value) };
+    }
+
+    #[inline]
+    pub fn as_ptr(&self) -> *const T {
+        self.0.get()
     }
 
     #[inline]
@@ -41,12 +71,6 @@ impl<T> VolatileCell<T, ReadWrite> {
 }
 
 impl<T, V: VolatileAccess> Volatile for VolatileCell<T, V> {}
-
-impl<T: core::fmt::Debug, V: VolatileAccess> core::fmt::Debug for VolatileCell<T, V> {
-    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter.debug_tuple("VolatileCell").field(&self.read()).finish()
-    }
-}
 
 #[repr(C)]
 pub struct VolatileSplitPtr<T: Sized> {

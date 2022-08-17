@@ -2,6 +2,7 @@ mod exceptions;
 mod stubs;
 
 pub mod apic;
+pub mod ioapic;
 pub mod pic;
 pub use exceptions::*;
 pub use stubs::*;

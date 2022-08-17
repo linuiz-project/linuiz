@@ -60,6 +60,7 @@ fn alloc_error(error: core::alloc::Layout) -> ! {
 }
 
 pub enum ReadOnly {}
+pub enum WriteOnly {}
 pub enum ReadWrite {}
 
 pub const KIBIBYTE: usize = 0x400; // 1024

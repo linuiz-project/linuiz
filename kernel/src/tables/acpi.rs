@@ -1,4 +1,4 @@
-use acpi::{fadt::Fadt, sdt::Signature, AcpiTables, PhysicalMapping};
+use acpi::{fadt::Fadt, madt::Madt, sdt::Signature, AcpiTables, PhysicalMapping, PlatformInfo};
 use spin::Once;
 
 /// REMARK: Naming convention aligns with `acpi` crate convention.
@@ -41,7 +41,7 @@ unsafe impl Send for AcpiTablesWrapper {}
 unsafe impl Sync for AcpiTablesWrapper {}
 
 static RSDP: Once<AcpiTablesWrapper> = Once::new();
-fn get_rsdp() -> &'static acpi::AcpiTables<AcpiHandler> {
+pub fn get_rsdp() -> &'static acpi::AcpiTables<AcpiHandler> {
     &RSDP
         .call_once(|| unsafe {
             let rsdp_ptr = LIMINE_RSDP
@@ -60,6 +60,29 @@ fn get_rsdp() -> &'static acpi::AcpiTables<AcpiHandler> {
         .0
 }
 
+pub struct PlatformInfoWrapper(PlatformInfo);
+unsafe impl Send for PlatformInfoWrapper {}
+unsafe impl Sync for PlatformInfoWrapper {}
+
+static PLATFORM_INFO: Once<PlatformInfoWrapper> = Once::new();
+/// Returns an insatnce of the machine's MADT, or panics of it isn't present.
+fn get_platform_info() -> &'static PlatformInfo {
+    &PLATFORM_INFO
+        .call_once(|| unsafe {
+            PlatformInfoWrapper(PlatformInfo::new(get_rsdp()).expect("error parsing machine platform info"))
+        })
+        .0
+}
+
+static APIC_MODEL: Once<&'static acpi::platform::interrupt::Apic> = Once::new();
+/// Returns the interrupt model of this machine.
+pub fn get_apic_model() -> &'static acpi::platform::interrupt::Apic {
+    APIC_MODEL.call_once(|| match &get_platform_info().interrupt_model {
+        acpi::InterruptModel::Apic(apic) => &apic,
+        _ => panic!("unknown interrupt models not supported"),
+    })
+}
+
 struct FadtWrapper(PhysicalMapping<AcpiHandler, Fadt>);
 unsafe impl Send for FadtWrapper {}
 unsafe impl Sync for FadtWrapper {}
@@ -71,7 +94,7 @@ pub fn get_fadt() -> &'static PhysicalMapping<AcpiHandler, Fadt> {
         .call_once(|| unsafe {
             FadtWrapper(
                 get_rsdp()
-                    .get_sdt::<acpi::fadt::Fadt>(Signature::FADT)
+                    .get_sdt::<Fadt>(Signature::FADT)
                     .expect("FADT failed to validate its checksum")
                     .expect("no FADT found in RSDP table"),
             )
