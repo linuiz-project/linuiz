@@ -20,7 +20,8 @@
     new_uninit,
     inline_const,
     sync_unsafe_cell,
-    if_let_guard
+    if_let_guard,
+    pointer_is_aligned
 )]
 
 #[macro_use]
@@ -149,6 +150,12 @@ unsafe extern "sysv64" fn _entry() -> ! {
         trace!("Assigning libkernel global allocator.");
         libkernel::memory::global_alloc::set(&*crate::KMALLOC);
     }
+
+    for ioapic in crate::interrupts::ioapic::get_io_apics() {
+        info!("ioapic irqs {:?}", ioapic.handled_irqs());
+    }
+
+    loop {}
 
     debug!("Finished initial kernel setup.");
     SMP_MEMORY_READY.store(true, core::sync::atomic::Ordering::Relaxed);
@@ -339,14 +346,6 @@ unsafe fn core_setup(is_bsp: bool) -> ! {
         trace!("TSS loaded, and temporary GDT trashed.");
     }
 
-    /* global clock */
-    trace!("Loading ACPI timer as global system clock.");
-    {
-        crate::time::clock::set_system_clock(alloc::boxed::Box::new(
-            crate::time::clock::ACPIClock::load().expect("failed to load ACPI timer"),
-        ));
-    }
-
     trace!("Arch-specific local setup complete.");
     crate::cpu_setup(is_bsp)
 }
@@ -400,6 +399,8 @@ unsafe fn core_setup(is_bsp: bool) -> ! {
 fn syscall_test() -> ! {
     use libkernel::syscall;
     let control = syscall::Control { id: syscall::ID::Test, blah: 0xD3ADC0D3 };
+    // TODO don't construct a new timer for every instance, use local timer
+    let clock = crate::time::clock::get();
 
     loop {
         let result: u64;
@@ -414,10 +415,7 @@ fn syscall_test() -> ! {
 
         info!("{:#X}", result);
 
-        use crate::time::clock;
-        let wait_window = (clock::get_frequency() / 1000) * 500;
-        let target_wait = clock::get_timestamp() + wait_window;
-        while clock::get_timestamp() < target_wait {}
+        clock.spin_wait_us(500000)
     }
 }
 

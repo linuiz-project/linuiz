@@ -16,7 +16,9 @@ pub unsafe fn configure_new_timer(freq: u16) -> Box<dyn Timer> {
     }
 }
 
-const MS_WINDOW: u64 = 10;
+const US_PER_SEC: u64 = 1000000;
+const US_WAIT: u64 = 10000;
+const US_FREQ_FACTOR: u64 = US_PER_SEC / US_WAIT;
 
 pub trait Timer {
     /// Sets the minimum interval for the timer, in nanoseconds.
@@ -54,14 +56,12 @@ impl APICTimer {
             //      can be done when the interrupt device is abstracted out into `libkernel`.
 
             let freq = {
-                let wait_window = (clock::get_frequency() / 1000) * MS_WINDOW;
-
-                let target_wait = clock::get_timestamp() + wait_window;
+                let clock = clock::get();
                 apic::set_timer_initial_count(u32::MAX);
-                while clock::get_timestamp() < target_wait {}
+                clock.spin_wait_us(US_WAIT as u32);
                 let timer_count = apic::get_timer_current_count();
 
-                ((u32::MAX - timer_count) as u64) * (1000 / MS_WINDOW)
+                ((u32::MAX - timer_count) as u64) * US_FREQ_FACTOR
             };
 
             Some(Self((freq / (set_freq as u64)) as u32))
@@ -106,14 +106,12 @@ impl TSCTimer {
                 .unwrap_or_else(|| {
                     trace!("CPU does not support TSC frequency reporting via CPUID.");
 
-                    let wait_window = (clock::get_frequency() / 1000) * MS_WINDOW;
-
-                    let target_wait = clock::get_timestamp() + wait_window;
+                    let clock = clock::get();
                     let start_tsc = core::arch::x86_64::_rdtsc();
-                    while clock::get_timestamp() < target_wait {}
+                    clock.spin_wait_us(US_WAIT as u32);
                     let end_tsc = core::arch::x86_64::_rdtsc();
 
-                    (end_tsc - start_tsc) * (1000 / MS_WINDOW)
+                    (end_tsc - start_tsc) * US_FREQ_FACTOR
                 });
 
             Some(Self(freq / (set_freq as u64)))
