@@ -1,9 +1,9 @@
 #![allow(non_camel_case_types, non_upper_case_globals)]
 
+use crate::interrupts;
 use bit_field::BitField;
 use core::{marker::PhantomData, sync::atomic::Ordering};
 use libkernel::registers::msr::IA32_APIC_BASE;
-use libkernel::InterruptDeliveryMode;
 
 lazy_static::lazy_static! {
     pub static ref xAPIC_SUPPORT: bool = libkernel::cpu::CPUID.get_feature_info().map(|info| info.has_apic()).unwrap_or(false);
@@ -133,7 +133,7 @@ impl InterruptCommand {
     pub const fn new(
         vector: u8,
         apic_id: u32,
-        delivery_mode: InterruptDeliveryMode,
+        delivery_mode: interrupts::DeliveryMode,
         is_logical: bool,
         is_assert: bool,
     ) -> Self {
@@ -147,11 +147,11 @@ impl InterruptCommand {
     }
 
     pub const fn new_init(apic_id: u32) -> Self {
-        Self::new(0, apic_id, libkernel::InterruptDeliveryMode::INIT, false, true)
+        Self::new(0, apic_id, interrupts::DeliveryMode::INIT, false, true)
     }
 
     pub const fn new_sipi(vector: u8, apic_id: u32) -> Self {
-        Self::new(vector, apic_id, InterruptDeliveryMode::StartUp, false, true)
+        Self::new(vector, apic_id, interrupts::DeliveryMode::StartUp, false, true)
     }
 
     pub const fn get_raw(&self) -> u64 {
@@ -490,7 +490,7 @@ impl<T: LocalVectorVariant> core::fmt::Debug for LocalVector<T> {
 
 impl<T: GenericVectorVariant> LocalVector<T> {
     #[inline]
-    pub unsafe fn set_delivery_mode(&self, mode: InterruptDeliveryMode) -> &Self {
+    pub unsafe fn set_delivery_mode(&self, mode: interrupts::DeliveryMode) -> &Self {
         write_register(T::REGISTER, *read_register(T::REGISTER).set_bits(8..11, mode as u64));
 
         self

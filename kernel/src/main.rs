@@ -70,6 +70,7 @@ static LIMINE_INFO: limine::LimineBootInfoRequest = limine::LimineBootInfoReques
 const DEV_UNMAP_LOWER_HALF_IDMAP: bool = false;
 static mut CON_OUT: crate::drivers::stdout::Serial = crate::drivers::stdout::Serial::new(crate::drivers::stdout::COM1);
 static SMP_MEMORY_READY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+static SMP_LAPIC_IDS: spin::Once<crossbeam_queue::ArrayQueue<u32>> = spin::Once::new();
 
 #[no_mangle]
 unsafe extern "sysv64" fn _entry() -> ! {
@@ -93,25 +94,6 @@ unsafe extern "sysv64" fn _entry() -> ! {
             info!("Vendor              {}", vendor_str);
         } else {
             info!("Vendor              None");
-        }
-    }
-
-    /* prepare APs for startup */
-    // TODO add a kernel parameter for SMP
-    {
-        let smp_response =
-            LIMINE_SMP.get_response().as_mut_ptr().expect("received no SMP response from bootloader").as_mut().unwrap();
-
-        if let Some(cpus) = smp_response.cpus() {
-            debug!("Detected {} APs.", cpus.len() - 1);
-
-            for cpu_info in cpus {
-                // Ensure we don't try to 'start' the BSP.
-                if cpu_info.lapic_id != smp_response.bsp_lapic_id {
-                    debug!("Starting processor: PID{}/LID{}", cpu_info.processor_id, cpu_info.lapic_id);
-                    cpu_info.goto_address = _smp_entry as u64;
-                }
-            }
         }
     }
 
@@ -151,11 +133,88 @@ unsafe extern "sysv64" fn _entry() -> ! {
         libkernel::memory::global_alloc::set(&*crate::KMALLOC);
     }
 
-    for ioapic in crate::interrupts::ioapic::get_io_apics() {
-        info!("ioapic irqs {:?}", ioapic.handled_irqs());
+    /* prepare APs for startup */
+    // TODO add a kernel parameter for SMP
+    let smp_count = {
+        let smp_response =
+            LIMINE_SMP.get_response().as_mut_ptr().expect("received no SMP response from bootloader").as_mut().unwrap();
+
+        let lapic_ids = SMP_LAPIC_IDS.call_once(|| crossbeam_queue::ArrayQueue::new(smp_response.cpu_count as usize));
+
+        if let Some(cpus) = smp_response.cpus() {
+            debug!("Detected {} APs.", cpus.len() - 1);
+
+            for cpu_info in cpus {
+                // Ensure we don't try to 'start' the BSP.
+                if cpu_info.lapic_id != smp_response.bsp_lapic_id {
+                    debug!("Starting processor: PID{}/LID{}", cpu_info.processor_id, cpu_info.lapic_id);
+                    cpu_info.goto_address = _smp_entry as u64;
+                    lapic_ids.push(cpu_info.lapic_id).expect("LAPIC ID queue unexpectedly full")
+                }
+            }
+        }
+
+        smp_response.cpu_count as u32
+    };
+
+    /* configure I/O APIC redirections */
+    {
+        let mut cur_vector = 0x30;
+        let ioapics = crate::interrupts::ioapic::get_io_apics();
+
+        for irq_source in &crate::tables::acpi::get_apic_model().interrupt_source_overrides {
+            debug!("Processing interrupt source override: {:?}", irq_source);
+
+            let target_ioapic = ioapics
+                .iter()
+                .find(|ioapic| ioapic.handled_irqs().contains(&irq_source.global_system_interrupt))
+                .expect("no I/I APIC found for IRQ override");
+
+            let mut redirection = target_ioapic.get_redirection(irq_source.global_system_interrupt);
+            redirection.set_delivery_mode(interrupts::DeliveryMode::Fixed);
+            redirection.set_destination_mode(interrupts::DestinationMode::Logical);
+            redirection.set_masked(false);
+            redirection.set_pin_polarity(irq_source.polarity);
+            redirection.set_trigger_mode(irq_source.trigger_mode);
+            redirection.set_vector({
+                let vector = cur_vector;
+                cur_vector += 1;
+                vector
+            });
+            redirection.set_destination_id(libkernel::cpu::get_id() as u8);
+            target_ioapic.set_redirection(irq_source.global_system_interrupt, redirection);
+        }
+
+        for nmi_source in &crate::tables::acpi::get_apic_model().nmi_sources {
+            debug!("Processing NMI source override: {:?}", nmi_source);
+
+            let target_ioapic = ioapics
+                .iter()
+                .find(|ioapic| ioapic.handled_irqs().contains(&nmi_source.global_system_interrupt))
+                .expect("no I/I APIC found for IRQ override");
+
+            let mut redirection = target_ioapic.get_redirection(nmi_source.global_system_interrupt);
+            redirection.set_delivery_mode(interrupts::DeliveryMode::NMI);
+            redirection.set_destination_mode(interrupts::DestinationMode::Logical);
+            redirection.set_masked(false);
+            redirection.set_pin_polarity(nmi_source.polarity);
+            redirection.set_trigger_mode(nmi_source.trigger_mode);
+            redirection.set_vector({
+                let vector = cur_vector;
+                cur_vector += 1;
+                vector
+            });
+            redirection.set_destination_id(libkernel::cpu::get_id() as u8);
+            target_ioapic.set_redirection(nmi_source.global_system_interrupt, redirection);
+        }
     }
 
-    loop {}
+    /* take ownership of ACPI */
+    {
+        let fadt = tables::acpi::get_fadt();
+        let mut smi_cmd = libkernel::io::port::WriteOnlyPort::<u8>::new(fadt.smi_cmd_port as u16);
+        smi_cmd.write(fadt.acpi_enable);
+    }
 
     debug!("Finished initial kernel setup.");
     SMP_MEMORY_READY.store(true, core::sync::atomic::Ordering::Relaxed);

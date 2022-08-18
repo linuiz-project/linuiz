@@ -1,4 +1,4 @@
-use acpi::{fadt::Fadt, madt::Madt, sdt::Signature, AcpiTables, PhysicalMapping, PlatformInfo};
+use acpi::{fadt::Fadt, sdt::Signature, AcpiTables, PhysicalMapping, PlatformInfo};
 use spin::Once;
 
 /// REMARK: Naming convention aligns with `acpi` crate convention.

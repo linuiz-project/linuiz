@@ -12,6 +12,25 @@ use libkernel::cpu::GeneralRegisters;
 use num_enum::TryFromPrimitive;
 use x86_64::structures::idt::InterruptStackFrame;
 
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
+pub enum DeliveryMode {
+    Fixed = 0b000,
+    LowPriority = 0b001,
+    SMI = 0b010,
+    NMI = 0b100,
+    INIT = 0b101,
+    StartUp = 0b110,
+    ExtINT = 0b111,
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DestinationMode {
+    Physical = 0,
+    Logical = 1,
+}
+
 #[repr(u64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
 #[allow(non_camel_case_types)]

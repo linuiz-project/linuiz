@@ -18,5 +18,5 @@ x86_64 = "*"
 limine = "*"
 raw-cpuid = "*"
 lazy_static = { version = "*", features = ["spin_no_std"] }
-acpi = "*"
+acpi = { path = "../../acpi/acpi/" }
 aml = "*"
