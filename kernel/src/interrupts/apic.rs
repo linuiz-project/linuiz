@@ -49,13 +49,7 @@ pub unsafe fn init(
         //
         // REMARK: All CPU cores share the same higher-half page tables, so this mapping will be globally utilized.
         page_manager
-            .map(
-                &xlapic_page,
-                xlapic_new_frame_index,
-                libkernel::memory::FrameOwnership::None,
-                libkernel::memory::PageAttributes::RW,
-                frame_manager,
-            )
+            .map(&xlapic_page, xlapic_new_frame_index, false, libkernel::memory::PageAttributes::RW, frame_manager)
             .unwrap();
 
         trace!("Freeing old xLAPIC kernel frame.");

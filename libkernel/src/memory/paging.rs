@@ -199,15 +199,6 @@ impl PageTableEntry {
         // Ensure RISC-V 64 PBMT bits are 0 if unsupported
     }
 
-    /// Sets the frame and attributes of this entry.
-    #[inline(always)]
-    pub const fn set(&mut self, frame_index: usize, attributes: PageAttributes) {
-        #[cfg(target_arch = "x86_64")]
-        {
-            self.0 = ((frame_index as u64) * 0x1000) | attributes.bits();
-        }
-    }
-
     /// Whether the page table entry is present or usable the memory controller.
     #[inline(always)]
     pub const fn is_present(&self) -> bool {
@@ -226,7 +217,16 @@ impl PageTableEntry {
         }
     }
 
-    // Takes this page table entry's frame, even if it is non-present.
+    /// Sets the entry's frame index.
+    #[inline(always)]
+    pub const fn set_frame_index(&mut self, frame_index: usize) {
+        #[cfg(target_arch = "x86_64")]
+        {
+            self.0 = (self.0 & !Self::FRAME_INDEX_MASK) | ((frame_index as u64) * 0x1000);
+        }
+    }
+
+    /// Takes this page table entry's frame, even if it is non-present.
     pub const unsafe fn take_frame_index(&mut self) -> usize {
         let frame_index = self.get_frame_index();
         self.0 &= !Self::FRAME_INDEX_MASK;
@@ -240,14 +240,14 @@ impl PageTableEntry {
     }
 
     /// Sets the attributes of this page table entry.
-    pub fn set_attributes(&mut self, new_attribs: PageAttributes, modify_mode: AttributeModify) {
+    pub fn set_attributes(&mut self, new_attributes: PageAttributes, modify_mode: AttributeModify) {
         let mut attributes = PageAttributes::from_bits_truncate(self.0);
 
         match modify_mode {
-            AttributeModify::Set => attributes = new_attribs,
-            AttributeModify::Insert => attributes.insert(new_attribs),
-            AttributeModify::Remove => attributes.remove(new_attribs),
-            AttributeModify::Toggle => attributes.toggle(new_attribs),
+            AttributeModify::Set => attributes = new_attributes,
+            AttributeModify::Insert => attributes.insert(new_attributes),
+            AttributeModify::Remove => attributes.remove(new_attributes),
+            AttributeModify::Toggle => attributes.toggle(new_attributes),
         }
 
         #[cfg(target_arch = "x86_64")]
@@ -373,8 +373,8 @@ impl<L: HeirarchicalLevel> PageTable<L> {
         }
     }
 
-    /// Attempts to get a mutable reference to  the page table that lies in the given entry index's frame, or
-    /// creates the sub page table if it doesn't already exist.
+    /// Attempts to get a mutable reference to the page table that lies in the given entry index's frame, or
+    /// creates the sub page table if it doesn't exist.
     pub unsafe fn sub_table_create(
         &mut self,
         index: usize,
@@ -388,14 +388,18 @@ impl<L: HeirarchicalLevel> PageTable<L> {
         } else {
             let frame_index = frame_manager.lock_next().unwrap();
 
-            entry.set(frame_index, PageAttributes::PRESENT | PageAttributes::WRITABLE | PageAttributes::USERSPACE);
+            entry.set_frame_index(frame_index);
+            entry.set_attributes(
+                PageAttributes::PRESENT | PageAttributes::WRITABLE | PageAttributes::USERSPACE,
+                AttributeModify::Set,
+            );
 
             (frame_index, true)
         };
 
         let sub_table_page = phys_mapping_page.forward_checked(frame_index).unwrap();
 
-        // If we created the page, clear it to a known initial state.
+        // If we created the sub-table page, clear it to a known initial state.
         if created {
             sub_table_page.clear_memory();
         }

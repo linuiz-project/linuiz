@@ -38,24 +38,6 @@ mod scheduling;
 mod tables;
 mod time;
 
-use libkernel::LinkerSymbol;
-
-extern "C" {
-    static __code_start: LinkerSymbol;
-    static __startup_start: LinkerSymbol;
-    static __code_end: LinkerSymbol;
-
-    static __ro_start: LinkerSymbol;
-    static __ro_end: LinkerSymbol;
-
-    static __relro_start: LinkerSymbol;
-    static __relro_end: LinkerSymbol;
-
-    static __rw_start: LinkerSymbol;
-    static __bsp_top: LinkerSymbol;
-    static __rw_end: LinkerSymbol;
-}
-
 lazy_static::lazy_static! {
     /// We must take care not to call any allocating functions, or reference KMALLOC itself,
     /// prior to initializing memory (frame/page manager). The SLOB *immtediately* configures
@@ -64,10 +46,9 @@ lazy_static::lazy_static! {
 }
 
 pub const LIMINE_REV: u64 = 0;
-static LIMINE_SMP: limine::LimineSmpRequest = limine::LimineSmpRequest::new(LIMINE_REV);
 static LIMINE_INFO: limine::LimineBootInfoRequest = limine::LimineBootInfoRequest::new(LIMINE_REV);
+static LIMINE_SMP: limine::LimineSmpRequest = limine::LimineSmpRequest::new(LIMINE_REV);
 
-const DEV_UNMAP_LOWER_HALF_IDMAP: bool = false;
 static mut CON_OUT: crate::drivers::stdout::Serial = crate::drivers::stdout::Serial::new(crate::drivers::stdout::COM1);
 static SMP_MEMORY_READY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 static SMP_LAPIC_IDS: spin::Once<crossbeam_queue::ArrayQueue<u32>> = spin::Once::new();
@@ -80,59 +61,122 @@ unsafe extern "sysv64" fn _entry() -> ! {
         Err(_) => libkernel::instructions::interrupts::wait_indefinite(),
     }
 
-    /* log boot info */
-    {
-        let boot_info = LIMINE_INFO.get_response().get().expect("bootloader provided no info");
-        info!(
-            "Bootloader Info     {} v{} (rev {})",
-            core::ffi::CStr::from_ptr(boot_info.name.as_ptr().unwrap() as *const _).to_str().unwrap(),
-            core::ffi::CStr::from_ptr(boot_info.version.as_ptr().unwrap() as *const _).to_str().unwrap(),
-            boot_info.revision,
-        );
+    let boot_info = LIMINE_INFO.get_response().get().expect("bootloader provided no info");
+    info!(
+        "Bootloader Info     {} v{} (rev {})",
+        core::ffi::CStr::from_ptr(boot_info.name.as_ptr().unwrap() as *const _).to_str().unwrap(),
+        core::ffi::CStr::from_ptr(boot_info.version.as_ptr().unwrap() as *const _).to_str().unwrap(),
+        boot_info.revision,
+    );
 
-        if let Some(vendor_str) = libkernel::cpu::get_vendor() {
-            info!("Vendor              {}", vendor_str);
-        } else {
-            info!("Vendor              None");
-        }
+    if let Some(vendor_str) = libkernel::cpu::get_vendor() {
+        info!("Vendor              {}", vendor_str);
+    } else {
+        info!("Vendor              None");
     }
 
-    /* init memory */
-    {
-        trace!("Configuring kernel memory.");
+    load_registers();
+    debug!("Initializing kernel page manager...");
+    crate::memory::init_kernel_page_manager();
+    load_tables();
+    debug!("Switch to kernel page tables...");
+    crate::memory::get_kernel_page_manager().write_cr3();
+    info!("worked");
+    crate::memory::reclaim_bootloader_memory();
+    trace!("Assigning libkernel global allocator.");
+    libkernel::memory::global_alloc::set(&*crate::KMALLOC);
 
-        // Next, we create the kernel page manager, utilizing the bootloader's higher-half direct
-        // mapping for virtual offset mapping.
-        let hhdm_addr = crate::memory::get_kernel_hhdm_addr();
-        trace!("Higher half identity mapping base: {:?}", hhdm_addr);
+    debug!("Finished initial kernel setup.");
+    SMP_MEMORY_READY.store(true, core::sync::atomic::Ordering::Relaxed);
+    core_setup(true)
+    // configure_acpi()
+}
 
-        let frame_manager = crate::memory::get_kernel_frame_manager();
-        // The frame manager's allocation table is allocated with identity mapping assumed,
-        // so before we unmap the lower half virtual memory mapping (for kernel heap), we
-        // must ensure the frame manager uses the HHDM base.
-        frame_manager.slide_table_base(hhdm_addr.as_usize());
+fn load_registers() {
+    trace!("Loading x86-specific control registers to known state.");
 
-        // if DEV_UNMAP_LOWER_HALF_IDMAP {
-        //     let page_manager = crate::memory::get_kernel_page_manager();
-        //     trace!("Unmapping lower half identity mappings.");
-        //     for entry in memory_map.iter() {
-        //         for page in (entry.base..(entry.base + entry.len))
-        //             .step_by(0x1000)
-        //             .map(|base| Page::from_index((base / 0x1000) as usize))
-        //         {
-        //             // TODO maybe sometimes this fails? It did before, but isn't now. Could be because of an update to Limine.
-        //             page_manager.unmap(&page, libkernel::memory::FrameOwnership::None, frame_manager).unwrap();
-        //         }
-        //     }
-        // }
+    // Set CR0 flags.
+    use libkernel::registers::control::{CR0Flags, CR0};
+    unsafe { CR0::write(CR0Flags::PE | CR0Flags::MP | CR0Flags::ET | CR0Flags::NE | CR0Flags::WP | CR0Flags::PG) };
 
-        // The global kernel allocator must be set AFTER the upper half
-        // identity mappings are purged, so that the allocation table
-        // (which will reside in the lower half) isn't unmapped.
-        trace!("Assigning libkernel global allocator.");
-        libkernel::memory::global_alloc::set(&*crate::KMALLOC);
+    // Set CR4 flags.
+    use libkernel::{
+        cpu::{EXT_FEATURE_INFO, FEATURE_INFO},
+        registers::control::{CR4Flags, CR4},
+    };
+
+    let mut flags = CR4Flags::PAE | CR4Flags::PGE | CR4Flags::OSXMMEXCPT;
+
+    if FEATURE_INFO.has_de() {
+        trace!("Detected support for debugging extensions.");
+        flags.insert(CR4Flags::DE);
     }
 
+    if FEATURE_INFO.has_fxsave_fxstor() {
+        trace!("Detected support for `fxsave` and `fxstor` instructions.");
+        flags.insert(CR4Flags::OSFXSR);
+    }
+
+    if FEATURE_INFO.has_mce() {
+        trace!("Detected support for machine check exceptions.")
+    }
+
+    if FEATURE_INFO.has_pcid() {
+        trace!("Detected support for process context IDs.");
+        flags.insert(CR4Flags::PCIDE);
+    }
+
+    if EXT_FEATURE_INFO.as_ref().map(|info| info.has_umip()).unwrap_or(false) {
+        trace!("Detected support for usermode instruction prevention.");
+        flags.insert(CR4Flags::UMIP);
+    }
+
+    if EXT_FEATURE_INFO.as_ref().map(|info| info.has_fsgsbase()).unwrap_or(false) {
+        trace!("Detected support for CPL3 FS/GS base usage.");
+        flags.insert(CR4Flags::FSGSBASE);
+    }
+
+    if EXT_FEATURE_INFO.as_ref().map(|info| info.has_smep()).unwrap_or(false) {
+        trace!("Detected support for supervisor mode execution prevention.");
+        flags.insert(CR4Flags::SMEP);
+    }
+
+    if EXT_FEATURE_INFO.as_ref().map(|info| info.has_smap()).unwrap_or(false) {
+        trace!("Detected support for supervisor mode access prevention.");
+        flags.insert(CR4Flags::SMAP);
+    }
+
+    unsafe { CR4::write(flags) };
+
+    // Enable use of the `NO_EXECUTE` page attribute, if supported.
+    if libkernel::cpu::EXT_FUNCTION_INFO.as_ref().map(|func_info| func_info.has_execute_disable()).unwrap_or(false) {
+        trace!("Detected support for paging execution prevention.");
+        unsafe { libkernel::registers::msr::IA32_EFER::set_nxe(true) };
+    } else {
+        warn!("PC does not support the NX bit; system security will be compromised (this warning is purely informational).")
+    }
+}
+
+/// SAFETY: Caller must ensure this method is called only once per core.
+unsafe fn load_tables() {
+    trace!("Configuring local tables (IDT, GDT).");
+
+    // Always initialize GDT prior to configuring IDT.
+    crate::tables::gdt::init();
+
+    // Due to the fashion in which the `x86_64` crate initializes the IDT entries,
+    // it must be ensured that the handlers are set only *after* the GDT has been
+    // properly initialized and loaded—otherwise, the `CS` value for the IDT entries
+    // is incorrect, and this causes very confusing GPFs.
+    let idt_frame_index = crate::memory::get_kernel_frame_manager().lock_next().unwrap();
+    let idt_addr = crate::memory::get_kernel_hhdm_addr().as_usize() + (idt_frame_index * 0x1000);
+    let idt = &mut *(idt_addr as *mut x86_64::structures::idt::InterruptDescriptorTable);
+    crate::interrupts::set_exception_handlers(idt);
+    crate::interrupts::set_stub_handlers(idt);
+    crate::tables::idt::store(idt);
+}
+
+unsafe fn configure_acpi() -> ! {
     /* prepare APs for startup */
     // TODO add a kernel parameter for SMP
     let smp_count = {
@@ -209,11 +253,46 @@ unsafe extern "sysv64" fn _entry() -> ! {
         }
     }
 
+    /* configure AML handling */
+    {
+        let _aml_context = crate::tables::acpi::get_aml_context();
+    }
+
     /* take ownership of ACPI */
     {
+        use acpi::platform::address::AddressSpace;
+        use bit_field::BitField;
+
         let fadt = tables::acpi::get_fadt();
+
         let mut smi_cmd = libkernel::io::port::WriteOnlyPort::<u8>::new(fadt.smi_cmd_port as u16);
         smi_cmd.write(fadt.acpi_enable);
+
+        {
+            let pm1a_cnt_blk_reg = crate::tables::acpi::Register::<u16>::new(
+                &fadt.pm1a_control_block().expect("no `PM1a_CNT_BLK` found in FADT"),
+            )
+            .expect("failed to get register for `PM1a_CNT_BLK`");
+
+            while !pm1a_cnt_blk_reg.read().get_bit(0) {
+                libkernel::instructions::pause();
+            }
+        }
+
+        // Enable relevant bits for ACPI SCI interrupt triggers.
+        {
+            let pm1a_evt_blk = &fadt.pm1a_event_block().expect("no `PM1a_EVT_BLK` found in FADT");
+            let mut pm1a_evt_blk_reg = crate::tables::acpi::Register::<u16>::new(pm1a_evt_blk)
+                .expect("failed to get register for `PM1a_EVT_BLK`");
+
+            info!("{:#?}", pm1a_evt_blk);
+            info!("{:#b}", pm1a_evt_blk_reg.read());
+            info!("{:#b}", pm1a_evt_blk_reg.read());
+            pm1a_evt_blk_reg.write(0b01);
+            // pm1a_evt_blk_reg.write(*(pm1a_evt_blk_reg.read().set_bit(0, true).set_bit(8, true).set_bit(9, true)));
+            info!("{:#b}", pm1a_evt_blk_reg.read());
+            info!("{:#b}", pm1a_evt_blk_reg.read());
+        }
     }
 
     debug!("Finished initial kernel setup.");
@@ -227,93 +306,16 @@ unsafe extern "C" fn _smp_entry() -> ! {
     // Wait to ensure the machine is the correct state to execute cpu setup.
     while !SMP_MEMORY_READY.load(core::sync::atomic::Ordering::Relaxed) {}
 
+    load_registers();
+    load_tables();
+
     core_setup(false)
 }
 
 /// SAFETY: This function invariantly assumes it will only be called once.
 unsafe fn core_setup(is_bsp: bool) -> ! {
-    /* load registers */
+    /* load tss */
     {
-        // Set CR0 flags.
-        use libkernel::registers::control::{CR0Flags, CR0};
-        CR0::write(CR0Flags::PE | CR0Flags::MP | CR0Flags::ET | CR0Flags::NE | CR0Flags::WP | CR0Flags::PG);
-
-        // Set CR4 flags.
-        use libkernel::{
-            cpu::{EXT_FEATURE_INFO, FEATURE_INFO},
-            registers::control::{CR4Flags, CR4},
-        };
-
-        let mut flags = CR4Flags::PAE | CR4Flags::PGE | CR4Flags::OSXMMEXCPT;
-
-        if FEATURE_INFO.has_de() {
-            trace!("Detected support for debugging extensions.");
-            flags.insert(CR4Flags::DE);
-        }
-
-        if FEATURE_INFO.has_fxsave_fxstor() {
-            trace!("Detected support for `fxsave` and `fxstor` instructions.");
-            flags.insert(CR4Flags::OSFXSR);
-        }
-
-        if FEATURE_INFO.has_mce() {
-            trace!("Detected support for machine check exceptions.")
-        }
-
-        if FEATURE_INFO.has_pcid() {
-            trace!("Detected support for process context IDs.");
-            flags.insert(CR4Flags::PCIDE);
-        }
-
-        if EXT_FEATURE_INFO.as_ref().map(|info| info.has_umip()).unwrap_or(false) {
-            trace!("Detected support for usermode instruction prevention.");
-            flags.insert(CR4Flags::UMIP);
-        }
-
-        if EXT_FEATURE_INFO.as_ref().map(|info| info.has_fsgsbase()).unwrap_or(false) {
-            trace!("Detected support for CPL3 FS/GS base usage.");
-            flags.insert(CR4Flags::FSGSBASE);
-        }
-
-        if EXT_FEATURE_INFO.as_ref().map(|info| info.has_smep()).unwrap_or(false) {
-            trace!("Detected support for supervisor mode execution prevention.");
-            flags.insert(CR4Flags::SMEP);
-        }
-
-        if EXT_FEATURE_INFO.as_ref().map(|info| info.has_smap()).unwrap_or(false) {
-            trace!("Detected support for supervisor mode access prevention.");
-            flags.insert(CR4Flags::SMAP);
-        }
-
-        CR4::write(flags);
-
-        // Enable use of the `NO_EXECUTE` page attribute, if supported.
-        if libkernel::cpu::EXT_FUNCTION_INFO.as_ref().map(|func_info| func_info.has_execute_disable()).unwrap_or(false)
-        {
-            libkernel::registers::msr::IA32_EFER::set_nxe(true);
-        } else {
-            warn!("PC does not support the NX bit; system security will be compromised (this warning is purely informational).")
-        }
-    }
-
-    /* load tables */
-    {
-        trace!("Configuring local tables (IDT, GDT).");
-
-        // Always initialize GDT prior to configuring IDT.
-        crate::tables::gdt::init();
-
-        crate::interrupts::set_common_interrupt_handler(crate::interrupts::common_interrupt_handler);
-        // Due to the fashion in which the `x86_64` crate initializes the IDT entries,
-        // it must be ensured that the handlers are set only *after* the GDT has been
-        // properly initialized and loaded—otherwise, the `CS` value for the IDT entries
-        // is incorrect, and this causes very confusing GPFs.
-        let mut idt = Box::new(x86_64::structures::idt::InterruptDescriptorTable::new());
-        crate::interrupts::set_exception_handlers(idt.as_mut());
-        crate::interrupts::set_stub_handlers(idt.as_mut());
-        crate::tables::idt::store(idt);
-
-        /* load tss */
         use crate::interrupts::StackTableIndex;
         use alloc::boxed::Box;
         use libkernel::memory::{page_aligned_allocator, PageAlignedBox};

@@ -300,9 +300,7 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
                 };
 
                 if had_bits && !has_bits {
-                    page_manager
-                        .unmap(&Page::from_index(map_index), libkernel::memory::FrameOwnership::Locked, frame_manager)
-                        .unwrap();
+                    page_manager.unmap(&Page::from_index(map_index), true, frame_manager).unwrap();
                 }
             }
         })

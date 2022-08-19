@@ -2,7 +2,7 @@ use crate::{instructions::interrupts::without_interrupts, Address, Physical, Vir
 use crate::{
     instructions::tlb,
     memory::{
-        frame_manager::{FrameManager, FrameOwnership},
+        frame_manager::FrameManager,
         paging::{AttributeModify, Level4, Page, PageAttributes, PageTable, PageTableEntry},
     },
 };
@@ -97,13 +97,15 @@ impl VirtualMapper {
         for frame_index in 0..frame_manager.total_frames() {
             let cur_page = base_page.forward_checked(frame_index).unwrap();
 
-            self.get_page_entry_create(&cur_page, frame_manager).set(
-                frame_index,
+            let entry = self.get_page_entry_create(&cur_page, frame_manager);
+            entry.set_frame_index(frame_index);
+            entry.set_attributes(
                 PageAttributes::PRESENT
                     | PageAttributes::WRITABLE
                     | PageAttributes::WRITE_THROUGH
                     | PageAttributes::NO_EXECUTE
                     | PageAttributes::GLOBAL,
+                AttributeModify::Set,
             );
 
             tlb::invlpg(&cur_page);
@@ -143,21 +145,11 @@ impl PageManager {
         Self {
             virtual_map: spin::RwLock::new({
                 let pml4_index = frame_manager.lock_next().expect("Failed to lock frame for virtual addressor's PML4");
+                let pml4_mapped = mapped_page.forward_checked(pml4_index).unwrap();
 
-                if let Some(pml4) = pml4_copy {
-                    // Write existing PML4.
-                    mapped_page
-                        .forward_checked(pml4_index)
-                        .unwrap()
-                        .as_mut_ptr::<PageTable<Level4>>()
-                        .write_volatile(pml4);
-                } else {
-                    // Clear PML4 frame.
-                    core::ptr::write_bytes(
-                        mapped_page.forward_checked(pml4_index).unwrap().as_mut_ptr::<u8>(),
-                        0,
-                        0x1000,
-                    );
+                match pml4_copy {
+                    Some(pml4_copy) => pml4_mapped.as_mut_ptr::<PageTable<Level4>>().write(pml4_copy),
+                    None => core::ptr::write_bytes(pml4_mapped.as_mut_ptr::<u8>(), 0, 0x1000),
                 }
 
                 VirtualMapper::new(mapped_page, pml4_index)
@@ -180,17 +172,13 @@ impl PageManager {
 
     /* MAP / UNMAP */
 
-    /// Maps the specified frame to the specified frame index.
-    ///
-    /// The `lock_frame` parameter is set as follows:
-    ///     `Some` or `None` indicates whether frame allocation is required,
-    ///         `true` or `false` in a `Some` indicates whether the frame is locked or merely referenced.
+    /// Maps the specified page to the specified frame index.
     pub fn map(
         &self,
         page: &Page,
         frame_index: usize,
-        ownership: FrameOwnership,
-        attribs: PageAttributes,
+        lock_frame: bool,
+        attributes: PageAttributes,
         frame_manager: &'static FrameManager<'_>,
     ) -> Result<(), MapError> {
         without_interrupts(|| {
@@ -200,16 +188,14 @@ impl PageManager {
             let mut map_write = self.virtual_map.write();
 
             // Attempt to acquire the requisite frame, following the outlined parsing of `lock_frame`.
-            let frame_result = match ownership {
-                FrameOwnership::None => Ok(frame_index),
-                FrameOwnership::Borrowed => frame_manager.borrow(frame_index),
-                FrameOwnership::Locked => frame_manager.lock(frame_index),
-            };
+            let frame_result = if lock_frame { frame_manager.lock(frame_index) } else { Ok(frame_index) };
 
             match frame_result {
                 // If acquisition of the frame is successful, map the page to the frame index.
                 Ok(frame_index) => {
-                    map_write.get_page_entry_create(page, frame_manager).set(frame_index, attribs);
+                    let entry = map_write.get_page_entry_create(page, frame_manager);
+                    entry.set_frame_index(frame_index);
+                    entry.set_attributes(attributes, AttributeModify::Set);
 
                     tlb::invlpg(page);
 
@@ -222,11 +208,11 @@ impl PageManager {
         })
     }
 
-    /// Unmaps the given page, optionally freeing / dropping the frame the page points to within the given [`FrameManager`].
+    /// Unmaps the given page, optionally freeing the frame the page points to within the given [`FrameManager`].
     pub fn unmap(
         &self,
         page: &Page,
-        ownership: FrameOwnership,
+        free_frame: bool,
         frame_manager: &'static FrameManager<'_>,
     ) -> Result<(), MapError> {
         without_interrupts(|| {
@@ -237,12 +223,8 @@ impl PageManager {
                     entry.set_attributes(PageAttributes::PRESENT, AttributeModify::Remove);
 
                     // Handle frame permissions to keep them updated.
-                    unsafe {
-                        match ownership {
-                            FrameOwnership::None => {}
-                            FrameOwnership::Borrowed => frame_manager.drop(entry.take_frame_index()).unwrap(),
-                            FrameOwnership::Locked => frame_manager.free(entry.take_frame_index()).unwrap(),
-                        }
+                    if free_frame {
+                        unsafe { frame_manager.free(entry.take_frame_index()).unwrap() };
                     }
 
                     // Invalidate the page in the TLB.
@@ -273,7 +255,9 @@ impl PageManager {
             maybe_new_pte_frame_index_attribs
                 .map(|(new_pte_frame_index, new_pte_attribs)| {
                     // Create the new page table entry with the old entry's data.
-                    map_write.get_page_entry_create(map_to, frame_manager).set(new_pte_frame_index, new_pte_attribs);
+                    let entry = map_write.get_page_entry_create(map_to, frame_manager);
+                    entry.set_frame_index(new_pte_frame_index);
+                    entry.set_attributes(new_pte_attribs, AttributeModify::Set);
 
                     // Invalidate both old and new pages in TLB.
                     tlb::invlpg(map_to);
@@ -284,7 +268,7 @@ impl PageManager {
     }
 
     pub fn auto_map(&self, page: &Page, attribs: PageAttributes, frame_manager: &'static FrameManager<'_>) {
-        self.map(page, frame_manager.lock_next().unwrap(), FrameOwnership::None, attribs, frame_manager).unwrap();
+        self.map(page, frame_manager.lock_next().unwrap(), false, attribs, frame_manager).unwrap();
     }
 
     /* STATE QUERYING */

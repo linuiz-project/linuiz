@@ -2,12 +2,9 @@ use x86_64::structures::idt::InterruptDescriptorTable;
 
 /// Stores the given IDT in the interrupt descriptor table register.
 ///
-/// SAFETY: This function leaks the memory that the IDT is stored within, so it
-///         is assumed the caller will only invoke this once per core.
-///
-/// TODO:   Move to per-core IDT.
-pub unsafe fn store(idt: alloc::boxed::Box<InterruptDescriptorTable>) {
-    let idt = alloc::boxed::Box::leak(idt);
+/// SAFETY: This function assumes the given IDT will not be deallocated or
+///         otherwise removed without proper preceding control flow.
+pub unsafe fn store(idt: &mut InterruptDescriptorTable) {
     idt.load_unsafe();
 }
 

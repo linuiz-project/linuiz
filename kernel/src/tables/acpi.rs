@@ -1,9 +1,47 @@
 use acpi::{fadt::Fadt, sdt::Signature, AcpiTables, PhysicalMapping, PlatformInfo};
+use libkernel::io::port::{ReadOnlyPort, WriteOnlyPort};
 use spin::Once;
 
-/// REMARK: Naming convention aligns with `acpi` crate convention.
+pub enum Register<'a, T: libkernel::io::port::PortReadWrite> {
+    IO(libkernel::io::port::ReadWritePort<T>),
+    MMIO(&'a libkernel::memory::volatile::VolatileCell<T, libkernel::ReadWrite>),
+}
+
+impl<T: libkernel::io::port::PortReadWrite> Register<'_, T> {
+    pub const fn new(generic_address: &acpi::platform::address::GenericAddress) -> Option<Self> {
+        match generic_address.address_space {
+            acpi::platform::address::AddressSpace::SystemMemory => {
+                Some(Self::MMIO(unsafe { &*(generic_address.address as *const _) }))
+            }
+
+            acpi::platform::address::AddressSpace::SystemIo => {
+                Some(Self::IO(unsafe { libkernel::io::port::ReadWritePort::<T>::new(generic_address.address as u16) }))
+            }
+
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub fn read(&self) -> T {
+        match self {
+            Register::IO(port) => port.read(),
+            Register::MMIO(addr) => addr.read(),
+        }
+    }
+
+    #[inline]
+    pub fn write(&mut self, value: T) {
+        match self {
+            Register::IO(port) => port.write(value),
+            Register::MMIO(addr) => addr.write(value),
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct AcpiHandler;
+
 impl acpi::AcpiHandler for AcpiHandler {
     unsafe fn map_physical_region<T>(&self, physical_address: usize, size: usize) -> acpi::PhysicalMapping<Self, T> {
         // Ensure we modify memory manager state, to keep it consistent, and ACPI MMIO uncached.
@@ -31,6 +69,88 @@ impl acpi::AcpiHandler for AcpiHandler {
 
     fn unmap_physical_region<T>(_: &acpi::PhysicalMapping<Self, T>) {
         // ... We don't actually need to unmap anything, since this utilizes the HHDM
+    }
+}
+
+impl aml::Handler for AcpiHandler {
+    fn read_u8(&self, address: usize) -> u8 {
+        unsafe { (address as *const u8).add(crate::memory::get_kernel_hhdm_addr().as_usize()).read() }
+    }
+
+    fn read_u16(&self, address: usize) -> u16 {
+        unsafe { (address as *const u16).add(crate::memory::get_kernel_hhdm_addr().as_usize()).read() }
+    }
+
+    fn read_u32(&self, address: usize) -> u32 {
+        unsafe { (address as *const u32).add(crate::memory::get_kernel_hhdm_addr().as_usize()).read() }
+    }
+
+    fn read_u64(&self, address: usize) -> u64 {
+        unsafe { (address as *const u64).add(crate::memory::get_kernel_hhdm_addr().as_usize()).read() }
+    }
+
+    fn write_u8(&mut self, address: usize, value: u8) {
+        unsafe { (address as *mut u8).add(crate::memory::get_kernel_hhdm_addr().as_usize()).write(value) };
+    }
+
+    fn write_u16(&mut self, address: usize, value: u16) {
+        unsafe { (address as *mut u16).add(crate::memory::get_kernel_hhdm_addr().as_usize()).write(value) };
+    }
+
+    fn write_u32(&mut self, address: usize, value: u32) {
+        unsafe { (address as *mut u32).add(crate::memory::get_kernel_hhdm_addr().as_usize()).write(value) };
+    }
+
+    fn write_u64(&mut self, address: usize, value: u64) {
+        unsafe { (address as *mut u64).add(crate::memory::get_kernel_hhdm_addr().as_usize()).write(value) };
+    }
+
+    fn read_io_u8(&self, port: u16) -> u8 {
+        unsafe { ReadOnlyPort::<u8>::new(port) }.read()
+    }
+
+    fn read_io_u16(&self, port: u16) -> u16 {
+        unsafe { ReadOnlyPort::<u16>::new(port) }.read()
+    }
+
+    fn read_io_u32(&self, port: u16) -> u32 {
+        unsafe { ReadOnlyPort::<u32>::new(port) }.read()
+    }
+
+    fn write_io_u8(&self, port: u16, value: u8) {
+        unsafe { WriteOnlyPort::<u8>::new(port) }.write(value);
+    }
+
+    fn write_io_u16(&self, port: u16, value: u16) {
+        unsafe { WriteOnlyPort::<u16>::new(port) }.write(value);
+    }
+
+    fn write_io_u32(&self, port: u16, value: u32) {
+        unsafe { WriteOnlyPort::<u32>::new(port) }.write(value);
+    }
+
+    fn read_pci_u8(&self, segment: u16, bus: u8, device: u8, function: u8, offset: u16) -> u8 {
+        todo!()
+    }
+
+    fn read_pci_u16(&self, segment: u16, bus: u8, device: u8, function: u8, offset: u16) -> u16 {
+        todo!()
+    }
+
+    fn read_pci_u32(&self, segment: u16, bus: u8, device: u8, function: u8, offset: u16) -> u32 {
+        todo!()
+    }
+
+    fn write_pci_u8(&self, segment: u16, bus: u8, device: u8, function: u8, offset: u16, value: u8) {
+        todo!()
+    }
+
+    fn write_pci_u16(&self, segment: u16, bus: u8, device: u8, function: u8, offset: u16, value: u16) {
+        todo!()
+    }
+
+    fn write_pci_u32(&self, segment: u16, bus: u8, device: u8, function: u8, offset: u16, value: u32) {
+        todo!()
     }
 }
 
@@ -98,6 +218,48 @@ pub fn get_fadt() -> &'static PhysicalMapping<AcpiHandler, Fadt> {
                     .expect("FADT failed to validate its checksum")
                     .expect("no FADT found in RSDP table"),
             )
+        })
+        .0
+}
+
+struct AmlContextWrapper(aml::AmlContext);
+unsafe impl Send for AmlContextWrapper {}
+unsafe impl Sync for AmlContextWrapper {}
+
+static AML_CONTEXT: Once<AmlContextWrapper> = Once::new();
+
+pub fn get_aml_context() -> &'static aml::AmlContext {
+    &AML_CONTEXT
+        .call_once(|| {
+            AmlContextWrapper({
+                let mut aml_context =
+                    aml::AmlContext::new(alloc::boxed::Box::new(AcpiHandler), aml::DebugVerbosity::All);
+
+                let hhdm_offset = crate::memory::get_kernel_hhdm_addr().as_usize();
+
+                {
+                    let dsdt_table = get_rsdp().dsdt.as_ref().expect("machine has no DSDT");
+
+                    let dsdt_stream = unsafe {
+                        core::slice::from_raw_parts(dsdt_table.address as *const u8, dsdt_table.length as usize)
+                    };
+
+                    aml_context.parse_table(dsdt_stream).expect("failed to parse DSDT");
+                }
+
+                {
+                    for sdst_table in get_rsdp().ssdts.iter() {
+                        let sdst_stream = unsafe {
+                            core::slice::from_raw_parts(sdst_table.address as *const u8, sdst_table.length as usize)
+                        };
+                        aml_context.parse_table(sdst_stream).expect("failed to parse SDST");
+                    }
+                }
+
+                aml_context.initialize_objects().expect("failed to initialize AML objects");
+
+                aml_context
+            })
         })
         .0
 }

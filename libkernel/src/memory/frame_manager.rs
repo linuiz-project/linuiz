@@ -1,17 +1,8 @@
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::{AtomicU8, Ordering};
 use num_enum::TryFromPrimitive;
 use spin::RwLock;
 
-// TODO remove borrowing frames, it's useless
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum FrameOwnership {
-    None,
-    Borrowed,
-    Locked,
-}
-
-#[repr(u32)]
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
 pub enum FrameType {
     Usable = 0,
@@ -26,27 +17,12 @@ pub enum FrameType {
 
 #[derive(Debug)]
 #[repr(transparent)]
-struct Frame(AtomicU32);
+struct Frame(AtomicU8);
 
 impl Frame {
-    const REF_COUNT_MASK: u32 = 0xFFFF;
-    const PEEKED_BIT: u32 = 1 << 16;
-    const LOCKED_BIT: u32 = 1 << 17;
-    const FRAME_TYPE_SHIFT: u32 = 26;
-
-    /// 'Borrows' a frame, incrementing the reference counter.
-    #[inline]
-    fn borrow(&self) {
-        // REMARK: Possibly handle case where 2^16 references have been made to a single frame?
-        //         That does seem particularly unlikely, however.
-        self.0.fetch_add(1, Ordering::AcqRel);
-    }
-
-    /// 'Drops' a frame, decrementing the reference counter.
-    #[inline]
-    fn drop(&self) {
-        self.0.fetch_sub(1, Ordering::Relaxed);
-    }
+    const PEEKED_BIT: u8 = 1 << 0;
+    const LOCKED_BIT: u8 = 1 << 1;
+    const FRAME_TYPE_SHIFT: u8 = 2;
 
     /// Locks a frame, setting the `locked` bit.
     #[inline]
@@ -67,7 +43,9 @@ impl Frame {
 
     #[inline]
     fn peek(&self) {
-        while !self.try_peek() {}
+        while !self.try_peek() {
+            crate::instructions::pause()
+        }
     }
 
     #[inline]
@@ -77,14 +55,10 @@ impl Frame {
 
     /// Returns the frame data in a tuple.
     /// (frame type, reference count, is locked)
-    fn data(&self) -> (FrameType, u32, bool) {
+    fn data(&self) -> (bool, FrameType) {
         let raw = self.0.load(Ordering::Relaxed);
 
-        (
-            FrameType::try_from(raw >> Self::FRAME_TYPE_SHIFT).unwrap(),
-            raw & Self::REF_COUNT_MASK,
-            (raw & Self::LOCKED_BIT) > 0,
-        )
+        ((raw & Self::LOCKED_BIT) > 0, FrameType::try_from(raw >> Self::FRAME_TYPE_SHIFT).unwrap())
     }
 
     /// Attempts to modify the frame type. There are various checks internally to
@@ -106,7 +80,7 @@ impl Frame {
         {
             // Change frame type.
             self.0.store(
-                ((new_type as u32) << Self::FRAME_TYPE_SHIFT) | (raw & ((1 << Self::FRAME_TYPE_SHIFT) - 1)),
+                ((new_type as u8) << Self::FRAME_TYPE_SHIFT) | (raw & ((1 << Self::FRAME_TYPE_SHIFT) - 1)),
                 Ordering::Release,
             );
 
@@ -137,7 +111,7 @@ unsafe impl Send for FrameManager<'_> {}
 unsafe impl Sync for FrameManager<'_> {}
 
 impl<'arr> FrameManager<'arr> {
-    pub fn from_mmap(memory_map: &[limine::LimineMemmapEntry]) -> Self {
+    pub fn from_mmap(memory_map: &[limine::LimineMemmapEntry], hhdm_addr: crate::Address<crate::Virtual>) -> Self {
         use limine::LimineMemoryMapEntryType;
 
         // Calculates total system memory.
@@ -166,7 +140,9 @@ impl<'arr> FrameManager<'arr> {
         unsafe { core::ptr::write_bytes(map_entry.base as *mut u8, 0, req_falloc_memory_aligned) };
 
         let falloc = Self {
-            map: RwLock::new(unsafe { core::slice::from_raw_parts_mut(map_entry.base as *mut _, total_system_frames) }),
+            map: RwLock::new(unsafe {
+                core::slice::from_raw_parts_mut((hhdm_addr.as_u64() + map_entry.base) as *mut _, total_system_frames)
+            }),
         };
 
         let frame_ledger_range =
@@ -211,27 +187,29 @@ impl<'arr> FrameManager<'arr> {
             last_frame_end = start_index + frame_count;
         }
 
+        falloc.lock(1).ok();
+
         trace!("Successfully configured frame manager.");
 
         falloc
     }
 
     pub unsafe fn slide_table_base(&self, slide: usize) {
-        let mut map_write = self.map.write();
-        let new_map_base = map_write.as_mut_ptr().cast::<u8>().add(slide).cast::<Frame>();
-        *map_write = core::slice::from_raw_parts_mut(new_map_base, map_write.len());
+        crate::instructions::interrupts::without_interrupts(|| {
+            let mut map_write = self.map.write();
+            let new_map_base = map_write.as_mut_ptr().cast::<u8>().add(slide).cast::<Frame>();
+            *map_write = core::slice::from_raw_parts_mut(new_map_base, map_write.len());
+        })
     }
 
     pub fn lock(&self, index: usize) -> Result<usize, FrameError> {
         if let Some(frame) = self.map.read().get(index) {
             frame.peek();
 
-            let (ty, ref_count, locked) = frame.data();
+            let (locked, ty) = frame.data();
 
             let result = if ty == FrameType::Unusable {
                 Err(FrameError::FrameUnusable(index))
-            } else if ref_count > 0 {
-                Err(FrameError::FrameBorrowed(index))
             } else if locked {
                 Err(FrameError::FrameLocked(index))
             } else {
@@ -247,33 +225,33 @@ impl<'arr> FrameManager<'arr> {
     }
 
     pub fn lock_many(&self, index: usize, count: usize) -> Result<usize, FrameError> {
-        self.map
-            .write()
-            .iter()
-            .skip(index)
-            .take(count)
-            .find_map(|frame| {
-                let (ty, ref_count, locked) = frame.data();
+        crate::instructions::interrupts::without_interrupts(|| {
+            self.map
+                .write()
+                .iter()
+                .skip(index)
+                .take(count)
+                .find_map(|frame| {
+                    let (locked, ty) = frame.data();
 
-                if ty == FrameType::Unusable {
-                    Some(FrameError::FrameUnusable(index))
-                } else if ref_count > 0 {
-                    Some(FrameError::FrameBorrowed(index))
-                } else if locked {
-                    Some(FrameError::FrameLocked(index))
-                } else {
-                    frame.lock();
-                    None
-                }
-            })
-            .map_or(Ok(index), |error| Err(error))
+                    if ty == FrameType::Unusable {
+                        Some(FrameError::FrameUnusable(index))
+                    } else if locked {
+                        Some(FrameError::FrameLocked(index))
+                    } else {
+                        frame.lock();
+                        None
+                    }
+                })
+                .map_or(Ok(index), |error| Err(error))
+        })
     }
 
     pub fn free(&self, index: usize) -> Result<(), FrameError> {
         if let Some(frame) = self.map.read().get(index) {
             frame.peek();
 
-            let (_, _, locked) = frame.data();
+            let (locked, _) = frame.data();
 
             let result = if !locked {
                 Err(FrameError::FrameNotLocked(index))
@@ -289,38 +267,6 @@ impl<'arr> FrameManager<'arr> {
         }
     }
 
-    pub fn borrow(&self, index: usize) -> Result<usize, FrameError> {
-        if let Some(frame) = self.map.read().get(index) {
-            let (ty, _, locked) = frame.data();
-
-            if ty == FrameType::Unusable {
-                Err(FrameError::FrameUnusable(index))
-            } else if locked {
-                Err(FrameError::FrameLocked(index))
-            } else {
-                frame.borrow();
-                Ok(index)
-            }
-        } else {
-            Err(FrameError::OutOfRange(index))
-        }
-    }
-
-    pub fn drop(&self, index: usize) -> Result<(), FrameError> {
-        if let Some(frame) = self.map.read().get(index) {
-            let (_, ref_count, _) = frame.data();
-
-            if ref_count == 0 {
-                Err(FrameError::FrameNotBorrowed(index))
-            } else {
-                frame.drop();
-                Ok(())
-            }
-        } else {
-            Err(FrameError::OutOfRange(index))
-        }
-    }
-
     pub fn lock_next(&self) -> Result<usize, FrameError> {
         self.map
             .read()
@@ -328,9 +274,9 @@ impl<'arr> FrameManager<'arr> {
             .enumerate()
             .find_map(|(index, frame)| {
                 if frame.try_peek() {
-                    let (ty, ref_count, locked) = frame.data();
+                    let (locked, ty) = frame.data();
 
-                    if ty == FrameType::Usable && ref_count == 0 && !locked {
+                    if ty == FrameType::Usable && !locked {
                         frame.lock();
                         frame.unpeek();
                         Some(index)
@@ -412,7 +358,7 @@ pub struct FrameIterator<'arr> {
 }
 
 impl Iterator for FrameIterator<'_> {
-    type Item = (FrameType, u32, bool);
+    type Item = (bool, FrameType);
 
     fn next(&mut self) -> Option<Self::Item> {
         let map_read = self.map.read();

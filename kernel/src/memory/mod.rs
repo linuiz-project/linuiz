@@ -9,19 +9,13 @@ use spin::Once;
 static LIMINE_MMAP: limine::LimineMmapRequest = limine::LimineMmapRequest::new(crate::LIMINE_REV);
 static LIMINE_HHDM: limine::LimineHhdmRequest = limine::LimineHhdmRequest::new(crate::LIMINE_REV);
 
-static KERNEL_FRAME_MANAGER: Once<FrameManager> = Once::new();
-/// Gets the kernel frame manager.
-pub fn get_kernel_frame_manager() -> &'static FrameManager<'static> {
-    KERNEL_FRAME_MANAGER.call_once(|| {
-        FrameManager::from_mmap(
-            LIMINE_MMAP
-                .get_response()
-                .get()
-                .expect("bootloader provided no memory map response")
-                .mmap()
-                .expect("bootloader provided no memory map entries"),
-        )
-    })
+fn get_limine_mmap() -> &'static [limine::LimineMemmapEntry] {
+    LIMINE_MMAP
+        .get_response()
+        .get()
+        .expect("bootloader provided no memory map response")
+        .mmap()
+        .expect("bootloader provided no memory map entries")
 }
 
 static HHDM_ADDR: Once<Address<Virtual>> = Once::new();
@@ -36,9 +30,109 @@ pub fn get_kernel_hhdm_addr() -> Address<Virtual> {
     })
 }
 
+static KERNEL_FRAME_MANAGER: Once<FrameManager> = Once::new();
+/// Gets the kernel frame manager.
+pub fn get_kernel_frame_manager() -> &'static FrameManager<'static> {
+    KERNEL_FRAME_MANAGER.call_once(|| FrameManager::from_mmap(get_limine_mmap(), get_kernel_hhdm_addr()))
+}
+
+use libkernel::LinkerSymbol;
+
+extern "C" {
+    static __text_start: LinkerSymbol;
+    static __text_end: LinkerSymbol;
+
+    static __rodata_start: LinkerSymbol;
+    static __rodata_end: LinkerSymbol;
+
+    static __bss_start: LinkerSymbol;
+    static __bss_end: LinkerSymbol;
+
+    static __data_start: LinkerSymbol;
+    static __data_end: LinkerSymbol;
+}
+
 static KERNEL_PAGE_MANAGER: Once<PageManager> = Once::new();
 /// Gets the kernel page manager.
+pub fn init_kernel_page_manager() {
+    KERNEL_PAGE_MANAGER.call_once(|| unsafe {
+        use libkernel::memory::*;
+
+        let hhdm_base_page_index = get_kernel_hhdm_addr().page_index();
+        let frame_manager = get_kernel_frame_manager();
+        let page_manager =
+            libkernel::memory::PageManager::new(frame_manager, &Page::from_index(hhdm_base_page_index), None);
+
+        // map code
+        (__text_start.as_usize()..__text_end.as_usize())
+            .step_by(0x1000)
+            .map(|page_base_addr| Page::from_index(page_base_addr / 0x1000))
+            .for_each(|page| {
+                page_manager.auto_map(&page, PageAttributes::RX | PageAttributes::GLOBAL, frame_manager);
+            });
+
+        // map readonly
+        (__rodata_start.as_usize()..__rodata_end.as_usize())
+            .step_by(0x1000)
+            .map(|page_base_addr| Page::from_index(page_base_addr))
+            .for_each(|page| page_manager.auto_map(&page, PageAttributes::RO | PageAttributes::GLOBAL, frame_manager));
+
+        // map readwrite
+        (__bss_start.as_usize()..__bss_end.as_usize())
+            .chain(__data_start.as_usize()..__data_end.as_usize())
+            .step_by(0x1000)
+            .map(|page_base_addr| Page::from_index(page_base_addr))
+            .for_each(|page| page_manager.auto_map(&page, PageAttributes::RO | PageAttributes::GLOBAL, frame_manager));
+
+        for entry in get_limine_mmap() {
+            let entry_start = entry.base as usize;
+            let entry_end = entry_start + (entry.len as usize);
+            let page_attributes = {
+                use libkernel::memory::PageAttributes;
+                use limine::LimineMemoryMapEntryType;
+                match entry.typ {
+                    LimineMemoryMapEntryType::BadMemory => PageAttributes::RW,
+
+                    LimineMemoryMapEntryType::KernelAndModules
+                    | LimineMemoryMapEntryType::Usable
+                    | LimineMemoryMapEntryType::Reserved
+                    | LimineMemoryMapEntryType::BootloaderReclaimable
+                    | LimineMemoryMapEntryType::AcpiReclaimable => PageAttributes::RW,
+
+                    LimineMemoryMapEntryType::AcpiNvs | LimineMemoryMapEntryType::Framebuffer => PageAttributes::MMIO,
+                }
+            };
+
+            info!("{:?}", entry);
+
+            for page_base_addr in (entry_start..entry_end).step_by(0x1000) {
+                let frame_index = page_base_addr / 0x1000;
+                let page_index = hhdm_base_page_index + frame_index;
+
+                page_manager
+                    .map(&Page::from_index(page_index), frame_index, false, page_attributes, frame_manager)
+                    .unwrap();
+            }
+        }
+
+        page_manager
+    });
+}
+
 pub fn get_kernel_page_manager() -> &'static PageManager {
-    KERNEL_PAGE_MANAGER
-        .call_once(|| unsafe { PageManager::from_current(&libkernel::memory::Page::from_addr(get_kernel_hhdm_addr())) })
+    KERNEL_PAGE_MANAGER.get().unwrap()
+}
+
+pub fn reclaim_bootloader_memory() {
+    let frame_manager = get_kernel_frame_manager();
+
+    get_limine_mmap()
+        .iter()
+        .filter(|entry| entry.typ == limine::LimineMemoryMapEntryType::BootloaderReclaimable)
+        .flat_map(|entry| (entry.base..(entry.base + entry.len)))
+        .step_by(0x1000)
+        .map(|base_frame_addr| (base_frame_addr / 0x1000) as usize)
+        .for_each(|frame_index| {
+            frame_manager.force_modify_type(frame_index, libkernel::memory::FrameType::Usable).unwrap()
+        })
 }

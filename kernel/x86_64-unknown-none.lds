@@ -31,21 +31,21 @@ SECTIONS
 
     . = ALIGN(CONSTANT(MAXPAGESIZE));
     /* text sections */
-    __text_start        = .;
+    PROVIDE(__text_start = .);
     .plt                : { *(.plt) *(.iplt) }
     .text               : { *(.text .text.*) }
-    __text_end          = .;
+    PROVIDE(__text_end = .);
     
     . = ALIGN(CONSTANT(MAXPAGESIZE));
     /* rodata sections */
-    __rodata_start      = .;
+    PROVIDE(__rodata_start = .);
     .rodata             : { *(.rodata .rodata.*) }
     .eh_frame_hdr       : { *(.eh_frame_hdr) }
-    __rodata_end        = .;
+    PROVIDE(__rodata_end = .);
     
     . = ALIGN(CONSTANT(MAXPAGESIZE));
     /* bss sections */
-    __bss_start         = .;
+    PROVIDE(__bss_start = .);
     .eh_frame           : { KEEP(*(.eh_frame)) }
     .gcc_except_table   : { KEEP(*(.gcc_except_table)) }
     .tdata              : { *(.tdata .tdata.*) }
@@ -58,15 +58,15 @@ SECTIONS
     .dynamic            : { *(.dynamic) }
     .got                : { *(.got) *(.igot) }
     .bss                : { *(.bss .bss.*) }
-    __bss_end           = .;
+    PROVIDE(__bss_end = .);
     .                   = DATA_SEGMENT_RELRO_END(0, .);
 
     . = ALIGN(CONSTANT(MAXPAGESIZE));
     /* data sections */
-    __data_start        = .;
+    PROVIDE(__data_start = .);
     .got.plt            : { *(.got.plt) *(.igot.plt) }
     .data               : { *(.data .data.*) }
-    __data_end          = .;
+    PROVIDE(__data_end = .);
 
     .comment              0 : { *(.comment) }
     .debug                0 : { *(.debug) }
