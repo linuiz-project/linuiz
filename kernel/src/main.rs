@@ -79,11 +79,38 @@ unsafe extern "sysv64" fn _entry() -> ! {
     load_tables();
     debug!("Initializing kernel page manager...");
     crate::memory::init_kernel_page_manager();
+    debug!("Kernel has finalized control of page tables.");
+    debug!("Reclaiming bootloader reclaimable memory...");
     crate::memory::reclaim_bootloader_memory();
-    trace!("Assigning libkernel global allocator.");
-    libkernel::memory::global_alloc::set(&*crate::KMALLOC);
+    // trace!("Assigning libkernel global allocator.");
+    // libkernel::memory::global_alloc::set(&*crate::KMALLOC);
+
+    let smp_count = {
+        trace!("Attempting to start additional cores...");
+
+        let smp_response =
+            LIMINE_SMP.get_response().as_mut_ptr().expect("received no SMP response from bootloader").as_mut().unwrap();
+
+        //let lapic_ids = SMP_LAPIC_IDS.call_once(|| crossbeam_queue::ArrayQueue::new(smp_response.cpu_count as usize));
+
+        if let Some(cpus) = smp_response.cpus() {
+            debug!("Detected {} APs.", cpus.len() - 1);
+
+            for cpu_info in cpus {
+                // Ensure we don't try to 'start' the BSP.
+                if cpu_info.lapic_id != smp_response.bsp_lapic_id {
+                    debug!("Starting processor: PID{}/LID{}", cpu_info.processor_id, cpu_info.lapic_id);
+                    cpu_info.goto_address = _smp_entry as u64;
+                    //lapic_ids.push(cpu_info.lapic_id).expect("LAPIC ID queue unexpectedly full")
+                }
+            }
+        }
+
+        smp_response.cpu_count as u32
+    };
 
     debug!("Finished initial kernel setup.");
+    loop {}
     SMP_MEMORY_READY.store(true, core::sync::atomic::Ordering::Relaxed);
     core_setup(true)
     // configure_acpi()
@@ -177,27 +204,6 @@ unsafe fn load_tables() {
 unsafe fn configure_acpi() -> ! {
     /* prepare APs for startup */
     // TODO add a kernel parameter for SMP
-    let smp_count = {
-        let smp_response =
-            LIMINE_SMP.get_response().as_mut_ptr().expect("received no SMP response from bootloader").as_mut().unwrap();
-
-        let lapic_ids = SMP_LAPIC_IDS.call_once(|| crossbeam_queue::ArrayQueue::new(smp_response.cpu_count as usize));
-
-        if let Some(cpus) = smp_response.cpus() {
-            debug!("Detected {} APs.", cpus.len() - 1);
-
-            for cpu_info in cpus {
-                // Ensure we don't try to 'start' the BSP.
-                if cpu_info.lapic_id != smp_response.bsp_lapic_id {
-                    debug!("Starting processor: PID{}/LID{}", cpu_info.processor_id, cpu_info.lapic_id);
-                    cpu_info.goto_address = _smp_entry as u64;
-                    lapic_ids.push(cpu_info.lapic_id).expect("LAPIC ID queue unexpectedly full")
-                }
-            }
-        }
-
-        smp_response.cpu_count as u32
-    };
 
     /* configure I/O APIC redirections */
     {

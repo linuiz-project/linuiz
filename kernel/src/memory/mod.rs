@@ -69,6 +69,8 @@ pub fn init_kernel_page_manager() {
             .step_by(0x1000)
             .map(|page_base_addr| Page::from_index(page_base_addr / 0x1000))
             .for_each(|page| {
+                trace!("TEXT     {:?}", page);
+
                 page_manager
                     .map(
                         &page,
@@ -85,6 +87,8 @@ pub fn init_kernel_page_manager() {
             .step_by(0x1000)
             .map(|page_base_addr| Page::from_index(page_base_addr / 0x1000))
             .for_each(|page| {
+                trace!("RODATA   {:?}", page);
+
                 page_manager
                     .map(
                         &page,
@@ -98,10 +102,28 @@ pub fn init_kernel_page_manager() {
 
         // map readwrite
         (__bss_start.as_usize()..__bss_end.as_usize())
-            .chain(__data_start.as_usize()..__data_end.as_usize())
             .step_by(0x1000)
             .map(|page_base_addr| Page::from_index(page_base_addr / 0x1000))
             .for_each(|page| {
+                trace!("BSS      {:?}", page);
+
+                page_manager
+                    .map(
+                        &page,
+                        old_page_manager.get_mapped_to(&page).unwrap(),
+                        false,
+                        PageAttributes::RW | PageAttributes::GLOBAL,
+                        frame_manager,
+                    )
+                    .unwrap()
+            });
+
+        (__data_start.as_usize()..__data_end.as_usize())
+            .step_by(0x1000)
+            .map(|page_base_addr| Page::from_index(page_base_addr / 0x1000))
+            .for_each(|page| {
+                trace!("DATA     {:?}", page);
+
                 page_manager
                     .map(
                         &page,
@@ -142,7 +164,7 @@ pub fn init_kernel_page_manager() {
             }
         }
 
-        debug!("Switch to kernel page tables...");
+        debug!("Switching to kernel page tables...");
         page_manager.write_cr3();
 
         page_manager
