@@ -64,6 +64,10 @@ pub struct Options {
     #[clap(long)]
     log: bool,
 
+    /// Stops QEMU from automatically exiting when a triple fault occurs.
+    #[clap(long)]
+    no_shutdown: bool,
+
     /// Which type of block driver to use for root drive.
     #[clap(arg_enum, long, default_value = "virt-io")]
     block: BlockDriver,
@@ -99,6 +103,7 @@ pub fn run(options: Options) -> Result<(), xshell::Error> {
             vec!["-bios", "resources/OVMF.fd", "-drive", "format=raw,file=fat:rw:.hdd/root/"]
         }
     };
+    let no_shutdown = if options.no_shutdown { vec!["-no-shutdown"] } else { vec![] };
 
     cmd!(
         shell,
@@ -115,6 +120,7 @@ pub fn run(options: Options) -> Result<(), xshell::Error> {
             -drive format=raw,file=.hdd/disk0.img,id=disk1,if=none
             -device {block_driver_str},drive=disk1,serial=deadbeef
             {log_str...}
+            {no_shutdown...}
         "
     )
     .run()?;
