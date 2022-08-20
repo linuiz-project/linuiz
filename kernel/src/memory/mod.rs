@@ -20,7 +20,7 @@ fn get_limine_mmap() -> &'static [limine::LimineMemmapEntry] {
 
 static HHDM_ADDR: Once<Address<Virtual>> = Once::new();
 // Gets the kernel's higher half direct mapping page.
-pub fn get_kernel_hhdm_addr() -> Address<Virtual> {
+pub fn get_kernel_hhdm_address() -> Address<Virtual> {
     *HHDM_ADDR.call_once(|| {
         Address::<Virtual>::new(
             LIMINE_HHDM.get_response().get().expect("bootloader provided no higher-half direct mapping").offset
@@ -33,7 +33,7 @@ pub fn get_kernel_hhdm_addr() -> Address<Virtual> {
 static KERNEL_FRAME_MANAGER: Once<FrameManager> = Once::new();
 /// Gets the kernel frame manager.
 pub fn get_kernel_frame_manager() -> &'static FrameManager<'static> {
-    KERNEL_FRAME_MANAGER.call_once(|| FrameManager::from_mmap(get_limine_mmap(), get_kernel_hhdm_addr()))
+    KERNEL_FRAME_MANAGER.call_once(|| FrameManager::from_mmap(get_limine_mmap(), get_kernel_hhdm_address()))
 }
 
 static KERNEL_PAGE_MANAGER: Once<PageManager> = Once::new();
@@ -42,7 +42,7 @@ pub fn get_kernel_page_manager() -> &'static PageManager {
     KERNEL_PAGE_MANAGER.call_once(|| unsafe {
         PageManager::new(
             get_kernel_frame_manager(),
-            &libkernel::memory::Page::from_index(get_kernel_hhdm_addr().page_index()),
+            &libkernel::memory::Page::from_index(get_kernel_hhdm_address().page_index()),
             None,
         )
     })
@@ -61,5 +61,7 @@ pub fn reclaim_bootloader_memory() {
 }
 
 pub fn allocate_pages(page_count: usize) -> *mut u8 {
-    0x0 as *mut u8
+    let base_frame_index = get_kernel_frame_manager().lock_next_many(page_count).unwrap();
+
+    unsafe { get_kernel_hhdm_address().as_mut_ptr::<u8>().add(base_frame_index * 0x1000) }
 }

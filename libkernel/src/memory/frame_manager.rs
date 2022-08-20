@@ -12,7 +12,7 @@ pub enum FrameType {
     Kernel,
     FrameMap,
     BootReclaim,
-    ACPIReclaim,
+    AcpiReclaim,
 }
 
 #[derive(Debug)]
@@ -76,7 +76,7 @@ impl Frame {
             || (new_type == FrameType::MMIO
                 && matches!(frame_type, FrameType::Unusable | FrameType::Reserved))
             || (new_type == FrameType::Usable
-                && matches!(frame_type, FrameType::BootReclaim | FrameType::ACPIReclaim))
+                && matches!(frame_type, FrameType::BootReclaim | FrameType::AcpiReclaim))
         {
             // Change frame type.
             self.0.store(
@@ -170,7 +170,7 @@ impl<'arr> FrameManager<'arr> {
             let frame_ty = match entry.typ {
                 LimineMemoryMapEntryType::Usable => FrameType::Usable,
                 LimineMemoryMapEntryType::BootloaderReclaimable => FrameType::BootReclaim,
-                LimineMemoryMapEntryType::AcpiReclaimable => FrameType::ACPIReclaim,
+                LimineMemoryMapEntryType::AcpiReclaimable => FrameType::AcpiReclaim,
                 LimineMemoryMapEntryType::KernelAndModules => FrameType::Kernel,
                 LimineMemoryMapEntryType::Reserved => FrameType::Reserved,
                 LimineMemoryMapEntryType::AcpiNvs | LimineMemoryMapEntryType::Framebuffer => FrameType::MMIO,
@@ -201,25 +201,27 @@ impl<'arr> FrameManager<'arr> {
     }
 
     pub fn lock(&self, index: usize) -> Result<usize, FrameError> {
-        if let Some(frame) = self.map.read().get(index) {
-            frame.peek();
+        crate::instructions::interrupts::without_interrupts(|| {
+            if let Some(frame) = self.map.read().get(index) {
+                frame.peek();
 
-            let (locked, ty) = frame.data();
+                let (locked, ty) = frame.data();
 
-            let result = if ty == FrameType::Unusable {
-                Err(FrameError::FrameUnusable(index))
-            } else if locked {
-                Err(FrameError::FrameLocked(index))
+                let result = if ty == FrameType::Unusable {
+                    Err(FrameError::FrameUnusable(index))
+                } else if locked {
+                    Err(FrameError::FrameLocked(index))
+                } else {
+                    frame.lock();
+                    Ok(index)
+                };
+
+                frame.unpeek();
+                result
             } else {
-                frame.lock();
-                Ok(index)
-            };
-
-            frame.unpeek();
-            result
-        } else {
-            Err(FrameError::OutOfRange(index))
-        }
+                Err(FrameError::OutOfRange(index))
+            }
+        })
     }
 
     pub fn lock_many(&self, index: usize, count: usize) -> Result<usize, FrameError> {
@@ -246,103 +248,114 @@ impl<'arr> FrameManager<'arr> {
     }
 
     pub fn free(&self, index: usize) -> Result<(), FrameError> {
-        if let Some(frame) = self.map.read().get(index) {
-            frame.peek();
+        crate::instructions::interrupts::without_interrupts(|| {
+            if let Some(frame) = self.map.read().get(index) {
+                frame.peek();
 
-            let (locked, _) = frame.data();
+                let (locked, _) = frame.data();
 
-            let result = if !locked {
-                Err(FrameError::FrameNotLocked(index))
+                let result = if !locked {
+                    Err(FrameError::FrameNotLocked(index))
+                } else {
+                    frame.free();
+                    Ok(())
+                };
+
+                frame.unpeek();
+                result
             } else {
-                frame.free();
-                Ok(())
-            };
-
-            frame.unpeek();
-            result
-        } else {
-            Err(FrameError::OutOfRange(index))
-        }
+                Err(FrameError::OutOfRange(index))
+            }
+        })
     }
 
     pub fn lock_next(&self) -> Result<usize, FrameError> {
-        self.map
-            .read()
-            .iter()
-            .enumerate()
-            .find_map(|(index, frame)| {
-                if frame.try_peek() {
-                    let (locked, ty) = frame.data();
+        crate::instructions::interrupts::without_interrupts(|| {
+            self.map
+                .read()
+                .iter()
+                .enumerate()
+                .find_map(|(index, frame)| {
+                    if frame.try_peek() {
+                        let (locked, ty) = frame.data();
 
-                    if ty == FrameType::Usable && !locked {
-                        frame.lock();
-                        frame.unpeek();
-                        Some(index)
+                        if ty == FrameType::Usable && !locked {
+                            frame.lock();
+                            frame.unpeek();
+                            Some(index)
+                        } else {
+                            frame.unpeek();
+                            None
+                        }
                     } else {
-                        frame.unpeek();
                         None
                     }
-                } else {
-                    None
-                }
-            })
-            .ok_or(FrameError::NoFreeFrames)
+                })
+                .ok_or(FrameError::NoFreeFrames)
+        })
     }
 
-    // pub fn lock_next_many(&self, count: usize) -> Result<usize, FrameError> {
-    //     let map = self.map.write();
+    pub fn lock_next_many(&self, count: usize) -> Result<usize, FrameError> {
+        crate::instructions::interrupts::without_interrupts(|| {
+            let map = self.map.write();
 
-    //     let mut start_index = 0;
-    //     let mut current_run = 0;
-    //     for (index, frame) in map.iter().enumerate() {
-    //         let (ty, ref_count, locked) = frame.data();
+            let mut start_index = 0;
+            let mut current_run = 0;
+            for (index, frame) in map.iter().enumerate() {
+                let (locked, ty) = frame.data();
 
-    //         if ty == FrameType::Usable && ref_count == 0 && !locked {
-    //             current_run += 1;
+                if ty == FrameType::Usable && !locked {
+                    current_run += 1;
 
-    //             if current_run == count {
-    //                 break;
-    //             }
-    //         } else {
-    //             current_run = 0;
-    //             start_index = index + 1;
-    //         }
-    //     }
+                    if current_run == count {
+                        break;
+                    }
+                } else {
+                    current_run = 0;
+                    start_index = index + 1;
+                }
+            }
 
-    //     if current_run < count {
-    //         Err(FrameError::NoFreeFrames)
-    //     } else {
-    //         map.iter().skip(start_index).take(count).for_each(|frame| {
-    //             frame.lock();
-    //         });
+            if current_run < count {
+                Err(FrameError::NoFreeFrames)
+            } else {
+                map.iter().skip(start_index).take(count).for_each(|frame| {
+                    frame.lock();
+                });
 
-    //         Ok(start_index)
-    //     }
-    // }
+                Ok(start_index)
+            }
+        })
+    }
 
     pub fn try_modify_type(&self, index: usize, new_type: FrameType) -> core::result::Result<(), FrameError> {
-        self.map.read().get(index).ok_or(FrameError::OutOfRange(index)).and_then(|frame| frame.modify_type(new_type))
+        crate::instructions::interrupts::without_interrupts(|| {
+            self.map
+                .read()
+                .get(index)
+                .ok_or(FrameError::OutOfRange(index))
+                .and_then(|frame| frame.modify_type(new_type))
+        })
     }
 
     pub fn force_modify_type(&self, index: usize, new_type: FrameType) -> core::result::Result<(), FrameError> {
-        self.map.read().get(index).ok_or(FrameError::OutOfRange(index)).and_then(|frame| frame.modify_type(new_type))
+        crate::instructions::interrupts::without_interrupts(|| {
+            self.map
+                .read()
+                .get(index)
+                .ok_or(FrameError::OutOfRange(index))
+                .and_then(|frame| frame.modify_type(new_type))
+        })
     }
 
     /// Total memory of a given type represented by frame allocator. If `None` is
     ///  provided for type, the total of all memory types is returned instead.
     pub fn total_memory(&self) -> usize {
-        self.map.read().len() * 0x1000
+        crate::instructions::interrupts::without_interrupts(|| self.map.read().len() * 0x1000)
     }
 
     pub fn total_frames(&self) -> usize {
-        self.map.read().len()
-    }
-
-    pub fn map_pages(&self) -> core::ops::Range<crate::memory::Page> {
-        let map_read = self.map.read();
-        let ptr = map_read.as_ptr() as usize;
-
-        crate::memory::Page::range(ptr / 0x1000, (ptr + (map_read.len() * core::mem::size_of::<Frame>())) / 0x1000)
+        crate::instructions::interrupts::without_interrupts(|| self.map.read().len())
     }
 
     pub fn iter(&'arr self) -> FrameIterator<'arr> {
@@ -359,15 +372,17 @@ impl Iterator for FrameIterator<'_> {
     type Item = (bool, FrameType);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let map_read = self.map.read();
-        if self.cur_index < map_read.len() {
-            let cur_index = self.cur_index;
-            self.cur_index += 1;
+        crate::instructions::interrupts::without_interrupts(|| {
+            let map_read = self.map.read();
+            if self.cur_index < map_read.len() {
+                let cur_index = self.cur_index;
+                self.cur_index += 1;
 
-            Some(map_read[cur_index].data())
-        } else {
-            None
-        }
+                Some(map_read[cur_index].data())
+            } else {
+                None
+            }
+        })
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {

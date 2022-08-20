@@ -164,7 +164,7 @@ pub fn get_io_apics() -> &'static Vec<IoApic<'static>> {
             .iter()
             .map(|ioapic_info| unsafe {
                 let ptr =
-                    ((ioapic_info.address as usize) + crate::memory::get_kernel_hhdm_addr().as_usize()) as *mut u32;
+                    ((ioapic_info.address as usize) + crate::memory::get_kernel_hhdm_address().as_usize()) as *mut u32;
                 assert!(ptr.is_aligned(), "I/O APIC pointers must be aligned");
 
                 let ioregsel = &*ptr.cast::<VolatileCell<u32, libkernel::WriteOnly>>();

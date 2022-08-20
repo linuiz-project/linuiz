@@ -35,26 +35,37 @@ static APIC: core::cell::SyncUnsafeCell<usize> = core::cell::SyncUnsafeCell::new
 /// Initializes the core-local APIC in the most advanced mode possible, and hardware-enables it.
 ///
 /// SAFETY: Caller must ensure this method is called only once.
-pub unsafe fn init(
+pub unsafe fn init_interface(
     frame_manager: &'static libkernel::memory::FrameManager,
     page_manager: &'static libkernel::memory::PageManager,
 ) {
     if let Mode::xAPIC = Mode::get() {
-        use libkernel::memory::{FrameError, PageAttributes};
+        use libkernel::memory::{FrameError, MapError, PageAttributes};
 
         let xapic_frame_index = xAPIC_BASE_ADDR / 0x1000;
         let xapic_mapped_page_index = page_manager.mapped_page().index() + xapic_frame_index;
+        let xapic_page = libkernel::memory::Page::from_index(xapic_mapped_page_index);
 
+        frame_manager.lock(xapic_frame_index).ok();
         match frame_manager.try_modify_type(xapic_frame_index, libkernel::memory::FrameType::MMIO) {
-            Ok(()) | Err(FrameError::OutOfRange(_)) => {}
+            Ok(()) => page_manager.set_page_attributes(
+                &xapic_page,
+                PageAttributes::MMIO | PageAttributes::GLOBAL,
+                libkernel::memory::AttributeModify::Set,
+            ),
+
+            Err(FrameError::OutOfRange(_)) => page_manager
+                .map(
+                    &xapic_page,
+                    xapic_frame_index,
+                    false,
+                    PageAttributes::MMIO | PageAttributes::GLOBAL,
+                    frame_manager,
+                )
+                .expect("failed to map xAPIC page"),
+
             Err(frame_error) => panic!("failed to modify xAPIC frame type: {:?}", frame_error),
         }
-
-        page_manager.set_page_attributes(
-            &libkernel::memory::Page::from_index(xapic_mapped_page_index),
-            PageAttributes::MMIO | PageAttributes::GLOBAL,
-            libkernel::memory::AttributeModify::Set,
-        );
 
         APIC.get().write(xapic_mapped_page_index * 0x1000);
     }
@@ -313,7 +324,7 @@ pub unsafe fn software_reset() {
     sw_enable();
 
     // IA32 SDM specifies that after a software disable, all local vectors
-    // are masked, so we need to re-enable the LINT local vectors.
+    // are masked, so we need to re-enable the LINTx vectors.
     get_lint0().set_masked(false).set_vector(LINT0_VECTOR);
     get_lint1().set_masked(false).set_vector(LINT1_VECTOR);
 }

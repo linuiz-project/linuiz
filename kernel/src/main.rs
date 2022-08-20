@@ -80,12 +80,13 @@ unsafe extern "sysv64" fn _entry() -> ! {
         }
     }
 
-    /* core init */
+    /* register & table init */
     {
         load_registers();
         load_tables();
     }
 
+    let frame_manager = crate::memory::get_kernel_frame_manager();
     let page_manager = crate::memory::get_kernel_page_manager();
 
     /* memory init */
@@ -111,8 +112,7 @@ unsafe extern "sysv64" fn _entry() -> ! {
 
         debug!("Initializing kernel page manager...");
 
-        let hhdm_base_page_index = crate::memory::get_kernel_hhdm_addr().page_index();
-        let frame_manager = crate::memory::get_kernel_frame_manager();
+        let hhdm_base_page_index = crate::memory::get_kernel_hhdm_address().page_index();
         let hhdm_mapped_page = Page::from_index(hhdm_base_page_index);
         let old_page_manager = PageManager::from_current(&hhdm_mapped_page);
 
@@ -200,7 +200,7 @@ unsafe extern "sysv64" fn _entry() -> ! {
                     | FrameType::Kernel
                     | FrameType::FrameMap
                     | FrameType::BootReclaim
-                    | FrameType::ACPIReclaim => PageAttributes::RW,
+                    | FrameType::AcpiReclaim => PageAttributes::RW,
                 }
             };
 
@@ -248,6 +248,10 @@ unsafe extern "sysv64" fn _entry() -> ! {
         debug!("Kernel has finalized control of page tables.");
         trace!("Assigning global allocator...");
         libkernel::memory::global_alloc::set(&*crate::KMALLOC);
+        trace!("Initializing APIC interface...");
+        crate::interrupts::apic::init_interface(frame_manager, page_manager);
+        trace!("Initializing ACPI interface...");
+        crate::tables::acpi::init_interface();
 
         trace!("Boot core will release other cores, and then wait for all cores to update root page table.");
         SMP_MEMORY_READY.store(true, Ordering::Relaxed);
@@ -258,12 +262,6 @@ unsafe extern "sysv64" fn _entry() -> ! {
 
         debug!("Reclaiming bootloader reclaimable memory...");
         crate::memory::reclaim_bootloader_memory();
-
-        // and APIC init, because it can be done right after memory init
-        crate::interrupts::apic::init(
-            crate::memory::get_kernel_frame_manager(),
-            crate::memory::get_kernel_page_manager(),
-        );
     }
 
     debug!("Finished initial kernel setup.");
@@ -339,22 +337,98 @@ fn load_registers() {
 
 /// SAFETY: Caller must ensure this method is called only once per core.
 unsafe fn load_tables() {
+    use crate::{interrupts::StackTableIndex, memory::allocate_pages};
+    use x86_64::{
+        instructions::tables,
+        structures::{gdt::Descriptor, idt::InterruptDescriptorTable, tss::TaskStateSegment},
+        VirtAddr,
+    };
+
     trace!("Configuring local tables (IDT, GDT).");
 
     // Always initialize GDT prior to configuring IDT.
     crate::tables::gdt::init();
 
-    // Due to the fashion in which the `x86_64` crate initializes the IDT entries,
-    // it must be ensured that the handlers are set only *after* the GDT has been
-    // properly initialized and loaded—otherwise, the `CS` value for the IDT entries
-    // is incorrect, and this causes very confusing GPFs.
-    let idt_frame_index = crate::memory::get_kernel_frame_manager().lock_next().unwrap();
-    trace!("Core IDT @{:#X}", idt_frame_index * 0x1000);
-    let idt_addr = crate::memory::get_kernel_hhdm_addr().as_usize() + (idt_frame_index * 0x1000);
-    let idt = &mut *(idt_addr as *mut x86_64::structures::idt::InterruptDescriptorTable);
-    crate::interrupts::set_exception_handlers(idt);
-    crate::interrupts::set_stub_handlers(idt);
-    crate::tables::idt::store(idt);
+    let frame_manager = crate::memory::get_kernel_frame_manager();
+    let hhdm_address = crate::memory::get_kernel_hhdm_address().as_usize();
+
+    /* IDT init */
+    {
+        // Due to the fashion in which the `x86_64` crate initializes the IDT entries,
+        // it must be ensured that the handlers are set only *after* the GDT has been
+        // properly initialized and loaded—otherwise, the `CS` value for the IDT entries
+        // is incorrect, and this causes very confusing GPFs.
+        let idt_frame_index = frame_manager.lock_next().unwrap();
+        let idt_ptr = (hhdm_address + (idt_frame_index * 0x1000)) as *mut InterruptDescriptorTable;
+        idt_ptr.write(InterruptDescriptorTable::new());
+
+        let idt = &mut *idt_ptr;
+        crate::interrupts::set_exception_handlers(idt);
+        crate::interrupts::set_stub_handlers(idt);
+        idt.load_unsafe();
+    }
+
+    /* TSS init */
+    {
+        trace!("Configuring new TSS and loading via temp GDT.");
+
+        let tss_ptr = {
+            let tss_frame_index = frame_manager.lock_next().unwrap();
+            let tss_address = hhdm_address + (tss_frame_index * 0x1000);
+            let tss_ptr = tss_address as *mut TaskStateSegment;
+            tss_ptr.write(TaskStateSegment::new());
+
+            let mut tss = &mut *tss_ptr;
+            // TODO guard pages for these stacks
+            tss.privilege_stack_table[0] = VirtAddr::from_ptr(allocate_pages(5));
+            tss.interrupt_stack_table[StackTableIndex::Debug as usize] = VirtAddr::from_ptr(allocate_pages(2));
+            tss.interrupt_stack_table[StackTableIndex::NonMaskable as usize] = VirtAddr::from_ptr(allocate_pages(2));
+            tss.interrupt_stack_table[StackTableIndex::DoubleFault as usize] = VirtAddr::from_ptr(allocate_pages(2));
+            tss.interrupt_stack_table[StackTableIndex::MachineCheck as usize] = VirtAddr::from_ptr(allocate_pages(2));
+
+            tss_ptr
+        };
+
+        trace!("Configuring TSS descriptor for temp GDT.");
+        let tss_descriptor = {
+            use bit_field::BitField;
+
+            let tss_ptr_u64 = tss_ptr as u64;
+
+            let mut low = x86_64::structures::gdt::DescriptorFlags::PRESENT.bits();
+            // base
+            low.set_bits(16..40, tss_ptr_u64.get_bits(0..24));
+            low.set_bits(56..64, tss_ptr_u64.get_bits(24..32));
+            // limit (the `-1` is needed since the bound is inclusive, not exclusive)
+            low.set_bits(0..16, (core::mem::size_of::<TaskStateSegment>() - 1) as u64);
+            // type (0b1001 = available 64-bit tss)
+            low.set_bits(40..44, 0b1001);
+
+            // high 32 bits of base
+            let mut high = 0;
+            high.set_bits(0..32, tss_ptr_u64.get_bits(32..64));
+
+            Descriptor::SystemSegment(low, high)
+        };
+
+        trace!("Loading in temp GDT to `ltr` the TSS.");
+        // Store current GDT pointer to restore later.
+        let cur_gdt = tables::sgdt();
+        // Create temporary kernel GDT to avoid a GPF on switching to it.
+        let mut temp_gdt = x86_64::structures::gdt::GlobalDescriptorTable::new();
+        temp_gdt.add_entry(Descriptor::kernel_code_segment());
+        temp_gdt.add_entry(Descriptor::kernel_data_segment());
+        let tss_selector = temp_gdt.add_entry(tss_descriptor);
+
+        // Load temp GDT ...
+        temp_gdt.load_unsafe();
+        // ... load TSS from temporary GDT ...
+        tables::load_tss(tss_selector);
+        // ... and restore cached GDT.
+        tables::lgdt(&cur_gdt);
+
+        trace!("TSS loaded, and temporary GDT trashed.");
+    }
 }
 
 unsafe fn configure_acpi() -> ! {
@@ -482,99 +556,6 @@ unsafe extern "sysv64" fn _smp_entry(kernel_page_tables_frame_index: u64) -> ! {
 
 /// SAFETY: This function invariantly assumes it will only be called once.
 unsafe fn core_setup() -> ! {
-    /* load tss */
-    {
-        use crate::interrupts::StackTableIndex;
-        use alloc::boxed::Box;
-        use libkernel::memory::{page_aligned_allocator, PageAlignedBox};
-        use x86_64::{
-            instructions::tables,
-            structures::{
-                gdt::{Descriptor, GlobalDescriptorTable},
-                tss::TaskStateSegment,
-            },
-            VirtAddr,
-        };
-
-        const PRIVILEGE_STACK_SIZE: usize = 0x5000;
-        const EXCEPTION_STACK_SIZE: usize = 0x2000;
-
-        let privilege_stack_ptr =
-            Box::leak(PageAlignedBox::<[u8]>::new_uninit_slice_in(PRIVILEGE_STACK_SIZE, page_aligned_allocator()))
-                .as_mut_ptr()
-                .add(PRIVILEGE_STACK_SIZE);
-        let db_stack_ptr =
-            Box::leak(PageAlignedBox::<[u8]>::new_uninit_slice_in(EXCEPTION_STACK_SIZE, page_aligned_allocator()))
-                .as_mut_ptr()
-                .add(EXCEPTION_STACK_SIZE);
-        let nmi_stack_ptr =
-            Box::leak(PageAlignedBox::<[u8]>::new_uninit_slice_in(EXCEPTION_STACK_SIZE, page_aligned_allocator()))
-                .as_mut_ptr()
-                .add(EXCEPTION_STACK_SIZE);
-        let df_stack_ptr =
-            Box::leak(PageAlignedBox::<[u8]>::new_uninit_slice_in(EXCEPTION_STACK_SIZE, page_aligned_allocator()))
-                .as_mut_ptr()
-                .add(EXCEPTION_STACK_SIZE);
-        let mc_stack_ptr =
-            Box::leak(PageAlignedBox::<[u8]>::new_uninit_slice_in(EXCEPTION_STACK_SIZE, page_aligned_allocator()))
-                .as_mut_ptr()
-                .add(EXCEPTION_STACK_SIZE);
-
-        trace!("Configuring new TSS and loading via temp GDT.");
-
-        let tss_ptr = Box::leak({
-            let mut tss = Box::new(x86_64::structures::tss::TaskStateSegment::new());
-
-            tss.privilege_stack_table[0] = VirtAddr::from_ptr(privilege_stack_ptr);
-            tss.interrupt_stack_table[StackTableIndex::Debug as usize] = VirtAddr::from_ptr(db_stack_ptr);
-            tss.interrupt_stack_table[StackTableIndex::NonMaskable as usize] = VirtAddr::from_ptr(nmi_stack_ptr);
-            tss.interrupt_stack_table[StackTableIndex::DoubleFault as usize] = VirtAddr::from_ptr(df_stack_ptr);
-            tss.interrupt_stack_table[StackTableIndex::MachineCheck as usize] = VirtAddr::from_ptr(mc_stack_ptr);
-
-            tss
-        }) as *mut _;
-
-        trace!("Configuring TSS descriptor for temp GDT.");
-        let tss_descriptor = {
-            use bit_field::BitField;
-
-            let tss_ptr_u64 = tss_ptr as u64;
-
-            let mut low = x86_64::structures::gdt::DescriptorFlags::PRESENT.bits();
-            // base
-            low.set_bits(16..40, tss_ptr_u64.get_bits(0..24));
-            low.set_bits(56..64, tss_ptr_u64.get_bits(24..32));
-            // limit (the `-1` is needed since the bound is inclusive, not exclusive)
-            low.set_bits(0..16, (core::mem::size_of::<TaskStateSegment>() - 1) as u64);
-            // type (0b1001 = available 64-bit tss)
-            low.set_bits(40..44, 0b1001);
-
-            // high 32 bits of base
-            let mut high = 0;
-            high.set_bits(0..32, tss_ptr_u64.get_bits(32..64));
-
-            Descriptor::SystemSegment(low, high)
-        };
-
-        trace!("Loading in temp GDT to `ltr` the TSS.");
-        // Store current GDT pointer to restore later.
-        let cur_gdt = tables::sgdt();
-        // Create temporary kernel GDT to avoid a GPF on switching to it.
-        let mut temp_gdt = GlobalDescriptorTable::new();
-        temp_gdt.add_entry(Descriptor::kernel_code_segment());
-        temp_gdt.add_entry(Descriptor::kernel_data_segment());
-        let tss_selector = temp_gdt.add_entry(tss_descriptor);
-
-        // Load temp GDT ...
-        temp_gdt.load_unsafe();
-        // ... load TSS from temporary GDT ...
-        tables::load_tss(tss_selector);
-        // ... and restore cached GDT.
-        tables::lgdt(&cur_gdt);
-
-        trace!("TSS loaded, and temporary GDT trashed.");
-    }
-
     trace!("Arch-specific local setup complete.");
     crate::cpu_setup()
 }

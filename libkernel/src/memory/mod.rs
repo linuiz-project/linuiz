@@ -107,7 +107,7 @@ impl MMIO {
             // Set the correct page attributes for MMIO virtual memory.
             page_manager.set_page_attributes(
                 &current_phys_mem_page,
-                crate::memory::PageAttributes::UNCACHEABLE | crate::memory::PageAttributes::WRITE_THROUGH,
+                crate::memory::PageAttributes::UNCACHEABLE,
                 crate::memory::AttributeModify::Insert,
             );
         }

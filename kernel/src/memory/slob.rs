@@ -67,7 +67,7 @@ impl<'map> SLOB<'map> {
         let initial_alloc_table_page = Page::from_index(1);
         let alloc_table_len = 0x1000 / core::mem::size_of::<BlockPage>();
         let current_page_manager =
-            libkernel::memory::PageManager::from_current(&Page::from_addr(crate::memory::get_kernel_hhdm_addr()));
+            libkernel::memory::PageManager::from_current(&Page::from_addr(crate::memory::get_kernel_hhdm_address()));
         let kernel_frame_manager = crate::memory::get_kernel_frame_manager();
 
         // Map all of the pages in the allocation table.
@@ -120,7 +120,7 @@ impl<'map> SLOB<'map> {
 
         let frame_manager = crate::memory::get_kernel_frame_manager();
         let page_manager = unsafe {
-            libkernel::memory::PageManager::from_current(&Page::from_addr(crate::memory::get_kernel_hhdm_addr()))
+            libkernel::memory::PageManager::from_current(&Page::from_addr(crate::memory::get_kernel_hhdm_address()))
         };
 
         // Attempt to find a run of already-mapped pages within our allocator that can contain
@@ -237,7 +237,7 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
             let start_table_index = start_block_index / BlockPage::BLOCKS_PER;
             let frame_manager = crate::memory::get_kernel_frame_manager();
             let page_manager = unsafe {
-                libkernel::memory::PageManager::from_current(&Page::from_addr(crate::memory::get_kernel_hhdm_addr()))
+                libkernel::memory::PageManager::from_current(&Page::from_addr(crate::memory::get_kernel_hhdm_address()))
             };
             for table_index in start_table_index..end_table_index {
                 let block_page = &mut table_write[table_index];
@@ -278,8 +278,9 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
             let end_table_index = align_up_div(end_block_index, BlockPage::BLOCKS_PER);
             let mut table_write = self.table.write();
             let frame_manager = crate::memory::get_kernel_frame_manager();
-            let page_manager =
-                libkernel::memory::PageManager::from_current(&Page::from_addr(crate::memory::get_kernel_hhdm_addr()));
+            let page_manager = libkernel::memory::PageManager::from_current(&Page::from_addr(
+                crate::memory::get_kernel_hhdm_address(),
+            ));
             for map_index in start_table_index..end_table_index {
                 let (had_bits, has_bits) = {
                     let block_page = &mut table_write[map_index];

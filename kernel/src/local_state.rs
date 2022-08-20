@@ -66,7 +66,7 @@ pub unsafe fn init() {
 
     let core_id = libkernel::cpu::get_id();
 
-    trace!("Configuring local state for core: {:#X}", core_id);
+    trace!("Configuring local state: #{}", core_id);
 
     // Ensure we load the local state pointer via `cpuid` to avoid using the APIC before it is initialized.
     let local_state_ptr = (LOCAL_STATES_BASE.load(Ordering::Relaxed) as *mut LocalState).add(core_id as usize);
@@ -81,15 +81,13 @@ pub unsafe fn init() {
         let end_page = base_page.forward_checked(core::mem::size_of::<LocalState>() / 0x1000).unwrap();
         (base_page..end_page)
             .for_each(|page| page_manager.auto_map(&page, libkernel::memory::PageAttributes::RW, frame_manager));
-
-        // Initialize the local APIC in the most advanced mode.
-        crate::interrupts::apic::init(frame_manager, page_manager);
     }
 
     /* CONFIGURE TIMER */
     use crate::interrupts::apic;
     use crate::interrupts::Vector;
 
+    trace!("Configuring local APIC...");
     apic::software_reset();
     apic::set_timer_divisor(apic::TimerDivisor::Div1);
     apic::get_timer().set_vector(Vector::Timer as u8).set_masked(false);

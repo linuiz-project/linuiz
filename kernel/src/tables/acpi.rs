@@ -2,7 +2,7 @@ use acpi::{fadt::Fadt, sdt::Signature, AcpiTables, PhysicalMapping, PlatformInfo
 use libkernel::io::port::{ReadOnlyPort, WriteOnlyPort};
 use spin::Once;
 
-use crate::memory::get_kernel_hhdm_addr;
+use crate::memory::get_kernel_hhdm_address;
 
 pub enum Register<'a, T: libkernel::io::port::PortReadWrite> {
     IO(libkernel::io::port::ReadWritePort<T>),
@@ -46,9 +46,20 @@ pub struct AcpiHandler;
 
 impl acpi::AcpiHandler for AcpiHandler {
     unsafe fn map_physical_region<T>(&self, physical_address: usize, size: usize) -> acpi::PhysicalMapping<Self, T> {
+        let hhdm_base_address = get_kernel_hhdm_address().as_usize();
+
+        let hhdm_physical_address = if physical_address > hhdm_base_address {
+            trace!("ACPI mapping @{:#X}", physical_address);
+            physical_address
+        } else {
+            let hhdm_physical_address = hhdm_base_address + physical_address;
+            trace!("ACPI mapping {:#X} -> {:#X}", physical_address, hhdm_physical_address);
+            hhdm_physical_address
+        };
+
         acpi::PhysicalMapping::new(
             physical_address,
-            core::ptr::NonNull::new_unchecked((physical_address + get_kernel_hhdm_addr().as_usize()) as *mut _),
+            core::ptr::NonNull::new_unchecked(hhdm_physical_address as *mut _),
             size,
             size,
             Self,
@@ -62,35 +73,35 @@ impl acpi::AcpiHandler for AcpiHandler {
 
 impl aml::Handler for AcpiHandler {
     fn read_u8(&self, address: usize) -> u8 {
-        unsafe { (address as *const u8).add(get_kernel_hhdm_addr().as_usize()).read() }
+        unsafe { (address as *const u8).add(get_kernel_hhdm_address().as_usize()).read() }
     }
 
     fn read_u16(&self, address: usize) -> u16 {
-        unsafe { (address as *const u16).add(get_kernel_hhdm_addr().as_usize()).read() }
+        unsafe { (address as *const u16).add(get_kernel_hhdm_address().as_usize()).read() }
     }
 
     fn read_u32(&self, address: usize) -> u32 {
-        unsafe { (address as *const u32).add(get_kernel_hhdm_addr().as_usize()).read() }
+        unsafe { (address as *const u32).add(get_kernel_hhdm_address().as_usize()).read() }
     }
 
     fn read_u64(&self, address: usize) -> u64 {
-        unsafe { (address as *const u64).add(get_kernel_hhdm_addr().as_usize()).read() }
+        unsafe { (address as *const u64).add(get_kernel_hhdm_address().as_usize()).read() }
     }
 
     fn write_u8(&mut self, address: usize, value: u8) {
-        unsafe { (address as *mut u8).add(get_kernel_hhdm_addr().as_usize()).write(value) };
+        unsafe { (address as *mut u8).add(get_kernel_hhdm_address().as_usize()).write(value) };
     }
 
     fn write_u16(&mut self, address: usize, value: u16) {
-        unsafe { (address as *mut u16).add(get_kernel_hhdm_addr().as_usize()).write(value) };
+        unsafe { (address as *mut u16).add(get_kernel_hhdm_address().as_usize()).write(value) };
     }
 
     fn write_u32(&mut self, address: usize, value: u32) {
-        unsafe { (address as *mut u32).add(get_kernel_hhdm_addr().as_usize()).write(value) };
+        unsafe { (address as *mut u32).add(get_kernel_hhdm_address().as_usize()).write(value) };
     }
 
     fn write_u64(&mut self, address: usize, value: u64) {
-        unsafe { (address as *mut u64).add(get_kernel_hhdm_addr().as_usize()).write(value) };
+        unsafe { (address as *mut u64).add(get_kernel_hhdm_address().as_usize()).write(value) };
     }
 
     fn read_io_u8(&self, port: u16) -> u8 {
@@ -149,23 +160,30 @@ unsafe impl Send for AcpiTablesWrapper {}
 unsafe impl Sync for AcpiTablesWrapper {}
 
 static RSDP: Once<AcpiTablesWrapper> = Once::new();
-pub fn get_rsdp() -> &'static acpi::AcpiTables<AcpiHandler> {
-    &RSDP
-        .call_once(|| unsafe {
-            let rsdp_ptr = LIMINE_RSDP
-                .get_response()
-                .get()
-                .expect("bootloader failed to provide an RSDP address")
-                .address
-                .as_ptr()
-                .expect("bootloader RSDP address is not valid");
-            debug!("RSDP pointer is: {:?}", rsdp_ptr);
 
-            AcpiTablesWrapper(
-                acpi::AcpiTables::from_rsdp(AcpiHandler, rsdp_ptr as usize).expect("failed to acquire RSDP table"),
+/// Initializes the ACPI interface.
+///
+/// REMARK: If this method is called after bootloader memory has been reclaimed, it will panic.
+pub fn init_interface() {
+    RSDP.call_once(|| unsafe {
+        AcpiTablesWrapper(
+            acpi::AcpiTables::from_rsdp(
+                AcpiHandler,
+                LIMINE_RSDP
+                    .get_response()
+                    .get()
+                    .expect("bootloader failed to provide an RSDP address")
+                    .address
+                    .as_ptr()
+                    .expect("bootloader RSDP address is not valid") as usize,
             )
-        })
-        .0
+            .expect("failed to acquire RSDP table"),
+        )
+    });
+}
+
+pub fn get_rsdp() -> &'static acpi::AcpiTables<AcpiHandler> {
+    &RSDP.get().as_ref().unwrap().0
 }
 
 pub struct PlatformInfoWrapper(PlatformInfo);
@@ -223,7 +241,7 @@ pub fn get_aml_context() -> &'static aml::AmlContext {
                 let mut aml_context =
                     aml::AmlContext::new(alloc::boxed::Box::new(AcpiHandler), aml::DebugVerbosity::All);
 
-                let hhdm_offset = get_kernel_hhdm_addr().as_usize();
+                let hhdm_offset = get_kernel_hhdm_address().as_usize();
 
                 {
                     let dsdt_table = get_rsdp().dsdt.as_ref().expect("machine has no DSDT");

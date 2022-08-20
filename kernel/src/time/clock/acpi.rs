@@ -12,11 +12,10 @@ impl AcpiClock<'_> {
     /// Loads the ACPI timer, and creates a [`Clock`] from it.
     pub fn load() -> Option<Self> {
         unsafe {
-            let fadt = crate::tables::acpi::get_fadt();
-
-            fadt.pm_timer_block()
+            crate::tables::acpi::get_fadt()
+                .pm_timer_block()
                 .ok()
-                .and_then(|f| f)
+                .flatten()
                 .and_then(|timer_block| acpi::Register::new(&timer_block))
                 .map(|register| Self(register))
         }

@@ -1,8 +1,9 @@
 use libkernel::cell::SyncOnceCell;
 use x86_64::{registers::segmentation::SegmentSelector, structures::gdt::GlobalDescriptorTable};
 
-lazy_static::lazy_static! {
-    static ref GDT: GlobalDescriptorTable = {
+static GDT: spin::Once<GlobalDescriptorTable> = spin::Once::new();
+fn get_gdt() -> &'static GlobalDescriptorTable {
+    GDT.call_once(|| {
         use x86_64::structures::gdt::Descriptor;
 
         let mut gdt = GlobalDescriptorTable::new();
@@ -18,7 +19,7 @@ lazy_static::lazy_static! {
         UCODE_SELECTOR.set(gdt.add_entry(Descriptor::user_code_segment())).unwrap();
 
         gdt
-    };
+    })
 }
 
 pub static KCODE_SELECTOR: SyncOnceCell<SegmentSelector> = unsafe { SyncOnceCell::new() };
@@ -28,7 +29,7 @@ pub static UDATA_SELECTOR: SyncOnceCell<SegmentSelector> = unsafe { SyncOnceCell
 
 pub fn init() {
     unsafe {
-        GDT.load();
+        get_gdt().load();
 
         use x86_64::instructions::segmentation::{Segment, CS, DS, ES, FS, GS, SS};
 
