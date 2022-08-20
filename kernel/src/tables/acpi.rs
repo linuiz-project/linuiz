@@ -2,6 +2,8 @@ use acpi::{fadt::Fadt, sdt::Signature, AcpiTables, PhysicalMapping, PlatformInfo
 use libkernel::io::port::{ReadOnlyPort, WriteOnlyPort};
 use spin::Once;
 
+use crate::memory::get_kernel_hhdm_addr;
+
 pub enum Register<'a, T: libkernel::io::port::PortReadWrite> {
     IO(libkernel::io::port::ReadWritePort<T>),
     MMIO(&'a libkernel::memory::volatile::VolatileCell<T, libkernel::ReadWrite>),
@@ -44,23 +46,9 @@ pub struct AcpiHandler;
 
 impl acpi::AcpiHandler for AcpiHandler {
     unsafe fn map_physical_region<T>(&self, physical_address: usize, size: usize) -> acpi::PhysicalMapping<Self, T> {
-        // Ensure we modify memory manager state, to keep it consistent, and ACPI MMIO uncached.
-        let page_manager = crate::memory::get_kernel_page_manager();
-        for page_index in (libkernel::align_down(physical_address, 0x1000)
-            ..libkernel::align_up(physical_address + size, 0x1000))
-            .step_by(0x1000)
-            .map(|addr| addr / 0x1000)
-        {
-            page_manager.set_page_attributes(
-                &libkernel::memory::Page::from_index(page_index),
-                libkernel::memory::PageAttributes::MMIO,
-                libkernel::memory::AttributeModify::Set,
-            );
-        }
-
         acpi::PhysicalMapping::new(
             physical_address,
-            core::ptr::NonNull::new_unchecked(physical_address as *mut _),
+            core::ptr::NonNull::new_unchecked((physical_address + get_kernel_hhdm_addr().as_usize()) as *mut _),
             size,
             size,
             Self,
@@ -74,35 +62,35 @@ impl acpi::AcpiHandler for AcpiHandler {
 
 impl aml::Handler for AcpiHandler {
     fn read_u8(&self, address: usize) -> u8 {
-        unsafe { (address as *const u8).add(crate::memory::get_kernel_hhdm_addr().as_usize()).read() }
+        unsafe { (address as *const u8).add(get_kernel_hhdm_addr().as_usize()).read() }
     }
 
     fn read_u16(&self, address: usize) -> u16 {
-        unsafe { (address as *const u16).add(crate::memory::get_kernel_hhdm_addr().as_usize()).read() }
+        unsafe { (address as *const u16).add(get_kernel_hhdm_addr().as_usize()).read() }
     }
 
     fn read_u32(&self, address: usize) -> u32 {
-        unsafe { (address as *const u32).add(crate::memory::get_kernel_hhdm_addr().as_usize()).read() }
+        unsafe { (address as *const u32).add(get_kernel_hhdm_addr().as_usize()).read() }
     }
 
     fn read_u64(&self, address: usize) -> u64 {
-        unsafe { (address as *const u64).add(crate::memory::get_kernel_hhdm_addr().as_usize()).read() }
+        unsafe { (address as *const u64).add(get_kernel_hhdm_addr().as_usize()).read() }
     }
 
     fn write_u8(&mut self, address: usize, value: u8) {
-        unsafe { (address as *mut u8).add(crate::memory::get_kernel_hhdm_addr().as_usize()).write(value) };
+        unsafe { (address as *mut u8).add(get_kernel_hhdm_addr().as_usize()).write(value) };
     }
 
     fn write_u16(&mut self, address: usize, value: u16) {
-        unsafe { (address as *mut u16).add(crate::memory::get_kernel_hhdm_addr().as_usize()).write(value) };
+        unsafe { (address as *mut u16).add(get_kernel_hhdm_addr().as_usize()).write(value) };
     }
 
     fn write_u32(&mut self, address: usize, value: u32) {
-        unsafe { (address as *mut u32).add(crate::memory::get_kernel_hhdm_addr().as_usize()).write(value) };
+        unsafe { (address as *mut u32).add(get_kernel_hhdm_addr().as_usize()).write(value) };
     }
 
     fn write_u64(&mut self, address: usize, value: u64) {
-        unsafe { (address as *mut u64).add(crate::memory::get_kernel_hhdm_addr().as_usize()).write(value) };
+        unsafe { (address as *mut u64).add(get_kernel_hhdm_addr().as_usize()).write(value) };
     }
 
     fn read_io_u8(&self, port: u16) -> u8 {
@@ -235,7 +223,7 @@ pub fn get_aml_context() -> &'static aml::AmlContext {
                 let mut aml_context =
                     aml::AmlContext::new(alloc::boxed::Box::new(AcpiHandler), aml::DebugVerbosity::All);
 
-                let hhdm_offset = crate::memory::get_kernel_hhdm_addr().as_usize();
+                let hhdm_offset = get_kernel_hhdm_addr().as_usize();
 
                 {
                     let dsdt_table = get_rsdp().dsdt.as_ref().expect("machine has no DSDT");

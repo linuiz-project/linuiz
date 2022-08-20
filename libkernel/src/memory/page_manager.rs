@@ -126,6 +126,30 @@ impl VirtualMapper {
             crate::registers::control::CR3Flags::empty(),
         );
     }
+
+    pub fn print_walk(&self, address: Address<Virtual>) {
+        let mapped_page = self.mapped_page;
+
+        unsafe {
+            self.pml4()
+                .and_then(|table| {
+                    info!("L4 {:?}", table.get_entry(address.p4_index()));
+                    table.sub_table(address.p4_index(), &mapped_page)
+                })
+                .and_then(|table| {
+                    info!("L3 {:?}", table.get_entry(address.p3_index()));
+                    table.sub_table(address.p3_index(), &mapped_page)
+                })
+                .and_then(|table| {
+                    info!("L2 {:?}", table.get_entry(address.p2_index()));
+                    table.sub_table(address.p2_index(), &mapped_page)
+                })
+                .and_then(|table| {
+                    info!("L1 {:?}", table.get_entry(address.p1_index()));
+                    Some(table.get_entry(address.p1_index()))
+                });
+        }
+    }
 }
 
 pub struct PageManager {
@@ -336,6 +360,12 @@ impl PageManager {
             unsafe {
                 vmap.mapped_page.forward_checked(vmap.pml4_frame).unwrap().as_ptr::<PageTable<Level4>>().read_volatile()
             }
+        })
+    }
+
+    pub fn print_walk(&self, address: Address<Virtual>) {
+        without_interrupts(|| {
+            self.virtual_map.read().print_walk(address);
         })
     }
 }

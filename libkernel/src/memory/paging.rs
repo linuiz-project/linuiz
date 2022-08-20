@@ -271,7 +271,7 @@ impl fmt::Debug for PageTableEntry {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_tuple("Page Table Entry")
-            .field(&self.get_frame_index())
+            .field(&format_args!("{:#X}", self.get_frame_index()))
             .field(&self.get_attributes())
             .field(&format_args!("0x{:X}", self.0))
             .finish()

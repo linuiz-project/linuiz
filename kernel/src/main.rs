@@ -76,12 +76,9 @@ unsafe extern "sysv64" fn _entry() -> ! {
     }
 
     load_registers();
+    load_tables();
     debug!("Initializing kernel page manager...");
     crate::memory::init_kernel_page_manager();
-    load_tables();
-    debug!("Switch to kernel page tables...");
-    crate::memory::get_kernel_page_manager().write_cr3();
-    info!("worked");
     crate::memory::reclaim_bootloader_memory();
     trace!("Assigning libkernel global allocator.");
     libkernel::memory::global_alloc::set(&*crate::KMALLOC);
@@ -169,6 +166,7 @@ unsafe fn load_tables() {
     // properly initialized and loaded—otherwise, the `CS` value for the IDT entries
     // is incorrect, and this causes very confusing GPFs.
     let idt_frame_index = crate::memory::get_kernel_frame_manager().lock_next().unwrap();
+    trace!("Core IDT @{:#X}", idt_frame_index * 0x1000);
     let idt_addr = crate::memory::get_kernel_hhdm_addr().as_usize() + (idt_frame_index * 0x1000);
     let idt = &mut *(idt_addr as *mut x86_64::structures::idt::InterruptDescriptorTable);
     crate::interrupts::set_exception_handlers(idt);

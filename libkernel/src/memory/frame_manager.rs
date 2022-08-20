@@ -187,8 +187,6 @@ impl<'arr> FrameManager<'arr> {
             last_frame_end = start_index + frame_count;
         }
 
-        falloc.lock(1).ok();
-
         trace!("Successfully configured frame manager.");
 
         falloc

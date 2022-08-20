@@ -60,29 +60,58 @@ pub fn init_kernel_page_manager() {
 
         let hhdm_base_page_index = get_kernel_hhdm_addr().page_index();
         let frame_manager = get_kernel_frame_manager();
-        let page_manager =
-            libkernel::memory::PageManager::new(frame_manager, &Page::from_index(hhdm_base_page_index), None);
+        let hhdm_mapped_page = Page::from_index(hhdm_base_page_index);
+        let old_page_manager = PageManager::from_current(&hhdm_mapped_page);
+        let page_manager = PageManager::new(frame_manager, &hhdm_mapped_page, None);
 
         // map code
         (__text_start.as_usize()..__text_end.as_usize())
             .step_by(0x1000)
             .map(|page_base_addr| Page::from_index(page_base_addr / 0x1000))
             .for_each(|page| {
-                page_manager.auto_map(&page, PageAttributes::RX | PageAttributes::GLOBAL, frame_manager);
+                page_manager
+                    .map(
+                        &page,
+                        old_page_manager.get_mapped_to(&page).unwrap(),
+                        false,
+                        PageAttributes::RX | PageAttributes::GLOBAL,
+                        frame_manager,
+                    )
+                    .unwrap()
             });
 
         // map readonly
         (__rodata_start.as_usize()..__rodata_end.as_usize())
             .step_by(0x1000)
-            .map(|page_base_addr| Page::from_index(page_base_addr))
-            .for_each(|page| page_manager.auto_map(&page, PageAttributes::RO | PageAttributes::GLOBAL, frame_manager));
+            .map(|page_base_addr| Page::from_index(page_base_addr / 0x1000))
+            .for_each(|page| {
+                page_manager
+                    .map(
+                        &page,
+                        old_page_manager.get_mapped_to(&page).unwrap(),
+                        false,
+                        PageAttributes::RO | PageAttributes::GLOBAL,
+                        frame_manager,
+                    )
+                    .unwrap()
+            });
 
         // map readwrite
         (__bss_start.as_usize()..__bss_end.as_usize())
             .chain(__data_start.as_usize()..__data_end.as_usize())
             .step_by(0x1000)
-            .map(|page_base_addr| Page::from_index(page_base_addr))
-            .for_each(|page| page_manager.auto_map(&page, PageAttributes::RO | PageAttributes::GLOBAL, frame_manager));
+            .map(|page_base_addr| Page::from_index(page_base_addr / 0x1000))
+            .for_each(|page| {
+                page_manager
+                    .map(
+                        &page,
+                        old_page_manager.get_mapped_to(&page).unwrap(),
+                        false,
+                        PageAttributes::RW | PageAttributes::GLOBAL,
+                        frame_manager,
+                    )
+                    .unwrap()
+            });
 
         for entry in get_limine_mmap() {
             let entry_start = entry.base as usize;
@@ -91,7 +120,7 @@ pub fn init_kernel_page_manager() {
                 use libkernel::memory::PageAttributes;
                 use limine::LimineMemoryMapEntryType;
                 match entry.typ {
-                    LimineMemoryMapEntryType::BadMemory => PageAttributes::RW,
+                    LimineMemoryMapEntryType::BadMemory => PageAttributes::empty(),
 
                     LimineMemoryMapEntryType::KernelAndModules
                     | LimineMemoryMapEntryType::Usable
@@ -103,8 +132,6 @@ pub fn init_kernel_page_manager() {
                 }
             };
 
-            info!("{:?}", entry);
-
             for page_base_addr in (entry_start..entry_end).step_by(0x1000) {
                 let frame_index = page_base_addr / 0x1000;
                 let page_index = hhdm_base_page_index + frame_index;
@@ -114,6 +141,9 @@ pub fn init_kernel_page_manager() {
                     .unwrap();
             }
         }
+
+        debug!("Switch to kernel page tables...");
+        page_manager.write_cr3();
 
         page_manager
     });
