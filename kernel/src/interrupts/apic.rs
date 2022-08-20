@@ -2,71 +2,62 @@
 
 use crate::interrupts;
 use bit_field::BitField;
-use core::{marker::PhantomData, sync::atomic::Ordering};
+use core::marker::PhantomData;
 use libkernel::registers::msr::IA32_APIC_BASE;
 
-lazy_static::lazy_static! {
-    pub static ref xAPIC_SUPPORT: bool = libkernel::cpu::CPUID.get_feature_info().map(|info| info.has_apic()).unwrap_or(false);
-    pub static ref x2APIC_SUPPORT: bool = libkernel::cpu::CPUID.get_feature_info().map(|info| info.has_x2apic()).unwrap_or(false);
+const xAPIC_BASE_ADDR: usize = 0xFEE00000;
+const x2APIC_BASE_MSR_ADDR: u32 = 0x800;
+
+/// Type for representing the mode of the core-local APIC.
+enum Mode {
+    Disabled,
+    xAPIC,
+    x2APIC,
 }
 
-// xAPIC needs a sized field to avoid being optimized to zero-sized (even
-// with the page-aligned repr), so a `usize` is employed. It should *never*
-// be read, it's *only* to force the compiler to provide padding.
-#[repr(C, align(0x1000))]
-struct xAPIC(usize);
-unsafe impl Send for xAPIC {}
-unsafe impl Sync for xAPIC {}
+/// Returns the current mode of the core-local APIC.
+impl Mode {
+    fn get() -> Self {
+        if IA32_APIC_BASE::get_hw_enabled() {
+            if IA32_APIC_BASE::get_is_x2_mode() {
+                Mode::x2APIC
+            } else {
+                Mode::xAPIC
+            }
+        } else {
+            Mode::Disabled
+        }
+    }
+}
 
-static xLAPIC: xAPIC = xAPIC(0);
-static xLAPIC_INITIALIZED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+static APIC: core::cell::SyncUnsafeCell<usize> = core::cell::SyncUnsafeCell::new(0);
 
 /// Initializes the core-local APIC in the most advanced mode possible, and hardware-enables it.
 ///
-/// SAFETY: Caller must ensure this method is called only once per core.
+/// SAFETY: Caller must ensure this method is called only once.
 pub unsafe fn init(
     frame_manager: &'static libkernel::memory::FrameManager,
     page_manager: &'static libkernel::memory::PageManager,
 ) {
-    if xLAPIC_INITIALIZED.compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
-        trace!("Configuring memory mappings for xAPIC.");
-        let xlapic_page = libkernel::memory::Page::from_ptr(&raw const xLAPIC);
-        let xlapic_old_frame_index = page_manager.get_mapped_to(&xlapic_page).unwrap();
-        let xlapic_new_frame_index = xAPIC_BASE_ADDR / 0x1000;
+    if let Mode::xAPIC = Mode::get() {
+        use libkernel::memory::{FrameError, PageAttributes};
 
-        trace!("Locking xAPIC frame ({:#X}).", xAPIC_BASE_ADDR);
-        // We don't know if the xAPIC base address lies within physical memory (or is out of range), so
-        // all of the frame manipulation must be done manually (rather than automatically by the page manager).
-        use libkernel::memory::FrameError;
-        match frame_manager.lock(xlapic_new_frame_index) {
-            Ok(_) | Err(FrameError::OutOfRange(_)) => {}
-            Err(err) => panic!("encountered error while configuring xAPIC: {:?}", err),
+        let xapic_frame_index = xAPIC_BASE_ADDR / 0x1000;
+        let xapic_mapped_page_index = page_manager.mapped_page().index() + xapic_frame_index;
+
+        match frame_manager.try_modify_type(xapic_frame_index, libkernel::memory::FrameType::MMIO) {
+            Ok(()) | Err(FrameError::OutOfRange(_)) => {}
+            Err(frame_error) => panic!("failed to modify xAPIC frame type: {:?}", frame_error),
         }
-        frame_manager.try_modify_type(xlapic_new_frame_index, libkernel::memory::FrameType::MMIO).ok();
 
-        trace!("Mapping kernel page {:?} to xAPIC frame.", xlapic_page);
-        // Map the xAPIC frames into the kernel higher-half address space.
-        //
-        // REMARK: All CPU cores share the same higher-half page tables, so this mapping will be globally utilized.
-        page_manager
-            .map(&xlapic_page, xlapic_new_frame_index, false, libkernel::memory::PageAttributes::RW, frame_manager)
-            .unwrap();
+        page_manager.set_page_attributes(
+            &libkernel::memory::Page::from_index(xapic_mapped_page_index),
+            PageAttributes::MMIO | PageAttributes::GLOBAL,
+            libkernel::memory::AttributeModify::Set,
+        );
 
-        trace!("Freeing old xLAPIC kernel frame.");
-        // Ensure we free the old xLAPIC frame for use.
-        frame_manager.free(xlapic_old_frame_index).ok();
+        APIC.get().write(xapic_mapped_page_index * 0x1000);
     }
-
-    trace!("Hardware enabling the local APIC.");
-    if *x2APIC_SUPPORT {
-        IA32_APIC_BASE::set(true, true);
-    } else if *xAPIC_SUPPORT {
-        IA32_APIC_BASE::set(true, false);
-    } else {
-        panic!("CPU does not support core-local APIC!");
-    }
-
-    trace!("Local APIC has been put into a valid enable state.");
 }
 
 /// Various valid modes for APIC timer to operate in.
@@ -109,7 +100,8 @@ impl TimerDivisor {
 }
 
 bitflags::bitflags! {
-    pub struct ErrorStatusFlags: u8 {
+    #[repr(transparent)]
+    pub struct ErrorStatusFlags : u8 {
         const SEND_CHECKSUM_ERROR = 1 << 0;
         const RECEIVE_CHECKSUM_ERROR = 1 << 1;
         const SEND_ACCEPT_ERROR = 1 << 2;
@@ -219,50 +211,23 @@ pub const LINT0_VECTOR: u8 = 253;
 pub const LINT1_VECTOR: u8 = 254;
 pub const SPURIOUS_VECTOR: u8 = 255;
 
-const xAPIC_BASE_ADDR: usize = 0xFEE00000;
-const x2APIC_BASE_MSR_ADDR: u32 = 0x800;
-
-/// Type for representing the mode of the core-local APIC.
-enum Mode {
-    xAPIC,
-    x2APIC,
-    None,
-}
-
-/// Returns the current mode of the core-local APIC.
-fn get_mode() -> Mode {
-    if IA32_APIC_BASE::get_hw_enabled() {
-        if IA32_APIC_BASE::get_is_x2_mode() {
-            Mode::x2APIC
-        } else if xLAPIC_INITIALIZED.load(Ordering::Relaxed) {
-            Mode::xAPIC
-        } else {
-            Mode::None
-        }
-    } else {
-        Mode::None
-    }
-}
-
 /// Reads the given register from the local APIC. Panics if APIC is not properly initialized.
 unsafe fn read_register(register: Register) -> u64 {
-    match get_mode() {
-        Mode::xAPIC => {
-            ((((&raw const xLAPIC) as usize) + register.as_xapic_offset()) as *mut u32).read_volatile() as u64
-        }
+    match Mode::get() {
+        Mode::xAPIC => ((((&raw const APIC) as usize) + register.as_xapic_offset()) as *mut u32).read_volatile() as u64,
         Mode::x2APIC => libkernel::registers::msr::rdmsr(register.as_x2apic_msr()),
-        Mode::None => panic!("cannot write; core-local APIC is not in a valid mode"),
+        Mode::Disabled => panic!("cannot write; core-local APIC is not in a valid mode"),
     }
 }
 
 /// Reads the given register from the local APIC. Panics if APIC is not properly initialized.
 unsafe fn write_register(register: Register, value: u64) {
-    match get_mode() {
+    match Mode::get() {
         Mode::xAPIC => {
-            ((((&raw const xLAPIC) as usize) + register.as_xapic_offset()) as *mut u32).write_volatile(value as u32)
+            ((((&raw const APIC) as usize) + register.as_xapic_offset()) as *mut u32).write_volatile(value as u32)
         }
         Mode::x2APIC => libkernel::registers::msr::wrmsr(register.as_x2apic_msr(), value),
-        Mode::None => panic!("cannot write; core-local APIC is not in a valid mode"),
+        Mode::Disabled => panic!("cannot write; core-local APIC is not in a valid mode"),
     }
 }
 
@@ -284,12 +249,12 @@ pub unsafe fn sw_disable() {
 
 pub fn get_id() -> u32 {
     unsafe {
-        match get_mode() {
+        match Mode::get() {
             Mode::xAPIC => {
-                ((((&raw const xLAPIC) as usize) + Register::ID.as_xapic_offset()) as *mut u32).read_volatile() >> 24
+                ((((&raw const APIC) as usize) + Register::ID.as_xapic_offset()) as *mut u32).read_volatile() >> 24
             }
             Mode::x2APIC => libkernel::registers::msr::rdmsr(Register::ID.as_x2apic_msr()) as u32,
-            Mode::None => panic!("cannot read ID; core-local APIC is not in a valid mode"),
+            Mode::Disabled => panic!("cannot read ID; core-local APIC is not in a valid mode"),
         }
     }
 }

@@ -24,6 +24,8 @@
     pointer_is_aligned
 )]
 
+use core::sync::atomic::Ordering;
+
 #[macro_use]
 extern crate log;
 extern crate alloc;
@@ -47,11 +49,11 @@ lazy_static::lazy_static! {
 
 pub const LIMINE_REV: u64 = 0;
 static LIMINE_INFO: limine::LimineBootInfoRequest = limine::LimineBootInfoRequest::new(LIMINE_REV);
-static LIMINE_SMP: limine::LimineSmpRequest = limine::LimineSmpRequest::new(LIMINE_REV);
+static LIMINE_SMP: limine::LimineSmpRequest = limine::LimineSmpRequest::new(LIMINE_REV).flags(0b1);
 
 static mut CON_OUT: crate::drivers::stdout::Serial = crate::drivers::stdout::Serial::new(crate::drivers::stdout::COM1);
 static SMP_MEMORY_READY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
-static SMP_LAPIC_IDS: spin::Once<crossbeam_queue::ArrayQueue<u32>> = spin::Once::new();
+static SMP_MEMORY_INIT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
 #[no_mangle]
 unsafe extern "sysv64" fn _entry() -> ! {
@@ -61,58 +63,212 @@ unsafe extern "sysv64" fn _entry() -> ! {
         Err(_) => libkernel::instructions::interrupts::wait_indefinite(),
     }
 
-    let boot_info = LIMINE_INFO.get_response().get().expect("bootloader provided no info");
-    info!(
-        "Bootloader Info     {} v{} (rev {})",
-        core::ffi::CStr::from_ptr(boot_info.name.as_ptr().unwrap() as *const _).to_str().unwrap(),
-        core::ffi::CStr::from_ptr(boot_info.version.as_ptr().unwrap() as *const _).to_str().unwrap(),
-        boot_info.revision,
-    );
+    /* info dump */
+    {
+        let boot_info = LIMINE_INFO.get_response().get().expect("bootloader provided no info");
+        info!(
+            "Bootloader Info     {} v{} (rev {})",
+            core::ffi::CStr::from_ptr(boot_info.name.as_ptr().unwrap() as *const _).to_str().unwrap(),
+            core::ffi::CStr::from_ptr(boot_info.version.as_ptr().unwrap() as *const _).to_str().unwrap(),
+            boot_info.revision,
+        );
 
-    if let Some(vendor_str) = libkernel::cpu::get_vendor() {
-        info!("Vendor              {}", vendor_str);
-    } else {
-        info!("Vendor              None");
+        if let Some(vendor_str) = libkernel::cpu::get_vendor() {
+            info!("Vendor              {}", vendor_str);
+        } else {
+            info!("Vendor              None");
+        }
     }
 
-    load_registers();
-    load_tables();
-    debug!("Initializing kernel page manager...");
-    crate::memory::init_kernel_page_manager();
-    debug!("Kernel has finalized control of page tables.");
-    debug!("Reclaiming bootloader reclaimable memory...");
-    crate::memory::reclaim_bootloader_memory();
-    // trace!("Assigning libkernel global allocator.");
-    // libkernel::memory::global_alloc::set(&*crate::KMALLOC);
+    /* core init */
+    {
+        load_registers();
+        load_tables();
+    }
 
-    let smp_count = {
+    let page_manager = crate::memory::get_kernel_page_manager();
+
+    /* memory init */
+    {
+        use libkernel::{
+            memory::{Page, PageAttributes, PageManager},
+            LinkerSymbol,
+        };
+
+        extern "C" {
+            static __text_start: LinkerSymbol;
+            static __text_end: LinkerSymbol;
+
+            static __rodata_start: LinkerSymbol;
+            static __rodata_end: LinkerSymbol;
+
+            static __bss_start: LinkerSymbol;
+            static __bss_end: LinkerSymbol;
+
+            static __data_start: LinkerSymbol;
+            static __data_end: LinkerSymbol;
+        }
+
+        debug!("Initializing kernel page manager...");
+
+        let hhdm_base_page_index = crate::memory::get_kernel_hhdm_addr().page_index();
+        let frame_manager = crate::memory::get_kernel_frame_manager();
+        let hhdm_mapped_page = Page::from_index(hhdm_base_page_index);
+        let old_page_manager = PageManager::from_current(&hhdm_mapped_page);
+
+        // map code
+        (__text_start.as_usize()..__text_end.as_usize())
+            .step_by(0x1000)
+            .map(|page_base_addr| Page::from_index(page_base_addr / 0x1000))
+            .for_each(|page| {
+                trace!("TEXT     {:?}", page);
+
+                page_manager
+                    .map(
+                        &page,
+                        old_page_manager.get_mapped_to(&page).unwrap(),
+                        false,
+                        PageAttributes::RX | PageAttributes::GLOBAL,
+                        frame_manager,
+                    )
+                    .unwrap()
+            });
+
+        // map readonly
+        (__rodata_start.as_usize()..__rodata_end.as_usize())
+            .step_by(0x1000)
+            .map(|page_base_addr| Page::from_index(page_base_addr / 0x1000))
+            .for_each(|page| {
+                trace!("RODATA   {:?}", page);
+
+                page_manager
+                    .map(
+                        &page,
+                        old_page_manager.get_mapped_to(&page).unwrap(),
+                        false,
+                        PageAttributes::RO | PageAttributes::GLOBAL,
+                        frame_manager,
+                    )
+                    .unwrap()
+            });
+
+        // map readwrite
+        (__bss_start.as_usize()..__bss_end.as_usize())
+            .step_by(0x1000)
+            .map(|page_base_addr| Page::from_index(page_base_addr / 0x1000))
+            .for_each(|page| {
+                trace!("BSS      {:?}", page);
+
+                page_manager
+                    .map(
+                        &page,
+                        old_page_manager.get_mapped_to(&page).unwrap(),
+                        false,
+                        PageAttributes::RW | PageAttributes::GLOBAL,
+                        frame_manager,
+                    )
+                    .unwrap()
+            });
+
+        (__data_start.as_usize()..__data_end.as_usize())
+            .step_by(0x1000)
+            .map(|page_base_addr| Page::from_index(page_base_addr / 0x1000))
+            .for_each(|page| {
+                trace!("DATA     {:?}", page);
+
+                page_manager
+                    .map(
+                        &page,
+                        old_page_manager.get_mapped_to(&page).unwrap(),
+                        false,
+                        PageAttributes::RW | PageAttributes::GLOBAL,
+                        frame_manager,
+                    )
+                    .unwrap()
+            });
+
+        frame_manager.iter().enumerate().for_each(|(frame_index, (_, ty))| {
+            let page_attributes = {
+                use libkernel::memory::FrameType;
+                use libkernel::memory::PageAttributes;
+
+                match ty {
+                    FrameType::Unusable => PageAttributes::empty(),
+                    FrameType::MMIO => PageAttributes::MMIO,
+                    FrameType::Usable
+                    | FrameType::Reserved
+                    | FrameType::Kernel
+                    | FrameType::FrameMap
+                    | FrameType::BootReclaim
+                    | FrameType::ACPIReclaim => PageAttributes::RW,
+                }
+            };
+
+            page_manager
+                .map(
+                    &Page::from_index(hhdm_base_page_index + frame_index),
+                    frame_index,
+                    false,
+                    page_attributes,
+                    frame_manager,
+                )
+                .unwrap();
+        });
+    }
+
+    /* SMP init */
+    // Because the SMP information structures (and thus, their `goto_address`) are only mapped in the bootloader
+    // page tables, we have to start the other cores and pass the root page table frame index in. All of the cores
+    // will then wait until every core has swapped to the new page tables, then this core (the boot core) will
+    // reclaim bootloader memory.
+    {
         trace!("Attempting to start additional cores...");
 
         let smp_response =
-            LIMINE_SMP.get_response().as_mut_ptr().expect("received no SMP response from bootloader").as_mut().unwrap();
-
-        //let lapic_ids = SMP_LAPIC_IDS.call_once(|| crossbeam_queue::ArrayQueue::new(smp_response.cpu_count as usize));
+            LIMINE_SMP.get_response().as_mut_ptr().expect("bootloader provided no SMP information").as_mut().unwrap();
 
         if let Some(cpus) = smp_response.cpus() {
             debug!("Detected {} APs.", cpus.len() - 1);
 
             for cpu_info in cpus {
-                // Ensure we don't try to 'start' the BSP.
                 if cpu_info.lapic_id != smp_response.bsp_lapic_id {
+                    SMP_MEMORY_INIT.fetch_add(1, Ordering::Relaxed);
+
                     debug!("Starting processor: PID{}/LID{}", cpu_info.processor_id, cpu_info.lapic_id);
                     cpu_info.goto_address = _smp_entry as u64;
-                    //lapic_ids.push(cpu_info.lapic_id).expect("LAPIC ID queue unexpectedly full")
                 }
             }
         }
+    }
 
-        smp_response.cpu_count as u32
-    };
+    /* memory finalize */
+    {
+        debug!("Switching to kernel page tables...");
+        page_manager.write_cr3();
+        debug!("Kernel has finalized control of page tables.");
+        trace!("Assigning global allocator...");
+        libkernel::memory::global_alloc::set(&*crate::KMALLOC);
+
+        trace!("Boot core will release other cores, and then wait for all cores to update root page table.");
+        SMP_MEMORY_READY.store(true, Ordering::Relaxed);
+
+        while SMP_MEMORY_INIT.load(Ordering::Relaxed) > 0 {
+            libkernel::instructions::pause();
+        }
+
+        debug!("Reclaiming bootloader reclaimable memory...");
+        crate::memory::reclaim_bootloader_memory();
+
+        // and APIC init, because it can be done right after memory init
+        crate::interrupts::apic::init(
+            crate::memory::get_kernel_frame_manager(),
+            crate::memory::get_kernel_page_manager(),
+        );
+    }
 
     debug!("Finished initial kernel setup.");
-    loop {}
-    SMP_MEMORY_READY.store(true, core::sync::atomic::Ordering::Relaxed);
-    core_setup(true)
+
+    core_setup()
     // configure_acpi()
 }
 
@@ -264,7 +420,6 @@ unsafe fn configure_acpi() -> ! {
 
     /* take ownership of ACPI */
     {
-        use acpi::platform::address::AddressSpace;
         use bit_field::BitField;
 
         let fadt = tables::acpi::get_fadt();
@@ -300,24 +455,33 @@ unsafe fn configure_acpi() -> ! {
     }
 
     debug!("Finished initial kernel setup.");
-    SMP_MEMORY_READY.store(true, core::sync::atomic::Ordering::Relaxed);
-    core_setup(true)
+    SMP_MEMORY_READY.store(true, Ordering::Relaxed);
+    core_setup()
 }
 
 /// Entrypoint for AP processors.
 #[inline(never)]
-unsafe extern "C" fn _smp_entry() -> ! {
+unsafe extern "sysv64" fn _smp_entry(kernel_page_tables_frame_index: u64) -> ! {
     // Wait to ensure the machine is the correct state to execute cpu setup.
-    while !SMP_MEMORY_READY.load(core::sync::atomic::Ordering::Relaxed) {}
+    while !SMP_MEMORY_READY.load(Ordering::Relaxed) {}
 
     load_registers();
     load_tables();
 
-    core_setup(false)
+    crate::memory::get_kernel_page_manager().write_cr3();
+
+    SMP_MEMORY_INIT.fetch_sub(1, Ordering::Relaxed);
+    while SMP_MEMORY_INIT.load(Ordering::Relaxed) > 0 {
+        libkernel::instructions::pause();
+    }
+
+    trace!("Finished SMP entry for core.");
+
+    core_setup()
 }
 
 /// SAFETY: This function invariantly assumes it will only be called once.
-unsafe fn core_setup(is_bsp: bool) -> ! {
+unsafe fn core_setup() -> ! {
     /* load tss */
     {
         use crate::interrupts::StackTableIndex;
@@ -412,7 +576,7 @@ unsafe fn core_setup(is_bsp: bool) -> ! {
     }
 
     trace!("Arch-specific local setup complete.");
-    crate::cpu_setup(is_bsp)
+    crate::cpu_setup()
 }
 
 // use libkernel::io::pci;
@@ -486,8 +650,8 @@ fn syscall_test() -> ! {
 
 /// SAFETY: This function invariantly assumes it will be called only once per core.
 #[inline(never)]
-pub(self) unsafe fn cpu_setup(is_bsp: bool) -> ! {
-    crate::local_state::init(is_bsp);
+pub(self) unsafe fn cpu_setup() -> ! {
+    crate::local_state::init();
 
     use crate::{local_state::try_push_task, scheduling::*};
     use libkernel::registers::RFlags;

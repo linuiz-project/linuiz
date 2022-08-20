@@ -381,6 +381,7 @@ impl<L: HeirarchicalLevel> PageTable<L> {
         phys_mapping_page: &Page,
         frame_manager: &'static crate::memory::FrameManager,
     ) -> &mut PageTable<L::NextLevel> {
+        // TODO use a `for` loop to support arbitrary page table depths
         let entry = self.get_entry_mut(index);
 
         let (frame_index, created) = if entry.is_present() {

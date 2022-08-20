@@ -16,7 +16,7 @@ pub enum MapError {
 
 struct VirtualMapper {
     mapped_page: Page,
-    pml4_frame: usize,
+    root_frame_index: usize,
 }
 
 impl VirtualMapper {
@@ -31,7 +31,7 @@ impl VirtualMapper {
             // We don't know where physical memory is mapped at this point,
             // so rely on what the caller specifies for us.
             mapped_page: *mapped_page,
-            pml4_frame: pml4_index,
+            root_frame_index: pml4_index,
         }
     }
 
@@ -42,7 +42,7 @@ impl VirtualMapper {
     /* ACQUIRE STATE */
 
     fn pml4_page(&self) -> Page {
-        self.mapped_page.forward_checked(self.pml4_frame).unwrap()
+        self.mapped_page.forward_checked(self.root_frame_index).unwrap()
     }
 
     fn pml4(&self) -> Option<&PageTable<Level4>> {
@@ -116,13 +116,13 @@ impl VirtualMapper {
 
     /// Returns `true` if the current CR3 address matches the addressor's PML4 frame, and `false` otherwise.
     fn is_active(&self) -> bool {
-        crate::registers::control::CR3::read().0.frame_index() == self.pml4_frame
+        crate::registers::control::CR3::read().0.frame_index() == self.root_frame_index
     }
 
     #[inline(always)]
     pub unsafe fn write_cr3(&mut self) {
         crate::registers::control::CR3::write(
-            Address::<Physical>::new(self.pml4_frame * 0x1000),
+            Address::<Physical>::new(self.root_frame_index * 0x1000),
             crate::registers::control::CR3Flags::empty(),
         );
     }
@@ -181,8 +181,8 @@ impl PageManager {
         }
     }
 
-    pub fn cr3(&self) -> usize {
-        self.virtual_map.read().pml4_frame * 0x1000
+    pub fn root_frame_index(&self) -> usize {
+        self.virtual_map.read().root_frame_index
     }
 
     pub unsafe fn from_current(mapped_page: &Page) -> Self {
@@ -358,7 +358,11 @@ impl PageManager {
             let vmap = self.virtual_map.read();
 
             unsafe {
-                vmap.mapped_page.forward_checked(vmap.pml4_frame).unwrap().as_ptr::<PageTable<Level4>>().read_volatile()
+                vmap.mapped_page
+                    .forward_checked(vmap.root_frame_index)
+                    .unwrap()
+                    .as_ptr::<PageTable<Level4>>()
+                    .read_volatile()
             }
         })
     }

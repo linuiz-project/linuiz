@@ -47,7 +47,7 @@ fn get_local_state() -> Option<&'static mut LocalState> {
 /// Initializes the core-local state structure.
 ///
 /// SAFETY: This function invariantly assumes it will only be called once.
-pub unsafe fn init(is_bsp: bool) {
+pub unsafe fn init() {
     LOCAL_STATES_BASE
         .compare_exchange(
             0,

@@ -48,7 +48,7 @@ impl APICTimer {
     ///         affect software execution, and additionally that the [`crate::interrupts::Vector::LocalTimer`] has
     ///         a proper handler.
     pub unsafe fn new(set_freq: u16) -> Option<Self> {
-        if *apic::xAPIC_SUPPORT || *apic::x2APIC_SUPPORT {
+        if libkernel::registers::msr::IA32_APIC_BASE::get_hw_enabled() {
             apic::get_timer().set_mode(apic::TimerMode::OneShot);
 
             // TODO perhaps check the state of APIC timer LVT? It should be asserted that the below will always work.
@@ -91,7 +91,7 @@ impl TSCTimer {
     ///         affect software execution, and additionally that the [crate::interrupts::Vector::LocalTimer] vector has
     ///         a proper handler.
     pub unsafe fn new(set_freq: u16) -> Option<Self> {
-        if (*apic::xAPIC_SUPPORT || *apic::x2APIC_SUPPORT)
+        if libkernel::registers::msr::IA32_APIC_BASE::get_hw_enabled()
             && libkernel::cpu::FEATURE_INFO.has_tsc()
             && libkernel::cpu::FEATURE_INFO.has_tsc_deadline()
         {
