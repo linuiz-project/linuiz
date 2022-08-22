@@ -21,19 +21,6 @@ pub fn breakpoint() {
     }
 }
 
-#[inline(always)]
-pub unsafe fn set_data_registers(value: u16) {
-    asm!(
-        "mov ds, ax",
-        "mov es, ax",
-        "mov gs, ax",
-        "mov fs, ax",
-        "mov ss, ax",
-        in("ax") value,
-        options(readonly, nostack, preserves_flags)
-    );
-}
-
 #[derive(Debug, Clone, Copy)]
 pub enum RandError {
     NotSupported,

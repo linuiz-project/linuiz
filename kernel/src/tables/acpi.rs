@@ -1,8 +1,7 @@
+use crate::memory::get_kernel_hhdm_address;
 use acpi::{fadt::Fadt, sdt::Signature, AcpiTables, PhysicalMapping, PlatformInfo};
 use libkernel::io::port::{ReadOnlyPort, WriteOnlyPort};
 use spin::Once;
-
-use crate::memory::get_kernel_hhdm_address;
 
 pub enum Register<'a, T: libkernel::io::port::PortReadWrite> {
     IO(libkernel::io::port::ReadWritePort<T>),
@@ -47,15 +46,10 @@ pub struct AcpiHandler;
 impl acpi::AcpiHandler for AcpiHandler {
     unsafe fn map_physical_region<T>(&self, physical_address: usize, size: usize) -> acpi::PhysicalMapping<Self, T> {
         let hhdm_base_address = get_kernel_hhdm_address().as_usize();
-
-        let hhdm_physical_address = if physical_address > hhdm_base_address {
-            trace!("ACPI mapping @{:#X}", physical_address);
-            physical_address
-        } else {
-            let hhdm_physical_address = hhdm_base_address + physical_address;
-            trace!("ACPI mapping {:#X} -> {:#X}", physical_address, hhdm_physical_address);
-            hhdm_physical_address
-        };
+        let hhdm_physical_address =
+        // The RSDP address provided by Limine resides within the HHDM, but the other pointers do not. This logic
+        // accounts for that quirk.
+            if physical_address > hhdm_base_address { physical_address } else { hhdm_base_address + physical_address };
 
         acpi::PhysicalMapping::new(
             physical_address,

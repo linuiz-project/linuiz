@@ -21,7 +21,8 @@
     allocator_api,
     sync_unsafe_cell,
     asm_sym,
-    asm_const
+    asm_const,
+    core_intrinsics
 )]
 
 #[macro_use]
@@ -46,6 +47,8 @@ pub mod syscall;
 #[cfg(feature = "panic_handler")]
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
+    // TODO impl stack unwinding
+
     error!("KERNEL PANIC (at {}): {}", info.location().unwrap(), info.message().unwrap());
 
     crate::instructions::interrupts::wait_indefinite()

@@ -13,28 +13,28 @@ pub mod global_alloc {
     use core::{alloc::GlobalAlloc, cell::OnceCell};
 
     struct GlobalAllocator<'m>(OnceCell<&'m dyn GlobalAlloc>);
-
-    impl GlobalAllocator<'_> {
-        pub const fn new() -> Self {
-            Self(OnceCell::new())
-        }
-    }
-
     unsafe impl Send for GlobalAllocator<'_> {}
     unsafe impl Sync for GlobalAllocator<'_> {}
 
     unsafe impl GlobalAlloc for GlobalAllocator<'_> {
         unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
-            self.0.get().unwrap().alloc(layout)
+            match self.0.get() {
+                Some(global_allocator) => global_allocator.alloc(layout),
+                // TODO properly handle abort, via `ud2` handler and perhaps an interrupt flag in fsbase MSR?
+                None => core::intrinsics::abort(),
+            }
         }
 
         unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
-            self.0.get().unwrap().dealloc(ptr, layout);
+            match self.0.get() {
+                Some(global_allocator) => global_allocator.dealloc(ptr, layout),
+                None => core::intrinsics::abort(),
+            }
         }
     }
 
     #[global_allocator]
-    static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator::new();
+    static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator(OnceCell::new());
 
     pub unsafe fn set(galloc: &'static dyn GlobalAlloc) {
         if let Err(_) = GLOBAL_ALLOCATOR.0.set(galloc) {

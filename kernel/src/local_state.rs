@@ -281,6 +281,7 @@ pub fn try_begin_scheduling() {
         let scheduler = &mut local_state.scheduler;
 
         if !scheduler.is_enabled() {
+            trace!("Enabling kernel scheduler.");
             scheduler.enable();
 
             unsafe { reload_timer(core::num::NonZeroU16::new_unchecked(1)) };
