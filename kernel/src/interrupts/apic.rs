@@ -225,7 +225,7 @@ pub const SPURIOUS_VECTOR: u8 = 255;
 /// Reads the given register from the local APIC. Panics if APIC is not properly initialized.
 unsafe fn read_register(register: Register) -> u64 {
     match Mode::get() {
-        Mode::xAPIC => ((((&raw const APIC) as usize) + register.as_xapic_offset()) as *mut u32).read_volatile() as u64,
+        Mode::xAPIC => ((APIC.get().read() + register.as_xapic_offset()) as *mut u32).read_volatile() as u64,
         Mode::x2APIC => libkernel::registers::msr::rdmsr(register.as_x2apic_msr()),
         Mode::Disabled => panic!("cannot write; core-local APIC is not in a valid mode"),
     }
@@ -234,9 +234,7 @@ unsafe fn read_register(register: Register) -> u64 {
 /// Reads the given register from the local APIC. Panics if APIC is not properly initialized.
 unsafe fn write_register(register: Register, value: u64) {
     match Mode::get() {
-        Mode::xAPIC => {
-            ((((&raw const APIC) as usize) + register.as_xapic_offset()) as *mut u32).write_volatile(value as u32)
-        }
+        Mode::xAPIC => ((APIC.get().read() + register.as_xapic_offset()) as *mut u32).write_volatile(value as u32),
         Mode::x2APIC => libkernel::registers::msr::wrmsr(register.as_x2apic_msr(), value),
         Mode::Disabled => panic!("cannot write; core-local APIC is not in a valid mode"),
     }
@@ -261,9 +259,7 @@ pub unsafe fn sw_disable() {
 pub fn get_id() -> u32 {
     unsafe {
         match Mode::get() {
-            Mode::xAPIC => {
-                ((((&raw const APIC) as usize) + Register::ID.as_xapic_offset()) as *mut u32).read_volatile() >> 24
-            }
+            Mode::xAPIC => ((APIC.get().read() + Register::ID.as_xapic_offset()) as *mut u32).read_volatile() >> 24,
             Mode::x2APIC => libkernel::registers::msr::rdmsr(Register::ID.as_x2apic_msr()) as u32,
             Mode::Disabled => panic!("cannot read ID; core-local APIC is not in a valid mode"),
         }
