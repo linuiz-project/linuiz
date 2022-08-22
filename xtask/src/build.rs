@@ -38,6 +38,7 @@ static LIMINE_DEFAULT_CFG: &str = "
     PROTOCOL=limine
     RESOLUTION=800x600x16
     KERNEL_PATH=boot:///linuiz/kernel_x64.elf
+    CMDLINE=smp:yes
     KASLR=yes
     ";
 

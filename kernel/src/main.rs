@@ -48,17 +48,22 @@ lazy_static::lazy_static! {
 }
 
 pub const LIMINE_REV: u64 = 0;
+static LIMINE_KERNEL_FILE: limine::LimineKernelFileRequest = limine::LimineKernelFileRequest::new(0);
 static LIMINE_INFO: limine::LimineBootInfoRequest = limine::LimineBootInfoRequest::new(LIMINE_REV);
 static LIMINE_SMP: limine::LimineSmpRequest = limine::LimineSmpRequest::new(LIMINE_REV).flags(0b1);
+static LIMINE_STACK: limine::LimineStackSizeRequest =
+    limine::LimineStackSizeRequest::new(LIMINE_REV).stack_size(0x16000);
 
 static mut CON_OUT: crate::drivers::stdout::Serial = crate::drivers::stdout::Serial::new(crate::drivers::stdout::COM1);
 static SMP_MEMORY_READY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 static SMP_MEMORY_INIT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
+static mut KERNEL_CFG_SMP: bool = false;
+
 #[no_mangle]
 unsafe extern "sysv64" fn _entry() -> ! {
     CON_OUT.init(crate::drivers::stdout::SerialSpeed::S115200);
-    match crate::drivers::stdout::set_stdout(&mut CON_OUT, log::LevelFilter::Trace) {
+    match crate::drivers::stdout::set_stdout(&mut CON_OUT, log::LevelFilter::Debug) {
         Ok(()) => info!("Successfully loaded into kernel."),
         Err(_) => libkernel::instructions::interrupts::wait_indefinite(),
     }
@@ -79,6 +84,32 @@ unsafe extern "sysv64" fn _entry() -> ! {
             info!("Vendor              None");
         }
     }
+
+    /* parse kernel arguments */
+    {
+        let kernel_file = LIMINE_KERNEL_FILE
+            .get_response()
+            .get()
+            .expect("bootloader did not provide a kernel file")
+            .kernel_file
+            .get()
+            .expect("bootloader kernel file response did not provide a valid file handle");
+        let cmdline = core::ffi::CStr::from_ptr(kernel_file.cmdline.as_mut_ptr().unwrap() as *mut _)
+            .to_str()
+            .expect("invalid cmdline string");
+
+        for argument in cmdline.split(' ') {
+            match argument.split_once(':') {
+                Some(("smp", "on")) => KERNEL_CFG_SMP = true,
+                Some(("smp", "off")) => KERNEL_CFG_SMP = false,
+                _ => warn!("Unhandled cmdline parameter: {:?}", argument),
+            }
+        }
+    }
+
+    crate::memory::init_kernel_hhdm_address();
+    crate::memory::init_kernel_frame_manager();
+    crate::memory::init_kernel_page_manager();
 
     /* register & table init */
     {
@@ -121,8 +152,6 @@ unsafe extern "sysv64" fn _entry() -> ! {
             .step_by(0x1000)
             .map(|page_base_addr| Page::from_index(page_base_addr / 0x1000))
             .for_each(|page| {
-                trace!("TEXT     {:?}", page);
-
                 page_manager
                     .map(
                         &page,
@@ -139,8 +168,6 @@ unsafe extern "sysv64" fn _entry() -> ! {
             .step_by(0x1000)
             .map(|page_base_addr| Page::from_index(page_base_addr / 0x1000))
             .for_each(|page| {
-                trace!("RODATA   {:?}", page);
-
                 page_manager
                     .map(
                         &page,
@@ -157,8 +184,6 @@ unsafe extern "sysv64" fn _entry() -> ! {
             .step_by(0x1000)
             .map(|page_base_addr| Page::from_index(page_base_addr / 0x1000))
             .for_each(|page| {
-                trace!("BSS      {:?}", page);
-
                 page_manager
                     .map(
                         &page,
@@ -174,8 +199,6 @@ unsafe extern "sysv64" fn _entry() -> ! {
             .step_by(0x1000)
             .map(|page_base_addr| Page::from_index(page_base_addr / 0x1000))
             .for_each(|page| {
-                trace!("DATA     {:?}", page);
-
                 page_manager
                     .map(
                         &page,
@@ -232,10 +255,14 @@ unsafe extern "sysv64" fn _entry() -> ! {
 
             for cpu_info in cpus {
                 if cpu_info.lapic_id != smp_response.bsp_lapic_id {
-                    SMP_MEMORY_INIT.fetch_add(1, Ordering::Relaxed);
+                    if KERNEL_CFG_SMP {
+                        debug!("Starting processor: PID{}/LID{}", cpu_info.processor_id, cpu_info.lapic_id);
 
-                    debug!("Starting processor: PID{}/LID{}", cpu_info.processor_id, cpu_info.lapic_id);
-                    cpu_info.goto_address = _smp_entry as u64;
+                        SMP_MEMORY_INIT.fetch_add(1, Ordering::Relaxed);
+                        cpu_info.goto_address = _smp_entry as u64;
+                    } else {
+                        cpu_info.goto_address = libkernel::instructions::interrupts::wait_indefinite as u64;
+                    }
                 }
             }
         }
@@ -648,6 +675,7 @@ pub(self) unsafe fn cpu_setup() -> ! {
     ))
     .unwrap();
 
+    trace!("Beginning scheduling...");
     crate::local_state::try_begin_scheduling();
     libkernel::instructions::interrupts::wait_indefinite()
 }
