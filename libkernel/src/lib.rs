@@ -33,14 +33,13 @@ mod addr;
 mod macros;
 
 pub use addr::*;
-pub mod cell;
 pub mod collections;
 pub mod elf;
 pub mod instructions;
 pub mod io;
 pub mod memory;
 // TODO decide if I can move the `registers` module to `kernel::`
-pub mod registers;
+//pub mod registers;
 pub mod sync;
 pub mod syscall;
 
