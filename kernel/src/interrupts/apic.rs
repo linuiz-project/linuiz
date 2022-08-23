@@ -36,18 +36,19 @@ static APIC: core::cell::SyncUnsafeCell<usize> = core::cell::SyncUnsafeCell::new
 ///
 /// SAFETY: Caller must ensure this method is called only once.
 pub unsafe fn init_interface(
-    frame_manager: &'static libkernel::memory::FrameManager,
-    page_manager: &'static libkernel::memory::PageManager,
+    frame_manager: &'static crate::memory::FrameManager,
+    page_manager: &'static crate::memory::PageManager,
 ) {
     if let Mode::xAPIC = Mode::get() {
-        use libkernel::memory::{FrameError, MapError, PageAttributes};
+        use crate::memory::{FrameError, MapError};
+        use libkernel::memory::PageAttributes;
 
         let xapic_frame_index = xAPIC_BASE_ADDR / 0x1000;
         let xapic_mapped_page_index = page_manager.mapped_page().index() + xapic_frame_index;
         let xapic_page = libkernel::memory::Page::from_index(xapic_mapped_page_index);
 
         frame_manager.lock(xapic_frame_index).ok();
-        match frame_manager.try_modify_type(xapic_frame_index, libkernel::memory::FrameType::MMIO) {
+        match frame_manager.try_modify_type(xapic_frame_index, crate::memory::FrameType::MMIO) {
             Ok(()) => page_manager.set_page_attributes(
                 &xapic_page,
                 PageAttributes::MMIO | PageAttributes::GLOBAL,

@@ -21,7 +21,8 @@
     inline_const,
     sync_unsafe_cell,
     if_let_guard,
-    pointer_is_aligned
+    pointer_is_aligned,
+    core_intrinsics
 )]
 
 use core::sync::atomic::Ordering;
@@ -123,7 +124,7 @@ unsafe extern "sysv64" fn _entry() -> ! {
     /* memory init */
     {
         use libkernel::{
-            memory::{Page, PageAttributes, PageManager},
+            memory::{Page, PageAttributes},
             LinkerSymbol,
         };
 
@@ -145,7 +146,7 @@ unsafe extern "sysv64" fn _entry() -> ! {
 
         let hhdm_base_page_index = crate::memory::get_kernel_hhdm_address().page_index();
         let hhdm_mapped_page = Page::from_index(hhdm_base_page_index);
-        let old_page_manager = PageManager::from_current(&hhdm_mapped_page);
+        let old_page_manager = crate::memory::PageManager::from_current(&hhdm_mapped_page);
 
         // map code
         (__text_start.as_usize()..__text_end.as_usize())
@@ -212,8 +213,7 @@ unsafe extern "sysv64" fn _entry() -> ! {
 
         frame_manager.iter().enumerate().for_each(|(frame_index, (_, ty))| {
             let page_attributes = {
-                use libkernel::memory::FrameType;
-                use libkernel::memory::PageAttributes;
+                use crate::memory::FrameType;
 
                 match ty {
                     FrameType::Unusable => PageAttributes::empty(),
@@ -274,7 +274,7 @@ unsafe extern "sysv64" fn _entry() -> ! {
         page_manager.write_cr3();
         debug!("Kernel has finalized control of page tables.");
         trace!("Assigning global allocator...");
-        libkernel::memory::global_alloc::set(&*crate::KMALLOC);
+        crate::memory::set_global_allocator(&*crate::KMALLOC);
         trace!("Initializing APIC interface...");
         crate::interrupts::apic::init_interface(frame_manager, page_manager);
         trace!("Initializing ACPI interface...");

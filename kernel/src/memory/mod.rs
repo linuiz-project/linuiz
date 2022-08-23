@@ -1,12 +1,45 @@
+mod frame_manager;
+mod page_manager;
 mod slob;
 
-use core::cell::SyncUnsafeCell;
-
+pub use frame_manager::*;
+pub use page_manager::*;
 pub use slob::*;
 
-use libkernel::memory::{FrameManager, PageManager};
+use core::{alloc::GlobalAlloc, cell::OnceCell};
 use libkernel::{Address, Virtual};
 use spin::Once;
+
+struct GlobalAllocator<'m>(OnceCell<&'m dyn GlobalAlloc>);
+unsafe impl Send for GlobalAllocator<'_> {}
+unsafe impl Sync for GlobalAllocator<'_> {}
+
+unsafe impl GlobalAlloc for GlobalAllocator<'_> {
+    unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
+        match self.0.get() {
+            Some(global_allocator) => global_allocator.alloc(layout),
+            // TODO properly handle abort, via `ud2` handler and perhaps an interrupt flag in fsbase MSR?
+            None => core::intrinsics::abort(),
+        }
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
+        match self.0.get() {
+            Some(global_allocator) => global_allocator.dealloc(ptr, layout),
+            None => core::intrinsics::abort(),
+        }
+    }
+}
+
+#[global_allocator]
+static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator(OnceCell::new());
+
+pub unsafe fn set_global_allocator(galloc: &'static dyn GlobalAlloc) {
+    if let Err(_) = GLOBAL_ALLOCATOR.0.set(galloc) {
+        error!("Global allocator is already set.");
+        libkernel::instructions::interrupts::wait_indefinite();
+    }
+}
 
 fn get_limine_mmap() -> &'static [limine::LimineMemmapEntry] {
     static LIMINE_MMAP: limine::LimineMmapRequest = limine::LimineMmapRequest::new(crate::LIMINE_REV);
@@ -60,8 +93,6 @@ pub fn get_kernel_page_manager() -> &'static PageManager {
 }
 
 pub fn reclaim_bootloader_memory() {
-    use libkernel::memory::FrameType;
-
     let frame_manager = get_kernel_frame_manager();
     frame_manager.iter().enumerate().filter(|(_, (_, ty))| *ty == FrameType::BootReclaim).for_each(
         |(frame_index, (_, ty))| {

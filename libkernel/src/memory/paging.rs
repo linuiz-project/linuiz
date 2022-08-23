@@ -379,7 +379,7 @@ impl<L: HeirarchicalLevel> PageTable<L> {
         &mut self,
         index: usize,
         phys_mapping_page: &Page,
-        frame_manager: &'static crate::memory::FrameManager,
+        get_new_frame_index: impl FnOnce() -> usize,
     ) -> &mut PageTable<L::NextLevel> {
         // TODO use a `for` loop to support arbitrary page table depths
         let entry = self.get_entry_mut(index);
@@ -387,7 +387,7 @@ impl<L: HeirarchicalLevel> PageTable<L> {
         let (frame_index, created) = if entry.is_present() {
             (entry.get_frame_index(), false)
         } else {
-            let frame_index = frame_manager.lock_next().unwrap();
+            let frame_index = get_new_frame_index();
 
             entry.set_frame_index(frame_index);
             entry.set_attributes(
