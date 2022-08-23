@@ -7,8 +7,8 @@ pub mod pic;
 pub use exceptions::*;
 pub use stubs::*;
 
+use crate::cpu::GeneralRegisters;
 use core::cell::SyncUnsafeCell;
-use libkernel::cpu::GeneralRegisters;
 use num_enum::TryFromPrimitive;
 use x86_64::structures::idt::InterruptStackFrame;
 
@@ -201,7 +201,7 @@ pub(self) extern "x86-interrupt" fn irq_save_context(_: x86_64::structures::idt:
 extern "sysv64" fn irq_handoff(
     irq_number: u64,
     stack_frame: &mut InterruptStackFrame,
-    context: &mut libkernel::cpu::GeneralRegisters,
+    context: &mut crate::cpu::GeneralRegisters,
 ) {
     get_common_interrupt_handler()(irq_number, stack_frame, context);
 }

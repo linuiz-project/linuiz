@@ -30,9 +30,10 @@ impl RedirectionEntry {
     }
 
     pub fn get_destination_mode(&self) -> interrupts::DestinationMode {
-        match self.0.get_bit(11) {
-            false => interrupts::DestinationMode::Physical,
-            true => interrupts::DestinationMode::Logical,
+        if self.0.get_bit(11) {
+            interrupts::DestinationMode::Physical
+        } else {
+            interrupts::DestinationMode::Logical
         }
     }
 
@@ -45,9 +46,10 @@ impl RedirectionEntry {
     }
 
     pub fn get_pin_polarity(&self) -> Polarity {
-        match self.0.get_bit(13) {
-            false => Polarity::ActiveHigh,
-            true => Polarity::ActiveLow,
+        if self.0.get_bit(13) {
+            Polarity::ActiveLow
+        } else {
+            Polarity::ActiveHigh
         }
     }
 
@@ -62,9 +64,10 @@ impl RedirectionEntry {
     }
 
     pub fn get_trigger_mode(&self) -> TriggerMode {
-        match self.0.get_bit(15) {
-            false => TriggerMode::Edge,
-            true => TriggerMode::Level,
+        if self.0.get_bit(15) {
+            TriggerMode::Edge
+        } else {
+            TriggerMode::Level
         }
     }
 
@@ -95,14 +98,19 @@ impl RedirectionEntry {
     }
 }
 
-pub struct IoApic<'vol> {
+type IoApicRegisters<'a> =
+    Mutex<(&'a VolatileCell<u32, libkernel::WriteOnly>, &'a VolatileCell<u32, libkernel::ReadWrite>)>;
+
+pub struct IoApic<'a> {
     id: u8,
     version: u8,
-    handled_irqs: core::ops::Range<u32>,
-    ioregs: Mutex<(&'vol VolatileCell<u32, libkernel::WriteOnly>, &'vol VolatileCell<u32, libkernel::ReadWrite>)>,
+    handled_irqs: core::ops::RangeInclusive<u32>,
+    ioregs: IoApicRegisters<'a>,
 }
 
+// SAFETY: Non-read-only mutations are behind a [`spin::Mutex`].
 unsafe impl Send for IoApic<'_> {}
+// SAFETY: Non-read-only mutations are behind a [`spin::Mutex`].
 unsafe impl Sync for IoApic<'_> {}
 
 impl IoApic<'_> {
@@ -116,7 +124,7 @@ impl IoApic<'_> {
         self.version
     }
 
-    pub fn handled_irqs(&self) -> core::ops::Range<u32> {
+    pub fn handled_irqs(&self) -> core::ops::RangeInclusive<u32> {
         self.handled_irqs.clone()
     }
 
@@ -135,19 +143,22 @@ impl IoApic<'_> {
         RedirectionEntry(((high_bits as u64) << 32) | (low_bits as u64))
     }
 
-    pub fn set_redirection(&self, global_irq_num: u32, redirection: RedirectionEntry) {
+    pub fn set_redirection(&self, global_irq_num: u32, redirection: &RedirectionEntry) {
         assert!(self.handled_irqs().contains(&global_irq_num), "I/O APIC does not handle the provided redirection");
 
-        let redirection_low = redirection.0 as u32;
-        let redirection_high = (redirection.0 >> 32) as u32;
-        let reg_base_index = 0x10 + (global_irq_num * 2);
+        #[allow(clippy::cast_possible_truncation)]
+        {
+            let redirection_low = redirection.0 as u32;
+            let redirection_high = (redirection.0 >> 32) as u32;
+            let reg_base_index = 0x10 + (global_irq_num * 2);
 
-        let ioregs = self.ioregs.lock();
+            let ioregs = self.ioregs.lock();
 
-        ioregs.0.write(reg_base_index);
-        ioregs.1.write(redirection_low);
-        ioregs.0.write(reg_base_index + 1);
-        ioregs.1.write(redirection_high);
+            ioregs.0.write(reg_base_index);
+            ioregs.1.write(redirection_low);
+            ioregs.0.write(reg_base_index + 1);
+            ioregs.1.write(redirection_high);
+        }
     }
 
     pub fn modify_redirection(&self, global_irq_num: u32) {
@@ -180,7 +191,7 @@ pub fn get_io_apics() -> &'static Vec<IoApic<'static>> {
                     (value.get_bits(0..8) as u8, value.get_bits(16..24) as u32)
                 };
                 let irq_base = ioapic_info.global_system_interrupt_base;
-                let handled_irqs = irq_base..(irq_base + irq_count + 1);
+                let handled_irqs = irq_base..=(irq_base + irq_count);
 
                 IoApic { id, version, handled_irqs, ioregs: Mutex::new((ioregsel, ioregwin)) }
             })

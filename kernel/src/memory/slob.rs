@@ -13,7 +13,7 @@ struct BlockPage(u64);
 
 impl BlockPage {
     /// How many bits/block indexes in section primitive.
-    const BLOCKS_PER: usize = size_of::<u64>() * 8;
+    const BLOCKS_PER: usize = u64::BITS as usize;
 
     /// Whether the block page is empty.
     pub const fn is_empty(&self) -> bool {
@@ -97,11 +97,10 @@ impl<'map> SLOB<'map> {
         let mask_bit_offset = cur_block_index - floor_blocks_index;
         let mask_bit_count = usize::min(ceil_blocks_index, end_block_index) - cur_block_index;
 
-        (mask_bit_count, ((1 as u64) << mask_bit_count).wrapping_sub(1) << mask_bit_offset)
+        (mask_bit_count, (1_u64 << mask_bit_count).wrapping_sub(1) << mask_bit_offset)
     }
 
     fn grow(
-        &self,
         required_blocks: core::num::NonZeroUsize,
         table_write: &mut RwLockWriteGuard<&mut [BlockPage]>,
     ) -> Result<(), AllocError> {
@@ -176,13 +175,13 @@ impl<'map> SLOB<'map> {
             .iter_mut()
             .skip(new_table_base_page.index())
             .take(req_table_page_count)
-            .for_each(|block_page| block_page.set_full());
+            .for_each(BlockPage::set_full);
         // Mark the old table's pages as empty within the table.
         table_write
             .iter_mut()
             .skip(cur_table_base_page.index())
             .take(cur_table_page_count)
-            .for_each(|block_page| block_page.set_empty());
+            .for_each(BlockPage::set_empty);
 
         Ok(())
     }
@@ -226,7 +225,7 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
                 }
 
                 // No properly sized region was found, so grow list.
-                if let Err(_) = self.grow(core::num::NonZeroUsize::new(size_in_blocks).unwrap(), &mut table_write) {
+                if Self::grow(core::num::NonZeroUsize::new(size_in_blocks).unwrap(), &mut table_write).is_err() {
                     return Err(core::alloc::AllocError);
                 }
             }
@@ -236,6 +235,7 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
             let start_block_index = block_index;
             let start_table_index = start_block_index / BlockPage::BLOCKS_PER;
             let frame_manager = crate::memory::get_kernel_frame_manager();
+            // SAFETY:  Kernel HHDM is guaranteed by the kernel to be valid.
             let page_manager =
                 unsafe { PageManager::from_current(&Page::from_addr(crate::memory::get_kernel_hhdm_address())) };
             for table_index in start_table_index..end_table_index {
@@ -248,8 +248,8 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
                     end_block_index - block_index,
                     (block_index_floor + BlockPage::BLOCKS_PER) - block_index,
                 );
-                let mask_bits =
-                    (1 as u64).checked_shl(remaining_blocks_in_slice as u32).unwrap_or(u64::MAX).wrapping_sub(1);
+                #[allow(clippy::cast_possible_truncation)]
+                let mask_bits = 1_u64.checked_shl(remaining_blocks_in_slice as u32).unwrap_or(u64::MAX).wrapping_sub(1);
 
                 *block_page.value_mut() |= mask_bits << low_offset;
                 block_index += remaining_blocks_in_slice;
@@ -279,41 +279,38 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
             let frame_manager = crate::memory::get_kernel_frame_manager();
             let page_manager = PageManager::from_current(&Page::from_addr(crate::memory::get_kernel_hhdm_address()));
             for map_index in start_table_index..end_table_index {
-                let (had_bits, has_bits) = {
-                    let block_page = &mut table_write[map_index];
+                let block_page = &mut table_write[map_index];
 
-                    let had_bits = !block_page.is_empty();
+                let had_bits = !block_page.is_empty();
 
-                    let (bit_count, bit_mask) = Self::calculate_bit_fields(map_index, block_index, end_block_index);
-                    assert_eq!(
-                        *block_page.value() & bit_mask,
-                        bit_mask,
-                        "attempting to deallocate blocks that are already deallocated"
-                    );
+                let (bit_count, bit_mask) = Self::calculate_bit_fields(map_index, block_index, end_block_index);
+                assert_eq!(
+                    *block_page.value() & bit_mask,
+                    bit_mask,
+                    "attempting to deallocate blocks that are already deallocated"
+                );
 
-                    *block_page.value_mut() ^= bit_mask;
-                    block_index += bit_count;
+                *block_page.value_mut() ^= bit_mask;
+                block_index += bit_count;
 
-                    (had_bits, !block_page.is_empty())
-                };
-
-                if had_bits && !has_bits {
+                if had_bits && block_page.is_empty() {
                     page_manager.unmap(&Page::from_index(map_index), true, frame_manager).unwrap();
                 }
             }
-        })
+        });
     }
 }
 
+/// SAFETY: Honestly, I've probably fucked up some of the invariants `GlobalAlloc` is supposed to provide.
 unsafe impl core::alloc::GlobalAlloc for SLOB<'_> {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        match <Self as core::alloc::Allocator>::allocate(&self, layout) {
+        match <Self as core::alloc::Allocator>::allocate(self, layout) {
             Ok(non_null) => non_null.as_mut_ptr(),
             Err(_) => core::ptr::null_mut(),
         }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        <Self as core::alloc::Allocator>::deallocate(&self, core::ptr::NonNull::new(ptr).unwrap(), layout)
+        <Self as core::alloc::Allocator>::deallocate(self, core::ptr::NonNull::new(ptr).unwrap(), layout);
     }
 }

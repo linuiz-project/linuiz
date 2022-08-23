@@ -60,13 +60,15 @@ bitflags::bitflags! {
 impl InterruptLines {
     /// Low bits of the interrupt lines.
     #[inline(always)]
-    pub const fn low(&self) -> u8 {
+    #[allow(clippy::cast_possible_truncation)]
+    pub const fn low(self) -> u8 {
         self.bits() as u8
     }
 
     /// High bits of the interrupt lines.
     #[inline(always)]
-    pub const fn high(&self) -> u8 {
+    #[allow(clippy::cast_possible_truncation)]
+    pub const fn high(self) -> u8 {
         (self.bits() >> 8) as u8
     }
 
@@ -192,7 +194,7 @@ lazy_static::lazy_static! {
 ///         unrelated to this function, or even this core's context. It is thus the responsibility of the
 ///         caller to ensure modifying the enabled lines will not result in unwanted behaviour.
 pub unsafe fn set_enabled_lines(enabled_lines: InterruptLines) {
-    PIC8259.lock().init(enabled_lines)
+    PIC8259.lock().init(enabled_lines);
 }
 
 /// Safely sends an `end of interrupt` to the 8259 PIC.

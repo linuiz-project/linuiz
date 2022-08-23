@@ -402,7 +402,7 @@ impl<'dev> Controller<'dev> {
         nvme.msix.set_enable(true);
         nvme.msix.set_function_mask(false);
         nvme.msix[0].configure(
-            unsafe { libkernel::cpu::get_id() as u8 },
+            unsafe { crate::cpu::get_id() as u8 },
             // Specific vector should be dynamically selected
             // TODO possibly dynamically selected with special attributes per vector?
             //      i.e. separate interrupts for completions, DMA, etc.

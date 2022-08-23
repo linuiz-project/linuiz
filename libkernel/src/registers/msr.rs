@@ -12,6 +12,7 @@ use bit_field::BitField;
 #[derive(Debug)]
 pub struct NotSupported;
 
+/// SAFETY: This function does not check if MSRs are supported by this core, or if the procided MSR address is valid.
 #[inline(always)]
 pub unsafe fn rdmsr(ecx: u32) -> u64 {
     // TODO check the CPUID MSR feature bit
@@ -32,6 +33,8 @@ pub unsafe fn rdmsr(ecx: u32) -> u64 {
     value
 }
 
+/// SAFETY: This function does not check if MSRs are supported by this core, or if the procided MSR address is valid.
+///         This function does not check whether the provided write to the provided MSR address will result in undefined behaviour.
 #[inline(always)]
 pub unsafe fn wrmsr(ecx: u32, value: u64) {
     core::arch::asm!(
@@ -89,23 +92,6 @@ impl IA32_APIC_BASE {
     pub fn get_base_addr() -> Address<Physical> {
         Address::<Physical>::new((unsafe { rdmsr(0x1B) } & 0xFFFFFF000) as usize)
     }
-
-    pub fn set(hw_enable: bool, x2_mode: bool) {
-        let mut new_value = unsafe { rdmsr(0x1B) };
-        new_value.set_bit(10, x2_mode);
-        new_value.set_bit(11, hw_enable);
-        unsafe { wrmsr(0x1B, new_value) };
-    }
-
-    #[inline]
-    pub fn set_hw_enable(enable: bool) {
-        unsafe { wrmsr(0x1B, *rdmsr(0x1B).set_bit(11, enable)) };
-    }
-
-    #[inline]
-    pub fn set_x2_mode(enable: bool) {
-        unsafe { wrmsr(0x1B, *rdmsr(0x1B).set_bit(10, enable)) };
-    }
 }
 
 pub struct IA32_EFER;
@@ -119,6 +105,8 @@ impl IA32_EFER {
     }
 
     /// Sets the IA32_EFER.LME (long-mode enable) bit.
+    ///
+    /// SAFETY: This function does not check if long mode is supported, or if the core is prepared to enter it.
     #[inline(always)]
     pub unsafe fn set_lme(set: bool) {
         wrmsr(0xC0000080, *rdmsr(0xC0000080).set_bit(8, set));
@@ -131,16 +119,11 @@ impl IA32_EFER {
     }
 
     /// Sets the IA32_EFER.NXE (no-execute enable) bit.
+    ///
+    /// SAFETY: This function does not check if the NX bit is actually supported.
+    ///         Undefined behaviour will result if the NX bit is used in a page table entry, and this bit is disabled.
     #[inline(always)]
     pub unsafe fn set_nxe(set: bool) {
-        assert!(
-            crate::cpu::EXT_FUNCTION_INFO
-                .as_ref()
-                .map(|ext_func_info| ext_func_info.has_execute_disable())
-                .unwrap_or(false),
-            "Cannot enable IA32_EFER.NXE if CPU does not support it (CPUID.80000001H:EDX.NX [bit 20])."
-        );
-
         wrmsr(0xC0000080, *rdmsr(0xC0000080).set_bit(11, set));
     }
 }

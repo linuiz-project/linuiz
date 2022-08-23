@@ -14,7 +14,7 @@ lazy_static::lazy_static! {
 /// is the bootstrap processor.
 #[inline(always)]
 pub fn is_bsp() -> bool {
-    crate::registers::msr::IA32_APIC_BASE::get_is_bsp()
+    libkernel::registers::msr::IA32_APIC_BASE::get_is_bsp()
 }
 
 /// Gets the vendor of the CPU.

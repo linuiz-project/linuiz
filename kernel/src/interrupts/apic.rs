@@ -40,7 +40,7 @@ pub unsafe fn init_interface(
     page_manager: &'static crate::memory::PageManager,
 ) {
     if let Mode::xAPIC = Mode::get() {
-        use crate::memory::{FrameError, MapError};
+        use crate::memory::FrameError;
         use libkernel::memory::PageAttributes;
 
         let xapic_frame_index = xAPIC_BASE_ADDR / 0x1000;
@@ -208,14 +208,14 @@ pub enum Register {
 impl Register {
     /// Translates this APIC register to its respective xAPIC memory offset.
     #[inline(always)]
-    pub const fn as_xapic_offset(self) -> usize {
-        (self as usize) * 0x10
+    pub const fn as_xapic_offset(&self) -> usize {
+        (*self as usize) * 0x10
     }
 
     /// Translates this APIC register to its respective x2APIC MSR address.
     #[inline(always)]
-    pub const fn as_x2apic_msr(self) -> u32 {
-        x2APIC_BASE_MSR_ADDR + (self as u32)
+    pub const fn as_x2apic_msr(&self) -> u32 {
+        x2APIC_BASE_MSR_ADDR + (*self as u32)
     }
 }
 
@@ -466,8 +466,10 @@ impl<T: GenericVectorVariant> LocalVector<T> {
 
 impl LocalVector<Timer> {
     pub unsafe fn set_mode(&self, mode: TimerMode) -> &Self {
-        let tsc_dl_support =
-            libkernel::cpu::CPUID.get_feature_info().map(|info| info.has_tsc_deadline()).unwrap_or(false);
+        let tsc_dl_support = crate::cpu::CPUID
+            .get_feature_info()
+            .as_ref()
+            .map_or(false, crate::cpu::cpuid::FeatureInfo::has_tsc_deadline);
 
         assert!(mode != TimerMode::TSC_Deadline || tsc_dl_support, "TSC deadline is not supported on this CPU.");
 

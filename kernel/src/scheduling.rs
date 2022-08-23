@@ -1,10 +1,10 @@
+use crate::cpu::GeneralRegisters;
 use core::{
     mem::MaybeUninit,
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use crossbeam_queue::SegQueue;
 use libkernel::{
-    cpu::GeneralRegisters,
     memory::PageAlignedBox,
     registers::{control::CR3Flags, RFlags},
     Address, Physical,
@@ -32,7 +32,7 @@ impl TaskPriority {
 
     /// Gets the inner raw priority value.
     #[inline(always)]
-    pub fn get(&self) -> u8 {
+    pub fn get(self) -> u8 {
         self.0
     }
 }
@@ -64,13 +64,13 @@ impl Task {
     pub fn new(
         priority: TaskPriority,
         function: fn() -> !,
-        stack: TaskStackOption,
+        stack: &TaskStackOption,
         rfl: RFlags,
         cs: SegmentSelector,
         ss: SegmentSelector,
         cr3: (Address<Physical>, CR3Flags),
     ) -> Self {
-        let rip = function as u64;
+        let rip = function as usize as u64;
 
         let stack = match stack {
             TaskStackOption::Auto => PageAlignedBox::new_uninit_slice_in(
@@ -79,7 +79,7 @@ impl Task {
             ),
 
             TaskStackOption::Pages(page_count) => PageAlignedBox::new_uninit_slice_in(
-                (page_count + 1) * 0x1000,
+                (*page_count + 1) * 0x1000,
                 libkernel::memory::page_aligned_allocator(),
             ),
         };
@@ -94,6 +94,7 @@ impl Task {
             prio: priority,
             rip,
             cs: cs.0,
+            // SAFETY:  The slice is valid, and so its end pointer is valid.
             rsp: unsafe { stack.as_ptr().add(stack.len()) as u64 },
             ss: ss.0,
             rfl,
@@ -162,13 +163,13 @@ impl Scheduler {
     /// If the scheduler is enabled, attempts to return a new task from
     /// the task queue. Returns `None` if the queue is empty.
     pub fn pop_task(&self) -> Option<Task> {
-        match self.enabled.load(Ordering::Relaxed) {
-            true => self.tasks.pop().map(|task| {
+        if self.enabled.load(Ordering::Relaxed) {
+            self.tasks.pop().map(|task| {
                 self.total_priority.fetch_sub(task.priority().get() as u64, Ordering::Relaxed);
-
                 task
-            }),
-            false => None,
+            })
+        } else {
+            None
         }
     }
 

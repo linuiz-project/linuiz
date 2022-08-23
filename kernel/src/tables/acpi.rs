@@ -12,11 +12,20 @@ impl<T: libkernel::io::port::PortReadWrite> Register<'_, T> {
     pub const fn new(generic_address: &acpi::platform::address::GenericAddress) -> Option<Self> {
         match generic_address.address_space {
             acpi::platform::address::AddressSpace::SystemMemory => {
-                Some(Self::MMIO(unsafe { &*(generic_address.address as *const _) }))
+                Some(Self::MMIO(
+                    // SAFETY: There's no meaningful way to validate the address provided by the `GenericAddress` structure.
+                    unsafe { &*(generic_address.address as *const _) },
+                ))
             }
 
             acpi::platform::address::AddressSpace::SystemIo => {
-                Some(Self::IO(unsafe { libkernel::io::port::ReadWritePort::<T>::new(generic_address.address as u16) }))
+                Some(Self::IO(
+                    // SAFETY: There's no meaningful way to validate the port provided by the `GenericAddress` structure.
+                    unsafe {
+                        #[allow(clippy::cast_possible_truncation)]
+                        libkernel::io::port::ReadWritePort::<T>::new(generic_address.address as u16)
+                    },
+                ))
             }
 
             _ => None,
@@ -41,6 +50,7 @@ impl<T: libkernel::io::port::PortReadWrite> Register<'_, T> {
 }
 
 #[derive(Clone, Copy)]
+#[allow(clippy::module_name_repetitions)]
 pub struct AcpiHandler;
 
 impl acpi::AcpiHandler for AcpiHandler {
@@ -65,6 +75,7 @@ impl acpi::AcpiHandler for AcpiHandler {
     }
 }
 
+#[allow(clippy::undocumented_unsafe_blocks)]
 impl aml::Handler for AcpiHandler {
     fn read_u8(&self, address: usize) -> u8 {
         unsafe { (address as *const u8).add(get_kernel_hhdm_address().as_usize()).read() }
@@ -150,7 +161,9 @@ impl aml::Handler for AcpiHandler {
 static LIMINE_RSDP: limine::LimineRsdpRequest = limine::LimineRsdpRequest::new(crate::LIMINE_REV);
 
 struct AcpiTablesWrapper(AcpiTables<AcpiHandler>);
+// SAFETY: Read-only type.
 unsafe impl Send for AcpiTablesWrapper {}
+// SAFETY: Read-only type.
 unsafe impl Sync for AcpiTablesWrapper {}
 
 static RSDP: Once<AcpiTablesWrapper> = Once::new();
@@ -159,20 +172,21 @@ static RSDP: Once<AcpiTablesWrapper> = Once::new();
 ///
 /// REMARK: If this method is called after bootloader memory has been reclaimed, it will panic.
 pub fn init_interface() {
-    RSDP.call_once(|| unsafe {
-        AcpiTablesWrapper(
-            acpi::AcpiTables::from_rsdp(
-                AcpiHandler,
-                LIMINE_RSDP
-                    .get_response()
-                    .get()
-                    .expect("bootloader failed to provide an RSDP address")
-                    .address
-                    .as_ptr()
-                    .expect("bootloader RSDP address is not valid") as usize,
-            )
-            .expect("failed to acquire RSDP table"),
-        )
+    RSDP.call_once(|| {
+        AcpiTablesWrapper({
+            let handler = AcpiHandler;
+            let address = LIMINE_RSDP
+                .get_response()
+                .get()
+                .expect("bootloader failed to provide an RSDP address")
+                .address
+                .as_ptr()
+                .expect("bootloader RSDP address is not valid") as usize;
+
+            // SAFETY:  We simply have no way to check if the bootloader provides an invalid RSDP address.
+            //          Hopefully, the crate's safety checks catch it.
+            unsafe { acpi::AcpiTables::from_rsdp(handler, address).expect("failed to acquire RSDP table") }
+        })
     });
 }
 
@@ -181,16 +195,16 @@ pub fn get_rsdp() -> &'static acpi::AcpiTables<AcpiHandler> {
 }
 
 pub struct PlatformInfoWrapper(PlatformInfo);
+// SAFETY: Read-only type.
 unsafe impl Send for PlatformInfoWrapper {}
+// SAFETY: Read-only type.
 unsafe impl Sync for PlatformInfoWrapper {}
 
 static PLATFORM_INFO: Once<PlatformInfoWrapper> = Once::new();
 /// Returns an insatnce of the machine's MADT, or panics of it isn't present.
 fn get_platform_info() -> &'static PlatformInfo {
     &PLATFORM_INFO
-        .call_once(|| unsafe {
-            PlatformInfoWrapper(PlatformInfo::new(get_rsdp()).expect("error parsing machine platform info"))
-        })
+        .call_once(|| PlatformInfoWrapper(PlatformInfo::new(get_rsdp()).expect("error parsing machine platform info")))
         .0
 }
 
@@ -198,32 +212,40 @@ static APIC_MODEL: Once<&'static acpi::platform::interrupt::Apic> = Once::new();
 /// Returns the interrupt model of this machine.
 pub fn get_apic_model() -> &'static acpi::platform::interrupt::Apic {
     APIC_MODEL.call_once(|| match &get_platform_info().interrupt_model {
-        acpi::InterruptModel::Apic(apic) => &apic,
+        acpi::InterruptModel::Apic(apic) => apic,
         _ => panic!("unknown interrupt models not supported"),
     })
 }
 
 struct FadtWrapper(PhysicalMapping<AcpiHandler, Fadt>);
+// SAFETY: Read-only type.
 unsafe impl Send for FadtWrapper {}
+// SAFETY: Read-only type.
 unsafe impl Sync for FadtWrapper {}
 
 static FADT: Once<FadtWrapper> = Once::new();
 /// Returns an instance of the machine's FADT, or panics if it isn't present.
 pub fn get_fadt() -> &'static PhysicalMapping<AcpiHandler, Fadt> {
     &FADT
-        .call_once(|| unsafe {
-            FadtWrapper(
-                get_rsdp()
-                    .get_sdt::<Fadt>(Signature::FADT)
-                    .expect("FADT failed to validate its checksum")
-                    .expect("no FADT found in RSDP table"),
-            )
+        .call_once(|| {
+            FadtWrapper({
+                let rsdp = get_rsdp();
+
+                // SAFETY: Using the `Fadt` type from the crate, we can be certain the SDT's structure will match the memory the crate wraps.
+                unsafe {
+                    rsdp.get_sdt::<Fadt>(Signature::FADT)
+                        .expect("FADT failed to validate its checksum")
+                        .expect("no FADT found in RSDP table")
+                }
+            })
         })
         .0
 }
 
 struct AmlContextWrapper(aml::AmlContext);
+// SAFETY: TODO
 unsafe impl Send for AmlContextWrapper {}
+// SAFETY: TODO
 unsafe impl Sync for AmlContextWrapper {}
 
 static AML_CONTEXT: Once<AmlContextWrapper> = Once::new();
@@ -235,11 +257,10 @@ pub fn get_aml_context() -> &'static aml::AmlContext {
                 let mut aml_context =
                     aml::AmlContext::new(alloc::boxed::Box::new(AcpiHandler), aml::DebugVerbosity::All);
 
-                let hhdm_offset = get_kernel_hhdm_address().as_usize();
-
                 {
                     let dsdt_table = get_rsdp().dsdt.as_ref().expect("machine has no DSDT");
 
+                    // SAFETY: We can be reasonably certain the provided base address and length are valid.
                     let dsdt_stream = unsafe {
                         core::slice::from_raw_parts(dsdt_table.address as *const u8, dsdt_table.length as usize)
                     };
@@ -248,7 +269,8 @@ pub fn get_aml_context() -> &'static aml::AmlContext {
                 }
 
                 {
-                    for sdst_table in get_rsdp().ssdts.iter() {
+                    for sdst_table in &get_rsdp().ssdts {
+                        // SAFETY: We can be reasonably certain the provided base address and length are valid.
                         let sdst_stream = unsafe {
                             core::slice::from_raw_parts(sdst_table.address as *const u8, sdst_table.length as usize)
                         };

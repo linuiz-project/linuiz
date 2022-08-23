@@ -19,7 +19,7 @@ pub(crate) struct LocalState {
 }
 
 impl LocalState {
-    const MAGIC: u64 = 0x0_411_B33F_D3ADC0DE;
+    const MAGIC: u64 = 0x1234_B33F_D3AD_C0DE;
 
     fn is_valid_magic(&self) -> bool {
         self.magic == LocalState::MAGIC
@@ -35,12 +35,10 @@ fn get_local_state() -> Option<&'static mut LocalState> {
         let local_state_ptr = (LOCAL_STATES_BASE.load(Ordering::Relaxed) as *mut LocalState)
             .add(crate::interrupts::apic::get_id() as usize);
 
-        match crate::memory::get_kernel_page_manager().is_mapped(Address::<Virtual>::from_ptr(local_state_ptr)) {
-            true if let Some(local_state) = local_state_ptr.as_mut() && local_state.is_valid_magic() => {
+        if  crate::memory::get_kernel_page_manager().is_mapped(Address::<Virtual>::from_ptr(local_state_ptr)) &&  let Some(local_state) = local_state_ptr.as_mut() && local_state.is_valid_magic()  {
                 Some(local_state)
-            },
-            _ => None
-        }
+            } else {
+            None}
     }
 }
 
@@ -64,7 +62,7 @@ pub unsafe fn init() {
         )
         .ok();
 
-    let core_id = libkernel::cpu::get_id();
+    let core_id = crate::cpu::get_id();
 
     trace!("Configuring local state: #{}", core_id);
 
@@ -108,7 +106,7 @@ pub unsafe fn init() {
         default_task: Task::new(
             TaskPriority::new(1).unwrap(),
             libkernel::instructions::interrupts::wait_indefinite,
-            crate::scheduling::TaskStackOption::Auto,
+            &crate::scheduling::TaskStackOption::Auto,
             RFlags::INTERRUPT_FLAG,
             *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
             *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
@@ -131,7 +129,7 @@ pub unsafe fn init() {
 /// Attempts to schedule the next task in the local task queue.
 pub fn schedule_next_task(
     stack_frame: &mut x86_64::structures::idt::InterruptStackFrame,
-    cached_regs: &mut libkernel::cpu::GeneralRegisters,
+    cached_regs: &mut crate::cpu::GeneralRegisters,
 ) {
     const MIN_TIME_SLICE_MS: u16 = 1;
     const PRIO_TIME_SLICE_MS: u16 = 2;

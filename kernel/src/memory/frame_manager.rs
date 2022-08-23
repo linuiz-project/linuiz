@@ -45,7 +45,7 @@ impl Frame {
     #[inline]
     fn peek(&self) {
         while !self.try_peek() {
-            libkernel::instructions::pause()
+            core::hint::spin_loop();
         }
     }
 
@@ -95,9 +95,7 @@ impl Frame {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameError {
     FrameUnusable(usize),
-    FrameBorrowed(usize),
     FrameLocked(usize),
-    FrameNotBorrowed(usize),
     FrameNotLocked(usize),
     OutOfRange(usize),
     TypeConversion { from: FrameType, to: FrameType },
@@ -194,14 +192,6 @@ impl<'arr> FrameManager<'arr> {
         Self { map: RwLock::new(frame_table) }
     }
 
-    pub unsafe fn slide_table_base(&self, slide: usize) {
-        without_interrupts(|| {
-            let mut map_write = self.map.write();
-            let new_map_base = map_write.as_mut_ptr().cast::<u8>().add(slide).cast::<Frame>();
-            *map_write = core::slice::from_raw_parts_mut(new_map_base, map_write.len());
-        })
-    }
-
     pub fn lock(&self, index: usize) -> Result<usize, FrameError> {
         without_interrupts(|| {
             if let Some(frame) = self.map.read().get(index) {
@@ -245,7 +235,7 @@ impl<'arr> FrameManager<'arr> {
                         None
                     }
                 })
-                .map_or(Ok(index), |error| Err(error))
+                .map_or(Ok(index), Err)
         })
     }
 
@@ -256,11 +246,11 @@ impl<'arr> FrameManager<'arr> {
 
                 let (locked, _) = frame.data();
 
-                let result = if !locked {
-                    Err(FrameError::FrameNotLocked(index))
-                } else {
+                let result = if locked {
                     frame.free();
                     Ok(())
+                } else {
+                    Err(FrameError::FrameNotLocked(index))
                 };
 
                 frame.unpeek();
@@ -351,7 +341,7 @@ impl<'arr> FrameManager<'arr> {
     }
 
     pub fn get_frame_info(&self, frame_index: usize) -> Option<(bool, FrameType)> {
-        without_interrupts(|| self.map.read().get(frame_index).map(|frame| frame.data()))
+        without_interrupts(|| self.map.read().get(frame_index).map(Frame::data))
     }
 
     /// Total memory of a given type represented by frame allocator. If `None` is

@@ -1,8 +1,12 @@
 use crate::tables::acpi;
+
 /// Clock wrapper around the ACPI PWM timer.
+#[allow(clippy::module_name_repetitions)]
 pub struct AcpiClock<'a>(acpi::Register<'a, u32>);
 
+// SAFETY: This structure is effectively read-only with no side-effects.
 unsafe impl Send for AcpiClock<'_> {}
+// SAFETY: This structure is effectively read-only with no side-effects.
 unsafe impl Sync for AcpiClock<'_> {}
 
 impl AcpiClock<'_> {
@@ -11,14 +15,12 @@ impl AcpiClock<'_> {
 
     /// Loads the ACPI timer, and creates a [`Clock`] from it.
     pub fn load() -> Option<Self> {
-        unsafe {
-            crate::tables::acpi::get_fadt()
-                .pm_timer_block()
-                .ok()
-                .flatten()
-                .and_then(|timer_block| acpi::Register::new(&timer_block))
-                .map(|register| Self(register))
-        }
+        crate::tables::acpi::get_fadt()
+            .pm_timer_block()
+            .ok()
+            .flatten()
+            .and_then(|timer_block| acpi::Register::new(&timer_block))
+            .map(Self)
     }
 }
 

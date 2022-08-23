@@ -23,7 +23,7 @@ pub trait Clock: Send + Sync {
             total_ticks -= (current_tick_new - current_tick).clamp(0, total_ticks);
             current_tick = current_tick_new;
 
-            libkernel::instructions::pause();
+            core::hint::spin_loop();
         }
     }
 }
@@ -34,12 +34,14 @@ static SYSTEM_CLOCK: spin::Once<Box<dyn Clock>> = spin::Once::new();
 /// Sets the given [`Clock`] as the global system clock.
 ///
 /// SAFETY: If this function is called within an interrupt context, a deadlock may occur.
-pub fn get() -> &'static Box<dyn Clock> {
-    SYSTEM_CLOCK.call_once(|| {
-        libkernel::instructions::interrupts::without_interrupts(|| {
-            // TODO support invariant TSC as clock
+pub fn get() -> &'static dyn Clock {
+    SYSTEM_CLOCK
+        .call_once(|| {
+            libkernel::instructions::interrupts::without_interrupts(|| {
+                // TODO support invariant TSC as clock
 
-            Box::new(acpi::AcpiClock::load().unwrap())
+                Box::new(acpi::AcpiClock::load().unwrap())
+            })
         })
-    })
+        .as_ref()
 }

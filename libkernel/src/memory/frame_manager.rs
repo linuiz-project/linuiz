@@ -45,7 +45,7 @@ impl Frame {
     #[inline]
     fn peek(&self) {
         while !self.try_peek() {
-            crate::instructions::pause()
+            core::hint::spin_loop();
         }
     }
 

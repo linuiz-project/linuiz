@@ -1,7 +1,7 @@
-use libkernel::cell::SyncOnceCell;
+use spin::Once;
 use x86_64::{registers::segmentation::SegmentSelector, structures::gdt::GlobalDescriptorTable};
 
-static GDT: spin::Once<GlobalDescriptorTable> = spin::Once::new();
+static GDT: Once<GlobalDescriptorTable> = Once::new();
 fn get_gdt() -> &'static GlobalDescriptorTable {
     GDT.call_once(|| {
         use x86_64::structures::gdt::Descriptor;
@@ -13,21 +13,24 @@ fn get_gdt() -> &'static GlobalDescriptorTable {
         // standard set by the aforementioned IA32_STAR MSR.
         //
         // Details can be found in the description of the `syscall` and `sysret` instructions in the IA32 Software Developer's Manual.
-        KCODE_SELECTOR.set(gdt.add_entry(Descriptor::kernel_code_segment())).unwrap();
-        KDATA_SELECTOR.set(gdt.add_entry(Descriptor::kernel_data_segment())).unwrap();
-        UDATA_SELECTOR.set(gdt.add_entry(Descriptor::user_data_segment())).unwrap();
-        UCODE_SELECTOR.set(gdt.add_entry(Descriptor::user_code_segment())).unwrap();
+        KCODE_SELECTOR.call_once(|| gdt.add_entry(Descriptor::kernel_code_segment()));
+        KDATA_SELECTOR.call_once(|| gdt.add_entry(Descriptor::kernel_data_segment()));
+        UDATA_SELECTOR.call_once(|| gdt.add_entry(Descriptor::user_data_segment()));
+        UCODE_SELECTOR.call_once(|| gdt.add_entry(Descriptor::user_code_segment()));
 
         gdt
     })
 }
 
-pub static KCODE_SELECTOR: SyncOnceCell<SegmentSelector> = unsafe { SyncOnceCell::new() };
-pub static KDATA_SELECTOR: SyncOnceCell<SegmentSelector> = unsafe { SyncOnceCell::new() };
-pub static UCODE_SELECTOR: SyncOnceCell<SegmentSelector> = unsafe { SyncOnceCell::new() };
-pub static UDATA_SELECTOR: SyncOnceCell<SegmentSelector> = unsafe { SyncOnceCell::new() };
+pub static KCODE_SELECTOR: Once<SegmentSelector> = Once::new();
+pub static KDATA_SELECTOR: Once<SegmentSelector> = Once::new();
+pub static UCODE_SELECTOR: Once<SegmentSelector> = Once::new();
+pub static UDATA_SELECTOR: Once<SegmentSelector> = Once::new();
 
 pub fn init() {
+    // SAFETY:  This would technically be unsafe, but since we know the GDT's structure
+    //          deterministically, running this function over and over would not change
+    //          software execution at all. So, it's safe to execute all of this code.
     unsafe {
         get_gdt().load();
 

@@ -16,9 +16,9 @@ pub unsafe fn configure_new_timer(freq: u16) -> Box<dyn Timer> {
     }
 }
 
-const US_PER_SEC: u64 = 1000000;
-const US_WAIT: u64 = 10000;
-const US_FREQ_FACTOR: u64 = US_PER_SEC / US_WAIT;
+const US_PER_SEC: u32 = 1000000;
+const US_WAIT: u32 = 10000;
+const US_FREQ_FACTOR: u32 = US_PER_SEC / US_WAIT;
 
 pub trait Timer {
     /// Sets the minimum interval for the timer, in nanoseconds.
@@ -58,13 +58,13 @@ impl APICTimer {
             let freq = {
                 let clock = clock::get();
                 apic::set_timer_initial_count(u32::MAX);
-                clock.spin_wait_us(US_WAIT as u32);
+                clock.spin_wait_us(US_WAIT);
                 let timer_count = apic::get_timer_current_count();
 
-                ((u32::MAX - timer_count) as u64) * US_FREQ_FACTOR
+                (u32::MAX - timer_count) * US_FREQ_FACTOR
             };
 
-            Some(Self((freq / (set_freq as u64)) as u32))
+            Some(Self(freq / (set_freq as u32)))
         } else {
             None
         }
@@ -81,38 +81,38 @@ impl Timer for APICTimer {
     }
 }
 
-/// APIC timer utilizing the TSC_DL feature to use the CPU's high-precision timestamp counter.
+/// APIC timer utilizing the `TSC_DL` feature to use the CPU's high-precision timestamp counter.
 struct TSCTimer(u64);
 
 impl TSCTimer {
     /// Creates a new TSC-based timer.
     ///
     /// SAFETY: Caller must ensure that reconfiguring the APIC timer mode will not adversely
-    ///         affect software execution, and additionally that the [crate::interrupts::Vector::LocalTimer] vector has
+    ///         affect software execution, and additionally that the `crate::interrupts::Vector::LocalTimer` vector has
     ///         a proper handler.
     pub unsafe fn new(set_freq: u16) -> Option<Self> {
         if libkernel::registers::msr::IA32_APIC_BASE::get_hw_enabled()
-            && libkernel::cpu::FEATURE_INFO.has_tsc()
-            && libkernel::cpu::FEATURE_INFO.has_tsc_deadline()
+            && crate::cpu::FEATURE_INFO.has_tsc()
+            && crate::cpu::FEATURE_INFO.has_tsc_deadline()
         {
             apic::get_timer().set_mode(apic::TimerMode::TSC_Deadline);
 
-            let freq = libkernel::cpu::CPUID
-                .get_processor_frequency_info()
-                .map(|info| {
-                    (info.bus_frequency() as u64)
-                        / ((info.processor_base_frequency() as u64) * (info.processor_max_frequency() as u64))
-                })
-                .unwrap_or_else(|| {
+            let freq = crate::cpu::CPUID.get_processor_frequency_info().map_or_else(
+                || {
                     trace!("CPU does not support TSC frequency reporting via CPUID.");
 
                     let clock = clock::get();
                     let start_tsc = core::arch::x86_64::_rdtsc();
-                    clock.spin_wait_us(US_WAIT as u32);
+                    clock.spin_wait_us(US_WAIT);
                     let end_tsc = core::arch::x86_64::_rdtsc();
 
-                    (end_tsc - start_tsc) * US_FREQ_FACTOR
-                });
+                    (end_tsc - start_tsc) * (US_FREQ_FACTOR as u64)
+                },
+                |info| {
+                    (info.bus_frequency() as u64)
+                        / ((info.processor_base_frequency() as u64) * (info.processor_max_frequency() as u64))
+                },
+            );
 
             Some(Self(freq / (set_freq as u64)))
         } else {

@@ -18,7 +18,7 @@ struct VirtualMapper {
 }
 
 impl VirtualMapper {
-    /// Attempts to create a new PageManager, with `mapped_page` specifying the current page
+    /// Attempts to create a new `PageManager`, with `mapped_page` specifying the current page
     /// where the entirety of the system physical memory is mapped.
     ///
     /// SAFETY: This method is unsafe because `mapped_page` can be any value; that is, not necessarily
@@ -60,7 +60,7 @@ impl VirtualMapper {
                 .and_then(|p4| p4.sub_table(addr.p4_index(), &mapped_page))
                 .and_then(|p3| p3.sub_table(addr.p3_index(), &mapped_page))
                 .and_then(|p2| p2.sub_table(addr.p2_index(), &mapped_page))
-                .and_then(|p1| Some(p1.get_entry(addr.p1_index())))
+                .map(|p1| p1.get_entry(addr.p1_index()))
         }
     }
 
@@ -73,7 +73,7 @@ impl VirtualMapper {
                 .and_then(|p4| p4.sub_table_mut(addr.p4_index(), &mapped_page))
                 .and_then(|p3| p3.sub_table_mut(addr.p3_index(), &mapped_page))
                 .and_then(|p2| p2.sub_table_mut(addr.p2_index(), &mapped_page))
-                .and_then(|p1| Some(p1.get_entry_mut(addr.p1_index())))
+                .map(|p1| p1.get_entry_mut(addr.p1_index()))
         }
     }
 
@@ -130,6 +130,7 @@ impl VirtualMapper {
         let mapped_page = self.mapped_page;
 
         unsafe {
+            #[allow(clippy::bind_instead_of_map)]
             self.pml4()
                 .and_then(|table| {
                     info!("L4 {:?}", table.get_entry(address.p4_index()));
@@ -326,19 +327,17 @@ impl PageManager {
 
     pub unsafe fn set_page_attributes(&self, page: &Page, attributes: PageAttributes, modify_mode: AttributeModify) {
         without_interrupts(|| {
-            self.virtual_map
-                .write()
-                .get_page_entry_mut(page)
-                .map(|page_entry| page_entry.set_attributes(attributes, modify_mode));
-
-            tlb::invlpg(page);
-        })
+            if let Some(page_entry) = self.virtual_map.write().get_page_entry_mut(page) {
+                page_entry.set_attributes(attributes, modify_mode);
+                tlb::invlpg(page);
+            }
+        });
     }
 
     pub unsafe fn modify_mapped_page(&self, page: Page, frame_manager: &'static FrameManager<'_>) {
         without_interrupts(|| {
             self.virtual_map.write().modify_mapped_page(page, frame_manager);
-        })
+        });
     }
 
     pub fn mapped_page(&self) -> Page {
@@ -349,7 +348,7 @@ impl PageManager {
     pub unsafe fn write_cr3(&self) {
         without_interrupts(|| {
             self.virtual_map.write().write_cr3();
-        })
+        });
     }
 
     pub fn copy_pml4(&self) -> PageTable<Level4> {
@@ -369,6 +368,6 @@ impl PageManager {
     pub fn print_walk(&self, address: Address<Virtual>) {
         without_interrupts(|| {
             self.virtual_map.read().print_walk(address);
-        })
+        });
     }
 }

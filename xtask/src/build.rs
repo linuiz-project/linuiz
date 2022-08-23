@@ -114,7 +114,7 @@ pub fn build(options: Options) -> Result<(), xshell::Error> {
         cmd!(
             shell,
             "
-                    cargo build
+                    cargo clippy
                         --profile {profile_str}
                         --target {target_str}
                         -Z unstable-options
