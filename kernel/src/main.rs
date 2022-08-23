@@ -543,7 +543,7 @@ unsafe fn load_tables() {
 
 //         let fadt = tables::acpi::get_fadt();
 
-//         let mut smi_cmd = libkernel::io::port::WriteOnlyPort::<u8>::new(fadt.smi_cmd_port as u16);
+//         let mut smi_cmd = crate::memory::io::WriteOnlyPort::<u8>::new(fadt.smi_cmd_port as u16);
 //         smi_cmd.write(fadt.acpi_enable);
 
 //         {

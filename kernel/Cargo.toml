@@ -14,9 +14,11 @@ num_enum = { version = "*", default-features = false }
 spin = "*"
 crossbeam-queue = { version = "*", default-features = false, features = ["alloc"] }
 paste = "*"
-x86_64 = "*"
-limine = "*"
-raw-cpuid = "*"
 lazy_static = { version = "*", features = ["spin_no_std"] }
 acpi = { path = "../../acpi/acpi/" }
 aml = "*"
+
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+x86_64 = "*"
+limine = "*"
+raw-cpuid = "*"

@@ -1,52 +1,62 @@
-mod portrw;
+mod rv64;
+mod x64;
+
+#[cfg(target_arch = "riscv64")]
+pub use rv64::*;
+#[cfg(target_arch = "x86_64")]
+pub use x64::*;
 
 use core::marker::PhantomData;
-use portrw::*;
+
+#[cfg(target_arch = "x86_64")]
+type PortAddress = u16;
+#[cfg(target_arch = "riscv64")]
+type PortAddress = usize;
 
 pub trait PortRead {
-    unsafe fn read(port: u16) -> Self;
+    unsafe fn read(port: PortAddress) -> Self;
 }
 
 pub trait PortWrite {
-    unsafe fn write(port: u16, value: Self);
+    unsafe fn write(port: PortAddress, value: Self);
 }
 
 pub trait PortReadWrite: PortRead + PortWrite {}
 
 /* PORTREAD */
 impl PortRead for u8 {
-    unsafe fn read(port: u16) -> Self {
+    unsafe fn read(port: PortAddress) -> Self {
         read8(port)
     }
 }
 
 impl PortRead for u16 {
-    unsafe fn read(port: u16) -> Self {
+    unsafe fn read(port: PortAddress) -> Self {
         read16(port)
     }
 }
 
 impl PortRead for u32 {
-    unsafe fn read(port: u16) -> Self {
+    unsafe fn read(port: PortAddress) -> Self {
         read32(port)
     }
 }
 
 /* PORTWRITE */
 impl PortWrite for u8 {
-    unsafe fn write(port: u16, value: Self) {
+    unsafe fn write(port: PortAddress, value: Self) {
         write8(port, value)
     }
 }
 
 impl PortWrite for u16 {
-    unsafe fn write(port: u16, value: Self) {
+    unsafe fn write(port: PortAddress, value: Self) {
         write16(port, value)
     }
 }
 
 impl PortWrite for u32 {
-    unsafe fn write(port: u16, value: Self) {
+    unsafe fn write(port: PortAddress, value: Self) {
         write32(port, value)
     }
 }
@@ -60,7 +70,7 @@ impl PortReadWrite for u32 {}
 #[repr(transparent)]
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ReadOnlyPort<T: PortRead> {
-    port: u16,
+    port: PortAddress,
     phantom: PhantomData<T>,
 }
 
@@ -69,12 +79,12 @@ impl<T: PortRead> ReadOnlyPort<T> {
     ///
     /// This method is unsafe because the caller must ensure the given port is a valid address
     #[inline(always)]
-    pub const unsafe fn new(port: u16) -> Self {
+    pub const unsafe fn new(port: PortAddress) -> Self {
         ReadOnlyPort { port, phantom: PhantomData }
     }
 
     #[inline(always)]
-    pub const fn port_num(&self) -> u16 {
+    pub const fn port_num(&self) -> PortAddress {
         self.port
     }
 
@@ -88,7 +98,7 @@ impl<T: PortRead> ReadOnlyPort<T> {
 #[repr(transparent)]
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct WriteOnlyPort<T: PortWrite> {
-    port: u16,
+    port: PortAddress,
     phantom: PhantomData<T>,
 }
 
@@ -99,12 +109,12 @@ impl<T: PortWrite> WriteOnlyPort<T> {
     ///
     /// This method is unsafe because the caller must ensure the given port is a valid address
     #[inline(always)]
-    pub const unsafe fn new(port: u16) -> Self {
+    pub const unsafe fn new(port: PortAddress) -> Self {
         WriteOnlyPort { port, phantom: PhantomData }
     }
 
     #[inline(always)]
-    pub const fn port_num(&self) -> u16 {
+    pub const fn port_num(&self) -> PortAddress {
         self.port
     }
 
@@ -118,7 +128,7 @@ impl<T: PortWrite> WriteOnlyPort<T> {
 #[repr(transparent)]
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ReadWritePort<T: PortReadWrite> {
-    port: u16,
+    port: PortAddress,
     phantom: PhantomData<T>,
 }
 
@@ -127,12 +137,12 @@ impl<T: PortReadWrite> ReadWritePort<T> {
     ///
     /// This method is unsafe because the caller must ensure the given port is a valid address
     #[inline(always)]
-    pub const unsafe fn new(port: u16) -> Self {
+    pub const unsafe fn new(port: PortAddress) -> Self {
         ReadWritePort { port, phantom: PhantomData }
     }
 
     #[inline(always)]
-    pub const fn port_num(&self) -> u16 {
+    pub const fn port_num(&self) -> PortAddress {
         self.port
     }
 
@@ -144,24 +154,5 @@ impl<T: PortReadWrite> ReadWritePort<T> {
     #[inline(always)]
     pub fn write(&mut self, value: T) {
         unsafe { T::write(self.port_num(), value) }
-    }
-}
-
-pub struct ParallelPort<T: PortReadWrite> {
-    read: ReadOnlyPort<T>,
-    write: WriteOnlyPort<T>,
-}
-
-impl<T: PortReadWrite> ParallelPort<T> {
-    pub const unsafe fn new(read_addr: u16, write_addr: u16) -> Self {
-        Self { read: ReadOnlyPort::new(read_addr), write: WriteOnlyPort::new(write_addr) }
-    }
-
-    pub fn write(&mut self, data: T) {
-        self.write.write(data);
-    }
-
-    pub fn read(&self) -> T {
-        self.read.read()
     }
 }

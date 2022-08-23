@@ -2,8 +2,8 @@ mod serial;
 
 pub use serial::*;
 
+use crate::memory::io::WriteOnlyPort;
 use core::{borrow::BorrowMut, fmt::Write};
-use libkernel::io::port::WriteOnlyPort;
 use spin::Mutex;
 
 pub struct QEMUE9(WriteOnlyPort<u8>);

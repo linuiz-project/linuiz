@@ -20,12 +20,16 @@ pub struct Options {
     release: bool,
 
     /// Whether to produce a disassembly file.
-    #[clap(long)]
+    #[clap(short, long)]
     disassemble: bool,
 
-    // Whether to output the result of `readelf` to a file.
-    #[clap(long)]
+    /// Whether to output the result of `readelf` to a file.
+    #[clap(short, long)]
     readelf: bool,
+
+    /// Whether to use `cargo clippy` rather than `cargo build`.
+    #[clap(short, long)]
+    clippy: bool,
 }
 
 static REQUIRED_ROOT_DIRS: [&str; 5] = ["resources/", ".hdd/", ".hdd/root/EFI/BOOT/", ".hdd/root/linuiz/", ".debug/"];
@@ -90,6 +94,7 @@ pub fn build(options: Options) -> Result<(), xshell::Error> {
     /* kernel */
     {
         let _dir = shell.push_dir("kernel/");
+        let cargo_cmd_str = format!("{}", if options.clippy { "clippy" } else { "build" });
         let profile_str = format!("{}", if options.release { "release" } else { "dev" });
         let target_str = format!(
             "{}",
@@ -114,11 +119,11 @@ pub fn build(options: Options) -> Result<(), xshell::Error> {
         cmd!(
             shell,
             "
-                    cargo clippy
-                        --profile {profile_str}
-                        --target {target_str}
-                        -Z unstable-options
-                    "
+                cargo {cargo_cmd_str}
+                    --profile {profile_str}
+                    --target {target_str}
+                    -Z unstable-options
+            "
         )
         .run()?;
     }

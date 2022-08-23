@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use libkernel::io::port::{ReadOnlyPort, ReadWritePort, WriteOnlyPort};
+use crate::memory::io::{ReadOnlyPort, ReadWritePort, WriteOnlyPort};
 
 /// Address of the first COM port.
 /// This port is VERY likely to be at this address.

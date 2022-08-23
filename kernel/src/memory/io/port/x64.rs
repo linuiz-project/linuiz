@@ -1,7 +1,3 @@
-///! Group of functions for reading and writing to legacy IO ports.
-///!
-///! SAFETY:    It is the responsibility of the caller to ensure the provided ports
-///!            and values are valid, and have no unexpected side effects.
 use core::arch::asm;
 
 /* 8 BIT */

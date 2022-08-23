@@ -1,14 +1,14 @@
 use crate::memory::get_kernel_hhdm_address;
+use crate::memory::io::{ReadOnlyPort, WriteOnlyPort};
 use acpi::{fadt::Fadt, sdt::Signature, AcpiTables, PhysicalMapping, PlatformInfo};
-use libkernel::io::port::{ReadOnlyPort, WriteOnlyPort};
 use spin::Once;
 
-pub enum Register<'a, T: libkernel::io::port::PortReadWrite> {
-    IO(libkernel::io::port::ReadWritePort<T>),
+pub enum Register<'a, T: crate::memory::io::PortReadWrite> {
+    IO(crate::memory::io::ReadWritePort<T>),
     MMIO(&'a libkernel::memory::volatile::VolatileCell<T, libkernel::ReadWrite>),
 }
 
-impl<T: libkernel::io::port::PortReadWrite> Register<'_, T> {
+impl<T: crate::memory::io::PortReadWrite> Register<'_, T> {
     pub const fn new(generic_address: &acpi::platform::address::GenericAddress) -> Option<Self> {
         match generic_address.address_space {
             acpi::platform::address::AddressSpace::SystemMemory => {
@@ -23,7 +23,7 @@ impl<T: libkernel::io::port::PortReadWrite> Register<'_, T> {
                     // SAFETY: There's no meaningful way to validate the port provided by the `GenericAddress` structure.
                     unsafe {
                         #[allow(clippy::cast_possible_truncation)]
-                        libkernel::io::port::ReadWritePort::<T>::new(generic_address.address as u16)
+                        crate::memory::io::ReadWritePort::<T>::new(generic_address.address as u16)
                     },
                 ))
             }

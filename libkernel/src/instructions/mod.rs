@@ -1,5 +1,4 @@
 pub mod interrupts;
-pub mod pwm;
 pub mod sync;
 pub mod tlb;
 

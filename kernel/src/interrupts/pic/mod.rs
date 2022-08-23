@@ -9,7 +9,7 @@ Information about the PIC can be found here: https://en.wikipedia.org/wiki/Intel
 
 pub mod pit;
 
-use libkernel::io::port::{ReadWritePort, WriteOnlyPort};
+use crate::memory::io::{ReadWritePort, WriteOnlyPort};
 use num_enum::TryFromPrimitive;
 
 const CMD_INIT: u8 = 0x11;

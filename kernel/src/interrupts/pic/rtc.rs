@@ -1,4 +1,4 @@
-use crate::io::port::{ReadWritePort, WriteOnlyPort};
+use crate::memory::io::{ReadWritePort, WriteOnlyPort};
 
 static mut SELECTOR: WriteOnlyPort<u8> = unsafe { WriteOnlyPort::new(0x70) };
 static mut DATA: ReadWritePort<u8> = unsafe { ReadWritePort::new(0x71) };

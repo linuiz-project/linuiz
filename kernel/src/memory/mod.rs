@@ -2,6 +2,8 @@ mod frame_manager;
 mod page_manager;
 mod slob;
 
+pub mod io;
+
 pub use frame_manager::*;
 pub use page_manager::*;
 pub use slob::*;

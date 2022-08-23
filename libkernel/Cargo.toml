@@ -14,7 +14,6 @@ bitflags = "*"
 paste = "*"
 num_enum = { version = "*", default-features = false }
 spin = "*"
-raw-cpuid = "*"
 
 [features]
 default = ["panic_handler", "alloc_error_handler"]

@@ -1,5 +1,5 @@
+use crate::memory::io::WriteOnlyPort;
 use bit_field::BitField;
-use libkernel::io::port::WriteOnlyPort;
 
 const TICK_RATE: u32 = 1193182;
 
