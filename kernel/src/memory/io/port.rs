@@ -1,17 +1,97 @@
-mod rv64;
-mod x64;
+#[cfg(target_arch = "x86_64")]
+mod portrw {
+    use core::arch::asm;
+
+    pub type PortAddress = u16;
+
+    /* 8 BIT */
+    #[inline(always)]
+    pub unsafe fn read8(port: PortAddress) -> u8 {
+        let result: u8;
+
+        asm!("in al, dx", out("al") result, in("dx") port, options(nostack, nomem, preserves_flags));
+
+        result
+    }
+
+    #[inline(always)]
+    pub unsafe fn write8(port: PortAddress, value: u8) {
+        asm!("out dx, al", in("dx") port, in("al") value, options(nostack, nomem, preserves_flags));
+    }
+
+    /* 16 BIT */
+    #[inline(always)]
+    pub unsafe fn read16(port: PortAddress) -> u16 {
+        let result: u16;
+
+        asm!("in ax, dx", out("ax") result, in("dx") port, options(nostack, nomem, preserves_flags));
+
+        result
+    }
+
+    #[inline(always)]
+    pub unsafe fn write16(port: PortAddress, value: u16) {
+        asm!("out dx, ax", in("dx") port, in("ax") value, options(nostack, nomem, preserves_flags));
+    }
+
+    /* 32 BIT */
+    #[inline(always)]
+    pub unsafe fn read32(port: PortAddress) -> u32 {
+        let result: u32;
+
+        asm!("in eax, dx", out("eax") result, in("dx") port, options(nostack, nomem, preserves_flags));
+
+        result
+    }
+
+    #[inline(always)]
+    pub unsafe fn write32(port: PortAddress, value: u32) {
+        asm!("out dx, eax", in("dx") port, in("eax") value, options(nostack, nomem, preserves_flags));
+    }
+}
 
 #[cfg(target_arch = "riscv64")]
-pub use rv64::*;
-#[cfg(target_arch = "x86_64")]
-pub use x64::*;
+mod portrw {
+    use core::arch::asm;
+
+    pub type PortAddress = usize;
+
+    /* 8 BIT */
+    #[inline(always)]
+    pub unsafe fn read8(port: PortAddress) -> u8 {
+        (port as *const _).read_volatile()
+    }
+
+    #[inline(always)]
+    pub unsafe fn write8(port: PortAddress, value: u8) {
+        (port as *mut _).write_volatile(value);
+    }
+
+    /* 16 BIT */
+    #[inline(always)]
+    pub unsafe fn read16(port: PortAddress) -> u16 {
+        (port as *const _).read_volatile()
+    }
+
+    #[inline(always)]
+    pub unsafe fn write16(port: PortAddress, value: u16) {
+        (port as *mut _).write_volatile(value);
+    }
+
+    /* 32 BIT */
+    #[inline(always)]
+    pub unsafe fn read32(port: PortAddress) -> u32 {
+        (port as *const _).read_volatile()
+    }
+
+    #[inline(always)]
+    pub unsafe fn write32(port: PortAddress, value: u32) {
+        (port as *mut _).write_volatile(value);
+    }
+}
 
 use core::marker::PhantomData;
-
-#[cfg(target_arch = "x86_64")]
-type PortAddress = u16;
-#[cfg(target_arch = "riscv64")]
-type PortAddress = usize;
+use portrw::*;
 
 pub trait PortRead {
     unsafe fn read(port: PortAddress) -> Self;
