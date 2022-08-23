@@ -1,6 +1,8 @@
 mod exceptions;
+mod instructions;
 mod stubs;
 
+pub use instructions::*;
 pub mod apic;
 pub mod ioapic;
 pub mod pic;

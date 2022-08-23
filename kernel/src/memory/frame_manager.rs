@@ -1,5 +1,5 @@
+use crate::interrupts;
 use core::sync::atomic::{AtomicU8, Ordering};
-use libkernel::instructions::interrupts::without_interrupts;
 use num_enum::TryFromPrimitive;
 use spin::RwLock;
 
@@ -193,7 +193,7 @@ impl<'arr> FrameManager<'arr> {
     }
 
     pub fn lock(&self, index: usize) -> Result<usize, FrameError> {
-        without_interrupts(|| {
+        interrupts::without(|| {
             if let Some(frame) = self.map.read().get(index) {
                 frame.peek();
 
@@ -217,7 +217,7 @@ impl<'arr> FrameManager<'arr> {
     }
 
     pub fn lock_many(&self, index: usize, count: usize) -> Result<usize, FrameError> {
-        without_interrupts(|| {
+        interrupts::without(|| {
             self.map
                 .write()
                 .iter()
@@ -240,7 +240,7 @@ impl<'arr> FrameManager<'arr> {
     }
 
     pub fn free(&self, index: usize) -> Result<(), FrameError> {
-        without_interrupts(|| {
+        interrupts::without(|| {
             if let Some(frame) = self.map.read().get(index) {
                 frame.peek();
 
@@ -262,7 +262,7 @@ impl<'arr> FrameManager<'arr> {
     }
 
     pub fn lock_next(&self) -> Result<usize, FrameError> {
-        without_interrupts(|| {
+        interrupts::without(|| {
             self.map
                 .read()
                 .iter()
@@ -288,7 +288,7 @@ impl<'arr> FrameManager<'arr> {
     }
 
     pub fn lock_next_many(&self, count: usize) -> Result<usize, FrameError> {
-        without_interrupts(|| {
+        interrupts::without(|| {
             let map = self.map.write();
 
             let mut start_index = 0;
@@ -321,7 +321,7 @@ impl<'arr> FrameManager<'arr> {
     }
 
     pub fn try_modify_type(&self, index: usize, new_type: FrameType) -> core::result::Result<(), FrameError> {
-        without_interrupts(|| {
+        interrupts::without(|| {
             self.map
                 .read()
                 .get(index)
@@ -331,7 +331,7 @@ impl<'arr> FrameManager<'arr> {
     }
 
     pub fn force_modify_type(&self, index: usize, new_type: FrameType) -> core::result::Result<(), FrameError> {
-        without_interrupts(|| {
+        interrupts::without(|| {
             self.map
                 .read()
                 .get(index)
@@ -341,17 +341,17 @@ impl<'arr> FrameManager<'arr> {
     }
 
     pub fn get_frame_info(&self, frame_index: usize) -> Option<(bool, FrameType)> {
-        without_interrupts(|| self.map.read().get(frame_index).map(Frame::data))
+        interrupts::without(|| self.map.read().get(frame_index).map(Frame::data))
     }
 
     /// Total memory of a given type represented by frame allocator. If `None` is
     ///  provided for type, the total of all memory types is returned instead.
     pub fn total_memory(&self) -> usize {
-        without_interrupts(|| self.map.read().len() * 0x1000)
+        interrupts::without(|| self.map.read().len() * 0x1000)
     }
 
     pub fn total_frames(&self) -> usize {
-        without_interrupts(|| self.map.read().len())
+        interrupts::without(|| self.map.read().len())
     }
 
     pub fn iter(&'arr self) -> FrameIterator<'arr> {
@@ -368,7 +368,7 @@ impl Iterator for FrameIterator<'_> {
     type Item = (bool, FrameType);
 
     fn next(&mut self) -> Option<Self::Item> {
-        without_interrupts(|| {
+        interrupts::without(|| {
             let map_read = self.map.read();
             if self.cur_index < map_read.len() {
                 let cur_index = self.cur_index;

@@ -6,8 +6,8 @@
 //!
 //! TODO:       Don't just fail; respect the MSR feature.
 
-use crate::{Address, Physical};
 use bit_field::BitField;
+use libkernel::{Address, Physical};
 
 #[derive(Debug)]
 pub struct NotSupported;
@@ -53,12 +53,12 @@ macro_rules! generic_msr {
         impl $name {
             #[inline(always)]
             pub fn read() -> u64 {
-                unsafe { $crate::registers::msr::rdmsr($addr) }
+                unsafe { $crate::registers::x64::msr::rdmsr($addr) }
             }
 
             #[inline(always)]
             pub unsafe fn write(value: u64) {
-                $crate::registers::msr::wrmsr($addr, value);
+                $crate::registers::x64::msr::wrmsr($addr, value);
             }
         }
     };

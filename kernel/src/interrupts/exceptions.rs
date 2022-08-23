@@ -138,7 +138,7 @@ extern "x86-interrupt" fn device_not_available_handler(stack_frame: InterruptSta
 extern "x86-interrupt" fn double_fault_handler(stack_frame: InterruptStackFrame, _: u64) -> ! {
     get_common_exception_handler()(Exception::DoubleFault(stack_frame));
     // Wait indefinite in case the above exception handler returns control flow.
-    libkernel::instructions::interrupts::wait_indefinite()
+    crate::interrupts::wait_loop()
 }
 
 extern "x86-interrupt" fn invalid_tss_handler(stack_frame: InterruptStackFrame, error_code: u64) {
@@ -173,7 +173,7 @@ extern "x86-interrupt" fn page_fault_handler(
     get_common_exception_handler()(Exception::PageFault(
         stack_frame,
         error_code,
-        libkernel::registers::control::CR2::read(),
+        crate::registers::x64::control::CR2::read(),
     ))
 }
 
@@ -190,7 +190,7 @@ extern "x86-interrupt" fn alignment_check_handler(stack_frame: InterruptStackFra
 extern "x86-interrupt" fn machine_check_handler(stack_frame: InterruptStackFrame) -> ! {
     get_common_exception_handler()(Exception::MachineCheck(stack_frame));
     // Wait indefinite in case the above exception handler returns control flow.
-    libkernel::instructions::interrupts::wait_indefinite()
+    crate::interrupts::wait_loop()
 }
 
 extern "x86-interrupt" fn simd_floating_point_handler(stack_frame: InterruptStackFrame) {

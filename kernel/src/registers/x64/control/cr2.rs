@@ -1,4 +1,4 @@
-use crate::{Address, Virtual};
+use libkernel::{Address, Virtual};
 
 pub struct CR2;
 

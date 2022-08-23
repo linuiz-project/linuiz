@@ -1,9 +1,9 @@
 #![allow(non_camel_case_types, non_upper_case_globals)]
 
 use crate::interrupts;
+use crate::registers::x64::msr::IA32_APIC_BASE;
 use bit_field::BitField;
 use core::marker::PhantomData;
-use libkernel::registers::msr::IA32_APIC_BASE;
 
 const xAPIC_BASE_ADDR: usize = 0xFEE00000;
 const x2APIC_BASE_MSR_ADDR: u32 = 0x800;
@@ -227,7 +227,7 @@ pub const SPURIOUS_VECTOR: u8 = 255;
 unsafe fn read_register(register: Register) -> u64 {
     match Mode::get() {
         Mode::xAPIC => ((APIC.get().read() + register.as_xapic_offset()) as *mut u32).read_volatile() as u64,
-        Mode::x2APIC => libkernel::registers::msr::rdmsr(register.as_x2apic_msr()),
+        Mode::x2APIC => crate::registers::x64::msr::rdmsr(register.as_x2apic_msr()),
         Mode::Disabled => panic!("cannot write; core-local APIC is not in a valid mode"),
     }
 }
@@ -236,7 +236,7 @@ unsafe fn read_register(register: Register) -> u64 {
 unsafe fn write_register(register: Register, value: u64) {
     match Mode::get() {
         Mode::xAPIC => ((APIC.get().read() + register.as_xapic_offset()) as *mut u32).write_volatile(value as u32),
-        Mode::x2APIC => libkernel::registers::msr::wrmsr(register.as_x2apic_msr(), value),
+        Mode::x2APIC => crate::registers::x64::msr::wrmsr(register.as_x2apic_msr(), value),
         Mode::Disabled => panic!("cannot write; core-local APIC is not in a valid mode"),
     }
 }
@@ -261,7 +261,7 @@ pub fn get_id() -> u32 {
     unsafe {
         match Mode::get() {
             Mode::xAPIC => ((APIC.get().read() + Register::ID.as_xapic_offset()) as *mut u32).read_volatile() >> 24,
-            Mode::x2APIC => libkernel::registers::msr::rdmsr(Register::ID.as_x2apic_msr()) as u32,
+            Mode::x2APIC => crate::registers::x64::msr::rdmsr(Register::ID.as_x2apic_msr()) as u32,
             Mode::Disabled => panic!("cannot read ID; core-local APIC is not in a valid mode"),
         }
     }

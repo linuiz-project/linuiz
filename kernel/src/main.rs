@@ -34,7 +34,9 @@
     sync_unsafe_cell,
     if_let_guard,
     pointer_is_aligned,
-    core_intrinsics
+    core_intrinsics,
+    panic_info_message,
+    alloc_error_handler
 )]
 
 use core::sync::atomic::Ordering;
@@ -50,9 +52,28 @@ mod interrupts;
 mod local_state;
 mod logging;
 mod memory;
+mod registers;
 mod scheduling;
 mod tables;
 mod time;
+
+#[panic_handler]
+fn panic(info: &core::panic::PanicInfo) -> ! {
+    // TODO impl stack unwinding
+
+    error!("KERNEL PANIC (at {}): {}", info.location().unwrap(), info.message().unwrap());
+
+    // TODO should we actually abort on every panic?
+    core::intrinsics::abort()
+}
+
+#[alloc_error_handler]
+fn alloc_error(error: core::alloc::Layout) -> ! {
+    error!("KERNEL ALLOCATOR PANIC: {:?}", error);
+
+    // TODO should we actually abort on every alloc error?
+    core::intrinsics::abort()
+}
 
 lazy_static::lazy_static! {
     /// We must take care not to call any allocating functions, or reference KMALLOC itself,
@@ -79,7 +100,7 @@ unsafe extern "sysv64" fn _entry() -> ! {
     CON_OUT.init(crate::drivers::stdout::SerialSpeed::S115200);
     match crate::drivers::stdout::set_stdout(&mut CON_OUT, log::LevelFilter::Debug) {
         Ok(()) => info!("Successfully loaded into kernel."),
-        Err(_) => libkernel::instructions::interrupts::wait_indefinite(),
+        Err(_) => core::intrinsics::abort(),
     }
 
     /* info dump */
@@ -274,7 +295,7 @@ unsafe extern "sysv64" fn _entry() -> ! {
                         SMP_MEMORY_INIT.fetch_add(1, Ordering::Relaxed);
                         cpu_info.goto_address = _smp_entry as usize as u64;
                     } else {
-                        cpu_info.goto_address = libkernel::instructions::interrupts::wait_indefinite as usize as u64;
+                        cpu_info.goto_address = crate::interrupts::wait_loop as usize as u64;
                     }
                 }
             }
@@ -314,13 +335,13 @@ fn load_registers() {
     trace!("Loading x86-specific control registers to known state.");
 
     // Set CR0 flags.
-    use libkernel::registers::control::{CR0Flags, CR0};
+    use crate::registers::x64::control::{CR0Flags, CR0};
     // SAFETY: We set `CR0` once, and setting it again during kernel execution is not supported.
     unsafe { CR0::write(CR0Flags::PE | CR0Flags::MP | CR0Flags::ET | CR0Flags::NE | CR0Flags::WP | CR0Flags::PG) };
 
     // Set CR4 flags.
     use crate::cpu::{EXT_FEATURE_INFO, FEATURE_INFO};
-    use libkernel::registers::control::{CR4Flags, CR4};
+    use crate::registers::x64::control::{CR4Flags, CR4};
 
     let mut flags = CR4Flags::PAE | CR4Flags::PGE | CR4Flags::OSXMMEXCPT;
 
@@ -374,7 +395,7 @@ fn load_registers() {
         trace!("Detected support for paging execution prevention.");
         // SAFETY:  Setting `IA32_EFER.NXE` in this context is safe because the bootloader does not use the `NX` bit. However, the kernel does, so
         //          disabling it after paging is in control of the kernel is unsupported.
-        unsafe { libkernel::registers::msr::IA32_EFER::set_nxe(true) };
+        unsafe { crate::registers::x64::msr::IA32_EFER::set_nxe(true) };
     } else {
         warn!("PC does not support the NX bit; system security will be compromised (this warning is purely informational).");
     }
@@ -682,8 +703,8 @@ fn syscall_test() -> ! {
 pub(self) unsafe fn cpu_setup() -> ! {
     crate::local_state::init();
 
+    use crate::registers::x64::RFlags;
     use crate::{local_state::try_push_task, scheduling::*};
-    use libkernel::registers::RFlags;
 
     try_push_task(Task::new(
         TaskPriority::new(3).unwrap(),
@@ -692,11 +713,12 @@ pub(self) unsafe fn cpu_setup() -> ! {
         RFlags::INTERRUPT_FLAG,
         *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
         *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
-        libkernel::registers::control::CR3::read(),
+        crate::registers::x64::control::CR3::read(),
     ))
     .unwrap();
 
     trace!("Beginning scheduling...");
     crate::local_state::try_begin_scheduling();
-    libkernel::instructions::interrupts::wait_indefinite()
+
+    panic!("failed to begin scheduling!")
 }

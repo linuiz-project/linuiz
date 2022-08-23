@@ -153,7 +153,7 @@ impl ExactSizeIterator for PageIterator {
 bitflags::bitflags! {
     #[repr(transparent)]
     pub struct PageAttributes: u64 {
-        const PRESENT = 1 << 0;
+        const VALID = 1 << 0;
         const WRITABLE = 1 << 1;
         const USERSPACE = 1 << 2;
         const WRITE_THROUGH = 1 << 3;
@@ -168,9 +168,9 @@ bitflags::bitflags! {
         // 52..=58 available
         const NO_EXECUTE = 1 << 63;
 
-        const RO = Self::PRESENT.bits() | Self::NO_EXECUTE.bits();
-        const RW = Self::PRESENT.bits() | Self::WRITABLE.bits() | Self::NO_EXECUTE.bits();
-        const RX = Self::PRESENT.bits();
+        const RO = Self::VALID.bits() | Self::NO_EXECUTE.bits();
+        const RW = Self::VALID.bits() | Self::WRITABLE.bits() | Self::NO_EXECUTE.bits();
+        const RX = Self::VALID.bits();
         const MMIO = Self::RW.bits() | Self::UNCACHEABLE.bits();
     }
 }
@@ -190,40 +190,33 @@ pub struct PageTableEntry(u64);
 impl PageTableEntry {
     #[cfg(target_arch = "x86_64")]
     const FRAME_INDEX_MASK: u64 = 0x000FFFFF_FFFFF000;
+    #[cfg(target_arch = "riscv64")]
+    const FRAME_INDEX_MASK: u64 = 0x003FFFFF_FFFFFC00;
+
+    const FRAME_INDEX_SHIFT: u32 = Self::FRAME_INDEX_MASK.trailing_zeros();
 
     /// Returns an empty `Self`. All bits of this entry will be 0.
     #[inline(always)]
     pub const fn empty() -> Self {
         Self(0)
-
-        // Ensure RISC-V 64 PBMT bits are 0 if unsupported
     }
 
     /// Whether the page table entry is present or usable the memory controller.
     #[inline(always)]
     pub const fn is_present(&self) -> bool {
-        #[cfg(target_arch = "x86_64")]
-        {
-            self.get_attributes().contains(PageAttributes::PRESENT)
-        }
+        self.get_attributes().contains(PageAttributes::VALID)
     }
 
     /// Gets the frame index of the page table entry.
     #[inline(always)]
     pub const fn get_frame_index(&self) -> usize {
-        #[cfg(target_arch = "x86_64")]
-        {
-            ((self.0 & Self::FRAME_INDEX_MASK) / 0x1000) as usize
-        }
+        (self.0 & (Self::FRAME_INDEX_MASK >> Self::FRAME_INDEX_SHIFT)) as usize
     }
 
     /// Sets the entry's frame index.
     #[inline(always)]
     pub const fn set_frame_index(&mut self, frame_index: usize) {
-        #[cfg(target_arch = "x86_64")]
-        {
-            self.0 = (self.0 & !Self::FRAME_INDEX_MASK) | ((frame_index as u64) * 0x1000);
-        }
+        self.0 = (self.0 & !Self::FRAME_INDEX_MASK) | ((frame_index as u64) << Self::FRAME_INDEX_SHIFT);
     }
 
     /// Takes this page table entry's frame, even if it is non-present.
@@ -250,13 +243,14 @@ impl PageTableEntry {
             AttributeModify::Toggle => attributes.toggle(new_attributes),
         }
 
-        #[cfg(target_arch = "x86_64")]
-        {
-            if !crate::registers::msr::IA32_EFER::get_nxe() {
-                // This bit is reserved if NXE is not supported. For now, this means silently removing it for compatability.
-                attributes.remove(PageAttributes::NO_EXECUTE);
-            }
-        }
+        // TODO maybe handle no NX bit support? Maybe not
+        // #[cfg(target_arch = "x86_64")]
+        // {
+        //     if !crate::registers::msr::IA32_EFER::get_nxe() {
+        //         // This bit is reserved if NXE is not supported. For now, this means silently removing it for compatability.
+        //         attributes.remove(PageAttributes::NO_EXECUTE);
+        //     }
+        // }
 
         self.0 = (self.0 & !PageAttributes::all().bits()) | attributes.bits();
     }
@@ -391,7 +385,7 @@ impl<L: HeirarchicalLevel> PageTable<L> {
 
             entry.set_frame_index(frame_index);
             entry.set_attributes(
-                PageAttributes::PRESENT | PageAttributes::WRITABLE | PageAttributes::USERSPACE,
+                PageAttributes::VALID | PageAttributes::WRITABLE | PageAttributes::USERSPACE,
                 AttributeModify::Set,
             );
 

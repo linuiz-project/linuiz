@@ -189,7 +189,7 @@ impl<'map> SLOB<'map> {
 
 unsafe impl core::alloc::Allocator for SLOB<'_> {
     fn allocate(&self, layout: Layout) -> Result<core::ptr::NonNull<[u8]>, core::alloc::AllocError> {
-        libkernel::instructions::interrupts::without_interrupts(|| {
+        crate::interrupts::without(|| {
             let align_mask = usize::max(layout.align() / Self::BLOCK_SIZE, 1) - 1;
             let size_in_blocks = libkernel::align_up_div(layout.size(), Self::BLOCK_SIZE);
 
@@ -268,7 +268,7 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
     }
 
     unsafe fn deallocate(&self, ptr: core::ptr::NonNull<u8>, layout: Layout) {
-        libkernel::instructions::interrupts::without_interrupts(|| {
+        crate::interrupts::without(|| {
             let start_block_index = ptr.addr().get() / Self::BLOCK_SIZE;
             let end_block_index = start_block_index + align_up_div(layout.size(), Self::BLOCK_SIZE);
             let mut block_index = start_block_index;

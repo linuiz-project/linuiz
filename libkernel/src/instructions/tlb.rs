@@ -6,12 +6,6 @@ pub fn invlpg(page: &crate::memory::Page) {
     }
 }
 
-/// Switches the current CR3 register in and out, causing all TLB entries to be invalidated.
-#[inline(always)]
-pub fn invlpg_all() {
-    crate::registers::control::CR3::refresh();
-}
-
 pub mod pcid {
 
     /// Error indicating a given PCID value is outside the 12 maximum allowed bits.

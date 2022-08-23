@@ -42,7 +42,7 @@ static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator(OnceCell::new());
 pub unsafe fn set_global_allocator(galloc: &'static dyn GlobalAlloc) {
     if GLOBAL_ALLOCATOR.0.set(galloc).is_err() {
         error!("Global allocator is already set.");
-        libkernel::instructions::interrupts::wait_indefinite();
+        crate::interrupts::wait_loop();
     }
 }
 

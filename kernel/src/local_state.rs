@@ -1,10 +1,10 @@
-use crate::scheduling::{Scheduler, Task, TaskPriority};
+use crate::{
+    registers::x64::{control::CR3, RFlags},
+    scheduling::{Scheduler, Task, TaskPriority},
+};
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicUsize, Ordering};
-use libkernel::{
-    registers::{control::CR3, RFlags},
-    Address, Virtual,
-};
+use libkernel::{Address, Virtual};
 
 static ACTIVE_CPUS_LIST: spin::RwLock<Vec<u32>> = spin::RwLock::new(Vec::new());
 
@@ -52,9 +52,10 @@ pub unsafe fn init() {
             // Cosntruct the local state pointer (with slide) via the `Address` struct, to
             // automatically sign extend.
             Address::<Virtual>::new_truncate(
-                ((510 * libkernel::memory::PML4_ENTRY_MEM_SIZE)
-                    + (libkernel::rand(0..(u32::MAX as u64)).unwrap_or(0) as usize))
-                    & !0xFFF,
+                (
+                    (510 * libkernel::memory::PML4_ENTRY_MEM_SIZE)
+                    // + (libkernel::rand(0..(u32::MAX as u64)).unwrap_or(0) as usize)
+                ) & !0xFFF,
             )
             .as_usize(),
             Ordering::AcqRel,
@@ -95,7 +96,7 @@ pub unsafe fn init() {
     // LINT0&1 should be configured by the APIC reset.
 
     // Ensure interrupts are enabled after APIC is reset.
-    libkernel::instructions::interrupts::enable();
+    crate::interrupts::enable();
 
     trace!("Writing local state struct out to memory.");
     local_state_ptr.write(LocalState {
@@ -105,7 +106,7 @@ pub unsafe fn init() {
         scheduler: Scheduler::new(false),
         default_task: Task::new(
             TaskPriority::new(1).unwrap(),
-            libkernel::instructions::interrupts::wait_indefinite,
+            crate::interrupts::wait_loop,
             &crate::scheduling::TaskStackOption::Auto,
             RFlags::INTERRUPT_FLAG,
             *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),

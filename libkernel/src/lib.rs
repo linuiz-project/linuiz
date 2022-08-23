@@ -25,9 +25,8 @@
     core_intrinsics
 )]
 
-#[macro_use]
-extern crate log;
 extern crate alloc;
+extern crate log;
 
 mod addr;
 mod macros;
@@ -42,24 +41,6 @@ pub mod memory;
 //pub mod registers;
 pub mod sync;
 pub mod syscall;
-
-#[cfg(feature = "panic_handler")]
-#[panic_handler]
-fn panic(info: &core::panic::PanicInfo) -> ! {
-    // TODO impl stack unwinding
-
-    error!("KERNEL PANIC (at {}): {}", info.location().unwrap(), info.message().unwrap());
-
-    crate::instructions::interrupts::wait_indefinite()
-}
-
-#[cfg(feature = "alloc_error_handler")]
-#[alloc_error_handler]
-fn alloc_error(error: core::alloc::Layout) -> ! {
-    error!("KERNEL ALLOCATOR PANIC: {:?}", error);
-
-    crate::instructions::interrupts::wait_indefinite()
-}
 
 pub enum ReadOnly {}
 pub enum WriteOnly {}
@@ -161,11 +142,12 @@ impl core::fmt::Debug for IndexRing {
     }
 }
 
-/// Generates a random number within the given range, or [Option::None] if [crate::instructions::rdrand64] is unavaible.
-pub fn rand(range: core::ops::Range<u64>) -> Option<u64> {
-    crate::instructions::rdrand().ok().map(|initial| {
-        let rand_absolute_factor = u64::MAX / initial;
-        let slide = (range.end - range.start) / rand_absolute_factor;
-        range.start + slide
-    })
-}
+// /// Generates a random number within the given range, or [Option::None] if [crate::instructions::rdrand64] is unavaible.
+// TODO this should be arch-independent
+// pub fn rand(range: core::ops::Range<u64>) -> Option<u64> {
+//     crate::instructions::rdrand().ok().map(|initial| {
+//         let rand_absolute_factor = u64::MAX / initial;
+//         let slide = (range.end - range.start) / rand_absolute_factor;
+//         range.start + slide
+//     })
+// }

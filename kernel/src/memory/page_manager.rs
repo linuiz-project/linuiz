@@ -1,6 +1,5 @@
-use crate::memory::FrameManager;
+use crate::{interrupts, memory::FrameManager};
 use libkernel::{
-    instructions::{interrupts::without_interrupts, tlb},
     memory::{AttributeModify, Level4, Page, PageAttributes, PageTable, PageTableEntry},
     Address, Physical, Virtual,
 };
@@ -99,7 +98,7 @@ impl VirtualMapper {
             let entry = self.get_page_entry_create(&cur_page, frame_manager);
             entry.set_frame_index(frame_index);
             entry.set_attributes(
-                PageAttributes::PRESENT
+                PageAttributes::VALID
                     | PageAttributes::WRITABLE
                     | PageAttributes::WRITE_THROUGH
                     | PageAttributes::NO_EXECUTE
@@ -107,7 +106,8 @@ impl VirtualMapper {
                 AttributeModify::Set,
             );
 
-            tlb::invlpg(&cur_page);
+            #[cfg(target_arch = "x86_64")]
+            libkernel::instructions::tlb::invlpg(&cur_page);
         }
 
         self.mapped_page = base_page;
@@ -115,14 +115,14 @@ impl VirtualMapper {
 
     /// Returns `true` if the current CR3 address matches the addressor's PML4 frame, and `false` otherwise.
     fn is_active(&self) -> bool {
-        libkernel::registers::control::CR3::read().0.frame_index() == self.root_frame_index
+        crate::registers::x64::control::CR3::read().0.frame_index() == self.root_frame_index
     }
 
     #[inline(always)]
     pub unsafe fn write_cr3(&mut self) {
-        libkernel::registers::control::CR3::write(
+        crate::registers::x64::control::CR3::write(
             Address::<Physical>::new(self.root_frame_index * 0x1000),
-            libkernel::registers::control::CR3Flags::empty(),
+            crate::registers::x64::control::CR3Flags::empty(),
         );
     }
 
@@ -189,7 +189,7 @@ impl PageManager {
         Self {
             virtual_map: spin::RwLock::new(VirtualMapper::new(
                 mapped_page,
-                libkernel::registers::control::CR3::read().0.frame_index(),
+                crate::registers::x64::control::CR3::read().0.frame_index(),
             )),
         }
     }
@@ -205,7 +205,7 @@ impl PageManager {
         attributes: PageAttributes,
         frame_manager: &'static FrameManager<'_>,
     ) -> Result<(), MapError> {
-        without_interrupts(|| {
+        interrupts::without(|| {
             // Lock the virtual map first. This avoids a situation where the frame for this page is
             // freed, an interrupt occurs, and then the page is memory referenced (and thus, a page
             // pointing to a frame it doesn't own is accessed).
@@ -221,7 +221,8 @@ impl PageManager {
                     entry.set_frame_index(frame_index);
                     entry.set_attributes(attributes, AttributeModify::Set);
 
-                    tlb::invlpg(page);
+                    #[cfg(target_arch = "x86_64")]
+                    libkernel::instructions::tlb::invlpg(page);
 
                     Ok(())
                 }
@@ -239,12 +240,12 @@ impl PageManager {
         free_frame: bool,
         frame_manager: &'static FrameManager<'_>,
     ) -> Result<(), MapError> {
-        without_interrupts(|| {
+        interrupts::without(|| {
             self.virtual_map
                 .write()
                 .get_page_entry_mut(page)
                 .map(|entry| {
-                    entry.set_attributes(PageAttributes::PRESENT, AttributeModify::Remove);
+                    entry.set_attributes(PageAttributes::VALID, AttributeModify::Remove);
 
                     // Handle frame permissions to keep them updated.
                     if free_frame {
@@ -252,7 +253,8 @@ impl PageManager {
                     }
 
                     // Invalidate the page in the TLB.
-                    tlb::invlpg(page);
+                    #[cfg(target_arch = "x86_64")]
+                    libkernel::instructions::tlb::invlpg(page);
                 })
                 .ok_or(MapError::NotMapped)
         })
@@ -265,7 +267,7 @@ impl PageManager {
         new_attribs: Option<PageAttributes>,
         frame_manager: &'static FrameManager<'_>,
     ) -> Result<(), MapError> {
-        without_interrupts(|| {
+        interrupts::without(|| {
             let mut map_write = self.virtual_map.write();
 
             let maybe_new_pte_frame_index_attribs = map_write.get_page_entry_mut(unmap_from).map(|entry| {
@@ -284,8 +286,12 @@ impl PageManager {
                     entry.set_attributes(new_pte_attribs, AttributeModify::Set);
 
                     // Invalidate both old and new pages in TLB.
-                    tlb::invlpg(map_to);
-                    tlb::invlpg(unmap_from);
+                    #[cfg(target_arch = "x86_64")]
+                    {
+                        use libkernel::instructions::tlb::invlpg;
+                        invlpg(map_to);
+                        invlpg(unmap_from);
+                    }
                 })
                 .ok_or(MapError::NotMapped)
         })
@@ -298,61 +304,63 @@ impl PageManager {
     /* STATE QUERYING */
 
     pub fn is_mapped(&self, virt_addr: Address<Virtual>) -> bool {
-        without_interrupts(|| {
+        interrupts::without(|| {
             self.virtual_map
                 .read()
                 .get_page_entry(&Page::containing_addr(virt_addr))
-                .filter(|entry| entry.get_attributes().contains(PageAttributes::PRESENT))
+                .filter(|entry| entry.get_attributes().contains(PageAttributes::VALID))
                 .is_some()
         })
     }
 
     pub fn is_mapped_to(&self, page: &Page, frame_index: usize) -> bool {
-        without_interrupts(|| {
+        interrupts::without(|| {
             self.virtual_map.read().get_page_entry(page).map_or(false, |entry| frame_index == entry.get_frame_index())
         })
     }
 
     pub fn get_mapped_to(&self, page: &Page) -> Option<usize> {
-        without_interrupts(|| self.virtual_map.read().get_page_entry(page).map(|entry| entry.get_frame_index()))
+        interrupts::without(|| self.virtual_map.read().get_page_entry(page).map(|entry| entry.get_frame_index()))
     }
 
     /* STATE CHANGING */
 
     pub fn get_page_attributes(&self, page: &Page) -> Option<PageAttributes> {
-        without_interrupts(|| {
+        interrupts::without(|| {
             self.virtual_map.read().get_page_entry(page).map(|page_entry| page_entry.get_attributes())
         })
     }
 
     pub unsafe fn set_page_attributes(&self, page: &Page, attributes: PageAttributes, modify_mode: AttributeModify) {
-        without_interrupts(|| {
+        interrupts::without(|| {
             if let Some(page_entry) = self.virtual_map.write().get_page_entry_mut(page) {
                 page_entry.set_attributes(attributes, modify_mode);
-                tlb::invlpg(page);
+
+                #[cfg(target_arch = "x86_64")]
+                libkernel::instructions::tlb::invlpg(page);
             }
         });
     }
 
     pub unsafe fn modify_mapped_page(&self, page: Page, frame_manager: &'static FrameManager<'_>) {
-        without_interrupts(|| {
+        interrupts::without(|| {
             self.virtual_map.write().modify_mapped_page(page, frame_manager);
         });
     }
 
     pub fn mapped_page(&self) -> Page {
-        self.virtual_map.read().mapped_page
+        interrupts::without(|| self.virtual_map.read().mapped_page)
     }
 
     #[inline(always)]
     pub unsafe fn write_cr3(&self) {
-        without_interrupts(|| {
+        interrupts::without(|| {
             self.virtual_map.write().write_cr3();
         });
     }
 
     pub fn copy_pml4(&self) -> PageTable<Level4> {
-        without_interrupts(|| {
+        interrupts::without(|| {
             let vmap = self.virtual_map.read();
 
             unsafe {
@@ -366,7 +374,7 @@ impl PageManager {
     }
 
     pub fn print_walk(&self, address: Address<Virtual>) {
-        without_interrupts(|| {
+        interrupts::without(|| {
             self.virtual_map.read().print_walk(address);
         });
     }

@@ -44,7 +44,7 @@ pub fn set_stdout(std_out: &'static mut dyn Write, minimum_level: log::LevelFilt
 
 #[doc(hidden)]
 pub fn __std_out(args: core::fmt::Arguments) {
-    libkernel::instructions::interrupts::without_interrupts(|| {
+    crate::interrupts::without(|| {
         let mut std_out = &mut *STD_OUT.lock();
         std_out.as_mut().expect("standard out has not been configured").write_fmt(args).unwrap();
     });

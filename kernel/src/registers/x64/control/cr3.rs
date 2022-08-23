@@ -1,5 +1,5 @@
-use crate::{Address, Physical};
 use core::arch::asm;
+use libkernel::{Address, Physical};
 
 bitflags::bitflags! {
     pub struct CR3Flags : usize {

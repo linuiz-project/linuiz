@@ -48,7 +48,7 @@ impl APICTimer {
     ///         affect software execution, and additionally that the [`crate::interrupts::Vector::LocalTimer`] has
     ///         a proper handler.
     pub unsafe fn new(set_freq: u16) -> Option<Self> {
-        if libkernel::registers::msr::IA32_APIC_BASE::get_hw_enabled() {
+        if crate::registers::x64::msr::IA32_APIC_BASE::get_hw_enabled() {
             apic::get_timer().set_mode(apic::TimerMode::OneShot);
 
             // TODO perhaps check the state of APIC timer LVT? It should be asserted that the below will always work.
@@ -91,7 +91,7 @@ impl TSCTimer {
     ///         affect software execution, and additionally that the `crate::interrupts::Vector::LocalTimer` vector has
     ///         a proper handler.
     pub unsafe fn new(set_freq: u16) -> Option<Self> {
-        if libkernel::registers::msr::IA32_APIC_BASE::get_hw_enabled()
+        if crate::registers::x64::msr::IA32_APIC_BASE::get_hw_enabled()
             && crate::cpu::FEATURE_INFO.has_tsc()
             && crate::cpu::FEATURE_INFO.has_tsc_deadline()
         {
@@ -127,6 +127,6 @@ impl Timer for TSCTimer {
 
         let tsc_wait = self.0.checked_mul(interval_multiplier as u64).expect("timer interval multiplier overflowed");
 
-        libkernel::registers::msr::IA32_TSC_DEADLINE::set(libkernel::registers::TSC::read() + tsc_wait);
+        crate::registers::x64::msr::IA32_TSC_DEADLINE::set(crate::registers::x64::TSC::read() + tsc_wait);
     }
 }

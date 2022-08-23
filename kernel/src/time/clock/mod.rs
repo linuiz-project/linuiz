@@ -37,7 +37,7 @@ static SYSTEM_CLOCK: spin::Once<Box<dyn Clock>> = spin::Once::new();
 pub fn get() -> &'static dyn Clock {
     SYSTEM_CLOCK
         .call_once(|| {
-            libkernel::instructions::interrupts::without_interrupts(|| {
+            crate::interrupts::without(|| {
                 // TODO support invariant TSC as clock
 
                 Box::new(acpi::AcpiClock::load().unwrap())

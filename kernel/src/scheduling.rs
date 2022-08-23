@@ -1,14 +1,13 @@
-use crate::cpu::GeneralRegisters;
+use crate::{
+    cpu::GeneralRegisters,
+    registers::x64::{control::CR3Flags, RFlags},
+};
 use core::{
     mem::MaybeUninit,
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use crossbeam_queue::SegQueue;
-use libkernel::{
-    memory::PageAlignedBox,
-    registers::{control::CR3Flags, RFlags},
-    Address, Physical,
-};
+use libkernel::{memory::PageAlignedBox, Address, Physical};
 use x86_64::registers::segmentation::SegmentSelector;
 
 static NEXT_THREAD_ID: AtomicU64 = AtomicU64::new(1);
