@@ -1,14 +1,9 @@
-use crate::{
-    cpu::GeneralRegisters,
-    registers::x64::{control::CR3Flags, RFlags},
-};
 use core::{
     mem::MaybeUninit,
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use crossbeam_queue::SegQueue;
-use libkernel::{memory::PageAlignedBox, Address, Physical};
-use x86_64::registers::segmentation::SegmentSelector;
+use libkernel::memory::PageAlignedBox;
 
 static NEXT_THREAD_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -47,14 +42,10 @@ pub struct Task {
     id: u64,
     prio: TaskPriority,
     //pcid: Option<PCID>,
-    pub rip: u64,
-    pub cs: u16,
-    pub rsp: u64,
-    pub ss: u16,
-    pub rfl: RFlags,
-    pub gprs: GeneralRegisters,
+    pub ctrl_flow_context: crate::interrupts::ControlFlowContext,
+    pub arch_context: crate::interrupts::ArchContext,
     pub stack: PageAlignedBox<[MaybeUninit<u8>]>,
-    pub cr3: (Address<Physical>, CR3Flags),
+    pub root_page_table_args: crate::memory::RootPageTable,
 }
 
 impl Task {
@@ -64,10 +55,8 @@ impl Task {
         priority: TaskPriority,
         function: fn() -> !,
         stack: &TaskStackOption,
-        rfl: RFlags,
-        cs: SegmentSelector,
-        ss: SegmentSelector,
-        cr3: (Address<Physical>, CR3Flags),
+        arch_context: crate::interrupts::ArchContext,
+        root_page_table_args: crate::memory::RootPageTable,
     ) -> Self {
         let rip = function as usize as u64;
 
@@ -91,15 +80,13 @@ impl Task {
         Self {
             id: NEXT_THREAD_ID.fetch_add(1, core::sync::atomic::Ordering::AcqRel),
             prio: priority,
-            rip,
-            cs: cs.0,
-            // SAFETY:  The slice is valid, and so its end pointer is valid.
-            rsp: unsafe { stack.as_ptr().add(stack.len()) as u64 },
-            ss: ss.0,
-            rfl,
-            gprs: GeneralRegisters::empty(),
+            ctrl_flow_context: crate::interrupts::ControlFlowContext {
+                ip: function as usize as u64,
+                sp: unsafe { stack.as_ptr().add(stack.len()) as u64 },
+            },
+            arch_context,
             stack,
-            cr3,
+            root_page_table_args,
         }
     }
 

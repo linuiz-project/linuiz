@@ -80,7 +80,7 @@ pub fn build(options: Options) -> Result<(), xshell::Error> {
         }
 
         // update the submodule to ensure latest version
-        cmd!(shell, "git submodule update").run()?;
+        cmd!(shell, "git submodule update --recursive --remote").run()?;
         // copy the resultant EFI binary
         shell.copy_file(bootx64_efi_path.clone(), PathBuf::from(".hdd/root/EFI/BOOT/"))?;
     }

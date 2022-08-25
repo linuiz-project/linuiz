@@ -1,8 +1,8 @@
-use crate::{interrupts, memory::FrameManager};
-use libkernel::{
-    memory::{AttributeModify, Level4, Page, PageAttributes, PageTable, PageTableEntry},
-    Address, Physical, Virtual,
+use crate::{
+    interrupts,
+    memory::{AttributeModify, FrameManager, Level4, PageAttributes, PageTable, PageTableEntry},
 };
+use libkernel::{memory::Page, Address, Physical, Virtual};
 
 #[derive(Debug, Clone, Copy)]
 pub enum MapError {
@@ -79,14 +79,13 @@ impl VirtualMapper {
     fn get_page_entry_create(&mut self, page: &Page, frame_manager: &'static FrameManager<'_>) -> &mut PageTableEntry {
         let mapped_page = self.mapped_page;
         let addr = page.base_addr();
-        let get_new_frame_index = || frame_manager.lock_next().unwrap();
 
         unsafe {
             self.pml4_mut()
                 .unwrap()
-                .sub_table_create(addr.p4_index(), &mapped_page, get_new_frame_index)
-                .sub_table_create(addr.p3_index(), &mapped_page, get_new_frame_index)
-                .sub_table_create(addr.p2_index(), &mapped_page, get_new_frame_index)
+                .sub_table_create(addr.p4_index(), &mapped_page, frame_manager)
+                .sub_table_create(addr.p3_index(), &mapped_page, frame_manager)
+                .sub_table_create(addr.p2_index(), &mapped_page, frame_manager)
                 .get_entry_mut(addr.p1_index())
         }
     }
@@ -107,22 +106,18 @@ impl VirtualMapper {
             );
 
             #[cfg(target_arch = "x86_64")]
-            libkernel::instructions::tlb::invlpg(&cur_page);
+            crate::arch::x64::instructions::tlb::invlpg(&cur_page);
         }
 
         self.mapped_page = base_page;
     }
 
-    /// Returns `true` if the current CR3 address matches the addressor's PML4 frame, and `false` otherwise.
-    fn is_active(&self) -> bool {
-        crate::registers::x64::control::CR3::read().0.frame_index() == self.root_frame_index
-    }
-
     #[inline(always)]
     pub unsafe fn write_cr3(&mut self) {
-        crate::registers::x64::control::CR3::write(
+        #[cfg(target_arch = "x86_64")]
+        crate::arch::x64::registers::control::CR3::write(
             Address::<Physical>::new(self.root_frame_index * 0x1000),
-            crate::registers::x64::control::CR3Flags::empty(),
+            crate::arch::x64::registers::control::CR3Flags::empty(),
         );
     }
 
@@ -168,15 +163,15 @@ impl PageManager {
     ) -> Self {
         Self {
             virtual_map: spin::RwLock::new({
-                let pml4_index = frame_manager.lock_next().expect("Failed to lock frame for virtual addressor's PML4");
-                let pml4_mapped = mapped_page.forward_checked(pml4_index).unwrap();
+                let root_index = frame_manager.lock_next().expect("Failed to lock frame for virtual addressor's PML4");
+                let pml4_mapped = mapped_page.forward_checked(root_index).unwrap();
 
                 match pml4_copy {
                     Some(pml4_copy) => pml4_mapped.as_mut_ptr::<PageTable<Level4>>().write(pml4_copy),
                     None => core::ptr::write_bytes(pml4_mapped.as_mut_ptr::<u8>(), 0, 0x1000),
                 }
 
-                VirtualMapper::new(mapped_page, pml4_index)
+                VirtualMapper::new(mapped_page, root_index)
             }),
         }
     }
@@ -189,7 +184,8 @@ impl PageManager {
         Self {
             virtual_map: spin::RwLock::new(VirtualMapper::new(
                 mapped_page,
-                crate::registers::x64::control::CR3::read().0.frame_index(),
+                #[cfg(target_arch = "x86_64")]
+                crate::arch::x64::registers::control::CR3::read().0.frame_index(),
             )),
         }
     }
@@ -222,7 +218,7 @@ impl PageManager {
                     entry.set_attributes(attributes, AttributeModify::Set);
 
                     #[cfg(target_arch = "x86_64")]
-                    libkernel::instructions::tlb::invlpg(page);
+                    crate::arch::x64::instructions::tlb::invlpg(page);
 
                     Ok(())
                 }
@@ -254,7 +250,7 @@ impl PageManager {
 
                     // Invalidate the page in the TLB.
                     #[cfg(target_arch = "x86_64")]
-                    libkernel::instructions::tlb::invlpg(page);
+                    crate::arch::x64::instructions::tlb::invlpg(page);
                 })
                 .ok_or(MapError::NotMapped)
         })
@@ -288,7 +284,7 @@ impl PageManager {
                     // Invalidate both old and new pages in TLB.
                     #[cfg(target_arch = "x86_64")]
                     {
-                        use libkernel::instructions::tlb::invlpg;
+                        use crate::arch::x64::instructions::tlb::invlpg;
                         invlpg(map_to);
                         invlpg(unmap_from);
                     }
@@ -337,7 +333,7 @@ impl PageManager {
                 page_entry.set_attributes(attributes, modify_mode);
 
                 #[cfg(target_arch = "x86_64")]
-                libkernel::instructions::tlb::invlpg(page);
+                crate::arch::x64::instructions::tlb::invlpg(page);
             }
         });
     }

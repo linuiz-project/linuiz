@@ -18,7 +18,7 @@ pub unsafe fn rdmsr(ecx: u32) -> u64 {
     // TODO check the CPUID MSR feature bit
 
     let value: u64;
-    core::arch:: asm!(
+    core::arch::asm!(
         "
         push rax        #  Preserve the `rax` value.
         rdmsr
@@ -53,12 +53,12 @@ macro_rules! generic_msr {
         impl $name {
             #[inline(always)]
             pub fn read() -> u64 {
-                unsafe { $crate::registers::x64::msr::rdmsr($addr) }
+                unsafe { $crate::arch::x64::registers::msr::rdmsr($addr) }
             }
 
             #[inline(always)]
             pub unsafe fn write(value: u64) {
-                $crate::registers::x64::msr::wrmsr($addr, value);
+                $crate::arch::x64::registers::msr::wrmsr($addr, value);
             }
         }
     };

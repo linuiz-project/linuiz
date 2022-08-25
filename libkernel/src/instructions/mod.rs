@@ -1,11 +1,10 @@
 pub mod sync;
-pub mod tlb;
 
-#[derive(Debug, Clone, Copy)]
-pub enum RandError {
-    NotSupported,
-    HardFailure,
-}
+// #[derive(Debug, Clone, Copy)]
+// pub enum RandError {
+//     NotSupported,
+//     HardFailure,
+// }
 
 // TODO `rand` function should be generalized in `crate`, probably. For ARM, it's often a hardware device, for instance.
 //      This creates a somnewhat natural incompatability with instruction-based rand, like on x64.

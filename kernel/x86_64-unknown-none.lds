@@ -65,6 +65,7 @@ SECTIONS
     PROVIDE(__data_start = .);
     .got.plt            : { *(.got.plt) *(.igot.plt) }
     .data               : { *(.data .data.*) }
+    .limine_reqs        : { *(.limine_reqs) }
     PROVIDE(__data_end = .);
 
     .comment              0 : { *(.comment) }

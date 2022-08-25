@@ -1,8 +1,6 @@
 mod rflags;
-mod tsc;
 
 pub use rflags::*;
-pub use tsc::*;
 pub mod control;
 pub mod msr;
 

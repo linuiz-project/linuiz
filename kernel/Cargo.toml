@@ -17,8 +17,8 @@ paste = "*"
 lazy_static = { version = "*", features = ["spin_no_std"] }
 acpi = { path = "../../acpi/acpi/" }
 aml = "*"
+limine = { version = "*", features = ["requests-section"] }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86_64 = "*"
-limine = "*"
 raw-cpuid = "*"

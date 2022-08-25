@@ -1,5 +1,5 @@
 use crate::memory::get_kernel_hhdm_address;
-use crate::memory::io::{ReadOnlyPort, WriteOnlyPort};
+use crate::memory::io::{PortAddress, ReadOnlyPort, WriteOnlyPort};
 use acpi::{fadt::Fadt, sdt::Signature, AcpiTables, PhysicalMapping, PlatformInfo};
 use spin::Once;
 
@@ -23,7 +23,7 @@ impl<T: crate::memory::io::PortReadWrite> Register<'_, T> {
                     // SAFETY: There's no meaningful way to validate the port provided by the `GenericAddress` structure.
                     unsafe {
                         #[allow(clippy::cast_possible_truncation)]
-                        crate::memory::io::ReadWritePort::<T>::new(generic_address.address as u16)
+                        crate::memory::io::ReadWritePort::<T>::new(generic_address.address as PortAddress)
                     },
                 ))
             }
@@ -110,27 +110,27 @@ impl aml::Handler for AcpiHandler {
     }
 
     fn read_io_u8(&self, port: u16) -> u8 {
-        unsafe { ReadOnlyPort::<u8>::new(port) }.read()
+        unsafe { ReadOnlyPort::<u8>::new(port as PortAddress) }.read()
     }
 
     fn read_io_u16(&self, port: u16) -> u16 {
-        unsafe { ReadOnlyPort::<u16>::new(port) }.read()
+        unsafe { ReadOnlyPort::<u16>::new(port as PortAddress) }.read()
     }
 
     fn read_io_u32(&self, port: u16) -> u32 {
-        unsafe { ReadOnlyPort::<u32>::new(port) }.read()
+        unsafe { ReadOnlyPort::<u32>::new(port as PortAddress) }.read()
     }
 
     fn write_io_u8(&self, port: u16, value: u8) {
-        unsafe { WriteOnlyPort::<u8>::new(port) }.write(value);
+        unsafe { WriteOnlyPort::<u8>::new(port as PortAddress) }.write(value);
     }
 
     fn write_io_u16(&self, port: u16, value: u16) {
-        unsafe { WriteOnlyPort::<u16>::new(port) }.write(value);
+        unsafe { WriteOnlyPort::<u16>::new(port as PortAddress) }.write(value);
     }
 
     fn write_io_u32(&self, port: u16, value: u32) {
-        unsafe { WriteOnlyPort::<u32>::new(port) }.write(value);
+        unsafe { WriteOnlyPort::<u32>::new(port as PortAddress) }.write(value);
     }
 
     fn read_pci_u8(&self, segment: u16, bus: u8, device: u8, function: u8, offset: u16) -> u8 {

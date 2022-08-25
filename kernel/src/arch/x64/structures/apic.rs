@@ -1,7 +1,6 @@
 #![allow(non_camel_case_types, non_upper_case_globals)]
 
-use crate::interrupts;
-use crate::registers::x64::msr::IA32_APIC_BASE;
+use crate::{arch::x64::registers::msr::IA32_APIC_BASE, interrupts};
 use bit_field::BitField;
 use core::marker::PhantomData;
 
@@ -40,8 +39,7 @@ pub unsafe fn init_interface(
     page_manager: &'static crate::memory::PageManager,
 ) {
     if let Mode::xAPIC = Mode::get() {
-        use crate::memory::FrameError;
-        use libkernel::memory::PageAttributes;
+        use crate::memory::{FrameError, PageAttributes};
 
         let xapic_frame_index = xAPIC_BASE_ADDR / 0x1000;
         let xapic_mapped_page_index = page_manager.mapped_page().index() + xapic_frame_index;
@@ -52,7 +50,7 @@ pub unsafe fn init_interface(
             Ok(()) => page_manager.set_page_attributes(
                 &xapic_page,
                 PageAttributes::MMIO | PageAttributes::GLOBAL,
-                libkernel::memory::AttributeModify::Set,
+                crate::memory::AttributeModify::Set,
             ),
 
             Err(FrameError::OutOfRange(_)) => page_manager
@@ -227,7 +225,7 @@ pub const SPURIOUS_VECTOR: u8 = 255;
 unsafe fn read_register(register: Register) -> u64 {
     match Mode::get() {
         Mode::xAPIC => ((APIC.get().read() + register.as_xapic_offset()) as *mut u32).read_volatile() as u64,
-        Mode::x2APIC => crate::registers::x64::msr::rdmsr(register.as_x2apic_msr()),
+        Mode::x2APIC => crate::arch::x64::registers::msr::rdmsr(register.as_x2apic_msr()),
         Mode::Disabled => panic!("cannot write; core-local APIC is not in a valid mode"),
     }
 }
@@ -236,7 +234,7 @@ unsafe fn read_register(register: Register) -> u64 {
 unsafe fn write_register(register: Register, value: u64) {
     match Mode::get() {
         Mode::xAPIC => ((APIC.get().read() + register.as_xapic_offset()) as *mut u32).write_volatile(value as u32),
-        Mode::x2APIC => crate::registers::x64::msr::wrmsr(register.as_x2apic_msr(), value),
+        Mode::x2APIC => crate::arch::x64::registers::msr::wrmsr(register.as_x2apic_msr(), value),
         Mode::Disabled => panic!("cannot write; core-local APIC is not in a valid mode"),
     }
 }
@@ -261,7 +259,7 @@ pub fn get_id() -> u32 {
     unsafe {
         match Mode::get() {
             Mode::xAPIC => ((APIC.get().read() + Register::ID.as_xapic_offset()) as *mut u32).read_volatile() >> 24,
-            Mode::x2APIC => crate::registers::x64::msr::rdmsr(Register::ID.as_x2apic_msr()) as u32,
+            Mode::x2APIC => crate::arch::x64::registers::msr::rdmsr(Register::ID.as_x2apic_msr()) as u32,
             Mode::Disabled => panic!("cannot read ID; core-local APIC is not in a valid mode"),
         }
     }
@@ -466,10 +464,10 @@ impl<T: GenericVectorVariant> LocalVector<T> {
 
 impl LocalVector<Timer> {
     pub unsafe fn set_mode(&self, mode: TimerMode) -> &Self {
-        let tsc_dl_support = crate::cpu::CPUID
+        let tsc_dl_support = crate::arch::x64::cpu::cpuid::CPUID
             .get_feature_info()
             .as_ref()
-            .map_or(false, crate::cpu::cpuid::FeatureInfo::has_tsc_deadline);
+            .map_or(false, crate::arch::x64::cpu::cpuid::FeatureInfo::has_tsc_deadline);
 
         assert!(mode != TimerMode::TSC_Deadline || tsc_dl_support, "TSC deadline is not supported on this CPU.");
 
@@ -481,7 +479,7 @@ impl LocalVector<Timer> {
         if tsc_dl_support {
             // IA32 SDM instructs utilizing the `mfence` instruction to ensure all writes to the IA32_TSC_DEADLINE
             // MSR are serialized *after* the APIC timer mode switch (`wrmsr` to `IA32_TSC_DEADLINE` is non-serializing).
-            libkernel::instructions::sync::mfence();
+            crate::arch::x64::instructions::sync::mfence();
         }
 
         self

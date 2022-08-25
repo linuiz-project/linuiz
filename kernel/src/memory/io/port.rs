@@ -52,46 +52,46 @@ mod portrw {
 
 #[cfg(target_arch = "riscv64")]
 mod portrw {
-    use core::arch::asm;
-
     pub type PortAddress = usize;
 
     /* 8 BIT */
     #[inline(always)]
     pub unsafe fn read8(port: PortAddress) -> u8 {
-        (port as *const _).read_volatile()
+        (port as *const u8).read_volatile()
     }
 
     #[inline(always)]
     pub unsafe fn write8(port: PortAddress, value: u8) {
-        (port as *mut _).write_volatile(value);
+        (port as *mut u8).write_volatile(value);
     }
 
     /* 16 BIT */
     #[inline(always)]
     pub unsafe fn read16(port: PortAddress) -> u16 {
-        (port as *const _).read_volatile()
+        (port as *const u16).read_volatile()
     }
 
     #[inline(always)]
     pub unsafe fn write16(port: PortAddress, value: u16) {
-        (port as *mut _).write_volatile(value);
+        (port as *mut u16).write_volatile(value);
     }
 
     /* 32 BIT */
     #[inline(always)]
     pub unsafe fn read32(port: PortAddress) -> u32 {
-        (port as *const _).read_volatile()
+        (port as *const u32).read_volatile()
     }
 
     #[inline(always)]
     pub unsafe fn write32(port: PortAddress, value: u32) {
-        (port as *mut _).write_volatile(value);
+        (port as *mut u32).write_volatile(value);
     }
 }
 
 use core::marker::PhantomData;
 use portrw::*;
+
+pub use portrw::PortAddress;
 
 pub trait PortRead {
     unsafe fn read(port: PortAddress) -> Self;
@@ -183,8 +183,6 @@ pub struct WriteOnlyPort<T: PortWrite> {
 }
 
 impl<T: PortWrite> WriteOnlyPort<T> {
-    // TODO add a raw_write -esque function.
-
     /// Constructs a port wrapping the given address
     ///
     /// This method is unsafe because the caller must ensure the given port is a valid address

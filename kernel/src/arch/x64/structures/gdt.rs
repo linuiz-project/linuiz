@@ -1,11 +1,13 @@
+pub use x86_64::{
+    registers::segmentation::SegmentSelector,
+    structures::gdt::{Descriptor, GlobalDescriptorTable},
+};
+
 use spin::Once;
-use x86_64::{registers::segmentation::SegmentSelector, structures::gdt::GlobalDescriptorTable};
 
 static GDT: Once<GlobalDescriptorTable> = Once::new();
 fn get_gdt() -> &'static GlobalDescriptorTable {
     GDT.call_once(|| {
-        use x86_64::structures::gdt::Descriptor;
-
         let mut gdt = GlobalDescriptorTable::new();
 
         // This GDT layout is very specific, due to the behaviour of the IA32_STAR MSR and its

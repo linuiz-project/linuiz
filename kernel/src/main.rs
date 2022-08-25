@@ -46,14 +46,14 @@ extern crate log;
 extern crate alloc;
 extern crate libkernel;
 
-mod cpu;
+mod arch;
+mod boot;
 mod drivers;
 mod interrupts;
 mod local_state;
-mod logging;
 mod memory;
-mod registers;
 mod scheduling;
+mod stdout;
 mod tables;
 mod time;
 
@@ -64,7 +64,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     error!("KERNEL PANIC (at {}): {}", info.location().unwrap(), info.message().unwrap());
 
     // TODO should we actually abort on every panic?
-    core::intrinsics::abort()
+    crate::interrupts::wait_loop()
 }
 
 #[alloc_error_handler]
@@ -72,15 +72,15 @@ fn alloc_error(error: core::alloc::Layout) -> ! {
     error!("KERNEL ALLOCATOR PANIC: {:?}", error);
 
     // TODO should we actually abort on every alloc error?
-    core::intrinsics::abort()
+    crate::interrupts::wait_loop()
 }
 
 lazy_static::lazy_static! {
     /// We must take care not to call any allocating functions, or reference KMALLOC itself,
     /// prior to initializing memory (frame/page manager). The SLOB *immtediately* configures
     /// its own allocation table, utilizing both of the aforementioned managers.
-    /// SAFETY: TODO this shouldn't be lazy init. Definitely manual init.
-    pub static ref KMALLOC: memory::SLOB<'static> = unsafe { memory::SLOB::new() };
+    /// TODO this shouldn't be lazy init. Definitely manual init.
+    pub static ref KMALLOC: crate::memory::slob::SLOB<'static> = unsafe { crate::memory::slob::SLOB::new() };
 }
 
 pub const LIMINE_REV: u64 = 0;
@@ -88,7 +88,8 @@ static LIMINE_KERNEL_FILE: limine::LimineKernelFileRequest = limine::LimineKerne
 static LIMINE_INFO: limine::LimineBootInfoRequest = limine::LimineBootInfoRequest::new(LIMINE_REV);
 static LIMINE_SMP: limine::LimineSmpRequest = limine::LimineSmpRequest::new(LIMINE_REV).flags(0b1);
 
-static mut CON_OUT: crate::drivers::stdout::Serial = crate::drivers::stdout::Serial::new(crate::drivers::stdout::COM1);
+static CON_OUT: core::cell::SyncUnsafeCell<crate::memory::io::Serial> =
+    core::cell::SyncUnsafeCell::new(crate::memory::io::Serial::new(crate::memory::io::COM1));
 static SMP_MEMORY_READY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 static SMP_MEMORY_INIT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
@@ -97,11 +98,14 @@ static mut KERNEL_CFG_SMP: bool = false;
 #[no_mangle]
 #[allow(clippy::too_many_lines)]
 unsafe extern "sysv64" fn _entry() -> ! {
-    CON_OUT.init(crate::drivers::stdout::SerialSpeed::S115200);
-    match crate::drivers::stdout::set_stdout(&mut CON_OUT, log::LevelFilter::Debug) {
-        Ok(()) => info!("Successfully loaded into kernel."),
-        Err(_) => core::intrinsics::abort(),
+    /* standard output setup */
+    {
+        let con_out_mut = &mut *CON_OUT.get();
+        con_out_mut.init(crate::memory::io::SerialSpeed::S115200);
+        crate::stdout::set_stdout(con_out_mut, log::LevelFilter::Debug);
     }
+
+    info!("Successfully loaded into kernel.");
 
     /* info dump */
     {
@@ -113,7 +117,8 @@ unsafe extern "sysv64" fn _entry() -> ! {
             boot_info.revision,
         );
 
-        if let Some(vendor_str) = crate::cpu::get_vendor() {
+        #[cfg(target_arch = "x86_64")]
+        if let Some(vendor_str) = crate::arch::x64::cpu::get_vendor() {
             info!("Vendor              {}", vendor_str);
         } else {
             info!("Vendor              None");
@@ -146,21 +151,22 @@ unsafe extern "sysv64" fn _entry() -> ! {
     crate::memory::init_kernel_frame_manager();
     crate::memory::init_kernel_page_manager();
 
-    /* register & table init */
+    /* bsp core init */
+    #[cfg(target_arch = "x86_64")]
     {
-        load_registers();
-        load_tables();
+        crate::arch::x64::cpu::load_registers();
+        crate::arch::x64::cpu::load_tables();
     }
+
+    // TODO rv64 bsp hart init
 
     let frame_manager = crate::memory::get_kernel_frame_manager();
     let page_manager = crate::memory::get_kernel_page_manager();
 
     /* memory init */
     {
-        use libkernel::{
-            memory::{Page, PageAttributes},
-            LinkerSymbol,
-        };
+        use crate::memory::PageAttributes;
+        use libkernel::{memory::Page, LinkerSymbol};
 
         extern "C" {
             static __text_start: LinkerSymbol;
@@ -309,8 +315,13 @@ unsafe extern "sysv64" fn _entry() -> ! {
         debug!("Kernel has finalized control of page tables.");
         trace!("Assigning global allocator...");
         crate::memory::set_global_allocator(&*crate::KMALLOC);
-        trace!("Initializing APIC interface...");
-        crate::interrupts::apic::init_interface(frame_manager, page_manager);
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            trace!("Initializing APIC interface...");
+            crate::arch::x64::structures::apic::init_interface(frame_manager, page_manager);
+        }
+
         trace!("Initializing ACPI interface...");
         crate::tables::acpi::init_interface();
 
@@ -329,172 +340,6 @@ unsafe extern "sysv64" fn _entry() -> ! {
 
     core_setup()
     // configure_acpi()
-}
-
-fn load_registers() {
-    trace!("Loading x86-specific control registers to known state.");
-
-    // Set CR0 flags.
-    use crate::registers::x64::control::{CR0Flags, CR0};
-    // SAFETY: We set `CR0` once, and setting it again during kernel execution is not supported.
-    unsafe { CR0::write(CR0Flags::PE | CR0Flags::MP | CR0Flags::ET | CR0Flags::NE | CR0Flags::WP | CR0Flags::PG) };
-
-    // Set CR4 flags.
-    use crate::cpu::{EXT_FEATURE_INFO, FEATURE_INFO};
-    use crate::registers::x64::control::{CR4Flags, CR4};
-
-    let mut flags = CR4Flags::PAE | CR4Flags::PGE | CR4Flags::OSXMMEXCPT;
-
-    if FEATURE_INFO.has_de() {
-        trace!("Detected support for debugging extensions.");
-        flags.insert(CR4Flags::DE);
-    }
-
-    if FEATURE_INFO.has_fxsave_fxstor() {
-        trace!("Detected support for `fxsave` and `fxstor` instructions.");
-        flags.insert(CR4Flags::OSFXSR);
-    }
-
-    if FEATURE_INFO.has_mce() {
-        trace!("Detected support for machine check exceptions.");
-    }
-
-    if FEATURE_INFO.has_pcid() {
-        trace!("Detected support for process context IDs.");
-        flags.insert(CR4Flags::PCIDE);
-    }
-
-    if EXT_FEATURE_INFO.as_ref().map_or(false, crate::cpu::cpuid::ExtendedFeatures::has_umip) {
-        trace!("Detected support for usermode instruction prevention.");
-        flags.insert(CR4Flags::UMIP);
-    }
-
-    if EXT_FEATURE_INFO.as_ref().map_or(false, crate::cpu::cpuid::ExtendedFeatures::has_fsgsbase) {
-        trace!("Detected support for CPL3 FS/GS base usage.");
-        flags.insert(CR4Flags::FSGSBASE);
-    }
-
-    if EXT_FEATURE_INFO.as_ref().map_or(false, crate::cpu::cpuid::ExtendedFeatures::has_smep) {
-        trace!("Detected support for supervisor mode execution prevention.");
-        flags.insert(CR4Flags::SMEP);
-    }
-
-    if EXT_FEATURE_INFO.as_ref().map_or(false, crate::cpu::cpuid::ExtendedFeatures::has_smap) {
-        trace!("Detected support for supervisor mode access prevention.");
-        flags.insert(CR4Flags::SMAP);
-    }
-
-    // SAFETY:  Initialize the CR4 register with all CPU & kernel supported features.
-    unsafe { CR4::write(flags) };
-
-    // Enable use of the `NO_EXECUTE` page attribute, if supported.
-    if crate::cpu::EXT_FUNCTION_INFO
-        .as_ref()
-        .map_or(false, crate::cpu::cpuid::ExtendedProcessorFeatureIdentifiers::has_execute_disable)
-    {
-        trace!("Detected support for paging execution prevention.");
-        // SAFETY:  Setting `IA32_EFER.NXE` in this context is safe because the bootloader does not use the `NX` bit. However, the kernel does, so
-        //          disabling it after paging is in control of the kernel is unsupported.
-        unsafe { crate::registers::x64::msr::IA32_EFER::set_nxe(true) };
-    } else {
-        warn!("PC does not support the NX bit; system security will be compromised (this warning is purely informational).");
-    }
-}
-
-/// SAFETY: Caller must ensure this method is called only once per core.
-unsafe fn load_tables() {
-    use crate::{interrupts::StackTableIndex, memory::allocate_pages};
-    use x86_64::{
-        instructions::tables,
-        structures::{gdt::Descriptor, idt::InterruptDescriptorTable, tss::TaskStateSegment},
-        VirtAddr,
-    };
-
-    trace!("Configuring local tables (IDT, GDT).");
-
-    // Always initialize GDT prior to configuring IDT.
-    crate::tables::gdt::init();
-
-    let frame_manager = crate::memory::get_kernel_frame_manager();
-    let hhdm_address = crate::memory::get_kernel_hhdm_address().as_usize();
-
-    /* IDT init */
-    {
-        // Due to the fashion in which the `x86_64` crate initializes the IDT entries,
-        // it must be ensured that the handlers are set only *after* the GDT has been
-        // properly initialized and loaded—otherwise, the `CS` value for the IDT entries
-        // is incorrect, and this causes very confusing GPFs.
-        let idt_frame_index = frame_manager.lock_next().unwrap();
-        let idt_ptr = (hhdm_address + (idt_frame_index * 0x1000)) as *mut InterruptDescriptorTable;
-        idt_ptr.write(InterruptDescriptorTable::new());
-
-        let idt = &mut *idt_ptr;
-        crate::interrupts::set_exception_handlers(idt);
-        crate::interrupts::set_stub_handlers(idt);
-        idt.load_unsafe();
-    }
-
-    /* TSS init */
-    {
-        trace!("Configuring new TSS and loading via temp GDT.");
-
-        let tss_ptr = {
-            let tss_frame_index = frame_manager.lock_next().unwrap();
-            let tss_address = hhdm_address + (tss_frame_index * 0x1000);
-            let tss_ptr = tss_address as *mut TaskStateSegment;
-            tss_ptr.write(TaskStateSegment::new());
-
-            let mut tss = &mut *tss_ptr;
-            // TODO guard pages for these stacks
-            tss.privilege_stack_table[0] = VirtAddr::from_ptr(allocate_pages(5));
-            tss.interrupt_stack_table[StackTableIndex::Debug as usize] = VirtAddr::from_ptr(allocate_pages(2));
-            tss.interrupt_stack_table[StackTableIndex::NonMaskable as usize] = VirtAddr::from_ptr(allocate_pages(2));
-            tss.interrupt_stack_table[StackTableIndex::DoubleFault as usize] = VirtAddr::from_ptr(allocate_pages(2));
-            tss.interrupt_stack_table[StackTableIndex::MachineCheck as usize] = VirtAddr::from_ptr(allocate_pages(2));
-
-            tss_ptr
-        };
-
-        trace!("Configuring TSS descriptor for temp GDT.");
-        let tss_descriptor = {
-            use bit_field::BitField;
-
-            let tss_ptr_u64 = tss_ptr as u64;
-
-            let mut low = x86_64::structures::gdt::DescriptorFlags::PRESENT.bits();
-            // base
-            low.set_bits(16..40, tss_ptr_u64.get_bits(0..24));
-            low.set_bits(56..64, tss_ptr_u64.get_bits(24..32));
-            // limit (the `-1` is needed since the bound is inclusive, not exclusive)
-            low.set_bits(0..16, (core::mem::size_of::<TaskStateSegment>() - 1) as u64);
-            // type (0b1001 = available 64-bit tss)
-            low.set_bits(40..44, 0b1001);
-
-            // high 32 bits of base
-            let mut high = 0;
-            high.set_bits(0..32, tss_ptr_u64.get_bits(32..64));
-
-            Descriptor::SystemSegment(low, high)
-        };
-
-        trace!("Loading in temp GDT to `ltr` the TSS.");
-        // Store current GDT pointer to restore later.
-        let cur_gdt = tables::sgdt();
-        // Create temporary kernel GDT to avoid a GPF on switching to it.
-        let mut temp_gdt = x86_64::structures::gdt::GlobalDescriptorTable::new();
-        temp_gdt.add_entry(Descriptor::kernel_code_segment());
-        temp_gdt.add_entry(Descriptor::kernel_data_segment());
-        let tss_selector = temp_gdt.add_entry(tss_descriptor);
-
-        // Load temp GDT ...
-        temp_gdt.load_unsafe();
-        // ... load TSS from temporary GDT ...
-        tables::load_tss(tss_selector);
-        // ... and restore cached GDT.
-        tables::lgdt(&cur_gdt);
-
-        trace!("TSS loaded, and temporary GDT trashed.");
-    }
 }
 
 // unsafe fn configure_acpi() -> ! {
@@ -601,14 +446,17 @@ unsafe fn load_tables() {
 
 /// Entrypoint for AP processors.
 #[inline(never)]
-unsafe extern "sysv64" fn _smp_entry() -> ! {
+unsafe fn _smp_entry() -> ! {
     // Wait to ensure the machine is the correct state to execute cpu setup.
     while !SMP_MEMORY_READY.load(Ordering::Relaxed) {
         core::hint::spin_loop();
     }
 
-    load_registers();
-    load_tables();
+    #[cfg(target_arch = "x86_64")]
+    {
+        crate::arch::x64::cpu::load_registers();
+        crate::arch::x64::cpu::load_tables();
+    }
 
     crate::memory::get_kernel_page_manager().write_cr3();
 
@@ -681,18 +529,19 @@ fn syscall_test() -> ! {
     let clock = crate::time::clock::get();
 
     loop {
-        let result: u64;
-
         // SAFETY: Temporary syscall test.
+        #[cfg(target_arch = "x86_64")]
         unsafe {
+            let result: u64;
+
             core::arch::asm!(
                 "int 0xF0",
                 in("rdi") &raw const control,
                 out("rsi") result
             );
-        }
 
-        info!("{:#X}", result);
+            info!("{:#X}", result);
+        }
 
         clock.spin_wait_us(500000);
     }
@@ -701,24 +550,24 @@ fn syscall_test() -> ! {
 /// SAFETY: This function invariantly assumes it will be called only once per core.
 #[inline(never)]
 pub(self) unsafe fn cpu_setup() -> ! {
-    crate::local_state::init();
+    crate::local_state::init(0);
 
-    use crate::registers::x64::RFlags;
-    use crate::{local_state::try_push_task, scheduling::*};
+    // use crate::registers::x64::RFlags;
+    // use crate::{local_state::try_push_task, scheduling::*};
 
-    try_push_task(Task::new(
-        TaskPriority::new(3).unwrap(),
-        syscall_test,
-        &TaskStackOption::Pages(1),
-        RFlags::INTERRUPT_FLAG,
-        *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
-        *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
-        crate::registers::x64::control::CR3::read(),
-    ))
-    .unwrap();
+    // TODO
+    // try_push_task(Task::new(
+    //     TaskPriority::new(3).unwrap(),
+    //     syscall_test,
+    //     &TaskStackOption::Pages(1),
+    //     RFlags::INTERRUPT_FLAG,
+    //     *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
+    //     *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
+    //     crate::registers::x64::control::CR3::read(),
+    // ))
+    // .unwrap();
 
     trace!("Beginning scheduling...");
     crate::local_state::try_begin_scheduling();
-
-    panic!("failed to begin scheduling!")
+    crate::interrupts::wait_loop()
 }

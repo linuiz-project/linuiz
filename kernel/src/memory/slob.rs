@@ -1,9 +1,6 @@
-use crate::memory::PageManager;
+use crate::memory::{PageAttributes, PageManager};
 use core::{alloc::Layout, mem::size_of};
-use libkernel::{
-    align_up_div,
-    memory::{Page, PageAttributes},
-};
+use libkernel::{align_up_div, memory::Page};
 use spin::{RwLock, RwLockWriteGuard};
 
 /// Represents one page worth of memory blocks (i.e. 4096 bytes in blocks).
@@ -154,10 +151,10 @@ impl<'map> SLOB<'map> {
         }
         // For the remainder of the table's pages (pages that didn't exist prior), create new auto mappings.
         for page_offset in cur_table_page_count..req_table_page_count {
-            let mut new_page = new_table_base_page.forward_checked(page_offset).unwrap();
+            let new_page = new_table_base_page.forward_checked(page_offset).unwrap();
             page_manager.auto_map(&new_page, PageAttributes::RW, frame_manager);
             // Clear the newly allocated table page.
-            unsafe { new_page.mem_clear() };
+            unsafe { new_page.clear_memory() };
         }
 
         // Point to new map.

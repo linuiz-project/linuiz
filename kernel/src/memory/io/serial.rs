@@ -1,36 +1,36 @@
 #![allow(dead_code)]
 
-use crate::memory::io::{ReadOnlyPort, ReadWritePort, WriteOnlyPort};
+use crate::memory::io::{PortAddress, ReadOnlyPort, ReadWritePort, WriteOnlyPort};
 
 /// Address of the first COM port.
 /// This port is VERY likely to be at this address.
-pub const COM1: u16 = 0x3F8;
+pub const COM1: PortAddress = 0x3F8;
 /// Address of the second COM port.
 /// This port is likely to be at this address.
-pub const COM2: u16 = 0x2F8;
+pub const COM2: PortAddress = 0x2F8;
 /// Address of the third COM port.
 /// This address is configurable on some BIOSes, so it is not a very reliable port address.
-pub const COM3: u16 = 0x3E8;
+pub const COM3: PortAddress = 0x3E8;
 /// Address of the fourth COM port.
 /// This address is configurable on some BIOSes, so it is not a very reliable port address.
-pub const COM4: u16 = 0x2E8;
+pub const COM4: PortAddress = 0x2E8;
 
 /// Address offset of the data port.
-pub const DATA: u16 = 0x0;
+pub const DATA: PortAddress = 0x0;
 /// Address offset of the interrupt enable port.
-pub const IRQ_CONTROL: u16 = 0x1;
+pub const IRQ_CONTROL: PortAddress = 0x1;
 /// Address offset of the FIFO control port.
-pub const FIFO_CONTROL: u16 = 0x2;
+pub const FIFO_CONTROL: PortAddress = 0x2;
 /// Address offset of the line control port.
-pub const LINE_CONTROL: u16 = 0x3;
+pub const LINE_CONTROL: PortAddress = 0x3;
 /// Address offset of the modem control port.
-pub const MODEM_CONTROL: u16 = 0x4;
+pub const MODEM_CONTROL: PortAddress = 0x4;
 /// Address offset of the line status port.
-pub const LINE_STATUS: u16 = 0x5;
+pub const LINE_STATUS: PortAddress = 0x5;
 /// Address offset of the modem status port.
-pub const MODEM_STATUS: u16 = 0x6;
+pub const MODEM_STATUS: PortAddress = 0x6;
 /// Address offset of the scratch port.
-pub const SCRATCH: u16 = 0x7;
+pub const SCRATCH: PortAddress = 0x7;
 
 bitflags::bitflags! {
     #[repr(transparent)]
@@ -83,7 +83,7 @@ pub struct Serial {
 }
 
 impl Serial {
-    pub const fn new(base: u16) -> Self {
+    pub const fn new(base: PortAddress) -> Self {
         unsafe {
             Self {
                 data: ReadWritePort::<u8>::new(base + DATA),

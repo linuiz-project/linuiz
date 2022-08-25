@@ -1,18 +1,15 @@
 use crate::{
-    registers::x64::{control::CR3, RFlags},
+    memory::RootPageTable,
     scheduling::{Scheduler, Task, TaskPriority},
 };
-use alloc::vec::Vec;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use libkernel::{Address, Virtual};
-
-static ACTIVE_CPUS_LIST: spin::RwLock<Vec<u32>> = spin::RwLock::new(Vec::new());
 
 #[repr(C, align(0x1000))]
 pub(crate) struct LocalState {
     magic: u64,
     core_id: u32,
-    timer: alloc::boxed::Box<dyn crate::time::timers::Timer>,
+    timer: alloc::boxed::Box<dyn crate::time::timer::Timer>,
     scheduler: Scheduler,
     default_task: Task,
     cur_task: Option<Task>,
@@ -31,9 +28,10 @@ static LOCAL_STATES_BASE: AtomicUsize = AtomicUsize::new(0);
 /// Returns the pointer to the local state structure.
 #[inline]
 fn get_local_state() -> Option<&'static mut LocalState> {
+    // TODO read from `IA32_KERNEL_GS_BASE`
     unsafe {
         let local_state_ptr = (LOCAL_STATES_BASE.load(Ordering::Relaxed) as *mut LocalState)
-            .add(crate::interrupts::apic::get_id() as usize);
+            .add(crate::arch::x64::structures::apic::get_id() as usize);
 
         if  crate::memory::get_kernel_page_manager().is_mapped(Address::<Virtual>::from_ptr(local_state_ptr)) &&  let Some(local_state) = local_state_ptr.as_mut() && local_state.is_valid_magic()  {
                 Some(local_state)
@@ -45,7 +43,8 @@ fn get_local_state() -> Option<&'static mut LocalState> {
 /// Initializes the core-local state structure.
 ///
 /// SAFETY: This function invariantly assumes it will only be called once.
-pub unsafe fn init() {
+pub unsafe fn init(core_id: u32) {
+    // TODO write to `IA32_KERNEL_GS_BASE`
     LOCAL_STATES_BASE
         .compare_exchange(
             0,
@@ -63,8 +62,6 @@ pub unsafe fn init() {
         )
         .ok();
 
-    let core_id = crate::cpu::get_id();
-
     trace!("Configuring local state: #{}", core_id);
 
     // Ensure we load the local state pointer via `cpuid` to avoid using the APIC before it is initialized.
@@ -79,21 +76,28 @@ pub unsafe fn init() {
         let base_page = Page::from_ptr(local_state_ptr);
         let end_page = base_page.forward_checked(core::mem::size_of::<LocalState>() / 0x1000).unwrap();
         (base_page..end_page)
-            .for_each(|page| page_manager.auto_map(&page, libkernel::memory::PageAttributes::RW, frame_manager));
+            .for_each(|page| page_manager.auto_map(&page, crate::memory::PageAttributes::RW, frame_manager));
     }
 
     /* CONFIGURE TIMER */
-    use crate::interrupts::apic;
-    use crate::interrupts::Vector;
+    #[cfg(target_arch = "x86_64")]
+    {
+        use crate::arch::x64::structures::apic;
+        use crate::interrupts::Vector;
 
-    trace!("Configuring local APIC...");
-    apic::software_reset();
-    apic::set_timer_divisor(apic::TimerDivisor::Div1);
-    apic::get_timer().set_vector(Vector::Timer as u8).set_masked(false);
-    apic::get_error().set_vector(Vector::Error as u8).set_masked(false);
-    apic::get_performance().set_vector(Vector::Performance as u8);
-    apic::get_thermal_sensor().set_vector(Vector::Thermal as u8);
-    // LINT0&1 should be configured by the APIC reset.
+        // TODO abstract this somehow, so we can call e.g. `crate::interrupts::configure_controller();`
+
+        trace!("Configuring local APIC...");
+        apic::software_reset();
+        apic::set_timer_divisor(apic::TimerDivisor::Div1);
+        apic::get_timer().set_vector(Vector::Timer as u8).set_masked(false);
+        apic::get_error().set_vector(Vector::Error as u8).set_masked(false);
+        apic::get_performance().set_vector(Vector::Performance as u8);
+        apic::get_thermal_sensor().set_vector(Vector::Thermal as u8);
+        // LINT0&1 should be configured by the APIC reset.
+    }
+
+    // TODO configure RISC-V ACLINT
 
     // Ensure interrupts are enabled after APIC is reset.
     crate::interrupts::enable();
@@ -102,16 +106,28 @@ pub unsafe fn init() {
     local_state_ptr.write(LocalState {
         magic: LocalState::MAGIC,
         core_id,
-        timer: crate::time::timers::configure_new_timer(1000),
+        timer: crate::time::timer::configure_new_timer(1000),
         scheduler: Scheduler::new(false),
         default_task: Task::new(
             TaskPriority::new(1).unwrap(),
             crate::interrupts::wait_loop,
             &crate::scheduling::TaskStackOption::Auto,
-            RFlags::INTERRUPT_FLAG,
-            *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
-            *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
-            CR3::read(),
+            {
+                #[cfg(target_arch = "x86_64")]
+                {
+                    use crate::arch::x64;
+
+                    (
+                        x64::cpu::GeneralContext::empty(),
+                        x64::cpu::SpecialContext {
+                            cs: x64::structures::gdt::KCODE_SELECTOR.get().unwrap().0 as u64,
+                            ss: x64::structures::gdt::KDATA_SELECTOR.get().unwrap().0 as u64,
+                            flags: x64::registers::RFlags::INTERRUPT_FLAG,
+                        },
+                    )
+                }
+            },
+            RootPageTable::read(),
         ),
         cur_task: None,
     });
@@ -122,15 +138,12 @@ pub unsafe fn init() {
     }
 
     trace!("Local state structure written to memory and validated.");
-
-    let mut active_cpus_list = ACTIVE_CPUS_LIST.write();
-    active_cpus_list.push(crate::interrupts::apic::get_id());
 }
 
 /// Attempts to schedule the next task in the local task queue.
 pub fn schedule_next_task(
-    stack_frame: &mut x86_64::structures::idt::InterruptStackFrame,
-    cached_regs: &mut crate::cpu::GeneralRegisters,
+    ctrl_flow_context: &mut crate::interrupts::ControlFlowContext,
+    arch_context: &mut crate::interrupts::ArchContext,
 ) {
     const MIN_TIME_SLICE_MS: u16 = 1;
     const PRIO_TIME_SLICE_MS: u16 = 2;
@@ -139,13 +152,9 @@ pub fn schedule_next_task(
 
     // Move the current task, if any, back into the scheduler queue.
     if let Some(mut cur_task) = local_state.cur_task.take() {
-        cur_task.rip = stack_frame.instruction_pointer.as_u64();
-        cur_task.cs = stack_frame.code_segment as u16;
-        cur_task.rsp = stack_frame.stack_pointer.as_u64();
-        cur_task.ss = stack_frame.stack_segment as u16;
-        cur_task.rfl = unsafe { RFlags::from_bits_unchecked(stack_frame.cpu_flags) };
-        cur_task.gprs = *cached_regs;
-        cur_task.cr3 = CR3::read();
+        cur_task.ctrl_flow_context = *ctrl_flow_context;
+        cur_task.arch_context = *arch_context;
+        cur_task.root_page_table_args = RootPageTable::read();
 
         local_state.scheduler.push_task(cur_task);
     }
@@ -222,20 +231,12 @@ pub fn schedule_next_task(
 
     unsafe {
         let next_timer_ms = if let Some(next_task) = local_state.scheduler.pop_task() {
-            // Modify task frame to restore rsp & rip.
-            stack_frame.as_mut().write(x86_64::structures::idt::InterruptStackFrameValue {
-                instruction_pointer: x86_64::VirtAddr::new_truncate(next_task.rip),
-                code_segment: next_task.cs as u64,
-                cpu_flags: next_task.rfl.bits(),
-                stack_pointer: x86_64::VirtAddr::new_truncate(next_task.rsp),
-                stack_segment: next_task.ss as u64,
-            });
-
-            // Restore task registers.
-            *cached_regs = next_task.gprs;
+            // Modify interrupt contexts (usually, the registers).
+            *ctrl_flow_context = next_task.ctrl_flow_context;
+            *arch_context = next_task.arch_context;
 
             // Set current page tables.
-            CR3::write(next_task.cr3.0, next_task.cr3.1);
+            RootPageTable::write(&next_task.root_page_table_args);
 
             let next_timer_ms = (next_task.priority().get() as u16) * PRIO_TIME_SLICE_MS;
             local_state.cur_task = Some(next_task);
@@ -244,22 +245,17 @@ pub fn schedule_next_task(
         } else {
             let default_task = &local_state.default_task;
 
-            stack_frame.as_mut().write(x86_64::structures::idt::InterruptStackFrameValue {
-                instruction_pointer: x86_64::VirtAddr::new_truncate(default_task.rip),
-                code_segment: default_task.cs as u64,
-                cpu_flags: default_task.rfl.bits(),
-                stack_pointer: x86_64::VirtAddr::new_truncate(default_task.rsp),
-                stack_segment: default_task.ss as u64,
-            });
+            // Modify interrupt contexts (usually, the registers).
+            *ctrl_flow_context = default_task.ctrl_flow_context;
+            *arch_context = default_task.arch_context;
 
             // Set current page tables.
-            CR3::write(default_task.cr3.0, default_task.cr3.1);
+            RootPageTable::write(&default_task.root_page_table_args);
 
             MIN_TIME_SLICE_MS
         };
 
         reload_timer(core::num::NonZeroU16::new(next_timer_ms).unwrap());
-        crate::interrupts::apic::end_of_interrupt();
     }
 }
 

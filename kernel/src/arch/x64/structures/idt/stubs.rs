@@ -1,4 +1,4 @@
-pub fn set_stub_handlers(idt: &mut x86_64::structures::idt::InterruptDescriptorTable) {
+pub fn set_stub_handlers(idt: &mut super::InterruptDescriptorTable) {
     idt[32].set_handler_fn(irq_32);
     idt[33].set_handler_fn(irq_33);
     idt[34].set_handler_fn(irq_34);
@@ -230,15 +230,63 @@ macro_rules! irq_stub {
     ($irq_vector:literal) => {
         paste::paste! {
             #[naked]
-            extern "x86-interrupt" fn [<irq_ $irq_vector>](_: x86_64::structures::idt::InterruptStackFrame) {
+            extern "x86-interrupt" fn [<irq_ $irq_vector>](_: crate::arch::x64::structures::idt::InterruptStackFrame) {
                 unsafe {
                     core::arch::asm!(
                         "
+                        cld
+
                         push {}
+
+                        # Push all gprs to the stack.
+                        push r15
+                        push r14
+                        push r13
+                        push r12
+                        push r11
+                        push r10
+                        push r9
+                        push r8
+                        push rbp
+                        push rdi
+                        push rsi
+                        push rdx
+                        push rcx
+                        push rbx
+                        push rax
+                
+                        # Move IRQ vector into first parameter
+                        mov rdi, [rsp + (16 * 8)]
+                        # Move stack frame into second parameter.
+                        lea rsi, [rsp + (17 * 8)]
+                        # Move cached gprs pointer into third parameter.
+                        mov rdx, rsp
+                
                         call {}
+                    
+                        pop rax
+                        pop rbx
+                        pop rcx
+                        pop rdx
+                        pop rsi
+                        pop rdi
+                        pop rbp
+                        pop r8
+                        pop r9
+                        pop r10
+                        pop r11
+                        pop r12
+                        pop r13
+                        pop r14
+                        pop r15
+                
+                        # 'pop' interrupt vector and return pointer
+                        add rsp, 0x10
+                
+                        iretq
                         ",
                         const $irq_vector,
-                        sym super::irq_save_context,
+                        sym crate::arch::x64::cpu::irq_handoff,
                         options(noreturn)
                     );
                 }

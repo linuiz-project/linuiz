@@ -173,7 +173,7 @@ extern "x86-interrupt" fn page_fault_handler(
     get_common_exception_handler()(Exception::PageFault(
         stack_frame,
         error_code,
-        crate::registers::x64::control::CR2::read(),
+        crate::arch::x64::registers::control::CR2::read(),
     ))
 }
 

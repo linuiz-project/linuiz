@@ -1,12 +1,13 @@
 mod frame_manager;
 mod page_manager;
-mod slob;
+mod paging;
 
 pub mod io;
+pub mod slob;
 
 pub use frame_manager::*;
 pub use page_manager::*;
-pub use slob::*;
+pub use paging::*;
 
 use core::{alloc::GlobalAlloc, cell::OnceCell};
 use libkernel::{Address, Virtual};
@@ -113,4 +114,23 @@ pub fn allocate_pages(page_count: usize) -> *mut u8 {
 
     // SAFETY:  Kernel HHDM is guaranteed (by the kernel) to be valid, so this cannot fail.
     unsafe { get_kernel_hhdm_address().as_mut_ptr::<u8>().add(base_frame_index * 0x1000) }
+}
+
+#[cfg(target_arch = "x86_64")]
+pub struct RootPageTable(pub Address<libkernel::Physical>, pub crate::arch::x64::registers::control::CR3Flags);
+
+impl RootPageTable {
+    pub fn read() -> Self {
+        #[cfg(target_arch = "x86_64")]
+        {
+            let args = crate::arch::x64::registers::control::CR3::read();
+            Self(args.0, args.1)
+        }
+    }
+
+    /// SAFETY: Writing to this register has the chance to externally invalidate memory references.
+    pub unsafe fn write(args: &Self) {
+        #[cfg(target_arch = "x86_64")]
+        crate::arch::x64::registers::control::CR3::write(args.0, args.1);
+    }
 }
