@@ -90,28 +90,6 @@ impl VirtualMapper {
         }
     }
 
-    unsafe fn modify_mapped_page(&mut self, base_page: Page, frame_manager: &'static FrameManager) {
-        for frame_index in 0..frame_manager.total_frames() {
-            let cur_page = base_page.forward_checked(frame_index).unwrap();
-
-            let entry = self.get_page_entry_create(&cur_page, frame_manager);
-            entry.set_frame_index(frame_index);
-            entry.set_attributes(
-                PageAttributes::VALID
-                    | PageAttributes::WRITABLE
-                    | PageAttributes::WRITE_THROUGH
-                    | PageAttributes::NO_EXECUTE
-                    | PageAttributes::GLOBAL,
-                AttributeModify::Set,
-            );
-
-            #[cfg(target_arch = "x86_64")]
-            crate::arch::x64::instructions::tlb::invlpg(&cur_page);
-        }
-
-        self.mapped_page = base_page;
-    }
-
     #[inline(always)]
     pub unsafe fn write_cr3(&mut self) {
         #[cfg(target_arch = "x86_64")]
@@ -182,11 +160,12 @@ impl PageManager {
 
     pub unsafe fn from_current(mapped_page: &Page) -> Self {
         Self {
-            virtual_map: spin::RwLock::new(VirtualMapper::new(
-                mapped_page,
+            virtual_map: spin::RwLock::new(VirtualMapper::new(mapped_page, {
                 #[cfg(target_arch = "x86_64")]
-                crate::arch::x64::registers::control::CR3::read().0.frame_index(),
-            )),
+                {
+                    crate::arch::x64::registers::control::CR3::read().0.frame_index()
+                }
+            })),
         }
     }
 
@@ -335,12 +314,6 @@ impl PageManager {
                 #[cfg(target_arch = "x86_64")]
                 crate::arch::x64::instructions::tlb::invlpg(page);
             }
-        });
-    }
-
-    pub unsafe fn modify_mapped_page(&self, page: Page, frame_manager: &'static FrameManager<'_>) {
-        interrupts::without(|| {
-            self.virtual_map.write().modify_mapped_page(page, frame_manager);
         });
     }
 

@@ -213,6 +213,16 @@ pub struct SpecialContext {
     pub flags: crate::arch::x64::registers::RFlags,
 }
 
+impl SpecialContext {
+    pub fn with_kernel_segments(flags: crate::arch::x64::registers::RFlags) -> Self {
+        Self {
+            cs: crate::arch::x64::structures::gdt::KCODE_SELECTOR.get().unwrap().0 as u64,
+            ss: crate::arch::x64::structures::gdt::KDATA_SELECTOR.get().unwrap().0 as u64,
+            flags,
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct GeneralContext {

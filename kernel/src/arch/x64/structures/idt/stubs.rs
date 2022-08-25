@@ -256,9 +256,9 @@ macro_rules! irq_stub {
                         push rax
                 
                         # Move IRQ vector into first parameter
-                        mov rdi, [rsp + (16 * 8)]
+                        mov rdi, [rsp + (15 * 8)]
                         # Move stack frame into second parameter.
-                        lea rsi, [rsp + (17 * 8)]
+                        lea rsi, [rsp + (16 * 8)]
                         # Move cached gprs pointer into third parameter.
                         mov rdx, rsp
                 
@@ -280,8 +280,8 @@ macro_rules! irq_stub {
                         pop r14
                         pop r15
                 
-                        # 'pop' interrupt vector and return pointer
-                        add rsp, 0x10
+                        # 'pop' interrupt vector
+                        add rsp, 0x8
                 
                         iretq
                         ",

@@ -77,6 +77,7 @@ pub mod stvec {
 pub mod satp {
     ///! Wrapper module for the `satp` control register.
     use bit_field::BitField;
+    use libkernel::{Address, Physical};
     use num_enum::TryFromPrimitive;
 
     #[repr(u8)]
@@ -105,6 +106,19 @@ pub mod satp {
     #[inline]
     fn write_raw(value: u64) {
         unsafe { core::arch::asm!("csrw satp, {}", in(reg) value, options(nostack, nomem)) };
+    }
+
+    #[inline]
+    pub fn read() -> (Address<Physical>, u16, Mode) {
+        (get_ppn() * 0x1000, get_asid(), get_mode())
+    }
+
+    pub unsafe fn write(
+        ppn: usize, /* TODO make this a struct to ensure validity within the bit range */
+        asid: u16,
+        mode: Mode,
+    ) {
+        write_raw((ppn as u64) | ((asid as u64) << 44) | ((mode as u64) << 60));
     }
 
     /// Gets the physical page number from the `satp` control register.
@@ -140,13 +154,5 @@ pub mod satp {
     #[inline]
     pub fn get_mode() -> Mode {
         Mode::try_from(read_raw().get_bits(60..64) as u8).unwrap()
-    }
-
-    pub unsafe fn write(
-        ppn: usize, /* TODO make this a struct to ensure validity within the bit range */
-        asid: u16,
-        mode: Mode,
-    ) {
-        write_raw((ppn as u64) | ((asid as u64) << 44) | ((mode as u64) << 60));
     }
 }

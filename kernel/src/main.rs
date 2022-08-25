@@ -97,12 +97,12 @@ static mut KERNEL_CFG_SMP: bool = false;
 
 #[no_mangle]
 #[allow(clippy::too_many_lines)]
-unsafe extern "sysv64" fn _entry() -> ! {
+unsafe extern "C" fn _entry() -> ! {
     /* standard output setup */
     {
         let con_out_mut = &mut *CON_OUT.get();
         con_out_mut.init(crate::memory::io::SerialSpeed::S115200);
-        crate::stdout::set_stdout(con_out_mut, log::LevelFilter::Debug);
+        crate::stdout::set_stdout(con_out_mut, log::LevelFilter::Trace);
     }
 
     info!("Successfully loaded into kernel.");
@@ -152,13 +152,15 @@ unsafe extern "sysv64" fn _entry() -> ! {
     crate::memory::init_kernel_page_manager();
 
     /* bsp core init */
-    #[cfg(target_arch = "x86_64")]
     {
-        crate::arch::x64::cpu::load_registers();
-        crate::arch::x64::cpu::load_tables();
-    }
+        #[cfg(target_arch = "x86_64")]
+        {
+            crate::arch::x64::cpu::load_registers();
+            crate::arch::x64::cpu::load_tables();
+        }
 
-    // TODO rv64 bsp hart init
+        // TODO rv64 bsp hart init
+    }
 
     let frame_manager = crate::memory::get_kernel_frame_manager();
     let page_manager = crate::memory::get_kernel_page_manager();
@@ -553,19 +555,26 @@ pub(self) unsafe fn cpu_setup() -> ! {
     crate::local_state::init(0);
 
     // use crate::registers::x64::RFlags;
-    // use crate::{local_state::try_push_task, scheduling::*};
+    use crate::{local_state::try_push_task, scheduling::*};
 
-    // TODO
-    // try_push_task(Task::new(
-    //     TaskPriority::new(3).unwrap(),
-    //     syscall_test,
-    //     &TaskStackOption::Pages(1),
-    //     RFlags::INTERRUPT_FLAG,
-    //     *crate::tables::gdt::KCODE_SELECTOR.get().unwrap(),
-    //     *crate::tables::gdt::KDATA_SELECTOR.get().unwrap(),
-    //     crate::registers::x64::control::CR3::read(),
-    // ))
-    // .unwrap();
+    try_push_task(Task::new(
+        TaskPriority::new(3).unwrap(),
+        syscall_test,
+        &TaskStackOption::Pages(1),
+        {
+            #[cfg(target_arch = "x86_64")]
+            {
+                (
+                    crate::arch::x64::cpu::GeneralContext::empty(),
+                    crate::arch::x64::cpu::SpecialContext::with_kernel_segments(
+                        crate::arch::x64::registers::RFlags::INTERRUPT_FLAG,
+                    ),
+                )
+            }
+        },
+        crate::memory::RootPageTable::read(),
+    ))
+    .unwrap();
 
     trace!("Beginning scheduling...");
     crate::local_state::try_begin_scheduling();

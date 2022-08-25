@@ -88,7 +88,7 @@ static KERNEL_PAGE_MANAGER: Once<PageManager> = Once::new();
 pub fn init_kernel_page_manager() {
     KERNEL_PAGE_MANAGER.call_once(|| {
         let frame_manager = get_kernel_frame_manager();
-        let mapped_page = libkernel::memory::Page::from_index(get_kernel_hhdm_address().page_index());
+        let mapped_page = libkernel::memory::Page::from_addr(get_kernel_hhdm_address());
         let pml4_copy = None;
 
         // SAFETY:  The mapped page is guaranteed to be valid, as the kernel guarantees its HHDM will be valid.
@@ -118,6 +118,8 @@ pub fn allocate_pages(page_count: usize) -> *mut u8 {
 
 #[cfg(target_arch = "x86_64")]
 pub struct RootPageTable(pub Address<libkernel::Physical>, pub crate::arch::x64::registers::control::CR3Flags);
+#[cfg(target_arch = "riscv64")]
+pub struct RootPageTable(pub Address<libkernel::Physical>, pub u16, pub crate::arch::rv64::registers::satp::Mode);
 
 impl RootPageTable {
     pub fn read() -> Self {
@@ -125,6 +127,12 @@ impl RootPageTable {
         {
             let args = crate::arch::x64::registers::control::CR3::read();
             Self(args.0, args.1)
+        }
+
+        #[cfg(target_arch = "riscv64")]
+        {
+            let args = crate::arch::rv64::registers::satp::read();
+            Self(args.0, args.1, args.2)
         }
     }
 

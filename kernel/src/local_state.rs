@@ -119,11 +119,7 @@ pub unsafe fn init(core_id: u32) {
 
                     (
                         x64::cpu::GeneralContext::empty(),
-                        x64::cpu::SpecialContext {
-                            cs: x64::structures::gdt::KCODE_SELECTOR.get().unwrap().0 as u64,
-                            ss: x64::structures::gdt::KDATA_SELECTOR.get().unwrap().0 as u64,
-                            flags: x64::registers::RFlags::INTERRUPT_FLAG,
-                        },
+                        x64::cpu::SpecialContext::with_kernel_segments(x64::registers::RFlags::INTERRUPT_FLAG),
                     )
                 }
             },

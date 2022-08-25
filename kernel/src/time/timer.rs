@@ -9,8 +9,10 @@ mod timers_impl {
     ///         adverse effects throughout the rest of the program.
     pub unsafe fn configure_new_timer(freq: u16) -> Box<dyn super::Timer> {
         if let Some(tsc_timer) = TSCTimer::new(freq) {
+            trace!("Selecting TSC deadline timer: {} Hz", tsc_timer.0 * (freq as u64));
             Box::new(tsc_timer)
         } else if let Some(apic_timer) = APICTimer::new(freq) {
+            trace!("Selecting APIC timer: {} Hz", apic_timer.0 * (freq as u32));
             Box::new(apic_timer)
         } else {
             panic!("no timers available! APIC is not supported?")

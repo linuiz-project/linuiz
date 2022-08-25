@@ -84,7 +84,7 @@ impl PageTableEntry {
     /// Gets the frame index of the page table entry.
     #[inline(always)]
     pub const fn get_frame_index(&self) -> usize {
-        (self.0 & (Self::FRAME_INDEX_MASK >> Self::FRAME_INDEX_SHIFT)) as usize
+        ((self.0 & Self::FRAME_INDEX_MASK) >> Self::FRAME_INDEX_SHIFT) as usize
     }
 
     /// Sets the entry's frame index.
@@ -145,9 +145,13 @@ impl fmt::Debug for PageTableEntry {
 
 pub trait TableLevel {}
 
+#[derive(Debug)]
 pub enum Level4 {}
+#[derive(Debug)]
 pub enum Level3 {}
+#[derive(Debug)]
 pub enum Level2 {}
+#[derive(Debug)]
 pub enum Level1 {}
 
 impl TableLevel for Level4 {}
@@ -169,6 +173,7 @@ impl HeirarchicalLevel for Level2 {
 }
 
 #[repr(C, align(0x1000))]
+#[derive(Debug)]
 pub struct PageTable<L: TableLevel>([PageTableEntry; 512], core::marker::PhantomData<L>);
 
 impl<L: TableLevel> PageTable<L> {
