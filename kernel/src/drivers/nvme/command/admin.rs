@@ -87,26 +87,11 @@ impl Debug for Identify {
         formatter
             .debug_struct("NVMe Controller Identify")
             .field("Vendor ID", &format_args!("0x{:X}", self.vendor_id))
-            .field(
-                "Subsystem Vendor ID",
-                &format_args!("0x{:X}", self.subsys_vendor_id),
-            )
-            .field(
-                "Serial Number",
-                &core::str::from_utf8(&self.serial_number).unwrap(),
-            )
-            .field(
-                "Model Number",
-                &core::str::from_utf8(&self.model_number).unwrap(),
-            )
-            .field(
-                "Firmware Revision",
-                &core::str::from_utf8(&self.firmware_rev).unwrap(),
-            )
-            .field(
-                "Recommended Arbitration Burst",
-                &format_args!("2^{}", self.rec_arb_burst),
-            )
+            .field("Subsystem Vendor ID", &format_args!("0x{:X}", self.subsys_vendor_id))
+            .field("Serial Number", &core::str::from_utf8(&self.serial_number).unwrap())
+            .field("Model Number", &core::str::from_utf8(&self.model_number).unwrap())
+            .field("Firmware Revision", &core::str::from_utf8(&self.firmware_rev).unwrap())
+            .field("Recommended Arbitration Burst", &format_args!("2^{}", self.rec_arb_burst))
             .field("IEEE OUI Identifier", &self.ieee)
             .field("Maybe Multiple Subsystem Port", &self.cmic.get_bit(0))
             .field("Maybe Multiple Controllers", &self.cmic.get_bit(1))
@@ -122,13 +107,7 @@ impl Debug for Identify {
                     }
                 ),
             )
-            .field(
-                "Version",
-                &format_args!(
-                    "{}.{}.{}",
-                    self.version[0], self.version[1], self.version[2]
-                ),
-            )
+            .field("Version", &format_args!("{}.{}.{}", self.version[0], self.version[1], self.version[2]))
             .finish()
     }
 }

@@ -4,8 +4,7 @@ pub mod io;
 use bit_field::BitField;
 use core::{convert::TryFrom, fmt, marker::PhantomData, ops::Range};
 use libkernel::{
-    memory::volatile::VolatileCell, volatile_bitfield_getter, volatile_bitfield_getter_as, Address,
-    Physical, ReadWrite,
+    memory::volatile::VolatileCell, volatile_bitfield_getter, volatile_bitfield_getter_as, Address, Physical, ReadWrite,
 };
 use num_enum::TryFromPrimitive;
 

@@ -37,12 +37,12 @@ impl PCIeDevice<Standard> {
             Standard::REGISTER_COUNT,
         ) {
             if !register.is_unused() {
-                trace!("Device Register {}: {:?}", register_num, register);
+                debug!("Device Register {}: {:?}", register_num, register);
 
                 // The address is MMIO, so is memory-mapped—thus, the page index and frame index will match.
                 let frame_index = register.as_addr().page_index();
                 let frame_usage = crate::align_up_div(register.memory_usage(), 0x1000);
-                trace!(
+                debug!(
                     "\tAcquiring register destination frame as MMIO: {}:{}",
                     frame_index,
                     frame_usage
@@ -55,7 +55,7 @@ impl PCIeDevice<Standard> {
                     DeviceRegister::MemorySpace64(value, _) => (value & 0b1000) > 0,
                     _ => false,
                 } {
-                    trace!("\tRegister is prefetchable; setting WRITE_THROUGH on MMIO page.");
+                    debug!("\tRegister is prefetchable; setting WRITE_THROUGH on MMIO page.");
 
                     let page_manager = crate::memory::global_pmgr();
                     for page in register_mmio.pages() {

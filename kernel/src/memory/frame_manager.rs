@@ -118,14 +118,14 @@ impl<'arr> FrameManager<'arr> {
 
         // Calculates total system memory.
         let total_system_memory = memory_map.last().map(|entry| entry.base + entry.len).unwrap();
-        trace!("Total system memory: {:#X} bytes", total_system_memory);
+        debug!("Total system memory: {:#X} bytes", total_system_memory);
         // Memory required to represent all system frames.
         let total_system_frames = libkernel::align_up_div(total_system_memory as usize, 0x1000);
         let req_falloc_memory = total_system_frames * core::mem::size_of::<Frame>();
         let req_falloc_memory_frames = libkernel::align_up_div(req_falloc_memory as usize, 0x1000);
         let req_falloc_memory_aligned = req_falloc_memory_frames * 0x1000;
 
-        trace!("Required frame manager map memory: {:#X}", req_falloc_memory_aligned);
+        debug!("Required frame manager map memory: {:#X}", req_falloc_memory_aligned);
 
         // Find the best-fit descriptor for the falloc memory frames.
         let map_entry = memory_map
@@ -151,7 +151,7 @@ impl<'arr> FrameManager<'arr> {
             frame.lock();
         }
 
-        trace!("Reserving requsite system frames.");
+        debug!("Reserving requsite system frames.");
         let mut last_frame_end = 0;
         for entry in memory_map {
             assert_eq!(entry.base & 0xFFF, 0, "Memory map entry is not page-aligned: {:?}", entry);
@@ -187,7 +187,7 @@ impl<'arr> FrameManager<'arr> {
             last_frame_end = start_index + frame_count;
         }
 
-        trace!("Successfully configured frame manager.");
+        debug!("Successfully configured frame manager.");
 
         Self { map: RwLock::new(frame_table) }
     }

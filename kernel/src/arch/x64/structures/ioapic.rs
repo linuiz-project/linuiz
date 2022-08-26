@@ -166,20 +166,45 @@ impl IoApic<'_> {
     }
 }
 
+// TODO We don't need to store this probably, find some way to init architecture-specifically.
+//      Maybe just iterate them once, processing redirections within the same context.
 static IOAPICS: Once<Vec<IoApic>> = Once::new();
 /// Queries the platform for I/O APICs, and returns them in a collection.
 pub fn get_io_apics() -> &'static Vec<IoApic<'static>> {
     IOAPICS.call_once(|| {
+        let frame_manager = crate::memory::get_kernel_frame_manager();
+        let page_manager = crate::memory::get_kernel_page_manager();
+
         crate::tables::acpi::get_apic_model()
             .io_apics
             .iter()
             .map(|ioapic_info| unsafe {
-                let ptr =
+                let ioapic_regs_ptr =
                     ((ioapic_info.address as usize) + crate::memory::get_kernel_hhdm_address().as_usize()) as *mut u32;
-                assert!(ptr.is_aligned(), "I/O APIC pointers must be aligned");
+                assert!(ioapic_regs_ptr.is_aligned(), "I/O APIC pointers must be aligned");
 
-                let ioregsel = &*ptr.cast::<VolatileCell<u32, libkernel::WriteOnly>>();
-                let ioregwin = &*ptr.add(4).cast::<VolatileCell<u32, libkernel::ReadWrite>>();
+                let ioregsel = &*ioapic_regs_ptr.cast::<VolatileCell<u32, libkernel::WriteOnly>>();
+                let ioregwin = &*ioapic_regs_ptr.add(4).cast::<VolatileCell<u32, libkernel::ReadWrite>>();
+
+                /* Ensure I/O APIC register pages are mapped */
+                {
+                    let ioapic_regs_page = libkernel::memory::Page::from_ptr(ioapic_regs_ptr);
+                    let ioapic_frame_index = (ioapic_info.address / 0x1000) as usize;
+
+                    frame_manager.lock(ioapic_frame_index).ok();
+
+                    if !page_manager.is_mapped(ioapic_regs_page) {
+                        page_manager
+                            .map(
+                                &ioapic_regs_page,
+                                ioapic_frame_index,
+                                false,
+                                crate::memory::PageAttributes::MMIO,
+                                frame_manager,
+                            )
+                            .unwrap();
+                    }
+                }
 
                 let id = {
                     ioregsel.write(0x0);

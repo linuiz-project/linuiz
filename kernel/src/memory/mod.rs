@@ -140,5 +140,23 @@ impl RootPageTable {
     pub unsafe fn write(args: &Self) {
         #[cfg(target_arch = "x86_64")]
         crate::arch::x64::registers::control::CR3::write(args.0, args.1);
+
+        #[cfg(target_arch = "riscv64")]
+        crate::arch::rv64::registers::satp::write(args.0.as_usize(), args.1, args.2);
     }
+}
+
+pub fn ensure_hhdm_frame_is_mapped(frame_index: usize, page_attributes: crate::memory::PageAttributes) {
+    let page_manager = crate::memory::get_kernel_page_manager();
+    let hhdm_page = libkernel::memory::Page::from_index(
+        crate::memory::get_kernel_hhdm_address().as_usize() + (frame_index * 0x1000),
+    );
+
+    if !page_manager.is_mapped(hhdm_page) {
+        let frame_manager = crate::memory::get_kernel_frame_manager();
+        frame_manager.lock(frame_index).ok();
+        page_manager.map(&hhdm_page, frame_index, false, page_attributes, frame_manager).unwrap();
+    }
+
+    assert!(page_manager.is_mapped(hhdm_page));
 }

@@ -152,7 +152,7 @@ pub fn build(options: Options) -> Result<(), xshell::Error> {
     if options.disassemble {
         match options.target {
             Target::x64 => {
-                let output = cmd!(shell, "objdump -D .hdd/root/linuiz/{kernel_file_str}").output()?;
+                let output = cmd!(shell, "objdump -M intel -D .hdd/root/linuiz/{kernel_file_str}").output()?;
                 shell.write_file(PathBuf::from(".debug/disassembly"), output.stdout)?;
             }
             Target::rv64 => panic!("`--disassemble` options cannot be used when targeting `rv64`"),

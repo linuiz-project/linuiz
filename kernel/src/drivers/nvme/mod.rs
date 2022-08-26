@@ -133,12 +133,7 @@ impl Volatile for Version {}
 
 impl fmt::Debug for Version {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_tuple("Version")
-            .field(&self.major())
-            .field(&self.minor())
-            .field(&self.tertiary())
-            .finish()
+        formatter.debug_tuple("Version").field(&self.major()).field(&self.minor()).field(&self.tertiary()).finish()
     }
 }
 
@@ -181,8 +176,7 @@ impl ControllerConfiguration {
     }
 
     pub fn set_css(&self, command_set: CommandSet) {
-        self.value
-            .write(*self.value.read().set_bits(4..7, command_set as u32))
+        self.value.write(*self.value.read().set_bits(4..7, command_set as u32))
     }
 
     pub fn get_mps(&self) -> u32 {
@@ -190,35 +184,25 @@ impl ControllerConfiguration {
     }
 
     pub fn set_mps(&self, mps: u32) {
-        assert!(
-            mps < 0b10000,
-            "Provided memory page size must be no more than 4 bits."
-        );
-        assert!(
-            !self.get_en(),
-            "Memory page size may only be set when controller is not enabled."
-        );
+        assert!(mps < 0b10000, "Provided memory page size must be no more than 4 bits.");
+        assert!(!self.get_en(), "Memory page size may only be set when controller is not enabled.");
         self.value.write(*self.value.read().set_bits(7..11, mps));
     }
 
     pub fn get_ams(&self) -> ArbitrationMechanism {
-        ArbitrationMechanism::try_from(self.value.read().get_bits(11..14))
-            .expect("AMS is reserved value")
+        ArbitrationMechanism::try_from(self.value.read().get_bits(11..14)).expect("AMS is reserved value")
     }
 
     pub fn set_ams(&self, ams: ArbitrationMechanism) {
-        self.value
-            .write(*self.value.read().set_bits(11..14, ams as u32))
+        self.value.write(*self.value.read().set_bits(11..14, ams as u32))
     }
 
     pub fn get_shn(&self) -> ShutdownNotification {
-        ShutdownNotification::try_from(self.value.read().get_bits(14..16))
-            .expect("SHN is resrved value")
+        ShutdownNotification::try_from(self.value.read().get_bits(14..16)).expect("SHN is resrved value")
     }
 
     pub fn set_shn(&self, shn: ShutdownNotification) {
-        self.value
-            .write(*self.value.read().set_bits(14..16, shn as u32))
+        self.value.write(*self.value.read().set_bits(14..16, shn as u32))
     }
 
     pub fn get_iosqes(&self) -> u32 {
@@ -226,8 +210,7 @@ impl ControllerConfiguration {
     }
 
     pub fn set_iosqes(&self, iosqes: u32) {
-        self.value
-            .write(*self.value.read().set_bits(16..20, iosqes))
+        self.value.write(*self.value.read().set_bits(16..20, iosqes))
     }
 
     pub fn get_iocqes(&self) -> u32 {
@@ -235,8 +218,7 @@ impl ControllerConfiguration {
     }
 
     pub fn set_iocqes(&self, iocqes: u32) {
-        self.value
-            .write(*self.value.read().set_bits(20..24, iocqes))
+        self.value.write(*self.value.read().set_bits(20..24, iocqes))
     }
 
     // TODO CC.CRIME
@@ -360,16 +342,11 @@ impl<'dev> Controller<'dev> {
             let admin_com = queue::Queue::<queue::Completion>::new(reg0, 0, com_entry_count);
             reg0.write(Self::ASQ, admin_sub.get_phys_addr().as_u64());
             reg0.write(Self::ACQ, admin_com.get_phys_addr().as_u64());
-            reg0.write(
-                Self::AQA,
-                ((com_entry_count as u32) << 16) | (sub_entry_count as u32),
-            );
+            reg0.write(Self::AQA, ((com_entry_count as u32) << 16) | (sub_entry_count as u32));
 
             Self {
                 device,
-                msix: device
-                    .find_msix()
-                    .expect("MSI-X is required for NVMe controller creation."),
+                msix: device.find_msix().expect("MSI-X is required for NVMe controller creation."),
                 next_sub_queue_id: AtomicU16::new(1),
                 next_com_queue_id: AtomicU16::new(1),
                 admin_sub: Mutex::new(admin_sub),
@@ -379,8 +356,7 @@ impl<'dev> Controller<'dev> {
         };
 
         unsafe {
-            nvme.set_enable_and_wait(false)
-                .expect("NVMe controller failed to reset");
+            nvme.set_enable_and_wait(false).expect("NVMe controller failed to reset");
         }
         debug!("NVMe controller successfully reset.");
 
@@ -413,56 +389,30 @@ impl<'dev> Controller<'dev> {
         nvme.msix[0].set_masked(false);
 
         unsafe {
-            nvme.set_enable_and_wait(true)
-                .expect("NVMe driver failed to enable");
+            nvme.set_enable_and_wait(true).expect("NVMe driver failed to enable");
         }
 
         nvme
     }
 
     pub fn capabilities(&self) -> &Capabilities {
-        unsafe {
-            self.device
-                .get_register(StandardRegister::Register0)
-                .unwrap()
-                .borrow(Self::CAP)
-        }
+        unsafe { self.device.get_register(StandardRegister::Register0).unwrap().borrow(Self::CAP) }
     }
 
     pub fn version(&self) -> &Version {
-        unsafe {
-            self.device
-                .get_register(StandardRegister::Register0)
-                .unwrap()
-                .borrow(Self::VER)
-        }
+        unsafe { self.device.get_register(StandardRegister::Register0).unwrap().borrow(Self::VER) }
     }
 
     pub fn interrupt_mask(&self) -> &InterruptMask {
-        unsafe {
-            self.device
-                .get_register(StandardRegister::Register0)
-                .unwrap()
-                .borrow(Self::INTMS)
-        }
+        unsafe { self.device.get_register(StandardRegister::Register0).unwrap().borrow(Self::INTMS) }
     }
 
     pub fn config(&self) -> &ControllerConfiguration {
-        unsafe {
-            self.device
-                .get_register(StandardRegister::Register0)
-                .unwrap()
-                .borrow(Self::CC)
-        }
+        unsafe { self.device.get_register(StandardRegister::Register0).unwrap().borrow(Self::CC) }
     }
 
     pub fn status(&self) -> &ControllerStatus {
-        unsafe {
-            self.device
-                .get_register(StandardRegister::Register0)
-                .unwrap()
-                .borrow(Self::CSTS)
-        }
+        unsafe { self.device.get_register(StandardRegister::Register0).unwrap().borrow(Self::CSTS) }
     }
 
     pub unsafe fn set_enable_and_wait(&self, enabled: bool) -> Result<(), ControllerEnableError> {
@@ -472,10 +422,7 @@ impl<'dev> Controller<'dev> {
         let max_wait = self.capabilities().get_to() * 500;
         let mut msec_waited = 0;
 
-        debug!(
-            "Waiting up to {}ms for controller to finalize enable state.",
-            max_wait
-        );
+        debug!("Waiting up to {}ms for controller to finalize enable state.", max_wait);
         while csts.get_rdy() != enabled && !csts.get_cfs() && msec_waited < max_wait {
             const SLEEP_INTERVAL: u64 = 100;
 
@@ -540,7 +487,7 @@ impl<'dev> Controller<'dev> {
                     mdata_ptr: Address::zero(),
                     data_ptr: DataPointer::new_prp(phys_addr, None),
                     cdw10: ((ctrl_id as u32) << 16) | 0b1, // TODO implement CNS
-                    cdw11: 0, // Ensure CSI or CNS Specific Identifier are not required,
+                    cdw11: 0,                              // Ensure CSI or CNS Specific Identifier are not required,
                     cdw12: 0,
                     cdw13: 0,
                     cdw14: 0, // Ensure no UUID is required, or possibly allow providing one (?)
@@ -572,9 +519,7 @@ impl<'dev> Controller<'dev> {
 
                 use command::{GenericStatus, StatusCode};
                 match cmd_result.get_status().status_code() {
-                    StatusCode::Generic(GenericStatus::SuccessfulCompletion) => {
-                        success_source.complete(true)
-                    }
+                    StatusCode::Generic(GenericStatus::SuccessfulCompletion) => success_source.complete(true),
                     _ => success_source.complete(false),
                 }
             }
@@ -610,8 +555,7 @@ pub fn exec_driver() {
         .iter()
         .find_map(|device_variant| match device_variant {
             pci::DeviceVariant::Standard(device)
-                if device.class() == pci::DeviceClass::MassStorageController
-                    && device.subclass() == 0x08 =>
+                if device.class() == pci::DeviceClass::MassStorageController && device.subclass() == 0x08 =>
             {
                 Some(Controller::from_device_and_configure(&device, 4, 4))
             }

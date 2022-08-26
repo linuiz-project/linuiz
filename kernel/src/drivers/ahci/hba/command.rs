@@ -66,7 +66,7 @@ impl Command {
         ((self.cmd_tbl_addr_lower as usize) | ((self.cmd_tbl_addr_upper as usize) << 32)) as *mut u8
     }
 
-    pub fn reset<F: CommandFIS + Sized>(&mut self, prdt_len: u16, fis: F) {
+    pub fn reset<F: CommandFIS + Sized>(&mut self, fis: F) {
         let cmd_tbl_ptr = unsafe {
             alloc::alloc::alloc_zeroed(alloc::alloc::Layout::from_size_align_unchecked(
                 Self::total_command_alloc(prdt_len),

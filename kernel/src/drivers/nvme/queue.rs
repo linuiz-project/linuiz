@@ -63,15 +63,11 @@ impl<'q, T: QueueType> Queue<'q, T> {
             let doorbell_offset = calc_doorbell_offset(
                 queue_id,
                 T::DOORBELL_OFFSET,
-                reg0.borrow::<crate::drivers::nvme::Capabilities>(CAP_OFFSET)
-                    .get_dstrd() as usize,
+                reg0.borrow::<crate::drivers::nvme::Capabilities>(CAP_OFFSET).get_dstrd() as usize,
             );
 
             Self {
-                entries: Box::new_uninit_slice_in(
-                    entry_count as usize,
-                    libkernel::memory::page_aligned_allocator(),
-                ),
+                entries: Box::new_uninit_slice_in(entry_count as usize, libkernel::memory::page_aligned_allocator()),
                 doorbell: reg0.borrow(doorbell_offset),
                 cur_index: IndexRing::new(entry_count as usize),
                 phase_tag: true,

@@ -67,10 +67,10 @@ pub fn send_command(command: &Command) {
 pub unsafe fn set_timer_freq(frequency: u32, operating_mode: OperatingMode) {
     assert!(frequency > TICK_RATE, "PIT frequency cannot be greater than maximum tick rate ({}Hz)!", TICK_RATE);
 
-    trace!("Configuring 8259 PIT tick frequency.");
+    debug!("Configuring 8259 PIT tick frequency.");
     send_command(&Command::new(operating_mode, AccessByte::LowAndHigh, Channel::Channel0));
     let divisor = TICK_RATE / frequency;
-    trace!("8259 PIT configuration: (Rate {}Hz) / (Freq {}Hz) = (Div {})", TICK_RATE, frequency, divisor);
+    debug!("8259 PIT configuration: (Rate {}Hz) / (Freq {}Hz) = (Div {})", TICK_RATE, frequency, divisor);
 
     let data = &mut get_data_port();
     data.write(divisor as u8);

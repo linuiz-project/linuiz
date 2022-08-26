@@ -27,7 +27,7 @@ pub fn get_pcie_devices<'a>() -> impl Iterator<Item = DeviceVariant> + 'a {
             let vendor_id = mmio.read::<u16>(0).assume_init();
 
             if vendor_id > u16::MIN && vendor_id < u16::MAX {
-                trace!("Configuring PCIe bus: @{:?}", device_base_addr);
+                debug!("Configuring PCIe bus: @{:?}", device_base_addr);
 
                 let page_manager = crate::memory::global_pmgr();
                 for page in mmio.pages() {

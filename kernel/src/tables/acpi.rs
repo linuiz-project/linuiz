@@ -1,5 +1,5 @@
-use crate::memory::get_kernel_hhdm_address;
 use crate::memory::io::{PortAddress, ReadOnlyPort, WriteOnlyPort};
+use crate::memory::{ensure_hhdm_frame_is_mapped, get_kernel_hhdm_address, PageAttributes};
 use acpi::{fadt::Fadt, sdt::Signature, AcpiTables, PhysicalMapping, PlatformInfo};
 use spin::Once;
 
@@ -56,10 +56,28 @@ pub struct AcpiHandler;
 impl acpi::AcpiHandler for AcpiHandler {
     unsafe fn map_physical_region<T>(&self, physical_address: usize, size: usize) -> acpi::PhysicalMapping<Self, T> {
         let hhdm_base_address = get_kernel_hhdm_address().as_usize();
-        let hhdm_physical_address =
         // The RSDP address provided by Limine resides within the HHDM, but the other pointers do not. This logic
         // accounts for that quirk.
+        let hhdm_physical_address =
             if physical_address > hhdm_base_address { physical_address } else { hhdm_base_address + physical_address };
+
+        let kernel_frame_manager = crate::memory::get_kernel_frame_manager();
+        let kernel_page_manager = crate::memory::get_kernel_page_manager();
+        for page_base in (hhdm_physical_address..(hhdm_physical_address + size)).step_by(0x1000) {
+            let page = libkernel::memory::Page::from_index(page_base / 0x1000);
+
+            if !kernel_page_manager.is_mapped(page) {
+                kernel_page_manager
+                    .map(
+                        &page,
+                        physical_address / 0x1000,
+                        false,
+                        crate::memory::PageAttributes::RW,
+                        kernel_frame_manager,
+                    )
+                    .unwrap();
+            }
+        }
 
         acpi::PhysicalMapping::new(
             physical_address,
@@ -78,35 +96,43 @@ impl acpi::AcpiHandler for AcpiHandler {
 #[allow(clippy::undocumented_unsafe_blocks)]
 impl aml::Handler for AcpiHandler {
     fn read_u8(&self, address: usize) -> u8 {
-        unsafe { (address as *const u8).add(get_kernel_hhdm_address().as_usize()).read() }
+        ensure_hhdm_frame_is_mapped(address / 0x1000, PageAttributes::MMIO);
+        unsafe { ((address + get_kernel_hhdm_address().as_usize()) as *const u8).read() }
     }
 
     fn read_u16(&self, address: usize) -> u16 {
-        unsafe { (address as *const u16).add(get_kernel_hhdm_address().as_usize()).read() }
+        ensure_hhdm_frame_is_mapped(address / 0x1000, PageAttributes::MMIO);
+        unsafe { ((address + get_kernel_hhdm_address().as_usize()) as *const u16).read() }
     }
 
     fn read_u32(&self, address: usize) -> u32 {
-        unsafe { (address as *const u32).add(get_kernel_hhdm_address().as_usize()).read() }
+        ensure_hhdm_frame_is_mapped(address / 0x1000, PageAttributes::MMIO);
+        unsafe { ((address + get_kernel_hhdm_address().as_usize()) as *const u32).read() }
     }
 
     fn read_u64(&self, address: usize) -> u64 {
-        unsafe { (address as *const u64).add(get_kernel_hhdm_address().as_usize()).read() }
+        ensure_hhdm_frame_is_mapped(address / 0x1000, PageAttributes::MMIO);
+        unsafe { ((address + get_kernel_hhdm_address().as_usize()) as *const u64).read() }
     }
 
     fn write_u8(&mut self, address: usize, value: u8) {
-        unsafe { (address as *mut u8).add(get_kernel_hhdm_address().as_usize()).write(value) };
+        ensure_hhdm_frame_is_mapped(address / 0x1000, PageAttributes::MMIO);
+        unsafe { ((address + get_kernel_hhdm_address().as_usize()) as *mut u8).write(value) };
     }
 
     fn write_u16(&mut self, address: usize, value: u16) {
-        unsafe { (address as *mut u16).add(get_kernel_hhdm_address().as_usize()).write(value) };
+        ensure_hhdm_frame_is_mapped(address / 0x1000, PageAttributes::MMIO);
+        unsafe { ((address + get_kernel_hhdm_address().as_usize()) as *mut u16).write(value) };
     }
 
     fn write_u32(&mut self, address: usize, value: u32) {
-        unsafe { (address as *mut u32).add(get_kernel_hhdm_address().as_usize()).write(value) };
+        ensure_hhdm_frame_is_mapped(address / 0x1000, PageAttributes::MMIO);
+        unsafe { ((address + get_kernel_hhdm_address().as_usize()) as *mut u32).write(value) };
     }
 
     fn write_u64(&mut self, address: usize, value: u64) {
-        unsafe { (address as *mut u64).add(get_kernel_hhdm_address().as_usize()).write(value) };
+        ensure_hhdm_frame_is_mapped(address / 0x1000, PageAttributes::MMIO);
+        unsafe { ((address + get_kernel_hhdm_address().as_usize()) as *mut u64).write(value) };
     }
 
     fn read_io_u8(&self, port: u16) -> u8 {
@@ -250,38 +276,84 @@ unsafe impl Sync for AmlContextWrapper {}
 
 static AML_CONTEXT: Once<AmlContextWrapper> = Once::new();
 
-pub fn get_aml_context() -> &'static aml::AmlContext {
-    &AML_CONTEXT
-        .call_once(|| {
-            AmlContextWrapper({
-                let mut aml_context =
-                    aml::AmlContext::new(alloc::boxed::Box::new(AcpiHandler), aml::DebugVerbosity::All);
+pub fn init_aml_context() {
+    AML_CONTEXT.call_once(|| {
+        AmlContextWrapper({
+            let mut aml_context = aml::AmlContext::new(alloc::boxed::Box::new(AcpiHandler), aml::DebugVerbosity::All);
+            let kernel_hhdm_address = crate::memory::get_kernel_hhdm_address().as_usize();
 
-                {
-                    let dsdt_table = get_rsdp().dsdt.as_ref().expect("machine has no DSDT");
+            {
+                let dsdt_table = get_rsdp().dsdt.as_ref().expect("machine has no DSDT");
 
+                // SAFETY: We can be reasonably certain the provided base address and length are valid.
+                let dsdt_stream = unsafe {
+                    core::slice::from_raw_parts(
+                        (dsdt_table.address + kernel_hhdm_address) as *const u8,
+                        dsdt_table.length as usize,
+                    )
+                };
+
+                debug!("Parsing DSDT @{:?}", dsdt_stream.as_ptr());
+                aml_context.parse_table(dsdt_stream).expect("failed to parse DSDT");
+            }
+
+            {
+                for sdst_table in &get_rsdp().ssdts {
                     // SAFETY: We can be reasonably certain the provided base address and length are valid.
-                    let dsdt_stream = unsafe {
-                        core::slice::from_raw_parts(dsdt_table.address as *const u8, dsdt_table.length as usize)
+                    let sdst_stream = unsafe {
+                        core::slice::from_raw_parts(
+                            (sdst_table.address + kernel_hhdm_address) as *const u8,
+                            sdst_table.length as usize,
+                        )
                     };
 
-                    aml_context.parse_table(dsdt_stream).expect("failed to parse DSDT");
+                    debug!("Parsing SDST @{:?}", sdst_stream.as_ptr());
+                    aml_context.parse_table(sdst_stream).expect("failed to parse SDST");
                 }
+            }
 
-                {
-                    for sdst_table in &get_rsdp().ssdts {
-                        // SAFETY: We can be reasonably certain the provided base address and length are valid.
-                        let sdst_stream = unsafe {
-                            core::slice::from_raw_parts(sdst_table.address as *const u8, sdst_table.length as usize)
-                        };
-                        aml_context.parse_table(sdst_stream).expect("failed to parse SDST");
-                    }
-                }
+            aml_context.initialize_objects().expect("failed to initialize AML objects");
 
-                aml_context.initialize_objects().expect("failed to initialize AML objects");
-
-                aml_context
-            })
+            aml_context
         })
-        .0
+    });
 }
+
+bitflags::bitflags! {
+    #[repr(transparent)]
+    pub struct PM1a_EVT_BLK : u32 {
+        /* statuses */
+        const STATUS_TIMER = 1 << 0;
+        const STATUS_BUS_MASTER = 1 << 4;
+        const STATUS_GLOBAL =  1 << 5;
+        const STATUS_POWER_BUTTON =  1 << 8;
+        const STATUS_SLEEP_BUTTON =  1 << 9;
+        const STATUS_RTC =  1 << 10;
+        const STATUS_PCIe_WAKE =  1 << 14;
+        const STATUS_WAKE =  1 << 15;
+
+        /* enables */
+        const ENABLE_TIMER = 1 << 16;
+        const ENABLE_GLOBAL = 1 << 21;
+        const ENABLE_POWER_BUTTON = 1 << 24;
+        const ENABLE_SLEEP_BUTTON = 1 << 25;
+        const ENABLE_RTC = 1 << 26;
+        const ENABLE_PCIe_WAKE =  1 << 30;
+    }
+}
+
+use crate::memory::io;
+
+impl io::PortRead for PM1a_EVT_BLK {
+    unsafe fn read(port: PortAddress) -> Self {
+        Self::from_bits_truncate(io::_read32(port))
+    }
+}
+
+impl io::PortWrite for PM1a_EVT_BLK {
+    unsafe fn write(port: PortAddress, value: Self) {
+        io::_write32(port, value.bits());
+    }
+}
+
+impl io::PortReadWrite for PM1a_EVT_BLK {}
