@@ -6,7 +6,8 @@ mod portrw {
 
     /* 8 BIT */
     #[inline(always)]
-    pub unsafe fn read8(port: PortAddress) -> u8 {
+    #[doc(hidden)]
+    pub unsafe fn _read8(port: PortAddress) -> u8 {
         let result: u8;
 
         asm!("in al, dx", out("al") result, in("dx") port, options(nostack, nomem, preserves_flags));
@@ -15,13 +16,15 @@ mod portrw {
     }
 
     #[inline(always)]
-    pub unsafe fn write8(port: PortAddress, value: u8) {
+    #[doc(hidden)]
+    pub unsafe fn _write8(port: PortAddress, value: u8) {
         asm!("out dx, al", in("dx") port, in("al") value, options(nostack, nomem, preserves_flags));
     }
 
     /* 16 BIT */
     #[inline(always)]
-    pub unsafe fn read16(port: PortAddress) -> u16 {
+    #[doc(hidden)]
+    pub unsafe fn _read16(port: PortAddress) -> u16 {
         let result: u16;
 
         asm!("in ax, dx", out("ax") result, in("dx") port, options(nostack, nomem, preserves_flags));
@@ -30,13 +33,15 @@ mod portrw {
     }
 
     #[inline(always)]
-    pub unsafe fn write16(port: PortAddress, value: u16) {
+    #[doc(hidden)]
+    pub unsafe fn _write16(port: PortAddress, value: u16) {
         asm!("out dx, ax", in("dx") port, in("ax") value, options(nostack, nomem, preserves_flags));
     }
 
     /* 32 BIT */
     #[inline(always)]
-    pub unsafe fn read32(port: PortAddress) -> u32 {
+    #[doc(hidden)]
+    pub unsafe fn _read32(port: PortAddress) -> u32 {
         let result: u32;
 
         asm!("in eax, dx", out("eax") result, in("dx") port, options(nostack, nomem, preserves_flags));
@@ -45,7 +50,8 @@ mod portrw {
     }
 
     #[inline(always)]
-    pub unsafe fn write32(port: PortAddress, value: u32) {
+    #[doc(hidden)]
+    pub unsafe fn _write32(port: PortAddress, value: u32) {
         asm!("out dx, eax", in("dx") port, in("eax") value, options(nostack, nomem, preserves_flags));
     }
 }
@@ -56,42 +62,47 @@ mod portrw {
 
     /* 8 BIT */
     #[inline(always)]
-    pub unsafe fn read8(port: PortAddress) -> u8 {
+    #[doc(hidden)]
+    pub unsafe fn _read8(port: PortAddress) -> u8 {
         (port as *const u8).read_volatile()
     }
 
     #[inline(always)]
-    pub unsafe fn write8(port: PortAddress, value: u8) {
+    #[doc(hidden)]
+    pub unsafe fn _write8(port: PortAddress, value: u8) {
         (port as *mut u8).write_volatile(value);
     }
 
     /* 16 BIT */
     #[inline(always)]
-    pub unsafe fn read16(port: PortAddress) -> u16 {
+    #[doc(hidden)]
+    pub unsafe fn _read16(port: PortAddress) -> u16 {
         (port as *const u16).read_volatile()
     }
 
     #[inline(always)]
-    pub unsafe fn write16(port: PortAddress, value: u16) {
+    #[doc(hidden)]
+    pub unsafe fn _write16(port: PortAddress, value: u16) {
         (port as *mut u16).write_volatile(value);
     }
 
     /* 32 BIT */
     #[inline(always)]
-    pub unsafe fn read32(port: PortAddress) -> u32 {
+    #[doc(hidden)]
+    pub unsafe fn _read32(port: PortAddress) -> u32 {
         (port as *const u32).read_volatile()
     }
 
     #[inline(always)]
-    pub unsafe fn write32(port: PortAddress, value: u32) {
+    #[doc(hidden)]
+    pub unsafe fn _write32(port: PortAddress, value: u32) {
         (port as *mut u32).write_volatile(value);
     }
 }
 
 use core::marker::PhantomData;
-use portrw::*;
 
-pub use portrw::PortAddress;
+pub use portrw::*;
 
 pub trait PortRead {
     unsafe fn read(port: PortAddress) -> Self;
@@ -106,38 +117,38 @@ pub trait PortReadWrite: PortRead + PortWrite {}
 /* PORTREAD */
 impl PortRead for u8 {
     unsafe fn read(port: PortAddress) -> Self {
-        read8(port)
+        _read8(port)
     }
 }
 
 impl PortRead for u16 {
     unsafe fn read(port: PortAddress) -> Self {
-        read16(port)
+        _read16(port)
     }
 }
 
 impl PortRead for u32 {
     unsafe fn read(port: PortAddress) -> Self {
-        read32(port)
+        _read32(port)
     }
 }
 
 /* PORTWRITE */
 impl PortWrite for u8 {
     unsafe fn write(port: PortAddress, value: Self) {
-        write8(port, value)
+        _write8(port, value)
     }
 }
 
 impl PortWrite for u16 {
     unsafe fn write(port: PortAddress, value: Self) {
-        write16(port, value)
+        _write16(port, value)
     }
 }
 
 impl PortWrite for u32 {
     unsafe fn write(port: PortAddress, value: Self) {
-        write32(port, value)
+        _write32(port, value)
     }
 }
 

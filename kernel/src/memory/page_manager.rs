@@ -91,7 +91,7 @@ impl VirtualMapper {
     }
 
     #[inline(always)]
-    pub unsafe fn write_cr3(&mut self) {
+    pub unsafe fn write_root_table(&mut self) {
         #[cfg(target_arch = "x86_64")]
         crate::arch::x64::registers::control::CR3::write(
             Address::<Physical>::new(self.root_frame_index * 0x1000),
@@ -164,6 +164,11 @@ impl PageManager {
                 #[cfg(target_arch = "x86_64")]
                 {
                     crate::arch::x64::registers::control::CR3::read().0.frame_index()
+                }
+
+                #[cfg(target_arch = "riscv64")]
+                {
+                    crate::arch::rv64::registers::satp::get_ppn()
                 }
             })),
         }
@@ -278,11 +283,11 @@ impl PageManager {
 
     /* STATE QUERYING */
 
-    pub fn is_mapped(&self, virt_addr: Address<Virtual>) -> bool {
+    pub fn is_mapped(&self, page: Page) -> bool {
         interrupts::without(|| {
             self.virtual_map
                 .read()
-                .get_page_entry(&Page::containing_addr(virt_addr))
+                .get_page_entry(&page)
                 .filter(|entry| entry.get_attributes().contains(PageAttributes::VALID))
                 .is_some()
         })
@@ -324,7 +329,7 @@ impl PageManager {
     #[inline(always)]
     pub unsafe fn write_cr3(&self) {
         interrupts::without(|| {
-            self.virtual_map.write().write_cr3();
+            self.virtual_map.write().write_root_table();
         });
     }
 

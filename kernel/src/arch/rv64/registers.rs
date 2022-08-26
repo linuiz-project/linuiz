@@ -93,7 +93,7 @@ pub mod satp {
     }
 
     /// Reads the raw value from the `satp` control register.
-    #[inline]
+    #[inline(always)]
     fn read_raw() -> u64 {
         let value: u64;
 
@@ -103,16 +103,17 @@ pub mod satp {
     }
 
     /// Writes a raw value to the `satp` control register.
-    #[inline]
+    #[inline(always)]
     fn write_raw(value: u64) {
         unsafe { core::arch::asm!("csrw satp, {}", in(reg) value, options(nostack, nomem)) };
     }
 
     #[inline]
     pub fn read() -> (Address<Physical>, u16, Mode) {
-        (get_ppn() * 0x1000, get_asid(), get_mode())
+        (Address::<Physical>::new_truncate(get_ppn() * 0x1000), get_asid(), get_mode())
     }
 
+    #[inline]
     pub unsafe fn write(
         ppn: usize, /* TODO make this a struct to ensure validity within the bit range */
         asid: u16,
@@ -146,8 +147,8 @@ pub mod satp {
 
     /// Gets the ASID from the `satp` control register.
     #[inline]
-    pub fn get_asid() -> usize {
-        read_raw().get_bits(44..(44 + get_asid_len())) as usize
+    pub fn get_asid() -> u16 {
+        read_raw().get_bits(44..(44 + get_asid_len())) as u16
     }
 
     /// Gets the current paging level mode from the `satp` control register.

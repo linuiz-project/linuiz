@@ -11,7 +11,7 @@ pub unsafe fn enable() {
     asm!("sti", options(nostack, nomem));
 
     #[cfg(target_arch = "riscv64")]
-    crate::registers::rv64::sstatus::set_sie(true);
+    crate::arch::rv64::registers::sstatus::set_sie(true);
 }
 
 /// Disables interrupts for the current core.
@@ -23,7 +23,7 @@ pub unsafe fn disable() {
     asm!("cli", options(nostack, nomem));
 
     #[cfg(target_arch = "riscv64")]
-    crate::registers::rv64::sstatus::set_sie(false);
+    crate::arch::rv64::registers::sstatus::set_sie(false);
 }
 
 /// Returns whether or not interrupts are enabled for the current core.
@@ -36,7 +36,7 @@ pub fn are_enabled() -> bool {
 
     #[cfg(target_arch = "riscv64")]
     {
-        crate::registers::rv64::sstatus::get_sie()
+        crate::arch::rv64::registers::sstatus::get_sie()
     }
 }
 
@@ -115,17 +115,17 @@ pub enum DestinationMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
 #[allow(non_camel_case_types)]
 pub enum Vector {
-    Clock = 0xE0,
+    Clock = 0x20,
 
-    Syscall = 0xF0,
-    Timer = 0xF1,
-    Thermal = 0xF2,
-    Performance = 0xF3,
-    /* 0xF4..0xFC free for use */
-    Error = 0xFC,
-    LINT0 = 0xFD,
-    LINT1 = 0xFE,
-    SPURIOUS = 0xFF,
+    Syscall = 0x30,
+    Timer = 0x31,
+    Thermal = 0x32,
+    Performance = 0x33,
+    /* 0x34..=0x3B free for use */
+    Error = 0x3C,
+    LINT0 = 0x3D,
+    LINT1 = 0x3E,
+    SPURIOUS = 0x3F,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -154,7 +154,7 @@ pub fn common_interrupt_handler(
                 let control_ptr = arch_context.0.rdi as *mut libkernel::syscall::Control;
 
                 if !crate::memory::get_kernel_page_manager()
-                    .is_mapped(libkernel::Address::<libkernel::Virtual>::from_ptr(control_ptr))
+                    .is_mapped(libkernel::memory::Page::from_index((control_ptr as usize) / 0x1000))
                 {
                     arch_context.0.rsi = libkernel::syscall::Error::ControlNotMapped as u64;
                     return;

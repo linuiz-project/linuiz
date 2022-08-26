@@ -2,8 +2,6 @@ use crate::{
     memory::RootPageTable,
     scheduling::{Scheduler, Task, TaskPriority},
 };
-use core::sync::atomic::{AtomicUsize, Ordering};
-use libkernel::{Address, Virtual};
 
 #[repr(C, align(0x1000))]
 pub(crate) struct LocalState {
@@ -13,6 +11,7 @@ pub(crate) struct LocalState {
     scheduler: Scheduler,
     default_task: Task,
     cur_task: Option<Task>,
+    // interrupt_slots: []
 }
 
 impl LocalState {
@@ -23,20 +22,14 @@ impl LocalState {
     }
 }
 
-static LOCAL_STATES_BASE: AtomicUsize = AtomicUsize::new(0);
-
 /// Returns the pointer to the local state structure.
 #[inline]
 fn get_local_state() -> Option<&'static mut LocalState> {
-    // TODO read from `IA32_KERNEL_GS_BASE`
     unsafe {
-        let local_state_ptr = (LOCAL_STATES_BASE.load(Ordering::Relaxed) as *mut LocalState)
-            .add(crate::arch::x64::structures::apic::get_id() as usize);
-
-        if  crate::memory::get_kernel_page_manager().is_mapped(Address::<Virtual>::from_ptr(local_state_ptr)) &&  let Some(local_state) = local_state_ptr.as_mut() && local_state.is_valid_magic()  {
-                Some(local_state)
-            } else {
-            None}
+        #[cfg(target_arch = "x86_64")]
+        {
+            ((crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::read()) as *mut LocalState).as_mut()
+        }
     }
 }
 
@@ -44,28 +37,17 @@ fn get_local_state() -> Option<&'static mut LocalState> {
 ///
 /// SAFETY: This function invariantly assumes it will only be called once.
 pub unsafe fn init(core_id: u32) {
-    // TODO write to `IA32_KERNEL_GS_BASE`
-    LOCAL_STATES_BASE
-        .compare_exchange(
-            0,
-            // Cosntruct the local state pointer (with slide) via the `Address` struct, to
-            // automatically sign extend.
-            Address::<Virtual>::new_truncate(
-                (
-                    (510 * libkernel::memory::PML4_ENTRY_MEM_SIZE)
-                    // + (libkernel::rand(0..(u32::MAX as u64)).unwrap_or(0) as usize)
-                ) & !0xFFF,
-            )
-            .as_usize(),
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        )
-        .ok();
+    let local_state_ptr =
+        crate::memory::allocate_pages(libkernel::align_up_div(core::mem::size_of::<LocalState>(), 0x1000))
+            .cast::<LocalState>();
+
+    #[cfg(target_arch = "x86_64")]
+    crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::write(local_state_ptr as usize as u64);
+    // TODO abstract the `tp` register
+    #[cfg(target_arch = "riscv64")]
+    core::arch::asm!("mv tp, {}", in(reg) local_state_pages as u64, options(nostack, nomem));
 
     trace!("Configuring local state: #{}", core_id);
-
-    // Ensure we load the local state pointer via `cpuid` to avoid using the APIC before it is initialized.
-    let local_state_ptr = (LOCAL_STATES_BASE.load(Ordering::Relaxed) as *mut LocalState).add(core_id as usize);
 
     {
         use libkernel::memory::Page;
