@@ -1,4 +1,4 @@
-// pub mod pci;
+pub mod pci;
 mod port;
 mod serial;
 

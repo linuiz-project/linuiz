@@ -82,7 +82,7 @@ const PIC_BASE: u8 = 0xE0;
 /// Delivery mode for IPIs.
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(self) enum InterruptDeliveryMode {
+pub enum InterruptDeliveryMode {
     Fixed = 0b000,
     LowPriority = 0b001,
     SMI = 0b010,

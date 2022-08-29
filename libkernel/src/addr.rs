@@ -12,6 +12,7 @@ impl AddressType for Physical {}
 pub enum Virtual {}
 impl AddressType for Virtual {}
 
+// TODO use `u64` for the internal integer type
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Address<T: AddressType>(usize, PhantomData<T>);
@@ -48,29 +49,30 @@ impl<T: AddressType> Address<T> {
 }
 
 impl Address<Physical> {
+    #[inline(always)]
+    pub const fn is_canonical(address: u64) -> bool {
+        (address & 0xFFF00000_00000000) == 0
+    }
+
     pub const fn new(addr: usize) -> Self {
-        match addr >> 52 {
-            0 => Self(addr, PhantomData),
-            _ => panic!("given address is not canonical (bits 52..64 contain data)"),
+        if Self::is_canonical(addr as u64) {
+            Self(addr, PhantomData)
+        } else {
+            panic!("given address is not canonical (bits 52..64 contain data)")
         }
     }
 
-    #[inline]
+    #[inline(always)]
     pub const fn new_truncate(addr: usize) -> Self {
         Self(addr & 0xFFFFFFFFFFFFF, PhantomData)
     }
 
-    #[inline]
+    #[inline(always)]
     pub const fn frame_index(&self) -> usize {
         (self.as_usize() / 0x1000) as usize
     }
 
-    #[inline]
-    pub const fn is_canonical(&self) -> bool {
-        (self.0 >> 52) == 0
-    }
-
-    #[inline]
+    #[inline(always)]
     pub const fn is_frame_aligned(&self) -> bool {
         (self.0 & 0xFFF) == 0
     }
@@ -136,57 +138,57 @@ impl Address<Virtual> {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     pub const fn new_truncate(addr: usize) -> Self {
         Self((((addr << 16) as isize) >> 16) as usize, PhantomData)
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn from_ptr<T>(ptr: *const T) -> Self {
         Self::new_truncate(ptr as usize)
     }
 
-    #[inline]
+    #[inline(always)]
     pub const fn page_index(&self) -> usize {
         (self.as_usize() / 0x1000) as usize
     }
 
-    #[inline]
+    #[inline(always)]
     pub const fn as_ptr<T>(&self) -> *const T {
         self.0 as *const T
     }
 
-    #[inline]
+    #[inline(always)]
     pub const fn as_mut_ptr<T>(&mut self) -> *mut T {
         self.0 as *mut T
     }
 
-    #[inline]
+    #[inline(always)]
     pub const fn page_offset(&self) -> usize {
         (self.0 & 0xFFF) as usize
     }
 
-    #[inline]
+    #[inline(always)]
     pub const fn p1_index(&self) -> usize {
         ((self.0 >> 12) & 0x1FF) as usize
     }
 
-    #[inline]
+    #[inline(always)]
     pub const fn p2_index(&self) -> usize {
         ((self.0 >> 12 >> 9) & 0x1FF) as usize
     }
 
-    #[inline]
+    #[inline(always)]
     pub const fn p3_index(&self) -> usize {
         ((self.0 >> 12 >> 9 >> 9) & 0x1FF) as usize
     }
 
-    #[inline]
+    #[inline(always)]
     pub const fn p4_index(&self) -> usize {
         ((self.0 >> 12 >> 9 >> 9 >> 9) & 0x1FF) as usize
     }
 
-    #[inline]
+    #[inline(always)]
     pub const fn is_page_aligned(&self) -> bool {
         (self.0 & 0xFFF) == 0
     }

@@ -174,52 +174,57 @@ pub fn get_io_apics() -> &'static Vec<IoApic<'static>> {
     IOAPICS.call_once(|| {
         let frame_manager = crate::memory::get_kernel_frame_manager();
         let page_manager = crate::memory::get_kernel_page_manager();
+        let platform_info = crate::tables::acpi::get_platform_info();
 
-        crate::tables::acpi::get_apic_model()
-            .io_apics
-            .iter()
-            .map(|ioapic_info| unsafe {
-                let ioapic_regs_ptr =
-                    ((ioapic_info.address as usize) + crate::memory::get_kernel_hhdm_address().as_usize()) as *mut u32;
-                assert!(ioapic_regs_ptr.is_aligned(), "I/O APIC pointers must be aligned");
+        if let acpi::platform::interrupt::InterruptModel::Apic(apic) = &platform_info.interrupt_model {
+            apic.io_apics
+                .iter()
+                .map(|ioapic_info| unsafe {
+                    let ioapic_regs_ptr = ((ioapic_info.address as usize)
+                        + crate::memory::get_kernel_hhdm_address().as_usize())
+                        as *mut u32;
+                    assert!(ioapic_regs_ptr.is_aligned(), "I/O APIC pointers must be aligned");
 
-                let ioregsel = &*ioapic_regs_ptr.cast::<VolatileCell<u32, libkernel::WriteOnly>>();
-                let ioregwin = &*ioapic_regs_ptr.add(4).cast::<VolatileCell<u32, libkernel::ReadWrite>>();
+                    let ioregsel = &*ioapic_regs_ptr.cast::<VolatileCell<u32, libkernel::WriteOnly>>();
+                    let ioregwin = &*ioapic_regs_ptr.add(4).cast::<VolatileCell<u32, libkernel::ReadWrite>>();
 
-                /* Ensure I/O APIC register pages are mapped */
-                {
-                    let ioapic_regs_page = libkernel::memory::Page::from_ptr(ioapic_regs_ptr);
-                    let ioapic_frame_index = (ioapic_info.address / 0x1000) as usize;
+                    /* Ensure I/O APIC register pages are mapped */
+                    {
+                        let ioapic_regs_page = libkernel::memory::Page::from_ptr(ioapic_regs_ptr);
+                        let ioapic_frame_index = (ioapic_info.address / 0x1000) as usize;
 
-                    frame_manager.lock(ioapic_frame_index).ok();
+                        frame_manager.lock(ioapic_frame_index).ok();
 
-                    if !page_manager.is_mapped(ioapic_regs_page) {
-                        page_manager
-                            .map(
-                                &ioapic_regs_page,
-                                ioapic_frame_index,
-                                false,
-                                crate::memory::PageAttributes::MMIO,
-                                frame_manager,
-                            )
-                            .unwrap();
+                        if !page_manager.is_mapped(ioapic_regs_page) {
+                            page_manager
+                                .map(
+                                    &ioapic_regs_page,
+                                    ioapic_frame_index,
+                                    false,
+                                    crate::memory::PageAttributes::MMIO,
+                                    frame_manager,
+                                )
+                                .unwrap();
+                        }
                     }
-                }
 
-                let id = {
-                    ioregsel.write(0x0);
-                    ioregwin.read().get_bits(24..28) as u8
-                };
-                let (version, irq_count) = {
-                    ioregsel.write(0x1);
-                    let value = ioregwin.read();
-                    (value.get_bits(0..8) as u8, value.get_bits(16..24) as u32)
-                };
-                let irq_base = ioapic_info.global_system_interrupt_base;
-                let handled_irqs = irq_base..=(irq_base + irq_count);
+                    let id = {
+                        ioregsel.write(0x0);
+                        ioregwin.read().get_bits(24..28) as u8
+                    };
+                    let (version, irq_count) = {
+                        ioregsel.write(0x1);
+                        let value = ioregwin.read();
+                        (value.get_bits(0..8) as u8, value.get_bits(16..24) as u32)
+                    };
+                    let irq_base = ioapic_info.global_system_interrupt_base;
+                    let handled_irqs = irq_base..=(irq_base + irq_count);
 
-                IoApic { id, version, handled_irqs, ioregs: Mutex::new((ioregsel, ioregwin)) }
-            })
-            .collect()
+                    IoApic { id, version, handled_irqs, ioregs: Mutex::new((ioregsel, ioregwin)) }
+                })
+                .collect()
+        } else {
+            alloc::vec::Vec::new()
+        }
     })
 }

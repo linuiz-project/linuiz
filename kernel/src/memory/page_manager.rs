@@ -213,6 +213,27 @@ impl PageManager {
         })
     }
 
+    /// Helper function to map MMIO pages and update `FrameManager` state.
+    ///
+    /// SAFETY: This function trusts implicitly that the provided page and frame index are valid for mapping.
+    pub unsafe fn map_mmio(
+        &self,
+        page: Page,
+        frame_index: usize,
+        frame_manager: &'static FrameManager<'_>,
+    ) -> Result<(), MapError> {
+        frame_manager.lock(frame_index).ok();
+        frame_manager.force_modify_type(frame_index, crate::memory::FrameType::MMIO).ok();
+
+        if self.is_mapped(page) {
+            self.set_page_attributes(&page, PageAttributes::MMIO, AttributeModify::Set);
+
+            Ok(())
+        } else {
+            self.map(&page, frame_index, false, PageAttributes::MMIO, frame_manager)
+        }
+    }
+
     /// Unmaps the given page, optionally freeing the frame the page points to within the given [`FrameManager`].
     pub fn unmap(
         &self,

@@ -52,6 +52,7 @@ mod drivers;
 mod interrupts;
 mod local_state;
 mod memory;
+mod num;
 mod scheduling;
 mod stdout;
 mod tables;
@@ -326,6 +327,8 @@ unsafe extern "C" fn _entry() -> ! {
 
         debug!("Initializing ACPI interface...");
         crate::tables::acpi::init_interface();
+        debug!("Initializing PCI devices...");
+        crate::memory::io::pci::init_pcie_devices();
 
         debug!("Boot core will release other cores, and then wait for all cores to update root page table.");
         SMP_MEMORY_READY.store(true, Ordering::Relaxed);
@@ -349,67 +352,71 @@ unsafe fn configure_acpi() -> ! {
     {
         debug!("Configuring I/O APIC and processing interrupt overrides.");
 
-        let mut cur_vector = 0x70;
         let ioapics = crate::arch::x64::structures::ioapic::get_io_apics();
+        let platform_info = crate::tables::acpi::get_platform_info();
 
-        for irq_source in &crate::tables::acpi::get_apic_model().interrupt_source_overrides {
-            debug!("{:?}", irq_source);
+        if let acpi::platform::interrupt::InterruptModel::Apic(apic) = &platform_info.interrupt_model {
+            let mut cur_vector = 0x70;
 
-            let target_ioapic = ioapics
-                .iter()
-                .find(|ioapic| ioapic.handled_irqs().contains(&irq_source.global_system_interrupt))
-                .expect("no I/I APIC found for IRQ override");
+            for irq_source in apic.interrupt_source_overrides.iter() {
+                debug!("{:?}", irq_source);
 
-            let mut redirection = target_ioapic.get_redirection(irq_source.global_system_interrupt);
-            redirection.set_delivery_mode(interrupts::DeliveryMode::Fixed);
-            redirection.set_destination_mode(interrupts::DestinationMode::Logical);
-            redirection.set_masked(false);
-            redirection.set_pin_polarity(irq_source.polarity);
-            redirection.set_trigger_mode(irq_source.trigger_mode);
-            redirection.set_vector({
-                let vector = cur_vector;
-                cur_vector += 1;
-                vector
-            });
-            redirection.set_destination_id(0 /* TODO real cpu id */);
+                let target_ioapic = ioapics
+                    .iter()
+                    .find(|ioapic| ioapic.handled_irqs().contains(&irq_source.global_system_interrupt))
+                    .expect("no I/I APIC found for IRQ override");
 
-            debug!(
-                "IRQ override: Global {} -> {}:{}",
-                irq_source.global_system_interrupt,
-                redirection.get_destination_id(),
-                redirection.get_vector()
-            );
-            target_ioapic.set_redirection(irq_source.global_system_interrupt, &redirection);
-        }
+                let mut redirection = target_ioapic.get_redirection(irq_source.global_system_interrupt);
+                redirection.set_delivery_mode(interrupts::DeliveryMode::Fixed);
+                redirection.set_destination_mode(interrupts::DestinationMode::Logical);
+                redirection.set_masked(false);
+                redirection.set_pin_polarity(irq_source.polarity);
+                redirection.set_trigger_mode(irq_source.trigger_mode);
+                redirection.set_vector({
+                    let vector = cur_vector;
+                    cur_vector += 1;
+                    vector
+                });
+                redirection.set_destination_id(0 /* TODO real cpu id */);
 
-        for nmi_source in &crate::tables::acpi::get_apic_model().nmi_sources {
-            debug!("{:?}", nmi_source);
+                debug!(
+                    "IRQ override: Global {} -> {}:{}",
+                    irq_source.global_system_interrupt,
+                    redirection.get_destination_id(),
+                    redirection.get_vector()
+                );
+                target_ioapic.set_redirection(irq_source.global_system_interrupt, &redirection);
+            }
 
-            let target_ioapic = ioapics
-                .iter()
-                .find(|ioapic| ioapic.handled_irqs().contains(&nmi_source.global_system_interrupt))
-                .expect("no I/I APIC found for IRQ override");
+            for nmi_source in apic.nmi_sources.iter() {
+                debug!("{:?}", nmi_source);
 
-            let mut redirection = target_ioapic.get_redirection(nmi_source.global_system_interrupt);
-            redirection.set_delivery_mode(interrupts::DeliveryMode::NMI);
-            redirection.set_destination_mode(interrupts::DestinationMode::Logical);
-            redirection.set_masked(false);
-            redirection.set_pin_polarity(nmi_source.polarity);
-            redirection.set_trigger_mode(nmi_source.trigger_mode);
-            redirection.set_vector({
-                let vector = cur_vector;
-                cur_vector += 1;
-                vector
-            });
-            redirection.set_destination_id(0 /* TODO real cpu id */);
+                let target_ioapic = ioapics
+                    .iter()
+                    .find(|ioapic| ioapic.handled_irqs().contains(&nmi_source.global_system_interrupt))
+                    .expect("no I/I APIC found for IRQ override");
 
-            debug!(
-                "NMI override: Global {} -> {}:{}",
-                nmi_source.global_system_interrupt,
-                redirection.get_destination_id(),
-                redirection.get_vector()
-            );
-            target_ioapic.set_redirection(nmi_source.global_system_interrupt, &redirection);
+                let mut redirection = target_ioapic.get_redirection(nmi_source.global_system_interrupt);
+                redirection.set_delivery_mode(interrupts::DeliveryMode::NMI);
+                redirection.set_destination_mode(interrupts::DestinationMode::Logical);
+                redirection.set_masked(false);
+                redirection.set_pin_polarity(nmi_source.polarity);
+                redirection.set_trigger_mode(nmi_source.trigger_mode);
+                redirection.set_vector({
+                    let vector = cur_vector;
+                    cur_vector += 1;
+                    vector
+                });
+                redirection.set_destination_id(0 /* TODO real cpu id */);
+
+                debug!(
+                    "NMI override: Global {} -> {}:{}",
+                    nmi_source.global_system_interrupt,
+                    redirection.get_destination_id(),
+                    redirection.get_vector()
+                );
+                target_ioapic.set_redirection(nmi_source.global_system_interrupt, &redirection);
+            }
         }
     }
 

@@ -88,7 +88,7 @@ static KERNEL_PAGE_MANAGER: Once<PageManager> = Once::new();
 pub fn init_kernel_page_manager() {
     KERNEL_PAGE_MANAGER.call_once(|| {
         let frame_manager = get_kernel_frame_manager();
-        let mapped_page = libkernel::memory::Page::from_addr(get_kernel_hhdm_address());
+        let mapped_page = libkernel::memory::Page::from_address(get_kernel_hhdm_address());
         let pml4_copy = None;
 
         // SAFETY:  The mapped page is guaranteed to be valid, as the kernel guarantees its HHDM will be valid.

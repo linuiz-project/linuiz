@@ -1,7 +1,8 @@
 use crate::memory::io::{PortAddress, ReadOnlyPort, WriteOnlyPort};
 use crate::memory::{ensure_hhdm_frame_is_mapped, get_kernel_hhdm_address, PageAttributes};
+use acpi::mcfg::Mcfg;
 use acpi::{fadt::Fadt, sdt::Signature, AcpiTables, PhysicalMapping, PlatformInfo};
-use spin::Once;
+use spin::{Mutex, MutexGuard, Once, RwLock, RwLockWriteGuard};
 
 pub enum Register<'a, T: crate::memory::io::PortReadWrite> {
     IO(crate::memory::io::ReadWritePort<T>),
@@ -192,14 +193,13 @@ unsafe impl Send for AcpiTablesWrapper {}
 // SAFETY: Read-only type.
 unsafe impl Sync for AcpiTablesWrapper {}
 
-static RSDP: Once<AcpiTablesWrapper> = Once::new();
-
+static RSDP: Once<Mutex<AcpiTables<AcpiHandler>>> = Once::new();
 /// Initializes the ACPI interface.
 ///
-/// REMARK: If this method is called after bootloader memory has been reclaimed, it will panic.
-pub fn init_interface() {
+/// SAFETY: This this method must be called before bootloader memory is reclaimed.
+pub unsafe fn init_interface() {
     RSDP.call_once(|| {
-        AcpiTablesWrapper({
+        Mutex::new({
             let handler = AcpiHandler;
             let address = LIMINE_RSDP
                 .get_response()
@@ -216,56 +216,52 @@ pub fn init_interface() {
     });
 }
 
-pub fn get_rsdp() -> &'static acpi::AcpiTables<AcpiHandler> {
-    &RSDP.get().as_ref().unwrap().0
+pub fn get_rsdp() -> MutexGuard<'static, acpi::AcpiTables<AcpiHandler>> {
+    RSDP.get().expect("RSDP has not been initialized").lock()
 }
 
-pub struct PlatformInfoWrapper(PlatformInfo);
-// SAFETY: Read-only type.
-unsafe impl Send for PlatformInfoWrapper {}
-// SAFETY: Read-only type.
-unsafe impl Sync for PlatformInfoWrapper {}
-
-static PLATFORM_INFO: Once<PlatformInfoWrapper> = Once::new();
+static PLATFORM_INFO: Once<Mutex<PlatformInfo>> = Once::new();
 /// Returns an insatnce of the machine's MADT, or panics of it isn't present.
-fn get_platform_info() -> &'static PlatformInfo {
-    &PLATFORM_INFO
-        .call_once(|| PlatformInfoWrapper(PlatformInfo::new(get_rsdp()).expect("error parsing machine platform info")))
-        .0
+pub fn get_platform_info() -> MutexGuard<'static, PlatformInfo> {
+    PLATFORM_INFO
+        .call_once(|| Mutex::new(PlatformInfo::new(&*get_rsdp()).expect("error parsing machine platform info")))
+        .lock()
 }
 
-static APIC_MODEL: Once<&'static acpi::platform::interrupt::Apic> = Once::new();
-/// Returns the interrupt model of this machine.
-pub fn get_apic_model() -> &'static acpi::platform::interrupt::Apic {
-    APIC_MODEL.call_once(|| match &get_platform_info().interrupt_model {
-        acpi::InterruptModel::Apic(apic) => apic,
-        _ => panic!("unknown interrupt models not supported"),
-    })
-}
-
-struct FadtWrapper(PhysicalMapping<AcpiHandler, Fadt>);
-// SAFETY: Read-only type.
-unsafe impl Send for FadtWrapper {}
-// SAFETY: Read-only type.
-unsafe impl Sync for FadtWrapper {}
-
-static FADT: Once<FadtWrapper> = Once::new();
+static FADT: Once<Mutex<PhysicalMapping<AcpiHandler, Fadt>>> = Once::new();
 /// Returns an instance of the machine's FADT, or panics if it isn't present.
-pub fn get_fadt() -> &'static PhysicalMapping<AcpiHandler, Fadt> {
-    &FADT
-        .call_once(|| {
-            FadtWrapper({
-                let rsdp = get_rsdp();
+pub fn get_fadt() -> MutexGuard<'static, PhysicalMapping<AcpiHandler, Fadt>> {
+    FADT.call_once(|| {
+        Mutex::new({
+            let rsdp = get_rsdp();
 
-                // SAFETY: Using the `Fadt` type from the crate, we can be certain the SDT's structure will match the memory the crate wraps.
-                unsafe {
-                    rsdp.get_sdt::<Fadt>(Signature::FADT)
-                        .expect("FADT failed to validate its checksum")
-                        .expect("no FADT found in RSDP table")
-                }
-            })
+            // SAFETY: Using the `Fadt` type from the `acpi` crate, we can be certain the SDT's structure will match the memory the crate wraps.
+            unsafe {
+                rsdp.get_sdt::<Fadt>(Signature::FADT)
+                    .expect("FADT failed to validate its checksum")
+                    .expect("no FADT found in RSDP table")
+            }
         })
-        .0
+    })
+    .lock()
+}
+
+static MCFG: Once<Mutex<PhysicalMapping<AcpiHandler, Mcfg>>> = Once::new();
+/// Returns an instance of the machine's MCFG, or panics if it isn't present.
+pub fn get_mcfg() -> MutexGuard<'static, PhysicalMapping<AcpiHandler, Mcfg>> {
+    MCFG.call_once(|| {
+        Mutex::new({
+            let rsdp = get_rsdp();
+
+            // SAFETY: Using the `Mcfg` type from the `acpi` crate, we can be certain the SDT's structure will match the memory it wraps.
+            unsafe {
+                rsdp.get_sdt::<Mcfg>(Signature::MCFG)
+                    .expect("MCFG failed to validate its checksum")
+                    .expect("no MCFG found in RSDP table")
+            }
+        })
+    })
+    .lock()
 }
 
 struct AmlContextWrapper(aml::AmlContext);
@@ -281,9 +277,10 @@ pub fn init_aml_context() {
         AmlContextWrapper({
             let mut aml_context = aml::AmlContext::new(alloc::boxed::Box::new(AcpiHandler), aml::DebugVerbosity::All);
             let kernel_hhdm_address = crate::memory::get_kernel_hhdm_address().as_usize();
+            let rsdp = get_rsdp();
 
             {
-                let dsdt_table = get_rsdp().dsdt.as_ref().expect("machine has no DSDT");
+                let dsdt_table = rsdp.dsdt.as_ref().expect("machine has no DSDT");
 
                 // SAFETY: We can be reasonably certain the provided base address and length are valid.
                 let dsdt_stream = unsafe {

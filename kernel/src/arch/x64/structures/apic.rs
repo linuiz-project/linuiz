@@ -4,8 +4,8 @@ use crate::{arch::x64::registers::msr::IA32_APIC_BASE, interrupts};
 use bit_field::BitField;
 use core::marker::PhantomData;
 
-const xAPIC_BASE_ADDR: usize = 0xFEE00000;
-const x2APIC_BASE_MSR_ADDR: u32 = 0x800;
+pub const xAPIC_BASE_ADDR: usize = 0xFEE00000;
+pub const x2APIC_BASE_MSR_ADDR: u32 = 0x800;
 
 /// Type for representing the mode of the core-local APIC.
 enum Mode {

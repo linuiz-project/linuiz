@@ -15,7 +15,7 @@ impl Page {
         Self { index }
     }
 
-    pub const fn from_addr(addr: Address<Virtual>) -> Self {
+    pub const fn from_address(addr: Address<Virtual>) -> Self {
         if addr.is_aligned_to(0x1000) {
             Self { index: addr.page_index() }
         } else {
