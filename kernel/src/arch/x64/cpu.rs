@@ -1,13 +1,13 @@
 pub mod cpuid {
     pub use raw_cpuid::*;
+    use spin::Lazy;
 
-    lazy_static::lazy_static! {
-        pub static ref CPUID: CpuId = CpuId::new();
-        pub static ref FEATURE_INFO: FeatureInfo = CPUID.get_feature_info().expect("no CPUID.01H support");
-        pub static ref EXT_FEATURE_INFO: Option<ExtendedFeatures> = CPUID.get_extended_feature_info();
-        pub static ref EXT_FUNCTION_INFO: Option<ExtendedProcessorFeatureIdentifiers> = CPUID.get_extended_processor_and_feature_identifiers();
-        pub static ref VENDOR_INFO: Option<VendorInfo> = CPUID.get_vendor_info();
-    }
+    pub static CPUID: Lazy<CpuId> = Lazy::new(|| CpuId::new());
+    pub static FEATURE_INFO: Lazy<FeatureInfo> = Lazy::new(|| CPUID.get_feature_info().expect("no CPUID.01H support"));
+    pub static EXT_FEATURE_INFO: Lazy<Option<ExtendedFeatures>> = Lazy::new(|| CPUID.get_extended_feature_info());
+    pub static EXT_FUNCTION_INFO: Lazy<Option<ExtendedProcessorFeatureIdentifiers>> =
+        Lazy::new(|| CPUID.get_extended_processor_and_feature_identifiers());
+    pub static VENDOR_INFO: Lazy<Option<VendorInfo>> = Lazy::new(|| CPUID.get_vendor_info());
 }
 
 /// Reads [`crate::regisers::x86_64::msr::IA32_APIC_BASE`] to determine whether the current core

@@ -103,9 +103,9 @@ impl PIC {
 /// A pair of chained PIC controllers.
 ///
 /// REMARK: This is the standard setup on x86.
-pub struct PICS([PIC; 2]);
+pub struct Pics([PIC; 2]);
 
-impl PICS {
+impl Pics {
     /// Create a new interface for the standard PIC1 and PIC2 controllers, specifying the desired interrupt offsets.
     const unsafe fn new(base_irq: u8) -> Self {
         Self([
@@ -184,9 +184,11 @@ impl PICS {
 
 // This is a lazy static to allow *not* initializing it on systems that don't
 // support it (when software properly checks for support).
-lazy_static::lazy_static! {
-    static ref PIC8259: spin::Mutex<PICS> = spin::Mutex::new(unsafe { PICS::new(32) });
-}
+static PIC8259: spin::Lazy<spin::Mutex<Pics>> = spin::Lazy::new(|| {
+    spin::Mutex::new(unsafe {
+        Pics::new(32 /* TODO use dynamic base */)
+    })
+});
 
 /// Sets the enabled interrupt lines for the 8259 PIC.
 ///

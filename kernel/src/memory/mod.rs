@@ -9,18 +9,17 @@ pub use frame_manager::*;
 pub use page_manager::*;
 pub use paging::*;
 
-use core::{alloc::GlobalAlloc, cell::OnceCell};
 use libkernel::{Address, Virtual};
 use spin::Once;
 
-struct GlobalAllocator<'m>(OnceCell<&'m dyn GlobalAlloc>);
+struct GlobalAllocator<'m>(Once<&'m dyn core::alloc::GlobalAlloc>);
 // SAFETY: `GlobalAlloc` trait requires `Send`.
 unsafe impl Send for GlobalAllocator<'_> {}
 // SAFETY: `GlobalAlloc` trait requires `Sync`.
 unsafe impl Sync for GlobalAllocator<'_> {}
 
 /// SAFETY: This struct is a simple wrapper around `GlobalAlloc` itself, and so necessarily implements its safety invariants.
-unsafe impl GlobalAlloc for GlobalAllocator<'_> {
+unsafe impl core::alloc::GlobalAlloc for GlobalAllocator<'_> {
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
         match self.0.get() {
             Some(global_allocator) => global_allocator.alloc(layout),
@@ -38,13 +37,12 @@ unsafe impl GlobalAlloc for GlobalAllocator<'_> {
 }
 
 #[global_allocator]
-static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator(OnceCell::new());
+static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator(Once::new());
+static KERNEL_MALLOC: Once<slob::SLOB<'static>> = Once::new();
 
-pub unsafe fn set_global_allocator(galloc: &'static dyn GlobalAlloc) {
-    if GLOBAL_ALLOCATOR.0.set(galloc).is_err() {
-        error!("Global allocator is already set.");
-        crate::interrupts::wait_loop();
-    }
+pub unsafe fn init_global_allocator(base_alloc_page: libkernel::memory::Page) {
+    KERNEL_MALLOC.call_once(|| slob::SLOB::new(base_alloc_page));
+    GLOBAL_ALLOCATOR.0.call_once(|| KERNEL_MALLOC.get().unwrap());
 }
 
 fn get_limine_mmap() -> &'static [limine::LimineMemmapEntry] {

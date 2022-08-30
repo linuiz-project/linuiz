@@ -40,14 +40,14 @@ pub fn init_devices() {
 
             kernel_page_manager.map_mmio(device_hhdm_page, device_frame_index as usize, kernel_frame_manager).unwrap();
 
-            let vendor_id = device_hhdm_page.as_ptr::<crate::num::LittleEndianU16>().read_volatile().get();
+            let vendor_id = device_hhdm_page.address().as_ptr::<crate::num::LittleEndianU16>().read_volatile().get();
             if vendor_id > u16::MIN && vendor_id < u16::MAX {
                 debug!(
                     "Configuring PCIe device: [{:0>2}:{:0>2}:{:0>2}.00@{:#X}]",
                     segment_index, bus_index, device_index, device_base_addr
                 );
 
-                if let DeviceVariant::Standard(pci_device) = new_device(device_hhdm_page.as_mut_ptr()) {
+                if let DeviceVariant::Standard(pci_device) = new_device(device_hhdm_page.address().as_mut_ptr()) {
                     debug!("{:#?}", pci_device);
                     pci_devices.push(SingleOwner::new(pci_device));
                 }

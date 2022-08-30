@@ -153,12 +153,12 @@ pub fn common_interrupt_handler(
             {
                 let control_ptr = arch_context.0.rdi as *mut libkernel::syscall::Control;
 
-                if !crate::memory::get_kernel_page_manager()
-                    .is_mapped(libkernel::memory::Page::from_index((control_ptr as usize) / 0x1000))
-                {
-                    arch_context.0.rsi = libkernel::syscall::Error::ControlNotMapped as u64;
-                    return;
-                }
+                // if !crate::memory::get_kernel_page_manager()
+                //     .is_mapped(libkernel::memory::Page::from_index((control_ptr as usize) / 0x1000))
+                // {
+                //     arch_context.0.rsi = libkernel::syscall::Error::ControlNotMapped as u64;
+                //     return;
+                // }
 
                 arch_context.0.rsi = 0xDEADC0DE;
             }
@@ -181,13 +181,6 @@ type ExceptionHandler = fn(ArchException);
 static EXCEPTION_HANDLER: SyncUnsafeCell<ExceptionHandler> =
     SyncUnsafeCell::new(|exception| panic!("\n{:#?}", exception));
 
-/// Sets the common exception handler.
-///
-/// SAFETY: The caller must ensure the provided function handles exceptions in a valid way.
-pub unsafe fn set_common_exception_handler(handler: ExceptionHandler) {
-    *EXCEPTION_HANDLER.get() = handler;
-}
-
 /// Gets the current common exception handler.
 #[inline]
 pub fn get_common_exception_handler() -> &'static ExceptionHandler {
@@ -197,13 +190,6 @@ pub fn get_common_exception_handler() -> &'static ExceptionHandler {
 /* NON-EXCEPTION IRQ HANDLING */
 type InterruptHandler = fn(u64, &mut ControlFlowContext, &mut ArchContext);
 static INTERRUPT_HANDLER: SyncUnsafeCell<InterruptHandler> = SyncUnsafeCell::new(common_interrupt_handler);
-
-/// Sets the common interrupt handler.
-///
-/// SAFETY: The caller must ensure the provided function handles interrupts in a valid way.
-pub unsafe fn set_common_interrupt_handler(handler: InterruptHandler) {
-    *INTERRUPT_HANDLER.get() = handler;
-}
 
 /// Gets the current common interrupt handler.
 #[inline]

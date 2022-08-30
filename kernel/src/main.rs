@@ -76,14 +76,6 @@ fn alloc_error(error: core::alloc::Layout) -> ! {
     crate::interrupts::wait_loop()
 }
 
-lazy_static::lazy_static! {
-    /// We must take care not to call any allocating functions, or reference KMALLOC itself,
-    /// prior to initializing memory (frame/page manager). The SLOB *immtediately* configures
-    /// its own allocation table, utilizing both of the aforementioned managers.
-    /// TODO this shouldn't be lazy init. Definitely manual init.
-    pub static ref KMALLOC: crate::memory::slob::SLOB<'static> = unsafe { crate::memory::slob::SLOB::new() };
-}
-
 pub const LIMINE_REV: u64 = 0;
 static LIMINE_KERNEL_FILE: limine::LimineKernelFileRequest = limine::LimineKernelFileRequest::new(0);
 static LIMINE_INFO: limine::LimineBootInfoRequest = limine::LimineBootInfoRequest::new(LIMINE_REV);
@@ -103,7 +95,7 @@ unsafe extern "C" fn _entry() -> ! {
     {
         let con_out_mut = &mut *CON_OUT.get();
         con_out_mut.init(crate::memory::io::SerialSpeed::S115200);
-        crate::stdout::set_stdout(con_out_mut, log::LevelFilter::Debug);
+        crate::stdout::set_stdout(con_out_mut, log::LevelFilter::Trace);
     }
 
     info!("Successfully loaded into kernel.");
@@ -317,7 +309,9 @@ unsafe extern "C" fn _entry() -> ! {
         page_manager.write_cr3();
         debug!("Kernel has finalized control of page tables.");
         debug!("Assigning global allocator...");
-        crate::memory::set_global_allocator(&*crate::KMALLOC);
+        crate::memory::init_global_allocator(libkernel::memory::Page::from_index(
+            (384 * libkernel::memory::PML4_ENTRY_MEM_SIZE) / 0x1000,
+        ));
 
         #[cfg(target_arch = "x86_64")]
         {
@@ -472,7 +466,7 @@ unsafe fn _smp_entry() -> ! {
 fn syscall_test() -> ! {
     use libkernel::syscall;
     let control = syscall::Control { id: syscall::ID::Test, blah: 0xD3ADC0D3 };
-    // TODO don't construct a new timer for every instance, use local timer
+    // TODO use local timer
     let clock = crate::time::clock::get();
 
     loop {
@@ -495,10 +489,26 @@ fn syscall_test() -> ! {
     }
 }
 
+fn alloc_test() -> ! {
+    loop {
+        use alloc::vec::Vec;
+        let mut vec = Vec::new();
+        for index in 0..1024 {
+            vec.push(index);
+        }
+
+        info!("{:?}", vec);
+    }
+}
+
 /// SAFETY: This function invariantly assumes it will be called only once per core.
 #[inline(never)]
 pub(self) unsafe fn kernel_thread_setup() -> ! {
     crate::local_state::init(0);
+
+    // if crate::arch::x64::cpu::is_bsp() {
+    //     crate::memory::get_kernel_page_manager().print_pml4();
+    // }
 
     // use crate::registers::x64::RFlags;
     use crate::{local_state::try_push_task, scheduling::*};
@@ -521,6 +531,25 @@ pub(self) unsafe fn kernel_thread_setup() -> ! {
         crate::memory::RootPageTable::read(),
     ))
     .unwrap();
+
+    // try_push_task(Task::new(
+    //     TaskPriority::new(3).unwrap(),
+    //     alloc_test,
+    //     &TaskStackOption::Pages(1),
+    //     {
+    //         #[cfg(target_arch = "x86_64")]
+    //         {
+    //             (
+    //                 crate::arch::x64::cpu::GeneralContext::empty(),
+    //                 crate::arch::x64::cpu::SpecialContext::with_kernel_segments(
+    //                     crate::arch::x64::registers::RFlags::INTERRUPT_FLAG,
+    //                 ),
+    //             )
+    //         }
+    //     },
+    //     crate::memory::RootPageTable::read(),
+    // ))
+    // .unwrap();
 
     trace!("Beginning scheduling...");
     crate::local_state::try_begin_scheduling();

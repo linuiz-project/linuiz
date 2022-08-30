@@ -55,33 +55,40 @@ impl<T: crate::memory::io::PortReadWrite> Register<'_, T> {
 pub struct AcpiHandler;
 
 impl acpi::AcpiHandler for AcpiHandler {
-    unsafe fn map_physical_region<T>(&self, physical_address: usize, size: usize) -> acpi::PhysicalMapping<Self, T> {
+    unsafe fn map_physical_region<T>(&self, address: usize, size: usize) -> acpi::PhysicalMapping<Self, T> {
         let hhdm_base_address = get_kernel_hhdm_address().as_usize();
         // The RSDP address provided by Limine resides within the HHDM, but the other pointers do not. This logic
         // accounts for that quirk.
-        let hhdm_physical_address =
-            if physical_address > hhdm_base_address { physical_address } else { hhdm_base_address + physical_address };
+        let hhdm_physical_address = if address > hhdm_base_address { address } else { hhdm_base_address + address };
 
         let kernel_frame_manager = crate::memory::get_kernel_frame_manager();
         let kernel_page_manager = crate::memory::get_kernel_page_manager();
         for page_base in (hhdm_physical_address..(hhdm_physical_address + size)).step_by(0x1000) {
             let page = libkernel::memory::Page::from_index(page_base / 0x1000);
 
+            trace!("ACPI MAP: {:?}", page);
+
             if !kernel_page_manager.is_mapped(page) {
                 kernel_page_manager
                     .map(
                         &page,
-                        physical_address / 0x1000,
+                        (hhdm_physical_address - hhdm_base_address) / 0x1000,
                         false,
                         crate::memory::PageAttributes::RW,
                         kernel_frame_manager,
                     )
                     .unwrap();
+            } else {
+                kernel_page_manager.set_page_attributes(
+                    &page,
+                    crate::memory::PageAttributes::RW,
+                    crate::memory::AttributeModify::Set,
+                )
             }
         }
 
         acpi::PhysicalMapping::new(
-            physical_address,
+            address,
             core::ptr::NonNull::new_unchecked(hhdm_physical_address as *mut _),
             size,
             size,
@@ -199,6 +206,8 @@ static RSDP: Once<Mutex<AcpiTables<AcpiHandler>>> = Once::new();
 /// SAFETY: This this method must be called before bootloader memory is reclaimed.
 pub unsafe fn init_interface() {
     RSDP.call_once(|| {
+        trace!("Initializing RSDP.");
+
         Mutex::new({
             let handler = AcpiHandler;
             let address = LIMINE_RSDP
@@ -224,7 +233,10 @@ static PLATFORM_INFO: Once<Mutex<PlatformInfo>> = Once::new();
 /// Returns an insatnce of the machine's MADT, or panics of it isn't present.
 pub fn get_platform_info() -> MutexGuard<'static, PlatformInfo> {
     PLATFORM_INFO
-        .call_once(|| Mutex::new(PlatformInfo::new(&*get_rsdp()).expect("error parsing machine platform info")))
+        .call_once(|| {
+            trace!("Initializing platform info.");
+            Mutex::new(PlatformInfo::new(&*get_rsdp()).expect("error parsing machine platform info"))
+        })
         .lock()
 }
 
@@ -232,6 +244,8 @@ static FADT: Once<Mutex<PhysicalMapping<AcpiHandler, Fadt>>> = Once::new();
 /// Returns an instance of the machine's FADT, or panics if it isn't present.
 pub fn get_fadt() -> MutexGuard<'static, PhysicalMapping<AcpiHandler, Fadt>> {
     FADT.call_once(|| {
+        trace!("Initializing FADT.");
+
         Mutex::new({
             let rsdp = get_rsdp();
 
@@ -250,6 +264,8 @@ static MCFG: Once<Mutex<PhysicalMapping<AcpiHandler, Mcfg>>> = Once::new();
 /// Returns an instance of the machine's MCFG, or panics if it isn't present.
 pub fn get_mcfg() -> MutexGuard<'static, PhysicalMapping<AcpiHandler, Mcfg>> {
     MCFG.call_once(|| {
+        trace!("Initializing MCFG.");
+
         Mutex::new({
             let rsdp = get_rsdp();
 

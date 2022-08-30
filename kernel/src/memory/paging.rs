@@ -212,6 +212,7 @@ impl<L: HeirarchicalLevel> PageTable<L> {
                 phys_mapped_page
                     .forward_checked(entry.get_frame_index())
                     .unwrap()
+                    .address()
                     .as_ptr::<PageTable<L::NextLevel>>()
                     .as_ref()
                     .unwrap(),
@@ -234,6 +235,7 @@ impl<L: HeirarchicalLevel> PageTable<L> {
                 phys_mapped_page
                     .forward_checked(entry.get_frame_index())
                     .unwrap()
+                    .address()
                     .as_mut_ptr::<PageTable<L::NextLevel>>()
                     .as_mut()
                     .unwrap(),
@@ -272,6 +274,6 @@ impl<L: HeirarchicalLevel> PageTable<L> {
             sub_table_page.clear_memory();
         }
 
-        sub_table_page.as_mut_ptr::<PageTable<L::NextLevel>>().as_mut().unwrap()
+        &mut *sub_table_page.address().as_mut_ptr::<PageTable<L::NextLevel>>()
     }
 }

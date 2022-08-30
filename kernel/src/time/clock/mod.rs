@@ -28,20 +28,17 @@ pub trait Clock: Send + Sync {
     }
 }
 
-// TODO system clock should not be able to be changed, for issues with race conditions and preemption while locked
 static SYSTEM_CLOCK: spin::Once<Box<dyn Clock>> = spin::Once::new();
 
 /// Sets the given [`Clock`] as the global system clock.
 ///
 /// SAFETY: If this function is called within an interrupt context, a deadlock may occur.
-pub fn get() -> &'static dyn Clock {
-    SYSTEM_CLOCK
-        .call_once(|| {
-            crate::interrupts::without(|| {
-                // TODO support invariant TSC as clock
+pub fn get() -> &'static Box<dyn Clock> {
+    SYSTEM_CLOCK.call_once(|| {
+        crate::interrupts::without(|| {
+            // TODO support invariant TSC as clock
 
-                Box::new(acpi::AcpiClock::load().unwrap())
-            })
+            Box::new(acpi::AcpiClock::load().unwrap())
         })
-        .as_ref()
+    })
 }

@@ -1,8 +1,8 @@
+use alloc::collections::VecDeque;
 use core::{
     mem::MaybeUninit,
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
 };
-use crossbeam_queue::SegQueue;
 use libkernel::memory::PageAlignedBox;
 
 static NEXT_THREAD_ID: AtomicU64 = AtomicU64::new(1);
@@ -107,17 +107,15 @@ impl core::fmt::Debug for Task {
     }
 }
 
-pub static mut GLOBAL_TASK_QUEUE: SegQueue<Task> = SegQueue::new();
-
 pub struct Scheduler {
     enabled: AtomicBool,
-    tasks: SegQueue<Task>,
+    tasks: VecDeque<Task>,
     total_priority: AtomicU64,
 }
 
 impl Scheduler {
     pub fn new(enabled: bool) -> Self {
-        Self { enabled: AtomicBool::new(enabled), tasks: SegQueue::new(), total_priority: AtomicU64::new(0) }
+        Self { enabled: AtomicBool::new(enabled), tasks: VecDeque::new(), total_priority: AtomicU64::new(0) }
     }
 
     /// Enables the scheduler to pop tasks.
@@ -141,16 +139,16 @@ impl Scheduler {
     }
 
     /// Pushes a new task to the scheduling queue.
-    pub fn push_task(&self, task: Task) {
+    pub fn push_task(&mut self, task: Task) {
         self.total_priority.fetch_add(task.priority().get() as u64, Ordering::Relaxed);
-        self.tasks.push(task);
+        self.tasks.push_back(task);
     }
 
     /// If the scheduler is enabled, attempts to return a new task from
     /// the task queue. Returns `None` if the queue is empty.
-    pub fn pop_task(&self) -> Option<Task> {
+    pub fn pop_task(&mut self) -> Option<Task> {
         if self.enabled.load(Ordering::Relaxed) {
-            self.tasks.pop().map(|task| {
+            self.tasks.pop_front().map(|task| {
                 self.total_priority.fetch_sub(task.priority().get() as u64, Ordering::Relaxed);
                 task
             })
@@ -161,5 +159,10 @@ impl Scheduler {
 
     pub fn get_avg_prio(&self) -> u64 {
         self.total_priority.load(Ordering::Relaxed).checked_div(self.tasks.len() as u64).unwrap_or(0)
+    }
+
+    #[inline]
+    pub fn get_task_count(&self) -> usize {
+        self.tasks.len()
     }
 }

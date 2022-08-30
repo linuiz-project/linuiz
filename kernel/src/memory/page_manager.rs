@@ -33,7 +33,7 @@ impl VirtualMapper {
     }
 
     fn mapped_offset(&self) -> Address<Virtual> {
-        self.mapped_page.base_addr()
+        self.mapped_page.address()
     }
 
     /* ACQUIRE STATE */
@@ -43,50 +43,50 @@ impl VirtualMapper {
     }
 
     fn pml4(&self) -> Option<&PageTable<Level4>> {
-        unsafe { self.pml4_page().as_ptr::<PageTable<Level4>>().as_ref() }
+        unsafe { self.pml4_page().address().as_ptr::<PageTable<Level4>>().as_ref() }
     }
 
     fn pml4_mut(&mut self) -> Option<&mut PageTable<Level4>> {
-        unsafe { self.pml4_page().as_mut_ptr::<PageTable<Level4>>().as_mut() }
+        unsafe { self.pml4_page().address().as_mut_ptr::<PageTable<Level4>>().as_mut() }
     }
 
     fn get_page_entry(&self, page: &Page) -> Option<&PageTableEntry> {
         let mapped_page = self.mapped_page;
-        let addr = page.base_addr();
+        let address = page.address();
 
         unsafe {
             self.pml4()
-                .and_then(|p4| p4.sub_table(addr.p4_index(), &mapped_page))
-                .and_then(|p3| p3.sub_table(addr.p3_index(), &mapped_page))
-                .and_then(|p2| p2.sub_table(addr.p2_index(), &mapped_page))
-                .map(|p1| p1.get_entry(addr.p1_index()))
+                .and_then(|p4| p4.sub_table(address.p4_index(), &mapped_page))
+                .and_then(|p3| p3.sub_table(address.p3_index(), &mapped_page))
+                .and_then(|p2| p2.sub_table(address.p2_index(), &mapped_page))
+                .map(|p1| p1.get_entry(address.p1_index()))
         }
     }
 
     fn get_page_entry_mut(&mut self, page: &Page) -> Option<&mut PageTableEntry> {
         let mapped_page = self.mapped_page;
-        let addr = page.base_addr();
+        let address = page.address();
 
         unsafe {
             self.pml4_mut()
-                .and_then(|p4| p4.sub_table_mut(addr.p4_index(), &mapped_page))
-                .and_then(|p3| p3.sub_table_mut(addr.p3_index(), &mapped_page))
-                .and_then(|p2| p2.sub_table_mut(addr.p2_index(), &mapped_page))
-                .map(|p1| p1.get_entry_mut(addr.p1_index()))
+                .and_then(|p4| p4.sub_table_mut(address.p4_index(), &mapped_page))
+                .and_then(|p3| p3.sub_table_mut(address.p3_index(), &mapped_page))
+                .and_then(|p2| p2.sub_table_mut(address.p2_index(), &mapped_page))
+                .map(|p1| p1.get_entry_mut(address.p1_index()))
         }
     }
 
     fn get_page_entry_create(&mut self, page: &Page, frame_manager: &'static FrameManager<'_>) -> &mut PageTableEntry {
         let mapped_page = self.mapped_page;
-        let addr = page.base_addr();
+        let address = page.address();
 
         unsafe {
             self.pml4_mut()
                 .unwrap()
-                .sub_table_create(addr.p4_index(), &mapped_page, frame_manager)
-                .sub_table_create(addr.p3_index(), &mapped_page, frame_manager)
-                .sub_table_create(addr.p2_index(), &mapped_page, frame_manager)
-                .get_entry_mut(addr.p1_index())
+                .sub_table_create(address.p4_index(), &mapped_page, frame_manager)
+                .sub_table_create(address.p3_index(), &mapped_page, frame_manager)
+                .sub_table_create(address.p2_index(), &mapped_page, frame_manager)
+                .get_entry_mut(address.p1_index())
         }
     }
 
@@ -145,8 +145,8 @@ impl PageManager {
                 let pml4_mapped = mapped_page.forward_checked(root_index).unwrap();
 
                 match pml4_copy {
-                    Some(pml4_copy) => pml4_mapped.as_mut_ptr::<PageTable<Level4>>().write(pml4_copy),
-                    None => core::ptr::write_bytes(pml4_mapped.as_mut_ptr::<u8>(), 0, 0x1000),
+                    Some(pml4_copy) => pml4_mapped.address().as_mut_ptr::<PageTable<Level4>>().write(pml4_copy),
+                    None => core::ptr::write_bytes(pml4_mapped.address().as_mut_ptr::<u8>(), 0, 0x1000),
                 }
 
                 VirtualMapper::new(mapped_page, root_index)
@@ -190,6 +190,10 @@ impl PageManager {
             // freed, an interrupt occurs, and then the page is memory referenced (and thus, a page
             // pointing to a frame it doesn't own is accessed).
             let mut map_write = self.virtual_map.write();
+
+            if page.index() < 10000 {
+                info!("{:?} -> {:#X}    :{:?}", page, frame_index, attributes);
+            }
 
             // Attempt to acquire the requisite frame, following the outlined parsing of `lock_frame`.
             let frame_result = if lock_frame { frame_manager.lock(frame_index) } else { Ok(frame_index) };
@@ -362,6 +366,7 @@ impl PageManager {
                 vmap.mapped_page
                     .forward_checked(vmap.root_frame_index)
                     .unwrap()
+                    .address()
                     .as_ptr::<PageTable<Level4>>()
                     .read_volatile()
             }
@@ -371,6 +376,13 @@ impl PageManager {
     pub fn print_walk(&self, address: Address<Virtual>) {
         interrupts::without(|| {
             self.virtual_map.read().print_walk(address);
+        });
+    }
+
+    pub fn print_pml4(&self) {
+        interrupts::without(|| {
+            let virtual_map = self.virtual_map.read();
+            debug!("{:?}", virtual_map.pml4());
         });
     }
 }

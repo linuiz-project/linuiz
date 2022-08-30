@@ -43,16 +43,8 @@ impl Page {
         self.index
     }
 
-    pub const fn base_addr(&self) -> Address<Virtual> {
-        unsafe { crate::Address::new_unsafe(self.index * 0x1000) }
-    }
-
-    pub const fn as_ptr<T>(&self) -> *const T {
-        (self.index * 0x1000) as *const T
-    }
-
-    pub const fn as_mut_ptr<T>(&self) -> *mut T {
-        (self.index * 0x1000) as *mut T
+    pub const fn address(&self) -> Address<Virtual> {
+        crate::Address::<Virtual>::new_truncate(self.index * 0x1000)
     }
 
     pub fn to(&self, count: usize) -> Option<PageIterator> {
@@ -69,7 +61,7 @@ impl Page {
 
     /// Clears the 4KiB region from this page's start to its end.
     pub unsafe fn clear_memory(&self) {
-        core::ptr::write_bytes(self.as_mut_ptr::<u8>(), 0, 0x1000);
+        core::ptr::write_bytes(self.address().as_mut_ptr::<u8>(), 0, 0x1000);
     }
 }
 

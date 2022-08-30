@@ -140,7 +140,7 @@ impl Address<Virtual> {
 
     #[inline(always)]
     pub const fn new_truncate(addr: usize) -> Self {
-        Self((((addr << 16) as isize) >> 16) as usize, PhantomData)
+        Self((((addr << 16) as i64) >> 16) as usize, PhantomData)
     }
 
     #[inline(always)]
