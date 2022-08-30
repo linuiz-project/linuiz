@@ -186,11 +186,13 @@ impl super::Capability for MSIX<'_> {
             let hhdm_offset_address = crate::memory::get_kernel_hhdm_address() + address.as_usize();
 
             for size_offset in (0..size).step_by(0x1000) {
-                page_manager.map_mmio(
-                    Page::from_address(hhdm_offset_address + size_offset),
-                    address.frame_index() + (size / 0x1000),
-                    frame_manager,
-                );
+                page_manager
+                    .map_mmio(
+                        Page::from_address(hhdm_offset_address + size_offset),
+                        address.frame_index() + (size / 0x1000),
+                        frame_manager,
+                    )
+                    .unwrap();
             }
 
             core::slice::from_raw_parts(hhdm_offset_address.as_ptr(), size / core::mem::size_of::<Message>())

@@ -2,7 +2,7 @@ use crate::memory::io::{PortAddress, ReadOnlyPort, WriteOnlyPort};
 use crate::memory::{ensure_hhdm_frame_is_mapped, get_kernel_hhdm_address, PageAttributes};
 use acpi::mcfg::Mcfg;
 use acpi::{fadt::Fadt, sdt::Signature, AcpiTables, PhysicalMapping, PlatformInfo};
-use spin::{Mutex, MutexGuard, Once, RwLock, RwLockWriteGuard};
+use spin::{Mutex, MutexGuard, Once};
 
 pub enum Register<'a, T: crate::memory::io::PortReadWrite> {
     IO(crate::memory::io::ReadWritePort<T>),

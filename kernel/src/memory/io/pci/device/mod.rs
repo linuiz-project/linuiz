@@ -1,7 +1,7 @@
 pub mod standard;
 
 use core::{fmt, marker::PhantomData};
-use libkernel::{Address, Physical, Virtual};
+use libkernel::{Address, Physical};
 
 use crate::num::LittleEndianU32;
 
@@ -138,7 +138,11 @@ pub struct Device<T: DeviceType> {
     phantom: PhantomData<T>,
 }
 
-pub fn new_device(base_ptr: *mut LittleEndianU32) -> DeviceVariant {
+// SAFETY: PCI MMIO (and so, the pointers used for it) utilize the global HHDM, and so can be sent between threads.
+unsafe impl<T: DeviceType> Send for Device<T> {}
+
+/// SAFETY: Caller must ensure that the provided base pointer is a valid (and mapped) PCI MMIO header base.
+pub unsafe fn new_device(base_ptr: *mut LittleEndianU32) -> DeviceVariant {
     let header_type = (unsafe { base_ptr.add(0x3).read_volatile().get() } >> 16) & 0x3F;
 
     // mask off the multifunction bit

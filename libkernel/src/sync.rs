@@ -1,5 +1,36 @@
 use alloc::sync::Arc;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::{
+    cell::UnsafeCell,
+    sync::atomic::{AtomicBool, Ordering},
+};
+
+pub struct SingleOwner<T> {
+    owned: AtomicBool,
+    value: UnsafeCell<T>,
+}
+
+unsafe impl<T: Send> Send for SingleOwner<T> {}
+unsafe impl<T: Send> Sync for SingleOwner<T> {}
+
+impl<T> SingleOwner<T> {
+    pub fn new(value: T) -> Self {
+        Self { owned: AtomicBool::new(false), value: UnsafeCell::new(value) }
+    }
+
+    pub fn acquire(&self) -> Option<&mut T> {
+        match self.owned.compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed) {
+            // SAFETY: We know no other mutable borrows will be handed out until `return()` is called.
+            Ok(_) => Some(unsafe { &mut *self.value.get() }),
+            Err(_) => None,
+        }
+    }
+
+    pub unsafe fn release(&self) {
+        if let Err(_) = self.owned.compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed) {
+            panic!("cannot release a `SingleOwner` that is not acquired");
+        }
+    }
+}
 
 pub struct SuccessSource(Arc<AtomicBool>, Arc<AtomicBool>);
 

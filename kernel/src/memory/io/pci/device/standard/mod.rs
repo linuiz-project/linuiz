@@ -1,10 +1,7 @@
 mod capabilities;
 pub use capabilities::*;
 
-use crate::{
-    arch::x64::structures::gdt::init,
-    memory::io::pci::{Device, DeviceType, Standard, BAR},
-};
+use crate::memory::io::pci::{Device, DeviceType, Standard, BAR};
 use bit_field::BitField;
 
 impl Device<Standard> {

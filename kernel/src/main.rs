@@ -328,7 +328,7 @@ unsafe extern "C" fn _entry() -> ! {
         debug!("Initializing ACPI interface...");
         crate::tables::acpi::init_interface();
         debug!("Initializing PCI devices...");
-        crate::memory::io::pci::init_pcie_devices();
+        crate::memory::io::pci::init_devices();
 
         debug!("Boot core will release other cores, and then wait for all cores to update root page table.");
         SMP_MEMORY_READY.store(true, Ordering::Relaxed);
