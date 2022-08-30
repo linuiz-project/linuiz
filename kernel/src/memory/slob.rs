@@ -180,8 +180,6 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
         crate::interrupts::without(|| {
             let mut table = self.table.write();
 
-            info!("{:?}", layout);
-
             let align_mask = usize::max(layout.align() / Self::BLOCK_SIZE, 1) - 1;
             let size_in_blocks = libkernel::align_up_div(layout.size(), Self::BLOCK_SIZE);
 

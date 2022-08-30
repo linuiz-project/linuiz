@@ -58,8 +58,6 @@ impl Task {
         arch_context: crate::interrupts::ArchContext,
         root_page_table_args: crate::memory::RootPageTable,
     ) -> Self {
-        let rip = function as usize as u64;
-
         let stack = match stack {
             TaskStackOption::Auto => PageAlignedBox::new_uninit_slice_in(
                 Self::DEFAULT_STACK_SIZE,

@@ -170,7 +170,8 @@ impl super::Capability for MSIX<'_> {
         use libkernel::memory::Page;
 
         let bar1 = bars[1].expect("MSI-X capability utilizes BAR 1");
-        let bar2 = bars[2].expect("MSI-X capability utilizes BAR 2");
+        // TODO support pending bits BAR
+        // let bar2 = bars[2].expect("MSI-X capability utilizes BAR 2");
 
         /* BAR 1 */
         let messages = {

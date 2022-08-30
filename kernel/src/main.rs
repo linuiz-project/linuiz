@@ -416,14 +416,10 @@ unsafe fn configure_acpi() -> ! {
 
     /* enable ACPI SCI interrupts */
     {
-        use crate::tables::acpi::PM1a_EVT_BLK;
-
         // TODO clean this filthy mess up
 
         let pm1a_evt_blk =
             &crate::tables::acpi::get_fadt().pm1a_event_block().expect("no `PM1a_EVT_BLK` found in FADT");
-        let mut pm1a_evt_blk_reg = crate::tables::acpi::Register::<PM1a_EVT_BLK>::new(pm1a_evt_blk)
-            .expect("failed to get register for `PM1a_EVT_BLK`");
 
         let mut reg = crate::tables::acpi::Register::<u16>::IO(crate::memory::io::ReadWritePort::new(
             (pm1a_evt_blk.address + ((pm1a_evt_blk.bit_width / 8) as u64)) as u16,
@@ -501,14 +497,12 @@ fn alloc_test() -> ! {
     }
 }
 
+const ALLOC_TEST: bool = false;
+
 /// SAFETY: This function invariantly assumes it will be called only once per core.
 #[inline(never)]
 pub(self) unsafe fn kernel_thread_setup() -> ! {
     crate::local_state::init(0);
-
-    // if crate::arch::x64::cpu::is_bsp() {
-    //     crate::memory::get_kernel_page_manager().print_pml4();
-    // }
 
     // use crate::registers::x64::RFlags;
     use crate::{local_state::try_push_task, scheduling::*};
@@ -532,24 +526,26 @@ pub(self) unsafe fn kernel_thread_setup() -> ! {
     ))
     .unwrap();
 
-    // try_push_task(Task::new(
-    //     TaskPriority::new(3).unwrap(),
-    //     alloc_test,
-    //     &TaskStackOption::Pages(1),
-    //     {
-    //         #[cfg(target_arch = "x86_64")]
-    //         {
-    //             (
-    //                 crate::arch::x64::cpu::GeneralContext::empty(),
-    //                 crate::arch::x64::cpu::SpecialContext::with_kernel_segments(
-    //                     crate::arch::x64::registers::RFlags::INTERRUPT_FLAG,
-    //                 ),
-    //             )
-    //         }
-    //     },
-    //     crate::memory::RootPageTable::read(),
-    // ))
-    // .unwrap();
+    if ALLOC_TEST {
+        try_push_task(Task::new(
+            TaskPriority::new(3).unwrap(),
+            alloc_test,
+            &TaskStackOption::Pages(1),
+            {
+                #[cfg(target_arch = "x86_64")]
+                {
+                    (
+                        crate::arch::x64::cpu::GeneralContext::empty(),
+                        crate::arch::x64::cpu::SpecialContext::with_kernel_segments(
+                            crate::arch::x64::registers::RFlags::INTERRUPT_FLAG,
+                        ),
+                    )
+                }
+            },
+            crate::memory::RootPageTable::read(),
+        ))
+        .unwrap();
+    }
 
     trace!("Beginning scheduling...");
     crate::local_state::try_begin_scheduling();

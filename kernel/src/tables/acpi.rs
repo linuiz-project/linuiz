@@ -332,29 +332,6 @@ pub fn init_aml_context() {
     });
 }
 
-bitflags::bitflags! {
-    #[repr(transparent)]
-    pub struct PM1a_EVT_BLK : u32 {
-        /* statuses */
-        const STATUS_TIMER = 1 << 0;
-        const STATUS_BUS_MASTER = 1 << 4;
-        const STATUS_GLOBAL =  1 << 5;
-        const STATUS_POWER_BUTTON =  1 << 8;
-        const STATUS_SLEEP_BUTTON =  1 << 9;
-        const STATUS_RTC =  1 << 10;
-        const STATUS_PCIe_WAKE =  1 << 14;
-        const STATUS_WAKE =  1 << 15;
-
-        /* enables */
-        const ENABLE_TIMER = 1 << 16;
-        const ENABLE_GLOBAL = 1 << 21;
-        const ENABLE_POWER_BUTTON = 1 << 24;
-        const ENABLE_SLEEP_BUTTON = 1 << 25;
-        const ENABLE_RTC = 1 << 26;
-        const ENABLE_PCIe_WAKE =  1 << 30;
-    }
-}
-
 use crate::memory::io;
 
 impl io::PortRead for PM1a_EVT_BLK {

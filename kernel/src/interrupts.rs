@@ -153,12 +153,12 @@ pub fn common_interrupt_handler(
             {
                 let control_ptr = arch_context.0.rdi as *mut libkernel::syscall::Control;
 
-                // if !crate::memory::get_kernel_page_manager()
-                //     .is_mapped(libkernel::memory::Page::from_index((control_ptr as usize) / 0x1000))
-                // {
-                //     arch_context.0.rsi = libkernel::syscall::Error::ControlNotMapped as u64;
-                //     return;
-                // }
+                if !crate::memory::get_kernel_page_manager()
+                    .is_mapped(libkernel::memory::Page::from_index((control_ptr as usize) / 0x1000))
+                {
+                    arch_context.0.rsi = libkernel::syscall::Error::ControlNotMapped as u64;
+                    return;
+                }
 
                 arch_context.0.rsi = 0xDEADC0DE;
             }

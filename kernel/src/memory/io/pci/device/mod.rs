@@ -147,7 +147,7 @@ pub unsafe fn new_device(base_ptr: *mut LittleEndianU32) -> DeviceVariant {
 
     // mask off the multifunction bit
     match header_type {
-        0x0 => DeviceVariant::Standard(unsafe { Device::<Standard> { base_ptr, phantom: PhantomData } }),
+        0x0 => DeviceVariant::Standard(Device::<Standard> { base_ptr, phantom: PhantomData }),
         0x1 => DeviceVariant::PCI2PCI(Device { base_ptr, phantom: PhantomData }),
         0x2 => DeviceVariant::PCI2CardBus(Device::<PCI2CardBus> { base_ptr, phantom: PhantomData }),
         header_type => {
