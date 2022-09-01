@@ -15,12 +15,9 @@
     ]
   },
   "executables": true,
-  "position-independent-executables": true,
-  "static-position-independent-executables": true,
   "os": "none",
-  "code-model": "kernel",
+  "code-model": "small",
   "eh-frame-header": false,
   "panic-strategy": "abort",
-  "disable-redzone": true,
-  "relocation-model": "pie"
+  "disable-redzone": true
 }

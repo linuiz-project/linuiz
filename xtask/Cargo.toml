@@ -9,6 +9,7 @@ edition = "2021"
 clap = { version = "*", features = ["derive"] }
 walkdir = "*"
 xshell = "*"
+miniz_oxide = "*"
 
 [profile.dev]
 debug = false

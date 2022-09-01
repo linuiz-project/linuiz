@@ -331,19 +331,3 @@ pub fn init_aml_context() {
         })
     });
 }
-
-use crate::memory::io;
-
-impl io::PortRead for PM1a_EVT_BLK {
-    unsafe fn read(port: PortAddress) -> Self {
-        Self::from_bits_truncate(io::_read32(port))
-    }
-}
-
-impl io::PortWrite for PM1a_EVT_BLK {
-    unsafe fn write(port: PortAddress, value: Self) {
-        io::_write32(port, value.bits());
-    }
-}
-
-impl io::PortReadWrite for PM1a_EVT_BLK {}
