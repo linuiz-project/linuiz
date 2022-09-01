@@ -1,0 +1,22 @@
+[package]
+name = "kernel"
+version = "0.0.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+libkernel = { path = "../libkernel/" }
+log = { version = "*", default-features = false }
+bit_field = "*"
+bitflags = "*"
+num_enum = { version = "*", default-features = false }
+spin = "*"
+paste = "*"
+acpi = { path = "../../../acpi/acpi/" }
+aml = "*"
+limine = { version = "*", features = ["requests-section"] }
+
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+x86_64 = "*"
+raw-cpuid = "*"
