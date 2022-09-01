@@ -142,6 +142,7 @@ impl PageManager {
         Self {
             virtual_map: spin::RwLock::new({
                 let root_index = frame_manager.lock_next().expect("Failed to lock frame for virtual addressor's PML4");
+
                 let pml4_mapped = mapped_page.forward_checked(root_index).unwrap();
 
                 match pml4_copy {

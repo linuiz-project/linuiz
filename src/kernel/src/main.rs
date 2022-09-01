@@ -13,30 +13,22 @@
 #![no_std]
 #![no_main]
 #![feature(
-    abi_efiapi,
-    abi_x86_interrupt,
-    once_cell,
-    const_mut_refs,
-    raw_ref_op,
-    const_option_ext,
-    naked_functions,
-    asm_sym,
     asm_const,
-    const_ptr_offset_from,
-    const_refs_to_cell,
-    exclusive_range_pattern,
-    raw_vec_internals,
-    allocator_api,
-    strict_provenance,
-    slice_ptr_get,
-    new_uninit,
-    inline_const,
+    asm_sym,
+    naked_functions,
+    abi_x86_interrupt,
     sync_unsafe_cell,
-    if_let_guard,
-    pointer_is_aligned,
-    core_intrinsics,
     panic_info_message,
-    alloc_error_handler
+    allocator_api,
+    once_cell,
+    pointer_is_aligned,
+    slice_ptr_get,
+    strict_provenance,
+    core_intrinsics,
+    alloc_error_handler,
+    exclusive_range_pattern,
+    raw_ref_op,
+    let_chains
 )]
 
 use core::sync::atomic::Ordering;
@@ -80,9 +72,17 @@ pub const LIMINE_REV: u64 = 0;
 static LIMINE_KERNEL_FILE: limine::LimineKernelFileRequest = limine::LimineKernelFileRequest::new(0);
 static LIMINE_INFO: limine::LimineBootInfoRequest = limine::LimineBootInfoRequest::new(LIMINE_REV);
 static LIMINE_SMP: limine::LimineSmpRequest = limine::LimineSmpRequest::new(LIMINE_REV).flags(0b1);
+static LIMINE_MODULES: limine::LimineModuleRequest = limine::LimineModuleRequest::new(LIMINE_REV);
+static LIMINE_STACK: limine::LimineStackSizeRequest =
+    limine::LimineStackSizeRequest::new(LIMINE_REV).stack_size(0x100000);
 
 static CON_OUT: core::cell::SyncUnsafeCell<crate::memory::io::Serial> =
     core::cell::SyncUnsafeCell::new(crate::memory::io::Serial::new(crate::memory::io::COM1));
+static DRIVERS_DATA: core::cell::SyncUnsafeCell<&'static [u8]> = core::cell::SyncUnsafeCell::new(
+    // SAFETY: Accesses to this slice will result in page faults, and that is the expected behaviour when this
+    //         value is not initialized.
+    unsafe { core::slice::from_raw_parts(core::ptr::null(), 0) },
+);
 static SMP_MEMORY_READY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 static SMP_MEMORY_INIT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
@@ -272,6 +272,28 @@ unsafe extern "C" fn _entry() -> ! {
                 )
                 .unwrap();
         });
+
+        /* save drivers data */
+        {
+            if let Some(modules) =
+                LIMINE_MODULES.get_response().get().and_then(|modules_response| modules_response.modules())
+            {
+                // Search specifically for 'drivers' module. This is a for loop to ensure forward compatibility if we ever load more than 1 module.
+                for module in modules.iter().filter(|module| module.path.to_string().unwrap().ends_with("drivers")) {
+                    let drivers_hhdm_ptr = module.base.as_ptr().unwrap();
+                    for base_offset in (0..(module.length as usize)).step_by(0x1000) {
+                        page_manager.set_page_attributes(
+                            &libkernel::memory::Page::from_ptr(drivers_hhdm_ptr.add(base_offset)),
+                            crate::memory::PageAttributes::RO,
+                            crate::memory::AttributeModify::Set,
+                        );
+                    }
+
+                    // Write pointer to driver data, so it is easily accessible after memory is switched to the kernel.
+                    DRIVERS_DATA.get().write(core::slice::from_raw_parts(drivers_hhdm_ptr, modules.len() as usize));
+                }
+            }
+        }
     }
 
     /* SMP init */

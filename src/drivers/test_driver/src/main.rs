@@ -1,11 +1,13 @@
 #![no_std]
 #![no_main]
+#![feature(start)]
 
 #[panic_handler]
-fn panic(info: &core::panic::PanicInfo) -> ! {
+fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {}
 }
 
-extern "sysv64" fn main() {
+#[start]
+extern "sysv64" fn _main() {
     loop {}
 }

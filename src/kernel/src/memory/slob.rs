@@ -13,30 +13,36 @@ impl BlockPage {
     const BLOCKS_PER: usize = u64::BITS as usize;
 
     /// Whether the block page is empty.
+    #[inline(always)]
     pub const fn is_empty(&self) -> bool {
         self.0 == u64::MIN
     }
 
     /// Whether the block page is full.
+    #[inline(always)]
     pub const fn is_full(&self) -> bool {
         self.0 == u64::MAX
     }
 
     /// Unset all of the block page's blocks.
-    pub const fn set_empty(&mut self) {
+    #[inline(always)]
+    pub fn set_empty(&mut self) {
         self.0 = u64::MIN;
     }
 
     /// Set all of the block page's blocks.
-    pub const fn set_full(&mut self) {
+    #[inline(always)]
+    pub fn set_full(&mut self) {
         self.0 = u64::MAX;
     }
 
+    #[inline(always)]
     pub const fn value(&self) -> &u64 {
         &self.0
     }
 
-    pub const fn value_mut(&mut self) -> &mut u64 {
+    #[inline(always)]
+    pub fn value_mut(&mut self) -> &mut u64 {
         &mut self.0
     }
 }

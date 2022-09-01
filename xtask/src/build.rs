@@ -9,6 +9,27 @@ pub enum Architecture {
     rv64,
 }
 
+#[derive(ArgEnum, Debug, Clone, Copy)]
+pub enum Compression {
+    None,
+    Fast,
+    Small,
+    Smallest,
+    Default,
+}
+
+impl Compression {
+    fn as_u8(&self) -> u8 {
+        match self {
+            Compression::None => 0,
+            Compression::Fast => 1,
+            Compression::Small => 9,
+            Compression::Smallest => 10,
+            Compression::Default => 6,
+        }
+    }
+}
+
 #[derive(Parser)]
 pub struct Options {
     /// The compilation target for this build.
@@ -30,9 +51,14 @@ pub struct Options {
     /// Whether to use `cargo clippy` rather than `cargo build`.
     #[clap(short, long)]
     clippy: bool,
+
+    /// The compression level to use when compressing init device drivers.
+    #[clap(arg_enum, long, default_value = "default")]
+    compress: Compression,
 }
 
 static REQUIRED_ROOT_DIRS: [&str; 5] = ["resources/", ".hdd/", ".hdd/root/EFI/BOOT/", ".hdd/root/linuiz/", ".debug/"];
+static PACKAGED_DRIVERS: [&str; 1] = ["test_driver"];
 
 static LIMINE_DEFAULT_CFG: &str = "
     TIMEOUT=3
@@ -85,7 +111,8 @@ pub fn build(options: Options) -> Result<(), xshell::Error> {
         shell.copy_file(bootx64_efi_path.clone(), PathBuf::from(".hdd/root/EFI/BOOT/"))?;
     }
 
-    /* build workspace */
+    /* workspace */
+
     {
         let _dir = shell.push_dir("src/");
 
@@ -115,41 +142,73 @@ pub fn build(options: Options) -> Result<(), xshell::Error> {
         cmd!(shell, "cargo {arguments...}").run()?;
     }
 
-    let kernel_file_str = format!("kernel_{:?}.elf", options.arch);
-
-    // Copy kernel binary to root hdd
-    shell.copy_file(
-        PathBuf::from(
-            format!(
-                "src/target/{}/{}/kernel",
-                // determine correct target path
-                match options.arch {
-                    Architecture::x64 => "x86_64-unknown-none",
-                    Architecture::rv64 => "riscv64gc-unknown-none-elf",
-                },
-                // determine correct build optimization
-                if options.release { "release" } else { "debug" }
-            )
-            .to_lowercase(),
-        ),
-        PathBuf::from(format!(".hdd/root/linuiz/{}", kernel_file_str)),
-    )?;
-
-    /* disassemble kernel */
-    if options.disassemble {
+    let build_dir_str = format!(
+        "src/target/{}/{}/",
+        // determine correct target path
         match options.arch {
-            Architecture::x64 => {
-                let output = cmd!(shell, "objdump -M intel -D .hdd/root/linuiz/{kernel_file_str}").output()?;
-                shell.write_file(PathBuf::from(".debug/disassembly"), output.stdout)?;
+            Architecture::x64 => "x86_64-unknown-none",
+            Architecture::rv64 => "riscv64gc-unknown-none-elf",
+        },
+        // determine correct build optimization
+        if options.release { "release" } else { "debug" }
+    )
+    .to_lowercase();
+
+    {
+        let kernel_file_str = format!("kernel_{:?}.elf", options.arch);
+
+        // Copy kernel binary to root hdd
+        shell.copy_file(
+            PathBuf::from(format!("{}/kernel", build_dir_str)),
+            PathBuf::from(format!(".hdd/root/linuiz/{}", kernel_file_str)),
+        )?;
+
+        /* disassemble kernel */
+        if options.disassemble {
+            match options.arch {
+                Architecture::x64 => {
+                    let output = cmd!(shell, "objdump -M intel -D .hdd/root/linuiz/{kernel_file_str}").output()?;
+                    shell.write_file(PathBuf::from(".debug/disassembly"), output.stdout)?;
+                }
+                Architecture::rv64 => panic!("`--disassemble` options cannot be used when targeting `rv64`"),
             }
-            Architecture::rv64 => panic!("`--disassemble` options cannot be used when targeting `rv64`"),
+        }
+
+        if options.readelf {
+            let output = cmd!(shell, "readelf -hlS .hdd/root/linuiz/{kernel_file_str}").output()?;
+            shell.write_file(PathBuf::from(".debug/readelf"), output.stdout)?;
         }
     }
 
-    if options.readelf {
-        let output = cmd!(shell, "readelf -hlS .hdd/root/linuiz/{kernel_file_str}").output()?;
-        shell.write_file(PathBuf::from(".debug/readelf"), output.stdout)?;
-    }
+    /* build and compress drivers */
+    let compressed_drivers = {
+        let mut bytes = vec![];
+
+        for (index, driver_name) in PACKAGED_DRIVERS.iter().enumerate() {
+            let mut file_bytes = shell.read_binary_file(PathBuf::from(format!("{}/{}", build_dir_str, driver_name)))?;
+
+            if PACKAGED_DRIVERS.get(index + 1).is_some() {
+                let byte_offset = bytes.len() + 8 + file_bytes.len();
+
+                bytes.push((byte_offset >> 0) as u8);
+                bytes.push((byte_offset >> 8) as u8);
+                bytes.push((byte_offset >> 16) as u8);
+                bytes.push((byte_offset >> 24) as u8);
+                bytes.push((byte_offset >> 32) as u8);
+                bytes.push((byte_offset >> 40) as u8);
+                bytes.push((byte_offset >> 48) as u8);
+                bytes.push((byte_offset >> 56) as u8);
+            }
+
+            bytes.append(&mut file_bytes);
+        }
+
+        println!("Compressing {} bytes of driver files...", bytes.len());
+        miniz_oxide::deflate::compress_to_vec(&bytes, options.compress.as_u8())
+    };
+
+    println!("Compression resulted in a {} byte dump.", compressed_drivers.len());
+    shell.write_file(PathBuf::from(".hdd/root/linuiz/drivers"), compressed_drivers)?;
 
     Ok(())
 }

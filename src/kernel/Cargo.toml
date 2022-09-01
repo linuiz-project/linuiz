@@ -8,14 +8,15 @@ edition = "2021"
 [dependencies]
 libkernel = { path = "../libkernel/" }
 log = { version = "*", default-features = false }
+num_enum = { version = "*", default-features = false }
+limine = { version = "*", features = ["requests-section"] }
 bit_field = "*"
 bitflags = "*"
-num_enum = { version = "*", default-features = false }
 spin = "*"
 paste = "*"
 acpi = { path = "../../../acpi/acpi/" }
 aml = "*"
-limine = { version = "*", features = ["requests-section"] }
+miniz_oxide = "*"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86_64 = "*"

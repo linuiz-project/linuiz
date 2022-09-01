@@ -89,12 +89,13 @@ impl PageTableEntry {
 
     /// Sets the entry's frame index.
     #[inline(always)]
-    pub const fn set_frame_index(&mut self, frame_index: usize) {
+    pub fn set_frame_index(&mut self, frame_index: usize) {
         self.0 = (self.0 & !Self::FRAME_INDEX_MASK) | ((frame_index as u64) << Self::FRAME_INDEX_SHIFT);
     }
 
     /// Takes this page table entry's frame, even if it is non-present.
-    pub const unsafe fn take_frame_index(&mut self) -> usize {
+    #[inline]
+    pub unsafe fn take_frame_index(&mut self) -> usize {
         let frame_index = self.get_frame_index();
         self.0 &= !Self::FRAME_INDEX_MASK;
         frame_index
@@ -127,7 +128,8 @@ impl PageTableEntry {
     }
 
     /// Clears the page table entry of data, setting all bits to zero.
-    pub const fn clear(&mut self) {
+    #[inline]
+    pub fn clear(&mut self) {
         self.0 = 0;
     }
 }
