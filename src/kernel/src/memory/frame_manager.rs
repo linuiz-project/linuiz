@@ -111,7 +111,7 @@ unsafe impl Sync for FrameManager<'_> {}
 
 impl<'arr> FrameManager<'arr> {
     pub fn from_mmap(
-        memory_map: &[limine::LimineMemmapEntry],
+        memory_map: &[limine::NonNullPtr<limine::LimineMemmapEntry>],
         hhdm_addr: libkernel::Address<libkernel::Virtual>,
     ) -> Self {
         use limine::LimineMemoryMapEntryType;

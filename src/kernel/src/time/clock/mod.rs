@@ -12,6 +12,8 @@ pub trait Clock: Send + Sync {
     /// Retrieves the current timestamp from the clock.
     fn get_timestamp(&self) -> u64;
 
+    fn get_max_timestamp(&self) -> u64;
+
     /// Spin-waits for the given number of microseconds.
     fn spin_wait_us(&self, microseconds: u32) {
         let ticks_per_us = self.get_frequency() / 1000000;
@@ -19,9 +21,9 @@ pub trait Clock: Send + Sync {
         let mut current_tick = self.get_timestamp();
 
         while total_ticks > 0 {
-            let current_tick_new = self.get_timestamp();
-            total_ticks -= (current_tick_new - current_tick).clamp(0, total_ticks);
-            current_tick = current_tick_new;
+            let new_tick = self.get_timestamp();
+            total_ticks -= (new_tick.wrapping_sub(current_tick) & self.get_max_timestamp()).min(total_ticks);
+            current_tick = new_tick;
 
             core::hint::spin_loop();
         }

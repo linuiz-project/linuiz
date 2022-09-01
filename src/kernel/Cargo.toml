@@ -9,7 +9,7 @@ edition = "2021"
 libkernel = { path = "../libkernel/" }
 log = { version = "*", default-features = false }
 num_enum = { version = "*", default-features = false }
-limine = { version = "*", features = ["requests-section"] }
+limine = { git = "https://github.com/limine-bootloader/limine-rs", features = ["requests-section"] }
 bit_field = "*"
 bitflags = "*"
 spin = "*"

@@ -206,7 +206,7 @@ static RSDP: Once<Mutex<AcpiTables<AcpiHandler>>> = Once::new();
 /// SAFETY: This this method must be called before bootloader memory is reclaimed.
 pub unsafe fn init_interface() {
     RSDP.call_once(|| {
-        trace!("Initializing RSDP.");
+        trace!("Initializing RSDP....");
 
         Mutex::new({
             let handler = AcpiHandler;

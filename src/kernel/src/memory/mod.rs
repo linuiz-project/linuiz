@@ -45,15 +45,10 @@ pub unsafe fn init_global_allocator(base_alloc_page: libkernel::memory::Page) {
     GLOBAL_ALLOCATOR.0.call_once(|| KERNEL_MALLOC.get().unwrap());
 }
 
-fn get_limine_mmap() -> &'static [limine::LimineMemmapEntry] {
-    static LIMINE_MMAP: limine::LimineMmapRequest = limine::LimineMmapRequest::new(crate::LIMINE_REV);
+fn get_limine_mmap() -> &'static [limine::NonNullPtr<limine::LimineMemmapEntry>] {
+    static LIMINE_MMAP: limine::LimineMemmapRequest = limine::LimineMemmapRequest::new(crate::LIMINE_REV);
 
-    LIMINE_MMAP
-        .get_response()
-        .get()
-        .expect("bootloader provided no memory map response")
-        .mmap()
-        .expect("bootloader provided no memory map entries")
+    LIMINE_MMAP.get_response().get().expect("bootloader provided no memory map response").memmap()
 }
 
 pub static HHDM_ADDRESS: Once<Address<Virtual>> = Once::new();

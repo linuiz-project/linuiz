@@ -50,7 +50,7 @@ pub fn init_devices() {
                 );
 
                 if let DeviceVariant::Standard(pci_device) = new_device(device_hhdm_page.address().as_mut_ptr()) {
-                    debug!("{:#?}", pci_device);
+                    trace!("{:#?}", pci_device);
                     pci_devices.push(SingleOwner::new(pci_device));
                 }
                 // TODO handle PCI-to-PCI busses

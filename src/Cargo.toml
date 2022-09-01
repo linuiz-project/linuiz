@@ -4,3 +4,6 @@ members = [
     "libkernel",
     "drivers/test_driver"
 ]
+
+[profile.dev]
+opt-level = 1

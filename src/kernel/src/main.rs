@@ -78,11 +78,6 @@ static LIMINE_STACK: limine::LimineStackSizeRequest =
 
 static CON_OUT: core::cell::SyncUnsafeCell<crate::memory::io::Serial> =
     core::cell::SyncUnsafeCell::new(crate::memory::io::Serial::new(crate::memory::io::COM1));
-static DRIVERS_DATA: core::cell::SyncUnsafeCell<&'static [u8]> = core::cell::SyncUnsafeCell::new(
-    // SAFETY: Accesses to this slice will result in page faults, and that is the expected behaviour when this
-    //         value is not initialized.
-    unsafe { core::slice::from_raw_parts(core::ptr::null(), 0) },
-);
 static SMP_MEMORY_READY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 static SMP_MEMORY_INIT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
@@ -127,9 +122,7 @@ unsafe extern "C" fn _entry() -> ! {
             .kernel_file
             .get()
             .expect("bootloader kernel file response did not provide a valid file handle");
-        let cmdline = core::ffi::CStr::from_ptr(kernel_file.cmdline.as_mut_ptr().unwrap().cast())
-            .to_str()
-            .expect("invalid cmdline string");
+        let cmdline = kernel_file.cmdline.to_str().unwrap().to_str().expect("invalid cmdline string");
 
         for argument in cmdline.split(' ') {
             match argument.split_once(':') {
@@ -157,6 +150,7 @@ unsafe extern "C" fn _entry() -> ! {
 
     let frame_manager = crate::memory::get_kernel_frame_manager();
     let page_manager = crate::memory::get_kernel_page_manager();
+    let drivers_data = core::cell::OnceCell::new();
 
     /* memory init */
     {
@@ -276,10 +270,12 @@ unsafe extern "C" fn _entry() -> ! {
         /* save drivers data */
         {
             if let Some(modules) =
-                LIMINE_MODULES.get_response().get().and_then(|modules_response| modules_response.modules())
+                LIMINE_MODULES.get_response().get().map(|modules_response| modules_response.modules())
             {
                 // Search specifically for 'drivers' module. This is a for loop to ensure forward compatibility if we ever load more than 1 module.
-                for module in modules.iter().filter(|module| module.path.to_string().unwrap().ends_with("drivers")) {
+                for module in
+                    modules.iter().filter(|module| module.path.to_str().unwrap().to_str().unwrap().ends_with("drivers"))
+                {
                     let drivers_hhdm_ptr = module.base.as_ptr().unwrap();
                     for base_offset in (0..(module.length as usize)).step_by(0x1000) {
                         page_manager.set_page_attributes(
@@ -289,8 +285,10 @@ unsafe extern "C" fn _entry() -> ! {
                         );
                     }
 
+                    debug!("Read {} bytes of compressed drivers from memory.", module.length);
                     // Write pointer to driver data, so it is easily accessible after memory is switched to the kernel.
-                    DRIVERS_DATA.get().write(core::slice::from_raw_parts(drivers_hhdm_ptr, modules.len() as usize));
+                    drivers_data.set(core::slice::from_raw_parts(drivers_hhdm_ptr, modules.len() as usize)).unwrap();
+                    break;
                 }
             }
         }
@@ -304,22 +302,19 @@ unsafe extern "C" fn _entry() -> ! {
     {
         debug!("Attempting to start additional cores...");
 
-        let smp_response =
-            LIMINE_SMP.get_response().as_mut_ptr().expect("bootloader provided no SMP information").as_mut().unwrap();
+        let smp_response = LIMINE_SMP.get_response().get_mut().expect("bootloader provided no SMP information");
+        debug!("Detected {} additional cores.", smp_response.cpu_count);
+        let bsp_lapic_id = smp_response.bsp_lapic_id;
 
-        if let Some(cpus) = smp_response.cpus() {
-            debug!("Detected {} APs.", cpus.len() - 1);
+        for cpu_info in smp_response.cpus() {
+            if cpu_info.lapic_id != bsp_lapic_id {
+                if KERNEL_CFG_SMP {
+                    debug!("Starting processor: PID{}/LID{}", cpu_info.processor_id, cpu_info.lapic_id);
 
-            for cpu_info in cpus {
-                if cpu_info.lapic_id != smp_response.bsp_lapic_id {
-                    if KERNEL_CFG_SMP {
-                        debug!("Starting processor: PID{}/LID{}", cpu_info.processor_id, cpu_info.lapic_id);
-
-                        SMP_MEMORY_INIT.fetch_add(1, Ordering::Relaxed);
-                        cpu_info.goto_address = _smp_entry as usize as u64;
-                    } else {
-                        cpu_info.goto_address = crate::interrupts::wait_loop as usize as u64;
-                    }
+                    SMP_MEMORY_INIT.fetch_add(1, Ordering::Relaxed);
+                    cpu_info.goto_address = _smp_entry as usize as u64;
+                } else {
+                    cpu_info.goto_address = crate::interrupts::wait_loop as usize as u64;
                 }
             }
         }
@@ -503,7 +498,7 @@ fn syscall_test() -> ! {
             info!("{:#X}", result);
         }
 
-        clock.spin_wait_us(500000);
+        clock.spin_wait_us(5000000);
     }
 }
 
