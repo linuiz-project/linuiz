@@ -4,7 +4,7 @@ use xshell::{cmd, Shell};
 
 #[allow(non_camel_case_types)]
 #[derive(ArgEnum, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Target {
+pub enum Architecture {
     x64,
     rv64,
 }
@@ -13,7 +13,7 @@ pub enum Target {
 pub struct Options {
     /// The compilation target for this build.
     #[clap(arg_enum, long)]
-    target: Target,
+    arch: Architecture,
 
     /// Whether the current build is a release build.
     #[clap(long)]
@@ -74,7 +74,7 @@ pub fn build(options: Options) -> Result<(), xshell::Error> {
         shell.copy_file(limine_cfg_path.clone(), PathBuf::from(".hdd/root/EFI/BOOT/"))?;
 
         // initialize git submodule if it hasn't been
-        let bootx64_efi_path = PathBuf::from("submodules/limine/BOOTX64.EFI");
+        let bootx64_efi_path = PathBuf::from("resources/submodules/limine/BOOTX64.EFI");
         if !shell.path_exists(bootx64_efi_path.clone()) {
             cmd!(shell, "git submodule init").run()?;
         }
@@ -85,60 +85,47 @@ pub fn build(options: Options) -> Result<(), xshell::Error> {
         shell.copy_file(bootx64_efi_path.clone(), PathBuf::from(".hdd/root/EFI/BOOT/"))?;
     }
 
-    /* libkernel */
+    /* build workspace */
     {
-        let _dir = shell.push_dir("libkernel/");
-        cmd!(shell, "cargo fmt").run()?;
-    }
-
-    /* kernel */
-    {
-        let _dir = shell.push_dir("kernel/");
-        let cargo_cmd_str = format!("{}", if options.clippy { "clippy" } else { "build" });
-        let profile_str = format!("{}", if options.release { "release" } else { "dev" });
-        let target_str = format!(
-            "{}",
-            match options.target {
-                Target::x64 => "x86_64-unknown-none.json",
-                Target::rv64 => "riscv64gc-unknown-none-elf",
-            }
-        );
+        let _dir = shell.push_dir("src/");
 
         let _rustflags = shell.push_env(
             "RUSTFLAGS",
             format!(
                 "-C link-arg=-T{}",
-                match options.target {
-                    Target::x64 => "x86_64-unknown-none.lds",
-                    Target::rv64 => "riscv64gc-unknown-none.lds",
+                match options.arch {
+                    Architecture::x64 => "x86_64-unknown-none.lds",
+                    Architecture::rv64 => "riscv64gc-unknown-none.lds",
                 }
             ),
         );
 
+        let arguments = vec![
+            if options.clippy { "clippy" } else { "build" },
+            "--profile",
+            if options.release { "release" } else { "dev" },
+            "--target",
+            match options.arch {
+                Architecture::x64 => "x86_64-unknown-none.json",
+                Architecture::rv64 => "riscv64gc-unknown-none-elf",
+            },
+        ];
+
         cmd!(shell, "cargo fmt").run()?;
-        cmd!(
-            shell,
-            "
-                cargo {cargo_cmd_str}
-                    --profile {profile_str}
-                    --target {target_str}
-                    -Z unstable-options
-            "
-        )
-        .run()?;
+        cmd!(shell, "cargo {arguments...}").run()?;
     }
 
-    let kernel_file_str = format!("kernel_{:?}.elf", options.target);
+    let kernel_file_str = format!("kernel_{:?}.elf", options.arch);
 
     // Copy kernel binary to root hdd
     shell.copy_file(
         PathBuf::from(
             format!(
-                "kernel/target/{}/{}/kernel",
+                "src/target/{}/{}/kernel",
                 // determine correct target path
-                match options.target {
-                    Target::x64 => "x86_64-unknown-none",
-                    Target::rv64 => "riscv64gc-unknown-none-elf",
+                match options.arch {
+                    Architecture::x64 => "x86_64-unknown-none",
+                    Architecture::rv64 => "riscv64gc-unknown-none-elf",
                 },
                 // determine correct build optimization
                 if options.release { "release" } else { "debug" }
@@ -150,12 +137,12 @@ pub fn build(options: Options) -> Result<(), xshell::Error> {
 
     /* disassemble kernel */
     if options.disassemble {
-        match options.target {
-            Target::x64 => {
+        match options.arch {
+            Architecture::x64 => {
                 let output = cmd!(shell, "objdump -M intel -D .hdd/root/linuiz/{kernel_file_str}").output()?;
                 shell.write_file(PathBuf::from(".debug/disassembly"), output.stdout)?;
             }
-            Target::rv64 => panic!("`--disassemble` options cannot be used when targeting `rv64`"),
+            Architecture::rv64 => panic!("`--disassemble` options cannot be used when targeting `rv64`"),
         }
     }
 
