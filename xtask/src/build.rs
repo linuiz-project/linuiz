@@ -184,21 +184,19 @@ pub fn build(options: Options) -> Result<(), xshell::Error> {
     let compressed_drivers = {
         let mut bytes = vec![];
 
-        for (index, driver_name) in PACKAGED_DRIVERS.iter().enumerate() {
+        for driver_name in PACKAGED_DRIVERS {
             let mut file_bytes = shell.read_binary_file(PathBuf::from(format!("{}/{}", build_dir_str, driver_name)))?;
 
-            if PACKAGED_DRIVERS.get(index + 1).is_some() {
-                let byte_offset = bytes.len() + 8 + file_bytes.len();
+            let byte_offset = 8 + file_bytes.len();
 
-                bytes.push((byte_offset >> 0) as u8);
-                bytes.push((byte_offset >> 8) as u8);
-                bytes.push((byte_offset >> 16) as u8);
-                bytes.push((byte_offset >> 24) as u8);
-                bytes.push((byte_offset >> 32) as u8);
-                bytes.push((byte_offset >> 40) as u8);
-                bytes.push((byte_offset >> 48) as u8);
-                bytes.push((byte_offset >> 56) as u8);
-            }
+            bytes.push((byte_offset >> 0) as u8);
+            bytes.push((byte_offset >> 8) as u8);
+            bytes.push((byte_offset >> 16) as u8);
+            bytes.push((byte_offset >> 24) as u8);
+            bytes.push((byte_offset >> 32) as u8);
+            bytes.push((byte_offset >> 40) as u8);
+            bytes.push((byte_offset >> 48) as u8);
+            bytes.push((byte_offset >> 56) as u8);
 
             bytes.append(&mut file_bytes);
         }
