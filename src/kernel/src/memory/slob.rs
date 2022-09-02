@@ -93,12 +93,17 @@ impl<'map> SLOB<'map> {
 
     /// Calculates the bit count and mask for a given set of block page parameters.
     fn calculate_bit_fields(map_index: usize, cur_block_index: usize, end_block_index: usize) -> (usize, u64) {
-        let floor_blocks_index = map_index * BlockPage::BLOCKS_PER;
-        let ceil_blocks_index = floor_blocks_index + BlockPage::BLOCKS_PER;
-        let mask_bit_offset = cur_block_index - floor_blocks_index;
-        let mask_bit_count = usize::min(ceil_blocks_index, end_block_index) - cur_block_index;
+        let floor_block_index = map_index * BlockPage::BLOCKS_PER;
+        let ceil_block_index = floor_block_index + BlockPage::BLOCKS_PER;
+        let mask_bit_offset = cur_block_index - floor_block_index;
+        let mask_bit_count = usize::min(ceil_block_index, end_block_index) - cur_block_index;
 
-        (mask_bit_count, (1_u64 << mask_bit_count).wrapping_sub(1) << mask_bit_offset)
+        // SAFETY: The above calculations for `floor_block_index` and `ceil_block_index` ensure the shift will be <64.
+        let mask_bits = unsafe { u64::MAX.unchecked_shr((u64::BITS as u64) - (mask_bit_count as u64)) }
+            .checked_shl(mask_bit_offset as u32)
+            .unwrap();
+
+        (mask_bit_count, mask_bits)
     }
 
     fn grow(
@@ -238,17 +243,20 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
                 let block_page = &mut table[table_index];
                 let was_empty = block_page.is_empty();
 
-                let block_index_floor = table_index * BlockPage::BLOCKS_PER;
-                let low_offset = block_index - block_index_floor;
-                let remaining_blocks_in_slice = usize::min(
-                    end_block_index - block_index,
-                    (block_index_floor + BlockPage::BLOCKS_PER) - block_index,
-                );
-                #[allow(clippy::cast_possible_truncation)]
-                let mask_bits = 1_u64.checked_shl(remaining_blocks_in_slice as u32).unwrap_or(u64::MAX).wrapping_sub(1);
+                // let block_index_floor = table_index * BlockPage::BLOCKS_PER;
+                // let low_offset = block_index - block_index_floor;
+                // let remaining_blocks_in_slice = usize::min(
+                //     end_block_index - block_index,
+                //     (block_index_floor + BlockPage::BLOCKS_PER) - block_index,
+                // );
 
-                *block_page.value_mut() |= mask_bits << low_offset;
-                block_index += remaining_blocks_in_slice;
+                let (bit_count, bit_mask) = Self::calculate_bit_fields(table_index, block_index, end_block_index);
+                debug_assert_eq!(*block_page.value() & bit_mask, 0);
+
+                *block_page.value_mut() |= bit_mask;
+                debug_assert_eq!(*block_page.value() & bit_mask, bit_mask);
+
+                block_index += bit_count;
 
                 if was_empty {
                     // Ensure when we map/unmap, we utilize the allocator's base table address.
@@ -269,6 +277,8 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
     }
 
     unsafe fn deallocate(&self, ptr: core::ptr::NonNull<u8>, layout: Layout) {
+        debug_assert!(ptr.as_ptr().is_aligned_to(Self::BLOCK_SIZE));
+
         crate::interrupts::without(|| {
             let mut table = self.table.write();
 
@@ -281,25 +291,22 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
             let frame_manager = crate::memory::get_kernel_frame_manager();
             let page_manager = PageManager::from_current(&Page::from_address(crate::memory::get_kernel_hhdm_address()));
             let alloc_base_address = table.as_ptr() as usize;
-            for map_index in start_table_index..end_table_index {
-                let block_page = &mut table[map_index];
-
+            for table_index in start_table_index..end_table_index {
+                let block_page = &mut table[table_index];
                 let had_bits = !block_page.is_empty();
 
-                let (bit_count, bit_mask) = Self::calculate_bit_fields(map_index, block_index, end_block_index);
-                assert_eq!(
-                    *block_page.value() & bit_mask,
-                    bit_mask,
-                    "attempting to deallocate blocks that are already deallocated"
-                );
+                let (bit_count, bit_mask) = Self::calculate_bit_fields(table_index, block_index, end_block_index);
+                debug_assert_eq!(*block_page.value() & bit_mask, bit_mask);
 
                 *block_page.value_mut() ^= bit_mask;
+                debug_assert_eq!(*block_page.value() & bit_mask, 0);
+
                 block_index += bit_count;
 
                 if had_bits && block_page.is_empty() {
                     // Ensure when we map/unmap, we utilize the allocator's base table address.
                     page_manager
-                        .unmap(&Page::from_index((alloc_base_address / 0x1000) + map_index), true, frame_manager)
+                        .unmap(&Page::from_index((alloc_base_address / 0x1000) + table_index), true, frame_manager)
                         .unwrap();
                 }
             }
