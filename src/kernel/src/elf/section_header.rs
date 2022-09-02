@@ -1,6 +1,6 @@
 #![allow(non_camel_case_types)]
 
-use crate::{Address, Virtual};
+use libkernel::{Address, Virtual};
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy)]
@@ -41,7 +41,7 @@ bitflags::bitflags! {
     }
 }
 
-#[repr(C)]
+#[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct SectionHeader {
     pub shstrtab_offset: u32,

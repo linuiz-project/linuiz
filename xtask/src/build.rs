@@ -187,7 +187,7 @@ pub fn build(options: Options) -> Result<(), xshell::Error> {
         for driver_name in PACKAGED_DRIVERS {
             let mut file_bytes = shell.read_binary_file(PathBuf::from(format!("{}/{}", build_dir_str, driver_name)))?;
 
-            let byte_offset = 8 + file_bytes.len();
+            let byte_offset = file_bytes.len();
 
             bytes.push((byte_offset >> 0) as u8);
             bytes.push((byte_offset >> 8) as u8);

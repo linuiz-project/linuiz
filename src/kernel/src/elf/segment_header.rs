@@ -1,4 +1,4 @@
-use crate::{Address, Physical, Virtual};
+use libkernel::{Address, Physical, Virtual};
 
 bitflags::bitflags! {
     #[repr(transparent)]
@@ -10,8 +10,8 @@ bitflags::bitflags! {
 }
 
 #[repr(u32)]
-#[allow(dead_code, non_camel_case_types)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[allow(dead_code, non_camel_case_types)]
 pub enum SegmentType {
     NULL = 0x0,
     LOAD = 0x1,

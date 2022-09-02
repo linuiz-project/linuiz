@@ -43,6 +43,7 @@ extern crate libkernel;
 mod arch;
 mod boot;
 mod drivers;
+mod elf;
 mod interrupts;
 mod local_state;
 mod memory;
@@ -456,34 +457,34 @@ unsafe extern "C" fn _entry() -> ! {
     SMP_MEMORY_READY.store(true, Ordering::Relaxed);
 
     {
-        let drivers_data = miniz_oxide::inflate::decompress_to_vec(drivers_data.get().unwrap()).unwrap();
-        debug!("Decompressed {} bytes of driver files.", drivers_data.len());
+        let drivers_raw_data = miniz_oxide::inflate::decompress_to_vec(drivers_data.get().unwrap()).unwrap();
+        debug!("Decompressed {} bytes of driver files.", drivers_raw_data.len());
 
         let mut current_offset = 0;
         loop {
             let driver_len = {
                 let mut value = 0;
 
-                value |= (drivers_data[current_offset + 0] as u64) << 0;
-                value |= (drivers_data[current_offset + 1] as u64) << 8;
-                value |= (drivers_data[current_offset + 2] as u64) << 16;
-                value |= (drivers_data[current_offset + 3] as u64) << 24;
-                value |= (drivers_data[current_offset + 4] as u64) << 32;
-                value |= (drivers_data[current_offset + 5] as u64) << 40;
-                value |= (drivers_data[current_offset + 6] as u64) << 48;
-                value |= (drivers_data[current_offset + 7] as u64) << 56;
+                value |= (drivers_raw_data[current_offset + 0] as u64) << 0;
+                value |= (drivers_raw_data[current_offset + 1] as u64) << 8;
+                value |= (drivers_raw_data[current_offset + 2] as u64) << 16;
+                value |= (drivers_raw_data[current_offset + 3] as u64) << 24;
+                value |= (drivers_raw_data[current_offset + 4] as u64) << 32;
+                value |= (drivers_raw_data[current_offset + 5] as u64) << 40;
+                value |= (drivers_raw_data[current_offset + 6] as u64) << 48;
+                value |= (drivers_raw_data[current_offset + 7] as u64) << 56;
 
                 value as usize
             };
 
-            use libkernel::elf::ELFHeader64;
-            info!(
-                "{:?}",
-                drivers_data[8..core::mem::size_of::<ELFHeader64>()].as_ptr().cast::<ELFHeader64>().as_ref().unwrap()
-            );
+            let base_offset = current_offset + 8 /* skip 'len' prefix */;
+            let driver_data = &drivers_raw_data[base_offset..(base_offset + driver_len)];
+            // TODO don't unwrap, just fail with a warning.
+            let driver_elf = crate::elf::Elf::from_bytes(driver_data).unwrap();
+            info!("{:?}", driver_elf);
 
-            current_offset += driver_len;
-            if current_offset >= drivers_data.len() {
+            current_offset += driver_len + 8  /* skip 'len' prefix */;
+            if current_offset >= drivers_raw_data.len() {
                 break;
             }
         }
