@@ -41,7 +41,7 @@ impl core::fmt::Debug for Color8i {
 }
 
 #[repr(u8)]
-#[allow(dead_code)]
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Colors {
     Black,

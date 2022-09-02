@@ -137,8 +137,6 @@ pub fn schedule_next_task(
         local_state.scheduler.push_task(cur_task);
     }
 
-    //trace!("{}", local_state.scheduler.get_task_count());
-
     // Take all tasks from the global queue. Every core will be doing this, so we'll load
     // balance the tasks later.
     // while let Some(task) = unsafe { crate::scheduling::GLOBAL_TASK_QUEUE.pop() } {
