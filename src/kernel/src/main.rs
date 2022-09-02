@@ -1,15 +1,3 @@
-#![forbid(clippy::inline_asm_x86_att_syntax)]
-#![deny(clippy::semicolon_if_nothing_returned, clippy::debug_assert_with_mut_call, clippy::float_arithmetic)]
-#![warn(clippy::cargo, clippy::pedantic, clippy::undocumented_unsafe_blocks)]
-#![allow(
-    clippy::cast_lossless,
-    clippy::enum_glob_use,
-    clippy::inline_always,
-    clippy::items_after_statements,
-    clippy::must_use_candidate,
-    clippy::unreadable_literal,
-    clippy::wildcard_imports
-)]
 #![no_std]
 #![no_main]
 #![feature(
@@ -28,7 +16,21 @@
     alloc_error_handler,
     exclusive_range_pattern,
     raw_ref_op,
-    let_chains
+    let_chains,
+    unchecked_math
+)]
+#![forbid(clippy::inline_asm_x86_att_syntax)]
+#![deny(clippy::semicolon_if_nothing_returned, clippy::debug_assert_with_mut_call, clippy::float_arithmetic)]
+#![warn(clippy::cargo, clippy::pedantic, clippy::undocumented_unsafe_blocks)]
+#![allow(
+    clippy::cast_lossless,
+    clippy::enum_glob_use,
+    clippy::inline_always,
+    clippy::items_after_statements,
+    clippy::must_use_candidate,
+    clippy::unreadable_literal,
+    clippy::wildcard_imports,
+    dead_code
 )]
 
 use core::sync::atomic::Ordering;
@@ -73,8 +75,19 @@ static LIMINE_KERNEL_FILE: limine::LimineKernelFileRequest = limine::LimineKerne
 static LIMINE_INFO: limine::LimineBootInfoRequest = limine::LimineBootInfoRequest::new(LIMINE_REV);
 static LIMINE_SMP: limine::LimineSmpRequest = limine::LimineSmpRequest::new(LIMINE_REV).flags(0b1);
 static LIMINE_MODULES: limine::LimineModuleRequest = limine::LimineModuleRequest::new(LIMINE_REV);
-static LIMINE_STACK: limine::LimineStackSizeRequest =
-    limine::LimineStackSizeRequest::new(LIMINE_REV).stack_size(0x100000);
+
+#[used]
+static LIMINE_STACK: limine::LimineStackSizeRequest = limine::LimineStackSizeRequest::new(LIMINE_REV).stack_size({
+    #[cfg(debug_assertions)]
+    {
+        0x100000
+    }
+
+    #[cfg(not(debug_assertions))]
+    {
+        0x4000
+    }
+});
 
 static CON_OUT: core::cell::SyncUnsafeCell<crate::memory::io::Serial> =
     core::cell::SyncUnsafeCell::new(crate::memory::io::Serial::new(crate::memory::io::COM1));
@@ -287,7 +300,7 @@ unsafe extern "C" fn _entry() -> ! {
 
                     debug!("Read {} bytes of compressed drivers from memory.", module.length);
                     // Write pointer to driver data, so it is easily accessible after memory is switched to the kernel.
-                    drivers_data.set(core::slice::from_raw_parts(drivers_hhdm_ptr, modules.len() as usize)).unwrap();
+                    drivers_data.set(core::slice::from_raw_parts(drivers_hhdm_ptr, module.length as usize)).unwrap();
                     break;
                 }
             }
@@ -352,12 +365,6 @@ unsafe extern "C" fn _entry() -> ! {
         crate::memory::reclaim_bootloader_frames();
     }
 
-    debug!("Finished initial kernel setup.");
-
-    configure_acpi()
-}
-
-unsafe fn configure_acpi() -> ! {
     /* configure I/O APIC redirections */
     #[cfg(target_arch = "x86_64")]
     {
@@ -429,24 +436,59 @@ unsafe fn configure_acpi() -> ! {
                 target_ioapic.set_redirection(nmi_source.global_system_interrupt, &redirection);
             }
         }
+
+        /* enable ACPI SCI interrupts */
+        {
+            // TODO clean this filthy mess up
+
+            let pm1a_evt_blk =
+                &crate::tables::acpi::get_fadt().pm1a_event_block().expect("no `PM1a_EVT_BLK` found in FADT");
+
+            let mut reg = crate::tables::acpi::Register::<u16>::IO(crate::memory::io::ReadWritePort::new(
+                (pm1a_evt_blk.address + ((pm1a_evt_blk.bit_width / 8) as u64)) as u16,
+            ));
+
+            reg.write((1 << 8) | (1 << 0));
+        }
     }
 
-    /* enable ACPI SCI interrupts */
-    {
-        // TODO clean this filthy mess up
-
-        let pm1a_evt_blk =
-            &crate::tables::acpi::get_fadt().pm1a_event_block().expect("no `PM1a_EVT_BLK` found in FADT");
-
-        let mut reg = crate::tables::acpi::Register::<u16>::IO(crate::memory::io::ReadWritePort::new(
-            (pm1a_evt_blk.address + ((pm1a_evt_blk.bit_width / 8) as u64)) as u16,
-        ));
-
-        reg.write((1 << 8) | (1 << 0));
-    }
-
-    debug!("Finished initial kernel setup.");
+    info!("Finished initial kernel setup.");
     SMP_MEMORY_READY.store(true, Ordering::Relaxed);
+
+    {
+        let drivers_data = miniz_oxide::inflate::decompress_to_vec(drivers_data.get().unwrap()).unwrap();
+        debug!("Decompressed {} bytes of driver files.", drivers_data.len());
+
+        let mut current_offset = 0;
+        loop {
+            let driver_len = {
+                let mut value = 0;
+
+                value |= (drivers_data[current_offset + 0] as u64) << 0;
+                value |= (drivers_data[current_offset + 1] as u64) << 8;
+                value |= (drivers_data[current_offset + 2] as u64) << 16;
+                value |= (drivers_data[current_offset + 3] as u64) << 24;
+                value |= (drivers_data[current_offset + 4] as u64) << 32;
+                value |= (drivers_data[current_offset + 5] as u64) << 40;
+                value |= (drivers_data[current_offset + 6] as u64) << 48;
+                value |= (drivers_data[current_offset + 7] as u64) << 56;
+
+                value as usize
+            };
+
+            use libkernel::elf::ELFHeader64;
+            info!(
+                "{:?}",
+                drivers_data[8..core::mem::size_of::<ELFHeader64>()].as_ptr().cast::<ELFHeader64>().as_ref().unwrap()
+            );
+
+            current_offset += driver_len;
+            if current_offset >= drivers_data.len() {
+                break;
+            }
+        }
+    }
+
     kernel_thread_setup()
 }
 
@@ -498,7 +540,7 @@ fn syscall_test() -> ! {
             info!("{:#X}", result);
         }
 
-        clock.spin_wait_us(5000000);
+        clock.spin_wait_us(500000);
     }
 }
 
