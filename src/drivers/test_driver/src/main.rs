@@ -1,5 +1,4 @@
 #![no_std]
-#![no_main]
 #![feature(start)]
 
 #[panic_handler]
@@ -8,6 +7,11 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 }
 
 #[start]
-extern "sysv64" fn _main() {
-    loop {}
+fn main(_arg_count: isize, _args: *const *const u8) -> isize {
+    let mut sum = 0;
+    for i in 0..10000 {
+        sum += i;
+    }
+
+    sum + _arg_count
 }
