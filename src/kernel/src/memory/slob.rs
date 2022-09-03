@@ -70,7 +70,7 @@ impl<'map> SLOB<'map> {
     pub unsafe fn new(base_alloc_page: Page) -> Self {
         let alloc_table_len = 0x1000 / core::mem::size_of::<BlockPage>();
         let current_page_manager =
-            PageManager::from_current(&Page::from_address(crate::memory::get_kernel_hhdm_address()));
+            PageManager::from_current(&Page::from_address(crate::memory::get_kernel_hhdm_address()).unwrap());
         let kernel_frame_manager = crate::memory::get_kernel_frame_manager();
 
         // Map all of the pages in the allocation table.
@@ -125,8 +125,9 @@ impl<'map> SLOB<'map> {
         }
 
         let frame_manager = crate::memory::get_kernel_frame_manager();
-        let page_manager =
-            unsafe { PageManager::from_current(&Page::from_address(crate::memory::get_kernel_hhdm_address())) };
+        let page_manager = unsafe {
+            PageManager::from_current(&Page::from_address(crate::memory::get_kernel_hhdm_address()).unwrap())
+        };
 
         // Attempt to find a run of already-mapped pages within our allocator that can contain
         // the required slice length.
@@ -236,8 +237,9 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
             let start_table_index = start_block_index / BlockPage::BLOCKS_PER;
             let frame_manager = crate::memory::get_kernel_frame_manager();
             // SAFETY:  Kernel HHDM is guaranteed by the kernel to be valid.
-            let page_manager =
-                unsafe { PageManager::from_current(&Page::from_address(crate::memory::get_kernel_hhdm_address())) };
+            let page_manager = unsafe {
+                PageManager::from_current(&Page::from_address(crate::memory::get_kernel_hhdm_address()).unwrap())
+            };
             let alloc_base_address = table.as_ptr() as usize;
             for table_index in start_table_index..end_table_index {
                 let block_page = &mut table[table_index];
@@ -289,7 +291,8 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
             let start_table_index = start_block_index / BlockPage::BLOCKS_PER;
             let end_table_index = align_up_div(end_block_index, BlockPage::BLOCKS_PER);
             let frame_manager = crate::memory::get_kernel_frame_manager();
-            let page_manager = PageManager::from_current(&Page::from_address(crate::memory::get_kernel_hhdm_address()));
+            let page_manager =
+                PageManager::from_current(&Page::from_address(crate::memory::get_kernel_hhdm_address()).unwrap());
             let alloc_base_address = table.as_ptr() as usize;
             for table_index in start_table_index..end_table_index {
                 let block_page = &mut table[table_index];

@@ -72,7 +72,11 @@ impl Task {
 
         // Unmap stack canary.
         crate::memory::get_kernel_page_manager()
-            .unmap(&libkernel::memory::Page::from_ptr(stack.as_ptr()), false, crate::memory::get_kernel_frame_manager())
+            .unmap(
+                &libkernel::memory::Page::from_ptr(stack.as_ptr()).unwrap(),
+                false,
+                crate::memory::get_kernel_frame_manager(),
+            )
             .unwrap();
 
         Self {

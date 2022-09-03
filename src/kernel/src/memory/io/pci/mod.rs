@@ -9,7 +9,7 @@ use spin::RwLock;
 static PCI_DEVICES: RwLock<Vec<SingleOwner<Device<Standard>>>> = RwLock::new(Vec::new());
 
 pub const fn get_device_base_address(base: u64, bus_index: u8, device_index: u8) -> Address<Physical> {
-    Address::<Physical>::new_truncate((base + (((bus_index as u64) << 20) | ((device_index as u64) << 15))) as usize)
+    Address::<Physical>::new_truncate(base + (((bus_index as u64) << 20) | ((device_index as u64) << 15)))
 }
 
 pub fn init_devices() {

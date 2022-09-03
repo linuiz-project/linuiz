@@ -55,7 +55,7 @@ pub unsafe fn init(core_id: u32) {
         // Map the pages this local state will utilize.
         let frame_manager = crate::memory::get_kernel_frame_manager();
         let page_manager = crate::memory::get_kernel_page_manager();
-        let base_page = Page::from_ptr(local_state_ptr);
+        let base_page = Page::from_ptr(local_state_ptr).unwrap();
         let end_page = base_page.forward_checked(core::mem::size_of::<LocalState>() / 0x1000).unwrap();
         (base_page..end_page)
             .for_each(|page| page_manager.auto_map(&page, crate::memory::PageAttributes::RW, frame_manager));

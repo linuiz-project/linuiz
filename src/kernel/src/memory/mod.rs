@@ -58,10 +58,9 @@ pub unsafe fn init_kernel_hhdm_address() {
         static LIMINE_HHDM: limine::LimineHhdmRequest = limine::LimineHhdmRequest::new(crate::LIMINE_REV);
 
         Address::<Virtual>::new(
-            LIMINE_HHDM.get_response().get().expect("bootloader provided no higher-half direct mapping").offset
-                as usize,
+            LIMINE_HHDM.get_response().get().expect("bootloader provided no higher-half direct mapping").offset,
         )
-        .expect("bootloader provided an invalid higher-half direct mapping address")
+        .expect("bootloader provided a non-canonical higher-half direct mapping address")
     });
 }
 pub fn get_kernel_hhdm_address() -> Address<Virtual> {
@@ -81,7 +80,7 @@ static KERNEL_PAGE_MANAGER: Once<PageManager> = Once::new();
 pub fn init_kernel_page_manager() {
     KERNEL_PAGE_MANAGER.call_once(|| {
         let frame_manager = get_kernel_frame_manager();
-        let mapped_page = libkernel::memory::Page::from_address(get_kernel_hhdm_address());
+        let mapped_page = libkernel::memory::Page::from_address(get_kernel_hhdm_address()).unwrap();
 
         // SAFETY:  The mapped page is guaranteed to be valid, as the kernel guarantees its HHDM will be valid.
         unsafe { PageManager::new(frame_manager, &mapped_page, None) }

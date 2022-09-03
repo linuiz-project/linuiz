@@ -94,7 +94,7 @@ impl VirtualMapper {
     pub unsafe fn write_root_table(&mut self) {
         #[cfg(target_arch = "x86_64")]
         crate::arch::x64::registers::control::CR3::write(
-            Address::<Physical>::new(self.root_frame_index * 0x1000),
+            Address::<Physical>::new((self.root_frame_index * 0x1000) as u64).unwrap(),
             crate::arch::x64::registers::control::CR3Flags::empty(),
         );
     }

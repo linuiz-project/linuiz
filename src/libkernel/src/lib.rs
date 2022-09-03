@@ -22,7 +22,8 @@
     sync_unsafe_cell,
     asm_sym,
     asm_const,
-    core_intrinsics
+    core_intrinsics,
+    pointer_is_aligned
 )]
 
 extern crate alloc;

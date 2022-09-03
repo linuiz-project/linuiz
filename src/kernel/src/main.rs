@@ -293,7 +293,7 @@ unsafe extern "C" fn _entry() -> ! {
                     let drivers_hhdm_ptr = module.base.as_ptr().unwrap();
                     for base_offset in (0..(module.length as usize)).step_by(0x1000) {
                         page_manager.set_page_attributes(
-                            &libkernel::memory::Page::from_ptr(drivers_hhdm_ptr.add(base_offset)),
+                            &libkernel::memory::Page::from_ptr(drivers_hhdm_ptr.add(base_offset)).unwrap(),
                             crate::memory::PageAttributes::RO,
                             crate::memory::AttributeModify::Set,
                         );

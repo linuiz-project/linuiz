@@ -257,7 +257,7 @@ impl<T: DeviceType> Device<T> {
 
                             bar_ptr.write_volatile(LittleEndianU32::new(bar_data));
 
-                            bar_size as usize
+                            bar_size
                         };
 
                         BAR::MemorySpace32 {
@@ -284,7 +284,7 @@ impl<T: DeviceType> Device<T> {
                             bar_ptr.write_volatile(LittleEndianU32::new(bar_data));
                             bar_high_ptr.write_volatile(LittleEndianU32::new(bar_high_data));
 
-                            bar_size as usize
+                            bar_size
                         };
 
                         BAR::MemorySpace64 {
@@ -319,9 +319,9 @@ impl<T: DeviceType> Device<T> {
 
 #[derive(Debug, Clone, Copy)]
 pub enum BAR {
-    MemorySpace32 { address: *mut u32, size: usize, prefetch: bool },
-    MemorySpace64 { address: *mut u64, size: usize, prefetch: bool },
-    IOSpace { address: u32, size: usize },
+    MemorySpace32 { address: *mut u32, size: u32, prefetch: bool },
+    MemorySpace64 { address: *mut u64, size: u64, prefetch: bool },
+    IOSpace { address: u32, size: u32 },
 }
 
 impl BAR {
@@ -337,21 +337,17 @@ impl BAR {
 
     pub const fn get_size(&self) -> usize {
         match self {
-            BAR::MemorySpace32 { address: _, size, prefetch: _ } => *size,
-            BAR::MemorySpace64 { address: _, size, prefetch: _ } => *size,
-            BAR::IOSpace { address: _, size } => *size,
+            BAR::MemorySpace32 { address: _, size, prefetch: _ } => *size as usize,
+            BAR::MemorySpace64 { address: _, size, prefetch: _ } => *size as usize,
+            BAR::IOSpace { address: _, size } => *size as usize,
         }
     }
 
     pub fn get_address(&self) -> Address<Physical> {
         match self {
-            BAR::MemorySpace32 { address, size: _, prefetch: _ } => {
-                Address::<Physical>::new_truncate(*address as usize)
-            }
-            BAR::MemorySpace64 { address, size: _, prefetch: _ } => {
-                Address::<Physical>::new_truncate(*address as usize)
-            }
-            BAR::IOSpace { address, size: _ } => Address::<Physical>::new_truncate(*address as usize),
+            BAR::MemorySpace32 { address, size: _, prefetch: _ } => Address::<Physical>::new_truncate(*address as u64),
+            BAR::MemorySpace64 { address, size: _, prefetch: _ } => Address::<Physical>::new_truncate(*address as u64),
+            BAR::IOSpace { address, size: _ } => Address::<Physical>::new_truncate(*address as u64),
         }
     }
 }

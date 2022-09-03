@@ -89,8 +89,8 @@ impl IA32_APIC_BASE {
 
     /// Gets bits 12..36 of the IA32_APIC_BASE MSR, representing the base address of the APIC.
     #[inline]
-    pub fn get_base_addr() -> Address<Physical> {
-        Address::<Physical>::new((unsafe { rdmsr(0x1B) } & 0xFFFFFF000) as usize)
+    pub fn get_base_address() -> Address<Physical> {
+        Address::<Physical>::new_truncate(unsafe { rdmsr(0x1B) } & 0xFFFFFF000)
     }
 }
 

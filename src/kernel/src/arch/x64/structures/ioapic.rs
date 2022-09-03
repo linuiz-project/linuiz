@@ -190,7 +190,7 @@ pub fn get_io_apics() -> &'static Vec<IoApic<'static>> {
 
                     /* Ensure I/O APIC register pages are mapped */
                     {
-                        let ioapic_regs_page = libkernel::memory::Page::from_ptr(ioapic_regs_ptr);
+                        let ioapic_regs_page = libkernel::memory::Page::from_ptr(ioapic_regs_ptr).unwrap();
                         let ioapic_frame_index = (ioapic_info.address / 0x1000) as usize;
 
                         frame_manager.lock(ioapic_frame_index).ok();

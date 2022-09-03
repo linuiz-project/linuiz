@@ -2,53 +2,58 @@ use crate::{Address, Virtual};
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Page {
-    index: usize,
-}
+pub struct Page(u64);
 
 impl Page {
+    #[inline(always)]
     pub const fn null() -> Self {
-        Self { index: 0 }
+        Self(0)
     }
 
+    #[inline(always)]
     pub const fn from_index(index: usize) -> Self {
-        Self { index }
+        Self(index as u64)
     }
 
-    pub const fn from_address(addr: Address<Virtual>) -> Self {
-        if addr.is_aligned_to(0x1000) {
-            Self { index: addr.page_index() }
+    /// Constructs a page from the provided address, or `None` if the address is not page-aligned.
+    #[inline(always)]
+    pub const fn from_address(address: Address<Virtual>) -> Option<Self> {
+        if address.is_aligned_to(
+            // SAFETY: value is known non-zero
+            unsafe { core::num::NonZeroUsize::new_unchecked(0x1000) },
+        ) {
+            Some(Self(address.page_index() as u64))
         } else {
-            panic!("page address is not page-aligned")
+            None
         }
     }
 
-    pub fn from_ptr<T>(ptr: *const T) -> Self {
-        let ptr_usize = ptr as usize;
-
-        assert_eq!(ptr_usize % 0x1000, 0, "Pointers must be page-aligned to use as page addresses.");
-
-        Self { index: ptr_usize / 0x1000 }
+    #[inline(always)]
+    pub const fn from_address_contains(address: Address<Virtual>) -> Self {
+        Self(address.page_index() as u64)
     }
 
-    pub const fn containing_addr(addr: Address<Virtual>) -> Self {
-        Self { index: addr.page_index() }
+    pub fn from_ptr<T>(ptr: *const T) -> Option<Self> {
+        if ptr.is_aligned_to(0x1000) {
+            Some(Self((ptr as usize as u64) / 0x1000))
+        } else {
+            None
+        }
     }
 
-    pub const fn range(start: usize, end: usize) -> core::ops::Range<Self> {
-        Self::from_index(start)..Self::from_index(end)
+    #[inline(always)]
+    pub const fn range(start_index: usize, end_index: usize) -> core::ops::Range<Self> {
+        Self::from_index(start_index)..Self::from_index(end_index)
     }
 
+    #[inline(always)]
     pub const fn index(&self) -> usize {
-        self.index
+        self.0 as usize
     }
 
+    #[inline(always)]
     pub const fn address(&self) -> Address<Virtual> {
-        crate::Address::<Virtual>::new_truncate(self.index * 0x1000)
-    }
-
-    pub fn to(&self, count: usize) -> Option<PageIterator> {
-        self.forward_checked(count).map(|end| PageIterator::new(self, &end))
+        crate::Address::<Virtual>::new_truncate(self.0 * 0x1000)
     }
 
     pub fn forward_checked(&self, count: usize) -> Option<Self> {
@@ -60,6 +65,7 @@ impl Page {
     }
 
     /// Clears the 4KiB region from this page's start to its end.
+    #[inline(always)]
     pub unsafe fn clear_memory(&self) {
         core::ptr::write_bytes(self.address().as_mut_ptr::<u8>(), 0, 0x1000);
     }
@@ -81,7 +87,7 @@ impl core::iter::Step for Page {
 
 impl core::fmt::Debug for Page {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter.debug_tuple("Page").field(&format_args!("0x{:X}", self.index)).finish()
+        formatter.debug_tuple("Page").field(&format_args!("{:X}", self.index())).finish()
     }
 }
 
@@ -121,9 +127,9 @@ impl Iterator for PageIterator {
     type Item = Page;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.current.index < self.end.index {
+        if self.current.0 < self.end.0 {
             let page = self.current.clone();
-            self.current.index += 1;
+            self.current.0 += 1;
             Some(page)
         } else {
             None
