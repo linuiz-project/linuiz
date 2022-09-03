@@ -61,6 +61,7 @@ pub enum AllocError {
 ///  easily and efficiently allocate.
 pub struct SLOB<'map> {
     table: RwLock<&'map mut [BlockPage]>,
+    base_alloc_page: Page,
 }
 
 impl<'map> SLOB<'map> {
@@ -75,20 +76,19 @@ impl<'map> SLOB<'map> {
 
         // Map all of the pages in the allocation table.
         for page_offset in 0..alloc_table_len {
-            current_page_manager.auto_map(
-                &base_alloc_page.forward_checked(page_offset).unwrap(),
-                PageAttributes::RW,
-                kernel_frame_manager,
-            );
+            let new_page = base_alloc_page.forward_checked(page_offset).unwrap();
+            current_page_manager.auto_map(&new_page, PageAttributes::RW, kernel_frame_manager);
         }
 
-        // Ensure when we map/unmap, we utilize the allocator's base table address.
-        let alloc_table =
-            core::slice::from_raw_parts_mut(base_alloc_page.address().as_mut_ptr::<BlockPage>(), alloc_table_len);
+        let alloc_table = core::slice::from_raw_parts_mut(
+            // Ensure when we map, we utilize the allocator's base table address.
+            base_alloc_page.address().as_mut_ptr::<BlockPage>(),
+            alloc_table_len,
+        );
         // Fill the allocator table's page.
         alloc_table[0].set_full();
 
-        Self { table: RwLock::new(alloc_table) }
+        Self { table: RwLock::new(alloc_table), base_alloc_page }
     }
 
     /// Calculates the bit count and mask for a given set of block page parameters.
@@ -109,6 +109,7 @@ impl<'map> SLOB<'map> {
     fn grow(
         required_blocks: core::num::NonZeroUsize,
         table: &mut RwLockWriteGuard<&mut [BlockPage]>,
+        base_alloc_page: &Page,
     ) -> Result<(), AllocError> {
         // Current length of our map, in indexes.
         let cur_table_len = table.len();
@@ -120,14 +121,9 @@ impl<'map> SLOB<'map> {
         // Required page count of our map.
         let req_table_page_count = libkernel::align_up_div(req_table_len * size_of::<BlockPage>(), 0x1000);
 
-        if (req_table_len * 0x1000) >= 0x746A52880000 {
+        if (req_table_len * 0x1000) >= 0x400000000000 {
             return Err(AllocError::OutOfMemory);
         }
-
-        let frame_manager = crate::memory::get_kernel_frame_manager();
-        let page_manager = unsafe {
-            PageManager::from_current(&Page::from_address(crate::memory::get_kernel_hhdm_address()).unwrap())
-        };
 
         // Attempt to find a run of already-mapped pages within our allocator that can contain
         // the required slice length.
@@ -146,42 +142,58 @@ impl<'map> SLOB<'map> {
             }
         }
 
-        // Ensure when we map/unmap, we utilize the allocator's base table address.
-        let cur_table_base_page = Page::from_index((table.as_ptr() as usize) / 0x1000);
-        let new_table_base_page = Page::from_index(*start_index.get_or_init(|| cur_table_len));
-        // Copy the existing table's pages by simply remapping the pages to point to the existing frames.
-        for page_offset in 0..cur_table_page_count {
-            page_manager
-                .copy_by_map(
-                    &cur_table_base_page.forward_checked(page_offset).unwrap(),
-                    &new_table_base_page.forward_checked(page_offset).unwrap(),
-                    None,
-                    frame_manager,
-                )
-                .unwrap();
+        // Map the new table extents. Each table index beyond `cur_table_len` is a new page.
+        {
+            let frame_manager = crate::memory::get_kernel_frame_manager();
+            // SAFETY: Kernel guarantees the HHDM will be a valid and mapped address.
+            let page_manager = unsafe {
+                PageManager::from_current(&Page::from_address(crate::memory::get_kernel_hhdm_address()).unwrap())
+            };
+
+            for page_offset in cur_table_len..req_table_len {
+                let new_page = base_alloc_page.forward_checked(page_offset).unwrap();
+                page_manager.auto_map(&new_page, PageAttributes::RW, frame_manager);
+                // Clear the newly allocated table page.
+                // SAFETY: We know no important memory is stored here to be overwritten, because we just mapped it.
+                unsafe { new_page.clear_memory() };
+            }
         }
-        // For the remainder of the table's pages (pages that didn't exist prior), create new auto mappings.
-        for page_offset in cur_table_page_count..req_table_page_count {
-            let new_page = new_table_base_page.forward_checked(page_offset).unwrap();
-            page_manager.auto_map(&new_page, PageAttributes::RW, frame_manager);
-            // Clear the newly allocated table page.
-            unsafe { new_page.clear_memory() };
+
+        let cur_table_start_index =
+            ((table.as_ptr() as usize) - base_alloc_page.address().as_usize()) / Self::BLOCK_SIZE;
+        let new_table_start_index = *start_index.get_or_init(|| cur_table_len);
+        // Ensure we set the new base table page to use the base allocation page as a starting index.
+        let new_table_base_page = base_alloc_page.forward_checked(new_table_start_index).unwrap();
+
+        let new_table =
+        // SAFETY: We know the address is pointer-aligned, and that the address range is valid for clearing via `write_bytes`.        
+        unsafe {
+            let new_table_ptr = new_table_base_page.address().as_mut_ptr::<BlockPage>();
+            // Ensure we clear the new table's contents before making a slice of it.
+            core::ptr::write_bytes(new_table_ptr, 0, req_table_len);
+            core::slice::from_raw_parts_mut(new_table_ptr, req_table_len)
+        };
+
+        // Copy old table into new table.
+        //
+        // REMARK: This could be done via `page_manager.copy_by_map`, I believe, but that approach introduces a certain level
+        //         of indirection which can make the overall process very confusing. If this block of code proves to be a performance
+        //         bottleneck, such an approach could be employed. However, given this function runs very infrequently, I find it hard
+        //         to imagine this will bottleneck allocations.
+        table.iter_mut().enumerate().for_each(|(index, block_page)| new_table[index] = block_page.clone());
+
+        // Clear old table bytes.
+        unsafe {
+            let old_table_ptr = table.as_mut_ptr();
+            core::ptr::write_bytes(old_table_ptr, 0, table.len());
         }
 
         // Point to new map.
-        **table = unsafe {
-            core::slice::from_raw_parts_mut(
-                new_table_base_page.address().as_mut_ptr(),
-                libkernel::align_up(req_table_len, 0x1000 / size_of::<BlockPage>()),
-            )
-        };
-        // Always set the 0th (null) page to full by default.
-        // Helps avoid some errors.
-        table[0].set_full();
-        // Mark the current table's pages as full within the table.
-        table.iter_mut().skip(new_table_base_page.index()).take(req_table_page_count).for_each(BlockPage::set_full);
+        **table = new_table;
+        // Mark the new table's pages as full within the table.
+        table.iter_mut().skip(new_table_start_index).take(req_table_page_count).for_each(BlockPage::set_full);
         // Mark the old table's pages as empty within the table.
-        table.iter_mut().skip(cur_table_base_page.index()).take(cur_table_page_count).for_each(BlockPage::set_empty);
+        table.iter_mut().skip(cur_table_start_index).take(cur_table_page_count).for_each(BlockPage::set_empty);
 
         Ok(())
     }
@@ -226,7 +238,9 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
                 }
 
                 // No properly sized region was found, so grow list.
-                if Self::grow(core::num::NonZeroUsize::new(size_in_blocks).unwrap(), &mut table).is_err() {
+                if Self::grow(core::num::NonZeroUsize::new(size_in_blocks).unwrap(), &mut table, &self.base_alloc_page)
+                    .is_err()
+                {
                     return Err(core::alloc::AllocError);
                 }
             }
@@ -235,22 +249,8 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
             block_index -= current_run - 1;
             let start_block_index = block_index;
             let start_table_index = start_block_index / BlockPage::BLOCKS_PER;
-            let frame_manager = crate::memory::get_kernel_frame_manager();
-            // SAFETY:  Kernel HHDM is guaranteed by the kernel to be valid.
-            let page_manager = unsafe {
-                PageManager::from_current(&Page::from_address(crate::memory::get_kernel_hhdm_address()).unwrap())
-            };
-            let alloc_base_address = table.as_ptr() as usize;
             for table_index in start_table_index..end_table_index {
                 let block_page = &mut table[table_index];
-                let was_empty = block_page.is_empty();
-
-                // let block_index_floor = table_index * BlockPage::BLOCKS_PER;
-                // let low_offset = block_index - block_index_floor;
-                // let remaining_blocks_in_slice = usize::min(
-                //     end_block_index - block_index,
-                //     (block_index_floor + BlockPage::BLOCKS_PER) - block_index,
-                // );
 
                 let (bit_count, bit_mask) = Self::calculate_bit_fields(table_index, block_index, end_block_index);
                 debug_assert_eq!(*block_page.value() & bit_mask, 0);
@@ -259,22 +259,12 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
                 debug_assert_eq!(*block_page.value() & bit_mask, bit_mask);
 
                 block_index += bit_count;
-
-                if was_empty {
-                    // Ensure when we map/unmap, we utilize the allocator's base table address.
-                    page_manager.auto_map(
-                        &Page::from_index((alloc_base_address / 0x1000) + table_index),
-                        PageAttributes::RW,
-                        frame_manager,
-                    );
-                }
             }
 
-            core::ptr::NonNull::new(core::ptr::slice_from_raw_parts_mut(
-                (alloc_base_address + (start_block_index * Self::BLOCK_SIZE)) as *mut u8,
-                layout.size(),
-            ))
-            .ok_or(core::alloc::AllocError)
+            let allocation_ptr =
+                (self.base_alloc_page.address().as_usize() + (start_block_index * Self::BLOCK_SIZE)) as *mut u8;
+            core::ptr::NonNull::new(core::ptr::slice_from_raw_parts_mut(allocation_ptr, layout.size()))
+                .ok_or(core::alloc::AllocError)
         })
     }
 
@@ -284,19 +274,14 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
         crate::interrupts::without(|| {
             let mut table = self.table.write();
 
-            let start_block_index = (ptr.addr().get() - (table.as_ptr() as usize)) / Self::BLOCK_SIZE;
+            let start_block_index = (ptr.addr().get() - self.base_alloc_page.address().as_usize()) / Self::BLOCK_SIZE;
             let end_block_index = start_block_index + align_up_div(layout.size(), Self::BLOCK_SIZE);
             let mut block_index = start_block_index;
 
             let start_table_index = start_block_index / BlockPage::BLOCKS_PER;
             let end_table_index = align_up_div(end_block_index, BlockPage::BLOCKS_PER);
-            let frame_manager = crate::memory::get_kernel_frame_manager();
-            let page_manager =
-                PageManager::from_current(&Page::from_address(crate::memory::get_kernel_hhdm_address()).unwrap());
-            let alloc_base_address = table.as_ptr() as usize;
             for table_index in start_table_index..end_table_index {
                 let block_page = &mut table[table_index];
-                let had_bits = !block_page.is_empty();
 
                 let (bit_count, bit_mask) = Self::calculate_bit_fields(table_index, block_index, end_block_index);
                 debug_assert_eq!(*block_page.value() & bit_mask, bit_mask);
@@ -305,13 +290,6 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
                 debug_assert_eq!(*block_page.value() & bit_mask, 0);
 
                 block_index += bit_count;
-
-                if had_bits && block_page.is_empty() {
-                    // Ensure when we map/unmap, we utilize the allocator's base table address.
-                    page_manager
-                        .unmap(&Page::from_index((alloc_base_address / 0x1000) + table_index), true, frame_manager)
-                        .unwrap();
-                }
             }
         });
     }
