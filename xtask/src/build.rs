@@ -168,7 +168,7 @@ pub fn build(options: Options) -> Result<(), xshell::Error> {
             match options.arch {
                 Architecture::x64 => {
                     let output = cmd!(shell, "llvm-objdump -M intel -D .hdd/root/linuiz/{kernel_file_str}").output()?;
-                    shell.write_file(PathBuf::from(".debug/disassembly"), output.stdout)?;
+                    shell.write_file(PathBuf::from(".debug/disassembly_kernel"), output.stdout)?;
                 }
                 Architecture::rv64 => panic!("`--disassemble` options cannot be used when targeting `rv64`"),
             }
@@ -176,7 +176,7 @@ pub fn build(options: Options) -> Result<(), xshell::Error> {
 
         if options.readelf {
             let output = cmd!(shell, "readelf -hlS .hdd/root/linuiz/{kernel_file_str}").output()?;
-            shell.write_file(PathBuf::from(".debug/readelf"), output.stdout)?;
+            shell.write_file(PathBuf::from(".debug/readelf_kernel"), output.stdout)?;
         }
     }
 
@@ -185,7 +185,8 @@ pub fn build(options: Options) -> Result<(), xshell::Error> {
         let mut bytes = vec![];
 
         for driver_name in PACKAGED_DRIVERS {
-            let mut file_bytes = shell.read_binary_file(PathBuf::from(format!("{}/{}", build_dir_str, driver_name)))?;
+            let driver_path = PathBuf::from(format!("{}/{}", build_dir_str, driver_name));
+            let mut file_bytes = shell.read_binary_file(driver_path.clone())?;
 
             let byte_offset = file_bytes.len();
 
@@ -199,6 +200,21 @@ pub fn build(options: Options) -> Result<(), xshell::Error> {
             bytes.push((byte_offset >> 56) as u8);
 
             bytes.append(&mut file_bytes);
+
+            if options.disassemble {
+                match options.arch {
+                    Architecture::x64 => {
+                        let output = cmd!(shell, "llvm-objdump -M intel -D {driver_path}").output()?;
+                        shell.write_file(PathBuf::from(format!(".debug/disassembly_{driver_name}")), output.stdout)?;
+                    }
+                    Architecture::rv64 => panic!("`--disassemble` options cannot be used when targeting `rv64`"),
+                }
+            }
+
+            if options.readelf {
+                let output = cmd!(shell, "readelf -hlS {driver_path}").output()?;
+                shell.write_file(PathBuf::from(format!(".debug/readelf_{driver_name}")), output.stdout)?;
+            }
         }
 
         println!("Compressing {} bytes of driver files...", bytes.len());
