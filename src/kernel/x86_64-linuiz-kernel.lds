@@ -3,11 +3,11 @@ OUTPUT_ARCH(i386:x86-64)
 
 ENTRY(_entry)
 
+/* Place kernel in the last 2GB of virtual memory. */
 KERN_BASE = 0xffffffff80000000;
 
 SECTIONS
 {
-    /* Place kernel in the last 2GB of virtual memory. */
     . = KERN_BASE + SIZEOF_HEADERS; 
 
     .hash               : { *(.hash) }

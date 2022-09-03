@@ -17,10 +17,16 @@ fn main() -> Result<(), xshell::Error> {
         Arguments::Build(build_options) => build::build(build_options),
         Arguments::Run(run_options) => runner::run(run_options),
         Arguments::Clean => {
+            static CLEAN_DIRS: [&str; 2] = ["src/kernel/", "src/drivers/"];
+
             let shell = xshell::Shell::new()?;
 
-            let _dir = shell.push_dir("src/");
-            cmd!(shell, "cargo clean").run()
+            for clean_dir in CLEAN_DIRS {
+                let _dir = shell.push_dir(clean_dir);
+                cmd!(shell, "cargo clean").run()?;
+            }
+
+            Ok(())
         }
     }
 }

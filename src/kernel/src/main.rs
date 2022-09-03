@@ -71,6 +71,10 @@ fn alloc_error(error: core::alloc::Layout) -> ! {
     crate::interrupts::wait_loop()
 }
 
+#[used]
+#[no_mangle]
+static BINARY_BASE: usize = 0xffffffff80000000;
+
 pub const LIMINE_REV: u64 = 0;
 static LIMINE_KERNEL_FILE: limine::LimineKernelFileRequest = limine::LimineKernelFileRequest::new(0);
 static LIMINE_INFO: limine::LimineBootInfoRequest = limine::LimineBootInfoRequest::new(LIMINE_REV);
@@ -482,8 +486,13 @@ unsafe extern "C" fn _entry() -> ! {
             let driver_elf = crate::elf::Elf::from_bytes(driver_data).unwrap();
 
             info!("{:?}", driver_elf);
-            for segment_header in driver_elf.get_segment_headers() {
-                info!("{:?}", segment_header);
+
+            for segment in driver_elf.iter_segments() {
+                info!("{:?}", segment);
+            }
+
+            for section in driver_elf.iter_sections() {
+                info!("{:?}", section);
             }
 
             current_offset += driver_len + 8  /* skip 'len' prefix */;

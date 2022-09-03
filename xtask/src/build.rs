@@ -75,6 +75,8 @@ static LIMINE_DEFAULT_CFG: &str = "
 pub fn build(options: Options) -> Result<(), xshell::Error> {
     let shell = Shell::new()?;
 
+    let workspace_root = shell.current_dir();
+
     /* setup default files and folders */
     {
         for root_dir in REQUIRED_ROOT_DIRS {
@@ -111,118 +113,125 @@ pub fn build(options: Options) -> Result<(), xshell::Error> {
         shell.copy_file(bootx64_efi_path.clone(), PathBuf::from(".hdd/root/EFI/BOOT/"))?;
     }
 
-    /* workspace */
+    /* compile kernel */
 
-    {
-        let _dir = shell.push_dir("src/");
+    let profile_str = if options.release { "release" } else { "debug" };
 
-        let _rustflags = shell.push_env(
-            "RUSTFLAGS",
-            format!(
-                "-C link-arg=-T{}",
-                match options.arch {
-                    Architecture::x64 => "x86_64-unknown-none.lds",
-                    Architecture::rv64 => "riscv64gc-unknown-none.lds",
-                }
-            ),
-        );
+    let cargo_arguments = vec![
+        if options.clippy { "clippy" } else { "build" },
+        "--profile",
+        if options.release { "release" } else { "dev" },
+        "--target",
+    ];
 
-        let arguments = vec![
-            if options.clippy { "clippy" } else { "build" },
-            "--profile",
-            if options.release { "release" } else { "dev" },
-            "--target",
-            match options.arch {
-                Architecture::x64 => "x86_64-unknown-none.json",
-                Architecture::rv64 => "riscv64gc-unknown-none-elf",
-            },
-        ];
+    fn disassemble(
+        shell: &xshell::Shell,
+        arch: Architecture,
+        mut workspace_root: PathBuf,
+        file_path: PathBuf,
+    ) -> xshell::Result<()> {
+        match arch {
+            Architecture::x64 => {
+                let output = cmd!(shell, "llvm-objdump -M intel -D {file_path}").output()?;
+                let file_name = file_path.file_name().unwrap().to_str().unwrap();
+                workspace_root.push(format!(".debug/disassembly_{}", file_name));
+                shell.write_file(workspace_root, output.stdout)?;
+            }
+            Architecture::rv64 => panic!("`--disassemble` options cannot be used when targeting `rv64`"),
+        }
 
-        cmd!(shell, "cargo fmt").run()?;
-        cmd!(shell, "cargo {arguments...}").run()?;
+        Ok(())
     }
 
-    let build_dir_str = format!(
-        "src/target/{}/{}/",
-        // determine correct target path
-        match options.arch {
-            Architecture::x64 => "x86_64-unknown-none",
-            Architecture::rv64 => "riscv64gc-unknown-none-elf",
-        },
-        // determine correct build optimization
-        if options.release { "release" } else { "debug" }
-    )
-    .to_lowercase();
+    fn readelf(shell: &xshell::Shell, mut workspace_root: PathBuf, file_path: PathBuf) -> xshell::Result<()> {
+        let output = cmd!(shell, "readelf -hlS {file_path}").output()?;
+        let file_name = file_path.file_name().unwrap().to_str().unwrap();
+        workspace_root.push(format!(".debug/readelf_{}", file_name));
+        shell.write_file(workspace_root, output.stdout)?;
 
+        Ok(())
+    }
+
+    // Compile kernel ...
     {
-        let kernel_file_str = format!("kernel_{:?}.elf", options.arch);
+        {
+            let _dir = shell.push_dir("src/kernel/");
 
-        // Copy kernel binary to root hdd
+            cmd!(shell, "cargo fmt").run()?;
+            let mut cargo_arguments = cargo_arguments.clone();
+            cargo_arguments.push(match options.arch {
+                Architecture::x64 => "x86_64-linuiz-kernel.json",
+                Architecture::rv64 => "riscv64gc-unknown-none-elf",
+            });
+            cmd!(shell, "cargo {cargo_arguments...}").run()?;
+        }
+
+        let out_path = PathBuf::from(".hdd/root/linuiz/kernel.elf");
+
         shell.copy_file(
-            PathBuf::from(format!("{}/kernel", build_dir_str)),
-            PathBuf::from(format!(".hdd/root/linuiz/{}", kernel_file_str)),
+            PathBuf::from(format!("src/kernel/target/x86_64-linuiz-kernel/{}/kernel", profile_str)),
+            PathBuf::from(out_path.clone()),
         )?;
 
-        /* disassemble kernel */
         if options.disassemble {
-            match options.arch {
-                Architecture::x64 => {
-                    let output = cmd!(shell, "llvm-objdump -M intel -D .hdd/root/linuiz/{kernel_file_str}").output()?;
-                    shell.write_file(PathBuf::from(".debug/disassembly_kernel"), output.stdout)?;
-                }
-                Architecture::rv64 => panic!("`--disassemble` options cannot be used when targeting `rv64`"),
-            }
+            disassemble(&shell, options.arch, workspace_root.clone(), out_path.clone())?;
         }
 
         if options.readelf {
-            let output = cmd!(shell, "readelf -hlS .hdd/root/linuiz/{kernel_file_str}").output()?;
-            shell.write_file(PathBuf::from(".debug/readelf_kernel"), output.stdout)?;
+            readelf(&shell, workspace_root.clone(), out_path.clone())?;
         }
     }
 
-    /* build and compress drivers */
-    let compressed_drivers = {
-        let mut bytes = vec![];
+    // Compile and compress drivers ...
+    {
+        let compressed_drivers = {
+            let _dir = shell.push_dir("src/drivers/");
 
-        for driver_name in PACKAGED_DRIVERS {
-            let driver_path = PathBuf::from(format!("{}/{}", build_dir_str, driver_name));
-            let mut file_bytes = shell.read_binary_file(driver_path.clone())?;
+            // Compile ...
+            cmd!(shell, "cargo fmt").run()?;
+            let mut cargo_arguments = cargo_arguments.clone();
+            cargo_arguments.push(match options.arch {
+                Architecture::x64 => "x86_64-linuiz-driver.json",
+                Architecture::rv64 => "riscv64gc-unknown-none-elf",
+            });
+            cmd!(shell, "cargo {cargo_arguments...}").run()?;
 
-            let byte_offset = file_bytes.len();
+            // Compress ...
+            let mut bytes = vec![];
 
-            bytes.push((byte_offset >> 0) as u8);
-            bytes.push((byte_offset >> 8) as u8);
-            bytes.push((byte_offset >> 16) as u8);
-            bytes.push((byte_offset >> 24) as u8);
-            bytes.push((byte_offset >> 32) as u8);
-            bytes.push((byte_offset >> 40) as u8);
-            bytes.push((byte_offset >> 48) as u8);
-            bytes.push((byte_offset >> 56) as u8);
+            for driver_name in PACKAGED_DRIVERS {
+                let driver_path = PathBuf::from(format!("target/x86_64-linuiz-driver/{}/{}", profile_str, driver_name));
+                let mut file_bytes = shell.read_binary_file(driver_path.clone())?;
 
-            bytes.append(&mut file_bytes);
+                let byte_offset = file_bytes.len();
 
-            if options.disassemble {
-                match options.arch {
-                    Architecture::x64 => {
-                        let output = cmd!(shell, "llvm-objdump -M intel -D {driver_path}").output()?;
-                        shell.write_file(PathBuf::from(format!(".debug/disassembly_{driver_name}")), output.stdout)?;
-                    }
-                    Architecture::rv64 => panic!("`--disassemble` options cannot be used when targeting `rv64`"),
+                bytes.push((byte_offset >> 0) as u8);
+                bytes.push((byte_offset >> 8) as u8);
+                bytes.push((byte_offset >> 16) as u8);
+                bytes.push((byte_offset >> 24) as u8);
+                bytes.push((byte_offset >> 32) as u8);
+                bytes.push((byte_offset >> 40) as u8);
+                bytes.push((byte_offset >> 48) as u8);
+                bytes.push((byte_offset >> 56) as u8);
+
+                bytes.append(&mut file_bytes);
+
+                if options.disassemble {
+                    disassemble(&shell, options.arch, workspace_root.clone(), driver_path.clone())?;
+                }
+
+                if options.readelf {
+                    readelf(&shell, workspace_root.clone(), driver_path.clone())?;
                 }
             }
 
-            if options.readelf {
-                let output = cmd!(shell, "readelf -hlS {driver_path}").output()?;
-                shell.write_file(PathBuf::from(format!(".debug/readelf_{driver_name}")), output.stdout)?;
-            }
-        }
+            println!("Compressing {} bytes of driver files...", bytes.len());
+            miniz_oxide::deflate::compress_to_vec(&bytes, options.compress.as_u8())
+        };
 
-        println!("Compressing {} bytes of driver files...", bytes.len());
-        miniz_oxide::deflate::compress_to_vec(&bytes, options.compress.as_u8())
-    };
-
-    println!("Compression resulted in a {} byte dump.", compressed_drivers.len());
-    shell.write_file(PathBuf::from(".hdd/root/linuiz/drivers"), compressed_drivers)?;
+        println!("Compression resulted in a {} byte dump.", compressed_drivers.len());
+        shell.write_file(PathBuf::from(".hdd/root/linuiz/drivers"), compressed_drivers)?;
+    }
 
     Ok(())
 }

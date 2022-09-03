@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "test_driver"
+]
+
+[profile.dev]
+opt-level = 1

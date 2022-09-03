@@ -1,8 +1,5 @@
-mod sections;
+mod section;
 mod segment;
-
-pub use sections::*;
-pub use segment::*;
 
 use libkernel::{Address, Virtual};
 
@@ -95,7 +92,7 @@ impl Type {
             0x4 => Self::Core,
             0xFE00..0xFEFF => Self::OsSpecific(value as u8),
             0xFF00..0xFFFF => Self::ProcessorSpecific(value as u8),
-            _ => unreachable!(),
+            _ => unimplemented!(),
         }
     }
 }
@@ -257,26 +254,6 @@ pub const ELF64_HEADER_SIZE: usize = 64;
 #[allow(non_camel_case_types)]
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct Elf<'a>(&'a [u8]);
-// magic: [u8; 4],
-// class: Class,
-// endianness: Endianness,
-// version0: u8,
-// abi: Abi,
-// abi_version: u8,
-// padding: [u8; 7],
-// ty: u16,
-// machine: Machine,
-// version1: u32,
-// entry: usize,
-// phoff: usize,
-// shoff: usize,
-// flags: u32,
-// ehsize: u16,
-// phentsize: u16,
-// phcnt: u16,
-// shentsize: u16,
-// shcnt: u16,
-// shstrndx: u16,
 
 impl<'a> Elf<'a> {
     pub const MAGIC: [u8; 4] = [0x7F, b'E', b'L', b'F'];
@@ -329,18 +306,18 @@ impl<'a> Elf<'a> {
     }
 
     #[inline]
-    pub fn get_entry_offset(&self) -> u64 {
-        u64::from_ne_bytes(self.0[0x18..0x20].try_into().unwrap())
+    pub fn get_entry_offset(&self) -> usize {
+        u64::from_ne_bytes(self.0[0x18..0x20].try_into().unwrap()) as usize
     }
 
     #[inline]
-    pub fn get_segment_headers_offset(&self) -> u64 {
-        u64::from_ne_bytes(self.0[0x20..0x28].try_into().unwrap())
+    pub fn get_segment_headers_offset(&self) -> usize {
+        u64::from_ne_bytes(self.0[0x20..0x28].try_into().unwrap()) as usize
     }
 
     #[inline]
-    pub fn get_section_headers_offset(&self) -> u64 {
-        u64::from_ne_bytes(self.0[0x28..0x30].try_into().unwrap())
+    pub fn get_section_headers_offset(&self) -> usize {
+        u64::from_ne_bytes(self.0[0x28..0x30].try_into().unwrap()) as usize
     }
 
     #[inline]
@@ -349,58 +326,99 @@ impl<'a> Elf<'a> {
     }
 
     #[inline]
-    pub fn get_segment_header_size(&self) -> u16 {
-        u16::from_ne_bytes(self.0[0x36..0x38].try_into().unwrap())
+    pub fn get_segment_header_size(&self) -> usize {
+        u16::from_ne_bytes(self.0[0x36..0x38].try_into().unwrap()) as usize
     }
 
     #[inline]
-    pub fn get_segment_headers_count(&self) -> u16 {
-        u16::from_ne_bytes(self.0[0x38..0x3A].try_into().unwrap())
+    pub fn get_segment_headers_count(&self) -> usize {
+        u16::from_ne_bytes(self.0[0x38..0x3A].try_into().unwrap()) as usize
     }
 
     #[inline]
-    pub fn get_section_header_size(&self) -> u16 {
-        u16::from_ne_bytes(self.0[0x3A..0x3C].try_into().unwrap())
+    pub fn get_section_header_size(&self) -> usize {
+        u16::from_ne_bytes(self.0[0x3A..0x3C].try_into().unwrap()) as usize
     }
 
     #[inline]
-    pub fn get_section_headers_count(&self) -> u16 {
-        u16::from_ne_bytes(self.0[0x3C..0x3E].try_into().unwrap())
+    pub fn get_section_headers_count(&self) -> usize {
+        u16::from_ne_bytes(self.0[0x3C..0x3E].try_into().unwrap()) as usize
     }
 
     #[inline]
-    pub fn get_section_names_header_index(&self) -> u16 {
-        u16::from_ne_bytes(self.0[0x3E..0x40].try_into().unwrap())
+    pub fn get_section_names_header_index(&self) -> usize {
+        u16::from_ne_bytes(self.0[0x3E..0x40].try_into().unwrap()) as usize
     }
 
-    pub fn get_segment_headers(&self) -> SegmentHeaderIterator {
-        SegmentHeaderIterator {
+    pub fn iter_segments(&self) -> SegmentIterator {
+        SegmentIterator {
             bytes: self.0,
-            base_offset: self.get_segment_headers_offset() as usize,
-            segment_count: self.get_segment_headers_count() as usize,
+            base_offset: self.get_segment_headers_offset(),
+            segment_count: self.get_segment_headers_count(),
             segment_index: 0,
+        }
+    }
+
+    pub fn iter_sections(&self) -> SectionIterator {
+        SectionIterator {
+            bytes: self.0,
+            base_offset: self.get_section_headers_offset(),
+            section_count: self.get_section_headers_count(),
+            section_index: 0,
         }
     }
 }
 
-pub struct SegmentHeaderIterator<'a> {
+pub struct SegmentIterator<'a> {
     bytes: &'a [u8],
     base_offset: usize,
     segment_count: usize,
     segment_index: usize,
 }
 
-impl<'a> Iterator for SegmentHeaderIterator<'a> {
-    type Item = &'a segment::Header;
+impl<'a> Iterator for SegmentIterator<'a> {
+    type Item = segment::Segment<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.segment_index < self.segment_count {
             let start_index = self.base_offset + (self.segment_index * core::mem::size_of::<segment::Header>());
             let end_index = start_index + core::mem::size_of::<segment::Header>();
-            let header = bytemuck::from_bytes(&self.bytes[start_index..end_index]);
+            let header: &segment::Header = bytemuck::from_bytes(&self.bytes[start_index..end_index]);
+
+            let start_offset = header.get_file_offset();
+            let end_offset = start_offset + header.get_disk_size();
+            let data = &self.bytes[start_offset..end_offset];
 
             self.segment_index += 1;
-            Some(header)
+            Some(segment::Segment::new(header, data))
+        } else {
+            None
+        }
+    }
+}
+
+pub struct SectionIterator<'a> {
+    bytes: &'a [u8],
+    base_offset: usize,
+    section_count: usize,
+    section_index: usize,
+}
+
+impl<'a> Iterator for SectionIterator<'a> {
+    type Item = section::Section<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.section_index < self.section_count {
+            let start_index = self.base_offset + (self.section_index * core::mem::size_of::<section::Header>());
+            let end_index = start_index + core::mem::size_of::<section::Header>();
+            let header: &section::Header = bytemuck::from_bytes(&self.bytes[start_index..end_index]);
+
+            let start_offset = header.get_file_offset();
+            let end_offset = start_offset + header.get_disk_size();
+            let data = &self.bytes[start_offset..end_offset];
+
+            self.section_index += 1;
+            Some(section::Section::new(header, data))
         } else {
             None
         }

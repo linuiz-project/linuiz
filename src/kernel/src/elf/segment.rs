@@ -37,13 +37,13 @@ impl Type {
             0x6474E551 => Self::GnuStack,
             0x60000000..0x6FFFFFFF => Self::OsSpecific(value),
             0x70000000..0x7FFFFFFF => Self::ProcessorSpecific(value),
-            _ => unreachable!(),
+            _ => unimplemented!(),
         }
     }
 }
 
 #[repr(C, packed)]
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct Header {
     ty: u32,
     flags: u32,
@@ -55,9 +55,9 @@ pub struct Header {
     align: u64,
 }
 
-// SAFETY: Type is composed of simple primitive numerics, so is pod-able.
-unsafe impl bytemuck::Pod for Header {}
-// SAFETY: Type is composed of simple primitive numerics, so is zeroable.
+// SAFETY: Type is composed of simple primitive numerics.
+unsafe impl bytemuck::AnyBitPattern for Header {}
+// SAFETY: Type is composed of simple primitive numerics.
 unsafe impl bytemuck::Zeroable for Header {}
 
 impl Header {
@@ -97,16 +97,41 @@ impl Header {
     }
 }
 
-impl core::fmt::Debug for Header {
+pub struct Segment<'a> {
+    header: &'a Header,
+    data: &'a [u8],
+}
+
+impl core::ops::Deref for Segment<'_> {
+    type Target = Header;
+
+    fn deref(&self) -> &Self::Target {
+        self.header
+    }
+}
+
+impl<'a> Segment<'a> {
+    #[inline(always)]
+    pub const fn new(header: &'a Header, data: &'a [u8]) -> Self {
+        Self { header, data }
+    }
+
+    #[inline(always)]
+    pub const fn data(&self) -> &[u8] {
+        self.data
+    }
+}
+
+impl core::fmt::Debug for Segment<'_> {
     fn fmt(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
         formatter
-            .debug_struct("Segment Header")
+            .debug_struct("Segment")
             .field("Type", &self.get_type())
             .field("Flags", &self.get_flags())
-            .field("Offset", &self.get_file_offset())
+            .field("File Offset", &self.get_file_offset())
+            .field("Disk Size", &self.get_disk_size())
             .field("Virtual Address", &self.get_virtual_address())
             .field("Physical Address", &self.get_physical_address())
-            .field("Disk Size", &self.get_disk_size())
             .field("Memory Layout", &self.get_memory_layout())
             .finish()
     }
