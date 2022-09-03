@@ -97,11 +97,6 @@ impl LinkerSymbol {
     }
 
     #[inline]
-    pub const unsafe fn as_mut_ptr<T>(&'static self) -> *mut T {
-        self as *const _ as *mut _
-    }
-
-    #[inline]
     pub unsafe fn as_usize(&'static self) -> usize {
         self as *const _ as usize
     }

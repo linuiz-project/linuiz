@@ -479,9 +479,12 @@ unsafe extern "C" fn _entry() -> ! {
 
             let base_offset = current_offset + 8 /* skip 'len' prefix */;
             let driver_data = &drivers_raw_data[base_offset..(base_offset + driver_len)];
-            let driver_header = crate::elf::Elf::from_bytes(driver_data).unwrap();
+            let driver_elf = crate::elf::Elf::from_bytes(driver_data).unwrap();
 
-            info!("{:?}", driver_header);
+            info!("{:?}", driver_elf);
+            for segment_header in driver_elf.get_segment_headers() {
+                info!("{:?}", segment_header);
+            }
 
             current_offset += driver_len + 8  /* skip 'len' prefix */;
             if current_offset >= drivers_raw_data.len() {

@@ -17,6 +17,7 @@ paste = "*"
 acpi = { path = "../../../acpi/acpi/" }
 aml = "*"
 miniz_oxide = "*"
+bytemuck = "*"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86_64 = "*"

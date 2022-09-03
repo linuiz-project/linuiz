@@ -1,8 +1,8 @@
 mod sections;
-mod segments;
+mod segment;
 
 pub use sections::*;
-pub use segments::*;
+pub use segment::*;
 
 use libkernel::{Address, Virtual};
 
@@ -334,12 +334,12 @@ impl<'a> Elf<'a> {
     }
 
     #[inline]
-    pub fn get_segments_offset(&self) -> u64 {
+    pub fn get_segment_headers_offset(&self) -> u64 {
         u64::from_ne_bytes(self.0[0x20..0x28].try_into().unwrap())
     }
 
     #[inline]
-    pub fn get_sections_offset(&self) -> u64 {
+    pub fn get_section_headers_offset(&self) -> u64 {
         u64::from_ne_bytes(self.0[0x28..0x30].try_into().unwrap())
     }
 
@@ -372,6 +372,39 @@ impl<'a> Elf<'a> {
     pub fn get_section_names_header_index(&self) -> u16 {
         u16::from_ne_bytes(self.0[0x3E..0x40].try_into().unwrap())
     }
+
+    pub fn get_segment_headers(&self) -> SegmentHeaderIterator {
+        SegmentHeaderIterator {
+            bytes: self.0,
+            base_offset: self.get_segment_headers_offset() as usize,
+            segment_count: self.get_segment_headers_count() as usize,
+            segment_index: 0,
+        }
+    }
+}
+
+pub struct SegmentHeaderIterator<'a> {
+    bytes: &'a [u8],
+    base_offset: usize,
+    segment_count: usize,
+    segment_index: usize,
+}
+
+impl<'a> Iterator for SegmentHeaderIterator<'a> {
+    type Item = &'a segment::Header;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.segment_index < self.segment_count {
+            let start_index = self.base_offset + (self.segment_index * core::mem::size_of::<segment::Header>());
+            let end_index = start_index + core::mem::size_of::<segment::Header>();
+            let header = bytemuck::from_bytes(&self.bytes[start_index..end_index]);
+
+            self.segment_index += 1;
+            Some(header)
+        } else {
+            None
+        }
+    }
 }
 
 impl core::fmt::Debug for Elf<'_> {
@@ -384,10 +417,10 @@ impl core::fmt::Debug for Elf<'_> {
             .field("Target Machine", &self.get_machine())
             .field("Flags", &self.get_flags())
             .field("Entry Point", &self.get_entry_offset())
-            .field("Segment Headers Offset", &self.get_segments_offset())
+            .field("Segment Headers Offset", &self.get_segment_headers_offset())
             .field("Segment Headers Count", &self.get_segment_headers_count())
             .field("Segment Header Size", &self.get_segment_header_size())
-            .field("Section Headers Offset", &self.get_sections_offset())
+            .field("Section Headers Offset", &self.get_section_headers_offset())
             .field("Section Headers Count", &self.get_section_headers_count())
             .field("Section Header Size", &self.get_section_header_size())
             .field("Section Names Header Index", &self.get_section_names_header_index())

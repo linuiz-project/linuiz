@@ -19,6 +19,7 @@ pub enum Type {
     Note,
     ProgramHeaderTable,
     ThreadLocalStorage,
+    GnuStack,
     OsSpecific(u32),
     ProcessorSpecific(u32),
 }
@@ -33,6 +34,7 @@ impl Type {
             0x4 => Self::Note,
             0x6 => Self::ProgramHeaderTable,
             0x7 => Self::ThreadLocalStorage,
+            0x6474E551 => Self::GnuStack,
             0x60000000..0x6FFFFFFF => Self::OsSpecific(value),
             0x70000000..0x7FFFFFFF => Self::ProcessorSpecific(value),
             _ => unreachable!(),
@@ -46,24 +48,52 @@ pub struct Header {
     ty: u32,
     flags: u32,
     offset: u64,
-    virt_addr: Address<Virtual>,
-    phys_addr: Address<Physical>,
+    virt_addr: u64,
+    phys_addr: u64,
     disk_size: u64,
     mem_size: u64,
     align: u64,
 }
 
+// SAFETY: Type is composed of simple primitive numerics, so is pod-able.
+unsafe impl bytemuck::Pod for Header {}
+// SAFETY: Type is composed of simple primitive numerics, so is zeroable.
+unsafe impl bytemuck::Zeroable for Header {}
+
 impl Header {
+    #[inline(always)]
     pub const fn get_type(&self) -> Type {
         Type::from_u32(self.ty)
     }
 
+    #[inline(always)]
     pub const fn get_flags(&self) -> Flags {
         Flags::from_bits_truncate(self.flags)
     }
 
-    pub const fn get_file_address(&self) -> u64 {
-        self.offset
+    #[inline(always)]
+    pub const fn get_file_offset(&self) -> usize {
+        self.offset as usize
+    }
+
+    #[inline(always)]
+    pub fn get_virtual_address(&self) -> Option<Address<Virtual>> {
+        Address::<Virtual>::new(self.virt_addr)
+    }
+
+    #[inline(always)]
+    pub fn get_physical_address(&self) -> Option<Address<Physical>> {
+        Address::<Physical>::new(self.phys_addr)
+    }
+
+    #[inline(always)]
+    pub const fn get_disk_size(&self) -> usize {
+        self.disk_size as usize
+    }
+
+    #[inline(always)]
+    pub fn get_memory_layout(&self) -> Result<core::alloc::Layout, core::alloc::LayoutError> {
+        core::alloc::Layout::from_size_align(self.mem_size as usize, self.align as usize)
     }
 }
 
@@ -71,14 +101,13 @@ impl core::fmt::Debug for Header {
     fn fmt(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
         formatter
             .debug_struct("Segment Header")
-            // .field("Type", &self.ty)
-            // .field("Flags", &self.flags)
-            // .field("Offset", &self.offset)
-            // .field("Virtual Address", &self.virt_addr)
-            // .field("Physical Address", &self.phys_addr)
-            // .field("Disk Size", &self.disk_size)
-            // .field("Memory Size", &self.mem_size)
-            // .field("Alignment", &self.align)
+            .field("Type", &self.get_type())
+            .field("Flags", &self.get_flags())
+            .field("Offset", &self.get_file_offset())
+            .field("Virtual Address", &self.get_virtual_address())
+            .field("Physical Address", &self.get_physical_address())
+            .field("Disk Size", &self.get_disk_size())
+            .field("Memory Layout", &self.get_memory_layout())
             .finish()
     }
 }
