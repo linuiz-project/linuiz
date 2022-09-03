@@ -155,12 +155,12 @@ impl Address<Virtual> {
     }
 
     #[inline(always)]
-    pub const fn as_ptr<T>(&self) -> *const T {
+    pub const unsafe fn as_ptr<T>(&self) -> *const T {
         self.0 as usize as *const T
     }
 
     #[inline(always)]
-    pub const fn as_mut_ptr<T>(&mut self) -> *mut T {
+    pub const unsafe fn as_mut_ptr<T>(&mut self) -> *mut T {
         self.0 as usize as *mut T
     }
 
