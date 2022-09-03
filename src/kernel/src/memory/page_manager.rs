@@ -192,10 +192,6 @@ impl PageManager {
             // pointing to a frame it doesn't own is accessed).
             let mut map_write = self.virtual_map.write();
 
-            if page.index() < 10000 {
-                info!("{:?} -> {:#X}    :{:?}", page, frame_index, attributes);
-            }
-
             // Attempt to acquire the requisite frame, following the outlined parsing of `lock_frame`.
             let frame_result = if lock_frame { frame_manager.lock(frame_index) } else { Ok(frame_index) };
 
