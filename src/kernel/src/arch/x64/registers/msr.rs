@@ -112,6 +112,14 @@ impl IA32_EFER {
         wrmsr(0xC0000080, *rdmsr(0xC0000080).set_bit(8, set));
     }
 
+    /// Sets the IA32_EFER.SCE (syscall/syret enable) bit.
+    ///
+    /// SAFETY: Caller must ensure software expects system calls to be enabled or disabled.
+    #[inline(always)]
+    pub unsafe fn set_sce(set: bool) {
+        wrmsr(0xC0000080, *rdmsr(0xC0000080).set_bit(0, set));
+    }
+
     /// Gets the IA32_EFER.NXE (no-execute enable) bit.
     #[inline(always)]
     pub fn get_nxe() -> bool {
@@ -128,12 +136,46 @@ impl IA32_EFER {
     }
 }
 
+pub struct IA32_STAR;
+impl IA32_STAR {
+    /// Sets the selectors used for `sysret`.
+    ///
+    /// Usage (from the IA32 specification):
+    /// > When SYSRET transfers control to 64-bit mode user code using REX.W, the processor gets the privilege level 3
+    /// > target code segment, instruction pointer, stack segment, and flags as follows:
+    /// > Target code segment:       Reads a non-NULL selector from IA32_STAR\[63:48\] + 16.
+    /// > ...
+    /// > Target stack segment:      IA32_STAR\[63:48\] + 8
+    /// > ...
+    ///
+    /// SAFETY: Caller must ensure the low and high selectors are valid.
+    #[inline(always)]
+    pub unsafe fn set_selectors(low_selector: SegmentSelector, high_selector: SegmentSelector) {
+        wrmsr(0xC0000081, (high_selector.index() as u64) << 51 | (low_selector.index() as u64) << 35);
+    }
+}
+
+pub struct IA32_LSTAR;
+impl IA32_LSTAR {
+    /// Sets the `rip` value that's jumped to when the `syscall` instruction is executed.
+    ///
+    /// SAFETY: Caller must ensure the given function pointer is valid for a syscall instruction pointer.
+    #[inline(always)]
+    pub unsafe fn set_syscall(func: unsafe extern "C" fn()) {
+        wrmsr(0xC0000082, func as u64);
+    }
+}
+
+pub struct IA32_CSTAR;
+impl Generic for IA32_CSTAR {
+    const ECX: u32 = 0xC0000083;
+}
+
 pub struct IA32_SFMASK;
 impl IA32_SFMASK {
     /// Sets `rflags` upon a `syscall` based on masking the bits in the given value.
     ///
-    /// SAFETY: This function is unsafe because the caller must ensure the function jumped to upon
-    ///         a `syscall` can correctly handle the provided RFlags.
+    /// SAFETY: Caller must ensure the function jumped to upon a `syscall` can correctly handle the provided RFlags.
     #[inline(always)]
     pub unsafe fn set_rflags_mask(rflags: super::RFlags) {
         wrmsr(0xC0000084, rflags.bits());

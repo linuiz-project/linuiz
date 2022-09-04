@@ -32,11 +32,21 @@ impl TaskPriority {
 }
 
 /// Represents a stack allocation strategy for a [`Task`].
-pub enum TaskStackOption {
+pub enum TaskStack {
+    None,
     Auto,
     Pages(usize),
 }
 
+pub enum TaskStart {
+    Address(libkernel::Address<libkernel::Virtual>),
+    Function(fn() -> !),
+}
+
+pub static GLOBAL_TASKS: spin::Lazy<spin::Mutex<VecDeque<Task>>> =
+    spin::Lazy::new(|| spin::Mutex::new(VecDeque::new()));
+
+// TODO: move `Task` and its types / impls to a module
 /// Representation object for different contexts of execution in the CPU.
 pub struct Task {
     id: u64,
@@ -53,18 +63,20 @@ impl Task {
 
     pub fn new(
         priority: TaskPriority,
-        function: fn() -> !,
-        stack: &TaskStackOption,
+        start: TaskStart,
+        stack: &TaskStack,
         arch_context: crate::interrupts::ArchContext,
         root_page_table_args: crate::memory::RootPageTable,
     ) -> Self {
         let stack = match stack {
-            TaskStackOption::Auto => PageAlignedBox::new_uninit_slice_in(
+            TaskStack::None => PageAlignedBox::new_uninit_slice_in(0, libkernel::memory::page_aligned_allocator()),
+
+            TaskStack::Auto => PageAlignedBox::new_uninit_slice_in(
                 Self::DEFAULT_STACK_SIZE,
                 libkernel::memory::page_aligned_allocator(),
             ),
 
-            TaskStackOption::Pages(page_count) => PageAlignedBox::new_uninit_slice_in(
+            TaskStack::Pages(page_count) => PageAlignedBox::new_uninit_slice_in(
                 (*page_count + 1) * 0x1000,
                 libkernel::memory::page_aligned_allocator(),
             ),
@@ -83,7 +95,10 @@ impl Task {
             id: NEXT_THREAD_ID.fetch_add(1, core::sync::atomic::Ordering::AcqRel),
             prio: priority,
             ctrl_flow_context: crate::interrupts::ControlFlowContext {
-                ip: function as usize as u64,
+                ip: match start {
+                    TaskStart::Address(address) => address.as_u64(),
+                    TaskStart::Function(function) => function as usize as u64,
+                },
                 sp: unsafe { stack.as_ptr().add(stack.len()) as u64 },
             },
             arch_context,

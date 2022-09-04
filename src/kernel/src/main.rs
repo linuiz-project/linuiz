@@ -71,10 +71,6 @@ fn alloc_error(error: core::alloc::Layout) -> ! {
     crate::interrupts::wait_loop()
 }
 
-#[used]
-#[no_mangle]
-static BINARY_BASE: usize = 0xffffffff80000000;
-
 pub const LIMINE_REV: u64 = 0;
 static LIMINE_KERNEL_FILE: limine::LimineKernelFileRequest = limine::LimineKernelFileRequest::new(0);
 static LIMINE_INFO: limine::LimineBootInfoRequest = limine::LimineBootInfoRequest::new(LIMINE_REV);
@@ -461,9 +457,17 @@ unsafe extern "C" fn _entry() -> ! {
     SMP_MEMORY_READY.store(true, Ordering::Relaxed);
 
     {
+        use crate::{elf::segment, memory::PageAttributes};
+        use libkernel::memory::Page;
+
         let drivers_raw_data = miniz_oxide::inflate::decompress_to_vec(drivers_data.get().unwrap()).unwrap();
         debug!("Decompressed {} bytes of driver files.", drivers_raw_data.len());
 
+        let frame_manager = crate::memory::get_kernel_frame_manager();
+        let hhdm_address = crate::memory::get_kernel_hhdm_address();
+
+        // TODO: some how handle the permissions of userspace stacks
+        // Iterate and load drivers as tasks.
         let mut current_offset = 0;
         loop {
             let driver_len = {
@@ -484,15 +488,100 @@ unsafe extern "C" fn _entry() -> ! {
             let base_offset = current_offset + 8 /* skip 'len' prefix */;
             let driver_data = &drivers_raw_data[base_offset..(base_offset + driver_len)];
             let driver_elf = crate::elf::Elf::from_bytes(driver_data).unwrap();
-
             info!("{:?}", driver_elf);
 
+            // Create the driver's page manager from the kernel's higher-half table.
+            let driver_page_manager = crate::memory::PageManager::new(
+                frame_manager,
+                &Page::from_address(crate::memory::get_kernel_hhdm_address()).unwrap(),
+                Some(crate::memory::get_kernel_page_manager().copy_pml4()),
+            );
+
             for segment in driver_elf.iter_segments() {
-                info!("{:?}", segment);
+                trace!("{:#?}", segment);
+
+                match segment.get_type() {
+                    segment::Type::Loadable => {
+                        let memory_start = segment.get_virtual_address().unwrap().as_usize();
+                        let memory_end = memory_start + segment.get_memory_layout().unwrap().size();
+                        let memory_range = memory_start..memory_end;
+
+                        debug!("Mapping memory      @{:#X?}", memory_range);
+
+                        for page_base in memory_range.step_by(0x1000) {
+                            // REMARK: This doesn't support RWX pages. I'm not sure it ever should.
+                            let page_attributes = if segment.get_flags().contains(segment::Flags::EXECUTABLE) {
+                                PageAttributes::RX
+                            } else if segment.get_flags().contains(segment::Flags::WRITABLE) {
+                                PageAttributes::RW
+                            } else {
+                                PageAttributes::RO
+                            };
+
+                            let page = Page::from_index(page_base / 0x1000);
+                            let frame_index = frame_manager.lock_next().unwrap();
+                            trace!("Mapping memory {:?} -> {:#X}", page, frame_index);
+                            driver_page_manager
+                                .map(&page, frame_index, false, page_attributes | PageAttributes::USER, frame_manager)
+                                .unwrap();
+
+                            let memory_offset = page_base - memory_start;
+                            let memory_remaining = memory_end - page_base;
+                            // SAFETY: HHDM is guaranteed by kernel to be valid, and the frame being pointed to was just allocated.
+                            let memory_hhdm = unsafe {
+                                core::slice::from_raw_parts_mut(
+                                    (hhdm_address + ((frame_index * 0x1000) as u64)).as_mut_ptr::<u8>(),
+                                    memory_remaining,
+                                )
+                            };
+
+                            // Handle zeroing of `.bss` segments.
+                            if memory_remaining > segment.data().len() {
+                                memory_hhdm.fill(0);
+                            } else {
+                                memory_hhdm.copy_from_slice(
+                                    &segment.data()[memory_offset
+                                        ..(memory_offset + core::cmp::min(memory_remaining, segment.data().len()))],
+                                );
+                            }
+                        }
+                    }
+
+                    _ => {}
+                }
             }
 
-            for section in driver_elf.iter_sections() {
-                info!("{:?}", section);
+            // Push ELF as global task.
+            {
+                use libkernel::{Address, Physical, Virtual};
+
+                let mut global_tasks = scheduling::GLOBAL_TASKS.lock();
+                global_tasks.push_back(scheduling::Task::new(
+                    scheduling::TaskPriority::new(scheduling::TaskPriority::MAX).unwrap(),
+                    // TODO: account for memory base when passing entry offset
+                    scheduling::TaskStart::Address(
+                        Address::<Virtual>::new(driver_elf.get_entry_offset() as u64).unwrap(),
+                    ),
+                    &scheduling::TaskStack::Auto,
+                    {
+                        #[cfg(target_arch = "x86_64")]
+                        {
+                            (
+                                crate::arch::x64::cpu::GeneralContext::empty(),
+                                crate::arch::x64::cpu::SpecialContext::with_user_segments(
+                                    crate::arch::x64::registers::RFlags::INTERRUPT_FLAG,
+                                ),
+                            )
+                        }
+                    },
+                    #[cfg(target_arch = "x86_64")]
+                    {
+                        crate::memory::RootPageTable(
+                            Address::<Physical>::new((driver_page_manager.root_frame_index() * 0x1000) as u64).unwrap(),
+                            crate::arch::x64::registers::control::CR3Flags::empty(),
+                        )
+                    },
+                ))
             }
 
             current_offset += driver_len + 8  /* skip 'len' prefix */;
@@ -579,30 +668,30 @@ pub(self) unsafe fn kernel_thread_setup() -> ! {
     // use crate::registers::x64::RFlags;
     use crate::{local_state::try_push_task, scheduling::*};
 
-    try_push_task(Task::new(
-        TaskPriority::new(3).unwrap(),
-        syscall_test,
-        &TaskStackOption::Pages(1),
-        {
-            #[cfg(target_arch = "x86_64")]
-            {
-                (
-                    crate::arch::x64::cpu::GeneralContext::empty(),
-                    crate::arch::x64::cpu::SpecialContext::with_kernel_segments(
-                        crate::arch::x64::registers::RFlags::INTERRUPT_FLAG,
-                    ),
-                )
-            }
-        },
-        crate::memory::RootPageTable::read(),
-    ))
-    .unwrap();
+    // try_push_task(Task::new(
+    //     TaskPriority::new(3).unwrap(),
+    //     TaskStart::Function(syscall_test),
+    //     &TaskStackOption::Pages(1),
+    //     {
+    //         #[cfg(target_arch = "x86_64")]
+    //         {
+    //             (
+    //                 crate::arch::x64::cpu::GeneralContext::empty(),
+    //                 crate::arch::x64::cpu::SpecialContext::with_kernel_segments(
+    //                     crate::arch::x64::registers::RFlags::INTERRUPT_FLAG,
+    //                 ),
+    //             )
+    //         }
+    //     },
+    //     crate::memory::RootPageTable::read(),
+    // ))
+    // .unwrap();
 
     if ALLOC_TEST {
         try_push_task(Task::new(
             TaskPriority::new(3).unwrap(),
-            alloc_test,
-            &TaskStackOption::Pages(1),
+            TaskStart::Function(alloc_test),
+            &TaskStack::Pages(1),
             {
                 #[cfg(target_arch = "x86_64")]
                 {

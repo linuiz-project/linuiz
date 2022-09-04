@@ -10,20 +10,34 @@ enum Arguments {
     Build(build::Options),
     Run(runner::Options),
     Clean,
+    Metadata,
 }
+
+static CRATE_DIRS: [&str; 2] = ["src/kernel/", "src/drivers/"];
 
 fn main() -> Result<(), xshell::Error> {
     match Arguments::parse() {
         Arguments::Build(build_options) => build::build(build_options),
-        Arguments::Run(run_options) => runner::run(run_options),
-        Arguments::Clean => {
-            static CLEAN_DIRS: [&str; 2] = ["src/kernel/", "src/drivers/"];
 
+        Arguments::Run(run_options) => runner::run(run_options),
+
+        Arguments::Clean => {
             let shell = xshell::Shell::new()?;
 
-            for clean_dir in CLEAN_DIRS {
-                let _dir = shell.push_dir(clean_dir);
+            for crate_dir in CRATE_DIRS {
+                let _dir = shell.push_dir(crate_dir);
                 cmd!(shell, "cargo clean").run()?;
+            }
+
+            Ok(())
+        }
+
+        Arguments::Metadata => {
+            let shell = xshell::Shell::new()?;
+
+            for crate_dir in CRATE_DIRS {
+                let _dir = shell.push_dir(crate_dir);
+                cmd!(shell, "cargo metadata --format-version 1").run()?;
             }
 
             Ok(())

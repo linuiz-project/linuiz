@@ -116,7 +116,7 @@ pub enum DestinationMode {
 #[allow(non_camel_case_types)]
 pub enum Vector {
     Clock = 0x20,
-
+    /* 0x21..=0x2F reserved for PIC */
     Syscall = 0x30,
     Timer = 0x31,
     Thermal = 0x32,
@@ -148,6 +148,8 @@ pub fn common_interrupt_handler(
         }
 
         Ok(vector) if vector == Vector::Syscall => {
+            info!("SYSCALL");
+
             // TODO general syscall impl
             #[cfg(target_arch = "x86_64")]
             {

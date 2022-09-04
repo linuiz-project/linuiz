@@ -92,8 +92,8 @@ pub unsafe fn init(core_id: u32) {
         scheduler: Scheduler::new(false),
         default_task: Task::new(
             TaskPriority::new(1).unwrap(),
-            crate::interrupts::wait_loop,
-            &crate::scheduling::TaskStackOption::Auto,
+            crate::scheduling::TaskStart::Function(crate::interrupts::wait_loop),
+            &crate::scheduling::TaskStack::Auto,
             {
                 #[cfg(target_arch = "x86_64")]
                 {
@@ -135,6 +135,11 @@ pub fn schedule_next_task(
         cur_task.root_page_table_args = RootPageTable::read();
 
         local_state.scheduler.push_task(cur_task);
+    }
+
+    if let Some(mut global_tasks) = crate::scheduling::GLOBAL_TASKS.try_lock()
+        && let Some(task) = global_tasks.pop_front() {
+            local_state.scheduler.push_task(task);
     }
 
     // Take all tasks from the global queue. Every core will be doing this, so we'll load

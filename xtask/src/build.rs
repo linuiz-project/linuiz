@@ -49,8 +49,12 @@ pub struct Options {
     readelf: bool,
 
     /// Whether to use `cargo clippy` rather than `cargo build`.
-    #[clap(short, long)]
+    #[clap(long)]
     clippy: bool,
+
+    // Whether to use `cargo check` rather than `cargo build`.
+    #[clap(long)]
+    check: bool,
 
     /// The compression level to use when compressing init device drivers.
     #[clap(arg_enum, long, default_value = "default")]
@@ -114,11 +118,20 @@ pub fn build(options: Options) -> Result<(), xshell::Error> {
     }
 
     /* compile kernel */
-
     let profile_str = if options.release { "release" } else { "debug" };
 
     let cargo_arguments = vec![
-        if options.clippy { "clippy" } else { "build" },
+        {
+            if options.clippy && options.check {
+                panic!("`--clippy` and `--check` cannot be used in tandem")
+            } else if options.clippy {
+                "clippy"
+            } else if options.check {
+                "check"
+            } else {
+                "build"
+            }
+        },
         "--profile",
         if options.release { "release" } else { "dev" },
         "--target",

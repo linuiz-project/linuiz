@@ -1,5 +1,5 @@
-mod section;
-mod segment;
+pub mod section;
+pub mod segment;
 
 use libkernel::{Address, Virtual};
 
