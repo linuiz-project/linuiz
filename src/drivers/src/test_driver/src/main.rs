@@ -1,6 +1,6 @@
 #![no_std]
 #![no_main]
-#![feature(raw_ref_op, sync_unsafe_cell, asm_const, asm_sym, naked_functions)]
+#![feature(sync_unsafe_cell, naked_functions, asm_const, asm_sym)]
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
@@ -14,30 +14,32 @@ static STACK: core::cell::SyncUnsafeCell<Stack> = core::cell::SyncUnsafeCell::ne
 
 #[naked]
 #[no_mangle]
-unsafe extern "C" fn _entry() -> ! {
+unsafe extern "C" fn _start() -> ! {
     core::arch::asm!(
         "
         lea rsp, [{} + {}]
         call {}
         ",
-        const STACK_SIZE,
         sym STACK,
+        const STACK_SIZE,
         sym main,
         options(noreturn)
-    );
+    )
 }
 
 extern "C" fn main() -> ! {
-    let control = (0_u64, 0xD3ADC0D3_u64);
-
     loop {
         unsafe {
-            let _result: u64;
-
             core::arch::asm!(
-                "syscall",
-                in("rdi") &raw const control,
-                out("rsi") _result
+                "
+                push rdi
+
+                mov rdi, 0x0
+                int 0x30
+
+                pop rdi
+                ",
+                options(nostack, nomem)
             );
 
             loop {}

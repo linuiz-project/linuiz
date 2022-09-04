@@ -33,7 +33,7 @@ impl Compression {
 #[derive(Parser)]
 pub struct Options {
     /// The compilation target for this build.
-    #[clap(arg_enum, long)]
+    #[clap(arg_enum, long, default_value = "x64")]
     arch: Architecture,
 
     /// Whether the current build is a release build.
@@ -48,17 +48,15 @@ pub struct Options {
     #[clap(short, long)]
     readelf: bool,
 
-    /// Whether to use `cargo clippy` rather than `cargo build`.
-    #[clap(long)]
-    clippy: bool,
-
-    // Whether to use `cargo check` rather than `cargo build`.
-    #[clap(long)]
-    check: bool,
-
     /// The compression level to use when compressing init device drivers.
     #[clap(arg_enum, long, default_value = "default")]
     compress: Compression,
+
+    /// Whether to use `cargo clippy` rather than `cargo build`.
+    pub clippy: bool,
+
+    // Whether to use `cargo check` rather than `cargo build`.
+    pub check: bool,
 }
 
 static REQUIRED_ROOT_DIRS: [&str; 5] = ["resources/", ".hdd/", ".hdd/root/EFI/BOOT/", ".hdd/root/linuiz/", ".debug/"];
@@ -204,7 +202,7 @@ pub fn build(options: Options) -> Result<(), xshell::Error> {
             cmd!(shell, "cargo fmt").run()?;
             let mut cargo_arguments = cargo_arguments.clone();
             cargo_arguments.push(match options.arch {
-                Architecture::x64 => "x86_64-linuiz-driver.json",
+                Architecture::x64 => "x86_64-unknown-linuiz.json",
                 Architecture::rv64 => "riscv64gc-unknown-none-elf",
             });
             cmd!(shell, "cargo {cargo_arguments...}").run()?;
@@ -213,7 +211,8 @@ pub fn build(options: Options) -> Result<(), xshell::Error> {
             let mut bytes = vec![];
 
             for driver_name in PACKAGED_DRIVERS {
-                let driver_path = PathBuf::from(format!("target/x86_64-linuiz-driver/{}/{}", profile_str, driver_name));
+                let driver_path =
+                    PathBuf::from(format!("target/x86_64-unknown-linuiz/{}/{}", profile_str, driver_name));
                 let mut file_bytes = shell.read_binary_file(driver_path.clone())?;
 
                 let byte_offset = file_bytes.len();

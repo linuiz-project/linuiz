@@ -9,11 +9,6 @@
   "target-c-int-width": "32",
   "max-atomic-width": "64",
   "linker-flavor": "ld.lld",
-  "pre-link-args": {
-    "ld.lld": [
-      "-Tx86_64-linuiz-driver.lds"
-    ]
-  },
   "executables": true,
   "os": "none",
   "code-model": "small",
