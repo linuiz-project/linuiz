@@ -17,7 +17,8 @@
     exclusive_range_pattern,
     raw_ref_op,
     let_chains,
-    unchecked_math
+    unchecked_math,
+    cstr_from_bytes_until_nul
 )]
 #![forbid(clippy::inline_asm_x86_att_syntax)]
 #![deny(clippy::semicolon_if_nothing_returned, clippy::debug_assert_with_mut_call, clippy::float_arithmetic)]
@@ -81,7 +82,7 @@ static LIMINE_MODULES: limine::LimineModuleRequest = limine::LimineModuleRequest
 static LIMINE_STACK: limine::LimineStackSizeRequest = limine::LimineStackSizeRequest::new(LIMINE_REV).stack_size({
     #[cfg(debug_assertions)]
     {
-        0x100000
+        0x1000000
     }
 
     #[cfg(not(debug_assertions))]
@@ -95,8 +96,10 @@ static CON_OUT: core::cell::SyncUnsafeCell<crate::memory::io::Serial> =
 static SMP_MEMORY_READY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 static SMP_MEMORY_INIT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
+// TODO: parse kernel command line configuration more succintly
 static mut KERNEL_CFG_SMP: bool = false;
 
+/// SAFETY: This function invariantly assumes it will be called only once per core.
 #[no_mangle]
 #[allow(clippy::too_many_lines)]
 unsafe extern "C" fn _entry() -> ! {
@@ -287,6 +290,7 @@ unsafe extern "C" fn _entry() -> ! {
                 LIMINE_MODULES.get_response().get().map(|modules_response| modules_response.modules())
             {
                 // Search specifically for 'drivers' module. This is a for loop to ensure forward compatibility if we ever load more than 1 module.
+
                 for module in
                     modules.iter().filter(|module| module.path.to_str().unwrap().to_str().unwrap().ends_with("drivers"))
                 {
@@ -302,7 +306,6 @@ unsafe extern "C" fn _entry() -> ! {
                     debug!("Read {} bytes of compressed drivers from memory.", module.length);
                     // Write pointer to driver data, so it is easily accessible after memory is switched to the kernel.
                     drivers_data.set(core::slice::from_raw_parts(drivers_hhdm_ptr, module.length as usize)).unwrap();
-                    break;
                 }
             }
         }
@@ -470,6 +473,7 @@ unsafe extern "C" fn _entry() -> ! {
         // Iterate and load drivers as tasks.
         let mut current_offset = 0;
         loop {
+            // Copy and reconstruct the driver byte length from the prefix.
             let driver_len = {
                 let mut value = 0;
 
@@ -497,18 +501,19 @@ unsafe extern "C" fn _entry() -> ! {
                 Some(crate::memory::get_kernel_page_manager().copy_pml4()),
             );
 
+            // Iterate the segments, and allocate them.
             for segment in driver_elf.iter_segments() {
-                trace!("{:#?}", segment);
+                trace!("{:?}", segment);
 
                 match segment.get_type() {
                     segment::Type::Loadable => {
                         let memory_start = segment.get_virtual_address().unwrap().as_usize();
                         let memory_end = memory_start + segment.get_memory_layout().unwrap().size();
-                        let memory_range = memory_start..memory_end;
+                        let start_page_index = libkernel::align_down_div(memory_start, 0x1000);
+                        let end_page_index = libkernel::align_up_div(memory_end, 0x1000);
+                        let mut data_offset = 0;
 
-                        debug!("Mapping memory      @{:#X?}", memory_range);
-
-                        for page_base in memory_range.step_by(0x1000) {
+                        for page_index in start_page_index..end_page_index {
                             // REMARK: This doesn't support RWX pages. I'm not sure it ever should.
                             let page_attributes = if segment.get_flags().contains(segment::Flags::EXECUTABLE) {
                                 PageAttributes::RX
@@ -518,31 +523,31 @@ unsafe extern "C" fn _entry() -> ! {
                                 PageAttributes::RO
                             };
 
-                            let page = Page::from_index(page_base / 0x1000);
+                            let page = Page::from_index(page_index);
                             let frame_index = frame_manager.lock_next().unwrap();
-                            trace!("Mapping memory {:?} -> {:#X}", page, frame_index);
                             driver_page_manager
                                 .map(&page, frame_index, false, page_attributes | PageAttributes::USER, frame_manager)
                                 .unwrap();
 
-                            let memory_offset = page_base - memory_start;
-                            let memory_remaining = memory_end - page_base;
                             // SAFETY: HHDM is guaranteed by kernel to be valid, and the frame being pointed to was just allocated.
                             let memory_hhdm = unsafe {
                                 core::slice::from_raw_parts_mut(
                                     (hhdm_address + ((frame_index * 0x1000) as u64)).as_mut_ptr::<u8>(),
-                                    memory_remaining,
+                                    0x1000,
                                 )
                             };
 
-                            // Handle zeroing of `.bss` segments.
-                            if memory_remaining > segment.data().len() {
-                                memory_hhdm.fill(0);
-                            } else {
-                                memory_hhdm.copy_from_slice(
-                                    &segment.data()[memory_offset
-                                        ..(memory_offset + core::cmp::min(memory_remaining, segment.data().len()))],
-                                );
+                            // If the virtual address isn't page-aligned, then this allows us to start writing at
+                            // the correct address, rather than writing the wrong bytes at the lower page boundary.
+                            let memory_offset = memory_start.checked_sub(page_index * 0x1000).unwrap_or(0);
+                            // REMARK: This could likely be optimized to use memcpy / copy_nonoverlapping, but
+                            //         for now this approach suffices.
+                            for index in memory_offset..0x1000 {
+                                let data_value = segment.data().get(data_offset);
+                                memory_hhdm[index] = *data_value
+                                    // Handle zeroing of `.bss` segments.
+                                    .unwrap_or(&0);
+                                data_offset += 1;
                             }
                         }
                     }
@@ -594,7 +599,7 @@ unsafe extern "C" fn _entry() -> ! {
     kernel_thread_setup()
 }
 
-/// Entrypoint for AP processors.
+/// SAFETY: This function invariantly assumes it will be called only once per core.
 #[inline(never)]
 unsafe fn _smp_entry() -> ! {
     // Wait to ensure the machine is the correct state to execute cpu setup.
@@ -620,93 +625,10 @@ unsafe fn _smp_entry() -> ! {
     kernel_thread_setup()
 }
 
-fn syscall_test() -> ! {
-    use libkernel::syscall;
-    let control = syscall::Control { id: syscall::ID::Test, blah: 0xD3ADC0D3 };
-    // TODO use local timer
-    let clock = crate::time::clock::get();
-
-    loop {
-        // SAFETY: Temporary syscall test.
-        #[cfg(target_arch = "x86_64")]
-        unsafe {
-            let result: u64;
-
-            core::arch::asm!(
-                "int {}",
-                const crate::interrupts::Vector::Syscall as u8,
-                in("rdi") &raw const control,
-                out("rsi") result
-            );
-
-            info!("{:#X}", result);
-        }
-
-        clock.spin_wait_us(500000);
-    }
-}
-
-fn alloc_test() -> ! {
-    loop {
-        use alloc::vec::Vec;
-        let mut vec = Vec::new();
-        for index in 0..1024 {
-            vec.push(index);
-        }
-
-        info!("{:?}", vec);
-    }
-}
-
-const ALLOC_TEST: bool = false;
-
 /// SAFETY: This function invariantly assumes it will be called only once per core.
 #[inline(never)]
 pub(self) unsafe fn kernel_thread_setup() -> ! {
     crate::local_state::init(0);
-
-    // use crate::registers::x64::RFlags;
-    use crate::{local_state::try_push_task, scheduling::*};
-
-    // try_push_task(Task::new(
-    //     TaskPriority::new(3).unwrap(),
-    //     TaskStart::Function(syscall_test),
-    //     &TaskStackOption::Pages(1),
-    //     {
-    //         #[cfg(target_arch = "x86_64")]
-    //         {
-    //             (
-    //                 crate::arch::x64::cpu::GeneralContext::empty(),
-    //                 crate::arch::x64::cpu::SpecialContext::with_kernel_segments(
-    //                     crate::arch::x64::registers::RFlags::INTERRUPT_FLAG,
-    //                 ),
-    //             )
-    //         }
-    //     },
-    //     crate::memory::RootPageTable::read(),
-    // ))
-    // .unwrap();
-
-    if ALLOC_TEST {
-        try_push_task(Task::new(
-            TaskPriority::new(3).unwrap(),
-            TaskStart::Function(alloc_test),
-            &TaskStack::Pages(1),
-            {
-                #[cfg(target_arch = "x86_64")]
-                {
-                    (
-                        crate::arch::x64::cpu::GeneralContext::empty(),
-                        crate::arch::x64::cpu::SpecialContext::with_kernel_segments(
-                            crate::arch::x64::registers::RFlags::INTERRUPT_FLAG,
-                        ),
-                    )
-                }
-            },
-            crate::memory::RootPageTable::read(),
-        ))
-        .unwrap();
-    }
 
     trace!("Beginning scheduling...");
     crate::local_state::try_begin_scheduling();
