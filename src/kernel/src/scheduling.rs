@@ -43,6 +43,7 @@ pub enum TaskStart {
     Function(fn() -> !),
 }
 
+// TODO: devise a better method for tasks to be queued globally
 pub static GLOBAL_TASKS: spin::Lazy<spin::Mutex<VecDeque<Task>>> =
     spin::Lazy::new(|| spin::Mutex::new(VecDeque::new()));
 

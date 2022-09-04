@@ -345,9 +345,9 @@ impl<'a> Elf<'a> {
         u16::from_ne_bytes(self.0[0x3C..0x3E].try_into().unwrap()) as usize
     }
 
-    #[inline]
-    pub fn get_section_names_header_index(&self) -> usize {
-        u16::from_ne_bytes(self.0[0x3E..0x40].try_into().unwrap()) as usize
+    pub fn get_section_names_section(&self) -> Option<section::Section> {
+        let section_names_header_index = u16::from_ne_bytes(self.0[0x3E..0x40].try_into().unwrap()) as usize;
+        self.iter_sections().nth(section_names_header_index)
     }
 
     pub fn iter_segments(&self) -> SegmentIterator {
@@ -441,7 +441,6 @@ impl core::fmt::Debug for Elf<'_> {
             .field("Section Headers Offset", &self.get_section_headers_offset())
             .field("Section Headers Count", &self.get_section_headers_count())
             .field("Section Header Size", &self.get_section_header_size())
-            .field("Section Names Header Index", &self.get_section_names_header_index())
             .finish()
     }
 }

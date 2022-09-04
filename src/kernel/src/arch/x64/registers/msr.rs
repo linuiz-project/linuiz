@@ -150,7 +150,10 @@ impl IA32_STAR {
     ///
     /// SAFETY: Caller must ensure the low and high selectors are valid.
     #[inline(always)]
-    pub unsafe fn set_selectors(low_selector: SegmentSelector, high_selector: SegmentSelector) {
+    pub unsafe fn set_selectors(
+        low_selector: x86_64::structures::gdt::SegmentSelector,
+        high_selector: x86_64::structures::gdt::SegmentSelector,
+    ) {
         wrmsr(0xC0000081, (high_selector.index() as u64) << 51 | (low_selector.index() as u64) << 35);
     }
 }
@@ -166,10 +169,7 @@ impl IA32_LSTAR {
     }
 }
 
-pub struct IA32_CSTAR;
-impl Generic for IA32_CSTAR {
-    const ECX: u32 = 0xC0000083;
-}
+generic_msr!(IA32_CSTAR, 0xC0000083);
 
 pub struct IA32_SFMASK;
 impl IA32_SFMASK {

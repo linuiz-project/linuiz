@@ -92,6 +92,11 @@ unsafe impl bytemuck::Zeroable for Header {}
 
 impl Header {
     #[inline(always)]
+    pub const fn get_names_section_offset(&self) -> usize {
+        self.shstrtab_offset as usize
+    }
+
+    #[inline(always)]
     pub const fn get_type(&self) -> Type {
         Type::from_u32(self.ty)
     }
