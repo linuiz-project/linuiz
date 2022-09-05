@@ -21,8 +21,12 @@ impl Write for QEMUE9 {
 
 #[doc(hidden)]
 pub fn __std_out(args: core::fmt::Arguments) {
-    crate::interrupts::without(|| {
-        STD_OUT.get().unwrap().0.lock().write_fmt(args).unwrap();
+    crate::interrupts::without(|| match STD_OUT.get() {
+        Some(std_out) => {
+            let mut std_out = std_out.0.lock();
+            std_out.write_fmt(args).unwrap()
+        }
+        None => loop {},
     });
 }
 

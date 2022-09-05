@@ -1,5 +1,6 @@
 pub mod section;
 pub mod segment;
+pub mod symbol;
 
 use libkernel::{Address, Virtual};
 

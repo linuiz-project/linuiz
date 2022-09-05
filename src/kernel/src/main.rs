@@ -20,7 +20,8 @@
     unchecked_math,
     cstr_from_bytes_until_nul,
     if_let_guard,
-    inline_const
+    inline_const,
+    lang_items
 )]
 #![forbid(clippy::inline_asm_x86_att_syntax)]
 #![deny(clippy::semicolon_if_nothing_returned, clippy::debug_assert_with_mut_call, clippy::float_arithmetic)]
@@ -35,8 +36,6 @@
     clippy::wildcard_imports,
     dead_code
 )]
-
-use core::sync::atomic::Ordering;
 
 #[macro_use]
 extern crate log;
@@ -55,6 +54,14 @@ mod scheduling;
 mod stdout;
 mod tables;
 mod time;
+
+use core::{cell::OnceCell, sync::atomic::Ordering};
+use spin::Once;
+
+#[lang = "eh_personality"]
+extern "C" fn rust_eh_personality() {}
+#[no_mangle]
+pub extern "C" fn _Unwind_Resume() {}
 
 const MAXIMUM_STACK_TRACE_DEPTH: usize = 32;
 
@@ -103,9 +110,25 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     };
     crate::newline!();
     crate::println!("STACK TRACE:");
-    for stack_trace in stack_traces {
-        if stack_trace != 0 {
-            crate::println!("\t{:#X}", stack_trace);
+
+    let debug_tables = DEBUG_TABLES.get();
+
+    for (increment, fn_address) in stack_traces.iter().rev().filter(|fn_address| **fn_address > 0).enumerate() {
+        if let Some((symtab, strtab)) = debug_tables
+            && let Some(fn_symbol) = symtab
+                .iter()
+                .filter(|symbol| symbol.get_type() == crate::elf::symbol::Type::Function)
+                .find(|symbol| symbol.get_value() == *fn_address)
+            && let Some(fn_name_offset) = fn_symbol.get_name_offset()
+            && let Some(symbol_name) = core::ffi::CStr::from_bytes_until_nul(&strtab[fn_name_offset..])
+                .ok()
+                .and_then(|cstr| cstr.to_str().ok())
+        {
+            let tab = symbol_name.len() + increment;
+            crate::println!("{symbol_name:tab$}");
+        } else {
+            let tab = (((u64::BITS - fn_address.leading_zeros()) / 4) as usize) + 2 + increment;
+            crate::println!("{fn_address:#tab$X}");
         }
     }
 
@@ -144,6 +167,8 @@ static CON_OUT: core::cell::SyncUnsafeCell<crate::memory::io::Serial> =
 static SMP_MEMORY_READY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 static SMP_MEMORY_INIT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
+pub static DEBUG_TABLES: Once<(&[crate::elf::symbol::Symbol], &[u8])> = Once::new();
+
 // TODO parse kernel command line configuration more succintly
 static mut KERNEL_CFG_SMP: bool = false;
 
@@ -172,13 +197,17 @@ unsafe extern "C" fn _entry() -> ! {
 
         #[cfg(target_arch = "x86_64")]
         if let Some(vendor_str) = crate::arch::x64::cpu::get_vendor() {
-            info!("Vendor              {}", vendor_str);
+            info!("Vendor              {vendor_str}");
         } else {
             info!("Vendor              None");
         }
     }
 
+    let symbol_table = OnceCell::new();
+    let string_table = OnceCell::new();
+
     /* parse kernel arguments */
+    // TODO parse the kernel file in a module or something
     {
         let kernel_file = LIMINE_KERNEL_FILE
             .get_response()
@@ -196,11 +225,68 @@ unsafe extern "C" fn _entry() -> ! {
                 _ => warn!("Unhandled cmdline parameter: {:?}", argument),
             }
         }
+
+        let kernel_bytes = core::slice::from_raw_parts(kernel_file.base.as_ptr().unwrap(), kernel_file.length as usize);
+        let kernel_elf = crate::elf::Elf::from_bytes(&kernel_bytes).expect("failed to parse kernel executable");
+        if let Some(names_section) = kernel_elf.get_section_names_section() {
+            for section in kernel_elf.iter_sections() {
+                if let Some(section_name) =
+                    core::ffi::CStr::from_bytes_until_nul(&names_section.data()[section.get_names_section_offset()..])
+                        .ok()
+                        .and_then(|cstr_name| cstr_name.to_str().ok())
+                {
+                    match section_name {
+                        ".symtab" => {
+                            if let Err(_) = symbol_table.set({
+                                let data = section.data();
+                                core::slice::from_raw_parts(data.as_ptr(), data.len())
+                            }) {
+                                break;
+                            }
+                        }
+
+                        ".strtab" => {
+                            if let Err(_) = string_table.set({
+                                let data = section.data();
+                                core::slice::from_raw_parts(data.as_ptr(), data.len())
+                            }) {
+                                break;
+                            }
+                        }
+
+                        _ => {}
+                    }
+                }
+            }
+        }
     }
 
     crate::memory::init_kernel_hhdm_address();
     crate::memory::init_kernel_frame_manager();
     crate::memory::init_kernel_page_manager();
+
+    /* allocate the string & symbol tables */
+    {
+        let frame_manager = crate::memory::get_kernel_frame_manager();
+        let hhdm_address = crate::memory::get_kernel_hhdm_address();
+
+        if let Some(symbol_table) = symbol_table.get() && let Some(string_table) = string_table.get() {
+            let symtab_frames_required = libkernel::align_up_div(symbol_table.len(), 0x1000);
+            let strtab_frames_required = libkernel::align_up_div(string_table.len(), 0x1000);
+
+            if let Ok(symtab_index) = frame_manager.lock_next_many(symtab_frames_required)
+                && let Ok(strtab_index) = frame_manager.lock_next_many(strtab_frames_required)
+            {
+                let symtab = core::slice::from_raw_parts_mut(hhdm_address.as_mut_ptr::<u8>().add(symtab_index * 0x1000), symbol_table.len());
+                let strtab = core::slice::from_raw_parts_mut(hhdm_address.as_mut_ptr::<u8>().add(strtab_index * 0x1000), string_table.len());
+
+                symtab.copy_from_slice(symbol_table);
+                strtab.copy_from_slice(string_table);
+
+                DEBUG_TABLES.call_once(|| (bytemuck::cast_slice(symtab), strtab));
+            }
+        }
+    }
 
     /* bsp core init */
     {
@@ -213,9 +299,9 @@ unsafe extern "C" fn _entry() -> ! {
         // TODO rv64 bsp hart init
     }
 
-    let frame_manager = crate::memory::get_kernel_frame_manager();
+    let kernel_frame_manager = crate::memory::get_kernel_frame_manager();
     let page_manager = crate::memory::get_kernel_page_manager();
-    let drivers_data = core::cell::OnceCell::new();
+    let drivers_data = OnceCell::new();
 
     /* memory init */
     {
@@ -253,7 +339,7 @@ unsafe extern "C" fn _entry() -> ! {
                         old_page_manager.get_mapped_to(&page).unwrap(),
                         false,
                         PageAttributes::RX | PageAttributes::GLOBAL,
-                        frame_manager,
+                        kernel_frame_manager,
                     )
                     .unwrap();
             });
@@ -269,7 +355,7 @@ unsafe extern "C" fn _entry() -> ! {
                         old_page_manager.get_mapped_to(&page).unwrap(),
                         false,
                         PageAttributes::RO | PageAttributes::GLOBAL,
-                        frame_manager,
+                        kernel_frame_manager,
                     )
                     .unwrap();
             });
@@ -285,7 +371,7 @@ unsafe extern "C" fn _entry() -> ! {
                         old_page_manager.get_mapped_to(&page).unwrap(),
                         false,
                         PageAttributes::RW | PageAttributes::GLOBAL,
-                        frame_manager,
+                        kernel_frame_manager,
                     )
                     .unwrap();
             });
@@ -300,12 +386,12 @@ unsafe extern "C" fn _entry() -> ! {
                         old_page_manager.get_mapped_to(&page).unwrap(),
                         false,
                         PageAttributes::RW | PageAttributes::GLOBAL,
-                        frame_manager,
+                        kernel_frame_manager,
                     )
                     .unwrap();
             });
 
-        frame_manager.iter().enumerate().for_each(|(frame_index, (_, ty))| {
+        kernel_frame_manager.iter().enumerate().for_each(|(frame_index, (_, ty))| {
             let page_attributes = {
                 use crate::memory::FrameType;
 
@@ -327,7 +413,7 @@ unsafe extern "C" fn _entry() -> ! {
                     frame_index,
                     false,
                     page_attributes,
-                    frame_manager,
+                    kernel_frame_manager,
                 )
                 .unwrap();
         });
@@ -398,7 +484,7 @@ unsafe extern "C" fn _entry() -> ! {
         #[cfg(target_arch = "x86_64")]
         {
             debug!("Initializing APIC interface...");
-            crate::arch::x64::structures::apic::init_interface(frame_manager, page_manager);
+            crate::arch::x64::structures::apic::init_interface(kernel_frame_manager, page_manager);
         }
 
         debug!("Initializing ACPI interface...");
