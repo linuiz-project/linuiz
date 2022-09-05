@@ -23,11 +23,8 @@ fn trace_frame_pointer(
     // TODO add checks somehow to ensure `rbp` is being used to store the stack base.
     while let Some(stack_frame) = unsafe { frame_ptr.as_ref() } {
         // 'Push' the return address to the array.
-        if let Some(stack_trace_address) = stack_trace_addresses.get_mut(stack_trace_index as usize) {
-            *stack_trace_address = Some(stack_frame.return_address);
-        } else {
-            return true;
-        }
+        let Some(stack_trace_address) = stack_trace_addresses.get_mut(stack_trace_index as usize) else { return true; };
+        *stack_trace_address = Some(stack_frame.return_address);
 
         frame_ptr = stack_frame.prev_frame_ptr;
         stack_trace_index += 1;
@@ -89,7 +86,15 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
                 .ok()
                 .and_then(|cstr| cstr.to_str().ok())
         {
-            print_stack_trace_entry(increment, fn_symbol.get_value(), Some(symbol_name));
+            let mut demangle_buffer = [0u8; 256];
+            mangling::demangle(symbol_name, &mut demangle_buffer).ok();
+
+            print_stack_trace_entry(
+                increment,
+                fn_symbol.get_value(),
+                //Some(symbol_name)
+                Some(core::str::from_utf8(&demangle_buffer).unwrap_or( symbol_name))
+            );
         } else {
             print_stack_trace_entry(increment, fn_address, None);
         }
@@ -99,6 +104,8 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 
     if trace_overflow {
         print_stack_trace_entry(increment, 0x0, Some("!!! trace overflowed !!!"))
+    } else if increment == 0 {
+        crate::println!("No stack trace is available.");
     }
 
     crate::println!("----------STACK-TRACE----------");
@@ -112,4 +119,97 @@ fn alloc_error(error: core::alloc::Layout) -> ! {
 
     // TODO should we actually abort on every alloc error?
     crate::interrupts::wait_loop()
+}
+
+mod mangling {
+    pub type Result<T> = core::result::Result<T, Error>;
+
+    pub enum Error {
+        Parser,
+        Malformed,
+        NonAscii,
+    }
+
+    pub fn demangle(symbol_name: &str, mut buffer: &mut [u8]) -> Result<()> {
+        if !symbol_name.is_ascii() {
+            return Err(Error::NonAscii);
+        }
+
+        static SKIP_TAGS: [&str; 2] = ["Nv", "Nt"];
+        static TYPE_ENCODINGS: [(&str, &str); 21] = [
+            ("a", "i8"),
+            ("b", "bool"),
+            ("c", "char"),
+            ("d", "f64"),
+            ("e", "str"),
+            ("f", "f32"),
+            ("h", "u8"),
+            ("i", "isize"),
+            ("j", "usize"),
+            ("l", "i32"),
+            ("m", "u32"),
+            ("n", "i128"),
+            ("o", "u128"),
+            ("s", "i16"),
+            ("t", "u16"),
+            ("u", "()"),
+            ("v", "..."),
+            ("x", "i64"),
+            ("y", "u64"),
+            ("z", "!"),
+            ("p", "_"),
+        ];
+
+        fn str_bytes_to_number(bytes: &[u8]) -> Option<usize> {
+            core::str::from_utf8(bytes).ok().and_then(|str| usize::from_str_radix(str, 10).ok())
+        }
+
+        fn parse_identifier(bytes: &[u8], buffer: &mut [u8]) -> Result<(usize, usize)> {
+            let number_len = bytes.iter().take_while(|b| b.is_ascii_digit()).count();
+            let Some(run_len) = str_bytes_to_number(&bytes[..number_len]) else { return Err(Error::Parser) };
+
+            for index in 0..run_len {
+                buffer[index] = bytes[number_len + index]
+            }
+
+            Ok((number_len, run_len))
+        }
+
+        // EXAMPLE: _RNvMNtNtNtNtNtCs9TTdqULsK7Z_6kernel4arch3x6410structures3idt10exceptionsNtB2_9Exception24common_exception_handler
+
+        let mut symbol_bytes = symbol_name.as_bytes();
+
+        if symbol_bytes.starts_with("_R".as_bytes()) {
+            symbol_bytes = &symbol_bytes[2..];
+        } else {
+            return Err(Error::Malformed);
+        }
+
+        // Skip skippable tags, such as namespace identifiers.
+        loop {
+            let Ok(tag_str) = core::str::from_utf8(&symbol_bytes[..2]) else { return Err(Error::Parser) };
+
+            if SKIP_TAGS.contains(&tag_str) {
+                symbol_bytes = &symbol_bytes[2..];
+            } else {
+                break;
+            }
+        }
+
+        loop {
+            match symbol_bytes.get(0) {
+                Some(byte_code) if byte_code.is_ascii_digit() => {
+                    let (byte_run, buffer_run) = parse_identifier(symbol_bytes, buffer)?;
+                    symbol_bytes = &symbol_bytes[byte_run..];
+                    buffer = &mut buffer[buffer_run..];
+                }
+
+                Some(_) => {
+                    symbol_bytes = &symbol_bytes[1..];
+                }
+
+                None => return Ok(()),
+            }
+        }
+    }
 }
