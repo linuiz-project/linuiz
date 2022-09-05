@@ -283,7 +283,7 @@ macro_rules! irq_stub {
                 
                         # 'pop' interrupt vector
                         add rsp, 0x8
-                
+
                         iretq
                         ",
                         const $irq_vector,

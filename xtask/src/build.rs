@@ -87,17 +87,17 @@ static LIMINE_DEFAULT_CFG: &str = "
 pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
     let workspace_root = shell.current_dir();
 
+    // Configure rustc via the `RUSTFLAGS` environment variable.
+    let _rustflags = if !options.release && !options.no_stack_traces {
+        Some(shell.push_env("RUSTFLAGS", "-Cforce-frame-pointers -Csymbol-mangling-version=v0"))
+    } else {
+        Some(shell.push_env("RUSTFLAGS", "-Clto=yes"))
+    };
+
     // Clean crates if required ...
     if options.clean {
         crate::clean(shell)?;
     }
-
-    // Configure rustc via the `RUSTFLAGS` environment variable.
-    let _rustflags = if !options.release && !options.no_stack_traces {
-        Some(shell.push_env("RUSTFLAGS", "-Cforce-unwind-tables -Cforce-frame-pointers -Csymbol-mangling-version=v0"))
-    } else {
-        Some(shell.push_env("RUSTFLAGS", "-Clto=yes"))
-    };
 
     // Ensure root directories exist
     for root_dir in REQUIRED_ROOT_DIRS {

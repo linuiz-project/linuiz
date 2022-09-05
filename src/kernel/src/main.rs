@@ -58,17 +58,15 @@ mod time;
 use core::{cell::OnceCell, sync::atomic::Ordering};
 use spin::Once;
 
-#[lang = "eh_personality"]
-extern "C" fn rust_eh_personality() {}
-#[no_mangle]
-pub extern "C" fn _Unwind_Resume() {}
-
 const MAXIMUM_STACK_TRACE_DEPTH: usize = 32;
 
 fn trace_frame_pointer(
     stack_trace_addresses: &mut spin::MutexGuard<'static, [u64; MAXIMUM_STACK_TRACE_DEPTH]>,
 ) -> bool {
-    #[repr(C, packed)]
+    // REMARK: This function should *never* panic or abort.
+
+    #[repr(C)]
+    #[derive(Debug)]
     struct StackFrame {
         next_frame_ptr: *const StackFrame,
         return_address: u64,
@@ -78,11 +76,11 @@ fn trace_frame_pointer(
     let mut frame_ptr: *const StackFrame;
     // SAFETY: Does not corrupt any auxiliary state.
     unsafe { core::arch::asm!("mov {}, rbp", out(reg) frame_ptr, options(nostack, nomem, preserves_flags)) };
-
     // SAFETY: Stack frame pointer should be valid, if `rbp` is being used correctly.
     // TODO add checks somehow to ensure `rbp` is being used to store the stack base.
     while let Some(stack_frame) = unsafe { frame_ptr.as_ref() } {
-        // 'Push' the return address to the
+        info!("{:X?}", stack_frame);
+        // 'Push' the return address to the array.
         stack_trace_addresses[stack_trace_index as usize] = stack_frame.return_address;
         frame_ptr = stack_frame.next_frame_ptr;
 
@@ -98,10 +96,16 @@ fn trace_frame_pointer(
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
+    // REMARK: This function should *never* panic or abort.
+
     static STACK_TRACE_ADDRESSES: spin::Mutex<[u64; MAXIMUM_STACK_TRACE_DEPTH]> =
         spin::Mutex::new([0u64; MAXIMUM_STACK_TRACE_DEPTH]);
 
-    error!("KERNEL PANIC (at {}): {}", info.location().unwrap(), info.message().unwrap());
+    error!(
+        "KERNEL PANIC (at {}): {}",
+        info.location().unwrap_or(core::panic::Location::caller()),
+        info.message().unwrap_or(&format_args!("no panic message"))
+    );
 
     let stack_traces = {
         let mut stack_trace_addresses = STACK_TRACE_ADDRESSES.lock();
@@ -109,7 +113,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
         stack_trace_addresses.clone()
     };
     crate::newline!();
-    crate::println!("STACK TRACE:");
+    crate::println!("----------STACK-TRACE---------");
 
     let debug_tables = DEBUG_TABLES.get();
 
@@ -124,13 +128,20 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
                 .ok()
                 .and_then(|cstr| cstr.to_str().ok())
         {
-            let tab = symbol_name.len() + increment;
-            crate::println!("{symbol_name:tab$}");
+            let tab = symbol_name.len() + increment + 4;
+            crate::println!("{increment}{fn_address:_>#tab$X} {symbol_name}");
+        } else if (fn_address & 0x7) > 0 {
+            crate::println!("Function address is not aligned to a common function boundary.");
+            crate::println!("Stack tracing is likely not enabled.");
+
+            break;
         } else {
-            let tab = (((u64::BITS - fn_address.leading_zeros()) / 4) as usize) + 2 + increment;
-            crate::println!("{fn_address:#tab$X}");
+            let tab = (((u64::BITS - fn_address.leading_zeros()) / 4) as usize) + 6 + (increment * 2);
+            crate::println!("{increment}{fn_address:_>#tab$X}");
         }
     }
+
+    crate::println!("----------STACK-TRACE----------");
 
     crate::interrupts::wait_loop()
 }
@@ -752,6 +763,8 @@ unsafe extern "C" fn _entry() -> ! {
         }
     }
 
+    libkernel::asm_marker!(0x1F1F1F1A);
+    panic!();
     kernel_thread_setup()
 }
 

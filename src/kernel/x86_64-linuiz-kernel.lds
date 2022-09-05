@@ -46,7 +46,7 @@ SECTIONS
     /* bss sections */
     . = ALIGN(CONSTANT(MAXPAGESIZE));
     PROVIDE(__bss_start = .);
-    .eh_frame           : { KEEP(*(.eh_frame)) }
+    .eh_frame           : { KEEP(*(.eh_frame .eh_frame.*)) }
     .gcc_except_table   : { KEEP(*(.gcc_except_table)) }
     .tdata              : { *(.tdata .tdata.*) }
     .tbss               : { *(.tbss .tbss.*) }
