@@ -91,10 +91,6 @@ extern "C" {
 }
 
 impl LinkerSymbol {
-    #[inline]
-    pub const unsafe fn as_ptr<T>(&'static self) -> *const T {
-        self as *const _ as *const _
-    }
 
     #[inline]
     pub unsafe fn as_usize(&'static self) -> usize {

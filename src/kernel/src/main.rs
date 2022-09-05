@@ -21,7 +21,8 @@
     cstr_from_bytes_until_nul,
     if_let_guard,
     inline_const,
-    lang_items
+    lang_items,
+    let_else
 )]
 #![forbid(clippy::inline_asm_x86_att_syntax)]
 #![deny(clippy::semicolon_if_nothing_returned, clippy::debug_assert_with_mut_call, clippy::float_arithmetic)]

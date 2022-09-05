@@ -91,7 +91,7 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
     let _rustflags = if !options.release && !options.no_stack_traces {
         Some(shell.push_env("RUSTFLAGS", "-Cforce-frame-pointers -Csymbol-mangling-version=v0"))
     } else {
-        Some(shell.push_env("RUSTFLAGS", "-Clto=yes"))
+        None
     };
 
     // Clean crates if required ...
