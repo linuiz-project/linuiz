@@ -1,9 +1,5 @@
 use alloc::collections::VecDeque;
-use core::{
-    mem::MaybeUninit,
-    sync::atomic::{AtomicBool, AtomicU64, Ordering},
-};
-use libkernel::memory::PageAlignedBox;
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 static NEXT_THREAD_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -42,11 +38,11 @@ pub enum TaskStart {
     Function(fn() -> !),
 }
 
-// TODO: devise a better method for tasks to be queued globally
+// TODO devise a better method for tasks to be queued globally
 pub static GLOBAL_TASKS: spin::Lazy<spin::Mutex<VecDeque<Task>>> =
     spin::Lazy::new(|| spin::Mutex::new(VecDeque::new()));
 
-// TODO: move `Task` and its types / impls to a module
+// TODO move `Task` and its types / impls to a module
 /// Representation object for different contexts of execution in the CPU.
 pub struct Task {
     id: u64,

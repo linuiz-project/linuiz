@@ -4,7 +4,7 @@
 //!             feature. In this case, well... all of this fails. And we're
 //!             going to ignore that. :)
 //!
-//! TODO:       Don't just fail; respect the MSR feature.
+//! TODO       Don't just fail; respect the MSR feature.
 
 use bit_field::BitField;
 use libkernel::{Address, Physical};

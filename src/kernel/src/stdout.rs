@@ -37,6 +37,13 @@ macro_rules! println {
     ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
 }
 
+#[macro_export]
+macro_rules! newline {
+    () => {
+        $crate::print!("\n")
+    };
+}
+
 bitflags::bitflags! {
     #[repr(transparent)]
     pub struct Logger : u8 {

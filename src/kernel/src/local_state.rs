@@ -61,12 +61,12 @@ pub unsafe fn init(core_id: u32) {
     }
 
     /* CONFIGURE TIMER */
+    // TODO configure RISC-V ACLINT
+    // TODO abstract this somehow, so we can call e.g. `crate::interrupts::configure_controller();`
     #[cfg(target_arch = "x86_64")]
     {
         use crate::arch::x64::structures::apic;
         use crate::interrupts::Vector;
-
-        // TODO abstract this somehow, so we can call e.g. `crate::interrupts::configure_controller();`
 
         trace!("Configuring local APIC...");
         apic::software_reset();
@@ -77,8 +77,6 @@ pub unsafe fn init(core_id: u32) {
         apic::get_thermal_sensor().set_vector(Vector::Thermal as u8);
         // LINT0&1 should be configured by the APIC reset.
     }
-
-    // TODO configure RISC-V ACLINT
 
     // Ensure interrupts are enabled after APIC is reset.
     crate::interrupts::enable();

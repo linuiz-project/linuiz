@@ -101,7 +101,6 @@ pub fn common_interrupt_handler(
         }
 
         Ok(vector) if vector == Vector::Syscall => {
-            // TODO general syscall impl
             #[cfg(target_arch = "x86_64")]
             {
                 arch_context.0.rax = syscall::syscall_handler(

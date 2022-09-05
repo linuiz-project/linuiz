@@ -12,7 +12,7 @@ impl AddressType for Physical {}
 pub enum Virtual {}
 impl AddressType for Virtual {}
 
-// TODO: handle address arithmetic around the address space hole
+// TODO handle address arithmetic around the address space hole
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Address<T: AddressType>(u64, PhantomData<T>);
