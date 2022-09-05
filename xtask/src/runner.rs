@@ -1,7 +1,7 @@
 use clap::{clap_derive::ArgEnum, Parser};
 use xshell::cmd;
 
-#[derive(ArgEnum, Clone, Copy)]
+#[derive(ArgEnum, Clone, Copy, PartialEq, Eq)]
 pub enum Accelerator {
     KVM,
     None,
@@ -20,9 +20,19 @@ impl core::fmt::Debug for Accelerator {
 pub enum CPU {
     Host,
     Max,
-    KVM64,
     QEMU64,
     RV64,
+}
+
+impl CPU {
+    pub const fn as_str(&self) -> &str {
+        match self {
+            CPU::Host => "host",
+            CPU::Max => "max",
+            CPU::QEMU64 => "qemu64",
+            CPU::RV64 => "rv64",
+        }
+    }
 }
 
 #[derive(ArgEnum, Clone, Copy)]
@@ -44,13 +54,12 @@ impl core::fmt::Debug for BlockDriver {
 
 #[derive(Parser)]
 pub struct Options {
-    /// Which simulator to use when executing the binary.
-    #[clap(arg_enum, long, default_value = "none")]
-    accel: Accelerator,
-
     /// CPU type to emulate.
     #[clap(arg_enum, long, default_value = "qemu64")]
     cpu: CPU,
+
+    #[clap(arg_enum, long, default_value = "none")]
+    accel: Accelerator,
 
     /// Number of CPUs to emulate.
     #[clap(long, default_value = "4")]
@@ -64,63 +73,81 @@ pub struct Options {
     #[clap(long)]
     log: bool,
 
-    /// Stops QEMU from automatically exiting when a triple fault occurs.
-    #[clap(long)]
-    no_shutdown: bool,
-
     /// Which type of block driver to use for root drive.
     #[clap(arg_enum, long, default_value = "virt-io")]
     block: BlockDriver,
+
+    #[clap(long)]
+    no_build: bool,
+
+    #[clap(flatten)]
+    build_options: crate::build::Options,
 }
 
-pub fn run(options: Options) -> Result<(), xshell::Error> {
-    let shell = xshell::Shell::new()?;
+pub fn run(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
+    if !options.no_build {
+        crate::build::build(shell, options.build_options)?;
+    }
 
-    let qemu_exe_type = match options.cpu {
+    let qemu_exe_str = match options.cpu {
         CPU::RV64 => "qemu-system-riscv64",
         _ => "qemu-system-x86_64",
     };
-    let machine_str = match options.cpu {
+
+    let mut arguments = vec![];
+
+    arguments.push("-machine");
+    arguments.push(match options.cpu {
+        CPU::RV64 => "virt",
+        CPU::Host | CPU::Max | CPU::QEMU64 if options.accel == Accelerator::KVM => "q35,accel=kvm",
+        _ => "q35",
+    });
+
+    arguments.push("-cpu");
+    arguments.push(options.cpu.as_str());
+
+    arguments.push("-smp");
+    let smp_string = options.smp.to_string();
+    arguments.push(&smp_string);
+
+    arguments.push("-m");
+    let memory_string = format!("{}M", options.ram);
+    arguments.push(&memory_string);
+
+    arguments.push("-device");
+    let device_string = format!("{:?},drive=disk1,serial=deadbeef", options.block);
+    arguments.push(&device_string);
+
+    if options.log {
+        arguments.push("-d");
+        arguments.push("int,guest_errors");
+        arguments.push("-D");
+        arguments.push(".debug/qemu.log");
+    }
+
+    match options.cpu {
         CPU::RV64 => {
-            if let Accelerator::KVM = options.accel {
-                panic!("cannot use KVM acceleration with rv64");
-            } else {
-                "virt".to_string()
-            }
-        }
-        _ => format!("q35{}", if let Accelerator::KVM = options.accel { ",accel=kvm" } else { "" }),
-    };
-    let cpu_str = format!("{:?}", options.cpu).to_lowercase();
-    let smp_str = format!("{}", options.smp);
-    let ram_str = format!("{}", options.ram);
-    let block_driver_str = format!("{:?}", options.block);
-    let log_str = if options.log { vec!["-d", "int,guest_errors", "-D", ".debug/qemu.log"] } else { vec![] };
-    let files_str = match options.cpu {
-        CPU::RV64 => {
-            vec!["-bios", "resources/fw_jump.fd", "-kernel", ".hdd/root/linuiz/kernel_rv64.elf"]
+            arguments.push("-bios");
+            arguments.push("resources/fw_jump.fd");
+            arguments.push("-kernel");
+            arguments.push(".hdd/root/linuiz/kernel_rv64.elf");
         }
         _ => {
-            vec!["-bios", "resources/OVMF.fd", "-drive", "format=raw,file=fat:rw:.hdd/root/"]
+            arguments.push("-bios");
+            arguments.push("resources/OVMF.fd");
+            arguments.push("-drive");
+            arguments.push("format=raw,file=fat:rw:.hdd/root/");
         }
     };
-    let no_shutdown = if options.no_shutdown { vec!["-no-shutdown"] } else { vec![] };
 
     cmd!(
         shell,
         "
-        {qemu_exe_type}
-            -no-reboot
-            {files_str...}
-            -machine {machine_str}
-            -cpu {cpu_str}
-            -smp {smp_str}
-            -m {ram_str}M
+        {qemu_exe_str}
+            {arguments...}
             -serial mon:stdio
-            -net none
             -drive format=raw,file=.hdd/disk0.img,id=disk1,if=none
-            -device {block_driver_str},drive=disk1,serial=deadbeef
-            {log_str...}
-            {no_shutdown...}
+            -net none
         "
     )
     .run()?;

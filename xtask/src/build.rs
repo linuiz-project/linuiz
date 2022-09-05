@@ -1,6 +1,6 @@
 use clap::{clap_derive::ArgEnum, Parser};
 use std::path::PathBuf;
-use xshell::{cmd, Shell};
+use xshell::cmd;
 
 #[allow(non_camel_case_types)]
 #[derive(ArgEnum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,10 +53,12 @@ pub struct Options {
     compress: Compression,
 
     /// Whether to use `cargo clippy` rather than `cargo build`.
-    pub clippy: bool,
+    #[clap(short, long)]
+    clippy: bool,
 
-    // Whether to use `cargo check` rather than `cargo build`.
-    pub check: bool,
+    /// Whether to force the compiler to use `rbp` to store the stack frame pointer. This allows semantic stack tracing.
+    #[clap(long)]
+    no_stack_traces: bool,
 }
 
 static REQUIRED_ROOT_DIRS: [&str; 5] = ["resources/", ".hdd/", ".hdd/root/EFI/BOOT/", ".hdd/root/linuiz/", ".debug/"];
@@ -74,10 +76,14 @@ static LIMINE_DEFAULT_CFG: &str = "
     KASLR=yes
     ";
 
-pub fn build(options: Options) -> Result<(), xshell::Error> {
-    let shell = Shell::new()?;
-
+pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
     let workspace_root = shell.current_dir();
+
+    let _rustflags = if !options.release && !options.no_stack_traces {
+        Some(shell.push_env("RUSTFLAGS", "-Cforce-unwind-tables -Cforce-frame-pointers -Csymbol-mangling-version=v0"))
+    } else {
+        None
+    };
 
     /* setup default files and folders */
     {
@@ -119,17 +125,7 @@ pub fn build(options: Options) -> Result<(), xshell::Error> {
     let profile_str = if options.release { "release" } else { "debug" };
 
     let cargo_arguments = vec![
-        {
-            if options.clippy && options.check {
-                panic!("`--clippy` and `--check` cannot be used in tandem")
-            } else if options.clippy {
-                "clippy"
-            } else if options.check {
-                "check"
-            } else {
-                "build"
-            }
-        },
+        if options.clippy { "clippy" } else { "build" },
         "--profile",
         if options.release { "release" } else { "dev" },
         "--target",

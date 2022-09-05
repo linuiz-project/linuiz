@@ -8,43 +8,22 @@ use xshell::cmd;
 #[clap(rename_all = "snake_case", setting = AppSettings::DisableVersionFlag)]
 enum Arguments {
     Build(build::Options),
-    Clippy(build::Options),
-    Check(build::Options),
     Run(runner::Options),
     Clean,
     Metadata,
 }
 
-static CRATE_DIRS: [&str; 2] = ["src/kernel/", "src/drivers/"];
-
 fn main() -> Result<(), xshell::Error> {
+    let shell = xshell::Shell::new()?;
+
     match Arguments::parse() {
-        Arguments::Build(build_options) => build::build(build_options),
-        Arguments::Clippy(mut build_options) => build::build({
-            build_options.clippy = true;
-            build_options
-        }),
-        Arguments::Check(mut build_options) => build::build({
-            build_options.check = true;
-            build_options
-        }),
+        Arguments::Build(build_options) => build::build(&shell, build_options),
 
-        Arguments::Run(run_options) => runner::run(run_options),
+        Arguments::Run(run_options) => runner::run(&shell, run_options),
 
-        Arguments::Clean => {
-            let shell = xshell::Shell::new()?;
-
-            for crate_dir in CRATE_DIRS {
-                let _dir = shell.push_dir(crate_dir);
-                cmd!(shell, "cargo clean").run()?;
-            }
-
-            Ok(())
-        }
+        Arguments::Clean => clean(&shell),
 
         Arguments::Metadata => {
-            let shell = xshell::Shell::new()?;
-
             for crate_dir in CRATE_DIRS {
                 let _dir = shell.push_dir(crate_dir);
                 cmd!(shell, "cargo metadata --format-version 1").run()?;
@@ -53,4 +32,15 @@ fn main() -> Result<(), xshell::Error> {
             Ok(())
         }
     }
+}
+
+static CRATE_DIRS: [&str; 2] = ["src/kernel/", "src/drivers/"];
+
+pub fn clean(shell: &xshell::Shell) -> xshell::Result<()> {
+    for crate_dir in CRATE_DIRS {
+        let _dir = shell.push_dir(crate_dir);
+        cmd!(shell, "cargo clean").run()?;
+    }
+
+    Ok(())
 }
