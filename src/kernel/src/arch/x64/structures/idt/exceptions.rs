@@ -104,23 +104,24 @@ pub enum Exception {
 
 impl Exception {
     pub fn common_exception_handler(exception: Self) {
+        use crate::memory::PageAttributes;
+        use libkernel::memory::Page;
+
+        let kernel_frame_manager = crate::memory::get_kernel_frame_manager();
+        // SAFETY: Kernel HHDM is guaranteed by the kernel to be valid.
+        let page_manager = unsafe {
+            crate::memory::PageManager::from_current(
+                &Page::from_address(crate::memory::get_kernel_hhdm_address()).unwrap(),
+            )
+        };
+
         match exception {
-            Self::PageFault(_, _, address) => {
-                use crate::memory::PageAttributes;
-                use libkernel::memory::Page;
-
-                let kernel_frame_manager = crate::memory::get_kernel_frame_manager();
-                // SAFETY: Kernel HHDM is guaranteed by the kernel to be valid.
-                let page_manager = unsafe {
-                    crate::memory::PageManager::from_current(
-                        &Page::from_address(crate::memory::get_kernel_hhdm_address()).unwrap(),
-                    )
-                };
-
+            Self::PageFault(_, _, address)
                 // Determine if the page fault occured within a demand-paged page.
-                let fault_page = Page::from_address_contains(address);
-                if  let Some(mut fault_page_attributes) = page_manager.get_page_attributes(&fault_page)
-                    && fault_page_attributes.contains(PageAttributes::DEMAND) {
+                if let Some(mut fault_page_attributes) = page_manager.get_page_attributes(&Page::from_address_contains(address))
+                    && fault_page_attributes.contains(PageAttributes::DEMAND) => {
+                        let fault_page = Page::from_address_contains(address);
+
                         page_manager.auto_map(
                             &fault_page,
                             {
@@ -137,9 +138,8 @@ impl Exception {
                         // SAFETY: We know the page was just mapped, and contains no relevant memory.
                         unsafe { fault_page.clear_memory() };
             }
-            }
 
-            exception => panic!("{:#?}", exception),
+            exception => panic!("{:#?}", exception)
         }
     }
 }

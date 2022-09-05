@@ -19,7 +19,8 @@
     let_chains,
     unchecked_math,
     cstr_from_bytes_until_nul,
-    if_let_guard
+    if_let_guard,
+    inline_const
 )]
 #![forbid(clippy::inline_asm_x86_att_syntax)]
 #![deny(clippy::semicolon_if_nothing_returned, clippy::debug_assert_with_mut_call, clippy::float_arithmetic)]
@@ -55,13 +56,59 @@ mod stdout;
 mod tables;
 mod time;
 
+const MAXIMUM_STACK_TRACE_DEPTH: usize = 32;
+
+fn trace_frame_pointer(
+    stack_trace_addresses: &mut spin::MutexGuard<'static, [u64; MAXIMUM_STACK_TRACE_DEPTH]>,
+) -> bool {
+    #[repr(C, packed)]
+    struct StackFrame {
+        next_frame_ptr: *const StackFrame,
+        return_address: u64,
+    }
+
+    let mut stack_trace_index: u8 = 0;
+    let mut frame_ptr: *const StackFrame;
+    // SAFETY: Does not corrupt any auxiliary state.
+    unsafe { core::arch::asm!("mov {}, rbp", out(reg) frame_ptr, options(nostack, nomem, preserves_flags)) };
+
+    // SAFETY: Stack frame pointer should be valid, if `rbp` is being used correctly.
+    // TODO add checks somehow to ensure `rbp` is being used to store the stack base.
+    while let Some(stack_frame) = unsafe { frame_ptr.as_ref() } {
+        // 'Push' the return address to the
+        stack_trace_addresses[stack_trace_index as usize] = stack_frame.return_address;
+        frame_ptr = stack_frame.next_frame_ptr;
+
+        // Increment the stack trace array index for the next iteration.
+        match stack_trace_index.checked_add(1) {
+            Some(value) => stack_trace_index = value,
+            None => return true,
+        }
+    }
+
+    false
+}
+
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
-    // TODO impl stack unwinding
+    static STACK_TRACE_ADDRESSES: spin::Mutex<[u64; MAXIMUM_STACK_TRACE_DEPTH]> =
+        spin::Mutex::new([0u64; MAXIMUM_STACK_TRACE_DEPTH]);
 
     error!("KERNEL PANIC (at {}): {}", info.location().unwrap(), info.message().unwrap());
 
-    // TODO should we actually abort on every panic?
+    let stack_traces = {
+        let mut stack_trace_addresses = STACK_TRACE_ADDRESSES.lock();
+        trace_frame_pointer(&mut stack_trace_addresses);
+        stack_trace_addresses.clone()
+    };
+    crate::newline!();
+    crate::println!("STACK TRACE:");
+    for stack_trace in stack_traces {
+        if stack_trace != 0 {
+            crate::println!("\t{:#X}", stack_trace);
+        }
+    }
+
     crate::interrupts::wait_loop()
 }
 
@@ -97,7 +144,7 @@ static CON_OUT: core::cell::SyncUnsafeCell<crate::memory::io::Serial> =
 static SMP_MEMORY_READY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 static SMP_MEMORY_INIT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
-// TODO: parse kernel command line configuration more succintly
+// TODO parse kernel command line configuration more succintly
 static mut KERNEL_CFG_SMP: bool = false;
 
 /// SAFETY: This function invariantly assumes it will be called only once per core.
@@ -470,7 +517,6 @@ unsafe extern "C" fn _entry() -> ! {
         let frame_manager = crate::memory::get_kernel_frame_manager();
         let hhdm_address = crate::memory::get_kernel_hhdm_address();
 
-        // TODO: some how handle the permissions of userspace stacks
         // Iterate and load drivers as tasks.
         let mut current_offset = 0;
         loop {
@@ -562,7 +608,7 @@ unsafe extern "C" fn _entry() -> ! {
                 use libkernel::{Address, Physical, Virtual};
 
                 let stack_address = {
-                    // TODO: make this a dynamic configuration
+                    // TODO make this a dynamic configuration
                     const DEFAULT_TASK_STACK_SIZE: u64 = 4 * libkernel::MIBIBYTE;
 
                     let kernel_frame_manager = crate::memory::get_kernel_frame_manager();
@@ -587,7 +633,7 @@ unsafe extern "C" fn _entry() -> ! {
                 let mut global_tasks = scheduling::GLOBAL_TASKS.lock();
                 global_tasks.push_back(scheduling::Task::new(
                     scheduling::TaskPriority::new(scheduling::TaskPriority::MAX).unwrap(),
-                    // TODO: account for memory base when passing entry offset
+                    // TODO account for memory base when passing entry offset
                     scheduling::TaskStart::Address(
                         Address::<Virtual>::new(driver_elf.get_entry_offset() as u64).unwrap(),
                     ),
