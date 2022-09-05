@@ -116,7 +116,7 @@ impl Address<Virtual> {
     }
 
     #[inline(always)]
-    pub const unsafe fn as_mut_ptr<T>(&mut self) -> *mut T {
+    pub const unsafe fn as_mut_ptr<T>(&self) -> *mut T {
         self.0 as usize as *mut T
     }
 

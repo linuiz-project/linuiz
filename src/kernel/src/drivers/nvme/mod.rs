@@ -416,7 +416,7 @@ impl<'dev> Controller<'dev> {
     }
 
     pub unsafe fn set_enable_and_wait(&self, enabled: bool) -> Result<(), ControllerEnableError> {
-        debug!("Resetting controller to enabled state: {}.", enabled);
+        debug!("Resetting controller to enabled state: {enabled}.");
         self.config().set_en(enabled);
         let csts = self.status();
         let max_wait = self.capabilities().get_to() * 500;

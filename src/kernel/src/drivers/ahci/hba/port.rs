@@ -325,7 +325,7 @@ impl Port {
                 .into_parts()
                 .0
         };
-        debug!("\tFIS base address: {:?}:{}", fis_base, fis_byte_len);
+        debug!("\tFIS base address: {:fis_base?}:{fis_byte_len}");
 
         unsafe {
             debug!("Clearing command and FIS lists, and updating port metadata.");

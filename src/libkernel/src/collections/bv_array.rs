@@ -48,7 +48,7 @@ impl<'arr, BV: BitValue> BitValueArray<'arr, BV> {
     }
 
     pub fn get(&self, index: usize) -> BV {
-        assert!(index < self.len(), "index must be less than the size of the collection ({} >= {})", index, self.len());
+        assert!(index < self.len(), "index must be less than the size of the collection ({index} >= {})", self.len());
 
         let (section_index, section_offset) = Self::get_index_and_offset(index);
         let section_value = self.array.read()[section_index];
@@ -57,7 +57,7 @@ impl<'arr, BV: BitValue> BitValueArray<'arr, BV> {
     }
 
     pub fn insert(&self, index: usize, new_type: BV) -> BV {
-        assert!(index < self.len(), "index must be less than the size of the collection ({} >= {})", index, self.len());
+        assert!(index < self.len(), "index must be less than the size of the collection ({index} >= {})", self.len());
 
         let (section_index, section_offset) = Self::get_index_and_offset(index);
         let sections_read = self.array.upgradeable_read();
@@ -71,7 +71,7 @@ impl<'arr, BV: BitValue> BitValueArray<'arr, BV> {
     }
 
     pub fn insert_eq(&self, index: usize, new_type: BV, eq_type: BV) -> bool {
-        assert!(index < self.len(), "index must be less than the size of the collection ({} >= {})", index, self.len());
+        assert!(index < self.len(), "index must be less than the size of the collection ({index} >= {})", self.len());
 
         {
             let (section_index, section_offset) = Self::get_index_and_offset(index);

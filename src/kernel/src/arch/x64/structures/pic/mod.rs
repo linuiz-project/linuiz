@@ -177,7 +177,7 @@ impl Pics {
             // raise on the master as well.
             self.0[0].end_of_interrupt();
         } else {
-            trace!("Invalid EOI request: {}", interrupt_id);
+            trace!("Invalid EOI request: {interrupt_id}");
         }
     }
 }
