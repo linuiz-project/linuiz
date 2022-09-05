@@ -56,7 +56,15 @@ pub struct Options {
     #[clap(short, long)]
     clippy: bool,
 
-    /// Whether to force the compiler to use `rbp` to store the stack frame pointer. This allows semantic stack tracing.
+    /// Verbose build output. Equivalent to `cargo build -vv`.
+    #[clap(short, long)]
+    verbose: bool,
+
+    /// Performs a `cargo clean` before building. This is useful for forcing a full recompile.
+    #[clap(long)]
+    clean: bool,
+
+    /// Whether to force the compiler to *not* use `rbp` to store the stack frame pointer. This does nothing when compiling in release.
     #[clap(long)]
     no_stack_traces: bool,
 }
@@ -71,7 +79,7 @@ static LIMINE_DEFAULT_CFG: &str = "
     COMMENT=Load Linuiz OS using the Stivale2 boot protocol.
     PROTOCOL=limine
     RESOLUTION=800x600x16
-    KERNEL_PATH=boot:///linuiz/kernel_x64.elf
+    KERNEL_PATH=boot:///linuiz/kernel.elf
     CMDLINE=smp:yes
     KASLR=yes
     ";
@@ -79,24 +87,29 @@ static LIMINE_DEFAULT_CFG: &str = "
 pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
     let workspace_root = shell.current_dir();
 
+    // Clean crates if required ...
+    if options.clean {
+        crate::clean(shell)?;
+    }
+
+    // Configure rustc via the `RUSTFLAGS` environment variable.
     let _rustflags = if !options.release && !options.no_stack_traces {
         Some(shell.push_env("RUSTFLAGS", "-Cforce-unwind-tables -Cforce-frame-pointers -Csymbol-mangling-version=v0"))
     } else {
-        None
+        Some(shell.push_env("RUSTFLAGS", "-Clto=yes"))
     };
 
-    /* setup default files and folders */
-    {
-        for root_dir in REQUIRED_ROOT_DIRS {
-            let path = PathBuf::from(root_dir);
-            if !shell.path_exists(&path) {
-                shell.create_dir(path)?;
-            }
+    // Ensure root directories exist
+    for root_dir in REQUIRED_ROOT_DIRS {
+        let path = PathBuf::from(root_dir);
+        if !shell.path_exists(&path) {
+            shell.create_dir(path)?;
         }
+    }
 
-        if !shell.path_exists(".hdd/disk0.img") {
-            cmd!(shell, "qemu-img create -f raw .hdd/disk0.img 256M").run()?;
-        }
+    // Ensure dev disk image exists.
+    if !shell.path_exists(".hdd/disk0.img") {
+        cmd!(shell, "qemu-img create -f raw .hdd/disk0.img 256M").run()?;
     }
 
     /* limine */
@@ -121,16 +134,6 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
         shell.copy_file(bootx64_efi_path.clone(), PathBuf::from(".hdd/root/EFI/BOOT/"))?;
     }
 
-    /* compile kernel */
-    let profile_str = if options.release { "release" } else { "debug" };
-
-    let cargo_arguments = vec![
-        if options.clippy { "clippy" } else { "build" },
-        "--profile",
-        if options.release { "release" } else { "dev" },
-        "--target",
-    ];
-
     fn disassemble(
         shell: &xshell::Shell,
         arch: Architecture,
@@ -141,7 +144,7 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
             Architecture::x64 => {
                 let output = cmd!(shell, "llvm-objdump -M intel -D {file_path}").output()?;
                 let file_name = file_path.file_name().unwrap().to_str().unwrap();
-                workspace_root.push(format!(".debug/disassembly_{}", file_name));
+                workspace_root.push(format!(".debug/disassembly_{file_name}"));
                 shell.write_file(workspace_root, output.stdout)?;
             }
             Architecture::rv64 => panic!("`--disassemble` options cannot be used when targeting `rv64`"),
@@ -153,11 +156,29 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
     fn readelf(shell: &xshell::Shell, mut workspace_root: PathBuf, file_path: PathBuf) -> xshell::Result<()> {
         let output = cmd!(shell, "readelf -hlS {file_path}").output()?;
         let file_name = file_path.file_name().unwrap().to_str().unwrap();
-        workspace_root.push(format!(".debug/readelf_{}", file_name));
+        workspace_root.push(format!(".debug/readelf_{file_name}"));
         shell.write_file(workspace_root, output.stdout)?;
 
         Ok(())
     }
+
+    /* compile kernel */
+    let profile_str = if options.release { "release" } else { "debug" };
+
+    let cargo_arguments = {
+        let mut vec = vec![
+            if options.clippy { "clippy" } else { "build" },
+            "--profile",
+            if options.release { "release" } else { "dev" },
+            "--target",
+        ];
+
+        if options.verbose {
+            vec.insert(1, "-vv");
+        }
+
+        vec
+    };
 
     // Compile kernel ...
     {
@@ -176,7 +197,7 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
         let out_path = PathBuf::from(".hdd/root/linuiz/kernel.elf");
 
         shell.copy_file(
-            PathBuf::from(format!("src/kernel/target/x86_64-linuiz-kernel/{}/kernel", profile_str)),
+            PathBuf::from(format!("src/kernel/target/x86_64-linuiz-kernel/{profile_str}/kernel")),
             PathBuf::from(out_path.clone()),
         )?;
 
@@ -207,8 +228,7 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
             let mut bytes = vec![];
 
             for driver_name in PACKAGED_DRIVERS {
-                let driver_path =
-                    PathBuf::from(format!("target/x86_64-unknown-linuiz/{}/{}", profile_str, driver_name));
+                let driver_path = PathBuf::from(format!("target/x86_64-unknown-linuiz/{profile_str}/{driver_name}"));
                 let mut file_bytes = shell.read_binary_file(driver_path.clone())?;
 
                 let byte_offset = file_bytes.len();
