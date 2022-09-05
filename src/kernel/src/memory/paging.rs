@@ -13,17 +13,18 @@ bitflags::bitflags! {
         const ACCESSED = 1 << 5;
         const DIRTY = 1 << 6;
         // We don't support huge pages for now.
-        // const HUGE_PAGE = 1 << 7;
+        const HUGE_PAGE = 1 << 7;
         const GLOBAL = 1 << 8;
-        //  9..=11 available
+        const DEMAND = 1 << 9;
+        //  9..=10 available
         // 12..52 frame index
-        // 52..=58 available
         const NO_EXECUTE = 1 << 63;
 
         const RO = Self::VALID.bits() | Self::NO_EXECUTE.bits();
         const RW = Self::VALID.bits() | Self::WRITABLE.bits() | Self::NO_EXECUTE.bits();
         const RX = Self::VALID.bits();
         const PTE = Self::VALID.bits() | Self::WRITABLE.bits() | Self::USER.bits();
+
         const MMIO = Self::RW.bits() | Self::UNCACHEABLE.bits();
     }
 }

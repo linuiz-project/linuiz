@@ -102,6 +102,48 @@ pub enum Exception {
     TripleFault,
 }
 
+impl Exception {
+    pub fn common_exception_handler(exception: Self) {
+        match exception {
+            Self::PageFault(_, _, address) => {
+                use crate::memory::PageAttributes;
+                use libkernel::memory::Page;
+
+                let kernel_frame_manager = crate::memory::get_kernel_frame_manager();
+                // SAFETY: Kernel HHDM is guaranteed by the kernel to be valid.
+                let page_manager = unsafe {
+                    crate::memory::PageManager::from_current(
+                        &Page::from_address(crate::memory::get_kernel_hhdm_address()).unwrap(),
+                    )
+                };
+
+                // Determine if the page fault occured within a demand-paged page.
+                let fault_page = Page::from_address_contains(address);
+                if  let Some(mut fault_page_attributes) = page_manager.get_page_attributes(&fault_page)
+                    && fault_page_attributes.contains(PageAttributes::DEMAND) {
+                        page_manager.auto_map(
+                            &fault_page,
+                            {
+                                // remove demand bit ...
+                                fault_page_attributes.remove(PageAttributes::DEMAND);
+                                // ... insert usable RW bits ...
+                                fault_page_attributes.insert(PageAttributes::RW);
+                                // ... return attributes
+                                fault_page_attributes
+                            },
+                            kernel_frame_manager
+                        );
+
+                        // SAFETY: We know the page was just mapped, and contains no relevant memory.
+                        unsafe { fault_page.clear_memory() };
+            }
+            }
+
+            exception => panic!("{:#?}", exception),
+        }
+    }
+}
+
 /* FAULT INTERRUPT HANDLERS */
 extern "x86-interrupt" fn divide_error_handler(stack_frame: InterruptStackFrame) {
     get_common_exception_handler()(Exception::DivideError(stack_frame))

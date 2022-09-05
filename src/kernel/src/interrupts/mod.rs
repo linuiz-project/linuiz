@@ -63,16 +63,13 @@ pub struct ControlFlowContext {
     pub sp: u64,
 }
 
-#[cfg(target_arch = "x86_64")]
-pub type ArchContext = (crate::arch::x64::cpu::GeneralContext, crate::arch::x64::cpu::SpecialContext);
-
+/* EXCEPTION HANDLING */
 #[cfg(target_arch = "x86_64")]
 pub type ArchException = crate::arch::x64::structures::idt::Exception;
 
-/* EXCEPTION HANDLING */
 type ExceptionHandler = fn(ArchException);
 static EXCEPTION_HANDLER: SyncUnsafeCell<ExceptionHandler> =
-    SyncUnsafeCell::new(|exception| panic!("\n{:#?}", exception));
+    SyncUnsafeCell::new(ArchException::common_exception_handler);
 
 /// Gets the current common exception handler.
 #[inline]
@@ -81,6 +78,9 @@ pub fn get_common_exception_handler() -> &'static ExceptionHandler {
 }
 
 /* NON-EXCEPTION IRQ HANDLING */
+#[cfg(target_arch = "x86_64")]
+pub type ArchContext = (crate::arch::x64::cpu::GeneralContext, crate::arch::x64::cpu::SpecialContext);
+
 type InterruptHandler = fn(u64, &mut ControlFlowContext, &mut ArchContext);
 static INTERRUPT_HANDLER: SyncUnsafeCell<InterruptHandler> = SyncUnsafeCell::new(common_interrupt_handler);
 

@@ -11,7 +11,6 @@ pub(crate) struct LocalState {
     scheduler: Scheduler,
     default_task: Task,
     cur_task: Option<Task>,
-    // interrupt_slots: []
 }
 
 impl LocalState {
@@ -93,7 +92,7 @@ pub unsafe fn init(core_id: u32) {
         default_task: Task::new(
             TaskPriority::new(1).unwrap(),
             crate::scheduling::TaskStart::Function(crate::interrupts::wait_loop),
-            &crate::scheduling::TaskStack::Auto,
+            crate::scheduling::TaskStack::None,
             {
                 #[cfg(target_arch = "x86_64")]
                 {

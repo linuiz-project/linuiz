@@ -199,6 +199,9 @@ impl PageManager {
                 // If acquisition of the frame is successful, map the page to the frame index.
                 Ok(frame_index) => {
                     let entry = map_write.get_page_entry_create(page, frame_manager);
+                    if frame_index == 0 {
+                        //crate::println!("{:?} {:?}", entry as *mut _, entry);
+                    }
                     entry.set_frame_index(frame_index);
                     entry.set_attributes(attributes, AttributeModify::Set);
 

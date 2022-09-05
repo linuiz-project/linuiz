@@ -18,7 +18,8 @@
     raw_ref_op,
     let_chains,
     unchecked_math,
-    cstr_from_bytes_until_nul
+    cstr_from_bytes_until_nul,
+    if_let_guard
 )]
 #![forbid(clippy::inline_asm_x86_att_syntax)]
 #![deny(clippy::semicolon_if_nothing_returned, clippy::debug_assert_with_mut_call, clippy::float_arithmetic)]
@@ -344,7 +345,7 @@ unsafe extern "C" fn _entry() -> ! {
         debug!("Kernel has finalized control of page tables.");
         debug!("Assigning global allocator...");
         crate::memory::init_global_allocator(libkernel::memory::Page::from_index(
-            (384 * libkernel::memory::PML4_ENTRY_MEM_SIZE) / 0x1000,
+            ((384 * libkernel::memory::PML4_ENTRY_MEM_SIZE) / 0x1000) as usize,
         ));
 
         #[cfg(target_arch = "x86_64")]
@@ -532,7 +533,7 @@ unsafe extern "C" fn _entry() -> ! {
                             // SAFETY: HHDM is guaranteed by kernel to be valid, and the frame being pointed to was just allocated.
                             let memory_hhdm = unsafe {
                                 core::slice::from_raw_parts_mut(
-                                    (hhdm_address + ((frame_index * 0x1000) as u64)).as_mut_ptr::<u8>(),
+                                    (hhdm_address.as_usize() + (frame_index * 0x1000)) as *mut u8,
                                     0x1000,
                                 )
                             };
@@ -560,6 +561,29 @@ unsafe extern "C" fn _entry() -> ! {
             {
                 use libkernel::{Address, Physical, Virtual};
 
+                let stack_address = {
+                    // TODO: make this a dynamic configuration
+                    const DEFAULT_TASK_STACK_SIZE: u64 = 4 * libkernel::MIBIBYTE;
+
+                    let kernel_frame_manager = crate::memory::get_kernel_frame_manager();
+                    let base_address = Address::<Virtual>::new_truncate(128 * libkernel::memory::PML4_ENTRY_MEM_SIZE);
+                    let stack_address =
+                        Address::<Virtual>::new_truncate(base_address.as_u64() + DEFAULT_TASK_STACK_SIZE);
+                    for page_index in base_address.page_index()..stack_address.page_index() {
+                        driver_page_manager
+                            .map(
+                                &Page::from_index(page_index),
+                                0,
+                                false,
+                                PageAttributes::DEMAND | PageAttributes::USER,
+                                kernel_frame_manager,
+                            )
+                            .unwrap();
+                    }
+
+                    stack_address
+                };
+
                 let mut global_tasks = scheduling::GLOBAL_TASKS.lock();
                 global_tasks.push_back(scheduling::Task::new(
                     scheduling::TaskPriority::new(scheduling::TaskPriority::MAX).unwrap(),
@@ -567,7 +591,7 @@ unsafe extern "C" fn _entry() -> ! {
                     scheduling::TaskStart::Address(
                         Address::<Virtual>::new(driver_elf.get_entry_offset() as u64).unwrap(),
                     ),
-                    &scheduling::TaskStack::Auto,
+                    scheduling::TaskStack::At(stack_address),
                     {
                         #[cfg(target_arch = "x86_64")]
                         {

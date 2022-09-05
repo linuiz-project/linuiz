@@ -7,27 +7,8 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {}
 }
 
-const STACK_SIZE: usize = 0x4000;
-#[repr(align(0x10))]
-struct Stack([u8; STACK_SIZE]);
-static STACK: core::cell::SyncUnsafeCell<Stack> = core::cell::SyncUnsafeCell::new(Stack([0u8; STACK_SIZE]));
-
-#[naked]
 #[no_mangle]
-unsafe extern "C" fn _start() -> ! {
-    core::arch::asm!(
-        "
-        lea rsp, [{} + {}]
-        call {}
-        ",
-        sym STACK,
-        const STACK_SIZE,
-        sym main,
-        options(noreturn)
-    )
-}
-
-extern "C" fn main() -> ! {
+extern "C" fn _start() -> ! {
     loop {
         unsafe {
             core::arch::asm!(

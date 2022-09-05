@@ -45,18 +45,18 @@ pub enum ReadOnly {}
 pub enum WriteOnly {}
 pub enum ReadWrite {}
 
-pub const KIBIBYTE: usize = 0x400; // 1024
-pub const MIBIBYTE: usize = KIBIBYTE * KIBIBYTE;
-pub const GIBIBYTE: usize = MIBIBYTE * MIBIBYTE;
+pub const KIBIBYTE: u64 = 0x400; // 1024
+pub const MIBIBYTE: u64 = KIBIBYTE * KIBIBYTE;
+pub const GIBIBYTE: u64 = MIBIBYTE * MIBIBYTE;
 pub const PT_L4_ENTRY_MEM: u64 = 1 << 9 << 9 << 9 << 12;
 
 #[inline(always)]
-pub const fn to_kibibytes(value: usize) -> usize {
+pub const fn to_kibibytes(value: u64) -> u64 {
     value / KIBIBYTE
 }
 
 #[inline(always)]
-pub const fn to_mibibytes(value: usize) -> usize {
+pub const fn to_mibibytes(value: u64) -> u64 {
     value / MIBIBYTE
 }
 

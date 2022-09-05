@@ -187,12 +187,15 @@ impl super::Capability for MSIX<'_> {
             // TODO maybe we shouldn't import kernel types? PCI may need to be moved back to libkernel, for userspace compatibility.
             let frame_manager = crate::memory::get_kernel_frame_manager();
             let page_manager = crate::memory::get_kernel_page_manager();
-            let hhdm_offset_address = crate::memory::get_kernel_hhdm_address() + address.as_u64();
+            let hhdm_offset_address = libkernel::Address::<libkernel::Virtual>::new(
+                crate::memory::get_kernel_hhdm_address().as_u64() + address.as_u64(),
+            )
+            .unwrap();
 
             for size_offset in (0..size).step_by(0x1000) {
                 page_manager
                     .map_mmio(
-                        Page::from_address(hhdm_offset_address + (size_offset as u64)).unwrap(),
+                        Page::from_index((hhdm_offset_address.as_usize() + size_offset) / 0x1000),
                         address.frame_index() + (size / 0x1000),
                         frame_manager,
                     )

@@ -12,7 +12,7 @@ impl AddressType for Physical {}
 pub enum Virtual {}
 impl AddressType for Virtual {}
 
-// TODO use `u64` for the internal integer type
+// TODO: handle address arithmetic around the address space hole
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Address<T: AddressType>(u64, PhantomData<T>);
@@ -79,50 +79,6 @@ impl Address<Physical> {
     }
 }
 
-impl core::ops::Add<Address<Physical>> for Address<Physical> {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        Self::new_truncate(self.0 + rhs.0)
-    }
-}
-
-impl core::ops::Add<u64> for Address<Physical> {
-    type Output = Self;
-
-    fn add(self, rhs: u64) -> Self::Output {
-        Self::new_truncate(self.0 + rhs)
-    }
-}
-
-impl core::ops::AddAssign<u64> for Address<Physical> {
-    fn add_assign(&mut self, rhs: u64) {
-        self.0 += rhs;
-    }
-}
-
-impl core::ops::Sub<Address<Physical>> for Address<Physical> {
-    type Output = Self;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        Self::new_truncate(self.0 - rhs.0)
-    }
-}
-
-impl core::ops::Sub<u64> for Address<Physical> {
-    type Output = Self;
-
-    fn sub(self, rhs: u64) -> Self::Output {
-        Self::new_truncate(self.0 - rhs)
-    }
-}
-
-impl core::ops::SubAssign<u64> for Address<Physical> {
-    fn sub_assign(&mut self, rhs: u64) {
-        self.0 -= rhs;
-    }
-}
-
 impl core::fmt::Debug for Address<Physical> {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter.debug_tuple("Address<Physical>").field(&format_args!("{:#X}", self.0)).finish()
@@ -151,7 +107,7 @@ impl Address<Virtual> {
 
     #[inline(always)]
     pub const fn page_index(&self) -> usize {
-        (self.as_usize() / 0x1000) as usize
+        self.as_usize() / 0x1000
     }
 
     #[inline(always)]
@@ -198,49 +154,5 @@ impl Address<Virtual> {
 impl core::fmt::Debug for Address<Virtual> {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter.debug_tuple("Address<Virtual>").field(&format_args!("{:#X}", self.0)).finish()
-    }
-}
-
-impl core::ops::Add<Address<Virtual>> for Address<Virtual> {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        Self::new_truncate(self.0 + rhs.0)
-    }
-}
-
-impl core::ops::Add<u64> for Address<Virtual> {
-    type Output = Self;
-
-    fn add(self, rhs: u64) -> Self::Output {
-        Self::new_truncate(self.0 + rhs)
-    }
-}
-
-impl core::ops::AddAssign<u64> for Address<Virtual> {
-    fn add_assign(&mut self, rhs: u64) {
-        self.0 += rhs;
-    }
-}
-
-impl core::ops::Sub<Address<Virtual>> for Address<Virtual> {
-    type Output = Self;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        Self::new_truncate(self.0 - rhs.0)
-    }
-}
-
-impl core::ops::Sub<u64> for Address<Virtual> {
-    type Output = Self;
-
-    fn sub(self, rhs: u64) -> Self::Output {
-        Self::new_truncate(self.0 - rhs)
-    }
-}
-
-impl core::ops::SubAssign<u64> for Address<Virtual> {
-    fn sub_assign(&mut self, rhs: u64) {
-        self.0 -= rhs;
     }
 }

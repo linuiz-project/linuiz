@@ -23,7 +23,7 @@ pub mod volatile;
 
 */
 
-pub const PML4_ENTRY_MEM_SIZE: usize = 1 << 9 << 9 << 9 << 12;
+pub const PML4_ENTRY_MEM_SIZE: u64 = 1 << 9 << 9 << 9 << 12;
 
 use core::alloc::Allocator;
 

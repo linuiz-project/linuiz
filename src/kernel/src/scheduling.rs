@@ -34,8 +34,7 @@ impl TaskPriority {
 /// Represents a stack allocation strategy for a [`Task`].
 pub enum TaskStack {
     None,
-    Auto,
-    Pages(usize),
+    At(libkernel::Address<libkernel::Virtual>),
 }
 
 pub enum TaskStart {
@@ -55,43 +54,17 @@ pub struct Task {
     //pcid: Option<PCID>,
     pub ctrl_flow_context: crate::interrupts::ControlFlowContext,
     pub arch_context: crate::interrupts::ArchContext,
-    pub stack: PageAlignedBox<[MaybeUninit<u8>]>,
     pub root_page_table_args: crate::memory::RootPageTable,
 }
 
 impl Task {
-    const DEFAULT_STACK_SIZE: usize = 0x5000;
-
     pub fn new(
         priority: TaskPriority,
         start: TaskStart,
-        stack: &TaskStack,
+        stack: TaskStack,
         arch_context: crate::interrupts::ArchContext,
         root_page_table_args: crate::memory::RootPageTable,
     ) -> Self {
-        let stack = match stack {
-            TaskStack::None => PageAlignedBox::new_uninit_slice_in(0, libkernel::memory::page_aligned_allocator()),
-
-            TaskStack::Auto => PageAlignedBox::new_uninit_slice_in(
-                Self::DEFAULT_STACK_SIZE,
-                libkernel::memory::page_aligned_allocator(),
-            ),
-
-            TaskStack::Pages(page_count) => PageAlignedBox::new_uninit_slice_in(
-                (*page_count + 1) * 0x1000,
-                libkernel::memory::page_aligned_allocator(),
-            ),
-        };
-
-        // Unmap stack canary.
-        crate::memory::get_kernel_page_manager()
-            .unmap(
-                &libkernel::memory::Page::from_ptr(stack.as_ptr()).unwrap(),
-                false,
-                crate::memory::get_kernel_frame_manager(),
-            )
-            .unwrap();
-
         Self {
             id: NEXT_THREAD_ID.fetch_add(1, core::sync::atomic::Ordering::AcqRel),
             prio: priority,
@@ -100,10 +73,12 @@ impl Task {
                     TaskStart::Address(address) => address.as_u64(),
                     TaskStart::Function(function) => function as usize as u64,
                 },
-                sp: unsafe { stack.as_ptr().add(stack.len()) as u64 },
+                sp: match stack {
+                    TaskStack::None => 0x0,
+                    TaskStack::At(address) => address.as_u64(),
+                },
             },
             arch_context,
-            stack,
             root_page_table_args,
         }
     }
