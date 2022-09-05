@@ -61,13 +61,23 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     let debug_tables = DEBUG_TABLES.get();
     let mut increment = 0;
 
+    enum SymbolName<'a> {
+        Demangled(&'a rustc_demangle::Demangle<'a>),
+        RawStr(&'a str),
+        None,
+    }
+
     /// Pretty-prints a stack-trace entry.
-    fn print_stack_trace_entry(entry_num: usize, fn_address: u64, symbol_name: Option<&str>) {
+    fn print_stack_trace_entry(entry_num: usize, fn_address: u64, symbol_name: SymbolName) {
         let tab_len = 4 + (entry_num * 2);
-        crate::println!(
-            "{entry_num:.<tab_len$}0x{fn_address:0<16X} {}",
-            symbol_name.unwrap_or("!!! no function found !!!")
-        );
+
+        match symbol_name {
+            SymbolName::Demangled(demangled) => {
+                crate::println!("{entry_num:.<tab_len$}0x{fn_address:0<16X} {demangled}")
+            }
+            SymbolName::RawStr(raw_str) => crate::println!("{entry_num:.<tab_len$}0x{fn_address:0<16X} {raw_str}"),
+            SymbolName::None => crate::println!("{entry_num:.<tab_len$}0x{fn_address:0<16X} !!! no function found !!!"),
+        }
     }
 
     for fn_address in stack_traces.iter().rev().filter_map(|fn_address| *fn_address) {
@@ -86,24 +96,32 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
                 .ok()
                 .and_then(|cstr| cstr.to_str().ok())
         {
-            let mut demangle_buffer = [0u8; 256];
-            mangling::demangle(symbol_name, &mut demangle_buffer).ok();
+            match rustc_demangle::try_demangle(symbol_name).ok() {
+                Some(demangled) => {
+                    print_stack_trace_entry(
+                        increment,
+                        fn_symbol.get_value(),
+                        SymbolName::Demangled(&demangled)
+                    )
+                },
 
-            print_stack_trace_entry(
-                increment,
-                fn_symbol.get_value(),
-                //Some(symbol_name)
-                Some(core::str::from_utf8(&demangle_buffer).unwrap_or( symbol_name))
-            );
+                None => {
+                    print_stack_trace_entry(
+                        increment,
+                        fn_symbol.get_value(),
+                        SymbolName::RawStr(symbol_name)
+                    )
+                }
+            }
         } else {
-            print_stack_trace_entry(increment, fn_address, None);
+            print_stack_trace_entry(increment, fn_address, SymbolName::None);
         }
 
         increment += 1;
     }
 
     if trace_overflow {
-        print_stack_trace_entry(increment, 0x0, Some("!!! trace overflowed !!!"))
+        print_stack_trace_entry(increment, 0x0, SymbolName::RawStr("!!! trace overflowed !!!"))
     } else if increment == 0 {
         crate::println!("No stack trace is available.");
     }

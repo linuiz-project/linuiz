@@ -18,6 +18,7 @@ acpi = { path = "../../../acpi/acpi/" }
 aml = "*"
 miniz_oxide = "*"
 bytemuck = "*"
+rustc-demangle = "*"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86_64 = "*"
