@@ -1,6 +1,6 @@
 pub static DEBUG_TABLES: spin::Once<(&[crate::elf::symbol::Symbol], &[u8])> = spin::Once::new();
 
-const MAXIMUM_STACK_TRACE_DEPTH: usize = 5;
+const MAXIMUM_STACK_TRACE_DEPTH: usize = 16;
 
 /// Traces the frame pointer, storing the traced return addresses within the provided array. Returns whether the trace overflowed the array.
 fn trace_frame_pointer(
@@ -24,10 +24,15 @@ fn trace_frame_pointer(
     while let Some(stack_frame) = unsafe { frame_ptr.as_ref() } {
         // 'Push' the return address to the array.
         let Some(stack_trace_address) = stack_trace_addresses.get_mut(stack_trace_index as usize) else { return true; };
-        *stack_trace_address = Some(stack_frame.return_address);
 
-        frame_ptr = stack_frame.prev_frame_ptr;
-        stack_trace_index += 1;
+        if stack_frame.return_address == 0x0 {
+            break;
+        } else {
+            *stack_trace_address = Some(stack_frame.return_address);
+
+            frame_ptr = stack_frame.prev_frame_ptr;
+            stack_trace_index += 1;
+        }
     }
 
     false
@@ -73,7 +78,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 
         match symbol_name {
             SymbolName::Demangled(demangled) => {
-                crate::println!("{entry_num:.<tab_len$}0x{fn_address:0<16X} {demangled}")
+                crate::println!("{entry_num:.<tab_len$}0x{fn_address:0<16X} {demangled:#}")
             }
             SymbolName::RawStr(raw_str) => crate::println!("{entry_num:.<tab_len$}0x{fn_address:0<16X} {raw_str}"),
             SymbolName::None => crate::println!("{entry_num:.<tab_len$}0x{fn_address:0<16X} !!! no function found !!!"),

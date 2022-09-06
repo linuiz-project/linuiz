@@ -51,7 +51,7 @@ fn get_limine_mmap() -> &'static [limine::NonNullPtr<limine::LimineMemmapEntry>]
     LIMINE_MMAP.get_response().get().expect("bootloader provided no memory map response").memmap()
 }
 
-pub static HHDM_ADDRESS: Once<Address<Virtual>> = Once::new();
+static HHDM_ADDRESS: Once<Address<Virtual>> = Once::new();
 /// SAFETY: This function assumes it will be called before the kernel takes ownership of the page tables.
 pub unsafe fn init_kernel_hhdm_address() {
     HHDM_ADDRESS.call_once(|| {

@@ -87,7 +87,7 @@ pub fn load_registers() {
 
     if EXT_FEATURE_INFO.as_ref().map_or(false, cpuid::ExtendedFeatures::has_smap) {
         trace!("Detected support for supervisor mode access prevention.");
-        flags.insert(CR4Flags::SMAP);
+        // TODO flags.insert(CR4Flags::SMAP);
     }
 
     // SAFETY:  Initialize the CR4 register with all CPU & kernel supported features.

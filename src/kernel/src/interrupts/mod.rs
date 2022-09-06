@@ -2,6 +2,7 @@ mod instructions;
 mod syscall;
 
 pub use instructions::*;
+use libkernel::{Address, Virtual};
 
 use core::cell::SyncUnsafeCell;
 use num_enum::TryFromPrimitive;
@@ -63,18 +64,45 @@ pub struct ControlFlowContext {
     pub sp: u64,
 }
 
-/* EXCEPTION HANDLING */
-#[cfg(target_arch = "x86_64")]
-pub type ArchException = crate::arch::x64::structures::idt::Exception;
+/// Indicates what type of error the common page fault handler encountered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PageFaultHandlerError {
+    AddressNotMapped,
+    NotDemandPaged,
+    CriticalError,
+}
 
-type ExceptionHandler = fn(ArchException);
-static EXCEPTION_HANDLER: SyncUnsafeCell<ExceptionHandler> =
-    SyncUnsafeCell::new(ArchException::common_exception_handler);
+/// SAFETY: This function expects only to be called upon a processor page fault exception.
+pub unsafe fn common_page_fault_handler(address: Address<Virtual>) -> Result<(), PageFaultHandlerError> {
+    use crate::memory;
+    use libkernel::memory::Page;
 
-/// Gets the current common exception handler.
-#[inline]
-pub fn get_common_exception_handler() -> &'static ExceptionHandler {
-    unsafe { &*EXCEPTION_HANDLER.get() }
+    let fault_page = Page::from_address_contains(address);
+    let Some(hhdm_page) = Page::from_address(memory::get_kernel_hhdm_address()) else { return Err(PageFaultHandlerError::CriticalError) };
+    let page_manager = memory::PageManager::from_current(&hhdm_page);
+    let Some(mut fault_page_attributes) = page_manager.get_page_attributes(&fault_page) else { return Err(PageFaultHandlerError::AddressNotMapped) };
+
+    if fault_page_attributes.contains(memory::PageAttributes::DEMAND) {
+        page_manager.auto_map(
+            &fault_page,
+            {
+                // remove demand bit ...
+                fault_page_attributes.remove(memory::PageAttributes::DEMAND);
+                // ... insert usable RW bits ...
+                fault_page_attributes.insert(memory::PageAttributes::RW);
+                // ... return attributes
+                fault_page_attributes
+            },
+            memory::get_kernel_frame_manager(),
+        );
+
+        // SAFETY: We know the page was just mapped, and contains no relevant memory.
+        fault_page.clear_memory();
+
+        Ok(())
+    } else {
+        Err(PageFaultHandlerError::NotDemandPaged)
+    }
 }
 
 /* NON-EXCEPTION IRQ HANDLING */
