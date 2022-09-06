@@ -1,7 +1,9 @@
-use libkernel::{Address, Virtual};
-use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode, SelectorErrorCode};
-
 use crate::arch::x64::cpu::GeneralContext;
+use core::arch::asm;
+use libkernel::{Address, Virtual};
+use x86_64::structures::idt::{PageFaultErrorCode, SelectorErrorCode};
+
+pub use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, InterruptStackFrameValue};
 
 macro_rules! push_fptr {
     ($ip_off:expr, $sp_off:expr) => {
@@ -72,7 +74,7 @@ macro_rules! exception_handler {
                 stack_frame: InterruptStackFrame,
             ) -> $return_type {
                 unsafe {
-                    core::arch::asm!(
+                    asm!(
                         "cld",
                         push_gprs!(),
                         push_fptr!(15, 18),
@@ -106,7 +108,7 @@ macro_rules! exception_handler_with_error {
                 error_code: $error_ty
             ) -> $return_type {
                 unsafe {
-                    core::arch::asm!(
+                    asm!(
                         "cld",
                         push_gprs!(),
                         push_fptr!(16, 19),
@@ -145,7 +147,7 @@ macro_rules! irq_stub {
             #[naked]
             extern "x86-interrupt" fn [<irq_ $irq_vector>](_: crate::arch::x64::structures::idt::InterruptStackFrame) {
                 unsafe {
-                    core::arch::asm!(
+                    asm!(
                         "cld",
                         push_gprs!(),
                         push_fptr!(15, 18),
@@ -448,7 +450,7 @@ pub fn set_exception_handlers(idt: &mut InterruptDescriptorTable) {
     // --- triple fault (can't handle)
 }
 
-pub fn set_stub_handlers(idt: &mut super::InterruptDescriptorTable) {
+pub fn set_stub_handlers(idt: &mut InterruptDescriptorTable) {
     idt[32].set_handler_fn(irq_32);
     idt[33].set_handler_fn(irq_33);
     idt[34].set_handler_fn(irq_34);
@@ -900,3 +902,9 @@ irq_stub!(252);
 irq_stub!(253);
 irq_stub!(254);
 irq_stub!(255);
+
+/// Loads the IDT from the interrupt descriptor table register.
+pub unsafe fn get_current() -> Option<&'static mut InterruptDescriptorTable> {
+    let idt_pointer = x86_64::instructions::tables::sidt();
+    idt_pointer.base.as_mut_ptr::<InterruptDescriptorTable>().as_mut()
+}

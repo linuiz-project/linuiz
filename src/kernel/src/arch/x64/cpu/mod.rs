@@ -1,3 +1,5 @@
+mod syscall;
+
 pub mod cpuid {
     pub use raw_cpuid::*;
     use spin::Lazy;
@@ -37,7 +39,7 @@ pub fn get_id() -> u32 {
         .unwrap_or_else(|| FEATURE_INFO.initial_local_apic_id() as u32)
 }
 
-pub fn load_registers() {
+fn init_registers() {
     trace!("Loading x86-specific control registers to known state.");
 
     // Set CR0 flags.
@@ -106,7 +108,7 @@ pub fn load_registers() {
 }
 
 /// SAFETY: Caller must ensure this method is called only once per core.
-pub unsafe fn load_tables() {
+unsafe fn init_tables() {
     use crate::{
         arch::x64::{
             instructions::tables,
@@ -204,6 +206,29 @@ pub unsafe fn load_tables() {
 
         trace!("TSS loaded, and temporary GDT trashed.");
     }
+}
+
+fn init_syscalls() {
+    // SAFETY: Parameters are set according to the IA-32 SDM, and so should have no undetermined side-effects.
+    unsafe {
+        use crate::arch::x64::registers::{msr, RFlags};
+        use crate::arch::x64::structures::gdt;
+
+        // Configure system call environment registers.
+        msr::IA32_STAR::set_selectors(*gdt::KCODE_SELECTOR.get().unwrap(), *gdt::KDATA_SELECTOR.get().unwrap());
+        msr::IA32_LSTAR::set_syscall(syscall::syscall_handler);
+        // We don't want to keep any flags set within the syscall (especially the interrupt flag).
+        msr::IA32_SFMASK::set_rflags_mask(RFlags::all());
+        // Enable `syscall`/`sysret`.
+        msr::IA32_EFER::set_sce(true);
+    }
+}
+
+/// SAFETY: This function expects to be called only once per CPU core.
+pub unsafe fn init() {
+    init_registers();
+    init_tables();
+    init_syscalls();
 }
 
 #[derive(Debug, Clone, Copy)]

@@ -1,5 +1,4 @@
 mod instructions;
-mod syscall;
 
 pub use instructions::*;
 use libkernel::{Address, Virtual};
@@ -47,8 +46,7 @@ pub enum DestinationMode {
 pub enum Vector {
     Clock = 0x20,
     /* 0x21..=0x2F reserved for PIC */
-    Syscall = 0x30,
-    Timer = 0x31,
+    Timer = 0x30,
     Thermal = 0x32,
     Performance = 0x33,
     /* 0x34..=0x3B free for use */
@@ -126,20 +124,6 @@ pub fn common_interrupt_handler(
     match Vector::try_from(irq_vector) {
         Ok(vector) if vector == Vector::Timer => {
             crate::local_state::schedule_next_task(ctrl_flow_context, arch_context);
-        }
-
-        Ok(vector) if vector == Vector::Syscall => {
-            #[cfg(target_arch = "x86_64")]
-            {
-                arch_context.0.rax = syscall::syscall_handler(
-                    arch_context.0.rdi,
-                    arch_context.0.rsi,
-                    arch_context.0.rdx,
-                    arch_context.0.rcx,
-                    arch_context.0.r8,
-                    arch_context.0.r9,
-                );
-            }
         }
 
         vector_result => {

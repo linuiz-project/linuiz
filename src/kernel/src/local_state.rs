@@ -3,9 +3,13 @@ use crate::{
     scheduling::{Scheduler, Task, TaskPriority},
 };
 
+pub const SYSCALL_STACK_SIZE: u64 = 0x4000;
+
 #[repr(C, align(0x1000))]
 pub(crate) struct LocalState {
+    syscall_stack_ptr: *const (),
     magic: u64,
+    syscall_stack: [u8; SYSCALL_STACK_SIZE as usize],
     core_id: u32,
     timer: alloc::boxed::Box<dyn crate::time::timer::Timer>,
     scheduler: Scheduler,
@@ -83,7 +87,17 @@ pub unsafe fn init(core_id: u32) {
 
     trace!("Writing local state struct out to memory.");
     local_state_ptr.write(LocalState {
+        syscall_stack_ptr: (local_state_ptr as *const u8)
+            // `::syscall_stack_ptr`
+            .add(8)
+            // `::magic`
+            .add(8)
+            // `::syscall_stack`
+            .add(SYSCALL_STACK_SIZE as usize)
+            // now we have a valid stack pointer
+            .cast(),
         magic: LocalState::MAGIC,
+        syscall_stack: [0u8; SYSCALL_STACK_SIZE as usize],
         core_id,
         timer: crate::time::timer::configure_new_timer(1000),
         scheduler: Scheduler::new(false),

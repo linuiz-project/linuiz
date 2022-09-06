@@ -164,7 +164,7 @@ impl IA32_LSTAR {
     ///
     /// SAFETY: Caller must ensure the given function pointer is valid for a syscall instruction pointer.
     #[inline(always)]
-    pub unsafe fn set_syscall(func: unsafe extern "C" fn()) {
+    pub unsafe fn set_syscall(func: unsafe extern "sysv64" fn()) {
         wrmsr(0xC0000082, func as u64);
     }
 }

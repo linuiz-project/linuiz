@@ -352,7 +352,7 @@ impl PageManager {
     }
 
     #[inline(always)]
-    pub unsafe fn write_cr3(&self) {
+    pub unsafe fn write_root_table(&self) {
         interrupts::without(|| {
             self.virtual_map.write().write_root_table();
         });

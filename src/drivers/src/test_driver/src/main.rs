@@ -15,8 +15,8 @@ extern "C" fn _start() -> ! {
                 "
                 push rdi
 
-                mov rdi, 0x0
-                int 0x30
+                mov rdi, 0x1000000
+                syscall
 
                 pop rdi
                 ",

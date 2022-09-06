@@ -205,10 +205,7 @@ unsafe extern "C" fn _entry() -> ! {
     /* bsp core init */
     {
         #[cfg(target_arch = "x86_64")]
-        {
-            crate::arch::x64::cpu::load_registers();
-            crate::arch::x64::cpu::load_tables();
-        }
+        crate::arch::x64::cpu::init();
 
         // TODO rv64 bsp hart init
     }
@@ -388,7 +385,7 @@ unsafe extern "C" fn _entry() -> ! {
     /* memory finalize */
     {
         debug!("Switching to kernel page tables...");
-        page_manager.write_cr3();
+        page_manager.write_root_table();
         debug!("Kernel has finalized control of page tables.");
         debug!("Assigning global allocator...");
         crate::memory::init_global_allocator(libkernel::memory::Page::from_index(
@@ -678,12 +675,9 @@ unsafe fn _smp_entry() -> ! {
     }
 
     #[cfg(target_arch = "x86_64")]
-    {
-        crate::arch::x64::cpu::load_registers();
-        crate::arch::x64::cpu::load_tables();
-    }
+    crate::arch::x64::cpu::init();
 
-    crate::memory::get_kernel_page_manager().write_cr3();
+    crate::memory::get_kernel_page_manager().write_root_table();
 
     SMP_MEMORY_INIT.fetch_sub(1, Ordering::Relaxed);
     while SMP_MEMORY_INIT.load(Ordering::Relaxed) > 0 {
