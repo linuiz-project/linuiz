@@ -368,36 +368,36 @@ pub trait LocalVectorVariant {
 
 pub trait GenericVectorVariant: LocalVectorVariant {}
 
-pub enum Timer {}
+pub struct Timer;
 impl LocalVectorVariant for Timer {
     const REGISTER: Register = Register::LVT_TIMER;
 }
 
-pub enum LINT0 {}
+pub struct LINT0;
 impl LocalVectorVariant for LINT0 {
     const REGISTER: Register = Register::LVT_LINT0;
 }
 impl GenericVectorVariant for LINT0 {}
 
-pub enum LINT1 {}
+pub struct LINT1;
 impl LocalVectorVariant for LINT1 {
     const REGISTER: Register = Register::LVT_LINT1;
 }
 impl GenericVectorVariant for LINT1 {}
 
-pub enum Performance {}
+pub struct Performance;
 impl LocalVectorVariant for Performance {
     const REGISTER: Register = Register::LVT_PERF;
 }
 impl GenericVectorVariant for Performance {}
 
-pub enum Thermal {}
+pub struct Thermal;
 impl LocalVectorVariant for Thermal {
     const REGISTER: Register = Register::LVT_THERMAL;
 }
 impl GenericVectorVariant for Thermal {}
 
-pub enum Error {}
+pub struct Error;
 impl LocalVectorVariant for Error {
     const REGISTER: Register = Register::LVT_ERR;
 }

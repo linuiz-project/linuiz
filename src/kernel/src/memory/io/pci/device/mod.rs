@@ -111,17 +111,17 @@ pub trait DeviceType {
     const REGISTER_COUNT: usize;
 }
 
-pub enum Standard {}
+pub struct Standard;
 impl DeviceType for Standard {
     const REGISTER_COUNT: usize = 6;
 }
 
-pub enum PCI2PCI {}
+pub struct PCI2PCI;
 impl DeviceType for PCI2PCI {
     const REGISTER_COUNT: usize = 2;
 }
 
-pub enum PCI2CardBus {}
+pub struct PCI2CardBus;
 impl DeviceType for PCI2CardBus {
     const REGISTER_COUNT: usize = 8;
 }
