@@ -12,6 +12,7 @@ bitflags::bitflags! {
         const OSFXSR        = 1 << 9;
         const OSXMMEXCPT    = 1 << 10;
         const UMIP          = 1 << 11;
+        const LA57          = 1 << 12;
         const VMXE          = 1 << 13;
         const SMXE          = 1 << 14;
         const FSGSBASE      = 1 << 16;
