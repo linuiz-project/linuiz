@@ -133,6 +133,8 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 
     crate::println!("----------STACK-TRACE----------");
 
+    // SAFETY: The current core is dead.
+    unsafe { crate::interrupts::disable() };
     crate::interrupts::wait_loop()
 }
 

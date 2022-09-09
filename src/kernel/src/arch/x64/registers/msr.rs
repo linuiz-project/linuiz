@@ -145,16 +145,16 @@ impl IA32_STAR {
     /// > target code segment, instruction pointer, stack segment, and flags as follows:
     /// > Target code segment:       Reads a non-NULL selector from IA32_STAR\[63:48\] + 16.
     /// > ...
-    /// > Target stack segment:      IA32_STAR\[63:48\] + 8
+    /// > Target stack segment:      Reads a non-NULL selector from IA32_STAR\[63:48\] + 8
     /// > ...
     ///
     /// SAFETY: Caller must ensure the low and high selectors are valid.
     #[inline(always)]
     pub unsafe fn set_selectors(
-        low_selector: x86_64::structures::gdt::SegmentSelector,
-        high_selector: x86_64::structures::gdt::SegmentSelector,
+        kcode: x86_64::structures::gdt::SegmentSelector,
+        kdata: x86_64::structures::gdt::SegmentSelector,
     ) {
-        wrmsr(0xC0000081, (high_selector.index() as u64) << 51 | (low_selector.index() as u64) << 35);
+        wrmsr(0xC0000081, (((kdata.index() << 3) as u64) << 48) | (((kcode.index() << 3) as u64) << 32));
     }
 }
 
@@ -171,8 +171,8 @@ impl IA32_LSTAR {
 
 generic_msr!(IA32_CSTAR, 0xC0000083);
 
-pub struct IA32_SFMASK;
-impl IA32_SFMASK {
+pub struct IA32_FMASK;
+impl IA32_FMASK {
     /// Sets `rflags` upon a `syscall` based on masking the bits in the given value.
     ///
     /// SAFETY: Caller must ensure the function jumped to upon a `syscall` can correctly handle the provided RFlags.

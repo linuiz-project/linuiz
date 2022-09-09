@@ -9,16 +9,34 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 
 #[no_mangle]
 extern "C" fn _start() -> ! {
-    unsafe {
-        let log_message = core::ffi::CStr::from_bytes_until_nul(b"process logging test\0").unwrap();
+    let log_message = core::ffi::CStr::from_bytes_until_nul(b"process logging test\0").unwrap();
 
-        core::arch::asm!(
-            "syscall",
-            in("rdi") 0x100,
-            in("rsi") log::Level::Info as usize,
-            in("rdx")  log_message.as_ptr(),
-            options(nostack, nomem)
-        );
+    for _ in 0..10 {
+        unsafe {
+            core::arch::asm!(
+                "
+                push rax
+                push rcx
+                push r8
+                push r9
+                push r10
+                push r11
+
+                syscall
+
+                pop r11
+                pop r10
+                pop r9
+                pop r9
+                pop rcx
+                pop rax
+                ",
+                inout("rdi") 0x100 => _,
+                inout("rsi") log::Level::Info as usize => _,
+                inout("rdx")  log_message.as_ptr() => _,
+                options(nostack, nomem)
+            );
+        }
     }
 
     loop {}

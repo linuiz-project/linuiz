@@ -646,7 +646,7 @@ unsafe extern "C" fn _entry() -> ! {
                         {
                             (
                                 crate::arch::x64::cpu::GeneralContext::empty(),
-                                crate::arch::x64::cpu::SpecialContext::with_user_segments(
+                                crate::arch::x64::cpu::SpecialContext::flags_with_user_segments(
                                     crate::arch::x64::registers::RFlags::INTERRUPT_FLAG,
                                 ),
                             )

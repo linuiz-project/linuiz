@@ -279,11 +279,12 @@ pub enum Exception<'a> {
 
 pub fn common_exception_handler(exception: Exception) {
     match exception {
-            Exception::PageFault(_, _, address, _)
-                // SAFETY: Function is being called in a valid page fault context.
-                if let Ok(()) = unsafe { crate::interrupts::common_page_fault_handler(address) } => {}
-            exception => panic!("{:#?}", exception)
-        }
+        Exception::PageFault(_, _, address, _)
+            // SAFETY: Function is being called in a valid page fault context.
+            if let Ok(()) = unsafe { crate::interrupts::common_page_fault_handler(address) } => {}
+
+        exception => panic!("{:#?}", exception)
+    }
 }
 
 exception_handler!(de, ());
@@ -371,12 +372,8 @@ extern "sysv64" fn pf_handler_inner(
     error_code: x86_64::structures::idt::PageFaultErrorCode,
     gprs: &GeneralContext,
 ) {
-    common_exception_handler(Exception::PageFault(
-        stack_frame,
-        error_code,
-        crate::arch::x64::registers::control::CR2::read(),
-        gprs,
-    ))
+    let fault_address = crate::arch::x64::registers::control::CR2::read();
+    common_exception_handler(Exception::PageFault(stack_frame, error_code, fault_address, gprs))
 }
 
 // --- reserved 15

@@ -6,6 +6,7 @@ pub unsafe extern "sysv64" fn syscall_handler() {
     core::arch::asm!(
         "
         cld
+        cli                         # always ensure interrupts are disabled within system calls
         mov rax, rsp                # save the userspace rsp
 
         swapgs                      # `swapgs` to switch to kernel stack
@@ -14,6 +15,7 @@ pub unsafe extern "sysv64" fn syscall_handler() {
 
         # preserve registers according to SysV ABI spec
         push rax    # this pushes the userspace `rsp`
+        push r11    # save usersapce `rflags`
         push rbx
         push rbp
         push r12
@@ -21,18 +23,16 @@ pub unsafe extern "sysv64" fn syscall_handler() {
         push r14
         push r15
 
-        # push the preserved registers pointer as stack argument
-        push rsp
         # push return context as stack arguments
-        push rax    
+        push rax
         push rcx
+
         # caller already passed their own arguments in relevant registers
         call {}
 
-        # taregt `rsp` stored in `rax`
-        mov [rsp + (6 * 8)], rax    # updates userspace `rsp` on stack
-        # rip stored in rdx
-        mov rcx, rax                # updates sysret `rip`
+        pop rcx     # store target `rip` in `rcx`
+        pop rax     # store target `rsp` in `rax`
+        mov [rsp + (7 * 8)], rax   # update userspace `rsp` on stack
 
         # restore preserved registers
         pop r15
@@ -41,9 +41,10 @@ pub unsafe extern "sysv64" fn syscall_handler() {
         pop r12
         pop rbp
         pop rbx
+        pop r11     # restore userspace `rflags`
         pop rsp     # this restores userspace `rsp`
 
-        sysret
+        sysretq
         ",
         sym syscall_handler_inner,
         options(noreturn)
@@ -59,6 +60,7 @@ struct PreservedRegisters {
     r12: u64,
     rbp: u64,
     rbx: u64,
+    rfl: u64,
     rsp: u64,
 }
 
@@ -78,7 +80,7 @@ extern "sysv64" fn syscall_handler_inner(
     _r9: u64,
     ret_ip: u64,
     ret_sp: u64,
-    _regs: &mut PreservedRegisters,
+    mut _regs: PreservedRegisters,
 ) -> ReturnContext {
     let syscall = match vector {
         0x100 => {
@@ -90,7 +92,6 @@ extern "sysv64" fn syscall_handler_inner(
                 2 => Ok(Level::Warn),
                 3 => Ok(Level::Info),
                 4 => Ok(Level::Debug),
-                5 => Ok(Level::Trace),
                 rsi => Err(rsi),
             };
 

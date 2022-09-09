@@ -219,7 +219,7 @@ fn init_syscalls() {
         msr::IA32_STAR::set_selectors(*gdt::KCODE_SELECTOR.get().unwrap(), *gdt::KDATA_SELECTOR.get().unwrap());
         msr::IA32_LSTAR::set_syscall(syscall::syscall_handler);
         // We don't want to keep any flags set within the syscall (especially the interrupt flag).
-        msr::IA32_SFMASK::set_rflags_mask(RFlags::all());
+        msr::IA32_FMASK::set_rflags_mask(RFlags::all());
         // Enable `syscall`/`sysret`.
         msr::IA32_EFER::set_sce(true);
     }
@@ -248,7 +248,7 @@ impl SpecialContext {
         }
     }
 
-    pub fn with_user_segments(flags: crate::arch::x64::registers::RFlags) -> Self {
+    pub fn flags_with_user_segments(flags: crate::arch::x64::registers::RFlags) -> Self {
         Self {
             cs: crate::arch::x64::structures::gdt::UCODE_SELECTOR.get().unwrap().0 as u64,
             ss: crate::arch::x64::structures::gdt::UDATA_SELECTOR.get().unwrap().0 as u64,
