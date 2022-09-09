@@ -1,29 +1,29 @@
+use super::{InteriorRef, Mut, Ref};
 use core::fmt;
-use libkernel::memory::Page;
+use libkernel::{memory::Page, Address, Virtual};
 
 #[cfg(target_arch = "x86_64")]
 bitflags::bitflags! {
     #[repr(transparent)]
     pub struct PageAttributes: u64 {
-        const VALID = 1 << 0;
+        const PRESENT = 1 << 0;
         const WRITABLE = 1 << 1;
         const USER = 1 << 2;
         const WRITE_THROUGH = 1 << 3;
         const UNCACHEABLE = 1 << 4;
         const ACCESSED = 1 << 5;
         const DIRTY = 1 << 6;
-        // We don't support huge pages for now.
-        const HUGE_PAGE = 1 << 7;
+        const HUGE = 1 << 7;
         const GLOBAL = 1 << 8;
         const DEMAND = 1 << 9;
         //  9..=10 available
         // 12..52 frame index
         const NO_EXECUTE = 1 << 63;
 
-        const RO = Self::VALID.bits() | Self::NO_EXECUTE.bits();
-        const RW = Self::VALID.bits() | Self::WRITABLE.bits() | Self::NO_EXECUTE.bits();
-        const RX = Self::VALID.bits();
-        const PTE = Self::VALID.bits() | Self::WRITABLE.bits() | Self::USER.bits();
+        const RO = Self::PRESENT.bits() | Self::NO_EXECUTE.bits();
+        const RW = Self::PRESENT.bits() | Self::WRITABLE.bits() | Self::NO_EXECUTE.bits();
+        const RX = Self::PRESENT.bits();
+        const PTE = Self::PRESENT.bits() | Self::WRITABLE.bits() | Self::USER.bits();
 
         const MMIO = Self::RW.bits() | Self::UNCACHEABLE.bits();
     }
@@ -58,6 +58,7 @@ pub enum AttributeModify {
     Toggle,
 }
 
+// TODO impl table levels for attribute masking on x86
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct PageTableEntry(u64);
@@ -76,10 +77,14 @@ impl PageTableEntry {
         Self(0)
     }
 
+    pub const fn new(frame_index: usize, attributes: PageAttributes) -> Self {
+        Self(((frame_index as u64) << Self::FRAME_INDEX_SHIFT) | attributes.bits())
+    }
+
     /// Whether the page table entry is present or usable the memory controller.
     #[inline(always)]
     pub const fn is_present(&self) -> bool {
-        self.get_attributes().contains(PageAttributes::VALID)
+        self.get_attributes().contains(PageAttributes::PRESENT)
     }
 
     /// Gets the frame index of the page table entry.
@@ -89,17 +94,11 @@ impl PageTableEntry {
     }
 
     /// Sets the entry's frame index.
+    ///
+    /// SAFETY: Caller must ensure changing the attributes of this entry does not cause any memory corruption side effects.
     #[inline(always)]
-    pub fn set_frame_index(&mut self, frame_index: usize) {
+    pub unsafe fn set_frame_index(&mut self, frame_index: usize) {
         self.0 = (self.0 & !Self::FRAME_INDEX_MASK) | ((frame_index as u64) << Self::FRAME_INDEX_SHIFT);
-    }
-
-    /// Takes this page table entry's frame, even if it is non-present.
-    #[inline]
-    pub unsafe fn take_frame_index(&mut self) -> usize {
-        let frame_index = self.get_frame_index();
-        self.0 &= !Self::FRAME_INDEX_MASK;
-        frame_index
     }
 
     /// Gets the attributes of this page table entry.
@@ -109,7 +108,9 @@ impl PageTableEntry {
     }
 
     /// Sets the attributes of this page table entry.
-    pub fn set_attributes(&mut self, new_attributes: PageAttributes, modify_mode: AttributeModify) {
+    ///
+    /// SAFETY: Caller must ensure changing the attributes of this entry does not cause any memory corruption side effects.
+    pub unsafe fn set_attributes(&mut self, new_attributes: PageAttributes, modify_mode: AttributeModify) {
         let mut attributes = PageAttributes::from_bits_truncate(self.0);
 
         match modify_mode {
@@ -129,8 +130,10 @@ impl PageTableEntry {
     }
 
     /// Clears the page table entry of data, setting all bits to zero.
+    ///
+    /// SAFETY: Caller must ensure there are no contexts which rely on the subtables this entry points to.
     #[inline]
-    pub fn clear(&mut self) {
+    pub unsafe fn clear(&mut self) {
         self.0 = 0;
     }
 }
@@ -146,137 +149,150 @@ impl fmt::Debug for PageTableEntry {
     }
 }
 
-pub trait TableLevel {}
-
-#[derive(Debug)]
-pub enum Level4 {}
-#[derive(Debug)]
-pub enum Level3 {}
-#[derive(Debug)]
-pub enum Level2 {}
-#[derive(Debug)]
-pub enum Level1 {}
-
-impl TableLevel for Level4 {}
-impl TableLevel for Level3 {}
-impl TableLevel for Level2 {}
-impl TableLevel for Level1 {}
-
-pub trait HeirarchicalLevel: TableLevel {
-    type NextLevel: TableLevel;
-}
-impl HeirarchicalLevel for Level4 {
-    type NextLevel = Level3;
-}
-impl HeirarchicalLevel for Level3 {
-    type NextLevel = Level2;
-}
-impl HeirarchicalLevel for Level2 {
-    type NextLevel = Level1;
+pub struct PageTable<'a, RefKind: InteriorRef> {
+    depth: usize,
+    phys_mapped_page: Page,
+    entry: <RefKind as InteriorRef>::RefType<'a, PageTableEntry>,
 }
 
-#[repr(C, align(0x1000))]
-#[derive(Debug)]
-pub struct PageTable<L: TableLevel>([PageTableEntry; 512], core::marker::PhantomData<L>);
+impl<RefKind: InteriorRef> core::ops::Deref for PageTable<'_, RefKind> {
+    type Target = PageTableEntry;
 
-impl<L: TableLevel> PageTable<L> {
-    pub const fn new() -> Self {
-        Self([PageTableEntry::empty(); 512], core::marker::PhantomData)
-    }
-
-    pub unsafe fn clear(&mut self) {
-        self.0.fill(PageTableEntry::empty());
-    }
-
-    pub fn get_entry(&self, index: usize) -> &PageTableEntry {
-        &self.0[index]
-    }
-
-    pub fn get_entry_mut(&mut self, index: usize) -> &mut PageTableEntry {
-        &mut self.0[index]
-    }
-
-    pub fn iter(&self) -> core::slice::Iter<PageTableEntry> {
-        self.0.iter()
-    }
-
-    pub fn iter_mut(&mut self) -> core::slice::IterMut<PageTableEntry> {
-        self.0.iter_mut()
+    fn deref(&self) -> &Self::Target {
+        RefKind::shared_ref(&self.entry)
     }
 }
 
-impl<L: HeirarchicalLevel> PageTable<L> {
-    /// Gets an immutable reference to the page table that lies in the given entry index's frame.
-    pub unsafe fn sub_table(&self, index: usize, phys_mapped_page: &Page) -> Option<&PageTable<L::NextLevel>> {
-        let entry = self.get_entry(index);
+impl core::ops::DerefMut for PageTable<'_, Mut> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut *self.entry
+    }
+}
 
-        if entry.is_present() {
-            Some(
-                phys_mapped_page
-                    .forward_checked(entry.get_frame_index())
-                    .unwrap()
-                    .address()
-                    .as_ptr::<PageTable<L::NextLevel>>()
-                    .as_ref()
-                    .unwrap(),
-            )
+impl<'a, RefKind: InteriorRef> PageTable<'a, RefKind> {
+    #[inline]
+    const fn get_depth_index(depth: usize, address: Address<Virtual>) -> usize {
+        (address.as_usize() >> ((depth - 1) * 9) >> 12) & 0x1FF
+    }
+
+    pub const fn get_phys_mapped_page(&self) -> &Page {
+        &self.phys_mapped_page
+    }
+
+    fn get_table_ptr(&self) -> Option<*mut PageTableEntry> {
+        let root_frame_index = self.get_frame_index();
+        match self.phys_mapped_page.forward_checked(root_frame_index) {
+            Some(phys_mapped_table) => Some({
+                // SAFETY: This type invariantly requires a valid physical mapping page, and that frame indexes be properly allocated.
+                unsafe { phys_mapped_table.address().as_mut_ptr() }
+            }),
+            None => None,
+        }
+    }
+
+    /// Gets a mutable reference to this page table's entries.
+    fn get_table(&self) -> Option<&[PageTableEntry]> {
+        if self.depth > 0 && self.is_present() && let Some(table_ptr) = self.get_table_ptr() {
+            // SAFETY: The layout of the page table pointer is known via Intel SDM.
+            Some(unsafe { core::slice::from_raw_parts(table_ptr, 512) })
         } else {
             None
         }
     }
 
-    /// Gets an mutable reference to the page table that lies in the given entry index's frame.
-    pub unsafe fn sub_table_mut(
-        &mut self,
-        index: usize,
-        phys_mapped_page: &Page,
-    ) -> Option<&mut PageTable<L::NextLevel>> {
-        let entry = self.get_entry(index);
+    pub fn with_entry<T>(&self, for_page: &Page, func: impl FnOnce(&PageTableEntry) -> T) -> Option<T> {
+        if let Some(entries) = self.get_table() {
+            let index = Self::get_depth_index(self.depth, for_page.address());
 
-        if entry.is_present() {
-            Some(
-                phys_mapped_page
-                    .forward_checked(entry.get_frame_index())
-                    .unwrap()
-                    .address()
-                    .as_mut_ptr::<PageTable<L::NextLevel>>()
-                    .as_mut()
-                    .unwrap(),
-            )
+            if self.depth > 1 {
+                PageTable::<Ref> {
+                    depth: self.depth - 1,
+                    phys_mapped_page: self.phys_mapped_page,
+                    entry: &entries[index],
+                }
+                .with_entry(for_page, func)
+            } else {
+                Some(func(&entries[index]))
+            }
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a> PageTable<'a, Ref> {
+    /// SAFETY: Caller must ensure the provided physical mapping page and page table entry are valid.
+    pub(super) unsafe fn new(depth: usize, phys_mapped_page: Page, entry: &'a PageTableEntry) -> Self {
+        Self { depth, phys_mapped_page, entry }
+    }
+}
+
+impl<'a> PageTable<'a, Mut> {
+    /// SAFETY: Caller must ensure the provided physical mapping page and page table entry are valid.
+    pub(super) unsafe fn new(depth: usize, phys_mapped_page: Page, entry: &'a mut PageTableEntry) -> Self {
+        Self { depth, phys_mapped_page, entry }
+    }
+
+    /// Gets a mutable reference to this page table's entries.
+    fn get_table_mut(&mut self) -> Option<&mut [PageTableEntry]> {
+        if self.depth > 0 && self.is_present() {
+            // SAFETY: The layout of the page table pointer is known via Intel SDM.
+            Some(unsafe { core::slice::from_raw_parts_mut(self.get_table_ptr()?, 512) })
+        } else {
+            None
+        }
+    }
+
+    pub fn with_entry_mut<T>(&mut self, for_page: &Page, func: impl FnOnce(&mut PageTableEntry) -> T) -> Option<T> {
+        let depth = self.depth;
+        let phys_mapped_page = self.phys_mapped_page;
+        if let Some(entries) = self.get_table_mut() {
+            let index = Self::get_depth_index(depth, for_page.address());
+            if depth > 1 {
+                PageTable::<Mut> { depth: depth - 1, phys_mapped_page: phys_mapped_page, entry: &mut entries[index] }
+                    .with_entry_mut(for_page, func)
+            } else {
+                Some(func(&mut entries[index]))
+            }
         } else {
             None
         }
     }
 
     /// Attempts to get a mutable reference to the page table that lies in the given entry index's frame, or
-    /// creates the sub page table if it doesn't exist.
-    pub unsafe fn sub_table_create(
+    /// creates the sub page table if it doesn't exist. This function returns `None` if it was unable to allocate
+    /// a frame for the requested page table.
+    pub fn with_entry_create<T>(
         &mut self,
-        index: usize,
-        phys_mapping_page: &Page,
+        for_page: &Page,
         frame_manager: &'static crate::memory::FrameManager,
-    ) -> &mut PageTable<L::NextLevel> {
-        // TODO use a `for` loop to support arbitrary page table depths
-        let entry = self.get_entry_mut(index);
+        func: impl FnOnce(&mut PageTableEntry) -> T,
+    ) -> Option<T> {
+        if !self.entry.is_present() {
+            let Ok(new_frame_index) = frame_manager.lock_next() else { return None };
 
-        let (frame_index, created) = if entry.is_present() {
-            (entry.get_frame_index(), false)
-        } else {
-            let frame_index = frame_manager.lock_next().unwrap();
+            // SAFETY: Entry was just created, so we know modifying it won't corrupt memory.
+            unsafe {
+                self.entry.set_frame_index(new_frame_index);
+                self.set_attributes(PageAttributes::PTE, AttributeModify::Set);
+            }
 
-            entry.set_frame_index(frame_index);
-            entry.set_attributes(PageAttributes::PTE, AttributeModify::Set);
-
-            (frame_index, true)
-        };
-
-        let sub_table_page = phys_mapping_page.forward_checked(frame_index).unwrap();
-
-        // If we created the sub-table page, clear it to a known initial state.
-        if created {
-            sub_table_page.clear_memory();
+            // SAFETY: Page was just allocated, so should not contain already-borrowed memory.
+            unsafe { self.phys_mapped_page.forward_checked(new_frame_index)?.clear_memory() };
         }
 
-        &mut *sub_table_page.address().as_mut_ptr::<PageTable<L::NextLevel>>()
+        let depth = self.depth;
+        let phys_mapped_page = self.phys_mapped_page;
+        if let Some(entries) = self.get_table_mut() {
+            let index = Self::get_depth_index(depth, for_page.address());
+            if depth > 1 {
+                PageTable::<Mut> { depth: depth - 1, phys_mapped_page: phys_mapped_page, entry: &mut entries[index] }
+                    .with_entry_create(for_page, frame_manager, func)
+            } else {
+                Some(func(&mut entries[index]))
+            }
+        } else {
+            None
+        }
     }
 }

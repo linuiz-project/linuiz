@@ -50,7 +50,7 @@ pub struct Task {
     //pcid: Option<PCID>,
     pub ctrl_flow_context: crate::interrupts::ControlFlowContext,
     pub arch_context: crate::interrupts::ArchContext,
-    pub root_page_table_args: crate::memory::RootPageTable,
+    pub root_page_table_args: crate::memory::VmemRegister,
 }
 
 impl Task {
@@ -59,7 +59,7 @@ impl Task {
         start: TaskStart,
         stack: TaskStack,
         arch_context: crate::interrupts::ArchContext,
-        root_page_table_args: crate::memory::RootPageTable,
+        root_page_table_args: crate::memory::VmemRegister,
     ) -> Self {
         Self {
             id: NEXT_THREAD_ID.fetch_add(1, core::sync::atomic::Ordering::AcqRel),

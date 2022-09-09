@@ -22,7 +22,7 @@ rustc-demangle = "*"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86_64 = "*"
-raw-cpuid = "*"
+raw-cpuid = { path = "../../../rust-cpuid/" }
 
 [profile.dev]
 opt-level = 1

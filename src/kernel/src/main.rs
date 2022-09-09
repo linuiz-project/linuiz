@@ -22,7 +22,9 @@
     if_let_guard,
     inline_const,
     lang_items,
-    let_else
+    let_else,
+    const_try,
+    generic_associated_types
 )]
 #![forbid(clippy::inline_asm_x86_att_syntax)]
 #![deny(clippy::semicolon_if_nothing_returned, clippy::debug_assert_with_mut_call, clippy::float_arithmetic)]
@@ -44,8 +46,6 @@ extern crate alloc;
 extern crate libkernel;
 
 mod arch;
-mod boot;
-mod drivers;
 mod elf;
 mod interrupts;
 mod local_state;
@@ -341,11 +341,13 @@ unsafe extern "C" fn _entry() -> ! {
                 {
                     let drivers_hhdm_ptr = module.base.as_ptr().unwrap();
                     for base_offset in (0..(module.length as usize)).step_by(0x1000) {
-                        page_manager.set_page_attributes(
-                            &libkernel::memory::Page::from_ptr(drivers_hhdm_ptr.add(base_offset)).unwrap(),
-                            crate::memory::PageAttributes::RO,
-                            crate::memory::AttributeModify::Set,
-                        );
+                        page_manager
+                            .set_page_attributes(
+                                &libkernel::memory::Page::from_ptr(drivers_hhdm_ptr.add(base_offset)).unwrap(),
+                                crate::memory::PageAttributes::RO,
+                                crate::memory::AttributeModify::Set,
+                            )
+                            .unwrap();
                     }
 
                     debug!("Read {} bytes of compressed drivers from memory.", module.length);
@@ -385,7 +387,7 @@ unsafe extern "C" fn _entry() -> ! {
     /* memory finalize */
     {
         debug!("Switching to kernel page tables...");
-        page_manager.write_root_table();
+        page_manager.commit_vmem_register().unwrap();
         debug!("Kernel has finalized control of page tables.");
         debug!("Assigning global allocator...");
         crate::memory::init_global_allocator(libkernel::memory::Page::from_index(
@@ -504,6 +506,7 @@ unsafe extern "C" fn _entry() -> ! {
     info!("Finished initial kernel setup.");
     SMP_MEMORY_READY.store(true, Ordering::Relaxed);
 
+    // TODO make this a standalone function so we can return error states
     {
         use crate::{elf::segment, memory::PageAttributes};
         use libkernel::memory::Page;
@@ -540,10 +543,12 @@ unsafe extern "C" fn _entry() -> ! {
 
             // Create the driver's page manager from the kernel's higher-half table.
             let driver_page_manager = crate::memory::PageManager::new(
-                frame_manager,
+                4,
                 &Page::from_address(crate::memory::get_kernel_hhdm_address()).unwrap(),
-                Some(crate::memory::get_kernel_page_manager().copy_pml4()),
-            );
+                Some(crate::memory::VmemRegister::read()),
+                frame_manager,
+            )
+            .expect("failed to create page manager for driver");
 
             // Iterate the segments, and allocate them.
             for segment in driver_elf.iter_segments() {
@@ -602,7 +607,7 @@ unsafe extern "C" fn _entry() -> ! {
 
             // Push ELF as global task.
             {
-                use libkernel::{Address, Physical, Virtual};
+                use libkernel::{Address, Virtual};
 
                 let stack_address = {
                     // TODO make this a dynamic configuration
@@ -648,10 +653,8 @@ unsafe extern "C" fn _entry() -> ! {
                     },
                     #[cfg(target_arch = "x86_64")]
                     {
-                        crate::memory::RootPageTable(
-                            Address::<Physical>::new((driver_page_manager.root_frame_index() * 0x1000) as u64).unwrap(),
-                            crate::arch::x64::registers::control::CR3Flags::empty(),
-                        )
+                        // TODO do not error here ?
+                        driver_page_manager.read_vmem_register().unwrap()
                     },
                 ))
             }
@@ -677,7 +680,7 @@ unsafe fn _smp_entry() -> ! {
     #[cfg(target_arch = "x86_64")]
     crate::arch::x64::cpu::init();
 
-    crate::memory::get_kernel_page_manager().write_root_table();
+    crate::memory::get_kernel_page_manager().commit_vmem_register().unwrap();
 
     SMP_MEMORY_INIT.fetch_sub(1, Ordering::Relaxed);
     while SMP_MEMORY_INIT.load(Ordering::Relaxed) > 0 {

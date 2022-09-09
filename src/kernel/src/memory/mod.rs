@@ -1,4 +1,5 @@
 mod frame_manager;
+mod interior_ref;
 mod page_manager;
 mod paging;
 
@@ -6,11 +7,21 @@ pub mod io;
 pub mod slob;
 
 pub use frame_manager::*;
+pub use interior_ref::*;
 pub use page_manager::*;
 pub use paging::*;
 
 use libkernel::{Address, Virtual};
 use spin::Once;
+
+struct Mut;
+impl InteriorRef for Mut {
+    type RefType<'a, T> = &'a mut T where T: 'a;
+
+    fn shared_ref<'a, T>(r: &'a Self::RefType<'_, T>) -> &'a T {
+        &**r
+    }
+}
 
 struct GlobalAllocator<'m>(Once<&'m dyn core::alloc::GlobalAlloc>);
 // SAFETY: `GlobalAlloc` trait requires `Send`.
@@ -83,7 +94,7 @@ pub fn init_kernel_page_manager() {
         let mapped_page = libkernel::memory::Page::from_address(get_kernel_hhdm_address()).unwrap();
 
         // SAFETY:  The mapped page is guaranteed to be valid, as the kernel guarantees its HHDM will be valid.
-        unsafe { PageManager::new(frame_manager, &mapped_page, None) }
+        unsafe { PageManager::new(4, &mapped_page, None, frame_manager).expect("failed to create kernel page manager") }
     });
 }
 pub fn get_kernel_page_manager() -> &'static PageManager {
@@ -108,11 +119,11 @@ pub fn allocate_pages(page_count: usize) -> *mut u8 {
 }
 
 #[cfg(target_arch = "x86_64")]
-pub struct RootPageTable(pub Address<libkernel::Physical>, pub crate::arch::x64::registers::control::CR3Flags);
+pub struct VmemRegister(pub Address<libkernel::Physical>, pub crate::arch::x64::registers::control::CR3Flags);
 #[cfg(target_arch = "riscv64")]
 pub struct RootPageTable(pub Address<libkernel::Physical>, pub u16, pub crate::arch::rv64::registers::satp::Mode);
 
-impl RootPageTable {
+impl VmemRegister {
     pub fn read() -> Self {
         #[cfg(target_arch = "x86_64")]
         {
@@ -143,11 +154,11 @@ pub fn ensure_hhdm_frame_is_mapped(frame_index: usize, page_attributes: crate::m
         crate::memory::get_kernel_hhdm_address().as_usize() + (frame_index * 0x1000),
     );
 
-    if !page_manager.is_mapped(hhdm_page) {
+    if !page_manager.is_mapped(&hhdm_page) {
         let frame_manager = crate::memory::get_kernel_frame_manager();
         frame_manager.lock(frame_index).ok();
         page_manager.map(&hhdm_page, frame_index, false, page_attributes, frame_manager).unwrap();
     }
 
-    assert!(page_manager.is_mapped(hhdm_page));
+    assert!(page_manager.is_mapped(&hhdm_page));
 }

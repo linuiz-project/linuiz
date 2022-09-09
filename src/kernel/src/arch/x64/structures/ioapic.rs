@@ -195,7 +195,7 @@ pub fn get_io_apics() -> &'static Vec<IoApic<'static>> {
 
                         frame_manager.lock(ioapic_frame_index).ok();
 
-                        if !page_manager.is_mapped(ioapic_regs_page) {
+                        if !page_manager.is_mapped(&ioapic_regs_page) {
                             page_manager
                                 .map(
                                     &ioapic_regs_page,

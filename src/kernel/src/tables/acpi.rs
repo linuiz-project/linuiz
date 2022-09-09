@@ -68,7 +68,7 @@ impl acpi::AcpiHandler for AcpiHandler {
 
             trace!("ACPI MAP: {:?}", page);
 
-            if !kernel_page_manager.is_mapped(page) {
+            if !kernel_page_manager.is_mapped(&page) {
                 kernel_page_manager
                     .map(
                         &page,
@@ -79,11 +79,9 @@ impl acpi::AcpiHandler for AcpiHandler {
                     )
                     .unwrap();
             } else {
-                kernel_page_manager.set_page_attributes(
-                    &page,
-                    crate::memory::PageAttributes::RW,
-                    crate::memory::AttributeModify::Set,
-                )
+                kernel_page_manager
+                    .set_page_attributes(&page, crate::memory::PageAttributes::RW, crate::memory::AttributeModify::Set)
+                    .unwrap()
             }
         }
 

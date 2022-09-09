@@ -195,7 +195,7 @@ impl super::Capability for MSIX<'_> {
             for size_offset in (0..size).step_by(0x1000) {
                 page_manager
                     .map_mmio(
-                        Page::from_index((hhdm_offset_address.as_usize() + size_offset) / 0x1000),
+                        &Page::from_index((hhdm_offset_address.as_usize() + size_offset) / 0x1000),
                         address.frame_index() + (size / 0x1000),
                         frame_manager,
                     )

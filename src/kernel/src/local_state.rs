@@ -1,5 +1,5 @@
 use crate::{
-    memory::RootPageTable,
+    memory::VmemRegister,
     scheduling::{Scheduler, Task, TaskPriority},
 };
 
@@ -116,7 +116,7 @@ pub unsafe fn init(core_id: u32) {
                     )
                 }
             },
-            RootPageTable::read(),
+            VmemRegister::read(),
         ),
         cur_task: None,
     });
@@ -143,7 +143,7 @@ pub fn schedule_next_task(
     if let Some(mut cur_task) = local_state.cur_task.take() {
         cur_task.ctrl_flow_context = *ctrl_flow_context;
         cur_task.arch_context = *arch_context;
-        cur_task.root_page_table_args = RootPageTable::read();
+        cur_task.root_page_table_args = VmemRegister::read();
 
         local_state.scheduler.push_task(cur_task);
     }
@@ -160,7 +160,7 @@ pub fn schedule_next_task(
             *arch_context = next_task.arch_context;
 
             // Set current page tables.
-            RootPageTable::write(&next_task.root_page_table_args);
+            VmemRegister::write(&next_task.root_page_table_args);
 
             let next_timer_ms = (next_task.priority().get() as u16) * PRIO_TIME_SLICE_MS;
             local_state.cur_task = Some(next_task);
@@ -174,7 +174,7 @@ pub fn schedule_next_task(
             *arch_context = default_task.arch_context;
 
             // Set current page tables.
-            RootPageTable::write(&default_task.root_page_table_args);
+            VmemRegister::write(&default_task.root_page_table_args);
 
             MIN_TIME_SLICE_MS
         };

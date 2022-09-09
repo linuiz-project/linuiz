@@ -39,7 +39,7 @@ pub fn init_devices() {
             );
 
             kernel_page_manager
-                .map_mmio(device_hhdm_page, device_base_address.frame_index(), kernel_frame_manager)
+                .map_mmio(&device_hhdm_page, device_base_address.frame_index(), kernel_frame_manager)
                 .unwrap();
 
             let vendor_id = device_hhdm_page.address().as_ptr::<crate::num::LittleEndianU16>().read_volatile().get();
