@@ -23,7 +23,8 @@
     asm_sym,
     asm_const,
     core_intrinsics,
-    pointer_is_aligned
+    pointer_is_aligned,
+    const_option_ext
 )]
 
 extern crate alloc;

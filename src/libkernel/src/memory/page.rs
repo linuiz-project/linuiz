@@ -56,12 +56,12 @@ impl Page {
         crate::Address::<Virtual>::new_truncate(self.0 * 0x1000)
     }
 
-    pub fn forward_checked(&self, count: usize) -> Option<Self> {
-        self.index().checked_add(count).map(|new_index| Self::from_index(new_index))
+    pub const fn forward_checked(&self, count: usize) -> Option<Self> {
+        self.index().checked_add(count).map(Self::from_index)
     }
 
-    pub fn backward_checked(&self, count: usize) -> Option<Self> {
-        self.index().checked_sub(count).map(|new_index| Self::from_index(new_index))
+    pub const fn backward_checked(&self, count: usize) -> Option<Self> {
+        self.index().checked_sub(count).map(Self::from_index)
     }
 
     /// Clears the 4KiB region from this page's start to its end.
