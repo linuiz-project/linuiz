@@ -179,10 +179,12 @@ pub fn get_io_apics() -> &'static Vec<IoApic<'static>> {
         if let acpi::platform::interrupt::InterruptModel::Apic(apic) = &platform_info.interrupt_model {
             apic.io_apics
                 .iter()
+                // TODO unsafety comment
                 .map(|ioapic_info| unsafe {
-                    let ioapic_regs_ptr = ((ioapic_info.address as usize)
-                        + crate::memory::get_kernel_hhdm_address().as_usize())
-                        as *mut u32;
+                    let ioapic_regs_ptr = crate::memory::get_kernel_hhdm_address()
+                        .as_mut_ptr::<u8>()
+                        .add(ioapic_info.address as usize)
+                        .cast::<u32>();
                     assert!(ioapic_regs_ptr.is_aligned(), "I/O APIC pointers must be aligned");
 
                     let ioregsel = &*ioapic_regs_ptr.cast::<VolatileCell<u32, libkernel::WriteOnly>>();

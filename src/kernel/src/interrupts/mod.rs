@@ -76,7 +76,7 @@ pub unsafe fn common_page_fault_handler(address: Address<Virtual>) -> Result<(),
     use libkernel::memory::Page;
 
     let fault_page = Page::from_address_contains(address);
-    let Some(hhdm_page) = Page::from_address(memory::get_kernel_hhdm_address()) else { return Err(PageFaultHandlerError::CriticalError) };
+    let hhdm_page = memory::get_kernel_hhdm_page();
     let page_manager = memory::PageManager::from_current(&hhdm_page);
     let Some(mut fault_page_attributes) = page_manager.get_page_attributes(&fault_page) else { return Err(PageFaultHandlerError::AddressNotMapped) };
 

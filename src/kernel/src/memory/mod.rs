@@ -77,6 +77,10 @@ pub unsafe fn init_kernel_hhdm_address() {
 pub fn get_kernel_hhdm_address() -> Address<Virtual> {
     *HHDM_ADDRESS.get().unwrap()
 }
+pub fn get_kernel_hhdm_page() -> libkernel::memory::Page {
+    libkernel::memory::Page::from_address(*HHDM_ADDRESS.get().unwrap())
+        .expect("kernel HHDM address is not page-aligned")
+}
 
 static KERNEL_FRAME_MANAGER: Once<FrameManager> = Once::new();
 /// SAFETY: This function assumes it will be called before the kernel takes ownership of the page tables.
@@ -91,7 +95,7 @@ static KERNEL_PAGE_MANAGER: Once<PageManager> = Once::new();
 pub fn init_kernel_page_manager() {
     KERNEL_PAGE_MANAGER.call_once(|| {
         let frame_manager = get_kernel_frame_manager();
-        let mapped_page = libkernel::memory::Page::from_address(get_kernel_hhdm_address()).unwrap();
+        let mapped_page = get_kernel_hhdm_page();
 
         // SAFETY:  The mapped page is guaranteed to be valid, as the kernel guarantees its HHDM will be valid.
         unsafe { PageManager::new(4, &mapped_page, None, frame_manager).expect("failed to create kernel page manager") }
@@ -150,9 +154,8 @@ impl VmemRegister {
 
 pub fn ensure_hhdm_frame_is_mapped(frame_index: usize, page_attributes: crate::memory::PageAttributes) {
     let page_manager = crate::memory::get_kernel_page_manager();
-    let hhdm_page = libkernel::memory::Page::from_index(
-        crate::memory::get_kernel_hhdm_address().as_usize() + (frame_index * 0x1000),
-    );
+    let hhdm_page =
+        get_kernel_hhdm_page().forward_checked(frame_index).expect("kernel HHDM overflowed from frame index");
 
     if !page_manager.is_mapped(&hhdm_page) {
         let frame_manager = crate::memory::get_kernel_frame_manager();

@@ -70,8 +70,7 @@ impl<'map> SLOB<'map> {
 
     pub unsafe fn new(base_alloc_page: Page) -> Self {
         let alloc_table_len = 0x1000 / core::mem::size_of::<BlockPage>();
-        let current_page_manager =
-            PageManager::from_current(&Page::from_address(crate::memory::get_kernel_hhdm_address()).unwrap());
+        let current_page_manager = PageManager::from_current(&crate::memory::get_kernel_hhdm_page());
         let kernel_frame_manager = crate::memory::get_kernel_frame_manager();
 
         // Map all of the pages in the allocation table.
@@ -146,9 +145,7 @@ impl<'map> SLOB<'map> {
         {
             let frame_manager = crate::memory::get_kernel_frame_manager();
             // SAFETY: Kernel guarantees the HHDM will be a valid and mapped address.
-            let page_manager = unsafe {
-                PageManager::from_current(&Page::from_address(crate::memory::get_kernel_hhdm_address()).unwrap())
-            };
+            let page_manager = unsafe { PageManager::from_current(&crate::memory::get_kernel_hhdm_page()) };
 
             for page_offset in cur_table_len..req_table_len {
                 let new_page = base_alloc_page.forward_checked(page_offset).unwrap();

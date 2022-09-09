@@ -127,7 +127,7 @@ unsafe fn init_tables() {
     crate::arch::x64::structures::gdt::init();
 
     let frame_manager = crate::memory::get_kernel_frame_manager();
-    let hhdm_address = crate::memory::get_kernel_hhdm_address().as_usize();
+    let hhdm_address = crate::memory::get_kernel_hhdm_address();
 
     /* IDT init */
     {
@@ -136,7 +136,7 @@ unsafe fn init_tables() {
         // properly initialized and loaded—otherwise, the `CS` value for the IDT entries
         // is incorrect, and this causes very confusing GPFs.
         let idt_frame_index = frame_manager.lock_next().unwrap();
-        let idt_ptr = (hhdm_address + (idt_frame_index * 0x1000)) as *mut InterruptDescriptorTable;
+        let idt_ptr = hhdm_address.as_mut_ptr::<u8>().add(idt_frame_index * 0x1000).cast::<InterruptDescriptorTable>();
         idt_ptr.write(InterruptDescriptorTable::new());
 
         let idt = &mut *idt_ptr;
@@ -151,12 +151,13 @@ unsafe fn init_tables() {
 
         let tss_ptr = {
             let tss_frame_index = frame_manager.lock_next().unwrap();
-            let tss_address = hhdm_address + (tss_frame_index * 0x1000);
-            let tss_ptr = tss_address as *mut TaskStateSegment;
+            let tss_ptr = hhdm_address.as_mut_ptr::<u8>().add(tss_frame_index * 0x1000).cast::<TaskStateSegment>();
+            // Ensure we write a valid `TaskStateSegment` state out to the pointer before we take a reference.
             tss_ptr.write(TaskStateSegment::new());
 
+            // Dereferencing the pointer here is safe; the pointer is known-good (from HHDM offset, and non-null + valid valued as it was just written to).
             let mut tss = &mut *tss_ptr;
-            // TODO guard pages for these stacks
+            // TODO guard pages for these stacks ?
             tss.privilege_stack_table[0] = VirtAddr::from_ptr(allocate_pages(5));
             tss.interrupt_stack_table[StackTableIndex::Debug as usize] = VirtAddr::from_ptr(allocate_pages(2));
             tss.interrupt_stack_table[StackTableIndex::NonMaskable as usize] = VirtAddr::from_ptr(allocate_pages(2));

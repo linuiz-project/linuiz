@@ -54,6 +54,7 @@ mod num;
 mod panic;
 mod scheduling;
 mod stdout;
+mod syscall;
 mod tables;
 mod time;
 
@@ -235,9 +236,8 @@ unsafe extern "C" fn _entry() -> ! {
 
         debug!("Initializing kernel page manager...");
 
-        let hhdm_base_page_index = crate::memory::get_kernel_hhdm_address().page_index();
-        let hhdm_mapped_page = Page::from_index(hhdm_base_page_index);
-        let old_page_manager = crate::memory::PageManager::from_current(&hhdm_mapped_page);
+        let hhdm_base_page = crate::memory::get_kernel_hhdm_page();
+        let old_page_manager = crate::memory::PageManager::from_current(&hhdm_base_page);
 
         // map code
         (__text_start.as_usize()..__text_end.as_usize())
@@ -320,7 +320,8 @@ unsafe extern "C" fn _entry() -> ! {
 
             page_manager
                 .map(
-                    &Page::from_index(hhdm_base_page_index + frame_index),
+                    // UNWRAP: These frames should be known-good from the bootloader's memory map.
+                    &hhdm_base_page.forward_checked(frame_index).unwrap(),
                     frame_index,
                     false,
                     page_attributes,
@@ -544,7 +545,7 @@ unsafe extern "C" fn _entry() -> ! {
             // Create the driver's page manager from the kernel's higher-half table.
             let driver_page_manager = crate::memory::PageManager::new(
                 4,
-                &Page::from_address(crate::memory::get_kernel_hhdm_address()).unwrap(),
+                &crate::memory::get_kernel_hhdm_page(),
                 Some(crate::memory::VmemRegister::read()),
                 frame_manager,
             )
@@ -581,7 +582,7 @@ unsafe extern "C" fn _entry() -> ! {
                             // SAFETY: HHDM is guaranteed by kernel to be valid, and the frame being pointed to was just allocated.
                             let memory_hhdm = unsafe {
                                 core::slice::from_raw_parts_mut(
-                                    (hhdm_address.as_usize() + (frame_index * 0x1000)) as *mut u8,
+                                    hhdm_address.as_mut_ptr::<u8>().add(frame_index * 0x1000),
                                     0x1000,
                                 )
                             };
