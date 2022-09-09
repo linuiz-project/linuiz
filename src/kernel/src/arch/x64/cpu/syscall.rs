@@ -1,10 +1,4 @@
-use num_enum::TryFromPrimitive;
-
-#[repr(u64)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
-enum Vector {
-    Test = 0x10000000,
-}
+use crate::syscall::Syscall;
 
 /// SAFETY: This function should never be called by software—it is the entrypoint for the x86_64 `syscall` instruction.
 #[naked]
@@ -77,19 +71,47 @@ struct ReturnContext {
 /// Handler for executing system calls from userspace.
 extern "sysv64" fn syscall_handler_inner(
     vector: u64,
-    _rsi: u64,
-    _rdx: u64,
+    rsi: u64,
+    rdx: u64,
     _rcx: u64,
     _r8: u64,
     _r9: u64,
     ret_ip: u64,
     ret_sp: u64,
-    regs: &mut PreservedRegisters,
+    _regs: &mut PreservedRegisters,
 ) -> ReturnContext {
-    match Vector::try_from_primitive(vector) {
-        Ok(Vector::Test) => info!("syscall test: Success! {:#X} {:#X} {:#X?}", ret_ip, ret_sp, regs),
+    let syscall = match vector {
+        0x100 => {
+            use log::Level;
 
-        Err(error) => warn!("Unhandled system call vector: {:#X}", error.number),
+            // TODO possibly PR the `log` crate to make `log::Level::from_usize()` public.
+            let log_level = match rsi {
+                1 => Ok(Level::Error),
+                2 => Ok(Level::Warn),
+                3 => Ok(Level::Info),
+                4 => Ok(Level::Debug),
+                5 => Ok(Level::Trace),
+                rsi => Err(rsi),
+            };
+
+            match log_level {
+                Ok(level) => Some(Syscall::Log { level, cstr_ptr: rdx as usize as *const _ }),
+                Err(invalid_level) => {
+                    warn!("Invalid log level provided: {}", invalid_level);
+                    None
+                }
+            }
+        }
+
+        vector => {
+            warn!("Unhandled system call vector: {:#X}", vector);
+            None
+        }
+    };
+
+    match syscall {
+        Some(syscall) => crate::syscall::do_syscall(syscall),
+        None => warn!("Failed to execute system call due to errors."),
     }
 
     ReturnContext { ip: ret_ip, sp: ret_sp }
