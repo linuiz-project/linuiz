@@ -29,13 +29,13 @@ pub trait QueueType {
     const DOORBELL_OFFSET: usize;
 }
 
-pub enum Submission {}
+pub struct Submission;
 impl QueueType for Submission {
     type EntryType = Command;
     const DOORBELL_OFFSET: usize = 0;
 }
 
-pub enum Completion {}
+pub struct Completion;
 impl QueueType for Completion {
     type EntryType = CommandResult;
     const DOORBELL_OFFSET: usize = 1;

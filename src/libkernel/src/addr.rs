@@ -5,11 +5,11 @@ pub const VADDR_HW_MAX: usize = 0x1000000000000;
 pub trait AddressType {}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Physical {}
+pub struct  Physical ;
 impl AddressType for Physical {}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Virtual {}
+pub struct  Virtual ;
 impl AddressType for Virtual {}
 
 // TODO handle address arithmetic around the address space hole

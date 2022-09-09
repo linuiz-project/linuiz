@@ -42,9 +42,9 @@ pub mod memory;
 pub mod sync;
 pub mod syscall;
 
-pub enum ReadOnly {}
-pub enum WriteOnly {}
-pub enum ReadWrite {}
+pub struct ReadOnly ;
+pub struct WriteOnly ;
+pub struct ReadWrite ;
 
 pub const KIBIBYTE: u64 = 0x400; // 1024
 pub const MIBIBYTE: u64 = KIBIBYTE * KIBIBYTE;
