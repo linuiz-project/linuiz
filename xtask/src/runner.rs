@@ -145,6 +145,8 @@ pub fn run(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Error>
         "
         {qemu_exe_str}
             {arguments...}
+            -no-shutdown
+            -no-reboot
             -serial mon:stdio
             -drive format=raw,file=.hdd/disk0.img,id=disk1,if=none
             -net none
