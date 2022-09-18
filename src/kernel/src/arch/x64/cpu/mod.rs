@@ -135,8 +135,8 @@ unsafe fn init_tables() {
         // it must be ensured that the handlers are set only *after* the GDT has been
         // properly initialized and loaded—otherwise, the `CS` value for the IDT entries
         // is incorrect, and this causes very confusing GPFs.
-        let idt_frame_index = frame_manager.lock_next().unwrap();
-        let idt_ptr = hhdm_address.as_mut_ptr::<u8>().add(idt_frame_index * 0x1000).cast::<InterruptDescriptorTable>();
+        let idt_frame = frame_manager.lock_next().unwrap();
+        let idt_ptr = hhdm_address.as_mut_ptr::<u8>().add(idt_frame.as_usize()).cast::<InterruptDescriptorTable>();
         idt_ptr.write(InterruptDescriptorTable::new());
 
         let idt = &mut *idt_ptr;
@@ -150,8 +150,8 @@ unsafe fn init_tables() {
         trace!("Configuring new TSS and loading via temp GDT.");
 
         let tss_ptr = {
-            let tss_frame_index = frame_manager.lock_next().unwrap();
-            let tss_ptr = hhdm_address.as_mut_ptr::<u8>().add(tss_frame_index * 0x1000).cast::<TaskStateSegment>();
+            let tss_frame = frame_manager.lock_next().unwrap();
+            let tss_ptr = hhdm_address.as_mut_ptr::<u8>().add(tss_frame.as_usize()).cast::<TaskStateSegment>();
             // Ensure we write a valid `TaskStateSegment` state out to the pointer before we take a reference.
             tss_ptr.write(TaskStateSegment::new());
 

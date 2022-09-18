@@ -1,6 +1,6 @@
 use super::{InteriorRef, Mut, Ref};
 use core::fmt;
-use libkernel::{memory::Page, Address, Virtual};
+use libkernel::{Address, Frame, Page, PageAlign, Virtual};
 
 #[cfg(target_arch = "x86_64")]
 bitflags::bitflags! {
@@ -65,11 +65,11 @@ pub struct PageTableEntry(u64);
 
 impl PageTableEntry {
     #[cfg(target_arch = "x86_64")]
-    const FRAME_INDEX_MASK: u64 = 0x000FFFFF_FFFFF000;
+    const FRAME_ADDRESS_MASK: u64 = 0x000FFFFF_FFFFF000;
     #[cfg(target_arch = "riscv64")]
     const FRAME_INDEX_MASK: u64 = 0x003FFFFF_FFFFFC00;
 
-    const FRAME_INDEX_SHIFT: u32 = Self::FRAME_INDEX_MASK.trailing_zeros();
+    const FRAME_ADDRESS_SHIFT: u32 = Self::FRAME_ADDRESS_MASK.trailing_zeros();
 
     /// Returns an empty `Self`. All bits of this entry will be 0.
     #[inline(always)]
@@ -77,8 +77,8 @@ impl PageTableEntry {
         Self(0)
     }
 
-    pub const fn new(frame_index: usize, attributes: PageAttributes) -> Self {
-        Self(((frame_index as u64) << Self::FRAME_INDEX_SHIFT) | attributes.bits())
+    pub const fn new(frame: Address<Frame>, attributes: PageAttributes) -> Self {
+        Self(frame.as_u64() | attributes.bits())
     }
 
     /// Whether the page table entry is present or usable the memory controller.
@@ -89,16 +89,16 @@ impl PageTableEntry {
 
     /// Gets the frame index of the page table entry.
     #[inline(always)]
-    pub const fn get_frame_index(&self) -> usize {
-        ((self.0 & Self::FRAME_INDEX_MASK) >> Self::FRAME_INDEX_SHIFT) as usize
+    pub const fn get_frame(&self) -> Address<Frame> {
+        Address::<Frame>::new_truncate(self.0 & Self::FRAME_ADDRESS_MASK)
     }
 
     /// Sets the entry's frame index.
     ///
     /// SAFETY: Caller must ensure changing the attributes of this entry does not cause any memory corruption side effects.
     #[inline(always)]
-    pub unsafe fn set_frame_index(&mut self, frame_index: usize) {
-        self.0 = (self.0 & !Self::FRAME_INDEX_MASK) | ((frame_index as u64) << Self::FRAME_INDEX_SHIFT);
+    pub unsafe fn set_frame(&mut self, frame: Address<Frame>) {
+        self.0 = (self.0 & !Self::FRAME_ADDRESS_MASK) | frame.as_u64();
     }
 
     /// Gets the attributes of this page table entry.
@@ -142,16 +142,24 @@ impl fmt::Debug for PageTableEntry {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_tuple("Page Table Entry")
-            .field(&format_args!("{:#X}", self.get_frame_index()))
+            .field(&self.get_frame())
             .field(&self.get_attributes())
-            .field(&format_args!("0x{:X}", self.0))
+            .field(&self.0)
             .finish()
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PagingError {
+    NotMapped,
+    WalkInterrupted,
+    DepthOverflow,
+    NoMoreFrames,
+}
+
 pub struct PageTable<'a, RefKind: InteriorRef> {
     depth: usize,
-    phys_mapped_page: Page,
+    hhdm_address: Address<Virtual>,
     entry: <RefKind as InteriorRef>::RefType<'a, PageTableEntry>,
 }
 
@@ -171,91 +179,103 @@ impl core::ops::DerefMut for PageTable<'_, Mut> {
 
 impl<'a, RefKind: InteriorRef> PageTable<'a, RefKind> {
     #[inline]
-    const fn get_depth_index(depth: usize, address: Address<Virtual>) -> usize {
-        (address.as_usize() >> ((depth - 1) * 9) >> 12) & 0x1FF
-    }
-
-    pub const fn get_phys_mapped_page(&self) -> &Page {
-        &self.phys_mapped_page
-    }
-
-    fn get_table_ptr(&self) -> Option<*mut PageTableEntry> {
-        let root_frame_index = self.get_frame_index();
-        match self.phys_mapped_page.forward_checked(root_frame_index) {
-            Some(phys_mapped_table) => Some({
-                // SAFETY: This type invariantly requires a valid physical mapping page, and that frame indexes be properly allocated.
-                unsafe { phys_mapped_table.address().as_mut_ptr() }
-            }),
-            None => None,
-        }
+    const fn get_depth_index(depth: usize, address: usize) -> usize {
+        (address >> ((depth - 1) * 9) >> 12) & 0x1FF
     }
 
     /// Gets a mutable reference to this page table's entries.
-    fn get_table(&self) -> Option<&[PageTableEntry]> {
-        if self.depth > 0 && self.is_present() && let Some(table_ptr) = self.get_table_ptr() {
-            // SAFETY: The layout of the page table pointer is known via Intel SDM.
-            Some(unsafe { core::slice::from_raw_parts(table_ptr, 512) })
-        } else {
-            None
-        }
+    fn get_table(&self) -> &[PageTableEntry] {
+        // SAFETY: This type's constructor requires that the physical mapped page and depth are valid values.
+        let root_mapped_ptr =
+            unsafe { self.hhdm_address.as_ptr::<u8>().add(self.get_frame().as_u64() as usize).cast() };
+        // SAFETY: The layout of the page table pointer is known via Intel SDM.
+        unsafe { core::slice::from_raw_parts(root_mapped_ptr, 512) }
     }
 
-    pub fn with_entry<T>(&self, for_page: &Page, func: impl FnOnce(&PageTableEntry) -> T) -> Option<T> {
-        if let Some(entries) = self.get_table() {
-            let index = Self::get_depth_index(self.depth, for_page.address());
+    pub fn with_entry<T>(
+        &self,
+        page: Address<Page>,
+        func: impl FnOnce(Result<&PageTableEntry, PagingError>) -> T,
+    ) -> T {
+        let cur_depth = self.depth;
+        let hhdm_address = self.hhdm_address;
+        let entry = &self.get_table()[Self::get_depth_index(cur_depth, page.address().as_usize())];
+        let is_huge_entry = entry.get_attributes().contains(PageAttributes::HUGE);
 
-            if self.depth > 1 {
-                PageTable::<Ref> {
-                    depth: self.depth - 1,
-                    phys_mapped_page: self.phys_mapped_page,
-                    entry: &entries[index],
-                }
-                .with_entry(for_page, func)
-            } else {
-                Some(func(&entries[index]))
+        if (page.align() == PageAlign::DontCare && (cur_depth == 1 || is_huge_entry))
+            || cur_depth == page.depth().unwrap_or(0)
+        {
+            func(Ok(entry))
+        } else if cur_depth > page.depth().unwrap_or(1) && !is_huge_entry {
+            match unsafe { PageTable::<Ref>::new(cur_depth - 1, hhdm_address, entry) } {
+                Some(page_table) => page_table.with_entry(page, func),
+                None => func(Err(PagingError::NotMapped)),
             }
+        } else if is_huge_entry {
+            func(Err(PagingError::WalkInterrupted))
         } else {
-            None
+            func(Err(PagingError::DepthOverflow))
         }
     }
 }
 
 impl<'a> PageTable<'a, Ref> {
     /// SAFETY: Caller must ensure the provided physical mapping page and page table entry are valid.
-    pub(super) unsafe fn new(depth: usize, phys_mapped_page: Page, entry: &'a PageTableEntry) -> Self {
-        Self { depth, phys_mapped_page, entry }
+    pub(super) unsafe fn new(depth: usize, hhdm_address: Address<Virtual>, entry: &'a PageTableEntry) -> Option<Self> {
+        if depth > 0 && entry.is_present() {
+            Some(Self { depth, hhdm_address, entry })
+        } else {
+            None
+        }
     }
 }
 
 impl<'a> PageTable<'a, Mut> {
     /// SAFETY: Caller must ensure the provided physical mapping page and page table entry are valid.
-    pub(super) unsafe fn new(depth: usize, phys_mapped_page: Page, entry: &'a mut PageTableEntry) -> Self {
-        Self { depth, phys_mapped_page, entry }
-    }
-
-    /// Gets a mutable reference to this page table's entries.
-    fn get_table_mut(&mut self) -> Option<&mut [PageTableEntry]> {
-        if self.depth > 0 && self.is_present() {
-            // SAFETY: The layout of the page table pointer is known via Intel SDM.
-            Some(unsafe { core::slice::from_raw_parts_mut(self.get_table_ptr()?, 512) })
+    pub(super) unsafe fn new(
+        depth: usize,
+        hhdm_address: Address<Virtual>,
+        entry: &'a mut PageTableEntry,
+    ) -> Option<Self> {
+        if depth > 0 && entry.is_present() {
+            Some(Self { depth, hhdm_address, entry })
         } else {
             None
         }
     }
 
-    pub fn with_entry_mut<T>(&mut self, for_page: &Page, func: impl FnOnce(&mut PageTableEntry) -> T) -> Option<T> {
-        let depth = self.depth;
-        let phys_mapped_page = self.phys_mapped_page;
-        if let Some(entries) = self.get_table_mut() {
-            let index = Self::get_depth_index(depth, for_page.address());
-            if depth > 1 {
-                PageTable::<Mut> { depth: depth - 1, phys_mapped_page: phys_mapped_page, entry: &mut entries[index] }
-                    .with_entry_mut(for_page, func)
-            } else {
-                Some(func(&mut entries[index]))
+    /// Gets a mutable reference to this page table's entries.
+    fn get_table_mut(&mut self) -> &mut [PageTableEntry] {
+        // SAFETY: This type's constructor requires that the physical mapped page and depth are valid values.
+        let root_mapped_address =
+            unsafe { Address::<Virtual>::new_unchecked(self.hhdm_address.as_u64() + self.get_frame().as_u64()) };
+        // SAFETY: The layout of the page table pointer is known via Intel SDM.
+        unsafe { core::slice::from_raw_parts_mut(root_mapped_address.as_mut_ptr(), 512) }
+    }
+
+    pub fn with_entry_mut<T>(
+        &mut self,
+        page: Address<Page>,
+        func: impl FnOnce(Result<&mut PageTableEntry, PagingError>) -> T,
+    ) -> T {
+        let cur_depth = self.depth;
+        let hhdm_address = self.hhdm_address;
+        let entry = &mut self.get_table_mut()[Self::get_depth_index(cur_depth, page.address().as_usize())];
+        let is_huge_entry = entry.get_attributes().contains(PageAttributes::HUGE);
+
+        if (page.align() == PageAlign::DontCare && (cur_depth == 1 || is_huge_entry))
+            || cur_depth == page.depth().unwrap_or(0)
+        {
+            func(Ok(entry))
+        } else if cur_depth > page.depth().unwrap_or(1) && !is_huge_entry {
+            match unsafe { PageTable::<Mut>::new(cur_depth - 1, hhdm_address, entry) } {
+                Some(mut page_table) => page_table.with_entry_mut(page, func),
+                None => func(Err(PagingError::NotMapped)),
             }
+        } else if is_huge_entry {
+            func(Err(PagingError::WalkInterrupted))
         } else {
-            None
+            func(Err(PagingError::DepthOverflow))
         }
     }
 
@@ -264,35 +284,41 @@ impl<'a> PageTable<'a, Mut> {
     /// a frame for the requested page table.
     pub fn with_entry_create<T>(
         &mut self,
-        for_page: &Page,
-        frame_manager: &'static crate::memory::FrameManager,
-        func: impl FnOnce(&mut PageTableEntry) -> T,
-    ) -> Option<T> {
-        if !self.entry.is_present() {
-            let Ok(new_frame_index) = frame_manager.lock_next() else { return None };
+        page: Address<Page>,
+        func: impl FnOnce(Result<&mut PageTableEntry, PagingError>) -> T,
+    ) -> T {
+        let cur_depth = self.depth;
+        let hhdm_address = self.hhdm_address;
+        let entry = &mut self.get_table_mut()[Self::get_depth_index(cur_depth, page.address().as_usize())];
 
-            // SAFETY: Entry was just created, so we know modifying it won't corrupt memory.
-            unsafe {
-                self.entry.set_frame_index(new_frame_index);
-                self.set_attributes(PageAttributes::PTE, AttributeModify::Set);
-            }
+        // TODO this doesn't handle page depth correctly for creations
+        // TODO possibly handle present but no frame, or frame but no present?
+        if !entry.is_present() && cur_depth > 1 {
+            // SAFETY: The layout is hardcoded, so is known to follow the required invariants (nonzero, power-of-two, etc.).
+            let layout = const { unsafe { core::alloc::Layout::from_size_align_unchecked(0x1000, 0x1000) } };
+            // SAFETY: The layout is hardcoded, so is known to follow the required invariants (nonzero, power-of-two, etc.).
+            let table_ptr = unsafe { alloc::alloc::alloc_zeroed(layout) };
 
-            // SAFETY: Page was just allocated, so should not contain already-borrowed memory.
-            unsafe { self.phys_mapped_page.forward_checked(new_frame_index)?.clear_memory() };
+            let Some(frame_address) = Address::<Frame>::new((table_ptr.addr() as u64) - hhdm_address.as_u64())
+                else { return func(Err(PagingError::NoMoreFrames)); };
+            *entry = PageTableEntry::new(frame_address, PageAttributes::PTE);
         }
 
-        let depth = self.depth;
-        let phys_mapped_page = self.phys_mapped_page;
-        if let Some(entries) = self.get_table_mut() {
-            let index = Self::get_depth_index(depth, for_page.address());
-            if depth > 1 {
-                PageTable::<Mut> { depth: depth - 1, phys_mapped_page: phys_mapped_page, entry: &mut entries[index] }
-                    .with_entry_create(for_page, frame_manager, func)
-            } else {
-                Some(func(&mut entries[index]))
+        let is_huge_entry = entry.get_attributes().contains(PageAttributes::HUGE);
+
+        if (page.align() == PageAlign::DontCare && (cur_depth == 1 || is_huge_entry))
+            || cur_depth == page.depth().unwrap_or(0)
+        {
+            func(Ok(entry))
+        } else if cur_depth > page.depth().unwrap_or(1) && !is_huge_entry {
+            match unsafe { PageTable::<Mut>::new(cur_depth - 1, hhdm_address, entry) } {
+                Some(mut page_table) => page_table.with_entry_create(page, func),
+                None => func(Err(PagingError::NotMapped)),
             }
+        } else if is_huge_entry {
+            func(Err(PagingError::WalkInterrupted))
         } else {
-            None
+            func(Err(PagingError::DepthOverflow))
         }
     }
 }

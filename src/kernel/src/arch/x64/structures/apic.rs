@@ -4,7 +4,7 @@ use crate::{arch::x64::registers::msr::IA32_APIC_BASE, interrupts};
 use bit_field::BitField;
 use core::marker::PhantomData;
 
-pub const xAPIC_BASE_ADDR: usize = 0xFEE00000;
+pub const xAPIC_BASE_ADDR: u64 = 0xFEE00000;
 pub const x2APIC_BASE_MSR_ADDR: u32 = 0x800;
 
 /// Type for representing the mode of the core-local APIC.
@@ -40,35 +40,33 @@ pub unsafe fn init_interface(
 ) {
     if let Mode::xAPIC = Mode::get() {
         use crate::memory::{FrameError, PageAttributes};
+        use libkernel::{Address, Frame, Page};
 
-        let xapic_frame_index = xAPIC_BASE_ADDR / 0x1000;
-        let xapic_mapped_page_index = page_manager.physical_mapped_page().index() + xapic_frame_index;
-        let xapic_page = libkernel::memory::Page::from_index(xapic_mapped_page_index);
+        let xapic_frame = Address::<Frame>::new(xAPIC_BASE_ADDR).unwrap();
+        let xapic_page = Address::<Page>::new(
+            page_manager.physical_mapped_address().as_u64() + xAPIC_BASE_ADDR,
+            libkernel::PageAlign::Align4KiB,
+        )
+        .unwrap();
 
-        frame_manager.lock(xapic_frame_index).ok();
-        match frame_manager.try_modify_type(xapic_frame_index, crate::memory::FrameType::MMIO) {
+        frame_manager.lock(xapic_frame).ok();
+        match frame_manager.try_modify_type(xapic_frame, crate::memory::FrameType::MMIO) {
             Ok(()) => page_manager
                 .set_page_attributes(
-                    &xapic_page,
+                    xapic_page,
                     PageAttributes::MMIO | PageAttributes::GLOBAL,
                     crate::memory::AttributeModify::Set,
                 )
                 .unwrap(),
 
-            Err(FrameError::OutOfRange(_)) => page_manager
-                .map(
-                    &xapic_page,
-                    xapic_frame_index,
-                    false,
-                    PageAttributes::MMIO | PageAttributes::GLOBAL,
-                    frame_manager,
-                )
+            Err(FrameError::OutOfRange) => page_manager
+                .map(xapic_page, xapic_frame, false, PageAttributes::MMIO | PageAttributes::GLOBAL, frame_manager)
                 .expect("failed to map xAPIC page"),
 
             Err(frame_error) => panic!("failed to modify xAPIC frame type: {:?}", frame_error),
         }
 
-        APIC.get().write(xapic_mapped_page_index * 0x1000);
+        APIC.get().write(xapic_page.address().as_usize());
     }
 }
 

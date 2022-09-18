@@ -2,6 +2,7 @@ use crate::memory::io::{PortAddress, ReadOnlyPort, WriteOnlyPort};
 use crate::memory::{ensure_hhdm_frame_is_mapped, get_kernel_hhdm_address, PageAttributes};
 use acpi::mcfg::Mcfg;
 use acpi::{fadt::Fadt, sdt::Signature, AcpiTables, PhysicalMapping, PlatformInfo};
+use libkernel::{Address, Frame, Page};
 use spin::{Mutex, MutexGuard, Once};
 
 pub enum Register<'a, T: crate::memory::io::PortReadWrite> {
@@ -59,20 +60,24 @@ impl acpi::AcpiHandler for AcpiHandler {
         let hhdm_base_address = get_kernel_hhdm_address().as_usize();
         // The RSDP address provided by Limine resides within the HHDM, but the other pointers do not. This logic
         // accounts for that quirk.
-        let hhdm_physical_address = if address > hhdm_base_address { address } else { hhdm_base_address + address };
+        let hhdm_mapped_address = if address > hhdm_base_address { address } else { hhdm_base_address + address };
 
         let kernel_frame_manager = crate::memory::get_kernel_frame_manager();
         let kernel_page_manager = crate::memory::get_kernel_page_manager();
-        for page_base in (hhdm_physical_address..(hhdm_physical_address + size)).step_by(0x1000) {
-            let page = libkernel::memory::Page::from_index(page_base / 0x1000);
+        for page_base in (hhdm_mapped_address..(hhdm_mapped_address + size)).step_by(0x1000) {
+            // TODO don't unwrap here
+            let page = Address::<Page>::containing(
+                Address::<libkernel::Virtual>::new(page_base as u64).unwrap(),
+                libkernel::PageAlign::Align4KiB,
+            );
 
             trace!("ACPI MAP: {:?}", page);
 
-            if !kernel_page_manager.is_mapped(&page) {
+            if !kernel_page_manager.is_mapped(page) {
                 kernel_page_manager
                     .map(
-                        &page,
-                        (hhdm_physical_address - hhdm_base_address) / 0x1000,
+                        page,
+                        Address::<Frame>::new((hhdm_mapped_address - hhdm_base_address) as u64).unwrap(),
                         false,
                         crate::memory::PageAttributes::RW,
                         kernel_frame_manager,
@@ -80,14 +85,14 @@ impl acpi::AcpiHandler for AcpiHandler {
                     .unwrap();
             } else {
                 kernel_page_manager
-                    .set_page_attributes(&page, crate::memory::PageAttributes::RW, crate::memory::AttributeModify::Set)
+                    .set_page_attributes(page, crate::memory::PageAttributes::RW, crate::memory::AttributeModify::Set)
                     .unwrap()
             }
         }
 
         acpi::PhysicalMapping::new(
             address,
-            core::ptr::NonNull::new_unchecked(hhdm_physical_address as *mut _),
+            core::ptr::NonNull::new_unchecked(hhdm_mapped_address as *mut _),
             size,
             size,
             Self,
@@ -102,42 +107,42 @@ impl acpi::AcpiHandler for AcpiHandler {
 #[allow(clippy::undocumented_unsafe_blocks)]
 impl aml::Handler for AcpiHandler {
     fn read_u8(&self, address: usize) -> u8 {
-        ensure_hhdm_frame_is_mapped(address / 0x1000, PageAttributes::MMIO);
+        ensure_hhdm_frame_is_mapped(Address::<Frame>::new(address as u64).unwrap(), PageAttributes::MMIO);
         unsafe { ((address + get_kernel_hhdm_address().as_usize()) as *const u8).read() }
     }
 
     fn read_u16(&self, address: usize) -> u16 {
-        ensure_hhdm_frame_is_mapped(address / 0x1000, PageAttributes::MMIO);
+        ensure_hhdm_frame_is_mapped(Address::<Frame>::new(address as u64).unwrap(), PageAttributes::MMIO);
         unsafe { ((address + get_kernel_hhdm_address().as_usize()) as *const u16).read() }
     }
 
     fn read_u32(&self, address: usize) -> u32 {
-        ensure_hhdm_frame_is_mapped(address / 0x1000, PageAttributes::MMIO);
+        ensure_hhdm_frame_is_mapped(Address::<Frame>::new(address as u64).unwrap(), PageAttributes::MMIO);
         unsafe { ((address + get_kernel_hhdm_address().as_usize()) as *const u32).read() }
     }
 
     fn read_u64(&self, address: usize) -> u64 {
-        ensure_hhdm_frame_is_mapped(address / 0x1000, PageAttributes::MMIO);
+        ensure_hhdm_frame_is_mapped(Address::<Frame>::new(address as u64).unwrap(), PageAttributes::MMIO);
         unsafe { ((address + get_kernel_hhdm_address().as_usize()) as *const u64).read() }
     }
 
     fn write_u8(&mut self, address: usize, value: u8) {
-        ensure_hhdm_frame_is_mapped(address / 0x1000, PageAttributes::MMIO);
+        ensure_hhdm_frame_is_mapped(Address::<Frame>::new(address as u64).unwrap(), PageAttributes::MMIO);
         unsafe { ((address + get_kernel_hhdm_address().as_usize()) as *mut u8).write(value) };
     }
 
     fn write_u16(&mut self, address: usize, value: u16) {
-        ensure_hhdm_frame_is_mapped(address / 0x1000, PageAttributes::MMIO);
+        ensure_hhdm_frame_is_mapped(Address::<Frame>::new(address as u64).unwrap(), PageAttributes::MMIO);
         unsafe { ((address + get_kernel_hhdm_address().as_usize()) as *mut u16).write(value) };
     }
 
     fn write_u32(&mut self, address: usize, value: u32) {
-        ensure_hhdm_frame_is_mapped(address / 0x1000, PageAttributes::MMIO);
+        ensure_hhdm_frame_is_mapped(Address::<Frame>::new(address as u64).unwrap(), PageAttributes::MMIO);
         unsafe { ((address + get_kernel_hhdm_address().as_usize()) as *mut u32).write(value) };
     }
 
     fn write_u64(&mut self, address: usize, value: u64) {
-        ensure_hhdm_frame_is_mapped(address / 0x1000, PageAttributes::MMIO);
+        ensure_hhdm_frame_is_mapped(Address::<Frame>::new(address as u64).unwrap(), PageAttributes::MMIO);
         unsafe { ((address + get_kernel_hhdm_address().as_usize()) as *mut u64).write(value) };
     }
 

@@ -1,5 +1,5 @@
-mod msix;
-pub use msix::*;
+// mod msix;
+// pub use msix::*;
 
 use super::DeviceType;
 use crate::num::LittleEndianU32;

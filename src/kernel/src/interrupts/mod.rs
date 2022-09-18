@@ -1,7 +1,7 @@
 mod instructions;
 
 pub use instructions::*;
-use libkernel::{Address, Virtual};
+use libkernel::{Address, Page, Virtual};
 
 use core::cell::SyncUnsafeCell;
 use num_enum::TryFromPrimitive;
@@ -73,21 +73,18 @@ pub enum PageFaultHandlerError {
 /// SAFETY: This function expects only to be called upon a processor page fault exception.
 pub unsafe fn common_page_fault_handler(address: Address<Virtual>) -> Result<(), PageFaultHandlerError> {
     use crate::memory;
-    use libkernel::memory::Page;
 
-    let fault_page = Page::from_address_contains(address);
-    let hhdm_page = memory::get_kernel_hhdm_page();
-    let page_manager = memory::PageManager::from_current(&hhdm_page);
-    let Some(mut fault_page_attributes) = page_manager.get_page_attributes(&fault_page) else { return Err(PageFaultHandlerError::AddressNotMapped) };
-
+    let fault_page = Address::<Page>::containing(address, libkernel::PageAlign::DontCare);
+    let page_manager = memory::PageManager::from_current(memory::get_kernel_hhdm_address());
+    let Some(mut fault_page_attributes) = page_manager.get_page_attributes(fault_page) else { return Err(PageFaultHandlerError::AddressNotMapped) };
     if fault_page_attributes.contains(memory::PageAttributes::DEMAND) {
         page_manager.auto_map(
-            &fault_page,
+            fault_page,
             {
                 // remove demand bit ...
                 fault_page_attributes.remove(memory::PageAttributes::DEMAND);
-                // ... insert usable RW bits ...
-                fault_page_attributes.insert(memory::PageAttributes::RW);
+                // ... insert present bit ...
+                fault_page_attributes.insert(memory::PageAttributes::PRESENT);
                 // ... return attributes
                 fault_page_attributes
             },
@@ -95,7 +92,7 @@ pub unsafe fn common_page_fault_handler(address: Address<Virtual>) -> Result<(),
         );
 
         // SAFETY: We know the page was just mapped, and contains no relevant memory.
-        fault_page.clear_memory();
+        fault_page.zero_memory();
 
         Ok(())
     } else {

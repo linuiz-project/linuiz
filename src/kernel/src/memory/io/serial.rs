@@ -71,7 +71,7 @@ pub enum SerialSpeed {
     S38400 = 3,
 }
 
-pub struct Serial {
+pub struct Uart {
     data: ReadWritePort<u8>,
     irq_control: WriteOnlyPort<u8>,
     fifo_control: WriteOnlyPort<u8>,
@@ -82,7 +82,7 @@ pub struct Serial {
     scratch: ReadWritePort<u8>,
 }
 
-impl Serial {
+impl Uart {
     pub const fn new(base: PortAddress) -> Self {
         unsafe {
             Self {
@@ -164,7 +164,7 @@ impl Serial {
     }
 }
 
-impl core::fmt::Write for Serial {
+impl core::fmt::Write for Uart {
     fn write_str(&mut self, string: &str) -> core::fmt::Result {
         if string.is_ascii() {
             self.write_str(string);

@@ -2,7 +2,7 @@ use crate::interrupts;
 use acpi::platform::interrupt::{Polarity, TriggerMode};
 use alloc::vec::Vec;
 use bit_field::BitField;
-use libkernel::memory::volatile::VolatileCell;
+use libkernel::{memory::volatile::VolatileCell, Address, Frame, Page};
 use spin::{Mutex, Once};
 
 #[repr(transparent)]
@@ -192,16 +192,18 @@ pub fn get_io_apics() -> &'static Vec<IoApic<'static>> {
 
                     /* Ensure I/O APIC register pages are mapped */
                     {
-                        let ioapic_regs_page = libkernel::memory::Page::from_ptr(ioapic_regs_ptr).unwrap();
-                        let ioapic_frame_index = (ioapic_info.address / 0x1000) as usize;
+                        // TODO do not unwrap here?
+                        let ioapic_regs_page =
+                            Address::<Page>::from_ptr(ioapic_regs_ptr, libkernel::PageAlign::Align4KiB).unwrap();
+                        let ioapic_frame = Address::<Frame>::new(ioapic_info.address as u64).unwrap();
 
-                        frame_manager.lock(ioapic_frame_index).ok();
+                        frame_manager.lock(ioapic_frame).ok();
 
-                        if !page_manager.is_mapped(&ioapic_regs_page) {
+                        if !page_manager.is_mapped(ioapic_regs_page) {
                             page_manager
                                 .map(
-                                    &ioapic_regs_page,
-                                    ioapic_frame_index,
+                                    ioapic_regs_page,
+                                    ioapic_frame,
                                     false,
                                     crate::memory::PageAttributes::MMIO,
                                     frame_manager,

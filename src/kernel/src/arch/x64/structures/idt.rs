@@ -283,7 +283,7 @@ pub fn common_exception_handler(exception: Exception) {
             // SAFETY: Function is being called in a valid page fault context.
             if let Ok(()) = unsafe { crate::interrupts::common_page_fault_handler(address) } => {}
 
-        exception => panic!("{:#?}", exception)
+        exception => panic!("{:#X?}", exception)
     }
 }
 
@@ -464,8 +464,7 @@ pub fn set_stub_handlers(idt: &mut InterruptDescriptorTable) {
     idt[45].set_handler_fn(irq_45);
     idt[46].set_handler_fn(irq_46);
     idt[47].set_handler_fn(irq_47);
-    // Ensure we allow userspace code to use the system call interrupt.
-    idt[48].set_handler_fn(irq_48).set_privilege_level(x86_64::PrivilegeLevel::Ring3);
+    idt[48].set_handler_fn(irq_48);
     idt[49].set_handler_fn(irq_49);
     idt[50].set_handler_fn(irq_50);
     idt[51].set_handler_fn(irq_51);
@@ -672,7 +671,7 @@ pub fn set_stub_handlers(idt: &mut InterruptDescriptorTable) {
     idt[252].set_handler_fn(irq_252);
     idt[253].set_handler_fn(irq_253);
     idt[254].set_handler_fn(irq_254);
-    idt[255].set_handler_fn(irq_255).set_privilege_level(x86_64::PrivilegeLevel::Ring3);
+    idt[255].set_handler_fn(irq_255);
 }
 
 irq_stub!(32);
