@@ -5,7 +5,7 @@ pub struct QEMUE9(crate::memory::io::WriteOnlyPort<u8>);
 
 impl QEMUE9 {
     pub const fn new() -> Self {
-        x86_64::structures::paging::Self(unsafe { crate::memory::io::WriteOnlyPort::new(0xE9) })
+        Self(unsafe { crate::memory::io::WriteOnlyPort::new(0xE9) })
     }
 }
 

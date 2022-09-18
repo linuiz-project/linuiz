@@ -1,27 +1,4 @@
-// mod frame_manager;
-// mod page_manager;
-mod page;
-
-// pub use frame_manager::*;
-// pub use page_manager::*;
-pub use page::*;
-
 pub mod volatile;
-
-/*
-
-   OVERALL L4 INDEX ASSIGNMENTS
-   ----------------------------------------
-   | 0-255   | Userspace                   |
-   ----------------------------------------
-   | 256-*** | Physical memory mapping     |
-   ----------------------------------------
-   | 510     | Kernel core-local state     |
-   ----------------------------------------
-   | 511     | Kernel ELF memory mappings  |
-   ----------------------------------------
-
-*/
 
 pub const PML4_ENTRY_MEM_SIZE: u64 = 1 << 9 << 9 << 9 << 12;
 
@@ -58,3 +35,5 @@ pub fn stack_aligned_allocator() -> AlignedAllocator<0x10, alloc::alloc::Global>
 pub type PageAlignedBox<T> = alloc::boxed::Box<T, AlignedAllocator<0x1000, alloc::alloc::Global>>;
 
 pub type StackAlignedBox<T> = alloc::boxed::Box<T, AlignedAllocator<0x10, alloc::alloc::Global>>;
+
+// TODO reintroduce MMIO structure

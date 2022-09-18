@@ -24,7 +24,10 @@
     asm_const,
     core_intrinsics,
     pointer_is_aligned,
-    const_option_ext
+    const_option_ext,
+    inline_const,
+    strict_provenance,
+    let_chains
 )]
 
 extern crate alloc;

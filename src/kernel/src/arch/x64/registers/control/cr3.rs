@@ -1,5 +1,5 @@
 use core::arch::asm;
-use libkernel::{Address, Physical};
+use libkernel::{Address, Frame};
 
 bitflags::bitflags! {
     pub struct CR3Flags : u64 {
@@ -11,20 +11,22 @@ bitflags::bitflags! {
 pub struct CR3;
 
 impl CR3 {
-    pub unsafe fn write(address: Address<Physical>, flags: CR3Flags) {
-        assert!(address.is_frame_aligned(), "address must be frame-aligned (low 12 bits empty)");
-
+    pub unsafe fn write(address: Address<Frame>, flags: CR3Flags) {
         asm!("mov cr3, {}", in(reg) address.as_u64() | flags.bits(), options(nostack));
     }
 
-    pub fn read() -> (Address<Physical>, CR3Flags) {
+    pub fn read() -> (Address<Frame>, CR3Flags) {
         let value: u64;
 
         unsafe {
             asm!("mov {}, cr3", out(reg) value, options(nostack, nomem));
         }
 
-        (Address::<Physical>::new(value & !CR3Flags::all().bits()).unwrap(), CR3Flags::from_bits_truncate(value))
+        (
+            // SAFETY: The function to write CR3 already requires a valid `Address<Frame>`.
+            unsafe { Address::<Frame>::new_unchecked(value & !CR3Flags::all().bits()) },
+            CR3Flags::from_bits_truncate(value),
+        )
     }
 
     #[inline(always)]

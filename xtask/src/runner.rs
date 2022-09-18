@@ -66,8 +66,8 @@ pub struct Options {
     smp: usize,
 
     // RAM size in MB.
-    #[clap(long, default_value = "512")]
-    ram: usize,
+    #[clap(long, short, default_value = "512")]
+    mem: usize,
 
     /// Enables debug logging to the specified location.
     #[clap(long)]
@@ -111,7 +111,7 @@ pub fn run(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Error>
     arguments.push(&smp_string);
 
     arguments.push("-m");
-    let memory_string = format!("{}M", options.ram);
+    let memory_string = format!("{}M", options.mem);
     arguments.push(&memory_string);
 
     arguments.push("-device");

@@ -1,6 +1,6 @@
 use crate::memory::{PageAttributes, PageManager};
 use core::{alloc::Layout, mem::size_of};
-use libkernel::{align_up_div, memory::Page};
+use libkernel::{align_up_div, Address, Page};
 use spin::{RwLock, RwLockWriteGuard};
 
 /// Represents one page worth of memory blocks (i.e. 4096 bytes in blocks).
@@ -61,33 +61,33 @@ pub enum AllocError {
 ///  easily and efficiently allocate.
 pub struct SLOB<'map> {
     table: RwLock<&'map mut [BlockPage]>,
-    base_alloc_page: Page,
+    base_alloc_address: Address<Page>,
 }
 
 impl<'map> SLOB<'map> {
     /// The size of an allocator block.
     pub const BLOCK_SIZE: usize = 0x1000 / BlockPage::BLOCKS_PER;
 
-    pub unsafe fn new(base_alloc_page: Page) -> Self {
+    pub unsafe fn new(base_alloc_address: Address<Page>) -> Self {
         let alloc_table_len = 0x1000 / core::mem::size_of::<BlockPage>();
-        let current_page_manager = PageManager::from_current(&crate::memory::get_kernel_hhdm_page());
+        let current_page_manager = PageManager::from_current(crate::memory::get_kernel_hhdm_address());
         let kernel_frame_manager = crate::memory::get_kernel_frame_manager();
 
         // Map all of the pages in the allocation table.
         for page_offset in 0..alloc_table_len {
-            let new_page = base_alloc_page.forward_checked(page_offset).unwrap();
-            current_page_manager.auto_map(&new_page, PageAttributes::RW, kernel_frame_manager);
+            let new_page = base_alloc_address.forward_checked(page_offset).unwrap();
+            current_page_manager.auto_map(new_page, PageAttributes::RW, kernel_frame_manager);
         }
 
         let alloc_table = core::slice::from_raw_parts_mut(
             // Ensure when we map, we utilize the allocator's base table address.
-            base_alloc_page.address().as_mut_ptr::<BlockPage>(),
+            base_alloc_address.address().as_mut_ptr::<BlockPage>(),
             alloc_table_len,
         );
         // Fill the allocator table's page.
         alloc_table[0].set_full();
 
-        Self { table: RwLock::new(alloc_table), base_alloc_page }
+        Self { table: RwLock::new(alloc_table), base_alloc_address }
     }
 
     /// Calculates the bit count and mask for a given set of block page parameters.
@@ -108,7 +108,7 @@ impl<'map> SLOB<'map> {
     fn grow(
         required_blocks: core::num::NonZeroUsize,
         table: &mut RwLockWriteGuard<&mut [BlockPage]>,
-        base_alloc_page: &Page,
+        base_alloc_address: Address<Page>,
     ) -> Result<(), AllocError> {
         // Current length of our map, in indexes.
         let cur_table_len = table.len();
@@ -145,22 +145,22 @@ impl<'map> SLOB<'map> {
         {
             let frame_manager = crate::memory::get_kernel_frame_manager();
             // SAFETY: Kernel guarantees the HHDM will be a valid and mapped address.
-            let page_manager = unsafe { PageManager::from_current(&crate::memory::get_kernel_hhdm_page()) };
+            let page_manager = unsafe { PageManager::from_current(crate::memory::get_kernel_hhdm_address()) };
 
             for page_offset in cur_table_len..req_table_len {
-                let new_page = base_alloc_page.forward_checked(page_offset).unwrap();
-                page_manager.auto_map(&new_page, PageAttributes::RW, frame_manager);
+                let new_page = base_alloc_address.forward_checked(page_offset).unwrap();
+                page_manager.auto_map(new_page, PageAttributes::RW, frame_manager);
                 // Clear the newly allocated table page.
                 // SAFETY: We know no important memory is stored here to be overwritten, because we just mapped it.
-                unsafe { new_page.clear_memory() };
+                unsafe { new_page.zero_memory() };
             }
         }
 
         let cur_table_start_index =
-            ((table.as_ptr() as usize) - base_alloc_page.address().as_usize()) / Self::BLOCK_SIZE;
+            (table.as_ptr().addr() - base_alloc_address.address().as_usize()) / Self::BLOCK_SIZE;
         let new_table_start_index = *start_index.get_or_init(|| cur_table_len);
         // Ensure we set the new base table page to use the base allocation page as a starting index.
-        let new_table_base_page = base_alloc_page.forward_checked(new_table_start_index).unwrap();
+        let new_table_base_page = base_alloc_address.forward_checked(new_table_start_index).unwrap();
 
         let new_table =
         // SAFETY: We know the address is pointer-aligned, and that the address range is valid for clearing via `write_bytes`.        
@@ -235,8 +235,12 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
                 }
 
                 // No properly sized region was found, so grow list.
-                if Self::grow(core::num::NonZeroUsize::new(size_in_blocks).unwrap(), &mut table, &self.base_alloc_page)
-                    .is_err()
+                if Self::grow(
+                    core::num::NonZeroUsize::new(size_in_blocks).unwrap(),
+                    &mut table,
+                    self.base_alloc_address,
+                )
+                .is_err()
                 {
                     return Err(core::alloc::AllocError);
                 }
@@ -259,7 +263,7 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
             }
 
             let allocation_ptr =
-                (self.base_alloc_page.address().as_usize() + (start_block_index * Self::BLOCK_SIZE)) as *mut u8;
+                (self.base_alloc_address.address().as_usize() + (start_block_index * Self::BLOCK_SIZE)) as *mut u8;
             core::ptr::NonNull::new(core::ptr::slice_from_raw_parts_mut(allocation_ptr, layout.size()))
                 .ok_or(core::alloc::AllocError)
         })
@@ -271,7 +275,8 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
         crate::interrupts::without(|| {
             let mut table = self.table.write();
 
-            let start_block_index = (ptr.addr().get() - self.base_alloc_page.address().as_usize()) / Self::BLOCK_SIZE;
+            let start_block_index =
+                (ptr.addr().get() - self.base_alloc_address.address().as_usize()) / Self::BLOCK_SIZE;
             let end_block_index = start_block_index + align_up_div(layout.size(), Self::BLOCK_SIZE);
             let mut block_index = start_block_index;
 

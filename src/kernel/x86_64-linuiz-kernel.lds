@@ -8,6 +8,8 @@ KERN_BASE = 0xffffffff80000000;
 
 SECTIONS
 {
+    PROVIDE(__SECTION_ALIGN =  0x200000);
+
     . = KERN_BASE + SIZEOF_HEADERS; 
 
     .hash               : { *(.hash) }
@@ -30,21 +32,21 @@ SECTIONS
     .rela.plt           : { *(.rela.plt) *(.rela.iplt) }
 
     /* text sections */
-    . = ALIGN(CONSTANT(0x200000));
+    . = ALIGN(__SECTION_ALIGN);
     PROVIDE(__text_start = .);
     .plt                : { *(.plt) *(.iplt) }
     .text               : { *(.text .text.*) }
     PROVIDE(__text_end = .);
     
     /* rodata sections */
-    . = ALIGN(CONSTANT(0x200000));
+    . = ALIGN(__SECTION_ALIGN);
     PROVIDE(__rodata_start = .);
     .rodata             : { *(.rodata .rodata.*) }
     .eh_frame_hdr       : { *(.eh_frame_hdr) }
     PROVIDE(__rodata_end = .);
     
     /* bss sections */
-    . = ALIGN(CONSTANT(0x200000));
+    . = ALIGN(__SECTION_ALIGN);
     PROVIDE(__bss_start = .);
     .eh_frame           : { KEEP(*(.eh_frame .eh_frame.*)) }
     .gcc_except_table   : { KEEP(*(.gcc_except_table)) }
@@ -61,7 +63,7 @@ SECTIONS
     PROVIDE(__bss_end = .);
 
     /* data sections */
-    . = ALIGN(CONSTANT(0x200000));
+    . = ALIGN(__SECTION_ALIGN);
     PROVIDE(__data_start = .);
     .got.plt            : { *(.got.plt) *(.igot.plt) }
     .data               : { *(.data .data.*) }

@@ -13,7 +13,7 @@ pub const fn get_device_base_address(base: u64, bus_index: u8, device_index: u8)
 }
 
 pub fn init_devices() {
-    let kernel_hhdm_page = crate::memory::get_kernel_hhdm_page();
+    let kernel_hhdm_address = crate::memory::get_kernel_hhdm_address();
     let kernel_frame_manager = crate::memory::get_kernel_frame_manager();
     let kernel_page_manager = crate::memory::get_kernel_page_manager();
     let mut pci_devices = PCI_DEVICES.write();
@@ -35,7 +35,8 @@ pub fn init_devices() {
             // Allocate devices
             let device_base_address = get_device_base_address(base_address, bus_index, device_index);
             // TODO somehow test if the computed base address makes any sense.
-            let Some(device_hhdm_page) = kernel_hhdm_page.forward_checked(device_base_address.frame_index())
+            let Some(device_hhdm_page) = Address::<libkernel::Page>::new(kernel_hhdm_address.as_u64(), libkernel::PageAlign::Align4KiB)
+                .and_then(|page| page.forward_checked(device_base_address.frame_containing().index()))
                 else {
                     warn!("Failed to map device HHDM page due to overflow: {:0>2}:{:0>2}:{:0>2}.00@{:?}",
                     segment_index, bus_index, device_index, device_base_address);
@@ -47,7 +48,7 @@ pub fn init_devices() {
             //         Additionally, if this mapping is invalid, it will be unmapped later on in this context.
             unsafe {
                 kernel_page_manager
-                    .map_mmio(&device_hhdm_page, device_base_address.frame_index(), kernel_frame_manager)
+                    .map_mmio(device_hhdm_page, device_base_address.frame_containing(), kernel_frame_manager)
                     .unwrap()
             };
 
@@ -72,7 +73,7 @@ pub fn init_devices() {
                 // Unmap the unused device MMIO
                 // SAFETY: HHDM is guaranteed to be valid by the kernel.
                 //         Additionally, this page was just previously mapped, and so is a known-valid mapping (hence the `.unwrap()`).
-                unsafe { kernel_page_manager.unmap(&device_hhdm_page, false, kernel_frame_manager).unwrap() };
+                unsafe { kernel_page_manager.unmap(device_hhdm_page, false, kernel_frame_manager).unwrap() };
             }
         });
 }

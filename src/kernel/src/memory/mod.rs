@@ -1,17 +1,18 @@
-mod frame_manager;
+// mod frame_manager;
 mod interior_ref;
 mod page_manager;
 mod paging;
 
 pub mod io;
+pub mod slab;
 pub mod slob;
 
-pub use frame_manager::*;
+// pub use frame_manager::*;
 pub use interior_ref::*;
 pub use page_manager::*;
 pub use paging::*;
 
-use libkernel::{Address, Virtual};
+use libkernel::{Address, Frame, Page, Virtual};
 use spin::Once;
 
 struct Mut;
@@ -23,7 +24,7 @@ impl InteriorRef for Mut {
     }
 }
 
-struct GlobalAllocator<'m>(Once<&'m dyn core::alloc::GlobalAlloc>);
+struct GlobalAllocator<'m>(Once<&'m dyn core::alloc::Allocator>);
 // SAFETY: `GlobalAlloc` trait requires `Send`.
 unsafe impl Send for GlobalAllocator<'_> {}
 // SAFETY: `GlobalAlloc` trait requires `Sync`.
@@ -32,16 +33,16 @@ unsafe impl Sync for GlobalAllocator<'_> {}
 /// SAFETY: This struct is a simple wrapper around `GlobalAlloc` itself, and so necessarily implements its safety invariants.
 unsafe impl core::alloc::GlobalAlloc for GlobalAllocator<'_> {
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
-        match self.0.get() {
-            Some(global_allocator) => global_allocator.alloc(layout),
+        match self.0.get().map(|allocator| allocator.allocate(layout)) {
+            Some(Ok(ptr)) => ptr.as_mut_ptr(),
             // TODO properly handle abort, via `ud2` handler and perhaps an interrupt flag in fsbase MSR?
-            None => core::intrinsics::abort(),
+            _ => core::intrinsics::abort(),
         }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
         match self.0.get() {
-            Some(global_allocator) => global_allocator.dealloc(ptr, layout),
+            Some(allocator) => allocator.deallocate(core::ptr::NonNull::new_unchecked(ptr), layout),
             None => core::intrinsics::abort(),
         }
     }
@@ -49,11 +50,15 @@ unsafe impl core::alloc::GlobalAlloc for GlobalAllocator<'_> {
 
 #[global_allocator]
 static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator(Once::new());
-static KERNEL_MALLOC: Once<slob::SLOB<'static>> = Once::new();
+static KERNEL_ALLOCATOR: Once<slab::SlabAllocator<'static>> = Once::new();
 
-pub unsafe fn init_global_allocator(base_alloc_page: libkernel::memory::Page) {
-    KERNEL_MALLOC.call_once(|| slob::SLOB::new(base_alloc_page));
-    GLOBAL_ALLOCATOR.0.call_once(|| KERNEL_MALLOC.get().unwrap());
+pub unsafe fn init_global_allocator() {
+    KERNEL_ALLOCATOR
+        .call_once(|| slab::SlabAllocator::from_memory_map(get_limine_mmap(), get_kernel_hhdm_address()).unwrap());
+    GLOBAL_ALLOCATOR.0.call_once(|| KERNEL_ALLOCATOR.get().unwrap());
+}
+pub fn get_global_allocator() -> &'static slab::SlabAllocator<'static> {
+    KERNEL_ALLOCATOR.get().unwrap()
 }
 
 fn get_limine_mmap() -> &'static [limine::NonNullPtr<limine::LimineMemmapEntry>] {
@@ -77,28 +82,24 @@ pub unsafe fn init_kernel_hhdm_address() {
 pub fn get_kernel_hhdm_address() -> Address<Virtual> {
     *HHDM_ADDRESS.get().unwrap()
 }
-pub fn get_kernel_hhdm_page() -> libkernel::memory::Page {
-    libkernel::memory::Page::from_address(*HHDM_ADDRESS.get().unwrap())
-        .expect("kernel HHDM address is not page-aligned")
-}
 
-static KERNEL_FRAME_MANAGER: Once<FrameManager> = Once::new();
-/// SAFETY: This function assumes it will be called before the kernel takes ownership of the page tables.
-pub unsafe fn init_kernel_frame_manager() {
-    KERNEL_FRAME_MANAGER.call_once(|| FrameManager::from_mmap(get_limine_mmap(), get_kernel_hhdm_address()));
-}
-pub fn get_kernel_frame_manager() -> &'static FrameManager<'static> {
-    KERNEL_FRAME_MANAGER.get().unwrap()
-}
+// static KERNEL_FRAME_MANAGER: Once<FrameManager> = Once::new();
+// /// SAFETY: This function assumes it will be called before the kernel takes ownership of the page tables.
+// pub unsafe fn init_kernel_frame_manager() {
+//     KERNEL_FRAME_MANAGER.call_once(|| FrameManager::from_memory_map(get_limine_mmap(), get_kernel_hhdm_address()));
+// }
+// pub fn get_kernel_frame_manager() -> &'static FrameManager<'static> {
+//     KERNEL_FRAME_MANAGER.get().unwrap()
+// }
 
 static KERNEL_PAGE_MANAGER: Once<PageManager> = Once::new();
 pub fn init_kernel_page_manager() {
     KERNEL_PAGE_MANAGER.call_once(|| {
-        let frame_manager = get_kernel_frame_manager();
-        let mapped_page = get_kernel_hhdm_page();
-
-        // SAFETY:  The mapped page is guaranteed to be valid, as the kernel guarantees its HHDM will be valid.
-        unsafe { PageManager::new(4, &mapped_page, None, frame_manager).expect("failed to create kernel page manager") }
+        // SAFETY: The mapped page is guaranteed to be valid, as the kernel guarantees its HHDM will be valid.
+        unsafe {
+            PageManager::new(4, get_kernel_hhdm_address(), None, get_kernel_frame_manager())
+                .expect("failed to create kernel page manager")
+        }
     });
 }
 pub fn get_kernel_page_manager() -> &'static PageManager {
@@ -109,23 +110,26 @@ pub fn reclaim_bootloader_frames() {
     let frame_manager = get_kernel_frame_manager();
     frame_manager.iter().enumerate().filter(|(_, (_, ty))| *ty == FrameType::BootReclaim).for_each(
         |(frame_index, _)| {
-            frame_manager.force_modify_type(frame_index, FrameType::Usable).ok();
-            frame_manager.free(frame_index).ok();
+            // SAFETY: These frames come directly from the frame manager, and so are guaranteed valid.
+            let frame = unsafe { Address::<Frame>::new_unchecked((frame_index * 0x1000) as u64) };
+            frame_manager.try_modify_type(frame, FrameType::Usable).ok();
+            frame_manager.free(frame).ok();
         },
     );
 }
 
 pub fn allocate_pages(page_count: usize) -> *mut u8 {
-    let base_frame_index = get_kernel_frame_manager().lock_next_many(page_count).unwrap();
+    // TODO maybe don't `.unwrap()` here, just return the option.
+    let base_frame = get_kernel_frame_manager().lock_next_many(page_count).unwrap();
 
     // SAFETY:  Kernel HHDM is guaranteed (by the kernel) to be valid, so this cannot fail.
-    unsafe { get_kernel_hhdm_address().as_mut_ptr::<u8>().add(base_frame_index * 0x1000) }
+    unsafe { get_kernel_hhdm_address().as_mut_ptr::<u8>().add(base_frame.as_usize() * 0x1000) }
 }
 
 #[cfg(target_arch = "x86_64")]
-pub struct VmemRegister(pub Address<libkernel::Physical>, pub crate::arch::x64::registers::control::CR3Flags);
+pub struct VmemRegister(pub Address<libkernel::Frame>, pub crate::arch::x64::registers::control::CR3Flags);
 #[cfg(target_arch = "riscv64")]
-pub struct RootPageTable(pub Address<libkernel::Physical>, pub u16, pub crate::arch::rv64::registers::satp::Mode);
+pub struct RootPageTable(pub Address<libkernel::Frame>, pub u16, pub crate::arch::rv64::registers::satp::Mode);
 
 impl VmemRegister {
     pub fn read() -> Self {
@@ -152,16 +156,17 @@ impl VmemRegister {
     }
 }
 
-pub fn ensure_hhdm_frame_is_mapped(frame_index: usize, page_attributes: crate::memory::PageAttributes) {
+pub fn ensure_hhdm_frame_is_mapped(frame: Address<Frame>, page_attributes: crate::memory::PageAttributes) {
     let page_manager = crate::memory::get_kernel_page_manager();
+    let hhdm_address = get_kernel_hhdm_address();
     let hhdm_page =
-        get_kernel_hhdm_page().forward_checked(frame_index).expect("kernel HHDM overflowed from frame index");
+        Address::<Page>::new(hhdm_address.as_u64() + frame.as_u64(), libkernel::PageAlign::Align4KiB).unwrap();
 
-    if !page_manager.is_mapped(&hhdm_page) {
+    if !page_manager.is_mapped(hhdm_page) {
         let frame_manager = crate::memory::get_kernel_frame_manager();
-        frame_manager.lock(frame_index).ok();
-        page_manager.map(&hhdm_page, frame_index, false, page_attributes, frame_manager).unwrap();
+        frame_manager.lock(frame).ok();
+        page_manager.map(hhdm_page, frame, false, page_attributes, frame_manager).unwrap();
     }
 
-    assert!(page_manager.is_mapped(&hhdm_page));
+    assert!(page_manager.is_mapped(hhdm_page));
 }
