@@ -1,0 +1,10 @@
+[package]
+name = "pic_8259"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies.port-rs]
+path = "../port-rs/"
+[dependencies]
+bitflags = "*"
+bit_field = "*"

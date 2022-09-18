@@ -2,7 +2,7 @@ pub mod section;
 pub mod segment;
 pub mod symbol;
 
-use libkernel::{Address, Virtual};
+use libcommon::{Address, Virtual};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Endianness {

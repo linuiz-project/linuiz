@@ -20,8 +20,7 @@
     unchecked_math,
     cstr_from_bytes_until_nul,
     if_let_guard,
-    inline_const,
-    let_else
+    inline_const
 )]
 #![forbid(clippy::inline_asm_x86_att_syntax)]
 #![deny(clippy::semicolon_if_nothing_returned, clippy::debug_assert_with_mut_call, clippy::float_arithmetic)]
@@ -40,11 +39,9 @@
 #[macro_use]
 extern crate log;
 extern crate alloc;
-extern crate libkernel;
+extern crate libcommon;
 
-mod arch;
 mod elf;
-mod interrupts;
 mod local_state;
 mod memory;
 mod num;
@@ -108,11 +105,73 @@ unsafe extern "C" fn _entry() -> ! {
         );
 
         #[cfg(target_arch = "x86_64")]
-        if let Some(vendor_str) = crate::arch::x64::cpu::get_vendor() {
+        if let Some(vendor_str) = libarch::x64::cpu::get_vendor() {
             info!("Vendor              {vendor_str}");
         } else {
             info!("Vendor              None");
         }
+    }
+
+    /* set interrupt handlers */
+    {
+        libarch::interrupts::set_page_fault_handler({
+            use libarch::interrupts::PageFaultHandlerError;
+
+            /// SAFETY: This function expects only to be called upon a processor page fault exception.
+            unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandlerError> {
+                use libarch::memory;
+
+                let fault_page = Address::<Page>::containing(address, libcommon::PageAlign::DontCare);
+                let virtual_mapper = libkernel::memory::VirtualMapper::from_current(memory::get_kernel_hhdm_address());
+                let Some(mut fault_page_attributes) = virtual_mapper.get_page_attributes(fault_page) else { return Err(PageFaultHandlerError::AddressNotMapped) };
+                if fault_page_attributes.contains(memory::PageAttributes::DEMAND) {
+                    virtual_mapper.auto_map(
+                        fault_page,
+                        {
+                            // remove demand bit ...
+                            fault_page_attributes.remove(memory::PageAttributes::DEMAND);
+                            // ... insert present bit ...
+                            fault_page_attributes.insert(memory::PageAttributes::PRESENT);
+                            // ... return attributes
+                            fault_page_attributes
+                        },
+                        memory::get_kernel_frame_manager(),
+                    );
+
+                    // SAFETY: We know the page was just mapped, and contains no relevant memory.
+                    fault_page.zero_memory();
+
+                    Ok(())
+                } else {
+                    Err(PageFaultHandlerError::NotDemandPaged)
+                }
+            }
+
+            pf_handler
+        });
+
+        libarch::interrupts::set_interrupt_handler({
+            use libarch::interrupts::{ArchContext, ControlFlowContext, Vector};
+
+            fn common_interrupt_handler(
+                irq_vector: u64,
+                ctrl_flow_context: &mut ControlFlowContext,
+                arch_context: &mut ArchContext,
+            ) {
+                match Vector::try_from(irq_vector) {
+                    Ok(vector) if vector == Vector::Timer => {
+                        crate::local_state::schedule_next_task(ctrl_flow_context, arch_context);
+                    }
+
+                    vector_result => {
+                        warn!("Unhandled IRQ vector: {:?}", vector_result);
+                    }
+                }
+
+                #[cfg(target_arch = "x86_64")]
+                libarch::x64::structures::apic::end_of_interrupt();
+            }
+        });
     }
 
     let symbol_table = OnceCell::new();
@@ -183,8 +242,8 @@ unsafe extern "C" fn _entry() -> ! {
         let hhdm_address = crate::memory::get_kernel_hhdm_address();
 
         if let Some(symbol_table) = symbol_table.get() && let Some(string_table) = string_table.get() {
-            let symtab_frames_required = libkernel::align_up_div(symbol_table.len(), 0x1000);
-            let strtab_frames_required = libkernel::align_up_div(string_table.len(), 0x1000);
+            let symtab_frames_required = libcommon::align_up_div(symbol_table.len(), 0x1000);
+            let strtab_frames_required = libcommon::align_up_div(string_table.len(), 0x1000);
 
             if let Some(symtab_frame) = global_allocator.lock_next_many(symtab_frames_required)
                 && let Some(strtab_frame) = global_allocator.lock_next_many(strtab_frames_required)
@@ -203,7 +262,7 @@ unsafe extern "C" fn _entry() -> ! {
     /* bsp core init */
     {
         #[cfg(target_arch = "x86_64")]
-        crate::arch::x64::cpu::init();
+        libarch::x64::cpu::init();
 
         // TODO rv64 bsp hart init
     }
@@ -215,7 +274,7 @@ unsafe extern "C" fn _entry() -> ! {
     /* memory init */
     {
         use crate::memory::{PageAttributes, PageManager};
-        use libkernel::{Address, LinkerSymbol, Page, PageAlign};
+        use libcommon::{Address, LinkerSymbol, Page, PageAlign};
 
         extern "C" {
             static __SECTION_ALIGN: LinkerSymbol;
@@ -327,7 +386,7 @@ unsafe extern "C" fn _entry() -> ! {
             };
 
             // TODO the frame iterator should return this already (an Address<Frame>, and not a frame index)
-            let frame = unsafe { Address::<libkernel::Frame>::new_unchecked((frame_index * 0x1000) as u64) };
+            let frame = unsafe { Address::<libcommon::Frame>::new_unchecked((frame_index * 0x1000) as u64) };
             page_manager
                 .map(
                     // UNWRAP: These frames should be known-good from the bootloader's memory map.
@@ -405,7 +464,7 @@ unsafe extern "C" fn _entry() -> ! {
         #[cfg(target_arch = "x86_64")]
         {
             debug!("Initializing APIC interface...");
-            crate::arch::x64::structures::apic::init_interface(kernel_frame_manager, page_manager);
+            libarch::x64::structures::apic::init_interface(kernel_frame_manager, page_manager);
         }
 
         debug!("Initializing ACPI interface...");
@@ -429,7 +488,7 @@ unsafe extern "C" fn _entry() -> ! {
     {
         debug!("Configuring I/O APIC and processing interrupt overrides.");
 
-        let ioapics = crate::arch::x64::structures::ioapic::get_io_apics();
+        let ioapics = libarch::x64::structures::ioapic::get_io_apics();
         let platform_info = crate::tables::acpi::get_platform_info();
 
         if let acpi::platform::interrupt::InterruptModel::Apic(apic) = &platform_info.interrupt_model {
@@ -517,7 +576,7 @@ unsafe extern "C" fn _entry() -> ! {
     // TODO make this a standalone function so we can return error states
     {
         use crate::{elf::segment, memory::PageAttributes};
-        use libkernel::{Address, Page, PageAlign, Virtual};
+        use libcommon::{Address, Page, PageAlign, Virtual};
 
         let drivers_raw_data = miniz_oxide::inflate::decompress_to_vec(drivers_data.get().unwrap()).unwrap();
         debug!("Decompressed {} bytes of driver files.", drivers_raw_data.len());
@@ -566,8 +625,8 @@ unsafe extern "C" fn _entry() -> ! {
                     segment::Type::Loadable => {
                         let memory_start = segment.get_virtual_address().unwrap().as_usize();
                         let memory_end = memory_start + segment.get_memory_layout().unwrap().size();
-                        let start_page_index = libkernel::align_down_div(memory_start, 0x1000);
-                        let end_page_index = libkernel::align_up_div(memory_end, 0x1000);
+                        let start_page_index = libcommon::align_down_div(memory_start, 0x1000);
+                        let end_page_index = libcommon::align_up_div(memory_end, 0x1000);
                         let mut data_offset = 0;
 
                         for page_index in start_page_index..end_page_index {
@@ -618,11 +677,11 @@ unsafe extern "C" fn _entry() -> ! {
             {
                 let stack_address = {
                     // TODO make this a dynamic configuration
-                    const DEFAULT_TASK_STACK_SIZE: u64 = 8 * libkernel::MIBIBYTE;
+                    const DEFAULT_TASK_STACK_SIZE: u64 = 8 * libcommon::MIBIBYTE;
 
                     let kernel_frame_manager = crate::memory::get_kernel_frame_manager();
                     let base_address =
-                        Address::<Page>::new(128 * libkernel::memory::PML4_ENTRY_MEM_SIZE, PageAlign::Align2MiB)
+                        Address::<Page>::new(128 * libcommon::memory::PML4_ENTRY_MEM_SIZE, PageAlign::Align2MiB)
                             .unwrap();
                     let stack_address = Address::<Page>::new(
                         base_address.address().as_u64() + DEFAULT_TASK_STACK_SIZE,
@@ -633,7 +692,7 @@ unsafe extern "C" fn _entry() -> ! {
                         driver_page_manager
                             .map(
                                 page,
-                                Address::<libkernel::Frame>::new_truncate(0x0),
+                                Address::<libcommon::Frame>::new_truncate(0x0),
                                 false,
                                 PageAttributes::WRITABLE
                                     | PageAttributes::NO_EXECUTE
@@ -660,9 +719,9 @@ unsafe extern "C" fn _entry() -> ! {
                         #[cfg(target_arch = "x86_64")]
                         {
                             (
-                                crate::arch::x64::cpu::GeneralContext::empty(),
-                                crate::arch::x64::cpu::SpecialContext::flags_with_user_segments(
-                                    crate::arch::x64::registers::RFlags::INTERRUPT_FLAG,
+                                libarch::x64::cpu::GeneralContext::empty(),
+                                libarch::x64::cpu::SpecialContext::flags_with_user_segments(
+                                    libarch::x64::registers::RFlags::INTERRUPT_FLAG,
                                 ),
                             )
                         }
@@ -694,7 +753,7 @@ unsafe fn _smp_entry() -> ! {
     }
 
     #[cfg(target_arch = "x86_64")]
-    crate::arch::x64::cpu::init();
+    libarch::x64::cpu::init();
 
     crate::memory::get_kernel_page_manager().commit_vmem_register().unwrap();
 

@@ -1,4 +1,4 @@
-use libkernel::{Address, Page};
+use libcommon::{Address, Page};
 
 use crate::memory::{get_kernel_hhdm_address, PageManager};
 
@@ -21,7 +21,7 @@ pub fn do_syscall(vector: Syscall) {
             let mut last_char_page_base = unsafe { Address::<Page>::new_unchecked(0) };
             loop {
                 // Ensure the memory of the current cstr increment address is mapped.
-                let Some(char_address_base_page) = Address::<Page>::from_ptr(cstr_increment_ptr, libkernel::PageAlign::DontCare)
+                let Some(char_address_base_page) = Address::<Page>::from_ptr(cstr_increment_ptr, libcommon::PageAlign::DontCare)
                     else {
                         warn!("Process attempted to overrun with `CStr` pointer.");
                         return;

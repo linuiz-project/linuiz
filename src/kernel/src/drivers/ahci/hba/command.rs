@@ -1,4 +1,4 @@
-use libkernel::bitfield_getter;
+use libcommon::bitfield_getter;
 
 #[repr(C)]
 pub struct PRDTEntry {
@@ -12,7 +12,7 @@ impl PRDTEntry {
     bitfield_getter!(bits, u32, byte_count, 0..22);
     bitfield_getter!(bits, interrupt_on_completion, 31);
 
-    pub fn set_db_addr(&mut self, addr: libkernel::Address<libkernel::Virtual>) {
+    pub fn set_db_addr(&mut self, addr: libcommon::Address<libcommon::Virtual>) {
         let addr_usize = addr.as_usize();
 
         self.db_addr_lower = addr_usize as u32;

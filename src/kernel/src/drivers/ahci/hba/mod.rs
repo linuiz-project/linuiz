@@ -5,7 +5,7 @@ mod port;
 pub use command::*;
 pub use port::*;
 
-use libkernel::{memory::volatile::VolatileCell, ReadOnly};
+use libcommon::{memory::VolatileCell, ReadOnly};
 
 #[repr(C)]
 pub struct Memory {
@@ -49,4 +49,4 @@ impl Memory {
     }
 }
 
-impl libkernel::memory::volatile::Volatile for Memory {}
+impl libcommon::memory::Volatile for Memory {}

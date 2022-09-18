@@ -31,7 +31,7 @@ fn get_local_state() -> Option<&'static mut LocalState> {
     unsafe {
         #[cfg(target_arch = "x86_64")]
         {
-            ((crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::read()) as *mut LocalState).as_mut()
+            ((libarch::x64::registers::msr::IA32_KERNEL_GS_BASE::read()) as *mut LocalState).as_mut()
         }
     }
 }
@@ -41,11 +41,11 @@ fn get_local_state() -> Option<&'static mut LocalState> {
 /// SAFETY: This function invariantly assumes it will only be called once.
 pub unsafe fn init(core_id: u32) {
     let local_state_ptr =
-        crate::memory::allocate_pages(libkernel::align_up_div(core::mem::size_of::<LocalState>(), 0x1000))
+        crate::memory::allocate_pages(libcommon::align_up_div(core::mem::size_of::<LocalState>(), 0x1000))
             .cast::<LocalState>();
 
     #[cfg(target_arch = "x86_64")]
-    crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::write(local_state_ptr as usize as u64);
+    libarch::x64::registers::msr::IA32_KERNEL_GS_BASE::write(local_state_ptr as usize as u64);
     // TODO abstract the `tp` register
     #[cfg(target_arch = "riscv64")]
     core::arch::asm!("mv tp, {}", in(reg) local_state_pages as u64, options(nostack, nomem));
@@ -53,12 +53,12 @@ pub unsafe fn init(core_id: u32) {
     trace!("Configuring local state: #{}", core_id);
 
     {
-        use libkernel::{Address, Page};
+        use libcommon::{Address, Page};
 
         // Map the pages this local state will utilize.
         let frame_manager = crate::memory::get_kernel_frame_manager();
         let page_manager = crate::memory::get_kernel_page_manager();
-        let base_page = Address::<Page>::from_ptr(local_state_ptr, libkernel::PageAlign::Align4KiB).unwrap();
+        let base_page = Address::<Page>::from_ptr(local_state_ptr, libcommon::PageAlign::Align4KiB).unwrap();
         let end_page = base_page.forward_checked(core::mem::size_of::<LocalState>() / 0x1000).unwrap();
         (base_page..end_page)
             .for_each(|page| page_manager.auto_map(page, crate::memory::PageAttributes::RW, frame_manager));
@@ -69,8 +69,8 @@ pub unsafe fn init(core_id: u32) {
     // TODO abstract this somehow, so we can call e.g. `crate::interrupts::configure_controller();`
     #[cfg(target_arch = "x86_64")]
     {
-        use crate::arch::x64::structures::apic;
         use crate::interrupts::Vector;
+        use libarch::x64::structures::apic;
 
         trace!("Configuring local APIC...");
         apic::software_reset();
@@ -108,7 +108,7 @@ pub unsafe fn init(core_id: u32) {
             {
                 #[cfg(target_arch = "x86_64")]
                 {
-                    use crate::arch::x64;
+                    use libarch::x64;
 
                     (
                         x64::cpu::GeneralContext::empty(),
