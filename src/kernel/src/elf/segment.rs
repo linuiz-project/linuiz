@@ -1,4 +1,4 @@
-use libkernel::{Address, Physical, Virtual};
+use libcommon::{Address, Physical, Virtual};
 
 bitflags::bitflags! {
     #[repr(transparent)]

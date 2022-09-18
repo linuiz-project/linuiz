@@ -30,11 +30,11 @@ impl TaskPriority {
 /// Represents a stack allocation strategy for a [`Task`].
 pub enum TaskStack {
     None,
-    At(libkernel::Address<libkernel::Virtual>),
+    At(libcommon::Address<libcommon::Virtual>),
 }
 
 pub enum TaskStart {
-    Address(libkernel::Address<libkernel::Virtual>),
+    Address(libcommon::Address<libcommon::Virtual>),
     Function(fn() -> !),
 }
 

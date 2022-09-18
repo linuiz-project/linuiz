@@ -1,7 +1,7 @@
 #[cfg(target_arch = "x86_64")]
 mod timers_impl {
-    use crate::arch::x64::structures::apic;
     use alloc::boxed::Box;
+    use libarch::x64::structures::apic;
 
     /// Gets the best (most precise) local timer available.
     ///
@@ -29,12 +29,12 @@ mod timers_impl {
         ///         affect software execution, and additionally that the [`crate::interrupts::Vector::LocalTimer`] has
         ///         a proper handler.
         pub unsafe fn new(set_freq: u16) -> Option<Self> {
-            if crate::arch::x64::registers::msr::IA32_APIC_BASE::get_hw_enabled() {
+            if libarch::x64::registers::msr::IA32_APIC_BASE::get_hw_enabled() {
                 apic::get_timer().set_mode(apic::TimerMode::OneShot);
 
                 // TODO perhaps check the state of APIC timer LVT? It should be asserted that the below will always work.
                 //      Really, in general, the state of the APIC timer should be more carefully controlled. Perhaps this
-                //      can be done when the interrupt device is abstracted out into `libkernel`.
+                //      can be done when the interrupt device is abstracted out into `libcommon`.
 
                 let freq = {
                     let clock = crate::time::clock::get();
@@ -73,13 +73,13 @@ mod timers_impl {
         ///         affect software execution, and additionally that the `crate::interrupts::Vector::LocalTimer` vector has
         ///         a proper handler.
         pub unsafe fn new(set_freq: u16) -> Option<Self> {
-            if crate::arch::x64::registers::msr::IA32_APIC_BASE::get_hw_enabled()
-                && crate::arch::x64::cpu::cpuid::FEATURE_INFO.has_tsc()
-                && crate::arch::x64::cpu::cpuid::FEATURE_INFO.has_tsc_deadline()
+            if libarch::x64::registers::msr::IA32_APIC_BASE::get_hw_enabled()
+                && libarch::x64::cpu::cpuid::FEATURE_INFO.has_tsc()
+                && libarch::x64::cpu::cpuid::FEATURE_INFO.has_tsc_deadline()
             {
                 apic::get_timer().set_mode(apic::TimerMode::TSC_Deadline);
 
-                let freq = crate::arch::x64::cpu::cpuid::CPUID.get_processor_frequency_info().map_or_else(
+                let freq = libarch::x64::cpu::cpuid::CPUID.get_processor_frequency_info().map_or_else(
                     || {
                         trace!("CPU does not support TSC frequency reporting via CPUID.");
 
@@ -110,7 +110,7 @@ mod timers_impl {
             let tsc_wait =
                 self.0.checked_mul(interval_multiplier as u64).expect("timer interval multiplier overflowed");
 
-            crate::arch::x64::registers::msr::IA32_TSC_DEADLINE::set(core::arch::x86_64::_rdtsc() + tsc_wait);
+            libarch::x64::registers::msr::IA32_TSC_DEADLINE::set(core::arch::x86_64::_rdtsc() + tsc_wait);
         }
     }
 }

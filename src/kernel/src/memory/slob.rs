@@ -1,6 +1,6 @@
 use crate::memory::{PageAttributes, PageManager};
 use core::{alloc::Layout, mem::size_of};
-use libkernel::{align_up_div, Address, Page};
+use libcommon::{align_up_div, Address, Page};
 use spin::{RwLock, RwLockWriteGuard};
 
 /// Represents one page worth of memory blocks (i.e. 4096 bytes in blocks).
@@ -114,11 +114,11 @@ impl<'map> SLOB<'map> {
         let cur_table_len = table.len();
         // Required length of our map, in indexes.
         let req_table_len =
-            (table.len() + libkernel::align_up_div(required_blocks.get(), BlockPage::BLOCKS_PER)).next_power_of_two();
+            (table.len() + libcommon::align_up_div(required_blocks.get(), BlockPage::BLOCKS_PER)).next_power_of_two();
         // Current page count of our map (i.e. how many pages the slice requires)
-        let cur_table_page_count = libkernel::align_up_div(cur_table_len * size_of::<BlockPage>(), 0x1000);
+        let cur_table_page_count = libcommon::align_up_div(cur_table_len * size_of::<BlockPage>(), 0x1000);
         // Required page count of our map.
-        let req_table_page_count = libkernel::align_up_div(req_table_len * size_of::<BlockPage>(), 0x1000);
+        let req_table_page_count = libcommon::align_up_div(req_table_len * size_of::<BlockPage>(), 0x1000);
 
         if (req_table_len * 0x1000) >= 0x400000000000 {
             return Err(AllocError::OutOfMemory);
@@ -202,7 +202,7 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
             let mut table = self.table.write();
 
             let align_mask = usize::max(layout.align() / Self::BLOCK_SIZE, 1) - 1;
-            let size_in_blocks = libkernel::align_up_div(layout.size(), Self::BLOCK_SIZE);
+            let size_in_blocks = libcommon::align_up_div(layout.size(), Self::BLOCK_SIZE);
 
             let end_table_index;
             let mut block_index;

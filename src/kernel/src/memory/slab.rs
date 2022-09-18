@@ -1,7 +1,7 @@
 use alloc::{alloc::Global, vec::Vec};
 use bit_field::BitField;
 use core::{alloc::AllocError, sync::atomic::Ordering};
-use libkernel::{
+use libcommon::{
     memory::{page_aligned_allocator, AlignedAllocator},
     Address, Virtual,
 };
@@ -121,8 +121,8 @@ impl<'a> SlabAllocator<'a> {
         phys_mapped_address: Address<Virtual>,
     ) -> Option<Self> {
         let page_count =
-            libkernel::align_up_div(memory_map.last().map(|entry| entry.base + entry.len).unwrap() as usize, 0x1000);
-        let table_bytes = libkernel::align_up(page_count * core::mem::size_of::<Frame>(), 0x1000);
+            libcommon::align_up_div(memory_map.last().map(|entry| entry.base + entry.len).unwrap() as usize, 0x1000);
+        let table_bytes = libcommon::align_up(page_count * core::mem::size_of::<Frame>(), 0x1000);
 
         let table_entry = memory_map
             .iter()
@@ -189,125 +189,6 @@ impl<'a> SlabAllocator<'a> {
 
     fn with_table<T>(&self, func: impl FnOnce(&[Frame]) -> T) -> T {
         crate::interrupts::without(|| func(self.table))
-    }
-
-    pub fn lock_next(&self) -> Result<Address<libkernel::Frame>> {
-        self.with_table(|table| {
-            table
-                .iter()
-                .enumerate()
-                .find_map(|(index, table_page)| {
-                    if table_page.try_peek() {
-                        let (ref_count, ty) = table_page.data();
-
-                        let result = if ref_count == 0 && ty == FrameType::Generic {
-                            table_page.borrow();
-                            Some(Address::<libkernel::Frame>::new_truncate((index * 0x1000) as u64))
-                        } else {
-                            None
-                        };
-
-                        table_page.unpeek();
-                        result
-                    } else {
-                        None
-                    }
-                })
-                .ok_or(AllocError)
-        })
-    }
-
-    pub fn lock_next_many(&self, count: usize) -> Result<Address<libkernel::Frame>> {
-        self.with_table(|table| {
-            let mut start_index = 0;
-
-            while start_index < (table.len() - count) {
-                let sub_table = &table[start_index..(start_index + count)];
-                sub_table.iter().for_each(Frame::peek);
-
-                match sub_table
-                    .iter()
-                    .enumerate()
-                    .map(|(index, frame)| (index, frame.data()))
-                    .find(|(_, (ref_count, ty))| *ref_count > 0 || *ty != FrameType::Generic)
-                {
-                    Some((index, _)) => {
-                        start_index += index + 1;
-                        sub_table.iter().for_each(Frame::unpeek);
-                    }
-                    None => {
-                        sub_table.iter().for_each(|frame| {
-                            frame.borrow();
-                            frame.unpeek();
-                        });
-
-                        return Ok(Address::<libkernel::Frame>::new_truncate((start_index * 0x1000) as u64));
-                    }
-                }
-            }
-
-            Err(AllocError)
-        })
-    }
-
-    pub fn borrow(&self, frame: Address<libkernel::Frame>) -> Result<()> {
-        self.with_table(|table| {
-            let Some(frame) = table.get(frame.index()) else { return Err(AllocError) };
-            frame.peek();
-
-            let (ref_count, ty) = frame.data();
-            if ref_count < 0xFFF && ty == FrameType::Generic {
-                frame.borrow();
-                frame.unpeek();
-
-                Ok(())
-            } else {
-                frame.unpeek();
-
-                Err(AllocError)
-            }
-        })
-    }
-
-    pub fn borrow_many(&self, base: Address<libkernel::Frame>, count: usize) -> Result<()> {
-        self.with_table(|table| {
-            let frames = &table[base.index()..(base.index() + count)];
-
-            frames.iter().for_each(Frame::peek);
-            if frames.iter().map(Frame::data).all(|(ref_count, ty)| ref_count < 0xFFF && ty == FrameType::Generic) {
-                frames.iter().for_each(Frame::borrow);
-                frames.iter().for_each(Frame::unpeek);
-
-                Ok(())
-            } else {
-                frames.iter().for_each(Frame::unpeek);
-
-                Err(AllocError)
-            }
-        })
-    }
-
-    pub fn free(&self, frame: Address<libkernel::Frame>) -> Result<()> {
-        self.with_table(|table| {
-            let Some(frame) = table.get(frame.index()) else { return Err(AllocError) };
-
-            frame.peek();
-
-            match frame.data() {
-                (ref_count, _) if ref_count > 0 => {
-                    frame.free();
-                    frame.unpeek();
-
-                    Ok(())
-                }
-
-                _ => {
-                    frame.unpeek();
-
-                    Err(AllocError)
-                }
-            }
-        })
     }
 }
 
@@ -388,7 +269,7 @@ unsafe impl<'a> core::alloc::Allocator for SlabAllocator<'a> {
                     // SAFETY: Frame addresses are naturally aligned, and arbitrary memory is valid for `u8`, and `phys_mapped_address` is
                     //         required to be valid for arbitrary offsets from within its range.
                     let allocation_ptr = unsafe { self.phys_mapped_address.as_mut_ptr::<u8>().add(address.as_usize()) };
-                    slice_from_raw_parts_mut(allocation_ptr, libkernel::align_up(layout.size(), 4096))
+                    slice_from_raw_parts_mut(allocation_ptr, libcommon::align_up(layout.size(), 4096))
                 })
             }
         };
@@ -411,5 +292,130 @@ unsafe impl<'a> core::alloc::Allocator for SlabAllocator<'a> {
         } else {
             todo!("don't leak memory")
         }
+    }
+}
+
+impl libcommon::memory::KernelAllocator for SlabAllocator<'_> {
+    fn lock_next(&self) -> Result<Address<libcommon::Frame>, AllocError> {
+        self.with_table(|table| {
+            table
+                .iter()
+                .enumerate()
+                .find_map(|(index, table_page)| {
+                    if table_page.try_peek() {
+                        let (ref_count, ty) = table_page.data();
+
+                        let result = if ref_count == 0 && ty == FrameType::Generic {
+                            table_page.borrow();
+                            Some(Address::<libcommon::Frame>::new_truncate((index * 0x1000) as u64))
+                        } else {
+                            None
+                        };
+
+                        table_page.unpeek();
+                        result
+                    } else {
+                        None
+                    }
+                })
+                .ok_or(AllocError)
+        })
+    }
+
+    fn lock_next_many(&self, count: usize) -> Result<Address<libcommon::Frame>, AllocError> {
+        self.with_table(|table| {
+            let mut start_index = 0;
+
+            while start_index < (table.len() - count) {
+                let sub_table = &table[start_index..(start_index + count)];
+                sub_table.iter().for_each(Frame::peek);
+
+                match sub_table
+                    .iter()
+                    .enumerate()
+                    .map(|(index, frame)| (index, frame.data()))
+                    .find(|(_, (ref_count, ty))| *ref_count > 0 || *ty != FrameType::Generic)
+                {
+                    Some((index, _)) => {
+                        start_index += index + 1;
+                        sub_table.iter().for_each(Frame::unpeek);
+                    }
+                    None => {
+                        sub_table.iter().for_each(|frame| {
+                            frame.borrow();
+                            frame.unpeek();
+                        });
+
+                        return Ok(Address::<libcommon::Frame>::new_truncate((start_index * 0x1000) as u64));
+                    }
+                }
+            }
+
+            Err(AllocError)
+        })
+    }
+
+    fn borrow(&self, frame: Address<libcommon::Frame>) -> Result<(), AllocError> {
+        self.with_table(|table| {
+            let Some(frame) = table.get(frame.index()) else { return Err(AllocError) };
+            frame.peek();
+
+            let (ref_count, ty) = frame.data();
+            if ref_count < 0xFFF && ty == FrameType::Generic {
+                frame.borrow();
+                frame.unpeek();
+
+                Ok(())
+            } else {
+                frame.unpeek();
+
+                Err(AllocError)
+            }
+        })
+    }
+
+    fn borrow_many(&self, base: Address<libcommon::Frame>, count: usize) -> Result<(), AllocError> {
+        self.with_table(|table| {
+            let frames = &table[base.index()..(base.index() + count)];
+
+            frames.iter().for_each(Frame::peek);
+            if frames.iter().map(Frame::data).all(|(ref_count, ty)| ref_count < 0xFFF && ty == FrameType::Generic) {
+                frames.iter().for_each(Frame::borrow);
+                frames.iter().for_each(Frame::unpeek);
+
+                Ok(())
+            } else {
+                frames.iter().for_each(Frame::unpeek);
+
+                Err(AllocError)
+            }
+        })
+    }
+
+    fn free(&self, frame: Address<libcommon::Frame>) -> Result<(), AllocError> {
+        self.with_table(|table| {
+            let Some(frame) = table.get(frame.index()) else { return Err(AllocError) };
+
+            frame.peek();
+
+            match frame.data() {
+                (ref_count, _) if ref_count > 0 => {
+                    frame.free();
+                    frame.unpeek();
+
+                    Ok(())
+                }
+
+                _ => {
+                    frame.unpeek();
+
+                    Err(AllocError)
+                }
+            }
+        })
+    }
+
+    fn allocate_to(&self, frame: Address<libcommon::Frame>) -> Result<Address<Virtual>, AllocError> {
+        self.borrow(frame).map(|_| Address::<Virtual>::new_truncate(self.phys_mapped_address.as_u64() + frame.as_u64()))
     }
 }

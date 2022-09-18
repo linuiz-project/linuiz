@@ -2,12 +2,12 @@ use crate::memory::io::{PortAddress, ReadOnlyPort, WriteOnlyPort};
 use crate::memory::{ensure_hhdm_frame_is_mapped, get_kernel_hhdm_address, PageAttributes};
 use acpi::mcfg::Mcfg;
 use acpi::{fadt::Fadt, sdt::Signature, AcpiTables, PhysicalMapping, PlatformInfo};
-use libkernel::{Address, Frame, Page};
+use libcommon::{Address, Frame, Page};
 use spin::{Mutex, MutexGuard, Once};
 
 pub enum Register<'a, T: crate::memory::io::PortReadWrite> {
     IO(crate::memory::io::ReadWritePort<T>),
-    MMIO(&'a libkernel::memory::volatile::VolatileCell<T, libkernel::ReadWrite>),
+    MMIO(&'a libcommon::memory::VolatileCell<T, libcommon::ReadWrite>),
 }
 
 impl<T: crate::memory::io::PortReadWrite> Register<'_, T> {
@@ -67,8 +67,8 @@ impl acpi::AcpiHandler for AcpiHandler {
         for page_base in (hhdm_mapped_address..(hhdm_mapped_address + size)).step_by(0x1000) {
             // TODO don't unwrap here
             let page = Address::<Page>::containing(
-                Address::<libkernel::Virtual>::new(page_base as u64).unwrap(),
-                libkernel::PageAlign::Align4KiB,
+                Address::<libcommon::Virtual>::new(page_base as u64).unwrap(),
+                libcommon::PageAlign::Align4KiB,
             );
 
             trace!("ACPI MAP: {:?}", page);

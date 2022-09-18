@@ -3,10 +3,14 @@ name = "kernel"
 version = "0.0.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
+[dependencies.libcommon]
+path = "../shared/libcommon/"
+features = ["global_allocator"]
+[dependencies.libarch]
+path = "../shared/libarch/"
+[dependencies.libkernel]
+path = "../shared/libkernel/"
 [dependencies]
-libkernel = { path = "../libkernel/" }
 log = { version = "*", default-features = false }
 num_enum = { version = "*", default-features = false }
 limine = { git = "https://github.com/limine-bootloader/limine-rs", features = ["requests-section"] }
@@ -14,15 +18,12 @@ bit_field = "*"
 bitflags = "*"
 spin = "*"
 paste = "*"
+# TODO perhaps don't use ACPI / DTB in the kernel, but abstract it in libarch/libcommon/libkernel?
 acpi = { path = "../../../acpi/acpi/" }
 aml = "*"
 miniz_oxide = "*"
 bytemuck = "*"
 rustc-demangle = "*"
-
-[target.'cfg(target_arch = "x86_64")'.dependencies]
-x86_64 = "*"
-raw-cpuid = { path = "../../../rust-cpuid/" }
 
 [profile.dev]
 opt-level = 1

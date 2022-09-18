@@ -1,7 +1,7 @@
 pub mod standard;
 
 use core::{fmt, marker::PhantomData};
-use libkernel::{Address, Physical};
+use libcommon::{Address, Physical};
 
 use crate::num::LittleEndianU32;
 

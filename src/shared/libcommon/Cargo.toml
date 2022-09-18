@@ -1,0 +1,16 @@
+[package]
+name = "libcommon"
+version = "0.0.1"
+authors = ["semiviral"]
+edition = "2021"
+
+[dependencies]
+log = { version = "*", default-features = false }
+bit_field = "*"
+bitflags = "*"
+paste = "*"
+num_enum = { version = "*", default-features = false }
+spin = "*"
+
+[features]
+global_allocator = []
