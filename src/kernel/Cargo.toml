@@ -29,5 +29,6 @@ rustc-demangle = "*"
 opt-level = 1
 
 [profile.release]
-opt-level = 3
+strip = true
 lto = true
+# Further release optimizations are specified in the xtask `Builder`. Optimization can be controlled with `-O speed/size`

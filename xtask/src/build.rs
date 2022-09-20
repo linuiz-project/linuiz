@@ -2,6 +2,12 @@ use clap::{clap_derive::ArgEnum, Parser};
 use std::path::PathBuf;
 use xshell::cmd;
 
+#[derive(ArgEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Optimization {
+    Speed,
+    Size,
+}
+
 #[allow(non_camel_case_types)]
 #[derive(ArgEnum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Architecture {
@@ -31,6 +37,7 @@ impl Compression {
 }
 
 #[derive(Parser)]
+#[allow(non_snake_case)]
 pub struct Options {
     /// The compilation target for this build.
     #[clap(arg_enum, long, default_value = "x64")]
@@ -67,6 +74,9 @@ pub struct Options {
     /// Whether to force the compiler to *not* use `rbp` to store the stack frame pointer. This does nothing when compiling in release.
     #[clap(long)]
     no_stack_traces: bool,
+
+    #[clap(arg_enum, short)]
+    Optimize: Option<Optimization>,
 }
 
 static REQUIRED_ROOT_DIRS: [&str; 5] = ["resources/", ".hdd/", ".hdd/root/EFI/BOOT/", ".hdd/root/linuiz/", ".debug/"];
@@ -170,12 +180,31 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
             if options.clippy { "clippy" } else { "build" },
             "--profile",
             if options.release { "release" } else { "dev" },
-            "--target",
+            "--future-incompat-report",
         ];
 
         if options.verbose {
-            vec.insert(1, "-vv");
+            vec.push("-vv");
         }
+
+        match options.Optimize {
+            Some(Optimization::Speed) => {
+                vec.push("--config");
+                vec.push("opt-level=3");
+            }
+
+            Some(Optimization::Size) => {
+                vec.push("--config");
+                vec.push("opt-level='z'");
+
+                vec.push("--config");
+                vec.push("codegen-units=1");
+            }
+
+            None => {}
+        }
+
+        vec.push("--target");
 
         vec
     };
