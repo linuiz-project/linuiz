@@ -39,13 +39,14 @@ mod addr;
 mod macros;
 
 pub use addr::*;
+pub mod acpi;
 pub mod memory;
 pub mod sync;
 pub mod syscall;
 
-pub struct ReadOnly ;
-pub struct WriteOnly ;
-pub struct ReadWrite ;
+pub struct ReadOnly;
+pub struct WriteOnly;
+pub struct ReadWrite;
 
 pub const KIBIBYTE: u64 = 0x400; // 1024
 pub const MIBIBYTE: u64 = KIBIBYTE * KIBIBYTE;
@@ -93,7 +94,6 @@ extern "C" {
 }
 
 impl LinkerSymbol {
-
     #[inline]
     pub unsafe fn as_usize(&'static self) -> usize {
         self as *const _ as usize

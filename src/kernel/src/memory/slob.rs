@@ -296,17 +296,3 @@ unsafe impl core::alloc::Allocator for SLOB<'_> {
         });
     }
 }
-
-/// SAFETY: Honestly, I've probably fucked up some of the invariants `GlobalAlloc` is supposed to provide.
-unsafe impl core::alloc::GlobalAlloc for SLOB<'_> {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        match <Self as core::alloc::Allocator>::allocate(self, layout) {
-            Ok(non_null) => non_null.as_mut_ptr(),
-            Err(_) => core::ptr::null_mut(),
-        }
-    }
-
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        <Self as core::alloc::Allocator>::deallocate(self, core::ptr::NonNull::new(ptr).unwrap(), layout);
-    }
-}

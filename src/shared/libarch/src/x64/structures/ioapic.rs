@@ -172,7 +172,7 @@ static IOAPICS: Once<Vec<IoApic>> = Once::new();
 /// Queries the platform for I/O APICs, and returns them in a collection.
 pub fn get_io_apics() -> &'static Vec<IoApic<'static>> {
     IOAPICS.call_once(|| {
-        let platform_info = crate::tables::acpi::get_platform_info();
+        let platform_info = libcommon::acpi::get_platform_info();
 
         if let acpi::platform::interrupt::InterruptModel::Apic(apic) = &platform_info.interrupt_model {
             apic.io_apics
@@ -181,7 +181,7 @@ pub fn get_io_apics() -> &'static Vec<IoApic<'static>> {
                 .map(|ioapic_info| unsafe {
 
                     let (ioregsel, ioregwin) = {
-                        let Ok(ioapic_regs) = libcommon::memory::get_global_allocator().allocate_to(Address::<Frame>::new_truncate(ioapic_info.address as u64))
+                        let Ok(ioapic_regs) = libcommon::memory::get_global_allocator().allocate_to(Address::<Frame>::new_truncate(ioapic_info.address as u64), 1)
                             else { panic!("failed to initialize I/O APIC") };
 
                         (

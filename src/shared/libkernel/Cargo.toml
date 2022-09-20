@@ -8,3 +8,5 @@ path = "../libarch/"
 [dependencies.libcommon]
 path = "../libcommon/"
 features = ["global_allocator"]
+[dependencies]
+spin = "*"

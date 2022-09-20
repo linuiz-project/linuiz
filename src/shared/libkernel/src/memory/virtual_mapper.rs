@@ -1,9 +1,13 @@
-use crate::memory::{AttributeModify, Mut, PageTable, PageTableEntry, Ref};
-use libarch::memory::PageAttributes;
-use libcommon::{Address, Frame, Page, Virtual};
+use crate::memory::{AttributeModify, PageTable, PageTableEntry};
+use libarch::{
+    interrupts,
+    memory::{PageAttributes, VmemRegister},
+};
+use libcommon::{
+    memory::{Mut, Ref},
+    Address, Frame, Page, Virtual,
+};
 use spin::RwLock;
-
-use super::VmemRegister;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PageManagerError {
@@ -71,7 +75,7 @@ impl VirtualMapper {
     }
 
     fn with_root_table<T>(&self, func: impl FnOnce(PageTable<Ref>) -> T) -> T {
-        libarch::interrupts::without(|| {
+        interrupts::without(|| {
             let data = self.0.read();
             // TODO try to find alternative to unwrapping here
             // SAFETY: `PageManager` already requires that the physical mapping page is valid, so it can be safely passed to the page table.
@@ -80,7 +84,7 @@ impl VirtualMapper {
     }
 
     fn with_root_table_mut<T>(&self, func: impl FnOnce(PageTable<Mut>) -> T) -> T {
-        libarch::interrupts::without(|| {
+        interrupts::without(|| {
             let mut data = self.0.write();
             // SAFETY: `PageManager` already requires that the physical mapping page is valid, so it can be safely passed to the page table.
             func(unsafe { PageTable::<Mut>::new(data.depth, data.phys_mapped_address, &mut data.entry).unwrap() })
@@ -99,7 +103,7 @@ impl VirtualMapper {
         let result = self.with_root_table_mut(|mut root_table| {
             let frame_count = (page.align() as usize) / 0x1000;
             // If the acquisition of the frame fails, return the error.
-            if crate::memory::get_global_allocator().borrow_many(frame, frame_count as usize).is_err() {
+            if libcommon::memory::get_global_allocator().borrow_many(frame, frame_count as usize).is_err() {
                 return Err(PageManagerError::AllocError);
             }
 
@@ -145,16 +149,10 @@ impl VirtualMapper {
                         // SAFETY: We've got an explicit directive from the caller to unmap this page, so the caller must ensure that's a valid operation.
                         unsafe { entry.set_attributes(PageAttributes::PRESENT, AttributeModify::Remove) };
 
-                        // Handle frame permissions to keep them updated.
-                        if free_frame {
-                            let frame_index = entry.get_frame();
-
-                            // SAFETY: See above.
-                            unsafe {
-                                entry.set_frame(Address::<Frame>::zero());
-                                frame_manager.free(frame_index).unwrap();
-                            }
-                        }
+                        let frame = entry.get_frame();
+                        // SAFETY: See above.
+                        unsafe { entry.set_frame(Address::<Frame>::zero()) };
+                        libcommon::memory::get_global_allocator().free(frame).unwrap();
 
                         // Invalidate the page in the TLB.
                         #[cfg(target_arch = "x86_64")]
@@ -171,7 +169,8 @@ impl VirtualMapper {
 
     #[inline]
     pub fn auto_map(&self, page: Address<Page>, attributes: PageAttributes) {
-        self.map(page, frame_manager.lock_next_many((page.align() as usize) / 0x1000).unwrap(), attributes).unwrap();
+        // TODO do not unwrap here
+        self.map(page, libcommon::memory::get_global_allocator().borrow_next().unwrap(), attributes).unwrap();
     }
 
     /* STATE QUERYING */

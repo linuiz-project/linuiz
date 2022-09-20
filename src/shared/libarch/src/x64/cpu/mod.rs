@@ -1,7 +1,4 @@
-use alloc::boxed::Box;
-
-mod syscall;
-
+pub mod syscall;
 pub mod cpuid {
     pub use raw_cpuid::*;
     use spin::Lazy;
@@ -13,6 +10,8 @@ pub mod cpuid {
         Lazy::new(|| CPUID.get_extended_processor_and_feature_identifiers());
     pub static VENDOR_INFO: Lazy<Option<VendorInfo>> = Lazy::new(|| CPUID.get_vendor_info());
 }
+
+use alloc::boxed::Box;
 
 /// Reads [`crate::regisers::x86_64::msr::IA32_APIC_BASE`] to determine whether the current core
 /// is the bootstrap processor.
@@ -147,7 +146,7 @@ unsafe fn init_tables() {
             use core::mem::MaybeUninit;
             use libcommon::memory::stack_aligned_allocator;
 
-            let tss = Box::new(TaskStateSegment::new());
+            let mut tss = Box::new(TaskStateSegment::new());
 
             let allocate_tss_stack = |pages: usize| {
                 VirtAddr::from_ptr::<MaybeUninit<()>>(

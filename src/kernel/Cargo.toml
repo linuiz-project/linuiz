@@ -19,7 +19,7 @@ bitflags = "*"
 spin = "*"
 paste = "*"
 # TODO perhaps don't use ACPI / DTB in the kernel, but abstract it in libarch/libcommon/libkernel?
-acpi = { path = "../../../acpi/acpi/" }
+acpi = { git = "https://github.com/semiviral/acpi" }
 aml = "*"
 miniz_oxide = "*"
 bytemuck = "*"
