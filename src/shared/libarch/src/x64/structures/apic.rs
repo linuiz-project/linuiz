@@ -192,7 +192,7 @@ fn get_apic() -> Address<libcommon::Virtual> {
     *APIC.call_once(|| {
         // SAFETY: On x86, this address is always valid physical memory.
         let xapic_frame = unsafe { Address::<libcommon::Frame>::new_unchecked(xAPIC_BASE_ADDR) };
-        match libcommon::memory::get_global_allocator().allocate_to(xapic_frame) {
+        match libcommon::memory::get_global_allocator().allocate_to(xapic_frame, 1) {
             Ok(address) => address,
             Err(_) => panic!("failed to initialize xAPIC"),
         }

@@ -1,8 +1,6 @@
-use crate::syscall::Syscall;
-
 /// SAFETY: This function should never be called by software—it is the entrypoint for the x86_64 `syscall` instruction.
 #[naked]
-pub unsafe extern "sysv64" fn syscall_handler() {
+pub(super) unsafe extern "sysv64" fn syscall_handler() {
     core::arch::asm!(
         "
         cld
@@ -53,7 +51,7 @@ pub unsafe extern "sysv64" fn syscall_handler() {
 
 #[repr(C)]
 #[derive(Debug)]
-struct PreservedRegisters {
+pub struct PreservedRegisters {
     r15: u64,
     r14: u64,
     r13: u64,
@@ -64,56 +62,28 @@ struct PreservedRegisters {
     rsp: u64,
 }
 
-#[repr(C, packed)]
-struct ReturnContext {
-    ip: u64,
-    sp: u64,
-}
-
 /// Handler for executing system calls from userspace.
 extern "sysv64" fn syscall_handler_inner(
-    vector: u64,
+    rdi: u64,
     rsi: u64,
     rdx: u64,
-    _rcx: u64,
-    _r8: u64,
-    _r9: u64,
+    rcx: u64,
+    r8: u64,
+    r9: u64,
     ret_ip: u64,
     ret_sp: u64,
-    mut _regs: PreservedRegisters,
-) -> ReturnContext {
-    let syscall = match vector {
-        0x100 => {
-            use log::Level;
-
-            // TODO possibly PR the `log` crate to make `log::Level::from_usize()` public.
-            let log_level = match rsi {
-                1 => Ok(Level::Error),
-                2 => Ok(Level::Warn),
-                3 => Ok(Level::Info),
-                4 => Ok(Level::Debug),
-                rsi => Err(rsi),
-            };
-
-            match log_level {
-                Ok(level) => Some(Syscall::Log { level, cstr_ptr: rdx as usize as *const _ }),
-                Err(invalid_level) => {
-                    warn!("Invalid log level provided: {}", invalid_level);
-                    None
-                }
-            }
-        }
-
-        vector => {
-            warn!("Unhandled system call vector: {:#X}", vector);
-            None
-        }
-    };
-
-    match syscall {
-        Some(syscall) => crate::syscall::do_syscall(syscall),
-        None => warn!("Failed to execute system call due to errors."),
-    }
-
-    ReturnContext { ip: ret_ip, sp: ret_sp }
+    mut preserved_regs: PreservedRegisters,
+) -> crate::interrupts::SyscallReturnContext {
+    // SAFETY: Function pointer is required to be valid for reading by the interrupt module.
+    (unsafe { &*crate::interrupts::SYSCALL_HANDLER.get() })(
+        rdi,
+        rsi,
+        rdx,
+        rcx,
+        r8,
+        r9,
+        ret_ip,
+        ret_sp,
+        &mut preserved_regs,
+    )
 }

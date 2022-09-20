@@ -72,7 +72,7 @@ pub(crate) static PAGE_FAULT_HANDLER: SyncUnsafeCell<PageFaultHandler> =
     SyncUnsafeCell::new(|_| Err(PageFaultHandlerError::NoHandler));
 pub fn set_page_fault_handler(handler: PageFaultHandler) {
     // SAFETY: Changing a function pointer shouldn't result in UB with interrupts disabled.
-    crate::interrupts::without(|| unsafe { unsafe { PAGE_FAULT_HANDLER.get().write(handler) } });
+    crate::interrupts::without(|| unsafe { PAGE_FAULT_HANDLER.get().write(handler) });
 }
 
 /* NON-EXCEPTION IRQ HANDLING */
@@ -84,4 +84,29 @@ pub(crate) static INTERRUPT_HANDLER: SyncUnsafeCell<InterruptHandler> = SyncUnsa
 pub fn set_interrupt_handler(handler: InterruptHandler) {
     // SAFETY: Changing a function pointer shouldn't result in UB with interrupts disabled.
     crate::interrupts::without(|| unsafe { INTERRUPT_HANDLER.get().write(handler) });
+}
+
+#[cfg(target_arch = "x86_64")]
+pub type SyscallContext = crate::x64::cpu::syscall::PreservedRegisters;
+#[repr(C, packed)]
+pub struct SyscallReturnContext {
+    ip: u64,
+    sp: u64,
+}
+pub type SyscallHandler = fn(
+    vector: u64,
+    arg0: u64,
+    arg1: u64,
+    arg2: u64,
+    arg3: u64,
+    arg4: u64,
+    ret_ip: u64,
+    ret_sp: u64,
+    regs: &mut SyscallContext,
+) -> SyscallReturnContext;
+pub(crate) static SYSCALL_HANDLER: SyncUnsafeCell<SyscallHandler> =
+    SyncUnsafeCell::new(|_, _, _, _, _, _, _, _, _| panic!("no system call handler"));
+pub fn set_syscall_handler(syscall_handler: SyscallHandler) {
+    // SAFETY: Changing a function pointer shouldn't result in UB when interrupts are disabled.
+    crate::interrupts::without(|| unsafe { SYSCALL_HANDLER.get().write(syscall_handler) });
 }

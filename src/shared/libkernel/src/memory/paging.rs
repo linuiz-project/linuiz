@@ -1,7 +1,9 @@
-use super::{InteriorRef, Mut, Ref};
 use core::fmt;
 use libarch::memory::{PageAttributes, PTE_FRAME_ADDRESS_MASK};
-use libcommon::{Address, Frame, Page, PageAlign, Virtual};
+use libcommon::{
+    memory::{InteriorRef, Mut, Ref},
+    Address, Frame, Page, PageAlign, Virtual,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttributeModify {
@@ -26,7 +28,7 @@ impl PageTableEntry {
     }
 
     pub const fn new(frame: Address<Frame>, attributes: PageAttributes) -> Self {
-        Self(frame.as_u64() | attributes.bits())
+        Self(((frame.index() as u64) << Self::FRAME_ADDRESS_SHIFT) | attributes.bits())
     }
 
     /// Whether the page table entry is present or usable the memory controller.
@@ -38,7 +40,7 @@ impl PageTableEntry {
     /// Gets the frame index of the page table entry.
     #[inline(always)]
     pub const fn get_frame(&self) -> Address<Frame> {
-        Address::<Frame>::new_truncate(self.0 & PTE_FRAME_ADDRESS_MASK)
+        Address::<Frame>::new_truncate(((self.0 & PTE_FRAME_ADDRESS_MASK) >> Self::FRAME_ADDRESS_SHIFT) * 0x1000)
     }
 
     /// Sets the entry's frame index.
@@ -46,7 +48,7 @@ impl PageTableEntry {
     /// SAFETY: Caller must ensure changing the attributes of this entry does not cause any memory corruption side effects.
     #[inline(always)]
     pub unsafe fn set_frame(&mut self, frame: Address<Frame>) {
-        self.0 = (self.0 & !PTE_FRAME_ADDRESS_MASK) | frame.as_u64();
+        self.0 = (self.0 & !PTE_FRAME_ADDRESS_MASK) | ((frame.index() as u64) << Self::FRAME_ADDRESS_SHIFT);
     }
 
     /// Gets the attributes of this page table entry.
@@ -242,14 +244,9 @@ impl<'a> PageTable<'a, Mut> {
         // TODO this doesn't handle page depth correctly for creations
         // TODO possibly handle present but no frame, or frame but no present?
         if !entry.is_present() && cur_depth > 1 {
-            // SAFETY: The layout is hardcoded, so is known to follow the required invariants (nonzero, power-of-two, etc.).
-            let layout = const { unsafe { core::alloc::Layout::from_size_align_unchecked(0x1000, 0x1000) } };
-            // SAFETY: The layout is hardcoded, so is known to follow the required invariants (nonzero, power-of-two, etc.).
-            let table_ptr = unsafe { alloc::alloc::alloc_zeroed(layout) };
-
-            let Some(frame_address) = Address::<Frame>::new((table_ptr.addr() as u64) - hhdm_address.as_u64())
+            let Ok(frame) = libcommon::memory::get_global_allocator().borrow_next()
                 else { return func(Err(PagingError::NoMoreFrames)); };
-            *entry = PageTableEntry::new(frame_address, PageAttributes::PTE);
+            *entry = PageTableEntry::new(frame, PageAttributes::PTE);
         }
 
         let is_huge_entry = entry.get_attributes().contains(PageAttributes::HUGE);

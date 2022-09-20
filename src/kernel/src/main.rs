@@ -49,7 +49,6 @@ mod panic;
 mod scheduling;
 mod stdout;
 mod syscall;
-mod tables;
 mod time;
 
 use core::{cell::OnceCell, sync::atomic::Ordering};
@@ -468,7 +467,23 @@ unsafe extern "C" fn _entry() -> ! {
         }
 
         debug!("Initializing ACPI interface...");
-        crate::tables::acpi::init_interface();
+        {
+            static LIMINE_RSDP: limine::LimineRsdpRequest = limine::LimineRsdpRequest::new(crate::LIMINE_REV);
+
+            let rsdp_address = LIMINE_RSDP
+                .get_response()
+                .get()
+                .expect("bootloader provided no RSDP address")
+                .address
+                .as_ptr()
+                .unwrap()
+                .addr();
+            let hhdm_address = crate::memory::get_kernel_hhdm_address().as_u64();
+            libcommon::acpi::init_interface(libcommon::Address::<libcommon::Physical>::new_truncate(
+                // Properly handle the bootloader's mapping of ACPI addresses in lower-half or higher-half memory space.
+                if rsdp_address > hhdm_address { rsdp_address - hhdm_address } else { rsdp_address } as u64,
+            ));
+        }
         debug!("Initializing PCI devices...");
         crate::memory::io::pci::init_devices();
 

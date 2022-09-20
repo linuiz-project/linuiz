@@ -44,7 +44,9 @@ pub trait KernelAllocator: Send + Sync + core::alloc::Allocator {
     fn borrow_many(&self, frame: Address<Frame>, count: usize) -> Result<(), AllocError>;
     fn free(&self, frame: Address<Frame>) -> Result<(), AllocError>;
 
-    fn allocate_to(&self, frame: Address<Frame>) -> Result<Address<Virtual>, AllocError>;
+    fn allocate_to(&self, frame: Address<Frame>, count: usize) -> Result<Address<Virtual>, AllocError>;
+
+    fn total_memory(&self) -> usize;
 }
 
 #[cfg(feature = "global_allocator")]

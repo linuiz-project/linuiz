@@ -415,7 +415,11 @@ impl libcommon::memory::KernelAllocator for SlabAllocator<'_> {
         })
     }
 
-    fn allocate_to(&self, frame: Address<libcommon::Frame>) -> Result<Address<Virtual>, AllocError> {
+    fn allocate_to(&self, frame: Address<libcommon::Frame>, _: usize) -> Result<Address<Virtual>, AllocError> {
         self.borrow(frame).map(|_| Address::<Virtual>::new_truncate(self.phys_mapped_address.as_u64() + frame.as_u64()))
+    }
+
+    fn total_memory(&self) -> usize {
+        self.table.len() * 0x1000
     }
 }
