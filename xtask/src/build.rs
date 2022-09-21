@@ -4,8 +4,9 @@ use xshell::cmd;
 
 #[derive(ArgEnum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Optimization {
-    Speed,
-    Size,
+    P,
+    S,
+    PS,
 }
 
 #[allow(non_camel_case_types)]
@@ -76,7 +77,7 @@ pub struct Options {
     no_stack_traces: bool,
 
     #[clap(arg_enum, short)]
-    Optimize: Option<Optimization>,
+    optimize: Option<Optimization>,
 }
 
 static REQUIRED_ROOT_DIRS: [&str; 5] = ["resources/", ".hdd/", ".hdd/root/EFI/BOOT/", ".hdd/root/linuiz/", ".debug/"];
@@ -187,18 +188,41 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
             vec.push("-vv");
         }
 
-        match options.Optimize {
-            Some(Optimization::Speed) => {
+        match options.optimize {
+            Some(Optimization::P) => {
                 vec.push("--config");
                 vec.push("opt-level=3");
+
+                vec.push("--config");
+                vec.push("lto=thin");
             }
 
-            Some(Optimization::Size) => {
+            Some(Optimization::S) => {
                 vec.push("--config");
                 vec.push("opt-level='z'");
 
                 vec.push("--config");
                 vec.push("codegen-units=1");
+
+                vec.push("--config");
+                vec.push("lto=fat");
+
+                vec.push("--config");
+                vec.push("strip=true");
+            }
+
+            Some(Optimization::PS) => {
+                vec.push("--config");
+                vec.push("opt-level=3");
+
+                vec.push("--config");
+                vec.push("codegen-units=1");
+
+                vec.push("--config");
+                vec.push("lto=fat");
+
+                vec.push("--config");
+                vec.push("strip=true");
             }
 
             None => {}
@@ -242,7 +266,7 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
     // Compile and compress drivers ...
     {
         let compressed_drivers = {
-            let _dir = shell.push_dir("src/drivers/");
+            let _dir = shell.push_dir("src/userspace/");
 
             // Compile ...
             cmd!(shell, "cargo fmt").run()?;

@@ -10,7 +10,7 @@ use libcommon::{
 use spin::RwLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PageManagerError {
+pub enum VirtualMapperError {
     NotMapped,
     AlreadyMapped,
     AllocError,
@@ -78,7 +78,7 @@ impl VirtualMapper {
         interrupts::without(|| {
             let data = self.0.read();
             // TODO try to find alternative to unwrapping here
-            // SAFETY: `PageManager` already requires that the physical mapping page is valid, so it can be safely passed to the page table.
+            // SAFETY: `VirtualMapper` already requires that the physical mapping page is valid, so it can be safely passed to the page table.
             func(unsafe { PageTable::<Ref>::new(data.depth, data.phys_mapped_address, &data.entry).unwrap() })
         })
     }
@@ -86,7 +86,7 @@ impl VirtualMapper {
     fn with_root_table_mut<T>(&self, func: impl FnOnce(PageTable<Mut>) -> T) -> T {
         interrupts::without(|| {
             let mut data = self.0.write();
-            // SAFETY: `PageManager` already requires that the physical mapping page is valid, so it can be safely passed to the page table.
+            // SAFETY: `VirtualMapper` already requires that the physical mapping page is valid, so it can be safely passed to the page table.
             func(unsafe { PageTable::<Mut>::new(data.depth, data.phys_mapped_address, &mut data.entry).unwrap() })
         })
     }
@@ -99,12 +99,12 @@ impl VirtualMapper {
         page: Address<Page>,
         frame: Address<Frame>,
         attributes: PageAttributes,
-    ) -> Result<(), PageManagerError> {
+    ) -> Result<(), VirtualMapperError> {
         let result = self.with_root_table_mut(|mut root_table| {
             let frame_count = (page.align() as usize) / 0x1000;
             // If the acquisition of the frame fails, return the error.
             if libcommon::memory::get_global_allocator().borrow_many(frame, frame_count as usize).is_err() {
-                return Err(PageManagerError::AllocError);
+                return Err(VirtualMapperError::AllocError);
             }
 
             // If acquisition of the frame is successful, attempt to map the page to the frame index.
@@ -124,7 +124,7 @@ impl VirtualMapper {
                         Ok(())
                     }
 
-                    Err(err) => Err(PageManagerError::PagingError(err)),
+                    Err(err) => Err(VirtualMapperError::PagingError(err)),
                 }
             })
         });
@@ -141,7 +141,7 @@ impl VirtualMapper {
     /// Unmaps the given page, optionally freeing the frame the page points to within the given [`FrameManager`].
     ///
     /// SAFETY: Caller must ensure calling this function does not cause memory corruption.
-    pub unsafe fn unmap(&self, page: Address<Page>) -> Result<(), PageManagerError> {
+    pub unsafe fn unmap(&self, page: Address<Page>) -> Result<(), VirtualMapperError> {
         self.with_root_table_mut(|mut root_table| {
             root_table.with_entry_mut(page, |entry| {
                 match entry {
@@ -161,7 +161,7 @@ impl VirtualMapper {
                         Ok(())
                     }
 
-                    Err(err) => Err(PageManagerError::PagingError(err)),
+                    Err(err) => Err(VirtualMapperError::PagingError(err)),
                 }
             })
         })
@@ -210,7 +210,7 @@ impl VirtualMapper {
         page: Address<Page>,
         attributes: PageAttributes,
         modify_mode: AttributeModify,
-    ) -> Result<(), PageManagerError> {
+    ) -> Result<(), VirtualMapperError> {
         self.with_root_table_mut(|mut root_table| {
             root_table.with_entry_mut(page, |entry| match entry {
                 Ok(entry) => {
@@ -222,7 +222,7 @@ impl VirtualMapper {
                     Ok(())
                 }
 
-                Err(err) => Err(PageManagerError::PagingError(err)),
+                Err(err) => Err(VirtualMapperError::PagingError(err)),
             })
         })
     }
@@ -245,7 +245,7 @@ impl VirtualMapper {
     }
 
     #[inline]
-    pub unsafe fn commit_vmem_register(&self) -> Result<(), PageManagerError> {
+    pub unsafe fn commit_vmem_register(&self) -> Result<(), VirtualMapperError> {
         interrupts::without(|| {
             let vmap = self.0.write();
 

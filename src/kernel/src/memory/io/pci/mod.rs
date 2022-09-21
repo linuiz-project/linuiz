@@ -14,8 +14,7 @@ pub const fn get_device_base_address(base: u64, bus_index: u8, device_index: u8)
 
 pub fn init_devices() {
     let kernel_hhdm_address = crate::memory::get_kernel_hhdm_address();
-    let kernel_frame_manager = crate::memory::get_kernel_frame_manager();
-    let kernel_page_manager = crate::memory::get_kernel_page_manager();
+    let kernel_page_manager = crate::memory::get_kernel_virtual_mapper();
     let mut pci_devices = PCI_DEVICES.write();
 
     crate::tables::acpi::get_mcfg()

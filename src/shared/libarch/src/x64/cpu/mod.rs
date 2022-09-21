@@ -214,7 +214,7 @@ fn init_syscalls() {
 
         // Configure system call environment registers.
         msr::IA32_STAR::set_selectors(*gdt::KCODE_SELECTOR.get().unwrap(), *gdt::KDATA_SELECTOR.get().unwrap());
-        msr::IA32_LSTAR::set_syscall(syscall::syscall_handler);
+        msr::IA32_LSTAR::set_syscall(syscall::_syscall_entry);
         // We don't want to keep any flags set within the syscall (especially the interrupt flag).
         msr::IA32_FMASK::set_rflags_mask(RFlags::all());
         // Enable `syscall`/`sysret`.

@@ -71,6 +71,7 @@ pub fn wait() {
 #[inline(always)]
 pub fn wait_indefinite() -> ! {
     loop {
-        wait()
+        wait();
+        info!("RESET");
     }
 }

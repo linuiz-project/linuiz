@@ -1,5 +1,5 @@
-use crate::memory::{get_kernel_hhdm_address, PageManager};
-use libarch::interrupts::SyscallReturnContext;
+use crate::memory::get_kernel_hhdm_address;
+use libarch::interrupts::ControlFlowContext;
 use libcommon::{Address, Page};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -10,7 +10,7 @@ pub enum Syscall {
     Log { level: log::Level, cstr_ptr: *const core::ffi::c_char },
 }
 
-pub fn parse_syscall(
+pub fn syscall_handler(
     vector: u64,
     arg0: u64,
     arg1: u64,
@@ -20,22 +20,22 @@ pub fn parse_syscall(
     ret_ip: u64,
     ret_sp: u64,
     regs: &mut libarch::interrupts::SyscallContext,
-) -> SyscallReturnContext {
+) -> ControlFlowContext {
     let syscall = match vector {
         0x100 => {
             use log::Level;
 
             // TODO possibly PR the `log` crate to make `log::Level::from_usize()` public.
-            let log_level = match rsi {
+            let log_level = match arg0 {
                 1 => Ok(Level::Error),
                 2 => Ok(Level::Warn),
                 3 => Ok(Level::Info),
                 4 => Ok(Level::Debug),
-                rsi => Err(rsi),
+                arg0 => Err(arg0),
             };
 
             match log_level {
-                Ok(level) => Some(Syscall::Log { level, cstr_ptr: rdx as usize as *const _ }),
+                Ok(level) => Some(Syscall::Log { level, cstr_ptr: arg1 as usize as *const _ }),
                 Err(invalid_level) => {
                     warn!("Invalid log level provided: {}", invalid_level);
                     None
@@ -54,14 +54,14 @@ pub fn parse_syscall(
         None => warn!("Failed to execute system call."),
     }
 
-    SyscallReturnContext { ip: ret_ip, sp: ret_sp }
+    ControlFlowContext { ip: ret_ip, sp: ret_sp }
 }
 
 pub fn do_syscall(vector: Syscall) {
     match vector {
         Syscall::Log { level, cstr_ptr } => {
             // SAFETY: The kernel guarantees the HHDM will be valid.
-            let page_manager = unsafe { PageManager::from_current(get_kernel_hhdm_address()) };
+            let page_manager = unsafe { libkernel::memory::VirtualMapper::from_current(get_kernel_hhdm_address()) };
 
             let mut cstr_increment_ptr = cstr_ptr;
             // SAFETY: This is meant to be a null page, for the loop below to work correctly.

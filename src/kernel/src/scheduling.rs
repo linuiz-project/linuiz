@@ -48,9 +48,9 @@ pub struct Task {
     id: u64,
     prio: TaskPriority,
     //pcid: Option<PCID>,
-    pub ctrl_flow_context: crate::interrupts::ControlFlowContext,
-    pub arch_context: crate::interrupts::ArchContext,
-    pub root_page_table_args: crate::memory::VmemRegister,
+    pub ctrl_flow_context: libarch::interrupts::ControlFlowContext,
+    pub arch_context: libarch::interrupts::ArchContext,
+    pub root_page_table_args: libarch::memory::VmemRegister,
 }
 
 impl Task {
@@ -58,13 +58,13 @@ impl Task {
         priority: TaskPriority,
         start: TaskStart,
         stack: TaskStack,
-        arch_context: crate::interrupts::ArchContext,
-        root_page_table_args: crate::memory::VmemRegister,
+        arch_context: libarch::interrupts::ArchContext,
+        root_page_table_args: libarch::memory::VmemRegister,
     ) -> Self {
         Self {
             id: NEXT_THREAD_ID.fetch_add(1, core::sync::atomic::Ordering::AcqRel),
             prio: priority,
-            ctrl_flow_context: crate::interrupts::ControlFlowContext {
+            ctrl_flow_context: libarch::interrupts::ControlFlowContext {
                 ip: match start {
                     TaskStart::Address(address) => address.as_u64(),
                     TaskStart::Function(function) => function as usize as u64,

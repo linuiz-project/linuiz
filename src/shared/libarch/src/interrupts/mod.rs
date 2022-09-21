@@ -53,6 +53,7 @@ pub enum Vector {
     SPURIOUS = 0x3F,
 }
 
+#[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct ControlFlowContext {
     pub ip: u64,
@@ -67,7 +68,7 @@ pub enum PageFaultHandlerError {
     NoHandler,
 }
 
-type PageFaultHandler = fn(Address<Virtual>) -> Result<(), PageFaultHandlerError>;
+type PageFaultHandler = unsafe fn(Address<Virtual>) -> Result<(), PageFaultHandlerError>;
 pub(crate) static PAGE_FAULT_HANDLER: SyncUnsafeCell<PageFaultHandler> =
     SyncUnsafeCell::new(|_| Err(PageFaultHandlerError::NoHandler));
 pub fn set_page_fault_handler(handler: PageFaultHandler) {
@@ -88,11 +89,6 @@ pub fn set_interrupt_handler(handler: InterruptHandler) {
 
 #[cfg(target_arch = "x86_64")]
 pub type SyscallContext = crate::x64::cpu::syscall::PreservedRegisters;
-#[repr(C, packed)]
-pub struct SyscallReturnContext {
-    ip: u64,
-    sp: u64,
-}
 pub type SyscallHandler = fn(
     vector: u64,
     arg0: u64,
@@ -103,7 +99,7 @@ pub type SyscallHandler = fn(
     ret_ip: u64,
     ret_sp: u64,
     regs: &mut SyscallContext,
-) -> SyscallReturnContext;
+) -> ControlFlowContext;
 pub(crate) static SYSCALL_HANDLER: SyncUnsafeCell<SyscallHandler> =
     SyncUnsafeCell::new(|_, _, _, _, _, _, _, _, _| panic!("no system call handler"));
 pub fn set_syscall_handler(syscall_handler: SyscallHandler) {

@@ -134,16 +134,17 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     crate::println!("----------STACK-TRACE----------");
 
     // SAFETY: The current core is dead.
-    unsafe { crate::interrupts::disable() };
-    crate::interrupts::wait_loop()
+    unsafe { libarch::interrupts::disable() };
+    libarch::interrupts::wait_indefinite()
 }
 
 #[alloc_error_handler]
 fn alloc_error(error: core::alloc::Layout) -> ! {
     error!("KERNEL ALLOCATOR PANIC: {:?}", error);
 
-    // TODO should we actually abort on every alloc error?
-    crate::interrupts::wait_loop()
+    // SAFETY: The current core is dead.
+    unsafe { libarch::interrupts::disable() };
+    libarch::interrupts::wait_indefinite()
 }
 
 mod mangling {

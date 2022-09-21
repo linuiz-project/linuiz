@@ -157,7 +157,7 @@ pub enum PageAlign {
 }
 
 impl PageAlign {
-    const fn index(self) -> u64 {
+    pub const fn index(self) -> u64 {
         match self {
             PageAlign::DontCare => 0,
             PageAlign::Align4KiB => 1,
