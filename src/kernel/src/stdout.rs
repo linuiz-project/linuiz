@@ -1,27 +1,9 @@
 use core::fmt::Write;
 use spin::Once;
 
-pub struct QEMUE9(crate::memory::io::WriteOnlyPort<u8>);
-
-impl QEMUE9 {
-    pub const fn new() -> Self {
-        Self(unsafe { crate::memory::io::WriteOnlyPort::new(0xE9) })
-    }
-}
-
-impl Write for QEMUE9 {
-    fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        for byte in s.bytes() {
-            self.0.write(byte);
-        }
-
-        Ok(())
-    }
-}
-
 #[doc(hidden)]
 pub fn __std_out(args: core::fmt::Arguments) {
-    crate::interrupts::without(|| match STD_OUT.get() {
+    libarch::interrupts::without(|| match STD_OUT.get() {
         Some(std_out) => {
             let mut std_out = std_out.0.lock();
             std_out.write_fmt(args).unwrap()
@@ -91,7 +73,7 @@ static LOGGER: core::cell::SyncUnsafeCell<Logger> = core::cell::SyncUnsafeCell::
 ///
 /// SAFETY: Calling this method more than once could result in undocumented behaviour.
 unsafe fn init_logger(modes: Logger, min_level: log::LevelFilter) {
-    crate::interrupts::without(|| {
+    libarch::interrupts::without(|| {
         *LOGGER.get() = modes;
 
         match unsafe { log::set_logger_racy(&*LOGGER.get()) } {
@@ -109,7 +91,7 @@ unsafe impl Sync for StdOutWrapper {}
 static STD_OUT: Once<StdOutWrapper> = Once::new();
 
 pub fn set_stdout(std_out: &'static mut dyn Write, min_level: log::LevelFilter) {
-    crate::interrupts::without(|| {
+    libarch::interrupts::without(|| {
         STD_OUT.call_once(|| {
             // SAFETY: We know this will only be called once within this context.
             unsafe { init_logger(Logger::SERIAL, min_level) };

@@ -1,8 +1,6 @@
-use crate::tables::acpi;
-
 /// Clock wrapper around the ACPI PWM timer.
 #[allow(clippy::module_name_repetitions)]
-pub struct AcpiClock<'a>(acpi::Register<'a, u32>, u32);
+pub struct AcpiClock<'a>(libcommon::acpi::Register<'a, u32>, u32);
 
 // SAFETY: This structure is effectively read-only with no side-effects.
 unsafe impl Send for AcpiClock<'_> {}
@@ -15,8 +13,8 @@ impl AcpiClock<'_> {
 
     /// Loads the ACPI timer, and creates a [`Clock`] from it.
     pub fn load() -> Option<Self> {
-        crate::tables::acpi::get_platform_info().pm_timer.as_ref().and_then(|pm_timer| {
-            acpi::Register::new(&pm_timer.base)
+        libcommon::acpi::get_platform_info().pm_timer.as_ref().and_then(|pm_timer| {
+            libcommon::acpi::Register::new(&pm_timer.base)
                 .map(|register| Self(register, if pm_timer.supports_32bit { u32::MAX } else { 0xFFFFFF }))
         })
     }

@@ -24,6 +24,7 @@ aml = "*"
 miniz_oxide = "*"
 bytemuck = "*"
 rustc-demangle = "*"
+uart_16550 = "*"
 
 [profile.dev]
 opt-level = 1

@@ -37,7 +37,7 @@ static SYSTEM_CLOCK: spin::Once<Box<dyn Clock>> = spin::Once::new();
 /// SAFETY: If this function is called within an interrupt context, a deadlock may occur.
 pub fn get() -> &'static Box<dyn Clock> {
     SYSTEM_CLOCK.call_once(|| {
-        crate::interrupts::without(|| {
+        libarch::interrupts::without(|| {
             // TODO support for invariant TSC as clock
 
             Box::new(acpi::AcpiClock::load().unwrap())

@@ -1,6 +1,6 @@
 /// SAFETY: This function should never be called by software—it is the entrypoint for the x86_64 `syscall` instruction.
 #[naked]
-pub(super) unsafe extern "sysv64" fn syscall_handler() {
+pub(super) unsafe extern "sysv64" fn _syscall_entry() {
     core::arch::asm!(
         "
         cld
@@ -44,7 +44,7 @@ pub(super) unsafe extern "sysv64" fn syscall_handler() {
 
         sysretq
         ",
-        sym syscall_handler_inner,
+        sym syscall_handoff,
         options(noreturn)
     )
 }
@@ -63,7 +63,7 @@ pub struct PreservedRegisters {
 }
 
 /// Handler for executing system calls from userspace.
-extern "sysv64" fn syscall_handler_inner(
+extern "sysv64" fn syscall_handoff(
     rdi: u64,
     rsi: u64,
     rdx: u64,
@@ -73,7 +73,7 @@ extern "sysv64" fn syscall_handler_inner(
     ret_ip: u64,
     ret_sp: u64,
     mut preserved_regs: PreservedRegisters,
-) -> crate::interrupts::SyscallReturnContext {
+) -> crate::interrupts::ControlFlowContext {
     // SAFETY: Function pointer is required to be valid for reading by the interrupt module.
     (unsafe { &*crate::interrupts::SYSCALL_HANDLER.get() })(
         rdi,

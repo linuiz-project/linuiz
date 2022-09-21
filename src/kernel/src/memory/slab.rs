@@ -2,7 +2,7 @@ use alloc::{alloc::Global, vec::Vec};
 use bit_field::BitField;
 use core::{alloc::AllocError, sync::atomic::Ordering};
 use libcommon::{
-    memory::{page_aligned_allocator, AlignedAllocator},
+    memory::{page_aligned_allocator, AlignedAllocator, KernelAllocator},
     Address, Virtual,
 };
 use spin::Mutex;
@@ -41,13 +41,13 @@ impl FrameType {
 
 #[derive(Debug)]
 #[repr(transparent)]
-struct Frame(core::sync::atomic::AtomicU16);
+pub struct Frame(core::sync::atomic::AtomicU16);
 
 impl Frame {
-    const PEEKED_BIT_SHIFT: usize = 12;
-    const PEEKED_BIT: u16 = 1 << Self::PEEKED_BIT_SHIFT;
-    const TYPE_SHIFT: u16 = 13;
     const REFERENCE_COUNT_MASK: u16 = 0xFFF;
+    const PEEKED_SHIFT: usize = 12;
+    const PEEKED_BIT: u16 = 1 << Self::PEEKED_SHIFT;
+    const TYPE_SHIFT: u32 = 13;
 
     fn borrow(&self) {
         let old_value = self.0.fetch_add(1, Ordering::Relaxed);
@@ -61,7 +61,7 @@ impl Frame {
 
     #[inline]
     fn try_peek(&self) -> bool {
-        (self.0.fetch_or(Self::PEEKED_BIT, Ordering::Relaxed) & Self::PEEKED_BIT) == 0
+        !self.0.fetch_or(1 << Self::PEEKED_SHIFT, Ordering::Relaxed).get_bit(Self::PEEKED_SHIFT)
     }
 
     #[inline]
@@ -70,18 +70,19 @@ impl Frame {
             core::hint::spin_loop();
         }
 
-        debug_assert!(self.0.load(Ordering::Relaxed).get_bit(Self::PEEKED_BIT_SHIFT));
+        debug_assert!(self.0.load(Ordering::Relaxed).get_bit(Self::PEEKED_SHIFT));
     }
 
     #[inline]
     fn unpeek(&self) {
-        debug_assert!(self.0.load(Ordering::Relaxed).get_bit(Self::PEEKED_BIT_SHIFT));
-        self.0.fetch_and(!Self::PEEKED_BIT, Ordering::Relaxed);
+        debug_assert!(self.0.load(Ordering::Relaxed).get_bit(Self::PEEKED_SHIFT));
+
+        self.0.fetch_and(!(1 << Self::PEEKED_SHIFT), Ordering::Relaxed);
     }
 
     /// Returns the frame data in a tuple.
     fn data(&self) -> (u16, FrameType) {
-        debug_assert!(self.0.load(Ordering::Relaxed).get_bit(Self::PEEKED_BIT_SHIFT));
+        debug_assert!(self.0.load(Ordering::Relaxed).get_bit(Self::PEEKED_SHIFT));
 
         let raw = self.0.load(Ordering::Relaxed);
 
@@ -89,7 +90,7 @@ impl Frame {
     }
 
     fn modify_type(&self, new_type: FrameType) {
-        debug_assert!(self.0.load(Ordering::Relaxed).get_bit(Self::PEEKED_BIT_SHIFT));
+        debug_assert!(self.0.load(Ordering::Relaxed).get_bit(Self::PEEKED_SHIFT));
 
         self.0.store(
             (self.0.load(Ordering::Relaxed) & !(u16::MAX >> Self::TYPE_SHIFT))
@@ -116,10 +117,7 @@ unsafe impl Send for SlabAllocator<'_> {}
 unsafe impl Sync for SlabAllocator<'_> {}
 
 impl<'a> SlabAllocator<'a> {
-    pub fn from_memory_map(
-        memory_map: &[limine::NonNullPtr<limine::LimineMemmapEntry>],
-        phys_mapped_address: Address<Virtual>,
-    ) -> Option<Self> {
+    pub fn from_memory_map(memory_map: &[crate::MmapEntry], phys_mapped_address: Address<Virtual>) -> Option<Self> {
         let page_count =
             libcommon::align_up_div(memory_map.last().map(|entry| entry.base + entry.len).unwrap() as usize, 0x1000);
         let table_bytes = libcommon::align_up(page_count * core::mem::size_of::<Frame>(), 0x1000);
@@ -155,18 +153,17 @@ impl<'a> SlabAllocator<'a> {
 
             // Translate UEFI memory type to kernel frame type.
             let frame_ty = {
-                use limine::LimineMemoryMapEntryType;
+                use crate::MmapEntryType;
 
                 match entry.typ {
-                    LimineMemoryMapEntryType::Usable
-                    | LimineMemoryMapEntryType::AcpiNvs
-                    | LimineMemoryMapEntryType::Framebuffer => FrameType::Generic,
-                    LimineMemoryMapEntryType::BootloaderReclaimable => FrameType::BootReclaim,
-                    LimineMemoryMapEntryType::AcpiReclaimable => FrameType::AcpiReclaim,
-                    LimineMemoryMapEntryType::KernelAndModules | LimineMemoryMapEntryType::Reserved => {
-                        FrameType::Reserved
-                    }
-                    LimineMemoryMapEntryType::BadMemory => FrameType::Unusable,
+                    MmapEntryType::Usable => FrameType::Generic,
+                    MmapEntryType::BootloaderReclaimable => FrameType::BootReclaim,
+                    MmapEntryType::AcpiReclaimable => FrameType::AcpiReclaim,
+                    MmapEntryType::KernelAndModules
+                    | MmapEntryType::Reserved
+                    | MmapEntryType::AcpiNvs
+                    | MmapEntryType::Framebuffer => FrameType::Reserved,
+                    MmapEntryType::BadMemory => FrameType::Unusable,
                 }
             };
 
@@ -188,7 +185,7 @@ impl<'a> SlabAllocator<'a> {
     }
 
     fn with_table<T>(&self, func: impl FnOnce(&[Frame]) -> T) -> T {
-        crate::interrupts::without(|| func(self.table))
+        libarch::interrupts::without(|| func(self.table))
     }
 }
 
@@ -196,35 +193,30 @@ macro_rules! slab_allocate {
     ($self:expr, $slabs_name:ident, $slab_size:expr) => {
         {
             let mut slabs = $self.$slabs_name.lock();
-            let mut allocation_ptr_cell = core::cell::OnceCell::new();
-            while let None = allocation_ptr_cell.get() {
-                match slabs.iter_mut().find_map(|(memory_ptr, allocations)| {
-                    let allocations_remaining = allocations.trailing_zeros();
+            let allocation_ptr =
 
-                    if allocations_remaining > 0 {
-                        let allocation_bit = (allocations_remaining - 1) as usize;
-                        allocations.set_bit(allocation_bit, true);
-                        // SAFETY: Arbitrary `u8` memory region is valid for any offset.
-                        Some(unsafe { memory_ptr.add(allocation_bit * $slab_size) })
-                    } else {
-                        None
-                    }
-                }) {
-                    Some(allocation_ptr) if allocation_ptr_cell.set(allocation_ptr).is_err() => unreachable!(),
-                    None if let Ok(address) = $self.lock_next() => {
-                        slabs.push((
-                            // SAFETY: `phys_mapped_address` is required to be valid for arbitrary offsets from within its range.
-                            unsafe { $self.phys_mapped_address.as_mut_ptr::<u8>().add(address.as_usize()) },
-                            0
-                        ));
-                    }
+                match slabs.iter_mut().find(|(memory_ptr, allocations)| allocations.trailing_zeros() > 0) {
+                Some((memory_ptr, allocations)) => {
+                    let allocation_bit = (allocations.trailing_zeros() - 1) as usize;
+                    allocations.set_bit(allocation_bit, true);
 
-                    _ => unimplemented!()
+                    // SAFETY: Arbitrary `u8` memory region is valid for the offsets within its bounds.
+                    unsafe { memory_ptr.add(allocation_bit * $slab_size) }
                 }
-            }
+
+                None if let Ok(frame) = $self.borrow_next() => {
+                    // SAFETY: `phys_mapped_address` is required to be valid for arbitrary offsets from within its range.
+                    let memory_ptr = unsafe { $self.phys_mapped_address.as_mut_ptr::<u8>().add(frame.as_usize()) };
+                    slabs.push((memory_ptr, 1 << ((0x1000 / $slab_size) - 1)));
+
+                    memory_ptr
+                }
+
+                None => unimplemented!()
+            };
 
             // SAFETY: This code is only reached once `allocation_ptr` is no longer `None`.
-            Ok(slice_from_raw_parts_mut(unsafe { allocation_ptr_cell.take().unwrap_unchecked() }, $slab_size))
+            Ok(slice_from_raw_parts_mut(allocation_ptr, $slab_size))
         }
     };
 }
@@ -261,9 +253,9 @@ unsafe impl<'a> core::alloc::Allocator for SlabAllocator<'a> {
                 slab_allocate!(self, slabs512, 512)
             } else {
                 (if layout.align() <= 4096 && layout.size() <= 4096 {
-                    self.lock_next()
+                    self.borrow_next()
                 } else {
-                    self.lock_next_many(layout.size() / 0x1000)
+                    self.borrow_next_many(layout.size() / 0x1000)
                 })
                 .map(|address| {
                     // SAFETY: Frame addresses are naturally aligned, and arbitrary memory is valid for `u8`, and `phys_mapped_address` is
@@ -295,26 +287,23 @@ unsafe impl<'a> core::alloc::Allocator for SlabAllocator<'a> {
     }
 }
 
-impl libcommon::memory::KernelAllocator for SlabAllocator<'_> {
-    fn lock_next(&self) -> Result<Address<libcommon::Frame>, AllocError> {
+impl KernelAllocator for SlabAllocator<'_> {
+    fn borrow_next(&self) -> Result<Address<libcommon::Frame>> {
         self.with_table(|table| {
             table
                 .iter()
                 .enumerate()
                 .find_map(|(index, table_page)| {
-                    if table_page.try_peek() {
-                        let (ref_count, ty) = table_page.data();
-
-                        let result = if ref_count == 0 && ty == FrameType::Generic {
+                    if table_page.try_peek()
+                        && let (ref_count, ty) = table_page.data()
+                        && ref_count == 0 && ty == FrameType::Generic {
                             table_page.borrow();
-                            Some(Address::<libcommon::Frame>::new_truncate((index * 0x1000) as u64))
-                        } else {
-                            None
-                        };
+                            table_page.unpeek();
 
-                        table_page.unpeek();
-                        result
+                            Some(Address::<libcommon::Frame>::new_truncate((index * 0x1000) as u64))
                     } else {
+                        table_page.unpeek();
+
                         None
                     }
                 })
@@ -322,7 +311,7 @@ impl libcommon::memory::KernelAllocator for SlabAllocator<'_> {
         })
     }
 
-    fn lock_next_many(&self, count: usize) -> Result<Address<libcommon::Frame>, AllocError> {
+    fn borrow_next_many(&self, count: usize) -> Result<Address<libcommon::Frame>> {
         self.with_table(|table| {
             let mut start_index = 0;
 
@@ -355,7 +344,7 @@ impl libcommon::memory::KernelAllocator for SlabAllocator<'_> {
         })
     }
 
-    fn borrow(&self, frame: Address<libcommon::Frame>) -> Result<(), AllocError> {
+    fn borrow(&self, frame: Address<libcommon::Frame>) -> Result<()> {
         self.with_table(|table| {
             let Some(frame) = table.get(frame.index()) else { return Err(AllocError) };
             frame.peek();
@@ -374,7 +363,7 @@ impl libcommon::memory::KernelAllocator for SlabAllocator<'_> {
         })
     }
 
-    fn borrow_many(&self, base: Address<libcommon::Frame>, count: usize) -> Result<(), AllocError> {
+    fn borrow_many(&self, base: Address<libcommon::Frame>, count: usize) -> Result<()> {
         self.with_table(|table| {
             let frames = &table[base.index()..(base.index() + count)];
 
@@ -392,7 +381,7 @@ impl libcommon::memory::KernelAllocator for SlabAllocator<'_> {
         })
     }
 
-    fn free(&self, frame: Address<libcommon::Frame>) -> Result<(), AllocError> {
+    fn free(&self, frame: Address<libcommon::Frame>) -> Result<()> {
         self.with_table(|table| {
             let Some(frame) = table.get(frame.index()) else { return Err(AllocError) };
 
@@ -415,7 +404,7 @@ impl libcommon::memory::KernelAllocator for SlabAllocator<'_> {
         })
     }
 
-    fn allocate_to(&self, frame: Address<libcommon::Frame>, _: usize) -> Result<Address<Virtual>, AllocError> {
+    fn allocate_to(&self, frame: Address<libcommon::Frame>, _: usize) -> Result<Address<Virtual>> {
         self.borrow(frame).map(|_| Address::<Virtual>::new_truncate(self.phys_mapped_address.as_u64() + frame.as_u64()))
     }
 

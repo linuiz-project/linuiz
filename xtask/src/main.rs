@@ -34,7 +34,7 @@ fn main() -> Result<(), xshell::Error> {
     }
 }
 
-static CRATE_DIRS: [&str; 2] = ["src/kernel/", "src/drivers/"];
+static CRATE_DIRS: [&str; 2] = ["src/kernel/", "src/userspace/"];
 
 pub fn clean(shell: &xshell::Shell) -> xshell::Result<()> {
     for crate_dir in CRATE_DIRS {

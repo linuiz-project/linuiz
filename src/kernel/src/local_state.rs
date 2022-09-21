@@ -1,15 +1,13 @@
-use crate::{
-    memory::VmemRegister,
-    scheduling::{Scheduler, Task, TaskPriority},
-};
+use crate::scheduling::{Scheduler, Task, TaskPriority};
+use libarch::memory::VmemRegister;
 
 pub const SYSCALL_STACK_SIZE: u64 = 0x4000;
 
 #[repr(C, align(0x1000))]
 pub(crate) struct LocalState {
     syscall_stack_ptr: *const (),
-    magic: u64,
     syscall_stack: [u8; SYSCALL_STACK_SIZE as usize],
+    magic: u64,
     core_id: u32,
     timer: alloc::boxed::Box<dyn crate::time::timer::Timer>,
     scheduler: Scheduler,
@@ -40,37 +38,14 @@ fn get_local_state() -> Option<&'static mut LocalState> {
 ///
 /// SAFETY: This function invariantly assumes it will only be called once.
 pub unsafe fn init(core_id: u32) {
-    let local_state_ptr =
-        crate::memory::allocate_pages(libcommon::align_up_div(core::mem::size_of::<LocalState>(), 0x1000))
-            .cast::<LocalState>();
-
-    #[cfg(target_arch = "x86_64")]
-    libarch::x64::registers::msr::IA32_KERNEL_GS_BASE::write(local_state_ptr as usize as u64);
-    // TODO abstract the `tp` register
-    #[cfg(target_arch = "riscv64")]
-    core::arch::asm!("mv tp, {}", in(reg) local_state_pages as u64, options(nostack, nomem));
-
     trace!("Configuring local state: #{}", core_id);
-
-    {
-        use libcommon::{Address, Page};
-
-        // Map the pages this local state will utilize.
-        let frame_manager = crate::memory::get_kernel_frame_manager();
-        let page_manager = crate::memory::get_kernel_page_manager();
-        let base_page = Address::<Page>::from_ptr(local_state_ptr, libcommon::PageAlign::Align4KiB).unwrap();
-        let end_page = base_page.forward_checked(core::mem::size_of::<LocalState>() / 0x1000).unwrap();
-        (base_page..end_page)
-            .for_each(|page| page_manager.auto_map(page, crate::memory::PageAttributes::RW, frame_manager));
-    }
 
     /* CONFIGURE TIMER */
     // TODO configure RISC-V ACLINT
-    // TODO abstract this somehow, so we can call e.g. `crate::interrupts::configure_controller();`
+    // TODO abstract this somehow, so we can call e.g. `libarch::interrupts::configure_controller();`
     #[cfg(target_arch = "x86_64")]
     {
-        use crate::interrupts::Vector;
-        use libarch::x64::structures::apic;
+        use libarch::{interrupts::Vector, x64::structures::apic};
 
         trace!("Configuring local APIC...");
         apic::software_reset();
@@ -82,57 +57,68 @@ pub unsafe fn init(core_id: u32) {
         // LINT0&1 should be configured by the APIC reset.
     }
 
-    // Ensure interrupts are enabled after APIC is reset.
-    crate::interrupts::enable();
+    // Ensure interrupts are enabled after interrupt controller is reset.
+    libarch::interrupts::enable();
 
     trace!("Writing local state struct out to memory.");
-    local_state_ptr.write(LocalState {
-        syscall_stack_ptr: (local_state_ptr as *const u8)
-            // `::syscall_stack_ptr`
-            .add(8)
-            // `::magic`
-            .add(8)
-            // `::syscall_stack`
-            .add(SYSCALL_STACK_SIZE as usize)
-            // now we have a valid stack pointer
-            .cast(),
-        magic: LocalState::MAGIC,
-        syscall_stack: [0u8; SYSCALL_STACK_SIZE as usize],
-        core_id,
-        timer: crate::time::timer::configure_new_timer(1000),
-        scheduler: Scheduler::new(false),
-        default_task: Task::new(
-            TaskPriority::new(1).unwrap(),
-            crate::scheduling::TaskStart::Function(crate::interrupts::wait_loop),
-            crate::scheduling::TaskStack::None,
-            {
-                #[cfg(target_arch = "x86_64")]
-                {
-                    use libarch::x64;
+    {
+        let local_state_ptr = {
+            use alloc::boxed::Box;
 
-                    (
-                        x64::cpu::GeneralContext::empty(),
-                        x64::cpu::SpecialContext::with_kernel_segments(x64::registers::RFlags::INTERRUPT_FLAG),
-                    )
-                }
-            },
-            VmemRegister::read(),
-        ),
-        cur_task: None,
-    });
+            Box::leak(Box::new(LocalState {
+                syscall_stack_ptr: core::ptr::null(),
+                syscall_stack: [0u8; SYSCALL_STACK_SIZE as usize],
+                magic: LocalState::MAGIC,
+                core_id,
+                timer: crate::time::timer::configure_new_timer(1000),
+                scheduler: Scheduler::new(false),
+                default_task: Task::new(
+                    TaskPriority::new(1).unwrap(),
+                    crate::scheduling::TaskStart::Function(libarch::interrupts::wait_indefinite),
+                    crate::scheduling::TaskStack::None,
+                    {
+                        #[cfg(target_arch = "x86_64")]
+                        {
+                            use libarch::x64;
 
-    match get_local_state() {
-        Some(local_state) if local_state.is_valid_magic() => {}
-        _ => panic!("local state is invalid after write"),
+                            (
+                                x64::cpu::GeneralContext::empty(),
+                                x64::cpu::SpecialContext::with_kernel_segments(x64::registers::RFlags::INTERRUPT_FLAG),
+                            )
+                        }
+                    },
+                    VmemRegister::read(),
+                ),
+                cur_task: None,
+            })) as *mut LocalState
+        };
+        // Write out correct syscall stack pointer.
+        local_state_ptr.cast::<*const ()>().write({
+            local_state_ptr
+                .cast::<u8>()
+                // `::syscall_stack_ptr`
+                .add(8)
+                // `::syscall_stack`
+                .add(SYSCALL_STACK_SIZE as usize)
+                // now we have a valid stack pointer
+                .cast()
+        });
+
+        #[cfg(target_arch = "x86_64")]
+        libarch::x64::registers::msr::IA32_KERNEL_GS_BASE::write(local_state_ptr as usize as u64);
     }
 
+    assert!(
+        get_local_state().filter(|local_state| local_state.is_valid_magic()).is_some(),
+        "local state is invalid after write"
+    );
     trace!("Local state structure written to memory and validated.");
 }
 
 /// Attempts to schedule the next task in the local task queue.
 pub fn schedule_next_task(
-    ctrl_flow_context: &mut crate::interrupts::ControlFlowContext,
-    arch_context: &mut crate::interrupts::ArchContext,
+    ctrl_flow_context: &mut libarch::interrupts::ControlFlowContext,
+    arch_context: &mut libarch::interrupts::ArchContext,
 ) {
     const MIN_TIME_SLICE_MS: u16 = 1;
     const PRIO_TIME_SLICE_MS: u16 = 2;
