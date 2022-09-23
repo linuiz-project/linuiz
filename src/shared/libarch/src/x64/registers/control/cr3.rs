@@ -22,11 +22,7 @@ impl CR3 {
             asm!("mov {}, cr3", out(reg) value, options(nostack, nomem));
         }
 
-        (
-            // SAFETY: The function to write CR3 already requires a valid `Address<Frame>`.
-            unsafe { Address::<Frame>::new_unchecked(value & !CR3Flags::all().bits()) },
-            CR3Flags::from_bits_truncate(value),
-        )
+        (Address::<Frame>::new_truncate(value & !CR3Flags::all().bits()), CR3Flags::from_bits_truncate(value))
     }
 
     #[inline(always)]

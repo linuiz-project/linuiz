@@ -130,11 +130,11 @@ unsafe extern "C" fn _entry() -> ! {
 
             /// SAFETY: This function expects only to be called upon a processor page fault exception.
             unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandlerError> {
-                use libarch::memory::PageAttributes;
+                use crate::memory::PageAttributes;
 
-                let fault_page = Address::<Page>::containing(address, libcommon::PageAlign::DontCare);
+                let fault_page = Address::<Page>::new(address, None).unwrap();
                 let virtual_mapper =
-                    libkernel::memory::VirtualMapper::from_current(crate::memory::get_kernel_hhdm_address());
+                    crate::memory::VirtualMapper::from_current(crate::memory::get_kernel_hhdm_address());
                 let Some(mut fault_page_attributes) = virtual_mapper.get_page_attributes(fault_page) else { return Err(PageFaultHandlerError::AddressNotMapped) };
                 if fault_page_attributes.contains(PageAttributes::DEMAND) {
                     virtual_mapper.auto_map(fault_page, {
@@ -257,8 +257,8 @@ unsafe extern "C" fn _entry() -> ! {
             let symtab_frames_required = libcommon::align_up_div(symbol_table.len(), 0x1000);
             let strtab_frames_required = libcommon::align_up_div(string_table.len(), 0x1000);
 
-            if let Ok(symtab_frame) = global_allocator.borrow_next_many(symtab_frames_required)
-                && let Ok(strtab_frame) = global_allocator.borrow_next_many(strtab_frames_required)
+            if let Ok(symtab_frame) = global_allocator.lock_next_many(symtab_frames_required)
+                && let Ok(strtab_frame) = global_allocator.lock_next_many(strtab_frames_required)
             {
                 let symtab = core::slice::from_raw_parts_mut(hhdm_address.as_mut_ptr::<u8>().add(symtab_frame.as_usize()), symbol_table.len());
                 let strtab = core::slice::from_raw_parts_mut(hhdm_address.as_mut_ptr::<u8>().add(strtab_frame.as_usize()), string_table.len());
@@ -279,19 +279,16 @@ unsafe extern "C" fn _entry() -> ! {
         // TODO rv64 bsp hart init
     }
 
-    let global_allocator = libcommon::memory::get_global_allocator();
-    let virtual_mapper = crate::memory::get_kernel_virtual_mapper();
+    let to_mapper = crate::memory::get_kernel_virtual_mapper();
     let drivers_data = OnceCell::new();
 
     /* memory init */
     {
-        use libarch::memory::PageAttributes;
+        use crate::memory::PageAttributes;
+        use crate::memory::VirtualMapper;
         use libcommon::{LinkerSymbol, PageAlign};
-        use libkernel::memory::VirtualMapper;
 
         extern "C" {
-            static __SECTION_ALIGN: LinkerSymbol;
-
             static __text_start: LinkerSymbol;
             static __text_end: LinkerSymbol;
 
@@ -307,74 +304,68 @@ unsafe extern "C" fn _entry() -> ! {
 
         debug!("Initializing kernel page manager...");
 
-        let hhdm_base_address = crate::memory::get_kernel_hhdm_address();
-        let cur_page_manager = VirtualMapper::from_current(hhdm_base_address);
-        let page_align = if __SECTION_ALIGN.as_u64() == (PageAlign::Align4KiB as u64) {
-            PageAlign::Align4KiB
-        } else if __SECTION_ALIGN.as_u64() == (PageAlign::Align2MiB as u64) {
-            PageAlign::Align2MiB
-        } else if __SECTION_ALIGN.as_u64() == (PageAlign::Align1GiB as u64) {
-            PageAlign::Align1GiB
-        } else {
-            unimplemented!()
-        };
+        let hhdm_address = crate::memory::get_kernel_hhdm_address();
+        let from_mapper = VirtualMapper::from_current(hhdm_address);
 
-        // map code
-        (__text_start.as_usize()..__text_end.as_usize())
-            .step_by(__SECTION_ALIGN.as_usize())
-            .map(|page_base_addr| Address::<Page>::new(page_base_addr as u64, page_align).unwrap())
-            .for_each(|page| {
-                virtual_mapper
-                    .map(
-                        page,
-                        cur_page_manager.get_mapped_to(page).unwrap(),
-                        PageAttributes::RX | PageAttributes::GLOBAL,
-                    )
-                    .unwrap();
-            });
+        {
+            fn map_range_from(
+                from_mapper: &VirtualMapper,
+                to_mapper: &VirtualMapper,
+                range: core::ops::Range<u64>,
+                attributes: PageAttributes,
+            ) {
+                // SAFETY: Linker should have correctly set this value.
+                let page_align = unsafe {
+                    extern "C" {
+                        static __SECTION_ALIGN: LinkerSymbol;
+                    }
 
-        // map readonly
-        (__rodata_start.as_usize()..__rodata_end.as_usize())
-            .step_by(__SECTION_ALIGN.as_usize())
-            .map(|page_base_addr| Address::<Page>::new(page_base_addr as u64, page_align).unwrap())
-            .for_each(|page| {
-                virtual_mapper
-                    .map(
-                        page,
-                        cur_page_manager.get_mapped_to(page).unwrap(),
-                        PageAttributes::RO | PageAttributes::GLOBAL,
-                    )
-                    .unwrap();
-            });
+                    PageAlign::from_u64(__SECTION_ALIGN.as_u64()).unwrap()
+                };
 
-        // map readwrite
-        (__bss_start.as_usize()..__bss_end.as_usize())
-            .step_by(__SECTION_ALIGN.as_usize())
-            .map(|page_base_addr| Address::<Page>::new(page_base_addr as u64, page_align).unwrap())
-            .for_each(|page| {
-                virtual_mapper
-                    .map(
-                        page,
-                        cur_page_manager.get_mapped_to(page).unwrap(),
-                        PageAttributes::RW | PageAttributes::GLOBAL,
-                    )
-                    .unwrap();
-            });
+                for address in range.step_by(page_align.as_usize()).map(Address::<Virtual>::new_truncate) {
+                    info!("{:X?}", address);
+                    to_mapper
+                        .map(
+                            Address::<Page>::new_truncate(address, page_align),
+                            // Properly handle the bootloader possibly not using huge page mappings (but still physically contiguous).
+                            Address::<Page>::new(address, None)
+                                .and_then(|page_address| from_mapper.get_mapped_to(page_address))
+                                .unwrap(),
+                            false,
+                            attributes,
+                        )
+                        .unwrap();
+                }
+            }
 
-        (__data_start.as_usize()..__data_end.as_usize())
-            .step_by(__SECTION_ALIGN.as_usize())
-            .map(|page_base_addr| Address::<Page>::new(page_base_addr as u64, page_align).unwrap())
-            .for_each(|page| {
-                virtual_mapper
-                    .map(
-                        page,
-                        cur_page_manager.get_mapped_to(page).unwrap(),
-                        PageAttributes::RW | PageAttributes::GLOBAL,
-                    )
-                    .unwrap();
-            });
+            map_range_from(
+                &from_mapper,
+                &to_mapper,
+                __text_start.as_u64()..__text_end.as_u64(),
+                PageAttributes::RX | PageAttributes::GLOBAL,
+            );
+            map_range_from(
+                &from_mapper,
+                &to_mapper,
+                __rodata_start.as_u64()..__rodata_end.as_u64(),
+                PageAttributes::RO | PageAttributes::GLOBAL,
+            );
+            map_range_from(
+                &from_mapper,
+                &to_mapper,
+                __bss_start.as_u64()..__bss_end.as_u64(),
+                PageAttributes::RW | PageAttributes::GLOBAL,
+            );
+            map_range_from(
+                &from_mapper,
+                &to_mapper,
+                __data_start.as_u64()..__data_end.as_u64(),
+                PageAttributes::RW | PageAttributes::GLOBAL,
+            );
+        }
 
-        for (frame_index, entry) in LIMINE_MMAP.get_response().get().unwrap().memmap().iter().enumerate() {
+        for entry in LIMINE_MMAP.get_response().get().unwrap().memmap() {
             let page_attributes = {
                 use limine::LimineMemoryMapEntryType;
                 match entry.typ {
@@ -389,20 +380,20 @@ unsafe extern "C" fn _entry() -> ! {
                         PageAttributes::RO
                     }
 
-                    LimineMemoryMapEntryType::BadMemory => PageAttributes::empty(),
+                    LimineMemoryMapEntryType::BadMemory => continue,
                 }
             };
 
             for phys_base in (entry.base..(entry.base + entry.len)).step_by(0x1000) {
-                virtual_mapper
+                // TODO use huge pages here if possible
+                to_mapper
                     .map(
-                        // UNWRAP: These frames should be known-good from the bootloader's memory map.
-                        unsafe {
-                            Address::<Page>::new_unchecked(
-                                (hhdm_base_address.as_u64() + phys_base) | PageAlign::Align4KiB.index(),
-                            )
-                        },
-                        unsafe { Address::<Frame>::new_unchecked((frame_index * 0x1000) as u64) },
+                        Address::<Page>::new_truncate(
+                            Address::<Virtual>::new_truncate(hhdm_address.as_u64() + phys_base),
+                            PageAlign::Align4KiB,
+                        ),
+                        Address::<Frame>::new_truncate(phys_base),
+                        false,
                         page_attributes,
                     )
                     .unwrap();
@@ -421,12 +412,15 @@ unsafe extern "C" fn _entry() -> ! {
                 {
                     let drivers_hhdm_ptr = module.base.as_ptr().unwrap();
                     for base_offset in (0..(module.length as usize)).step_by(0x1000) {
-                        virtual_mapper
+                        to_mapper
                             .set_page_attributes(
-                                Address::<Page>::from_ptr(drivers_hhdm_ptr.add(base_offset), PageAlign::Align4KiB)
-                                    .unwrap(),
-                                libarch::memory::PageAttributes::RO,
-                                libkernel::memory::AttributeModify::Set,
+                                Address::<Page>::from_ptr(
+                                    drivers_hhdm_ptr.add(base_offset),
+                                    Some(PageAlign::Align4KiB),
+                                )
+                                .unwrap(),
+                                crate::memory::PageAttributes::RO,
+                                crate::memory::AttributeModify::Set,
                             )
                             .unwrap();
                     }
@@ -468,7 +462,7 @@ unsafe extern "C" fn _entry() -> ! {
     /* memory finalize */
     {
         debug!("Switching to kernel page tables...");
-        virtual_mapper.commit_vmem_register().unwrap();
+        to_mapper.commit_vmem_register().unwrap();
         debug!("Kernel has finalized control of page tables.");
 
         debug!("Initializing ACPI interface...");
@@ -600,8 +594,7 @@ unsafe extern "C" fn _entry() -> ! {
 
     // TODO make this a standalone function so we can return error states
     {
-        use crate::elf::segment;
-        use libarch::memory::PageAttributes;
+        use crate::{elf::segment, memory::PageAttributes};
         use libcommon::PageAlign;
 
         let drivers_raw_data = miniz_oxide::inflate::decompress_to_vec(drivers_data.get().unwrap()).unwrap();
@@ -634,7 +627,7 @@ unsafe extern "C" fn _entry() -> ! {
             info!("{:?}", driver_elf);
 
             // Create the driver's page manager from the kernel's higher-half table.
-            let driver_page_manager = libkernel::memory::VirtualMapper::new(
+            let driver_page_manager = crate::memory::VirtualMapper::new(
                 4,
                 crate::memory::get_kernel_hhdm_address(),
                 Some(libarch::memory::VmemRegister::read()),
@@ -663,15 +656,19 @@ unsafe extern "C" fn _entry() -> ! {
                                 PageAttributes::RO
                             };
 
-                            let page =
-                                Address::<Page>::new((page_index * 0x1000) as u64, PageAlign::Align4KiB).unwrap();
-                            let frame = global_allocator.borrow_next().unwrap();
-                            driver_page_manager.map(page, frame, page_attributes | PageAttributes::USER).unwrap();
+                            let page = Address::<Page>::new(
+                                Address::<Virtual>::new((page_index * 0x1000) as u64).unwrap(),
+                                Some(PageAlign::Align4KiB),
+                            )
+                            .unwrap();
+                            driver_page_manager.auto_map(page, page_attributes | PageAttributes::USER);
 
                             // SAFETY: HHDM is guaranteed by kernel to be valid, and the frame being pointed to was just allocated.
                             let memory_hhdm = unsafe {
                                 core::slice::from_raw_parts_mut(
-                                    hhdm_address.as_mut_ptr::<u8>().add(frame.as_usize()),
+                                    hhdm_address
+                                        .as_mut_ptr::<u8>()
+                                        .add(driver_page_manager.get_mapped_to(page).unwrap().as_usize()),
                                     0x1000,
                                 )
                             };
@@ -698,20 +695,21 @@ unsafe extern "C" fn _entry() -> ! {
             // Push ELF as global task.
             {
                 let stack_address = {
-                    // TODO make this a dynamic configuration
-                    const DEFAULT_TASK_STACK_SIZE: u64 = 8 * libcommon::MIBIBYTE;
-
-                    let base_address = Address::<Page>::new(128 << 39, PageAlign::Align2MiB).unwrap();
-                    let stack_address = Address::<Page>::new(
-                        base_address.address().as_u64() + DEFAULT_TASK_STACK_SIZE,
+                    const TASK_STACK_BASE_ADDRESS: Address<Page> = Address::<Page>::new_truncate(
+                        Address::<Virtual>::new_truncate(128 << 39),
                         PageAlign::Align2MiB,
-                    )
-                    .unwrap();
-                    for page in base_address..stack_address {
+                    );
+                    // TODO make this a dynamic configuration
+                    const TASK_STACK_PAGE_COUNT: usize = 2;
+
+                    for page in (0..TASK_STACK_PAGE_COUNT)
+                        .map(|offset| TASK_STACK_BASE_ADDRESS.forward_checked(offset).unwrap())
+                    {
                         driver_page_manager
                             .map(
                                 page,
-                                Address::<Frame>::new_truncate(0x0),
+                                Address::<Frame>::zero(),
+                                false,
                                 PageAttributes::WRITABLE
                                     | PageAttributes::NO_EXECUTE
                                     | PageAttributes::DEMAND
@@ -721,7 +719,7 @@ unsafe extern "C" fn _entry() -> ! {
                             .unwrap();
                     }
 
-                    stack_address
+                    TASK_STACK_BASE_ADDRESS.forward_checked(TASK_STACK_PAGE_COUNT).unwrap()
                 };
 
                 let mut global_tasks = scheduling::GLOBAL_TASKS.lock();

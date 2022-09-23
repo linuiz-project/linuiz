@@ -1,8 +1,13 @@
+mod paging;
+mod virtual_mapper;
+
 pub mod io;
 pub mod slab;
+pub use libarch::memory::PageAttributes;
+pub use paging::*;
+pub use virtual_mapper::*;
 
 use libcommon::{Address, Virtual};
-use libkernel::memory::VirtualMapper;
 use spin::Once;
 
 static KERNEL_ALLOCATOR: Once<slab::SlabAllocator<'static>> = Once::new();

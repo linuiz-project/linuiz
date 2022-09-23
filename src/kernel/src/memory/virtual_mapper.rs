@@ -15,6 +15,7 @@ pub enum VirtualMapperError {
     AlreadyMapped,
     AllocError,
     InvalidRootFrame,
+    UnalignedPageAddress,
     PagingError(crate::memory::PagingError),
 }
 
@@ -41,7 +42,7 @@ impl VirtualMapper {
         const VALID_DEPTHS: core::ops::RangeInclusive<usize> = 3..=5;
 
         if VALID_DEPTHS.contains(&depth)
-            && let Ok(root_frame) = libcommon::memory::get_global_allocator().borrow_next()
+            && let Ok(root_frame) = libcommon::memory::get_global_allocator().lock_next()
             && let Some(root_mapped_address) = Address::<Virtual>::new(phys_mapped_address.as_u64() + root_frame.as_u64())
         {
             match vmem_register_copy {
@@ -98,12 +99,15 @@ impl VirtualMapper {
         &self,
         page: Address<Page>,
         frame: Address<Frame>,
-        attributes: PageAttributes,
+        lock_frames: bool,
+        mut attributes: PageAttributes,
     ) -> Result<(), VirtualMapperError> {
         let result = self.with_root_table_mut(|mut root_table| {
-            let frame_count = (page.align() as usize) / 0x1000;
+            let Some(page_align) = page.align() else { return Err(VirtualMapperError::UnalignedPageAddress) };
             // If the acquisition of the frame fails, return the error.
-            if libcommon::memory::get_global_allocator().borrow_many(frame, frame_count as usize).is_err() {
+            if lock_frames
+                && libcommon::memory::get_global_allocator().lock_many(frame, page_align.as_usize() / 0x1000).is_err()
+            {
                 return Err(VirtualMapperError::AllocError);
             }
 
@@ -115,7 +119,17 @@ impl VirtualMapper {
                         //         pages and entries, so if this isn't safe it's on the caller.
                         unsafe {
                             entry.set_frame(frame);
-                            entry.set_attributes(attributes, AttributeModify::Set);
+                            entry.set_attributes(
+                                {
+                                    // Make sure the `HUGE` but is automatically set for huge pages.
+                                    if page.depth().unwrap_or(1) > 1 {
+                                        attributes.insert(PageAttributes::HUGE);
+                                    }
+
+                                    attributes
+                                },
+                                AttributeModify::Set,
+                            );
                         }
 
                         #[cfg(target_arch = "x86_64")]
@@ -170,7 +184,7 @@ impl VirtualMapper {
     #[inline]
     pub fn auto_map(&self, page: Address<Page>, attributes: PageAttributes) {
         // TODO do not unwrap here
-        self.map(page, libcommon::memory::get_global_allocator().borrow_next().unwrap(), attributes).unwrap();
+        self.map(page, libcommon::memory::get_global_allocator().lock_next().unwrap(), false, attributes).unwrap();
     }
 
     /* STATE QUERYING */
