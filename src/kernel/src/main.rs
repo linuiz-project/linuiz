@@ -451,9 +451,46 @@ unsafe extern "C" fn _entry() -> ! {
                     debug!("Starting processor: PID{}/LID{}", cpu_info.processor_id, cpu_info.lapic_id);
 
                     SMP_MEMORY_INIT.fetch_add(1, Ordering::Relaxed);
-                    cpu_info.goto_address = _smp_entry as usize as u64;
+                    cpu_info.goto_address = {
+                        // REMARK: Function is placed locally here to ensure it is never called in another context.
+                        extern "C" fn _smp_entry(_: *const limine::LimineSmpInfo) -> ! {
+                            // Wait to ensure the machine is the correct state to execute cpu setup.
+                            while !SMP_MEMORY_READY.load(Ordering::Relaxed) {
+                                core::hint::spin_loop();
+                            }
+
+                            // SAFETY: Function is called only once per core.
+                            #[cfg(target_arch = "x86_64")]
+                            unsafe {
+                                libarch::x64::cpu::init()
+                            };
+
+                            // SAFETY: All currently referenced memory should be mapped in the kernel page tables.
+                            unsafe { crate::memory::get_kernel_virtual_mapper().commit_vmem_register().unwrap() };
+
+                            SMP_MEMORY_INIT.fetch_sub(1, Ordering::Relaxed);
+                            while SMP_MEMORY_INIT.load(Ordering::Relaxed) > 0 {
+                                core::hint::spin_loop();
+                            }
+
+                            trace!("Finished SMP entry for core.");
+
+                            // SAFETY: Function is called only once.
+                            unsafe { kernel_thread_setup() }
+                        }
+
+                        _smp_entry
+                    };
                 } else {
-                    cpu_info.goto_address = libarch::interrupts::wait_indefinite as usize as u64;
+                    cpu_info.goto_address = {
+                        extern "C" fn _idle_forever(_: *const limine::LimineSmpInfo) -> ! {
+                            // SAFETY: Core is not expecting anything to happen, as it will be idling.
+                            unsafe { libarch::interrupts::disable() };
+                            libarch::interrupts::wait_indefinite()
+                        }
+
+                        _idle_forever
+                    };
                 }
             }
         }
@@ -755,29 +792,6 @@ unsafe extern "C" fn _entry() -> ! {
             }
         }
     }
-
-    kernel_thread_setup()
-}
-
-/// SAFETY: This function invariantly assumes it will be called only once per core.
-#[inline(never)]
-unsafe fn _smp_entry() -> ! {
-    // Wait to ensure the machine is the correct state to execute cpu setup.
-    while !SMP_MEMORY_READY.load(Ordering::Relaxed) {
-        core::hint::spin_loop();
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    libarch::x64::cpu::init();
-
-    crate::memory::get_kernel_virtual_mapper().commit_vmem_register().unwrap();
-
-    SMP_MEMORY_INIT.fetch_sub(1, Ordering::Relaxed);
-    while SMP_MEMORY_INIT.load(Ordering::Relaxed) > 0 {
-        core::hint::spin_loop();
-    }
-
-    trace!("Finished SMP entry for core.");
 
     kernel_thread_setup()
 }
