@@ -14,12 +14,12 @@ pub fn syscall_handler(
     vector: u64,
     arg0: u64,
     arg1: u64,
-    arg2: u64,
-    arg3: u64,
-    arg4: u64,
+    _arg2: u64,
+    _arg3: u64,
+    _arg4: u64,
     ret_ip: u64,
     ret_sp: u64,
-    regs: &mut libarch::interrupts::SyscallContext,
+    _regs: &mut libarch::interrupts::SyscallContext,
 ) -> ControlFlowContext {
     let syscall = match vector {
         0x100 => {
@@ -61,14 +61,13 @@ pub fn do_syscall(vector: Syscall) {
     match vector {
         Syscall::Log { level, cstr_ptr } => {
             // SAFETY: The kernel guarantees the HHDM will be valid.
-            let page_manager = unsafe { libkernel::memory::VirtualMapper::from_current(get_kernel_hhdm_address()) };
+            let page_manager = unsafe { crate::memory::VirtualMapper::from_current(get_kernel_hhdm_address()) };
 
             let mut cstr_increment_ptr = cstr_ptr;
-            // SAFETY: This is meant to be a null page, for the loop below to work correctly.
-            let mut last_char_page_base = unsafe { Address::<Page>::new_unchecked(0) };
+            let mut last_char_page_base = Address::<Page>::new(Address::zero(), None).unwrap();
             loop {
                 // Ensure the memory of the current cstr increment address is mapped.
-                let Some(char_address_base_page) = Address::<Page>::from_ptr(cstr_increment_ptr, libcommon::PageAlign::DontCare)
+                let Some(char_address_base_page) = Address::<Page>::from_ptr(cstr_increment_ptr, None)
                     else {
                         warn!("Process attempted to overrun with `CStr` pointer.");
                         return;

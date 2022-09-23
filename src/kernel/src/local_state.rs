@@ -189,6 +189,7 @@ pub fn try_begin_scheduling() {
             trace!("Enabling kernel scheduler.");
             scheduler.enable();
 
+            // SAFETY: Value provided is known-non-zero.
             unsafe { reload_timer(core::num::NonZeroU16::new_unchecked(1)) };
         }
     }

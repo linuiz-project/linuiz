@@ -1,4 +1,4 @@
-use crate::{Address};
+use crate::Address;
 use acpi::{fadt::Fadt, mcfg::Mcfg, sdt::Signature, AcpiTables, PhysicalMapping, PlatformInfo};
 use port::{PortAddress, ReadOnlyPort, ReadWritePort, WriteOnlyPort};
 use spin::{Mutex, MutexGuard, Once};
@@ -66,7 +66,7 @@ impl acpi::AcpiHandler for AcpiHandler {
 
             acpi::PhysicalMapping::new(
                 aligned_address.as_usize(),
-                core::ptr::NonNull::new_unchecked(virtual_address.as_mut_ptr()),
+                core::ptr::NonNull::new(virtual_address.as_mut_ptr()).unwrap(),
                 size,
                 frame_count * 0x1000,
                 Self,

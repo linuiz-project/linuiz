@@ -37,11 +37,11 @@ impl InteriorRef for Mut {
 // TODO reintroduce MMIO structure
 
 pub trait KernelAllocator: Send + Sync + core::alloc::Allocator {
-    fn borrow_next(&self) -> Result<Address<Frame>, AllocError>;
-    fn borrow_next_many(&self, count: usize) -> Result<Address<Frame>, AllocError>;
+    fn lock_next(&self) -> Result<Address<Frame>, AllocError>;
+    fn lock_next_many(&self, count: usize) -> Result<Address<Frame>, AllocError>;
 
-    fn borrow(&self, frame: Address<Frame>) -> Result<(), AllocError>;
-    fn borrow_many(&self, frame: Address<Frame>, count: usize) -> Result<(), AllocError>;
+    fn lock(&self, frame: Address<Frame>) -> Result<(), AllocError>;
+    fn lock_many(&self, frame: Address<Frame>, count: usize) -> Result<(), AllocError>;
     fn free(&self, frame: Address<Frame>) -> Result<(), AllocError>;
 
     fn allocate_to(&self, frame: Address<Frame>, count: usize) -> Result<Address<Virtual>, AllocError>;

@@ -8,8 +8,6 @@ path = "../shared/libcommon/"
 features = ["global_allocator"]
 [dependencies.libarch]
 path = "../shared/libarch/"
-[dependencies.libkernel]
-path = "../shared/libkernel/"
 [dependencies]
 log = { version = "*", default-features = false }
 num_enum = { version = "*", default-features = false }
@@ -30,6 +28,4 @@ uart_16550 = "*"
 opt-level = 1
 
 [profile.release]
-strip = true
-lto = true
-# Further release optimizations are specified in the xtask `Builder`. Optimization can be controlled with `-O speed/size`
+# Release optimizations are specified in the xtask `Builder`. Optimization can be controlled with `-o p/s/ps`
