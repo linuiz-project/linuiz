@@ -5,7 +5,7 @@ use spin::{Mutex, MutexGuard, Once};
 
 pub enum Register<'a, T: port::PortReadWrite> {
     IO(ReadWritePort<T>),
-    MMIO(&'a crate::memory::VolatileCell<T, crate::ReadWrite>),
+    MMIO(&'a libcommon::memory::VolatileCell<T, libcommon::ReadWrite>),
 }
 
 impl<T: port::PortReadWrite> Register<'_, T> {
@@ -55,23 +55,17 @@ pub struct AcpiHandler;
 
 impl acpi::AcpiHandler for AcpiHandler {
     unsafe fn map_physical_region<T>(&self, address: usize, size: usize) -> acpi::PhysicalMapping<Self, T> {
-        let kernel_allocator = crate::memory::get_global_allocator();
-        if address > kernel_allocator.total_memory() {
-            panic!("physical region address out of memory range")
-        } else {
-            let aligned_address = Address::<crate::Frame>::new_truncate(address as u64);
-            let aligned_size = (address & !0xFFF).abs_diff(address + size);
-            let frame_count = (aligned_size / 0x1000) + 1;
-            let virtual_address = kernel_allocator.allocate_to(aligned_address, frame_count).unwrap();
+        trace!("ACPI MAP: @{:#X}:{}", address, size);
 
-            acpi::PhysicalMapping::new(
-                aligned_address.as_usize(),
-                core::ptr::NonNull::new(virtual_address.as_mut_ptr()).unwrap(),
-                size,
-                frame_count * 0x1000,
-                Self,
-            )
-        }
+        acpi::PhysicalMapping::new(
+            address,
+            core::ptr::NonNull::new_unchecked(
+                crate::memory::get_kernel_hhdm_address().as_mut_ptr::<u8>().add(address).cast(),
+            ),
+            size,
+            size,
+            Self,
+        )
     }
 
     fn unmap_physical_region<T>(_: &acpi::PhysicalMapping<Self, T>) {
@@ -170,7 +164,7 @@ static RSDP: Once<Mutex<AcpiTables<AcpiHandler>>> = Once::new();
 /// Initializes the ACPI interface.
 ///
 /// SAFETY: This this method must be called before bootloader memory is reclaimed.
-pub unsafe fn init_interface(rsdp_address: Address<crate::Physical>) {
+pub unsafe fn init_interface(rsdp_address: Address<libcommon::Physical>) {
     RSDP.call_once(move || {
         Mutex::new({
             let handler = AcpiHandler;

@@ -23,6 +23,7 @@ miniz_oxide = "*"
 bytemuck = "*"
 rustc-demangle = "*"
 uart_16550 = "*"
+port-rs = { path = "../shared/port-rs/" }
 
 [profile.dev]
 opt-level = 1
