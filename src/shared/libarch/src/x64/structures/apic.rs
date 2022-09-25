@@ -1,34 +1,8 @@
 #![allow(non_camel_case_types, non_upper_case_globals)]
 
-use crate::{interrupts, x64::registers::msr::IA32_APIC_BASE};
+use crate::interrupts;
 use bit_field::BitField;
 use core::marker::PhantomData;
-use libcommon::Address;
-
-pub const xAPIC_BASE_ADDR: u64 = 0xFEE00000;
-pub const x2APIC_BASE_MSR_ADDR: u32 = 0x800;
-
-/// Type for representing the mode of the core-local APIC.
-enum Mode {
-    Disabled,
-    xAPIC,
-    x2APIC,
-}
-
-/// Returns the current mode of the core-local APIC.
-impl Mode {
-    fn get() -> Self {
-        if IA32_APIC_BASE::get_hw_enabled() {
-            if IA32_APIC_BASE::get_is_x2_mode() {
-                Mode::x2APIC
-            } else {
-                Mode::xAPIC
-            }
-        } else {
-            Mode::Disabled
-        }
-    }
-}
 
 /// Initializes the core-local APIC in the most advanced mode possible, and hardware-enables it.
 ///
@@ -186,34 +160,59 @@ pub const LINT0_VECTOR: u8 = 253;
 pub const LINT1_VECTOR: u8 = 254;
 pub const SPURIOUS_VECTOR: u8 = 255;
 
-static APIC: spin::Once<Address<libcommon::Virtual>> = spin::Once::new();
+pub const xAPIC_BASE_ADDR: u64 = 0xFEE00000;
+pub const x2APIC_BASE_MSR_ADDR: u32 = 0x800;
 
-fn get_apic() -> Address<libcommon::Virtual> {
-    *APIC.call_once(|| {
-        // SAFETY: On x86, this address is always valid physical memory.
-        let xapic_frame = Address::<libcommon::Frame>::new_truncate(xAPIC_BASE_ADDR);
-        match libcommon::memory::get_global_allocator().allocate_to(xapic_frame, 1) {
-            Ok(address) => address,
-            Err(_) => panic!("failed to initialize xAPIC"),
+/// Type for representing the mode of the core-local APIC.
+enum Apic {
+    xAPIC(usize),
+    x2APIC,
+}
+
+static APIC: spin::Once<Apic> = spin::Once::new();
+
+#[derive(Debug)]
+pub struct ApicNotEnabled;
+pub fn init_apic(global_map_physical_region: impl FnOnce(usize, usize) -> *mut u32) -> Result<(), ApicNotEnabled> {
+    APIC.try_call_once(|| {
+        use crate::x64::registers::msr::IA32_APIC_BASE;
+
+        if IA32_APIC_BASE::get_hw_enabled() {
+            if IA32_APIC_BASE::get_is_x2_mode() {
+                Ok(Apic::x2APIC)
+            } else {
+                Ok(Apic::xAPIC(
+                    global_map_physical_region(IA32_APIC_BASE::get_base_address().as_usize(), 0x1000) as usize
+                ))
+            }
+        } else {
+            Err(ApicNotEnabled)
         }
     })
+    .map(|_| ())
 }
 
 /// Reads the given register from the local APIC. Panics if APIC is not properly initialized.
-unsafe fn read_register(register: Register) -> u64 {
-    match Mode::get() {
-        Mode::xAPIC => get_apic().as_mut_ptr::<u32>().add(register.xapic_offset()).read_volatile() as u64,
-        Mode::x2APIC => crate::x64::registers::msr::rdmsr(register.x2apic_msr()),
-        Mode::Disabled => panic!("cannot write; core-local APIC is not in a valid mode"),
+fn read_register(register: Register) -> u64 {
+    match APIC.get() {
+        // SAFETY: Address provided for xAPIC mapping is required to be valid.
+        Some(Apic::xAPIC(address)) => unsafe {
+            (*address as *const u32).add(register.xapic_offset()).read_volatile() as u64
+        },
+
+        // SAFETY: MSR addresses are known-valid from IA32 SDM.
+        Some(Apic::x2APIC) => unsafe { crate::x64::registers::msr::rdmsr(register.x2apic_msr()) },
+
+        None => panic!("cannot write; core-local APIC is not in a valid mode"),
     }
 }
 
 /// Reads the given register from the local APIC. Panics if APIC is not properly initialized.
 unsafe fn write_register(register: Register, value: u64) {
-    match Mode::get() {
-        Mode::xAPIC => get_apic().as_mut_ptr::<u32>().add(register.xapic_offset()).write_volatile(value as u32),
-        Mode::x2APIC => crate::x64::registers::msr::wrmsr(register.x2apic_msr(), value),
-        Mode::Disabled => panic!("cannot write; core-local APIC is not in a valid mode"),
+    match APIC.get() {
+        Some(Apic::xAPIC(address)) => (*address as *mut u32).add(register.xapic_offset()).write_volatile(value as u32),
+        Some(Apic::x2APIC) => crate::x64::registers::msr::wrmsr(register.x2apic_msr(), value),
+        None => panic!("cannot write; core-local APIC is not in a valid mode"),
     }
 }
 
@@ -234,18 +233,12 @@ pub unsafe fn sw_disable() {
 }
 
 pub fn get_id() -> u32 {
-    unsafe {
-        match Mode::get() {
-            Mode::xAPIC => get_apic().as_mut_ptr::<u32>().add(Register::ID.xapic_offset()).read_volatile() >> 24,
-            Mode::x2APIC => crate::x64::registers::msr::rdmsr(Register::ID.x2apic_msr()) as u32,
-            Mode::Disabled => panic!("cannot read ID; core-local APIC is not in a valid mode"),
-        }
-    }
+    read_register(Register::ID).get_bits(24..32) as u32
 }
 
 #[inline]
 pub fn get_version() -> u32 {
-    unsafe { read_register(Register::VERSION) as u32 }
+    read_register(Register::VERSION) as u32
 }
 
 #[inline]
@@ -255,7 +248,7 @@ pub fn end_of_interrupt() {
 
 #[inline]
 pub fn get_error_status() -> ErrorStatusFlags {
-    ErrorStatusFlags::from_bits_truncate(unsafe { read_register(Register::ERR) as u8 })
+    ErrorStatusFlags::from_bits_truncate(read_register(Register::ERR) as u8)
 }
 
 #[inline]
@@ -275,7 +268,7 @@ pub unsafe fn set_timer_initial_count(count: u32) {
 
 #[inline]
 pub fn get_timer_current_count() -> u32 {
-    unsafe { read_register(Register::TIMER_CUR_CNT) as u32 }
+    read_register(Register::TIMER_CUR_CNT) as u32
 }
 
 /// Resets the APIC module. The APIC module state is configured as follows:
@@ -389,12 +382,12 @@ impl<T: LocalVectorVariant> LocalVector<T> {
 
     #[inline]
     pub fn get_interrupted(&self) -> bool {
-        unsafe { read_register(T::REGISTER).get_bit(Self::INTERRUPTED_OFFSET) }
+        read_register(T::REGISTER).get_bit(Self::INTERRUPTED_OFFSET)
     }
 
     #[inline]
     pub fn get_masked(&self) -> bool {
-        unsafe { read_register(T::REGISTER).get_bit(Self::MASKED_OFFSET) }
+        read_register(T::REGISTER).get_bit(Self::MASKED_OFFSET)
     }
 
     #[inline]
@@ -406,7 +399,7 @@ impl<T: LocalVectorVariant> LocalVector<T> {
 
     #[inline]
     pub fn get_vector(&self) -> Option<u8> {
-        match unsafe { read_register(T::REGISTER).get_bits(0..8) } {
+        match read_register(T::REGISTER).get_bits(0..8) {
             0..32 => None,
             vector => Some(vector as u8),
         }
@@ -424,10 +417,7 @@ impl<T: LocalVectorVariant> LocalVector<T> {
 
 impl<T: LocalVectorVariant> core::fmt::Debug for LocalVector<T> {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter
-            .debug_tuple("Local Vector")
-            .field(&format_args!("0b{:b}", unsafe { &read_register(T::REGISTER) }))
-            .finish()
+        formatter.debug_tuple("Local Vector").field(&read_register(T::REGISTER)).finish()
     }
 }
 
