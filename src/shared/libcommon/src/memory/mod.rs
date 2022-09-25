@@ -1,7 +1,7 @@
 mod aligned_allocator;
 mod volatile;
 
-use core::alloc::AllocError;
+use core::{alloc::AllocError, num::NonZeroUsize};
 
 pub use aligned_allocator::*;
 pub use volatile::*;
@@ -38,7 +38,7 @@ impl InteriorRef for Mut {
 
 pub trait KernelAllocator: Send + Sync + core::alloc::Allocator {
     fn lock_next(&self) -> Result<Address<Frame>, AllocError>;
-    fn lock_next_many(&self, count: usize) -> Result<Address<Frame>, AllocError>;
+    fn lock_next_many(&self, count: NonZeroUsize, alignment: NonZeroUsize) -> Result<Address<Frame>, AllocError>;
 
     fn lock(&self, frame: Address<Frame>) -> Result<(), AllocError>;
     fn lock_many(&self, frame: Address<Frame>, count: usize) -> Result<(), AllocError>;

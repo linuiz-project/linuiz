@@ -115,22 +115,14 @@ impl VirtualMapper {
             root_table.with_entry_create(page, |entry| {
                 match entry {
                     Ok(entry) => {
-                        // SAFETY: We've got an explicit directive from the caller to map these pages, and we've checked the condition of the
-                        //         pages and entries, so if this isn't safe it's on the caller.
-                        unsafe {
-                            entry.set_frame(frame);
-                            entry.set_attributes(
-                                {
-                                    // Make sure the `HUGE` but is automatically set for huge pages.
-                                    if page.depth().unwrap_or(1) > 1 {
-                                        attributes.insert(PageAttributes::HUGE);
-                                    }
+                        *entry = PageTableEntry::new(frame, {
+                            // Make sure the `HUGE` bit is automatically set for huge pages.
+                            if page.depth().unwrap_or(1) > 1 {
+                                attributes.insert(PageAttributes::HUGE);
+                            }
 
-                                    attributes
-                                },
-                                AttributeModify::Set,
-                            );
-                        }
+                            attributes
+                        });
 
                         #[cfg(target_arch = "x86_64")]
                         libarch::x64::instructions::tlb::invlpg(page);

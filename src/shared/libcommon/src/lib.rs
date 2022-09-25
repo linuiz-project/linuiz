@@ -38,8 +38,9 @@ extern crate log;
 mod addr;
 mod macros;
 
+use core::num::NonZeroUsize;
+
 pub use addr::*;
-pub mod acpi;
 pub mod memory;
 pub mod sync;
 pub mod syscall;
@@ -64,8 +65,8 @@ pub const fn to_mibibytes(value: u64) -> u64 {
 }
 
 #[inline(always)]
-pub const fn align_up(value: usize, alignment: usize) -> usize {
-    let alignment_mask = alignment - 1;
+pub const fn align_up(value: usize, alignment: NonZeroUsize) -> usize {
+    let alignment_mask = alignment.get() - 1;
     if value & alignment_mask == 0 {
         value
     } else {
@@ -73,20 +74,19 @@ pub const fn align_up(value: usize, alignment: usize) -> usize {
     }
 }
 
-// TODO use u64 for these alignment functions
 #[inline(always)]
-pub const fn align_up_div(value: usize, alignment: usize) -> usize {
-    ((value + alignment) - 1) / alignment
+pub const fn align_up_div(value: usize, alignment: NonZeroUsize) -> usize {
+    ((value + alignment.get()) - 1) / alignment.get()
 }
 
 #[inline(always)]
-pub const fn align_down(value: usize, alignment: usize) -> usize {
-    value & !(alignment - 1)
+pub const fn align_down(value: usize, alignment: NonZeroUsize) -> usize {
+    value & !(alignment.get() - 1)
 }
 
 #[inline(always)]
-pub const fn align_down_div(value: usize, alignment: usize) -> usize {
-    align_down(value, alignment) / alignment
+pub const fn align_down_div(value: usize, alignment: NonZeroUsize) -> usize {
+    align_down(value, alignment) / alignment.get()
 }
 
 extern "C" {
