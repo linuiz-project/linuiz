@@ -32,43 +32,52 @@ SECTIONS
     .rela.plt           : { *(.rela.plt) *(.rela.iplt) }
 
     /* text sections */
-    . = ALIGN(__SECTION_ALIGN);
-    PROVIDE(__text_start = .);
-    .plt                : { *(.plt) *(.iplt) }
-    .text               : { *(.text .text.*) }
-    PROVIDE(__text_end = .);
+    .text               : ALIGN(__SECTION_ALIGN) {
+        PROVIDE(__text_start = .);
+
+        *(.plt) *(.iplt)
+        *(.text .text.*)
+    
+        PROVIDE(__text_end = .);
+    }
     
     /* rodata sections */
-    . = ALIGN(__SECTION_ALIGN);
-    PROVIDE(__rodata_start = .);
-    .rodata             : { *(.rodata .rodata.*) }
-    .eh_frame_hdr       : { *(.eh_frame_hdr) }
-    PROVIDE(__rodata_end = .);
+    .rodata             : ALIGN(__SECTION_ALIGN) {
+        PROVIDE(__rodata_start = .);
+
+        *(.rodata .rodata.*)
+        *(.eh_frame_hdr)
+
+        PROVIDE(__rodata_end = .);
+    }
     
     /* bss sections */
-    . = ALIGN(__SECTION_ALIGN);
-    PROVIDE(__bss_start = .);
-    .eh_frame           : { KEEP(*(.eh_frame .eh_frame.*)) }
-    .gcc_except_table   : { KEEP(*(.gcc_except_table)) }
-    .tdata              : { *(.tdata .tdata.*) }
-    .tbss               : { *(.tbss .tbss.*) }
-    .data.rel.ro            :
-    {
+    .bss                : ALIGN(__SECTION_ALIGN) {
+        PROVIDE(__bss_start = .);
+
+        KEEP(*(.eh_frame .eh_frame.*))
+        KEEP(*(.gcc_except_table))
+        *(.tdata .tdata.*)
+        *(.tbss .tbss.*)
         *(.data.rel.ro.local .data.rel.ro.local.*)
         *(.data.rel.ro .data.rel.ro.*)
+        *(.dynamic)
+        *(.got) *(.igot)
+        *(.bss .bss.*)
+
+        PROVIDE(__bss_end = .);
     }
-    .dynamic            : { *(.dynamic) }
-    .got                : { *(.got) *(.igot) }
-    .bss                : { *(.bss .bss.*) }
-    PROVIDE(__bss_end = .);
 
     /* data sections */
-    . = ALIGN(__SECTION_ALIGN);
-    PROVIDE(__data_start = .);
-    .got.plt            : { *(.got.plt) *(.igot.plt) }
-    .data               : { *(.data .data.*) }
-    .limine_reqs        : { *(.limine_reqs) }
-    PROVIDE(__data_end = .);
+    .data               : ALIGN(__SECTION_ALIGN) {
+        PROVIDE(__data_start = .);
+
+        *(.got.plt) *(.igot.plt)
+        *(.data .data.*)
+        *(.limine_reqs)
+
+        PROVIDE(__data_end = .);
+    }
 
     .comment              0 : { *(.comment) }
     .debug                0 : { *(.debug) }
