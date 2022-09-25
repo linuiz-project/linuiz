@@ -1,6 +1,6 @@
 use alloc::{alloc::Global, vec::Vec};
 use bit_field::BitField;
-use core::{alloc::AllocError, sync::atomic::Ordering};
+use core::{alloc::AllocError, num::NonZeroUsize, sync::atomic::Ordering};
 use libcommon::{
     memory::{page_aligned_allocator, AlignedAllocator, KernelAllocator},
     Address, Virtual,
@@ -115,9 +115,16 @@ unsafe impl Sync for SlabAllocator<'_> {}
 
 impl<'a> SlabAllocator<'a> {
     pub fn from_memory_map(memory_map: &[crate::MmapEntry], phys_mapped_address: Address<Virtual>) -> Option<Self> {
-        let page_count =
-            libcommon::align_up_div(memory_map.last().map(|entry| entry.base + entry.len).unwrap() as usize, 0x1000);
-        let table_bytes = libcommon::align_up(page_count * core::mem::size_of::<Frame>(), 0x1000);
+        let page_count = libcommon::align_up_div(
+            memory_map.last().map(|entry| entry.base + entry.len).unwrap() as usize,
+            // SAFETY: Value provided is non-zero.
+            unsafe { NonZeroUsize::new_unchecked(0x1000) },
+        );
+        let table_bytes = libcommon::align_up(
+            page_count * core::mem::size_of::<Frame>(),
+            // SAFETY: Value provided is non-zero.
+            unsafe { NonZeroUsize::new_unchecked(0x1000) },
+        );
 
         let table_entry = memory_map
             .iter()
@@ -125,19 +132,11 @@ impl<'a> SlabAllocator<'a> {
             .find(|entry| entry.len >= (table_bytes as u64))?;
 
         // Clear the memory of the chosen region.
-        unsafe { core::ptr::write_bytes(table_entry.base as *mut u8, 0, table_entry.len as usize) };
+        unsafe { core::ptr::write_bytes(table_entry.base as *mut u8, 0, table_bytes) };
 
         let table = unsafe {
             core::slice::from_raw_parts((phys_mapped_address.as_u64() + table_entry.base) as *mut Frame, page_count)
         };
-
-        table.iter().skip((table_entry.base / 0x1000) as usize).take((table_entry.len / 0x1000) as usize).for_each(
-            |frame| {
-                frame.peek();
-                frame.modify_type(FrameType::Reserved);
-                frame.unpeek();
-            },
-        );
 
         for entry in memory_map {
             assert_eq!(entry.base & 0xFFF, 0, "memory map entry is not page-aligned: {entry:?}");
@@ -167,6 +166,21 @@ impl<'a> SlabAllocator<'a> {
                 frame.unpeek();
             });
         }
+
+        // Ensure the table pages are reserved, so as to not be locked by any of the `_next` functions.
+        table
+            .iter()
+            .skip((table_entry.base / 0x1000) as usize)
+            .take(libcommon::align_up_div(
+                table_bytes,
+                // SAFETY: Value provided is non-zero.
+                unsafe { NonZeroUsize::new_unchecked(0x1000) },
+            ))
+            .for_each(|frame| {
+                frame.peek();
+                frame.modify_type(FrameType::Reserved);
+                frame.unpeek();
+            });
 
         Some(Self {
             slabs64: Mutex::new(Vec::new_in(page_aligned_allocator())),
@@ -248,13 +262,24 @@ unsafe impl<'a> core::alloc::Allocator for SlabAllocator<'a> {
                 (if layout.align() <= 4096 && layout.size() <= 4096 {
                     self.lock_next()
                 } else {
-                    self.lock_next_many(layout.size() / 0x1000)
+                    self.lock_next_many(
+                        NonZeroUsize::new(layout.size() / 0x1000).unwrap(),
+                        // SAFETY: `Layout::align()` can not be zero in safe Rust.
+                        unsafe { NonZeroUsize::new_unchecked(layout.align()) },
+                    )
                 })
                 .map(|address| {
                     // SAFETY: Frame addresses are naturally aligned, and arbitrary memory is valid for `u8`, and `phys_mapped_address` is
                     //         required to be valid for arbitrary offsets from within its range.
                     let allocation_ptr = unsafe { self.phys_mapped_address.as_mut_ptr::<u8>().add(address.as_usize()) };
-                    slice_from_raw_parts_mut(allocation_ptr, libcommon::align_up(layout.size(), 4096))
+                    slice_from_raw_parts_mut(
+                        allocation_ptr,
+                        libcommon::align_up(
+                            layout.size(),
+                            // SAFETY: Value provided is non-zero.
+                            unsafe { NonZeroUsize::new_unchecked(0x1000) },
+                        ),
+                    )
                 })
             }
         };
@@ -304,22 +329,29 @@ impl KernelAllocator for SlabAllocator<'_> {
         })
     }
 
-    fn lock_next_many(&self, count: usize) -> Result<Address<libcommon::Frame>> {
+    fn lock_next_many(&self, count: NonZeroUsize, alignment: NonZeroUsize) -> Result<Address<libcommon::Frame>> {
+        debug_assert!(alignment.is_power_of_two());
+
         self.with_table(|table| {
+            let frame_alignment = NonZeroUsize::new(alignment.get() / 0x1000).unwrap_or(
+                // SAFETY: Value provided is known non-zero.
+                unsafe { NonZeroUsize::new_unchecked(1) },
+            );
             let mut start_index = 0;
 
-            while start_index < (table.len() - count) {
-                let sub_table = &table[start_index..(start_index + count)];
+            while start_index < (table.len() - count.get()) {
+                let sub_table = &table[start_index..(start_index + count.get())];
                 sub_table.iter().for_each(Frame::peek);
 
                 match sub_table
                     .iter()
                     .enumerate()
                     .map(|(index, frame)| (index, frame.data()))
+                    .rev() // Reverse the iterator to ensure we get the very last index that isn't viable (speeds up iterations).
                     .find(|(_, (locked, ty))| *locked || *ty != FrameType::Generic)
                 {
                     Some((index, _)) => {
-                        start_index += index + 1;
+                        start_index = libcommon::align_up(index + 1, frame_alignment);
                         sub_table.iter().for_each(Frame::unpeek);
                     }
                     None => {
@@ -397,8 +429,10 @@ impl KernelAllocator for SlabAllocator<'_> {
         })
     }
 
-    fn allocate_to(&self, frame: Address<libcommon::Frame>, _: usize) -> Result<Address<Virtual>> {
-        self.lock(frame).map(|_| Address::<Virtual>::new_truncate(self.phys_mapped_address.as_u64() + frame.as_u64()))
+    // TODO non-zero usize for the count
+    fn allocate_to(&self, frame: Address<libcommon::Frame>, count: usize) -> Result<Address<Virtual>> {
+        self.lock_many(frame, count)
+            .map(|_| Address::<Virtual>::new_truncate(self.phys_mapped_address.as_u64() + frame.as_u64()))
     }
 
     fn total_memory(&self) -> usize {

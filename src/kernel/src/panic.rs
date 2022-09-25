@@ -1,4 +1,7 @@
-pub static DEBUG_TABLES: spin::Once<(&[crate::elf::symbol::Symbol], &[u8])> = spin::Once::new();
+use spin::Once;
+
+pub static KERNEL_SYMBOLS: Once<&[crate::elf::symbol::Symbol]> = Once::new();
+pub static KERNEL_STRINGS: Once<&[u8]> = Once::new();
 
 const MAXIMUM_STACK_TRACE_DEPTH: usize = 16;
 
@@ -23,7 +26,7 @@ fn trace_frame_pointer(
     // TODO add checks somehow to ensure `rbp` is being used to store the stack base.
     while let Some(stack_frame) = unsafe { frame_ptr.as_ref() } {
         // 'Push' the return address to the array.
-        let Some(stack_trace_address) = stack_trace_addresses.get_mut(stack_trace_index as usize) else { return true; };
+        let Some(stack_trace_address) = stack_trace_addresses.get_mut(stack_trace_index as usize) else { return true };
 
         if stack_frame.return_address == 0x0 {
             break;
@@ -63,9 +66,6 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     crate::newline!();
     crate::println!("----------STACK-TRACE---------");
 
-    let debug_tables = DEBUG_TABLES.get();
-    let mut increment = 0;
-
     enum SymbolName<'a> {
         Demangled(&'a rustc_demangle::Demangle<'a>),
         RawStr(&'a str),
@@ -85,49 +85,52 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
         }
     }
 
-    for fn_address in stack_traces.iter().rev().filter_map(|fn_address| *fn_address) {
-        if let Some((symtab, strtab)) = debug_tables
-            && let Some(fn_symbol) = symtab
-                .iter()
-                .filter(|symbol| symbol.get_type() == crate::elf::symbol::Type::Function)
-                .find(|symbol| {
-                    let symbol_start = symbol.get_value();
-                    let symbol_end = symbol_start + (symbol.get_size() as u64);
+    let mut trace_index = 0;
 
-                    (symbol_start..symbol_end).contains(&fn_address)
-                })
-            && let Some(fn_name_offset) = fn_symbol.get_name_offset()
-            && let Some(symbol_name) = core::ffi::CStr::from_bytes_until_nul(&strtab[fn_name_offset..])
-                .ok()
-                .and_then(|cstr| cstr.to_str().ok())
-        {
-            match rustc_demangle::try_demangle(symbol_name).ok() {
-                Some(demangled) => {
-                    print_stack_trace_entry(
-                        increment,
-                        fn_symbol.get_value(),
-                        SymbolName::Demangled(&demangled)
-                    )
-                },
+    if let Some(symtab) = KERNEL_SYMBOLS.get() && let Some(strtab) = KERNEL_STRINGS.get() {
+        for fn_address in stack_traces.iter().rev().filter_map(|fn_address| *fn_address) {
+            if let Some(fn_symbol) = symtab
+                    .iter()
+                    .filter(|symbol| symbol.get_type() == crate::elf::symbol::Type::Function)
+                    .find(|symbol| {
+                        let symbol_start = symbol.get_value();
+                        let symbol_end = symbol_start + (symbol.get_size() as u64);
 
-                None => {
-                    print_stack_trace_entry(
-                        increment,
-                        fn_symbol.get_value(),
-                        SymbolName::RawStr(symbol_name)
-                    )
+                        (symbol_start..symbol_end).contains(&fn_address)
+                    })
+                && let Some(fn_name_offset) = fn_symbol.get_name_offset()
+                && let Some(symbol_name) = core::ffi::CStr::from_bytes_until_nul(&strtab[fn_name_offset..])
+                    .ok()
+                    .and_then(|cstr| cstr.to_str().ok())
+            {
+                match rustc_demangle::try_demangle(symbol_name).ok() {
+                    Some(demangled) => {
+                        print_stack_trace_entry(
+                            trace_index,
+                            fn_symbol.get_value(),
+                            SymbolName::Demangled(&demangled)
+                        )
+                    },
+
+                    None => {
+                        print_stack_trace_entry(
+                            trace_index,
+                            fn_symbol.get_value(),
+                            SymbolName::RawStr(symbol_name)
+                        )
+                    }
                 }
+            } else {
+                print_stack_trace_entry(trace_index, fn_address, SymbolName::None);
             }
-        } else {
-            print_stack_trace_entry(increment, fn_address, SymbolName::None);
-        }
 
-        increment += 1;
+            trace_index += 1;
+        }
     }
 
     if trace_overflow {
-        print_stack_trace_entry(increment, 0x0, SymbolName::RawStr("!!! trace overflowed !!!"))
-    } else if increment == 0 {
+        print_stack_trace_entry(trace_index, 0x0, SymbolName::RawStr("!!! trace overflowed !!!"))
+    } else if trace_index == 0 {
         crate::println!("No stack trace is available.");
     }
 

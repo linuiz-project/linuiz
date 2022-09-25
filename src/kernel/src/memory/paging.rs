@@ -150,17 +150,16 @@ impl<'a, RefKind: InteriorRef> PageTable<'a, RefKind> {
         let cur_depth = self.depth;
         let hhdm_address = self.hhdm_address;
         let entry = &self.get_table()[Self::get_depth_index(cur_depth, page.address().as_usize())];
-        let is_huge_entry = entry.get_attributes().contains(PageAttributes::HUGE);
         let page_depth = page.depth().unwrap_or(1);
 
-        if cur_depth == page_depth && (cur_depth == 1 || is_huge_entry) {
+        if cur_depth == page_depth {
             func(Ok(entry))
-        } else if cur_depth > page_depth && !is_huge_entry {
+        } else if cur_depth > page_depth && !entry.get_attributes().contains(PageAttributes::HUGE) {
             match unsafe { PageTable::<Ref>::new(cur_depth - 1, hhdm_address, entry) } {
                 Some(page_table) => page_table.with_entry(page, func),
                 None => func(Err(PagingError::NotMapped)),
             }
-        } else if is_huge_entry {
+        } else if entry.get_attributes().contains(PageAttributes::HUGE) {
             func(Err(PagingError::WalkInterrupted))
         } else {
             func(Err(PagingError::DepthOverflow))
@@ -210,17 +209,16 @@ impl<'a> PageTable<'a, Mut> {
         let cur_depth = self.depth;
         let hhdm_address = self.hhdm_address;
         let entry = &mut self.get_table_mut()[Self::get_depth_index(cur_depth, page.address().as_usize())];
-        let is_huge_entry = entry.get_attributes().contains(PageAttributes::HUGE);
         let page_depth = page.depth().unwrap_or(1);
 
-        if cur_depth == page_depth && (cur_depth == 1 || is_huge_entry) {
+        if cur_depth == page_depth {
             func(Ok(entry))
-        } else if cur_depth > page_depth && !is_huge_entry {
+        } else if cur_depth > page_depth && !entry.get_attributes().contains(PageAttributes::HUGE) {
             match unsafe { PageTable::<Mut>::new(cur_depth - 1, hhdm_address, entry) } {
                 Some(mut page_table) => page_table.with_entry_mut(page, func),
                 None => func(Err(PagingError::NotMapped)),
             }
-        } else if is_huge_entry {
+        } else if entry.get_attributes().contains(PageAttributes::HUGE) {
             func(Err(PagingError::WalkInterrupted))
         } else {
             func(Err(PagingError::DepthOverflow))
@@ -242,47 +240,20 @@ impl<'a> PageTable<'a, Mut> {
 
         // TODO this doesn't handle page depth correctly for creations
         // TODO possibly handle present but no frame, or frame but no present?
-        if !entry.is_present() {
-            // If we're still traversing ...
-            if cur_depth > page_depth {
-                let Ok(frame) = libcommon::memory::get_global_allocator().lock_next()
-                    else { return func(Err(PagingError::NoMoreFrames)); };
-                *entry = PageTableEntry::new(frame, PageAttributes::PTE);
-            // ... if we're done traversing and reached a 4KiB PTE ...
-            } else if cur_depth == page_depth && page_depth == 1 {
-                let Ok(frame) = libcommon::memory::get_global_allocator().lock_next()
-                    else { return func(Err(PagingError::NoMoreFrames)); };
-                // Clear the memory of the frame.
-                // SAFETY: The HHDM address is required to be valid, and the frame provided the gloal allocator must also be valid.
-                unsafe { core::ptr::write_bytes((hhdm_address.as_u64() + frame.as_u64()) as *mut u8, 0, 0x1000) };
-
-                *entry = PageTableEntry::new(frame, PageAttributes::PRESENT);
-            // ... if we're done traversing and reached a huge PTE
-            } else if cur_depth == page_depth && page_depth > 1 {
-                let page_size = page.align().unwrap().as_usize();
-                let Ok(frame) = libcommon::memory::get_global_allocator().lock_next_many(page_size / 0x1000)
-                    else { return func(Err(PagingError::NoMoreFrames)); };
-                // Clear the memory of the frame.
-                // SAFETY: The HHDM address is required to be valid, and the frame provided the gloal allocator must also be valid.
-                unsafe { core::ptr::write_bytes((hhdm_address.as_u64() + frame.as_u64()) as *mut u8, 0, page_size) };
-
-                *entry = PageTableEntry::new(frame, PageAttributes::PRESENT | PageAttributes::HUGE);
-            } else {
-                unimplemented!()
-            }
+        if !entry.is_present() && cur_depth > page_depth {
+            let Ok(frame) = libcommon::memory::get_global_allocator().lock_next()
+                else { return func(Err(PagingError::NoMoreFrames)) };
+            *entry = PageTableEntry::new(frame, PageAttributes::PTE);
         }
 
-        let is_huge_entry = entry.get_attributes().contains(PageAttributes::HUGE);
-
-        if cur_depth == page_depth && (cur_depth == 1 || is_huge_entry) {
+        if cur_depth == page_depth {
             func(Ok(entry))
-        } else if cur_depth > page_depth && !is_huge_entry {
+        } else if cur_depth > page_depth && !entry.get_attributes().contains(PageAttributes::HUGE) {
             match unsafe { PageTable::<Mut>::new(cur_depth - 1, hhdm_address, entry) } {
                 Some(mut page_table) => page_table.with_entry_create(page, func),
                 None => func(Err(PagingError::NotMapped)),
             }
-        } else if is_huge_entry {
-            info!("{}/{} {} {:?}", cur_depth, page_depth, is_huge_entry, entry);
+        } else if entry.get_attributes().contains(PageAttributes::HUGE) {
             func(Err(PagingError::WalkInterrupted))
         } else {
             func(Err(PagingError::DepthOverflow))
