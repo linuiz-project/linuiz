@@ -265,6 +265,7 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
 
     // Compile and compress drivers ...
     {
+        // TODO I'm not sure how I feel about the layout of this whole block.
         let compressed_drivers = {
             let _dir = shell.push_dir("src/userspace/");
 
@@ -282,20 +283,31 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
 
             for driver_name in PACKAGED_DRIVERS {
                 let driver_path = PathBuf::from(format!("target/x86_64-unknown-linuiz/{profile_str}/{driver_name}"));
-                let mut file_bytes = shell.read_binary_file(driver_path.clone())?;
 
-                let byte_offset = file_bytes.len();
+                // Compress and append driver bytes.
+                {
+                    let file_bytes = shell.read_binary_file(driver_path.clone())?;
+                    let mut compressed_bytes =
+                        miniz_oxide::deflate::compress_to_vec(&file_bytes, options.compress.as_u8());
 
-                bytes.push((byte_offset >> 0) as u8);
-                bytes.push((byte_offset >> 8) as u8);
-                bytes.push((byte_offset >> 16) as u8);
-                bytes.push((byte_offset >> 24) as u8);
-                bytes.push((byte_offset >> 32) as u8);
-                bytes.push((byte_offset >> 40) as u8);
-                bytes.push((byte_offset >> 48) as u8);
-                bytes.push((byte_offset >> 56) as u8);
+                    println!(
+                        "Compress driver '{}': {} -> {} bytes",
+                        driver_name,
+                        file_bytes.len(),
+                        compressed_bytes.len()
+                    );
 
-                bytes.append(&mut file_bytes);
+                    let bytes_len = compressed_bytes.len();
+                    bytes.push((bytes_len >> 0) as u8);
+                    bytes.push((bytes_len >> 8) as u8);
+                    bytes.push((bytes_len >> 16) as u8);
+                    bytes.push((bytes_len >> 24) as u8);
+                    bytes.push((bytes_len >> 32) as u8);
+                    bytes.push((bytes_len >> 40) as u8);
+                    bytes.push((bytes_len >> 48) as u8);
+                    bytes.push((bytes_len >> 56) as u8);
+                    bytes.append(&mut compressed_bytes);
+                }
 
                 if options.disassemble {
                     disassemble(&shell, options.arch, workspace_root.clone(), driver_path.clone())?;
@@ -306,8 +318,7 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
                 }
             }
 
-            println!("Compressing {} bytes of driver files...", bytes.len());
-            miniz_oxide::deflate::compress_to_vec(&bytes, options.compress.as_u8())
+            bytes
         };
 
         println!("Compression resulted in a {} byte dump.", compressed_drivers.len());
