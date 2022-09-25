@@ -12,7 +12,7 @@ use libcommon::{Address, Physical};
 #[derive(Debug)]
 pub struct NotSupported;
 
-/// SAFETY: This function does not check if MSRs are supported by this core, or if the procided MSR address is valid.
+/// SAFETY: This function does not check if MSRs are supported by this core, or if the provided MSR address is valid.
 #[inline(always)]
 pub unsafe fn rdmsr(ecx: u32) -> u64 {
     // TODO check the CPUID MSR feature bit
@@ -20,14 +20,13 @@ pub unsafe fn rdmsr(ecx: u32) -> u64 {
     let value: u64;
     core::arch::asm!(
         "
-        push rax        #  Preserve the `rax` value.
         rdmsr
         shl rdx, 32     # Shift high value to high bits.
         or rdx, rax     # Copy low value in.
-        pop rax         # Return the preserved `rax` value.
         ",
         in("ecx") ecx,
         out("rdx") value,
+        out("rax") _,
         options(nostack, nomem)
     );
     value
