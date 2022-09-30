@@ -40,7 +40,6 @@ fn get_local_state() -> Option<&'static mut LocalState> {
 pub unsafe fn init(core_id: u32) {
     trace!("Configuring local state: #{}", core_id);
 
-    /* CONFIGURE TIMER */
     // TODO configure RISC-V ACLINT
     // TODO abstract this somehow, so we can call e.g. `libarch::interrupts::configure_controller();`
     #[cfg(target_arch = "x86_64")]
@@ -49,16 +48,11 @@ pub unsafe fn init(core_id: u32) {
 
         trace!("Configuring local APIC...");
         apic::software_reset();
-        apic::set_timer_divisor(apic::TimerDivisor::Div1);
-        apic::get_timer().set_vector(Vector::Timer as u8).set_masked(false);
         apic::get_error().set_vector(Vector::Error as u8).set_masked(false);
-        apic::get_performance().set_vector(Vector::Performance as u8);
-        apic::get_thermal_sensor().set_vector(Vector::Thermal as u8);
+        apic::get_performance().set_vector(Vector::Performance as u8).set_masked(true);
+        apic::get_thermal_sensor().set_vector(Vector::Thermal as u8).set_masked(true);
         // LINT0&1 should be configured by the APIC reset.
     }
-
-    // Ensure interrupts are enabled after interrupt controller is reset.
-    libarch::interrupts::enable();
 
     trace!("Writing local state struct out to memory.");
     {
@@ -180,8 +174,8 @@ unsafe fn reload_timer(freq_multiplier: core::num::NonZeroU16) {
 }
 
 /// Attempts to begin scheduling tasks on the current thread. If the scheduler has already been
-/// enabled, or local state has not been initialized, this function does nothing.
-pub fn try_begin_scheduling() {
+/// initialized, this function panicks.
+pub fn begin_scheduling() {
     if let Some(local_state) = get_local_state() {
         let scheduler = &mut local_state.scheduler;
 
@@ -189,6 +183,7 @@ pub fn try_begin_scheduling() {
             trace!("Enabling kernel scheduler.");
             scheduler.enable();
 
+            unsafe { local_state.timer.enable() };
             // SAFETY: Value provided is known-non-zero.
             unsafe { reload_timer(core::num::NonZeroU16::new_unchecked(1)) };
         }
