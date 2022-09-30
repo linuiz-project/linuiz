@@ -30,11 +30,9 @@ mod timers_impl {
         ///         a proper handler.
         pub unsafe fn new(set_freq: u16) -> Option<Self> {
             if libarch::x64::registers::msr::IA32_APIC_BASE::get_hw_enabled() {
-                apic::get_timer().set_mode(apic::TimerMode::OneShot);
-
-                // TODO perhaps check the state of APIC timer LVT? It should be asserted that the below will always work.
-                //      Really, in general, the state of the APIC timer should be more carefully controlled. Perhaps this
-                //      can be done when the interrupt device is abstracted out into `libcommon`.
+                apic::sw_enable();
+                apic::set_timer_divisor(libarch::x64::structures::apic::TimerDivisor::Div1);
+                apic::get_timer().set_masked(true).set_mode(apic::TimerMode::OneShot);
 
                 let freq = {
                     let clock = crate::time::clock::get();
@@ -44,6 +42,9 @@ mod timers_impl {
 
                     (u32::MAX - timer_count) * super::US_FREQ_FACTOR
                 };
+
+                // Ensure we reset the APIC timer to avoid any errant interrupts.
+                apic::set_timer_initial_count(0);
 
                 Some(Self(freq / (set_freq as u32)))
             } else {
@@ -60,6 +61,14 @@ mod timers_impl {
                 self.0.checked_mul(interval_multiplier as u32).expect("timer interval multiplier overflowed");
 
             apic::set_timer_initial_count(timer_wait);
+        }
+
+        unsafe fn enable(&mut self) {
+            apic::get_timer().set_masked(false);
+        }
+
+        unsafe fn disable(&mut self) {
+            apic::get_timer().set_masked(true);
         }
     }
 
@@ -82,6 +91,9 @@ mod timers_impl {
                 let freq = libarch::x64::cpu::cpuid::CPUID.get_processor_frequency_info().map_or_else(
                     || {
                         trace!("CPU does not support TSC frequency reporting via CPUID.");
+
+                        apic::sw_enable();
+                        apic::get_timer().set_masked(true).set_mode(apic::TimerMode::TSC_Deadline);
 
                         let clock = crate::time::clock::get();
                         let start_tsc = core::arch::x86_64::_rdtsc();
@@ -112,6 +124,14 @@ mod timers_impl {
 
             libarch::x64::registers::msr::IA32_TSC_DEADLINE::set(core::arch::x86_64::_rdtsc() + tsc_wait);
         }
+
+        unsafe fn enable(&mut self) {
+            apic::get_timer().set_masked(false);
+        }
+
+        unsafe fn disable(&mut self) {
+            apic::get_timer().set_masked(true);
+        }
     }
 }
 
@@ -127,4 +147,10 @@ pub trait Timer {
     /// SAFETY: Caller must ensure reloading the timer will not adversely affect regular
     ///         control flow.
     unsafe fn set_next_wait(&mut self, interval_multiplier: u16);
+
+    /// Enables the timer.
+    unsafe fn enable(&mut self);
+
+    /// Disables the timer.
+    unsafe fn disable(&mut self);
 }
