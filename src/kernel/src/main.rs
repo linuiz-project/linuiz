@@ -52,7 +52,7 @@ mod stdout;
 mod syscall;
 mod time;
 
-use core::{cell::OnceCell, num::NonZeroUsize, sync::atomic::Ordering};
+use core::{num::NonZeroUsize, sync::atomic::Ordering};
 use libcommon::{Address, Frame, Page, Virtual};
 
 pub const LIMINE_REV: u64 = 0;
@@ -124,6 +124,14 @@ unsafe extern "C" fn _entry() -> ! {
         }
     }
 
+    // TODO do this somewhere that makes sense
+    #[cfg(target_arch = "x86_64")]
+    {
+        // SAFETY: Provided IRQ base is intentionally within the exception range for x86 CPUs.
+        static PICS: spin::Mutex<pic_8259::Pics> = spin::Mutex::new(unsafe { pic_8259::Pics::new(0) });
+        PICS.lock().init(pic_8259::InterruptLines::empty());
+    }
+
     /* set interrupt handlers */
     {
         libarch::interrupts::set_page_fault_handler({
@@ -138,14 +146,16 @@ unsafe extern "C" fn _entry() -> ! {
                     crate::memory::VirtualMapper::from_current(crate::memory::get_kernel_hhdm_address());
                 let Some(mut fault_page_attributes) = virtual_mapper.get_page_attributes(fault_page) else { return Err(PageFaultHandlerError::AddressNotMapped) };
                 if fault_page_attributes.contains(PageAttributes::DEMAND) {
-                    virtual_mapper.auto_map(fault_page, {
-                        // remove demand bit ...
-                        fault_page_attributes.remove(PageAttributes::DEMAND);
-                        // ... insert present bit ...
-                        fault_page_attributes.insert(PageAttributes::PRESENT);
-                        // ... return attributes
-                        fault_page_attributes
-                    });
+                    virtual_mapper
+                        .auto_map(fault_page, {
+                            // remove demand bit ...
+                            fault_page_attributes.remove(PageAttributes::DEMAND);
+                            // ... insert present bit ...
+                            fault_page_attributes.insert(PageAttributes::PRESENT);
+                            // ... return attributes
+                            fault_page_attributes
+                        })
+                        .unwrap();
 
                     // SAFETY: We know the page was just mapped, and contains no relevant memory.
                     fault_page.zero_memory();
@@ -189,60 +199,54 @@ unsafe extern "C" fn _entry() -> ! {
 
     /* parse kernel file */
     // TODO parse the kernel file in a module or something
-    /* parse ELFs */
     {
-        /* parse kernel ELF */
-        {
-            let kernel_file = LIMINE_KERNEL_FILE
-                .get_response()
-                .get()
-                .expect("bootloader did not provide a kernel file")
-                .kernel_file
-                .get()
-                .expect("bootloader kernel file response did not provide a valid file handle");
-            let cmdline = kernel_file.cmdline.to_str().unwrap().to_str().expect("invalid cmdline string");
+        let kernel_file = LIMINE_KERNEL_FILE
+            .get_response()
+            .get()
+            .expect("bootloader did not provide a kernel file")
+            .kernel_file
+            .get()
+            .expect("bootloader kernel file response did not provide a valid file handle");
+        let cmdline = kernel_file.cmdline.to_str().unwrap().to_str().expect("invalid cmdline string");
 
-            for argument in cmdline.split(' ') {
-                match argument.split_once(':') {
-                    Some(("smp", "on")) => KERNEL_CFG_SMP = true,
-                    Some(("smp", "off")) => KERNEL_CFG_SMP = false,
-                    _ => warn!("Unhandled cmdline parameter: {:?}", argument),
-                }
+        for argument in cmdline.split(' ') {
+            match argument.split_once(':') {
+                Some(("smp", "on")) => KERNEL_CFG_SMP = true,
+                Some(("smp", "off")) => KERNEL_CFG_SMP = false,
+                _ => warn!("Unhandled cmdline parameter: {:?}", argument),
             }
+        }
 
-            let kernel_bytes =
-                core::slice::from_raw_parts(kernel_file.base.as_ptr().unwrap(), kernel_file.length as usize);
-            let kernel_elf = crate::elf::Elf::from_bytes(&kernel_bytes).expect("failed to parse kernel executable");
-            if let Some(names_section) = kernel_elf.get_section_names_section() {
-                for section in kernel_elf.iter_sections() {
-                    if let Some(section_name) = core::ffi::CStr::from_bytes_until_nul(
-                        &names_section.data()[section.get_names_section_offset()..],
-                    )
-                    .ok()
-                    .and_then(|cstr_name| cstr_name.to_str().ok())
-                    {
-                        match section_name {
-                            ".symtab" => {
-                                panic::KERNEL_SYMBOLS.call_once(|| {
-                                    let (pre, symbols, post) = section.data().align_to::<crate::elf::symbol::Symbol>();
+        let kernel_bytes = core::slice::from_raw_parts(kernel_file.base.as_ptr().unwrap(), kernel_file.length as usize);
+        let kernel_elf = crate::elf::Elf::from_bytes(&kernel_bytes).expect("failed to parse kernel executable");
+        if let Some(names_section) = kernel_elf.get_section_names_section() {
+            for section in kernel_elf.iter_sections() {
+                if let Some(section_name) =
+                    core::ffi::CStr::from_bytes_until_nul(&names_section.data()[section.get_names_section_offset()..])
+                        .ok()
+                        .and_then(|cstr_name| cstr_name.to_str().ok())
+                {
+                    match section_name {
+                        ".symtab" => {
+                            panic::KERNEL_SYMBOLS.call_once(|| {
+                                let (pre, symbols, post) = section.data().align_to::<crate::elf::symbol::Symbol>();
 
-                                    // Ensure the symbols are properly aligned to safely convert.
-                                    debug_assert!(pre.is_empty());
-                                    debug_assert!(post.is_empty());
+                                // Ensure the symbols are properly aligned to safely convert.
+                                debug_assert!(pre.is_empty());
+                                debug_assert!(post.is_empty());
 
-                                    core::slice::from_raw_parts(symbols.as_ptr(), symbols.len())
-                                });
-                            }
-
-                            ".strtab" => {
-                                panic::KERNEL_STRINGS.call_once(|| {
-                                    let data = section.data();
-                                    core::slice::from_raw_parts(data.as_ptr(), data.len())
-                                });
-                            }
-
-                            _ => {}
+                                core::slice::from_raw_parts(symbols.as_ptr(), symbols.len())
+                            });
                         }
+
+                        ".strtab" => {
+                            panic::KERNEL_STRINGS.call_once(|| {
+                                let data = section.data();
+                                core::slice::from_raw_parts(data.as_ptr(), data.len())
+                            });
+                        }
+
+                        _ => {}
                     }
                 }
             }
@@ -262,7 +266,6 @@ unsafe extern "C" fn _entry() -> ! {
     }
 
     let to_mapper = crate::memory::get_kernel_virtual_mapper();
-    let drivers_data = OnceCell::new();
 
     /* memory init */
     {
@@ -454,8 +457,23 @@ unsafe extern "C" fn _entry() -> ! {
         #[cfg(target_arch = "x86_64")]
         {
             debug!("Initializing APIC interface...");
-            libarch::x64::structures::apic::init_apic(|address, _| {
-                (crate::memory::get_kernel_hhdm_address().as_usize() + address) as *mut u32
+            libarch::x64::structures::apic::init_apic(|address| {
+                let page_address = Address::<Page>::new(
+                    Address::<Virtual>::new(crate::memory::get_kernel_hhdm_address().as_u64() + (address as u64))
+                        .unwrap(),
+                    Some(libcommon::PageAlign::Align4KiB),
+                )
+                .unwrap();
+
+                crate::memory::get_kernel_virtual_mapper()
+                    .map_if_not_mapped(
+                        page_address,
+                        Some((Address::<libcommon::Frame>::new(address as u64).unwrap(), false)),
+                        crate::memory::PageAttributes::MMIO,
+                    )
+                    .unwrap();
+
+                page_address.address().as_mut_ptr()
             })
             .unwrap();
         }
@@ -477,6 +495,8 @@ unsafe extern "C" fn _entry() -> ! {
                 // Properly handle the bootloader's mapping of ACPI addresses in lower-half or higher-half memory space.
                 if rsdp_address > hhdm_address { rsdp_address - hhdm_address } else { rsdp_address } as u64,
             ));
+
+            load_drivers();
         }
         // TODO init PCI devices
         // debug!("Initializing PCI devices...");
@@ -598,15 +618,13 @@ pub(self) unsafe fn kernel_thread_setup() -> ! {
     crate::local_state::init(0);
 
     trace!("Beginning scheduling...");
-    crate::local_state::try_begin_scheduling();
+    libarch::interrupts::enable();
+    crate::local_state::begin_scheduling();
     libarch::interrupts::wait_indefinite()
 }
 
 /* MODULE LOADING */
 fn load_drivers() {
-    use crate::{elf::segment, memory::PageAttributes};
-    use libcommon::PageAlign;
-
     let drivers_data = LIMINE_MODULES
         .get_response()
         .get()
@@ -639,8 +657,10 @@ fn load_drivers() {
         };
 
         let base_offset = current_offset + 8 /* skip 'len' prefix */;
-        let driver_data = &drivers_raw_data[base_offset..(base_offset + driver_len)];
-        let driver_elf = crate::elf::Elf::from_bytes(driver_data).unwrap();
+        let driver_data =
+            miniz_oxide::inflate::decompress_to_vec(&drivers_data[base_offset..(base_offset + driver_len)])
+                .expect("failed to decompress driver");
+        let driver_elf = crate::elf::Elf::from_bytes(&driver_data).unwrap();
         info!("{:?}", driver_elf);
 
         load_driver(&driver_elf);
@@ -650,13 +670,21 @@ fn load_drivers() {
 }
 
 fn load_driver(driver: &crate::elf::Elf) {
+    use crate::{elf::segment, memory::PageAttributes};
+    use libcommon::PageAlign;
+
     // Create the driver's page manager from the kernel's higher-half table.
-    let driver_page_manager = crate::memory::VirtualMapper::new(
-        4,
-        crate::memory::get_kernel_hhdm_address(),
-        Some(libarch::memory::VmemRegister::read()),
-    )
-    .expect("failed to create page manager for driver");
+    // SAFETY: Kernel guarantees HHDM to be valid.
+    let driver_page_manager = unsafe {
+        crate::memory::VirtualMapper::new(
+            4,
+            crate::memory::get_kernel_hhdm_address(),
+            Some(libarch::memory::VmemRegister::read()),
+        )
+        .expect("failed to create page manager for driver")
+    };
+
+    let hhdm_address = crate::memory::get_kernel_hhdm_address();
 
     // Iterate the segments, and allocate them.
     for segment in driver.iter_segments() {
@@ -666,8 +694,12 @@ fn load_driver(driver: &crate::elf::Elf) {
             segment::Type::Loadable => {
                 let memory_start = segment.get_virtual_address().unwrap().as_usize();
                 let memory_end = memory_start + segment.get_memory_layout().unwrap().size();
-                let start_page_index = libcommon::align_down_div(memory_start, NonZeroUsize::new_unchecked(0x1000));
-                let end_page_index = libcommon::align_up_div(memory_end, NonZeroUsize::new_unchecked(0x1000));
+                // SAFETY: Value provided is non-zero.
+                let start_page_index =
+                    libcommon::align_down_div(memory_start, unsafe { NonZeroUsize::new_unchecked(0x1000) });
+                // SAFETY: Value provided is non-zero.
+                let end_page_index =
+                    libcommon::align_up_div(memory_end, unsafe { NonZeroUsize::new_unchecked(0x1000) });
                 let mut data_offset = 0;
 
                 for page_index in start_page_index..end_page_index {
@@ -685,7 +717,7 @@ fn load_driver(driver: &crate::elf::Elf) {
                         Some(PageAlign::Align4KiB),
                     )
                     .unwrap();
-                    driver_page_manager.auto_map(page, page_attributes | PageAttributes::USER);
+                    driver_page_manager.auto_map(page, page_attributes | PageAttributes::USER).unwrap();
 
                     // SAFETY: HHDM is guaranteed by kernel to be valid, and the frame being pointed to was just allocated.
                     let memory_hhdm = unsafe {
@@ -748,7 +780,7 @@ fn load_driver(driver: &crate::elf::Elf) {
         global_tasks.push_back(scheduling::Task::new(
             scheduling::TaskPriority::new(scheduling::TaskPriority::MAX).unwrap(),
             // TODO account for memory base when passing entry offset
-            scheduling::TaskStart::Address(Address::<Virtual>::new(driver_elf.get_entry_offset() as u64).unwrap()),
+            scheduling::TaskStart::Address(Address::<Virtual>::new(driver.get_entry_offset() as u64).unwrap()),
             scheduling::TaskStack::At(stack_address.address()),
             {
                 #[cfg(target_arch = "x86_64")]
