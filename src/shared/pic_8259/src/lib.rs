@@ -130,7 +130,7 @@ pub struct Pics([PIC; 2]);
 
 impl Pics {
     /// Create a new interface for the standard PIC1 and PIC2 controllers, specifying the desired interrupt offsets.
-    const unsafe fn new(base_irq: u8) -> Self {
+    pub const unsafe fn new(base_irq: u8) -> Self {
         Self([
             PIC { offset: base_irq, command: WriteOnlyPort::new(0x20), data: ReadWritePort::new(0x21) },
             PIC { offset: base_irq + 8, command: WriteOnlyPort::new(0xA0), data: ReadWritePort::new(0xA1) },
