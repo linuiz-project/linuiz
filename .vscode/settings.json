@@ -7,6 +7,7 @@
         "src/shared/libcommon/Cargo.toml",
         "src/shared/libarch/Cargo.toml",
         "src/shared/pic_8259/Cargo.toml",
+        "src/shared/uart/Cargo.toml",
         "src/shared/port-rs/Cargo.toml",
         "src/userspace/Cargo.toml",
         "xtask/Cargo.toml"
