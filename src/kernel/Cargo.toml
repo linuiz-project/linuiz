@@ -3,11 +3,17 @@ name = "kernel"
 version = "0.0.0"
 edition = "2021"
 
+[dependencies.port-rs]
+path = "../shared/port-rs/"
+[dependencies.uart]
+path = "../shared/uart/"
 [dependencies.libcommon]
 path = "../shared/libcommon/"
 features = ["global_allocator"]
 [dependencies.libarch]
 path = "../shared/libarch/"
+[target.'cfg(target_arch = "x86_64")'.dependencies.pic_8259]
+path = "../shared/pic_8259/"
 [dependencies]
 log = { version = "*", default-features = false }
 num_enum = { version = "*", default-features = false }
@@ -22,8 +28,7 @@ aml = "*"
 miniz_oxide = "*"
 bytemuck = "*"
 rustc-demangle = "*"
-uart_16550 = "*"
-port-rs = { path = "../shared/port-rs/" }
+
 
 [profile.dev]
 opt-level = 1

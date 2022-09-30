@@ -173,10 +173,11 @@ impl VirtualMapper {
         })
     }
 
-    #[inline]
-    pub fn auto_map(&self, page: Address<Page>, attributes: PageAttributes) {
-        // TODO do not unwrap here
-        self.map(page, libcommon::memory::get_global_allocator().lock_next().unwrap(), false, attributes).unwrap();
+    pub fn auto_map(&self, page: Address<Page>, attributes: PageAttributes) -> Result<(), VirtualMapperError> {
+        match libcommon::memory::get_global_allocator().lock_next() {
+            Ok(frame) => self.map(page, frame, false, attributes),
+            Err(_) => Err(VirtualMapperError::AllocError),
+        }
     }
 
     /* STATE QUERYING */
@@ -185,23 +186,37 @@ impl VirtualMapper {
         self.with_root_table(|root_table| root_table.with_entry(page, |entry| entry.is_ok()))
     }
 
-    #[inline]
     pub fn is_mapped_to(&self, page: Address<Page>, frame: Address<Frame>) -> bool {
         self.with_root_table(|root_table| {
             root_table.with_entry(page, |entry| entry.map(|entry| entry.get_frame() == frame).unwrap_or(false))
         })
     }
 
-    #[inline]
     pub fn get_mapped_to(&self, page: Address<Page>) -> Option<Address<Frame>> {
         self.with_root_table(|root_table| {
             root_table.with_entry(page, |entry| entry.ok().map(|entry| entry.get_frame()))
         })
     }
 
+    pub fn map_if_not_mapped(
+        &self,
+        page: Address<Page>,
+        frame_and_lock: Option<(Address<Frame>, bool)>,
+        attributes: PageAttributes,
+    ) -> Result<(), VirtualMapperError> {
+        match frame_and_lock {
+            Some((frame, lock_frame)) if !self.is_mapped_to(page, frame) => {
+                self.map(page, frame, lock_frame, attributes)
+            }
+
+            None if !self.is_mapped(page) => self.auto_map(page, attributes),
+
+            _ => Ok(()),
+        }
+    }
+
     /* STATE CHANGING */
 
-    #[inline]
     pub fn get_page_attributes(&self, page: Address<Page>) -> Option<PageAttributes> {
         self.with_root_table(|root_table| {
             root_table.with_entry(page, |entry| match entry {
@@ -233,12 +248,10 @@ impl VirtualMapper {
         })
     }
 
-    #[inline]
     pub fn physical_mapped_address(&self) -> Address<Virtual> {
         interrupts::without(|| self.0.read().phys_mapped_address)
     }
 
-    #[inline]
     pub fn read_vmem_register(&self) -> Option<VmemRegister> {
         interrupts::without(|| {
             let vmap = self.0.read();
@@ -250,7 +263,6 @@ impl VirtualMapper {
         })
     }
 
-    #[inline]
     pub unsafe fn commit_vmem_register(&self) -> Result<(), VirtualMapperError> {
         interrupts::without(|| {
             let vmap = self.0.write();
