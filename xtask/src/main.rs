@@ -11,6 +11,7 @@ enum Arguments {
     Run(runner::Options),
     Clean,
     Metadata,
+    Update,
 }
 
 fn main() -> Result<(), xshell::Error> {
@@ -22,6 +23,8 @@ fn main() -> Result<(), xshell::Error> {
         Arguments::Run(run_options) => runner::run(&shell, run_options),
 
         Arguments::Clean => clean(&shell),
+
+        Arguments::Update => update(&shell),
 
         Arguments::Metadata => {
             for crate_dir in CRATE_DIRS {
@@ -40,6 +43,15 @@ pub fn clean(shell: &xshell::Shell) -> xshell::Result<()> {
     for crate_dir in CRATE_DIRS {
         let _dir = shell.push_dir(crate_dir);
         cmd!(shell, "cargo clean").run()?;
+    }
+
+    Ok(())
+}
+
+pub fn update(shell: &xshell::Shell) -> xshell::Result<()> {
+    for crate_dir in CRATE_DIRS {
+        let _dir = shell.push_dir(crate_dir);
+        cmd!(shell, "cargo update").run()?;
     }
 
     Ok(())
