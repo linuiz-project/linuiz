@@ -146,7 +146,7 @@ impl Register {
     /// Translates this APIC register to its respective xAPIC memory offset.
     #[inline(always)]
     pub const fn xapic_offset(self) -> usize {
-        self as usize
+        (self as usize) * 0x10
     }
 
     /// Translates this APIC register to its respective x2APIC MSR address.
@@ -173,7 +173,7 @@ static APIC: spin::Once<Apic> = spin::Once::new();
 
 #[derive(Debug)]
 pub struct ApicNotEnabled;
-pub fn init_apic(global_map_physical_region: impl FnOnce(usize, usize) -> *mut u32) -> Result<(), ApicNotEnabled> {
+pub fn init_apic(global_map_physical_region: impl FnOnce(usize) -> *mut u32) -> Result<(), ApicNotEnabled> {
     APIC.try_call_once(|| {
         use crate::x64::registers::msr::IA32_APIC_BASE;
 
@@ -181,9 +181,7 @@ pub fn init_apic(global_map_physical_region: impl FnOnce(usize, usize) -> *mut u
             if IA32_APIC_BASE::get_is_x2_mode() {
                 Ok(Apic::x2APIC)
             } else {
-                Ok(Apic::xAPIC(
-                    global_map_physical_region(IA32_APIC_BASE::get_base_address().as_usize(), 0x1000) as usize
-                ))
+                Ok(Apic::xAPIC(global_map_physical_region(IA32_APIC_BASE::get_base_address().as_usize()) as usize))
             }
         } else {
             Err(ApicNotEnabled)
@@ -197,7 +195,7 @@ fn read_register(register: Register) -> u64 {
     match APIC.get() {
         // SAFETY: Address provided for xAPIC mapping is required to be valid.
         Some(Apic::xAPIC(address)) => unsafe {
-            (*address as *const u32).add(register.xapic_offset()).read_volatile() as u64
+            ((*address + register.xapic_offset()) as *const u32).read_volatile() as u64
         },
 
         // SAFETY: MSR addresses are known-valid from IA32 SDM.
@@ -210,7 +208,7 @@ fn read_register(register: Register) -> u64 {
 /// Reads the given register from the local APIC. Panics if APIC is not properly initialized.
 unsafe fn write_register(register: Register, value: u64) {
     match APIC.get() {
-        Some(Apic::xAPIC(address)) => (*address as *mut u32).add(register.xapic_offset()).write_volatile(value as u32),
+        Some(Apic::xAPIC(address)) => ((*address + register.xapic_offset()) as *mut u32).write_volatile(value as u32),
         Some(Apic::x2APIC) => crate::x64::registers::msr::wrmsr(register.x2apic_msr(), value),
         None => panic!("cannot write; core-local APIC is not in a valid mode"),
     }
@@ -284,7 +282,6 @@ pub unsafe fn software_reset() {
     sw_disable();
 
     write_register(Register::TPR, 0x0);
-    write_register(Register::TIMER_INT_CNT, 0x0);
     write_register(Register::SPURIOUS, *read_register(Register::SPURIOUS).set_bits(0..8, SPURIOUS_VECTOR as u64));
 
     sw_enable();
