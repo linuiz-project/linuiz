@@ -45,8 +45,15 @@ fn trace_frame_pointer(
 fn panic(info: &core::panic::PanicInfo) -> ! {
     // REMARK: This function should *never* panic or abort.
 
+    use core::sync::atomic::{AtomicBool, Ordering};
+
+    static STACK_TRACE_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
     static STACK_TRACE_ADDRESSES: spin::Mutex<[Option<u64>; MAXIMUM_STACK_TRACE_DEPTH]> =
         spin::Mutex::new([None; MAXIMUM_STACK_TRACE_DEPTH]);
+
+    while STACK_TRACE_IN_PROGRESS.compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed).is_err() {
+        core::hint::spin_loop();
+    }
 
     error!(
         "KERNEL PANIC (at {}): {}",
@@ -135,6 +142,8 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     }
 
     crate::println!("----------STACK-TRACE----------");
+
+    STACK_TRACE_IN_PROGRESS.store(false, Ordering::Relaxed);
 
     // SAFETY: The current core is dead.
     unsafe { libarch::interrupts::disable() };

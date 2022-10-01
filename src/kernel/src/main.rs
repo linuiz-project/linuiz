@@ -20,7 +20,8 @@
     unchecked_math,
     cstr_from_bytes_until_nul,
     if_let_guard,
-    inline_const
+    inline_const,
+    exact_size_is_empty
 )]
 #![forbid(clippy::inline_asm_x86_att_syntax)]
 #![deny(clippy::semicolon_if_nothing_returned, clippy::debug_assert_with_mut_call, clippy::float_arithmetic)]
@@ -88,20 +89,18 @@ pub type MmapEntryType = limine::LimineMemoryMapEntryType;
 unsafe extern "C" fn _entry() -> ! {
     /* standard output setup */
     {
-        #[cfg(target_arch = "x86_64")]
-        static UART: core::cell::SyncUnsafeCell<uart_16550::SerialPort> = core::cell::SyncUnsafeCell::new(unsafe {
-            uart_16550::SerialPort::new(0x3F8 /* COM1 */)
+        use crate::memory::io::SerialWriter;
+        use core::cell::SyncUnsafeCell;
+        use spin::Lazy;
+
+        static UART: Lazy<SyncUnsafeCell<SerialWriter>> = Lazy::new(|| {
+            SyncUnsafeCell::new({
+                // SAFETY: Function is called only this once, statically (lazily).
+                unsafe { SerialWriter::init() }
+            })
         });
 
-        crate::stdout::set_stdout(
-            {
-                let uart = &mut *UART.get();
-                uart.init();
-
-                uart
-            },
-            log::LevelFilter::Trace,
-        );
+        crate::stdout::set_stdout(&mut *UART.get(), log::LevelFilter::Trace);
     }
 
     info!("Successfully loaded into kernel.");
@@ -495,9 +494,11 @@ unsafe extern "C" fn _entry() -> ! {
                 // Properly handle the bootloader's mapping of ACPI addresses in lower-half or higher-half memory space.
                 if rsdp_address > hhdm_address { rsdp_address - hhdm_address } else { rsdp_address } as u64,
             ));
-
-            load_drivers();
         }
+
+        debug!("Loading pre-packaged drivers...");
+        // load_drivers();
+
         // TODO init PCI devices
         // debug!("Initializing PCI devices...");
         // crate::memory::io::pci::init_devices();
