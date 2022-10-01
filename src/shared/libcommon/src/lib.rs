@@ -138,13 +138,3 @@ impl core::fmt::Debug for IndexRing {
         formatter.debug_tuple("Index Ring").field(&format_args!("{}/{}", self.current, self.max - 1)).finish()
     }
 }
-
-// /// Generates a random number within the given range, or [Option::None] if [crate::instructions::rdrand64] is unavaible.
-// TODO this should be arch-independent
-// pub fn rand(range: core::ops::Range<u64>) -> Option<u64> {
-//     crate::instructions::rdrand().ok().map(|initial| {
-//         let rand_absolute_factor = u64::MAX / initial;
-//         let slide = (range.end - range.start) / rand_absolute_factor;
-//         range.start + slide
-//     })
-// }

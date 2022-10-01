@@ -181,17 +181,20 @@ impl Mode for Configure {}
 
 pub struct Uart<M: Mode>(UartAddress, PhantomData<M>);
 
+/// SAFETY: Type constructor requires that the inner address be `Send`-able.
+unsafe impl<M: Mode> Send for Uart<M> {}
+
 impl<M: Mode> Uart<M> {
     #[inline]
     fn read(&self, offset: ReadOffset) -> u8 {
-        // SAFETY: Constructor for Uart requires a valid base address.
+        // SAFETY: Constructor for `Uart` requires a valid base address.
         unsafe {
             match self.0 {
                 UartAddress::Io(port) => {
                     let value: u8;
 
                     #[cfg(target_arch = "x86_64")]
-                    core::arch::asm!("in al, dx", out("al") value, in("dx") port, options(nostack, nomem, preserves_flags));
+                    core::arch::asm!("in al, dx", out("al") value, in("dx") port + (offset as u16), options(nostack, nomem, preserves_flags));
                     #[cfg(not(target_arch = "x86_64"))]
                     unimplemented!();
 
@@ -205,12 +208,12 @@ impl<M: Mode> Uart<M> {
 
     #[inline]
     fn write(&mut self, offset: WriteOffset, value: u8) {
-        // SAFETY: Constructor for Uart requires a valid base address.
+        // SAFETY: Constructor for `Uart` requires a valid base address.
         unsafe {
             match self.0 {
                 UartAddress::Io(port) => {
                     #[cfg(target_arch = "x86_64")]
-                    core::arch::asm!("out dx, al", in("dx") port, in("al") value, options(nostack, nomem, preserves_flags));
+                    core::arch::asm!("out dx, al", in("dx") port + (offset as u16), in("al") value, options(nostack, nomem, preserves_flags));
                     #[cfg(not(target_arch = "x86_64"))]
                     unimplemented!();
                 }
@@ -332,6 +335,11 @@ impl Uart<Configure> {
 }
 
 impl Uart<Data> {
+    /// SAFETY: Provided address must be `Send`-able (i.e. can be used on any CPU core).
+    pub unsafe fn new(address: UartAddress) -> Self {
+        Self(address, PhantomData)
+    }
+
     #[inline]
     pub fn read_data(&self) -> u8 {
         self.read(ReadOffset::Data0)
@@ -360,90 +368,3 @@ impl Uart<Data> {
         Uart::<Configure>(self.0, PhantomData)
     }
 }
-
-/// SAFETY: The caller must ensure the provided port address is correct.
-pub unsafe fn init_uart(address: UartAddress, baud: Baud) -> Uart<Data> {
-    let mut uart = Uart::<Data>(address, PhantomData);
-
-    // Bring UART to a known state.
-    uart.write_line_control(LineControl::empty());
-    uart.write_interrupt_enable(InterruptEnable::empty());
-
-    // Configure the baud rate (tx/rx speed).
-    let mut uart = uart.configure_mode();
-    uart.set_baud(baud);
-    let mut uart = uart.data_mode();
-
-    // Configure total UART state.
-    uart.write_line_control(LineControl {
-        bits: DataBits::Eight,
-        parity: ParityMode::None,
-        extra_stop: false,
-        break_signal: false,
-    });
-    uart.enable_fifo(true, true, false, FifoSize::Fourteen);
-
-    // Test the UART to ensure it's functioning correctly.
-    uart.write_model_control(
-        ModemControl::REQUEST_TO_SEND
-            | ModemControl::AUXILIARY_OUTPUT_1
-            | ModemControl::AUXILIARY_OUTPUT_2
-            | ModemControl::LOOPBACK_MODE,
-    );
-    uart.write_data(0x1F);
-    assert_eq!(uart.read_data(), 0x1F);
-
-    // Configure modem control for actual UART usage.
-    uart.write_model_control(
-        ModemControl::TERMINAL_READY
-            | ModemControl::REQUEST_TO_SEND
-            | ModemControl::AUXILIARY_OUTPUT_1
-            | ModemControl::AUXILIARY_OUTPUT_2,
-    );
-
-    // Enable transmit buffer interrupting.
-    uart.write_interrupt_enable(InterruptEnable::TRANSMIT_EMPTY);
-
-    uart
-}
-
-//     pub fn write(&mut self, byte: u8) {
-//         // This ensures we don't overwrite pending data.
-//         while !self.line_status(LineStatus::TRANSMIT_EMPTY_IDLE) {}
-
-//         self.data0.write(byte);
-//     }
-
-//     pub fn write_str(&mut self, string: &str) {
-//         for byte in string.bytes() {
-//             self.write(byte);
-//         }
-//     }
-
-//     /// Waits for data to be ready on the data port, and then reads it.
-//     pub fn read(&mut self) -> u8 {
-//         while !self.line_status(LineStatus::DATA_AVAILABLE) {}
-
-//         self.data0.read()
-//     }
-// }
-
-// impl core::fmt::Write for Uart<Data> {
-//     fn write_str(&mut self, string: &str) -> core::fmt::Result {
-//         if string.is_ascii() {
-//             self.write_str(string);
-//             Ok(())
-//         } else {
-//             Err(core::fmt::Error)
-//         }
-//     }
-
-//     fn write_char(&mut self, c: char) -> core::fmt::Result {
-//         if c.is_ascii() {
-//             self.write(c as u8);
-//             Ok(())
-//         } else {
-//             Err(core::fmt::Error)
-//         }
-//     }
-// }
