@@ -1,4 +1,4 @@
-use clap::{clap_derive::ValueEnum, Parser};
+use clap::clap_derive::ValueEnum;
 use std::path::PathBuf;
 use xshell::cmd;
 
@@ -37,7 +37,7 @@ impl Compression {
     }
 }
 
-#[derive(Parser)]
+#[derive(clap::Parser)]
 #[allow(non_snake_case)]
 pub struct Options {
     /// The compilation target for this build.
