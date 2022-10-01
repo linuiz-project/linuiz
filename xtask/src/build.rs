@@ -1,8 +1,8 @@
-use clap::{clap_derive::ArgEnum, Parser};
+use clap::{clap_derive::ValueEnum, Parser};
 use std::path::PathBuf;
 use xshell::cmd;
 
-#[derive(ArgEnum, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Optimization {
     P,
     S,
@@ -10,13 +10,13 @@ pub enum Optimization {
 }
 
 #[allow(non_camel_case_types)]
-#[derive(ArgEnum, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Architecture {
     x64,
     rv64,
 }
 
-#[derive(ArgEnum, Debug, Clone, Copy)]
+#[derive(ValueEnum, Debug, Clone, Copy)]
 pub enum Compression {
     None,
     Fast,
@@ -41,42 +41,42 @@ impl Compression {
 #[allow(non_snake_case)]
 pub struct Options {
     /// The compilation target for this build.
-    #[clap(arg_enum, long, default_value = "x64")]
+    #[arg(value_enum, long, default_value = "x64")]
     arch: Architecture,
 
     /// Whether the current build is a release build.
-    #[clap(long)]
+    #[arg(long)]
     release: bool,
 
     /// Whether to produce a disassembly file.
-    #[clap(short, long)]
+    #[arg(short, long)]
     disassemble: bool,
 
     /// Whether to output the result of `readelf` to a file.
-    #[clap(short, long)]
+    #[arg(short, long)]
     readelf: bool,
 
     /// The compression level to use when compressing init device drivers.
-    #[clap(arg_enum, long, default_value = "default")]
+    #[arg(value_enum, long, default_value = "default")]
     compress: Compression,
 
     /// Whether to use `cargo clippy` rather than `cargo build`.
-    #[clap(short, long)]
+    #[arg(short, long)]
     clippy: bool,
 
     /// Verbose build output. Equivalent to `cargo build -vv`.
-    #[clap(short, long)]
+    #[arg(short, long)]
     verbose: bool,
 
     /// Performs a `cargo clean` before building. This is useful for forcing a full recompile.
-    #[clap(long)]
+    #[arg(long)]
     clean: bool,
 
     /// Whether to force the compiler to *not* use `rbp` to store the stack frame pointer. This does nothing when compiling in release.
-    #[clap(long)]
+    #[arg(long)]
     no_stack_traces: bool,
 
-    #[clap(arg_enum, short)]
+    #[clap(value_enum, short)]
     optimize: Option<Optimization>,
 }
 
