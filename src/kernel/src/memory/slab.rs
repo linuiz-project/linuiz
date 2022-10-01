@@ -202,7 +202,6 @@ macro_rules! slab_allocate {
                     None => unimplemented!()
                 };
 
-            // SAFETY: This code is only reached once `allocation_ptr` is no longer `None`.
             Ok(slice_from_raw_parts_mut(allocation_ptr, $slab_size))
         }
     };
@@ -291,16 +290,16 @@ impl KernelAllocator for SlabAllocator<'_> {
             table
                 .iter()
                 .enumerate()
-                .find_map(|(index, table_page)| {
-                    if table_page.try_peek()
-                        && let (locked, ty) = table_page.data()
+                .find_map(|(index, frame)| {
+                    if frame.try_peek()
+                        && let (locked, ty) = frame.data()
                         && !locked && ty == FrameType::Generic {
-                            table_page.lock();
-                            table_page.unpeek();
+                            frame.lock();
+                            frame.unpeek();
 
                             Some(Address::<libcommon::Frame>::new_truncate((index * 0x1000) as u64))
                     } else {
-                        table_page.unpeek();
+                        frame.unpeek();
 
                         None
                     }
@@ -320,7 +319,8 @@ impl KernelAllocator for SlabAllocator<'_> {
             let mut start_index = 0;
 
             while start_index < (table.len() - count.get()) {
-                let sub_table = &table[start_index..(start_index + count.get())];
+                let sub_table_range = start_index..(start_index + count.get());
+                let sub_table = &table[sub_table_range.clone()];
                 sub_table.iter().for_each(Frame::peek);
 
                 match sub_table
@@ -331,7 +331,7 @@ impl KernelAllocator for SlabAllocator<'_> {
                     .find(|(_, (locked, ty))| *locked || *ty != FrameType::Generic)
                 {
                     Some((index, _)) => {
-                        start_index = libcommon::align_up(index + 1, frame_alignment);
+                        start_index += libcommon::align_up(index + 1, frame_alignment);
                         sub_table.iter().for_each(Frame::unpeek);
                     }
 
