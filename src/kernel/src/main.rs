@@ -621,6 +621,8 @@ pub(self) unsafe fn kernel_thread_setup() -> ! {
     trace!("Beginning scheduling...");
     libarch::interrupts::enable();
     crate::local_state::begin_scheduling();
+
+    trace!("Core will soon execute a task, or otherwise halt.");
     libarch::interrupts::wait_indefinite()
 }
 
