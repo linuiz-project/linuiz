@@ -1,7 +1,7 @@
-use clap::{clap_derive::ArgEnum, Parser};
+use clap::{ Parser, ValueEnum};
 use xshell::cmd;
 
-#[derive(ArgEnum, Clone, Copy, PartialEq, Eq)]
+#[derive(ValueEnum, Clone, Copy, PartialEq, Eq)]
 pub enum Accelerator {
     KVM,
     None,
@@ -16,7 +16,7 @@ impl core::fmt::Debug for Accelerator {
     }
 }
 
-#[derive(ArgEnum, Debug, Clone, Copy)]
+#[derive(ValueEnum, Debug, Clone, Copy)]
 pub enum CPU {
     Host,
     Max,
@@ -35,7 +35,7 @@ impl CPU {
     }
 }
 
-#[derive(ArgEnum, Clone, Copy)]
+#[derive(ValueEnum, Clone, Copy)]
 pub enum BlockDriver {
     AHCI,
     NVME,
@@ -55,32 +55,33 @@ impl core::fmt::Debug for BlockDriver {
 #[derive(Parser)]
 pub struct Options {
     /// CPU type to emulate.
-    #[clap(arg_enum, long, default_value = "qemu64")]
+    #[arg(value_enum, long, default_value = "qemu64")]
     cpu: CPU,
 
-    #[clap(arg_enum, long, default_value = "none")]
+    #[arg(value_enum, long, default_value = "none")]
     accel: Accelerator,
 
     /// Number of CPUs to emulate.
-    #[clap(long, default_value = "4")]
+    #[arg(long, default_value = "4")]
     smp: usize,
 
     // RAM size in MB.
-    #[clap(long, short, default_value = "512")]
-    mem: usize,
+
+    #[arg(long, default_value = "512")]
+    ram: usize,
 
     /// Enables debug logging to the specified location.
-    #[clap(long)]
+    #[arg(long)]
     log: bool,
 
     /// Which type of block driver to use for root drive.
-    #[clap(arg_enum, long, default_value = "virt-io")]
+    #[arg(value_enum, long, default_value = "virt-io")]
     block: BlockDriver,
 
-    #[clap(long)]
+    #[arg(long)]
     no_build: bool,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     build_options: crate::build::Options,
 }
 
@@ -111,7 +112,7 @@ pub fn run(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Error>
     arguments.push(&smp_string);
 
     arguments.push("-m");
-    let memory_string = format!("{}M", options.mem);
+    let memory_string = format!("{}M", options.ram);
     arguments.push(&memory_string);
 
     arguments.push("-device");

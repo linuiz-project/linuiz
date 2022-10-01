@@ -1,11 +1,11 @@
 pub mod build;
 pub mod runner;
 
-use clap::{AppSettings, Parser};
+use clap::Parser;
 use xshell::cmd;
 
 #[derive(Parser)]
-#[clap(rename_all = "snake_case", setting = AppSettings::DisableVersionFlag)]
+#[command(rename_all = "snake_case")]
 enum Arguments {
     Build(build::Options),
     Run(runner::Options),
