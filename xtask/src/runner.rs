@@ -1,4 +1,4 @@
-use clap::{ Parser, ValueEnum};
+use clap::ValueEnum;
 use xshell::cmd;
 
 #[derive(ValueEnum, Clone, Copy, PartialEq, Eq)]
@@ -52,7 +52,7 @@ impl core::fmt::Debug for BlockDriver {
     }
 }
 
-#[derive(Parser)]
+#[derive(clap::Parser)]
 pub struct Options {
     /// CPU type to emulate.
     #[arg(value_enum, long, default_value = "qemu64")]
@@ -66,7 +66,6 @@ pub struct Options {
     smp: usize,
 
     // RAM size in MB.
-
     #[arg(long, default_value = "512")]
     ram: usize,
 
@@ -81,14 +80,14 @@ pub struct Options {
     #[arg(long)]
     no_build: bool,
 
-    #[command(flatten)]
-    build_options: crate::build::Options,
+    // #[command(flatten)]
+    // build_options: crate::build::Options,
 }
 
 pub fn run(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
-    if !options.no_build {
-        crate::build::build(shell, options.build_options)?;
-    }
+    // if !options.no_build {
+    //     crate::build::build(shell, options.build_options)?;
+    // }
 
     let qemu_exe_str = match options.cpu {
         CPU::RV64 => "qemu-system-riscv64",
