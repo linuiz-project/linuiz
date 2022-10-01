@@ -1,68 +1,50 @@
 use alloc::{alloc::Global, vec::Vec};
 use bit_field::BitField;
-use core::{alloc::AllocError, num::NonZeroUsize, sync::atomic::Ordering};
+use core::{
+    alloc::AllocError,
+    num::NonZeroUsize,
+    sync::atomic::{AtomicBool, Ordering},
+};
 use libcommon::{
     memory::{page_aligned_allocator, AlignedAllocator, KernelAllocator},
     Address, Virtual,
 };
+use num_enum::TryFromPrimitive;
 use spin::Mutex;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
 pub enum FrameType {
-    Unusable = 0,
-    Generic = 1,
-    Reserved = 2,
-    BootReclaim = 3,
-    AcpiReclaim = 4,
-}
-
-impl FrameType {
-    fn from_u16(value: u16) -> Self {
-        match value {
-            0 => Self::Unusable,
-            1 => Self::Generic,
-            2 => Self::Reserved,
-            3 => Self::BootReclaim,
-            4 => Self::AcpiReclaim,
-            _ => unimplemented!(),
-        }
-    }
-
-    fn as_u16(self) -> u16 {
-        match self {
-            FrameType::Unusable => 0,
-            FrameType::Generic => 1,
-            FrameType::Reserved => 2,
-            FrameType::BootReclaim => 3,
-            FrameType::AcpiReclaim => 4,
-        }
-    }
+    Unusable,
+    Generic,
+    Reserved,
+    BootReclaim,
+    AcpiReclaim,
 }
 
 #[derive(Debug)]
-#[repr(transparent)]
-pub struct Frame(core::sync::atomic::AtomicU16);
+pub struct Frame {
+    peeked: AtomicBool,
+    locked: AtomicBool,
+    ty: core::sync::atomic::AtomicU8,
+}
 
 impl Frame {
-    const PEEKED_SHIFT: usize = 0;
-    const LOCKED_SHIFT: usize = 1;
-    const TYPE_SHIFT: usize = 12;
-    const PEEKED_BIT: u16 = 1 << Self::PEEKED_SHIFT;
-    const LOCKED_BIT: u16 = 1 << Self::LOCKED_SHIFT;
-
+    #[inline]
     fn lock(&self) {
-        let old_value = self.0.fetch_or(Self::LOCKED_BIT, Ordering::Relaxed);
-        debug_assert!(!old_value.get_bit(Self::LOCKED_SHIFT));
+        let lock_result = self.locked.compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed);
+        debug_assert!(lock_result.is_ok());
     }
 
+    #[inline]
     fn free(&self) {
-        let old_value = self.0.fetch_and(Self::LOCKED_BIT, Ordering::Relaxed);
-        debug_assert!(old_value.get_bit(Self::LOCKED_SHIFT));
+        let free_result = self.locked.compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed);
+        debug_assert!(free_result.is_ok());
     }
 
     #[inline]
     fn try_peek(&self) -> bool {
-        !self.0.fetch_or(Self::PEEKED_BIT, Ordering::Relaxed).get_bit(Self::PEEKED_SHIFT)
+        self.peeked.compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed).is_ok()
     }
 
     #[inline]
@@ -70,30 +52,25 @@ impl Frame {
         while !self.try_peek() {
             core::hint::spin_loop();
         }
-
-        debug_assert!(self.0.load(Ordering::Relaxed).get_bit(Self::PEEKED_SHIFT));
     }
 
     #[inline]
     fn unpeek(&self) {
-        debug_assert!(self.0.load(Ordering::Relaxed).get_bit(Self::PEEKED_SHIFT));
+        self.peeked.store(false, Ordering::Release);
+    }
 
-        self.0.fetch_and(!Self::PEEKED_BIT, Ordering::Relaxed);
+    #[inline]
+    fn modify_type(&self, new_type: FrameType) {
+        debug_assert!(self.peeked.load(Ordering::Acquire));
+
+        self.ty.store(new_type as u8, Ordering::Relaxed);
     }
 
     /// Returns the frame data in a tuple.
     fn data(&self) -> (bool, FrameType) {
-        debug_assert!(self.0.load(Ordering::Relaxed).get_bit(Self::PEEKED_SHIFT));
+        debug_assert!(self.peeked.load(Ordering::Acquire));
 
-        let raw = self.0.load(Ordering::Relaxed);
-        (raw.get_bit(Self::LOCKED_SHIFT), FrameType::from_u16(raw >> Self::TYPE_SHIFT))
-    }
-
-    fn modify_type(&self, new_type: FrameType) {
-        debug_assert!(self.0.load(Ordering::Relaxed).get_bit(Self::PEEKED_SHIFT));
-
-        self.0
-            .store(*self.0.load(Ordering::Relaxed).set_bits(Self::TYPE_SHIFT.., new_type.as_u16()), Ordering::Relaxed);
+        (self.locked.load(Ordering::Relaxed), FrameType::try_from_primitive(self.ty.load(Ordering::Relaxed)).unwrap())
     }
 }
 
@@ -334,7 +311,7 @@ impl KernelAllocator for SlabAllocator<'_> {
 
         self.with_table(|table| {
             let frame_alignment = NonZeroUsize::new(alignment.get() / 0x1000).unwrap_or(
-                // SAFETY: Value provided is known non-zero.
+                // SAFETY: Value provided is non-zero.
                 unsafe { NonZeroUsize::new_unchecked(1) },
             );
             let mut start_index = 0;
@@ -354,6 +331,7 @@ impl KernelAllocator for SlabAllocator<'_> {
                         start_index = libcommon::align_up(index + 1, frame_alignment);
                         sub_table.iter().for_each(Frame::unpeek);
                     }
+
                     None => {
                         sub_table.iter().for_each(|frame| {
                             frame.lock();
