@@ -52,11 +52,14 @@ impl Frame {
         while !self.try_peek() {
             core::hint::spin_loop();
         }
+
+        debug_assert!(self.peeked.load(Ordering::Acquire));
     }
 
     #[inline]
     fn unpeek(&self) {
-        self.peeked.store(false, Ordering::Release);
+        let unpeek_result = self.peeked.compare_exchange(true, false, Ordering::AcqRel, Ordering::Relaxed);
+        debug_assert!(unpeek_result.is_ok());
     }
 
     #[inline]
