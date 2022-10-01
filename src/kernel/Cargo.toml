@@ -28,6 +28,7 @@ aml = "*"
 miniz_oxide = "*"
 bytemuck = "*"
 rustc-demangle = "*"
+crossbeam = { version = "*", features = ["alloc"], default_features = false }
 
 
 [profile.dev]
