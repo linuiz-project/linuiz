@@ -48,7 +48,6 @@ mod local_state;
 mod memory;
 mod num;
 mod panic;
-mod scheduling;
 mod stdout;
 mod syscall;
 mod time;
@@ -129,71 +128,6 @@ unsafe extern "C" fn _entry() -> ! {
         // SAFETY: Provided IRQ base is intentionally within the exception range for x86 CPUs.
         static PICS: spin::Mutex<pic_8259::Pics> = spin::Mutex::new(unsafe { pic_8259::Pics::new(0) });
         PICS.lock().init(pic_8259::InterruptLines::empty());
-    }
-
-    /* set interrupt handlers */
-    {
-        libarch::interrupts::set_page_fault_handler({
-            use libarch::interrupts::PageFaultHandlerError;
-
-            /// SAFETY: This function expects only to be called upon a processor page fault exception.
-            unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandlerError> {
-                use crate::memory::PageAttributes;
-
-                let fault_page = Address::<Page>::new(address, None).unwrap();
-                let virtual_mapper =
-                    crate::memory::VirtualMapper::from_current(crate::memory::get_kernel_hhdm_address());
-                let Some(mut fault_page_attributes) = virtual_mapper.get_page_attributes(fault_page) else { return Err(PageFaultHandlerError::AddressNotMapped) };
-                if fault_page_attributes.contains(PageAttributes::DEMAND) {
-                    virtual_mapper
-                        .auto_map(fault_page, {
-                            // remove demand bit ...
-                            fault_page_attributes.remove(PageAttributes::DEMAND);
-                            // ... insert present bit ...
-                            fault_page_attributes.insert(PageAttributes::PRESENT);
-                            // ... return attributes
-                            fault_page_attributes
-                        })
-                        .unwrap();
-
-                    // SAFETY: We know the page was just mapped, and contains no relevant memory.
-                    fault_page.zero_memory();
-
-                    Ok(())
-                } else {
-                    Err(PageFaultHandlerError::NotDemandPaged)
-                }
-            }
-
-            pf_handler
-        });
-
-        libarch::interrupts::set_interrupt_handler({
-            use libarch::interrupts::{ArchContext, ControlFlowContext, Vector};
-
-            fn common_interrupt_handler(
-                irq_vector: u64,
-                ctrl_flow_context: &mut ControlFlowContext,
-                arch_context: &mut ArchContext,
-            ) {
-                match Vector::try_from(irq_vector) {
-                    Ok(vector) if vector == Vector::Timer => {
-                        crate::local_state::schedule_next_task(ctrl_flow_context, arch_context);
-                    }
-
-                    vector_result => {
-                        warn!("Unhandled IRQ vector: {:?}", vector_result);
-                    }
-                }
-
-                #[cfg(target_arch = "x86_64")]
-                libarch::x64::structures::apic::end_of_interrupt();
-            }
-
-            common_interrupt_handler
-        });
-
-        libarch::interrupts::set_syscall_handler(crate::syscall::syscall_handler)
     }
 
     /* parse kernel file */
@@ -403,8 +337,10 @@ unsafe extern "C" fn _entry() -> ! {
 
                     SMP_MEMORY_INIT.fetch_add(1, Ordering::Relaxed);
                     cpu_info.goto_address = {
-                        // REMARK: Function is placed locally here to ensure it is never called in another context.
-                        extern "C" fn _smp_entry(_: *const limine::LimineSmpInfo) -> ! {
+                        extern "C" fn _smp_entry(info: *const limine::LimineSmpInfo) -> ! {
+                            // SAFETY: Bootloader ensures this pointer is unique to this thread.
+                            let info = unsafe { &*info };
+
                             // Wait to ensure the machine is the correct state to execute cpu setup.
                             while !SMP_MEMORY_READY.load(Ordering::Relaxed) {
                                 core::hint::spin_loop();
@@ -426,8 +362,8 @@ unsafe extern "C" fn _entry() -> ! {
 
                             trace!("Finished SMP entry for core.");
 
-                            // SAFETY: Function is called only once.
-                            unsafe { kernel_thread_setup() }
+                            // SAFETY: Function is called only once for this core.
+                            unsafe { kernel_thread_setup(info.lapic_id) }
                         }
 
                         _smp_entry
@@ -435,9 +371,8 @@ unsafe extern "C" fn _entry() -> ! {
                 } else {
                     cpu_info.goto_address = {
                         extern "C" fn _idle_forever(_: *const limine::LimineSmpInfo) -> ! {
-                            // SAFETY: Core is not expecting anything to happen, as it will be idling.
-                            unsafe { libarch::interrupts::disable() };
-                            libarch::interrupts::wait_indefinite()
+                            // SAFETY: Murder isn't legal. Is this?
+                            unsafe { libarch::interrupts::halt_and_catch_fire() }
                         }
 
                         _idle_forever
@@ -496,7 +431,7 @@ unsafe extern "C" fn _entry() -> ! {
             ));
         }
 
-        debug!("Loading pre-packaged drivers...");
+        // TODO debug!("Loading pre-packaged drivers...");
         // load_drivers();
 
         // TODO init PCI devices
@@ -516,114 +451,113 @@ unsafe extern "C" fn _entry() -> ! {
     }
 
     /* configure I/O APIC redirections */
-    // #[cfg(target_arch = "x86_64")]
-    // {
-    //     debug!("Configuring I/O APIC and processing interrupt overrides.");
+    #[cfg(target_arch = "x86_64")]
+    {
+        //     debug!("Configuring I/O APIC and processing interrupt overrides.");
 
-    //     let ioapics = libarch::x64::structures::ioapic::get_io_apics();
-    //     let platform_info = crate::acpi::get_platform_info();
+        //     let ioapics = libarch::x64::structures::ioapic::get_io_apics();
+        //     let platform_info = crate::acpi::get_platform_info();
 
-    //     if let acpi::platform::interrupt::InterruptModel::Apic(apic) = &platform_info.interrupt_model {
-    //         use libarch::interrupts;
+        //     if let acpi::platform::interrupt::InterruptModel::Apic(apic) = &platform_info.interrupt_model {
+        //         use libarch::interrupts;
 
-    //         let mut cur_vector = 0x70;
+        //         let mut cur_vector = 0x70;
 
-    //         for irq_source in apic.interrupt_source_overrides.iter() {
-    //             debug!("{:?}", irq_source);
+        //         for irq_source in apic.interrupt_source_overrides.iter() {
+        //             debug!("{:?}", irq_source);
 
-    //             let target_ioapic = ioapics
-    //                 .iter()
-    //                 .find(|ioapic| ioapic.handled_irqs().contains(&irq_source.global_system_interrupt))
-    //                 .expect("no I/I APIC found for IRQ override");
+        //             let target_ioapic = ioapics
+        //                 .iter()
+        //                 .find(|ioapic| ioapic.handled_irqs().contains(&irq_source.global_system_interrupt))
+        //                 .expect("no I/I APIC found for IRQ override");
 
-    //             let mut redirection = target_ioapic.get_redirection(irq_source.global_system_interrupt);
-    //             redirection.set_delivery_mode(interrupts::DeliveryMode::Fixed);
-    //             redirection.set_destination_mode(interrupts::DestinationMode::Logical);
-    //             redirection.set_masked(false);
-    //             redirection.set_pin_polarity(irq_source.polarity);
-    //             redirection.set_trigger_mode(irq_source.trigger_mode);
-    //             redirection.set_vector({
-    //                 let vector = cur_vector;
-    //                 cur_vector += 1;
-    //                 vector
-    //             });
-    //             redirection.set_destination_id(0 /* TODO real cpu id */);
+        //             let mut redirection = target_ioapic.get_redirection(irq_source.global_system_interrupt);
+        //             redirection.set_delivery_mode(interrupts::DeliveryMode::Fixed);
+        //             redirection.set_destination_mode(interrupts::DestinationMode::Logical);
+        //             redirection.set_masked(false);
+        //             redirection.set_pin_polarity(irq_source.polarity);
+        //             redirection.set_trigger_mode(irq_source.trigger_mode);
+        //             redirection.set_vector({
+        //                 let vector = cur_vector;
+        //                 cur_vector += 1;
+        //                 vector
+        //             });
+        //             redirection.set_destination_id(0 /* TODO real cpu id */);
 
-    //             debug!(
-    //                 "IRQ override: Global {} -> {}:{}",
-    //                 irq_source.global_system_interrupt,
-    //                 redirection.get_destination_id(),
-    //                 redirection.get_vector()
-    //             );
-    //             target_ioapic.set_redirection(irq_source.global_system_interrupt, &redirection);
-    //         }
+        //             debug!(
+        //                 "IRQ override: Global {} -> {}:{}",
+        //                 irq_source.global_system_interrupt,
+        //                 redirection.get_destination_id(),
+        //                 redirection.get_vector()
+        //             );
+        //             target_ioapic.set_redirection(irq_source.global_system_interrupt, &redirection);
+        //         }
 
-    //         for nmi_source in apic.nmi_sources.iter() {
-    //             debug!("{:?}", nmi_source);
+        //         for nmi_source in apic.nmi_sources.iter() {
+        //             debug!("{:?}", nmi_source);
 
-    //             let target_ioapic = ioapics
-    //                 .iter()
-    //                 .find(|ioapic| ioapic.handled_irqs().contains(&nmi_source.global_system_interrupt))
-    //                 .expect("no I/I APIC found for IRQ override");
+        //             let target_ioapic = ioapics
+        //                 .iter()
+        //                 .find(|ioapic| ioapic.handled_irqs().contains(&nmi_source.global_system_interrupt))
+        //                 .expect("no I/I APIC found for IRQ override");
 
-    //             let mut redirection = target_ioapic.get_redirection(nmi_source.global_system_interrupt);
-    //             redirection.set_delivery_mode(interrupts::DeliveryMode::NMI);
-    //             redirection.set_destination_mode(interrupts::DestinationMode::Logical);
-    //             redirection.set_masked(false);
-    //             redirection.set_pin_polarity(nmi_source.polarity);
-    //             redirection.set_trigger_mode(nmi_source.trigger_mode);
-    //             redirection.set_vector({
-    //                 let vector = cur_vector;
-    //                 cur_vector += 1;
-    //                 vector
-    //             });
-    //             redirection.set_destination_id(0 /* TODO real cpu id */);
+        //             let mut redirection = target_ioapic.get_redirection(nmi_source.global_system_interrupt);
+        //             redirection.set_delivery_mode(interrupts::DeliveryMode::NMI);
+        //             redirection.set_destination_mode(interrupts::DestinationMode::Logical);
+        //             redirection.set_masked(false);
+        //             redirection.set_pin_polarity(nmi_source.polarity);
+        //             redirection.set_trigger_mode(nmi_source.trigger_mode);
+        //             redirection.set_vector({
+        //                 let vector = cur_vector;
+        //                 cur_vector += 1;
+        //                 vector
+        //             });
+        //             redirection.set_destination_id(0 /* TODO real cpu id */);
 
-    //             debug!(
-    //                 "NMI override: Global {} -> {}:{}",
-    //                 nmi_source.global_system_interrupt,
-    //                 redirection.get_destination_id(),
-    //                 redirection.get_vector()
-    //             );
-    //             target_ioapic.set_redirection(nmi_source.global_system_interrupt, &redirection);
-    //         }
-    //     }
+        //             debug!(
+        //                 "NMI override: Global {} -> {}:{}",
+        //                 nmi_source.global_system_interrupt,
+        //                 redirection.get_destination_id(),
+        //                 redirection.get_vector()
+        //             );
+        //             target_ioapic.set_redirection(nmi_source.global_system_interrupt, &redirection);
+        //         }
+        //     }
 
-    //     // TODO ?? maybe
-    //     // /* enable ACPI SCI interrupts */
-    //     // {
-    //     //     // TODO clean this filthy mess up
+        //     // TODO ?? maybe
+        //     // /* enable ACPI SCI interrupts */
+        //     // {
+        //     //     // TODO clean this filthy mess up
 
-    //     //     let pm1a_evt_blk =
-    //     //         &crate::tables::acpi::get_fadt().pm1a_event_block().expect("no `PM1a_EVT_BLK` found in FADT");
+        //     //     let pm1a_evt_blk =
+        //     //         &crate::tables::acpi::get_fadt().pm1a_event_block().expect("no `PM1a_EVT_BLK` found in FADT");
 
-    //     //     let mut reg = libcommon::acpi::Register::<u16>::IO(crate::memory::io::ReadWritePort::new(
-    //     //         (pm1a_evt_blk.address + ((pm1a_evt_blk.bit_width / 8) as u64)) as u16,
-    //     //     ));
+        //     //     let mut reg = libcommon::acpi::Register::<u16>::IO(crate::memory::io::ReadWritePort::new(
+        //     //         (pm1a_evt_blk.address + ((pm1a_evt_blk.bit_width / 8) as u64)) as u16,
+        //     //     ));
 
-    //     //     reg.write((1 << 8) | (1 << 0));
-    //     // }
-    // }
+        //     //     reg.write((1 << 8) | (1 << 0));
+        //     // }
+    }
 
     info!("Finished initial kernel setup.");
     SMP_MEMORY_READY.store(true, Ordering::Relaxed);
 
     // TODO make this a standalone function so we can return error states
 
-    kernel_thread_setup()
+    kernel_thread_setup(0)
 }
 
 /// SAFETY: This function invariantly assumes it will be called only once per core.
 #[inline(never)]
-pub(self) unsafe fn kernel_thread_setup() -> ! {
-    crate::local_state::init(0);
+pub(self) unsafe fn kernel_thread_setup(core_id: u32) -> ! {
+    crate::local_state::init(core_id);
 
-    trace!("Beginning scheduling...");
     libarch::interrupts::enable();
-    crate::local_state::begin_scheduling();
-
+    trace!("Enabling and starting scheduler...");
+    crate::local_state::with_scheduler(crate::local_state::Scheduler::start);
     trace!("Core will soon execute a task, or otherwise halt.");
-    libarch::interrupts::wait_indefinite()
+    libarch::interrupts::wait_loop()
 }
 
 /* MODULE LOADING */
@@ -779,12 +713,12 @@ fn load_driver(driver: &crate::elf::Elf) {
             TASK_STACK_BASE_ADDRESS.forward_checked(TASK_STACK_PAGE_COUNT).unwrap()
         };
 
-        let mut global_tasks = scheduling::GLOBAL_TASKS.lock();
-        global_tasks.push_back(scheduling::Task::new(
-            scheduling::TaskPriority::new(scheduling::TaskPriority::MAX).unwrap(),
+        let mut global_tasks = crate::local_state::GLOBAL_TASKS.lock();
+        global_tasks.push_back(crate::local_state::Task::new(
+            crate::local_state::TaskPriority::new(crate::local_state::TaskPriority::MAX).unwrap(),
             // TODO account for memory base when passing entry offset
-            scheduling::TaskStart::Address(Address::<Virtual>::new(driver.get_entry_offset() as u64).unwrap()),
-            scheduling::TaskStack::At(stack_address.address()),
+            crate::local_state::TaskStart::Address(Address::<Virtual>::new(driver.get_entry_offset() as u64).unwrap()),
+            crate::local_state::TaskStack::At(stack_address.address()),
             {
                 #[cfg(target_arch = "x86_64")]
                 {
@@ -803,4 +737,59 @@ fn load_driver(driver: &crate::elf::Elf) {
             },
         ))
     }
+}
+
+/// SAFETY: Do not call this function.
+#[no_mangle]
+#[doc(hidden)]
+unsafe fn __pf_handler(address: Address<Virtual>) -> Result<(), libarch::interrupts::PageFaultHandlerError> {
+    use crate::memory::PageAttributes;
+    use libarch::interrupts::PageFaultHandlerError;
+
+    let fault_page = Address::<Page>::new(address, None).unwrap();
+    let virtual_mapper = crate::memory::VirtualMapper::from_current(crate::memory::get_kernel_hhdm_address());
+    let Some(mut fault_page_attributes) = virtual_mapper.get_page_attributes(fault_page) else { return Err(PageFaultHandlerError::AddressNotMapped) };
+    if fault_page_attributes.contains(PageAttributes::DEMAND) {
+        virtual_mapper
+            .auto_map(fault_page, {
+                // remove demand bit ...
+                fault_page_attributes.remove(PageAttributes::DEMAND);
+                // ... insert present bit ...
+                fault_page_attributes.insert(PageAttributes::PRESENT);
+                // ... return attributes
+                fault_page_attributes
+            })
+            .unwrap();
+
+        // SAFETY: We know the page was just mapped, and contains no relevant memory.
+        fault_page.zero_memory();
+
+        Ok(())
+    } else {
+        Err(PageFaultHandlerError::NotDemandPaged)
+    }
+}
+
+/// SAFETY: Do not call this function.
+#[no_mangle]
+#[doc(hidden)]
+unsafe fn __irq_handler(
+    irq_vector: u64,
+    ctrl_flow_context: &mut libarch::interrupts::ControlFlowContext,
+    arch_context: &mut libarch::interrupts::ArchContext,
+) {
+    use libarch::interrupts::Vector;
+
+    match Vector::try_from(irq_vector) {
+        Ok(vector) if vector == Vector::Timer => {
+            crate::local_state::with_scheduler(|scheduler| scheduler.next_task(ctrl_flow_context, arch_context));
+        }
+
+        vector_result => {
+            warn!("Unhandled IRQ vector: {:?}", vector_result);
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    libarch::x64::structures::apic::end_of_interrupt();
 }

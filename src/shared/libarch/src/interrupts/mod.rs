@@ -1,9 +1,9 @@
-use core::cell::SyncUnsafeCell;
-use libcommon::{Address, Virtual};
+use libcommon::{Address, LinkerSymbol, Virtual};
 use num_enum::TryFromPrimitive;
 
 mod instructions;
 pub use instructions::*;
+use spin::Lazy;
 
 /// Delivery mode for IPIs.
 #[repr(u32)]
@@ -60,35 +60,37 @@ pub struct ControlFlowContext {
     pub sp: u64,
 }
 
+#[cfg(target_arch = "x86_64")]
+pub type ArchContext = (crate::x64::cpu::GeneralContext, crate::x64::cpu::SpecialContext);
+
+#[cfg(target_arch = "x86_64")]
+pub type SyscallContext = crate::x64::cpu::syscall::PreservedRegisters;
+
 /// Indicates what type of error the common page fault handler encountered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PageFaultHandlerError {
     AddressNotMapped,
     NotDemandPaged,
-    NoHandler,
 }
 
 type PageFaultHandler = unsafe fn(Address<Virtual>) -> Result<(), PageFaultHandlerError>;
-pub(crate) static PAGE_FAULT_HANDLER: SyncUnsafeCell<PageFaultHandler> =
-    SyncUnsafeCell::new(|_| Err(PageFaultHandlerError::NoHandler));
-pub fn set_page_fault_handler(handler: PageFaultHandler) {
-    // SAFETY: Changing a function pointer shouldn't result in UB with interrupts disabled.
-    crate::interrupts::without(|| unsafe { PAGE_FAULT_HANDLER.get().write(handler) });
-}
+pub(crate) static PAGE_FAULT_HANDLER: Lazy<PageFaultHandler> = Lazy::new(|| unsafe {
+    extern "C" {
+        static __pf_handler: LinkerSymbol;
+    }
 
-/* NON-EXCEPTION IRQ HANDLING */
-#[cfg(target_arch = "x86_64")]
-pub type ArchContext = (crate::x64::cpu::GeneralContext, crate::x64::cpu::SpecialContext);
+    core::mem::transmute(__pf_handler.as_usize())
+});
 
-type InterruptHandler = fn(u64, &mut ControlFlowContext, &mut ArchContext);
-pub(crate) static INTERRUPT_HANDLER: SyncUnsafeCell<InterruptHandler> = SyncUnsafeCell::new(|_, _, _| {});
-pub fn set_interrupt_handler(handler: InterruptHandler) {
-    // SAFETY: Changing a function pointer shouldn't result in UB with interrupts disabled.
-    crate::interrupts::without(|| unsafe { INTERRUPT_HANDLER.get().write(handler) });
-}
+type IrqHandler = unsafe fn(u64, &mut ControlFlowContext, &mut ArchContext);
+pub(crate) static IRQ_HANDLER: Lazy<IrqHandler> = Lazy::new(|| unsafe {
+    extern "C" {
+        static __irq_handler: LinkerSymbol;
+    }
 
-#[cfg(target_arch = "x86_64")]
-pub type SyscallContext = crate::x64::cpu::syscall::PreservedRegisters;
+    core::mem::transmute(__irq_handler.as_usize())
+});
+
 pub type SyscallHandler = fn(
     vector: u64,
     arg0: u64,
@@ -100,9 +102,10 @@ pub type SyscallHandler = fn(
     ret_sp: u64,
     regs: &mut SyscallContext,
 ) -> ControlFlowContext;
-pub(crate) static SYSCALL_HANDLER: SyncUnsafeCell<SyscallHandler> =
-    SyncUnsafeCell::new(|_, _, _, _, _, _, _, _, _| panic!("no system call handler"));
-pub fn set_syscall_handler(syscall_handler: SyscallHandler) {
-    // SAFETY: Changing a function pointer shouldn't result in UB when interrupts are disabled.
-    crate::interrupts::without(|| unsafe { SYSCALL_HANDLER.get().write(syscall_handler) });
-}
+pub(crate) static SYSCALL_HANDLER: Lazy<SyscallHandler> = Lazy::new(|| unsafe {
+    extern "C" {
+        static __syscall_handler: LinkerSymbol;
+    }
+
+    core::mem::transmute(__syscall_handler.as_usize())
+});

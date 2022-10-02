@@ -10,7 +10,8 @@ pub enum Syscall {
     Log { level: log::Level, cstr_ptr: *const core::ffi::c_char },
 }
 
-pub fn syscall_handler(
+#[no_mangle]
+fn __syscall_handler(
     vector: u64,
     arg0: u64,
     arg1: u64,

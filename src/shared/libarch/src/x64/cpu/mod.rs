@@ -317,7 +317,7 @@ pub(in crate::x64) extern "sysv64" fn irq_handoff(
     );
 
     // SAFETY: function pointer is guaranteed by the `set_interrupt_handler()` function to be valid.
-    (unsafe { *crate::interrupts::INTERRUPT_HANDLER.get() })(irq_number, &mut control_flow_context, &mut arch_context);
+    unsafe { crate::interrupts::IRQ_HANDLER(irq_number, &mut control_flow_context, &mut arch_context) };
 
     // SAFETY: The stack frame *has* to be modified to switch contexts within this interrupt.
     unsafe {

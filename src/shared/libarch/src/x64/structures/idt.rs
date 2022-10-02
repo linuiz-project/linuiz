@@ -279,8 +279,7 @@ pub enum Exception<'a> {
 pub fn common_exception_handler(exception: Exception) {
     match exception {
          Exception::PageFault(_, _, address, _)
-             // SAFETY: Function is being called in a valid page fault context.
-             if let Ok(()) = unsafe { (*crate::interrupts::PAGE_FAULT_HANDLER.get())(address) } => {}
+             if let Ok(()) = unsafe { crate::interrupts::PAGE_FAULT_HANDLER(address) } => {}
 
          exception => panic!("{:#X?}", exception)
      }
@@ -330,7 +329,7 @@ exception_handler_with_error!(df, u64, !);
 extern "sysv64" fn df_handler_inner(stack_frame: &InterruptStackFrame, _: u64, gprs: &GeneralContext) -> ! {
     common_exception_handler(Exception::DoubleFault(stack_frame, gprs));
     // Wait indefinite in case the above exception handler returns control flow.
-    crate::interrupts::wait_indefinite()
+    crate::interrupts::wait_loop()
 }
 
 exception_handler_with_error!(ts, u64, ());
@@ -391,7 +390,7 @@ exception_handler!(mc, !);
 extern "sysv64" fn mc_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralContext) -> ! {
     common_exception_handler(Exception::MachineCheck(stack_frame, gprs));
     // Wait indefinite in case the above exception handler returns control flow.
-    crate::interrupts::wait_indefinite()
+    crate::interrupts::wait_loop()
 }
 
 exception_handler!(xm, ());
