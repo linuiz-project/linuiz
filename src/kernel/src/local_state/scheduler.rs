@@ -1,5 +1,5 @@
 use alloc::collections::VecDeque;
-use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use core::sync::atomic::AtomicU64;
 
 static NEXT_THREAD_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -97,48 +97,51 @@ impl core::fmt::Debug for Task {
 }
 
 pub struct Scheduler {
-    enabled: AtomicBool,
+    enabled: bool,
+    total_priority: u64,
     tasks: VecDeque<Task>,
-    total_priority: AtomicU64,
+    idle_task: Task,
+    cur_task: Option<Task>,
+    timer: alloc::boxed::Box<dyn crate::time::timer::Timer>,
 }
 
 impl Scheduler {
-    pub fn new(enabled: bool) -> Self {
-        Self { enabled: AtomicBool::new(enabled), tasks: VecDeque::new(), total_priority: AtomicU64::new(0) }
+    pub fn new(enabled: bool, timer: alloc::boxed::Box<dyn crate::time::timer::Timer>, idle_task: Task) -> Self {
+        Self { enabled, total_priority: 0, tasks: VecDeque::new(), idle_task, cur_task: None, timer }
     }
 
     /// Enables the scheduler to pop tasks.
     #[inline]
-    pub fn enable(&self) {
-        self.enabled.store(true, Ordering::Relaxed);
+    pub fn enable(&mut self) {
+        self.enabled = true;
     }
 
     /// Disables scheduler from popping tasks.
     ///
     /// REMARK: Any task pops which are already in-flight will not be cancelled.
     #[inline]
-    pub fn disable(&self) {
-        self.enabled.store(false, Ordering::Relaxed);
+    pub fn disable(&mut self) {
+        self.enabled = false;
     }
 
     /// Indicates whether the scheduler is enabled.
     #[inline]
     pub fn is_enabled(&self) -> bool {
-        self.enabled.load(Ordering::Relaxed)
+        self.enabled
     }
 
     /// Pushes a new task to the scheduling queue.
     pub fn push_task(&mut self, task: Task) {
-        self.total_priority.fetch_add(task.priority().get() as u64, Ordering::Relaxed);
+        self.total_priority += task.priority().get() as u64;
         self.tasks.push_back(task);
     }
 
     /// If the scheduler is enabled, attempts to return a new task from
     /// the task queue. Returns `None` if the queue is empty.
     pub fn pop_task(&mut self) -> Option<Task> {
-        if self.enabled.load(Ordering::Relaxed) {
+        if self.enabled {
             self.tasks.pop_front().map(|task| {
-                self.total_priority.fetch_sub(task.priority().get() as u64, Ordering::Relaxed);
+                self.total_priority -= task.priority().get() as u64;
                 task
             })
         } else {
@@ -147,11 +150,77 @@ impl Scheduler {
     }
 
     pub fn get_avg_prio(&self) -> u64 {
-        self.total_priority.load(Ordering::Relaxed).checked_div(self.tasks.len() as u64).unwrap_or(0)
+        self.total_priority.checked_div(self.tasks.len() as u64).unwrap_or(0)
     }
 
     #[inline]
     pub fn get_task_count(&self) -> usize {
         self.tasks.len()
+    }
+
+    /// Attempts to schedule the next task in the local task queue.
+    pub fn next_task(
+        &mut self,
+        ctrl_flow_context: &mut libarch::interrupts::ControlFlowContext,
+        arch_context: &mut libarch::interrupts::ArchContext,
+    ) {
+        use libarch::memory::VmemRegister;
+
+        const PRIO_TIME_SLICE_MULTIPLIER: u16 = 10;
+
+        if let Some(mut global_tasks) = GLOBAL_TASKS.try_lock()
+            && let Some(task) = global_tasks.pop_front() {
+            self.push_task(task);
+        }
+
+        // Move the current task, if any, back into the scheduler queue.
+        if let Some(mut cur_task) = self.cur_task.take() {
+            cur_task.ctrl_flow_context = *ctrl_flow_context;
+            cur_task.arch_context = *arch_context;
+            cur_task.root_page_table_args = VmemRegister::read();
+
+            self.push_task(cur_task);
+        }
+
+        unsafe {
+            let next_wait_multiplier = if let Some(next_task) = self.pop_task() {
+                // Modify interrupt contexts (usually, the registers).
+                *ctrl_flow_context = next_task.ctrl_flow_context;
+                *arch_context = next_task.arch_context;
+
+                // Set current page tables.
+                VmemRegister::write(&next_task.root_page_table_args);
+
+                let next_timer_ms = (next_task.priority().get() as u16) * PRIO_TIME_SLICE_MULTIPLIER;
+                self.cur_task = Some(next_task);
+
+                next_timer_ms
+            } else {
+                let default_task = &self.idle_task;
+
+                // Modify interrupt contexts (usually, the registers).
+                *ctrl_flow_context = default_task.ctrl_flow_context;
+                *arch_context = default_task.arch_context;
+
+                // Set current page tables.
+                VmemRegister::write(&default_task.root_page_table_args);
+
+                PRIO_TIME_SLICE_MULTIPLIER
+            };
+
+            debug_assert!(next_wait_multiplier > 0);
+            self.timer.set_next_wait(next_wait_multiplier);
+        }
+    }
+
+    pub fn start(&mut self) {
+        assert!(!self.is_enabled());
+        self.enable();
+
+        // SAFETY: Value provided is non-zero, and enable/reload is expected / appropriate.
+        unsafe {
+            self.timer.enable();
+            self.timer.set_next_wait(1);
+        }
     }
 }
