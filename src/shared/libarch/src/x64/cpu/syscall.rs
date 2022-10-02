@@ -74,16 +74,5 @@ extern "sysv64" fn syscall_handoff(
     ret_sp: u64,
     mut preserved_regs: PreservedRegisters,
 ) -> crate::interrupts::ControlFlowContext {
-    // SAFETY: Function pointer is required to be valid for reading by the interrupt module.
-    (unsafe { &*crate::interrupts::SYSCALL_HANDLER.get() })(
-        rdi,
-        rsi,
-        rdx,
-        rcx,
-        r8,
-        r9,
-        ret_ip,
-        ret_sp,
-        &mut preserved_regs,
-    )
+    crate::interrupts::SYSCALL_HANDLER(rdi, rsi, rdx, rcx, r8, r9, ret_ip, ret_sp, &mut preserved_regs)
 }
