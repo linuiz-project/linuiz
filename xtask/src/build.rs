@@ -177,60 +177,64 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
     let profile_str = if options.release { "release" } else { "debug" };
 
     let cargo_arguments = {
-        let mut vec = vec![
+        let mut args = vec![
             if options.clippy { "clippy" } else { "build" },
             "--profile",
             if options.release { "release" } else { "dev" },
-            "--future-incompat-report",
         ];
 
+        // Only provide future-compatibiltiy notifications for development builds.
+        if !options.release {
+            args.push("--future-incompat-report");
+        }
+
         if options.verbose {
-            vec.push("-vv");
+            args.push("-vv");
         }
 
         match options.optimize {
             Some(Optimization::P) => {
-                vec.push("--config");
-                vec.push("opt-level=3");
+                args.push("--config");
+                args.push("opt-level=3");
 
-                vec.push("--config");
-                vec.push("lto=thin");
+                args.push("--config");
+                args.push("lto=thin");
             }
 
             Some(Optimization::S) => {
-                vec.push("--config");
-                vec.push("opt-level='z'");
+                args.push("--config");
+                args.push("opt-level='z'");
 
-                vec.push("--config");
-                vec.push("codegen-units=1");
+                args.push("--config");
+                args.push("codegen-units=1");
 
-                vec.push("--config");
-                vec.push("lto=fat");
+                args.push("--config");
+                args.push("lto=fat");
 
-                vec.push("--config");
-                vec.push("strip=true");
+                args.push("--config");
+                args.push("strip=true");
             }
 
             Some(Optimization::PS) => {
-                vec.push("--config");
-                vec.push("opt-level=3");
+                args.push("--config");
+                args.push("opt-level=3");
 
-                vec.push("--config");
-                vec.push("codegen-units=1");
+                args.push("--config");
+                args.push("codegen-units=1");
 
-                vec.push("--config");
-                vec.push("lto=fat");
+                args.push("--config");
+                args.push("lto=fat");
 
-                vec.push("--config");
-                vec.push("strip=true");
+                args.push("--config");
+                args.push("strip=true");
             }
 
             None => {}
         }
 
-        vec.push("--target");
+        args.push("--target");
 
-        vec
+        args
     };
 
     // Compile kernel ...

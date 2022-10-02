@@ -69,8 +69,14 @@ pub fn wait() {
 
 /// Indefinitely waits for the next interrupt on the current core.
 #[inline(always)]
-pub fn wait_indefinite() -> ! {
+pub fn wait_loop() -> ! {
     loop {
         wait();
     }
+}
+
+#[inline(always)]
+pub unsafe fn halt_and_catch_fire() -> ! {
+    disable();
+    wait_loop()
 }

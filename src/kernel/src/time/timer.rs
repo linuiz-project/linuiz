@@ -26,8 +26,7 @@ mod timers_impl {
         /// Creates a new APIC built-in clock timer, in one-shot mode.
         ///
         /// SAFETY: Caller must ensure that reconfiguring the APIC timer mode will not adversely
-        ///         affect software execution, and additionally that the [`crate::interrupts::Vector::LocalTimer`] has
-        ///         a proper handler.
+        ///         affect software execution, and additionally that the timer has a proper handler.
         pub unsafe fn new(set_freq: u16) -> Option<Self> {
             if libarch::x64::registers::msr::IA32_APIC_BASE::get_hw_enabled() {
                 apic::sw_enable();
@@ -55,12 +54,9 @@ mod timers_impl {
 
     impl super::Timer for APICTimer {
         unsafe fn set_next_wait(&mut self, interval_multiplier: u16) {
-            assert!(self.0 > 0, "timer frequency has not been configured");
+            assert!(self.0 > 0, "timer frequency has not been determined");
 
-            let timer_wait =
-                self.0.checked_mul(interval_multiplier as u32).expect("timer interval multiplier overflowed");
-
-            apic::set_timer_initial_count(timer_wait);
+            apic::set_timer_initial_count(self.0 * (interval_multiplier as u32));
         }
 
         unsafe fn enable(&mut self) {
@@ -79,8 +75,7 @@ mod timers_impl {
         /// Creates a new TSC-based timer.
         ///
         /// SAFETY: Caller must ensure that reconfiguring the APIC timer mode will not adversely
-        ///         affect software execution, and additionally that the `crate::interrupts::Vector::LocalTimer` vector has
-        ///         a proper handler.
+        ///         affect software execution, and additionally that the timer has a proper handler.
         pub unsafe fn new(set_freq: u16) -> Option<Self> {
             if libarch::x64::registers::msr::IA32_APIC_BASE::get_hw_enabled()
                 && libarch::x64::cpu::cpuid::FEATURE_INFO.has_tsc()
@@ -117,12 +112,11 @@ mod timers_impl {
 
     impl super::Timer for TSCTimer {
         unsafe fn set_next_wait(&mut self, interval_multiplier: u16) {
-            assert!(self.0 > 0, "timer frequency has not been configured");
+            assert!(self.0 > 0, "timer frequency has not been determined");
 
-            let tsc_wait =
-                self.0.checked_mul(interval_multiplier as u64).expect("timer interval multiplier overflowed");
-
-            libarch::x64::registers::msr::IA32_TSC_DEADLINE::set(core::arch::x86_64::_rdtsc() + tsc_wait);
+            libarch::x64::registers::msr::IA32_TSC_DEADLINE::set(
+                core::arch::x86_64::_rdtsc() + (self.0 * (interval_multiplier as u64)),
+            );
         }
 
         unsafe fn enable(&mut self) {
