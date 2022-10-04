@@ -59,9 +59,7 @@ impl acpi::AcpiHandler for AcpiHandler {
 
         acpi::PhysicalMapping::new(
             address,
-            core::ptr::NonNull::new_unchecked(
-                crate::memory::get_kernel_hhdm_address().as_mut_ptr::<u8>().add(address).cast(),
-            ),
+            core::ptr::NonNull::new_unchecked(crate::memory::get_hhdm_address().as_mut_ptr::<u8>().add(address).cast()),
             size,
             size,
             Self,
@@ -236,7 +234,7 @@ pub fn get_mcfg() -> MutexGuard<'static, PhysicalMapping<AcpiHandler, Mcfg>> {
 //     AML_CONTEXT.call_once(|| {
 //         AmlContextWrapper({
 //             let mut aml_context = aml::AmlContext::new(alloc::boxed::Box::new(AcpiHandler), aml::DebugVerbosity::All);
-//             let kernel_hhdm_address = crate::memory::get_kernel_hhdm_address().as_usize();
+//             let kernel_hhdm_address = crate::memory::get_hhdm_address().as_usize();
 //             let rsdp = get_rsdp();
 
 //             {

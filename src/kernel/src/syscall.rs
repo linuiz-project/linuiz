@@ -1,4 +1,4 @@
-use crate::memory::get_kernel_hhdm_address;
+use crate::memory::get_hhdm_address;
 use libarch::interrupts::ControlFlowContext;
 use libcommon::{Address, Page};
 
@@ -62,7 +62,7 @@ pub fn do_syscall(vector: Syscall) {
     match vector {
         Syscall::Log { level, cstr_ptr } => {
             // SAFETY: The kernel guarantees the HHDM will be valid.
-            let page_manager = unsafe { crate::memory::VirtualMapper::from_current(get_kernel_hhdm_address()) };
+            let page_manager = unsafe { crate::memory::VirtualMapper::from_current(get_hhdm_address()) };
 
             let mut cstr_increment_ptr = cstr_ptr;
             let mut last_char_page_base = Address::<Page>::new(Address::zero(), None).unwrap();

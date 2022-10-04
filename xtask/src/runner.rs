@@ -3,14 +3,14 @@ use xshell::cmd;
 
 #[derive(ValueEnum, Clone, Copy, PartialEq, Eq)]
 pub enum Accelerator {
-    KVM,
+    Kvm,
     None,
 }
 
 impl core::fmt::Debug for Accelerator {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            Accelerator::KVM => "q35,accel=kvm",
+            Accelerator::Kvm => "q35,accel=kvm",
             Accelerator::None => "q35",
         })
     }
@@ -20,8 +20,8 @@ impl core::fmt::Debug for Accelerator {
 pub enum CPU {
     Host,
     Max,
-    QEMU64,
-    RV64,
+    Qemu64,
+    Rv64,
 }
 
 impl CPU {
@@ -29,25 +29,25 @@ impl CPU {
         match self {
             CPU::Host => "host",
             CPU::Max => "max",
-            CPU::QEMU64 => "qemu64",
-            CPU::RV64 => "rv64",
+            CPU::Qemu64 => "qemu64",
+            CPU::Rv64 => "rv64",
         }
     }
 }
 
 #[derive(ValueEnum, Clone, Copy)]
 pub enum BlockDriver {
-    AHCI,
-    NVME,
-    VirtIO,
+    Ahci,
+    Nvme,
+    VirtIo,
 }
 
 impl core::fmt::Debug for BlockDriver {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            BlockDriver::AHCI => "ahci",
-            BlockDriver::NVME => "nvme",
-            BlockDriver::VirtIO => "virtio-blk-pci",
+            BlockDriver::Ahci => "ahci",
+            BlockDriver::Nvme => "nvme",
+            BlockDriver::VirtIo => "virtio-blk-pci",
         })
     }
 }
@@ -74,7 +74,7 @@ pub struct Options {
     log: bool,
 
     /// Which type of block driver to use for root drive.
-    #[arg(value_enum, long, default_value = "virt-io")]
+    #[arg(value_enum, long, default_value = "virtio")]
     block: BlockDriver,
 
     #[arg(long)]
@@ -90,7 +90,7 @@ pub fn run(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Error>
     // }
 
     let qemu_exe_str = match options.cpu {
-        CPU::RV64 => "qemu-system-riscv64",
+        CPU::Rv64 => "qemu-system-riscv64",
         _ => "qemu-system-x86_64",
     };
 
@@ -98,8 +98,8 @@ pub fn run(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Error>
 
     arguments.push("-machine");
     arguments.push(match options.cpu {
-        CPU::RV64 => "virt",
-        CPU::Host | CPU::Max | CPU::QEMU64 if options.accel == Accelerator::KVM => "q35,accel=kvm",
+        CPU::Rv64 => "virt",
+        CPU::Host | CPU::Max | CPU::Qemu64 if options.accel == Accelerator::Kvm => "q35,accel=kvm",
         _ => "q35",
     });
 
@@ -114,6 +114,7 @@ pub fn run(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Error>
     let memory_string = format!("{}M", options.ram);
     arguments.push(&memory_string);
 
+    // TODO this doesn't work for AHCI
     arguments.push("-device");
     let device_string = format!("{:?},drive=disk1,serial=deadbeef", options.block);
     arguments.push(&device_string);
@@ -126,7 +127,7 @@ pub fn run(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Error>
     }
 
     match options.cpu {
-        CPU::RV64 => {
+        CPU::Rv64 => {
             arguments.push("-bios");
             arguments.push("resources/fw_jump.fd");
             arguments.push("-kernel");
