@@ -1,11 +1,60 @@
+use spin::Mutex;
 use uart::{Data, Uart};
 
-pub struct SerialWriter {
-    pending: spin::Once<crossbeam::queue::ArrayQueue<[u8; 14]>>,
-    uart: spin::Mutex<uart::Uart<uart::Data>>,
+struct UartWriter(Uart<Data>);
+
+impl UartWriter {
+    fn write_bytes(&mut self, bytes: core::str::Bytes) {
+        libarch::interrupts::without(|| {
+            for (index, byte) in bytes.enumerate() {
+                if (index % 14) == 0 {
+                    while !self.0.read_line_status().contains(uart::LineStatus::TRANSMIT_EMPTY_IDLE) {
+                        core::hint::spin_loop();
+                    }
+                } else {
+                    while !self.0.read_line_status().contains(uart::LineStatus::TRANSMIT_EMPTY) {
+                        core::hint::spin_loop();
+                    }
+                }
+
+                self.0.write_data(byte);
+            }
+        });
+    }
 }
 
-impl SerialWriter {
+impl core::fmt::Write for UartWriter {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        if s.is_ascii() {
+            self.write_bytes(s.bytes());
+            Ok(())
+        } else {
+            Err(core::fmt::Error)
+        }
+    }
+
+    fn write_char(&mut self, c: char) -> core::fmt::Result {
+        if c.is_ascii() {
+            while !self.0.read_line_status().contains(uart::LineStatus::TRANSMIT_EMPTY_IDLE) {
+                core::hint::spin_loop();
+            }
+
+            self.0.write_data({
+                let mut buffer = [0u8; 1];
+                c.encode_utf8(&mut buffer);
+                buffer[0]
+            });
+
+            Ok(())
+        } else {
+            Err(core::fmt::Error)
+        }
+    }
+}
+
+pub struct Serial(Mutex<UartWriter>);
+
+impl Serial {
     /// SAFETY: This function expects to be called only once per boot cycle.
     pub unsafe fn init() -> Self {
         use uart::{LineControl, ModemControl};
@@ -53,88 +102,36 @@ impl SerialWriter {
                 | ModemControl::AUXILIARY_OUTPUT_2,
         );
 
-        Self { pending: spin::Once::new(), uart: spin::Mutex::new(uart) }
-    }
-
-    fn write_bytes(uart: &mut spin::MutexGuard<uart::Uart<uart::Data>>, bytes: &[u8]) {
-        for (index, byte) in bytes.iter().enumerate() {
-            if (index % 14) == 0 {
-                while !uart.read_line_status().contains(uart::LineStatus::TRANSMIT_EMPTY_IDLE) {
-                    core::hint::spin_loop();
-                }
-            } else {
-                while !uart.read_line_status().contains(uart::LineStatus::TRANSMIT_EMPTY) {
-                    core::hint::spin_loop();
-                }
-            }
-
-            uart.write_data(*byte);
-        }
-    }
-
-    /// SAFETY: Function must not be called from within an interrupted context.
-    pub unsafe fn into_queued(&self) {
-        libarch::interrupts::without(|| {
-            self.pending.call_once(|| crossbeam::queue::ArrayQueue::new(256));
-            let mut uart = self.uart.lock();
-            uart.write_interrupt_enable(uart::InterruptEnable::TRANSMIT_EMPTY);
-        });
-    }
-
-    /// SAFETY: This function expects to be called only from within the `TRANSMISSION_EMPTY_IDLE` interrupt.
-    pub unsafe fn flush_bytes(&self) {
-        assert!(!libarch::interrupts::are_enabled());
-        assert!(!self.uart.is_locked());
-        assert!(self.pending.is_completed());
-
-        // SAFETY: Mutex lock is already checked.
-        let mut uart = unsafe { self.uart.try_lock().unwrap_unchecked() };
-        // SAFETY: `Once` completion is already checked.
-        let pending_bytes = unsafe { self.pending.get_unchecked() };
-        while let Some(bytes) = pending_bytes.pop() {
-            Self::write_bytes(&mut uart, &bytes);
-        }
-    }
-
-    #[doc(hidden)]
-    fn _write_str(&self, string: &str) {
-        assert!(string.is_ascii());
-
-        match self.pending.get() {
-            Some(pending_bytes) => {
-                let mut bytes = string.bytes();
-                while !bytes.is_empty() {
-                    pending_bytes.force_push([
-                        bytes.next().unwrap_or(0),
-                        bytes.next().unwrap_or(0),
-                        bytes.next().unwrap_or(0),
-                        bytes.next().unwrap_or(0),
-                        bytes.next().unwrap_or(0),
-                        bytes.next().unwrap_or(0),
-                        bytes.next().unwrap_or(0),
-                        bytes.next().unwrap_or(0),
-                        bytes.next().unwrap_or(0),
-                        bytes.next().unwrap_or(0),
-                        bytes.next().unwrap_or(0),
-                        bytes.next().unwrap_or(0),
-                        bytes.next().unwrap_or(0),
-                        bytes.next().unwrap_or(0),
-                    ]);
-                }
-            }
-
-            None => libarch::interrupts::without(|| {
-                let mut uart = self.uart.lock();
-                Self::write_bytes(&mut uart, string.as_bytes());
-            }),
-        }
+        Self(Mutex::new(UartWriter(uart)))
     }
 }
 
-impl core::fmt::Write for SerialWriter {
-    fn write_str(&mut self, string: &str) -> core::fmt::Result {
-        self._write_str(string);
-
-        Ok(())
+impl log::Log for Serial {
+    fn enabled(&self, _: &log::Metadata) -> bool {
+        true
     }
+
+    fn log(&self, record: &log::Record) {
+        if self.enabled(record.metadata()) {
+            use core::fmt::Write;
+
+            // TODO tell the time
+            let ticks = 0;
+            let whole_time = ticks / 1000;
+            let frac_time = ticks % 1000;
+
+            let uart = self.0.lock();
+
+            uart.write_fmt(format_args!(
+                "[{whole_time:wwidth$}.{frac_time:0fwidth$}][{level}] {args}",
+                level = record.level(),
+                args = record.args(),
+                wwidth = 4,
+                fwidth = 3
+            ))
+            .ok();
+        }
+    }
+
+    fn flush(&self) {}
 }

@@ -1,7 +1,8 @@
+use alloc::vec::Vec;
 use spin::Once;
 
-pub static KERNEL_SYMBOLS: Once<&[crate::elf::symbol::Symbol]> = Once::new();
-pub static KERNEL_STRINGS: Once<&[u8]> = Once::new();
+pub static KERNEL_SYMBOLS: Once<Vec<crate::elf::symbol::Symbol>> = Once::new();
+pub static KERNEL_STRINGS: Once<Vec<u8>> = Once::new();
 
 const MAXIMUM_STACK_TRACE_DEPTH: usize = 16;
 
@@ -70,8 +71,8 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 
         (stack_trace_addresses_clone, trace_overflow)
     };
-    crate::newline!();
-    crate::println!("----------STACK-TRACE---------");
+
+    error!("----------STACK-TRACE---------");
 
     enum SymbolName<'a> {
         Demangled(&'a rustc_demangle::Demangle<'a>),
@@ -85,10 +86,10 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 
         match symbol_name {
             SymbolName::Demangled(demangled) => {
-                crate::println!("{entry_num:.<tab_len$}0x{fn_address:0<16X} {demangled:#}")
+                error!("{entry_num:.<tab_len$}0x{fn_address:0<16X} {demangled:#}")
             }
-            SymbolName::RawStr(raw_str) => crate::println!("{entry_num:.<tab_len$}0x{fn_address:0<16X} {raw_str}"),
-            SymbolName::None => crate::println!("{entry_num:.<tab_len$}0x{fn_address:0<16X} !!! no function found !!!"),
+            SymbolName::RawStr(raw_str) => error!("{entry_num:.<tab_len$}0x{fn_address:0<16X} {raw_str}"),
+            SymbolName::None => error!("{entry_num:.<tab_len$}0x{fn_address:0<16X} !!! no function found !!!"),
         }
     }
 
@@ -138,10 +139,10 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     if trace_overflow {
         print_stack_trace_entry(trace_index, 0x0, SymbolName::RawStr("!!! trace overflowed !!!"))
     } else if trace_index == 0 {
-        crate::println!("No stack trace is available.");
+        error!("No stack trace is available.");
     }
 
-    crate::println!("----------STACK-TRACE----------");
+    error!("----------STACK-TRACE----------");
 
     STACK_TRACE_IN_PROGRESS.store(false, Ordering::Relaxed);
 
@@ -155,97 +156,4 @@ fn alloc_error(error: core::alloc::Layout) -> ! {
 
     // SAFETY: It's dead, Jim.
     unsafe { libarch::interrupts::halt_and_catch_fire() }
-}
-
-mod mangling {
-    pub type Result<T> = core::result::Result<T, Error>;
-
-    pub enum Error {
-        Parser,
-        Malformed,
-        NonAscii,
-    }
-
-    pub fn demangle(symbol_name: &str, mut buffer: &mut [u8]) -> Result<()> {
-        if !symbol_name.is_ascii() {
-            return Err(Error::NonAscii);
-        }
-
-        static SKIP_TAGS: [&str; 2] = ["Nv", "Nt"];
-        static TYPE_ENCODINGS: [(&str, &str); 21] = [
-            ("a", "i8"),
-            ("b", "bool"),
-            ("c", "char"),
-            ("d", "f64"),
-            ("e", "str"),
-            ("f", "f32"),
-            ("h", "u8"),
-            ("i", "isize"),
-            ("j", "usize"),
-            ("l", "i32"),
-            ("m", "u32"),
-            ("n", "i128"),
-            ("o", "u128"),
-            ("s", "i16"),
-            ("t", "u16"),
-            ("u", "()"),
-            ("v", "..."),
-            ("x", "i64"),
-            ("y", "u64"),
-            ("z", "!"),
-            ("p", "_"),
-        ];
-
-        fn str_bytes_to_number(bytes: &[u8]) -> Option<usize> {
-            core::str::from_utf8(bytes).ok().and_then(|str| usize::from_str_radix(str, 10).ok())
-        }
-
-        fn parse_identifier(bytes: &[u8], buffer: &mut [u8]) -> Result<(usize, usize)> {
-            let number_len = bytes.iter().take_while(|b| b.is_ascii_digit()).count();
-            let Some(run_len) = str_bytes_to_number(&bytes[..number_len]) else { return Err(Error::Parser) };
-
-            for index in 0..run_len {
-                buffer[index] = bytes[number_len + index]
-            }
-
-            Ok((number_len, run_len))
-        }
-
-        // EXAMPLE: _RNvMNtNtNtNtNtCs9TTdqULsK7Z_6kernel4arch3x6410structures3idt10exceptionsNtB2_9Exception24common_exception_handler
-
-        let mut symbol_bytes = symbol_name.as_bytes();
-
-        if symbol_bytes.starts_with("_R".as_bytes()) {
-            symbol_bytes = &symbol_bytes[2..];
-        } else {
-            return Err(Error::Malformed);
-        }
-
-        // Skip skippable tags, such as namespace identifiers.
-        loop {
-            let Ok(tag_str) = core::str::from_utf8(&symbol_bytes[..2]) else { return Err(Error::Parser) };
-
-            if SKIP_TAGS.contains(&tag_str) {
-                symbol_bytes = &symbol_bytes[2..];
-            } else {
-                break;
-            }
-        }
-
-        loop {
-            match symbol_bytes.get(0) {
-                Some(byte_code) if byte_code.is_ascii_digit() => {
-                    let (byte_run, buffer_run) = parse_identifier(symbol_bytes, buffer)?;
-                    symbol_bytes = &symbol_bytes[byte_run..];
-                    buffer = &mut buffer[buffer_run..];
-                }
-
-                Some(_) => {
-                    symbol_bytes = &symbol_bytes[1..];
-                }
-
-                None => return Ok(()),
-            }
-        }
-    }
 }

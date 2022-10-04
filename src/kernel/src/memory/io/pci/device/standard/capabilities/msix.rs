@@ -188,7 +188,7 @@ impl super::Capability for MSIX<'_> {
             let frame_manager = crate::memory::get_kernel_frame_manager();
             let page_manager = crate::memory::get_kernel_page_manager();
             let hhdm_offset_address = libcommon::Address::<libcommon::Virtual>::new(
-                crate::memory::get_kernel_hhdm_address().as_u64() + address.as_u64(),
+                crate::memory::get_hhdm_address().as_u64() + address.as_u64(),
             )
             .unwrap();
 
