@@ -44,21 +44,19 @@ extern crate libcommon;
 
 mod acpi;
 mod elf;
+mod init;
 mod local_state;
 mod memory;
+mod modules;
 mod num;
 mod panic;
-mod stdout;
 mod syscall;
 mod time;
 
-use core::{num::NonZeroUsize, sync::atomic::Ordering};
+use core::sync::atomic::Ordering;
 use libcommon::{Address, Frame, Page, Virtual};
 
 pub const LIMINE_REV: u64 = 0;
-static LIMINE_KERNEL_FILE: limine::LimineKernelFileRequest = limine::LimineKernelFileRequest::new(0);
-static LIMINE_INFO: limine::LimineBootInfoRequest = limine::LimineBootInfoRequest::new(LIMINE_REV);
-static LIMINE_SMP: limine::LimineSmpRequest = limine::LimineSmpRequest::new(LIMINE_REV).flags(0b1);
 static LIMINE_MODULES: limine::LimineModuleRequest = limine::LimineModuleRequest::new(LIMINE_REV);
 static LIMINE_MMAP: limine::LimineMemmapRequest = limine::LimineMemmapRequest::new(LIMINE_REV);
 static LIMINE_STACK: limine::LimineStackSizeRequest = limine::LimineStackSizeRequest::new(LIMINE_REV).stack_size({
@@ -73,12 +71,6 @@ static LIMINE_STACK: limine::LimineStackSizeRequest = limine::LimineStackSizeReq
     }
 });
 
-static SMP_MEMORY_READY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
-static SMP_MEMORY_INIT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
-
-// TODO parse kernel command line configuration more succintly
-static mut KERNEL_CFG_SMP: bool = false;
-
 pub type MmapEntry = limine::NonNullPtr<limine::LimineMemmapEntry>;
 pub type MmapEntryType = limine::LimineMemoryMapEntryType;
 
@@ -86,301 +78,30 @@ pub type MmapEntryType = limine::LimineMemoryMapEntryType;
 #[no_mangle]
 #[allow(clippy::too_many_lines)]
 unsafe extern "C" fn _entry() -> ! {
-    /* standard output setup */
-    {
-        use crate::memory::io::SerialWriter;
-        use core::cell::SyncUnsafeCell;
-        use spin::Lazy;
+    init::serial();
 
-        static UART: Lazy<SyncUnsafeCell<SerialWriter>> = Lazy::new(|| {
-            SyncUnsafeCell::new({
-                // SAFETY: Function is called only this once, statically (lazily).
-                unsafe { SerialWriter::init() }
-            })
-        });
+    info!("Successfully loaded into kernel with serial logging.");
 
-        crate::stdout::set_stdout(&mut *UART.get(), log::LevelFilter::Trace);
-    }
+    init::boot_info();
+    init::smp();
+    init::memory();
 
-    info!("Successfully loaded into kernel.");
-
-    /* info dump */
-    {
-        let boot_info = LIMINE_INFO.get_response().get().expect("bootloader provided no info");
-        info!(
-            "Bootloader Info     {} v{} (rev {})",
-            core::ffi::CStr::from_ptr(boot_info.name.as_ptr().unwrap().cast()).to_str().unwrap(),
-            core::ffi::CStr::from_ptr(boot_info.version.as_ptr().unwrap().cast()).to_str().unwrap(),
-            boot_info.revision,
-        );
-
-        #[cfg(target_arch = "x86_64")]
-        if let Some(vendor_str) = libarch::x64::cpu::get_vendor() {
-            info!("Vendor              {vendor_str}");
-        } else {
-            info!("Vendor              None");
-        }
-    }
-
-    // TODO do this somewhere that makes sense
+    /* arch core init */
     #[cfg(target_arch = "x86_64")]
     {
         // SAFETY: Provided IRQ base is intentionally within the exception range for x86 CPUs.
         static PICS: spin::Mutex<pic_8259::Pics> = spin::Mutex::new(unsafe { pic_8259::Pics::new(0) });
         PICS.lock().init(pic_8259::InterruptLines::empty());
-    }
 
-    /* parse kernel file */
-    // TODO parse the kernel file in a module or something
-    {
-        let kernel_file = LIMINE_KERNEL_FILE
-            .get_response()
-            .get()
-            .expect("bootloader did not provide a kernel file")
-            .kernel_file
-            .get()
-            .expect("bootloader kernel file response did not provide a valid file handle");
-        let cmdline = kernel_file.cmdline.to_str().unwrap().to_str().expect("invalid cmdline string");
-
-        for argument in cmdline.split(' ') {
-            match argument.split_once(':') {
-                Some(("smp", "on")) => KERNEL_CFG_SMP = true,
-                Some(("smp", "off")) => KERNEL_CFG_SMP = false,
-                _ => warn!("Unhandled cmdline parameter: {:?}", argument),
-            }
-        }
-
-        let kernel_bytes = core::slice::from_raw_parts(kernel_file.base.as_ptr().unwrap(), kernel_file.length as usize);
-        let kernel_elf = crate::elf::Elf::from_bytes(&kernel_bytes).expect("failed to parse kernel executable");
-        if let Some(names_section) = kernel_elf.get_section_names_section() {
-            for section in kernel_elf.iter_sections() {
-                if let Some(section_name) =
-                    core::ffi::CStr::from_bytes_until_nul(&names_section.data()[section.get_names_section_offset()..])
-                        .ok()
-                        .and_then(|cstr_name| cstr_name.to_str().ok())
-                {
-                    match section_name {
-                        ".symtab" => {
-                            panic::KERNEL_SYMBOLS.call_once(|| {
-                                let (pre, symbols, post) = section.data().align_to::<crate::elf::symbol::Symbol>();
-
-                                // Ensure the symbols are properly aligned to safely convert.
-                                debug_assert!(pre.is_empty());
-                                debug_assert!(post.is_empty());
-
-                                core::slice::from_raw_parts(symbols.as_ptr(), symbols.len())
-                            });
-                        }
-
-                        ".strtab" => {
-                            panic::KERNEL_STRINGS.call_once(|| {
-                                let data = section.data();
-                                core::slice::from_raw_parts(data.as_ptr(), data.len())
-                            });
-                        }
-
-                        _ => {}
-                    }
-                }
-            }
-        }
-    }
-
-    crate::memory::init_kernel_hhdm_address();
-    crate::memory::init_global_allocator(LIMINE_MMAP.get_response().get().unwrap().memmap());
-    crate::memory::init_kernel_page_manager();
-
-    /* bsp core init */
-    {
-        #[cfg(target_arch = "x86_64")]
         libarch::x64::cpu::init();
-
-        // TODO rv64 bsp hart init
     }
 
-    let to_mapper = crate::memory::get_kernel_virtual_mapper();
+    // TODO rv64 bsp hart init
 
-    /* memory init */
-    {
-        use crate::memory::PageAttributes;
-        use crate::memory::VirtualMapper;
-        use libcommon::{LinkerSymbol, PageAlign};
-
-        extern "C" {
-            static __text_start: LinkerSymbol;
-            static __text_end: LinkerSymbol;
-
-            static __rodata_start: LinkerSymbol;
-            static __rodata_end: LinkerSymbol;
-
-            static __bss_start: LinkerSymbol;
-            static __bss_end: LinkerSymbol;
-
-            static __data_start: LinkerSymbol;
-            static __data_end: LinkerSymbol;
-        }
-
-        debug!("Initializing kernel page manager...");
-
-        let hhdm_address = crate::memory::get_kernel_hhdm_address();
-        let from_mapper = VirtualMapper::from_current(hhdm_address);
-
-        {
-            fn map_range_from(
-                from_mapper: &VirtualMapper,
-                to_mapper: &VirtualMapper,
-                range: core::ops::Range<u64>,
-                attributes: PageAttributes,
-            ) {
-                // SAFETY: Linker should have correctly set this value.
-                let page_align = unsafe {
-                    extern "C" {
-                        static __SECTION_ALIGN: LinkerSymbol;
-                    }
-
-                    PageAlign::from_u64(__SECTION_ALIGN.as_u64()).unwrap()
-                };
-
-                for address in range.step_by(page_align.as_usize()).map(Address::<Virtual>::new_truncate) {
-                    to_mapper
-                        .map(
-                            Address::<Page>::new_truncate(address, page_align),
-                            // Properly handle the bootloader possibly not using huge page mappings (but still physically contiguous).
-                            Address::<Page>::new(address, None)
-                                .and_then(|page_address| from_mapper.get_mapped_to(page_address))
-                                .unwrap(),
-                            false,
-                            attributes,
-                        )
-                        .unwrap();
-                }
-            }
-
-            map_range_from(
-                &from_mapper,
-                &to_mapper,
-                __text_start.as_u64()..__text_end.as_u64(),
-                PageAttributes::RX | PageAttributes::GLOBAL,
-            );
-            map_range_from(
-                &from_mapper,
-                &to_mapper,
-                __rodata_start.as_u64()..__rodata_end.as_u64(),
-                PageAttributes::RO | PageAttributes::GLOBAL,
-            );
-            map_range_from(
-                &from_mapper,
-                &to_mapper,
-                __bss_start.as_u64()..__bss_end.as_u64(),
-                PageAttributes::RW | PageAttributes::GLOBAL,
-            );
-            map_range_from(
-                &from_mapper,
-                &to_mapper,
-                __data_start.as_u64()..__data_end.as_u64(),
-                PageAttributes::RW | PageAttributes::GLOBAL,
-            );
-        }
-
-        for entry in LIMINE_MMAP.get_response().get().unwrap().memmap() {
-            let page_attributes = {
-                use limine::LimineMemoryMapEntryType;
-                match entry.typ {
-                    LimineMemoryMapEntryType::Usable
-                    | LimineMemoryMapEntryType::AcpiNvs
-                    | LimineMemoryMapEntryType::AcpiReclaimable
-                    | LimineMemoryMapEntryType::BootloaderReclaimable
-                    // TODO handle the PATs or something to make this WC
-                    | LimineMemoryMapEntryType::Framebuffer => PageAttributes::RW,
-
-                    LimineMemoryMapEntryType::Reserved | LimineMemoryMapEntryType::KernelAndModules => {
-                        PageAttributes::RO
-                    }
-
-                    LimineMemoryMapEntryType::BadMemory => continue,
-                }
-            };
-
-            for phys_base in (entry.base..(entry.base + entry.len)).step_by(0x1000) {
-                // TODO use huge pages here if possible
-                to_mapper
-                    .map(
-                        Address::<Page>::new_truncate(
-                            Address::<Virtual>::new_truncate(hhdm_address.as_u64() + phys_base),
-                            PageAlign::Align4KiB,
-                        ),
-                        Address::<Frame>::new_truncate(phys_base),
-                        false,
-                        page_attributes,
-                    )
-                    .unwrap();
-            }
-        }
-    }
-
-    /* SMP init */
     // Because the SMP information structures (and thus, their `goto_address`) are only mapped in the bootloader
     // page tables, we have to start the other cores and pass the root page table frame index in. All of the cores
     // will then wait until every core has swapped to the new page tables, then this core (the boot core) will
     // reclaim bootloader memory.
-    {
-        debug!("Attempting to start additional cores...");
-
-        let smp_response = LIMINE_SMP.get_response().get_mut().expect("bootloader provided no SMP information");
-        debug!("Detected {} additional cores.", smp_response.cpu_count - 1);
-        let bsp_lapic_id = smp_response.bsp_lapic_id;
-
-        for cpu_info in smp_response.cpus() {
-            if cpu_info.lapic_id != bsp_lapic_id {
-                if KERNEL_CFG_SMP {
-                    trace!("Starting processor: ID P{}/L{}", cpu_info.processor_id, cpu_info.lapic_id);
-
-                    SMP_MEMORY_INIT.fetch_add(1, Ordering::Relaxed);
-                    cpu_info.goto_address = {
-                        extern "C" fn _smp_entry(info: *const limine::LimineSmpInfo) -> ! {
-                            // SAFETY: Bootloader ensures this pointer is unique to this thread.
-                            let info = unsafe { &*info };
-
-                            // Wait to ensure the machine is the correct state to execute cpu setup.
-                            while !SMP_MEMORY_READY.load(Ordering::Relaxed) {
-                                core::hint::spin_loop();
-                            }
-
-                            // SAFETY: Function is called only once per core.
-                            #[cfg(target_arch = "x86_64")]
-                            unsafe {
-                                libarch::x64::cpu::init()
-                            };
-
-                            // SAFETY: All currently referenced memory should be mapped in the kernel page tables.
-                            unsafe { crate::memory::get_kernel_virtual_mapper().commit_vmem_register().unwrap() };
-
-                            SMP_MEMORY_INIT.fetch_sub(1, Ordering::Relaxed);
-                            while SMP_MEMORY_INIT.load(Ordering::Relaxed) > 0 {
-                                core::hint::spin_loop();
-                            }
-
-                            trace!("Finished SMP entry for core.");
-
-                            // SAFETY: Function is called only once for this core.
-                            unsafe { kernel_thread_setup(info.lapic_id) }
-                        }
-
-                        _smp_entry
-                    };
-                } else {
-                    cpu_info.goto_address = {
-                        extern "C" fn _idle_forever(_: *const limine::LimineSmpInfo) -> ! {
-                            // SAFETY: Murder isn't legal. Is this?
-                            unsafe { libarch::interrupts::halt_and_catch_fire() }
-                        }
-
-                        _idle_forever
-                    };
-                }
-            }
-        }
-    }
 
     /* memory finalize */
     {
@@ -393,13 +114,12 @@ unsafe extern "C" fn _entry() -> ! {
             debug!("Initializing APIC interface...");
             libarch::x64::structures::apic::init_apic(|address| {
                 let page_address = Address::<Page>::new(
-                    Address::<Virtual>::new(crate::memory::get_kernel_hhdm_address().as_u64() + (address as u64))
-                        .unwrap(),
+                    Address::<Virtual>::new(crate::memory::get_hhdm_address().as_u64() + (address as u64)).unwrap(),
                     Some(libcommon::PageAlign::Align4KiB),
                 )
                 .unwrap();
 
-                crate::memory::get_kernel_virtual_mapper()
+                crate::memory::get_kernel_mapper()
                     .map_if_not_mapped(
                         page_address,
                         Some((Address::<libcommon::Frame>::new(address as u64).unwrap(), false)),
@@ -424,7 +144,7 @@ unsafe extern "C" fn _entry() -> ! {
                 .as_ptr()
                 .unwrap()
                 .addr();
-            let hhdm_address = crate::memory::get_kernel_hhdm_address().as_usize();
+            let hhdm_address = crate::memory::get_hhdm_address().as_usize();
             crate::acpi::init_interface(libcommon::Address::<libcommon::Physical>::new_truncate(
                 // Properly handle the bootloader's mapping of ACPI addresses in lower-half or higher-half memory space.
                 if rsdp_address > hhdm_address { rsdp_address - hhdm_address } else { rsdp_address } as u64,
@@ -441,7 +161,7 @@ unsafe extern "C" fn _entry() -> ! {
         debug!("Boot core will release other cores, and then wait for all cores to update root page table.");
         SMP_MEMORY_READY.store(true, Ordering::Relaxed);
 
-        while SMP_MEMORY_INIT.load(Ordering::Relaxed) > 0 {
+        while init::SMPS_INITIALIZING.load(Ordering::Relaxed) > 0 {
             core::hint::spin_loop();
         }
 
@@ -560,184 +280,54 @@ pub(self) unsafe fn kernel_thread_setup(core_id: u32) -> ! {
     libarch::interrupts::wait_loop()
 }
 
-/* MODULE LOADING */
-fn load_drivers() {
-    let drivers_data = LIMINE_MODULES
-        .get_response()
-        .get()
-        // Find the drives module, and map the `Option<>` to it.
-        .and_then(|modules| {
-            modules.modules().iter().find(|module| module.path.to_str().unwrap().to_str().unwrap().ends_with("drivers"))
-        })
-        // SAFETY: Kernel promises HHDM to be valid, and the module pointer should be in the HHDM, so this should be valid for `u8`.
-        .map(|drivers_module| unsafe {
-            core::slice::from_raw_parts(drivers_module.base.as_ptr().unwrap(), drivers_module.length as usize)
-        })
-        .expect("no drivers provided");
-
-    let mut current_offset = 0;
-    while current_offset < drivers_data.len() {
-        // Copy and reconstruct the driver byte length from the prefix.
-        let driver_len = {
-            let mut value = 0;
-
-            value |= (drivers_data[current_offset + 0] as u64) << 0;
-            value |= (drivers_data[current_offset + 1] as u64) << 8;
-            value |= (drivers_data[current_offset + 2] as u64) << 16;
-            value |= (drivers_data[current_offset + 3] as u64) << 24;
-            value |= (drivers_data[current_offset + 4] as u64) << 32;
-            value |= (drivers_data[current_offset + 5] as u64) << 40;
-            value |= (drivers_data[current_offset + 6] as u64) << 48;
-            value |= (drivers_data[current_offset + 7] as u64) << 56;
-
-            value as usize
-        };
-
-        let base_offset = current_offset + 8 /* skip 'len' prefix */;
-        let driver_data =
-            miniz_oxide::inflate::decompress_to_vec(&drivers_data[base_offset..(base_offset + driver_len)])
-                .expect("failed to decompress driver");
-        let driver_elf = crate::elf::Elf::from_bytes(&driver_data).unwrap();
-        info!("{:?}", driver_elf);
-
-        load_driver(&driver_elf);
-
-        current_offset += driver_len + 8  /* skip 'len' prefix */;
-    }
-}
-
-fn load_driver(driver: &crate::elf::Elf) {
-    use crate::{elf::segment, memory::PageAttributes};
-    use libcommon::PageAlign;
-
-    // Create the driver's page manager from the kernel's higher-half table.
-    // SAFETY: Kernel guarantees HHDM to be valid.
-    let driver_page_manager = unsafe {
-        crate::memory::VirtualMapper::new(
-            4,
-            crate::memory::get_kernel_hhdm_address(),
-            Some(libarch::memory::VmemRegister::read()),
-        )
-        .expect("failed to create page manager for driver")
+fn parse_symols() {
+    let (kernel_file_base, kernel_file_len) = {
+        let kernel_file = get_kernel_file();
+        (kernel_file.base.as_ptr().unwrap(), kernel_file.length as usize)
     };
 
-    let hhdm_address = crate::memory::get_kernel_hhdm_address();
+    // SAFETY: Kernel file is guaranteed to be valid by bootloader.
+    let kernel_elf =
+        crate::elf::Elf::from_bytes(&(unsafe { core::slice::from_raw_parts(kernel_file_base, kernel_file_len) }))
+            .expect("failed to parse kernel executable");
+    if let Some(names_section) = kernel_elf.get_section_names_section() {
+        for (section, name) in kernel_elf.iter_sections().filter_map(|section| {
+            Some((
+                section,
+                core::ffi::CStr::from_bytes_until_nul(&names_section.data()[section.get_names_section_offset()..])
+                    .ok()?
+                    .to_str()
+                    .ok()?,
+            ))
+        }) {
+            {
+                use alloc::vec::Vec;
 
-    // Iterate the segments, and allocate them.
-    for segment in driver.iter_segments() {
-        trace!("{:?}", segment);
-
-        match segment.get_type() {
-            segment::Type::Loadable => {
-                let memory_start = segment.get_virtual_address().unwrap().as_usize();
-                let memory_end = memory_start + segment.get_memory_layout().unwrap().size();
-                // SAFETY: Value provided is non-zero.
-                let start_page_index =
-                    libcommon::align_down_div(memory_start, unsafe { NonZeroUsize::new_unchecked(0x1000) });
-                // SAFETY: Value provided is non-zero.
-                let end_page_index =
-                    libcommon::align_up_div(memory_end, unsafe { NonZeroUsize::new_unchecked(0x1000) });
-                let mut data_offset = 0;
-
-                for page_index in start_page_index..end_page_index {
-                    // REMARK: This doesn't support RWX pages. I'm not sure it ever should.
-                    let page_attributes = if segment.get_flags().contains(segment::Flags::EXECUTABLE) {
-                        PageAttributes::RX
-                    } else if segment.get_flags().contains(segment::Flags::WRITABLE) {
-                        PageAttributes::RW
-                    } else {
-                        PageAttributes::RO
-                    };
-
-                    let page = Address::<Page>::new(
-                        Address::<Virtual>::new((page_index * 0x1000) as u64).unwrap(),
-                        Some(PageAlign::Align4KiB),
-                    )
-                    .unwrap();
-                    driver_page_manager.auto_map(page, page_attributes | PageAttributes::USER).unwrap();
-
-                    // SAFETY: HHDM is guaranteed by kernel to be valid, and the frame being pointed to was just allocated.
-                    let memory_hhdm = unsafe {
-                        core::slice::from_raw_parts_mut(
-                            hhdm_address
-                                .as_mut_ptr::<u8>()
-                                .add(driver_page_manager.get_mapped_to(page).unwrap().as_usize()),
-                            0x1000,
-                        )
-                    };
-
-                    // If the virtual address isn't page-aligned, then this allows us to start writing at
-                    // the correct address, rather than writing the wrong bytes at the lower page boundary.
-                    let memory_offset = memory_start.checked_sub(page_index * 0x1000).unwrap_or(0);
-                    // REMARK: This could likely be optimized to use memcpy / copy_nonoverlapping, but
-                    //         for now this approach suffices.
-                    for index in memory_offset..0x1000 {
-                        let data_value = segment.data().get(data_offset);
-                        memory_hhdm[index] = *data_value
-                            // Handle zeroing of `.bss` segments.
-                            .unwrap_or(&0);
-                        data_offset += 1;
+                match name {
+                    ".symtab" if let Ok(symbols) = bytemuck::try_cast_slice(section.data()) => {
+                        panic::KERNEL_SYMBOLS.call_once(|| {
+                            let mut symbols_copy = Vec::new();
+                            symbols_copy.extend_from_slice(symbols);
+                            symbols_copy
+                        });
                     }
+
+                    ".strtab" => {
+                        panic::KERNEL_STRINGS.call_once(|| {
+                            let mut strings_copy = Vec::new();
+                            strings_copy.extend_from_slice(section.data());
+                            strings_copy
+                        });
+                    }
+
+                    _ => {}
                 }
             }
-
-            _ => {}
         }
     }
-
-    // Push ELF as global task.
-    {
-        let stack_address = {
-            const TASK_STACK_BASE_ADDRESS: Address<Page> =
-                Address::<Page>::new_truncate(Address::<Virtual>::new_truncate(128 << 39), PageAlign::Align2MiB);
-            // TODO make this a dynamic configuration
-            const TASK_STACK_PAGE_COUNT: usize = 2;
-
-            for page in
-                (0..TASK_STACK_PAGE_COUNT).map(|offset| TASK_STACK_BASE_ADDRESS.forward_checked(offset).unwrap())
-            {
-                driver_page_manager
-                    .map(
-                        page,
-                        Address::<Frame>::zero(),
-                        false,
-                        PageAttributes::WRITABLE
-                            | PageAttributes::NO_EXECUTE
-                            | PageAttributes::DEMAND
-                            | PageAttributes::USER
-                            | PageAttributes::HUGE,
-                    )
-                    .unwrap();
-            }
-
-            TASK_STACK_BASE_ADDRESS.forward_checked(TASK_STACK_PAGE_COUNT).unwrap()
-        };
-
-        let mut global_tasks = crate::local_state::GLOBAL_TASKS.lock();
-        global_tasks.push_back(crate::local_state::Task::new(
-            crate::local_state::TaskPriority::new(crate::local_state::TaskPriority::MAX).unwrap(),
-            // TODO account for memory base when passing entry offset
-            crate::local_state::TaskStart::Address(Address::<Virtual>::new(driver.get_entry_offset() as u64).unwrap()),
-            crate::local_state::TaskStack::At(stack_address.address()),
-            {
-                #[cfg(target_arch = "x86_64")]
-                {
-                    (
-                        libarch::x64::cpu::GeneralContext::empty(),
-                        libarch::x64::cpu::SpecialContext::flags_with_user_segments(
-                            libarch::x64::registers::RFlags::INTERRUPT_FLAG,
-                        ),
-                    )
-                }
-            },
-            #[cfg(target_arch = "x86_64")]
-            {
-                // TODO do not error here ?
-                driver_page_manager.read_vmem_register().unwrap()
-            },
-        ))
-    }
 }
+
+/* MODULE LOADING */
 
 /// SAFETY: Do not call this function.
 #[no_mangle]
@@ -747,7 +337,7 @@ unsafe fn __pf_handler(address: Address<Virtual>) -> Result<(), libarch::interru
     use libarch::interrupts::PageFaultHandlerError;
 
     let fault_page = Address::<Page>::new(address, None).unwrap();
-    let virtual_mapper = crate::memory::VirtualMapper::from_current(crate::memory::get_kernel_hhdm_address());
+    let virtual_mapper = crate::memory::VirtualMapper::from_current(crate::memory::get_hhdm_address());
     let Some(mut fault_page_attributes) = virtual_mapper.get_page_attributes(fault_page) else { return Err(PageFaultHandlerError::AddressNotMapped) };
     if fault_page_attributes.contains(PageAttributes::DEMAND) {
         virtual_mapper
