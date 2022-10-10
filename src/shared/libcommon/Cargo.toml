@@ -14,6 +14,7 @@ spin = "*"
 port-rs = { path = "../port-rs/" }
 acpi = { git = "https://github.com/semiviral/acpi" }
 aml = "*"
+bytemuck = "*"
 
 [features]
 global_allocator = []

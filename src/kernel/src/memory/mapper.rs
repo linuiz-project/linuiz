@@ -10,7 +10,7 @@ use libcommon::{
 use spin::RwLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum VirtualMapperError {
+pub enum MapperError {
     NotMapped,
     AlreadyMapped,
     AllocError,
@@ -19,19 +19,19 @@ pub enum VirtualMapperError {
     PagingError(crate::memory::PagingError),
 }
 
-struct VirtualMapperData {
+struct Data {
     depth: usize,
     root_frame: Address<Frame>,
-    phys_mapped_address: Address<Virtual>,
+    hhdm_address: Address<Virtual>,
     entry: PageTableEntry,
 }
 
-pub struct VirtualMapper(RwLock<VirtualMapperData>);
+pub struct Mapper(RwLock<Data>);
 
 // SAFETY: Type is designed to be thread-agnostic internally.
-unsafe impl Sync for VirtualMapper {}
+unsafe impl Sync for Mapper {}
 
-impl VirtualMapper {
+impl Mapper {
     /// Attempts to construct a new page manager. Returns `None` if the provided page table depth is not supported.
     /// SAFETY: Refer to `VirtualMapper::new()`.
     pub unsafe fn new(
@@ -42,7 +42,7 @@ impl VirtualMapper {
         const VALID_DEPTHS: core::ops::RangeInclusive<usize> = 3..=5;
 
         if VALID_DEPTHS.contains(&depth)
-            && let Ok(root_frame) = libcommon::memory::get_global_allocator().lock_next()
+            && let Ok(root_frame) = libcommon::memory::get().lock_next()
             && let Some(root_mapped_address) = Address::<Virtual>::new(phys_mapped_address.as_u64() + root_frame.as_u64())
         {
             match vmem_register_copy {
@@ -52,17 +52,17 @@ impl VirtualMapper {
                 _ => core::ptr::write_bytes(root_mapped_address.as_mut_ptr::<u8>(), 0, 0x1000),
             }
 
-            Some(Self(RwLock::new(VirtualMapperData { depth, root_frame, phys_mapped_address, entry: PageTableEntry::new(root_frame, PageAttributes::PRESENT) })))
+            Some(Self(RwLock::new(Data { depth, root_frame, hhdm_address: phys_mapped_address, entry: PageTableEntry::new(root_frame, PageAttributes::PRESENT) })))
         } else {
             None
         }
     }
 
-    pub unsafe fn from_current(phys_mapped_address: Address<Virtual>) -> Self {
+    pub unsafe fn from_current(hhdm_address: Address<Virtual>) -> Self {
         let root_frame = libarch::memory::VmemRegister::read().frame();
         let root_table_entry = PageTableEntry::new(root_frame, PageAttributes::PRESENT);
 
-        Self(RwLock::new(VirtualMapperData {
+        Self(RwLock::new(Data {
             // TODO fix this for rv64 Sv39
             depth: if libarch::memory::supports_5_level_paging() && libarch::memory::is_5_level_paged() {
                 5
@@ -70,7 +70,7 @@ impl VirtualMapper {
                 4
             },
             root_frame,
-            phys_mapped_address,
+            hhdm_address,
             entry: root_table_entry,
         }))
     }
@@ -80,7 +80,7 @@ impl VirtualMapper {
             let data = self.0.read();
             // TODO try to find alternative to unwrapping here
             // SAFETY: `VirtualMapper` already requires that the physical mapping page is valid, so it can be safely passed to the page table.
-            func(unsafe { PageTable::<Ref>::new(data.depth, data.phys_mapped_address, &data.entry).unwrap() })
+            func(unsafe { PageTable::<Ref>::new(data.depth, data.hhdm_address, &data.entry).unwrap() })
         })
     }
 
@@ -88,7 +88,7 @@ impl VirtualMapper {
         interrupts::without(|| {
             let mut data = self.0.write();
             // SAFETY: `VirtualMapper` already requires that the physical mapping page is valid, so it can be safely passed to the page table.
-            func(unsafe { PageTable::<Mut>::new(data.depth, data.phys_mapped_address, &mut data.entry).unwrap() })
+            func(unsafe { PageTable::<Mut>::new(data.depth, data.hhdm_address, &mut data.entry).unwrap() })
         })
     }
 
@@ -101,14 +101,12 @@ impl VirtualMapper {
         frame: Address<Frame>,
         lock_frames: bool,
         mut attributes: PageAttributes,
-    ) -> Result<(), VirtualMapperError> {
+    ) -> Result<(), MapperError> {
         let result = self.with_root_table_mut(|mut root_table| {
-            let Some(page_align) = page.align() else { return Err(VirtualMapperError::UnalignedPageAddress) };
+            let Some(page_align) = page.align() else { return Err(MapperError::UnalignedPageAddress) };
             // If the acquisition of the frame fails, return the error.
-            if lock_frames
-                && libcommon::memory::get_global_allocator().lock_many(frame, page_align.as_usize() / 0x1000).is_err()
-            {
-                return Err(VirtualMapperError::AllocError);
+            if lock_frames && libcommon::memory::get().lock_many(frame, page_align.as_usize() / 0x1000).is_err() {
+                return Err(MapperError::AllocError);
             }
 
             // If acquisition of the frame is successful, attempt to map the page to the frame index.
@@ -130,7 +128,7 @@ impl VirtualMapper {
                         Ok(())
                     }
 
-                    Err(err) => Err(VirtualMapperError::PagingError(err)),
+                    Err(err) => Err(MapperError::PagingError(err)),
                 }
             })
         });
@@ -147,36 +145,33 @@ impl VirtualMapper {
     /// Unmaps the given page, optionally freeing the frame the page points to within the given [`FrameManager`].
     ///
     /// SAFETY: Caller must ensure calling this function does not cause memory corruption.
-    pub unsafe fn unmap(&self, page: Address<Page>) -> Result<(), VirtualMapperError> {
+    pub unsafe fn unmap(&self, page: Address<Page>, free_frame: bool) -> Result<(), super::PagingError> {
         self.with_root_table_mut(|mut root_table| {
             root_table.with_entry_mut(page, |entry| {
-                match entry {
-                    Ok(entry) => {
-                        // SAFETY: We've got an explicit directive from the caller to unmap this page, so the caller must ensure that's a valid operation.
-                        unsafe { entry.set_attributes(PageAttributes::PRESENT, AttributeModify::Remove) };
+                entry.map(|entry| {
+                    // SAFETY: We've got an explicit directive from the caller to unmap this page, so the caller must ensure that's a valid operation.
+                    unsafe { entry.set_attributes(PageAttributes::PRESENT, AttributeModify::Remove) };
 
-                        let frame = entry.get_frame();
-                        // SAFETY: See above.
-                        unsafe { entry.set_frame(Address::<Frame>::zero()) };
-                        libcommon::memory::get_global_allocator().free(frame).unwrap();
+                    let frame = entry.get_frame();
+                    // SAFETY: See above.
+                    unsafe { entry.set_frame(Address::<Frame>::zero()) };
 
-                        // Invalidate the page in the TLB.
-                        #[cfg(target_arch = "x86_64")]
-                        libarch::x64::instructions::tlb::invlpg(page);
-
-                        Ok(())
+                    if free_frame {
+                        libcommon::memory::get().free(frame).unwrap();
                     }
 
-                    Err(err) => Err(VirtualMapperError::PagingError(err)),
-                }
+                    // Invalidate the page in the TLB.
+                    #[cfg(target_arch = "x86_64")]
+                    libarch::x64::instructions::tlb::invlpg(page);
+                })
             })
         })
     }
 
-    pub fn auto_map(&self, page: Address<Page>, attributes: PageAttributes) -> Result<(), VirtualMapperError> {
-        match libcommon::memory::get_global_allocator().lock_next() {
+    pub fn auto_map(&self, page: Address<Page>, attributes: PageAttributes) -> Result<(), MapperError> {
+        match libcommon::memory::get().lock_next() {
             Ok(frame) => self.map(page, frame, false, attributes),
-            Err(_) => Err(VirtualMapperError::AllocError),
+            Err(_) => Err(MapperError::AllocError),
         }
     }
 
@@ -203,7 +198,7 @@ impl VirtualMapper {
         page: Address<Page>,
         frame_and_lock: Option<(Address<Frame>, bool)>,
         attributes: PageAttributes,
-    ) -> Result<(), VirtualMapperError> {
+    ) -> Result<(), MapperError> {
         match frame_and_lock {
             Some((frame, lock_frame)) if !self.is_mapped_to(page, frame) => {
                 self.map(page, frame, lock_frame, attributes)
@@ -231,7 +226,7 @@ impl VirtualMapper {
         page: Address<Page>,
         attributes: PageAttributes,
         modify_mode: AttributeModify,
-    ) -> Result<(), VirtualMapperError> {
+    ) -> Result<(), MapperError> {
         self.with_root_table_mut(|mut root_table| {
             root_table.with_entry_mut(page, |entry| match entry {
                 Ok(entry) => {
@@ -243,13 +238,13 @@ impl VirtualMapper {
                     Ok(())
                 }
 
-                Err(err) => Err(VirtualMapperError::PagingError(err)),
+                Err(err) => Err(MapperError::PagingError(err)),
             })
         })
     }
 
     pub fn physical_mapped_address(&self) -> Address<Virtual> {
-        interrupts::without(|| self.0.read().phys_mapped_address)
+        interrupts::without(|| self.0.read().hhdm_address)
     }
 
     pub fn read_vmem_register(&self) -> Option<VmemRegister> {
@@ -263,7 +258,9 @@ impl VirtualMapper {
         })
     }
 
-    pub unsafe fn commit_vmem_register(&self) -> Result<(), VirtualMapperError> {
+    /// SAFETY: Caller must ensure that committing this mapper's parameters to the virtual memory register will
+    ///         not result in undefined behaviour.
+    pub unsafe fn commit_vmem_register(&self) -> Result<(), MapperError> {
         interrupts::without(|| {
             let vmap = self.0.write();
 

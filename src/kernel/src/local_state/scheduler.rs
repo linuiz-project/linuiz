@@ -102,11 +102,11 @@ pub struct Scheduler {
     tasks: VecDeque<Task>,
     idle_task: Task,
     cur_task: Option<Task>,
-    timer: alloc::boxed::Box<dyn crate::time::timer::Timer>,
+    timer: crate::time::Timer,
 }
 
 impl Scheduler {
-    pub fn new(enabled: bool, timer: alloc::boxed::Box<dyn crate::time::timer::Timer>, idle_task: Task) -> Self {
+    pub fn new(enabled: bool, timer: crate::time::Timer, idle_task: Task) -> Self {
         Self { enabled, total_priority: 0, tasks: VecDeque::new(), idle_task, cur_task: None, timer }
     }
 

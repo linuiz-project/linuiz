@@ -83,11 +83,33 @@ mod global_allocator {
     #[global_allocator]
     static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator(spin::Once::new());
 
-    pub fn set_global_allocator(global_allocator: &'static dyn KernelAllocator) {
+    pub fn set(global_allocator: &'static dyn KernelAllocator) {
         GLOBAL_ALLOCATOR.0.call_once(|| global_allocator);
     }
 
-    pub fn get_global_allocator() -> &'static dyn KernelAllocator {
+    pub fn get() -> &'static dyn KernelAllocator {
         *GLOBAL_ALLOCATOR.0.get().unwrap()
+    }
+
+    pub unsafe fn allocate_static<T: bytemuck::AnyBitPattern>() -> Result<*mut T, core::alloc::AllocError> {
+        match alloc::alloc::alloc(core::alloc::Layout::from_size_align_unchecked(
+            core::mem::size_of::<T>(),
+            core::mem::align_of::<T>(),
+        )) {
+            // SAFETY: Pointer is known non-null (so allocation succeeded, and unwrap is guaranteed success).
+            ptr if !ptr.is_null() => Ok(ptr.cast::<T>()),
+            _ => Err(core::alloc::AllocError),
+        }
+    }
+
+    pub unsafe fn allocate_static_zeroed<T: bytemuck::Zeroable>() -> Result<*mut T, core::alloc::AllocError> {
+        match alloc::alloc::alloc_zeroed(core::alloc::Layout::from_size_align_unchecked(
+            core::mem::size_of::<T>(),
+            core::mem::align_of::<T>(),
+        )) {
+            // SAFETY: Pointer is known non-null (so allocation succeeded, and unwrap is guaranteed success).
+            ptr if !ptr.is_null() => Ok(ptr.cast::<T>()),
+            _ => Err(core::alloc::AllocError),
+        }
     }
 }

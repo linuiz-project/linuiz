@@ -183,7 +183,7 @@ pub fn get_io_apics() -> &'static Vec<IoApic<'static>> {
         //         .map(|ioapic_info| unsafe {
 
         //             let (ioregsel, ioregwin) = {
-        //                 let Ok(ioapic_regs) = libcommon::memory::get_global_allocator().allocate_to(Address::<Frame>::new_truncate(ioapic_info.address as u64), 1)
+        //                 let Ok(ioapic_regs) = libcommon::memory::get().allocate_to(Address::<Frame>::new_truncate(ioapic_info.address as u64), 1)
         //                     else { panic!("failed to initialize I/O APIC") };
 
         //                 (

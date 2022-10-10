@@ -21,7 +21,8 @@
     cstr_from_bytes_until_nul,
     if_let_guard,
     inline_const,
-    exact_size_is_empty
+    exact_size_is_empty,
+    fn_align
 )]
 #![forbid(clippy::inline_asm_x86_att_syntax)]
 #![deny(clippy::semicolon_if_nothing_returned, clippy::debug_assert_with_mut_call, clippy::float_arithmetic)]
@@ -53,12 +54,11 @@ mod panic;
 mod syscall;
 mod time;
 
-use core::sync::atomic::Ordering;
-use libcommon::{Address, Frame, Page, Virtual};
+use libcommon::Address;
 
 pub const LIMINE_REV: u64 = 0;
+// TODO somehow model that these requests are invalidated
 static LIMINE_MODULES: limine::LimineModuleRequest = limine::LimineModuleRequest::new(LIMINE_REV);
-static LIMINE_MMAP: limine::LimineMemmapRequest = limine::LimineMemmapRequest::new(LIMINE_REV);
 static LIMINE_STACK: limine::LimineStackSizeRequest = limine::LimineStackSizeRequest::new(LIMINE_REV).stack_size({
     #[cfg(debug_assertions)]
     {
@@ -78,23 +78,15 @@ pub type MmapEntryType = limine::LimineMemoryMapEntryType;
 #[no_mangle]
 #[allow(clippy::too_many_lines)]
 unsafe extern "C" fn _entry() -> ! {
-    init::serial();
-
-    info!("Successfully loaded into kernel with serial logging.");
-
-    init::boot_info();
-    init::smp();
-    init::memory();
-
     /* arch core init */
     #[cfg(target_arch = "x86_64")]
     {
         // SAFETY: Provided IRQ base is intentionally within the exception range for x86 CPUs.
         static PICS: spin::Mutex<pic_8259::Pics> = spin::Mutex::new(unsafe { pic_8259::Pics::new(0) });
         PICS.lock().init(pic_8259::InterruptLines::empty());
-
-        libarch::x64::cpu::init();
     }
+
+    init::init();
 
     // TODO rv64 bsp hart init
 
@@ -105,65 +97,12 @@ unsafe extern "C" fn _entry() -> ! {
 
     /* memory finalize */
     {
-        debug!("Switching to kernel page tables...");
-        to_mapper.commit_vmem_register().unwrap();
-        debug!("Kernel has finalized control of page tables.");
-
-        #[cfg(target_arch = "x86_64")]
-        {
-            debug!("Initializing APIC interface...");
-            libarch::x64::structures::apic::init_apic(|address| {
-                let page_address = Address::<Page>::new(
-                    Address::<Virtual>::new(crate::memory::get_hhdm_address().as_u64() + (address as u64)).unwrap(),
-                    Some(libcommon::PageAlign::Align4KiB),
-                )
-                .unwrap();
-
-                crate::memory::get_kernel_mapper()
-                    .map_if_not_mapped(
-                        page_address,
-                        Some((Address::<libcommon::Frame>::new(address as u64).unwrap(), false)),
-                        crate::memory::PageAttributes::MMIO,
-                    )
-                    .unwrap();
-
-                page_address.address().as_mut_ptr()
-            })
-            .unwrap();
-        }
-
-        debug!("Initializing ACPI interface...");
-        {
-            static LIMINE_RSDP: limine::LimineRsdpRequest = limine::LimineRsdpRequest::new(crate::LIMINE_REV);
-
-            let rsdp_address = LIMINE_RSDP
-                .get_response()
-                .get()
-                .expect("bootloader provided no RSDP address")
-                .address
-                .as_ptr()
-                .unwrap()
-                .addr();
-            let hhdm_address = crate::memory::get_hhdm_address().as_usize();
-            crate::acpi::init_interface(libcommon::Address::<libcommon::Physical>::new_truncate(
-                // Properly handle the bootloader's mapping of ACPI addresses in lower-half or higher-half memory space.
-                if rsdp_address > hhdm_address { rsdp_address - hhdm_address } else { rsdp_address } as u64,
-            ));
-        }
-
         // TODO debug!("Loading pre-packaged drivers...");
         // load_drivers();
 
         // TODO init PCI devices
         // debug!("Initializing PCI devices...");
         // crate::memory::io::pci::init_devices();
-
-        debug!("Boot core will release other cores, and then wait for all cores to update root page table.");
-        SMP_MEMORY_READY.store(true, Ordering::Relaxed);
-
-        while init::SMPS_INITIALIZING.load(Ordering::Relaxed) > 0 {
-            core::hint::spin_loop();
-        }
 
         // TODO reclaim bootloader memory
         // debug!("Reclaiming bootloader reclaimable memory...");
@@ -260,9 +199,6 @@ unsafe extern "C" fn _entry() -> ! {
         //     // }
     }
 
-    info!("Finished initial kernel setup.");
-    SMP_MEMORY_READY.store(true, Ordering::Relaxed);
-
     // TODO make this a standalone function so we can return error states
 
     kernel_thread_setup(0)
@@ -280,106 +216,62 @@ pub(self) unsafe fn kernel_thread_setup(core_id: u32) -> ! {
     libarch::interrupts::wait_loop()
 }
 
-fn parse_symols() {
-    let (kernel_file_base, kernel_file_len) = {
-        let kernel_file = get_kernel_file();
-        (kernel_file.base.as_ptr().unwrap(), kernel_file.length as usize)
-    };
+#[doc(hidden)]
+mod handlers {
+    use libcommon::{Address, Page, Virtual};
 
-    // SAFETY: Kernel file is guaranteed to be valid by bootloader.
-    let kernel_elf =
-        crate::elf::Elf::from_bytes(&(unsafe { core::slice::from_raw_parts(kernel_file_base, kernel_file_len) }))
-            .expect("failed to parse kernel executable");
-    if let Some(names_section) = kernel_elf.get_section_names_section() {
-        for (section, name) in kernel_elf.iter_sections().filter_map(|section| {
-            Some((
-                section,
-                core::ffi::CStr::from_bytes_until_nul(&names_section.data()[section.get_names_section_offset()..])
-                    .ok()?
-                    .to_str()
-                    .ok()?,
-            ))
-        }) {
-            {
-                use alloc::vec::Vec;
+    /// SAFETY: Do not call this function.
+    #[no_mangle]
+    #[repr(align(0x10))]
+    unsafe fn __pf_handler(address: Address<Virtual>) -> Result<(), libarch::interrupts::PageFaultHandlerError> {
+        use crate::memory::PageAttributes;
+        use libarch::interrupts::PageFaultHandlerError;
 
-                match name {
-                    ".symtab" if let Ok(symbols) = bytemuck::try_cast_slice(section.data()) => {
-                        panic::KERNEL_SYMBOLS.call_once(|| {
-                            let mut symbols_copy = Vec::new();
-                            symbols_copy.extend_from_slice(symbols);
-                            symbols_copy
-                        });
-                    }
+        let fault_page = Address::<Page>::new(address, None).unwrap();
+        let virtual_mapper = crate::memory::Mapper::from_current(crate::memory::get_hhdm_address());
+        let Some(mut fault_page_attributes) = virtual_mapper.get_page_attributes(fault_page) else { return Err(PageFaultHandlerError::AddressNotMapped) };
+        if fault_page_attributes.contains(PageAttributes::DEMAND) {
+            virtual_mapper
+                .auto_map(fault_page, {
+                    // remove demand bit ...
+                    fault_page_attributes.remove(PageAttributes::DEMAND);
+                    // ... insert present bit ...
+                    fault_page_attributes.insert(PageAttributes::PRESENT);
+                    // ... return attributes
+                    fault_page_attributes
+                })
+                .unwrap();
 
-                    ".strtab" => {
-                        panic::KERNEL_STRINGS.call_once(|| {
-                            let mut strings_copy = Vec::new();
-                            strings_copy.extend_from_slice(section.data());
-                            strings_copy
-                        });
-                    }
+            // SAFETY: We know the page was just mapped, and contains no relevant memory.
+            fault_page.zero_memory();
 
-                    _ => {}
-                }
+            Ok(())
+        } else {
+            Err(PageFaultHandlerError::NotDemandPaged)
+        }
+    }
+
+    /// SAFETY: Do not call this function.
+    #[no_mangle]
+    #[repr(align(0x10))]
+    unsafe fn __irq_handler(
+        irq_vector: u64,
+        ctrl_flow_context: &mut libarch::interrupts::ControlFlowContext,
+        arch_context: &mut libarch::interrupts::ArchContext,
+    ) {
+        use libarch::interrupts::Vector;
+
+        match Vector::try_from(irq_vector) {
+            Ok(vector) if vector == Vector::Timer => {
+                crate::local_state::with_scheduler(|scheduler| scheduler.next_task(ctrl_flow_context, arch_context));
+            }
+
+            vector_result => {
+                warn!("Unhandled IRQ vector: {:?}", vector_result);
             }
         }
+
+        #[cfg(target_arch = "x86_64")]
+        libarch::x64::structures::apic::end_of_interrupt();
     }
-}
-
-/* MODULE LOADING */
-
-/// SAFETY: Do not call this function.
-#[no_mangle]
-#[doc(hidden)]
-unsafe fn __pf_handler(address: Address<Virtual>) -> Result<(), libarch::interrupts::PageFaultHandlerError> {
-    use crate::memory::PageAttributes;
-    use libarch::interrupts::PageFaultHandlerError;
-
-    let fault_page = Address::<Page>::new(address, None).unwrap();
-    let virtual_mapper = crate::memory::VirtualMapper::from_current(crate::memory::get_hhdm_address());
-    let Some(mut fault_page_attributes) = virtual_mapper.get_page_attributes(fault_page) else { return Err(PageFaultHandlerError::AddressNotMapped) };
-    if fault_page_attributes.contains(PageAttributes::DEMAND) {
-        virtual_mapper
-            .auto_map(fault_page, {
-                // remove demand bit ...
-                fault_page_attributes.remove(PageAttributes::DEMAND);
-                // ... insert present bit ...
-                fault_page_attributes.insert(PageAttributes::PRESENT);
-                // ... return attributes
-                fault_page_attributes
-            })
-            .unwrap();
-
-        // SAFETY: We know the page was just mapped, and contains no relevant memory.
-        fault_page.zero_memory();
-
-        Ok(())
-    } else {
-        Err(PageFaultHandlerError::NotDemandPaged)
-    }
-}
-
-/// SAFETY: Do not call this function.
-#[no_mangle]
-#[doc(hidden)]
-unsafe fn __irq_handler(
-    irq_vector: u64,
-    ctrl_flow_context: &mut libarch::interrupts::ControlFlowContext,
-    arch_context: &mut libarch::interrupts::ArchContext,
-) {
-    use libarch::interrupts::Vector;
-
-    match Vector::try_from(irq_vector) {
-        Ok(vector) if vector == Vector::Timer => {
-            crate::local_state::with_scheduler(|scheduler| scheduler.next_task(ctrl_flow_context, arch_context));
-        }
-
-        vector_result => {
-            warn!("Unhandled IRQ vector: {:?}", vector_result);
-        }
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    libarch::x64::structures::apic::end_of_interrupt();
 }

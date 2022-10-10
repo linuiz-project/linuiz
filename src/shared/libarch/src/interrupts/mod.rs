@@ -1,8 +1,8 @@
+mod instructions;
+
+pub use instructions::*;
 use libcommon::{Address, LinkerSymbol, Virtual};
 use num_enum::TryFromPrimitive;
-
-mod instructions;
-pub use instructions::*;
 use spin::Lazy;
 
 /// Delivery mode for IPIs.

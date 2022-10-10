@@ -20,7 +20,7 @@ num_enum = { version = "*", default-features = false }
 limine = { git = "https://github.com/limine-bootloader/limine-rs", features = ["requests-section"] }
 bit_field = "*"
 bitflags = "*"
-spin = "*"
+spin = { git = "https://github.com/semiviral/spin-rs" }
 paste = "*"
 # TODO perhaps don't use ACPI / DTB in the kernel, but abstract it in libarch/libcommon/libkernel?
 acpi = { git = "https://github.com/semiviral/acpi" }
