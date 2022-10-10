@@ -161,14 +161,13 @@ unsafe impl Sync for AcpiTablesWrapper {}
 static RSDP: Once<Mutex<AcpiTables<AcpiHandler>>> = Once::new();
 /// Initializes the ACPI interface.
 ///
-/// SAFETY: This this method must be called before bootloader memory is reclaimed.
+/// SAFETY: Caller must ensure the RSDP address is valid.
 pub unsafe fn init_interface(rsdp_address: Address<libcommon::Physical>) {
     RSDP.call_once(move || {
         Mutex::new({
             let handler = AcpiHandler;
 
-            // SAFETY:  We simply have no way to check if the bootloader provides an invalid RSDP address.
-            //          Hopefully, the crate's safety checks catch it.
+            // SAFETY: Caller is required to provide a valid RSDP address.
             unsafe {
                 acpi::AcpiTables::from_rsdp(handler, rsdp_address.as_usize()).expect("failed to acquire RSDP table")
             }

@@ -120,10 +120,10 @@ impl log::Log for Serial {
             let whole_time = ticks / 1000;
             let frac_time = ticks % 1000;
 
-            let uart = self.0.lock();
+            let mut uart = self.0.lock();
 
             uart.write_fmt(format_args!(
-                "[{whole_time:wwidth$}.{frac_time:0fwidth$}][{level}] {args}",
+                "[{whole_time:wwidth$}.{frac_time:0fwidth$}][{level}] {args}\n",
                 level = record.level(),
                 args = record.args(),
                 wwidth = 4,

@@ -3,17 +3,16 @@ use bit_field::BitField;
 use core::{
     alloc::AllocError,
     num::NonZeroUsize,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::atomic::{AtomicU8, Ordering},
 };
 use libcommon::{
     memory::{page_aligned_allocator, AlignedAllocator, KernelAllocator},
     Address, Virtual,
 };
-use num_enum::TryFromPrimitive;
 use spin::Mutex;
 
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameType {
     Unusable,
     Generic,
@@ -22,58 +21,85 @@ pub enum FrameType {
     AcpiReclaim,
 }
 
-#[derive(Debug)]
-pub struct Frame {
-    peeked: AtomicBool,
-    locked: AtomicBool,
-    ty: core::sync::atomic::AtomicU8,
+impl FrameType {
+    const fn from_u8(value: u8) -> Self {
+        match value {
+            0 => Self::Unusable,
+            1 => Self::Generic,
+            2 => Self::Reserved,
+            3 => Self::BootReclaim,
+            4 => Self::AcpiReclaim,
+            _ => unimplemented!(),
+        }
+    }
+
+    const fn as_u8(self) -> u8 {
+        match self {
+            FrameType::Unusable => 0,
+            FrameType::Generic => 1,
+            FrameType::Reserved => 2,
+            FrameType::BootReclaim => 3,
+            FrameType::AcpiReclaim => 4,
+        }
+    }
 }
 
+#[derive(Debug)]
+pub struct Frame(AtomicU8);
+
 impl Frame {
-    #[inline]
+    const LOCKED_SHIFT: usize = 7;
+    const PEEKED_SHIFT: usize = 6;
+    const LOCKED_BIT: u8 = 1 << Self::LOCKED_SHIFT;
+    const PEEKED_BIT: u8 = 1 << Self::PEEKED_SHIFT;
+    const TYPE_RANGE: core::ops::Range<usize> = 0..4;
+
+    #[inline(always)]
     fn lock(&self) {
-        let lock_result = self.locked.compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed);
-        debug_assert!(lock_result.is_ok());
+        let lock_result = self.0.fetch_or(Self::LOCKED_BIT, Ordering::AcqRel);
+        debug_assert!(!lock_result.get_bit(Self::LOCKED_SHIFT));
     }
 
-    #[inline]
+    #[inline(always)]
     fn free(&self) {
-        let free_result = self.locked.compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed);
-        debug_assert!(free_result.is_ok());
+        let free_result = self.0.fetch_xor(Self::LOCKED_BIT, Ordering::AcqRel);
+        debug_assert!(free_result.get_bit(Self::LOCKED_SHIFT));
     }
 
-    #[inline]
+    #[inline(always)]
     fn try_peek(&self) -> bool {
-        self.peeked.compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed).is_ok()
+        !self.0.fetch_or(Self::PEEKED_BIT, Ordering::AcqRel).get_bit(Self::PEEKED_SHIFT)
     }
 
-    #[inline]
+    #[inline(always)]
     fn peek(&self) {
         while !self.try_peek() {
             core::hint::spin_loop();
         }
-
-        debug_assert!(self.peeked.load(Ordering::Acquire));
     }
 
-    #[inline]
+    #[inline(always)]
     fn unpeek(&self) {
-        let unpeek_result = self.peeked.compare_exchange(true, false, Ordering::AcqRel, Ordering::Relaxed);
-        debug_assert!(unpeek_result.is_ok());
+        let unpeek_result = self.0.fetch_and(!Self::PEEKED_BIT, Ordering::AcqRel);
+        debug_assert!(unpeek_result.get_bit(Self::PEEKED_SHIFT));
     }
 
-    #[inline]
-    fn modify_type(&self, new_type: FrameType) {
-        debug_assert!(self.peeked.load(Ordering::Acquire));
+    #[inline(always)]
+    fn set_type(&self, new_type: FrameType) {
+        debug_assert!(self.0.load(Ordering::Acquire).get_bit(Self::PEEKED_SHIFT));
 
-        self.ty.store(new_type as u8, Ordering::Relaxed);
+        self.0
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |mut value| {
+                Some(*value.set_bits(Self::TYPE_RANGE, new_type.as_u8()))
+            })
+            .ok();
     }
 
-    /// Returns the frame data in a tuple.
     fn data(&self) -> (bool, FrameType) {
-        debug_assert!(self.peeked.load(Ordering::Acquire));
+        debug_assert!(self.0.load(Ordering::Acquire).get_bit(Self::PEEKED_SHIFT));
 
-        (self.locked.load(Ordering::Relaxed), FrameType::try_from_primitive(self.ty.load(Ordering::Relaxed)).unwrap())
+        let raw = self.0.load(Ordering::Relaxed);
+        (raw.get_bit(Self::LOCKED_SHIFT), FrameType::from_u8(raw.get_bits(Self::TYPE_RANGE)))
     }
 }
 
@@ -94,7 +120,11 @@ unsafe impl Send for SlabAllocator<'_> {}
 unsafe impl Sync for SlabAllocator<'_> {}
 
 impl<'a> SlabAllocator<'a> {
-    pub fn from_memory_map(memory_map: &[crate::MmapEntry], phys_mapped_address: Address<Virtual>) -> Option<Self> {
+    // SAFETY: Caller must guarantee the physical mapped address is valid.
+    pub unsafe fn from_memory_map(
+        memory_map: &[crate::MmapEntry],
+        phys_mapped_address: Address<Virtual>,
+    ) -> Option<Self> {
         let page_count = libcommon::align_up_div(
             memory_map.last().map(|entry| entry.base + entry.len).unwrap() as usize,
             // SAFETY: Value provided is non-zero.
@@ -142,7 +172,7 @@ impl<'a> SlabAllocator<'a> {
 
             (base_index..(base_index + count)).map(|index| &table[index as usize]).for_each(|frame| {
                 frame.peek();
-                frame.modify_type(frame_ty);
+                frame.set_type(frame_ty);
                 frame.unpeek();
             });
         }
@@ -158,7 +188,7 @@ impl<'a> SlabAllocator<'a> {
             ))
             .for_each(|frame| {
                 frame.peek();
-                frame.modify_type(FrameType::Reserved);
+                frame.set_type(FrameType::Reserved);
                 frame.unpeek();
             });
 
@@ -299,8 +329,6 @@ impl KernelAllocator for SlabAllocator<'_> {
 
                             Some(Address::<libcommon::Frame>::new_truncate((index * 0x1000) as u64))
                     } else {
-                        frame.unpeek();
-
                         None
                     }
                 })
@@ -309,41 +337,27 @@ impl KernelAllocator for SlabAllocator<'_> {
     }
 
     fn lock_next_many(&self, count: NonZeroUsize, alignment: NonZeroUsize) -> Result<Address<libcommon::Frame>> {
-        debug_assert!(alignment.is_power_of_two());
+        assert!(alignment.is_power_of_two());
 
         self.with_table(|table| {
-            let frame_alignment = NonZeroUsize::new(alignment.get() / 0x1000).unwrap_or(
-                // SAFETY: Value provided is non-zero.
-                unsafe { NonZeroUsize::new_unchecked(1) },
-            );
-            let mut start_index = 0;
+            assert!(count.get() < table.len());
 
-            while start_index < (table.len() - count.get()) {
-                let sub_table_range = start_index..(start_index + count.get());
-                let sub_table = &table[sub_table_range.clone()];
-                sub_table.iter().for_each(Frame::peek);
+            let alignment = core::cmp::max(alignment.get() / 0x1000, 1);
+            let chunks = table.chunks_exact(alignment).enumerate();
+            while !chunks.is_empty() {
+                let frames = chunks.take(count.get()).flat_map(|(_, frames)| frames.iter());
 
-                match sub_table
-                    .iter()
-                    .enumerate()
-                    .map(|(index, frame)| (index, frame.data()))
-                    .rev() // Reverse the iterator to ensure we get the very last index that isn't viable (speeds up iterations).
-                    .find(|(_, (locked, ty))| *locked || *ty != FrameType::Generic)
-                {
-                    Some((index, _)) => {
-                        start_index += libcommon::align_up(index + 1, frame_alignment);
-                        sub_table.iter().for_each(Frame::unpeek);
-                    }
+                frames.clone().for_each(Frame::peek);
 
-                    None => {
-                        sub_table.iter().for_each(|frame| {
-                            frame.lock();
-                            frame.unpeek();
-                        });
-
-                        return Ok(Address::<libcommon::Frame>::new_truncate((start_index * 0x1000) as u64));
-                    }
+                if frames.clone().map(Frame::data).all(|(locked, ty)| !locked && ty == FrameType::Generic) {
+                    frames.clone().for_each(Frame::lock);
+                    frames.clone().for_each(Frame::unpeek);
+                    return Ok(Address::<libcommon::Frame>::new_truncate(
+                        ((chunks.next().unwrap().0 * alignment) * 0x1000) as u64,
+                    ));
                 }
+
+                frames.clone().for_each(Frame::unpeek);
             }
 
             Err(AllocError)

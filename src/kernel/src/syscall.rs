@@ -11,6 +11,7 @@ pub enum Syscall {
 }
 
 #[no_mangle]
+#[repr(align(0x10))]
 fn __syscall_handler(
     vector: u64,
     arg0: u64,
@@ -62,7 +63,7 @@ pub fn do_syscall(vector: Syscall) {
     match vector {
         Syscall::Log { level, cstr_ptr } => {
             // SAFETY: The kernel guarantees the HHDM will be valid.
-            let page_manager = unsafe { crate::memory::VirtualMapper::from_current(get_hhdm_address()) };
+            let page_manager = unsafe { crate::memory::Mapper::from_current(get_hhdm_address()) };
 
             let mut cstr_increment_ptr = cstr_ptr;
             let mut last_char_page_base = Address::<Page>::new(Address::zero(), None).unwrap();

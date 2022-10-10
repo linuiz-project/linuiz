@@ -39,7 +39,7 @@ impl CPU {
 pub enum BlockDriver {
     Ahci,
     Nvme,
-    VirtIo,
+    Virtio,
 }
 
 impl core::fmt::Debug for BlockDriver {
@@ -47,7 +47,7 @@ impl core::fmt::Debug for BlockDriver {
         formatter.write_str(match self {
             BlockDriver::Ahci => "ahci",
             BlockDriver::Nvme => "nvme",
-            BlockDriver::VirtIo => "virtio-blk-pci",
+            BlockDriver::Virtio => "virtio-blk-pci",
         })
     }
 }

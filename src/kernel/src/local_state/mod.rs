@@ -3,12 +3,12 @@ mod scheduler;
 use libarch::memory::VmemRegister;
 pub use scheduler::*;
 
-pub const SYSCALL_STACK_SIZE: u64 = 0x4000;
+pub const SYSCALL_STACK_SIZE: usize = 0x4000;
 
 #[repr(C, align(0x1000))]
 pub(crate) struct LocalState {
     syscall_stack_ptr: *const (),
-    syscall_stack: [u8; SYSCALL_STACK_SIZE as usize],
+    syscall_stack: [u8; SYSCALL_STACK_SIZE],
     magic: u64,
     core_id: u32,
     scheduler: Scheduler,
@@ -45,7 +45,6 @@ pub unsafe fn init(core_id: u32) {
     {
         use libarch::{interrupts::Vector, x64::structures::apic};
 
-        trace!("Configuring local APIC...");
         apic::software_reset();
         apic::get_timer().set_vector(Vector::Timer as u8);
         apic::get_error().set_vector(Vector::Error as u8).set_masked(false);
@@ -54,65 +53,47 @@ pub unsafe fn init(core_id: u32) {
         // LINT0&1 should be configured by the APIC reset.
     }
 
-    trace!("Writing local state struct out to memory.");
-    {
-        let local_state_ptr = {
-            use alloc::boxed::Box;
+    let local_state_ptr = alloc::alloc::alloc(core::alloc::Layout::from_size_align_unchecked(
+        core::mem::size_of::<LocalState>(),
+        core::mem::align_of::<LocalState>(),
+    ))
+    .cast::<LocalState>();
+    assert!(!local_state_ptr.is_null());
 
-            Box::leak(Box::new(LocalState {
-                syscall_stack_ptr: core::ptr::null(),
-                syscall_stack: [0u8; SYSCALL_STACK_SIZE as usize],
-                magic: LocalState::MAGIC,
-                core_id,
-                scheduler: Scheduler::new(
-                    false,
-                    crate::time::timer::configure_new_timer(1000),
-                    Task::new(
-                        TaskPriority::new(1).unwrap(),
-                        TaskStart::Function(libarch::interrupts::wait_loop),
-                        TaskStack::At(libcommon::Address::<libcommon::Virtual>::from_ptr({
-                            alloc::alloc::alloc_zeroed(core::alloc::Layout::from_size_align_unchecked(0x10, 0x10))
-                        })),
-                        {
-                            #[cfg(target_arch = "x86_64")]
-                            {
-                                use libarch::x64;
+    local_state_ptr.write(LocalState {
+        syscall_stack_ptr: core::ptr::null(),
+        syscall_stack: [0u8; SYSCALL_STACK_SIZE],
+        magic: LocalState::MAGIC,
+        core_id,
+        scheduler: Scheduler::new(
+            false,
+            crate::time::Timer::new(1000).unwrap(),
+            Task::new(
+                TaskPriority::new(1).unwrap(),
+                TaskStart::Function(libarch::interrupts::wait_loop),
+                TaskStack::At(libcommon::Address::<libcommon::Virtual>::from_ptr({
+                    alloc::alloc::alloc_zeroed(core::alloc::Layout::from_size_align_unchecked(0x10, 0x10))
+                })),
+                {
+                    #[cfg(target_arch = "x86_64")]
+                    {
+                        use libarch::x64;
 
-                                (
-                                    x64::cpu::GeneralContext::empty(),
-                                    x64::cpu::SpecialContext::with_kernel_segments(
-                                        x64::registers::RFlags::INTERRUPT_FLAG,
-                                    ),
-                                )
-                            }
-                        },
-                        VmemRegister::read(),
-                    ),
-                ),
-            })) as *mut LocalState
-        };
-        // Write out correct syscall stack pointer.
-        local_state_ptr.cast::<*const ()>().write({
-            local_state_ptr
-                .cast::<u8>()
-                // `::syscall_stack_ptr`
-                .add(8)
-                // `::syscall_stack`
-                .add(SYSCALL_STACK_SIZE as usize)
-                // now we have a valid stack pointer
-                .cast()
-        });
+                        (
+                            x64::cpu::GeneralContext::empty(),
+                            x64::cpu::SpecialContext::with_kernel_segments(x64::registers::RFlags::INTERRUPT_FLAG),
+                        )
+                    }
+                },
+                VmemRegister::read(),
+            ),
+        ),
+    });
+    // Write out correct syscall stack pointer.
+    local_state_ptr.cast::<*const ()>().write(local_state_ptr.cast::<u8>().add(8 + SYSCALL_STACK_SIZE).cast());
 
-        #[cfg(target_arch = "x86_64")]
-        libarch::x64::registers::msr::IA32_KERNEL_GS_BASE::write(local_state_ptr as usize as u64);
-    }
-
-    assert!(
-        get_local_state().filter(|local_state| local_state.is_valid_magic()).is_some(),
-        "local state is invalid after write"
-    );
-
-    trace!("Local state structure written to memory and validated.");
+    #[cfg(target_arch = "x86_64")]
+    libarch::x64::registers::msr::IA32_KERNEL_GS_BASE::write(local_state_ptr as usize as u64);
 }
 
 pub fn with_scheduler<T>(func: impl FnOnce(&mut Scheduler) -> T) -> Option<T> {

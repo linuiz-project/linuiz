@@ -133,8 +133,18 @@ impl<'a, RefKind: InteriorRef> PageTable<'a, RefKind> {
         (address >> ((depth - 1) * 9) >> 12) & 0x1FF
     }
 
+    #[inline(always)]
+    pub fn depth(&self) -> usize {
+        self.depth
+    }
+
+    #[inline(always)]
+    pub fn hhdm_address(&self) -> Address<Virtual> {
+        self.hhdm_address
+    }
+
     /// Gets a mutable reference to this page table's entries.
-    fn get_table(&self) -> &[PageTableEntry] {
+    pub fn get_table(&self) -> &[PageTableEntry] {
         // SAFETY: This type's constructor requires that the physical mapped page and depth are valid values.
         let root_mapped_ptr =
             unsafe { self.hhdm_address.as_ptr::<u8>().add(self.get_frame().as_u64() as usize).cast() };
@@ -165,6 +175,22 @@ impl<'a, RefKind: InteriorRef> PageTable<'a, RefKind> {
             func(Err(PagingError::DepthOverflow))
         }
     }
+
+    pub fn iter_entries(&self, index: usize, func: impl Fn(usize, usize, &PageTableEntry) + Clone) {
+        let cur_depth = self.depth;
+        let hhdm_address = self.hhdm_address;
+
+        if cur_depth == 1 || self.get_attributes().contains(PageAttributes::HUGE) {
+            func(cur_depth, index, &*self);
+        } else {
+            for (index, entry) in self.get_table().iter().enumerate() {
+                // SAFETY: This type already requires its HHDM address and entry to be valid.
+                if let Some(page_table) = unsafe { PageTable::<Ref>::new(cur_depth - 1, hhdm_address, entry) } {
+                    page_table.iter_entries(index, &func);
+                }
+            }
+        }
+    }
 }
 
 impl<'a> PageTable<'a, Ref> {
@@ -193,7 +219,7 @@ impl<'a> PageTable<'a, Mut> {
     }
 
     /// Gets a mutable reference to this page table's entries.
-    fn get_table_mut(&mut self) -> &mut [PageTableEntry] {
+    pub fn get_table_mut(&mut self) -> &mut [PageTableEntry] {
         // SAFETY: This type's constructor requires that the physical mapped page and depth are valid values.
         let root_mapped_address =
             Address::<Virtual>::new_truncate(self.hhdm_address.as_u64() + self.get_frame().as_u64());
@@ -241,7 +267,7 @@ impl<'a> PageTable<'a, Mut> {
         // TODO this doesn't handle page depth correctly for creations
         // TODO possibly handle present but no frame, or frame but no present?
         if !entry.is_present() && cur_depth > page_depth {
-            let Ok(frame) = libcommon::memory::get_global_allocator().lock_next()
+            let Ok(frame) = libcommon::memory::get().lock_next()
                 else { return func(Err(PagingError::NoMoreFrames)) };
             *entry = PageTableEntry::new(frame, PageAttributes::PTE);
         }
@@ -257,6 +283,22 @@ impl<'a> PageTable<'a, Mut> {
             func(Err(PagingError::WalkInterrupted))
         } else {
             func(Err(PagingError::DepthOverflow))
+        }
+    }
+
+    pub fn iter_entries_mut(&mut self, index: usize, mut func: impl FnMut(usize, usize, &mut PageTableEntry)) {
+        let cur_depth = self.depth;
+        let hhdm_address = self.hhdm_address;
+
+        if cur_depth == 1 || self.get_attributes().contains(PageAttributes::HUGE) {
+            func(cur_depth, index, &mut *self);
+        } else {
+            for (index, entry) in self.get_table_mut().iter_mut().enumerate() {
+                // SAFETY: This type already requires its HHDM address and entry to be valid.
+                if let Some(mut page_table) = unsafe { PageTable::<Mut>::new(cur_depth - 1, hhdm_address, entry) } {
+                    page_table.iter_entries_mut(index, &mut func);
+                }
+            }
         }
     }
 }
