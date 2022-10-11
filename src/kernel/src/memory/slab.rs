@@ -343,21 +343,38 @@ impl KernelAllocator for SlabAllocator<'_> {
             assert!(count.get() < table.len());
 
             let alignment = core::cmp::max(alignment.get() / 0x1000, 1);
-            let chunks = table.chunks_exact(alignment).enumerate();
-            while !chunks.is_empty() {
-                let frames = chunks.take(count.get()).flat_map(|(_, frames)| frames.iter());
-
-                frames.clone().for_each(Frame::peek);
-
-                if frames.clone().map(Frame::data).all(|(locked, ty)| !locked && ty == FrameType::Generic) {
-                    frames.clone().for_each(Frame::lock);
-                    frames.clone().for_each(Frame::unpeek);
-                    return Ok(Address::<libcommon::Frame>::new_truncate(
-                        ((chunks.next().unwrap().0 * alignment) * 0x1000) as u64,
-                    ));
+            let mut sub_table = table;
+            while !sub_table.is_empty() {
+                if sub_table.len() < count.get() {
+                    return Err(AllocError);
                 }
 
-                frames.clone().for_each(Frame::unpeek);
+                let frames = &sub_table[..count.get()];
+                frames.iter().for_each(Frame::peek);
+
+                match frames
+                    .iter()
+                    .map(Frame::data)
+                    .enumerate()
+                    .rfind(|(_, (locked, ty))| !locked || *ty != FrameType::Generic)
+                {
+                    Some((index, _)) => {
+                        frames.iter().for_each(Frame::unpeek);
+                        sub_table = &sub_table[libcommon::align_up(
+                            index,
+                            // SAFETY: Value (via `max(alignment / 0x1000, 1)`) is guaranteed to be >0.
+                            unsafe { NonZeroUsize::new_unchecked(alignment) },
+                        )..]
+                    }
+
+                    None => {
+                        frames.iter().for_each(Frame::lock);
+                        frames.iter().for_each(Frame::unpeek);
+                        return Ok(Address::<libcommon::Frame>::new_truncate(
+                            ((table.len() - sub_table.len()) * 0x1000) as u64,
+                        ));
+                    }
+                }
             }
 
             Err(AllocError)

@@ -1,25 +1,10 @@
 use libcommon::{Address, Frame, Page, Virtual};
 
-#[derive(Debug, Clone, Copy)]
-pub struct Parameters {
-    pub smp: bool,
-    pub symbolinfo: bool,
-}
-
-impl Default for Parameters {
-    fn default() -> Self {
-        Self { smp: true, symbolinfo: false }
-    }
-}
-
-static PARAMETERS: spin::Once<Parameters> = spin::Once::new();
-
 pub fn get_parameters() -> Parameters {
     PARAMETERS.get().map(Parameters::clone).unwrap_or_default()
 }
 
 fn get_kernel_file() -> Option<&'static limine::LimineFile> {
-    static LIMINE_KERNEL_FILE: limine::LimineKernelFileRequest = limine::LimineKernelFileRequest::new(0);
 
     LIMINE_KERNEL_FILE.get_response().get().and_then(|response| response.kernel_file.get())
 }
@@ -45,7 +30,11 @@ pub fn init() {
 }
 
 static INIT_STAGES: [fn(); 9] = [
-    /* serial */
+    /*
+     * serial
+     *
+     * Initializes first to ensure the rest of the kernel init can be logged to a reliable standard output.
+     */
     || {
         static UART: spin::Lazy<crate::memory::io::Serial> = spin::Lazy::new(|| {
             // SAFETY: Function is called only once, when the `Lazy` is initialized.
@@ -55,7 +44,11 @@ static INIT_STAGES: [fn(); 9] = [
         log::set_max_level(log::LevelFilter::Trace);
         log::set_logger(&*UART).unwrap();
     },
-    /* boot info */
+    /*
+     * boot info
+     *
+     * Very unlikely to error out, and could provide useful information to debugging the init process.
+     */
     || {
         static LIMINE_INFO: limine::LimineBootInfoRequest = limine::LimineBootInfoRequest::new(crate::LIMINE_REV);
 
@@ -86,6 +79,10 @@ static INIT_STAGES: [fn(); 9] = [
         } else {
             info!("Vendor              None");
         }
+
+        // Initialize registers here as well, to ensure the proceeding code is using an up-to-date featureset.
+        #[cfg(target_arch = "x86_64")]
+        libarch::x64::cpu::init_registers();
     },
     /* boot parameters */
     || {
@@ -259,8 +256,9 @@ static INIT_STAGES: [fn(); 9] = [
     || {
         // SAFETY: Function is called only once for BSP.
         #[cfg(target_arch = "x86_64")]
-        unsafe {
-            libarch::x64::cpu::init()
+        {
+            unsafe { libarch::x64::cpu::load_local_tables() };
+            libarch::x64::cpu::init_syscalls();
         };
     },
     /* acpi */
@@ -370,7 +368,9 @@ static INIT_STAGES: [fn(); 9] = [
                         // SAFETY: Function is called only once per core.
                         #[cfg(target_arch = "x86_64")]
                         unsafe {
-                            libarch::x64::cpu::init()
+                            libarch::x64::cpu::init_registers();
+                            libarch::x64::cpu::load_local_tables();
+                            libarch::x64::cpu::init_syscalls();
                         };
 
                         // SAFETY: All currently referenced memory should also be mapped in the kernel page tables.
