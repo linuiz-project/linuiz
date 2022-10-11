@@ -40,7 +40,7 @@ pub fn get_id() -> u32 {
         .unwrap_or_else(|| FEATURE_INFO.initial_local_apic_id() as u32)
 }
 
-fn init_registers() {
+pub fn init_registers() {
     trace!("Loading x86-specific control registers to known state.");
 
     // Set CR0 flags.
@@ -93,120 +93,24 @@ fn init_registers() {
         // TODO flags.insert(CR4Flags::SMAP);
     }
 
-    // SAFETY:  Initialize the CR4 register with all CPU & kernel supported features.
+    // SAFETY: Initialize the CR4 register with all CPU & kernel supported features.
     unsafe { CR4::write(flags) };
 
     // Enable use of the `NO_EXECUTE` page attribute, if supported.
     if cpuid::EXT_FUNCTION_INFO.as_ref().map_or(false, cpuid::ExtendedProcessorFeatureIdentifiers::has_execute_disable)
     {
         trace!("Detected support for paging execution prevention.");
-        // SAFETY:  Setting `IA32_EFER.NXE` in this context is safe because the bootloader does not use the `NX` bit. However, the kernel does, so
-        //          disabling it after paging is in control of the kernel is unsupported.
+        // SAFETY: Setting `IA32_EFER.NXE` in this context is safe because the bootloader does not use the `NX` bit. However, the kernel does, so
+        //         disabling it after paging is in control of the kernel is unsupported.
         unsafe { crate::x64::registers::msr::IA32_EFER::set_nxe(true) };
     } else {
         warn!("PC does not support the NX bit; system security will be compromised (this warning is purely informational).");
     }
 }
 
-/// SAFETY: Caller must ensure this method is called only once per core.
-unsafe fn init_tables() {
-    use crate::x64::{
-        instructions::tables,
-        structures::{
-            gdt::Descriptor,
-            idt::{InterruptDescriptorTable, StackTableIndex},
-        },
-    };
-    use x86_64::{structures::tss::TaskStateSegment, VirtAddr};
 
-    trace!("Configuring local tables (IDT, GDT).");
 
-    // Always initialize GDT prior to configuring IDT.
-    crate::x64::structures::gdt::init();
-
-    /* IDT init */
-    {
-        // Due to the fashion in which the `x86_64` crate initializes the IDT entries,
-        // it must be ensured that the handlers are set only *after* the GDT has been
-        // properly initialized and loaded—otherwise, the `CS` value for the IDT entries
-        // is incorrect, and this causes very confusing GPFs.
-        let mut idt = Box::new(InterruptDescriptorTable::new());
-        crate::x64::structures::idt::set_exception_handlers(idt.as_mut());
-        crate::x64::structures::idt::set_stub_handlers(idt.as_mut());
-        idt.load_unsafe();
-
-        Box::leak(idt);
-    }
-
-    /* TSS init */
-    {
-        trace!("Configuring new TSS and loading via temp GDT.");
-
-        let tss_ptr = {
-            use core::mem::MaybeUninit;
-            use libcommon::memory::stack_aligned_allocator;
-
-            let mut tss = Box::new(TaskStateSegment::new());
-
-            let allocate_tss_stack = |pages: usize| {
-                VirtAddr::from_ptr::<MaybeUninit<()>>(
-                    Box::leak(Box::new_uninit_slice_in(pages * 0x1000, stack_aligned_allocator())).as_ptr(),
-                )
-            };
-
-            // TODO guard pages for these stacks ?
-            tss.privilege_stack_table[0] = allocate_tss_stack(5);
-            tss.interrupt_stack_table[StackTableIndex::Debug as usize] = allocate_tss_stack(2);
-            tss.interrupt_stack_table[StackTableIndex::NonMaskable as usize] = allocate_tss_stack(2);
-            tss.interrupt_stack_table[StackTableIndex::DoubleFault as usize] = allocate_tss_stack(2);
-            tss.interrupt_stack_table[StackTableIndex::MachineCheck as usize] = allocate_tss_stack(2);
-
-            Box::leak(tss) as *mut _
-        };
-
-        trace!("Configuring TSS descriptor for temp GDT.");
-        let tss_descriptor = {
-            use bit_field::BitField;
-
-            let tss_ptr_u64 = tss_ptr as u64;
-
-            let mut low = x86_64::structures::gdt::DescriptorFlags::PRESENT.bits();
-            // base
-            low.set_bits(16..40, tss_ptr_u64.get_bits(0..24));
-            low.set_bits(56..64, tss_ptr_u64.get_bits(24..32));
-            // limit (the `-1` is needed since the bound is inclusive, not exclusive)
-            low.set_bits(0..16, (core::mem::size_of::<TaskStateSegment>() - 1) as u64);
-            // type (0b1001 = available 64-bit tss)
-            low.set_bits(40..44, 0b1001);
-
-            // high 32 bits of base
-            let mut high = 0;
-            high.set_bits(0..32, tss_ptr_u64.get_bits(32..64));
-
-            Descriptor::SystemSegment(low, high)
-        };
-
-        trace!("Loading in temp GDT to `ltr` the TSS.");
-        // Store current GDT pointer to restore later.
-        let cur_gdt = tables::sgdt();
-        // Create temporary kernel GDT to avoid a GPF on switching to it.
-        let mut temp_gdt = x86_64::structures::gdt::GlobalDescriptorTable::new();
-        temp_gdt.add_entry(Descriptor::kernel_code_segment());
-        temp_gdt.add_entry(Descriptor::kernel_data_segment());
-        let tss_selector = temp_gdt.add_entry(tss_descriptor);
-
-        // Load temp GDT ...
-        temp_gdt.load_unsafe();
-        // ... load TSS from temporary GDT ...
-        tables::load_tss(tss_selector);
-        // ... and restore cached GDT.
-        tables::lgdt(&cur_gdt);
-
-        trace!("TSS loaded, and temporary GDT trashed.");
-    }
-}
-
-fn init_syscalls() {
+pub fn init_syscalls() {
     // SAFETY: Parameters are set according to the IA-32 SDM, and so should have no undetermined side-effects.
     unsafe {
         use crate::x64::registers::{msr, RFlags};
@@ -220,13 +124,6 @@ fn init_syscalls() {
         // Enable `syscall`/`sysret`.
         msr::IA32_EFER::set_sce(true);
     }
-}
-
-/// SAFETY: This function expects to be called only once per CPU core.
-pub unsafe fn init() {
-    init_registers();
-    init_tables();
-    init_syscalls();
 }
 
 #[derive(Debug, Clone, Copy)]
