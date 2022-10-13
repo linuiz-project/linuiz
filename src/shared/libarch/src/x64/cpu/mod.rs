@@ -11,8 +11,6 @@ pub mod cpuid {
     pub static VENDOR_INFO: Lazy<Option<VendorInfo>> = Lazy::new(|| CPUID.get_vendor_info());
 }
 
-use alloc::boxed::Box;
-
 /// Reads [`crate::regisers::x86_64::msr::IA32_APIC_BASE`] to determine whether the current core
 /// is the bootstrap processor.
 #[inline(always)]

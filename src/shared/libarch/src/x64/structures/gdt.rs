@@ -1,40 +1,38 @@
-pub use x86_64::{
-    registers::segmentation::SegmentSelector,
-    structures::gdt::{Descriptor, GlobalDescriptorTable},
-};
-
 use spin::Once;
 
-static GDT: Once<GlobalDescriptorTable> = Once::new();
-fn get_gdt() -> &'static GlobalDescriptorTable {
-    GDT.call_once(|| {
-        let mut gdt = GlobalDescriptorTable::new();
+pub use x86_64::{
+    instructions::tables::{lgdt, sgdt},
+    registers::segmentation::SegmentSelector,
+    structures::gdt::*,
+};
 
-        // This GDT layout is very specific, due to the behaviour of the IA32_STAR MSR and its
-        // affect on syscalls. Do not change this, or if it is changed, ensure it follows the requisite
-        // standard set by the aforementioned IA32_STAR MSR.
-        //
-        // Details can be found in the description of the `syscall` and `sysret` instructions in the IA32 Software Developer's Manual.
-        KCODE_SELECTOR.call_once(|| gdt.add_entry(Descriptor::kernel_code_segment()));
-        KDATA_SELECTOR.call_once(|| gdt.add_entry(Descriptor::kernel_data_segment()));
-        UDATA_SELECTOR.call_once(|| gdt.add_entry(Descriptor::user_data_segment()));
-        UCODE_SELECTOR.call_once(|| gdt.add_entry(Descriptor::user_code_segment()));
+static GDT: spin::Lazy<GlobalDescriptorTable> = spin::Lazy::new(|| {
+    let mut gdt = GlobalDescriptorTable::new();
 
-        gdt
-    })
-}
+    // This GDT layout is very specific, due to the behaviour of the IA32_STAR MSR and its
+    // affect on syscalls. Do not change this, or if it is changed, ensure it follows the requisite
+    // standard set by the aforementioned IA32_STAR MSR.
+    //
+    // Details can be found in the description of the `syscall` and `sysret` instructions in the IA32 Software Developer's Manual.
+    KCODE_SELECTOR.call_once(|| gdt.add_entry(Descriptor::kernel_code_segment()));
+    KDATA_SELECTOR.call_once(|| gdt.add_entry(Descriptor::kernel_data_segment()));
+    UDATA_SELECTOR.call_once(|| gdt.add_entry(Descriptor::user_data_segment()));
+    UCODE_SELECTOR.call_once(|| gdt.add_entry(Descriptor::user_code_segment()));
+
+    gdt
+});
 
 pub static KCODE_SELECTOR: Once<SegmentSelector> = Once::new();
 pub static KDATA_SELECTOR: Once<SegmentSelector> = Once::new();
 pub static UCODE_SELECTOR: Once<SegmentSelector> = Once::new();
 pub static UDATA_SELECTOR: Once<SegmentSelector> = Once::new();
 
-pub fn init() {
+pub fn load_kernel() {
     // SAFETY:  This would technically be unsafe, but since we know the GDT's structure
     //          deterministically, running this function over and over would not change
     //          software execution at all. So, it's safe to execute all of this code.
     unsafe {
-        get_gdt().load();
+        GDT.load();
 
         use x86_64::instructions::segmentation::{Segment, CS, DS, ES, FS, GS, SS};
 

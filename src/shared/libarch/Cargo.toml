@@ -11,6 +11,7 @@ log = "*"
 paste = "*"
 bitflags = "*"
 bit_field = "*"
+bytemuck = "*"
 spin = "*"
 num_enum = { version = "*", default-features = false }
 acpi = { git = "https://github.com/semiviral/acpi" }

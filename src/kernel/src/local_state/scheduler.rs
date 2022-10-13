@@ -102,12 +102,11 @@ pub struct Scheduler {
     tasks: VecDeque<Task>,
     idle_task: Task,
     cur_task: Option<Task>,
-    timer: crate::time::Timer,
 }
 
 impl Scheduler {
-    pub fn new(enabled: bool, timer: crate::time::Timer, idle_task: Task) -> Self {
-        Self { enabled, total_priority: 0, tasks: VecDeque::new(), idle_task, cur_task: None, timer }
+    pub fn new(enabled: bool, idle_task: Task) -> Self {
+        Self { enabled, total_priority: 0, tasks: VecDeque::new(), idle_task, cur_task: None }
     }
 
     /// Enables the scheduler to pop tasks.
@@ -209,18 +208,8 @@ impl Scheduler {
             };
 
             debug_assert!(next_wait_multiplier > 0);
-            self.timer.set_next_wait(next_wait_multiplier);
-        }
-    }
 
-    pub fn start(&mut self) {
-        assert!(!self.is_enabled());
-        self.enable();
-
-        // SAFETY: Value provided is non-zero, and enable/reload is expected / appropriate.
-        unsafe {
-            self.timer.enable();
-            self.timer.set_next_wait(1);
+            crate::local_state::preemption_wait(next_wait_multiplier);
         }
     }
 }

@@ -1,4 +1,3 @@
-use crate::Address;
 use acpi::{fadt::Fadt, mcfg::Mcfg, sdt::Signature, AcpiTables, PhysicalMapping, PlatformInfo};
 use port::{PortAddress, ReadOnlyPort, ReadWritePort, WriteOnlyPort};
 use spin::{Mutex, MutexGuard, Once};
@@ -159,20 +158,41 @@ struct AcpiTablesWrapper(AcpiTables<AcpiHandler>);
 unsafe impl Sync for AcpiTablesWrapper {}
 
 static RSDP: Once<Mutex<AcpiTables<AcpiHandler>>> = Once::new();
-/// Initializes the ACPI interface.
-///
-/// SAFETY: Caller must ensure the RSDP address is valid.
-pub unsafe fn init_interface(rsdp_address: Address<libcommon::Physical>) {
-    RSDP.call_once(move || {
-        Mutex::new({
-            let handler = AcpiHandler;
 
-            // SAFETY: Caller is required to provide a valid RSDP address.
-            unsafe {
-                acpi::AcpiTables::from_rsdp(handler, rsdp_address.as_usize()).expect("failed to acquire RSDP table")
+/// Initializes the ACPI interface. This function does nothing if called more than once.
+pub fn init_interface() {
+    RSDP.try_call_once(move || {
+        static LIMINE_RSDP: limine::LimineRsdpRequest = limine::LimineRsdpRequest::new(crate::LIMINE_REV);
+
+        match LIMINE_RSDP.get_response().get().and_then(|response| response.address.as_ptr()) {
+            Some(rsdp_ptr) => {
+                // SAFETY: Bootloader guarantees that the provided RSDP pointer will be valid.
+                let acpi_tables = unsafe {
+                    acpi::AcpiTables::from_rsdp(
+                        AcpiHandler,
+                        // Properly handle the bootloader's mapping of ACPI addresses in lower-half or higher-half memory space.
+                        core::cmp::min(
+                            rsdp_ptr.addr(),
+                            rsdp_ptr.addr().wrapping_sub(crate::memory::get_hhdm_address().as_usize()),
+                        ),
+                    )
+                };
+
+                if let Ok(acpi_tables) = acpi_tables {
+                    Ok(Mutex::new(acpi_tables))
+                } else {
+                    warn!("Failed to fully initialize the ACPI interface.");
+                    Err(())
+                }
             }
-        })
-    });
+
+            None => {
+                warn!("No ACPI interface identified. System functionality will be impaired.");
+                Err(())
+            }
+        }
+    })
+    .ok();
 }
 
 pub fn get_rsdp() -> MutexGuard<'static, acpi::AcpiTables<AcpiHandler>> {

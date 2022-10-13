@@ -1,8 +1,9 @@
 #![allow(non_camel_case_types, non_upper_case_globals)]
 
-use crate::interrupts;
+use crate::{interrupts, x64::registers::msr::IA32_APIC_BASE};
 use bit_field::BitField;
 use core::marker::PhantomData;
+use libcommon::{Address, Physical, Virtual};
 
 /// Initializes the core-local APIC in the most advanced mode possible, and hardware-enables it.
 ///
@@ -14,10 +15,22 @@ use core::marker::PhantomData;
 pub enum TimerMode {
     OneShot = 0b00,
     Periodic = 0b01,
-    TSC_Deadline = 0b10,
+    TscDeadline = 0b10,
 }
 
-/// Divisor for APIC timer to use when not in [TimerMode::TSC_Deadline].
+impl TimerMode {
+    #[inline]
+    const fn from_u64(value: u64) -> Self {
+        match value {
+            0b00 => Self::OneShot,
+            0b01 => Self::Periodic,
+            0b10 => Self::TscDeadline,
+            _ => unimplemented!(),
+        }
+    }
+}
+
+/// Divisor for APIC timer to use when not in [`TimerMode::TscDeadline`].
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TimerDivisor {
@@ -103,7 +116,7 @@ pub enum Register {
     PPR = 0x0A,
     EOI = 0x0B,
     LDR = 0x0C,
-    SPURIOUS = 0x0F,
+    SPR = 0x0F,
     ISR0 = 0x10,
     ISR32 = 0x11,
     ISR64 = 0x12,
@@ -156,177 +169,155 @@ impl Register {
     }
 }
 
-pub const LINT0_VECTOR: u8 = 253;
-pub const LINT1_VECTOR: u8 = 254;
-pub const SPURIOUS_VECTOR: u8 = 255;
-
-pub const xAPIC_BASE_ADDR: u64 = 0xFEE00000;
+pub const xAPIC_BASE_ADDR: Address<Physical> = Address::<Physical>::new_truncate(0xFEE00000);
 pub const x2APIC_BASE_MSR_ADDR: u32 = 0x800;
 
 /// Type for representing the mode of the core-local APIC.
-enum Apic {
-    xAPIC(usize),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Type {
+    xAPIC(Address<Virtual>),
     x2APIC,
 }
 
-static APIC: spin::Once<Apic> = spin::Once::new();
+pub struct Apic(Type);
 
-#[derive(Debug)]
-pub struct ApicNotEnabled;
-pub fn init_apic(global_map_physical_region: impl FnOnce(usize) -> *mut u32) -> Result<(), ApicNotEnabled> {
-    APIC.try_call_once(|| {
-        use crate::x64::registers::msr::IA32_APIC_BASE;
+impl Apic {
+    pub fn new(xapic_map_addr_fn: Option<impl FnOnce(Address<Physical>) -> Address<Virtual>>) -> Option<Self> {
+        let is_xapic = IA32_APIC_BASE::get_hw_enabled() && !IA32_APIC_BASE::get_is_x2_mode();
+        let is_x2apic = IA32_APIC_BASE::get_hw_enabled() && IA32_APIC_BASE::get_is_x2_mode();
 
-        if IA32_APIC_BASE::get_hw_enabled() {
-            if IA32_APIC_BASE::get_is_x2_mode() {
-                Ok(Apic::x2APIC)
-            } else {
-                Ok(Apic::xAPIC(global_map_physical_region(IA32_APIC_BASE::get_base_address().as_usize()) as usize))
-            }
-        } else {
-            Err(ApicNotEnabled)
+        match xapic_map_addr_fn {
+            Some(xapic_map_addr_fn) if is_xapic => Some(Self(Type::xAPIC(xapic_map_addr_fn(xAPIC_BASE_ADDR)))),
+            None if is_x2apic => Some(Self(Type::x2APIC)),
+            _ => None,
         }
-    })
-    .map(|_| ())
-}
+    }
 
-/// Reads the given register from the local APIC. Panics if APIC is not properly initialized.
-fn read_register(register: Register) -> u64 {
-    match APIC.get() {
-        // SAFETY: Address provided for xAPIC mapping is required to be valid.
-        Some(Apic::xAPIC(address)) => unsafe {
-            ((*address + register.xapic_offset()) as *const u32).read_volatile() as u64
-        },
+    /// Reads the given register from the local APIC. Panics if APIC is not properly initialized.
+    fn read_register(&self, register: Register) -> u64 {
+        match self.0 {
+            // SAFETY: Address provided for xAPIC mapping is required to be valid.
+            Type::xAPIC(address) => unsafe {
+                ((address.as_usize() + register.xapic_offset()) as *const u32).read_volatile() as u64
+            },
 
-        // SAFETY: MSR addresses are known-valid from IA32 SDM.
-        Some(Apic::x2APIC) => unsafe { crate::x64::registers::msr::rdmsr(register.x2apic_msr()) },
+            // SAFETY: MSR addresses are known-valid from IA32 SDM.
+            Type::x2APIC => unsafe { crate::x64::registers::msr::rdmsr(register.x2apic_msr()) },
+        }
+    }
 
-        None => panic!("cannot write; core-local APIC is not in a valid mode"),
+    /// Reads the given register from the local APIC. Panics if APIC is not properly initialized.
+    unsafe fn write_register(&self, register: Register, value: u64) {
+        match self.0 {
+            Type::xAPIC(address) => {
+                ((address.as_usize() + register.xapic_offset()) as *mut u32).write_volatile(value as u32)
+            }
+            Type::x2APIC => crate::x64::registers::msr::wrmsr(register.x2apic_msr(), value),
+        }
+    }
+
+    #[inline]
+    pub unsafe fn sw_enable(&self) {
+        self.write_register(Register::SPR, *self.read_register(Register::SPR).set_bit(8, true));
+    }
+
+    #[inline]
+    pub unsafe fn sw_disable(&self) {
+        self.write_register(Register::SPR, *self.read_register(Register::SPR).set_bit(8, false));
+    }
+
+    pub fn get_id(&self) -> u32 {
+        self.read_register(Register::ID).get_bits(24..32) as u32
+    }
+
+    #[inline]
+    pub fn get_version(&self) -> u32 {
+        self.read_register(Register::VERSION) as u32
+    }
+
+    #[inline]
+    pub fn end_of_interrupt(&self) {
+        unsafe { self.write_register(Register::EOI, 0x0) };
+    }
+
+    #[inline]
+    pub fn get_error_status(&self) -> ErrorStatusFlags {
+        ErrorStatusFlags::from_bits_truncate(self.read_register(Register::ERR) as u8)
+    }
+
+    #[inline]
+    pub unsafe fn send_int_cmd(&self, interrupt_command: InterruptCommand) {
+        self.write_register(Register::ICR, interrupt_command.get_raw());
+    }
+
+    #[inline]
+    pub unsafe fn set_timer_divisor(&self, divisor: TimerDivisor) {
+        self.write_register(Register::TIMER_DIVISOR, divisor.as_divide_value());
+    }
+
+    #[inline]
+    pub unsafe fn set_timer_initial_count(&self, count: u32) {
+        self.write_register(Register::TIMER_INT_CNT, count as u64);
+    }
+
+    #[inline]
+    pub fn get_timer_current_count(&self) -> u32 {
+        self.read_register(Register::TIMER_CUR_CNT) as u32
+    }
+
+    #[inline]
+    pub fn get_timer<'a>(&'a self) -> LocalVector<Timer> {
+        LocalVector(self, PhantomData)
+    }
+
+    #[inline]
+    pub fn get_lint0<'a>(&'a self) -> LocalVector<LINT0> {
+        LocalVector(self, PhantomData)
+    }
+
+    #[inline]
+    pub fn get_lint1<'a>(&'a self) -> LocalVector<LINT1> {
+        LocalVector(self, PhantomData)
+    }
+
+    #[inline]
+    pub fn get_performance<'a>(&'a self) -> LocalVector<Performance> {
+        LocalVector(self, PhantomData)
+    }
+
+    #[inline]
+    pub fn get_thermal_sensor<'a>(&'a self) -> LocalVector<Thermal> {
+        LocalVector(self, PhantomData)
+    }
+
+    #[inline]
+    pub fn get_error<'a>(&'a self) -> LocalVector<Error> {
+        LocalVector(self, PhantomData)
+    }
+
+    /// Resets the APIC module. The APIC module state is configured as follows:
+    ///     - Module is software disabled, then enabled at function end.
+    ///     - TPR and TIMER_INT_CNT are zeroed.
+    ///     - Timer, Performance, Thermal, and Error local vectors are masked.
+    ///     - LINT0 & LINT1 are unmasked and assigned to the `LINT0_VECTOR` (253) and `LINT1_VECTOR` (254), respectively.
+    ///     - The spurious register is configured with the `SPURIOUS_VECTOR` (255).
+    ///
+    /// SAFETY: The caller must guarantee that software is in a state that is ready to accept
+    ///         the APIC performing a software reset.
+    pub unsafe fn software_reset(&self, spr_vector: u8, lint0_vector: u8, lint1_vector: u8) {
+        self.sw_disable();
+
+        self.write_register(Register::TPR, 0x0);
+        self.write_register(Register::SPR, *self.read_register(Register::SPR).set_bits(0..8, spr_vector as u64));
+
+        self.sw_enable();
+
+        // IA32 SDM specifies that after a software disable, all local vectors
+        // are masked, so we need to re-enable the LINTx vectors.
+        self.get_lint0().set_masked(false).set_vector(lint0_vector);
+        self.get_lint1().set_masked(false).set_vector(lint1_vector);
     }
 }
-
-/// Reads the given register from the local APIC. Panics if APIC is not properly initialized.
-unsafe fn write_register(register: Register, value: u64) {
-    match APIC.get() {
-        Some(Apic::xAPIC(address)) => ((*address + register.xapic_offset()) as *mut u32).write_volatile(value as u32),
-        Some(Apic::x2APIC) => crate::x64::registers::msr::wrmsr(register.x2apic_msr(), value),
-        None => panic!("cannot write; core-local APIC is not in a valid mode"),
-    }
-}
-
-/*
-
-   APIC FUNCTIONS
-
-*/
-
-#[inline]
-pub unsafe fn sw_enable() {
-    write_register(Register::SPURIOUS, *read_register(Register::SPURIOUS).set_bit(8, true));
-}
-
-#[inline]
-pub unsafe fn sw_disable() {
-    write_register(Register::SPURIOUS, *read_register(Register::SPURIOUS).set_bit(8, false));
-}
-
-pub fn get_id() -> u32 {
-    read_register(Register::ID).get_bits(24..32) as u32
-}
-
-#[inline]
-pub fn get_version() -> u32 {
-    read_register(Register::VERSION) as u32
-}
-
-#[inline]
-pub fn end_of_interrupt() {
-    unsafe { write_register(Register::EOI, 0x0) };
-}
-
-#[inline]
-pub fn get_error_status() -> ErrorStatusFlags {
-    ErrorStatusFlags::from_bits_truncate(read_register(Register::ERR) as u8)
-}
-
-#[inline]
-pub unsafe fn send_int_cmd(int_cmd: InterruptCommand) {
-    write_register(Register::ICR, int_cmd.get_raw());
-}
-
-#[inline]
-pub unsafe fn set_timer_divisor(divisor: TimerDivisor) {
-    write_register(Register::TIMER_DIVISOR, divisor.as_divide_value());
-}
-
-#[inline]
-pub unsafe fn set_timer_initial_count(count: u32) {
-    write_register(Register::TIMER_INT_CNT, count as u64);
-}
-
-#[inline]
-pub fn get_timer_current_count() -> u32 {
-    read_register(Register::TIMER_CUR_CNT) as u32
-}
-
-/// Resets the APIC module. The APIC module state is configured as follows:
-///     - Module is software disabled, then enabled at function end.
-///     - TPR and TIMER_INT_CNT are zeroed.
-///     - Timer, Performance, Thermal, and Error local vectors are masked.
-///     - LINT0 & LINT1 are unmasked and assigned to the `LINT0_VECTOR` (253) and `LINT1_VECTOR` (254), respectively.
-///     - The spurious register is configured with the `SPURIOUS_VECTOR` (255).
-///
-/// SAFETY: The caller must guarantee that software is in a state that is ready to accept
-///         the APIC performing a software reset.
-pub unsafe fn software_reset() {
-    sw_disable();
-
-    write_register(Register::TPR, 0x0);
-    write_register(Register::SPURIOUS, *read_register(Register::SPURIOUS).set_bits(0..8, SPURIOUS_VECTOR as u64));
-
-    sw_enable();
-
-    // IA32 SDM specifies that after a software disable, all local vectors
-    // are masked, so we need to re-enable the LINTx vectors.
-    get_lint0().set_masked(false).set_vector(LINT0_VECTOR);
-    get_lint1().set_masked(false).set_vector(LINT1_VECTOR);
-}
-
-#[inline]
-pub fn get_timer() -> LocalVector<Timer> {
-    LocalVector(PhantomData)
-}
-
-#[inline]
-pub fn get_lint0() -> LocalVector<LINT0> {
-    LocalVector(PhantomData)
-}
-
-#[inline]
-pub fn get_lint1() -> LocalVector<LINT1> {
-    LocalVector(PhantomData)
-}
-
-#[inline]
-pub fn get_performance() -> LocalVector<Performance> {
-    LocalVector(PhantomData)
-}
-
-#[inline]
-pub fn get_thermal_sensor() -> LocalVector<Thermal> {
-    LocalVector(PhantomData)
-}
-
-#[inline]
-pub fn get_error() -> LocalVector<Error> {
-    LocalVector(PhantomData)
-}
-
-/*
-
-   LOCAL VECTOR TABLE TYPES
-
-*/
 
 pub trait LocalVectorVariant {
     const REGISTER: Register;
@@ -369,34 +360,34 @@ impl LocalVectorVariant for Error {
 }
 
 #[repr(transparent)]
-pub struct LocalVector<T: LocalVectorVariant>(PhantomData<T>);
+pub struct LocalVector<'a, T: LocalVectorVariant>(&'a Apic, PhantomData<T>);
 
-impl<T: LocalVectorVariant> libcommon::memory::Volatile for LocalVector<T> {}
+impl<T: LocalVectorVariant> libcommon::memory::Volatile for LocalVector<'_, T> {}
 
-impl<T: LocalVectorVariant> LocalVector<T> {
+impl<T: LocalVectorVariant> LocalVector<'_, T> {
     const INTERRUPTED_OFFSET: usize = 12;
     const MASKED_OFFSET: usize = 16;
 
     #[inline]
     pub fn get_interrupted(&self) -> bool {
-        read_register(T::REGISTER).get_bit(Self::INTERRUPTED_OFFSET)
+        self.0.read_register(T::REGISTER).get_bit(Self::INTERRUPTED_OFFSET)
     }
 
     #[inline]
     pub fn get_masked(&self) -> bool {
-        read_register(T::REGISTER).get_bit(Self::MASKED_OFFSET)
+        self.0.read_register(T::REGISTER).get_bit(Self::MASKED_OFFSET)
     }
 
     #[inline]
     pub unsafe fn set_masked(&self, masked: bool) -> &Self {
-        write_register(T::REGISTER, *read_register(T::REGISTER).set_bit(Self::MASKED_OFFSET, masked));
+        self.0.write_register(T::REGISTER, *self.0.read_register(T::REGISTER).set_bit(Self::MASKED_OFFSET, masked));
 
         self
     }
 
     #[inline]
     pub fn get_vector(&self) -> Option<u8> {
-        match read_register(T::REGISTER).get_bits(0..8) {
+        match self.0.read_register(T::REGISTER).get_bits(0..8) {
             0..32 => None,
             vector => Some(vector as u8),
         }
@@ -406,39 +397,44 @@ impl<T: LocalVectorVariant> LocalVector<T> {
     pub unsafe fn set_vector(&self, vector: u8) -> &Self {
         assert!(vector >= 32, "interrupt vectors 0..32 are reserved");
 
-        write_register(T::REGISTER, *read_register(T::REGISTER).set_bits(0..8, vector as u64));
+        self.0.write_register(T::REGISTER, *self.0.read_register(T::REGISTER).set_bits(0..8, vector as u64));
 
         self
     }
 }
 
-impl<T: LocalVectorVariant> core::fmt::Debug for LocalVector<T> {
+impl<T: LocalVectorVariant> core::fmt::Debug for LocalVector<'_, T> {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter.debug_tuple("Local Vector").field(&read_register(T::REGISTER)).finish()
+        formatter.debug_tuple("Local Vector").field(&self.0.read_register(T::REGISTER)).finish()
     }
 }
 
-impl<T: GenericVectorVariant> LocalVector<T> {
+impl<T: GenericVectorVariant> LocalVector<'_, T> {
     #[inline]
     pub unsafe fn set_delivery_mode(&self, mode: interrupts::DeliveryMode) -> &Self {
-        write_register(T::REGISTER, *read_register(T::REGISTER).set_bits(8..11, mode as u64));
+        self.0.write_register(T::REGISTER, *self.0.read_register(T::REGISTER).set_bits(8..11, mode as u64));
 
         self
     }
 }
 
-impl LocalVector<Timer> {
+impl LocalVector<'_, Timer> {
+    #[inline]
+    pub fn get_mode(&self) -> TimerMode {
+        TimerMode::from_u64(self.0.read_register(<Timer as LocalVectorVariant>::REGISTER).get_bits(17..19))
+    }
+
     pub unsafe fn set_mode(&self, mode: TimerMode) -> &Self {
         let tsc_dl_support = crate::x64::cpu::cpuid::CPUID
             .get_feature_info()
             .as_ref()
             .map_or(false, crate::x64::cpu::cpuid::FeatureInfo::has_tsc_deadline);
 
-        assert!(mode != TimerMode::TSC_Deadline || tsc_dl_support, "TSC deadline is not supported on this CPU.");
+        assert!(mode != TimerMode::TscDeadline || tsc_dl_support, "TSC deadline is not supported on this CPU.");
 
-        write_register(
+        self.0.write_register(
             <Timer as LocalVectorVariant>::REGISTER,
-            *read_register(<Timer as LocalVectorVariant>::REGISTER).set_bits(17..19, mode as u64),
+            *self.0.read_register(<Timer as LocalVectorVariant>::REGISTER).set_bits(17..19, mode as u64),
         );
 
         if tsc_dl_support {

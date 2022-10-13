@@ -321,14 +321,16 @@ impl KernelAllocator for SlabAllocator<'_> {
                 .iter()
                 .enumerate()
                 .find_map(|(index, frame)| {
-                    if frame.try_peek()
-                        && let (locked, ty) = frame.data()
-                        && !locked && ty == FrameType::Generic {
-                            frame.lock();
-                            frame.unpeek();
+                    frame.peek();
 
-                            Some(Address::<libcommon::Frame>::new_truncate((index * 0x1000) as u64))
+                    if let (false, FrameType::Generic) = frame.data() {
+                        frame.lock();
+                        frame.unpeek();
+
+                        Some(Address::<libcommon::Frame>::new_truncate((index * 0x1000) as u64))
                     } else {
+                        frame.unpeek();
+
                         None
                     }
                 })
