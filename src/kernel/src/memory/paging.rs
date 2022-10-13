@@ -267,7 +267,7 @@ impl<'a> PageTable<'a, Mut> {
         // TODO this doesn't handle page depth correctly for creations
         // TODO possibly handle present but no frame, or frame but no present?
         if !entry.is_present() && cur_depth > page_depth {
-            let Ok(frame) = libcommon::memory::get().lock_next()
+            let Ok(frame) = libcommon::memory::get_global_allocator().lock_next()
                 else { return func(Err(PagingError::NoMoreFrames)) };
             *entry = PageTableEntry::new(frame, PageAttributes::PTE);
         }

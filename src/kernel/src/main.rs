@@ -45,7 +45,6 @@ extern crate libcommon;
 
 mod acpi;
 mod elf;
-mod init;
 mod local_state;
 mod memory;
 mod modules;
@@ -54,8 +53,7 @@ mod panic;
 mod syscall;
 mod time;
 
-use libcommon::Address;
-
+use libcommon::{Address, Frame, Page, Virtual};
 
 pub type MmapEntry = limine::NonNullPtr<limine::LimineMemmapEntry>;
 pub type MmapEntryType = limine::LimineMemoryMapEntryType;
@@ -73,34 +71,36 @@ impl Default for Parameters {
     }
 }
 
-static PARAMETERS: spin::Lazy<Parameters> = spin::Lazy::new(|| 
+static PARAMETERS: spin::Lazy<Parameters> = spin::Lazy::new(|| {
+    LIMINE_KERNEL_FILE
+        .get_response()
+        .get()
+        .and_then(|response| response.kernel_file.get())
+        .and_then(|kernel_file| kernel_file.cmdline.to_str())
+        .and_then(|cmdline_cstr| cmdline_cstr.to_str().ok())
+        .map(|cmdline| {
+            let mut parameters = Parameters::default();
 
-    LIMINE_KERNEL_FILE.get_response().get().and_then(|response| {
-        response.kernel_file.get()
-    }).and_then(|kernel_file| {
-        kernel_file.cmdline.to_str()
-    }).and_then(|cmdline_cstr| cmdline_cstr.to_str().ok()).map(|cmdline|{
-let mut parameters = Parameters::default();
+            for parameter in cmdline.split(' ') {
+                match parameter.split_once(':') {
+                    Some(("smp", "on")) => parameters.smp = true,
+                    Some(("smp", "off")) => parameters.smp = false,
 
-                for parameter in cmdline.split(' ') {
-                    match parameter.split_once(':') {
-                        Some(("smp", "on")) => parameters.smp = true,
-                        Some(("smp", "off")) => parameters.smp = false,
+                    None if parameter == "symbolinfo" => parameters.symbolinfo = true,
+                    None if parameter == "lomem" => parameters.low_memory = true,
 
-                        None if parameter == "symbolinfo" => parameters.symbolinfo = true,
-                        None if parameter == "lomem" => parameters.low_memory = true,
-
-                        _ => warn!("Unhandled cmdline parameter: {:?}", parameter),
-                    }
+                    _ => warn!("Unhandled cmdline parameter: {:?}", parameter),
                 }
-            
+            }
 
             parameters
-}).unwrap_or_default());
-
+        })
+        .unwrap_or_default()
+});
 
 pub const LIMINE_REV: u64 = 0;
 // TODO somehow model that these requests are invalidated
+static LIMINE_MMAP: limine::LimineMemmapRequest = limine::LimineMemmapRequest::new(crate::LIMINE_REV);
 static LIMINE_KERNEL_FILE: limine::LimineKernelFileRequest = limine::LimineKernelFileRequest::new(0);
 static LIMINE_MODULES: limine::LimineModuleRequest = limine::LimineModuleRequest::new(LIMINE_REV);
 static LIMINE_STACK: limine::LimineStackSizeRequest = limine::LimineStackSizeRequest::new(LIMINE_REV).stack_size({
@@ -115,29 +115,22 @@ static LIMINE_STACK: limine::LimineStackSizeRequest = limine::LimineStackSizeReq
     }
 });
 
-
-
-
-
 /// SAFETY: Do not call this function.
 #[no_mangle]
 #[allow(clippy::too_many_lines)]
 unsafe extern "C" fn _entry() -> ! {
-    
-     // Initialize serial first ensures kernel init can be logged to a reliable standard output.
-        log::set_max_level(log::LevelFilter::Trace);
-        log::set_logger({
-            static UART: spin::Lazy<crate::memory::io::Serial> = spin::Lazy::new(|| {
-                // SAFETY: Function is called only once, when the `Lazy` is initialized.
-                unsafe { crate::memory::io::Serial::init() }
-            });
+    log::set_max_level(log::LevelFilter::Trace);
+    log::set_logger({
+        static UART: spin::Lazy<crate::memory::io::Serial> = spin::Lazy::new(|| {
+            // SAFETY: Function is called only once, when the `Lazy` is initialized.
+            unsafe { crate::memory::io::Serial::init() }
+        });
 
-            &*UART}).unwrap();
-    /*
-     * boot info
-     *
-     * Very unlikely to error out, and could provide useful information to debugging the init process.
-     */
+        &*UART
+    })
+    .unwrap();
+
+    /* misc. boot info */
     {
         static LIMINE_INFO: limine::LimineBootInfoRequest = limine::LimineBootInfoRequest::new(crate::LIMINE_REV);
 
@@ -169,45 +162,33 @@ unsafe extern "C" fn _entry() -> ! {
         } else {
             info!("Vendor              None");
         }
-
-
     }
 
-        
+    #[cfg(target_arch = "x86_64")]
+    {
+        libarch::x64::structures::load_static_tables();
+        libarch::x64::cpu::init_registers();
+        libarch::x64::cpu::init_syscalls();
+    }
 
-            #[cfg(target_arch = "x86_64")]
-            libarch::x64::cpu::init_registers();
+    libcommon::memory::set_global_allocator({
+        static KERNEL_ALLOCATOR: spin::Once<crate::memory::slab::SlabAllocator<'static>> = spin::Once::new();
 
-
-            if PARAMETERS.low_memory {
-
-            
-            #[cfg(target_arch = "x86_64")]
-            libarch::x64::structures::load_static_tables();
-
-                    // Initialize the global memory allocator after the static platform initialization to ensure errors are
-        // properly logged in the process.
-        libcommon::memory::set({
-            static KERNEL_ALLOCATOR: spin::Once<crate::memory::slab::SlabAllocator<'static>> = spin::Once::new();
-
-            KERNEL_ALLOCATOR.call_once(|| unsafe {
-                crate::memory::slab::SlabAllocator::from_memory_map(memory_map, crate::memory::get_hhdm_address()).unwrap()
-            })
+        KERNEL_ALLOCATOR.call_once(|| unsafe {
+            crate::memory::slab::SlabAllocator::from_memory_map(
+                LIMINE_MMAP.get_response().get().map(limine::LimineMemmapResponse::memmap).unwrap(),
+                crate::memory::get_hhdm_address(),
+            )
+            .unwrap()
         })
-            }
-        
-    
+    });
+
     /*
      * Memory
      */
-     {
-        use crate::{
-            memory,
-            memory::{Mapper, PageAttributes, PageTable},
-        };
+    {
+        use crate::memory::{Mapper, PageAttributes};
         use libcommon::{LinkerSymbol, PageAlign};
-
-        let memory_map = get_memory_map().unwrap();
 
         extern "C" {
             static __text_start: LinkerSymbol;
@@ -252,7 +233,6 @@ unsafe extern "C" fn _entry() -> ! {
 
         // TODO don't unwrap, possibly switch to a simpler allocator? bump allocator, maybe
         // SAFETY: Kernel guarantees the HHDM to be valid.
-        ;
 
         debug!("Initializing kernel mapper...");
         // SAFETY: Kernel guarantees HHDM address to be valid.
@@ -291,7 +271,7 @@ unsafe extern "C" fn _entry() -> ! {
             );
         }
 
-        for entry in memory_map {
+        for entry in LIMINE_MMAP.get_response().get().map(limine::LimineMemmapResponse::memmap).unwrap() {
             let page_attributes = {
                 use limine::LimineMemoryMapEntryType;
 
@@ -315,7 +295,7 @@ unsafe extern "C" fn _entry() -> ! {
                 // TODO use huge pages here if possible
                 kernel_mapper
                     .map(
-                        Address::<Page>::new(
+                        Address::<libcommon::Page>::new(
                             Address::<Virtual>::new(crate::memory::get_hhdm_address().as_u64() + phys_base).unwrap(),
                             Some(PageAlign::Align4KiB),
                         )
@@ -333,110 +313,58 @@ unsafe extern "C" fn _entry() -> ! {
         //         changes nothing from the software perspective.
         unsafe { kernel_mapper.commit_vmem_register() }.unwrap();
         debug!("Kernel has finalized control of page tables.");
-    },
-    /* cpu structures */
-    || {
-        // SAFETY: Function is called only once for BSP.
-        #[cfg(target_arch = "x86_64")]
-        {
-            unsafe { libarch::x64::cpu::load_local_tables() };
-            libarch::x64::cpu::init_syscalls();
-        };
-    },
-    /* acpi */
-    || {
-        debug!("Initializing ACPI interface...");
+    }
 
-        static LIMINE_RSDP: limine::LimineRsdpRequest = limine::LimineRsdpRequest::new(crate::LIMINE_REV);
+    debug!("Initializing ACPI interface...");
+    crate::acpi::init_interface();
 
-        match LIMINE_RSDP.get_response().get().and_then(|response| response.address.as_ptr()).map(|ptr| ptr.addr()) {
-            // SAFETY: Bootloader guarantees that, if provided, the RSDP address will be valid.
-            Some(address) => unsafe {
-                crate::acpi::init_interface(libcommon::Address::<libcommon::Physical>::new_truncate({
-                    // Properly handle the bootloader's mapping of ACPI addresses in lower-half or higher-half memory space.
-                    core::cmp::min(address, address.wrapping_sub(crate::memory::get_hhdm_address().as_usize())) as u64
-                }))
-            },
-
-            None => warn!("No ACPI interface identified. System functionality will be impaired."),
-        }
-    },
-    /* interrupts */
-    || {
-        #[cfg(target_arch = "x86_64")]
-        {
-            debug!("Initializing APIC interface...");
-            libarch::x64::structures::apic::init_apic(|address| {
-                let page_address = Address::<Page>::new(
-                    Address::<Virtual>::new(crate::memory::get_hhdm_address().as_u64() + (address as u64)).unwrap(),
-                    Some(libcommon::PageAlign::Align4KiB),
-                )
-                .unwrap();
-
-                crate::memory::get_kernel_mapper()
-                    .map_if_not_mapped(
-                        page_address,
-                        Some((Address::<libcommon::Frame>::new(address as u64).unwrap(), false)),
-                        crate::memory::PageAttributes::MMIO,
-                    )
-                    .unwrap();
-
-                // SAFETY: TODO
-                unsafe { page_address.address().as_mut_ptr() }
-            })
-            .unwrap();
-        }
-    },
     /* symbols */
-    || {
+    if !PARAMETERS.low_memory {
         let (kernel_file_base, kernel_file_len) = {
-            let kernel_file = get_kernel_file();
-            (kernel_file.unwrap().base.as_ptr().unwrap(), kernel_file.unwrap().length as usize)
+            let kernel_file = LIMINE_KERNEL_FILE.get_response().get().and_then(|file| file.kernel_file.get()).unwrap();
+            (kernel_file.base.as_ptr().unwrap(), kernel_file.length as usize)
         };
 
-        // SAFETY: Kernel file is guaranteed to be valid by bootloader.
-        let kernel_elf =
-            crate::elf::Elf::from_bytes(&(unsafe { core::slice::from_raw_parts(kernel_file_base, kernel_file_len) }))
-                .expect("failed to parse kernel executable");
+        let kernel_elf = crate::elf::Elf::from_bytes(
+            // SAFETY: Kernel file is guaranteed to be valid by bootloader.
+            unsafe { core::slice::from_raw_parts(kernel_file_base, kernel_file_len) },
+        )
+        .expect("failed to parse kernel executable");
         if let Some(names_section) = kernel_elf.get_section_names_section() {
-            for (section, name) in kernel_elf.iter_sections().filter_map(|section| {
+            for section in kernel_elf.iter_sections() {
+                use alloc::vec::Vec;
+
                 let names_section_offset = section.get_names_section_offset();
-                Some((
-                    section,
-                    core::ffi::CStr::from_bytes_until_nul(&names_section.data()[names_section_offset..])
-                        .ok()?
-                        .to_str()
-                        .ok()?,
-                ))
-            }) {
-                {
-                    use alloc::vec::Vec;
+                if names_section.data().len() > names_section_offset {
+                    continue;
+                }
 
-                    match name {
-                        ".symtab" if let Ok(symbols) = bytemuck::try_cast_slice(section.data()) => {
-                            crate::panic::KERNEL_SYMBOLS.call_once(|| {
-                                let mut symbols_copy = Vec::new();
-                                symbols_copy.extend_from_slice(symbols);
-                                symbols_copy
-                            });
-                        }
+                let Some(section_name) = core::ffi::CStr::from_bytes_until_nul(&names_section.data()[names_section_offset..])
+                        .ok()
+                        .and_then(|cstr| cstr.to_str().ok())
+                    else { continue };
 
-                        ".strtab" => {
-                            crate::panic::KERNEL_STRINGS.call_once(|| {
-                                let mut strings_copy = Vec::new();
-                                strings_copy.extend_from_slice(section.data());
-                                strings_copy
-                            });
-                        }
-
-                        _ => {}
-                    }
+                if section_name == ".symtab" && let Ok(symbols) = bytemuck::try_cast_slice(section.data()) {
+                    crate::panic::KERNEL_SYMBOLS.call_once(|| {
+                        let mut symbols_copy = Vec::new();
+                        symbols_copy.extend_from_slice(symbols);
+                        symbols_copy
+                    });
+                } else if section_name == ".strtab" {
+                    crate::panic::KERNEL_STRINGS.call_once(|| {
+                        let mut strings_copy = Vec::new();
+                        strings_copy.extend_from_slice(section.data());
+                        strings_copy
+                    });
                 }
             }
         }
-    },
+    } else {
+        debug!("Kernel is running in low memory mode; stack tracing will be disabled.");
+    }
+
     /* smp */
-    || {
+    {
         static LIMINE_SMP: limine::LimineSmpRequest = limine::LimineSmpRequest::new(crate::LIMINE_REV).flags(0b1);
 
         if let Some(smp_response) = LIMINE_SMP.get_response().get_mut() {
@@ -445,13 +373,13 @@ unsafe extern "C" fn _entry() -> ! {
             for cpu_info in smp_response.cpus().iter_mut().filter(|info| info.lapic_id != bsp_lapic_id) {
                 trace!("Starting processor: ID P{}/L{}", cpu_info.processor_id, cpu_info.lapic_id);
 
-                cpu_info.goto_address = if get_parameters().smp {
+                cpu_info.goto_address = if PARAMETERS.smp {
                     extern "C" fn _smp_entry(info: *const limine::LimineSmpInfo) -> ! {
                         // SAFETY: Function is called only once per core.
                         #[cfg(target_arch = "x86_64")]
                         unsafe {
+                            libarch::x64::structures::load_static_tables();
                             libarch::x64::cpu::init_registers();
-                            libarch::x64::cpu::load_local_tables();
                             libarch::x64::cpu::init_syscalls();
                         };
 
@@ -475,38 +403,15 @@ unsafe extern "C" fn _entry() -> ! {
         } else {
             debug!("Bootloader has not provided any SMP information.");
         }
-    },
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    /* arch core init */
-    #[cfg(target_arch = "x86_64")]
-    {
-        // SAFETY: Provided IRQ base is intentionally within the exception range for x86 CPUs.
-        static PICS: spin::Mutex<pic_8259::Pics> = spin::Mutex::new(unsafe { pic_8259::Pics::new(0) });
-        PICS.lock().init(pic_8259::InterruptLines::empty());
     }
 
-    init::init();
+    /* arch core init */
+    // #[cfg(target_arch = "x86_64")]
+    // {
+    //     // SAFETY: Provided IRQ base is intentionally within the exception range for x86 CPUs.
+    //     static PICS: spin::Mutex<pic_8259::Pics> = spin::Mutex::new(unsafe { pic_8259::Pics::new(0) });
+    //     PICS.lock().init(pic_8259::InterruptLines::empty());
+    // }
 
     // TODO rv64 bsp hart init
 
@@ -627,11 +532,11 @@ unsafe extern "C" fn _entry() -> ! {
 /// SAFETY: This function invariantly assumes it will be called only once per core.
 #[inline(never)]
 pub(self) unsafe fn kernel_thread_setup(core_id: u32) -> ! {
-    crate::local_state::init(core_id);
+    crate::local_state::init(core_id, 1000);
 
     libarch::interrupts::enable();
     trace!("Enabling and starting scheduler...");
-    crate::local_state::with_scheduler(crate::local_state::Scheduler::start);
+    crate::local_state::begin_scheduling();
     trace!("Core will soon execute a task, or otherwise halt.");
     libarch::interrupts::wait_loop()
 }
@@ -683,7 +588,7 @@ mod handlers {
 
         match Vector::try_from(irq_vector) {
             Ok(vector) if vector == Vector::Timer => {
-                crate::local_state::with_scheduler(|scheduler| scheduler.next_task(ctrl_flow_context, arch_context));
+                crate::local_state::next_task(ctrl_flow_context, arch_context);
             }
 
             vector_result => {
@@ -692,6 +597,6 @@ mod handlers {
         }
 
         #[cfg(target_arch = "x86_64")]
-        libarch::x64::structures::apic::end_of_interrupt();
+        crate::local_state::end_of_interrupt();
     }
 }

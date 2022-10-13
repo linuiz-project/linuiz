@@ -111,8 +111,8 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
                     .ok()
                     .and_then(|cstr| cstr.to_str().ok())
             {
-                match rustc_demangle::try_demangle(symbol_name).ok() {
-                    Some(demangled) => {
+                match rustc_demangle::try_demangle(symbol_name) {
+                    Ok(demangled) => {
                         print_stack_trace_entry(
                             trace_index,
                             fn_symbol.get_value(),
@@ -120,7 +120,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
                         )
                     },
 
-                    None => {
+                    Err(_) => {
                         print_stack_trace_entry(
                             trace_index,
                             fn_symbol.get_value(),

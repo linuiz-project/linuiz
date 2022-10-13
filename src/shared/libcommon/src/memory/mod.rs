@@ -83,11 +83,11 @@ mod global_allocator {
     #[global_allocator]
     static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator(spin::Once::new());
 
-    pub fn set(global_allocator: &'static dyn KernelAllocator) {
+    pub fn set_global_allocator(global_allocator: &'static dyn KernelAllocator) {
         GLOBAL_ALLOCATOR.0.call_once(|| global_allocator);
     }
 
-    pub fn get() -> &'static dyn KernelAllocator {
+    pub fn get_global_allocator() -> &'static dyn KernelAllocator {
         *GLOBAL_ALLOCATOR.0.get().unwrap()
     }
 

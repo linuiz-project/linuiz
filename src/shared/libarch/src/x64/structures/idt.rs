@@ -1,8 +1,36 @@
 use crate::x64::cpu::GeneralContext;
 use libcommon::{Address, Virtual};
-use x86_64::structures::idt::{PageFaultErrorCode, SelectorErrorCode};
+use x86_64::structures::idt;
 
-pub use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, InterruptStackFrameValue};
+pub use x86_64::structures::idt::{InterruptStackFrame, InterruptStackFrameValue};
+
+/// Thin wrapper around [`x86_64::structures::idt::InterruptDescriptorTable`], implementing [`bytemuck::Zeroable`].
+#[repr(C, align(16))]
+#[derive(Clone, Debug)]
+pub struct InterruptDescriptorTable(idt::InterruptDescriptorTable);
+
+// SAFETY: Zeroed memory is a valid state for an IDT.
+unsafe impl bytemuck::Zeroable for InterruptDescriptorTable {}
+
+impl InterruptDescriptorTable {
+    pub const fn new() -> Self {
+        Self(idt::InterruptDescriptorTable::new())
+    }
+}
+
+impl core::ops::Deref for InterruptDescriptorTable {
+    type Target = idt::InterruptDescriptorTable;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl core::ops::DerefMut for InterruptDescriptorTable {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 
 macro_rules! push_fptr {
     ($ip_off:expr, $sp_off:expr) => {
@@ -214,31 +242,31 @@ pub enum Exception<'a> {
     /// Occurs when an invalid segment selector is referenced as part of a task switch, or as a
     /// result of a control transfer through a gate descriptor, which results in an invalid
     /// stack-segment reference using an SS selector in the TSS
-    InvalidTSS(&'a InterruptStackFrame, SelectorErrorCode, &'a GeneralContext),
+    InvalidTSS(&'a InterruptStackFrame, idt::SelectorErrorCode, &'a GeneralContext),
 
     /// Occurs when trying to load a segment or gate which has its `PRESENT` bit unset.
-    SegmentNotPresent(&'a InterruptStackFrame, SelectorErrorCode, &'a GeneralContext),
+    SegmentNotPresent(&'a InterruptStackFrame, idt::SelectorErrorCode, &'a GeneralContext),
 
     /// Occurs when:
     ///     - Loading a stack-segment referencing a segment descriptor which is not present;
     ///     - Any `push`/`pop` instruction or any instruction using `esp`/`ebp` as a base register
     ///         is executed, while the stack address is not in canonical form;
     ///     - The stack-limit check fails.
-    StackSegmentFault(&'a InterruptStackFrame, SelectorErrorCode, &'a GeneralContext),
+    StackSegmentFault(&'a InterruptStackFrame, idt::SelectorErrorCode, &'a GeneralContext),
 
     /// Occurs when:
     ///     - Segment error (privilege, type, limit, r/w rights).
     ///     - Executing a privileged instruction while CPL isn't supervisor (CPL0)
     ///     - Writing a `1` in a reserved register field or writing invalid value combinations (e.g. `CR0` with `PE` unset and `PG` set).
     ///     - Referencing or accessing a null descriptor.
-    GeneralProtectionFault(&'a InterruptStackFrame, SelectorErrorCode, &'a GeneralContext),
+    GeneralProtectionFault(&'a InterruptStackFrame, idt::SelectorErrorCode, &'a GeneralContext),
 
     /// Occurs when:
     ///     - A page directory or table entry is not present in physical memory.
     ///     - Attempting to load the instruction TLB with a translation for a non-executable page.
     ///     - A protection cehck (privilege, r/w) failed.
     ///     - A reserved bit in the page directory table or entries is set to 1.
-    PageFault(&'a InterruptStackFrame, PageFaultErrorCode, Address<Virtual>, &'a GeneralContext),
+    PageFault(&'a InterruptStackFrame, idt::PageFaultErrorCode, Address<Virtual>, &'a GeneralContext),
 
     /// Occurs when the `fwait` or `wait` instruction (or any floating point instruction) is executed, and the
     /// following conditions are true:
@@ -334,14 +362,14 @@ extern "sysv64" fn df_handler_inner(stack_frame: &InterruptStackFrame, _: u64, g
 
 exception_handler_with_error!(ts, u64, ());
 extern "sysv64" fn ts_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &GeneralContext) {
-    common_exception_handler(Exception::InvalidTSS(stack_frame, SelectorErrorCode::new_truncate(error_code), gprs))
+    common_exception_handler(Exception::InvalidTSS(stack_frame, idt::SelectorErrorCode::new_truncate(error_code), gprs))
 }
 
 exception_handler_with_error!(np, u64, ());
 extern "sysv64" fn np_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &GeneralContext) {
     common_exception_handler(Exception::SegmentNotPresent(
         stack_frame,
-        SelectorErrorCode::new_truncate(error_code),
+        idt::SelectorErrorCode::new_truncate(error_code),
         gprs,
     ))
 }
@@ -350,7 +378,7 @@ exception_handler_with_error!(ss, u64, ());
 extern "sysv64" fn ss_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &GeneralContext) {
     common_exception_handler(Exception::StackSegmentFault(
         stack_frame,
-        SelectorErrorCode::new_truncate(error_code),
+        idt::SelectorErrorCode::new_truncate(error_code),
         gprs,
     ))
 }
@@ -359,15 +387,15 @@ exception_handler_with_error!(gp, u64, ());
 extern "sysv64" fn gp_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &GeneralContext) {
     common_exception_handler(Exception::GeneralProtectionFault(
         stack_frame,
-        SelectorErrorCode::new_truncate(error_code),
+        idt::SelectorErrorCode::new_truncate(error_code),
         gprs,
     ))
 }
 
-exception_handler_with_error!(pf, x86_64::structures::idt::PageFaultErrorCode, ());
+exception_handler_with_error!(pf, idt::PageFaultErrorCode, ());
 extern "sysv64" fn pf_handler_inner(
     stack_frame: &InterruptStackFrame,
-    error_code: x86_64::structures::idt::PageFaultErrorCode,
+    error_code: idt::PageFaultErrorCode,
     gprs: &GeneralContext,
 ) {
     let fault_address = crate::x64::registers::control::CR2::read();
