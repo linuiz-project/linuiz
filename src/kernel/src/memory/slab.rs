@@ -272,7 +272,8 @@ unsafe impl<'a> core::alloc::Allocator for SlabAllocator<'a> {
                     self.lock_next()
                 } else {
                     self.lock_next_many(
-                        NonZeroUsize::new(layout.size() / 0x1000).unwrap(),
+                        // SAFETY: The size of `layout` at this point is known to be >4096.
+                        unsafe { NonZeroUsize::new_unchecked(layout.size() / 0x1000) },
                         // SAFETY: `Layout::align()` can not be zero in safe Rust.
                         unsafe { NonZeroUsize::new_unchecked(layout.align()) },
                     )
@@ -358,12 +359,12 @@ impl KernelAllocator for SlabAllocator<'_> {
                     .iter()
                     .map(Frame::data)
                     .enumerate()
-                    .rfind(|(_, (locked, ty))| !locked || *ty != FrameType::Generic)
+                    .rfind(|(_, (locked, ty))| *locked || *ty != FrameType::Generic)
                 {
                     Some((index, _)) => {
                         frames.iter().for_each(Frame::unpeek);
                         sub_table = &sub_table[libcommon::align_up(
-                            index,
+                            index + 1,
                             // SAFETY: Value (via `max(alignment / 0x1000, 1)`) is guaranteed to be >0.
                             unsafe { NonZeroUsize::new_unchecked(alignment) },
                         )..]
