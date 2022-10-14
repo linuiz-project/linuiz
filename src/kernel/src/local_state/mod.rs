@@ -52,14 +52,6 @@ fn get() -> &'static mut LocalState {
 pub unsafe fn init(core_id: u32, timer_frequency: u16) {
     trace!("Configuring local state: #{}", core_id);
 
-    // TODO configure RISC-V ACLINT
-    // TODO abstract this somehow, so we can call e.g. `libarch::interrupts::configure_controller();`
-    #[cfg(target_arch = "x86_64")]
-    {
-
-        // LINT0&1 should be configured by the APIC reset.
-    }
-
     let local_state_ptr = alloc::alloc::alloc(core::alloc::Layout::from_size_align_unchecked(
         core::mem::size_of::<LocalState>(),
         core::mem::align_of::<LocalState>(),
@@ -120,8 +112,7 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
             use libarch::x64::structures::{gdt, tss};
 
             let tss_ptr = {
-                use alloc::alloc::alloc;
-                use core::{alloc::Layout, num::NonZeroUsize};
+                use core::num::NonZeroUsize;
                 use libarch::{reexport::x86_64::VirtAddr, x64::structures::idt::StackTableIndex};
                 use libcommon::memory::allocate_static_zeroed;
 
@@ -130,9 +121,10 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
                 fn allocate_tss_stack(pages: NonZeroUsize) -> VirtAddr {
                     VirtAddr::from_ptr({
                         // SAFETY: Values provided are known-valid.
-                        let layout = unsafe { Layout::from_size_align_unchecked(pages.get() * 0x1000, 0x10) };
+                        let layout =
+                            unsafe { core::alloc::Layout::from_size_align_unchecked(pages.get() * 0x1000, 0x10) };
                         // SAFETY: Layout provided has a known-non-zero size.
-                        unsafe { alloc(layout) }
+                        unsafe { alloc::alloc::alloc(layout) }
                     })
                 }
 
