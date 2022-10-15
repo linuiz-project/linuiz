@@ -1,4 +1,3 @@
-pub mod syscall;
 pub mod cpuid {
     pub use raw_cpuid::*;
     use spin::Lazy;
@@ -36,92 +35,6 @@ pub fn get_id() -> u32 {
         .map(|info| info.x2apic_id())
         // ... and finally, this leaf as an absolute fallback.
         .unwrap_or_else(|| FEATURE_INFO.initial_local_apic_id() as u32)
-}
-
-pub fn init_registers() {
-    trace!("Loading x86-specific control registers to known state.");
-
-    // Set CR0 flags.
-    use crate::x64::registers::control::{CR0Flags, CR0};
-    // SAFETY: We set `CR0` once, and setting it again during kernel execution is not supported.
-    unsafe { CR0::write(CR0Flags::PE | CR0Flags::MP | CR0Flags::ET | CR0Flags::NE | CR0Flags::WP | CR0Flags::PG) };
-
-    // Set CR4 flags.
-    use crate::x64::registers::control::{CR4Flags, CR4};
-    use cpuid::{EXT_FEATURE_INFO, FEATURE_INFO};
-
-    let mut flags = CR4Flags::PAE | CR4Flags::PGE | CR4Flags::OSXMMEXCPT;
-
-    if FEATURE_INFO.has_de() {
-        trace!("Detected support for debugging extensions.");
-        flags.insert(CR4Flags::DE);
-    }
-
-    if FEATURE_INFO.has_fxsave_fxstor() {
-        trace!("Detected support for `fxsave` and `fxstor` instructions.");
-        flags.insert(CR4Flags::OSFXSR);
-    }
-
-    if FEATURE_INFO.has_mce() {
-        trace!("Detected support for machine check exceptions.");
-    }
-
-    if FEATURE_INFO.has_pcid() {
-        trace!("Detected support for process context IDs.");
-        flags.insert(CR4Flags::PCIDE);
-    }
-
-    if EXT_FEATURE_INFO.as_ref().map_or(false, cpuid::ExtendedFeatures::has_umip) {
-        trace!("Detected support for usermode instruction prevention.");
-        flags.insert(CR4Flags::UMIP);
-    }
-
-    if EXT_FEATURE_INFO.as_ref().map_or(false, cpuid::ExtendedFeatures::has_fsgsbase) {
-        trace!("Detected support for CPL3 FS/GS base usage.");
-        flags.insert(CR4Flags::FSGSBASE);
-    }
-
-    if EXT_FEATURE_INFO.as_ref().map_or(false, cpuid::ExtendedFeatures::has_smep) {
-        trace!("Detected support for supervisor mode execution prevention.");
-        flags.insert(CR4Flags::SMEP);
-    }
-
-    if EXT_FEATURE_INFO.as_ref().map_or(false, cpuid::ExtendedFeatures::has_smap) {
-        trace!("Detected support for supervisor mode access prevention.");
-        // TODO flags.insert(CR4Flags::SMAP);
-    }
-
-    // SAFETY: Initialize the CR4 register with all CPU & kernel supported features.
-    unsafe { CR4::write(flags) };
-
-    // Enable use of the `NO_EXECUTE` page attribute, if supported.
-    if cpuid::EXT_FUNCTION_INFO.as_ref().map_or(false, cpuid::ExtendedProcessorFeatureIdentifiers::has_execute_disable)
-    {
-        trace!("Detected support for paging execution prevention.");
-        // SAFETY: Setting `IA32_EFER.NXE` in this context is safe because the bootloader does not use the `NX` bit. However, the kernel does, so
-        //         disabling it after paging is in control of the kernel is unsupported.
-        unsafe { crate::x64::registers::msr::IA32_EFER::set_nxe(true) };
-    } else {
-        warn!("PC does not support the NX bit; system security will be compromised (this warning is purely informational).");
-    }
-}
-
-
-
-pub fn init_syscalls() {
-    // SAFETY: Parameters are set according to the IA-32 SDM, and so should have no undetermined side-effects.
-    unsafe {
-        use crate::x64::registers::{msr, RFlags};
-        use crate::x64::structures::gdt;
-
-        // Configure system call environment registers.
-        msr::IA32_STAR::set_selectors(*gdt::KCODE_SELECTOR.get().unwrap(), *gdt::KDATA_SELECTOR.get().unwrap());
-        msr::IA32_LSTAR::set_syscall(syscall::_syscall_entry);
-        // We don't want to keep any flags set within the syscall (especially the interrupt flag).
-        msr::IA32_FMASK::set_rflags_mask(RFlags::all());
-        // Enable `syscall`/`sysret`.
-        msr::IA32_EFER::set_sce(true);
-    }
 }
 
 #[derive(Debug, Clone, Copy)]

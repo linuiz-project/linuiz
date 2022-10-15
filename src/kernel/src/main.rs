@@ -167,8 +167,7 @@ unsafe extern "C" fn _entry() -> ! {
     #[cfg(target_arch = "x86_64")]
     {
         libarch::x64::structures::load_static_tables();
-        libarch::x64::cpu::init_registers();
-        libarch::x64::cpu::init_syscalls();
+        libarch::cpu::setup();
     }
 
     libcommon::memory::set_global_allocator({
@@ -365,7 +364,9 @@ unsafe extern "C" fn _entry() -> ! {
 
     /* smp */
     {
-        static LIMINE_SMP: limine::LimineSmpRequest = limine::LimineSmpRequest::new(crate::LIMINE_REV).flags(0b1);
+        static LIMINE_SMP: limine::LimineSmpRequest = limine::LimineSmpRequest::new(crate::LIMINE_REV)
+            // Enable x2APIC mode if available.
+            .flags(0b1);
 
         if let Some(smp_response) = LIMINE_SMP.get_response().get_mut() {
             let bsp_lapic_id = smp_response.bsp_lapic_id;
@@ -379,8 +380,7 @@ unsafe extern "C" fn _entry() -> ! {
                         #[cfg(target_arch = "x86_64")]
                         unsafe {
                             libarch::x64::structures::load_static_tables();
-                            libarch::x64::cpu::init_registers();
-                            libarch::x64::cpu::init_syscalls();
+                            libarch::cpu::setup();
                         };
 
                         // SAFETY: All currently referenced memory should also be mapped in the kernel page tables.
