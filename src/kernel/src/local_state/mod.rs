@@ -292,8 +292,10 @@ pub unsafe fn begin_scheduling() {
     #[cfg(target_arch = "x86_64")]
     unsafe {
         local_state.apic.0.get_timer().set_masked(false);
-        preemption_wait(1);
     }
+
+    // SAFETY: Value provided is non-zero.
+    preemption_wait(unsafe { core::num::NoNZeroU16::new_unchecked(1) });
 }
 
 pub fn next_task(
@@ -309,7 +311,7 @@ pub fn end_of_interrupt() {
     get().apic.0.end_of_interrupt()
 }
 
-pub fn preemption_wait(interval_wait: u16) {
+pub fn preemption_wait(interval_wait: core::num::NonZeroU16) {
     #[cfg(target_arch = "x86_64")]
     {
         use libarch::x64::structures::apic;
@@ -318,11 +320,11 @@ pub fn preemption_wait(interval_wait: u16) {
         match apic.get_timer().get_mode() {
             // SAFETY: Control flow expects timer initial count to be changed.
             apic::TimerMode::OneShot => unsafe {
-                apic.set_timer_initial_count(timer_interval.mul(interval_wait as u64) as u32)
+                apic.set_timer_initial_count(timer_interval.mul(interval_wait.get() as u64) as u32)
             },
             apic::TimerMode::TscDeadline => unsafe {
                 libarch::x64::registers::msr::IA32_TSC_DEADLINE::set(
-                    core::arch::x86_64::_rdtsc() + timer_interval.mul(interval_wait as u64),
+                    core::arch::x86_64::_rdtsc() + timer_interval.mul(interval_wait.get() as u64),
                 )
             },
             apic::TimerMode::Periodic => unimplemented!(),
