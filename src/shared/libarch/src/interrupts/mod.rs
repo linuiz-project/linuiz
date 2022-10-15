@@ -64,7 +64,7 @@ pub struct ControlFlowContext {
 pub type ArchContext = (crate::x64::cpu::GeneralContext, crate::x64::cpu::SpecialContext);
 
 #[cfg(target_arch = "x86_64")]
-pub type SyscallContext = crate::x64::cpu::syscall::PreservedRegisters;
+pub type SyscallContext = crate::cpu::PreservedRegisters;
 
 /// Indicates what type of error the common page fault handler encountered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

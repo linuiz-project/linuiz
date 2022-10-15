@@ -1,11 +1,21 @@
 #![no_std]
-#![feature(asm_sym, asm_const, naked_functions, sync_unsafe_cell, exclusive_range_pattern, allocator_api, if_let_guard)]
+#![feature(
+    asm_sym,
+    asm_const,
+    naked_functions,
+    sync_unsafe_cell,
+    exclusive_range_pattern,
+    allocator_api,
+    if_let_guard,
+    let_chains
+)]
 #![cfg_attr(target_arch = "x86_64", feature(abi_x86_interrupt))]
 
 #[macro_use]
 extern crate log;
 extern crate alloc;
 
+pub mod cpu;
 pub mod interrupts;
 pub mod memory;
 #[cfg(target_arch = "riscv64")]
