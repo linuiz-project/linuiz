@@ -70,9 +70,9 @@ mod clock {
 
             while total_ticks > 0 {
                 let new_tick = self.get_timestamp();
-                info!("{} - {}", total_ticks, new_tick,);
                 total_ticks -= (new_tick.wrapping_sub(current_tick) & self.max_timestamp()).min(total_ticks);
                 current_tick = new_tick;
+
                 core::hint::spin_loop();
             }
         }

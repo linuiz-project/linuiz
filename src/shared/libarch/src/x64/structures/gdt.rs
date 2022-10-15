@@ -27,7 +27,7 @@ pub static KDATA_SELECTOR: Once<SegmentSelector> = Once::new();
 pub static UCODE_SELECTOR: Once<SegmentSelector> = Once::new();
 pub static UDATA_SELECTOR: Once<SegmentSelector> = Once::new();
 
-pub fn load_kernel() {
+pub fn load() {
     // SAFETY:  This would technically be unsafe, but since we know the GDT's structure
     //          deterministically, running this function over and over would not change
     //          software execution at all. So, it's safe to execute all of this code.

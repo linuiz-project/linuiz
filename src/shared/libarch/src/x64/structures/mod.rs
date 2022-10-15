@@ -9,10 +9,8 @@ pub mod tss;
 pub fn load_static_tables() {
     use crate::x64::structures::idt::InterruptDescriptorTable;
 
-    trace!("Loading and configuring static kernel tables.");
-
     // Always initialize GDT prior to configuring IDT.
-    crate::x64::structures::gdt::load_kernel();
+    crate::x64::structures::gdt::load();
 
     /*
      * IDT
@@ -21,7 +19,7 @@ pub fn load_static_tables() {
      * properly initialized and loaded—otherwise, the `CS` value for the IDT entries
      * is incorrect, and this causes very confusing GPFs.
      */
-    {
+    crate::interrupts::without(|| {
         static LOW_MEMORY_IDT: Lazy<InterruptDescriptorTable> = Lazy::new(|| {
             let mut idt = InterruptDescriptorTable::new();
             crate::x64::structures::idt::set_exception_handlers(&mut idt);
@@ -30,5 +28,5 @@ pub fn load_static_tables() {
         });
 
         LOW_MEMORY_IDT.load();
-    }
+    });
 }
