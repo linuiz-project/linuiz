@@ -56,32 +56,25 @@ pub fn setup() {
         //         disabling it after paging is in control of the kernel is unsupported.
         unsafe { msr::IA32_EFER::set_nxe(true) };
     } else {
-        use core::sync::atomic;
-
-        static HAS_WARNED: atomic::AtomicBool = atomic::AtomicBool::new(false);
-
-        if HAS_WARNED.compare_exchange(false, true, atomic::Ordering::Relaxed, atomic::Ordering::Relaxed).is_ok() {
+        libcommon::do_once!({
             warn!("PC does not support the NX bit; system security will be compromised (this warning is purely informational).");
-        }
+        });
     }
 
     // Load the static processor tables for this core.
     crate::arch::x64::structures::load_static_tables();
 
     // Setup system call interface.
-    if let Some(kcode_selector) = gdt::KCODE_SELECTOR.get()
-        && let Some(kdata_selector) = gdt::KDATA_SELECTOR.get()
-    {
-        // SAFETY: Parameters are set according to the IA-32 SDM, and so should have no undetermined side-effects.
-        unsafe {
-            // Configure system call environment registers.
-            msr::IA32_STAR::set_selectors(*kcode_selector, *kdata_selector);
-            msr::IA32_LSTAR::set_syscall({
-                /// SAFETY: This function should never be called by software.
-                #[naked]
-                unsafe extern "sysv64" fn _syscall_entry() {
-                    core::arch::asm!(
-                        "
+    // SAFETY: Parameters are set according to the IA-32 SDM, and so should have no undetermined side-effects.
+    unsafe {
+        // Configure system call environment registers.
+        msr::IA32_STAR::set_selectors(gdt::kernel_code_selector(), gdt::kernel_data_selector());
+        msr::IA32_LSTAR::set_syscall({
+            /// SAFETY: This function should never be called by software.
+            #[naked]
+            unsafe extern "sysv64" fn _syscall_entry() {
+                core::arch::asm!(
+                    "
                         cld
                         cli                         # always ensure interrupts are disabled within system calls
                         mov rax, rsp                # save the userspace rsp
@@ -123,18 +116,17 @@ pub fn setup() {
 
                         sysretq
                         ",
-                        sym syscall_handler,
-                        options(noreturn)
-                    )
-                }
+                    sym syscall_handler,
+                    options(noreturn)
+                )
+            }
 
-                _syscall_entry
-            });
-            // We don't want to keep any flags set within the syscall (especially the interrupt flag).
-            msr::IA32_FMASK::set_rflags_mask(RFlags::all());
-            // Enable `syscall`/`sysret`.
-            msr::IA32_EFER::set_sce(true);
-        }
+            _syscall_entry
+        });
+        // We don't want to keep any flags set within the syscall (especially the interrupt flag).
+        msr::IA32_FMASK::set_rflags_mask(RFlags::all());
+        // Enable `syscall`/`sysret`.
+        msr::IA32_EFER::set_sce(true);
     }
 }
 
