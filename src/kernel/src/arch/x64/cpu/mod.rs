@@ -14,7 +14,7 @@ pub mod cpuid {
 /// is the bootstrap processor.
 #[inline(always)]
 pub fn is_bsp() -> bool {
-    crate::x64::registers::msr::IA32_APIC_BASE::get_is_bsp()
+    crate::arch::x64::registers::msr::IA32_APIC_BASE::get_is_bsp()
 }
 
 /// Gets the vendor of the CPU.
@@ -38,25 +38,25 @@ pub fn get_id() -> u32 {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct SpecialContext {
+pub struct SpecialRegisters {
     pub cs: u64,
     pub ss: u64,
-    pub flags: crate::x64::registers::RFlags,
+    pub flags: crate::arch::x64::registers::RFlags,
 }
 
-impl SpecialContext {
-    pub fn with_kernel_segments(flags: crate::x64::registers::RFlags) -> Self {
+impl SpecialRegisters {
+    pub fn with_kernel_segments(flags: crate::arch::x64::registers::RFlags) -> Self {
         Self {
-            cs: crate::x64::structures::gdt::KCODE_SELECTOR.get().unwrap().0 as u64,
-            ss: crate::x64::structures::gdt::KDATA_SELECTOR.get().unwrap().0 as u64,
+            cs: crate::arch::x64::structures::gdt::KCODE_SELECTOR.get().unwrap().0 as u64,
+            ss: crate::arch::x64::structures::gdt::KDATA_SELECTOR.get().unwrap().0 as u64,
             flags,
         }
     }
 
-    pub fn flags_with_user_segments(flags: crate::x64::registers::RFlags) -> Self {
+    pub fn flags_with_user_segments(flags: crate::arch::x64::registers::RFlags) -> Self {
         Self {
-            cs: crate::x64::structures::gdt::UCODE_SELECTOR.get().unwrap().0 as u64,
-            ss: crate::x64::structures::gdt::UDATA_SELECTOR.get().unwrap().0 as u64,
+            cs: crate::arch::x64::structures::gdt::UCODE_SELECTOR.get().unwrap().0 as u64,
+            ss: crate::arch::x64::structures::gdt::UDATA_SELECTOR.get().unwrap().0 as u64,
             flags,
         }
     }
@@ -64,7 +64,7 @@ impl SpecialContext {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
-pub struct GeneralContext {
+pub struct GeneralRegisters {
     pub rax: u64,
     pub rbx: u64,
     pub rcx: u64,
@@ -82,7 +82,7 @@ pub struct GeneralContext {
     pub r15: u64,
 }
 
-impl GeneralContext {
+impl GeneralRegisters {
     pub const fn empty() -> Self {
         Self {
             rax: 0,
@@ -104,34 +104,47 @@ impl GeneralContext {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
+#[repr(C, packed)]
+pub struct PreservedRegistersSysv64 {
+    r15: u64,
+    r14: u64,
+    r13: u64,
+    r12: u64,
+    rbp: u64,
+    rbx: u64,
+    rfl: u64,
+    rsp: u64,
+}
+
 /// Hand the interrupt context off to the common interrupt handler.
-pub(in crate::x64) extern "sysv64" fn irq_handoff(
+pub(in crate::arch::x64) extern "sysv64" fn irq_handoff(
     irq_number: u64,
-    stack_frame: &mut crate::x64::structures::idt::InterruptStackFrame,
-    general_context: &mut GeneralContext,
+    stack_frame: &mut crate::arch::x64::structures::idt::InterruptStackFrame,
+    general_context: &mut GeneralRegisters,
 ) {
-    let mut control_flow_context = crate::interrupts::ControlFlowContext {
+    let mut control_flow_context = crate::cpu::ControlContext {
         ip: stack_frame.instruction_pointer.as_u64(),
         sp: stack_frame.stack_pointer.as_u64(),
     };
 
     let mut arch_context = (
         *general_context,
-        SpecialContext {
+        SpecialRegisters {
             cs: stack_frame.code_segment,
             ss: stack_frame.stack_segment,
-            flags: crate::x64::registers::RFlags::from_bits_truncate(stack_frame.cpu_flags),
+            flags: crate::arch::x64::registers::RFlags::from_bits_truncate(stack_frame.cpu_flags),
         },
     );
 
     // SAFETY: function pointer is guaranteed by the `set_interrupt_handler()` function to be valid.
-    unsafe { crate::interrupts::IRQ_HANDLER(irq_number, &mut control_flow_context, &mut arch_context) };
+    unsafe { crate::interrupts::irq_handler(irq_number, &mut control_flow_context, &mut arch_context) };
 
     // SAFETY: The stack frame *has* to be modified to switch contexts within this interrupt.
     unsafe {
         use x86_64::VirtAddr;
 
-        stack_frame.as_mut().write(crate::x64::structures::idt::InterruptStackFrameValue {
+        stack_frame.as_mut().write(crate::arch::x64::structures::idt::InterruptStackFrameValue {
             instruction_pointer: VirtAddr::new(control_flow_context.ip),
             stack_pointer: VirtAddr::new(control_flow_context.sp),
             code_segment: arch_context.1.cs,

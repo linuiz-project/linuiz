@@ -1,8 +1,6 @@
 mod scheduler;
 
-use core::ops::Mul;
-
-use libarch::memory::VmemRegister;
+use crate::memory::VmemRegister;
 pub use scheduler::*;
 
 pub(self) const US_PER_SEC: u32 = 1000000;
@@ -21,11 +19,11 @@ pub(crate) struct LocalState {
     scheduler: Scheduler,
 
     #[cfg(target_arch = "x86_64")]
-    idt: Option<&'static mut libarch::x64::structures::idt::InterruptDescriptorTable>,
+    idt: Option<&'static mut crate::arch::x64::structures::idt::InterruptDescriptorTable>,
     #[cfg(target_arch = "x86_64")]
-    tss: &'static mut libarch::x64::structures::tss::TaskStateSegment,
+    tss: &'static mut crate::arch::x64::structures::tss::TaskStateSegment,
     #[cfg(target_arch = "x86_64")]
-    apic: (libarch::x64::structures::apic::Apic, u64),
+    apic: (crate::arch::x64::structures::apic::Apic, u64),
 }
 
 impl LocalState {
@@ -42,7 +40,8 @@ fn get() -> &'static mut LocalState {
     #[cfg(target_arch = "x86_64")]
     {
         // SAFETY: If MSR is not null, then the `LocalState` has been initialized.
-        unsafe { ((libarch::x64::registers::msr::IA32_KERNEL_GS_BASE::read()) as *mut LocalState).as_mut() }.unwrap()
+        unsafe { ((crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::read()) as *mut LocalState).as_mut() }
+            .unwrap()
     }
 }
 
@@ -69,18 +68,18 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
             false,
             Task::new(
                 TaskPriority::new(1).unwrap(),
-                TaskStart::Function(libarch::interrupts::wait_loop),
+                TaskStart::Function(crate::interrupts::wait_loop),
                 TaskStack::At(libcommon::Address::<libcommon::Virtual>::from_ptr({
                     alloc::alloc::alloc_zeroed(core::alloc::Layout::from_size_align_unchecked(0x10, 0x10))
                 })),
                 {
                     #[cfg(target_arch = "x86_64")]
                     {
-                        use libarch::x64;
+                        use crate::arch::x64;
 
                         (
-                            x64::cpu::GeneralContext::empty(),
-                            x64::cpu::SpecialContext::with_kernel_segments(x64::registers::RFlags::INTERRUPT_FLAG),
+                            x64::cpu::GeneralRegisters::empty(),
+                            x64::cpu::SpecialRegisters::with_kernel_segments(x64::registers::RFlags::INTERRUPT_FLAG),
                         )
                     }
                 },
@@ -90,7 +89,7 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
 
         #[cfg(target_arch = "x86_64")]
         idt: {
-            use libarch::x64::structures::idt;
+            use crate::arch::x64::structures::idt;
 
             if !crate::PARAMETERS.low_memory
                 && let Ok(idt_ptr) = libcommon::memory::allocate_static_zeroed::<idt::InterruptDescriptorTable>() {
@@ -109,11 +108,11 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
         },
         #[cfg(target_arch = "x86_64")]
         tss: {
-            use libarch::x64::structures::{gdt, tss};
+            use crate::arch::x64::structures::{gdt, tss};
 
             let tss_ptr = {
+                use crate::arch::{reexport::x86_64::VirtAddr, x64::structures::idt::StackTableIndex};
                 use core::num::NonZeroUsize;
-                use libarch::{reexport::x86_64::VirtAddr, x64::structures::idt::StackTableIndex};
                 use libcommon::memory::allocate_static_zeroed;
 
                 let ptr = allocate_static_zeroed::<tss::TaskStateSegment>().unwrap();
@@ -183,7 +182,7 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
         },
         #[cfg(target_arch = "x86_64")]
         apic: {
-            use libarch::{interrupts::Vector, x64};
+            use crate::{arch::x64, interrupts::Vector};
 
             let apic = x64::structures::apic::Apic::new(Some(|address: libcommon::Address<libcommon::Physical>| {
                 use libcommon::{Address, Page, Virtual};
@@ -265,11 +264,11 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
     local_state_ptr.cast::<*const ()>().write(local_state_ptr.cast::<u8>().add(8 + SYSCALL_STACK_SIZE).cast());
 
     #[cfg(target_arch = "x86_64")]
-    libarch::x64::registers::msr::IA32_KERNEL_GS_BASE::write(local_state_ptr as usize as u64);
+    crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::write(local_state_ptr as usize as u64);
 }
 
 pub fn with_scheduler<T>(func: impl FnOnce(&mut Scheduler) -> T) -> T {
-    libarch::interrupts::without(|| func(&mut get().scheduler))
+    crate::interrupts::without(|| func(&mut get().scheduler))
 }
 
 // TODO remove this, scheduling always enabled when local state init is done
@@ -287,13 +286,10 @@ pub unsafe fn begin_scheduling() {
     }
 
     // SAFETY: Value provided is non-zero.
-    preemption_wait(unsafe { core::num::NoNZeroU16::new_unchecked(1) });
+    preemption_wait(unsafe { core::num::NonZeroU16::new_unchecked(1) });
 }
 
-pub fn next_task(
-    ctrl_flow_context: &mut libarch::interrupts::ControlFlowContext,
-    arch_context: &mut libarch::interrupts::ArchContext,
-) {
+pub fn next_task(ctrl_flow_context: &mut crate::cpu::ControlContext, arch_context: &mut crate::cpu::ArchContext) {
     get().scheduler.next_task(ctrl_flow_context, arch_context);
 }
 
@@ -306,17 +302,17 @@ pub fn end_of_interrupt() {
 pub fn preemption_wait(interval_wait: core::num::NonZeroU16) {
     #[cfg(target_arch = "x86_64")]
     {
-        use libarch::x64::structures::apic;
+        use crate::arch::x64::structures::apic;
 
         let (apic, timer_interval) = &get().apic;
         match apic.get_timer().get_mode() {
             // SAFETY: Control flow expects timer initial count to be changed.
             apic::TimerMode::OneShot => unsafe {
-                apic.set_timer_initial_count(timer_interval.mul(interval_wait.get() as u64) as u32)
+                apic.set_timer_initial_count((timer_interval * (interval_wait.get() as u64)) as u32)
             },
             apic::TimerMode::TscDeadline => unsafe {
-                libarch::x64::registers::msr::IA32_TSC_DEADLINE::set(
-                    core::arch::x86_64::_rdtsc() + timer_interval.mul(interval_wait.get() as u64),
+                crate::arch::x64::registers::msr::IA32_TSC_DEADLINE::set(
+                    core::arch::x86_64::_rdtsc() + (timer_interval * (interval_wait.get() as u64)),
                 )
             },
             apic::TimerMode::Periodic => unimplemented!(),

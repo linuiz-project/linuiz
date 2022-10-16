@@ -64,7 +64,7 @@ impl Message {
 
         // MSI-X spec requires the low 2 bits be zeroed, for proper DWORD alignment.
         let addr =
-            ((libarch::x64::structures::apic::xAPIC_BASE_ADDR as u64) + ((processor_id << 12) as u64)) & !0b11;
+            ((crate::arch::x64::structures::apic::xAPIC_BASE_ADDR as u64) + ((processor_id << 12) as u64)) & !0b11;
         self.addr_low.write(addr as u32);
         // High address is reserved (zeroed) in x86.
         self.addr_high.write((addr >> 32) as u32);

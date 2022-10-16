@@ -1,6 +1,6 @@
 #![allow(non_camel_case_types, non_upper_case_globals)]
 
-use crate::{interrupts, x64::registers::msr::IA32_APIC_BASE};
+use crate::{arch::x64::registers::msr::IA32_APIC_BASE, interrupts};
 use bit_field::BitField;
 use core::marker::PhantomData;
 use libcommon::{Address, Physical, Virtual};
@@ -202,7 +202,7 @@ impl Apic {
             },
 
             // SAFETY: MSR addresses are known-valid from IA32 SDM.
-            Type::x2APIC => unsafe { crate::x64::registers::msr::rdmsr(register.x2apic_msr()) },
+            Type::x2APIC => unsafe { crate::arch::x64::registers::msr::rdmsr(register.x2apic_msr()) },
         }
     }
 
@@ -212,7 +212,7 @@ impl Apic {
             Type::xAPIC(address) => {
                 ((address.as_usize() + register.xapic_offset()) as *mut u32).write_volatile(value as u32)
             }
-            Type::x2APIC => crate::x64::registers::msr::wrmsr(register.x2apic_msr(), value),
+            Type::x2APIC => crate::arch::x64::registers::msr::wrmsr(register.x2apic_msr(), value),
         }
     }
 
@@ -425,10 +425,10 @@ impl LocalVector<'_, Timer> {
     }
 
     pub unsafe fn set_mode(&self, mode: TimerMode) -> &Self {
-        let tsc_dl_support = crate::x64::cpu::cpuid::CPUID
+        let tsc_dl_support = crate::arch::x64::cpu::cpuid::CPUID
             .get_feature_info()
             .as_ref()
-            .map_or(false, crate::x64::cpu::cpuid::FeatureInfo::has_tsc_deadline);
+            .map_or(false, crate::arch::x64::cpu::cpuid::FeatureInfo::has_tsc_deadline);
 
         assert!(mode != TimerMode::TscDeadline || tsc_dl_support, "TSC deadline is not supported on this CPU.");
 
@@ -440,7 +440,7 @@ impl LocalVector<'_, Timer> {
         if tsc_dl_support {
             // IA32 SDM instructs utilizing the `mfence` instruction to ensure all writes to the IA32_TSC_DEADLINE
             // MSR are serialized *after* the APIC timer mode switch (`wrmsr` to `IA32_TSC_DEADLINE` is non-serializing).
-            crate::x64::instructions::sync::mfence();
+            crate::arch::x64::instructions::sync::mfence();
         }
 
         self

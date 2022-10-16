@@ -53,7 +53,7 @@ fn drivers() {
                 crate::memory::Mapper::new(
                     4,
                     crate::memory::get_hhdm_address(),
-                    Some(libarch::memory::VmemRegister::read()),
+                    Some(crate::memory::VmemRegister::read()),
                 )
                 .expect("failed to create page manager for driver")
             };
@@ -166,9 +166,9 @@ fn drivers() {
                         #[cfg(target_arch = "x86_64")]
                         {
                             (
-                                libarch::x64::cpu::GeneralContext::empty(),
-                                libarch::x64::cpu::SpecialContext::flags_with_user_segments(
-                                    libarch::x64::registers::RFlags::INTERRUPT_FLAG,
+                                crate::arch::x64::cpu::GeneralRegisters::empty(),
+                                crate::arch::x64::cpu::SpecialRegisters::flags_with_user_segments(
+                                    crate::arch::x64::registers::RFlags::INTERRUPT_FLAG,
                                 ),
                             )
                         }

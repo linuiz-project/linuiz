@@ -1,7 +1,6 @@
-use crate::memory::{AttributeModify, PageTable, PageTableEntry};
-use libarch::{
+use crate::{
     interrupts,
-    memory::{PageAttributes, VmemRegister},
+    memory::{AttributeModify, PageAttributes, PageTable, PageTableEntry, VmemRegister},
 };
 use libcommon::{
     memory::{Mut, Ref},
@@ -59,16 +58,12 @@ impl Mapper {
     }
 
     pub unsafe fn from_current(hhdm_address: Address<Virtual>) -> Self {
-        let root_frame = libarch::memory::VmemRegister::read().frame();
+        let root_frame = VmemRegister::read().frame();
         let root_table_entry = PageTableEntry::new(root_frame, PageAttributes::PRESENT);
 
         Self(RwLock::new(Data {
             // TODO fix this for rv64 Sv39
-            depth: if libarch::memory::supports_5_level_paging() && libarch::memory::is_5_level_paged() {
-                5
-            } else {
-                4
-            },
+            depth: if crate::memory::supports_5_level_paging() && crate::memory::is_5_level_paged() { 5 } else { 4 },
             root_frame,
             hhdm_address,
             entry: root_table_entry,
@@ -125,7 +120,7 @@ impl Mapper {
                         });
 
                         #[cfg(target_arch = "x86_64")]
-                        libarch::x64::instructions::tlb::invlpg(page);
+                        crate::arch::x64::instructions::tlb::invlpg(page);
 
                         Ok(())
                     }
@@ -164,7 +159,7 @@ impl Mapper {
 
                     // Invalidate the page in the TLB.
                     #[cfg(target_arch = "x86_64")]
-                    libarch::x64::instructions::tlb::invlpg(page);
+                    crate::arch::x64::instructions::tlb::invlpg(page);
                 })
             })
         })
@@ -235,7 +230,7 @@ impl Mapper {
                     entry.set_attributes(attributes, modify_mode);
 
                     #[cfg(target_arch = "x86_64")]
-                    libarch::x64::instructions::tlb::invlpg(page);
+                    crate::arch::x64::instructions::tlb::invlpg(page);
 
                     Ok(())
                 }
@@ -255,7 +250,7 @@ impl Mapper {
 
             #[cfg(target_arch = "x86_64")]
             {
-                Some(VmemRegister(vmap.root_frame, libarch::x64::registers::control::CR3Flags::empty()))
+                Some(VmemRegister(vmap.root_frame, crate::arch::x64::registers::control::CR3Flags::empty()))
             }
         })
     }
@@ -267,9 +262,9 @@ impl Mapper {
             let vmap = self.0.write();
 
             #[cfg(target_arch = "x86_64")]
-            libarch::x64::registers::control::CR3::write(
+            crate::arch::x64::registers::control::CR3::write(
                 vmap.root_frame,
-                libarch::x64::registers::control::CR3Flags::empty(),
+                crate::arch::x64::registers::control::CR3Flags::empty(),
             );
 
             Ok(())

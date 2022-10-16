@@ -1,7 +1,7 @@
 #[cfg(target_arch = "x86_64")]
 mod clock {
     pub static SYSTEM_CLOCK: spin::Lazy<Clock> = spin::Lazy::new(|| {
-        libarch::interrupts::without(|| {
+        crate::interrupts::without(|| {
             // TODO support for invariant TSC as clock
 
             Clock::load().unwrap()

@@ -1,5 +1,4 @@
 use crate::memory::get_hhdm_address;
-use libarch::interrupts::ControlFlowContext;
 use libcommon::{Address, Page};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -8,55 +7,6 @@ pub enum Syscall {
     ///
     /// Vector: 0x100
     Log { level: log::Level, cstr_ptr: *const core::ffi::c_char },
-}
-
-#[no_mangle]
-#[repr(align(0x10))]
-fn __syscall_handler(
-    vector: u64,
-    arg0: u64,
-    arg1: u64,
-    _arg2: u64,
-    _arg3: u64,
-    _arg4: u64,
-    ret_ip: u64,
-    ret_sp: u64,
-    _regs: &mut libarch::interrupts::SyscallContext,
-) -> ControlFlowContext {
-    let syscall = match vector {
-        0x100 => {
-            use log::Level;
-
-            // TODO possibly PR the `log` crate to make `log::Level::from_usize()` public.
-            let log_level = match arg0 {
-                1 => Ok(Level::Error),
-                2 => Ok(Level::Warn),
-                3 => Ok(Level::Info),
-                4 => Ok(Level::Debug),
-                arg0 => Err(arg0),
-            };
-
-            match log_level {
-                Ok(level) => Some(Syscall::Log { level, cstr_ptr: arg1 as usize as *const _ }),
-                Err(invalid_level) => {
-                    warn!("Invalid log level provided: {}", invalid_level);
-                    None
-                }
-            }
-        }
-
-        vector => {
-            warn!("Unhandled system call vector: {:#X}", vector);
-            None
-        }
-    };
-
-    match syscall {
-        Some(syscall) => do_syscall(syscall),
-        None => warn!("Failed to execute system call."),
-    }
-
-    ControlFlowContext { ip: ret_ip, sp: ret_sp }
 }
 
 pub fn do_syscall(vector: Syscall) {
