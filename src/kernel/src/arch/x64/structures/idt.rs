@@ -1,4 +1,4 @@
-use crate::x64::cpu::GeneralContext;
+use crate::arch::x64::cpu::GeneralRegisters;
 use libcommon::{Address, Virtual};
 use x86_64::structures::idt;
 
@@ -172,7 +172,7 @@ macro_rules! irq_stub {
     ($irq_vector:literal) => {
         paste::paste! {
             #[naked]
-            extern "x86-interrupt" fn [<irq_ $irq_vector>](_: crate::x64::structures::idt::InterruptStackFrame) {
+            extern "x86-interrupt" fn [<irq_ $irq_vector>](_: crate::arch::x64::structures::idt::InterruptStackFrame) {
                 unsafe {
                     core::arch::asm!(
                         "cld",
@@ -196,7 +196,7 @@ macro_rules! irq_stub {
                         pop_gprs!(),
                         "iretq",
                         const $irq_vector,
-                        sym crate::x64::cpu::irq_handoff,
+                        sym crate::arch::x64::cpu::irq_handoff,
                         options(noreturn)
                     );
                 }
@@ -211,94 +211,94 @@ macro_rules! irq_stub {
 #[allow(non_camel_case_types)]
 pub enum Exception<'a> {
     /// Generated upon an attempt to divide by zero.
-    DivideError(&'a InterruptStackFrame, &'a GeneralContext),
+    DivideError(&'a InterruptStackFrame, &'a GeneralRegisters),
 
     /// Exception generated due to various conditions, outlined within the IA-32 SDM.
     /// Debug registers will be updated to provide context to this exception.
-    Debug(&'a InterruptStackFrame, &'a GeneralContext),
+    Debug(&'a InterruptStackFrame, &'a GeneralRegisters),
 
     /// Typically caused by unrecoverable RAM or other hardware errors.
-    NonMaskable(&'a InterruptStackFrame, &'a GeneralContext),
+    NonMaskable(&'a InterruptStackFrame, &'a GeneralRegisters),
 
     /// Occurs when `int3` is called in software.
-    Breakpoint(&'a InterruptStackFrame, &'a GeneralContext),
+    Breakpoint(&'a InterruptStackFrame, &'a GeneralRegisters),
 
     /// Occurs when the `into` instruction is executed with the `OVERFLOW` bit set in RFlags.
-    Overflow(&'a InterruptStackFrame, &'a GeneralContext),
+    Overflow(&'a InterruptStackFrame, &'a GeneralRegisters),
 
     /// Occurs when the `bound` instruction is executed and fails its check.
-    BoundRangeExceeded(&'a InterruptStackFrame, &'a GeneralContext),
+    BoundRangeExceeded(&'a InterruptStackFrame, &'a GeneralRegisters),
 
     /// Occurs when the processor tries to execute an invalid or undefined opcode.
-    InvalidOpcode(&'a InterruptStackFrame, &'a GeneralContext),
+    InvalidOpcode(&'a InterruptStackFrame, &'a GeneralRegisters),
 
     /// Generated when there is no FPU available, but an FPU-reliant instruction is executed.
-    DeviceNotAvailable(&'a InterruptStackFrame, &'a GeneralContext),
+    DeviceNotAvailable(&'a InterruptStackFrame, &'a GeneralRegisters),
 
     /// Occurs when an exception is unhandled or when an exception occurs while the CPU is
     /// trying to call an exception handler.
-    DoubleFault(&'a InterruptStackFrame, &'a GeneralContext),
+    DoubleFault(&'a InterruptStackFrame, &'a GeneralRegisters),
 
     /// Occurs when an invalid segment selector is referenced as part of a task switch, or as a
     /// result of a control transfer through a gate descriptor, which results in an invalid
     /// stack-segment reference using an SS selector in the TSS
-    InvalidTSS(&'a InterruptStackFrame, idt::SelectorErrorCode, &'a GeneralContext),
+    InvalidTSS(&'a InterruptStackFrame, idt::SelectorErrorCode, &'a GeneralRegisters),
 
     /// Occurs when trying to load a segment or gate which has its `PRESENT` bit unset.
-    SegmentNotPresent(&'a InterruptStackFrame, idt::SelectorErrorCode, &'a GeneralContext),
+    SegmentNotPresent(&'a InterruptStackFrame, idt::SelectorErrorCode, &'a GeneralRegisters),
 
     /// Occurs when:
     ///     - Loading a stack-segment referencing a segment descriptor which is not present;
     ///     - Any `push`/`pop` instruction or any instruction using `esp`/`ebp` as a base register
     ///         is executed, while the stack address is not in canonical form;
     ///     - The stack-limit check fails.
-    StackSegmentFault(&'a InterruptStackFrame, idt::SelectorErrorCode, &'a GeneralContext),
+    StackSegmentFault(&'a InterruptStackFrame, idt::SelectorErrorCode, &'a GeneralRegisters),
 
     /// Occurs when:
     ///     - Segment error (privilege, type, limit, r/w rights).
     ///     - Executing a privileged instruction while CPL isn't supervisor (CPL0)
     ///     - Writing a `1` in a reserved register field or writing invalid value combinations (e.g. `CR0` with `PE` unset and `PG` set).
     ///     - Referencing or accessing a null descriptor.
-    GeneralProtectionFault(&'a InterruptStackFrame, idt::SelectorErrorCode, &'a GeneralContext),
+    GeneralProtectionFault(&'a InterruptStackFrame, idt::SelectorErrorCode, &'a GeneralRegisters),
 
     /// Occurs when:
     ///     - A page directory or table entry is not present in physical memory.
     ///     - Attempting to load the instruction TLB with a translation for a non-executable page.
     ///     - A protection cehck (privilege, r/w) failed.
     ///     - A reserved bit in the page directory table or entries is set to 1.
-    PageFault(&'a InterruptStackFrame, idt::PageFaultErrorCode, Address<Virtual>, &'a GeneralContext),
+    PageFault(&'a InterruptStackFrame, idt::PageFaultErrorCode, Address<Virtual>, &'a GeneralRegisters),
 
     /// Occurs when the `fwait` or `wait` instruction (or any floating point instruction) is executed, and the
     /// following conditions are true:
     ///     - `CR0.NE` is set.
     ///     - An unmasked x87 floating point exception is pending (i.e. the exception bit in the x87 floating point status-word register is set).
-    x87FloatingPoint(&'a InterruptStackFrame, &'a GeneralContext),
+    x87FloatingPoint(&'a InterruptStackFrame, &'a GeneralRegisters),
 
     /// Occurs when alignment checking is enabled and an unaligned memory data reference is performed.
     ///
     /// REMARK: Alignment checks are only performed when in usermode (CPL3).
-    AlignmentCheck(&'a InterruptStackFrame, u64, &'a GeneralContext),
+    AlignmentCheck(&'a InterruptStackFrame, u64, &'a GeneralRegisters),
 
     /// Exception is model-specific and processor implementations are not required to support it.
     ///
     /// REMARK: It uses model-specific registers (MSRs) to provide error information.
     ///         It is disabled by default. Set `CR4.MCE` to enable it.
-    MachineCheck(&'a InterruptStackFrame, &'a GeneralContext),
+    MachineCheck(&'a InterruptStackFrame, &'a GeneralRegisters),
 
     /* VIRTUALIZATION EXCEPTIONS (not supported) */
     /// Occurs when an unmasked 128-bit media floating-point exception occurs and the `CR4.OSXMMEXCPT` bit
     /// is set. If it is not set, this error condition will trigger an invalid opcode exception instead.
-    SimdFlaotingPoint(&'a InterruptStackFrame, &'a GeneralContext),
+    SimdFlaotingPoint(&'a InterruptStackFrame, &'a GeneralRegisters),
 
     /// Occurs only on processors that support setting the `EPT-violation` bit for VM execution control.
-    Virtualization(&'a InterruptStackFrame, &'a GeneralContext),
+    Virtualization(&'a InterruptStackFrame, &'a GeneralRegisters),
 
     /// Occurs under several conditions on the `ret`/`iret`/`rstorssp`/`setssbsy` instructions.
-    ControlProtection(&'a InterruptStackFrame, &'a GeneralContext),
+    ControlProtection(&'a InterruptStackFrame, &'a GeneralRegisters),
 
-    HypervisorInjection(&'a InterruptStackFrame, &'a GeneralContext),
+    HypervisorInjection(&'a InterruptStackFrame, &'a GeneralRegisters),
 
-    VMMCommunication(&'a InterruptStackFrame, &'a GeneralContext),
+    VMMCommunication(&'a InterruptStackFrame, &'a GeneralRegisters),
 
     /// Not an exception; it will never be handled by an interrupt handler. It is included here for completeness.
     TripleFault,
@@ -307,66 +307,66 @@ pub enum Exception<'a> {
 pub fn common_exception_handler(exception: Exception) {
     match exception {
          Exception::PageFault(_, _, address, _)
-             if let Ok(()) = unsafe { crate::interrupts::PAGE_FAULT_HANDLER(address) } => {}
+             if let Ok(()) = unsafe { crate::interrupts::pf_handler(address) } => {}
 
          exception => panic!("{:#X?}", exception)
      }
 }
 
 exception_handler!(de, ());
-extern "sysv64" fn de_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralContext) {
+extern "sysv64" fn de_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralRegisters) {
     common_exception_handler(Exception::DivideError(stack_frame, gprs))
 }
 
 exception_handler!(db, ());
-extern "sysv64" fn db_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralContext) {
+extern "sysv64" fn db_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralRegisters) {
     common_exception_handler(Exception::Debug(stack_frame, gprs))
 }
 
 exception_handler!(nmi, ());
-extern "sysv64" fn nmi_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralContext) {
+extern "sysv64" fn nmi_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralRegisters) {
     common_exception_handler(Exception::NonMaskable(stack_frame, gprs))
 }
 
 exception_handler!(bp, ());
-extern "sysv64" fn bp_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralContext) {
+extern "sysv64" fn bp_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralRegisters) {
     common_exception_handler(Exception::Breakpoint(stack_frame, gprs))
 }
 
 exception_handler!(of, ());
-extern "sysv64" fn of_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralContext) {
+extern "sysv64" fn of_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralRegisters) {
     common_exception_handler(Exception::Overflow(stack_frame, gprs))
 }
 
 exception_handler!(br, ());
-extern "sysv64" fn br_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralContext) {
+extern "sysv64" fn br_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralRegisters) {
     common_exception_handler(Exception::BoundRangeExceeded(stack_frame, gprs))
 }
 
 exception_handler!(ud, ());
-extern "sysv64" fn ud_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralContext) {
+extern "sysv64" fn ud_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralRegisters) {
     common_exception_handler(Exception::InvalidOpcode(stack_frame, gprs))
 }
 
 exception_handler!(nm, ());
-extern "sysv64" fn nm_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralContext) {
+extern "sysv64" fn nm_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralRegisters) {
     common_exception_handler(Exception::DeviceNotAvailable(stack_frame, gprs))
 }
 
 exception_handler_with_error!(df, u64, !);
-extern "sysv64" fn df_handler_inner(stack_frame: &InterruptStackFrame, _: u64, gprs: &GeneralContext) -> ! {
+extern "sysv64" fn df_handler_inner(stack_frame: &InterruptStackFrame, _: u64, gprs: &GeneralRegisters) -> ! {
     common_exception_handler(Exception::DoubleFault(stack_frame, gprs));
     // Wait indefinite in case the above exception handler returns control flow.
     crate::interrupts::wait_loop()
 }
 
 exception_handler_with_error!(ts, u64, ());
-extern "sysv64" fn ts_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &GeneralContext) {
+extern "sysv64" fn ts_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &GeneralRegisters) {
     common_exception_handler(Exception::InvalidTSS(stack_frame, idt::SelectorErrorCode::new_truncate(error_code), gprs))
 }
 
 exception_handler_with_error!(np, u64, ());
-extern "sysv64" fn np_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &GeneralContext) {
+extern "sysv64" fn np_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &GeneralRegisters) {
     common_exception_handler(Exception::SegmentNotPresent(
         stack_frame,
         idt::SelectorErrorCode::new_truncate(error_code),
@@ -375,7 +375,7 @@ extern "sysv64" fn np_handler_inner(stack_frame: &InterruptStackFrame, error_cod
 }
 
 exception_handler_with_error!(ss, u64, ());
-extern "sysv64" fn ss_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &GeneralContext) {
+extern "sysv64" fn ss_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &GeneralRegisters) {
     common_exception_handler(Exception::StackSegmentFault(
         stack_frame,
         idt::SelectorErrorCode::new_truncate(error_code),
@@ -384,7 +384,7 @@ extern "sysv64" fn ss_handler_inner(stack_frame: &InterruptStackFrame, error_cod
 }
 
 exception_handler_with_error!(gp, u64, ());
-extern "sysv64" fn gp_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &GeneralContext) {
+extern "sysv64" fn gp_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &GeneralRegisters) {
     common_exception_handler(Exception::GeneralProtectionFault(
         stack_frame,
         idt::SelectorErrorCode::new_truncate(error_code),
@@ -396,38 +396,38 @@ exception_handler_with_error!(pf, idt::PageFaultErrorCode, ());
 extern "sysv64" fn pf_handler_inner(
     stack_frame: &InterruptStackFrame,
     error_code: idt::PageFaultErrorCode,
-    gprs: &GeneralContext,
+    gprs: &GeneralRegisters,
 ) {
-    let fault_address = crate::x64::registers::control::CR2::read();
+    let fault_address = crate::arch::x64::registers::control::CR2::read();
     common_exception_handler(Exception::PageFault(stack_frame, error_code, fault_address, gprs))
 }
 
 // --- reserved 15
 
 exception_handler!(mf, ());
-extern "sysv64" fn mf_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralContext) {
+extern "sysv64" fn mf_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralRegisters) {
     common_exception_handler(Exception::x87FloatingPoint(stack_frame, gprs))
 }
 
 exception_handler_with_error!(ac, u64, ());
-extern "sysv64" fn ac_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &GeneralContext) {
+extern "sysv64" fn ac_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &GeneralRegisters) {
     common_exception_handler(Exception::AlignmentCheck(stack_frame, error_code, gprs))
 }
 
 exception_handler!(mc, !);
-extern "sysv64" fn mc_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralContext) -> ! {
+extern "sysv64" fn mc_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralRegisters) -> ! {
     common_exception_handler(Exception::MachineCheck(stack_frame, gprs));
     // Wait indefinite in case the above exception handler returns control flow.
     crate::interrupts::wait_loop()
 }
 
 exception_handler!(xm, ());
-extern "sysv64" fn xm_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralContext) {
+extern "sysv64" fn xm_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralRegisters) {
     common_exception_handler(Exception::SimdFlaotingPoint(stack_frame, gprs))
 }
 
 exception_handler!(ve, ());
-extern "sysv64" fn ve_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralContext) {
+extern "sysv64" fn ve_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralRegisters) {
     common_exception_handler(Exception::Virtualization(stack_frame, gprs))
 }
 

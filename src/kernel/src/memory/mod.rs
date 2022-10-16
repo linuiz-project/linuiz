@@ -3,11 +3,10 @@ mod paging;
 
 pub mod io;
 pub mod slab;
-pub use libarch::memory::PageAttributes;
 pub use mapper::*;
 pub use paging::*;
 
-use libcommon::{Address, Virtual};
+use libcommon::{Address, Frame, Virtual};
 use spin::Once;
 
 pub fn get_hhdm_address() -> Address<Virtual> {
@@ -46,3 +45,62 @@ pub fn get_kernel_mapper() -> &'static Mapper {
 //         },
 //     );
 // }
+
+#[cfg(target_arch = "x86_64")]
+pub struct VmemRegister(pub Address<Frame>, pub crate::arch::x64::registers::control::CR3Flags);
+#[cfg(target_arch = "riscv64")]
+pub struct VmemRegister(pub Address<Frame>, pub u16, pub crate::arch::rv64::registers::satp::Mode);
+
+impl VmemRegister {
+    pub fn read() -> Self {
+        #[cfg(target_arch = "x86_64")]
+        {
+            let args = crate::arch::x64::registers::control::CR3::read();
+            Self(args.0, args.1)
+        }
+
+        #[cfg(target_arch = "riscv64")]
+        {
+            let args = crate::arch::rv64::registers::satp::read();
+            Self(args.0, args.1, args.2)
+        }
+    }
+
+    /// SAFETY: Writing to this register has the chance to externally invalidate memory references.
+    pub unsafe fn write(args: &Self) {
+        #[cfg(target_arch = "x86_64")]
+        crate::arch::x64::registers::control::CR3::write(args.0, args.1);
+
+        #[cfg(target_arch = "riscv64")]
+        crate::arch::rv64::registers::satp::write(args.0.as_usize(), args.1, args.2);
+    }
+
+    #[inline(always)]
+    pub const fn frame(&self) -> Address<Frame> {
+        self.0
+    }
+}
+
+pub fn supports_5_level_paging() -> bool {
+    #[cfg(target_arch = "x86_64")]
+    {
+        crate::arch::x64::cpu::cpuid::EXT_FEATURE_INFO
+            .as_ref()
+            .map(|ext_feature_info| ext_feature_info.has_la57())
+            .unwrap_or(false)
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    {
+        todo!()
+    }
+}
+
+pub fn is_5_level_paged() -> bool {
+    #[cfg(target_arch = "x86_64")]
+    {
+        supports_5_level_paging()
+            && crate::arch::x64::registers::control::CR4::read()
+                .contains(crate::arch::x64::registers::control::CR4Flags::LA57)
+    }
+}

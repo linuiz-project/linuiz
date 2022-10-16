@@ -147,7 +147,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     STACK_TRACE_IN_PROGRESS.store(false, Ordering::Relaxed);
 
     // SAFETY: It's dead, Jim.
-    unsafe { libarch::interrupts::halt_and_catch_fire() }
+    unsafe { crate::interrupts::halt_and_catch_fire() }
 }
 
 #[alloc_error_handler]
@@ -155,5 +155,5 @@ fn alloc_error(error: core::alloc::Layout) -> ! {
     error!("KERNEL ALLOCATOR PANIC: {:?}", error);
 
     // SAFETY: It's dead, Jim.
-    unsafe { libarch::interrupts::halt_and_catch_fire() }
+    unsafe { crate::interrupts::halt_and_catch_fire() }
 }

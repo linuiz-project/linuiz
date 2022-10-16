@@ -1,9 +1,60 @@
 use core::fmt;
-use libarch::memory::{PageAttributes, PTE_FRAME_ADDRESS_MASK};
 use libcommon::{
     memory::{InteriorRef, Mut, Ref},
     Address, Frame, Page, Virtual,
 };
+
+#[cfg(target_arch = "x86_64")]
+bitflags::bitflags! {
+    #[repr(transparent)]
+    pub struct PageAttributes: u64 {
+        const PRESENT = 1 << 0;
+        const WRITABLE = 1 << 1;
+        const USER = 1 << 2;
+        const WRITE_THROUGH = 1 << 3;
+        const UNCACHEABLE = 1 << 4;
+        const ACCESSED = 1 << 5;
+        const DIRTY = 1 << 6;
+        const HUGE = 1 << 7;
+        const GLOBAL = 1 << 8;
+        const DEMAND = 1 << 9;
+        const NO_EXECUTE = 1 << 63;
+
+        const RO = Self::PRESENT.bits() | Self::NO_EXECUTE.bits();
+        const RW = Self::PRESENT.bits() | Self::WRITABLE.bits() | Self::NO_EXECUTE.bits();
+        const RX = Self::PRESENT.bits();
+        const PTE = Self::PRESENT.bits() | Self::WRITABLE.bits() | Self::USER.bits();
+
+        const MMIO = Self::RW.bits() | Self::UNCACHEABLE.bits();
+    }
+}
+
+#[cfg(target_arch = "riscv64")]
+bitflags::bitflags! {
+    #[repr(transparent)]
+    pub struct PageAttributes: u64 {
+        const VALID = 1 << 0;
+        const READ = 1 << 1;
+        const WRITE = 1 << 2;
+        const EXECUTE = 1 << 3;
+        const USER = 1 << 4;
+        const GLOBAL = 1 << 5;
+        const ACCESSED = 1 << 6;
+        const DIRTY = 1 << 7;
+
+        const RO = Self::VALID.bits() | Self::READ.bits();
+        const RW = Self::VALID.bits() | Self::READ.bits() | Self::WRITE.bits();
+        const RX = Self::VALID.bits() | Self::READ.bits() | Self::EXECUTE.bits();
+        const PTE = Self::VALID.bits() | Self::READ.bits() | Self::WRITE.bits();
+
+        const MMIO = Self::RW.bits();
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+pub const PTE_FRAME_ADDRESS_MASK: u64 = 0x000FFFFF_FFFFF000;
+#[cfg(target_arch = "riscv64")]
+pub const PTE_FRAME_ADDRESS_MASK: u64 = 0x003FFFFF_FFFFFC00;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttributeModify {
@@ -71,7 +122,7 @@ impl PageTableEntry {
         }
 
         #[cfg(target_arch = "x86_64")]
-        if !libarch::x64::registers::msr::IA32_EFER::get_nxe() {
+        if !crate::arch::x64::registers::msr::IA32_EFER::get_nxe() {
             // This bit is reserved if NXE is not supported. For now, this means silently removing it for compatability.
             attributes.remove(PageAttributes::NO_EXECUTE);
         }

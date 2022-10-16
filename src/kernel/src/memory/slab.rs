@@ -203,7 +203,7 @@ impl<'a> SlabAllocator<'a> {
     }
 
     fn with_table<T>(&self, func: impl FnOnce(&[Frame]) -> T) -> T {
-        libarch::interrupts::without(|| func(self.table))
+        crate::interrupts::without(|| func(self.table))
     }
 }
 

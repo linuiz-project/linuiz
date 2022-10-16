@@ -5,7 +5,7 @@ struct UartWriter(Uart<Data>);
 
 impl UartWriter {
     fn write_bytes(&mut self, bytes: core::str::Bytes) {
-        libarch::interrupts::without(|| {
+        crate::interrupts::without(|| {
             for (index, byte) in bytes.enumerate() {
                 if (index % 14) == 0 {
                     while !self.0.read_line_status().contains(uart::LineStatus::TRANSMIT_EMPTY_IDLE) {

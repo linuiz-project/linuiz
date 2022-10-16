@@ -4,7 +4,6 @@
     asm_const,
     asm_sym,
     naked_functions,
-    abi_x86_interrupt,
     sync_unsafe_cell,
     panic_info_message,
     allocator_api,
@@ -37,6 +36,7 @@
     clippy::wildcard_imports,
     dead_code
 )]
+#![cfg_attr(target_arch = "x86_64", feature(abi_x86_interrupt))]
 
 #[macro_use]
 extern crate log;
@@ -44,13 +44,15 @@ extern crate alloc;
 extern crate libcommon;
 
 mod acpi;
+mod arch;
+mod cpu;
 mod elf;
+mod interrupts;
 mod local_state;
 mod memory;
 mod modules;
 mod num;
 mod panic;
-mod syscall;
 mod time;
 
 use libcommon::{Address, Frame, Page, Virtual};
@@ -157,18 +159,14 @@ unsafe extern "C" fn _entry() -> ! {
 
         // Vendor strings from the CPU need to be enumerated per-platform.
         #[cfg(target_arch = "x86_64")]
-        if let Some(vendor_str) = libarch::x64::cpu::get_vendor() {
+        if let Some(vendor_str) = crate::arch::x64::cpu::get_vendor() {
             info!("Vendor              {vendor_str}");
         } else {
             info!("Vendor              None");
         }
     }
 
-    #[cfg(target_arch = "x86_64")]
-    {
-        libarch::x64::structures::load_static_tables();
-        libarch::cpu::setup();
-    }
+    crate::cpu::setup();
 
     libcommon::memory::set_global_allocator({
         static KERNEL_ALLOCATOR: spin::Once<crate::memory::slab::SlabAllocator<'static>> = spin::Once::new();
@@ -376,12 +374,7 @@ unsafe extern "C" fn _entry() -> ! {
 
                 cpu_info.goto_address = if PARAMETERS.smp {
                     extern "C" fn _smp_entry(info: *const limine::LimineSmpInfo) -> ! {
-                        // SAFETY: Function is called only once per core.
-                        #[cfg(target_arch = "x86_64")]
-                        unsafe {
-                            libarch::x64::structures::load_static_tables();
-                            libarch::cpu::setup();
-                        };
+                        crate::cpu::setup();
 
                         // SAFETY: All currently referenced memory should also be mapped in the kernel page tables.
                         unsafe { crate::memory::get_kernel_mapper().commit_vmem_register().unwrap() };
@@ -394,7 +387,7 @@ unsafe extern "C" fn _entry() -> ! {
                 } else {
                     extern "C" fn _idle_forever(_: *const limine::LimineSmpInfo) -> ! {
                         // SAFETY: Murder isn't legal. Is this?
-                        unsafe { libarch::interrupts::halt_and_catch_fire() }
+                        unsafe { crate::interrupts::halt_and_catch_fire() }
                     }
 
                     _idle_forever
@@ -439,11 +432,11 @@ unsafe extern "C" fn _entry() -> ! {
     {
         //     debug!("Configuring I/O APIC and processing interrupt overrides.");
 
-        //     let ioapics = libarch::x64::structures::ioapic::get_io_apics();
+        //     let ioapics = crate::arch::x64::structures::ioapic::get_io_apics();
         //     let platform_info = crate::acpi::get_platform_info();
 
         //     if let acpi::platform::interrupt::InterruptModel::Apic(apic) = &platform_info.interrupt_model {
-        //         use libarch::interrupts;
+        //         use crate::interrupts;
 
         //         let mut cur_vector = 0x70;
 
@@ -534,69 +527,9 @@ unsafe extern "C" fn _entry() -> ! {
 pub(self) unsafe fn kernel_thread_setup(core_id: u32) -> ! {
     crate::local_state::init(core_id, 1000);
 
-    libarch::interrupts::enable();
+    crate::interrupts::enable();
     trace!("Enabling and starting scheduler...");
     crate::local_state::begin_scheduling();
     trace!("Core will soon execute a task, or otherwise halt.");
-    libarch::interrupts::wait_loop()
-}
-
-#[doc(hidden)]
-mod handlers {
-    use libcommon::{Address, Page, Virtual};
-
-    /// SAFETY: Do not call this function.
-    #[no_mangle]
-    #[repr(align(0x10))]
-    unsafe fn __pf_handler(address: Address<Virtual>) -> Result<(), libarch::interrupts::PageFaultHandlerError> {
-        use crate::memory::PageAttributes;
-        use libarch::interrupts::PageFaultHandlerError;
-
-        let fault_page = Address::<Page>::new(address, None).unwrap();
-        let virtual_mapper = crate::memory::Mapper::from_current(crate::memory::get_hhdm_address());
-        let Some(mut fault_page_attributes) = virtual_mapper.get_page_attributes(fault_page) else { return Err(PageFaultHandlerError::AddressNotMapped) };
-        if fault_page_attributes.contains(PageAttributes::DEMAND) {
-            virtual_mapper
-                .auto_map(fault_page, {
-                    // remove demand bit ...
-                    fault_page_attributes.remove(PageAttributes::DEMAND);
-                    // ... insert present bit ...
-                    fault_page_attributes.insert(PageAttributes::PRESENT);
-                    // ... return attributes
-                    fault_page_attributes
-                })
-                .unwrap();
-
-            // SAFETY: We know the page was just mapped, and contains no relevant memory.
-            fault_page.zero_memory();
-
-            Ok(())
-        } else {
-            Err(PageFaultHandlerError::NotDemandPaged)
-        }
-    }
-
-    /// SAFETY: Do not call this function.
-    #[no_mangle]
-    #[repr(align(0x10))]
-    unsafe fn __irq_handler(
-        irq_vector: u64,
-        ctrl_flow_context: &mut libarch::interrupts::ControlFlowContext,
-        arch_context: &mut libarch::interrupts::ArchContext,
-    ) {
-        use libarch::interrupts::Vector;
-
-        match Vector::try_from(irq_vector) {
-            Ok(vector) if vector == Vector::Timer => {
-                crate::local_state::next_task(ctrl_flow_context, arch_context);
-            }
-
-            vector_result => {
-                warn!("Unhandled IRQ vector: {:?}", vector_result);
-            }
-        }
-
-        #[cfg(target_arch = "x86_64")]
-        crate::local_state::end_of_interrupt();
-    }
+    crate::interrupts::wait_loop()
 }

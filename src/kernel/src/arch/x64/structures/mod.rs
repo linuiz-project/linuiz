@@ -7,10 +7,10 @@ pub mod ioapic;
 pub mod tss;
 
 pub fn load_static_tables() {
-    use crate::x64::structures::idt::InterruptDescriptorTable;
+    use crate::arch::x64::structures::idt::InterruptDescriptorTable;
 
     // Always initialize GDT prior to configuring IDT.
-    crate::x64::structures::gdt::load();
+    crate::arch::x64::structures::gdt::load();
 
     /*
      * IDT
@@ -22,8 +22,8 @@ pub fn load_static_tables() {
     crate::interrupts::without(|| {
         static LOW_MEMORY_IDT: Lazy<InterruptDescriptorTable> = Lazy::new(|| {
             let mut idt = InterruptDescriptorTable::new();
-            crate::x64::structures::idt::set_exception_handlers(&mut idt);
-            crate::x64::structures::idt::set_stub_handlers(&mut idt);
+            crate::arch::x64::structures::idt::set_exception_handlers(&mut idt);
+            crate::arch::x64::structures::idt::set_stub_handlers(&mut idt);
             idt
         });
 

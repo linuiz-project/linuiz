@@ -48,9 +48,9 @@ pub struct Task {
     id: u64,
     prio: TaskPriority,
     //pcid: Option<PCID>,
-    pub ctrl_flow_context: libarch::interrupts::ControlFlowContext,
-    pub arch_context: libarch::interrupts::ArchContext,
-    pub root_page_table_args: libarch::memory::VmemRegister,
+    pub ctrl_flow_context: crate::cpu::ControlContext,
+    pub arch_context: crate::cpu::ArchContext,
+    pub root_page_table_args: crate::memory::VmemRegister,
 }
 
 impl Task {
@@ -58,13 +58,13 @@ impl Task {
         priority: TaskPriority,
         start: TaskStart,
         stack: TaskStack,
-        arch_context: libarch::interrupts::ArchContext,
-        root_page_table_args: libarch::memory::VmemRegister,
+        arch_context: crate::cpu::ArchContext,
+        root_page_table_args: crate::memory::VmemRegister,
     ) -> Self {
         Self {
             id: NEXT_THREAD_ID.fetch_add(1, core::sync::atomic::Ordering::AcqRel),
             prio: priority,
-            ctrl_flow_context: libarch::interrupts::ControlFlowContext {
+            ctrl_flow_context: crate::cpu::ControlContext {
                 ip: match start {
                     TaskStart::Address(address) => address.as_u64(),
                     TaskStart::Function(function) => function as usize as u64,
@@ -160,10 +160,10 @@ impl Scheduler {
     /// Attempts to schedule the next task in the local task queue.
     pub fn next_task(
         &mut self,
-        ctrl_flow_context: &mut libarch::interrupts::ControlFlowContext,
-        arch_context: &mut libarch::interrupts::ArchContext,
+        ctrl_flow_context: &mut crate::cpu::ControlContext,
+        arch_context: &mut crate::cpu::ArchContext,
     ) {
-        use libarch::memory::VmemRegister;
+        use crate::memory::VmemRegister;
 
         const PRIO_TIME_SLICE_MULTIPLIER: u16 = 10;
 
@@ -207,9 +207,7 @@ impl Scheduler {
                 PRIO_TIME_SLICE_MULTIPLIER
             };
 
-            debug_assert!(next_wait_multiplier > 0);
-
-            crate::local_state::preemption_wait(next_wait_multiplier);
+            crate::local_state::preemption_wait(core::num::NonZeroU16::new(next_wait_multiplier).unwrap());
         }
     }
 }
