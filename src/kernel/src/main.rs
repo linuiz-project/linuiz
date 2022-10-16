@@ -528,8 +528,7 @@ pub(self) unsafe fn kernel_thread_setup(core_id: u32) -> ! {
     crate::local_state::init(core_id, 1000);
 
     crate::interrupts::enable();
-    trace!("Enabling and starting scheduler...");
     crate::local_state::begin_scheduling();
-    trace!("Core will soon execute a task, or otherwise halt.");
+    trace!("Core #{} scheduled.", core_id);
     crate::interrupts::wait_loop()
 }
