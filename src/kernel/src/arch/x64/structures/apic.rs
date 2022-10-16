@@ -425,10 +425,10 @@ impl LocalVector<'_, Timer> {
     }
 
     pub unsafe fn set_mode(&self, mode: TimerMode) -> &Self {
-        let tsc_dl_support = crate::arch::x64::cpu::cpuid::CPUID
+        let tsc_dl_support = crate::arch::x64::cpuid::CPUID
             .get_feature_info()
             .as_ref()
-            .map_or(false, crate::arch::x64::cpu::cpuid::FeatureInfo::has_tsc_deadline);
+            .map_or(false, crate::arch::x64::cpuid::FeatureInfo::has_tsc_deadline);
 
         assert!(mode != TimerMode::TscDeadline || tsc_dl_support, "TSC deadline is not supported on this CPU.");
 

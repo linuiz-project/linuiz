@@ -67,3 +67,83 @@ pub mod stack {
     basic_ptr_register! {RBP}
     basic_ptr_register! {RSP}
 }
+
+#[derive(Debug, Clone, Copy)]
+pub struct SpecialRegisters {
+    pub cs: u64,
+    pub ss: u64,
+    pub flags: crate::arch::x64::registers::RFlags,
+}
+
+impl SpecialRegisters {
+    pub fn with_kernel_segments(flags: crate::arch::x64::registers::RFlags) -> Self {
+        Self {
+            cs: crate::arch::x64::structures::gdt::KCODE_SELECTOR.get().unwrap().0 as u64,
+            ss: crate::arch::x64::structures::gdt::KDATA_SELECTOR.get().unwrap().0 as u64,
+            flags,
+        }
+    }
+
+    pub fn flags_with_user_segments(flags: crate::arch::x64::registers::RFlags) -> Self {
+        Self {
+            cs: crate::arch::x64::structures::gdt::UCODE_SELECTOR.get().unwrap().0 as u64,
+            ss: crate::arch::x64::structures::gdt::UDATA_SELECTOR.get().unwrap().0 as u64,
+            flags,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct GeneralRegisters {
+    pub rax: u64,
+    pub rbx: u64,
+    pub rcx: u64,
+    pub rdx: u64,
+    pub rsi: u64,
+    pub rdi: u64,
+    pub rbp: u64,
+    pub r8: u64,
+    pub r9: u64,
+    pub r10: u64,
+    pub r11: u64,
+    pub r12: u64,
+    pub r13: u64,
+    pub r14: u64,
+    pub r15: u64,
+}
+
+impl GeneralRegisters {
+    pub const fn empty() -> Self {
+        Self {
+            rax: 0,
+            rbx: 0,
+            rcx: 0,
+            rdx: 0,
+            rsi: 0,
+            rdi: 0,
+            rbp: 0,
+            r8: 0,
+            r9: 0,
+            r10: 0,
+            r11: 0,
+            r12: 0,
+            r13: 0,
+            r14: 0,
+            r15: 0,
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[repr(C, packed)]
+pub struct PreservedRegistersSysv64 {
+    r15: u64,
+    r14: u64,
+    r13: u64,
+    r12: u64,
+    rbp: u64,
+    rbx: u64,
+    rfl: u64,
+    rsp: u64,
+}

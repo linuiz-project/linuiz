@@ -1,11 +1,11 @@
-use crate::arch::x64::cpu::GeneralRegisters;
+use crate::arch::x64::registers::GeneralRegisters;
 use libcommon::{Address, Virtual};
 use x86_64::structures::idt;
 
 pub use x86_64::structures::idt::{InterruptStackFrame, InterruptStackFrameValue};
 
 /// Thin wrapper around [`x86_64::structures::idt::InterruptDescriptorTable`], implementing [`bytemuck::Zeroable`].
-#[repr(C, align(16))]
+#[repr(C, align(0x10))]
 #[derive(Clone, Debug)]
 pub struct InterruptDescriptorTable(idt::InterruptDescriptorTable);
 
@@ -168,6 +168,45 @@ macro_rules! exception_handler_with_error {
     };
 }
 
+/// SAFETY: This function should not be called from software.
+unsafe extern "sysv64" fn irq_handoff(
+    irq_number: u64,
+    stack_frame: &mut crate::arch::x64::structures::idt::InterruptStackFrame,
+    general_context: &mut crate::arch::x64::registers::GeneralRegisters,
+) {
+    let mut control_flow_context = crate::cpu::ControlContext {
+        ip: stack_frame.instruction_pointer.as_u64(),
+        sp: stack_frame.stack_pointer.as_u64(),
+    };
+
+    let mut arch_context = (
+        *general_context,
+        crate::arch::x64::registers::SpecialRegisters {
+            cs: stack_frame.code_segment,
+            ss: stack_frame.stack_segment,
+            flags: crate::arch::x64::registers::RFlags::from_bits_truncate(stack_frame.cpu_flags),
+        },
+    );
+
+    // SAFETY: function pointer is guaranteed by the `set_interrupt_handler()` function to be valid.
+    unsafe { crate::interrupts::irq_handler(irq_number, &mut control_flow_context, &mut arch_context) };
+
+    // SAFETY: The stack frame *has* to be modified to switch contexts within this interrupt.
+    unsafe {
+        use crate::arch::reexport::x86_64::VirtAddr;
+
+        stack_frame.as_mut().write(crate::arch::x64::structures::idt::InterruptStackFrameValue {
+            instruction_pointer: VirtAddr::new(control_flow_context.ip),
+            stack_pointer: VirtAddr::new(control_flow_context.sp),
+            code_segment: arch_context.1.cs,
+            stack_segment: arch_context.1.ss,
+            cpu_flags: arch_context.1.flags.bits(),
+        });
+
+        *general_context = arch_context.0;
+    };
+}
+
 macro_rules! irq_stub {
     ($irq_vector:literal) => {
         paste::paste! {
@@ -196,7 +235,7 @@ macro_rules! irq_stub {
                         pop_gprs!(),
                         "iretq",
                         const $irq_vector,
-                        sym crate::arch::x64::cpu::irq_handoff,
+                        sym irq_handoff,
                         options(noreturn)
                     );
                 }

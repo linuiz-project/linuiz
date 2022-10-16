@@ -166,8 +166,8 @@ fn drivers() {
                         #[cfg(target_arch = "x86_64")]
                         {
                             (
-                                crate::arch::x64::cpu::GeneralRegisters::empty(),
-                                crate::arch::x64::cpu::SpecialRegisters::flags_with_user_segments(
+                                crate::arch::x64::registers::GeneralRegisters::empty(),
+                                crate::arch::x64::registers::SpecialRegisters::flags_with_user_segments(
                                     crate::arch::x64::registers::RFlags::INTERRUPT_FLAG,
                                 ),
                             )

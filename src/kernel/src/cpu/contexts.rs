@@ -6,6 +6,6 @@ pub struct ControlContext {
 }
 
 #[cfg(target_arch = "x86_64")]
-pub type ArchContext = (crate::arch::x64::cpu::GeneralRegisters, crate::arch::x64::cpu::SpecialRegisters);
+pub type ArchContext = (crate::arch::x64::registers::GeneralRegisters, crate::arch::x64::registers::SpecialRegisters);
 #[cfg(target_arch = "x86_64")]
-pub type SyscallContext = crate::arch::x64::cpu::PreservedRegistersSysv64;
+pub type SyscallContext = crate::arch::x64::registers::PreservedRegistersSysv64;

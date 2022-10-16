@@ -78,8 +78,10 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
                         use crate::arch::x64;
 
                         (
-                            x64::cpu::GeneralRegisters::empty(),
-                            x64::cpu::SpecialRegisters::with_kernel_segments(x64::registers::RFlags::INTERRUPT_FLAG),
+                            x64::registers::GeneralRegisters::empty(),
+                            x64::registers::SpecialRegisters::with_kernel_segments(
+                                x64::registers::RFlags::INTERRUPT_FLAG,
+                            ),
                         )
                     }
                 },
@@ -201,8 +203,7 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
                     )
                     .unwrap();
 
-                // SAFETY: TODO
-                unsafe { page_address.address() }
+                page_address.address()
             }))
             .unwrap();
 
@@ -214,48 +215,47 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
             apic.get_thermal_sensor().set_vector(Vector::Thermal as u8).set_masked(true);
 
             // Configure APIC timer in most advanced mode.
-            let timer_interval =
-                if x64::cpu::cpuid::FEATURE_INFO.has_tsc() && x64::cpu::cpuid::FEATURE_INFO.has_tsc_deadline() {
-                    apic.get_timer().set_mode(x64::structures::apic::TimerMode::TscDeadline);
+            let timer_interval = if x64::cpuid::FEATURE_INFO.has_tsc() && x64::cpuid::FEATURE_INFO.has_tsc_deadline() {
+                apic.get_timer().set_mode(x64::structures::apic::TimerMode::TscDeadline);
 
-                    let frequency = x64::cpu::cpuid::CPUID.get_processor_frequency_info().map_or_else(
-                        || {
-                            trace!("CPU does not support TSC frequency reporting via CPUID.");
+                let frequency = x64::cpuid::CPUID.get_processor_frequency_info().map_or_else(
+                    || {
+                        trace!("CPU does not support TSC frequency reporting via CPUID.");
 
-                            apic.sw_enable();
-                            apic.get_timer().set_masked(true);
+                        apic.sw_enable();
+                        apic.get_timer().set_masked(true);
 
-                            let start_tsc = core::arch::x86_64::_rdtsc();
-                            crate::time::SYSTEM_CLOCK.spin_wait_us(US_WAIT);
-                            let end_tsc = core::arch::x86_64::_rdtsc();
-
-                            (end_tsc - start_tsc) * (US_FREQ_FACTOR as u64)
-                        },
-                        |info| {
-                            (info.bus_frequency() as u64)
-                                / ((info.processor_base_frequency() as u64) * (info.processor_max_frequency() as u64))
-                        },
-                    );
-
-                    frequency / (timer_frequency as u64)
-                } else {
-                    apic.sw_enable();
-                    apic.set_timer_divisor(x64::structures::apic::TimerDivisor::Div1);
-                    apic.get_timer().set_masked(true).set_mode(x64::structures::apic::TimerMode::OneShot);
-
-                    let frequency = {
-                        apic.set_timer_initial_count(u32::MAX);
+                        let start_tsc = core::arch::x86_64::_rdtsc();
                         crate::time::SYSTEM_CLOCK.spin_wait_us(US_WAIT);
-                        let timer_count = apic.get_timer_current_count();
+                        let end_tsc = core::arch::x86_64::_rdtsc();
 
-                        (u32::MAX - timer_count) * US_FREQ_FACTOR
-                    };
+                        (end_tsc - start_tsc) * (US_FREQ_FACTOR as u64)
+                    },
+                    |info| {
+                        (info.bus_frequency() as u64)
+                            / ((info.processor_base_frequency() as u64) * (info.processor_max_frequency() as u64))
+                    },
+                );
 
-                    // Ensure we reset the APIC timer to avoid any errant interrupts.
-                    apic.set_timer_initial_count(0);
+                frequency / (timer_frequency as u64)
+            } else {
+                apic.sw_enable();
+                apic.set_timer_divisor(x64::structures::apic::TimerDivisor::Div1);
+                apic.get_timer().set_masked(true).set_mode(x64::structures::apic::TimerMode::OneShot);
 
-                    (frequency / (timer_frequency as u32)) as u64
+                let frequency = {
+                    apic.set_timer_initial_count(u32::MAX);
+                    crate::time::SYSTEM_CLOCK.spin_wait_us(US_WAIT);
+                    let timer_count = apic.get_timer_current_count();
+
+                    (u32::MAX - timer_count) * US_FREQ_FACTOR
                 };
+
+                // Ensure we reset the APIC timer to avoid any errant interrupts.
+                apic.set_timer_initial_count(0);
+
+                (frequency / (timer_frequency as u32)) as u64
+            };
 
             (apic, timer_interval)
         },
