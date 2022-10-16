@@ -78,16 +78,16 @@ pub struct SpecialRegisters {
 impl SpecialRegisters {
     pub fn with_kernel_segments(flags: crate::arch::x64::registers::RFlags) -> Self {
         Self {
-            cs: crate::arch::x64::structures::gdt::KCODE_SELECTOR.get().unwrap().0 as u64,
-            ss: crate::arch::x64::structures::gdt::KDATA_SELECTOR.get().unwrap().0 as u64,
+            cs: crate::arch::x64::structures::gdt::kernel_code_selector().0 as u64,
+            ss: crate::arch::x64::structures::gdt::kernel_data_selector().0 as u64,
             flags,
         }
     }
 
     pub fn flags_with_user_segments(flags: crate::arch::x64::registers::RFlags) -> Self {
         Self {
-            cs: crate::arch::x64::structures::gdt::UCODE_SELECTOR.get().unwrap().0 as u64,
-            ss: crate::arch::x64::structures::gdt::UDATA_SELECTOR.get().unwrap().0 as u64,
+            cs: crate::arch::x64::structures::gdt::user_code_selector().0 as u64,
+            ss: crate::arch::x64::structures::gdt::user_data_selector().0 as u64,
             flags,
         }
     }
