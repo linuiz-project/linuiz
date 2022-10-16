@@ -49,8 +49,6 @@ fn get() -> &'static mut LocalState {
 ///
 /// SAFETY: This function invariantly assumes it will only be called once.
 pub unsafe fn init(core_id: u32, timer_frequency: u16) {
-    trace!("Configuring local state: #{}", core_id);
-
     let local_state_ptr = alloc::alloc::alloc(core::alloc::Layout::from_size_align_unchecked(
         core::mem::size_of::<LocalState>(),
         core::mem::align_of::<LocalState>(),
@@ -220,7 +218,9 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
 
                 let frequency = x64::cpuid::CPUID.get_processor_frequency_info().map_or_else(
                     || {
-                        trace!("CPU does not support TSC frequency reporting via CPUID.");
+                        libcommon::do_once!({
+                            trace!("Processors do not support TSC frequency reporting via CPUID.");
+                        });
 
                         apic.sw_enable();
                         apic.get_timer().set_masked(true);
