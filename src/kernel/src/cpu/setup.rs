@@ -1,7 +1,7 @@
 #[cfg(target_arch = "x86_64")]
 pub fn setup() {
     use crate::arch::x64::{
-        cpu::cpuid,
+        cpuid,
         registers::control::{CR0Flags, CR4Flags, CR0, CR4},
         registers::{msr, RFlags},
         structures::gdt,

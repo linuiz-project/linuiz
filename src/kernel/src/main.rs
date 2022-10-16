@@ -159,10 +159,10 @@ unsafe extern "C" fn _entry() -> ! {
 
         // Vendor strings from the CPU need to be enumerated per-platform.
         #[cfg(target_arch = "x86_64")]
-        if let Some(vendor_str) = crate::arch::x64::cpu::get_vendor() {
-            info!("Vendor              {vendor_str}");
+        if let Some(vendor_info) = crate::arch::x64::cpuid::VENDOR_INFO.as_ref() {
+            info!("Vendor              {}", vendor_info.as_str());
         } else {
-            info!("Vendor              None");
+            info!("Vendor              Unknown");
         }
     }
 

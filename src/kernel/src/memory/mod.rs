@@ -84,7 +84,7 @@ impl VmemRegister {
 pub fn supports_5_level_paging() -> bool {
     #[cfg(target_arch = "x86_64")]
     {
-        crate::arch::x64::cpu::cpuid::EXT_FEATURE_INFO
+        crate::arch::x64::cpuid::EXT_FEATURE_INFO
             .as_ref()
             .map(|ext_feature_info| ext_feature_info.has_la57())
             .unwrap_or(false)
