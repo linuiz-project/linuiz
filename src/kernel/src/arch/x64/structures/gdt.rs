@@ -1,12 +1,18 @@
-use spin::Once;
-
 pub use x86_64::{
     instructions::tables::{lgdt, sgdt},
     registers::segmentation::SegmentSelector,
     structures::gdt::*,
 };
 
-static GDT: spin::Lazy<GlobalDescriptorTable> = spin::Lazy::new(|| {
+struct GdtData {
+    gdt: GlobalDescriptorTable,
+    kcode: SegmentSelector,
+    kdata: SegmentSelector,
+    ucode: SegmentSelector,
+    udata: SegmentSelector,
+}
+
+static GDT_DATA: spin::Lazy<GdtData> = spin::Lazy::new(|| {
     let mut gdt = GlobalDescriptorTable::new();
 
     // This GDT layout is very specific, due to the behaviour of the IA32_STAR MSR and its
@@ -14,30 +20,45 @@ static GDT: spin::Lazy<GlobalDescriptorTable> = spin::Lazy::new(|| {
     // standard set by the aforementioned IA32_STAR MSR.
     //
     // Details can be found in the description of the `syscall` and `sysret` instructions in the IA32 Software Developer's Manual.
-    KCODE_SELECTOR.call_once(|| gdt.add_entry(Descriptor::kernel_code_segment()));
-    KDATA_SELECTOR.call_once(|| gdt.add_entry(Descriptor::kernel_data_segment()));
-    UDATA_SELECTOR.call_once(|| gdt.add_entry(Descriptor::user_data_segment()));
-    UCODE_SELECTOR.call_once(|| gdt.add_entry(Descriptor::user_code_segment()));
+    let kcode = gdt.add_entry(Descriptor::kernel_code_segment());
+    let kdata = gdt.add_entry(Descriptor::kernel_data_segment());
+    let ucode = gdt.add_entry(Descriptor::user_data_segment());
+    let udata = gdt.add_entry(Descriptor::user_code_segment());
 
-    gdt
+    GdtData { gdt, kcode, kdata, ucode, udata }
 });
 
-pub static KCODE_SELECTOR: Once<SegmentSelector> = Once::new();
-pub static KDATA_SELECTOR: Once<SegmentSelector> = Once::new();
-pub static UCODE_SELECTOR: Once<SegmentSelector> = Once::new();
-pub static UDATA_SELECTOR: Once<SegmentSelector> = Once::new();
+#[inline(always)]
+pub fn kernel_code_selector() -> SegmentSelector {
+    GDT_DATA.kcode.clone()
+}
+
+#[inline(always)]
+pub fn kernel_data_selector() -> SegmentSelector {
+    GDT_DATA.kdata.clone()
+}
+
+#[inline(always)]
+pub fn user_code_selector() -> SegmentSelector {
+    GDT_DATA.ucode.clone()
+}
+
+#[inline(always)]
+pub fn user_data_selector() -> SegmentSelector {
+    GDT_DATA.udata.clone()
+}
 
 pub fn load() {
     // SAFETY:  This would technically be unsafe, but since we know the GDT's structure
     //          deterministically, running this function over and over would not change
     //          software execution at all. So, it's safe to execute all of this code.
     unsafe {
-        GDT.load();
+        GDT_DATA.gdt.load();
 
         use x86_64::instructions::segmentation::{Segment, CS, DS, ES, FS, GS, SS};
 
-        CS::set_reg(*KCODE_SELECTOR.get().unwrap());
-        SS::set_reg(*KDATA_SELECTOR.get().unwrap());
+        CS::set_reg(kernel_code_selector());
+        SS::set_reg(kernel_data_selector());
 
         // Because this is x86, everything is complicated. It's important we load the extra
         // data segment registers (fs/gs) with the null descriptors, because if they don't
