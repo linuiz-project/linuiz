@@ -37,7 +37,7 @@ fn drivers() {
 
         let base_offset = current_offset + 8 /* skip 'len' prefix */;
         let driver_data =
-            miniz_oxide::inflate::decompress_to_vec(&drivers_data[base_offset..(base_offset + driver_len)])
+            miniz_oxide::inflate::core::decompress(&drivers_data[base_offset..(base_offset + driver_len)])
                 .expect("failed to decompress driver");
         let driver_elf = crate::elf::Elf::from_bytes(&driver_data).unwrap();
         info!("{:?}", driver_elf);

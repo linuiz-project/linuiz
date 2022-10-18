@@ -5,21 +5,19 @@ struct UartWriter(Uart<Data>);
 
 impl UartWriter {
     fn write_bytes(&mut self, bytes: core::str::Bytes) {
-        crate::interrupts::without(|| {
-            for (index, byte) in bytes.enumerate() {
-                if (index % 14) == 0 {
-                    while !self.0.read_line_status().contains(uart::LineStatus::TRANSMIT_EMPTY_IDLE) {
-                        core::hint::spin_loop();
-                    }
-                } else {
-                    while !self.0.read_line_status().contains(uart::LineStatus::TRANSMIT_EMPTY) {
-                        core::hint::spin_loop();
-                    }
+        for (index, byte) in bytes.enumerate() {
+            if (index % 14) == 0 {
+                while !self.0.read_line_status().contains(uart::LineStatus::TRANSMIT_EMPTY_IDLE) {
+                    core::hint::spin_loop();
                 }
-
-                self.0.write_data(byte);
+            } else {
+                while !self.0.read_line_status().contains(uart::LineStatus::TRANSMIT_EMPTY) {
+                    core::hint::spin_loop();
+                }
             }
-        });
+
+            self.0.write_data(byte);
+        }
     }
 }
 
@@ -122,14 +120,16 @@ impl log::Log for Serial {
 
             let mut uart = self.0.lock();
 
-            uart.write_fmt(format_args!(
-                "[{whole_time:wwidth$}.{frac_time:0fwidth$}][{level}] {args}\n",
-                level = record.level(),
-                args = record.args(),
-                wwidth = 4,
-                fwidth = 3
-            ))
-            .ok();
+            crate::interrupts::without(|| {
+                uart.write_fmt(format_args!(
+                    "[{whole_time:wwidth$}.{frac_time:0fwidth$}][{level}] {args}\n",
+                    level = record.level(),
+                    args = record.args(),
+                    wwidth = 4,
+                    fwidth = 3
+                ))
+                .ok()
+            });
         }
     }
 

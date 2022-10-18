@@ -10,7 +10,7 @@ bit_field = "*"
 bitflags = "*"
 paste = "*"
 num_enum = { version = "*", default-features = false }
-spin = "*"
+spin = { git = "https://github.com/semiviral/spin-rs" }
 port-rs = { path = "../port-rs/" }
 acpi = { git = "https://github.com/semiviral/acpi" }
 aml = "*"

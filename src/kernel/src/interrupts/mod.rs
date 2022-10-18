@@ -95,13 +95,9 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
 #[repr(align(0x10))]
 pub unsafe fn irq_handler(irq_vector: u64, ctrl_flow_context: &mut ControlContext, arch_context: &mut ArchContext) {
     match Vector::try_from(irq_vector) {
-        Ok(vector) if vector == Vector::Timer => {
-            crate::local_state::next_task(ctrl_flow_context, arch_context);
-        }
+        Ok(Vector::Timer) => crate::local_state::next_task(ctrl_flow_context, arch_context),
 
-        vector_result => {
-            warn!("Unhandled IRQ vector: {:?}", vector_result);
-        }
+        vector_result => {}
     }
 
     #[cfg(target_arch = "x86_64")]
