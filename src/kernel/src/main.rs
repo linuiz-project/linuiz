@@ -40,8 +40,8 @@
 
 #[macro_use]
 extern crate log;
-extern crate alloc;
 extern crate libcommon;
+extern crate lzalloc;
 
 mod acpi;
 mod arch;

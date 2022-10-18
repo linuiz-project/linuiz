@@ -10,6 +10,8 @@ path = "../shared/uart/"
 [dependencies.libcommon]
 path = "../shared/libcommon/"
 features = ["global_allocator"]
+[dependencies.lzalloc]
+path = "../shared/lzalloc/"
 [target.'cfg(target_arch = "x86_64")'.dependencies.pic_8259]
 path = "../shared/pic_8259/"
 [dependencies]
@@ -23,10 +25,9 @@ paste = "*"
 # TODO perhaps don't use ACPI / DTB in the kernel, but abstract it in libarch/libcommon/libkernel?
 acpi = { git = "https://github.com/semiviral/acpi" }
 aml = "*"
-miniz_oxide = "*"
+miniz_oxide = { version = "*", default-features = false }
 bytemuck = "*"
 rustc-demangle = "*"
-crossbeam = { version = "*", features = ["alloc"], default_features = false }
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86_64 = "*"
 raw-cpuid = "*"

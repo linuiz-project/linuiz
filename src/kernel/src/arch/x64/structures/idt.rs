@@ -2,35 +2,7 @@ use crate::arch::x64::registers::GeneralRegisters;
 use libcommon::{Address, Virtual};
 use x86_64::structures::idt;
 
-pub use x86_64::structures::idt::{InterruptStackFrame, InterruptStackFrameValue};
-
-/// Thin wrapper around [`x86_64::structures::idt::InterruptDescriptorTable`], implementing [`bytemuck::Zeroable`].
-#[repr(C, align(0x10))]
-#[derive(Clone, Debug)]
-pub struct InterruptDescriptorTable(idt::InterruptDescriptorTable);
-
-// SAFETY: Zeroed memory is a valid state for an IDT.
-unsafe impl bytemuck::Zeroable for InterruptDescriptorTable {}
-
-impl InterruptDescriptorTable {
-    pub const fn new() -> Self {
-        Self(idt::InterruptDescriptorTable::new())
-    }
-}
-
-impl core::ops::Deref for InterruptDescriptorTable {
-    type Target = idt::InterruptDescriptorTable;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl core::ops::DerefMut for InterruptDescriptorTable {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
+pub use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, InterruptStackFrameValue};
 
 macro_rules! push_fptr {
     ($ip_off:expr, $sp_off:expr) => {

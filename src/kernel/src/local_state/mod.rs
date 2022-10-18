@@ -91,10 +91,17 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
         idt: {
             use crate::arch::x64::structures::idt;
 
-            if !crate::PARAMETERS.low_memory
-                && let Ok(idt_ptr) = libcommon::memory::allocate_static_zeroed::<idt::InterruptDescriptorTable>() {
+            // TODO use fallible allocations for this
+            if !crate::PARAMETERS.low_memory {
+                let idt_memory_ptr = alloc::alloc::alloc(core::alloc::Layout::from_size_align_unchecked(
+                    core::mem::size_of::<idt::InterruptDescriptorTable>(),
+                    core::mem::align_of::<idt::InterruptDescriptorTable>(),
+                ))
+                .cast::<idt::InterruptDescriptorTable>();
+                idt_memory_ptr.write(idt::InterruptDescriptorTable::new());
+
                 Some({
-                    let idt = &mut *idt_ptr;
+                    let idt = &mut *idt_memory_ptr;
 
                     idt::set_exception_handlers(idt);
                     idt::set_stub_handlers(idt);
@@ -267,11 +274,6 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
     crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::write(local_state_ptr as usize as u64);
 }
 
-pub fn with_scheduler<T>(func: impl FnOnce(&mut Scheduler) -> T) -> T {
-    crate::interrupts::without(|| func(&mut get().scheduler))
-}
-
-// TODO remove this, scheduling always enabled when local state init is done
 // SAFETY: Caller must ensure control flow is prepared to begin scheduling tasks on the current core.
 pub unsafe fn begin_scheduling() {
     let local_state = get();
@@ -290,7 +292,8 @@ pub unsafe fn begin_scheduling() {
 }
 
 pub fn next_task(ctrl_flow_context: &mut crate::cpu::ControlContext, arch_context: &mut crate::cpu::ArchContext) {
-    get().scheduler.next_task(ctrl_flow_context, arch_context);
+    let local_state = get();
+    local_state.scheduler.next_task(ctrl_flow_context, arch_context);
 }
 
 #[inline]

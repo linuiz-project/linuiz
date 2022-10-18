@@ -151,6 +151,7 @@ pub fn run(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Error>
             -serial mon:stdio
             -drive format=raw,file=.hdd/disk0.img,id=disk1,if=none
             -net none
+            -M smm=off
         "
     )
     .run()?;
