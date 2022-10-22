@@ -13,6 +13,7 @@ pub mod vec;
 
 use core::{
     alloc::{AllocError, Allocator, Layout},
+    mem::{align_of, size_of},
     ptr::NonNull,
 };
 
@@ -77,14 +78,32 @@ impl GlobalAllocator {
         }
     }
 
+    unsafe fn deallocate(ptr: NonNull<u8>, layout: Layout) {
+        // SAFETY: Pointer is required to be valid for `AllocateFn`.
+        match unsafe { __deallocate.as_ptr::<DeallocateFn>().as_ref() } {
+            Some(func) => func(ptr, layout),
+            None => unimplemented!(),
+        }
+    }
+
+    pub fn allocate_with<T>(init_fn: impl FnOnce() -> T) -> AllocResult<&'static mut T> {
+        let allocation = Self::allocate(
+            // SAFETY: The layout of structs is required to be valid.
+            unsafe { Layout::from_size_align_unchecked(size_of::<T>(), align_of::<T>()) },
+        )?;
+        let Some(t_mut) = (unsafe { allocation.as_non_null_ptr().as_ptr().cast::<T>().as_mut() })
+            else { return Err(AllocError) };
+        *t_mut = init_fn();
+
+        Ok(t_mut)
+    }
+
     #[cfg(feature = "bytemuck")]
     pub fn allocate_static<T: bytemuck::NoUninit + bytemuck::AnyBitPattern>(
     ) -> Result<&'static mut T, core::alloc::AllocError> {
         Self::allocate(
             // SAFETY: The layout of structs is required to be valid.
-            unsafe {
-                core::alloc::Layout::from_size_align_unchecked(core::mem::size_of::<T>(), core::mem::align_of::<T>())
-            },
+            unsafe { core::alloc::Layout::from_size_align_unchecked(size_of::<T>(), align_of::<T>()) },
         )
         .and_then(|mut ptr| {
             bytemuck::try_from_bytes_mut(
@@ -99,21 +118,11 @@ impl GlobalAllocator {
     pub unsafe fn allocate_static_zeroed<T: bytemuck::Zeroable>() -> Result<&'static mut T, core::alloc::AllocError> {
         Self::allocate_zeroed(
             // SAFETY: The layout of structs is required to be valid.
-            unsafe {
-                core::alloc::Layout::from_size_align_unchecked(core::mem::size_of::<T>(), core::mem::align_of::<T>())
-            },
+            unsafe { core::alloc::Layout::from_size_align_unchecked(size_of::<T>(), align_of::<T>()) },
         )
         .map(|mut ptr| {
             // SAFETY: Safety requirements are upheld by `Allocator` & `bytemuck` APIs.
             unsafe { &mut *ptr.as_mut_ptr().cast::<T>() }
         })
-    }
-
-    pub unsafe fn deallocate(ptr: NonNull<u8>, layout: Layout) {
-        // SAFETY: Pointer is required to be valid for `AllocateFn`.
-        match unsafe { __deallocate.as_ptr::<DeallocateFn>().as_ref() } {
-            Some(func) => func(ptr, layout),
-            None => unimplemented!(),
-        }
     }
 }

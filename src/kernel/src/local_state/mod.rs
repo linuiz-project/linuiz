@@ -93,15 +93,8 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
 
             // TODO use fallible allocations for this
             if !crate::PARAMETERS.low_memory {
-                let idt_memory_ptr = alloc::alloc::alloc(core::alloc::Layout::from_size_align_unchecked(
-                    core::mem::size_of::<idt::InterruptDescriptorTable>(),
-                    core::mem::align_of::<idt::InterruptDescriptorTable>(),
-                ))
-                .cast::<idt::InterruptDescriptorTable>();
-                idt_memory_ptr.write(idt::InterruptDescriptorTable::new());
-
                 Some({
-                    let idt = &mut *idt_memory_ptr;
+                    let idt = lzalloc::GlobalAllocator::allocate_with(|| idt::InterruptDescriptorTable::new()).unwrap();
 
                     idt::set_exception_handlers(idt);
                     idt::set_stub_handlers(idt);
@@ -120,9 +113,9 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
             let tss_ptr = {
                 use crate::arch::{reexport::x86_64::VirtAddr, x64::structures::idt::StackTableIndex};
                 use core::num::NonZeroUsize;
-                use libcommon::memory::allocate_static_zeroed;
+                use lzalloc::GlobalAllocator;
 
-                let ptr = allocate_static_zeroed::<tss::TaskStateSegment>().unwrap();
+                let tss = lzalloc::GlobalAllocator::allocate_with(|| tss::TaskStateSegment::new()).unwrap();
 
                 fn allocate_tss_stack(pages: NonZeroUsize) -> VirtAddr {
                     VirtAddr::from_ptr({
@@ -134,7 +127,6 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
                     })
                 }
 
-                let tss = &mut *ptr;
                 // TODO guard pages for these stacks ?
                 tss.privilege_stack_table[0] = allocate_tss_stack(NonZeroUsize::new_unchecked(5));
                 tss.interrupt_stack_table[StackTableIndex::Debug as usize] =
@@ -146,7 +138,7 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
                 tss.interrupt_stack_table[StackTableIndex::MachineCheck as usize] =
                     allocate_tss_stack(NonZeroUsize::new_unchecked(2));
 
-                ptr
+                tss as *mut tss::TaskStateSegment
             };
 
             let tss_descriptor = {

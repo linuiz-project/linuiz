@@ -28,7 +28,7 @@ pub fn get_kernel_mapper() -> &'static Mapper {
     static KERNEL_MAPPER: Once<Mapper> = Once::new();
 
     KERNEL_MAPPER.call_once(|| {
-        // SAFETY: T kernel guarantees the HHDM will be valid.
+        // SAFETY: The kernel guarantees the HHDM will be valid.
         unsafe { Mapper::new(4, get_hhdm_address(), None).unwrap() }
     })
 }
@@ -104,3 +104,42 @@ pub fn is_5_level_paged() -> bool {
                 .contains(crate::arch::x64::registers::control::CR4Flags::LA57)
     }
 }
+
+pub mod allocator {
+    use core::alloc::Allocator;
+
+    pub struct AlignedAllocator<const ALIGN: usize, A: Allocator>(pub A);
+    
+    unsafe impl<const ALIGN: usize, A: Allocator> Allocator for AlignedAllocator<ALIGN, A> {
+        fn allocate(&self, layout: core::alloc::Layout) -> Result<core::ptr::NonNull<[u8]>, core::alloc::AllocError> {
+            match layout.align_to(ALIGN) {
+                Ok(layout) => self.0.allocate(layout),
+                Err(_) => Err(core::alloc::AllocError),
+            }
+        }
+    
+        unsafe fn deallocate(&self, ptr: core::ptr::NonNull<u8>, layout: core::alloc::Layout) {
+            match layout.align_to(ALIGN) {
+                Ok(layout) => self.0.deallocate(ptr, layout),
+                Err(_) => unimplemented!(),
+            }
+        }
+    }
+
+    static KERNEL_ALLOCATOR: spin::Lazy<super::slab::SlabAllocator> = spin::Lazy::new(|| {
+
+
+            crate::memory::slab::SlabAllocator::from_memory_map(
+                LIMINE_MMAP.get_response().get().map(limine::LimineMemmapResponse::memmap).unwrap(),
+                crate::memory::get_hhdm_address(),
+            )
+            .unwrap()
+        })
+    })
+
+    libcommon::memory::set_global_allocator({
+        
+    });
+}
+
+

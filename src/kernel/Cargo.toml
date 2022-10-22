@@ -12,6 +12,7 @@ path = "../shared/libcommon/"
 features = ["global_allocator"]
 [dependencies.lzalloc]
 path = "../shared/lzalloc/"
+features = ["bytemuck"]
 [target.'cfg(target_arch = "x86_64")'.dependencies.pic_8259]
 path = "../shared/pic_8259/"
 [dependencies]
@@ -23,9 +24,9 @@ bitflags = "*"
 spin = { git = "https://github.com/semiviral/spin-rs" }
 paste = "*"
 # TODO perhaps don't use ACPI / DTB in the kernel, but abstract it in libarch/libcommon/libkernel?
-acpi = { git = "https://github.com/semiviral/acpi" }
-aml = "*"
-miniz_oxide = { version = "*", default-features = false }
+acpi = { git = "https://github.com/semiviral/acpi", default-features = false }
+# aml = "*"
+# miniz_oxide = { version = "*", default-features = false }
 bytemuck = "*"
 rustc-demangle = "*"
 [target.'cfg(target_arch = "x86_64")'.dependencies]

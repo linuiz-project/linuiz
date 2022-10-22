@@ -1,14 +1,12 @@
-use alloc::{alloc::Global, vec::Vec};
+use crate::memory::AlignedAllocator;
 use bit_field::BitField;
 use core::{
     alloc::AllocError,
     num::NonZeroUsize,
     sync::atomic::{AtomicU8, Ordering},
 };
-use libcommon::{
-    memory::{page_aligned_allocator, AlignedAllocator, KernelAllocator},
-    Address, Virtual,
-};
+use libcommon::{Address, Virtual};
+use lzalloc::{vec::Vec, GlobalAllocator};
 use spin::Mutex;
 
 #[repr(u8)]

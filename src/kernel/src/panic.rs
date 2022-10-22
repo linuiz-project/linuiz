@@ -1,8 +1,7 @@
-use alloc::vec::Vec;
 use spin::Once;
 
-pub static KERNEL_SYMBOLS: Once<Vec<crate::elf::symbol::Symbol>> = Once::new();
-pub static KERNEL_STRINGS: Once<Vec<u8>> = Once::new();
+pub static KERNEL_SYMBOLS: Once<lzalloc::vec::Vec<crate::elf::symbol::Symbol>> = Once::new();
+pub static KERNEL_STRINGS: Once<lzalloc::vec::Vec<u8>> = Once::new();
 
 const MAXIMUM_STACK_TRACE_DEPTH: usize = 16;
 

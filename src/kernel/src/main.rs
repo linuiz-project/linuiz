@@ -2,7 +2,6 @@
 #![no_main]
 #![feature(
     asm_const,
-    asm_sym,
     naked_functions,
     sync_unsafe_cell,
     panic_info_message,
@@ -54,6 +53,7 @@ mod modules;
 mod num;
 mod panic;
 mod time;
+mod boot;
 
 use libcommon::{Address, Frame, Page, Virtual};
 
@@ -102,20 +102,7 @@ static PARAMETERS: spin::Lazy<Parameters> = spin::Lazy::new(|| {
 
 pub const LIMINE_REV: u64 = 0;
 // TODO somehow model that these requests are invalidated
-static LIMINE_MMAP: limine::LimineMemmapRequest = limine::LimineMemmapRequest::new(crate::LIMINE_REV);
-static LIMINE_KERNEL_FILE: limine::LimineKernelFileRequest = limine::LimineKernelFileRequest::new(0);
-static LIMINE_MODULES: limine::LimineModuleRequest = limine::LimineModuleRequest::new(LIMINE_REV);
-static LIMINE_STACK: limine::LimineStackSizeRequest = limine::LimineStackSizeRequest::new(LIMINE_REV).stack_size({
-    #[cfg(debug_assertions)]
-    {
-        0x1000000
-    }
 
-    #[cfg(not(debug_assertions))]
-    {
-        0x4000
-    }
-});
 
 /// SAFETY: Do not call this function.
 #[no_mangle]
@@ -168,17 +155,6 @@ unsafe extern "C" fn _entry() -> ! {
 
     crate::cpu::setup();
 
-    libcommon::memory::set_global_allocator({
-        static KERNEL_ALLOCATOR: spin::Once<crate::memory::slab::SlabAllocator<'static>> = spin::Once::new();
-
-        KERNEL_ALLOCATOR.call_once(|| unsafe {
-            crate::memory::slab::SlabAllocator::from_memory_map(
-                LIMINE_MMAP.get_response().get().map(limine::LimineMemmapResponse::memmap).unwrap(),
-                crate::memory::get_hhdm_address(),
-            )
-            .unwrap()
-        })
-    });
 
     /*
      * Memory
@@ -329,7 +305,7 @@ unsafe extern "C" fn _entry() -> ! {
         .expect("failed to parse kernel executable");
         if let Some(names_section) = kernel_elf.get_section_names_section() {
             for section in kernel_elf.iter_sections() {
-                use alloc::vec::Vec;
+                use lzalloc::vec::Vec;
 
                 let names_section_offset = section.get_names_section_offset();
                 if names_section.data().len() > names_section_offset {
