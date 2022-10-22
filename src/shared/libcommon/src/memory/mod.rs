@@ -1,12 +1,7 @@
-mod aligned_allocator;
+
 mod volatile;
 
-use core::{alloc::AllocError, num::NonZeroUsize};
-
-pub use aligned_allocator::*;
 pub use volatile::*;
-
-use crate::{Address, Frame, Virtual};
 
 pub trait InteriorRef {
     type RefType<'a, T>

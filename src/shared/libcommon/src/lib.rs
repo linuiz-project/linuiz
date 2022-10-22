@@ -20,7 +20,6 @@
     naked_functions,
     allocator_api,
     sync_unsafe_cell,
-    asm_sym,
     asm_const,
     core_intrinsics,
     pointer_is_aligned,
@@ -32,7 +31,6 @@
     associated_type_defaults
 )]
 
-extern crate alloc;
 extern crate log;
 
 mod addr;
@@ -42,7 +40,7 @@ use core::num::NonZeroUsize;
 
 pub use addr::*;
 pub mod memory;
-pub mod sync;
+// TODO pub mod sync;
 pub mod syscall;
 
 pub struct ReadOnly;
