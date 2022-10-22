@@ -17,7 +17,7 @@ use core::{
     ptr::NonNull,
 };
 
-pub(crate) type AllocResult<T> = core::result::Result<T, AllocError>;
+pub type AllocResult<T> = core::result::Result<T, AllocError>;
 
 extern "C" {
     type LinkedSymbol;
@@ -120,7 +120,7 @@ impl GlobalAllocator {
             // SAFETY: The layout of structs is required to be valid.
             unsafe { core::alloc::Layout::from_size_align_unchecked(size_of::<T>(), align_of::<T>()) },
         )
-        .map(|mut ptr| {
+        .map(|ptr| {
             // SAFETY: Safety requirements are upheld by `Allocator` & `bytemuck` APIs.
             unsafe { &mut *ptr.as_mut_ptr().cast::<T>() }
         })

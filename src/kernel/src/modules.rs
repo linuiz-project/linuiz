@@ -1,7 +1,5 @@
 use libcommon::{Address, Frame, Page, Virtual};
 
-static LIMINE_KERNEL_FILE: limine::LimineKernelFileRequest = limine::LimineKernelFileRequest::new(crate::LIMINE_REV);
-static LIMINE_MODULES: limine::LimineModuleRequest = limine::LimineModuleRequest::new(crate::LIMINE_REV);
 
 fn drivers() {
     let drivers_data = LIMINE_MODULES

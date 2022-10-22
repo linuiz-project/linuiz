@@ -1,22 +1,28 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
 mod ignore {
-    static LIMINE_STACK: limine::LimineStackSizeRequest = limine::LimineStackSizeRequest::new(LIMINE_REV).stack_size({
-        #[cfg(debug_assertions)]
-        {
-            0x1000000
-        }
+    ///! This module is never exported. It is used for bootloader requests that should never be accessed in software.
 
-        #[cfg(not(debug_assertions))]
-        {
-            0x4000
-        }
-    });
+    static LIMINE_STACK: limine::LimineStackSizeRequest = limine::LimineStackSizeRequest::new(super::LIMINE_REV)
+        .stack_size({
+            #[cfg(debug_assertions)]
+            {
+                0x1000000
+            }
+
+            #[cfg(not(debug_assertions))]
+            {
+                0x4000
+            }
+        });
 }
 
-static LIMINE_MMAP: limine::LimineMemmapRequest = limine::LimineMemmapRequest::new(crate::LIMINE_REV);
-static LIMINE_KERNEL_FILE: limine::LimineKernelFileRequest = limine::LimineKernelFileRequest::new(0);
+pub const LIMINE_REV: u64 = 0;
+
+static LIMINE_MMAP: limine::LimineMemmapRequest = limine::LimineMemmapRequest::new(LIMINE_REV);
+static LIMINE_KERNEL_FILE: limine::LimineKernelFileRequest = limine::LimineKernelFileRequest::new(LIMINE_REV);
 static LIMINE_MODULES: limine::LimineModuleRequest = limine::LimineModuleRequest::new(LIMINE_REV);
+static LIMINE_RSDP: limine::LimineRsdpRequest = limine::LimineRsdpRequest::new(LIMINE_REV);
 
 static BOOT_RECLAIM: AtomicBool = AtomicBool::new(false);
 
@@ -36,4 +42,16 @@ pub fn get_memory_map() -> Option<&'static [limine::NonNullPtr<limine::LimineMem
 
 pub fn get_kernel_file() -> Option<&'static limine::LimineFile> {
     boot_only!({ LIMINE_KERNEL_FILE.get_response().get().and_then(|response| response.kernel_file.get()) })
+}
+
+pub fn get_rsdp_address() -> Option<libcommon::Address<libcommon::Physical>> {
+    boot_only!({
+        LIMINE_RSDP.get_response().get().and_then(|response| response.address.as_ptr()).and_then(|ptr| {
+            libcommon::Address::<libcommon::Physical>::new(
+                // Properly handle the bootloader's mapping of ACPI addresses in lower-half or higher-half memory space.
+                core::cmp::min(ptr.addr(), ptr.addr().wrapping_sub(crate::memory::get_hhdm_address().as_usize()))
+                    as u64,
+            )
+        })
+    })
 }

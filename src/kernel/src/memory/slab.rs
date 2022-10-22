@@ -1,4 +1,4 @@
-use crate::memory::AlignedAllocator;
+use crate::memory::allocator::AlignedAllocator;
 use bit_field::BitField;
 use core::{
     alloc::AllocError,
@@ -6,7 +6,7 @@ use core::{
     sync::atomic::{AtomicU8, Ordering},
 };
 use libcommon::{Address, Virtual};
-use lzalloc::{vec::Vec, GlobalAllocator};
+use lzalloc::{vec::Vec, AllocResult, GlobalAllocator};
 use spin::Mutex;
 
 #[repr(u8)]
@@ -101,13 +101,11 @@ impl Frame {
     }
 }
 
-type Result<T> = core::result::Result<T, AllocError>;
-
 pub struct SlabAllocator<'a> {
-    slabs64: Mutex<Vec<(*mut u8, u64), AlignedAllocator<0x1000, Global>>>,
-    slabs128: Mutex<Vec<(*mut u8, u32), AlignedAllocator<0x1000, Global>>>,
-    slabs256: Mutex<Vec<(*mut u8, u16), AlignedAllocator<0x1000, Global>>>,
-    slabs512: Mutex<Vec<(*mut u8, u8), AlignedAllocator<0x1000, Global>>>,
+    slabs64: Mutex<Vec<(*mut u8, u64), AlignedAllocator<0x1000, GlobalAllocator>>>,
+    slabs128: Mutex<Vec<(*mut u8, u32), AlignedAllocator<0x1000, GlobalAllocator>>>,
+    slabs256: Mutex<Vec<(*mut u8, u16), AlignedAllocator<0x1000, GlobalAllocator>>>,
+    slabs512: Mutex<Vec<(*mut u8, u8), AlignedAllocator<0x1000, GlobalAllocator>>>,
     phys_mapped_address: Address<Virtual>,
     table: &'a [Frame],
 }
@@ -253,7 +251,7 @@ macro_rules! slab_deallocate {
 
 // SAFETY: `SlabAllocator` promises to do everything right.
 unsafe impl<'a> core::alloc::Allocator for SlabAllocator<'a> {
-    fn allocate(&self, layout: core::alloc::Layout) -> Result<core::ptr::NonNull<[u8]>> {
+    fn allocate(&self, layout: core::alloc::Layout) -> AllocResult<core::ptr::NonNull<[u8]>> {
         use core::ptr::{slice_from_raw_parts_mut, NonNull};
 
         let allocation_ptr = {
@@ -313,8 +311,8 @@ unsafe impl<'a> core::alloc::Allocator for SlabAllocator<'a> {
     }
 }
 
-impl KernelAllocator for SlabAllocator<'_> {
-    fn lock_next(&self) -> Result<Address<libcommon::Frame>> {
+impl SlabAllocator<'_> {
+    fn lock_next(&self) -> AllocResult<Address<libcommon::Frame>> {
         self.with_table(|table| {
             table
                 .iter()
@@ -337,7 +335,7 @@ impl KernelAllocator for SlabAllocator<'_> {
         })
     }
 
-    fn lock_next_many(&self, count: NonZeroUsize, alignment: NonZeroUsize) -> Result<Address<libcommon::Frame>> {
+    fn lock_next_many(&self, count: NonZeroUsize, alignment: NonZeroUsize) -> AllocResult<Address<libcommon::Frame>> {
         assert!(alignment.is_power_of_two());
 
         self.with_table(|table| {

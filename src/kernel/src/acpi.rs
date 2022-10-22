@@ -1,6 +1,6 @@
-use acpi::{fadt::Fadt, mcfg::Mcfg, sdt::Signature, AcpiTables, PhysicalMapping, PlatformInfo};
+use acpi::PhysicalMapping;
 use port::{PortAddress, ReadOnlyPort, ReadWritePort, WriteOnlyPort};
-use spin::{Mutex, MutexGuard, Once};
+use spin::{Lazy, Mutex};
 
 pub enum Register<'a, T: port::PortReadWrite> {
     IO(ReadWritePort<T>),
@@ -70,178 +70,107 @@ impl acpi::AcpiHandler for AcpiHandler {
     }
 }
 
-#[allow(clippy::undocumented_unsafe_blocks)]
-impl aml::Handler for AcpiHandler {
-    fn read_u8(&self, address: usize) -> u8 {
-        unsafe { (address as *const u8).read() }
-    }
+// #[allow(clippy::undocumented_unsafe_blocks)]
+// impl aml::Handler for AcpiHandler {
+//     fn read_u8(&self, address: usize) -> u8 {
+//         unsafe { (address as *const u8).read() }
+//     }
 
-    fn read_u16(&self, address: usize) -> u16 {
-        unsafe { (address as *const u16).read() }
-    }
+//     fn read_u16(&self, address: usize) -> u16 {
+//         unsafe { (address as *const u16).read() }
+//     }
 
-    fn read_u32(&self, address: usize) -> u32 {
-        unsafe { (address as *const u32).read() }
-    }
+//     fn read_u32(&self, address: usize) -> u32 {
+//         unsafe { (address as *const u32).read() }
+//     }
 
-    fn read_u64(&self, address: usize) -> u64 {
-        unsafe { (address as *const u64).read() }
-    }
+//     fn read_u64(&self, address: usize) -> u64 {
+//         unsafe { (address as *const u64).read() }
+//     }
 
-    fn write_u8(&mut self, address: usize, value: u8) {
-        unsafe { (address as *mut u8).write(value) };
-    }
+//     fn write_u8(&mut self, address: usize, value: u8) {
+//         unsafe { (address as *mut u8).write(value) };
+//     }
 
-    fn write_u16(&mut self, address: usize, value: u16) {
-        unsafe { (address as *mut u16).write(value) };
-    }
+//     fn write_u16(&mut self, address: usize, value: u16) {
+//         unsafe { (address as *mut u16).write(value) };
+//     }
 
-    fn write_u32(&mut self, address: usize, value: u32) {
-        unsafe { (address as *mut u32).write(value) };
-    }
+//     fn write_u32(&mut self, address: usize, value: u32) {
+//         unsafe { (address as *mut u32).write(value) };
+//     }
 
-    fn write_u64(&mut self, address: usize, value: u64) {
-        unsafe { (address as *mut u64).write(value) };
-    }
+//     fn write_u64(&mut self, address: usize, value: u64) {
+//         unsafe { (address as *mut u64).write(value) };
+//     }
 
-    fn read_io_u8(&self, port: u16) -> u8 {
-        unsafe { ReadOnlyPort::<u8>::new(port as PortAddress) }.read()
-    }
+//     fn read_io_u8(&self, port: u16) -> u8 {
+//         unsafe { ReadOnlyPort::<u8>::new(port as PortAddress) }.read()
+//     }
 
-    fn read_io_u16(&self, port: u16) -> u16 {
-        unsafe { ReadOnlyPort::<u16>::new(port as PortAddress) }.read()
-    }
+//     fn read_io_u16(&self, port: u16) -> u16 {
+//         unsafe { ReadOnlyPort::<u16>::new(port as PortAddress) }.read()
+//     }
 
-    fn read_io_u32(&self, port: u16) -> u32 {
-        unsafe { ReadOnlyPort::<u32>::new(port as PortAddress) }.read()
-    }
+//     fn read_io_u32(&self, port: u16) -> u32 {
+//         unsafe { ReadOnlyPort::<u32>::new(port as PortAddress) }.read()
+//     }
 
-    fn write_io_u8(&self, port: u16, value: u8) {
-        unsafe { WriteOnlyPort::<u8>::new(port as PortAddress) }.write(value);
-    }
+//     fn write_io_u8(&self, port: u16, value: u8) {
+//         unsafe { WriteOnlyPort::<u8>::new(port as PortAddress) }.write(value);
+//     }
 
-    fn write_io_u16(&self, port: u16, value: u16) {
-        unsafe { WriteOnlyPort::<u16>::new(port as PortAddress) }.write(value);
-    }
+//     fn write_io_u16(&self, port: u16, value: u16) {
+//         unsafe { WriteOnlyPort::<u16>::new(port as PortAddress) }.write(value);
+//     }
 
-    fn write_io_u32(&self, port: u16, value: u32) {
-        unsafe { WriteOnlyPort::<u32>::new(port as PortAddress) }.write(value);
-    }
+//     fn write_io_u32(&self, port: u16, value: u32) {
+//         unsafe { WriteOnlyPort::<u32>::new(port as PortAddress) }.write(value);
+//     }
 
-    fn read_pci_u8(&self, _segment: u16, _bus: u8, _device: u8, _function: u8, _offset: u16) -> u8 {
-        todo!()
-    }
+//     fn read_pci_u8(&self, _segment: u16, _bus: u8, _device: u8, _function: u8, _offset: u16) -> u8 {
+//         todo!()
+//     }
 
-    fn read_pci_u16(&self, _segment: u16, _bus: u8, _device: u8, _function: u8, _offset: u16) -> u16 {
-        todo!()
-    }
+//     fn read_pci_u16(&self, _segment: u16, _bus: u8, _device: u8, _function: u8, _offset: u16) -> u16 {
+//         todo!()
+//     }
 
-    fn read_pci_u32(&self, _segment: u16, _bus: u8, _device: u8, _function: u8, _offset: u16) -> u32 {
-        todo!()
-    }
+//     fn read_pci_u32(&self, _segment: u16, _bus: u8, _device: u8, _function: u8, _offset: u16) -> u32 {
+//         todo!()
+//     }
 
-    fn write_pci_u8(&self, _segment: u16, _bus: u8, _device: u8, _function: u8, _offset: u16, _value: u8) {
-        todo!()
-    }
+//     fn write_pci_u8(&self, _segment: u16, _bus: u8, _device: u8, _function: u8, _offset: u16, _value: u8) {
+//         todo!()
+//     }
 
-    fn write_pci_u16(&self, _segment: u16, _bus: u8, _device: u8, _function: u8, _offset: u16, _value: u16) {
-        todo!()
-    }
+//     fn write_pci_u16(&self, _segment: u16, _bus: u8, _device: u8, _function: u8, _offset: u16, _value: u16) {
+//         todo!()
+//     }
 
-    fn write_pci_u32(&self, _segment: u16, _bus: u8, _device: u8, _function: u8, _offset: u16, _value: u32) {
-        todo!()
-    }
-}
+//     fn write_pci_u32(&self, _segment: u16, _bus: u8, _device: u8, _function: u8, _offset: u16, _value: u32) {
+//         todo!()
+//     }
+// }
 
-struct AcpiTablesWrapper(AcpiTables<AcpiHandler>);
-// SAFETY: Read-only type.
-unsafe impl Sync for AcpiTablesWrapper {}
+pub static ROOT_SDT: Lazy<Mutex<acpi::RootSdt<AcpiHandler>>> = Lazy::new(|| {
+    Mutex::new(acpi::RootSdt::from_rsdp_address(
+        AcpiHandler,
+        crate::boot::get_rsdp_address().expect("initializing root SDT requires bootloader data").as_usize(),
+    ))
+});
 
-static RSDP: Once<Mutex<AcpiTables<AcpiHandler>>> = Once::new();
+pub static FADT: Lazy<Option<Mutex<PhysicalMapping<AcpiHandler, acpi::fadt::Fadt>>>> = Lazy::new(|| {
+    let root_sdt = ROOT_SDT.lock();
 
-/// Initializes the ACPI interface. This function does nothing if called more than once.
-pub fn init_interface() {
-    RSDP.try_call_once(move || {
-        static LIMINE_RSDP: limine::LimineRsdpRequest = limine::LimineRsdpRequest::new(crate::LIMINE_REV);
+    root_sdt.find_table::<acpi::fadt::Fadt>().map(Mutex::new).ok()
+});
 
-        match LIMINE_RSDP.get_response().get().and_then(|response| response.address.as_ptr()) {
-            Some(rsdp_ptr) => {
-                // SAFETY: Bootloader guarantees that the provided RSDP pointer will be valid.
-                let acpi_tables = unsafe {
-                    acpi::AcpiTables::from_rsdp(
-                        AcpiHandler,
-                        // Properly handle the bootloader's mapping of ACPI addresses in lower-half or higher-half memory space.
-                        core::cmp::min(
-                            rsdp_ptr.addr(),
-                            rsdp_ptr.addr().wrapping_sub(crate::memory::get_hhdm_address().as_usize()),
-                        ),
-                    )
-                };
+pub static MCFG: Lazy<Option<Mutex<PhysicalMapping<AcpiHandler, acpi::mcfg::Mcfg>>>> = Lazy::new(|| {
+    let root_sdt = ROOT_SDT.lock();
 
-                if let Ok(acpi_tables) = acpi_tables {
-                    Ok(Mutex::new(acpi_tables))
-                } else {
-                    warn!("Failed to fully initialize the ACPI interface.");
-                    Err(())
-                }
-            }
-
-            None => {
-                warn!("No ACPI interface identified. System functionality will be impaired.");
-                Err(())
-            }
-        }
-    })
-    .ok();
-}
-
-pub fn get_rsdp() -> MutexGuard<'static, acpi::AcpiTables<AcpiHandler>> {
-    RSDP.get().expect("RSDP has not been initialized").lock()
-}
-
-static PLATFORM_INFO: Once<Mutex<PlatformInfo>> = Once::new();
-/// Returns an insatnce of the machine's MADT, or panics of it isn't present.
-pub fn get_platform_info() -> MutexGuard<'static, PlatformInfo> {
-    PLATFORM_INFO
-        .call_once(|| Mutex::new(PlatformInfo::new(&*get_rsdp()).expect("error parsing machine platform info")))
-        .lock()
-}
-
-static FADT: Once<Mutex<PhysicalMapping<AcpiHandler, Fadt>>> = Once::new();
-/// Returns an instance of the machine's FADT, or panics if it isn't present.
-pub fn get_fadt() -> MutexGuard<'static, PhysicalMapping<AcpiHandler, Fadt>> {
-    FADT.call_once(|| {
-        Mutex::new({
-            let rsdp = get_rsdp();
-
-            // SAFETY: Using the `Fadt` type from the `acpi` crate, we can be certain the SDT's structure will match the memory the crate wraps.
-            unsafe {
-                rsdp.get_sdt::<Fadt>(Signature::FADT)
-                    .expect("FADT failed to validate its checksum")
-                    .expect("no FADT found in RSDP table")
-            }
-        })
-    })
-    .lock()
-}
-
-static MCFG: Once<Mutex<PhysicalMapping<AcpiHandler, Mcfg>>> = Once::new();
-/// Returns an instance of the machine's MCFG, or panics if it isn't present.
-pub fn get_mcfg() -> MutexGuard<'static, PhysicalMapping<AcpiHandler, Mcfg>> {
-    MCFG.call_once(|| {
-        Mutex::new({
-            let rsdp = get_rsdp();
-
-            // SAFETY: Using the `Mcfg` type from the `acpi` crate, we can be certain the SDT's structure will match the memory it wraps.
-            unsafe {
-                rsdp.get_sdt::<Mcfg>(Signature::MCFG)
-                    .expect("MCFG failed to validate its checksum")
-                    .expect("no MCFG found in RSDP table")
-            }
-        })
-    })
-    .lock()
-}
+    root_sdt.find_table::<acpi::mcfg::Mcfg>().map(Mutex::new).ok()
+});
 
 // struct AmlContextWrapper(aml::AmlContext);
 // // SAFETY: TODO

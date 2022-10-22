@@ -14,7 +14,7 @@ pub fn get_hhdm_address() -> Address<Virtual> {
 
     HHDM_ADDRESS
         .call_once(|| {
-            static LIMINE_HHDM: limine::LimineHhdmRequest = limine::LimineHhdmRequest::new(crate::LIMINE_REV);
+            static LIMINE_HHDM: limine::LimineHhdmRequest = limine::LimineHhdmRequest::new(crate::boot::LIMINE_REV);
 
             Address::<Virtual>::new(
                 LIMINE_HHDM.get_response().get().expect("bootloader provided no higher-half direct mapping").offset,
@@ -109,7 +109,7 @@ pub mod allocator {
     use core::alloc::Allocator;
 
     pub struct AlignedAllocator<const ALIGN: usize, A: Allocator>(pub A);
-    
+
     unsafe impl<const ALIGN: usize, A: Allocator> Allocator for AlignedAllocator<ALIGN, A> {
         fn allocate(&self, layout: core::alloc::Layout) -> Result<core::ptr::NonNull<[u8]>, core::alloc::AllocError> {
             match layout.align_to(ALIGN) {
@@ -117,7 +117,7 @@ pub mod allocator {
                 Err(_) => Err(core::alloc::AllocError),
             }
         }
-    
+
         unsafe fn deallocate(&self, ptr: core::ptr::NonNull<u8>, layout: core::alloc::Layout) {
             match layout.align_to(ALIGN) {
                 Ok(layout) => self.0.deallocate(ptr, layout),
@@ -126,20 +126,11 @@ pub mod allocator {
         }
     }
 
-    static KERNEL_ALLOCATOR: spin::Lazy<super::slab::SlabAllocator> = spin::Lazy::new(|| {
+    pub static KERNEL_ALLOCATOR: spin::Lazy<super::slab::SlabAllocator> = spin::Lazy::new(|| {
+        let memory_map =
+            crate::boot::get_memory_map().expect("kernel allocator requires boot loader memory map for initialization");
 
-
-            crate::memory::slab::SlabAllocator::from_memory_map(
-                LIMINE_MMAP.get_response().get().map(limine::LimineMemmapResponse::memmap).unwrap(),
-                crate::memory::get_hhdm_address(),
-            )
-            .unwrap()
-        })
-    })
-
-    libcommon::memory::set_global_allocator({
-        
+        unsafe { crate::memory::slab::SlabAllocator::from_memory_map(memory_map, crate::memory::get_hhdm_address()) }
+            .unwrap_or_else(|| todo!("fall back to a simpler allocator"))
     });
 }
-
-
