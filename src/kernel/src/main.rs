@@ -44,6 +44,7 @@ extern crate lzalloc;
 
 mod acpi;
 mod arch;
+mod boot;
 mod cpu;
 mod elf;
 mod interrupts;
@@ -53,7 +54,6 @@ mod modules;
 mod num;
 mod panic;
 mod time;
-mod boot;
 
 use libcommon::{Address, Frame, Page, Virtual};
 
@@ -74,10 +74,7 @@ impl Default for Parameters {
 }
 
 static PARAMETERS: spin::Lazy<Parameters> = spin::Lazy::new(|| {
-    LIMINE_KERNEL_FILE
-        .get_response()
-        .get()
-        .and_then(|response| response.kernel_file.get())
+    crate::boot::get_kernel_file()
         .and_then(|kernel_file| kernel_file.cmdline.to_str())
         .and_then(|cmdline_cstr| cmdline_cstr.to_str().ok())
         .map(|cmdline| {
@@ -100,9 +97,7 @@ static PARAMETERS: spin::Lazy<Parameters> = spin::Lazy::new(|| {
         .unwrap_or_default()
 });
 
-pub const LIMINE_REV: u64 = 0;
 // TODO somehow model that these requests are invalidated
-
 
 /// SAFETY: Do not call this function.
 #[no_mangle]
@@ -121,7 +116,7 @@ unsafe extern "C" fn _entry() -> ! {
 
     /* misc. boot info */
     {
-        static LIMINE_INFO: limine::LimineBootInfoRequest = limine::LimineBootInfoRequest::new(crate::LIMINE_REV);
+        static LIMINE_INFO: limine::LimineBootInfoRequest = limine::LimineBootInfoRequest::new(crate::boot::LIMINE_REV);
 
         if let Some(boot_info) = LIMINE_INFO.get_response().get() {
             use core::ffi::CStr;
@@ -154,7 +149,6 @@ unsafe extern "C" fn _entry() -> ! {
     }
 
     crate::cpu::setup();
-
 
     /*
      * Memory
@@ -244,7 +238,7 @@ unsafe extern "C" fn _entry() -> ! {
             );
         }
 
-        for entry in LIMINE_MMAP.get_response().get().map(limine::LimineMemmapResponse::memmap).unwrap() {
+        for entry in crate::boot::get_memory_map().unwrap() {
             let page_attributes = {
                 use limine::LimineMemoryMapEntryType;
 
@@ -294,7 +288,7 @@ unsafe extern "C" fn _entry() -> ! {
     /* symbols */
     if !PARAMETERS.low_memory {
         let (kernel_file_base, kernel_file_len) = {
-            let kernel_file = LIMINE_KERNEL_FILE.get_response().get().and_then(|file| file.kernel_file.get()).unwrap();
+            let kernel_file = crate::boot::get_kernel_file().unwrap();
             (kernel_file.base.as_ptr().unwrap(), kernel_file.length as usize)
         };
 
@@ -338,7 +332,7 @@ unsafe extern "C" fn _entry() -> ! {
 
     /* smp */
     {
-        static LIMINE_SMP: limine::LimineSmpRequest = limine::LimineSmpRequest::new(crate::LIMINE_REV)
+        static LIMINE_SMP: limine::LimineSmpRequest = limine::LimineSmpRequest::new(crate::boot::LIMINE_REV)
             // Enable x2APIC mode if available.
             .flags(0b1);
 

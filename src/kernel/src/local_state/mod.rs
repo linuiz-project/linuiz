@@ -113,7 +113,6 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
             let tss_ptr = {
                 use crate::arch::{reexport::x86_64::VirtAddr, x64::structures::idt::StackTableIndex};
                 use core::num::NonZeroUsize;
-                use lzalloc::GlobalAllocator;
 
                 let tss = lzalloc::GlobalAllocator::allocate_with(|| tss::TaskStateSegment::new()).unwrap();
 
