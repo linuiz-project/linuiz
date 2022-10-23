@@ -1,0 +1,10 @@
+[package]
+name = "apic"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies.msr]
+path = "../msr/"
+[dependencies]
+bit_field = "*"
+bitflags = "*"
