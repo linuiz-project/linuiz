@@ -44,6 +44,10 @@ pub fn get_kernel_file() -> Option<&'static limine::LimineFile> {
     boot_only!({ LIMINE_KERNEL_FILE.get_response().get().and_then(|response| response.kernel_file.get()) })
 }
 
+pub fn get_kernel_modules() -> Option<&'static [limine::NonNullPtr<limine::LimineFile>]> {
+    boot_only!({ LIMINE_MODULES.get_response().get().map(|response| response.modules()) })
+}
+
 pub fn get_rsdp_address() -> Option<libcommon::Address<libcommon::Physical>> {
     boot_only!({
         LIMINE_RSDP.get_response().get().and_then(|response| response.address.as_ptr()).and_then(|ptr| {

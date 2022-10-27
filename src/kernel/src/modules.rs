@@ -1,13 +1,10 @@
 use libcommon::{Address, Frame, Page, Virtual};
 
-
 fn drivers() {
-    let drivers_data = LIMINE_MODULES
-        .get_response()
-        .get()
+    let drivers_data = crate::boot::get_kernel_modules()
         // Find the drives module, and map the `Option<>` to it.
         .and_then(|modules| {
-            modules.modules().iter().find(|module| module.path.to_str().unwrap().to_str().unwrap().ends_with("drivers"))
+            modules.iter().find(|module| module.path.to_str().unwrap().to_str().unwrap().ends_with("drivers"))
         })
         // SAFETY: Kernel promises HHDM to be valid, and the module pointer should be in the HHDM, so this should be valid for `u8`.
         .map(|drivers_module| unsafe {

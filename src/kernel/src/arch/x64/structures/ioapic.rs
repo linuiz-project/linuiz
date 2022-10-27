@@ -1,9 +1,9 @@
 use crate::interrupts;
 use acpi::platform::interrupt::{Polarity, TriggerMode};
-use alloc::vec::Vec;
+// use alloc::vec::Vec;
 use bit_field::BitField;
-use libcommon::{memory::VolatileCell, Address, Frame};
-use spin::{Mutex, Once};
+use libcommon::memory::VolatileCell;
+use spin::Mutex;
 
 #[repr(transparent)]
 pub struct RedirectionEntry(u64);
@@ -168,47 +168,47 @@ impl IoApic<'_> {
 
 // TODO We don't need to store this probably, find some way to init architecture-specifically.
 //      Maybe just iterate them once, processing redirections within the same context.
-static IOAPICS: Once<Vec<IoApic>> = Once::new();
-/// Queries the platform for I/O APICs, and returns them in a collection.
-pub fn get_io_apics() -> &'static Vec<IoApic<'static>> {
-    IOAPICS.call_once(|| {
-        todo!()
+// static IOAPICS: Once<Vec<IoApic>> = Once::new();
+// /// Queries the platform for I/O APICs, and returns them in a collection.
+// pub fn get_io_apics() -> &'static Vec<IoApic<'static>> {
+//     IOAPICS.call_once(|| {
+//         todo!()
 
-        // let platform_info = libcommon::acpi::get_platform_info();
+//          let platform_info = libcommon::acpi::get_platform_info();
 
-        // if let acpi::platform::interrupt::InterruptModel::Apic(apic) = &platform_info.interrupt_model {
-        //     apic.io_apics
-        //         .iter()
-        //         // TODO unsafety comment
-        //         .map(|ioapic_info| unsafe {
+//          if let acpi::platform::interrupt::InterruptModel::Apic(apic) = &platform_info.interrupt_model {
+//              apic.io_apics
+//                  .iter()
+//                  // TODO unsafety comment
+//                  .map(|ioapic_info| unsafe {
 
-        //             let (ioregsel, ioregwin) = {
-        //                 let Ok(ioapic_regs) = libcommon::memory::get().allocate_to(Address::<Frame>::new_truncate(ioapic_info.address as u64), 1)
-        //                     else { panic!("failed to initialize I/O APIC") };
+//                      let (ioregsel, ioregwin) = {
+//                          let Ok(ioapic_regs) = libcommon::memory::get().allocate_to(Address::<Frame>::new_truncate(ioapic_info.address as u64), 1)
+//                              else { panic!("failed to initialize I/O APIC") };
 
-        //                 (
-        //                     &*ioapic_regs.as_ptr::<VolatileCell<u32, libcommon::WriteOnly>>(),
-        //                     &*ioapic_regs.as_ptr::<VolatileCell<u32, libcommon::ReadWrite>>().add(1)
-        //                 )
-        //             };
+//                          (
+//                              &*ioapic_regs.as_ptr::<VolatileCell<u32, libcommon::WriteOnly>>(),
+//                              &*ioapic_regs.as_ptr::<VolatileCell<u32, libcommon::ReadWrite>>().add(1)
+//                          )
+//                      };
 
-        //             let id = {
-        //                 ioregsel.write(0x0);
-        //                 ioregwin.read().get_bits(24..28) as u8
-        //             };
-        //             let (version, irq_count) = {
-        //                 ioregsel.write(0x1);
-        //                 let value = ioregwin.read();
-        //                 (value.get_bits(0..8) as u8, value.get_bits(16..24) as u32)
-        //             };
-        //             let irq_base = ioapic_info.global_system_interrupt_base;
-        //             let handled_irqs = irq_base..=(irq_base + irq_count);
+//                      let id = {
+//                          ioregsel.write(0x0);
+//                          ioregwin.read().get_bits(24..28) as u8
+//                      };
+//                      let (version, irq_count) = {
+//                          ioregsel.write(0x1);
+//                          let value = ioregwin.read();
+//                          (value.get_bits(0..8) as u8, value.get_bits(16..24) as u32)
+//                      };
+//                      let irq_base = ioapic_info.global_system_interrupt_base;
+//                      let handled_irqs = irq_base..=(irq_base + irq_count);
 
-        //             IoApic { id, version, handled_irqs, ioregs: Mutex::new((ioregsel, ioregwin)) }
-        //         })
-        //         .collect()
-        // } else {
-        //     alloc::vec::Vec::new()
-        // }
-    })
-}
+//                      IoApic { id, version, handled_irqs, ioregs: Mutex::new((ioregsel, ioregwin)) }
+//                  })
+//                  .collect()
+//          } else {
+//              alloc::vec::Vec::new()
+//          }
+//     })
+// }

@@ -1,5 +1,5 @@
 use acpi::PhysicalMapping;
-use port::{PortAddress, ReadOnlyPort, ReadWritePort, WriteOnlyPort};
+use port::{PortAddress, ReadWritePort};
 use spin::{Lazy, Mutex};
 
 pub enum Register<'a, T: port::PortReadWrite> {
@@ -8,16 +8,16 @@ pub enum Register<'a, T: port::PortReadWrite> {
 }
 
 impl<T: port::PortReadWrite> Register<'_, T> {
-    pub const fn new(generic_address: &acpi::platform::address::GenericAddress) -> Option<Self> {
+    pub const fn new(generic_address: &acpi::address::GenericAddress) -> Option<Self> {
         match generic_address.address_space {
-            acpi::platform::address::AddressSpace::SystemMemory => {
+            acpi::address::AddressSpace::SystemMemory => {
                 Some(Self::MMIO(
                     // SAFETY: There's no meaningful way to validate the address provided by the `GenericAddress` structure.
                     unsafe { &*(generic_address.address as *const _) },
                 ))
             }
 
-            acpi::platform::address::AddressSpace::SystemIo => {
+            acpi::address::AddressSpace::SystemIo => {
                 Some(Self::IO(
                     // SAFETY: There's no meaningful way to validate the port provided by the `GenericAddress` structure.
                     unsafe {
@@ -153,24 +153,39 @@ impl acpi::AcpiHandler for AcpiHandler {
 //     }
 // }
 
-pub static ROOT_SDT: Lazy<Mutex<acpi::RootSdt<AcpiHandler>>> = Lazy::new(|| {
-    Mutex::new(acpi::RootSdt::from_rsdp_address(
-        AcpiHandler,
-        crate::boot::get_rsdp_address().expect("initializing root SDT requires bootloader data").as_usize(),
-    ))
-});
+static TABLES: spin::Once<Mutex<acpi::AcpiTables<AcpiHandler>>> = spin::Once::new();
+
+pub fn init_interface() {
+    let tables_init = TABLES.try_call_once(|| {
+        crate::boot::get_rsdp_address()
+            .map(|address| {
+                Mutex::new(
+                    // SAFETY: Bootloader guarantees any address provided for RDSP will be valid.
+                    unsafe { acpi::AcpiTables::from_rsdp(AcpiHandler, address) },
+                )
+            })
+            .ok_or(())
+    });
+
+    if tables_init.is_err() {
+        warn!("ACPI interface failed to initialize. System will continue with a limited feature set.")
+    }
+}
 
 pub static FADT: Lazy<Option<Mutex<PhysicalMapping<AcpiHandler, acpi::fadt::Fadt>>>> = Lazy::new(|| {
-    let root_sdt = ROOT_SDT.lock();
+    let tables = TABLES.lock();
 
-    root_sdt.find_table::<acpi::fadt::Fadt>().map(Mutex::new).ok()
+    tables.find_table::<acpi::fadt::Fadt>().map(Mutex::new).ok()
 });
 
 pub static MCFG: Lazy<Option<Mutex<PhysicalMapping<AcpiHandler, acpi::mcfg::Mcfg>>>> = Lazy::new(|| {
-    let root_sdt = ROOT_SDT.lock();
+    let tables = TABLES.lock();
 
-    root_sdt.find_table::<acpi::mcfg::Mcfg>().map(Mutex::new).ok()
+    tables.find_table::<acpi::mcfg::Mcfg>().map(Mutex::new).ok()
 });
+
+pub static PLATFORM_INFO: Lazy<Option<Mutex<acpi::PlatformInfo<crate::memory::slab::SlabAllocator>>>> =
+    Lazy::new(|| Mutex::new(acpi::PlatformInfo::new_in(&*TABLES, &*crate::memory::KERNEL_ALLOCATOR)));
 
 // struct AmlContextWrapper(aml::AmlContext);
 // // SAFETY: TODO

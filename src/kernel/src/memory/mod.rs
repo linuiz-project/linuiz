@@ -6,6 +6,7 @@ pub mod slab;
 pub use mapper::*;
 pub use paging::*;
 
+use core::alloc::Allocator;
 use libcommon::{Address, Frame, Virtual};
 use spin::Once;
 
@@ -105,32 +106,51 @@ pub fn is_5_level_paged() -> bool {
     }
 }
 
-pub mod allocator {
-    use core::alloc::Allocator;
+pub struct AlignedAllocator<const ALIGN: usize, A: Allocator>(pub A);
 
-    pub struct AlignedAllocator<const ALIGN: usize, A: Allocator>(pub A);
-
-    unsafe impl<const ALIGN: usize, A: Allocator> Allocator for AlignedAllocator<ALIGN, A> {
-        fn allocate(&self, layout: core::alloc::Layout) -> Result<core::ptr::NonNull<[u8]>, core::alloc::AllocError> {
-            match layout.align_to(ALIGN) {
-                Ok(layout) => self.0.allocate(layout),
-                Err(_) => Err(core::alloc::AllocError),
-            }
-        }
-
-        unsafe fn deallocate(&self, ptr: core::ptr::NonNull<u8>, layout: core::alloc::Layout) {
-            match layout.align_to(ALIGN) {
-                Ok(layout) => self.0.deallocate(ptr, layout),
-                Err(_) => unimplemented!(),
-            }
+unsafe impl<const ALIGN: usize, A: Allocator> Allocator for AlignedAllocator<ALIGN, A> {
+    fn allocate(&self, layout: core::alloc::Layout) -> Result<core::ptr::NonNull<[u8]>, core::alloc::AllocError> {
+        match layout.align_to(ALIGN) {
+            Ok(layout) => self.0.allocate(layout),
+            Err(_) => Err(core::alloc::AllocError),
         }
     }
 
-    pub static KERNEL_ALLOCATOR: spin::Lazy<super::slab::SlabAllocator> = spin::Lazy::new(|| {
-        let memory_map =
-            crate::boot::get_memory_map().expect("kernel allocator requires boot loader memory map for initialization");
+    unsafe fn deallocate(&self, ptr: core::ptr::NonNull<u8>, layout: core::alloc::Layout) {
+        match layout.align_to(ALIGN) {
+            Ok(layout) => self.0.deallocate(ptr, layout),
+            Err(_) => unimplemented!(),
+        }
+    }
+}
 
-        unsafe { crate::memory::slab::SlabAllocator::from_memory_map(memory_map, crate::memory::get_hhdm_address()) }
+pub static KERNEL_ALLOCATOR: spin::Lazy<slab::SlabAllocator> = spin::Lazy::new(|| {
+    let memory_map =
+        crate::boot::get_memory_map().expect("kernel allocator requires boot loader memory map for initialization");
+
+    unsafe {
+        slab::SlabAllocator::from_memory_map(memory_map, crate::memory::get_hhdm_address())
             .unwrap_or_else(|| todo!("fall back to a simpler allocator"))
-    });
+    }
+});
+
+mod lzg_impls {
+    use core::{
+        alloc::{AllocError, Layout},
+        ptr::NonNull,
+    };
+
+    /// Implicitly linked function for the `lzalloc` global allocator.
+    /// Do not call in software.
+    #[no_mangle]
+    fn __lzg_allocate(layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        super::KERNEL_ALLOCATOR.allocate(layout)
+    }
+
+    /// Implicitly linked function for the `lzalloc` global allocator.
+    /// Do not call in software.
+    #[no_mangle]
+    unsafe fn __lzg_deallocate(ptr: NonNull<u8>, layout: Layout) {
+        super::KERNEL_ALLOCATOR.deallocate(ptr, layout);
+    }
 }
