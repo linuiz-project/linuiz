@@ -4,7 +4,9 @@ mod rflags;
 
 pub use rflags::*;
 pub mod control;
-pub mod msr;
+pub mod msr {
+    pub use msr::*;
+}
 
 macro_rules! basic_raw_register {
     ($register_ident:ident) => {

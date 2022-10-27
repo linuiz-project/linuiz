@@ -7,6 +7,10 @@ edition = "2021"
 path = "../shared/port-rs/"
 [dependencies.uart]
 path = "../shared/uart/"
+[dependencies.msr]
+path = "../shared/msr/"
+[dependencies.apic]
+path = "../shared/apic/"
 [dependencies.libcommon]
 path = "../shared/libcommon/"
 features = ["global_allocator"]
@@ -24,7 +28,7 @@ bitflags = "*"
 spin = { git = "https://github.com/semiviral/spin-rs" }
 paste = "*"
 # TODO perhaps don't use ACPI / DTB in the kernel, but abstract it in libarch/libcommon/libkernel?
-acpi = { git = "https://github.com/semiviral/acpi", default-features = false }
+acpi = { git = "https://github.com/semiviral/acpi" }
 # aml = "*"
 # miniz_oxide = { version = "*", default-features = false }
 bytemuck = "*"

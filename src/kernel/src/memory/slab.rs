@@ -1,4 +1,4 @@
-use crate::memory::allocator::AlignedAllocator;
+use crate::memory::AlignedAllocator;
 use bit_field::BitField;
 use core::{
     alloc::AllocError,
@@ -102,10 +102,10 @@ impl Frame {
 }
 
 pub struct SlabAllocator<'a> {
-    slabs64: Mutex<Vec<(*mut u8, u64), AlignedAllocator<0x1000, GlobalAllocator>>>,
-    slabs128: Mutex<Vec<(*mut u8, u32), AlignedAllocator<0x1000, GlobalAllocator>>>,
-    slabs256: Mutex<Vec<(*mut u8, u16), AlignedAllocator<0x1000, GlobalAllocator>>>,
-    slabs512: Mutex<Vec<(*mut u8, u8), AlignedAllocator<0x1000, GlobalAllocator>>>,
+    slabs64: Mutex<Vec<(*mut u8, u64), Aligned<0x1000, GlobalAllocator>>>,
+    slabs128: Mutex<Vec<(*mut u8, u32), Aligned<0x1000, GlobalAllocator>>>,
+    slabs256: Mutex<Vec<(*mut u8, u16), Aligned<0x1000, GlobalAllocator>>>,
+    slabs512: Mutex<Vec<(*mut u8, u8), Aligned<0x1000, GlobalAllocator>>>,
     phys_mapped_address: Address<Virtual>,
     table: &'a [Frame],
 }
@@ -114,94 +114,6 @@ pub struct SlabAllocator<'a> {
 unsafe impl Send for SlabAllocator<'_> {}
 // SAFETY: Type ensures all concurrent accesses are synchronized.
 unsafe impl Sync for SlabAllocator<'_> {}
-
-impl<'a> SlabAllocator<'a> {
-    // SAFETY: Caller must guarantee the physical mapped address is valid.
-    pub unsafe fn from_memory_map(
-        memory_map: &[crate::MmapEntry],
-        phys_mapped_address: Address<Virtual>,
-    ) -> Option<Self> {
-        let page_count = libcommon::align_up_div(
-            memory_map.last().map(|entry| entry.base + entry.len).unwrap() as usize,
-            // SAFETY: Value provided is non-zero.
-            unsafe { NonZeroUsize::new_unchecked(0x1000) },
-        );
-        let table_bytes = libcommon::align_up(
-            page_count * core::mem::size_of::<Frame>(),
-            // SAFETY: Value provided is non-zero.
-            unsafe { NonZeroUsize::new_unchecked(0x1000) },
-        );
-
-        let table_entry = memory_map
-            .iter()
-            .filter(|entry| entry.typ == limine::LimineMemoryMapEntryType::Usable)
-            .find(|entry| entry.len >= (table_bytes as u64))?;
-
-        // Clear the memory of the chosen region.
-        unsafe { core::ptr::write_bytes(table_entry.base as *mut u8, 0, table_bytes) };
-
-        let table = unsafe {
-            core::slice::from_raw_parts((phys_mapped_address.as_u64() + table_entry.base) as *mut Frame, page_count)
-        };
-
-        for entry in memory_map {
-            assert_eq!(entry.base & 0xFFF, 0, "memory map entry is not page-aligned: {entry:?}");
-
-            let base_index = entry.base / 0x1000;
-            let count = entry.len / 0x1000;
-
-            // Translate UEFI memory type to kernel frame type.
-            let frame_ty = {
-                use crate::MmapEntryType;
-
-                match entry.typ {
-                    MmapEntryType::Usable => FrameType::Generic,
-                    MmapEntryType::BootloaderReclaimable => FrameType::BootReclaim,
-                    MmapEntryType::AcpiReclaimable => FrameType::AcpiReclaim,
-                    MmapEntryType::KernelAndModules
-                    | MmapEntryType::Reserved
-                    | MmapEntryType::AcpiNvs
-                    | MmapEntryType::Framebuffer => FrameType::Reserved,
-                    MmapEntryType::BadMemory => FrameType::Unusable,
-                }
-            };
-
-            (base_index..(base_index + count)).map(|index| &table[index as usize]).for_each(|frame| {
-                frame.peek();
-                frame.set_type(frame_ty);
-                frame.unpeek();
-            });
-        }
-
-        // Ensure the table pages are reserved, so as to not be locked by any of the `_next` functions.
-        table
-            .iter()
-            .skip((table_entry.base / 0x1000) as usize)
-            .take(libcommon::align_up_div(
-                table_bytes,
-                // SAFETY: Value provided is non-zero.
-                unsafe { NonZeroUsize::new_unchecked(0x1000) },
-            ))
-            .for_each(|frame| {
-                frame.peek();
-                frame.set_type(FrameType::Reserved);
-                frame.unpeek();
-            });
-
-        Some(Self {
-            slabs64: Mutex::new(Vec::new_in(page_aligned_allocator())),
-            slabs128: Mutex::new(Vec::new_in(page_aligned_allocator())),
-            slabs256: Mutex::new(Vec::new_in(page_aligned_allocator())),
-            slabs512: Mutex::new(Vec::new_in(page_aligned_allocator())),
-            phys_mapped_address,
-            table,
-        })
-    }
-
-    fn with_table<T>(&self, func: impl FnOnce(&[Frame]) -> T) -> T {
-        crate::interrupts::without(|| func(self.table))
-    }
-}
 
 macro_rules! slab_allocate {
     ($self:expr, $slabs_name:ident, $slab_size:expr) => {
@@ -312,7 +224,93 @@ unsafe impl<'a> core::alloc::Allocator for SlabAllocator<'a> {
 }
 
 impl SlabAllocator<'_> {
-    fn lock_next(&self) -> AllocResult<Address<libcommon::Frame>> {
+    // SAFETY: Caller must guarantee the physical mapped address is valid.
+    pub unsafe fn from_memory_map(
+        memory_map: &[crate::MmapEntry],
+        phys_mapped_address: Address<Virtual>,
+    ) -> Option<Self> {
+        let page_count = libcommon::align_up_div(
+            memory_map.last().map(|entry| entry.base + entry.len).unwrap() as usize,
+            // SAFETY: Value provided is non-zero.
+            unsafe { NonZeroUsize::new_unchecked(0x1000) },
+        );
+        let table_bytes = libcommon::align_up(
+            page_count * core::mem::size_of::<Frame>(),
+            // SAFETY: Value provided is non-zero.
+            unsafe { NonZeroUsize::new_unchecked(0x1000) },
+        );
+
+        let table_entry = memory_map
+            .iter()
+            .filter(|entry| entry.typ == limine::LimineMemoryMapEntryType::Usable)
+            .find(|entry| entry.len >= (table_bytes as u64))?;
+
+        // Clear the memory of the chosen region.
+        unsafe { core::ptr::write_bytes(table_entry.base as *mut u8, 0, table_bytes) };
+
+        let table = unsafe {
+            core::slice::from_raw_parts((phys_mapped_address.as_u64() + table_entry.base) as *mut Frame, page_count)
+        };
+
+        for entry in memory_map {
+            assert_eq!(entry.base & 0xFFF, 0, "memory map entry is not page-aligned: {entry:?}");
+
+            let base_index = entry.base / 0x1000;
+            let count = entry.len / 0x1000;
+
+            // Translate UEFI memory type to kernel frame type.
+            let frame_ty = {
+                use crate::MmapEntryType;
+
+                match entry.typ {
+                    MmapEntryType::Usable => FrameType::Generic,
+                    MmapEntryType::BootloaderReclaimable => FrameType::BootReclaim,
+                    MmapEntryType::AcpiReclaimable => FrameType::AcpiReclaim,
+                    MmapEntryType::KernelAndModules
+                    | MmapEntryType::Reserved
+                    | MmapEntryType::AcpiNvs
+                    | MmapEntryType::Framebuffer => FrameType::Reserved,
+                    MmapEntryType::BadMemory => FrameType::Unusable,
+                }
+            };
+
+            (base_index..(base_index + count)).map(|index| &table[index as usize]).for_each(|frame| {
+                frame.peek();
+                frame.set_type(frame_ty);
+                frame.unpeek();
+            });
+        }
+
+        // Ensure the table pages are reserved, so as to not be locked by any of the `_next` functions.
+        table
+            .iter()
+            .skip((table_entry.base / 0x1000) as usize)
+            .take(libcommon::align_up_div(
+                table_bytes,
+                // SAFETY: Value provided is non-zero.
+                unsafe { NonZeroUsize::new_unchecked(0x1000) },
+            ))
+            .for_each(|frame| {
+                frame.peek();
+                frame.set_type(FrameType::Reserved);
+                frame.unpeek();
+            });
+
+        Some(Self {
+            slabs64: Mutex::new(Vec::new_in(page_aligned_allocator())),
+            slabs128: Mutex::new(Vec::new_in(page_aligned_allocator())),
+            slabs256: Mutex::new(Vec::new_in(page_aligned_allocator())),
+            slabs512: Mutex::new(Vec::new_in(page_aligned_allocator())),
+            phys_mapped_address,
+            table,
+        })
+    }
+
+    fn with_table<T>(&self, func: impl FnOnce(&[Frame]) -> T) -> T {
+        crate::interrupts::without(|| func(self.table))
+    }
+
+    pub fn lock_next(&self) -> AllocResult<Address<libcommon::Frame>> {
         self.with_table(|table| {
             table
                 .iter()
@@ -335,7 +333,11 @@ impl SlabAllocator<'_> {
         })
     }
 
-    fn lock_next_many(&self, count: NonZeroUsize, alignment: NonZeroUsize) -> AllocResult<Address<libcommon::Frame>> {
+    pub fn lock_next_many(
+        &self,
+        count: NonZeroUsize,
+        alignment: NonZeroUsize,
+    ) -> AllocResult<Address<libcommon::Frame>> {
         assert!(alignment.is_power_of_two());
 
         self.with_table(|table| {
@@ -380,7 +382,7 @@ impl SlabAllocator<'_> {
         })
     }
 
-    fn lock(&self, frame: Address<libcommon::Frame>) -> Result<()> {
+    pub fn lock(&self, frame: Address<libcommon::Frame>) -> AllocResult<()> {
         self.with_table(|table| {
             let Some(frame) = table.get(frame.index()) else { return Err(AllocError) };
             frame.peek();
@@ -399,7 +401,7 @@ impl SlabAllocator<'_> {
         })
     }
 
-    fn lock_many(&self, base: Address<libcommon::Frame>, count: usize) -> Result<()> {
+    pub fn lock_many(&self, base: Address<libcommon::Frame>, count: usize) -> AllocResult<()> {
         self.with_table(|table| {
             let frames = &table[base.index()..(base.index() + count)];
             frames.iter().for_each(Frame::peek);
@@ -417,7 +419,7 @@ impl SlabAllocator<'_> {
         })
     }
 
-    fn free(&self, frame: Address<libcommon::Frame>) -> Result<()> {
+    pub fn free(&self, frame: Address<libcommon::Frame>) -> AllocResult<()> {
         self.with_table(|table| {
             let Some(frame) = table.get(frame.index()) else { return Err(AllocError) };
 
@@ -441,12 +443,12 @@ impl SlabAllocator<'_> {
     }
 
     // TODO non-zero usize for the count
-    fn allocate_to(&self, frame: Address<libcommon::Frame>, count: usize) -> Result<Address<Virtual>> {
+    pub fn allocate_to(&self, frame: Address<libcommon::Frame>, count: usize) -> AllocResult<Address<Virtual>> {
         self.lock_many(frame, count)
             .map(|_| Address::<Virtual>::new_truncate(self.phys_mapped_address.as_u64() + frame.as_u64()))
     }
 
-    fn total_memory(&self) -> usize {
+    pub fn total_memory(&self) -> usize {
         self.table.len() * 0x1000
     }
 }

@@ -5,10 +5,6 @@ use bit_field::BitField;
 use core::marker::PhantomData;
 use libcommon::{Address, Physical, Virtual};
 
-/// Initializes the core-local APIC in the most advanced mode possible, and hardware-enables it.
-///
-/// SAFETY: Caller must ensure this method is called only once.
-
 /// Various valid modes for APIC timer to operate in.
 #[repr(u64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -10,6 +10,7 @@ mod clock {
 
     pub enum Type<'a> {
         Acpi(crate::acpi::Register<'a, u32>),
+        // Tsc(u64)
     }
 
     pub struct Clock<'a> {
@@ -25,18 +26,20 @@ mod clock {
 
     impl<'a> Clock<'a> {
         fn load() -> Option<Self> {
-            if let Some(pm_timer) = crate::acpi::get_platform_info().pm_timer.as_ref()
-                && let Some(register) = crate::acpi::Register::new(&pm_timer.base)
-            {
-                Some(Self {
-                    ty: Type::Acpi(register),
-                    frequency: 3579545,
-                    max_timestamp: (if pm_timer.supports_32bit { u32::MAX } else { 0xFFFFFF }) as u64
-                })
+            let platform_info = crate::acpi::PLATFORM_INFO.map(|pi| pi.lock())?;
 
-            } else {
-                None
-            }
+            if let Some(pm_timer) = platform_info.pm_timer.as_ref()
+                 && let Some(register) = crate::acpi::Register::new(&pm_timer.base)
+             {
+                 Some(Self {
+                     ty: Type::Acpi(register),
+                     frequency: 3579545,
+                     max_timestamp: (if pm_timer.supports_32bit { u32::MAX } else { 0xFFFFFF }) as u64
+                 })
+
+             } else {
+                 None
+             }
         }
 
         pub fn unload(&mut self) {
