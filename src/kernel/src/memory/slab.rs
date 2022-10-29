@@ -1,4 +1,3 @@
-use crate::memory::AlignedAllocator;
 use bit_field::BitField;
 use core::{
     alloc::AllocError,
@@ -6,7 +5,7 @@ use core::{
     sync::atomic::{AtomicU8, Ordering},
 };
 use libcommon::{Address, Virtual};
-use lzalloc::{vec::Vec, AllocResult, GlobalAllocator};
+use lzalloc::{vec::Vec, AlignedAllocator, AllocResult};
 use spin::Mutex;
 
 #[repr(u8)]
@@ -102,10 +101,10 @@ impl Frame {
 }
 
 pub struct SlabAllocator<'a> {
-    slabs64: Mutex<Vec<(*mut u8, u64), Aligned<0x1000, GlobalAllocator>>>,
-    slabs128: Mutex<Vec<(*mut u8, u32), Aligned<0x1000, GlobalAllocator>>>,
-    slabs256: Mutex<Vec<(*mut u8, u16), Aligned<0x1000, GlobalAllocator>>>,
-    slabs512: Mutex<Vec<(*mut u8, u8), Aligned<0x1000, GlobalAllocator>>>,
+    slabs64: Mutex<Vec<(*mut u8, u64), AlignedAllocator<0x1000>>>,
+    slabs128: Mutex<Vec<(*mut u8, u32), AlignedAllocator<0x1000>>>,
+    slabs256: Mutex<Vec<(*mut u8, u16), AlignedAllocator<0x1000>>>,
+    slabs512: Mutex<Vec<(*mut u8, u8), AlignedAllocator<0x1000>>>,
     phys_mapped_address: Address<Virtual>,
     table: &'a [Frame],
 }
@@ -297,10 +296,10 @@ impl SlabAllocator<'_> {
             });
 
         Some(Self {
-            slabs64: Mutex::new(Vec::new_in(page_aligned_allocator())),
-            slabs128: Mutex::new(Vec::new_in(page_aligned_allocator())),
-            slabs256: Mutex::new(Vec::new_in(page_aligned_allocator())),
-            slabs512: Mutex::new(Vec::new_in(page_aligned_allocator())),
+            slabs64: Mutex::new(Vec::new_in(AlignedAllocator::<0x1000>)),
+            slabs128: Mutex::new(Vec::new_in(AlignedAllocator::<0x1000>)),
+            slabs256: Mutex::new(Vec::new_in(AlignedAllocator::<0x1000>)),
+            slabs512: Mutex::new(Vec::new_in(AlignedAllocator::<0x1000>)),
             phys_mapped_address,
             table,
         })

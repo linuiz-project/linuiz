@@ -158,34 +158,41 @@ static TABLES: spin::Once<Mutex<acpi::AcpiTables<AcpiHandler>>> = spin::Once::ne
 pub fn init_interface() {
     let tables_init = TABLES.try_call_once(|| {
         crate::boot::get_rsdp_address()
-            .map(|address| {
-                Mutex::new(
-                    // SAFETY: Bootloader guarantees any address provided for RDSP will be valid.
-                    unsafe { acpi::AcpiTables::from_rsdp(AcpiHandler, address) },
-                )
-            })
+            // SAFETY: Bootloader guarantees any address provided for RDSP will be valid.
+            .and_then(|rsdp_address| unsafe { acpi::AcpiTables::from_rsdp(AcpiHandler, rsdp_address.as_usize()).ok() })
+            .map(Mutex::new)
             .ok_or(())
     });
 
     if tables_init.is_err() {
-        warn!("ACPI interface failed to initialize. System will continue with a limited feature set.")
+        warn!("ACPI interface failed to initialize. System will continue with a limited feature set.");
     }
 }
 
 pub static FADT: Lazy<Option<Mutex<PhysicalMapping<AcpiHandler, acpi::fadt::Fadt>>>> = Lazy::new(|| {
-    let tables = TABLES.lock();
-
-    tables.find_table::<acpi::fadt::Fadt>().map(Mutex::new).ok()
+    TABLES
+        .get()
+        .map(|mutex| mutex.lock())
+        .and_then(|tables| tables.find_table::<acpi::fadt::Fadt>().ok())
+        .map(Mutex::new)
 });
 
 pub static MCFG: Lazy<Option<Mutex<PhysicalMapping<AcpiHandler, acpi::mcfg::Mcfg>>>> = Lazy::new(|| {
-    let tables = TABLES.lock();
-
-    tables.find_table::<acpi::mcfg::Mcfg>().map(Mutex::new).ok()
+    TABLES
+        .get()
+        .map(|mutex| mutex.lock())
+        .and_then(|tables| tables.find_table::<acpi::mcfg::Mcfg>().ok())
+        .map(Mutex::new)
 });
 
 pub static PLATFORM_INFO: Lazy<Option<Mutex<acpi::PlatformInfo<crate::memory::slab::SlabAllocator>>>> =
-    Lazy::new(|| Mutex::new(acpi::PlatformInfo::new_in(&*TABLES, &*crate::memory::KERNEL_ALLOCATOR)));
+    Lazy::new(|| {
+        TABLES
+            .get()
+            .map(|mutex| mutex.lock())
+            .and_then(|tables| acpi::PlatformInfo::new_in(&*tables, &*crate::memory::KERNEL_ALLOCATOR).ok())
+            .map(Mutex::new)
+    });
 
 // struct AmlContextWrapper(aml::AmlContext);
 // // SAFETY: TODO

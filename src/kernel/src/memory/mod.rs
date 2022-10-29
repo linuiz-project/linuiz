@@ -6,7 +6,6 @@ pub mod slab;
 pub use mapper::*;
 pub use paging::*;
 
-use core::alloc::Allocator;
 use libcommon::{Address, Frame, Virtual};
 use spin::Once;
 
@@ -106,24 +105,6 @@ pub fn is_5_level_paged() -> bool {
     }
 }
 
-pub struct AlignedAllocator<const ALIGN: usize, A: Allocator>(pub A);
-
-unsafe impl<const ALIGN: usize, A: Allocator> Allocator for AlignedAllocator<ALIGN, A> {
-    fn allocate(&self, layout: core::alloc::Layout) -> Result<core::ptr::NonNull<[u8]>, core::alloc::AllocError> {
-        match layout.align_to(ALIGN) {
-            Ok(layout) => self.0.allocate(layout),
-            Err(_) => Err(core::alloc::AllocError),
-        }
-    }
-
-    unsafe fn deallocate(&self, ptr: core::ptr::NonNull<u8>, layout: core::alloc::Layout) {
-        match layout.align_to(ALIGN) {
-            Ok(layout) => self.0.deallocate(ptr, layout),
-            Err(_) => unimplemented!(),
-        }
-    }
-}
-
 pub static KERNEL_ALLOCATOR: spin::Lazy<slab::SlabAllocator> = spin::Lazy::new(|| {
     let memory_map =
         crate::boot::get_memory_map().expect("kernel allocator requires boot loader memory map for initialization");
@@ -136,7 +117,7 @@ pub static KERNEL_ALLOCATOR: spin::Lazy<slab::SlabAllocator> = spin::Lazy::new(|
 
 mod lzg_impls {
     use core::{
-        alloc::{AllocError, Layout},
+        alloc::{AllocError, Allocator, Layout},
         ptr::NonNull,
     };
 

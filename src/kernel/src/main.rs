@@ -20,7 +20,8 @@
     if_let_guard,
     inline_const,
     exact_size_is_empty,
-    fn_align
+    fn_align,
+    ptr_as_uninit
 )]
 #![forbid(clippy::inline_asm_x86_att_syntax)]
 #![deny(clippy::semicolon_if_nothing_returned, clippy::debug_assert_with_mut_call, clippy::float_arithmetic)]
@@ -298,31 +299,45 @@ unsafe extern "C" fn _entry() -> ! {
         )
         .expect("failed to parse kernel executable");
         if let Some(names_section) = kernel_elf.get_section_names_section() {
+            let names_section = names_section.data();
+
             for section in kernel_elf.iter_sections() {
-                use lzalloc::vec::Vec;
+                use crate::elf::symbol::Symbol;
+                use core::num::NonZeroUsize;
 
                 let names_section_offset = section.get_names_section_offset();
-                if names_section.data().len() > names_section_offset {
+                // Check if names section offset is greater than the length of the names section.
+                if names_section.len() < names_section_offset {
                     continue;
                 }
 
-                let Some(section_name) = core::ffi::CStr::from_bytes_until_nul(&names_section.data()[names_section_offset..])
+                let Some(section_name) = core::ffi::CStr::from_bytes_until_nul(&names_section[names_section_offset..])
                         .ok()
                         .and_then(|cstr| cstr.to_str().ok())
                     else { continue };
 
-                if section_name == ".symtab" && let Ok(symbols) = bytemuck::try_cast_slice(section.data()) {
-                    crate::panic::KERNEL_SYMBOLS.call_once(|| {
-                        let mut symbols_copy = Vec::new();
-                        symbols_copy.extend_from_slice(symbols);
-                        symbols_copy
-                    });
-                } else if section_name == ".strtab" {
-                    crate::panic::KERNEL_STRINGS.call_once(|| {
-                        let mut strings_copy = Vec::new();
-                        strings_copy.extend_from_slice(section.data());
-                        strings_copy
-                    });
+                match section_name {
+                    ".symtab" => {
+                        let Ok(symbols) = bytemuck::try_cast_slice::<u8, Symbol>(section.data())
+                            else { continue };
+                        let Ok(symbols_copy) = lzalloc::allocate_slice(unsafe{ NonZeroUsize::new_unchecked(symbols.len()) }, Symbol::default())
+                            else { continue };
+
+                        crate::panic::KERNEL_SYMBOLS.call_once(|| {
+                            symbols_copy.copy_from_slice(symbols);
+                            symbols_copy
+                        });
+                    }
+
+                    ".strtab" => {
+                        let Ok(strings_copy) = lzalloc::allocate_slice(NonZeroUsize::new_unchecked(section.data().len()), 0)
+                            else { continue };
+
+                        crate::panic::KERNEL_STRINGS.call_once(|| {
+                            strings_copy.copy_from_slice(section.data());
+                            strings_copy
+                        });
+                    }
                 }
             }
         }
