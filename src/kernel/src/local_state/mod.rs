@@ -51,10 +51,10 @@ fn get() -> &'static mut LocalState {
 ///
 /// SAFETY: This function invariantly assumes it will only be called once.
 pub unsafe fn init(core_id: u32, timer_frequency: u16) {
-    let Ok(local_state_ptr) = lzalloc::GlobalAllocator::allocate_with(|| {
+    let Ok(local_state_ptr) = lzalloc::allocate_with(|| {
         LocalState {
             syscall_stack_ptr: core::ptr::null(),
-            syscall_stack: Stack::<SYSCALL_STACK_SIZE>,
+            syscall_stack: Stack::<SYSCALL_STACK_SIZE>([0u8; SYSCALL_STACK_SIZE]),
             magic: LocalState::MAGIC,
             core_id,
             scheduler: Scheduler::new(
@@ -63,7 +63,7 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
                     TaskPriority::new(1).unwrap(),
                     TaskStart::Function(crate::interrupts::wait_loop),
                     TaskStack::At(libcommon::Address::<libcommon::Virtual>::from_ptr({
-                        lzalloc::GlobalAllocator:: alloc::alloc::alloc_zeroed(core::alloc::Layout::from_size_align_unchecked(0x10, 0x10))
+                        lzalloc::allocate_zeroed(core::alloc::Layout::from_size_align_unchecked(0x10, 0x10)).unwrap().as_non_null_ptr().as_ptr()
                     })),
                     {
                         #[cfg(target_arch = "x86_64")]
@@ -90,7 +90,7 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
                 if !crate::PARAMETERS.low_memory {
                     Some({
                         let idt =
-                            lzalloc::GlobalAllocator::allocate_with(|| idt::InterruptDescriptorTable::new()).unwrap();
+                            lzalloc::allocate_with(|| idt::InterruptDescriptorTable::new()).unwrap().as_mut();
 
                         idt::set_exception_handlers(idt);
                         idt::set_stub_handlers(idt);
@@ -111,17 +111,20 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
                     use core::num::NonZeroUsize;
 
                     let tss_ptr = lzalloc::allocate_with(|| tss::TaskStateSegment::new()).unwrap();
-                    let tss = tss_ptr.as_mut();
+
+                    {
+
 
                     fn allocate_tss_stack(pages: NonZeroUsize) -> VirtAddr {
                         VirtAddr::from_ptr(
-                            // SAFETY: Values provided are known-valid.
                             lzalloc::allocate(
+                            // SAFETY: Values provided are known-valid.
                             unsafe { core::alloc::Layout::from_size_align_unchecked(pages.get() * 0x1000, 0x10) }
-                        )
+                        ).unwrap().as_non_null_ptr().as_ptr()
                         )
                     }
 
+                    let tss = tss_ptr.as_mut();
                     // TODO guard pages for these stacks ?
                     tss.privilege_stack_table[0] = allocate_tss_stack(NonZeroUsize::new_unchecked(5));
                     tss.interrupt_stack_table[StackTableIndex::Debug as usize] =
@@ -132,6 +135,7 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
                         allocate_tss_stack(NonZeroUsize::new_unchecked(2));
                     tss.interrupt_stack_table[StackTableIndex::MachineCheck as usize] =
                         allocate_tss_stack(NonZeroUsize::new_unchecked(2));
+                }
 
                     tss_ptr
                 };
@@ -172,7 +176,7 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
                 // ... and restore cached GDT.
                 gdt::lgdt(&cur_gdt);
 
-                &mut *tss_ptr
+                tss_ptr.as_mut()
             },
             #[cfg(target_arch = "x86_64")]
             apic: {
@@ -270,7 +274,7 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
         .cast();
 
     #[cfg(target_arch = "x86_64")]
-    crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::write(local_state_ptr as usize as u64);
+    crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::write(local_state_ptr.addr().get() as u64);
 }
 
 // SAFETY: Caller must ensure control flow is prepared to begin scheduling tasks on the current core.

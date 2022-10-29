@@ -80,7 +80,7 @@ impl Visibility {
 }
 
 #[repr(C, packed)]
-#[derive(Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 pub struct Symbol {
     name_offset: u32,
     info: u8,

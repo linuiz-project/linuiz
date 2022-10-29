@@ -168,4 +168,14 @@ impl<T, A: Allocator> Vec<T, A> {
             None
         }
     }
+
+    pub fn iter<'a>(&'a self) -> core::slice::Iter<'a, T> {
+        // SAFETY: Slice is valid for range so long as vec is valid for range.
+        unsafe { core::slice::from_raw_parts(self.as_ptr(), self.len()) }.iter()
+    }
+
+    pub fn iter_mut<'a>(&'a self) -> core::slice::IterMut<'a, T> {
+        // SAFETY: Slice is valid for range so long as vec is valid for range.
+        unsafe { core::slice::from_raw_parts_mut(self.as_mut_ptr(), self.len()) }.iter_mut()
+    }
 }
