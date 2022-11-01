@@ -60,7 +60,9 @@ pub enum PageFaultHandlerError {
     NotDemandPaged,
 }
 
-/// SAFETY: Do not call this function.
+/// ### Safety
+///
+/// Do not call this function.
 #[no_mangle]
 #[repr(align(0x10))]
 pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandlerError> {
@@ -81,7 +83,7 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
             })
             .unwrap();
 
-        // SAFETY: We know the page was just mapped, and contains no relevant memory.
+        // ### Safety: We know the page was just mapped, and contains no relevant memory.
         fault_page.zero_memory();
 
         Ok(())
@@ -90,7 +92,9 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
     }
 }
 
-/// SAFETY: Do not call this function.
+/// ### Safety
+///
+/// Do not call this function.
 #[no_mangle]
 #[repr(align(0x10))]
 pub unsafe fn irq_handler(irq_vector: u64, ctrl_flow_context: &mut ControlContext, arch_context: &mut ArchContext) {

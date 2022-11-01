@@ -1,13 +1,16 @@
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 #![feature(
-    ptr_internals,
     core_intrinsics,
-    allocator_api,  // #32838 <https://github.com/rust-lang/rust/issues/32838>
-    extern_types,   // #43467 <https://github.com/rust-lang/rust/issues/43467>
-    // REMARK: Not sure if this feature should be used. Doesn't seem particularly close to stable?
-    slice_ptr_get   // #74265 <https://github.com/rust-lang/rust/issues/74265>
+    allocator_api,      // #32838 <https://github.com/rust-lang/rust/issues/32838>
+    extern_types,       // #43467 <https://github.com/rust-lang/rust/issues/43467>
+    slice_ptr_get,      // #74265 <https://github.com/rust-lang/rust/issues/74265>
+    const_mut_refs,     // #57349 <https://github.com/rust-lang/rust/issues/57349>
+    const_slice_from_raw_parts_mut,
+    const_option_ext,
+    const_cmp
 )]
 
+pub mod deque;
 pub mod raw_vec;
 pub mod vec;
 
@@ -17,6 +20,11 @@ use core::{
     num::NonZeroUsize,
     ptr::NonNull,
 };
+
+#[inline]
+pub const fn next_capacity(capacity: usize) -> usize {
+    core::cmp::max(if capacity.is_power_of_two() { capacity } else { capacity.next_power_of_two() }, 4)
+}
 
 pub type AllocResult<T> = core::result::Result<T, AllocError>;
 
@@ -44,7 +52,7 @@ pub trait LzAllocator: Allocator {
     fn allocate_with<T>(&self, init_fn: impl FnOnce() -> T) -> AllocResult<NonNull<T>> {
         let allocation = self
             .allocate(
-                // SAFETY: The layout of structs is required to be valid.
+                // ### Safety: The layout of structs is required to be valid.
                 unsafe { Layout::from_size_align_unchecked(size_of::<T>(), align_of::<T>()) },
             )?
             .as_non_null_ptr()
@@ -58,7 +66,7 @@ pub trait LzAllocator: Allocator {
     fn allocate_slice<T: Clone>(&self, len: NonZeroUsize, value: T) -> AllocResult<&mut [T]> {
         let Ok(layout) = Layout::array::<T>(len.get()) else { return Err(AllocError) };
         let t_ptr = self.allocate(layout)?.as_non_null_ptr().cast::<T>();
-        // SAFETY: Size and alignment will be valid due to `.allocate()`s guarantees, and values will be initialized
+        // ### Safety: Size and alignment will be valid due to `.allocate()`s guarantees, and values will be initialized
         //         before the calling context can access the slice memory.
         let t_slice = unsafe { core::slice::from_raw_parts_mut(t_ptr.as_ptr(), len.get()) };
         t_slice.fill(value);
@@ -69,7 +77,7 @@ pub trait LzAllocator: Allocator {
     fn allocate_slice_with<T>(&self, len: NonZeroUsize, init_fn: impl FnMut() -> T) -> AllocResult<&mut [T]> {
         let Ok(layout) = Layout::array::<T>(len.get()) else { return Err(AllocError) };
         let t_ptr = self.allocate(layout)?.as_non_null_ptr().cast::<T>();
-        // SAFETY: Size and alignment will be valid due to `.allocate()`s guarantees, and values will be initialized
+        // ### Safety: Size and alignment will be valid due to `.allocate()`s guarantees, and values will be initialized
         //         before the calling context can access the slice memory.
         let t_slice = unsafe { core::slice::from_raw_parts_mut(t_ptr.as_ptr(), len.get()) };
         t_slice.fill_with(init_fn);
@@ -82,11 +90,11 @@ pub struct GlobalAllocator;
 
 impl LzAllocator for GlobalAllocator {}
 
-// SAFETY: Implementation safety of these functions is passed on to the implementations of the
+// ### Safety: Implementation safety of these functions is passed on to the implementations of the
 //         statically-linked external functions `__allocate`, `__allocate_zeroed`, and `__deallocate`.
 unsafe impl Allocator for GlobalAllocator {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        // SAFETY: Pointer is required to be valid for `AllocateFn`.
+        // ### Safety: Pointer is required to be valid for `AllocateFn`.
         let try_func = unsafe { __lzg_allocate.as_ptr::<AllocateFn>().as_ref() };
         match try_func {
             Some(func) => func(layout),
@@ -110,7 +118,7 @@ unsafe impl Allocator for GlobalAllocator {
     }
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
-        // SAFETY: Pointer is required to be valid for `AllocateFn`.
+        // ### Safety: Pointer is required to be valid for `AllocateFn`.
         match unsafe { __lzg_deallocate.as_ptr::<DeallocateFn>().as_ref() } {
             Some(func) => func(ptr, layout),
             None => unimplemented!(),

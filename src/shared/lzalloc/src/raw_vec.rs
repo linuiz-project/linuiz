@@ -3,14 +3,17 @@ use core::{
     alloc::{AllocError, Allocator, Layout},
     mem::size_of,
     num::NonZeroUsize,
-    ptr::{NonNull, Unique},
+    ptr::NonNull,
 };
 
 pub(crate) struct RawVec<T, A: Allocator = GlobalAllocator> {
-    ptr: Unique<T>,
+    ptr: NonNull<T>,
     capacity: usize,
     allocator: A,
 }
+
+// SAFETY: Type is not thread-bound.
+unsafe impl<T: Send, A: Allocator + Send> Send for RawVec<T, A> {}
 
 impl<T> RawVec<T, GlobalAllocator> {
     pub const fn new() -> Self {
@@ -27,10 +30,10 @@ impl<T> RawVec<T, GlobalAllocator> {
 }
 
 impl<T, A: Allocator> RawVec<T, A> {
-    const IS_ZST: bool = size_of::<T>() == 0;
+    const T_IS_ZST: bool = size_of::<T>() == 0;
 
     pub const fn new_in(allocator: A) -> Self {
-        Self { ptr: Unique::dangling(), capacity: 0, allocator }
+        Self { ptr: NonNull::dangling(), capacity: 0, allocator }
     }
 
     #[inline]
@@ -44,7 +47,7 @@ impl<T, A: Allocator> RawVec<T, A> {
     }
 
     fn allocate_in(capacity: usize, zero_memory: bool, allocator: A) -> AllocResult<Self> {
-        if Self::IS_ZST || capacity == 0 {
+        if Self::T_IS_ZST || capacity == 0 {
             Ok(Self::new_in(allocator))
         } else {
             let layout = Layout::array::<T>(capacity).or(Err(AllocError))?;
@@ -52,8 +55,8 @@ impl<T, A: Allocator> RawVec<T, A> {
             let allocation = if zero_memory { allocator.allocate_zeroed(layout) } else { allocator.allocate(layout) }?;
 
             Ok(Self {
-                // SAFETY: Pointer is known non-null from allocator.
-                ptr: unsafe { Unique::new_unchecked(allocation.as_non_null_ptr().as_ptr().cast()) },
+                // ### Safety: Pointer is known non-null from allocator.
+                ptr: unsafe { NonNull::new_unchecked(allocation.as_non_null_ptr().as_ptr().cast()) },
                 capacity,
                 allocator,
             })
@@ -61,13 +64,18 @@ impl<T, A: Allocator> RawVec<T, A> {
     }
 
     #[inline]
-    pub const fn ptr(&self) -> *mut T {
+    pub const fn ptr(&self) -> *const T {
+        self.ptr.as_ptr()
+    }
+
+    #[inline]
+    pub const fn ptr_mut(&self) -> *mut T {
         self.ptr.as_ptr()
     }
 
     #[inline]
     pub const fn capacity(&self) -> usize {
-        if Self::IS_ZST {
+        if Self::T_IS_ZST {
             usize::MAX
         } else {
             self.capacity
@@ -80,23 +88,33 @@ impl<T, A: Allocator> RawVec<T, A> {
     }
 
     fn current_memory(&self) -> Option<(NonNull<u8>, Layout)> {
-        if Self::IS_ZST || self.capacity == 0 {
+        if Self::T_IS_ZST || self.capacity == 0 {
             None
         } else {
             Some((
-                // SAFETY: If the above conditions weren't met, the pointer is valid.
+                // ### Safety: If the above conditions weren't met, the pointer is valid.
                 unsafe { NonNull::new_unchecked(self.ptr.as_ptr().cast()) },
-                // SAFETY: If `capacity > 0`, then the layout will be valid.
+                // ### Safety: If `capacity > 0`, then the layout will be valid.
                 unsafe { Layout::array::<T>(self.capacity).unwrap_unchecked() },
             ))
         }
     }
 
     fn set_ptr_and_capacity(&mut self, ptr: NonNull<[u8]>, capacity: usize) {
-        self.ptr = unsafe { Unique::new_unchecked(ptr.as_non_null_ptr().as_ptr().cast()) };
+        self.ptr = unsafe { NonNull::new_unchecked(ptr.as_non_null_ptr().as_ptr().cast()) };
         self.capacity = capacity;
     }
 
+    /// Ensures that the buffer contains at least enough space to hold `len +
+    /// additional` elements. If it doesn't already have enough capacity, will
+    /// reallocate space up to the next power of two capacity to get amortized
+    /// *O*(1) behavior.
+    ///
+    /// If `len` exceeds `self.capacity()`, this may fail to actually allocate
+    /// the requested space. This is not really unsafe, but the unsafe
+    /// code *you* write that relies on the behavior of this function may break.
+    ///
+    /// This is ideal for implementing a bulk-push operation like `extend`.
     #[inline]
     pub fn reserve(&mut self, len: usize, additional: NonZeroUsize) -> AllocResult<()> {
         // This logic is extraced into a non-generic function to avoid bloating the code-size of `reserve`.
@@ -116,8 +134,16 @@ impl<T, A: Allocator> RawVec<T, A> {
         }
     }
 
-    pub fn reserve_for_push(&mut self, len: usize) -> AllocResult<()> {
-        // SAFETY: Value is non-zero.g
+    pub fn reserve_exact(&mut self, len: usize, additional: NonZeroUsize) -> AllocResult<()> {
+        if self.needs_to_grow(len, additional) {
+            self.grow_exact(len, additional)
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn reserve_one(&mut self, len: usize) -> AllocResult<()> {
+        // ### Safety: Value is non-zero.
         self.grow_amortized(len, unsafe { NonZeroUsize::new_unchecked(1) })
     }
 
@@ -125,17 +151,41 @@ impl<T, A: Allocator> RawVec<T, A> {
         additional.get() > self.capacity().wrapping_sub(len)
     }
 
+    // This method is usually instantiated many times. So we want it to be as
+    // small as possible, to improve compile times. But we also want as much of
+    // its contents to be statically computable as possible, to make the
+    // generated code run faster. Therefore, this method is carefully written
+    // so that all of the code that depends on `T` is within it, while as much
+    // of the code that doesn't depend on `T` as possible is in functions that
+    // are non-generic over `T`.
     fn grow_amortized(&mut self, len: usize, additional: NonZeroUsize) -> AllocResult<()> {
-        if Self::IS_ZST {
+        if Self::T_IS_ZST {
             return Err(AllocError);
         }
 
         let required_capacity = len.checked_add(additional.get()).ok_or(AllocError)?;
-        let new_capacity = core::cmp::max(self.capacity.next_power_of_two(), required_capacity);
+        let new_capacity = crate::next_capacity(required_capacity);
         let new_layout = Layout::array::<T>(new_capacity).or(Err(AllocError))?;
         let ptr = finish_grow(new_layout, self.current_memory(), &mut self.allocator)?;
 
         self.set_ptr_and_capacity(ptr, new_capacity);
+
+        Ok(())
+    }
+
+    // The constraints on this method are much the same as those on
+    // `grow_amortized`, but this method is usually instantiated less often so
+    // it's less critical.
+    fn grow_exact(&mut self, len: usize, additional: NonZeroUsize) -> AllocResult<()> {
+        if Self::T_IS_ZST {
+            return Err(AllocError);
+        }
+
+        let capacity = len.checked_add(additional.get()).ok_or(AllocError)?;
+        let Ok(new_layout) = Layout::array::<T>(capacity) else { return Err(AllocError) };
+
+        let ptr = finish_grow(new_layout, self.current_memory(), &mut self.allocator)?;
+        self.set_ptr_and_capacity(ptr, capacity);
 
         Ok(())
     }
@@ -149,14 +199,19 @@ fn finish_grow<A: Allocator>(
 ) -> AllocResult<NonNull<[u8]>> {
     memory_overflow_guard(new_layout.size())?;
 
-    current_memory.ok_or(AllocError).and_then(|(ptr, old_layout)| {
-        debug_assert_eq!(new_layout.align(), old_layout.align());
+    match current_memory {
+        Some((ptr, old_layout)) => {
+            debug_assert_eq!(new_layout.align(), old_layout.align());
 
-        // SAFETY: Allocator checks for alignment equality.
-        unsafe { core::intrinsics::assume(new_layout.align() == old_layout.align()) };
-        // SAFETY: Allocation data comes from the allocator itself.
-        unsafe { allocator.grow(ptr, old_layout, new_layout) }
-    })
+            // ### Safety: Allocator checks for alignment equality.
+            unsafe { core::intrinsics::assume(new_layout.align() == old_layout.align()) };
+
+            // ### Safety: Allocation data comes from the allocator itself.
+            unsafe { allocator.grow(ptr, old_layout, new_layout) }
+        }
+
+        None => allocator.allocate_zeroed(new_layout),
+    }
 }
 
 #[inline]

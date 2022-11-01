@@ -98,16 +98,16 @@ static PARAMETERS: spin::Lazy<Parameters> = spin::Lazy::new(|| {
         .unwrap_or_default()
 });
 
-// TODO somehow model that these requests are invalidated
-
-/// SAFETY: Do not call this function.
+/// ### Safety
+///
+/// Do not call this function.
 #[no_mangle]
 #[allow(clippy::too_many_lines)]
 unsafe extern "C" fn _entry() -> ! {
     log::set_max_level(log::LevelFilter::Trace);
     log::set_logger({
         static UART: spin::Lazy<crate::memory::io::Serial> = spin::Lazy::new(|| {
-            // SAFETY: Function is called only once, when the `Lazy` is initialized.
+            // ### Safety: Function is called only once, when the `Lazy` is initialized.
             unsafe { crate::memory::io::Serial::init() }
         });
 
@@ -183,7 +183,7 @@ unsafe extern "C" fn _entry() -> ! {
             range: core::ops::Range<u64>,
             attributes: PageAttributes,
         ) {
-            // SAFETY: Linker should have correctly set this value.
+            // ### Safety: Linker should have correctly set this value.
             let page_align = unsafe { PageAlign::from_u64(__section_align.as_u64()).unwrap() };
 
             for address in range.step_by(page_align.as_usize()).map(Address::<Virtual>::new_truncate) {
@@ -200,10 +200,10 @@ unsafe extern "C" fn _entry() -> ! {
         }
 
         // TODO don't unwrap, possibly switch to a simpler allocator? bump allocator, maybe
-        // SAFETY: Kernel guarantees the HHDM to be valid.
+        // ### Safety: Kernel guarantees the HHDM to be valid.
 
         debug!("Initializing kernel mapper...");
-        // SAFETY: Kernel guarantees HHDM address to be valid.
+        // ### Safety: Kernel guarantees HHDM address to be valid.
         let boot_mapper = unsafe { Mapper::from_current(memory::get_hhdm_address()) };
         let kernel_mapper = memory::get_kernel_mapper();
 
@@ -212,28 +212,28 @@ unsafe extern "C" fn _entry() -> ! {
             map_range_from(
                 &boot_mapper,
                 &kernel_mapper,
-                // SAFETY: These linker symbols are guaranteed by the bootloader to be valid.
+                // ### Safety: These linker symbols are guaranteed by the bootloader to be valid.
                 unsafe { __text_start.as_u64()..__text_end.as_u64() },
                 PageAttributes::RX | PageAttributes::GLOBAL,
             );
             map_range_from(
                 &boot_mapper,
                 &kernel_mapper,
-                // SAFETY: These linker symbols are guaranteed by the bootloader to be valid.
+                // ### Safety: These linker symbols are guaranteed by the bootloader to be valid.
                 unsafe { __rodata_start.as_u64()..__rodata_end.as_u64() },
                 PageAttributes::RO | PageAttributes::GLOBAL,
             );
             map_range_from(
                 &boot_mapper,
                 &kernel_mapper,
-                // SAFETY: These linker symbols are guaranteed by the bootloader to be valid.
+                // ### Safety: These linker symbols are guaranteed by the bootloader to be valid.
                 unsafe { __bss_start.as_u64()..__bss_end.as_u64() },
                 PageAttributes::RW | PageAttributes::GLOBAL,
             );
             map_range_from(
                 &boot_mapper,
                 &kernel_mapper,
-                // SAFETY: These linker symbols are guaranteed by the bootloader to be valid.
+                // ### Safety: These linker symbols are guaranteed by the bootloader to be valid.
                 unsafe { __data_start.as_u64()..__data_end.as_u64() },
                 PageAttributes::RW | PageAttributes::GLOBAL,
             );
@@ -277,7 +277,7 @@ unsafe extern "C" fn _entry() -> ! {
         }
 
         debug!("Switching to kernel page tables...");
-        // SAFETY: Kernel mapper has mapped all existing memory references, so commiting
+        // ### Safety: Kernel mapper has mapped all existing memory references, so commiting
         //         changes nothing from the software perspective.
         unsafe { kernel_mapper.commit_vmem_register() }.unwrap();
         debug!("Kernel has finalized control of page tables.");
@@ -294,7 +294,7 @@ unsafe extern "C" fn _entry() -> ! {
         };
 
         let kernel_elf = crate::elf::Elf::from_bytes(
-            // SAFETY: Kernel file is guaranteed to be valid by bootloader.
+            // ### Safety: Kernel file is guaranteed to be valid by bootloader.
             unsafe { core::slice::from_raw_parts(kernel_file_base, kernel_file_len) },
         )
         .expect("failed to parse kernel executable");
@@ -361,17 +361,17 @@ unsafe extern "C" fn _entry() -> ! {
                     extern "C" fn _smp_entry(info: *const limine::LimineSmpInfo) -> ! {
                         crate::cpu::setup();
 
-                        // SAFETY: All currently referenced memory should also be mapped in the kernel page tables.
+                        // ### Safety: All currently referenced memory should also be mapped in the kernel page tables.
                         unsafe { crate::memory::get_kernel_mapper().commit_vmem_register().unwrap() };
 
-                        // SAFETY: Function is called only once for this core.
+                        // ### Safety: Function is called only once for this core.
                         unsafe { crate::kernel_thread_setup(info.read().lapic_id) }
                     }
 
                     _smp_entry
                 } else {
                     extern "C" fn _idle_forever(_: *const limine::LimineSmpInfo) -> ! {
-                        // SAFETY: Murder isn't legal. Is this?
+                        // ### Safety: Murder isn't legal. Is this?
                         unsafe { crate::interrupts::halt_and_catch_fire() }
                     }
 
@@ -386,7 +386,7 @@ unsafe extern "C" fn _entry() -> ! {
     /* arch core init */
     // #[cfg(target_arch = "x86_64")]
     // {
-    //     // SAFETY: Provided IRQ base is intentionally within the exception range for x86 CPUs.
+    //     // ### Safety: Provided IRQ base is intentionally within the exception range for x86 CPUs.
     //     static PICS: spin::Mutex<pic_8259::Pics> = spin::Mutex::new(unsafe { pic_8259::Pics::new(0) });
     //     PICS.lock().init(pic_8259::InterruptLines::empty());
     // }
@@ -507,7 +507,9 @@ unsafe extern "C" fn _entry() -> ! {
     kernel_thread_setup(0)
 }
 
-/// SAFETY: This function invariantly assumes it will be called only once per core.
+/// ### Safety
+///
+/// This function invariantly assumes it will be called only once per core.
 #[inline(never)]
 pub(self) unsafe fn kernel_thread_setup(core_id: u32) -> ! {
     crate::local_state::init(core_id, 1000);

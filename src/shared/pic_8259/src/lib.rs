@@ -140,7 +140,9 @@ impl Pics {
     /// Initializes the chained PICs. They're initialized together (at the same time) because
     /// I/O operations might not be intantaneous on older processors.
     ///
-    /// SAFETY: Setting new enabled interrupt lines has the possibility of adversely affecting control flow
+    /// ### Safety
+/// 
+/// Setting new enabled interrupt lines has the possibility of adversely affecting control flow
     ///         unrelated to this function, or even this core's context. It is thus the responsibility of the
     ///         caller to ensure modifying the enabled lines will not result in unwanted behaviour.
     pub unsafe fn init(&mut self, enabled: InterruptLines) {
@@ -190,7 +192,9 @@ impl Pics {
     }
 
     /// Signals to the chained PICs to send the EOI command.
-    /// SAFETY: This function is unsafe because an invalid interrupt ID can be specified.
+    /// ### Safety
+/// 
+/// This function is unsafe because an invalid interrupt ID can be specified.
     pub fn end_of_interrupt(&mut self, interrupt: InterruptOffset) -> Result<(), InterruptOffset> {
         if self.handles_interrupt(interrupt) {
             // If the interrupt belongs to the slave PIC, we send the EOI command to it.

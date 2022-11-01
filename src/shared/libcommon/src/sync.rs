@@ -19,7 +19,7 @@ impl<T> SingleOwner<T> {
 
     pub fn acquire(&self) -> Option<&mut T> {
         match self.owned.compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed) {
-            // SAFETY: We know no other mutable borrows will be handed out until `return()` is called.
+            // ### Safety: We know no other mutable borrows will be handed out until `return()` is called.
             Ok(_) => Some(unsafe { &mut *self.value.get() }),
             Err(_) => None,
         }

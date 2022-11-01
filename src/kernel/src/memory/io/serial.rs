@@ -53,7 +53,9 @@ impl core::fmt::Write for UartWriter {
 pub struct Serial(Mutex<UartWriter>);
 
 impl Serial {
-    /// SAFETY: This function expects to be called only once per boot cycle.
+    /// ### Safety
+    ///
+    /// This function expects to be called only once per boot cycle.
     pub unsafe fn init() -> Self {
         use uart::{LineControl, ModemControl};
 

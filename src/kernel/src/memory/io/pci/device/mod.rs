@@ -138,10 +138,12 @@ pub struct Device<T: DeviceType> {
     phantom: PhantomData<T>,
 }
 
-// SAFETY: PCI MMIO (and so, the pointers used for it) utilize the global HHDM, and so can be sent between threads.
+// ### Safety: PCI MMIO (and so, the pointers used for it) utilize the global HHDM, and so can be sent between threads.
 unsafe impl<T: DeviceType> Send for Device<T> {}
 
-/// SAFETY: Caller must ensure that the provided base pointer is a valid (and mapped) PCI MMIO header base.
+/// ### Safety
+/// 
+/// Caller must ensure that the provided base pointer is a valid (and mapped) PCI MMIO header base.
 pub unsafe fn new_device(base_ptr: *mut LittleEndianU32) -> DeviceVariant {
     let header_type = (unsafe { base_ptr.add(0x3).read_volatile().get() } >> 16) & 0x3F;
 
@@ -231,17 +233,17 @@ impl<T: DeviceType> Device<T> {
 
         assert!(index < T::REGISTER_COUNT);
 
-        // SAFETY: PCI spec indicates the address space always contains BARs.
+        // ### Safety: PCI spec indicates the address space always contains BARs.
         let base_bar_ptr = unsafe { self.base_ptr.add(0x4) };
 
         // We need to check if this BAR is the upper-half of a 64-bit BAR
-        // SAFETY: The lower and upper bound of the index are already checked, so we know the following BAR pointer is valid.
+        // ### Safety: The lower and upper bound of the index are already checked, so we know the following BAR pointer is valid.
         if index > 0 && unsafe { base_bar_ptr.add(index - 1).read_volatile() }.get().get_bits(0..3).eq(&0b100) {
             None
         } else {
-            // SAFETY: See above about PCI spec.
+            // ### Safety: See above about PCI spec.
             let bar_ptr = unsafe { base_bar_ptr.add(index) };
-            // SAFETY: See above about PCI spec.
+            // ### Safety: See above about PCI spec.
             let bar_data = unsafe { bar_ptr.read_volatile() }.get();
 
             // Check whether BAAR is IO space
@@ -250,7 +252,7 @@ impl<T: DeviceType> Device<T> {
             } else {
                 match bar_data.get_bits(1..3) {
                     0b00 => Some({
-                        // SAFETY: See above about PCI spec.
+                        // ### Safety: See above about PCI spec.
                         let size = unsafe {
                             bar_ptr.write_volatile(LittleEndianU32::new(u32::MAX));
                             let bar_size = !(bar_ptr.read_volatile().get() & !0b1111) + 1;
@@ -268,12 +270,12 @@ impl<T: DeviceType> Device<T> {
                     }),
 
                     0b10 => Some({
-                        // SAFETY: See above about PCI spec.
+                        // ### Safety: See above about PCI spec.
                         let bar_high_ptr = unsafe { bar_ptr.add(0x1) };
-                        // SAFETY: See above about PCI spec.
+                        // ### Safety: See above about PCI spec.
                         let bar_high_data = unsafe { bar_high_ptr.read_volatile() }.get();
 
-                        // SAFETY: See above about PCI spec.
+                        // ### Safety: See above about PCI spec.
                         let size = unsafe {
                             bar_ptr.write_volatile(LittleEndianU32::new(u32::MAX));
                             bar_ptr.add(1).write_volatile(LittleEndianU32::new(u32::MAX));

@@ -1,5 +1,5 @@
-use alloc::collections::VecDeque;
 use core::sync::atomic::AtomicU64;
+use lzalloc::deque::Deque;
 
 static NEXT_THREAD_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -39,8 +39,7 @@ pub enum TaskStart {
 }
 
 // TODO devise a better method for tasks to be queued globally
-pub static GLOBAL_TASKS: spin::Lazy<spin::Mutex<VecDeque<Task>>> =
-    spin::Lazy::new(|| spin::Mutex::new(VecDeque::new()));
+pub static GLOBAL_TASKS: spin::Lazy<spin::Mutex<Deque<Task>>> = spin::Lazy::new(|| spin::Mutex::new(Deque::new()));
 
 // TODO move `Task` and its types / impls to a module
 /// Representation object for different contexts of execution in the CPU.
@@ -99,14 +98,14 @@ impl core::fmt::Debug for Task {
 pub struct Scheduler {
     enabled: bool,
     total_priority: u64,
-    tasks: VecDeque<Task>,
+    tasks: Deque<Task>,
     idle_task: Task,
     cur_task: Option<Task>,
 }
 
 impl Scheduler {
     pub fn new(enabled: bool, idle_task: Task) -> Self {
-        Self { enabled, total_priority: 0, tasks: VecDeque::new(), idle_task, cur_task: None }
+        Self { enabled, total_priority: 0, tasks: Deque::new(), idle_task, cur_task: None }
     }
 
     /// Enables the scheduler to pop tasks.

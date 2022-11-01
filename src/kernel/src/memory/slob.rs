@@ -97,7 +97,7 @@ impl<'map> SLOB<'map> {
         let mask_bit_offset = cur_block_index - floor_block_index;
         let mask_bit_count = usize::min(ceil_block_index, end_block_index) - cur_block_index;
 
-        // SAFETY: The above calculations for `floor_block_index` and `ceil_block_index` ensure the shift will be <64.
+        // ### Safety: The above calculations for `floor_block_index` and `ceil_block_index` ensure the shift will be <64.
         let mask_bits = unsafe { u64::MAX.unchecked_shr((u64::BITS as u64) - (mask_bit_count as u64)) }
             .checked_shl(mask_bit_offset as u32)
             .unwrap();
@@ -144,14 +144,14 @@ impl<'map> SLOB<'map> {
         // Map the new table extents. Each table index beyond `cur_table_len` is a new page.
         {
             let frame_manager = crate::memory::get_kernel_frame_manager();
-            // SAFETY: Kernel guarantees the HHDM will be a valid and mapped address.
+            // ### Safety: Kernel guarantees the HHDM will be a valid and mapped address.
             let page_manager = unsafe { VirtualMapper::from_current(crate::memory::get_hhdm_address()) };
 
             for page_offset in cur_table_len..req_table_len {
                 let new_page = base_alloc_address.forward_checked(page_offset).unwrap();
                 page_manager.auto_map(new_page, PageAttributes::RW, frame_manager);
                 // Clear the newly allocated table page.
-                // SAFETY: We know no important memory is stored here to be overwritten, because we just mapped it.
+                // ### Safety: We know no important memory is stored here to be overwritten, because we just mapped it.
                 unsafe { new_page.zero_memory() };
             }
         }
@@ -163,7 +163,7 @@ impl<'map> SLOB<'map> {
         let new_table_base_page = base_alloc_address.forward_checked(new_table_start_index).unwrap();
 
         let new_table =
-        // SAFETY: We know the address is pointer-aligned, and that the address range is valid for clearing via `write_bytes`.        
+        // ### Safety: We know the address is pointer-aligned, and that the address range is valid for clearing via `write_bytes`.        
         unsafe {
             let new_table_ptr = new_table_base_page.address().as_mut_ptr::<BlockPage>();
             // Ensure we clear the new table's contents before making a slice of it.

@@ -109,9 +109,9 @@ pub struct SlabAllocator<'a> {
     table: &'a [Frame],
 }
 
-// SAFETY: Type uses a global physical mapped address, and so is thread-independent.
+// ### Safety: Type uses a global physical mapped address, and so is thread-independent.
 unsafe impl Send for SlabAllocator<'_> {}
-// SAFETY: Type ensures all concurrent accesses are synchronized.
+// ### Safety: Type ensures all concurrent accesses are synchronized.
 unsafe impl Sync for SlabAllocator<'_> {}
 
 macro_rules! slab_allocate {
@@ -124,12 +124,12 @@ macro_rules! slab_allocate {
                         let allocation_bit = (allocations.trailing_zeros() - 1) as usize;
                         allocations.set_bit(allocation_bit, true);
 
-                        // SAFETY: Arbitrary `u8` memory region is valid for the offsets within its bounds.
+                        // ### Safety: Arbitrary `u8` memory region is valid for the offsets within its bounds.
                         unsafe { memory_ptr.add(allocation_bit * $slab_size) }
                     }
 
                     None if let Ok(frame) = $self.lock_next() => {
-                        // SAFETY: `phys_mapped_address` is required to be valid for arbitrary offsets from within its range.
+                        // ### Safety: `phys_mapped_address` is required to be valid for arbitrary offsets from within its range.
                         let memory_ptr = unsafe { $self.phys_mapped_address.as_mut_ptr::<u8>().add(frame.as_usize()) };
                         slabs.push((memory_ptr, 1 << ((0x1000 / $slab_size) - 1)));
 
@@ -160,7 +160,7 @@ macro_rules! slab_deallocate {
     };
 }
 
-// SAFETY: `SlabAllocator` promises to do everything right.
+// ### Safety: `SlabAllocator` promises to do everything right.
 unsafe impl<'a> core::alloc::Allocator for SlabAllocator<'a> {
     fn allocate(&self, layout: core::alloc::Layout) -> AllocResult<core::ptr::NonNull<[u8]>> {
         use core::ptr::{slice_from_raw_parts_mut, NonNull};
@@ -179,21 +179,21 @@ unsafe impl<'a> core::alloc::Allocator for SlabAllocator<'a> {
                     self.lock_next()
                 } else {
                     self.lock_next_many(
-                        // SAFETY: The size of `layout` at this point is known to be >4096.
+                        // ### Safety: The size of `layout` at this point is known to be >4096.
                         unsafe { NonZeroUsize::new_unchecked(layout.size() / 0x1000) },
-                        // SAFETY: `Layout::align()` can not be zero in safe Rust.
+                        // ### Safety: `Layout::align()` can not be zero in safe Rust.
                         unsafe { NonZeroUsize::new_unchecked(layout.align()) },
                     )
                 })
                 .map(|address| {
-                    // SAFETY: Frame addresses are naturally aligned, and arbitrary memory is valid for `u8`, and `phys_mapped_address` is
+                    // ### Safety: Frame addresses are naturally aligned, and arbitrary memory is valid for `u8`, and `phys_mapped_address` is
                     //         required to be valid for arbitrary offsets from within its range.
                     let allocation_ptr = unsafe { self.phys_mapped_address.as_mut_ptr::<u8>().add(address.as_usize()) };
                     slice_from_raw_parts_mut(
                         allocation_ptr,
                         libcommon::align_up(
                             layout.size(),
-                            // SAFETY: Value provided is non-zero.
+                            // ### Safety: Value provided is non-zero.
                             unsafe { NonZeroUsize::new_unchecked(0x1000) },
                         ),
                     )
@@ -223,19 +223,19 @@ unsafe impl<'a> core::alloc::Allocator for SlabAllocator<'a> {
 }
 
 impl SlabAllocator<'_> {
-    // SAFETY: Caller must guarantee the physical mapped address is valid.
+    // ### Safety: Caller must guarantee the physical mapped address is valid.
     pub unsafe fn from_memory_map(
         memory_map: &[crate::MmapEntry],
         phys_mapped_address: Address<Virtual>,
     ) -> Option<Self> {
         let page_count = libcommon::align_up_div(
             memory_map.last().map(|entry| entry.base + entry.len).unwrap() as usize,
-            // SAFETY: Value provided is non-zero.
+            // ### Safety: Value provided is non-zero.
             unsafe { NonZeroUsize::new_unchecked(0x1000) },
         );
         let table_bytes = libcommon::align_up(
             page_count * core::mem::size_of::<Frame>(),
-            // SAFETY: Value provided is non-zero.
+            // ### Safety: Value provided is non-zero.
             unsafe { NonZeroUsize::new_unchecked(0x1000) },
         );
 
@@ -286,7 +286,7 @@ impl SlabAllocator<'_> {
             .skip((table_entry.base / 0x1000) as usize)
             .take(libcommon::align_up_div(
                 table_bytes,
-                // SAFETY: Value provided is non-zero.
+                // ### Safety: Value provided is non-zero.
                 unsafe { NonZeroUsize::new_unchecked(0x1000) },
             ))
             .for_each(|frame| {
@@ -362,7 +362,7 @@ impl SlabAllocator<'_> {
                         frames.iter().for_each(Frame::unpeek);
                         sub_table = &sub_table[libcommon::align_up(
                             index + 1,
-                            // SAFETY: Value (via `max(alignment / 0x1000, 1)`) is guaranteed to be >0.
+                            // ### Safety: Value (via `max(alignment / 0x1000, 1)`) is guaranteed to be >0.
                             unsafe { NonZeroUsize::new_unchecked(alignment) },
                         )..]
                     }
