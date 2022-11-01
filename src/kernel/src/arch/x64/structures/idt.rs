@@ -140,7 +140,9 @@ macro_rules! exception_handler_with_error {
     };
 }
 
-/// SAFETY: This function should not be called from software.
+/// ### Safety
+///
+/// This function should not be called from software.
 unsafe extern "sysv64" fn irq_handoff(
     irq_number: u64,
     stack_frame: &mut crate::arch::x64::structures::idt::InterruptStackFrame,
@@ -160,10 +162,10 @@ unsafe extern "sysv64" fn irq_handoff(
         },
     );
 
-    // SAFETY: function pointer is guaranteed by the `set_interrupt_handler()` function to be valid.
+    // ### Safety: function pointer is guaranteed by the `set_interrupt_handler()` function to be valid.
     unsafe { crate::interrupts::irq_handler(irq_number, &mut control_flow_context, &mut arch_context) };
 
-    // SAFETY: The stack frame *has* to be modified to switch contexts within this interrupt.
+    // ### Safety: The stack frame *has* to be modified to switch contexts within this interrupt.
     unsafe {
         use crate::arch::reexport::x86_64::VirtAddr;
 

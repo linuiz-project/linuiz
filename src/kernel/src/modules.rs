@@ -6,7 +6,7 @@ fn drivers() {
         .and_then(|modules| {
             modules.iter().find(|module| module.path.to_str().unwrap().to_str().unwrap().ends_with("drivers"))
         })
-        // SAFETY: Kernel promises HHDM to be valid, and the module pointer should be in the HHDM, so this should be valid for `u8`.
+        // ### Safety: Kernel promises HHDM to be valid, and the module pointer should be in the HHDM, so this should be valid for `u8`.
         .map(|drivers_module| unsafe {
             core::slice::from_raw_parts(drivers_module.base.as_ptr().unwrap(), drivers_module.length as usize)
         })
@@ -43,7 +43,7 @@ fn drivers() {
             use libcommon::PageAlign;
 
             // Create the driver's page manager from the kernel's higher-half table.
-            // SAFETY: Kernel guarantees HHDM to be valid.
+            // ### Safety: Kernel guarantees HHDM to be valid.
             let driver_page_manager = unsafe {
                 crate::memory::Mapper::new(
                     4,
@@ -63,11 +63,11 @@ fn drivers() {
                     segment::Type::Loadable => {
                         let memory_start = segment.get_virtual_address().unwrap().as_usize();
                         let memory_end = memory_start + segment.get_memory_layout().unwrap().size();
-                        // SAFETY: Value provided is non-zero.
+                        // ### Safety: Value provided is non-zero.
                         let start_page_index = libcommon::align_down_div(memory_start, unsafe {
                             core::num::NonZeroUsize::new_unchecked(0x1000)
                         });
-                        // SAFETY: Value provided is non-zero.
+                        // ### Safety: Value provided is non-zero.
                         let end_page_index = libcommon::align_up_div(memory_end, unsafe {
                             core::num::NonZeroUsize::new_unchecked(0x1000)
                         });
@@ -90,7 +90,7 @@ fn drivers() {
                             .unwrap();
                             driver_page_manager.auto_map(page, page_attributes | PageAttributes::USER).unwrap();
 
-                            // SAFETY: HHDM is guaranteed by kernel to be valid, and the frame being pointed to was just allocated.
+                            // ### Safety: HHDM is guaranteed by kernel to be valid, and the frame being pointed to was just allocated.
                             let memory_hhdm = unsafe {
                                 core::slice::from_raw_parts_mut(
                                     hhdm_address
@@ -150,30 +150,32 @@ fn drivers() {
                 };
 
                 let mut global_tasks = crate::local_state::GLOBAL_TASKS.lock();
-                global_tasks.push_back(crate::local_state::Task::new(
-                    crate::local_state::TaskPriority::new(crate::local_state::TaskPriority::MAX).unwrap(),
-                    // TODO account for memory base when passing entry offset
-                    crate::local_state::TaskStart::Address(
-                        Address::<Virtual>::new(driver_elf.get_entry_offset() as u64).unwrap(),
-                    ),
-                    crate::local_state::TaskStack::At(stack_address.address()),
-                    {
+                global_tasks
+                    .push_back(crate::local_state::Task::new(
+                        crate::local_state::TaskPriority::new(crate::local_state::TaskPriority::MAX).unwrap(),
+                        // TODO account for memory base when passing entry offset
+                        crate::local_state::TaskStart::Address(
+                            Address::<Virtual>::new(driver_elf.get_entry_offset() as u64).unwrap(),
+                        ),
+                        crate::local_state::TaskStack::At(stack_address.address()),
+                        {
+                            #[cfg(target_arch = "x86_64")]
+                            {
+                                (
+                                    crate::arch::x64::registers::GeneralRegisters::empty(),
+                                    crate::arch::x64::registers::SpecialRegisters::flags_with_user_segments(
+                                        crate::arch::x64::registers::RFlags::INTERRUPT_FLAG,
+                                    ),
+                                )
+                            }
+                        },
                         #[cfg(target_arch = "x86_64")]
                         {
-                            (
-                                crate::arch::x64::registers::GeneralRegisters::empty(),
-                                crate::arch::x64::registers::SpecialRegisters::flags_with_user_segments(
-                                    crate::arch::x64::registers::RFlags::INTERRUPT_FLAG,
-                                ),
-                            )
-                        }
-                    },
-                    #[cfg(target_arch = "x86_64")]
-                    {
-                        // TODO do not error here ?
-                        driver_page_manager.read_vmem_register().unwrap()
-                    },
-                ))
+                            // TODO do not error here ?
+                            driver_page_manager.read_vmem_register().unwrap()
+                        },
+                    ))
+                    .unwrap();
             }
         }
 

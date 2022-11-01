@@ -29,12 +29,14 @@ struct Data {
 
 pub struct Mapper(RwLock<Data>);
 
-// SAFETY: Type is designed to be thread-agnostic internally.
+// ### Safety: Type is designed to be thread-agnostic internally.
 unsafe impl Sync for Mapper {}
 
 impl Mapper {
     /// Attempts to construct a new page manager. Returns `None` if the provided page table depth is not supported.
-    /// SAFETY: Refer to `VirtualMapper::new()`.
+    /// ### Safety
+    ///
+    /// Refer to `VirtualMapper::new()`.
     pub unsafe fn new(
         depth: usize,
         phys_mapped_address: Address<Virtual>,
@@ -76,7 +78,7 @@ impl Mapper {
         interrupts::without(|| {
             let data = self.0.read();
             // TODO try to find alternative to unwrapping here
-            // SAFETY: `VirtualMapper` already requires that the physical mapping page is valid, so it can be safely passed to the page table.
+            // ### Safety: `VirtualMapper` already requires that the physical mapping page is valid, so it can be safely passed to the page table.
             func(unsafe { PageTable::<Ref>::new(data.depth, data.hhdm_address, &data.entry).unwrap() })
         })
     }
@@ -84,7 +86,7 @@ impl Mapper {
     fn with_root_table_mut<T>(&self, func: impl FnOnce(PageTable<Mut>) -> T) -> T {
         interrupts::without(|| {
             let mut data = self.0.write();
-            // SAFETY: `VirtualMapper` already requires that the physical mapping page is valid, so it can be safely passed to the page table.
+            // ### Safety: `VirtualMapper` already requires that the physical mapping page is valid, so it can be safely passed to the page table.
             func(unsafe { PageTable::<Mut>::new(data.depth, data.hhdm_address, &mut data.entry).unwrap() })
         })
     }
@@ -141,16 +143,18 @@ impl Mapper {
 
     /// Unmaps the given page, optionally freeing the frame the page points to within the given [`FrameManager`].
     ///
-    /// SAFETY: Caller must ensure calling this function does not cause memory corruption.
+    /// ### Safety
+    ///
+    /// Caller must ensure calling this function does not cause memory corruption.
     pub unsafe fn unmap(&self, page: Address<Page>, free_frame: bool) -> Result<(), super::PagingError> {
         self.with_root_table_mut(|mut root_table| {
             root_table.with_entry_mut(page, |entry| {
                 entry.map(|entry| {
-                    // SAFETY: We've got an explicit directive from the caller to unmap this page, so the caller must ensure that's a valid operation.
+                    // ### Safety: We've got an explicit directive from the caller to unmap this page, so the caller must ensure that's a valid operation.
                     unsafe { entry.set_attributes(PageAttributes::PRESENT, AttributeModify::Remove) };
 
                     let frame = entry.get_frame();
-                    // SAFETY: See above.
+                    // ### Safety: See above.
                     unsafe { entry.set_frame(Address::<Frame>::zero()) };
 
                     if free_frame {
@@ -255,7 +259,9 @@ impl Mapper {
         })
     }
 
-    /// SAFETY: Caller must ensure that committing this mapper's parameters to the virtual memory register will
+    /// ### Safety
+    ///
+    /// Caller must ensure that committing this mapper's parameters to the virtual memory register will
     ///         not result in undefined behaviour.
     pub unsafe fn commit_vmem_register(&self) -> Result<(), MapperError> {
         interrupts::without(|| {

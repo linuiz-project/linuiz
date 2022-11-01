@@ -12,7 +12,7 @@ pub enum Syscall {
 pub fn do_syscall(vector: Syscall) {
     match vector {
         Syscall::Log { level, cstr_ptr } => {
-            // SAFETY: The kernel guarantees the HHDM will be valid.
+            // ### Safety: The kernel guarantees the HHDM will be valid.
             let page_manager = unsafe { crate::memory::Mapper::from_current(get_hhdm_address()) };
 
             let mut cstr_increment_ptr = cstr_ptr;
@@ -34,7 +34,7 @@ pub fn do_syscall(vector: Syscall) {
                     }
                 }
 
-                // SAFETY: Pointer is proven-mapped, is a numeric primitive (so cannot be 'uninitialized' in this context).
+                // ### Safety: Pointer is proven-mapped, is a numeric primitive (so cannot be 'uninitialized' in this context).
                 if unsafe { cstr_increment_ptr.read_unaligned() } == 0 {
                     break;
                 } else {
@@ -48,7 +48,7 @@ pub fn do_syscall(vector: Syscall) {
                 }
             }
 
-            // SAFETY: At this point, the `CStr` pointer should be completely known-valid.
+            // ### Safety: At this point, the `CStr` pointer should be completely known-valid.
             match unsafe { core::ffi::CStr::from_ptr(cstr_ptr) }.to_str() {
                 Ok(string) => log!(level, "{}", string),
                 Err(error) => {

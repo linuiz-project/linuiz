@@ -226,17 +226,17 @@ impl<'dev> MSIX<'dev> {
     // }
 
     fn get_table_size(&self) -> usize {
-        // SAFETY: Type's constructor invariantly requires a valid base pointer.
+        // ### Safety: Type's constructor invariantly requires a valid base pointer.
         unsafe { self.base_ptr.read_volatile() }.get().get_bits(16..26) as usize
     }
 
     pub fn get_function_mask(&self) -> bool {
-        // SAFETY: See `Self::get_table_size()`.
+        // ### Safety: See `Self::get_table_size()`.
         unsafe { self.base_ptr.read_volatile() }.get().get_bit(30)
     }
 
     pub fn set_function_mask(&self, mask_all: bool) {
-        // SAFETY: See `Self::get_table_size()`.
+        // ### Safety: See `Self::get_table_size()`.
         unsafe {
             self.base_ptr
                 .write_volatile(LittleEndianU32::new(*self.base_ptr.read_volatile().get().set_bit(30, mask_all)))
@@ -244,12 +244,12 @@ impl<'dev> MSIX<'dev> {
     }
 
     pub fn get_enable(&self) -> bool {
-        // SAFETY: See `Self::get_table_size()`.
+        // ### Safety: See `Self::get_table_size()`.
         unsafe { self.base_ptr.read_volatile() }.get().get_bit(31)
     }
 
     pub fn set_enable(&self, enable: bool) {
-        // SAFETY: See `Self::get_table_size()`.
+        // ### Safety: See `Self::get_table_size()`.
         unsafe {
             self.base_ptr.write_volatile(LittleEndianU32::new(*self.base_ptr.read_volatile().get().set_bit(31, enable)))
         };

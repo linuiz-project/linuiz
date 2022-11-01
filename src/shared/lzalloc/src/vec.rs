@@ -73,13 +73,12 @@ impl<T, A: Allocator> Vec<T, A> {
 
     #[inline]
     pub const fn as_ptr(&self) -> *const T {
-        // SAFETY: Exclusive pointer decays into a shared pointer.
-        unsafe { self.as_mut_ptr() }
+        self.buffer.ptr()
     }
 
     #[inline]
     pub const unsafe fn as_mut_ptr(&self) -> *mut T {
-        self.buffer.ptr()
+        self.buffer.ptr_mut()
     }
 
     pub fn reserve(&mut self, additional: NonZeroUsize) -> VecResult<()> {
@@ -90,7 +89,7 @@ impl<T, A: Allocator> Vec<T, A> {
         let len = self.len();
 
         if len == self.buffer.capacity() {
-            // SAFETY: Value is non-zero.
+            // ### Safety: Value is non-zero.
             self.reserve(unsafe { NonZeroUsize::new_unchecked(1) })?;
         }
 
@@ -142,7 +141,7 @@ impl<T, A: Allocator> Vec<T, A> {
         let len = self.len();
 
         if len == self.capacity() {
-            to_vec_result(self.buffer.reserve_for_push(len))?;
+            to_vec_result(self.buffer.reserve_one(len))?;
         }
 
         unsafe {
@@ -159,23 +158,33 @@ impl<T, A: Allocator> Vec<T, A> {
         let len = self.len();
 
         if len > 0 {
-            // SAFETY: Length is expected to be decremented.
+            // ### Safety: Length is expected to be decremented.
             unsafe { self.set_len(len - 1) };
 
-            // SAFETY: Pointer address is known-good.
+            // ### Safety: Pointer address is known-good.
             Some(unsafe { self.as_ptr().add(len).read() })
         } else {
             None
         }
     }
 
-    pub fn iter<'a>(&'a self) -> core::slice::Iter<'a, T> {
-        // SAFETY: Slice is valid for range so long as vec is valid for range.
-        unsafe { core::slice::from_raw_parts(self.as_ptr(), self.len()) }.iter()
+    #[inline]
+    pub const fn as_slice<'a>(&'a self) -> &'a [T] {
+        // ### Safety: Slice is valid for range so long as vec is valid for range.
+        unsafe { core::slice::from_raw_parts(self.as_ptr(), self.len()) }
     }
 
-    pub fn iter_mut<'a>(&'a self) -> core::slice::IterMut<'a, T> {
-        // SAFETY: Slice is valid for range so long as vec is valid for range.
-        unsafe { core::slice::from_raw_parts_mut(self.as_mut_ptr(), self.len()) }.iter_mut()
+    #[inline]
+    pub const fn as_slice_mut<'a>(&'a mut self) -> &'a mut [T] {
+        // ### Safety: Slice is valid for range so long as vec is valid for range.
+        unsafe { core::slice::from_raw_parts_mut(self.as_mut_ptr(), self.len()) }
+    }
+
+    pub fn iter<'a>(&'a self) -> core::slice::Iter<'a, T> {
+        self.as_slice().iter()
+    }
+
+    pub fn iter_mut<'a>(&'a mut self) -> core::slice::IterMut<'a, T> {
+        self.as_slice_mut().iter_mut()
     }
 }

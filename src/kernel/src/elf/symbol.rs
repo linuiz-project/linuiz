@@ -90,9 +90,9 @@ pub struct Symbol {
     size: u64,
 }
 
-// SAFETY: Type is composed of simple primitive numerics.
+// ### Safety: Type is composed of simple primitive numerics.
 unsafe impl bytemuck::Zeroable for Symbol {}
-// SAFETY: Type is composed of simple primitive numerics.
+// ### Safety: Type is composed of simple primitive numerics.
 unsafe impl bytemuck::AnyBitPattern for Symbol {}
 
 impl Symbol {

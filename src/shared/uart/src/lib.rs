@@ -181,13 +181,15 @@ impl Mode for Configure {}
 
 pub struct Uart<M: Mode>(UartAddress, PhantomData<M>);
 
-/// SAFETY: Type constructor requires that the inner address be `Send`-able.
+/// ### Safety
+/// 
+/// Type constructor requires that the inner address be `Send`-able.
 unsafe impl<M: Mode> Send for Uart<M> {}
 
 impl<M: Mode> Uart<M> {
     #[inline]
     fn read(&self, offset: ReadOffset) -> u8 {
-        // SAFETY: Constructor for `Uart` requires a valid base address.
+        // ### Safety: Constructor for `Uart` requires a valid base address.
         unsafe {
             match self.0 {
                 UartAddress::Io(port) => {
@@ -208,7 +210,7 @@ impl<M: Mode> Uart<M> {
 
     #[inline]
     fn write(&mut self, offset: WriteOffset, value: u8) {
-        // SAFETY: Constructor for `Uart` requires a valid base address.
+        // ### Safety: Constructor for `Uart` requires a valid base address.
         unsafe {
             match self.0 {
                 UartAddress::Io(port) => {
@@ -335,7 +337,9 @@ impl Uart<Configure> {
 }
 
 impl Uart<Data> {
-    /// SAFETY: Provided address must be `Send`-able (i.e. can be used on any CPU core).
+    /// ### Safety
+/// 
+/// Provided address must be `Send`-able (i.e. can be used on any CPU core).
     pub unsafe fn new(address: UartAddress) -> Self {
         Self(address, PhantomData)
     }

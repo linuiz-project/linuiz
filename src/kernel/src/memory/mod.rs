@@ -28,7 +28,7 @@ pub fn get_kernel_mapper() -> &'static Mapper {
     static KERNEL_MAPPER: Once<Mapper> = Once::new();
 
     KERNEL_MAPPER.call_once(|| {
-        // SAFETY: The kernel guarantees the HHDM will be valid.
+        // ### Safety: The kernel guarantees the HHDM will be valid.
         unsafe { Mapper::new(4, get_hhdm_address(), None).unwrap() }
     })
 }
@@ -38,7 +38,7 @@ pub fn get_kernel_mapper() -> &'static Mapper {
 //     let frame_manager = get_kernel_frame_manager();
 //     frame_manager.iter().enumerate().filter(|(_, (_, ty))| *ty == FrameType::BootReclaim).for_each(
 //         |(frame_index, _)| {
-//             // SAFETY: These frames come directly from the frame manager, and so are guaranteed valid.
+//             // ### Safety: These frames come directly from the frame manager, and so are guaranteed valid.
 //             let frame = unsafe { Address::<Frame>::new_unchecked((frame_index * 0x1000) as u64) };
 //             frame_manager.try_modify_type(frame, FrameType::Usable).ok();
 //             frame_manager.free(frame).ok();
@@ -66,7 +66,9 @@ impl VmemRegister {
         }
     }
 
-    /// SAFETY: Writing to this register has the chance to externally invalidate memory references.
+    /// ### Safety
+    ///
+    /// Writing to this register has the chance to externally invalidate memory references.
     pub unsafe fn write(args: &Self) {
         #[cfg(target_arch = "x86_64")]
         crate::arch::x64::registers::control::CR3::write(args.0, args.1);

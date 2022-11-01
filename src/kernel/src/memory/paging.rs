@@ -96,7 +96,9 @@ impl PageTableEntry {
 
     /// Sets the entry's frame index.
     ///
-    /// SAFETY: Caller must ensure changing the attributes of this entry does not cause any memory corruption side effects.
+    /// ### Safety
+    ///
+    /// Caller must ensure changing the attributes of this entry does not cause any memory corruption side effects.
     #[inline(always)]
     pub unsafe fn set_frame(&mut self, frame: Address<Frame>) {
         self.0 = (self.0 & !PTE_FRAME_ADDRESS_MASK) | ((frame.index() as u64) << Self::FRAME_ADDRESS_SHIFT);
@@ -110,7 +112,9 @@ impl PageTableEntry {
 
     /// Sets the attributes of this page table entry.
     ///
-    /// SAFETY: Caller must ensure changing the attributes of this entry does not cause any memory corruption side effects.
+    /// ### Safety
+    ///
+    /// Caller must ensure changing the attributes of this entry does not cause any memory corruption side effects.
     pub unsafe fn set_attributes(&mut self, new_attributes: PageAttributes, modify_mode: AttributeModify) {
         let mut attributes = PageAttributes::from_bits_truncate(self.0);
 
@@ -132,7 +136,9 @@ impl PageTableEntry {
 
     /// Clears the page table entry of data, setting all bits to zero.
     ///
-    /// SAFETY: Caller must ensure there are no contexts which rely on the subtables this entry points to.
+    /// ### Safety
+    ///
+    /// Caller must ensure there are no contexts which rely on the subtables this entry points to.
     #[inline]
     pub unsafe fn clear(&mut self) {
         self.0 = 0;
@@ -196,10 +202,10 @@ impl<'a, RefKind: InteriorRef> PageTable<'a, RefKind> {
 
     /// Gets a mutable reference to this page table's entries.
     pub fn get_table(&self) -> &[PageTableEntry] {
-        // SAFETY: This type's constructor requires that the physical mapped page and depth are valid values.
+        // ### Safety: This type's constructor requires that the physical mapped page and depth are valid values.
         let root_mapped_ptr =
             unsafe { self.hhdm_address.as_ptr::<u8>().add(self.get_frame().as_u64() as usize).cast() };
-        // SAFETY: The layout of the page table pointer is known via Intel SDM.
+        // ### Safety: The layout of the page table pointer is known via Intel SDM.
         unsafe { core::slice::from_raw_parts(root_mapped_ptr, 512) }
     }
 
@@ -235,7 +241,7 @@ impl<'a, RefKind: InteriorRef> PageTable<'a, RefKind> {
             func(cur_depth, index, &*self);
         } else {
             for (index, entry) in self.get_table().iter().enumerate() {
-                // SAFETY: This type already requires its HHDM address and entry to be valid.
+                // ### Safety: This type already requires its HHDM address and entry to be valid.
                 if let Some(page_table) = unsafe { PageTable::<Ref>::new(cur_depth - 1, hhdm_address, entry) } {
                     page_table.iter_entries(index, &func);
                 }
@@ -245,7 +251,9 @@ impl<'a, RefKind: InteriorRef> PageTable<'a, RefKind> {
 }
 
 impl<'a> PageTable<'a, Ref> {
-    /// SAFETY: Caller must ensure the provided physical mapping page and page table entry are valid.
+    /// ### Safety
+    ///
+    /// Caller must ensure the provided physical mapping page and page table entry are valid.
     pub(super) unsafe fn new(depth: usize, hhdm_address: Address<Virtual>, entry: &'a PageTableEntry) -> Option<Self> {
         if depth > 0 && entry.is_present() {
             Some(Self { depth, hhdm_address, entry })
@@ -256,7 +264,9 @@ impl<'a> PageTable<'a, Ref> {
 }
 
 impl<'a> PageTable<'a, Mut> {
-    /// SAFETY: Caller must ensure the provided physical mapping page and page table entry are valid.
+    /// ### Safety
+    ///
+    /// Caller must ensure the provided physical mapping page and page table entry are valid.
     pub(super) unsafe fn new(
         depth: usize,
         hhdm_address: Address<Virtual>,
@@ -271,10 +281,10 @@ impl<'a> PageTable<'a, Mut> {
 
     /// Gets a mutable reference to this page table's entries.
     pub fn get_table_mut(&mut self) -> &mut [PageTableEntry] {
-        // SAFETY: This type's constructor requires that the physical mapped page and depth are valid values.
+        // ### Safety: This type's constructor requires that the physical mapped page and depth are valid values.
         let root_mapped_address =
             Address::<Virtual>::new_truncate(self.hhdm_address.as_u64() + self.get_frame().as_u64());
-        // SAFETY: The layout of the page table pointer is known via Intel SDM.
+        // ### Safety: The layout of the page table pointer is known via Intel SDM.
         unsafe { core::slice::from_raw_parts_mut(root_mapped_address.as_mut_ptr(), 512) }
     }
 
@@ -345,7 +355,7 @@ impl<'a> PageTable<'a, Mut> {
             func(cur_depth, index, &mut *self);
         } else {
             for (index, entry) in self.get_table_mut().iter_mut().enumerate() {
-                // SAFETY: This type already requires its HHDM address and entry to be valid.
+                // ### Safety: This type already requires its HHDM address and entry to be valid.
                 if let Some(mut page_table) = unsafe { PageTable::<Mut>::new(cur_depth - 1, hhdm_address, entry) } {
                     page_table.iter_entries_mut(index, &mut func);
                 }

@@ -2,7 +2,9 @@ use core::arch::asm;
 
 /// Enables interrupts for the current core.
 ///
-/// SAFETY: Enabling interrupts early can result in unexpected behaviour.
+/// ### Safety
+///
+/// Enabling interrupts early can result in unexpected behaviour.
 #[inline(always)]
 pub unsafe fn enable() {
     #[cfg(target_arch = "x86_64")]
@@ -14,7 +16,9 @@ pub unsafe fn enable() {
 
 /// Disables interrupts for the current core.
 ///
-/// SAFETY: Disabling interrupts can cause the system to become unresponsive if they are not re-enabled.
+/// ### Safety
+///
+/// Disabling interrupts can cause the system to become unresponsive if they are not re-enabled.
 #[inline(always)]
 pub unsafe fn disable() {
     #[cfg(target_arch = "x86_64")]

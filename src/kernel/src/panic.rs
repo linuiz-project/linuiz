@@ -20,9 +20,9 @@ fn trace_frame_pointer(
 
     let mut stack_trace_index: u8 = 0;
     let mut frame_ptr: *const StackFrame;
-    // SAFETY: Does not corrupt any auxiliary state.
+    // ### Safety: Does not corrupt any auxiliary state.
     unsafe { core::arch::asm!("mov {}, rbp", out(reg) frame_ptr, options(nostack, nomem, preserves_flags)) };
-    // SAFETY: Stack frame pointer should be valid, if `rbp` is being used correctly.
+    // ### Safety: Stack frame pointer should be valid, if `rbp` is being used correctly.
     // TODO add checks somehow to ensure `rbp` is being used to store the stack base.
     while let Some(stack_frame) = unsafe { frame_ptr.as_ref() } {
         // 'Push' the return address to the array.
@@ -145,7 +145,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 
     STACK_TRACE_IN_PROGRESS.store(false, Ordering::Relaxed);
 
-    // SAFETY: It's dead, Jim.
+    // ### Safety: It's dead, Jim.
     unsafe { crate::interrupts::halt_and_catch_fire() }
 }
 
@@ -153,6 +153,6 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 fn alloc_error(error: core::alloc::Layout) -> ! {
     error!("KERNEL ALLOCATOR PANIC: {:?}", error);
 
-    // SAFETY: It's dead, Jim.
+    // ### Safety: It's dead, Jim.
     unsafe { crate::interrupts::halt_and_catch_fire() }
 }

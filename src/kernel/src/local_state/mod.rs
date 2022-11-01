@@ -41,7 +41,7 @@ impl LocalState {
 fn get() -> &'static mut LocalState {
     #[cfg(target_arch = "x86_64")]
     {
-        // SAFETY: If MSR is not null, then the `LocalState` has been initialized.
+        // ### Safety: If MSR is not null, then the `LocalState` has been initialized.
         unsafe { ((crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::read()) as *mut LocalState).as_mut() }
             .unwrap()
     }
@@ -49,7 +49,9 @@ fn get() -> &'static mut LocalState {
 
 /// Initializes the core-local state structure.
 ///
-/// SAFETY: This function invariantly assumes it will only be called once.
+/// ### Safety
+///
+/// This function invariantly assumes it will only be called once.
 pub unsafe fn init(core_id: u32, timer_frequency: u16) {
     let Ok(local_state_ptr) = lzalloc::allocate_with(|| {
         LocalState {
@@ -118,7 +120,7 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
                     fn allocate_tss_stack(pages: NonZeroUsize) -> VirtAddr {
                         VirtAddr::from_ptr(
                             lzalloc::allocate(
-                            // SAFETY: Values provided are known-valid.
+                            // ### Safety: Values provided are known-valid.
                             unsafe { core::alloc::Layout::from_size_align_unchecked(pages.get() * 0x1000, 0x10) }
                         ).unwrap().as_non_null_ptr().as_ptr()
                         )
@@ -277,20 +279,20 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
     crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::write(local_state_ptr.addr().get() as u64);
 }
 
-// SAFETY: Caller must ensure control flow is prepared to begin scheduling tasks on the current core.
+// ### Safety: Caller must ensure control flow is prepared to begin scheduling tasks on the current core.
 pub unsafe fn begin_scheduling() {
     let local_state = get();
 
     assert!(!local_state.scheduler.is_enabled());
     local_state.scheduler.enable();
 
-    // SAFETY: Value provided is non-zero, and enable/reload is expected / appropriate.
+    // ### Safety: Value provided is non-zero, and enable/reload is expected / appropriate.
     #[cfg(target_arch = "x86_64")]
     unsafe {
         local_state.apic.0.get_timer().set_masked(false);
     }
 
-    // SAFETY: Value provided is non-zero.
+    // ### Safety: Value provided is non-zero.
     preemption_wait(unsafe { core::num::NonZeroU16::new_unchecked(1) });
 }
 
@@ -312,7 +314,7 @@ pub fn preemption_wait(interval_wait: core::num::NonZeroU16) {
 
         let (apic, timer_interval) = &get().apic;
         match apic.get_timer().get_mode() {
-            // SAFETY: Control flow expects timer initial count to be changed.
+            // ### Safety: Control flow expects timer initial count to be changed.
             apic::TimerMode::OneShot => unsafe {
                 apic.set_timer_initial_count((timer_interval * (interval_wait.get() as u64)) as u32)
             },
