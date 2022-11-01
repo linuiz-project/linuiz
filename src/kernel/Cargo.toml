@@ -15,27 +15,31 @@ path = "../shared/apic/"
 path = "../shared/libcommon/"
 features = ["global_allocator"]
 [dependencies.lzalloc]
-path = "../shared/lzalloc/"
-features = ["bytemuck"]
-[target.'cfg(target_arch = "x86_64")'.dependencies.pic_8259]
-path = "../shared/pic_8259/"
+git = "https://github.com/linuiz-project/lzalloc"
+[dependencies.spin]
+git = "https://github.com/semiviral/spin-rs"
+[dependencies.limine]
+git = "https://github.com/limine-bootloader/limine-rs"
+features = ["requests-section"]
+[dependencies.acpi]
+git = "https://github.com/rust-osdev/acpi"
+[dependencies.miniz_oxide]
+git = "https://github.com/linuiz-project/miniz_oxide"
+
 [dependencies]
 log = { version = "*", default-features = false }
 num_enum = { version = "*", default-features = false }
-limine = { git = "https://github.com/limine-bootloader/limine-rs", features = ["requests-section"] }
 bit_field = "*"
 bitflags = "*"
-spin = { git = "https://github.com/semiviral/spin-rs" }
 paste = "*"
-# TODO perhaps don't use ACPI / DTB in the kernel, but abstract it in libarch/libcommon/libkernel?
-acpi = { git = "https://github.com/semiviral/acpi" }
 # aml = "*"
-# miniz_oxide = { version = "*", default-features = false }
 bytemuck = "*"
 rustc-demangle = "*"
+
 [target.'cfg(target_arch = "x86_64")'.dependencies]
-x86_64 = "*"
+pic_8259 = { path = "../shared/pic_8259/" }
 raw-cpuid = "*"
+x86_64 = "*"
 
 [profile.dev]
 opt-level = 1

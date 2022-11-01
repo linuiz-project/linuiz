@@ -5,16 +5,16 @@ authors = ["semiviral"]
 edition = "2021"
 
 [dependencies.lzalloc]
-path = "../lzalloc/"
+git = "https://github.com/linuiz-project/lzalloc"
+[dependencies.spin]
+git = "https://github.com/semiviral/spin-rs"
 [dependencies]
 log = { version = "*", default-features = false }
 bit_field = "*"
 bitflags = "*"
 paste = "*"
 num_enum = { version = "*", default-features = false }
-spin = { git = "https://github.com/semiviral/spin-rs" }
 port-rs = { path = "../port-rs/" }
-acpi = { git = "https://github.com/semiviral/acpi", default-features = false }
 # aml = "*"
 bytemuck = "*"
 
