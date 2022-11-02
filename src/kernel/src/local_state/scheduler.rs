@@ -131,7 +131,7 @@ impl Scheduler {
     /// Pushes a new task to the scheduling queue.
     pub fn push_task(&mut self, task: Task) {
         self.total_priority += task.priority().get() as u64;
-        self.tasks.push_back(task);
+        self.tasks.push_back(task).unwrap();
     }
 
     /// If the scheduler is enabled, attempts to return a new task from

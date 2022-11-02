@@ -288,6 +288,8 @@ unsafe extern "C" fn _entry() -> ! {
 
     /* symbols */
     if !PARAMETERS.low_memory {
+        debug!("Parsing kernel symbols...");
+
         let (kernel_file_base, kernel_file_len) = {
             let kernel_file = crate::boot::get_kernel_file().unwrap();
             (kernel_file.base.as_ptr().unwrap(), kernel_file.length as usize)
@@ -338,6 +340,8 @@ unsafe extern "C" fn _entry() -> ! {
                             strings_copy
                         });
                     }
+
+                    _ => {}
                 }
             }
         }
@@ -350,6 +354,8 @@ unsafe extern "C" fn _entry() -> ! {
         static LIMINE_SMP: limine::LimineSmpRequest = limine::LimineSmpRequest::new(crate::boot::LIMINE_REV)
             // Enable x2APIC mode if available.
             .flags(0b1);
+
+        debug!("Detecting and starting additional cores.");
 
         if let Some(smp_response) = LIMINE_SMP.get_response().get_mut() {
             let bsp_lapic_id = smp_response.bsp_lapic_id;

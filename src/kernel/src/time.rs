@@ -26,7 +26,8 @@ mod clock {
 
     impl<'a> Clock<'a> {
         fn load() -> Option<Self> {
-            let platform_info = crate::acpi::PLATFORM_INFO.map(|pi| pi.lock())?;
+            let platform_info = crate::acpi::PLATFORM_INFO.as_ref()?;
+            let platform_info = platform_info.lock();
 
             if let Some(pm_timer) = platform_info.pm_timer.as_ref()
                  && let Some(register) = crate::acpi::Register::new(&pm_timer.base)

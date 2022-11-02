@@ -53,7 +53,7 @@ fn get() -> &'static mut LocalState {
 ///
 /// This function invariantly assumes it will only be called once.
 pub unsafe fn init(core_id: u32, timer_frequency: u16) {
-    let Ok(local_state_ptr) = lzalloc::allocate_with(|| {
+    let Ok(mut local_state_ptr) = lzalloc::allocate_with(|| {
         LocalState {
             syscall_stack_ptr: core::ptr::null(),
             syscall_stack: Stack::<SYSCALL_STACK_SIZE>([0u8; SYSCALL_STACK_SIZE]),
@@ -65,7 +65,10 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
                     TaskPriority::new(1).unwrap(),
                     TaskStart::Function(crate::interrupts::wait_loop),
                     TaskStack::At(libcommon::Address::<libcommon::Virtual>::from_ptr({
-                        lzalloc::allocate_zeroed(core::alloc::Layout::from_size_align_unchecked(0x10, 0x10)).unwrap().as_non_null_ptr().as_ptr()
+                        lzalloc::allocate_zeroed(core::alloc::Layout::from_size_align_unchecked(0x10, 0x10))
+                            .unwrap()
+                            .as_non_null_ptr()
+                            .as_ptr()
                     })),
                     {
                         #[cfg(target_arch = "x86_64")]
@@ -91,8 +94,7 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
                 // TODO use fallible allocations for this
                 if !crate::PARAMETERS.low_memory {
                     Some({
-                        let idt =
-                            lzalloc::allocate_with(|| idt::InterruptDescriptorTable::new()).unwrap().as_mut();
+                        let idt = lzalloc::allocate_with(|| idt::InterruptDescriptorTable::new()).unwrap().as_mut();
 
                         idt::set_exception_handlers(idt);
                         idt::set_stub_handlers(idt);
@@ -108,36 +110,39 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
             tss: {
                 use crate::arch::x64::structures::{gdt, tss};
 
-                let tss_ptr = {
+                let mut tss_ptr = {
                     use crate::arch::{reexport::x86_64::VirtAddr, x64::structures::idt::StackTableIndex};
                     use core::num::NonZeroUsize;
 
-                    let tss_ptr = lzalloc::allocate_with(|| tss::TaskStateSegment::new()).unwrap();
+                    let mut tss_ptr = lzalloc::allocate_with(|| tss::TaskStateSegment::new()).unwrap();
 
                     {
+                        fn allocate_tss_stack(pages: NonZeroUsize) -> VirtAddr {
+                            VirtAddr::from_ptr(
+                                lzalloc::allocate(
+                                    // ### Safety: Values provided are known-valid.
+                                    unsafe {
+                                        core::alloc::Layout::from_size_align_unchecked(pages.get() * 0x1000, 0x10)
+                                    },
+                                )
+                                .unwrap()
+                                .as_non_null_ptr()
+                                .as_ptr(),
+                            )
+                        }
 
-
-                    fn allocate_tss_stack(pages: NonZeroUsize) -> VirtAddr {
-                        VirtAddr::from_ptr(
-                            lzalloc::allocate(
-                            // ### Safety: Values provided are known-valid.
-                            unsafe { core::alloc::Layout::from_size_align_unchecked(pages.get() * 0x1000, 0x10) }
-                        ).unwrap().as_non_null_ptr().as_ptr()
-                        )
+                        let tss = tss_ptr.as_mut();
+                        // TODO guard pages for these stacks ?
+                        tss.privilege_stack_table[0] = allocate_tss_stack(NonZeroUsize::new_unchecked(5));
+                        tss.interrupt_stack_table[StackTableIndex::Debug as usize] =
+                            allocate_tss_stack(NonZeroUsize::new_unchecked(2));
+                        tss.interrupt_stack_table[StackTableIndex::NonMaskable as usize] =
+                            allocate_tss_stack(NonZeroUsize::new_unchecked(2));
+                        tss.interrupt_stack_table[StackTableIndex::DoubleFault as usize] =
+                            allocate_tss_stack(NonZeroUsize::new_unchecked(2));
+                        tss.interrupt_stack_table[StackTableIndex::MachineCheck as usize] =
+                            allocate_tss_stack(NonZeroUsize::new_unchecked(2));
                     }
-
-                    let tss = tss_ptr.as_mut();
-                    // TODO guard pages for these stacks ?
-                    tss.privilege_stack_table[0] = allocate_tss_stack(NonZeroUsize::new_unchecked(5));
-                    tss.interrupt_stack_table[StackTableIndex::Debug as usize] =
-                        allocate_tss_stack(NonZeroUsize::new_unchecked(2));
-                    tss.interrupt_stack_table[StackTableIndex::NonMaskable as usize] =
-                        allocate_tss_stack(NonZeroUsize::new_unchecked(2));
-                    tss.interrupt_stack_table[StackTableIndex::DoubleFault as usize] =
-                        allocate_tss_stack(NonZeroUsize::new_unchecked(2));
-                    tss.interrupt_stack_table[StackTableIndex::MachineCheck as usize] =
-                        allocate_tss_stack(NonZeroUsize::new_unchecked(2));
-                }
 
                     tss_ptr
                 };

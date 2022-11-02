@@ -131,7 +131,8 @@ macro_rules! slab_allocate {
                     None if let Ok(frame) = $self.lock_next() => {
                         // ### Safety: `phys_mapped_address` is required to be valid for arbitrary offsets from within its range.
                         let memory_ptr = unsafe { $self.phys_mapped_address.as_mut_ptr::<u8>().add(frame.as_usize()) };
-                        slabs.push((memory_ptr, 1 << ((0x1000 / $slab_size) - 1)));
+                        // TODO: do not unwrap here
+                        slabs.push((memory_ptr, 1 << ((0x1000 / $slab_size) - 1))).ok();
 
                         memory_ptr
                     }

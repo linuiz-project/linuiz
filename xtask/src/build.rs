@@ -1,4 +1,5 @@
 use clap::clap_derive::ValueEnum;
+use lza::CompressionLevel;
 use std::path::PathBuf;
 use xshell::cmd;
 
@@ -25,14 +26,14 @@ pub enum Compression {
     Default,
 }
 
-impl Compression {
-    fn as_u8(&self) -> u8 {
+impl Into<CompressionLevel> for Compression {
+    fn into(self) -> CompressionLevel {
         match self {
-            Compression::None => 0,
-            Compression::Fast => 1,
-            Compression::Small => 9,
-            Compression::Smallest => 10,
-            Compression::Default => 6,
+            Compression::None => CompressionLevel::NoCompression,
+            Compression::Fast => CompressionLevel::BestSpeed,
+            Compression::Small => CompressionLevel::BestCompression,
+            Compression::Smallest => CompressionLevel::UberCompression,
+            Compression::Default => CompressionLevel::DefaultLevel,
         }
     }
 }
@@ -270,7 +271,7 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
     // Compile and compress drivers ...
     {
         // TODO I'm not sure how I feel about the layout of this whole block.
-        let compressed_drivers = {
+        let driver_data = {
             let _dir = shell.push_dir("src/userspace/");
 
             // Compile ...
@@ -283,35 +284,15 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
             cmd!(shell, "cargo {cargo_arguments...}").run()?;
 
             // Compress ...
-            let mut bytes = vec![];
+            let mut archive_builder = lza::ArchiveBuilder::new(options.compress.into());
 
             for driver_name in PACKAGED_DRIVERS {
                 let driver_path = PathBuf::from(format!("target/x86_64-unknown-linuiz/{profile_str}/{driver_name}"));
 
                 // Compress and append driver bytes.
-                {
-                    let file_bytes = shell.read_binary_file(driver_path.clone())?;
-                    let mut compressed_bytes =
-                        miniz_oxide::deflate::compress_to_vec(&file_bytes, options.compress.as_u8());
-
-                    println!(
-                        "Compress driver '{}': {} -> {} bytes",
-                        driver_name,
-                        file_bytes.len(),
-                        compressed_bytes.len()
-                    );
-
-                    let bytes_len = compressed_bytes.len();
-                    bytes.push((bytes_len >> 0) as u8);
-                    bytes.push((bytes_len >> 8) as u8);
-                    bytes.push((bytes_len >> 16) as u8);
-                    bytes.push((bytes_len >> 24) as u8);
-                    bytes.push((bytes_len >> 32) as u8);
-                    bytes.push((bytes_len >> 40) as u8);
-                    bytes.push((bytes_len >> 48) as u8);
-                    bytes.push((bytes_len >> 56) as u8);
-                    bytes.append(&mut compressed_bytes);
-                }
+                archive_builder
+                    .push_data(driver_name, shell.read_binary_file(driver_path.clone())?.as_slice())
+                    .expect("failed to write data to archive");
 
                 if options.disassemble {
                     disassemble(&shell, options.arch, workspace_root.clone(), driver_path.clone())?;
@@ -322,11 +303,11 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
                 }
             }
 
-            bytes
+            archive_builder.take_data()
         };
 
-        println!("Compression resulted in a {} byte dump.", compressed_drivers.len());
-        shell.write_file(PathBuf::from(".hdd/root/linuiz/drivers"), compressed_drivers)?;
+        println!("Compression resulted in a {} byte dump.", driver_data.len());
+        shell.write_file(PathBuf::from(".hdd/root/linuiz/drivers"), driver_data)?;
     }
 
     Ok(())

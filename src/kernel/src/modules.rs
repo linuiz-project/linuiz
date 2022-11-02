@@ -12,30 +12,30 @@ fn drivers() {
         })
         .expect("no drivers provided");
 
-    let mut current_offset = 0;
-    while current_offset < drivers_data.len() {
-        // Copy and reconstruct the driver byte length from the prefix.
-        let driver_len = {
-            let mut value = 0;
+    for (header, data) in lza::ArchiveReader::new(drivers_data) {
+        // SAFETY: Value is non-zero.
+        let Ok(elf_buffer) = lzalloc::allocate_slice::<u8>(unsafe { core::num::NonZeroUsize::new_unchecked(header.len.get() as usize) }, 0)
+            else {
+                warn!("Failed allocate decompression buffer for driver: {:?}", header.name());
+                continue
+            };
 
-            value |= (drivers_data[current_offset + 0] as u64) << 0;
-            value |= (drivers_data[current_offset + 1] as u64) << 8;
-            value |= (drivers_data[current_offset + 2] as u64) << 16;
-            value |= (drivers_data[current_offset + 3] as u64) << 24;
-            value |= (drivers_data[current_offset + 4] as u64) << 32;
-            value |= (drivers_data[current_offset + 5] as u64) << 40;
-            value |= (drivers_data[current_offset + 6] as u64) << 48;
-            value |= (drivers_data[current_offset + 7] as u64) << 56;
-
-            value as usize
+        let mut inflate_state = miniz_oxide::inflate::stream::InflateState::new(miniz_oxide::DataFormat::Zlib);
+        if miniz_oxide::inflate::stream::inflate(&mut inflate_state, data, elf_buffer, miniz_oxide::MZFlush::Finish)
+            .status
+            .is_err()
+        {
+            warn!("Failed parse decompress driver blob: {:?}", header.name());
+            continue;
         };
 
-        let base_offset = current_offset + 8 /* skip 'len' prefix */;
-        let driver_data =
-            miniz_oxide::inflate::core::decompress(&drivers_data[base_offset..(base_offset + driver_len)])
-                .expect("failed to decompress driver");
-        let driver_elf = crate::elf::Elf::from_bytes(&driver_data).unwrap();
-        info!("{:?}", driver_elf);
+        let Some(elf) = crate::elf::Elf::from_bytes(elf_buffer)
+            else {
+                warn!("Failed parse driver blob into valid ELF: {:?}", header.name());
+                continue
+            };
+
+        info!("{:?}", elf);
 
         /* load driver */
         {
@@ -56,7 +56,7 @@ fn drivers() {
             let hhdm_address = crate::memory::get_hhdm_address();
 
             // Iterate the segments, and allocate them.
-            for segment in driver_elf.iter_segments() {
+            for segment in elf.iter_segments() {
                 trace!("{:?}", segment);
 
                 match segment.get_type() {
@@ -155,7 +155,7 @@ fn drivers() {
                         crate::local_state::TaskPriority::new(crate::local_state::TaskPriority::MAX).unwrap(),
                         // TODO account for memory base when passing entry offset
                         crate::local_state::TaskStart::Address(
-                            Address::<Virtual>::new(driver_elf.get_entry_offset() as u64).unwrap(),
+                            Address::<Virtual>::new(elf.get_entry_offset() as u64).unwrap(),
                         ),
                         crate::local_state::TaskStack::At(stack_address.address()),
                         {
@@ -178,7 +178,5 @@ fn drivers() {
                     .unwrap();
             }
         }
-
-        current_offset += driver_len + 8  /* skip 'len' prefix */;
     }
 }

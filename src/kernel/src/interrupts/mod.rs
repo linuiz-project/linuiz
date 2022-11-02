@@ -101,7 +101,7 @@ pub unsafe fn irq_handler(irq_vector: u64, ctrl_flow_context: &mut ControlContex
     match Vector::try_from(irq_vector) {
         Ok(Vector::Timer) => crate::local_state::next_task(ctrl_flow_context, arch_context),
 
-        vector_result => {}
+        _vector_result => {}
     }
 
     #[cfg(target_arch = "x86_64")]

@@ -147,7 +147,7 @@ unsafe extern "sysv64" fn syscall_handler(
     mut syscall_context: crate::cpu::SyscallContext,
 ) -> crate::cpu::ControlContext {
     // Take a reference to the syscall context, to avoid not mutating the in-memory representation.
-    let syscall_context = &mut syscall_context;
+    let _syscall_context = &mut syscall_context;
 
     let syscall = match vector {
         0x100 => {

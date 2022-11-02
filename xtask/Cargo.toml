@@ -3,13 +3,12 @@ name = "xtask"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
+[dependencies.lza]
+git = "https://github.com/linuiz-project/lza"
 [dependencies]
 clap = { version = "*", features = ["derive"] }
 walkdir = "*"
 xshell = "*"
-miniz_oxide = "*"
 
 [profile.dev]
 debug = false
