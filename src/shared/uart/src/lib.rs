@@ -95,7 +95,7 @@ pub struct LineControl {
 }
 
 impl LineControl {
-    #[inline(always)]
+    #[inline]
     pub const fn empty() -> Self {
         Self { bits: DataBits::Five, parity: ParityMode::None, extra_stop: false, break_signal: false }
     }

@@ -56,7 +56,7 @@ mod num;
 mod panic;
 mod time;
 
-use libcommon::{Address, Frame, Page, Virtual};
+use libcommon::{Address, Frame, Page, Physical, Virtual};
 
 pub type MmapEntry = limine::NonNullPtr<limine::LimineMemmapEntry>;
 pub type MmapEntryType = limine::LimineMemoryMapEntryType;
@@ -102,6 +102,7 @@ static PARAMETERS: spin::Lazy<Parameters> = spin::Lazy::new(|| {
 ///
 /// Do not call this function.
 #[no_mangle]
+#[doc(hidden)]
 #[allow(clippy::too_many_lines)]
 unsafe extern "C" fn _entry() -> ! {
     log::set_max_level(log::LevelFilter::Trace);
@@ -189,9 +190,8 @@ unsafe extern "C" fn _entry() -> ! {
             for address in range.step_by(page_align.as_usize()).map(Address::<Virtual>::new_truncate) {
                 to_mapper
                     .map(
-                        Address::<Page>::new_truncate(address, page_align),
-                        // Properly handle the bootloader possibly not using huge page mappings (but still physically contiguous).
-                        Address::<Page>::new(address, None).and_then(|page| from_mapper.get_mapped_to(page)).unwrap(),
+                        Address::<Page>::new_truncate(address, Some(page_align)),
+                        from_mapper.get_mapped_to(Address::<Page>::new_truncate(address, None)).unwrap(),
                         false,
                         attributes,
                     )
@@ -263,14 +263,32 @@ unsafe extern "C" fn _entry() -> ! {
                 // TODO use huge pages here if possible
                 kernel_mapper
                     .map(
-                        Address::<libcommon::Page>::new(
-                            Address::<Virtual>::new(crate::memory::get_hhdm_address().as_u64() + phys_base).unwrap(),
+                        Address::<libcommon::Page>::from_u64_truncate(
+                            crate::memory::get_hhdm_address().as_u64() + phys_base,
                             Some(PageAlign::Align4KiB),
-                        )
-                        .unwrap(),
-                        Address::<Frame>::new(phys_base).unwrap(),
+                        ),
+                        Address::<Frame>::from_u64_truncate(phys_base),
                         false,
                         page_attributes,
+                    )
+                    .unwrap();
+            }
+
+            // ... map architecture-specific memory ...
+
+            #[cfg(target_arch = "x86_64")]
+            {
+                // map APIC ...
+                let apic_address = msr::IA32_APIC_BASE::get_base_address();
+                kernel_mapper
+                    .map(
+                        Address::<Page>::from_u64_truncate(
+                            crate::memory::get_hhdm_address().as_u64() + apic_address,
+                            Some(PageAlign::Align4KiB),
+                        ),
+                        Address::<Frame>::from_u64_truncate(apic_address),
+                        false,
+                        PageAttributes::MMIO,
                     )
                     .unwrap();
             }
@@ -283,6 +301,9 @@ unsafe extern "C" fn _entry() -> ! {
         debug!("Kernel has finalized control of page tables.");
     }
 
+    debug!("Loading kernel modules...");
+    crate::modules::load_modules();
+
     debug!("Initializing ACPI interface...");
     crate::acpi::init_interface();
 
@@ -291,7 +312,7 @@ unsafe extern "C" fn _entry() -> ! {
         debug!("Parsing kernel symbols...");
 
         let (kernel_file_base, kernel_file_len) = {
-            let kernel_file = crate::boot::get_kernel_file().unwrap();
+            let kernel_file = crate::boot::get_kernel_file().expect("failed to get kernel file");
             (kernel_file.base.as_ptr().unwrap(), kernel_file.length as usize)
         };
 
@@ -300,6 +321,7 @@ unsafe extern "C" fn _entry() -> ! {
             unsafe { core::slice::from_raw_parts(kernel_file_base, kernel_file_len) },
         )
         .expect("failed to parse kernel executable");
+
         if let Some(names_section) = kernel_elf.get_section_names_section() {
             let names_section = names_section.data();
 
@@ -322,22 +344,26 @@ unsafe extern "C" fn _entry() -> ! {
                     ".symtab" => {
                         let Ok(symbols) = bytemuck::try_cast_slice::<u8, Symbol>(section.data())
                             else { continue };
-                        let Ok(symbols_copy) = lzalloc::allocate_slice(unsafe{ NonZeroUsize::new_unchecked(symbols.len()) }, Symbol::default())
+                        let Some(symbols_copy) = NonZeroUsize::new(symbols.len()).and_then(|len| lzalloc::allocate_slice(len, Symbol::default()).ok())
                             else { continue };
 
-                        crate::panic::KERNEL_SYMBOLS.call_once(|| {
-                            symbols_copy.copy_from_slice(symbols);
-                            symbols_copy
+                        crate::interrupts::without(|| {
+                            crate::panic::KERNEL_SYMBOLS.call_once(|| {
+                                symbols_copy.copy_from_slice(symbols);
+                                symbols_copy
+                            });
                         });
                     }
 
                     ".strtab" => {
-                        let Ok(strings_copy) = lzalloc::allocate_slice(NonZeroUsize::new_unchecked(section.data().len()), 0)
+                        let Some(strings_copy) = NonZeroUsize::new(section.data().len()).and_then(|len|  lzalloc::allocate_slice(len, 0).ok())
                             else { continue };
 
-                        crate::panic::KERNEL_STRINGS.call_once(|| {
-                            strings_copy.copy_from_slice(section.data());
-                            strings_copy
+                        crate::interrupts::without(|| {
+                            crate::panic::KERNEL_STRINGS.call_once(|| {
+                                strings_copy.copy_from_slice(section.data());
+                                strings_copy
+                            });
                         });
                     }
 
@@ -522,6 +548,5 @@ pub(self) unsafe fn kernel_thread_setup(core_id: u32) -> ! {
 
     crate::interrupts::enable();
     crate::local_state::begin_scheduling();
-    trace!("Core #{} scheduled.", core_id);
     crate::interrupts::wait_loop()
 }

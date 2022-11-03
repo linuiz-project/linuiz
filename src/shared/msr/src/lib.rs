@@ -11,7 +11,7 @@ use bit_field::BitField;
 /// ### Safety
 ///
 /// * Caller must ensure the address is valid.
-#[inline(always)]
+#[inline]
 pub unsafe fn rdmsr(address: u32) -> u64 {
     let value: u64;
 
@@ -34,7 +34,7 @@ pub unsafe fn rdmsr(address: u32) -> u64 {
 ///
 /// * Caller must ensure the address is valid.
 /// * Caller must ensure writing the value to the MSR address will not result in undefined behaviour.
-#[inline(always)]
+#[inline]
 pub unsafe fn wrmsr(address: u32, value: u64) {
     core::arch::asm!(
         "wrmsr",
@@ -50,12 +50,12 @@ macro_rules! generic_msr {
         pub struct $name;
 
         impl $name {
-            #[inline(always)]
+            #[inline]
             pub fn read() -> u64 {
                 unsafe { $crate::rdmsr($addr) }
             }
 
-            #[inline(always)]
+            #[inline]
             pub unsafe fn write(value: u64) {
                 $crate::wrmsr($addr, value);
             }
@@ -70,7 +70,7 @@ generic_msr!(IA32_KERNEL_GS_BASE, 0xC0000102);
 pub struct IA32_APIC_BASE;
 impl IA32_APIC_BASE {
     /// Gets the 8th bit of the IA32_APIC_BASE MSR, which indicates whether the current APIC resides on the boot processor.
-    #[inline(always)]
+    #[inline]
     pub fn get_is_bsp() -> bool {
         // ### Safety: MSR address is valid.
         unsafe { rdmsr(0x1B).get_bit(8) }
@@ -83,7 +83,7 @@ impl IA32_APIC_BASE {
     }
 
     /// Gets the 11th bit of the IA32_APIC_BASE MSR, getting the enable state of the APIC.
-    #[inline(always)]
+    #[inline]
     pub fn get_hw_enabled() -> bool {
         // ### Safety: MSR address is valid.
         unsafe { rdmsr(0x1B).get_bit(11) }
@@ -102,7 +102,7 @@ impl IA32_EFER {
     /// Leave the IA32_EFER.SCE bit unsupported, as we don't use `syscall`.
 
     /// Gets the IA32_EFER.LMA (long-mode active) bit.
-    #[inline(always)]
+    #[inline]
     pub fn get_lma() -> bool {
         // ### Safety: MSR address is valid.
         unsafe { rdmsr(0xC0000080).get_bit(10) }
@@ -113,7 +113,7 @@ impl IA32_EFER {
     /// ### Safety
     ///
     /// This function does not check if long mode is supported, or if the core is prepared to enter it.
-    #[inline(always)]
+    #[inline]
     pub unsafe fn set_lme(set: bool) {
         wrmsr(0xC0000080, *rdmsr(0xC0000080).set_bit(8, set));
     }
@@ -123,13 +123,13 @@ impl IA32_EFER {
     /// ### Safety
     ///
     /// Caller must ensure software expects system calls to be enabled or disabled.
-    #[inline(always)]
+    #[inline]
     pub unsafe fn set_sce(set: bool) {
         wrmsr(0xC0000080, *rdmsr(0xC0000080).set_bit(0, set));
     }
 
     /// Gets the IA32_EFER.NXE (no-execute enable) bit.
-    #[inline(always)]
+    #[inline]
     pub fn get_nxe() -> bool {
         // ### Safety: MSR address is valid.
         unsafe { rdmsr(0xC0000080).get_bit(11) }
@@ -140,7 +140,7 @@ impl IA32_EFER {
     /// ### Safety
     ///
     /// This function does not check if the NX bit is actually supported.
-    #[inline(always)]
+    #[inline]
     pub unsafe fn set_nxe(set: bool) {
         wrmsr(0xC0000080, *rdmsr(0xC0000080).set_bit(11, set));
     }
@@ -162,7 +162,7 @@ impl IA32_STAR {
     /// ### Safety
     ///
     /// * Caller must ensure the low and high selectors are valid.
-    #[inline(always)]
+    #[inline]
     pub unsafe fn set_selectors(kcode_index: u16, kdata_index: u16) {
         wrmsr(0xC0000081, (((kdata_index << 3) as u64) << 48) | (((kcode_index << 3) as u64) << 32));
     }
@@ -175,7 +175,7 @@ impl IA32_LSTAR {
     /// ### Safety
     ///
     /// Caller must ensure the given function pointer is valid for a syscall instruction pointer.
-    #[inline(always)]
+    #[inline]
     pub unsafe fn set_syscall(func: unsafe extern "sysv64" fn()) {
         wrmsr(0xC0000082, func as u64);
     }
@@ -191,7 +191,7 @@ impl IA32_FMASK {
     ///
     /// * Caller must ensure the function jumped to upon a `syscall` can properly handle
     /// the provided `rflags` value.
-    #[inline(always)]
+    #[inline]
     pub unsafe fn set_rflags_mask(rflags: u64) {
         wrmsr(0xC0000084, rflags);
     }
@@ -204,7 +204,7 @@ impl IA32_TSC_DEADLINE {
     /// ### Safety
     ///
     /// * Caller must ensure writing to the MSR will not result in undefined behaviour.
-    #[inline(always)]
+    #[inline]
     pub unsafe fn set(value: u64) {
         wrmsr(0x6E0, value);
     }

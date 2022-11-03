@@ -77,7 +77,7 @@ impl VmemRegister {
         crate::arch::rv64::registers::satp::write(args.0.as_usize(), args.1, args.2);
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn frame(&self) -> Address<Frame> {
         self.0
     }

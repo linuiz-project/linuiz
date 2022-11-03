@@ -290,9 +290,13 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
                 let driver_path = PathBuf::from(format!("target/x86_64-unknown-linuiz/{profile_str}/{driver_name}"));
 
                 // Compress and append driver bytes.
-                archive_builder
+                let (header, data) = archive_builder
                     .push_data(driver_name, shell.read_binary_file(driver_path.clone())?.as_slice())
                     .expect("failed to write data to archive");
+
+                if !options.release {
+                    println!("{:?}\nData Snippet: {:?}", header, &data[..100]);
+                }
 
                 if options.disassemble {
                     disassemble(&shell, options.arch, workspace_root.clone(), driver_path.clone())?;

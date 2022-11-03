@@ -160,13 +160,13 @@ pub enum Register {
 
 impl Register {
     /// Translates this APIC register to its respective xAPIC memory offset.
-    #[inline(always)]
+    #[inline]
     pub const fn xapic_offset(self) -> usize {
         (self as usize) * 0x10
     }
 
     /// Translates this APIC register to its respective x2APIC MSR address.
-    #[inline(always)]
+    #[inline]
     pub const fn x2apic_msr(self) -> u32 {
         x2APIC_BASE_MSR_ADDR + (self as u32)
     }

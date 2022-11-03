@@ -29,7 +29,7 @@ bitflags::bitflags! {
 pub struct CR4;
 
 impl CR4 {
-    #[inline(always)]
+    #[inline]
     pub fn read() -> CR4Flags {
         let value: u64;
 
@@ -44,7 +44,7 @@ impl CR4 {
         unsafe { CR4Flags::from_bits_unchecked(value) }
     }
 
-    #[inline(always)]
+    #[inline]
     pub unsafe fn write(value: CR4Flags) {
         core::arch::asm!(
             "mov cr4, {}",
@@ -53,7 +53,7 @@ impl CR4 {
         );
     }
 
-    #[inline(always)]
+    #[inline]
     pub unsafe fn enable(flags: CR4Flags) {
         let mut new_flags = CR4::read();
         new_flags.set(flags, true);
@@ -61,7 +61,7 @@ impl CR4 {
         CR4::write(new_flags);
     }
 
-    #[inline(always)]
+    #[inline]
     pub unsafe fn disable(flags: CR4Flags) {
         let mut new_flags = CR4::read();
         new_flags.set(flags, false);

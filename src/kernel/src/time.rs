@@ -49,17 +49,17 @@ mod clock {
             }
         }
 
-        #[inline(always)]
+        #[inline]
         pub const fn frequency(&self) -> u64 {
             self.frequency
         }
 
-        #[inline(always)]
+        #[inline]
         pub const fn max_timestamp(&self) -> u64 {
             self.max_timestamp
         }
 
-        #[inline(always)]
+        #[inline]
         pub fn get_timestamp(&self) -> u64 {
             match &self.ty {
                 Type::Acpi(register) => register.read() as u64,

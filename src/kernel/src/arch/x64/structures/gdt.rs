@@ -28,22 +28,22 @@ static GDT_DATA: spin::Lazy<GdtData> = spin::Lazy::new(|| {
     GdtData { gdt, kcode, kdata, ucode, udata }
 });
 
-#[inline(always)]
+#[inline]
 pub fn kernel_code_selector() -> SegmentSelector {
     GDT_DATA.kcode.clone()
 }
 
-#[inline(always)]
+#[inline]
 pub fn kernel_data_selector() -> SegmentSelector {
     GDT_DATA.kdata.clone()
 }
 
-#[inline(always)]
+#[inline]
 pub fn user_code_selector() -> SegmentSelector {
     GDT_DATA.ucode.clone()
 }
 
-#[inline(always)]
+#[inline]
 pub fn user_data_selector() -> SegmentSelector {
     GDT_DATA.udata.clone()
 }

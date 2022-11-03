@@ -81,21 +81,21 @@ bitflags::bitflags! {
 
 impl InterruptLines {
     /// Low bits of the interrupt lines.
-    #[inline(always)]
+    #[inline]
     #[allow(clippy::cast_possible_truncation)]
     pub const fn low(self) -> u8 {
         self.bits() as u8
     }
 
     /// High bits of the interrupt lines.
-    #[inline(always)]
+    #[inline]
     #[allow(clippy::cast_possible_truncation)]
     pub const fn high(self) -> u8 {
         (self.bits() >> 8) as u8
     }
 
     /// All interrupt lines disabled.
-    #[inline(always)]
+    #[inline]
     pub const fn disabled() -> Self {
         Self::empty()
     }
@@ -110,14 +110,14 @@ struct PIC {
 
 impl PIC {
     /// Returns whether or not the PIC handles the given interrupt.
-    #[inline(always)]
+    #[inline]
     fn handles_interrupt(&self, interrupt: InterruptOffset) -> bool {
         let interrupt_id = interrupt as u8;
         interrupt_id >= self.offset && interrupt_id < (self.offset + 8)
     }
 
     /// Triggers an end of interrupt for the PIC.
-    #[inline(always)]
+    #[inline]
     fn end_of_interrupt(&mut self) {
         self.command.write(CMD_END_OF_INTERRUPT);
     }

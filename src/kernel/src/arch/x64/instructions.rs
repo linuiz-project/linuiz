@@ -1,5 +1,5 @@
 /// Calls a breakpoint exception.
-#[inline(always)]
+#[inline]
 #[cfg(target_arch = "x86_64")]
 pub fn breakpoint() {
     unsafe {
@@ -22,7 +22,7 @@ pub mod tlb {
     use libcommon::{Address, Page};
 
     /// Invalidates a single page from the TLB.
-    #[inline(always)]
+    #[inline]
     pub fn invlpg(page: Address<Page>) {
         unsafe {
             core::arch::asm!("invlpg [{}]", in(reg) page.address().as_u64(), options(nostack, preserves_flags));

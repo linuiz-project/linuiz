@@ -13,12 +13,12 @@ macro_rules! basic_raw_register {
         pub struct $register_ident;
 
         impl $register_ident {
-            #[inline(always)]
+            #[inline]
             pub unsafe fn write(value: u64) {
                 core::arch::asm!(concat!("mov ", stringify!($register_ident), ", {}"), in(reg) value, options(nomem, nostack));
             }
 
-            #[inline(always)]
+            #[inline]
             pub fn read() -> u64 {
                 let value: u64;
 
@@ -37,12 +37,12 @@ macro_rules! basic_ptr_register {
         pub struct $register_ident;
 
         impl $register_ident {
-            #[inline(always)]
+            #[inline]
             pub unsafe fn write(ptr: *const ()) {
                 core::arch::asm!(concat!("mov ", stringify!($register_ident), ", {}"), in(reg) ptr, options(nomem, nostack, preserves_flags));
             }
 
-            #[inline(always)]
+            #[inline]
             pub fn read() -> *const () {
                 let ptr: *const ();
                 unsafe {

@@ -91,48 +91,48 @@ unsafe impl bytemuck::AnyBitPattern for Header {}
 unsafe impl bytemuck::Zeroable for Header {}
 
 impl Header {
-    #[inline(always)]
+    #[inline]
     pub const fn get_names_section_offset(&self) -> usize {
         self.shstrtab_offset as usize
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn get_type(&self) -> Type {
         Type::from_u32(self.ty)
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn get_attributes(&self) -> Attributes {
         // TODO maybe don't truncate extra bits for os/processor-specific bits?
         Attributes::from_bits_truncate(self.attributes)
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn get_virtual_address(&self) -> Option<Address<Virtual>> {
         Address::<Virtual>::new(self.virt_addr)
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn get_file_offset(&self) -> usize {
         self.file_offset as usize
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn get_disk_size(&self) -> usize {
         self.disk_size as usize
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn get_associated_index(&self) -> usize {
         self.assc_index as usize
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn get_extra_info(&self) -> u32 {
         self.extra_info
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn get_alignment(&self) -> usize {
         self.align as usize
     }
@@ -152,12 +152,12 @@ impl core::ops::Deref for Section<'_> {
 }
 
 impl<'a> Section<'a> {
-    #[inline(always)]
+    #[inline]
     pub const fn new(header: &'a Header, data: &'a [u8]) -> Self {
         Self { header, data }
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn data(&self) -> &[u8] {
         self.data
     }

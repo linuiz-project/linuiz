@@ -7,7 +7,7 @@ mod portrw {
     pub type PortAddress = u16;
 
     /* 8 BIT */
-    #[inline(always)]
+    #[inline]
     #[doc(hidden)]
     pub unsafe fn _read8(port: PortAddress) -> u8 {
         let result: u8;
@@ -17,14 +17,14 @@ mod portrw {
         result
     }
 
-    #[inline(always)]
+    #[inline]
     #[doc(hidden)]
     pub unsafe fn _write8(port: PortAddress, value: u8) {
         asm!("out dx, al", in("dx") port, in("al") value, options(nostack, nomem, preserves_flags));
     }
 
     /* 16 BIT */
-    #[inline(always)]
+    #[inline]
     #[doc(hidden)]
     pub unsafe fn _read16(port: PortAddress) -> u16 {
         let result: u16;
@@ -34,14 +34,14 @@ mod portrw {
         result
     }
 
-    #[inline(always)]
+    #[inline]
     #[doc(hidden)]
     pub unsafe fn _write16(port: PortAddress, value: u16) {
         asm!("out dx, ax", in("dx") port, in("ax") value, options(nostack, nomem, preserves_flags));
     }
 
     /* 32 BIT */
-    #[inline(always)]
+    #[inline]
     #[doc(hidden)]
     pub unsafe fn _read32(port: PortAddress) -> u32 {
         let result: u32;
@@ -51,7 +51,7 @@ mod portrw {
         result
     }
 
-    #[inline(always)]
+    #[inline]
     #[doc(hidden)]
     pub unsafe fn _write32(port: PortAddress, value: u32) {
         asm!("out dx, eax", in("dx") port, in("eax") value, options(nostack, nomem, preserves_flags));
@@ -63,39 +63,39 @@ mod portrw {
     pub type PortAddress = usize;
 
     /* 8 BIT */
-    #[inline(always)]
+    #[inline]
     #[doc(hidden)]
     pub unsafe fn _read8(port: PortAddress) -> u8 {
         (port as *const u8).read_volatile()
     }
 
-    #[inline(always)]
+    #[inline]
     #[doc(hidden)]
     pub unsafe fn _write8(port: PortAddress, value: u8) {
         (port as *mut u8).write_volatile(value);
     }
 
     /* 16 BIT */
-    #[inline(always)]
+    #[inline]
     #[doc(hidden)]
     pub unsafe fn _read16(port: PortAddress) -> u16 {
         (port as *const u16).read_volatile()
     }
 
-    #[inline(always)]
+    #[inline]
     #[doc(hidden)]
     pub unsafe fn _write16(port: PortAddress, value: u16) {
         (port as *mut u16).write_volatile(value);
     }
 
     /* 32 BIT */
-    #[inline(always)]
+    #[inline]
     #[doc(hidden)]
     pub unsafe fn _read32(port: PortAddress) -> u32 {
         (port as *const u32).read_volatile()
     }
 
-    #[inline(always)]
+    #[inline]
     #[doc(hidden)]
     pub unsafe fn _write32(port: PortAddress, value: u32) {
         (port as *mut u32).write_volatile(value);
@@ -171,17 +171,17 @@ impl<T: PortRead> ReadOnlyPort<T> {
     /// Constructs a port wrapping the given address
     ///
     /// This method is unsafe because the caller must ensure the given port is a valid address
-    #[inline(always)]
+    #[inline]
     pub const unsafe fn new(port: PortAddress) -> Self {
         ReadOnlyPort { port, phantom: PhantomData }
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn port_num(&self) -> PortAddress {
         self.port
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn read(&self) -> T {
         unsafe { T::read(self.port_num()) }
     }
@@ -199,17 +199,17 @@ impl<T: PortWrite> WriteOnlyPort<T> {
     /// Constructs a port wrapping the given address
     ///
     /// This method is unsafe because the caller must ensure the given port is a valid address
-    #[inline(always)]
+    #[inline]
     pub const unsafe fn new(port: PortAddress) -> Self {
         WriteOnlyPort { port, phantom: PhantomData }
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn port_num(&self) -> PortAddress {
         self.port
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn write(&mut self, value: T) {
         unsafe { T::write(self.port_num(), value) }
     }
@@ -227,22 +227,22 @@ impl<T: PortReadWrite> ReadWritePort<T> {
     /// Constructs a port wrapping the given address
     ///
     /// This method is unsafe because the caller must ensure the given port is a valid address
-    #[inline(always)]
+    #[inline]
     pub const unsafe fn new(port: PortAddress) -> Self {
         ReadWritePort { port, phantom: PhantomData }
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn port_num(&self) -> PortAddress {
         self.port
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn read(&self) -> T {
         unsafe { T::read(self.port_num()) }
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn write(&mut self, value: T) {
         unsafe { T::write(self.port_num(), value) }
     }

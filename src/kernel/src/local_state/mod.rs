@@ -25,7 +25,7 @@ pub(crate) struct LocalState {
     #[cfg(target_arch = "x86_64")]
     tss: &'static mut crate::arch::x64::structures::tss::TaskStateSegment,
     #[cfg(target_arch = "x86_64")]
-    apic: (crate::arch::x64::structures::apic::Apic, u64),
+    apic: (apic::Apic, u64),
 }
 
 impl LocalState {
@@ -190,25 +190,9 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
                 use crate::{arch::x64, interrupts::Vector};
 
                 let apic =
-                    x64::structures::apic::Apic::new(Some(|address: libcommon::Address<libcommon::Physical>| {
-                        use libcommon::{Address, Page, Virtual};
+                    apic::Apic::new(Some(|address: usize| {
 
-                        let page_address = Address::<Page>::new(
-                            Address::<Virtual>::new(crate::memory::get_hhdm_address().as_u64() + address.as_u64())
-                                .unwrap(),
-                            Some(libcommon::PageAlign::Align4KiB),
-                        )
-                        .unwrap();
-
-                        crate::memory::get_kernel_mapper()
-                            .map_if_not_mapped(
-                                page_address,
-                                Some((address.frame(), false)),
-                                crate::memory::PageAttributes::MMIO,
-                            )
-                            .unwrap();
-
-                        page_address.address()
+                        libcommon::Address::<libcommon::Virtual>::new_truncate(crate::memory::get_hhdm_address().as_u64() + (address as u64)).as_mut_ptr()
                     }))
                     .unwrap();
 
@@ -223,7 +207,7 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
                 let timer_interval = if x64::cpuid::FEATURE_INFO.has_tsc()
                     && x64::cpuid::FEATURE_INFO.has_tsc_deadline()
                 {
-                    apic.get_timer().set_mode(x64::structures::apic::TimerMode::TscDeadline);
+                    apic.get_timer().set_mode(apic::TimerMode::TscDeadline);
 
                     let frequency = x64::cpuid::CPUID.get_processor_frequency_info().map_or_else(
                         || {
@@ -249,8 +233,8 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
                     frequency / (timer_frequency as u64)
                 } else {
                     apic.sw_enable();
-                    apic.set_timer_divisor(x64::structures::apic::TimerDivisor::Div1);
-                    apic.get_timer().set_masked(true).set_mode(x64::structures::apic::TimerMode::OneShot);
+                    apic.set_timer_divisor(apic::TimerDivisor::Div1);
+                    apic.get_timer().set_masked(true).set_mode(apic::TimerMode::OneShot);
 
                     let frequency = {
                         apic.set_timer_initial_count(u32::MAX);
@@ -284,7 +268,9 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
     crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::write(local_state_ptr.addr().get() as u64);
 }
 
-// ### Safety: Caller must ensure control flow is prepared to begin scheduling tasks on the current core.
+/// ### Safety
+///
+/// Caller must ensure control flow is prepared to begin scheduling tasks on the current core.
 pub unsafe fn begin_scheduling() {
     let local_state = get();
 
@@ -297,26 +283,35 @@ pub unsafe fn begin_scheduling() {
         local_state.apic.0.get_timer().set_masked(false);
     }
 
+    trace!("Core #{} scheduled.", local_state.core_id);
+
     // ### Safety: Value provided is non-zero.
-    preemption_wait(unsafe { core::num::NonZeroU16::new_unchecked(1) });
+    preemption_wait(core::num::NonZeroU16::new_unchecked(1));
 }
 
-pub fn next_task(ctrl_flow_context: &mut crate::cpu::ControlContext, arch_context: &mut crate::cpu::ArchContext) {
+/// ### Safety
+///
+/// Caller must ensure that context switching to a new task will not cause undefined behaviour.
+pub unsafe fn next_task(
+    ctrl_flow_context: &mut crate::cpu::ControlContext,
+    arch_context: &mut crate::cpu::ArchContext,
+) {
     let local_state = get();
     local_state.scheduler.next_task(ctrl_flow_context, arch_context);
 }
 
 #[inline]
-pub fn end_of_interrupt() {
+pub unsafe fn end_of_interrupt() {
     #[cfg(target_arch = "x86_64")]
     get().apic.0.end_of_interrupt()
 }
 
-pub fn preemption_wait(interval_wait: core::num::NonZeroU16) {
+/// ### Safety
+///
+/// Caller must ensure that setting a new preemption wait will not cause undefined behaviour.
+pub unsafe fn preemption_wait(interval_wait: core::num::NonZeroU16) {
     #[cfg(target_arch = "x86_64")]
     {
-        use crate::arch::x64::structures::apic;
-
         let (apic, timer_interval) = &get().apic;
         match apic.get_timer().get_mode() {
             // ### Safety: Control flow expects timer initial count to be changed.

@@ -30,22 +30,22 @@ impl<T: AddressType + RawAddressType> Address<T> {
         Self(0, PhantomData)
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn is_null(self) -> bool {
         self.0 == 0
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn as_usize(self) -> usize {
         self.0 as usize
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn as_u64(self) -> u64 {
         self.0
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn is_aligned_to(self, alignment: u64) -> bool {
         debug_assert!(alignment.is_power_of_two());
         (self.0 & (alignment - 1)) == 0
@@ -53,13 +53,13 @@ impl<T: AddressType + RawAddressType> Address<T> {
 }
 
 impl Address<Physical> {
-    #[inline(always)]
+    #[inline]
     pub const fn is_canonical(address: u64) -> bool {
         (address & 0xFFF00000_00000000) == 0
     }
 
     /// Constructs a new `Address<Physical>` if the provided address is canonical.
-    #[inline(always)]
+    #[inline]
     pub const fn new(address: u64) -> Option<Self> {
         if Self::is_canonical(address) {
             Some(Self(address, PhantomData))
@@ -68,17 +68,17 @@ impl Address<Physical> {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn new_truncate(address: u64) -> Self {
         Self(address & 0xFFFFFFFFFFFFF, PhantomData)
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn frame(self) -> Address<Frame> {
-        Address::<Frame>::new_truncate(self.0)
+        Address::<Frame>::new_truncate(self)
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn is_frame_aligned(self) -> bool {
         (self.0 & 0xFFF) == 0
     }
@@ -94,27 +94,27 @@ impl Address<Virtual> {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn new_truncate(address: u64) -> Self {
         Self((((address << 16) as i64) >> 16) as u64, PhantomData)
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn from_ptr<T>(ptr: *const T) -> Self {
         Self::new_truncate(ptr as usize as u64)
     }
 
-    #[inline(always)]
+    #[inline]
     pub const unsafe fn as_ptr<T>(self) -> *const T {
         self.0 as usize as *const T
     }
 
-    #[inline(always)]
+    #[inline]
     pub const unsafe fn as_mut_ptr<T>(self) -> *mut T {
         self.0 as usize as *mut T
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn get_page_index(self, depth: usize) -> Option<usize> {
         (self.0 as usize).checked_shr((((depth as u32) - 1) * 9) >> 12)
     }
@@ -122,20 +122,30 @@ impl Address<Virtual> {
 
 impl Address<Frame> {
     #[inline]
-    pub const fn new(address: u64) -> Option<Self> {
-        if (address & 0xFFF) == 0 && Address::<Physical>::is_canonical(address) {
-            Some(Self(address, PhantomData))
+    pub const fn new(address: Address<Physical>) -> Option<Self> {
+        if address.is_frame_aligned() {
+            Some(Self(address.as_u64(), PhantomData))
         } else {
             None
         }
     }
 
-    #[inline(always)]
-    pub const fn new_truncate(address: u64) -> Self {
-        Self(address & !0xFFF, PhantomData)
+    #[inline]
+    pub const fn new_truncate(address: Address<Physical>) -> Self {
+        Self(address.as_u64() & !0xFFF, PhantomData)
     }
 
-    #[inline(always)]
+    #[inline]
+    pub fn from_u64(address: u64) -> Option<Self> {
+        Address::<Physical>::new(address).and_then(Self::new)
+    }
+
+    #[inline]
+    pub const fn from_u64_truncate(address: u64) -> Self {
+        Self::new_truncate(Address::<Physical>::new_truncate(address))
+    }
+
+    #[inline]
     pub const fn index(self) -> usize {
         (self.0 / 0x1000) as usize
     }
@@ -198,7 +208,7 @@ impl PageAlign {
         self.as_u64() as usize
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn mask(self) -> u64 {
         self.as_u64() - 1
     }
@@ -220,9 +230,23 @@ impl Address<Page> {
         }
     }
 
-    #[inline(always)]
-    pub const fn new_truncate(address: Address<Virtual>, align: PageAlign) -> Self {
-        Self((address.as_u64() & !align.mask()) | align.depth(), PhantomData)
+    #[inline]
+    pub const fn new_truncate(address: Address<Virtual>, align: Option<PageAlign>) -> Self {
+        Self(
+            (address.as_u64() & !align.map_or(Self::ALIGN_BIT_MASK, PageAlign::mask))
+                | align.map_or(0, PageAlign::depth),
+            PhantomData,
+        )
+    }
+
+    #[inline]
+    pub fn from_u64(address: u64, align: Option<PageAlign>) -> Option<Self> {
+        Address::<Virtual>::new(address).and_then(|address| Self::new(address, align))
+    }
+
+    #[inline]
+    pub const fn from_u64_truncate(address: u64, align: Option<PageAlign>) -> Self {
+        Self::new_truncate(Address::<Virtual>::new_truncate(address), align)
     }
 
     #[inline]
@@ -238,12 +262,12 @@ impl Address<Page> {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn address(self) -> Address<Virtual> {
         Address::<Virtual>(self.0 & !Self::ALIGN_BIT_MASK, PhantomData)
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn align(self) -> Option<PageAlign> {
         match self.0 & Self::ALIGN_BIT_MASK {
             0 => None,
@@ -254,12 +278,12 @@ impl Address<Page> {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn index(self) -> Option<usize> {
         self.align().map(|align| self.address().as_usize() / align.as_usize())
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn depth(self) -> Option<usize> {
         self.align().map(|align| match align {
             PageAlign::Align4KiB => 1,
@@ -279,7 +303,7 @@ impl Address<Page> {
                 .as_u64()
                 .checked_add((count as u64) * align.as_u64())
                 .and_then(|address| Address::<Virtual>::new(address))
-                .map(|address| Self::new_truncate(address, align))
+                .map(|address| Self::new_truncate(address, Some(align)))
         })
     }
 
@@ -289,7 +313,7 @@ impl Address<Page> {
                 .as_u64()
                 .checked_sub((count as u64) * align.as_u64())
                 .and_then(|address| Address::<Virtual>::new(address))
-                .map(|address| Self::new_truncate(address, align))
+                .map(|address| Self::new_truncate(address, Some(align)))
         })
     }
 

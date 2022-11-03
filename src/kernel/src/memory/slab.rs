@@ -51,37 +51,37 @@ impl Frame {
     const PEEKED_BIT: u8 = 1 << Self::PEEKED_SHIFT;
     const TYPE_RANGE: core::ops::Range<usize> = 0..4;
 
-    #[inline(always)]
+    #[inline]
     fn lock(&self) {
         let lock_result = self.0.fetch_or(Self::LOCKED_BIT, Ordering::AcqRel);
         debug_assert!(!lock_result.get_bit(Self::LOCKED_SHIFT));
     }
 
-    #[inline(always)]
+    #[inline]
     fn free(&self) {
         let free_result = self.0.fetch_xor(Self::LOCKED_BIT, Ordering::AcqRel);
         debug_assert!(free_result.get_bit(Self::LOCKED_SHIFT));
     }
 
-    #[inline(always)]
+    #[inline]
     fn try_peek(&self) -> bool {
         !self.0.fetch_or(Self::PEEKED_BIT, Ordering::AcqRel).get_bit(Self::PEEKED_SHIFT)
     }
 
-    #[inline(always)]
+    #[inline]
     fn peek(&self) {
         while !self.try_peek() {
             core::hint::spin_loop();
         }
     }
 
-    #[inline(always)]
+    #[inline]
     fn unpeek(&self) {
         let unpeek_result = self.0.fetch_and(!Self::PEEKED_BIT, Ordering::AcqRel);
         debug_assert!(unpeek_result.get_bit(Self::PEEKED_SHIFT));
     }
 
-    #[inline(always)]
+    #[inline]
     fn set_type(&self, new_type: FrameType) {
         debug_assert!(self.0.load(Ordering::Acquire).get_bit(Self::PEEKED_SHIFT));
 
@@ -322,7 +322,7 @@ impl SlabAllocator<'_> {
                         frame.lock();
                         frame.unpeek();
 
-                        Some(Address::<libcommon::Frame>::new_truncate((index * 0x1000) as u64))
+                        Some(Address::<libcommon::Frame>::from_u64_truncate((index * 0x1000) as u64))
                     } else {
                         frame.unpeek();
 
@@ -371,7 +371,7 @@ impl SlabAllocator<'_> {
                     None => {
                         frames.iter().for_each(Frame::lock);
                         frames.iter().for_each(Frame::unpeek);
-                        return Ok(Address::<libcommon::Frame>::new_truncate(
+                        return Ok(Address::<libcommon::Frame>::from_u64_truncate(
                             ((table.len() - sub_table.len()) * 0x1000) as u64,
                         ));
                     }

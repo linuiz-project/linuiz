@@ -12,7 +12,7 @@ impl TaskPriority {
     pub const MAX: u8 = 16;
 
     /// Safely constructs a new instance of this type, with range checking for the priority.
-    #[inline(always)]
+    #[inline]
     pub const fn new(priority: u8) -> Option<Self> {
         match priority {
             Self::MIN..=Self::MAX => Some(Self(priority)),
@@ -21,7 +21,7 @@ impl TaskPriority {
     }
 
     /// Gets the inner raw priority value.
-    #[inline(always)]
+    #[inline]
     pub fn get(self) -> u8 {
         self.0
     }
@@ -38,8 +38,14 @@ pub enum TaskStart {
     Function(fn() -> !),
 }
 
-// TODO devise a better method for tasks to be queued globally
-pub static GLOBAL_TASKS: spin::Lazy<spin::Mutex<Deque<Task>>> = spin::Lazy::new(|| spin::Mutex::new(Deque::new()));
+static WAITING_TASKS: spin::Mutex<Deque<Task>> = spin::Mutex::new(Deque::new());
+
+pub fn queue_task(new_task: Task) {
+    crate::interrupts::without(|| {
+        let mut waiting_tasks = WAITING_TASKS.lock();
+        waiting_tasks.push_back(new_task).unwrap();
+    })
+}
 
 // TODO move `Task` and its types / impls to a module
 /// Representation object for different contexts of execution in the CPU.
@@ -98,14 +104,14 @@ impl core::fmt::Debug for Task {
 pub struct Scheduler {
     enabled: bool,
     total_priority: u64,
-    tasks: Deque<Task>,
     idle_task: Task,
     cur_task: Option<Task>,
+    tasks: Deque<Task>,
 }
 
 impl Scheduler {
     pub fn new(enabled: bool, idle_task: Task) -> Self {
-        Self { enabled, total_priority: 0, tasks: Deque::new(), idle_task, cur_task: None }
+        Self { enabled, total_priority: 0, idle_task, cur_task: None, tasks: Deque::new() }
     }
 
     /// Enables the scheduler to pop tasks.
@@ -166,10 +172,7 @@ impl Scheduler {
 
         const PRIO_TIME_SLICE_MULTIPLIER: u16 = 10;
 
-        if let Some(mut global_tasks) = GLOBAL_TASKS.try_lock()
-            && let Some(task) = global_tasks.pop_front() {
-            self.push_task(task);
-        }
+        debug_assert!(!crate::interrupts::are_enabled());
 
         // Move the current task, if any, back into the scheduler queue.
         if let Some(mut cur_task) = self.cur_task.take() {
@@ -178,6 +181,13 @@ impl Scheduler {
             cur_task.root_page_table_args = VmemRegister::read();
 
             self.push_task(cur_task);
+        }
+
+        {
+            let mut waiting_tasks = WAITING_TASKS.lock();
+            if waiting_tasks.len() > 0 && let Some(new_task) = waiting_tasks.pop_front() {
+                self.push_task(new_task);
+            }
         }
 
         unsafe {

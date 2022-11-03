@@ -5,7 +5,7 @@ use core::arch::asm;
 /// ### Safety
 ///
 /// Enabling interrupts early can result in unexpected behaviour.
-#[inline(always)]
+#[inline]
 pub unsafe fn enable() {
     #[cfg(target_arch = "x86_64")]
     asm!("sti", options(nostack, nomem));
@@ -19,7 +19,7 @@ pub unsafe fn enable() {
 /// ### Safety
 ///
 /// Disabling interrupts can cause the system to become unresponsive if they are not re-enabled.
-#[inline(always)]
+#[inline]
 pub unsafe fn disable() {
     #[cfg(target_arch = "x86_64")]
     asm!("cli", options(nostack, nomem));
@@ -29,7 +29,7 @@ pub unsafe fn disable() {
 }
 
 /// Returns whether or not interrupts are enabled for the current core.
-#[inline(always)]
+#[inline]
 pub fn are_enabled() -> bool {
     #[cfg(target_arch = "x86_64")]
     {
@@ -60,7 +60,7 @@ pub fn without<R>(func: impl FnOnce() -> R) -> R {
 }
 
 /// Waits for the next interrupt on the current core.
-#[inline(always)]
+#[inline]
 pub fn wait() {
     unsafe {
         #[cfg(target_arch = "x86_64")]
@@ -72,14 +72,14 @@ pub fn wait() {
 }
 
 /// Indefinitely waits for the next interrupt on the current core.
-#[inline(always)]
+#[inline]
 pub fn wait_loop() -> ! {
     loop {
         wait();
     }
 }
 
-#[inline(always)]
+#[inline]
 pub unsafe fn halt_and_catch_fire() -> ! {
     disable();
     wait_loop()

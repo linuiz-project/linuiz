@@ -22,10 +22,10 @@ impl CR3 {
             asm!("mov {}, cr3", out(reg) value, options(nostack, nomem));
         }
 
-        (Address::<Frame>::new_truncate(value & !CR3Flags::all().bits()), CR3Flags::from_bits_truncate(value))
+        (Address::<Frame>::from_u64_truncate(value & !CR3Flags::all().bits()), CR3Flags::from_bits_truncate(value))
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn refresh() {
         let value: u64;
 

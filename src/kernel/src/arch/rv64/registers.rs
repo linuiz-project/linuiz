@@ -9,7 +9,7 @@ bitflags::bitflags! {
 }
 
 impl SSTATUS {
-    #[inline(always)]
+    #[inline]
     pub unsafe fn write(value: Self) {
         asm!("csrwi sstatus, {}", in(reg) value.bits(), options(nostack, nomem));
     }
@@ -22,17 +22,17 @@ impl SSTATUS {
         Self::from_bits_truncate(bits)
     }
 
-    #[inline(always)]
+    #[inline]
     pub unsafe fn set_bits(bits: Self) {
         asm!("csrs sstatus, {}", in(reg) bits.bits(), options(nostack, nomem));
     }
 
-    #[inline(always)]
+    #[inline]
     pub unsafe fn clear_bits(bits: Self) {
         asm!("csrc sstatus, {}", in(reg) bits.bits(), options(nostack, nomem));
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn get_bits(bits: Self) -> bool {
         let value: u64;
 
@@ -93,7 +93,7 @@ pub mod satp {
     }
 
     /// Reads the raw value from the `satp` control register.
-    #[inline(always)]
+    #[inline]
     fn read_raw() -> u64 {
         let value: u64;
 
@@ -103,7 +103,7 @@ pub mod satp {
     }
 
     /// Writes a raw value to the `satp` control register.
-    #[inline(always)]
+    #[inline]
     fn write_raw(value: u64) {
         unsafe { core::arch::asm!("csrw satp, {}", in(reg) value, options(nostack, nomem)) };
     }

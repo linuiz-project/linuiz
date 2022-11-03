@@ -52,17 +52,17 @@ pub const MIBIBYTE: u64 = KIBIBYTE * KIBIBYTE;
 pub const GIBIBYTE: u64 = MIBIBYTE * MIBIBYTE;
 pub const PT_L4_ENTRY_MEM: u64 = 1 << 9 << 9 << 9 << 12;
 
-#[inline(always)]
+#[inline]
 pub const fn to_kibibytes(value: u64) -> u64 {
     value / KIBIBYTE
 }
 
-#[inline(always)]
+#[inline]
 pub const fn to_mibibytes(value: u64) -> u64 {
     value / MIBIBYTE
 }
 
-#[inline(always)]
+#[inline]
 pub const fn align_up(value: usize, alignment: NonZeroUsize) -> usize {
     let alignment_mask = alignment.get() - 1;
     if value & alignment_mask == 0 {
@@ -72,17 +72,17 @@ pub const fn align_up(value: usize, alignment: NonZeroUsize) -> usize {
     }
 }
 
-#[inline(always)]
+#[inline]
 pub const fn align_up_div(value: usize, alignment: NonZeroUsize) -> usize {
     ((value + alignment.get()) - 1) / alignment.get()
 }
 
-#[inline(always)]
+#[inline]
 pub const fn align_down(value: usize, alignment: NonZeroUsize) -> usize {
     value & !(alignment.get() - 1)
 }
 
-#[inline(always)]
+#[inline]
 pub const fn align_down_div(value: usize, alignment: NonZeroUsize) -> usize {
     align_down(value, alignment) / alignment.get()
 }

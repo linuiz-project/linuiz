@@ -73,7 +73,7 @@ impl PageTableEntry {
     const FRAME_ADDRESS_SHIFT: u32 = PTE_FRAME_ADDRESS_MASK.trailing_zeros();
 
     /// Returns an empty `Self`. All bits of this entry will be 0.
-    #[inline(always)]
+    #[inline]
     pub const fn empty() -> Self {
         Self(0)
     }
@@ -83,15 +83,15 @@ impl PageTableEntry {
     }
 
     /// Whether the page table entry is present or usable the memory controller.
-    #[inline(always)]
+    #[inline]
     pub const fn is_present(&self) -> bool {
         self.get_attributes().contains(PageAttributes::PRESENT)
     }
 
     /// Gets the frame index of the page table entry.
-    #[inline(always)]
+    #[inline]
     pub const fn get_frame(&self) -> Address<Frame> {
-        Address::<Frame>::new_truncate(((self.0 & PTE_FRAME_ADDRESS_MASK) >> Self::FRAME_ADDRESS_SHIFT) * 0x1000)
+        Address::<Frame>::from_u64_truncate(((self.0 & PTE_FRAME_ADDRESS_MASK) >> Self::FRAME_ADDRESS_SHIFT) * 0x1000)
     }
 
     /// Sets the entry's frame index.
@@ -99,13 +99,13 @@ impl PageTableEntry {
     /// ### Safety
     ///
     /// Caller must ensure changing the attributes of this entry does not cause any memory corruption side effects.
-    #[inline(always)]
+    #[inline]
     pub unsafe fn set_frame(&mut self, frame: Address<Frame>) {
         self.0 = (self.0 & !PTE_FRAME_ADDRESS_MASK) | ((frame.index() as u64) << Self::FRAME_ADDRESS_SHIFT);
     }
 
     /// Gets the attributes of this page table entry.
-    #[inline(always)]
+    #[inline]
     pub const fn get_attributes(&self) -> PageAttributes {
         PageAttributes::from_bits_truncate(self.0)
     }
@@ -190,12 +190,12 @@ impl<'a, RefKind: InteriorRef> PageTable<'a, RefKind> {
         (address >> ((depth - 1) * 9) >> 12) & 0x1FF
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn depth(&self) -> usize {
         self.depth
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn hhdm_address(&self) -> Address<Virtual> {
         self.hhdm_address
     }

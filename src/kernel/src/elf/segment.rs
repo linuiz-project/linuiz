@@ -61,37 +61,37 @@ unsafe impl bytemuck::AnyBitPattern for Header {}
 unsafe impl bytemuck::Zeroable for Header {}
 
 impl Header {
-    #[inline(always)]
+    #[inline]
     pub const fn get_type(&self) -> Type {
         Type::from_u32(self.ty)
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn get_flags(&self) -> Flags {
         Flags::from_bits_truncate(self.flags)
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn get_file_offset(&self) -> usize {
         self.offset as usize
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn get_virtual_address(&self) -> Option<Address<Virtual>> {
         Address::<Virtual>::new(self.virt_addr)
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn get_physical_address(&self) -> Option<Address<Physical>> {
         Address::<Physical>::new(self.phys_addr)
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn get_disk_size(&self) -> usize {
         self.disk_size as usize
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn get_memory_layout(&self) -> Result<core::alloc::Layout, core::alloc::LayoutError> {
         core::alloc::Layout::from_size_align(self.mem_size as usize, self.align as usize)
     }
@@ -111,12 +111,12 @@ impl core::ops::Deref for Segment<'_> {
 }
 
 impl<'a> Segment<'a> {
-    #[inline(always)]
+    #[inline]
     pub const fn new(header: &'a Header, data: &'a [u8]) -> Self {
         Self { header, data }
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn data(&self) -> &[u8] {
         self.data
     }

@@ -51,11 +51,15 @@ SECTIONS
         PROVIDE(__rodata_end = .);
     }
     
+
+    . = ALIGN(8);
+    PROVIDE(__eh_frame = .);
+    .eh_frame           : { KEEP(*(.eh_frame)) *(.eh_frame.*) }
+
     /* bss sections */
     .bss                : ALIGN(__section_align) {
         PROVIDE(__bss_start = .);
 
-        KEEP(*(.eh_frame .eh_frame.*))
         KEEP(*(.gcc_except_table))
         *(.tdata .tdata.*)
         *(.tbss .tbss.*)

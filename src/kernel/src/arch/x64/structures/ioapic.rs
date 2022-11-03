@@ -114,12 +114,12 @@ unsafe impl Send for IoApic<'_> {}
 unsafe impl Sync for IoApic<'_> {}
 
 impl IoApic<'_> {
-    #[inline(always)]
+    #[inline]
     pub const fn get_id(&self) -> u8 {
         self.id
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn get_version(&self) -> u8 {
         self.version
     }

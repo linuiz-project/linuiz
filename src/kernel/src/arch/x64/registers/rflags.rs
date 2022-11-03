@@ -58,12 +58,12 @@ bitflags! {
 }
 
 impl RFlags {
-    #[inline(always)]
+    #[inline]
     pub fn read() -> Self {
         unsafe { Self::from_bits_unchecked(Self::read_raw()) }
     }
 
-    #[inline(always)]
+    #[inline]
     fn read_raw() -> u64 {
         let result: u64;
 
@@ -79,7 +79,7 @@ impl RFlags {
         result
     }
 
-    #[inline(always)]
+    #[inline]
     pub unsafe fn write(flags: Self, set: bool) {
         let mut old_flags = Self::read();
         old_flags.set(flags, set);

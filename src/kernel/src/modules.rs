@@ -1,6 +1,6 @@
 use libcommon::{Address, Frame, Page, Virtual};
 
-fn drivers() {
+pub fn load_modules() {
     let drivers_data = crate::boot::get_kernel_modules()
         // Find the drives module, and map the `Option<>` to it.
         .and_then(|modules| {
@@ -14,24 +14,28 @@ fn drivers() {
 
     for (header, data) in lza::ArchiveReader::new(drivers_data) {
         // SAFETY: Value is non-zero.
-        let Ok(elf_buffer) = lzalloc::allocate_slice::<u8>(unsafe { core::num::NonZeroUsize::new_unchecked(header.len.get() as usize) }, 0)
+        let Ok(elf_buffer) = lzalloc::allocate_slice::<u8>(header.len(), 0)
             else {
-                warn!("Failed allocate decompression buffer for driver: {:?}", header.name());
+                warn!("Failed allocate decompression buffer for driver: {:?}", header);
                 continue
             };
 
-        let mut inflate_state = miniz_oxide::inflate::stream::InflateState::new(miniz_oxide::DataFormat::Zlib);
-        if miniz_oxide::inflate::stream::inflate(&mut inflate_state, data, elf_buffer, miniz_oxide::MZFlush::Finish)
-            .status
-            .is_err()
-        {
-            warn!("Failed parse decompress driver blob: {:?}", header.name());
+        let mut inflate_state = miniz_oxide::inflate::stream::InflateState::new(miniz_oxide::DataFormat::Raw);
+        let inflate_result =
+            miniz_oxide::inflate::stream::inflate(&mut inflate_state, data, elf_buffer, miniz_oxide::MZFlush::Finish);
+        if inflate_result.status.is_err() {
+            warn!(
+                "Failed decompress driver blob:\n{:#?}\n{:#?}\nData Snippet: {:?}",
+                header,
+                inflate_result,
+                &data[..100]
+            );
             continue;
         };
 
         let Some(elf) = crate::elf::Elf::from_bytes(elf_buffer)
             else {
-                warn!("Failed parse driver blob into valid ELF: {:?}", header.name());
+                warn!("Failed parse driver blob into valid ELF: {:?}", header);
                 continue
             };
 
@@ -83,11 +87,9 @@ fn drivers() {
                                 PageAttributes::RO
                             };
 
-                            let page = Address::<Page>::new(
-                                Address::<Virtual>::new((page_index * 0x1000) as u64).unwrap(),
-                                Some(PageAlign::Align4KiB),
-                            )
-                            .unwrap();
+                            let page =
+                                Address::<Page>::from_u64((page_index * 0x1000) as u64, Some(PageAlign::Align4KiB))
+                                    .unwrap();
                             driver_page_manager.auto_map(page, page_attributes | PageAttributes::USER).unwrap();
 
                             // ### Safety: HHDM is guaranteed by kernel to be valid, and the frame being pointed to was just allocated.
@@ -124,7 +126,7 @@ fn drivers() {
                 let stack_address = {
                     const TASK_STACK_BASE_ADDRESS: Address<Page> = Address::<Page>::new_truncate(
                         Address::<Virtual>::new_truncate(128 << 39),
-                        PageAlign::Align2MiB,
+                        Some(PageAlign::Align2MiB),
                     );
                     // TODO make this a dynamic configuration
                     const TASK_STACK_PAGE_COUNT: usize = 2;
@@ -149,33 +151,32 @@ fn drivers() {
                     TASK_STACK_BASE_ADDRESS.forward_checked(TASK_STACK_PAGE_COUNT).unwrap()
                 };
 
-                let mut global_tasks = crate::local_state::GLOBAL_TASKS.lock();
-                global_tasks
-                    .push_back(crate::local_state::Task::new(
-                        crate::local_state::TaskPriority::new(crate::local_state::TaskPriority::MAX).unwrap(),
-                        // TODO account for memory base when passing entry offset
-                        crate::local_state::TaskStart::Address(
-                            Address::<Virtual>::new(elf.get_entry_offset() as u64).unwrap(),
-                        ),
-                        crate::local_state::TaskStack::At(stack_address.address()),
-                        {
-                            #[cfg(target_arch = "x86_64")]
-                            {
-                                (
-                                    crate::arch::x64::registers::GeneralRegisters::empty(),
-                                    crate::arch::x64::registers::SpecialRegisters::flags_with_user_segments(
-                                        crate::arch::x64::registers::RFlags::INTERRUPT_FLAG,
-                                    ),
-                                )
-                            }
-                        },
+                let task = crate::local_state::Task::new(
+                    crate::local_state::TaskPriority::new(crate::local_state::TaskPriority::MAX).unwrap(),
+                    // TODO account for memory base when passing entry offset
+                    crate::local_state::TaskStart::Address(
+                        Address::<Virtual>::new(elf.get_entry_offset() as u64).unwrap(),
+                    ),
+                    crate::local_state::TaskStack::At(stack_address.address()),
+                    {
                         #[cfg(target_arch = "x86_64")]
                         {
-                            // TODO do not error here ?
-                            driver_page_manager.read_vmem_register().unwrap()
-                        },
-                    ))
-                    .unwrap();
+                            (
+                                crate::arch::x64::registers::GeneralRegisters::empty(),
+                                crate::arch::x64::registers::SpecialRegisters::flags_with_user_segments(
+                                    crate::arch::x64::registers::RFlags::INTERRUPT_FLAG,
+                                ),
+                            )
+                        }
+                    },
+                    #[cfg(target_arch = "x86_64")]
+                    {
+                        // TODO do not error here ?
+                        driver_page_manager.read_vmem_register().unwrap()
+                    },
+                );
+
+                crate::local_state::queue_task(task);
             }
         }
     }
