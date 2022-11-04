@@ -56,7 +56,7 @@ mod num;
 mod panic;
 mod time;
 
-use libcommon::{Address, Frame, Page, Physical, Virtual};
+use libcommon::{Address, Frame, Page, Virtual};
 
 pub type MmapEntry = limine::NonNullPtr<limine::LimineMemmapEntry>;
 pub type MmapEntryType = limine::LimineMemoryMapEntryType;
