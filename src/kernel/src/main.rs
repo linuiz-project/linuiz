@@ -21,7 +21,8 @@
     inline_const,
     exact_size_is_empty,
     fn_align,
-    ptr_as_uninit
+    ptr_as_uninit,
+    const_trait_impl
 )]
 #![forbid(clippy::inline_asm_x86_att_syntax)]
 #![deny(clippy::semicolon_if_nothing_returned, clippy::debug_assert_with_mut_call, clippy::float_arithmetic)]
@@ -56,7 +57,7 @@ mod num;
 mod panic;
 mod time;
 
-use libcommon::{Address, Frame, Page, Physical, Virtual};
+use libcommon::{Address, Frame, Page, Virtual};
 
 pub type MmapEntry = limine::NonNullPtr<limine::LimineMemmapEntry>;
 pub type MmapEntryType = limine::LimineMemoryMapEntryType;
@@ -335,16 +336,16 @@ unsafe extern "C" fn _entry() -> ! {
                     continue;
                 }
 
+                let section_data = section.data();
                 let Some(section_name) = core::ffi::CStr::from_bytes_until_nul(&names_section[names_section_offset..])
                         .ok()
                         .and_then(|cstr| cstr.to_str().ok())
                     else { continue };
 
                 match section_name {
-                    ".symtab" => {
-                        let Ok(symbols) = bytemuck::try_cast_slice::<u8, Symbol>(section.data())
-                            else { continue };
-                        let Some(symbols_copy) = NonZeroUsize::new(symbols.len()).and_then(|len| lzalloc::allocate_slice(len, Symbol::default()).ok())
+                    ".symtab" if section_data.len() > 0 && let Ok(symbols) = bytemuck::try_cast_slice::<u8, Symbol>(section.data()) => {
+                        // ### Safety: Value is checked non-zero.
+                        let Ok(symbols_copy) = lzalloc::allocate_slice(unsafe { NonZeroUsize::new_unchecked(symbols.len()) }, Symbol::default())
                             else { continue };
 
                         crate::interrupts::without(|| {
@@ -355,8 +356,9 @@ unsafe extern "C" fn _entry() -> ! {
                         });
                     }
 
-                    ".strtab" => {
-                        let Some(strings_copy) = NonZeroUsize::new(section.data().len()).and_then(|len|  lzalloc::allocate_slice(len, 0).ok())
+                    ".strtab" if section_data.len() > 0 => {
+                        // ### Safety: Value is checked non-zero.
+                        let Ok(strings_copy) = lzalloc::allocate_slice(unsafe { NonZeroUsize::new_unchecked(section_data.len()) }, 0)
                             else { continue };
 
                         crate::interrupts::without(|| {

@@ -3,6 +3,7 @@ mod paging;
 
 pub mod io;
 pub mod slab;
+pub mod slob;
 pub use mapper::*;
 pub use paging::*;
 
@@ -136,4 +137,10 @@ mod lzg_impls {
     unsafe fn __lzg_deallocate(ptr: NonNull<u8>, layout: Layout) {
         super::KERNEL_ALLOCATOR.deallocate(ptr, layout);
     }
+}
+
+pub type Stack = lzalloc::boxed::Box<[u8], lzalloc::AlignedAllocator<0x10>>;
+
+pub unsafe fn out_of_memory() -> ! {
+    panic!("Kernel ran out of memory during initialization.")
 }

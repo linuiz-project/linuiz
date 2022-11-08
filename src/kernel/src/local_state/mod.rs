@@ -1,6 +1,7 @@
 mod scheduler;
 
-use crate::memory::VmemRegister;
+use crate::memory::{Stack, VmemRegister};
+use lzalloc::{boxed::Box, AlignedAllocator};
 pub use scheduler::*;
 
 pub(self) const US_PER_SEC: u32 = 1000000;
@@ -9,13 +10,10 @@ pub(self) const US_FREQ_FACTOR: u32 = US_PER_SEC / US_WAIT;
 
 pub const SYSCALL_STACK_SIZE: usize = 0x4000;
 
-#[repr(align(0x10))]
-struct Stack<const SIZE: usize>([u8; SIZE]);
-
 #[repr(C, align(0x1000))]
 pub(crate) struct LocalState {
     syscall_stack_ptr: *const (),
-    syscall_stack: Stack<SYSCALL_STACK_SIZE>,
+    syscall_stack: Stack,
     magic: u64,
     core_id: u32,
     scheduler: Scheduler,
@@ -53,23 +51,23 @@ fn get() -> &'static mut LocalState {
 ///
 /// This function invariantly assumes it will only be called once.
 pub unsafe fn init(core_id: u32, timer_frequency: u16) {
+    let Ok(syscall_stack) = Box::new_zeroed_slice_in(SYSCALL_STACK_SIZE, AlignedAllocator).map(|b| b.assume_init())
+        else { crate::memory::out_of_memory() };
+    let Ok(idle_task_stack) = Box::new_zeroed_slice_in(0x10, AlignedAllocator::<0x10>).map(|b| b.assume_init())
+        else { crate::memory::out_of_memory() };
+
     let Ok(mut local_state_ptr) = lzalloc::allocate_with(|| {
         LocalState {
-            syscall_stack_ptr: core::ptr::null(),
-            syscall_stack: Stack::<SYSCALL_STACK_SIZE>([0u8; SYSCALL_STACK_SIZE]),
+            syscall_stack_ptr: syscall_stack,
+            syscall_stack,
             magic: LocalState::MAGIC,
             core_id,
             scheduler: Scheduler::new(
                 false,
                 Task::new(
-                    TaskPriority::new(1).unwrap(),
-                    TaskStart::Function(crate::interrupts::wait_loop),
-                    TaskStack::At(libcommon::Address::<libcommon::Virtual>::from_ptr({
-                        lzalloc::allocate_zeroed(core::alloc::Layout::from_size_align_unchecked(0x10, 0x10))
-                            .unwrap()
-                            .as_non_null_ptr()
-                            .as_ptr()
-                    })),
+                    0,
+                    EntryPoint::Function(crate::interrupts::wait_loop),
+                            idle_task_stack,
                     {
                         #[cfg(target_arch = "x86_64")]
                         {
@@ -258,11 +256,9 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
     };
 
     let local_state = local_state_ptr.as_mut();
+
     // Write out correct syscall stack pointer.
-    local_state.syscall_stack_ptr = (core::ptr::addr_of!(local_state.syscall_stack))
-        .cast::<u8>()
-        .add(core::mem::size_of_val(&local_state.syscall_stack))
-        .cast();
+    local_state.syscall_stack_ptr = local_state.syscall_stack.as_ptr().add(local_state.syscall_stack.len()).cast();
 
     #[cfg(target_arch = "x86_64")]
     crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::write(local_state_ptr.addr().get() as u64);

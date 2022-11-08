@@ -43,6 +43,7 @@ pub fn are_enabled() -> bool {
 }
 
 /// Disables interrupts, executes the given [`FnOnce`], and re-enables interrupts if they were prior.
+#[inline]
 pub fn without<R>(func: impl FnOnce() -> R) -> R {
     let interrupts_enabled = are_enabled();
 

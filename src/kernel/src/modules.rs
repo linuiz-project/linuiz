@@ -154,7 +154,7 @@ pub fn load_modules() {
                 let task = crate::local_state::Task::new(
                     crate::local_state::TaskPriority::new(crate::local_state::TaskPriority::MAX).unwrap(),
                     // TODO account for memory base when passing entry offset
-                    crate::local_state::TaskStart::Address(
+                    crate::local_state::EntryPoint::Address(
                         Address::<Virtual>::new(elf.get_entry_offset() as u64).unwrap(),
                     ),
                     crate::local_state::TaskStack::At(stack_address.address()),

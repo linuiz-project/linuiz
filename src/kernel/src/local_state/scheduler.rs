@@ -1,39 +1,10 @@
+use crate::memory::Stack;
 use core::sync::atomic::AtomicU64;
 use lzalloc::deque::Deque;
 
 static NEXT_THREAD_ID: AtomicU64 = AtomicU64::new(1);
 
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy)]
-pub struct TaskPriority(u8);
-
-impl TaskPriority {
-    pub const MIN: u8 = 1;
-    pub const MAX: u8 = 16;
-
-    /// Safely constructs a new instance of this type, with range checking for the priority.
-    #[inline]
-    pub const fn new(priority: u8) -> Option<Self> {
-        match priority {
-            Self::MIN..=Self::MAX => Some(Self(priority)),
-            _ => None,
-        }
-    }
-
-    /// Gets the inner raw priority value.
-    #[inline]
-    pub fn get(self) -> u8 {
-        self.0
-    }
-}
-
-/// Represents a stack allocation strategy for a [`Task`].
-pub enum TaskStack {
-    None,
-    At(libcommon::Address<libcommon::Virtual>),
-}
-
-pub enum TaskStart {
+pub enum EntryPoint {
     Address(libcommon::Address<libcommon::Virtual>),
     Function(fn() -> !),
 }
@@ -51,7 +22,8 @@ pub fn queue_task(new_task: Task) {
 /// Representation object for different contexts of execution in the CPU.
 pub struct Task {
     id: u64,
-    prio: TaskPriority,
+    prio: u8,
+    stack: Stack,
     //pcid: Option<PCID>,
     pub ctrl_flow_context: crate::cpu::ControlContext,
     pub arch_context: crate::cpu::ArchContext,
@@ -60,24 +32,23 @@ pub struct Task {
 
 impl Task {
     pub fn new(
-        priority: TaskPriority,
-        start: TaskStart,
-        stack: TaskStack,
+        priority: u8,
+        start: EntryPoint,
+        stack: Stack,
         arch_context: crate::cpu::ArchContext,
         root_page_table_args: crate::memory::VmemRegister,
     ) -> Self {
         Self {
             id: NEXT_THREAD_ID.fetch_add(1, core::sync::atomic::Ordering::AcqRel),
             prio: priority,
+            stack,
             ctrl_flow_context: crate::cpu::ControlContext {
                 ip: match start {
-                    TaskStart::Address(address) => address.as_u64(),
-                    TaskStart::Function(function) => function as usize as u64,
+                    EntryPoint::Address(address) => address.as_u64(),
+                    EntryPoint::Function(function) => function as usize as u64,
                 },
-                sp: match stack {
-                    TaskStack::None => 0x0,
-                    TaskStack::At(address) => address.as_u64(),
-                },
+                // ### Safety:
+                sp: stack.last().map(|v| v as *const u8).unwrap_or(core::ptr::null()),
             },
             arch_context,
             root_page_table_args,
@@ -90,7 +61,7 @@ impl Task {
     }
 
     /// Returns the [`TaskPriority`] struct for this task.
-    pub fn priority(&self) -> TaskPriority {
+    pub fn priority(&self) -> u8 {
         self.prio
     }
 }

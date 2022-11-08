@@ -45,7 +45,7 @@ impl Mapper {
         const VALID_DEPTHS: core::ops::RangeInclusive<usize> = 3..=5;
 
         if VALID_DEPTHS.contains(&depth)
-            && let Ok(root_frame) = KERNEL_ALLOCATOR.lock_next()
+            && let Ok(root_frame) = KERNEL_ALLOCATOR.next_frame()
             && let Some(root_mapped_address) = Address::<Virtual>::new(phys_mapped_address.as_u64() + root_frame.as_u64())
         {
             match vmem_register_copy {
@@ -104,7 +104,7 @@ impl Mapper {
         let result = self.with_root_table_mut(|mut root_table| {
             let Some(page_align) = page.align() else { return Err(MapperError::UnalignedPageAddress) };
             // If the acquisition of the frame fails, return the error.
-            if lock_frames && KERNEL_ALLOCATOR.lock_many(frame, page_align.as_usize() / 0x1000).is_err() {
+            if lock_frames && KERNEL_ALLOCATOR.lock_frames(frame, page_align.as_usize() / 0x1000).is_err() {
                 return Err(MapperError::AllocError);
             }
 
@@ -158,7 +158,7 @@ impl Mapper {
                     unsafe { entry.set_frame(Address::<Frame>::zero()) };
 
                     if free_frame {
-                        KERNEL_ALLOCATOR.free(frame).unwrap();
+                        KERNEL_ALLOCATOR.free_frame(frame).unwrap();
                     }
 
                     // Invalidate the page in the TLB.
@@ -170,7 +170,7 @@ impl Mapper {
     }
 
     pub fn auto_map(&self, page: Address<Page>, attributes: PageAttributes) -> Result<(), MapperError> {
-        match KERNEL_ALLOCATOR.lock_next() {
+        match KERNEL_ALLOCATOR.next_frame() {
             Ok(frame) => self.map(page, frame, false, attributes),
             Err(_) => Err(MapperError::AllocError),
         }
