@@ -7,6 +7,7 @@ pub mod slob;
 pub use mapper::*;
 pub use paging::*;
 
+use core::{num::NonZeroUsize, ptr::NonNull};
 use libcommon::{Address, Frame, Virtual};
 use spin::Once;
 
@@ -106,6 +107,13 @@ pub fn is_5_level_paged() -> bool {
             && crate::arch::x64::registers::control::CR4::read()
                 .contains(crate::arch::x64::registers::control::CR4Flags::LA57)
     }
+}
+
+#[repr(align(0x10))]
+pub struct Stack<const SIZE: NonZeroUsize>([u8; SIZE.get()]);
+
+pub fn allocate_kernel_stack<const SIZE: NonZeroUsize>(pages: usize) -> lzalloc::AllocResult<Stack<SIZE>> {
+    lzalloc::allocate_slice(unsafe { NonZeroUsize::new_unchecked(pages * 0x1000) }, 0u8)
 }
 
 pub static KERNEL_ALLOCATOR: spin::Lazy<slab::SlabAllocator> = spin::Lazy::new(|| {
