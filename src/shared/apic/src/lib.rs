@@ -304,8 +304,8 @@ impl Apic {
     ///     - The spurious register is configured with the `SPURIOUS_VECTOR` (255).
     ///
     /// ### Safety
-/// 
-/// The caller must guarantee that software is in a state that is ready to accept
+    ///
+    /// The caller must guarantee that software is in a state that is ready to accept
     ///         the APIC performing a software reset.
     pub unsafe fn software_reset(&self, spr_vector: u8, lint0_vector: u8, lint1_vector: u8) {
         self.sw_disable();

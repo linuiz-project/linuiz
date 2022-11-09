@@ -1,4 +1,5 @@
 use bit_field::BitField;
+use bitvec::slice::BitSlice;
 use core::{
     alloc::{AllocError, Layout},
     mem::size_of,
@@ -9,122 +10,31 @@ use libcommon::{align_up_div, Address, Page};
 use spin::Mutex;
 
 const BLOCK_SIZE: usize = 64;
-const SUPER_BLOCK_BITS: usize = 0x1000 / BLOCK_SIZE;
-const SUPER_BLOCK_BYTES: usize = SUPER_BLOCK_BITS / u8::BITS;
-
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct SuperBlockIndex(usize);
-
-impl SuperBlockIndex {
-    #[inline]
-    pub const fn new(index: usize) -> Option<Self> {
-        if index < SUPER_BLOCK_BITS {
-            Some(index)
-        } else {
-            None
-        }
-    }
-
-    #[inline]
-    pub const fn get(self) -> usize {
-        self.0
-    }
-
-    #[inline]
-    const fn get_byte_index(self) -> usize {
-        self.get() / SUPER_BLOCK_BYTES
-    }
-
-    #[inline]
-    const fn get_bit_index(self) -> usize {
-        self.get() % u8::BITS
-    }
-}
-
-/// Represents one page worth of memory blocks (i.e. 4096 bytes in blocks).
-#[repr(transparent)]
-#[derive(PartialEq, Eq, Clone)]
-struct SuperBlock(bitvec::array::);
-
-impl SuperBlock {
-    const BLOCKS_PER: usize = size_of::<Self>() * (u8::BITS as usize);
-
-    pub const FULL: Self = Self([u8::MAX; SUPER_BLOCK_BYTES]);
-    pub const EMPTY: Self = Self([u8::MIN; SUPER_BLOCK_BYTES]);
-
-    /// Whether the block page is empty.
-    #[inline]
-    pub const fn is_empty(&self) -> bool {
-        self.0 == Self::EMPTY
-    }
-
-    /// Whether the block page is full.
-    #[inline]
-    pub const fn is_full(&self) -> bool {
-        self.0 == Self::FULL
-    }
-
-    /// Unset all of the block page's blocks.
-    #[inline]
-    pub const fn set_empty(&mut self) {
-        *self = Self::EMPTY;
-    }
-
-    /// Set all of the block page's blocks.
-    #[inline]
-    pub const fn set_full(&mut self) {
-        *self = Self::FULL;
-    }
-
-    #[inline]
-    pub const fn get_block(&self, index: SuperBlockIndex) -> bool {
-        self.0[index.get_byte_index()].get_bit(index.get_bit_index())
-    }
-
-    #[inline]
-    pub fn set_block(&mut self, index: SuperBlockIndex, value: bool) {
-        self.0[index.get_byte_index()].set_bit(index.get_bit_index(), value);
-    }
-
-    pub fn get_blocks(&self, range: core::ops::Range<SuperBlockIndex>) -> impl Iterator<Item = bool> {
-        let range = range.start.get()..range.end.get();
-        self.0.iter().flat_map(|byte| for _ in 0..u8::BITS {
-            
-        }).enumerate().filter_map(|(index, byte)| {})
-    }
-}
-
-impl core::fmt::Debug for SuperBlock {
-    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter.debug_tuple("Block").field(&format_args!("0b{:b}", self.0)).finish()
-    }
-}
+const BLOCKS_PER_PAGE: usize = 0x1000 / BLOCK_SIZE;
+const PAGES_PER_TABLE_PAGE: usize = 0x1000 / BLOCKS_PER_PAGE;
 
 /// Allocator utilizing blocks of memory, in size of 64 bytes per block, to
 /// easily and efficiently allocate.
 pub struct Slob<'a> {
-    table: Mutex<&'a mut [SuperBlock]>,
+    table: Mutex<&'a mut BitSlice>,
     base_address: Address<Page>,
     map_page_fn: fn(Address<Page>) -> Result<(), ()>,
 }
 
 impl<'a> Slob<'a> {
     pub unsafe fn new(base_address: Address<Page>, map_page_fn: fn(Address<Page>) -> Result<(), ()>) -> Option<Self> {
-        const INITIAL_TABLE_LEN: usize = 0x1000 / size_of::<SuperBlock>();
-
         // Map all of the pages in the allocation table.
-        for page_offset in 0..INITIAL_TABLE_LEN {
+        for page_offset in 0..PAGES_PER_TABLE_PAGE {
             map_page_fn(base_address.forward_checked(page_offset).ok()?).ok()?;
         }
 
-        let alloc_table = core::slice::from_raw_parts_mut(
+        let alloc_table = BitSlice::from_slice_mut(core::slice::from_raw_parts_mut(
             // Ensure when we map, we utilize the allocator's base table address.
-            base_address.address().as_mut_ptr::<SuperBlock>(),
-            INITIAL_TABLE_LEN,
-        );
+            base_address.address().as_mut_ptr::<usize>(),
+            0x1000 / size_of::<usize>(),
+        ));
         // Fill the allocator table's page.
-        alloc_table[0].set_full();
+        alloc_table.iter_mut().take(BLOCKS_PER_PAGE).for_each(|bit| bit.set(true));
 
         Some(Self { table: Mutex::new(alloc_table), base_address, map_page_fn })
     }
@@ -146,44 +56,32 @@ impl<'a> Slob<'a> {
 
     fn grow(
         required_blocks: NonZeroUsize,
-        table: &mut [SuperBlock],
+        table: &mut BitSlice,
         base_address: Address<Page>,
         map_page_fn: impl FnMut(Address<Page>) -> Result<(), ()>,
     ) -> Result<(), AllocError> {
-        // Current length of our map, in indexes.
-        let current_table_len = table.len();
-        // Required length of our map, in indexes.
-        let required_table_len =
-            (table.len() + libcommon::align_up_div(required_blocks.get(), SuperBlock::BLOCKS_PER)).next_power_of_two();
+        let current_block_count = table.len();
+        let required_block_count = match table.len() + required_blocks.get() {
+            value if value.is_power_of_two() => value,
+            value => value.next_power_of_two(),
+        };
+
+        let cur_table_page_count = current_block_count / BLOCKS_PER_PAGE;
+        let req_table_page_count = required_block_count / BLOCKS_PER_PAGE;
+
         if (required_table_len * 0x1000) >= 0x400000000000 {
             return Err(AllocError);
         }
 
-        // Current page count of our map (i.e. how many pages the slice requires)
-        let cur_table_page_count = libcommon::align_up_div(current_table_len * size_of::<SuperBlock>(), 0x1000);
-        // Required page count of our map.
-        let required_run = libcommon::align_up_div(required_table_len * size_of::<SuperBlock>(), 0x1000);
-
-        // Attempt to find a run of already-mapped pages within our allocator that can contain
-        // the required slice length.
-        let mut current_run = 0;
-        let mut table_iter = table.iter().enumerate();
-        let start_index = loop {
-            let (index, block) = table_iter.next()?;
-
-            if block.is_empty() {
-                current_run += 1;
-
-                if current_run == required_run {
-                    break Some(index - (current_run - 1));
-                }
-            } else {
-                current_run = 0;
-            }
+        let required_run = required_block_count / BLOCK_SIZE;
+        let new_table_memory = if required_run > current_block_count {
+            None
+        } else {
+            table.windows(required_run).find(|window| window.not_any())
         };
 
         // Map the new table extents. Each table index beyond `cur_table_len` is a new page.
-        for page_offset in current_table_len..required_table_len {
+        for page_offset in cur_table_page_count..req_table_page_count {
             let new_page = base_address.forward_checked(page_offset).ok_or(AllocError)?;
             map_page_fn(new_page).map_err(AllocError)?;
             // Clear the newly allocated table page.

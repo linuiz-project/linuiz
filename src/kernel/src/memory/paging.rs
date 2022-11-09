@@ -204,7 +204,7 @@ impl<'a, RefKind: InteriorRef> PageTable<'a, RefKind> {
     pub fn get_table(&self) -> &[PageTableEntry] {
         // ### Safety: This type's constructor requires that the physical mapped page and depth are valid values.
         let root_mapped_ptr =
-            unsafe { self.hhdm_address.as_ptr::<u8>().add(self.get_frame().as_u64() as usize).cast() };
+            unsafe { self.hhdm_address.as_ptr::<PageTableEntry>().with_addr(self.get_frame().as_usize()) };
         // ### Safety: The layout of the page table pointer is known via Intel SDM.
         unsafe { core::slice::from_raw_parts(root_mapped_ptr, 512) }
     }

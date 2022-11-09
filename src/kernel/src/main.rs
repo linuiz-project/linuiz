@@ -22,7 +22,8 @@
     exact_size_is_empty,
     fn_align,
     ptr_as_uninit,
-    const_trait_impl
+    const_trait_impl,
+    nonzero_min_max
 )]
 #![forbid(clippy::inline_asm_x86_att_syntax)]
 #![deny(clippy::semicolon_if_nothing_returned, clippy::debug_assert_with_mut_call, clippy::float_arithmetic)]
@@ -302,8 +303,9 @@ unsafe extern "C" fn _entry() -> ! {
         debug!("Kernel has finalized control of page tables.");
     }
 
-    debug!("Loading kernel modules...");
-    crate::modules::load_modules();
+    // TODO
+    // debug!("Loading kernel modules...");
+    // crate::modules::load_modules();
 
     debug!("Initializing ACPI interface...");
     crate::acpi::init_interface();

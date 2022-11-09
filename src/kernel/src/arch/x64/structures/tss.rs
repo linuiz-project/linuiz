@@ -36,7 +36,7 @@ pub unsafe fn load_local(descriptor: gdt::Descriptor) {
         let mut temp_gdt = gdt::GlobalDescriptorTable::new();
         temp_gdt.add_entry(gdt::Descriptor::kernel_code_segment());
         temp_gdt.add_entry(gdt::Descriptor::kernel_data_segment());
-        let tss_selector = temp_gdt.add_entry(tss_descriptor);
+        let tss_selector = temp_gdt.add_entry(descriptor);
 
         // Load temp GDT ...
         temp_gdt.load_unsafe();

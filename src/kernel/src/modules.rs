@@ -1,4 +1,4 @@
-use libcommon::{Address, Frame, Page, Virtual};
+use libcommon::{Address, Page};
 
 pub fn load_modules() {
     let drivers_data = crate::boot::get_kernel_modules()
@@ -123,60 +123,61 @@ pub fn load_modules() {
 
             // Push ELF as global task.
             {
-                let stack_address = {
-                    const TASK_STACK_BASE_ADDRESS: Address<Page> = Address::<Page>::new_truncate(
-                        Address::<Virtual>::new_truncate(128 << 39),
-                        Some(PageAlign::Align2MiB),
-                    );
-                    // TODO make this a dynamic configuration
-                    const TASK_STACK_PAGE_COUNT: usize = 2;
+                // let stack_address = {
+                //     const TASK_STACK_BASE_ADDRESS: Address<Page> = Address::<Page>::new_truncate(
+                //         Address::<Virtual>::new_truncate(128 << 39),
+                //         Some(PageAlign::Align2MiB),
+                //     );
+                //     // TODO make this a dynamic configuration
+                //     const TASK_STACK_PAGE_COUNT: usize = 2;
 
-                    for page in (0..TASK_STACK_PAGE_COUNT)
-                        .map(|offset| TASK_STACK_BASE_ADDRESS.forward_checked(offset).unwrap())
-                    {
-                        driver_page_manager
-                            .map(
-                                page,
-                                Address::<Frame>::zero(),
-                                false,
-                                PageAttributes::WRITABLE
-                                    | PageAttributes::NO_EXECUTE
-                                    | PageAttributes::DEMAND
-                                    | PageAttributes::USER
-                                    | PageAttributes::HUGE,
-                            )
-                            .unwrap();
-                    }
+                //     for page in (0..TASK_STACK_PAGE_COUNT)
+                //         .map(|offset| TASK_STACK_BASE_ADDRESS.forward_checked(offset).unwrap())
+                //     {
+                //         driver_page_manager
+                //             .map(
+                //                 page,
+                //                 Address::<Frame>::zero(),
+                //                 false,
+                //                 PageAttributes::WRITABLE
+                //                     | PageAttributes::NO_EXECUTE
+                //                     | PageAttributes::DEMAND
+                //                     | PageAttributes::USER
+                //                     | PageAttributes::HUGE,
+                //             )
+                //             .unwrap();
+                //     }
 
-                    TASK_STACK_BASE_ADDRESS.forward_checked(TASK_STACK_PAGE_COUNT).unwrap()
-                };
+                //     TASK_STACK_BASE_ADDRESS.forward_checked(TASK_STACK_PAGE_COUNT).unwrap()
+                // };
 
-                let task = crate::local_state::Task::new(
-                    crate::local_state::TaskPriority::new(crate::local_state::TaskPriority::MAX).unwrap(),
-                    // TODO account for memory base when passing entry offset
-                    crate::local_state::EntryPoint::Address(
-                        Address::<Virtual>::new(elf.get_entry_offset() as u64).unwrap(),
-                    ),
-                    crate::local_state::TaskStack::At(stack_address.address()),
-                    {
-                        #[cfg(target_arch = "x86_64")]
-                        {
-                            (
-                                crate::arch::x64::registers::GeneralRegisters::empty(),
-                                crate::arch::x64::registers::SpecialRegisters::flags_with_user_segments(
-                                    crate::arch::x64::registers::RFlags::INTERRUPT_FLAG,
-                                ),
-                            )
-                        }
-                    },
-                    #[cfg(target_arch = "x86_64")]
-                    {
-                        // TODO do not error here ?
-                        driver_page_manager.read_vmem_register().unwrap()
-                    },
-                );
+                // TODO
+                // let task = crate::local_state::Task::new(
+                //     u8::MIN,
+                //     // TODO account for memory base when passing entry offset
+                //     crate::local_state::EntryPoint::Address(
+                //         Address::<Virtual>::new(elf.get_entry_offset() as u64).unwrap(),
+                //     ),
+                //     stack_address.address(),
+                //     {
+                //         #[cfg(target_arch = "x86_64")]
+                //         {
+                //             (
+                //                 crate::arch::x64::registers::GeneralRegisters::empty(),
+                //                 crate::arch::x64::registers::SpecialRegisters::flags_with_user_segments(
+                //                     crate::arch::x64::registers::RFlags::INTERRUPT_FLAG,
+                //                 ),
+                //             )
+                //         }
+                //     },
+                //     #[cfg(target_arch = "x86_64")]
+                //     {
+                //         // TODO do not error here ?
+                //         driver_page_manager.read_vmem_register().unwrap()
+                //     },
+                // );
 
-                crate::local_state::queue_task(task);
+                // crate::local_state::queue_task(task);
             }
         }
     }

@@ -3,11 +3,9 @@ mod paging;
 
 pub mod io;
 pub mod slab;
-pub mod slob;
 pub use mapper::*;
 pub use paging::*;
 
-use core::{num::NonZeroUsize, ptr::NonNull};
 use libcommon::{Address, Frame, Virtual};
 use spin::Once;
 
@@ -109,46 +107,33 @@ pub fn is_5_level_paged() -> bool {
     }
 }
 
-#[repr(align(0x10))]
-pub struct Stack<const SIZE: NonZeroUsize>([u8; SIZE.get()]);
-
-pub fn allocate_kernel_stack<const SIZE: NonZeroUsize>(pages: usize) -> lzalloc::AllocResult<Stack<SIZE>> {
-    lzalloc::allocate_slice(unsafe { NonZeroUsize::new_unchecked(pages * 0x1000) }, 0u8)
-}
-
 pub static KERNEL_ALLOCATOR: spin::Lazy<slab::SlabAllocator> = spin::Lazy::new(|| {
-    let memory_map =
-        crate::boot::get_memory_map().expect("kernel allocator requires boot loader memory map for initialization");
-
+    // ### Safety: Bootloader guarantees the memory map & higher-half direct map address will be valid so long as a response is provided.
     unsafe {
-        slab::SlabAllocator::from_memory_map(memory_map, crate::memory::get_hhdm_address())
-            .unwrap_or_else(|| todo!("fall back to a simpler allocator"))
+        slab::SlabAllocator::from_memory_map(
+            crate::boot::get_memory_map()
+                .unwrap_or_else(|| todo!("fall back to some kind of reserved-space allocator")),
+            crate::memory::get_hhdm_address(),
+        )
+        .unwrap_or_else(|| todo!("fall back to a simpler allocator"))
     }
 });
 
 mod lzg_impls {
-    use core::{
-        alloc::{AllocError, Allocator, Layout},
-        ptr::NonNull,
-    };
+    use core::alloc::Allocator;
 
-    /// Implicitly linked function for the `lzalloc` global allocator.
-    /// Do not call in software.
-    #[no_mangle]
-    fn __lzg_allocate(layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        super::KERNEL_ALLOCATOR.allocate(layout)
-    }
-
-    /// Implicitly linked function for the `lzalloc` global allocator.
-    /// Do not call in software.
-    #[no_mangle]
-    unsafe fn __lzg_deallocate(ptr: NonNull<u8>, layout: Layout) {
+    lzalloc::lzg_allocate!(|layout| { super::KERNEL_ALLOCATOR.allocate(layout) });
+    lzalloc::lzg_deallocate!(|ptr, layout| {
         super::KERNEL_ALLOCATOR.deallocate(ptr, layout);
-    }
+    });
 }
-
-pub type Stack = lzalloc::boxed::Box<[u8], lzalloc::AlignedAllocator<0x10>>;
 
 pub unsafe fn out_of_memory() -> ! {
     panic!("Kernel ran out of memory during initialization.")
+}
+
+pub type Stack = lzalloc::boxed::Box<[core::mem::MaybeUninit<u8>], lzalloc::AlignedAllocator<0x10>>;
+
+pub fn allocate_kernel_stack<const SIZE: usize>() -> lzalloc::AllocResult<Stack> {
+    lzalloc::boxed::Box::<_, _>::new_uninit_slice_in(SIZE, lzalloc::AlignedAllocator)
 }

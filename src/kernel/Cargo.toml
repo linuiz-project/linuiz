@@ -16,6 +16,7 @@ path = "../shared/libcommon/"
 features = ["global_allocator"]
 [dependencies.lzalloc]
 git = "https://github.com/linuiz-project/lzalloc"
+features = ["logging"]
 [dependencies.spin]
 git = "https://github.com/semiviral/spin-rs"
 [dependencies.limine]

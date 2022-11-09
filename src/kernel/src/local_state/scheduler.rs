@@ -9,12 +9,13 @@ pub enum EntryPoint {
     Function(fn() -> !),
 }
 
-static WAITING_TASKS: spin::Mutex<Deque<Task>> = spin::Mutex::new(Deque::new());
+// static WAITING_TASKS: spin::Mutex<Deque<Task>> = spin::Mutex::new(Deque::new());
 
-pub fn queue_task(new_task: Task) {
+pub fn queue_task(_new_task: Task) {
     crate::interrupts::without(|| {
-        let mut waiting_tasks = WAITING_TASKS.lock();
-        waiting_tasks.push_back(new_task).unwrap();
+        // TODO
+        // let mut waiting_tasks = WAITING_TASKS.lock();
+        // waiting_tasks.push_back(new_task).unwrap();
     })
 }
 
@@ -38,6 +39,8 @@ impl Task {
         arch_context: crate::cpu::ArchContext,
         root_page_table_args: crate::memory::VmemRegister,
     ) -> Self {
+        let sp = stack.as_ptr().with_addr(stack.len() & !0xF).addr() as u64;
+
         Self {
             id: NEXT_THREAD_ID.fetch_add(1, core::sync::atomic::Ordering::AcqRel),
             prio: priority,
@@ -47,8 +50,7 @@ impl Task {
                     EntryPoint::Address(address) => address.as_u64(),
                     EntryPoint::Function(function) => function as usize as u64,
                 },
-                // ### Safety:
-                sp: stack.last().map(|v| v as *const u8).unwrap_or(core::ptr::null()),
+                sp,
             },
             arch_context,
             root_page_table_args,
@@ -107,7 +109,7 @@ impl Scheduler {
 
     /// Pushes a new task to the scheduling queue.
     pub fn push_task(&mut self, task: Task) {
-        self.total_priority += task.priority().get() as u64;
+        self.total_priority += task.priority() as u64;
         self.tasks.push_back(task).unwrap();
     }
 
@@ -116,7 +118,7 @@ impl Scheduler {
     pub fn pop_task(&mut self) -> Option<Task> {
         if self.enabled {
             self.tasks.pop_front().map(|task| {
-                self.total_priority -= task.priority().get() as u64;
+                self.total_priority -= task.priority() as u64;
                 task
             })
         } else {
@@ -154,12 +156,12 @@ impl Scheduler {
             self.push_task(cur_task);
         }
 
-        {
-            let mut waiting_tasks = WAITING_TASKS.lock();
-            if waiting_tasks.len() > 0 && let Some(new_task) = waiting_tasks.pop_front() {
-                self.push_task(new_task);
-            }
-        }
+        // {
+        //     let mut waiting_tasks = WAITING_TASKS.lock();
+        //     if waiting_tasks.len() > 0 && let Some(new_task) = waiting_tasks.pop_front() {
+        //         self.push_task(new_task);
+        //     }
+        // }
 
         unsafe {
             let next_wait_multiplier = if let Some(next_task) = self.pop_task() {
@@ -170,7 +172,7 @@ impl Scheduler {
                 // Set current page tables.
                 VmemRegister::write(&next_task.root_page_table_args);
 
-                let next_timer_ms = (next_task.priority().get() as u16) * PRIO_TIME_SLICE_MULTIPLIER;
+                let next_timer_ms = (next_task.priority() as u16) * PRIO_TIME_SLICE_MULTIPLIER;
                 self.cur_task = Some(next_task);
 
                 next_timer_ms

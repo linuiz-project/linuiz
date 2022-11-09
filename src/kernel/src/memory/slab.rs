@@ -2,7 +2,7 @@ use bit_field::BitField;
 use core::{
     alloc::AllocError,
     num::NonZeroUsize,
-    ptr::NonNull,
+    ptr::{slice_from_raw_parts_mut, NonNull},
     sync::atomic::{AtomicU8, Ordering},
 };
 use libcommon::{Address, Frame, Virtual};
@@ -101,11 +101,17 @@ impl FrameData {
     }
 }
 
+const MIN_SLAB_SIZE_SHIFT: usize = 6;
+const MIN_SLAB_SIZE: usize = 1 << MIN_SLAB_SIZE_SHIFT;
+
+const SLAB_GROUPS: usize = 4;
+const SLAB_INDEXES: usize = 0x1000 / MIN_SLAB_SIZE;
+
+const MAX_SLAB_SIZE_SHIFT: usize = (SLAB_GROUPS - 1) + MIN_SLAB_SIZE_SHIFT;
+const MAX_SLAB_SIZE: usize = 1 << MAX_SLAB_SIZE_SHIFT;
+
 pub struct SlabAllocator<'a> {
-    slabs64: Mutex<Vec<(*mut u8, u64), AlignedAllocator<0x1000>>>,
-    slabs128: Mutex<Vec<(*mut u8, u32), AlignedAllocator<0x1000>>>,
-    slabs256: Mutex<Vec<(*mut u8, u16), AlignedAllocator<0x1000>>>,
-    slabs512: Mutex<Vec<(*mut u8, u8), AlignedAllocator<0x1000>>>,
+    slabs: [Mutex<Vec<(NonNull<[u8]>, bitvec::BitArr!(for SLAB_INDEXES)), AlignedAllocator<0x1000>>>; SLAB_GROUPS],
     phys_mapped_address: Address<Virtual>,
     table: &'a [FrameData],
 }
@@ -189,10 +195,7 @@ impl SlabAllocator<'_> {
             });
 
         Some(Self {
-            slabs64: Mutex::new(Vec::new_in(AlignedAllocator::<0x1000>)),
-            slabs128: Mutex::new(Vec::new_in(AlignedAllocator::<0x1000>)),
-            slabs256: Mutex::new(Vec::new_in(AlignedAllocator::<0x1000>)),
-            slabs512: Mutex::new(Vec::new_in(AlignedAllocator::<0x1000>)),
+            slabs: [const { Mutex::new(Vec::new_in(AlignedAllocator)) }; SLAB_GROUPS],
             phys_mapped_address,
             table,
         })
@@ -227,7 +230,7 @@ impl SlabAllocator<'_> {
                         None
                     }
                 })
-                .and_then(Address::<FrameData>::from_u64)
+                .and_then(Address::<Frame>::from_u64)
                 .ok_or(AllocError)
         })
     }
@@ -257,7 +260,7 @@ impl SlabAllocator<'_> {
                     Some((index, _)) => {
                         pages.iter().for_each(FrameData::unpeek);
                         let aligned_index = ((index + 1) + (alignment - 1)) / alignment;
-                        sub_table = &sub_table[aligned_index..]
+                        sub_table = &sub_table[aligned_index..];
                     }
 
                     None => {
@@ -266,7 +269,7 @@ impl SlabAllocator<'_> {
 
                         // Use wrapping arithmetic here to make any errors in computation painfully obvious due
                         // to extremely unpredictable results.
-                        break Ok(self.table.len().wrapping_sub(sub_table.len()).wrapping_mul(0x1000) as u64);
+                        break Some(self.table.len().wrapping_sub(sub_table.len()).wrapping_mul(0x1000) as u64);
                     }
                 }
             })
@@ -342,109 +345,80 @@ impl SlabAllocator<'_> {
     }
 }
 
-macro_rules! slab_allocate {
-    ($self:expr, $slabs_name:ident, $slab_size:expr) => {
-        {
-            let mut slabs = $self.$slabs_name.lock();
-            let allocation_ptr =
-                match slabs.iter_mut().find(|(_, allocations)| allocations.trailing_zeros() > 0) {
-                    Some((memory_ptr, allocations)) => {
-                        let allocation_bit = (allocations.trailing_zeros() - 1) as usize;
-                        allocations.set_bit(allocation_bit, true);
-
-                        // ### Safety: Arbitrary `u8` memory region is valid for the offsets within its bounds.
-                        unsafe { memory_ptr.add(allocation_bit * $slab_size) }
-                    }
-
-                    None if let Ok(frame_data) = $self.lock_next() => {
-                        // ### Safety: `phys_mapped_address` is required to be valid for arbitrary offsets from within its range.
-                        let memory_ptr = unsafe { $self.phys_mapped_address.as_mut_ptr::<u8>().add(frame_data.as_usize()) };
-                        // TODO: do not unwrap here
-                        slabs.push((memory_ptr, 1 << ((0x1000 / $slab_size) - 1))).ok();
-
-                        memory_ptr
-                    }
-
-                    None => unimplemented!()
-                };
-
-            Ok(core::ptr::slice_from_raw_parts_mut(allocation_ptr, $slab_size))
-        }
-    };
-}
-
-macro_rules! slab_deallocate {
-    ($self:expr, $slabs_name:ident, $slab_size:expr, $ptr:expr) => {
-        let ptr_addr = $ptr.addr().get();
-        let mut slabs = $self.$slabs_name.lock();
-
-        for (memory_ptr, allocations) in slabs.iter_mut() {
-            let memory_range = memory_ptr.addr()..(memory_ptr.addr() + 4096);
-            if memory_range.contains(&ptr_addr) {
-                let allocation_offset = ptr_addr - memory_range.start;
-                let allocation_bit = allocation_offset / $slab_size;
-                allocations.set_bit(allocation_bit, false);
-            }
-        }
-    };
-}
-
 // ### Safety: `SlabAllocator` promises to do everything right.
 unsafe impl<'a> core::alloc::Allocator for SlabAllocator<'a> {
     fn allocate(&self, layout: core::alloc::Layout) -> AllocResult<NonNull<[u8]>> {
-        let allocation_ptr;
-        if layout.align() <= 64 && layout.size() <= 64 {
-            allocation_ptr = slab_allocate!(self, slabs64, 64)?;
-        } else if layout.align() <= 128 && layout.size() <= 128 {
-            allocation_ptr = slab_allocate!(self, slabs128, 128)?;
-        } else if layout.align() <= 256 && layout.size() <= 246 {
-            allocation_ptr = slab_allocate!(self, slabs256, 256)?;
-        } else if layout.align() <= 512 && layout.size() <= 512 {
-            allocation_ptr = slab_allocate!(self, slabs512, 512)?;
-        } else if layout.align() <= 4096 && layout.size() <= 4096 {
+        debug_assert!(!crate::interrupts::are_enabled());
+
+        if layout.size() <= MAX_SLAB_SIZE && layout.align() <= MAX_SLAB_SIZE {
+            let slab_size = match core::cmp::max(layout.size(), layout.align()) {
+                value if value.is_power_of_two() => value,
+                value => value.next_power_of_two(),
+            };
+            let slab_index = (core::cmp::max(slab_size, MIN_SLAB_SIZE).trailing_zeros() as usize) - MIN_SLAB_SIZE_SHIFT;
+
+            let mut slabs = self.slabs.get(slab_index).ok_or(AllocError)?.lock();
+            match slabs.iter_mut().find(|(_, bits)| bits.not_all()) {
+                Some((memory_ptr, bits)) => {
+                    // ### Safety: BitArray is known to contain zeroes.
+                    let index = unsafe { bits.first_zero().unwrap_unchecked() };
+                    bits.set(index, true);
+                    Ok(unsafe {
+                        NonNull::new_unchecked(slice_from_raw_parts_mut(
+                            memory_ptr.as_non_null_ptr().as_ptr().add(index * slab_size),
+                            slab_size,
+                        ))
+                    })
+                }
+
+                None => {
+                    let new_frame_data =
+                        self.next_frames(unsafe { NonZeroUsize::new_unchecked(1 << slab_index) }, NonZeroUsize::MIN)?;
+                    // ### Safety: `phys_mapped_address` is required to be valid for arbitrary offsets from within its range.
+                    let memory_ptr = unsafe {
+                        NonNull::new_unchecked(slice_from_raw_parts_mut(
+                            self.phys_mapped_address.as_mut_ptr::<u8>().with_addr(new_frame_data.as_usize()),
+                            slab_size * SLAB_INDEXES,
+                        ))
+                    };
+                    let mut bit_array = bitvec::bitarr![0; SLAB_INDEXES];
+                    bit_array.set(0, true);
+                    slabs.push((memory_ptr, bit_array)).map_err(|_| AllocError)?;
+
+                    Ok(memory_ptr)
+                }
+            }
+        } else if layout.size() <= 0x1000 && layout.align() <= 0x1000 {
             // ... frame-sized allocation ...
 
-            allocation_ptr = self.next_frame().map(|address| {
-                core::ptr::slice_from_raw_parts_mut(
+            self.next_frame().map(|address| unsafe {
+                NonNull::new_unchecked(core::ptr::slice_from_raw_parts_mut(
                     // ### Safety: Physical mapping address is valid for its memory region.
-                    unsafe { self.phys_mapped_address.as_ptr().add(address.as_usize()) },
+                    self.phys_mapped_address.as_mut_ptr::<u8>().add(address.as_usize()),
                     0x1000,
-                )
-            })?;
+                ))
+            })
         } else {
             // ... many frames-sized allocation ...
 
             let frame_count = (layout.size() + 0xFFF) / 0x1000;
-            allocation_ptr = self
-                .next_frames(
-                    // ### Safety: Valid `Layout`s do not allow `.size()` to be 0.
-                    unsafe { NonZeroUsize::new_unchecked(frame_count) },
-                    // ### Safety: Valid `Layout`s do not allow `.align()` to be 0.
-                    unsafe { NonZeroUsize::new_unchecked(layout.align()) },
-                )
-                .map(|address| {
-                    core::ptr::slice_from_raw_parts_mut(
-                        // ### Safety: Physical mapping address is valid for its memory region.
-                        unsafe { self.phys_mapped_address.as_ptr().add(address.as_usize()) },
-                        frame_count * 0x1000,
-                    )
-                })?;
-        };
-
-        NonNull::new(allocation_ptr).ok_or(AllocError)
+            self.next_frames(
+                // ### Safety: Valid `Layout`s do not allow `.size()` to be 0.
+                unsafe { NonZeroUsize::new_unchecked(frame_count) },
+                // ### Safety: Valid `Layout`s do not allow `.align()` to be 0.
+                unsafe { NonZeroUsize::new_unchecked(layout.align()) },
+            )
+            .map(|address| unsafe {
+                NonNull::new_unchecked(core::ptr::slice_from_raw_parts_mut(
+                    // ### Safety: Physical mapping address is valid for its memory region.
+                    self.phys_mapped_address.as_mut_ptr::<u8>().add(address.as_usize()),
+                    frame_count * 0x1000,
+                ))
+            })
+        }
     }
 
-    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: core::alloc::Layout) {
-        if layout.align() <= 64 && layout.size() <= 64 {
-            slab_deallocate!(self, slabs64, 64, ptr);
-        } else if layout.align() <= 128 && layout.size() <= 128 {
-            slab_deallocate!(self, slabs128, 128, ptr);
-        } else if layout.align() <= 256 && layout.size() <= 246 {
-            slab_deallocate!(self, slabs256, 256, ptr);
-        } else if layout.align() <= 512 && layout.size() <= 512 {
-            slab_deallocate!(self, slabs512, 512, ptr);
-        } else {
-            todo!("don't leak memory")
-        }
+    unsafe fn deallocate(&self, _ptr: NonNull<u8>, _layout: core::alloc::Layout) {
+        todo!("don't leak memory")
     }
 }
