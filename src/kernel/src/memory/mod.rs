@@ -2,6 +2,7 @@ mod mapper;
 mod paging;
 
 pub mod io;
+pub mod pmm;
 pub mod slab;
 pub use mapper::*;
 pub use paging::*;
