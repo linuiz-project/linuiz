@@ -39,7 +39,8 @@ impl Task {
         arch_context: crate::cpu::ArchContext,
         root_page_table_args: crate::memory::VmemRegister,
     ) -> Self {
-        let sp = stack.as_ptr().with_addr(stack.len() & !0xF).addr() as u64;
+        // ### Safety: Stack pointer is valid for its length.
+        let sp = unsafe { stack.as_ptr().add(stack.len() & !0xF).addr() } as u64;
 
         Self {
             id: NEXT_THREAD_ID.fetch_add(1, core::sync::atomic::Ordering::AcqRel),

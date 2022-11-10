@@ -377,7 +377,7 @@ unsafe impl<'a> core::alloc::Allocator for SlabAllocator<'a> {
                     // ### Safety: `phys_mapped_address` is required to be valid for arbitrary offsets from within its range.
                     let memory_ptr = unsafe {
                         NonNull::new_unchecked(slice_from_raw_parts_mut(
-                            self.phys_mapped_address.as_mut_ptr::<u8>().with_addr(new_frame_data.as_usize()),
+                            self.phys_mapped_address.as_mut_ptr::<u8>().add(new_frame_data.as_usize()),
                             slab_size * SLAB_INDEXES,
                         ))
                     };
