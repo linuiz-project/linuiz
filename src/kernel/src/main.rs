@@ -23,7 +23,8 @@
     fn_align,
     ptr_as_uninit,
     const_trait_impl,
-    nonzero_min_max
+    nonzero_min_max,
+    nonnull_slice_from_raw_parts
 )]
 #![forbid(clippy::inline_asm_x86_att_syntax)]
 #![deny(clippy::semicolon_if_nothing_returned, clippy::debug_assert_with_mut_call, clippy::float_arithmetic)]

@@ -1,5 +1,10 @@
 use bit_field::BitField;
-use core::{num::NonZeroUsize, sync::atomic::Ordering};
+use core::{
+    alloc::{AllocError, Layout},
+    num::NonZeroUsize,
+    ptr::NonNull,
+    sync::atomic::Ordering,
+};
 use libcommon::{Address, Frame};
 
 pub enum Error {
@@ -118,13 +123,16 @@ pub struct MemoryMapping {
     pub typ: FrameType,
 }
 
-pub struct PhysicalMemoryManager<'a>(&'a [FrameData]);
+pub struct PhysicalMemoryManager<'a> {
+    table: &'a [FrameData],
+    physical_memory: NonNull<u8>,
+}
 
 impl PhysicalMemoryManager<'_> {
     // ### Safety: Caller must guarantee the physical mapped address is valid.
     pub unsafe fn from_memory_map(
         memory_map: impl ExactSizeIterator<Item = MemoryMapping>,
-        physical_memory: core::ptr::NonNull<u8>,
+        physical_memory: NonNull<u8>,
     ) -> Option<Self> {
         let (memory_map, memory_map_len) = {
             let memory_map_len = memory_map.len();
@@ -178,17 +186,17 @@ impl PhysicalMemoryManager<'_> {
             frame_data.unpeek();
         });
 
-        Some(Self(table))
+        Some(Self { table, physical_memory })
     }
 
     #[inline]
     pub const fn total_memory(&self) -> usize {
-        self.0.len() * 0x1000
+        self.table.len() * 0x1000
     }
 
     #[inline]
     fn with_table<T>(&self, func: impl FnOnce(&[FrameData]) -> T) -> T {
-        crate::interrupts::without(|| func(self.0))
+        crate::interrupts::without(|| func(self.table))
     }
 
     pub fn next_frame(&self) -> Result<Address<Frame>> {
@@ -253,7 +261,7 @@ impl PhysicalMemoryManager<'_> {
 
                         // Use wrapping arithmetic here to make any errors in computation painfully obvious due
                         // to extremely unpredictable results.
-                        let start_index = self.0.len().wrapping_sub(sub_table.len());
+                        let start_index = self.table.len().wrapping_sub(sub_table.len());
                         let start_address = start_index.wrapping_mul(0x1000);
                         break Address::<Frame>::from_u64(start_address as u64).ok_or(Error::Unknown);
                     }
@@ -329,5 +337,36 @@ impl PhysicalMemoryManager<'_> {
                 }
             }
         })
+    }
+}
+
+unsafe impl core::alloc::Allocator for PhysicalMemoryManager<'_> {
+    fn allocate(&self, layout: core::alloc::Layout) -> core::result::Result<NonNull<[u8]>, AllocError> {
+        let layout = unsafe { layout.align_to(0x1000).map_err(|_| AllocError)?.pad_to_align() };
+        let physical_memory = self.physical_memory;
+        self.next_frames(
+            NonZeroUsize::new(layout.size() / 0x1000).unwrap(),
+            NonZeroUsize::new(layout.align() / 0x1000).unwrap_or(NonZeroUsize::MIN),
+        )
+        .ok()
+        .and_then(|address| {
+            physical_memory
+                .addr()
+                .checked_add(address.as_usize())
+                .map(|address| NonNull::slice_from_raw_parts(physical_memory.with_addr(address), layout.size()))
+        })
+        .ok_or(AllocError)
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: core::alloc::Layout) {
+        debug_assert!(ptr.as_ptr().is_aligned_to(0x1000));
+
+        let Ok(layout) = layout.align_to(0x1000).map(|layout| layout.pad_to_align())
+            else {
+                warn!("Attempted to deallocate with an invalid alignment or size.")
+                return;
+            };
+
+        self.free_frame(Address::<Frame>::from_u64(address))
     }
 }
