@@ -6,7 +6,7 @@ use core::{
     sync::atomic::{AtomicU8, Ordering},
 };
 use libcommon::{Address, Frame, Virtual};
-use lzalloc::{vec::Vec, AlignedAllocator, AllocResult};
+use lzalloc::{vec::Vec, AlignedAllocator, Result};
 use spin::Mutex;
 
 #[repr(u8)]
@@ -195,7 +195,7 @@ impl SlabAllocator<'_> {
             });
 
         Some(Self {
-            slabs: [const { Mutex::new(Vec::new_in(AlignedAllocator)) }; SLAB_GROUPS],
+            slabs: [const { Mutex::new(Vec::new_in(AlignedAllocator::new())) }; SLAB_GROUPS],
             phys_mapped_address,
             table,
         })
@@ -211,7 +211,7 @@ impl SlabAllocator<'_> {
         crate::interrupts::without(|| func(self.table))
     }
 
-    pub fn next_frame(&self) -> AllocResult<Address<Frame>> {
+    pub fn next_frame(&self) -> Result<Address<Frame>> {
         self.with_table(|table| {
             table
                 .iter()
@@ -235,7 +235,7 @@ impl SlabAllocator<'_> {
         })
     }
 
-    pub fn next_frames(&self, count: NonZeroUsize, alignment: NonZeroUsize) -> AllocResult<Address<Frame>> {
+    pub fn next_frames(&self, count: NonZeroUsize, alignment: NonZeroUsize) -> Result<Address<Frame>> {
         if !alignment.is_power_of_two() {
             return Err(AllocError);
         }
@@ -278,7 +278,7 @@ impl SlabAllocator<'_> {
         })
     }
 
-    pub fn lock_frame(&self, frame: Address<libcommon::Frame>) -> AllocResult<()> {
+    pub fn lock_frame(&self, frame: Address<libcommon::Frame>) -> Result<()> {
         self.with_table(|table| {
             let Some(frame_data) = table.get(frame.index()) else { return Err(AllocError) };
             frame_data.peek();
@@ -297,7 +297,7 @@ impl SlabAllocator<'_> {
         })
     }
 
-    pub fn lock_frames(&self, base: Address<libcommon::Frame>, count: usize) -> AllocResult<()> {
+    pub fn lock_frames(&self, base: Address<libcommon::Frame>, count: usize) -> Result<()> {
         self.with_table(|table| {
             let frames = &table[base.index()..(base.index() + count)];
             frames.iter().for_each(FrameData::peek);
@@ -315,7 +315,7 @@ impl SlabAllocator<'_> {
         })
     }
 
-    pub fn free_frame(&self, frame: Address<libcommon::Frame>) -> AllocResult<()> {
+    pub fn free_frame(&self, frame: Address<libcommon::Frame>) -> Result<()> {
         self.with_table(|table| {
             let Some(frame_data) = table.get(frame.index()) else { return Err(AllocError) };
 
@@ -339,7 +339,7 @@ impl SlabAllocator<'_> {
     }
 
     // TODO non-zero usize for the count
-    pub fn allocate_to(&self, frame: Address<libcommon::Frame>, count: usize) -> AllocResult<Address<Virtual>> {
+    pub fn allocate_to(&self, frame: Address<libcommon::Frame>, count: usize) -> Result<Address<Virtual>> {
         self.lock_frames(frame, count)
             .map(|_| Address::<Virtual>::new_truncate(self.phys_mapped_address.as_u64() + frame.as_u64()))
     }
@@ -347,14 +347,11 @@ impl SlabAllocator<'_> {
 
 // ### Safety: `SlabAllocator` promises to do everything right.
 unsafe impl<'a> core::alloc::Allocator for SlabAllocator<'a> {
-    fn allocate(&self, layout: core::alloc::Layout) -> AllocResult<NonNull<[u8]>> {
+    fn allocate(&self, layout: core::alloc::Layout) -> Result<NonNull<[u8]>> {
         debug_assert!(!crate::interrupts::are_enabled());
 
         if layout.size() <= MAX_SLAB_SIZE && layout.align() <= MAX_SLAB_SIZE {
-            let slab_size = match core::cmp::max(layout.size(), layout.align()) {
-                value if value.is_power_of_two() => value,
-                value => value.next_power_of_two(),
-            };
+            let slab_size = core::cmp::max(layout.size(), layout.align()).next_power_of_two();
             let slab_index = (core::cmp::max(slab_size, MIN_SLAB_SIZE).trailing_zeros() as usize) - MIN_SLAB_SIZE_SHIFT;
 
             let mut slabs = self.slabs.get(slab_index).ok_or(AllocError)?.lock();

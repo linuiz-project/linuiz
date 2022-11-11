@@ -135,6 +135,6 @@ pub unsafe fn out_of_memory() -> ! {
 
 pub type Stack = lzalloc::boxed::Box<[core::mem::MaybeUninit<u8>], lzalloc::AlignedAllocator<0x10>>;
 
-pub fn allocate_kernel_stack<const SIZE: usize>() -> lzalloc::AllocResult<Stack> {
-    lzalloc::boxed::Box::<_, _>::new_uninit_slice_in(SIZE, lzalloc::AlignedAllocator)
+pub fn allocate_kernel_stack<const SIZE: usize>() -> lzalloc::Result<Stack> {
+    lzalloc::boxed::Box::<_, _>::new_uninit_slice_in(SIZE, lzalloc::AlignedAllocator::new())
 }

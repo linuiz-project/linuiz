@@ -61,10 +61,7 @@ impl<'a> Slob<'a> {
         map_page_fn: impl FnMut(Address<Page>) -> Result<(), ()>,
     ) -> Result<(), AllocError> {
         let current_block_count = table.len();
-        let required_block_count = match table.len() + required_blocks.get() {
-            value if value.is_power_of_two() => value,
-            value => value.next_power_of_two(),
-        };
+        let required_block_count = (table.len() + required_blocks.get()).next_power_of_two();
 
         let cur_table_page_count = current_block_count / BLOCKS_PER_PAGE;
         let req_table_page_count = required_block_count / BLOCKS_PER_PAGE;
