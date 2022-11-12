@@ -1,8 +1,8 @@
 mod mapper;
 mod paging;
+mod pmm;
 
 pub mod io;
-pub mod pmm;
 pub mod slab;
 pub use mapper::*;
 pub use paging::*;
@@ -105,6 +105,51 @@ pub fn is_5_level_paged() -> bool {
         supports_5_level_paging()
             && crate::arch::x64::registers::control::CR4::read()
                 .contains(crate::arch::x64::registers::control::CR4Flags::LA57)
+    }
+}
+
+pub static PMM: spin::Lazy<core::cell::SyncUnsafeCell<pmm::PhysicalMemoryManager>> = spin::Lazy::new(|| unsafe {
+    let memory_map = crate::boot::get_memory_map().unwrap();
+    core::cell::SyncUnsafeCell::new(
+        pmm::PhysicalMemoryManager::from_memory_map(
+            memory_map.iter().map(|entry| pmm::MemoryMapping {
+                base: entry.base as usize,
+                len: entry.len as usize,
+                typ: {
+                    use limine::LimineMemoryMapEntryType;
+                    use pmm::FrameType;
+
+                    match entry.typ {
+                        LimineMemoryMapEntryType::Usable => FrameType::Generic,
+                        LimineMemoryMapEntryType::BootloaderReclaimable => FrameType::BootReclaim,
+                        LimineMemoryMapEntryType::AcpiReclaimable => FrameType::AcpiReclaim,
+                        LimineMemoryMapEntryType::KernelAndModules
+                        | LimineMemoryMapEntryType::Reserved
+                        | LimineMemoryMapEntryType::AcpiNvs
+                        | LimineMemoryMapEntryType::Framebuffer => FrameType::Reserved,
+                        LimineMemoryMapEntryType::BadMemory => FrameType::Unusable,
+                    }
+                },
+            }),
+            core::ptr::NonNull::new(get_hhdm_address().as_mut_ptr()).unwrap(),
+        )
+        .unwrap(),
+    )
+});
+
+pub struct PhysicalMemoryManager;
+
+impl core::ops::Deref for PhysicalMemoryManager {
+    type Target = pmm::PhysicalMemoryManager<'static>;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { PMM.get().as_ref().unwrap_unchecked() }
+    }
+}
+
+impl core::ops::DerefMut for PhysicalMemoryManager {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { PMM.get().as_mut().unwrap_unchecked() }
     }
 }
 

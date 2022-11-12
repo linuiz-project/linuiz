@@ -128,6 +128,11 @@ pub struct PhysicalMemoryManager<'a> {
     physical_memory: NonNull<u8>,
 }
 
+// ### Safety: Type uses entirely atomic operations.
+unsafe impl Send for PhysicalMemoryManager<'_> {}
+// ### Safety: Type uses entirely atomic operations.
+unsafe impl Sync for PhysicalMemoryManager<'_> {}
+
 impl PhysicalMemoryManager<'_> {
     // ### Safety: Caller must guarantee the physical mapped address is valid.
     pub unsafe fn from_memory_map(
@@ -342,7 +347,7 @@ impl PhysicalMemoryManager<'_> {
 
 unsafe impl core::alloc::Allocator for PhysicalMemoryManager<'_> {
     fn allocate(&self, layout: core::alloc::Layout) -> core::result::Result<NonNull<[u8]>, AllocError> {
-        let layout = unsafe { layout.align_to(0x1000).map_err(|_| AllocError)?.pad_to_align() };
+        let layout = layout.align_to(0x1000).map_err(|_| AllocError)?.pad_to_align();
         let physical_memory = self.physical_memory;
         self.next_frames(
             NonZeroUsize::new(layout.size() / 0x1000).unwrap(),
@@ -358,15 +363,22 @@ unsafe impl core::alloc::Allocator for PhysicalMemoryManager<'_> {
         .ok_or(AllocError)
     }
 
-    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: core::alloc::Layout) {
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
         debug_assert!(ptr.as_ptr().is_aligned_to(0x1000));
 
         let Ok(layout) = layout.align_to(0x1000).map(|layout| layout.pad_to_align())
             else {
-                warn!("Attempted to deallocate with an invalid alignment or size.")
+                error!("Unexpectedly failed to align deallocation layout.");
                 return;
             };
 
-        self.free_frame(Address::<Frame>::from_u64(address))
+        let base_address = ptr.addr().get() - self.physical_memory.addr().get();
+        for offset in (0..layout.size()).step_by(0x1000) {
+            Address::<Frame>::from_u64((base_address + offset) as u64)
+                .and_then(|address| self.free_frame(address).ok())
+                .unwrap_or_else(|| {
+                    error!("Unexpectedly failed to free frame during deallocation");
+                });
+        }
     }
 }
