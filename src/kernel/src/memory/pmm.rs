@@ -345,7 +345,7 @@ impl PhysicalMemoryManager<'_> {
     }
 }
 
-unsafe impl core::alloc::Allocator for PhysicalMemoryManager<'_> {
+unsafe impl core::alloc::Allocator for &PhysicalMemoryManager<'_> {
     fn allocate(&self, layout: core::alloc::Layout) -> core::result::Result<NonNull<[u8]>, AllocError> {
         let layout = layout.align_to(0x1000).map_err(|_| AllocError)?.pad_to_align();
         let physical_memory = self.physical_memory;
