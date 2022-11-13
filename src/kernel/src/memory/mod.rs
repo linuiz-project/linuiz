@@ -3,12 +3,12 @@ mod paging;
 mod pmm;
 
 pub mod io;
-pub mod slab;
 pub use mapper::*;
 pub use paging::*;
 pub use pmm::*;
 
 use libcommon::{Address, Frame, Virtual};
+use slab::SlabAllocator;
 use spin::Once;
 
 pub fn get_hhdm_address() -> Address<Virtual> {
@@ -134,6 +134,8 @@ pub static PMM: spin::Lazy<PhysicalMemoryManager> = spin::Lazy::new(|| unsafe {
     )
     .unwrap()
 });
+
+pub static SLAB: SlabAllocator<'static, pmm::PhysicalMemoryManager>
 
 pub static KERNEL_ALLOCATOR: spin::Lazy<slab::SlabAllocator> = spin::Lazy::new(|| {
     // ### Safety: Bootloader guarantees the memory map & higher-half direct map address will be valid so long as a response is provided.

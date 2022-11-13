@@ -14,6 +14,8 @@ path = "../shared/apic/"
 [dependencies.libcommon]
 path = "../shared/libcommon/"
 features = ["global_allocator"]
+[dependencies.slab]
+path = "../shared/slab/"
 [dependencies.lzalloc]
 git = "https://github.com/linuiz-project/lzalloc"
 features = ["logging"]
@@ -33,7 +35,6 @@ default-features = false
 log = { version = "*", default-features = false }
 num_enum = { version = "*", default-features = false }
 miniz_oxide = { version = "*", default-features = false }
-bitvec = { version = "*", default-features = false }
 bit_field = "*"
 bitflags = "*"
 paste = "*"
