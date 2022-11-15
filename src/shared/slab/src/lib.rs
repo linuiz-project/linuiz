@@ -16,7 +16,7 @@ use core::{
     mem::{align_of, size_of, MaybeUninit},
     num::NonZeroUsize,
     ptr::NonNull,
-    sync::atomic::Ordering,
+    sync::atomic::{AtomicU32, Ordering},
 };
 use lzalloc::{vec::Vec, Result};
 
@@ -36,7 +36,9 @@ const SLAB_LENGTH: usize = 0x1000;
 
 pub struct Slab {
     layout: Layout,
-    allocations: NonNull<[SlabInt]>,
+    uid: [u8; 8],
+    allocations: AtomicU32,
+    max_allocations: u32,
     elements: NonNull<[u8]>,
 }
 
@@ -131,7 +133,7 @@ pub struct SlabAllocator<'a, A: Allocator> {
 
 impl<A: Allocator> SlabAllocator<'_, A> {
     #[inline]
-    pub fn new(allocator: A) -> Self {
+    pub fn new_in(allocator: A) -> Self {
         Self { slabs: Vec::new_in(allocator) }
     }
 

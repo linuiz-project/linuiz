@@ -135,19 +135,19 @@ pub static PMM: spin::Lazy<PhysicalMemoryManager> = spin::Lazy::new(|| unsafe {
     .unwrap()
 });
 
-pub static SLAB: SlabAllocator<'static, pmm::PhysicalMemoryManager>
+pub static SLAB: SlabAllocator<'static, pmm::PhysicalMemoryManager> = SlabAllocator::new_in(&*PMM);
 
-pub static KERNEL_ALLOCATOR: spin::Lazy<slab::SlabAllocator> = spin::Lazy::new(|| {
-    // ### Safety: Bootloader guarantees the memory map & higher-half direct map address will be valid so long as a response is provided.
-    unsafe {
-        slab::SlabAllocator::from_memory_map(
-            crate::boot::get_memory_map()
-                .unwrap_or_else(|| todo!("fall back to some kind of reserved-space allocator")),
-            crate::memory::get_hhdm_address(),
-        )
-        .unwrap_or_else(|| todo!("fall back to a simpler allocator"))
-    }
-});
+// pub static KERNEL_ALLOCATOR: spin::Lazy<slab::SlabAllocator> = spin::Lazy::new(|| {
+//     // ### Safety: Bootloader guarantees the memory map & higher-half direct map address will be valid so long as a response is provided.
+//     unsafe {
+//         slab::SlabAllocator::from_memory_map(
+//             crate::boot::get_memory_map()
+//                 .unwrap_or_else(|| todo!("fall back to some kind of reserved-space allocator")),
+//             crate::memory::get_hhdm_address(),
+//         )
+//         .unwrap_or_else(|| todo!("fall back to a simpler allocator"))
+//     }
+// });
 
 mod lzg_impls {
     use core::alloc::Allocator;
