@@ -128,7 +128,7 @@ pub fn rdrand() -> Result<u64, RdRandError> {
             if result > 0 && RFlags::from_bits_truncate(rflags).contains(RFlags::CARRY_FLAG) {
                 return Ok(result);
             } else {
-                pause();
+                core::hint::spin_loop();
             }
         }
 
