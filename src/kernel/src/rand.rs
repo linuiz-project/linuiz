@@ -5,7 +5,7 @@ pub type Result = core::result::Result<u64, Error>;
 pub fn rand() -> Result {
     #[cfg(target_arch = "x86_64")]
     {
-        let rand;
+        let mut rand = 0;
         // ### Safety: It's an intrinsic.
         match unsafe { core::arch::x86_64::_rdrand64_step(&mut rand) } {
             1 => Ok(rand),

@@ -7,3 +7,5 @@ edition = "2021"
 git = "https://github.com/linuiz-project/lzalloc"
 [dependencies.spin]
 git = "https://github.com/semiviral/spin-rs"
+[dependencies]
+log = "*"

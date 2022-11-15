@@ -7,6 +7,7 @@ use core::{
 };
 use libcommon::{Address, Frame};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
     /// There are not enough free frames to satisfy the request.
     NoneFree,
@@ -154,7 +155,7 @@ impl PhysicalMemoryManager<'_> {
 
         let total_memory = {
             let last_entry = memory_map.last()?;
-            ((last_entry.base + last_entry.len) & 0xFFF) as usize
+            ((last_entry.base + last_entry.len) & !0xFFF) as usize
         };
         let total_frames = total_memory / 0x1000;
 
@@ -163,13 +164,12 @@ impl PhysicalMemoryManager<'_> {
             // ### Safety: Value provided is non-zero.
             unsafe { NonZeroUsize::new_unchecked(0x1000) },
         );
-        let table_page_count = table_size_in_bytes / 0x1000;
         let table_entry =
             memory_map.iter().find(|entry| entry.typ == FrameType::Generic && entry.len >= table_size_in_bytes)?;
         let table = unsafe {
             core::slice::from_raw_parts(
                 physical_memory.as_ptr().add(table_entry.base as usize).cast::<FrameData>(),
-                table_page_count,
+                total_frames,
             )
         };
 
@@ -185,11 +185,13 @@ impl PhysicalMemoryManager<'_> {
             });
 
         // Ensure the table pages are reserved, so as to not be locked by any of the `_next` functions.
-        table.iter().skip((table_entry.base / 0x1000) as usize).take(table_page_count).for_each(|frame_data| {
-            frame_data.peek();
-            frame_data.set_type(FrameType::Reserved);
-            frame_data.unpeek();
-        });
+        table.iter().skip((table_entry.base / 0x1000) as usize).take(table_size_in_bytes / 0x1000).for_each(
+            |frame_data| {
+                frame_data.peek();
+                frame_data.set_type(FrameType::Reserved);
+                frame_data.unpeek();
+            },
+        );
 
         Some(Self { table, physical_memory })
     }

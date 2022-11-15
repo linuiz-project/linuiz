@@ -12,6 +12,7 @@
     const_mut_refs,
     const_option,
     const_option_ext,
+    ptr_metadata,
 )]
 
 use core::{
@@ -28,15 +29,23 @@ use spin::Mutex;
 /// * Desired memory profile    
 const SLAB_LENGTH: usize = 0x4000;
 
-#[derive(Debug)]
-pub struct SlabUid([u8; 4]);
-
-pub struct Slab<A: Allocator + Copy> {
+pub struct Slab<A: Allocator> {
     layout: Layout,
     capacity: usize,
     items: Option<Vec<NonNull<[u8]>, A>>,
     memory: NonNull<[u8]>,
     allocator: A,
+}
+
+impl<A: Allocator> core::fmt::Debug for Slab<A> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Slab")
+            .field("Layout", &self.layout())
+            .field("Capacity", &self.capacity())
+            .field("Items", &self.items().len())
+            .field("Memory", &self.memory.to_raw_parts())
+            .finish()
+    }
 }
 
 impl<A: Allocator + Copy> Slab<A> {
@@ -54,7 +63,9 @@ impl<A: Allocator + Copy> Slab<A> {
 
         Ok(Self { layout, capacity, items: Some(list), memory, allocator })
     }
+}
 
+impl<A: Allocator> Slab<A> {
     #[inline]
     const fn items(&self) -> &Vec<NonNull<[u8]>, A> {
         // ### Safety: `self.items` is only `None` when being dropped.
@@ -99,7 +110,7 @@ impl<A: Allocator + Copy> Slab<A> {
     }
 }
 
-impl<A: Allocator + Copy> Drop for Slab<A> {
+impl<A: Allocator> Drop for Slab<A> {
     fn drop(&mut self) {
         drop(self.items.take());
 
@@ -112,11 +123,16 @@ impl<A: Allocator + Copy> Drop for Slab<A> {
     }
 }
 
-pub struct SlabAllocator<A: Allocator + Copy> {
+pub struct SlabAllocator<A: Allocator> {
     slabs: Mutex<Vec<Slab<A>, A>>,
     max_size: usize,
     allocator: A,
 }
+
+// ### Safety: Type does not use thread-specific logic.
+unsafe impl<A: Allocator + Copy> Send for SlabAllocator<A> {}
+// ### Safety: Type's mutable conversions are synchronized via `spin::Mutex`.
+unsafe impl<A: Allocator + Copy> Sync for SlabAllocator<A> {}
 
 impl<A: Allocator + Copy> SlabAllocator<A> {
     #[inline]
@@ -132,12 +148,11 @@ unsafe impl<A: Allocator + Copy> Allocator for SlabAllocator<A> {
             self.allocator.allocate(layout)
         } else {
             let mut slabs = self.slabs.lock();
-            let slab = slabs.iter_mut().find(|slab| slab.remaining() > 0 && slab.layout() == layout);
-            let slab = match slab {
+            let slab = match slabs.iter_mut().find(|slab| slab.remaining() > 0 && slab.layout() == layout) {
                 Some(slab) => slab,
                 None => {
                     slabs.push(Slab::new_in(layout, self.allocator)?).map_err(|_| AllocError)?;
-                    unsafe { slabs.iter_mut().last().unwrap_unchecked() }
+                    unsafe { slabs.iter_mut().last().unwrap() }
                 }
             };
 

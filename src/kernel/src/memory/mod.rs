@@ -9,7 +9,7 @@ pub use pmm::*;
 
 use libcommon::{Address, Frame, Virtual};
 use slab::SlabAllocator;
-use spin::Once;
+use spin::{Lazy, Once};
 
 pub fn get_hhdm_address() -> Address<Virtual> {
     static HHDM_ADDRESS: Once<Address<Virtual>> = Once::new();
@@ -109,7 +109,7 @@ pub fn is_5_level_paged() -> bool {
     }
 }
 
-pub static PMM: spin::Lazy<PhysicalMemoryManager> = spin::Lazy::new(|| unsafe {
+pub static PMM: Lazy<PhysicalMemoryManager> = Lazy::new(|| unsafe {
     let memory_map = crate::boot::get_memory_map().unwrap();
     PhysicalMemoryManager::from_memory_map(
         memory_map.iter().map(|entry| MemoryMapping {
@@ -135,19 +135,8 @@ pub static PMM: spin::Lazy<PhysicalMemoryManager> = spin::Lazy::new(|| unsafe {
     .unwrap()
 });
 
-pub static SLAB: SlabAllocator<'static, pmm::PhysicalMemoryManager> = SlabAllocator::new_in(&*PMM);
-
-// pub static KERNEL_ALLOCATOR: spin::Lazy<slab::SlabAllocator> = spin::Lazy::new(|| {
-//     // ### Safety: Bootloader guarantees the memory map & higher-half direct map address will be valid so long as a response is provided.
-//     unsafe {
-//         slab::SlabAllocator::from_memory_map(
-//             crate::boot::get_memory_map()
-//                 .unwrap_or_else(|| todo!("fall back to some kind of reserved-space allocator")),
-//             crate::memory::get_hhdm_address(),
-//         )
-//         .unwrap_or_else(|| todo!("fall back to a simpler allocator"))
-//     }
-// });
+pub static KERNEL_ALLOCATOR: Lazy<SlabAllocator<&pmm::PhysicalMemoryManager>> =
+    Lazy::new(|| SlabAllocator::new_in(11, &*PMM));
 
 mod lzg_impls {
     use core::alloc::Allocator;

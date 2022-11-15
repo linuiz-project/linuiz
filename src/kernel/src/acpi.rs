@@ -185,14 +185,15 @@ pub static MCFG: Lazy<Option<Mutex<PhysicalMapping<AcpiHandler, acpi::mcfg::Mcfg
         .map(Mutex::new)
 });
 
-pub static PLATFORM_INFO: Lazy<Option<Mutex<acpi::PlatformInfo<crate::memory::slab::SlabAllocator>>>> =
-    Lazy::new(|| {
-        TABLES
-            .get()
-            .map(|mutex| mutex.lock())
-            .and_then(|tables| acpi::PlatformInfo::new_in(&*tables, &*crate::memory::KERNEL_ALLOCATOR).ok())
-            .map(Mutex::new)
-    });
+pub static PLATFORM_INFO: Lazy<
+    Option<Mutex<acpi::PlatformInfo<slab::SlabAllocator<&crate::memory::PhysicalMemoryManager>>>>,
+> = Lazy::new(|| {
+    TABLES
+        .get()
+        .map(|mutex| mutex.lock())
+        .and_then(|tables| acpi::PlatformInfo::new_in(&*tables, &*crate::memory::KERNEL_ALLOCATOR).ok())
+        .map(Mutex::new)
+});
 
 // struct AmlContextWrapper(aml::AmlContext);
 // // ### Safety: TODO
