@@ -9,89 +9,62 @@
     maybe_uninit_slice,             // #63569 <https://github.com/rust-lang/rust/issues/63569>
     int_roundings,                  // #88581 <https://github.com/rust-lang/rust/issues/88581>
     nonzero_min_max,                // #89065 <https://github.com/rust-lang/rust/issues/89065>
+    const_mut_refs,
+    const_option,
+    const_option_ext,
 )]
 
 use core::{
     alloc::{AllocError, Allocator, Layout},
-    mem::{align_of, size_of, MaybeUninit},
-    num::NonZeroUsize,
     ptr::NonNull,
-    sync::atomic::{AtomicU32, Ordering},
 };
 use lzalloc::{vec::Vec, Result};
-
-/// Type used as the backing store the [`bitvec::BitSlice`] allocation table.
-/// Using this, the backing store type can be more easily modulated in cases
-/// where performance is preferred over the space efficiency of the slabs.
-/// notation: lomem feature
-type SlabInt = core::sync::atomic::AtomicU16;
-const SLAB_INT_BITS: u32 = (size_of::<SlabInt>() as u32) * u8::BITS;
+use spin::Mutex;
 
 /// ## Remark
 /// This align shouldn't be constant; it needs to be dynamic based upon:
 /// * Cache line size
 /// * Available memory
 /// * Desired memory profile    
-const SLAB_LENGTH: usize = 0x1000;
+const SLAB_LENGTH: usize = 0x4000;
 
-pub struct Slab {
+#[derive(Debug)]
+pub struct SlabUid([u8; 4]);
+
+pub struct Slab<A: Allocator + Copy> {
     layout: Layout,
-    uid: [u8; 8],
-    allocations: AtomicU32,
-    max_allocations: u32,
-    elements: NonNull<[u8]>,
+    capacity: usize,
+    items: Option<Vec<NonNull<[u8]>, A>>,
+    memory: NonNull<[u8]>,
+    allocator: A,
 }
 
-impl Slab {
-    /// # Safety
-    ///
-    /// * `ptr` must be page-aligned.
-    /// * `ptr`s length must be equal to the expected slab length.
-    unsafe fn new<'a>(ptr: NonNull<[u8]>, element_layout: Layout) -> Option<&'a Self> {
-        let header_size = size_of::<Self>();
-        // We'd like to separate the elements by the maximum of their alignment or their size to the next power of two.
-        let element_size = core::cmp::max(element_layout.size().next_power_of_two(), element_layout.align());
+impl<A: Allocator + Copy> Slab<A> {
+    fn new_in(layout: Layout, allocator: A) -> lzalloc::Result<Self> {
+        let padded_layout = layout.pad_to_align();
+        let memory = allocator.allocate(unsafe { Layout::from_size_align_unchecked(SLAB_LENGTH, layout.align()) })?;
+        let capacity = memory.len() / padded_layout.size();
+        let mut list = Vec::with_capacity_in(capacity, allocator).map_err(|_| AllocError)?;
 
-        // Reduce the allocation table sizing issue to `(slab_size + 1 bit) * 8` to calculate the suitable allocation table entries.
-        // This is specifically an issue because the total size of the allocation is dynamic and dependent on the count of elements,
-        // while the total count of elements is also constrained by the size of the allocation table (since they both take up bytes
-        // in the resulting memory region).
-        let allocations_len = {
-            let grouping_size = (element_size * (SLAB_INT_BITS as usize)) + size_of::<SlabInt>();
-            let slabs_length = ptr.len() - header_size;
-            slabs_length / grouping_size
-        };
-        // ### Safety: Memory range is guaranteed to be within `ptr` address space due to the way `allocations_len` is calcualted.
-        let allocations_ptr = unsafe { ptr.get_unchecked_mut(header_size..(header_size + allocations_len)) };
+        for index in 0..capacity {
+            let start_offset = index * padded_layout.size();
+            let end_offset = start_offset + layout.size();
+            list.push(unsafe { memory.get_unchecked_mut(start_offset..end_offset) }).map_err(|_| AllocError)?;
+        }
 
-        let elements_offset = (header_size + allocations_len).next_multiple_of(element_layout.align());
-        let elements_len = allocations_len * (SLAB_INT_BITS as usize);
-        // ### Safety: Memory range is checked to be within `ptr` address space.
-        let elements_ptr = unsafe { ptr.get_unchecked_mut(elements_offset..(elements_offset + elements_len)) };
+        Ok(Self { layout, capacity, items: Some(list), memory, allocator })
+    }
 
-        // Check to ensure the `elements_ptr` memory range doesn't go out bounds.
-        debug_assert!(
-            ptr.as_non_null_ptr().addr().checked_add(ptr.len()).unwrap_or(NonZeroUsize::MIN)
-                >= elements_ptr.as_non_null_ptr().addr().checked_add(elements_len).unwrap_or(NonZeroUsize::MAX)
-        );
+    #[inline]
+    const fn items(&self) -> &Vec<NonNull<[u8]>, A> {
+        // ### Safety: `self.items` is only `None` when being dropped.
+        unsafe { self.items.as_ref().unwrap_unchecked() }
+    }
 
-        Some({
-            // ### Safety: Pointer is required to be valid for `Self`.
-            let mut slab = unsafe { ptr.as_non_null_ptr().cast::<Self>().as_mut() };
-            slab.layout = element_layout;
-            // ### Safety
-            // * Slab is checked valid for the given memory range.
-            // * Allocation slice is of a known and correct length for `usize`.
-            // * Slab is checked to contain no more than `BitSlice::MAX_BITS`.
-            slab.allocations = NonNull::slice_from_raw_parts(
-                allocations_ptr.as_non_null_ptr().cast(),
-                allocations_ptr.len() / size_of::<SlabInt>(),
-            );
-            // ### Safety: Memory range is calculated valid for the provided pointer and length.
-            slab.elements = elements_ptr;
-
-            slab
-        })
+    #[inline]
+    const fn items_mut(&mut self) -> &mut Vec<NonNull<[u8]>, A> {
+        // ### Safety: `self.items` is only `None` when being dropped.
+        unsafe { self.items.as_mut().unwrap_unchecked() }
     }
 
     #[inline]
@@ -100,75 +73,89 @@ impl Slab {
     }
 
     #[inline]
-    fn allocations(&self) -> &[SlabInt] {
-        unsafe { MaybeUninit::slice_assume_init_ref(self.allocations.as_uninit_slice()) }
+    pub const fn remaining(&self) -> usize {
+        self.items().len()
     }
 
     #[inline]
-    fn element_size(&self) -> usize {
-        core::cmp::max(self.layout().size().next_power_of_two(), self.layout().align())
+    pub const fn capacity(&self) -> usize {
+        self.capacity
     }
 
-    pub fn get_next_element(&self) -> Option<NonNull<[u8]>> {
-        for (index, allocation_block) in self.allocations().iter().enumerate() {
-            for bit_offset in 0..SLAB_INT_BITS {
-                let bit_mask = 1 << bit_offset;
-                // If the bit was previously zero, we have successfully allocated.
-                if (allocation_block.fetch_or(bit_mask, Ordering::Relaxed) & bit_mask) == 0 {
-                    let start_index = (index * (SLAB_INT_BITS as usize)) + (bit_offset as usize);
-                    let end_index = start_index + self.element_size();
-                    // ### Safety: Range is derived from the extents of the pointer.
-                    return Some(unsafe { self.elements.get_unchecked_mut(start_index..end_index) });
-                }
-            }
+    #[inline]
+    pub fn take_item(&mut self) -> Option<NonNull<[u8]>> {
+        self.items_mut().pop()
+    }
+
+    pub fn return_item(&mut self, ptr: NonNull<u8>) -> Result<()> {
+        if (unsafe { &*self.memory.as_ptr() }).as_ptr_range().contains(&ptr.as_ptr().cast_const())
+            && ptr.addr().get().next_multiple_of(self.layout().align()) == ptr.addr().get()
+        {
+            let layout_size = self.layout().size();
+            self.items_mut().push(NonNull::slice_from_raw_parts(ptr, layout_size)).map_err(|_| AllocError)
+        } else {
+            Err(AllocError)
         }
-
-        None
     }
 }
 
-pub struct SlabAllocator<'a, A: Allocator> {
-    slabs: Vec<&'a Slab, A>,
+impl<A: Allocator + Copy> Drop for Slab<A> {
+    fn drop(&mut self) {
+        drop(self.items.take());
+
+        unsafe {
+            self.allocator.deallocate(
+                self.memory.as_non_null_ptr(),
+                Layout::from_size_align_unchecked(self.memory.len(), self.layout.align()),
+            )
+        };
+    }
 }
 
-impl<A: Allocator> SlabAllocator<'_, A> {
+pub struct SlabAllocator<A: Allocator + Copy> {
+    slabs: Mutex<Vec<Slab<A>, A>>,
+    max_size: usize,
+    allocator: A,
+}
+
+impl<A: Allocator + Copy> SlabAllocator<A> {
     #[inline]
-    pub fn new_in(allocator: A) -> Self {
-        Self { slabs: Vec::new_in(allocator) }
+    pub fn new_in(max_size_shift: u32, allocator: A) -> Self {
+        Self { slabs: Mutex::new(Vec::new_in(allocator)), max_size: 1 << max_size_shift, allocator }
+    }
+}
+
+unsafe impl<A: Allocator + Copy> Allocator for SlabAllocator<A> {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>> {
+        let padded_layout = layout.pad_to_align();
+        if padded_layout.size() > self.max_size {
+            self.allocator.allocate(layout)
+        } else {
+            let mut slabs = self.slabs.lock();
+            let slab = slabs.iter_mut().find(|slab| slab.remaining() > 0 && slab.layout() == layout);
+            let slab = match slab {
+                Some(slab) => slab,
+                None => {
+                    slabs.push(Slab::new_in(layout, self.allocator)?).map_err(|_| AllocError)?;
+                    unsafe { slabs.iter_mut().last().unwrap_unchecked() }
+                }
+            };
+
+            Ok(slab.take_item().unwrap())
+        }
     }
 
-    pub fn get_object<T>(&mut self) -> Result<&mut MaybeUninit<T>> {
-        let layout = Layout::new::<T>();
-        let slab_size = core::cmp::max(layout.size(), layout.align());
-
-        loop {
-            match self
-                .slabs
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        let padded_layout = layout.pad_to_align();
+        if padded_layout.size() > self.max_size {
+            self.allocator.deallocate(ptr, layout);
+        } else {
+            let mut slabs = self.slabs.lock();
+            slabs
                 .iter_mut()
-                .find(|slab| slab.layout().size() == slab_size)
-                .and_then(|slab| slab.get_next_element())
-            {
-                Some(element) => break Ok(unsafe { element.as_non_null_ptr().cast::<T>().as_uninit_mut() }),
-
-                None => {
-                    // Attempt to allocate a new slab to be used for this allocation.
-                    if self
-                        .slabs
-                        .allocator()
-                        // ### Safety: Layout parameters provided are valid.
-                        .allocate_zeroed(unsafe { Layout::from_size_align_unchecked(SLAB_LENGTH, align_of::<Slab>()) })
-                        .ok()
-                        // ### Safety: Allocator invariants guarantee align and length of pointer.
-                        .and_then(|allocation| unsafe { Slab::new(allocation, Layout::new::<T>()) })
-                        // Push the new slab to the list.
-                        .and_then(|slab| self.slabs.push(slab).ok())
-                        // Check if any of the previous operations failed.
-                        .is_none()
-                    {
-                        return Err(AllocError);
-                    }
-                }
-            }
+                .filter(|slab| slab.remaining() < slab.capacity() && slab.layout() == layout)
+                .find_map(|slab| slab.return_item(ptr).ok())
+                .unwrap();
         }
     }
 }
