@@ -95,6 +95,7 @@ impl<A: Allocator> Slab<A> {
 
     #[inline]
     pub fn take_item(&mut self) -> Option<NonNull<[u8]>> {
+        log::trace!("TAKE ITEM");
         self.items_mut().pop()
     }
 

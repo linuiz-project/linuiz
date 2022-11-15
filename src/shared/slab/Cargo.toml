@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies.lzalloc]
-git = "https://github.com/linuiz-project/lzalloc"
+path = "../../../../lzalloc/"
+features = ["logging"]
 [dependencies.spin]
 git = "https://github.com/semiviral/spin-rs"
 [dependencies]
