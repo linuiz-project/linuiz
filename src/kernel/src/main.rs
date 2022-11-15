@@ -57,6 +57,7 @@ mod memory;
 mod modules;
 mod num;
 mod panic;
+mod rand;
 mod time;
 
 use libcommon::{Address, Frame, Page, Virtual};
