@@ -1,8 +1,6 @@
 pub mod build;
 pub mod runner;
 
-use std::path::PathBuf;
-
 use clap::Parser;
 use xshell::cmd;
 
