@@ -1,7 +1,10 @@
 mod scheduler;
 
-use crate::memory::{Stack, VmemRegister};
+use core::alloc::Allocator;
+
+use crate::memory::{Stack, VmemRegister, KMALLOC};
 pub use scheduler::*;
+use try_alloc::boxed::TryBox;
 
 pub(self) const US_PER_SEC: u32 = 1000000;
 pub(self) const US_WAIT: u32 = 10000;
@@ -20,7 +23,7 @@ pub(crate) struct LocalState {
     #[cfg(target_arch = "x86_64")]
     idt: Option<&'static mut crate::arch::x64::structures::idt::InterruptDescriptorTable>,
     #[cfg(target_arch = "x86_64")]
-    tss: &'static mut crate::arch::x64::structures::tss::TaskStateSegment,
+    tss: TryBox<crate::arch::x64::structures::tss::TaskStateSegment>,
     #[cfg(target_arch = "x86_64")]
     apic: (apic::Apic, u64),
 }
@@ -103,30 +106,25 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
             },
             #[cfg(target_arch = "x86_64")]
             tss: {
-                use crate::arch::x64::structures::tss;
+                use crate::arch::{reexport::x86_64::VirtAddr, x64::structures::{tss, idt::StackTableIndex}};
+                use core::num::NonZeroUsize;
 
-                let mut tss_ptr = {
-                    use crate::arch::{reexport::x86_64::VirtAddr, x64::structures::idt::StackTableIndex};
-                    use core::num::NonZeroUsize;
+                let Ok(tss) = TryBox::new(tss::TaskStateSegment::new()) else { crate::memory::out_of_memory() };
 
-                    let mut tss_ptr = lzalloc::allocate_with(|| tss::TaskStateSegment::new()).unwrap();
+                fn allocate_tss_stack(pages: NonZeroUsize) -> VirtAddr {
+                    VirtAddr::from_ptr(
+                crate::memory::KMALLOC.allocate(
+                    // ### Safety: Values provided are known-valid.
+                            unsafe {
+                                core::alloc::Layout::from_size_align_unchecked(pages.get() * 0x1000, 0x10)
+                            },
+                        )
+                        .unwrap()
+                        .as_non_null_ptr()
+                        .as_ptr(),
+                    )
+                }
 
-                    {
-                        fn allocate_tss_stack(pages: NonZeroUsize) -> VirtAddr {
-                            VirtAddr::from_ptr(
-                                lzalloc::allocate(
-                                    // ### Safety: Values provided are known-valid.
-                                    unsafe {
-                                        core::alloc::Layout::from_size_align_unchecked(pages.get() * 0x1000, 0x10)
-                                    },
-                                )
-                                .unwrap()
-                                .as_non_null_ptr()
-                                .as_ptr(),
-                            )
-                        }
-
-                        let tss = tss_ptr.as_mut();
                         // TODO guard pages for these stacks ?
                         tss.privilege_stack_table[0] = allocate_tss_stack(NonZeroUsize::new_unchecked(5));
                         tss.interrupt_stack_table[StackTableIndex::Debug as usize] =
@@ -137,12 +135,12 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
                             allocate_tss_stack(NonZeroUsize::new_unchecked(2));
                         tss.interrupt_stack_table[StackTableIndex::MachineCheck as usize] =
                             allocate_tss_stack(NonZeroUsize::new_unchecked(2));
-                    }
 
-                    tss_ptr
-                };
 
-                tss::load_local(tss::ptr_as_descriptor(&tss_ptr));
+
+
+
+                tss::load_local(tss::ptr_as_descriptor(TryBox::as_nonnull_ptr(&tss)));
 
                 tss_ptr.as_mut()
             },

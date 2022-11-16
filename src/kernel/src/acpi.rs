@@ -186,12 +186,12 @@ pub static MCFG: Lazy<Option<Mutex<PhysicalMapping<AcpiHandler, acpi::mcfg::Mcfg
 });
 
 pub static PLATFORM_INFO: Lazy<
-    Option<Mutex<acpi::PlatformInfo<slab::SlabAllocator<&crate::memory::PhysicalMemoryManager>>>>,
+    Option<Mutex<acpi::PlatformInfo<&slab::SlabAllocator<&crate::memory::PhysicalMemoryManager>>>>,
 > = Lazy::new(|| {
     TABLES
         .get()
         .map(|mutex| mutex.lock())
-        .and_then(|tables| acpi::PlatformInfo::new_in(&*tables, &*crate::memory::KERNEL_ALLOCATOR).ok())
+        .and_then(|tables| acpi::PlatformInfo::new_in(&*tables, &*crate::memory::KMALLOC).ok())
         .map(Mutex::new)
 });
 

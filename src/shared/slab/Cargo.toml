@@ -3,10 +3,8 @@ name = "slab"
 version = "0.1.0"
 edition = "2021"
 
-[dependencies.lzalloc]
-path = "../../../../lzalloc/"
-features = ["logging"]
 [dependencies.spin]
 git = "https://github.com/semiviral/spin-rs"
 [dependencies]
+try_alloc = { path = "../../../../try_alloc/"}
 log = "*"

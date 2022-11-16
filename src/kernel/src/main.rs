@@ -42,9 +42,9 @@
 #![cfg_attr(target_arch = "x86_64", feature(abi_x86_interrupt))]
 
 #[macro_use]
+extern crate alloc;
+#[macro_use]
 extern crate log;
-extern crate libcommon;
-extern crate lzalloc;
 
 mod acpi;
 mod arch;

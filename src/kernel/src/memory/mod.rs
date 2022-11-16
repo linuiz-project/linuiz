@@ -135,16 +135,39 @@ pub static PMM: Lazy<PhysicalMemoryManager> = Lazy::new(|| unsafe {
     .unwrap()
 });
 
-pub static KERNEL_ALLOCATOR: Lazy<SlabAllocator<&pmm::PhysicalMemoryManager>> =
-    Lazy::new(|| SlabAllocator::new_in(11, &*PMM));
+pub static KMALLOC: Lazy<SlabAllocator<&pmm::PhysicalMemoryManager>> = Lazy::new(|| SlabAllocator::new_in(11, &*PMM));
 
-mod lzg_impls {
-    use core::alloc::Allocator;
+mod global_allocator_impl {
+    use super::KMALLOC;
+    use core::{
+        alloc::{Allocator, GlobalAlloc, Layout},
+        ptr::NonNull,
+    };
 
-    lzalloc::lzg_allocate!(|layout| { super::KERNEL_ALLOCATOR.allocate(layout) });
-    lzalloc::lzg_deallocate!(|ptr, layout| {
-        super::KERNEL_ALLOCATOR.deallocate(ptr, layout);
-    });
+    struct GlobalAllocator;
+
+    unsafe impl GlobalAlloc for GlobalAllocator {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            KMALLOC.allocate(layout).map_or(core::ptr::null_mut(), |ptr| ptr.as_non_null_ptr().as_ptr())
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            KMALLOC.deallocate(NonNull::new(ptr).unwrap(), layout);
+        }
+    }
+
+    unsafe impl Allocator for GlobalAllocator {
+        fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, core::alloc::AllocError> {
+            KMALLOC.allocate(layout)
+        }
+
+        unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+            KMALLOC.deallocate(ptr, layout);
+        }
+    }
+
+    #[global_allocator]
+    static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator;
 }
 
 pub unsafe fn out_of_memory() -> ! {

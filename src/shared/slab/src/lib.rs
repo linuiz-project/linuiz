@@ -19,8 +19,8 @@ use core::{
     alloc::{AllocError, Allocator, Layout},
     ptr::NonNull,
 };
-use lzalloc::{vec::Vec, Result};
 use spin::Mutex;
+use try_alloc::vec::TryVec;
 
 /// ## Remark
 /// This align shouldn't be constant; it needs to be dynamic based upon:
@@ -32,7 +32,7 @@ const SLAB_LENGTH: usize = 0x4000;
 pub struct Slab<A: Allocator> {
     layout: Layout,
     capacity: usize,
-    items: Vec<NonNull<[u8]>, A>,
+    items: TryVec<NonNull<[u8]>, A>,
     memory: NonNull<[u8]>,
     allocator: A,
 }
@@ -49,11 +49,11 @@ impl<A: Allocator> core::fmt::Debug for Slab<A> {
 }
 
 impl<A: Allocator + Copy> Slab<A> {
-    fn new_in(layout: Layout, allocator: A) -> lzalloc::Result<Self> {
+    fn new_in(layout: Layout, allocator: A) -> Result<Self, AllocError> {
         let padded_layout = layout.pad_to_align();
         let memory = allocator.allocate(unsafe { Layout::from_size_align_unchecked(SLAB_LENGTH, layout.align()) })?;
         let capacity = memory.len() / padded_layout.size();
-        let mut list = Vec::with_capacity_in(capacity, allocator).map_err(|_| AllocError)?;
+        let mut list = TryVec::with_capacity_in(capacity, allocator).map_err(|_| AllocError)?;
 
         for index in 0..capacity {
             let start_offset = index * padded_layout.size();
@@ -72,7 +72,7 @@ impl<A: Allocator> Slab<A> {
     }
 
     #[inline]
-    pub const fn remaining(&self) -> usize {
+    pub fn remaining(&self) -> usize {
         self.items.len()
     }
 
@@ -87,7 +87,7 @@ impl<A: Allocator> Slab<A> {
         self.items.pop()
     }
 
-    pub fn return_item(&mut self, ptr: NonNull<u8>) -> Result<()> {
+    pub fn return_item(&mut self, ptr: NonNull<u8>) -> Result<(), AllocError> {
         if (unsafe { &*self.memory.as_ptr() }).as_ptr_range().contains(&ptr.as_ptr().cast_const())
             && ptr.addr().get().next_multiple_of(self.layout().align()) == ptr.addr().get()
         {
@@ -111,7 +111,7 @@ impl<A: Allocator> Drop for Slab<A> {
 }
 
 pub struct SlabAllocator<A: Allocator> {
-    slabs: Mutex<Vec<Slab<A>, A>>,
+    slabs: Mutex<TryVec<Slab<A>, A>>,
     max_size: usize,
     allocator: A,
 }
@@ -123,13 +123,13 @@ unsafe impl<A: Allocator + Copy> Sync for SlabAllocator<A> {}
 
 impl<A: Allocator + Copy> SlabAllocator<A> {
     #[inline]
-    pub fn new_in(max_size_shift: u32, allocator: A) -> Self {
-        Self { slabs: Mutex::new(Vec::new_in(allocator)), max_size: 1 << max_size_shift, allocator }
+    pub const fn new_in(max_size_shift: u32, allocator: A) -> Self {
+        Self { slabs: Mutex::new(TryVec::new_in(allocator)), max_size: 1 << max_size_shift, allocator }
     }
 }
 
-unsafe impl<A: Allocator + Copy> Allocator for SlabAllocator<A> {
-    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>> {
+unsafe impl<A: Allocator> Allocator for SlabAllocator<A> {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         let padded_layout = layout.pad_to_align();
         if padded_layout.size() > self.max_size {
             self.allocator.allocate(layout)
@@ -139,7 +139,7 @@ unsafe impl<A: Allocator + Copy> Allocator for SlabAllocator<A> {
                 Some(slab) => slab,
                 None => {
                     slabs.push(Slab::new_in(layout, self.allocator)?).map_err(|_| AllocError)?;
-                    unsafe { slabs.iter_mut().last().unwrap() }
+                    slabs.iter_mut().last().unwrap()
                 }
             };
 
@@ -161,4 +161,3 @@ unsafe impl<A: Allocator + Copy> Allocator for SlabAllocator<A> {
         }
     }
 }
-

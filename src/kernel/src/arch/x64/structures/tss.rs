@@ -2,7 +2,7 @@ use super::gdt;
 
 pub use x86_64::{instructions::tables::load_tss, structures::tss::TaskStateSegment};
 
-pub fn ptr_as_descriptor(tss_ptr: &core::ptr::NonNull<TaskStateSegment>) -> gdt::Descriptor {
+pub fn ptr_as_descriptor(tss_ptr: core::ptr::NonNull<TaskStateSegment>) -> gdt::Descriptor {
     use bit_field::BitField;
 
     let tss_ptr_u64 = tss_ptr.addr().get() as u64;

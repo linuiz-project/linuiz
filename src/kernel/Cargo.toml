@@ -16,19 +16,18 @@ path = "../shared/libcommon/"
 features = ["global_allocator"]
 [dependencies.slab]
 path = "../shared/slab/"
-[dependencies.lzalloc]
-git = "https://github.com/linuiz-project/lzalloc"
-features = ["logging"]
 [dependencies.spin]
 git = "https://github.com/semiviral/spin-rs"
 [dependencies.limine]
 git = "https://github.com/limine-bootloader/limine-rs"
 features = ["requests-section"]
 [dependencies.acpi]
-git = "https://github.com/rust-osdev/acpi"
+git = "https://github.com/semiviral/acpi"
 [dependencies.lza]
 git = "https://github.com/linuiz-project/lza"
 default-features = false
+[dependencies.try_alloc]
+git = "https://github.com/linuiz-project/try_alloc"
 
 
 [dependencies]
