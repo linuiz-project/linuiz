@@ -133,17 +133,8 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
         }
         // copy configuration to EFI image
         shell.copy_file(limine_cfg_path.clone(), PathBuf::from(".hdd/root/EFI/BOOT/"))?;
-
-        // initialize git submodule if it hasn't been
-        let bootx64_efi_path = PathBuf::from("resources/submodules/limine/BOOTX64.EFI");
-        if !shell.path_exists(bootx64_efi_path.clone()) {
-            cmd!(shell, "git submodule init").run()?;
-        }
-
-        // update the submodule to ensure latest version
-        cmd!(shell, "git submodule update --recursive --remote").run()?;
         // copy the resultant EFI binary
-        shell.copy_file(bootx64_efi_path.clone(), PathBuf::from(".hdd/root/EFI/BOOT/"))?;
+        shell.copy_file(PathBuf::from("submodules/limine/BOOTX64.EFI"), PathBuf::from(".hdd/root/EFI/BOOT/"))?;
     }
 
     fn disassemble(

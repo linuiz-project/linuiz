@@ -1,4 +1,16 @@
 [submodule "limine"]
-	path = resources/submodules/limine
+	path = submodules/limine
 	url = https://github.com/limine-bootloader/limine
 	branch = v4.0-branch-binary
+
+[submodule "try_alloc"]
+	path = submodules/try_alloc
+	url = https://github.com/linuiz-project/try_alloc
+
+[submodule "lza"]
+	path = submodules/lza
+	url = https://github.com/linuiz-project/lza
+
+[submodule "spin-rs"]
+	path = submodules/spin-rs
+	url = https://github.com/linuiz-project/spin-rs
