@@ -1,4 +1,4 @@
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 #![feature(
     allocator_api,                  // #32838 <https://github.com/rust-lang/rust/issues/32838>
     strict_provenance,              // #95228 <https://github.com/rust-lang/rust/issues/95228>
@@ -32,7 +32,7 @@ const SLAB_LENGTH: usize = 0x4000;
 pub struct Slab<A: Allocator> {
     layout: Layout,
     capacity: usize,
-    items: Option<Vec<NonNull<[u8]>, A>>,
+    items: Vec<NonNull<[u8]>, A>,
     memory: NonNull<[u8]>,
     allocator: A,
 }
@@ -42,7 +42,7 @@ impl<A: Allocator> core::fmt::Debug for Slab<A> {
         f.debug_struct("Slab")
             .field("Layout", &self.layout())
             .field("Capacity", &self.capacity())
-            .field("Items", &self.items().len())
+            .field("Items", &self.items.len())
             .field("Memory", &self.memory.to_raw_parts())
             .finish()
     }
@@ -61,23 +61,11 @@ impl<A: Allocator + Copy> Slab<A> {
             list.push(unsafe { memory.get_unchecked_mut(start_offset..end_offset) }).map_err(|_| AllocError)?;
         }
 
-        Ok(Self { layout, capacity, items: Some(list), memory, allocator })
+        Ok(Self { layout, capacity, items: list, memory, allocator })
     }
 }
 
 impl<A: Allocator> Slab<A> {
-    #[inline]
-    const fn items(&self) -> &Vec<NonNull<[u8]>, A> {
-        // ### Safety: `self.items` is only `None` when being dropped.
-        unsafe { self.items.as_ref().unwrap_unchecked() }
-    }
-
-    #[inline]
-    const fn items_mut(&mut self) -> &mut Vec<NonNull<[u8]>, A> {
-        // ### Safety: `self.items` is only `None` when being dropped.
-        unsafe { self.items.as_mut().unwrap_unchecked() }
-    }
-
     #[inline]
     pub const fn layout(&self) -> Layout {
         self.layout
@@ -85,7 +73,7 @@ impl<A: Allocator> Slab<A> {
 
     #[inline]
     pub const fn remaining(&self) -> usize {
-        self.items().len()
+        self.items.len()
     }
 
     #[inline]
@@ -96,7 +84,7 @@ impl<A: Allocator> Slab<A> {
     #[inline]
     pub fn take_item(&mut self) -> Option<NonNull<[u8]>> {
         log::trace!("TAKE ITEM");
-        self.items_mut().pop()
+        self.items.pop()
     }
 
     pub fn return_item(&mut self, ptr: NonNull<u8>) -> Result<()> {
@@ -104,7 +92,7 @@ impl<A: Allocator> Slab<A> {
             && ptr.addr().get().next_multiple_of(self.layout().align()) == ptr.addr().get()
         {
             let layout_size = self.layout().size();
-            self.items_mut().push(NonNull::slice_from_raw_parts(ptr, layout_size)).map_err(|_| AllocError)
+            self.items.push(NonNull::slice_from_raw_parts(ptr, layout_size)).map_err(|_| AllocError)
         } else {
             Err(AllocError)
         }
@@ -113,8 +101,6 @@ impl<A: Allocator> Slab<A> {
 
 impl<A: Allocator> Drop for Slab<A> {
     fn drop(&mut self) {
-        drop(self.items.take());
-
         unsafe {
             self.allocator.deallocate(
                 self.memory.as_non_null_ptr(),
@@ -175,3 +161,4 @@ unsafe impl<A: Allocator + Copy> Allocator for SlabAllocator<A> {
         }
     }
 }
+
