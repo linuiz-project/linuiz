@@ -21,7 +21,7 @@ fn main() -> Result<(), xshell::Error> {
 
     match Arguments::parse() {
         Arguments::Build(build_options) => {
-            keep_submodules_updated(&shell)?;
+            cmd!(shell, "git submodule update --init --recursive --remote").run()?;
             build::build(&shell, build_options)
         }
 
@@ -30,7 +30,7 @@ fn main() -> Result<(), xshell::Error> {
         Arguments::Clean => clean(&shell),
 
         Arguments::Update => {
-            keep_submodules_updated(&shell)?;
+            cmd!(shell, "git submodule update --init --recursive --remote").run()?;
             update(&shell)
         }
 
@@ -60,21 +60,6 @@ pub fn update(shell: &xshell::Shell) -> xshell::Result<()> {
     for crate_dir in CRATE_DIRS {
         let _dir = shell.push_dir(crate_dir);
         cmd!(shell, "cargo update").run()?;
-    }
-
-    Ok(())
-}
-
-fn keep_submodules_updated(shell: &xshell::Shell) -> xshell::Result<()> {
-    use std::path::PathBuf;
-
-    static SUBMODULES: [&str; 4] = ["limine", "lza", "try_alloc", "spin-rs"];
-
-    for submodule_name in SUBMODULES {
-        if !PathBuf::from(format!("submodules/{}", submodule_name)).exists() {
-            cmd!(shell, "git submodule init").run()?;
-            break;
-        }
     }
 
     Ok(())
