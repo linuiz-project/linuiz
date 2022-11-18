@@ -332,7 +332,7 @@ unsafe extern "C" fn _entry() -> ! {
 
             for section in kernel_elf.iter_sections() {
                 use crate::elf::symbol::Symbol;
-                use core::num::NonZeroUsize;
+                use try_alloc::boxed::TryBox;
 
                 let names_section_offset = section.get_names_section_offset();
                 // Check if names section offset is greater than the length of the names section.
@@ -348,27 +348,23 @@ unsafe extern "C" fn _entry() -> ! {
 
                 match section_name {
                     ".symtab" if section_data.len() > 0 && let Ok(symbols) = bytemuck::try_cast_slice::<u8, Symbol>(section.data()) => {
-                        // ### Safety: Value is checked non-zero.
-                        let Ok(symbols_copy) = lzalloc::allocate_slice(unsafe { NonZeroUsize::new_unchecked(symbols.len()) }, Symbol::default())
-                            else { continue };
+                        let Ok(symbols_copy) = TryBox::new_slice(symbols.len(), Symbol::default()) else { continue };
 
                         crate::interrupts::without(|| {
                             crate::panic::KERNEL_SYMBOLS.call_once(|| {
                                 symbols_copy.copy_from_slice(symbols);
-                                symbols_copy
+                                TryBox::leak(symbols_copy)
                             });
                         });
                     }
 
                     ".strtab" if section_data.len() > 0 => {
-                        // ### Safety: Value is checked non-zero.
-                        let Ok(strings_copy) = lzalloc::allocate_slice(unsafe { NonZeroUsize::new_unchecked(section_data.len()) }, 0)
-                            else { continue };
+                        let Ok(strings_copy) = TryBox::new_slice(section_data.len(), 0) else { continue };
 
                         crate::interrupts::without(|| {
                             crate::panic::KERNEL_STRINGS.call_once(|| {
                                 strings_copy.copy_from_slice(section.data());
-                                strings_copy
+                                TryBox::leak(strings_copy)
                             });
                         });
                     }

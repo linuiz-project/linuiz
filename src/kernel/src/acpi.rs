@@ -186,7 +186,7 @@ pub static MCFG: Lazy<Option<Mutex<PhysicalMapping<AcpiHandler, acpi::mcfg::Mcfg
 });
 
 pub static PLATFORM_INFO: Lazy<
-    Option<Mutex<acpi::PlatformInfo<&slab::SlabAllocator<&crate::memory::PhysicalMemoryManager>>>>,
+    Option<Mutex<acpi::PlatformInfo<&slab::SlabAllocator<&crate::memory::pmm::PhysicalMemoryManager>>>>,
 > = Lazy::new(|| {
     TABLES
         .get()

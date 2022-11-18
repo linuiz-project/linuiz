@@ -17,23 +17,20 @@ features = ["global_allocator"]
 [dependencies.slab]
 path = "../shared/slab/"
 [dependencies.spin]
-git = "https://github.com/semiviral/spin-rs"
-[dependencies.limine]
-git = "https://github.com/limine-bootloader/limine-rs"
-features = ["requests-section"]
-[dependencies.acpi]
-git = "https://github.com/semiviral/acpi"
+path = "../../submodules/spin-rs/"
 [dependencies.lza]
-git = "https://github.com/linuiz-project/lza"
+path = "../../submodules/lza/"
 default-features = false
 [dependencies.try_alloc]
-git = "https://github.com/linuiz-project/try_alloc"
-
+path = "../../submodules/try_alloc/"
+[dependencies.acpi]
+git = "https://github.com/semiviral/acpi"
 
 [dependencies]
 log = { version = "*", default-features = false }
 num_enum = { version = "*", default-features = false }
 miniz_oxide = { version = "*", default-features = false }
+limine = { version = "*", features = ["requests-section"] }
 bit_field = "*"
 bitflags = "*"
 paste = "*"

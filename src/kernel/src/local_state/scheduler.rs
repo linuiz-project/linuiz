@@ -1,6 +1,6 @@
 use crate::memory::Stack;
 use core::sync::atomic::AtomicU64;
-use lzalloc::deque::Deque;
+//use lzalloc::deque::Deque;
 
 static NEXT_THREAD_ID: AtomicU64 = AtomicU64::new(1);
 

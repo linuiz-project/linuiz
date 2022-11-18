@@ -1,4 +1,5 @@
 use libcommon::{Address, Page};
+use try_alloc::boxed::TryBox;
 
 pub fn load_modules() {
     let drivers_data = crate::boot::get_kernel_modules()
@@ -14,15 +15,19 @@ pub fn load_modules() {
 
     for (header, data) in lza::ArchiveReader::new(drivers_data) {
         // SAFETY: Value is non-zero.
-        let Ok(elf_buffer) = lzalloc::allocate_slice::<u8>(header.len(), 0)
+        let Ok(elf_buffer) = TryBox::new_slice(header.len().get(), 0u8)
             else {
                 warn!("Failed allocate decompression buffer for driver: {:?}", header);
                 continue
             };
 
         let mut inflate_state = miniz_oxide::inflate::stream::InflateState::new(miniz_oxide::DataFormat::Raw);
-        let inflate_result =
-            miniz_oxide::inflate::stream::inflate(&mut inflate_state, data, elf_buffer, miniz_oxide::MZFlush::Finish);
+        let inflate_result = miniz_oxide::inflate::stream::inflate(
+            &mut inflate_state,
+            data,
+            &mut *elf_buffer,
+            miniz_oxide::MZFlush::Finish,
+        );
         if inflate_result.status.is_err() {
             warn!(
                 "Failed decompress driver blob:\n{:#?}\n{:#?}\nData Snippet: {:?}",
@@ -33,7 +38,7 @@ pub fn load_modules() {
             continue;
         };
 
-        let Some(elf) = crate::elf::Elf::from_bytes(elf_buffer)
+        let Some(elf) = crate::elf::Elf::from_bytes(&*elf_buffer)
             else {
                 warn!("Failed parse driver blob into valid ELF: {:?}", header);
                 continue

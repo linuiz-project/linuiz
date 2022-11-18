@@ -128,7 +128,7 @@ impl<A: Allocator + Copy> SlabAllocator<A> {
     }
 }
 
-unsafe impl<A: Allocator> Allocator for SlabAllocator<A> {
+unsafe impl<A: Allocator + Copy> Allocator for SlabAllocator<A> {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         let padded_layout = layout.pad_to_align();
         if padded_layout.size() > self.max_size {

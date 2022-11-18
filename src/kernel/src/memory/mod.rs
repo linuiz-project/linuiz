@@ -1,15 +1,20 @@
 mod mapper;
 mod paging;
-mod pmm;
 
 pub mod io;
 pub use mapper::*;
 pub use paging::*;
-pub use pmm::*;
+pub mod pmm;
 
+use alloc::alloc::Global;
+use core::{
+    alloc::{AllocError, Allocator, Layout},
+    ptr::NonNull,
+};
 use libcommon::{Address, Frame, Virtual};
 use slab::SlabAllocator;
 use spin::{Lazy, Once};
+use try_alloc::boxed::TryBox;
 
 pub fn get_hhdm_address() -> Address<Virtual> {
     static HHDM_ADDRESS: Once<Address<Virtual>> = Once::new();
@@ -109,14 +114,15 @@ pub fn is_5_level_paged() -> bool {
     }
 }
 
-pub static PMM: Lazy<PhysicalMemoryManager> = Lazy::new(|| unsafe {
+pub static PMM: Lazy<pmm::PhysicalMemoryManager> = Lazy::new(|| unsafe {
     let memory_map = crate::boot::get_memory_map().unwrap();
-    PhysicalMemoryManager::from_memory_map(
-        memory_map.iter().map(|entry| MemoryMapping {
+    pmm::PhysicalMemoryManager::from_memory_map(
+        memory_map.iter().map(|entry| pmm::MemoryMapping {
             base: entry.base as usize,
             len: entry.len as usize,
             typ: {
                 use limine::LimineMemoryMapEntryType;
+                use pmm::FrameType;
 
                 match entry.typ {
                     LimineMemoryMapEntryType::Usable => FrameType::Generic,
@@ -174,8 +180,49 @@ pub unsafe fn out_of_memory() -> ! {
     panic!("Kernel ran out of memory during initialization.")
 }
 
-pub type Stack = lzalloc::boxed::Box<[core::mem::MaybeUninit<u8>], lzalloc::AlignedAllocator<0x10>>;
+pub type Stack = TryBox<[core::mem::MaybeUninit<u8>], AlignedAllocator<0x10>>;
 
-pub fn allocate_kernel_stack<const SIZE: usize>() -> lzalloc::Result<Stack> {
-    lzalloc::boxed::Box::<_, _>::new_uninit_slice_in(SIZE, lzalloc::AlignedAllocator::new())
+pub fn allocate_kernel_stack<const SIZE: usize>() -> Result<Stack, AllocError> {
+    TryBox::new_uninit_slice_in(SIZE, AlignedAllocator::new())
+}
+
+pub struct AlignedAllocator<const ALIGN: usize, A: Allocator = Global>(A);
+
+impl<const ALIGN: usize> AlignedAllocator<ALIGN> {
+    #[inline]
+    pub const fn new() -> Self {
+        AlignedAllocator::new_in(Global)
+    }
+}
+
+impl<const ALIGN: usize, A: Allocator> AlignedAllocator<ALIGN, A> {
+    #[inline]
+    pub const fn new_in(allocator: A) -> Self {
+        Self(allocator)
+    }
+}
+
+/// # Safety: Type is merely a wrapper for aligned allocation of another allocator impl.
+unsafe impl<const ALIGN: usize, A: Allocator> Allocator for AlignedAllocator<ALIGN, A> {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        match layout.align_to(ALIGN) {
+            Ok(layout) => self.0.allocate(layout),
+            Err(_) => Err(AllocError),
+        }
+    }
+
+    fn allocate_zeroed(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        match layout.align_to(ALIGN) {
+            Ok(layout) => self.0.allocate_zeroed(layout),
+            Err(_) => Err(AllocError),
+        }
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        match layout.align_to(ALIGN) {
+            // ### Safety: This function shares the same invariants as `GlobalAllocator::deallocate`.
+            Ok(layout) => unsafe { self.0.deallocate(ptr, layout) },
+            Err(_) => unimplemented!(),
+        }
+    }
 }
