@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies.spin]
 git = "https://github.com/semiviral/spin-rs"
+[dependencies.try_alloc]
+git = "https://github.com/linuiz-project/try_alloc"
 [dependencies]
-try_alloc = { path = "../../../submodules/try_alloc/"}
 log = "*"

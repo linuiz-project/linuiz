@@ -1,5 +1,5 @@
 use crate::memory::get_hhdm_address;
-use libcommon::{Address, Page};
+use lzstd::{Address, Page};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Syscall {

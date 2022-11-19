@@ -59,7 +59,7 @@ mod panic;
 mod rand;
 mod time;
 
-use libcommon::{Address, Frame, Page, Virtual};
+use lzstd::{Address, Frame, Page, Virtual};
 
 pub type MmapEntry = limine::NonNullPtr<limine::LimineMemmapEntry>;
 pub type MmapEntryType = limine::LimineMemoryMapEntryType;
@@ -160,7 +160,7 @@ unsafe extern "C" fn _entry() -> ! {
      */
     {
         use crate::memory::{Mapper, PageAttributes};
-        use libcommon::{LinkerSymbol, PageAlign};
+        use lzstd::{LinkerSymbol, PageAlign};
 
         extern "C" {
             static __text_start: LinkerSymbol;
@@ -266,7 +266,7 @@ unsafe extern "C" fn _entry() -> ! {
                 // TODO use huge pages here if possible
                 kernel_mapper
                     .map(
-                        Address::<libcommon::Page>::from_u64_truncate(
+                        Address::<lzstd::Page>::from_u64_truncate(
                             crate::memory::get_hhdm_address().as_u64() + phys_base,
                             Some(PageAlign::Align4KiB),
                         ),
@@ -496,7 +496,7 @@ unsafe extern "C" fn _entry() -> ! {
         //     //     let pm1a_evt_blk =
         //     //         &crate::tables::acpi::get_fadt().pm1a_event_block().expect("no `PM1a_EVT_BLK` found in FADT");
 
-        //     //     let mut reg = libcommon::acpi::Register::<u16>::IO(crate::memory::io::ReadWritePort::new(
+        //     //     let mut reg = lzstd::acpi::Register::<u16>::IO(crate::memory::io::ReadWritePort::new(
         //     //         (pm1a_evt_blk.address + ((pm1a_evt_blk.bit_width / 8) as u64)) as u16,
         //     //     ));
 

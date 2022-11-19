@@ -1,5 +1,5 @@
 use core::arch::asm;
-use libcommon::{Address, Frame};
+use lzstd::{Address, Frame};
 
 bitflags::bitflags! {
     pub struct CR3Flags : u64 {

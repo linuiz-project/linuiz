@@ -1,4 +1,4 @@
-use libcommon::{Address, Virtual};
+use lzstd::{Address, Virtual};
 
 pub struct CR2;
 

@@ -2,7 +2,7 @@ mod instructions;
 
 use crate::cpu::{ArchContext, ControlContext};
 pub use instructions::*;
-use libcommon::{Address, Page, Virtual};
+use lzstd::{Address, Page, Virtual};
 use num_enum::TryFromPrimitive;
 
 /// Delivery mode for IPIs.

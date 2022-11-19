@@ -5,7 +5,7 @@ use core::sync::atomic::AtomicU64;
 static NEXT_THREAD_ID: AtomicU64 = AtomicU64::new(1);
 
 pub enum EntryPoint {
-    Address(libcommon::Address<libcommon::Virtual>),
+    Address(lzstd::Address<lzstd::Virtual>),
     Function(fn() -> !),
 }
 

@@ -134,7 +134,7 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
             use crate::{arch::x64, interrupts::Vector};
 
             let apic = apic::Apic::new(Some(|address: usize| {
-                libcommon::Address::<libcommon::Virtual>::new_truncate(
+                lzstd::Address::<lzstd::Virtual>::new_truncate(
                     crate::memory::get_hhdm_address().as_u64() + (address as u64),
                 )
                 .as_mut_ptr()
@@ -154,7 +154,7 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
 
                 let frequency = x64::cpuid::CPUID.get_processor_frequency_info().map_or_else(
                     || {
-                        libcommon::do_once!({
+                        lzstd::do_once!({
                             trace!("Processors do not support TSC frequency reporting via CPUID.");
                         });
 

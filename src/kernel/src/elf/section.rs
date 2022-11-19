@@ -1,6 +1,6 @@
 #![allow(non_camel_case_types)]
 
-use libcommon::{Address, Virtual};
+use lzstd::{Address, Virtual};
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy)]

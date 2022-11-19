@@ -5,7 +5,7 @@ use core::{
     ptr::NonNull,
     sync::atomic::Ordering,
 };
-use libcommon::{Address, Frame};
+use lzstd::{Address, Frame};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
@@ -161,7 +161,7 @@ impl PhysicalMemoryManager<'_> {
         };
         let total_frames = total_memory / 0x1000;
 
-        let table_size_in_bytes = libcommon::align_up(
+        let table_size_in_bytes = lzstd::align_up(
             total_frames * core::mem::size_of::<FrameData>(),
             // ### Safety: Value provided is non-zero.
             unsafe { NonZeroUsize::new_unchecked(0x1000) },

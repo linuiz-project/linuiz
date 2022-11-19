@@ -5,7 +5,7 @@ use core::{
     ptr::{slice_from_raw_parts_mut, NonNull},
     sync::atomic::{AtomicU8, Ordering},
 };
-use libcommon::{Address, Frame, Virtual};
+use lzstd::{Address, Frame, Virtual};
 use lzalloc::{vec::Vec, AlignedAllocator, Result};
 use spin::Mutex;
 
@@ -127,12 +127,12 @@ impl SlabAllocator<'_> {
         memory_map: &[crate::MmapEntry],
         phys_mapped_address: Address<Virtual>,
     ) -> Option<Self> {
-        let page_count = libcommon::align_up_div(
+        let page_count = lzstd::align_up_div(
             memory_map.last().map(|entry| entry.base + entry.len).unwrap() as usize,
             // ### Safety: Value provided is non-zero.
             unsafe { NonZeroUsize::new_unchecked(0x1000) },
         );
-        let table_bytes = libcommon::align_up(
+        let table_bytes = lzstd::align_up(
             page_count * core::mem::size_of::<FrameData>(),
             // ### Safety: Value provided is non-zero.
             unsafe { NonZeroUsize::new_unchecked(0x1000) },
@@ -183,7 +183,7 @@ impl SlabAllocator<'_> {
         table
             .iter()
             .skip((table_entry.base / 0x1000) as usize)
-            .take(libcommon::align_up_div(
+            .take(lzstd::align_up_div(
                 table_bytes,
                 // ### Safety: Value provided is non-zero.
                 unsafe { NonZeroUsize::new_unchecked(0x1000) },
@@ -278,7 +278,7 @@ impl SlabAllocator<'_> {
         })
     }
 
-    pub fn lock_frame(&self, frame: Address<libcommon::Frame>) -> Result<()> {
+    pub fn lock_frame(&self, frame: Address<lzstd::Frame>) -> Result<()> {
         self.with_table(|table| {
             let Some(frame_data) = table.get(frame.index()) else { return Err(AllocError) };
             frame_data.peek();
@@ -297,7 +297,7 @@ impl SlabAllocator<'_> {
         })
     }
 
-    pub fn lock_frames(&self, base: Address<libcommon::Frame>, count: usize) -> Result<()> {
+    pub fn lock_frames(&self, base: Address<lzstd::Frame>, count: usize) -> Result<()> {
         self.with_table(|table| {
             let frames = &table[base.index()..(base.index() + count)];
             frames.iter().for_each(FrameData::peek);
@@ -315,7 +315,7 @@ impl SlabAllocator<'_> {
         })
     }
 
-    pub fn free_frame(&self, frame: Address<libcommon::Frame>) -> Result<()> {
+    pub fn free_frame(&self, frame: Address<lzstd::Frame>) -> Result<()> {
         self.with_table(|table| {
             let Some(frame_data) = table.get(frame.index()) else { return Err(AllocError) };
 
@@ -339,7 +339,7 @@ impl SlabAllocator<'_> {
     }
 
     // TODO non-zero usize for the count
-    pub fn allocate_to(&self, frame: Address<libcommon::Frame>, count: usize) -> Result<Address<Virtual>> {
+    pub fn allocate_to(&self, frame: Address<lzstd::Frame>, count: usize) -> Result<Address<Virtual>> {
         self.lock_frames(frame, count)
             .map(|_| Address::<Virtual>::new_truncate(self.phys_mapped_address.as_u64() + frame.as_u64()))
     }

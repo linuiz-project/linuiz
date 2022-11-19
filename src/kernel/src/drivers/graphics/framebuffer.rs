@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use crate::drivers::graphics::color::{Color8i, Colors};
-use libcommon::{Address, Physical, Size};
+use lzstd::{Address, Physical, Size};
 use spin::{Mutex, RwLock};
 
 #[repr(C)]
@@ -18,7 +18,7 @@ impl FramebufferDriver {
         let byte_len = pixel_len * core::mem::size_of::<Color8i>();
 
         let framebuffer = unsafe {
-            libcommon::memory::malloc::get()
+            lzstd::memory::malloc::get()
                 .alloc_against(buffer_addr.frame_index(), (byte_len + 0xFFF) / 0x1000)
                 .expect("Allocation error occurred when attempting to create pixelbuffer")
                 .cast()
@@ -28,7 +28,7 @@ impl FramebufferDriver {
         };
 
         let backbuffer = unsafe {
-            libcommon::memory::malloc::get()
+            lzstd::memory::malloc::get()
                 .alloc(
                     byte_len,
                     core::num::NonZeroUsize::new(core::mem::align_of::<Color8i>()),

@@ -46,11 +46,11 @@ pub fn get_kernel_modules() -> Option<&'static [limine::NonNullPtr<limine::Limin
     boot_only!({ LIMINE_MODULES.get_response().get().map(|response| response.modules()) })
 }
 
-pub fn get_rsdp_address() -> Option<libcommon::Address<libcommon::Physical>> {
+pub fn get_rsdp_address() -> Option<lzstd::Address<lzstd::Physical>> {
     static LIMINE_RSDP: limine::LimineRsdpRequest = limine::LimineRsdpRequest::new(LIMINE_REV);
     boot_only!({
         LIMINE_RSDP.get_response().get().and_then(|response| response.address.as_ptr()).and_then(|ptr| {
-            libcommon::Address::<libcommon::Physical>::new(
+            lzstd::Address::<lzstd::Physical>::new(
                 // Properly handle the bootloader's mapping of ACPI addresses in lower-half or higher-half memory space.
                 core::cmp::min(ptr.addr(), ptr.addr().wrapping_sub(crate::memory::get_hhdm_address().as_usize()))
                     as u64,
@@ -64,8 +64,8 @@ pub fn get_rsdp_address() -> Option<libcommon::Address<libcommon::Physical>> {
 /// No dangling references can remain to bootloader types or memory, as it may be concurrently overwritten.
 pub unsafe fn reclaim_boot_memory() {
     use crate::memory::pmm::FrameType;
-    use libcommon::{Address, Frame};
     use limine::LimineMemoryMapEntryType;
+    use lzstd::{Address, Frame};
 
     assert!(!BOOT_RECLAIM.load(Ordering::Acquire));
 

@@ -4,7 +4,7 @@ use core::{
     fmt::{Debug, Formatter, Result},
     marker::PhantomData,
 };
-use libcommon::{Address, Physical};
+use lzstd::{Address, Physical};
 use num_enum::TryFromPrimitive;
 
 // #[repr(u8)]

@@ -11,7 +11,7 @@ use core::{
     alloc::{AllocError, Allocator, Layout},
     ptr::NonNull,
 };
-use libcommon::{Address, Frame, Virtual};
+use lzstd::{Address, Frame, Virtual};
 use slab::SlabAllocator;
 use spin::{Lazy, Once};
 use try_alloc::boxed::TryBox;

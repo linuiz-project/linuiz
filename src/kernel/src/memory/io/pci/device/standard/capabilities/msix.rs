@@ -4,7 +4,7 @@ use crate::{
 };
 use bit_field::BitField;
 use core::fmt;
-use libcommon::{memory::VolatileCell, ReadWrite};
+use lzstd::{memory::VolatileCell, ReadWrite};
 
 // #[repr(C)]
 // pub struct MessageControl {
@@ -167,7 +167,7 @@ impl super::Capability for MSIX<'_> {
     const BARS_USED: [bool; Standard::REGISTER_COUNT] = [false, true, true, false, false, false];
 
     unsafe fn from_base_ptr(capability_base_ptr: *mut LittleEndianU32, bars: [Option<BAR>; 6]) -> Self {
-        use libcommon::memory::Page;
+        use lzstd::memory::Page;
 
         let bar1 = bars[1].expect("MSI-X capability utilizes BAR 1");
         // TODO support pending bits BAR
@@ -184,10 +184,10 @@ impl super::Capability for MSIX<'_> {
             );
             assert_eq!(size & (core::mem::size_of::<Message>() - 1), 0, "BAR size must be aligned");
 
-            // TODO maybe we shouldn't import kernel types? PCI may need to be moved back to libcommon, for userspace compatibility.
+            // TODO maybe we shouldn't import kernel types? PCI may need to be moved back to lzstd, for userspace compatibility.
             let frame_manager = crate::memory::get_kernel_frame_manager();
             let page_manager = crate::memory::get_kernel_page_manager();
-            let hhdm_offset_address = libcommon::Address::<libcommon::Virtual>::new(
+            let hhdm_offset_address = lzstd::Address::<lzstd::Virtual>::new(
                 crate::memory::get_hhdm_address().as_u64() + address.as_u64(),
             )
             .unwrap();

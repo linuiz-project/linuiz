@@ -1,4 +1,4 @@
-use libcommon::{Address, Physical, Virtual};
+use lzstd::{Address, Physical, Virtual};
 
 bitflags::bitflags! {
     #[repr(transparent)]

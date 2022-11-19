@@ -11,17 +11,17 @@ path = "../shared/uart/"
 path = "../shared/msr/"
 [dependencies.apic]
 path = "../shared/apic/"
-[dependencies.libcommon]
-path = "../shared/libcommon/"
 [dependencies.slab]
 path = "../shared/slab/"
+[dependencies.lzstd]
+git = "https://github.com/linuiz-project/lzstd"
 [dependencies.spin]
-path = "../../submodules/spin-rs/"
+git = "https://github.com/linuiz-project/spin-rs"
 [dependencies.lza]
-path = "../../submodules/lza/"
+git = "https://github.com/linuiz-project/lza"
 default-features = false
 [dependencies.try_alloc]
-path = "../../submodules/try_alloc/"
+git = "https://github.com/linuiz-project/try_alloc"
 [dependencies.acpi]
 git = "https://github.com/semiviral/acpi"
 

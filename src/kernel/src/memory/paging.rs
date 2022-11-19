@@ -1,5 +1,5 @@
 use core::fmt;
-use libcommon::{
+use lzstd::{
     mem::{InteriorRef, Mut, Ref},
     Address, Frame, Page, Virtual,
 };

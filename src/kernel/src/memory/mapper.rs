@@ -2,7 +2,7 @@ use crate::{
     interrupts,
     memory::{AttributeModify, PageAttributes, PageTable, PageTableEntry, VmemRegister, PMM},
 };
-use libcommon::{
+use lzstd::{
     mem::{Mut, Ref},
     Address, Frame, Page, Virtual,
 };

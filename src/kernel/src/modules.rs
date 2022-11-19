@@ -1,4 +1,4 @@
-use libcommon::{Address, Page};
+use lzstd::{Address, Page};
 use try_alloc::boxed::TryBox;
 
 pub fn load_modules() {
@@ -49,7 +49,7 @@ pub fn load_modules() {
         /* load driver */
         {
             use crate::{elf::segment, memory::PageAttributes};
-            use libcommon::PageAlign;
+            use lzstd::PageAlign;
 
             // Create the driver's page manager from the kernel's higher-half table.
             // ### Safety: Kernel guarantees HHDM to be valid.
@@ -73,13 +73,12 @@ pub fn load_modules() {
                         let memory_start = segment.get_virtual_address().unwrap().as_usize();
                         let memory_end = memory_start + segment.get_memory_layout().unwrap().size();
                         // ### Safety: Value provided is non-zero.
-                        let start_page_index = libcommon::align_down_div(memory_start, unsafe {
+                        let start_page_index = lzstd::align_down_div(memory_start, unsafe {
                             core::num::NonZeroUsize::new_unchecked(0x1000)
                         });
                         // ### Safety: Value provided is non-zero.
-                        let end_page_index = libcommon::align_up_div(memory_end, unsafe {
-                            core::num::NonZeroUsize::new_unchecked(0x1000)
-                        });
+                        let end_page_index =
+                            lzstd::align_up_div(memory_end, unsafe { core::num::NonZeroUsize::new_unchecked(0x1000) });
                         let mut data_offset = 0;
 
                         for page_index in start_page_index..end_page_index {

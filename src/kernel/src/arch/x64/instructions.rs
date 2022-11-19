@@ -19,7 +19,7 @@ pub mod sync {
 }
 
 pub mod tlb {
-    use libcommon::{Address, Page};
+    use lzstd::{Address, Page};
 
     /// Invalidates a single page from the TLB.
     #[inline]
@@ -64,7 +64,7 @@ pub mod tlb {
     //         /// Descriptor for use when executing the `invlpcid` instruction.
     //         #[repr(C)]
     //         pub struct InvalidateDescriptor {
-    //             page: libcommon::memory::Page,
+    //             page: lzstd::memory::Page,
     //             pcid: PCID,
     //         }
 
