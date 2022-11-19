@@ -97,6 +97,8 @@ static LIMINE_DEFAULT_CFG: &str = "
     ";
 
 pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
+    cmd!(shell, "git submodule update --init --recursive --remote").run()?;
+
     let workspace_root = shell.current_dir();
 
     // Configure rustc via the `RUSTFLAGS` environment variable.

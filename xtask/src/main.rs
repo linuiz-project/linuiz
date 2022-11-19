@@ -19,7 +19,6 @@ fn main() -> Result<(), xshell::Error> {
 
     match Arguments::parse() {
         Arguments::Build(build_options) => {
-            cmd!(shell, "git submodule update --init --recursive --remote").run()?;
             build::build(&shell, build_options)
         }
 
