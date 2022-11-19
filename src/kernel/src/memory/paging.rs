@@ -1,6 +1,6 @@
 use core::fmt;
 use libcommon::{
-    memory::{InteriorRef, Mut, Ref},
+    mem::{InteriorRef, Mut, Ref},
     Address, Frame, Page, Virtual,
 };
 

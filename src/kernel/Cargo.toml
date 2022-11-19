@@ -13,7 +13,6 @@ path = "../shared/msr/"
 path = "../shared/apic/"
 [dependencies.libcommon]
 path = "../shared/libcommon/"
-features = ["global_allocator"]
 [dependencies.slab]
 path = "../shared/slab/"
 [dependencies.spin]

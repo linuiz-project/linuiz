@@ -1,37 +1,11 @@
 #![no_std]
 #![feature(
-    once_cell,
-    raw_ref_op,
-    step_trait,
-    abi_efiapi,
-    abi_x86_interrupt,
-    panic_info_message,
-    alloc_error_handler,
-    const_mut_refs,
-    exclusive_range_pattern,
-    extern_types,
-    ptr_as_uninit,
-    slice_ptr_get,
-    const_align_offset,
-    const_transmute_copy,
-    const_ptr_as_ref,
-    const_option,
-    const_ptr_is_null,
-    naked_functions,
-    allocator_api,
-    sync_unsafe_cell,
-    asm_const,
-    core_intrinsics,
-    pointer_is_aligned,
+    extern_types,                       // #43467 <https://github.com/rust-lang/rust/issues/43467>
+    step_trait,                         // #42168 <https://github.com/rust-lang/rust/issues/42168> [POSSIBLY REMOVE]
+    strict_provenance,                  // #95228 <https://github.com/rust-lang/rust/issues/95228>
+    pointer_is_aligned,                 // #96284 <https://github.com/rust-lang/rust/issues/96284>
     const_option_ext,
-    inline_const,
-    strict_provenance,
-    let_chains,
-    if_let_guard,
-    associated_type_defaults
 )]
-
-extern crate log;
 
 mod addr;
 mod macros;
@@ -39,9 +13,7 @@ mod macros;
 use core::num::NonZeroUsize;
 
 pub use addr::*;
-pub mod memory;
-// TODO pub mod sync;
-pub mod syscall;
+pub mod mem;
 
 pub struct ReadOnly;
 pub struct WriteOnly;

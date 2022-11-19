@@ -2,7 +2,7 @@ use crate::interrupts;
 use acpi::platform::interrupt::{Polarity, TriggerMode};
 // use alloc::vec::Vec;
 use bit_field::BitField;
-use libcommon::memory::VolatileCell;
+use libcommon::mem::VolatileCell;
 use spin::Mutex;
 
 #[repr(transparent)]

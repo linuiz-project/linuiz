@@ -3,7 +3,7 @@ use crate::{
     memory::{AttributeModify, PageAttributes, PageTable, PageTableEntry, VmemRegister, PMM},
 };
 use libcommon::{
-    memory::{Mut, Ref},
+    mem::{Mut, Ref},
     Address, Frame, Page, Virtual,
 };
 use spin::RwLock;
