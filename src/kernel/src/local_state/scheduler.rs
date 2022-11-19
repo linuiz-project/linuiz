@@ -1,3 +1,5 @@
+use alloc::collections::{BTreeSet, BinaryHeap};
+
 use crate::memory::Stack;
 use core::sync::atomic::AtomicU64;
 //use lzalloc::deque::Deque;
@@ -24,6 +26,7 @@ pub fn queue_task(_new_task: Task) {
 pub struct Task {
     id: u64,
     prio: u8,
+    last_run: u32,
     stack: Stack,
     //pcid: Option<PCID>,
     pub ctrl_flow_context: crate::cpu::ControlContext,
@@ -45,6 +48,7 @@ impl Task {
         Self {
             id: NEXT_THREAD_ID.fetch_add(1, core::sync::atomic::Ordering::AcqRel),
             prio: priority,
+            last_run: 0,
             stack,
             ctrl_flow_context: crate::cpu::ControlContext {
                 ip: match start {
@@ -67,6 +71,31 @@ impl Task {
     pub fn priority(&self) -> u8 {
         self.prio
     }
+
+    pub fn last_run(&self) -> u32 {
+        self.last_run
+    }
+}
+
+impl Ord for Task {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        use core::cmp::Ordering;
+
+        let last_run_cmp = self.last_run().cmp(&other.last_run());
+        let priority_cmp = self.priority().cmp(&other.priority());
+
+        match (priority_cmp, last_run_cmp) {
+            (Ordering::Greater, Ordering::Greater) => Ordering::Greater,
+            (Ordering::Greater, _) => Ordering::Less,
+            (Ordering::Equal | Ordering::Less, ordering) => ordering,
+        }
+    }
+}
+
+impl PartialOrd for Task {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 impl core::fmt::Debug for Task {
@@ -80,12 +109,12 @@ pub struct Scheduler {
     total_priority: u64,
     idle_task: Task,
     cur_task: Option<Task>,
-    tasks: Deque<Task>,
+    tasks: BinaryHeap<Task>,
 }
 
 impl Scheduler {
     pub fn new(enabled: bool, idle_task: Task) -> Self {
-        Self { enabled, total_priority: 0, idle_task, cur_task: None, tasks: Deque::new() }
+        Self { enabled, total_priority: 0, idle_task, cur_task: None, tasks: BinaryHeap::new() }
     }
 
     /// Enables the scheduler to pop tasks.
@@ -111,14 +140,14 @@ impl Scheduler {
     /// Pushes a new task to the scheduling queue.
     pub fn push_task(&mut self, task: Task) {
         self.total_priority += task.priority() as u64;
-        self.tasks.push_back(task).unwrap();
+        self.tasks.push(task);
     }
 
     /// If the scheduler is enabled, attempts to return a new task from
     /// the task queue. Returns `None` if the queue is empty.
     pub fn pop_task(&mut self) -> Option<Task> {
         if self.enabled {
-            self.tasks.pop_front().map(|task| {
+            self.tasks.pop().map(|task| {
                 self.total_priority -= task.priority() as u64;
                 task
             })
@@ -127,13 +156,8 @@ impl Scheduler {
         }
     }
 
-    pub fn get_avg_prio(&self) -> u64 {
-        self.total_priority.checked_div(self.tasks.len() as u64).unwrap_or(0)
-    }
-
-    #[inline]
-    pub fn get_task_count(&self) -> usize {
-        self.tasks.len()
+    pub fn get_total_priority(&self) -> u64 {
+        self.total_priority
     }
 
     /// Attempts to schedule the next task in the local task queue.

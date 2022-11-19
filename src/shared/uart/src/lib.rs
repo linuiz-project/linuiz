@@ -182,7 +182,7 @@ impl Mode for Configure {}
 pub struct Uart<M: Mode>(UartAddress, PhantomData<M>);
 
 /// ### Safety
-/// 
+///
 /// Type constructor requires that the inner address be `Send`-able.
 unsafe impl<M: Mode> Send for Uart<M> {}
 
@@ -338,8 +338,8 @@ impl Uart<Configure> {
 
 impl Uart<Data> {
     /// ### Safety
-/// 
-/// Provided address must be `Send`-able (i.e. can be used on any CPU core).
+    ///
+    /// Provided address must be `Send`-able (i.e. can be used on any CPU core).
     pub unsafe fn new(address: UartAddress) -> Self {
         Self(address, PhantomData)
     }
