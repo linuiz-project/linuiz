@@ -79,7 +79,7 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
             // TODO use fallible allocations for this
             if !crate::PARAMETERS.low_memory {
                 Some({
-                    let idt = TryBox::new(idt::InterruptDescriptorTable::new()).unwrap();
+                    let mut idt = TryBox::new(idt::InterruptDescriptorTable::new()).unwrap();
 
                     idt::set_exception_handlers(&mut *idt);
                     idt::set_stub_handlers(&mut *idt);
@@ -99,7 +99,7 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
             };
             use core::num::NonZeroUsize;
 
-            let Ok(tss) = TryBox::new(tss::TaskStateSegment::new()) else { crate::memory::out_of_memory() };
+            let Ok(mut tss) = TryBox::new(tss::TaskStateSegment::new()) else { crate::memory::out_of_memory() };
 
             fn allocate_tss_stack(pages: NonZeroUsize) -> VirtAddr {
                 VirtAddr::from_ptr(

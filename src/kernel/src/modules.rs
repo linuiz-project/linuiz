@@ -15,7 +15,7 @@ pub fn load_modules() {
 
     for (header, data) in lza::ArchiveReader::new(drivers_data) {
         // SAFETY: Value is non-zero.
-        let Ok(elf_buffer) = TryBox::new_slice(header.len().get(), 0u8)
+        let Ok(mut elf_buffer) = TryBox::new_slice(header.len().get(), 0u8)
             else {
                 warn!("Failed allocate decompression buffer for driver: {:?}", header);
                 continue

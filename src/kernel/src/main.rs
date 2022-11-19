@@ -41,7 +41,6 @@
 )]
 #![cfg_attr(target_arch = "x86_64", feature(abi_x86_interrupt))]
 
-#[macro_use]
 extern crate alloc;
 #[macro_use]
 extern crate log;
@@ -348,7 +347,7 @@ unsafe extern "C" fn _entry() -> ! {
 
                 match section_name {
                     ".symtab" if section_data.len() > 0 && let Ok(symbols) = bytemuck::try_cast_slice::<u8, Symbol>(section.data()) => {
-                        let Ok(symbols_copy) = TryBox::new_slice(symbols.len(), Symbol::default()) else { continue };
+                        let Ok(mut symbols_copy) = TryBox::new_slice(symbols.len(), Symbol::default()) else { continue };
 
                         crate::interrupts::without(|| {
                             crate::panic::KERNEL_SYMBOLS.call_once(|| {
@@ -359,7 +358,7 @@ unsafe extern "C" fn _entry() -> ! {
                     }
 
                     ".strtab" if section_data.len() > 0 => {
-                        let Ok(strings_copy) = TryBox::new_slice(section_data.len(), 0) else { continue };
+                        let Ok(mut strings_copy) = TryBox::new_slice(section_data.len(), 0) else { continue };
 
                         crate::interrupts::without(|| {
                             crate::panic::KERNEL_STRINGS.call_once(|| {

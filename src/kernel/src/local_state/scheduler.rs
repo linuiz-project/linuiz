@@ -1,8 +1,6 @@
-use alloc::collections::{BTreeSet, BinaryHeap};
-
 use crate::memory::Stack;
+use alloc::{collections::BinaryHeap, vec::Vec};
 use core::sync::atomic::AtomicU64;
-//use lzalloc::deque::Deque;
 
 static NEXT_THREAD_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -11,13 +9,12 @@ pub enum EntryPoint {
     Function(fn() -> !),
 }
 
-// static WAITING_TASKS: spin::Mutex<Deque<Task>> = spin::Mutex::new(Deque::new());
+static WAITING_TASKS: spin::Mutex<Vec<Task>> = spin::Mutex::new(Vec::new());
 
-pub fn queue_task(_new_task: Task) {
+pub fn queue_task(new_task: Task) {
     crate::interrupts::without(|| {
-        // TODO
-        // let mut waiting_tasks = WAITING_TASKS.lock();
-        // waiting_tasks.push_back(new_task).unwrap();
+        let mut waiting_tasks = WAITING_TASKS.lock();
+        waiting_tasks.push(new_task);
     })
 }
 
@@ -33,6 +30,9 @@ pub struct Task {
     pub arch_context: crate::cpu::ArchContext,
     pub root_page_table_args: crate::memory::VmemRegister,
 }
+
+// TODO safety
+unsafe impl Send for Task {}
 
 impl Task {
     pub fn new(
@@ -95,6 +95,14 @@ impl Ord for Task {
 impl PartialOrd for Task {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+impl Eq for Task {}
+
+impl PartialEq for Task {
+    fn eq(&self, other: &Self) -> bool {
+        self.priority() == other.priority() && self.last_run() == other.last_run()
     }
 }
 

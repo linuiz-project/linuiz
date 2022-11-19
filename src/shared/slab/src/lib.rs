@@ -50,6 +50,8 @@ impl<A: Allocator> core::fmt::Debug for Slab<A> {
 
 impl<A: Allocator + Copy> Slab<A> {
     fn new_in(layout: Layout, allocator: A) -> Result<Self, AllocError> {
+        debug_assert!(layout.size() > 0);
+
         let padded_layout = layout.pad_to_align();
         let memory = allocator.allocate(unsafe { Layout::from_size_align_unchecked(SLAB_LENGTH, layout.align()) })?;
         let capacity = memory.len() / padded_layout.size();
@@ -83,7 +85,6 @@ impl<A: Allocator> Slab<A> {
 
     #[inline]
     pub fn take_item(&mut self) -> Option<NonNull<[u8]>> {
-        log::trace!("TAKE ITEM");
         self.items.pop()
     }
 
@@ -131,7 +132,9 @@ impl<A: Allocator + Copy> SlabAllocator<A> {
 unsafe impl<A: Allocator + Copy> Allocator for SlabAllocator<A> {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         let padded_layout = layout.pad_to_align();
-        if padded_layout.size() > self.max_size {
+        if padded_layout.size() == 0 {
+            Err(AllocError)
+        } else if padded_layout.size() > self.max_size {
             self.allocator.allocate(layout)
         } else {
             let mut slabs = self.slabs.lock();
