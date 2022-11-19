@@ -11,3 +11,6 @@
 	path = submodules/limine
 	url = https://github.com/limine-bootloader/limine
 	branch = v4.x-branch-binary
+[submodule "submodules/lzstd"]
+	path = submodules/lzstd
+	url = https://github.com/linuiz-project/lzstd
