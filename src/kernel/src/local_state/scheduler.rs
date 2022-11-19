@@ -176,7 +176,7 @@ impl Scheduler {
     ) {
         use crate::memory::VmemRegister;
 
-        const PRIO_TIME_SLICE_MULTIPLIER: u16 = 10;
+        const TIME_SLICE: u16 = 5;
 
         debug_assert!(!crate::interrupts::are_enabled());
 
@@ -197,7 +197,7 @@ impl Scheduler {
         // }
 
         unsafe {
-            let next_wait_multiplier = if let Some(next_task) = self.pop_task() {
+            if let Some(next_task) = self.pop_task() {
                 // Modify interrupt contexts (usually, the registers).
                 *ctrl_flow_context = next_task.ctrl_flow_context;
                 *arch_context = next_task.arch_context;
@@ -205,10 +205,7 @@ impl Scheduler {
                 // Set current page tables.
                 VmemRegister::write(&next_task.root_page_table_args);
 
-                let next_timer_ms = (next_task.priority() as u16) * PRIO_TIME_SLICE_MULTIPLIER;
                 self.cur_task = Some(next_task);
-
-                next_timer_ms
             } else {
                 let default_task = &self.idle_task;
 
@@ -218,11 +215,9 @@ impl Scheduler {
 
                 // Set current page tables.
                 VmemRegister::write(&default_task.root_page_table_args);
-
-                PRIO_TIME_SLICE_MULTIPLIER
             };
 
-            crate::local_state::preemption_wait(core::num::NonZeroU16::new(next_wait_multiplier).unwrap());
+            crate::local_state::preemption_wait(core::num::NonZeroU16::new_unchecked(TIME_SLICE));
         }
     }
 }

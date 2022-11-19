@@ -298,15 +298,10 @@ unsafe extern "C" fn _entry() -> ! {
         }
 
         debug!("Switching to kernel page tables...");
-        // ### Safety: Kernel mapper has mapped all existing memory references, so commiting
-        //         changes nothing from the software perspective.
+        // ### Safety: Kernel mapper has mapped all existing memory references, so commiting changes nothing from the software perspective.
         unsafe { kernel_mapper.commit_vmem_register() }.unwrap();
         debug!("Kernel has finalized control of page tables.");
     }
-
-    // TODO
-    // debug!("Loading kernel modules...");
-    // crate::modules::load_modules();
 
     debug!("Initializing ACPI interface...");
     crate::acpi::init_interface();
@@ -373,8 +368,11 @@ unsafe extern "C" fn _entry() -> ! {
             }
         }
     } else {
-        debug!("Kernel is running in low memory mode; stack tracing will be disabled.");
+        debug!("Kernel is running in low memory mode; pretty stack tracing will be disabled.");
     }
+
+    debug!("Loading kernel modules...");
+    crate::modules::load_modules();
 
     /* smp */
     {
@@ -414,35 +412,6 @@ unsafe extern "C" fn _entry() -> ! {
         } else {
             debug!("Bootloader has not provided any SMP information.");
         }
-    }
-
-    /* arch core init */
-    // #[cfg(target_arch = "x86_64")]
-    // {
-    //     // ### Safety: Provided IRQ base is intentionally within the exception range for x86 CPUs.
-    //     static PICS: spin::Mutex<pic_8259::Pics> = spin::Mutex::new(unsafe { pic_8259::Pics::new(0) });
-    //     PICS.lock().init(pic_8259::InterruptLines::empty());
-    // }
-
-    // TODO rv64 bsp hart init
-
-    // Because the SMP information structures (and thus, their `goto_address`) are only mapped in the bootloader
-    // page tables, we have to start the other cores and pass the root page table frame index in. All of the cores
-    // will then wait until every core has swapped to the new page tables, then this core (the boot core) will
-    // reclaim bootloader memory.
-
-    /* memory finalize */
-    {
-        // TODO debug!("Loading pre-packaged drivers...");
-        // load_drivers();
-
-        // TODO init PCI devices
-        // debug!("Initializing PCI devices...");
-        // crate::memory::io::pci::init_devices();
-
-        // TODO reclaim bootloader memory
-        // debug!("Reclaiming bootloader reclaimable memory...");
-        // crate::memory::reclaim_bootloader_frames();
     }
 
     /* configure I/O APIC redirections */
@@ -535,7 +504,8 @@ unsafe extern "C" fn _entry() -> ! {
         //     // }
     }
 
-    // TODO make this a standalone function so we can return error states
+    debug!("Reclaiming bootloader memory...");
+    crate::boot::reclaim_boot_memory();
 
     kernel_thread_setup(0)
 }

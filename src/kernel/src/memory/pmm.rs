@@ -20,6 +20,8 @@ pub enum Error {
     /// Attempted to free a frame that wasn't locked.
     NotLocked,
 
+    TypeMismatch,
+
     Unknown,
 }
 
@@ -323,7 +325,7 @@ impl PhysicalMemoryManager<'_> {
         })
     }
 
-    pub fn free_frame(&self, frame: Address<libcommon::Frame>) -> Result<()> {
+    pub fn free_frame(&self, frame: Address<Frame>) -> Result<()> {
         self.with_table(|table| {
             let Some(frame_data) = table.get(frame.index()) else { return Err(Error::OutOfBounds) };
 
@@ -343,6 +345,24 @@ impl PhysicalMemoryManager<'_> {
                     Err(Error::NotLocked)
                 }
             }
+        })
+    }
+
+    pub fn modify_type(&self, frame: Address<Frame>, new_type: FrameType, old_type: Option<FrameType>) -> Result<()> {
+        self.with_table(|table| {
+            let Some(frame_data) = table.get(frame.index()) else { return Err(Error::OutOfBounds) };
+
+            frame_data.peek();
+
+            let (_, ty) = frame_data.data();
+            if let Some(old_type) = old_type && old_type != ty {
+                return Err(Error::Unknown);
+            }
+            frame_data.set_type(new_type);
+
+            frame_data.unpeek();
+
+            Ok(())
         })
     }
 }

@@ -40,19 +40,6 @@ pub fn get_kernel_mapper() -> &'static Mapper {
     })
 }
 
-// TODO this
-// pub fn reclaim_bootloader_frames() {
-//     let frame_manager = get_kernel_frame_manager();
-//     frame_manager.iter().enumerate().filter(|(_, (_, ty))| *ty == FrameType::BootReclaim).for_each(
-//         |(frame_index, _)| {
-//             // ### Safety: These frames come directly from the frame manager, and so are guaranteed valid.
-//             let frame = unsafe { Address::<Frame>::new_unchecked((frame_index * 0x1000) as u64) };
-//             frame_manager.try_modify_type(frame, FrameType::Usable).ok();
-//             frame_manager.free(frame).ok();
-//         },
-//     );
-// }
-
 #[cfg(target_arch = "x86_64")]
 pub struct VmemRegister(pub Address<Frame>, pub crate::arch::x64::registers::control::CR3Flags);
 #[cfg(target_arch = "riscv64")]
