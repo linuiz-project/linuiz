@@ -337,12 +337,6 @@ impl SlabAllocator<'_> {
             }
         })
     }
-
-    // TODO non-zero usize for the count
-    pub fn allocate_to(&self, frame: Address<lzstd::Frame>, count: usize) -> Result<Address<Virtual>> {
-        self.lock_frames(frame, count)
-            .map(|_| Address::<Virtual>::new_truncate(self.phys_mapped_address.as_u64() + frame.as_u64()))
-    }
 }
 
 // ### Safety: `SlabAllocator` promises to do everything right.

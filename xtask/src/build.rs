@@ -263,7 +263,6 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
 
     // Compile and compress drivers ...
     {
-        // TODO I'm not sure how I feel about the layout of this whole block.
         let driver_data = {
             let _dir = shell.push_dir("src/userspace/");
 

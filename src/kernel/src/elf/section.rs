@@ -103,7 +103,6 @@ impl Header {
 
     #[inline]
     pub const fn get_attributes(&self) -> Attributes {
-        // TODO maybe don't truncate extra bits for os/processor-specific bits?
         Attributes::from_bits_truncate(self.attributes)
     }
 

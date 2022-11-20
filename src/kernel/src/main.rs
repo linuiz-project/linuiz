@@ -202,9 +202,6 @@ unsafe extern "C" fn _entry() -> ! {
             }
         }
 
-        // TODO don't unwrap, possibly switch to a simpler allocator? bump allocator, maybe
-        // ### Safety: Kernel guarantees the HHDM to be valid.
-
         debug!("Initializing kernel mapper...");
         // ### Safety: Kernel guarantees HHDM address to be valid.
         let boot_mapper = unsafe { Mapper::from_current(memory::get_hhdm_address()) };
@@ -491,7 +488,6 @@ unsafe extern "C" fn _entry() -> ! {
         //     // TODO ?? maybe
         //     // /* enable ACPI SCI interrupts */
         //     // {
-        //     //     // TODO clean this filthy mess up
 
         //     //     let pm1a_evt_blk =
         //     //         &crate::tables::acpi::get_fadt().pm1a_event_block().expect("no `PM1a_EVT_BLK` found in FADT");

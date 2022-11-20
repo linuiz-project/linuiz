@@ -28,7 +28,6 @@ pub fn do_syscall(vector: Syscall) {
                     if page_manager.is_mapped(char_address_base_page) {
                         last_char_page_base = char_address_base_page;
                     } else {
-                        // TODO do something more comprehensive here
                         warn!("Process attempted to log with unmapped `CStr` memory.");
                         return;
                     }

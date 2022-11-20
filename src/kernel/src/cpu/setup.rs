@@ -153,7 +153,6 @@ unsafe extern "sysv64" fn syscall_handler(
         0x100 => {
             use log::Level;
 
-            // TODO possibly PR the `log` crate to make `log::Level::from_usize()` public.
             let log_level = match arg0 {
                 1 => Ok(Level::Error),
                 2 => Ok(Level::Warn),
