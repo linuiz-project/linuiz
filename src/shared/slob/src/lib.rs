@@ -11,8 +11,6 @@ use spin::Mutex;
 
 type SlobInt = AtomicUsize;
 
-/// Allocator utilizing blocks of memory, in size of 64 bytes per block, to
-/// easily and efficiently allocate.
 pub struct Slob<'a> {
     table: Mutex<&'a mut [SlobInt]>,
     base_address: Address<Page>,
@@ -22,7 +20,7 @@ pub struct Slob<'a> {
 impl<'a> Slob<'a> {
     pub unsafe fn new(base_address: Address<Page>, map_page_fn: fn(Address<Page>) -> Result<(), ()>) -> Option<Self> {
         // Map all of the pages in the allocation table.
-        for page_offset in 0..PAGES_PER_TABLE_PAGE {
+        for page_offset in 0..SlobInt::BITS {
             map_page_fn(base_address.forward_checked(page_offset).ok()?).ok()?;
         }
 

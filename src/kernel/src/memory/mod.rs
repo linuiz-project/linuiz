@@ -5,7 +5,6 @@ pub mod io;
 pub use mapper::*;
 pub use paging::*;
 pub mod pmm;
-pub mod slob;
 
 use alloc::alloc::Global;
 use core::{

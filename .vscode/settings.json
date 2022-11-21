@@ -8,7 +8,10 @@
         "src/shared/uart/Cargo.toml",
         "src/shared/port-rs/Cargo.toml",
         "src/shared/slab/Cargo.toml",
+        "src/shared/bump/Cargo.toml",
+        "src/shared/freelist/Cargo.toml",
         "src/shared/apic/Cargo.toml",
+        "src/shared/bitslice/Cargo.toml",
         "src/userspace/Cargo.toml",
         "xtask/Cargo.toml"
     ],
