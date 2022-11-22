@@ -3,7 +3,9 @@
 
 extern crate alloc;
 
-use core::alloc::Allocator;
+use core::{alloc::{Allocator, Layout, AllocError}, ptr::NonNull};
+
+use alloc::collections::BTreeMap;
 
 struct Region {
     is_free: bool,
@@ -11,5 +13,11 @@ struct Region {
 }
 
 pub struct FreeListAllocator<A: Allocator> {
-    list: TryVec<Region>,
+    list: BTreeMap<Region, A>,
 }
+
+unsafe impl<A: Allocator> Allocator for FreeListAllocator<A> {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        
+    }
+} 
