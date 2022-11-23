@@ -33,46 +33,29 @@ impl PartialOrd for BoundaryTag {
     }
 }
 
-pub struct Slab<A: Allocator> {
-    memory: NonNull<[u8]>,
-    table: 
+pub struct Slab<A: Allocator + Clone> {
+    items: BTreeSet<NonNull<[u8]>, A>,
+    total_items: usize,
     allocator: A
 }
 
-
-impl<A: Allocator + Clone> Slab<A> {
-    fn new_in(, allocator: A) -> Result<Self, AllocError> {
-        debug_assert!(layout.size() > 0);
-
-        let padded_layout = layout.pad_to_align();
-        let memory = allocator.allocate(unsafe { Layout::from_size_align_unchecked(SLAB_LENGTH, layout.align()) })?;
-        let capacity = memory.len() / padded_layout.size();
-        let mut list = TryVec::with_capacity_in(capacity, allocator).map_err(|_| AllocError)?;
-
-        for index in 0..capacity {
-            let start_offset = index * padded_layout.size();
-            let end_offset = start_offset + layout.size();
-            list.push(unsafe { memory.get_unchecked_mut(start_offset..end_offset) }).map_err(|_| AllocError)?;
-        }
-
-        Ok(Self { layout, capacity, items: list, memory, allocator })
+impl<A: Allocator + Clone> Drop for Slab<A> {
+    fn drop(&mut self) {
+        todo!()
     }
 }
 
-impl<A: Allocator> Drop for Slab<A> {
-    fn drop(&mut self) {
-        unsafe {
-            self.allocator.deallocate(
-                self.memory.as_non_null_ptr(),
-                Layout::from_size_align_unchecked(self.memory.len(), self.layout.align()),
-            )
-        };
-    }
+
+
+
+pub enum VmemSegment {
+    SpanMarker(usize),
+    BoundaryTag
 }
 
 pub struct VmemArena<A: Allocator + Clone> {
     min_order: u32,
-    segments: BTreeSet<NonNull<[u8]>, A>,
+    segments: ,
     tags: BTreeMap<NonNull<u8>, usize, A>,
     quantums: Vec<Vec<Slab<A>, A>, A>
 
