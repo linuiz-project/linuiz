@@ -3,7 +3,7 @@
 
 extern crate alloc;
 
-use alloc::{collections::{BTreeSet, BTreeMap}, vec::Vec};
+use alloc::{collections::BTreeSet, vec::Vec};
 use core::{
     alloc::{AllocError, Allocator, Layout},
     ops::Range,
@@ -13,30 +13,13 @@ use core::{
 pub enum Fit {
     Best,
     Instant,
-    Next
-}
-
-pub struct BoundaryTag {
-    start: usize,
-    len: usize
-}
-
-impl Ord for BoundaryTag {
-    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        self.start.cmp(&other.start)
-    }
-}
-
-impl PartialOrd for BoundaryTag {
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        self.start.partial_cmp(&other.start)
-    }
+    Next,
 }
 
 pub struct Slab<A: Allocator + Clone> {
     items: BTreeSet<NonNull<[u8]>, A>,
     total_items: usize,
-    allocator: A
+    allocator: A,
 }
 
 impl<A: Allocator + Clone> Drop for Slab<A> {
@@ -45,32 +28,79 @@ impl<A: Allocator + Clone> Drop for Slab<A> {
     }
 }
 
-
-
-
-pub enum VmemSegment {
-    SpanMarker(usize),
-    BoundaryTag
+#[derive(Debug, Clone, Copy)]
+struct Span {
+    memory: NonNull<[u8]>,
+    refs: usize,
 }
 
-pub struct VmemArena<A: Allocator + Clone> {
-    min_order: u32,
-    segments: ,
-    tags: BTreeMap<NonNull<u8>, usize, A>,
-    quantums: Vec<Vec<Slab<A>, A>, A>
-
-
-    
-    allocator: A,
+impl Eq for Span {}
+impl PartialEq for Span {
+    fn eq(&self, other: &Self) -> bool {
+        self.start == other.start
+    }
 }
 
-impl<A: Allocator + Clone> VmemArena<A> {
-    fn 
+impl Ord for Span {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.start.cmp(&other.start)
+    }
 }
 
-unsafe impl<A: Allocator + Clone> Allocator for VmemArena<A> {
+impl PartialOrd for Span {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        self.start.partial_cmp(&other.start)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Segment {
+    start: usize,
+    len: usize,
+    span: Span,
+}
+
+impl Eq for Segment {}
+impl PartialEq for Segment {
+    fn eq(&self, other: &Self) -> bool {
+        self.start == other.start
+    }
+}
+
+impl Ord for Segment {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.start.cmp(&other.start)
+    }
+}
+
+impl PartialOrd for Segment {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        self.start.partial_cmp(&other.start)
+    }
+}
+
+pub struct Vmem<A: Allocator + Clone> {
+    spans: BTreeSet<Span, A>,
+    segments: BTreeSet<Segment, A>,
+    quantum_order: u32,
+    quantums: Vec<Slab<A>, A>,
+}
+
+impl<A: Allocator + Clone> Vmem<A> {
+    fn new_in(quantum_order: u32, orders: u32, allocator: A) -> Result<Self, AllocError> {
+        let quantums = Vec::new_in(allocator.clone());
+        for _ in 0..orders {
+            quantums.push(Slab::)
+        }
+    }
+}
+
+unsafe impl<A: Allocator + Clone> Allocator for Vmem<A> {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        let quantum = QuantumClass::from_layout(layout).ok_or(AllocError)?;
+        todo!()
+    }
 
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        todo!()
     }
 }
