@@ -19,7 +19,6 @@ use core::{
     alloc::{AllocError, Allocator, Layout},
     ptr::NonNull,
 };
-use alloc::collections::BTreeMap;
 use spin::Mutex;
 use try_alloc::vec::TryVec;
 

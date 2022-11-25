@@ -18,9 +18,7 @@ fn main() -> Result<(), xshell::Error> {
     let shell = xshell::Shell::new()?;
 
     match Arguments::parse() {
-        Arguments::Build(build_options) => {
-            build::build(&shell, build_options)
-        }
+        Arguments::Build(build_options) => build::build(&shell, build_options),
 
         Arguments::Run(run_options) => runner::run(&shell, run_options),
 
@@ -42,7 +40,7 @@ fn main() -> Result<(), xshell::Error> {
     }
 }
 
-static CRATE_DIRS: [&str; 2] = ["src/kernel/", "src/userspace/"];
+static CRATE_DIRS: [&str; 3] = ["src/kernel/", "src/userspace/", "src/shared/"];
 
 pub fn clean(shell: &xshell::Shell) -> xshell::Result<()> {
     for crate_dir in CRATE_DIRS {

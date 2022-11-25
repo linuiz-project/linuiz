@@ -18,8 +18,6 @@ fn trace_frame_pointer(
         return_address: u64,
     }
 
-    
-
     let mut stack_trace_index: u8 = 0;
     let mut frame_ptr: *const StackFrame;
     // ### Safety: Does not corrupt any auxiliary state.
