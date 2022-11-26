@@ -27,15 +27,29 @@ impl<A: Allocator + Clone> AddressSpace<A> {
         let layout = Layout::from_size_align(layout.size(), core::cmp::max(layout.align(), self.min_alignment))
             .map_err(|_| Error)?;
 
-        let result = self.regions.iter().enumerate().try_fold(Ok(0usize), |mut address, (index, region)| {
+        let search_result = self.regions.iter().try_fold((0usize, 0usize), |(mut index, mut address), region| {
             let aligned_address = lzstd::align_up(
                 // Safety: If `address` is `Err(_)`, it shouldn't be folding anymore.
                 unsafe { address.unwrap_unchecked() },
                 // Safety: `Layout` does not allow `0` for alignments.
                 unsafe { NonZeroUsize::new_unchecked(layout.align()) },
             );
+            let aligned_padding = aligned_address - address;
+            let aligned_len = region.len.saturating_sub(aligned_padding);
 
-            Ok(address)
+            if aligned_len < layout.size() {
+                Ok((index + 1, address + region.len))
+            } else {
+                Err(index)
+            }
         });
+
+        match search_result {
+            Ok((_, _)) => Err(Error),
+
+            Err(search_index) => {
+                
+            }
+        }
     }
 }
