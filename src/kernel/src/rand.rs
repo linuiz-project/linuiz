@@ -1,3 +1,4 @@
+#[derive(Debug, Clone, Copy)]
 pub struct Error;
 
 pub type Result = core::result::Result<u64, Error>;

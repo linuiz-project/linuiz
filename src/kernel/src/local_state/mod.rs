@@ -1,9 +1,8 @@
-mod scheduler;
-
+use crate::{
+    memory::{Stack, VmemRegister, KMALLOC},
+    proc::{task::Task, Scheduler},
+};
 use core::alloc::Allocator;
-
-use crate::memory::{Stack, VmemRegister, KMALLOC};
-pub use scheduler::*;
 use try_alloc::boxed::TryBox;
 
 pub(self) const US_PER_SEC: u32 = 1000000;
@@ -65,7 +64,7 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
             false,
             Task::new(
                 0,
-                EntryPoint::Function(crate::interrupts::wait_loop),
+                crate::proc::task::EntryPoint::Function(crate::interrupts::wait_loop),
                 idle_task_stack,
                 crate::cpu::default_arch_context(),
                 VmemRegister::read(),

@@ -56,6 +56,7 @@ mod memory;
 mod modules;
 mod num;
 mod panic;
+mod proc;
 mod rand;
 mod time;
 
