@@ -1,6 +1,7 @@
 use core::{
     alloc::{AllocError, Allocator, Layout},
     num::NonZeroUsize,
+    ops::ControlFlow,
     ptr::NonNull,
 };
 
@@ -26,28 +27,26 @@ impl<A: Allocator + Clone> AddressSpace<A> {
     pub fn mmap(&mut self, address: Option<NonNull<u8>>, layout: Layout) -> Result<NonNull<[u8]>, Error> {
         let layout = Layout::from_size_align(layout.size(), core::cmp::max(layout.align(), self.min_alignment))
             .map_err(|_| Error)?;
+        // Safety: `Layout` does not allow `0` for alignments.
+        let layout_align = unsafe { NonZeroUsize::new_unchecked(layout.align()) };
 
-        let search_result = self.regions.iter().try_fold((0usize, 0usize), |(mut index, mut address), region| {
-            let aligned_address = lzstd::align_up(
-                // Safety: If `address` is `Err(_)`, it shouldn't be folding anymore.
-                unsafe { address.unwrap_unchecked() },
-                // Safety: `Layout` does not allow `0` for alignments.
-                unsafe { NonZeroUsize::new_unchecked(layout.align()) },
-            );
+        let search = self.regions.iter().try_fold((0usize, 0usize), |(mut index, mut address), region| {
+            let aligned_address = lzstd::align_up(address, layout_align);
             let aligned_padding = aligned_address - address;
             let aligned_len = region.len.saturating_sub(aligned_padding);
 
             if aligned_len < layout.size() {
-                Ok((index + 1, address + region.len))
+                ControlFlow::Continue((index + 1, address + region.len))
             } else {
-                Err(index)
+                ControlFlow::Break((index, address))
             }
         });
 
-        match search_result {
-            Ok((_, _)) => Err(Error),
+        match search.break_value() {
+            None => Err(Error),
 
-            Err(search_index) => {
+            Some((index, address)) => {
+                let aligned_address = lzstd::align_up(address, layout_align);
                 
             }
         }
