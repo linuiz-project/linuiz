@@ -66,7 +66,7 @@ impl Scheduler {
         ctrl_flow_context: &mut crate::cpu::ControlContext,
         arch_context: &mut crate::cpu::ArchContext,
     ) {
-        use crate::memory::VmemRegister;
+        use crate::memory::PagingRegister;
 
         const TIME_SLICE: u16 = 5;
 
@@ -76,7 +76,7 @@ impl Scheduler {
         if let Some(mut cur_task) = self.cur_task.take() {
             cur_task.ctrl_flow_context = *ctrl_flow_context;
             cur_task.arch_context = *arch_context;
-            cur_task.root_page_table_args = VmemRegister::read();
+            cur_task.root_page_table_args = PagingRegister::read();
 
             self.push_task(cur_task);
         }
@@ -95,7 +95,7 @@ impl Scheduler {
                 *arch_context = next_task.arch_context;
 
                 // Set current page tables.
-                VmemRegister::write(&next_task.root_page_table_args);
+                PagingRegister::write(&next_task.root_page_table_args);
 
                 self.cur_task = Some(next_task);
             } else {
@@ -106,7 +106,7 @@ impl Scheduler {
                 *arch_context = default_task.arch_context;
 
                 // Set current page tables.
-                VmemRegister::write(&default_task.root_page_table_args);
+                PagingRegister::write(&default_task.root_page_table_args);
             };
 
             crate::local_state::preemption_wait(core::num::NonZeroU16::new_unchecked(TIME_SLICE));

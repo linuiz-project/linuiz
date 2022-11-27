@@ -57,7 +57,7 @@ pub fn load_modules() {
                 crate::memory::Mapper::new(
                     4,
                     crate::memory::get_hhdm_address(),
-                    Some(crate::memory::VmemRegister::read()),
+                    Some(crate::memory::PagingRegister::read()),
                 )
                 .expect("failed to create page manager for driver")
             };

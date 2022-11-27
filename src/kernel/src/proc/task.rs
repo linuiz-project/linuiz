@@ -1,5 +1,6 @@
 use crate::memory::Stack;
 use try_alloc::vec::TryVec;
+use uuid::Uuid;
 
 static WAITING_TASKS: spin::Mutex<TryVec<Task>> = spin::Mutex::new(TryVec::new());
 
@@ -17,14 +18,14 @@ pub enum EntryPoint {
 
 /// Representation object for different contexts of execution in the CPU.
 pub struct Task {
-    id: u64,
+    handle: Uuid,
     prio: u8,
     last_run: u32,
     stack: Stack,
     //pcid: Option<PCID>,
     pub ctrl_flow_context: crate::cpu::ControlContext,
     pub arch_context: crate::cpu::ArchContext,
-    pub root_page_table_args: crate::memory::VmemRegister,
+    pub root_page_table_args: crate::memory::PagingRegister,
 }
 
 // TODO safety
@@ -36,7 +37,7 @@ impl Task {
         start: EntryPoint,
         stack: Stack,
         arch_context: crate::cpu::ArchContext,
-        root_page_table_args: crate::memory::VmemRegister,
+        root_page_table_args: crate::memory::PagingRegister,
     ) -> Self {
         // ### Safety: Stack pointer is valid for its length.
         let sp = unsafe { stack.as_ptr().add(stack.len() & !0xF).addr() } as u64;

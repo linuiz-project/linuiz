@@ -6,7 +6,7 @@ pub use mapper::*;
 pub use paging::*;
 pub mod pmm;
 
-use alloc::alloc::Global;
+use alloc::{alloc::Global, collections::BTreeMap};
 use core::{
     alloc::{AllocError, Allocator, Layout},
     ptr::NonNull,
@@ -15,6 +15,9 @@ use lzstd::{Address, Frame, Virtual};
 use slab::SlabAllocator;
 use spin::{Lazy, Once};
 use try_alloc::boxed::TryBox;
+use uuid::Uuid;
+
+use crate::proc::AddressSpace;
 
 pub fn get_hhdm_address() -> Address<Virtual> {
     static HHDM_ADDRESS: Once<Address<Virtual>> = Once::new();
@@ -40,12 +43,16 @@ pub fn get_kernel_mapper() -> &'static Mapper {
     })
 }
 
+static MAPPERS: Lazy<BTreeMap<Uuid, Mapper>> = Lazy::new(|| BTreeMap::new_in(&*PMM));
+static ADDRESS_SPACES: Lazy<BTreeMap<Uuid, AddressSpace<&'static pmm::PhysicalMemoryManager>>> =
+    Lazy::new(|| BTreeMap::new_in(&*PMM));
+
 #[cfg(target_arch = "x86_64")]
-pub struct VmemRegister(pub Address<Frame>, pub crate::arch::x64::registers::control::CR3Flags);
+pub struct PagingRegister(pub Address<Frame>, pub crate::arch::x64::registers::control::CR3Flags);
 #[cfg(target_arch = "riscv64")]
 pub struct VmemRegister(pub Address<Frame>, pub u16, pub crate::arch::rv64::registers::satp::Mode);
 
-impl VmemRegister {
+impl PagingRegister {
     pub fn read() -> Self {
         #[cfg(target_arch = "x86_64")]
         {

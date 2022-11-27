@@ -1,5 +1,5 @@
 use crate::{
-    memory::{Stack, VmemRegister, KMALLOC},
+    memory::{Stack, PagingRegister, KMALLOC},
     proc::{task::Task, Scheduler},
 };
 use core::alloc::Allocator;
@@ -67,7 +67,7 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
                 crate::proc::task::EntryPoint::Function(crate::interrupts::wait_loop),
                 idle_task_stack,
                 crate::cpu::default_arch_context(),
-                VmemRegister::read(),
+                PagingRegister::read(),
             ),
         ),
 

@@ -1,6 +1,6 @@
 use crate::{
     interrupts,
-    memory::{AttributeModify, PageAttributes, PageTable, PageTableEntry, VmemRegister, PMM},
+    memory::{AttributeModify, PageAttributes, PageTable, PageTableEntry, PagingRegister, PMM},
 };
 use lzstd::{
     mem::{Mut, Ref},
@@ -38,7 +38,7 @@ impl Mapper {
     pub unsafe fn new(
         depth: usize,
         phys_mapped_address: Address<Virtual>,
-        vmem_register_copy: Option<VmemRegister>,
+        vmem_register_copy: Option<PagingRegister>,
     ) -> Option<Self> {
         const VALID_DEPTHS: core::ops::RangeInclusive<usize> = 3..=5;
 
@@ -60,7 +60,7 @@ impl Mapper {
     }
 
     pub unsafe fn from_current(hhdm_address: Address<Virtual>) -> Self {
-        let root_frame = VmemRegister::read().frame();
+        let root_frame = PagingRegister::read().frame();
         let root_table_entry = PageTableEntry::new(root_frame, PageAttributes::PRESENT);
 
         Self(RwLock::new(Data {
@@ -246,13 +246,13 @@ impl Mapper {
         interrupts::without(|| self.0.read().hhdm_address)
     }
 
-    pub fn read_vmem_register(&self) -> Option<VmemRegister> {
+    pub fn read_vmem_register(&self) -> Option<PagingRegister> {
         interrupts::without(|| {
             let vmap = self.0.read();
 
             #[cfg(target_arch = "x86_64")]
             {
-                Some(VmemRegister(vmap.root_frame, crate::arch::x64::registers::control::CR3Flags::empty()))
+                Some(PagingRegister(vmap.root_frame, crate::arch::x64::registers::control::CR3Flags::empty()))
             }
         })
     }

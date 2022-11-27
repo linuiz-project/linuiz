@@ -7,6 +7,8 @@ use core::{
 
 use try_alloc::vec::TryVec;
 
+use crate::memory::Mapper;
+
 #[derive(Debug, Clone, Copy)]
 pub struct Error;
 
@@ -20,6 +22,7 @@ pub struct AddressSpace<A: Allocator + Clone> {
     min_alignment: usize,
     regions: TryVec<Region, A>,
     allocator: A,
+    mapper: Mapper,
 }
 
 impl<A: Allocator + Clone> AddressSpace<A> {
@@ -68,7 +71,7 @@ impl<A: Allocator + Clone> AddressSpace<A> {
                 };
 
                 if remaining_len > 0 {
-                    if let Some(region) = self.regions.get_mut(index + 1) && region.free {
+                    if let Some(region) = self.regions.get_mut(index.saturating_add(1)) && region.free {
                         region.len += remaining_len;
                     } else {
                         self.regions.insert(index + 1, Region { len: remaining_len, free: true }).map_err(|_| Error)?;
