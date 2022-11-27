@@ -5,9 +5,22 @@ use core::{
     ptr::NonNull,
 };
 
+use lzstd::{Address, Page, PageAlign};
 use try_alloc::vec::TryVec;
 
-use crate::memory::Mapper;
+use crate::{
+    memory::{Mapper, PageAttributes},
+    PAGE_SIZE,
+};
+
+bitflags::bitflags! {
+    pub struct MmapFlags : usize {
+        const READ_ONLY = 1 << 0;
+        const READ_WRITE = 1 << 1;
+        const READ_EXECUTE = 1 << 2;
+        const NO_DEMAND = 1 << 3;
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct Error;
@@ -19,16 +32,20 @@ struct Region {
 }
 
 pub struct AddressSpace<A: Allocator + Clone> {
-    min_alignment: usize,
     regions: TryVec<Region, A>,
     allocator: A,
     mapper: Mapper,
 }
 
 impl<A: Allocator + Clone> AddressSpace<A> {
-    pub fn mmap(&mut self, address: Option<NonNull<u8>>, layout: Layout) -> Result<NonNull<[u8]>, Error> {
-        let layout = Layout::from_size_align(layout.size(), core::cmp::max(layout.align(), self.min_alignment))
-            .map_err(|_| Error)?;
+    pub fn mmap(
+        &mut self,
+        address: Option<NonNull<u8>>,
+        layout: Layout,
+        flags: MmapFlags,
+    ) -> Result<NonNull<[u8]>, Error> {
+        let layout =
+            Layout::from_size_align(layout.size(), core::cmp::max(layout.align(), PAGE_SIZE)).map_err(|_| Error)?;
         // Safety: `Layout` does not allow `0` for alignments.
         let layout_align = unsafe { NonZeroUsize::new_unchecked(layout.align()) };
 
@@ -76,6 +93,29 @@ impl<A: Allocator + Clone> AddressSpace<A> {
                     } else {
                         self.regions.insert(index + 1, Region { len: remaining_len, free: true }).map_err(|_| Error)?;
                     }
+                }
+
+                // Set up paging attributes based on provided mmap flags.
+                let mut attributes = {
+                    if flags.contains(MmapFlags::READ_EXECUTE) {
+                        PageAttributes::RX
+                    } else if flags.contains(MmapFlags::READ_WRITE) {
+                        PageAttributes::RW
+                    } else if flags.contains(MmapFlags::READ_ONLY) {
+                        PageAttributes::RO
+                    } else {
+                        PageAttributes::empty()
+                    }
+                };
+                // Demand paging is the default, but optionally the user can specify front-loading
+                // the physical page allocations.
+                if !flags.contains(MmapFlags::NO_DEMAND) {
+                    attributes.insert(PageAttributes::DEMAND);
+                }
+                // Finally, map all of the allocated pages in the virtual address space.
+                for page_base in (aligned_address..(aligned_address + layout.size())).step_by(PAGE_SIZE) {
+                    let page = Address::<Page>::from_u64(page_base as u64, None).ok_or(Error)?;
+                    self.mapper.auto_map(page, attributes).map_err(|_| Error)?;
                 }
 
                 NonNull::new(aligned_address as *mut u8)

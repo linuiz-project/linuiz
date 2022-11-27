@@ -25,6 +25,7 @@ struct Data {
     entry: PageTableEntry,
 }
 
+/// FIXME: This needs to not use internal locking (i.e. not `Sync`).
 pub struct Mapper(RwLock<Data>);
 
 // ### Safety: Type is designed to be thread-agnostic internally.
@@ -169,7 +170,7 @@ impl Mapper {
 
     pub fn auto_map(&self, page: Address<Page>, attributes: PageAttributes) -> Result<(), MapperError> {
         match PMM.next_frame() {
-            Ok(frame) => self.map(page, frame, false, attributes),
+            Ok(frame) => self.map(page, frame, !attributes.contains(PageAttributes::DEMAND), attributes),
             Err(_) => Err(MapperError::AllocError),
         }
     }

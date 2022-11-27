@@ -67,6 +67,9 @@ use lzstd::{Address, Frame, Page, Virtual};
 #[cfg(not(target_arch = "x86_64"))]
 getrandom::register_custom_getrandom!({ todo!() });
 
+/// TODO: This ought to be dynamic or target-based?
+pub const PAGE_SIZE: usize = 0x1000;
+
 #[derive(Debug, Clone, Copy)]
 pub struct Parameters {
     pub smp: bool,

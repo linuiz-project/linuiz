@@ -43,7 +43,6 @@ pub fn get_kernel_mapper() -> &'static Mapper {
     })
 }
 
-static MAPPERS: Lazy<BTreeMap<Uuid, Mapper>> = Lazy::new(|| BTreeMap::new_in(&*PMM));
 static ADDRESS_SPACES: Lazy<BTreeMap<Uuid, AddressSpace<&'static pmm::PhysicalMemoryManager>>> =
     Lazy::new(|| BTreeMap::new_in(&*PMM));
 

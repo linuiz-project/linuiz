@@ -25,7 +25,6 @@ pub struct Task {
     //pcid: Option<PCID>,
     pub ctrl_flow_context: crate::cpu::ControlContext,
     pub arch_context: crate::cpu::ArchContext,
-    pub root_page_table_args: crate::memory::PagingRegister,
 }
 
 // TODO safety
@@ -43,7 +42,7 @@ impl Task {
         let sp = unsafe { stack.as_ptr().add(stack.len() & !0xF).addr() } as u64;
 
         Self {
-            id: crate::rand::rand().unwrap(),
+            handle: uuid::Uuid::new_v4(),
             prio: priority,
             last_run: 0,
             stack,
@@ -55,7 +54,6 @@ impl Task {
                 sp,
             },
             arch_context,
-            root_page_table_args,
         }
     }
 
