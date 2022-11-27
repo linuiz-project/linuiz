@@ -5,7 +5,7 @@ use core::{
     ptr::NonNull,
 };
 
-use lzstd::{Address, Page, PageAlign};
+use lzstd::{Address, Page};
 use try_alloc::vec::TryVec;
 
 use crate::{

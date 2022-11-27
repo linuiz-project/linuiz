@@ -43,8 +43,9 @@ pub fn get_kernel_mapper() -> &'static Mapper {
     })
 }
 
-static ADDRESS_SPACES: Lazy<BTreeMap<Uuid, AddressSpace<&'static pmm::PhysicalMemoryManager>>> =
-    Lazy::new(|| BTreeMap::new_in(&*PMM));
+static ADDRESS_SPACES: Lazy<
+    BTreeMap<Uuid, AddressSpace<&'static pmm::PhysicalMemoryManager>, &'static pmm::PhysicalMemoryManager>,
+> = Lazy::new(|| BTreeMap::new_in(&*PMM));
 
 #[cfg(target_arch = "x86_64")]
 pub struct PagingRegister(pub Address<Frame>, pub crate::arch::x64::registers::control::CR3Flags);

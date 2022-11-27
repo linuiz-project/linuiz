@@ -58,8 +58,8 @@ impl Task {
     }
 
     /// Returns this task's ID.
-    pub fn id(&self) -> u64 {
-        self.id
+    pub fn handle(&self) -> Uuid {
+        self.handle
     }
 
     /// Returns the [`TaskPriority`] struct for this task.

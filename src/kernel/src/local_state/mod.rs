@@ -1,5 +1,5 @@
 use crate::{
-    memory::{Stack, PagingRegister, KMALLOC},
+    memory::{PagingRegister, Stack, KMALLOC},
     proc::{task::Task, Scheduler},
 };
 use core::alloc::Allocator;
