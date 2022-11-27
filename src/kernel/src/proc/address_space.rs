@@ -1,11 +1,10 @@
 use core::{
-    alloc::{AllocError, Allocator, Layout},
+    alloc::{Allocator, Layout},
     num::NonZeroUsize,
     ops::ControlFlow,
     ptr::NonNull,
 };
 
-use alloc::collections::BTreeSet;
 use try_alloc::vec::TryVec;
 
 #[derive(Debug, Clone, Copy)]
@@ -30,7 +29,7 @@ impl<A: Allocator + Clone> AddressSpace<A> {
         // Safety: `Layout` does not allow `0` for alignments.
         let layout_align = unsafe { NonZeroUsize::new_unchecked(layout.align()) };
 
-        let search = self.regions.iter().try_fold((0usize, 0usize), |(mut index, mut address), region| {
+        let search = self.regions.iter().try_fold((0usize, 0usize), |(index, address), region| {
             let aligned_address = lzstd::align_up(address, layout_align);
             let aligned_padding = aligned_address - address;
             let aligned_len = region.len.saturating_sub(aligned_padding);
@@ -77,7 +76,7 @@ impl<A: Allocator + Clone> AddressSpace<A> {
                 }
 
                 NonNull::new(aligned_address as *mut u8)
-                    .map(|ptr| NonNull::from_raw_parts(ptr, layout.size()))
+                    .map(|ptr| NonNull::slice_from_raw_parts(ptr, layout.size()))
                     .ok_or(Error)
             }
         }

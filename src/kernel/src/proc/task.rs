@@ -6,7 +6,7 @@ static WAITING_TASKS: spin::Mutex<TryVec<Task>> = spin::Mutex::new(TryVec::new()
 pub fn queue_task(new_task: Task) {
     crate::interrupts::without(|| {
         let mut waiting_tasks = WAITING_TASKS.lock();
-        waiting_tasks.push(new_task);
+        waiting_tasks.push(new_task).unwrap();
     })
 }
 

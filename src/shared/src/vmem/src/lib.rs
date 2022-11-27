@@ -90,7 +90,7 @@ impl<A: Allocator + Clone> Vmem<A> {
     fn new_in(quantum_order: u32, orders: u32, allocator: A) -> Result<Self, AllocError> {
         let quantums = Vec::new_in(allocator.clone());
         for _ in 0..orders {
-            quantums.push(Slab::)
+            // quantums.push(Slab::)
         }
     }
 }

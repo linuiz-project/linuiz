@@ -52,7 +52,7 @@ impl Ord for Segment {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         match self.len.cmp(&other.len) {
             core::cmp::Ordering::Equal => self.start.cmp(&other.start),
-            ordering => ordering
+            ordering => ordering,
         }
     }
 }
@@ -69,9 +69,9 @@ struct FreeList<A: Allocator + Clone> {
     allocation_tags: BTreeMap<NonNull<u8>, Span, A>,
 }
 
-pub struct FreeListAllocator<A: Allocator + Clone>{
+pub struct FreeListAllocator<A: Allocator + Clone> {
     freelist: spin::Mutex<FreeList<A>>,
-    allocator: A
+    allocator: A,
 }
 
 unsafe impl<A: Allocator + Clone> Allocator for FreeListAllocator<A> {
@@ -79,7 +79,7 @@ unsafe impl<A: Allocator + Clone> Allocator for FreeListAllocator<A> {
         let freelist = self.freelist.lock();
 
         loop {
-            let segment = freelist.segments.iter().find(|ptr| ptr.len() > )
+            // let segment = freelist.segments.iter().find(|ptr| ptr.len() > )
         }
     }
 }

@@ -6,7 +6,10 @@ use xshell::cmd;
 
 static CRATE_DIRS: [&str; 3] = ["src/kernel/", "src/userspace/", "src/shared/"];
 
-fn with_crate_dirs(with_fn: impl FnMut(&xshell::Shell) -> xshell::Result<()>) -> xshell::Result<()> {
+fn with_crate_dirs(
+    shell: &xshell::Shell,
+    mut with_fn: impl FnMut(&xshell::Shell) -> xshell::Result<()>,
+) -> xshell::Result<()> {
     for crate_dir in CRATE_DIRS {
         let _dir = shell.push_dir(crate_dir);
         with_fn(shell)?;
@@ -16,15 +19,15 @@ fn with_crate_dirs(with_fn: impl FnMut(&xshell::Shell) -> xshell::Result<()>) ->
 }
 
 pub fn cargo_fmt(shell: &xshell::Shell) -> xshell::Result<()> {
-    with_crate_dirs(|shell| cmd!(shell, "cargo fmt").run())
+    with_crate_dirs(shell, |shell| cmd!(shell, "cargo fmt").run())
 }
 
 pub fn cargo_clean(shell: &xshell::Shell) -> xshell::Result<()> {
-    with_crate_dirs(|shell| cmd!(shell, "cargo clean").run())
+    with_crate_dirs(shell, |shell| cmd!(shell, "cargo clean").run())
 }
 
 pub fn cargo_update(shell: &xshell::Shell) -> xshell::Result<()> {
-    with_crate_dirs(|shell| cmd!(shell, "cargo update").run())
+    with_crate_dirs(shell, |shell| cmd!(shell, "cargo update").run())
 }
 
 #[derive(Parser)]
