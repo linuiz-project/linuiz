@@ -64,8 +64,8 @@ mod time;
 
 use lzstd::{Address, Frame, Page, Virtual};
 
-pub type MmapEntry = limine::NonNullPtr<limine::LimineMemmapEntry>;
-pub type MmapEntryType = limine::LimineMemoryMapEntryType;
+#[cfg(not(target_arch = "x86_64"))]
+getrandom::register_custom_getrandom!({ todo!() });
 
 #[derive(Debug, Clone, Copy)]
 pub struct Parameters {

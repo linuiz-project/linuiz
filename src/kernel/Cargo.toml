@@ -29,6 +29,8 @@ git = "https://github.com/semiviral/acpi"
 log = { version = "*", default-features = false }
 num_enum = { version = "*", default-features = false }
 miniz_oxide = { version = "*", default-features = false }
+uuid = { version = "*", default-features = false, features = ["v4"] }
+getrandom = { version = "*", features = ["rdrand", "custom"] }
 limine = { version = "*", features = ["requests-section"] }
 bit_field = "*"
 bitflags = "*"
