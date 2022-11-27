@@ -4,6 +4,29 @@ pub mod runner;
 use clap::Parser;
 use xshell::cmd;
 
+static CRATE_DIRS: [&str; 3] = ["src/kernel/", "src/userspace/", "src/shared/"];
+
+fn with_crate_dirs(with_fn: impl FnMut(&xshell::Shell) -> xshell::Result<()>) -> xshell::Result<()> {
+    for crate_dir in CRATE_DIRS {
+        let _dir = shell.push_dir(crate_dir);
+        with_fn(shell)?;
+    }
+
+    Ok(())
+}
+
+pub fn cargo_fmt(shell: &xshell::Shell) -> xshell::Result<()> {
+    with_crate_dirs(|shell| cmd!(shell, "cargo fmt").run())
+}
+
+pub fn cargo_clean(shell: &xshell::Shell) -> xshell::Result<()> {
+    with_crate_dirs(|shell| cmd!(shell, "cargo clean").run())
+}
+
+pub fn cargo_update(shell: &xshell::Shell) -> xshell::Result<()> {
+    with_crate_dirs(|shell| cmd!(shell, "cargo update").run())
+}
+
 #[derive(Parser)]
 #[command(rename_all = "snake_case")]
 enum Arguments {
@@ -14,19 +37,22 @@ enum Arguments {
     Update,
 }
 
-fn main() -> Result<(), xshell::Error> {
+fn main() -> xshell::Result<()> {
     let shell = xshell::Shell::new()?;
 
     match Arguments::parse() {
-        Arguments::Build(build_options) => build::build(&shell, build_options),
+        Arguments::Build(build_options) => {
+            cargo_fmt(&shell)?;
+            build::build(&shell, build_options)
+        }
 
         Arguments::Run(run_options) => runner::run(&shell, run_options),
 
-        Arguments::Clean => clean(&shell),
+        Arguments::Clean => cargo_clean(&shell),
 
         Arguments::Update => {
             cmd!(shell, "git submodule update --init --recursive --remote").run()?;
-            update(&shell)
+            cargo_update(&shell)
         }
 
         Arguments::Metadata => {
@@ -38,24 +64,4 @@ fn main() -> Result<(), xshell::Error> {
             Ok(())
         }
     }
-}
-
-static CRATE_DIRS: [&str; 3] = ["src/kernel/", "src/userspace/", "src/shared/"];
-
-pub fn clean(shell: &xshell::Shell) -> xshell::Result<()> {
-    for crate_dir in CRATE_DIRS {
-        let _dir = shell.push_dir(crate_dir);
-        cmd!(shell, "cargo clean").run()?;
-    }
-
-    Ok(())
-}
-
-pub fn update(shell: &xshell::Shell) -> xshell::Result<()> {
-    for crate_dir in CRATE_DIRS {
-        let _dir = shell.push_dir(crate_dir);
-        cmd!(shell, "cargo update").run()?;
-    }
-
-    Ok(())
 }

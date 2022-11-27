@@ -110,7 +110,7 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
 
     // Clean crates if required ...
     if options.clean {
-        crate::clean(shell)?;
+        crate::cargo_clean(shell)?;
     }
 
     // Ensure root directories exist
@@ -236,7 +236,6 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
         {
             let _dir = shell.push_dir("src/kernel/");
 
-            cmd!(shell, "cargo fmt").run()?;
             let mut cargo_arguments = cargo_arguments.clone();
             cargo_arguments.push(match options.arch {
                 Architecture::x64 => "x86_64-linuiz-kernel.json",
@@ -267,7 +266,6 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
             let _dir = shell.push_dir("src/userspace/");
 
             // Compile ...
-            cmd!(shell, "cargo fmt").run()?;
             let mut cargo_arguments = cargo_arguments.clone();
             cargo_arguments.push(match options.arch {
                 Architecture::x64 => "x86_64-unknown-linuiz.json",
