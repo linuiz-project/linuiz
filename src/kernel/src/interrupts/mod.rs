@@ -69,10 +69,11 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
     use crate::memory::PageAttributes;
 
     let fault_page = Address::<Page>::new(address, None).unwrap();
-    let virtual_mapper = crate::memory::Mapper::from_current(crate::memory::get_hhdm_address());
-    let Some(mut fault_page_attributes) = virtual_mapper.get_page_attributes(fault_page) else { return Err(PageFaultHandlerError::AddressNotMapped) };
+    // FIXME: Fabricating the virtual mapper is unsafe.
+    let mut mapper = crate::memory::Mapper::from_current(crate::memory::get_hhdm_address());
+    let Some(mut fault_page_attributes) = mapper.get_page_attributes(fault_page) else { return Err(PageFaultHandlerError::AddressNotMapped) };
     if fault_page_attributes.contains(PageAttributes::DEMAND) {
-        virtual_mapper
+        mapper
             .auto_map(fault_page, {
                 // remove demand bit ...
                 fault_page_attributes.remove(PageAttributes::DEMAND);

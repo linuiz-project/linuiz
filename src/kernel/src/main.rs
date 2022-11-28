@@ -190,7 +190,7 @@ unsafe extern "C" fn _entry() -> ! {
 
         fn map_range_from(
             from_mapper: &Mapper,
-            to_mapper: &Mapper,
+            to_mapper: &mut Mapper,
             range: core::ops::Range<u64>,
             attributes: PageAttributes,
         ) {
@@ -212,34 +212,34 @@ unsafe extern "C" fn _entry() -> ! {
         debug!("Initializing kernel mapper...");
         // ### Safety: Kernel guarantees HHDM address to be valid.
         let boot_mapper = unsafe { Mapper::from_current(memory::get_hhdm_address()) };
-        let kernel_mapper = memory::get_kernel_mapper();
+        let mut kernel_mapper = unsafe { &mut *(memory::get_kernel_mapper() as *const _ as *mut _) };
 
         /* map the kernel segments */
         {
             map_range_from(
                 &boot_mapper,
-                &kernel_mapper,
+                &mut kernel_mapper,
                 // ### Safety: These linker symbols are guaranteed by the bootloader to be valid.
                 unsafe { __text_start.as_u64()..__text_end.as_u64() },
                 PageAttributes::RX | PageAttributes::GLOBAL,
             );
             map_range_from(
                 &boot_mapper,
-                &kernel_mapper,
+                &mut kernel_mapper,
                 // ### Safety: These linker symbols are guaranteed by the bootloader to be valid.
                 unsafe { __rodata_start.as_u64()..__rodata_end.as_u64() },
                 PageAttributes::RO | PageAttributes::GLOBAL,
             );
             map_range_from(
                 &boot_mapper,
-                &kernel_mapper,
+                &mut kernel_mapper,
                 // ### Safety: These linker symbols are guaranteed by the bootloader to be valid.
                 unsafe { __bss_start.as_u64()..__bss_end.as_u64() },
                 PageAttributes::RW | PageAttributes::GLOBAL,
             );
             map_range_from(
                 &boot_mapper,
-                &kernel_mapper,
+                &mut kernel_mapper,
                 // ### Safety: These linker symbols are guaranteed by the bootloader to be valid.
                 unsafe { __data_start.as_u64()..__data_end.as_u64() },
                 PageAttributes::RW | PageAttributes::GLOBAL,
