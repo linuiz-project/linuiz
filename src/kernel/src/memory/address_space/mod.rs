@@ -1,17 +1,32 @@
+mod mapper;
+pub use mapper::*;
+
+use crate::{
+    memory::{Mapper, PageAttributes, PhysicalAlloactor},
+    PAGE_SIZE,
+};
+use alloc::collections::{BTreeMap, TryReserveError};
 use core::{
-    alloc::{Allocator, Layout},
+    alloc::{AllocError, Allocator, Layout},
     num::NonZeroUsize,
     ops::ControlFlow,
     ptr::NonNull,
 };
-
 use lzstd::{Address, Page};
+use spin::{Lazy, RwLock};
 use try_alloc::vec::TryVec;
+use uuid::Uuid;
 
-use crate::{
-    memory::{Mapper, PageAttributes},
-    PAGE_SIZE,
-};
+static ADDRESS_SPACES: Lazy<BTreeMap<Uuid, RwLock<AddressSpace<PhysicalAlloactor>>, PhysicalAlloactor>> =
+    Lazy::new(|| BTreeMap::new_in(&*super::PMM));
+
+pub fn register() -> Result<Uuid, AllocError> {
+    todo!()
+}
+
+pub fn get(uuid: &Uuid) -> Option<&'static RwLock<AddressSpace<PhysicalAlloactor>>> {
+    ADDRESS_SPACES.get(uuid)
+}
 
 bitflags::bitflags! {
     pub struct MmapFlags : usize {
@@ -38,6 +53,15 @@ pub struct AddressSpace<A: Allocator + Clone> {
 }
 
 impl<A: Allocator + Clone> AddressSpace<A> {
+    pub fn new_in(size: usize, hhdm_ptr: NonNull<u8>, allocator: A) -> Result<Self, TryReserveError> {
+        if size > 0 {
+            let mut vec = TryVec::new_in(allocator.clone());
+            vec.push(Region { len: size, free: true })?;
+
+            Self { regions: vec, allocator, mapper: Mapper::new(depth, hhdm_address, None) }
+        }
+    }
+
     pub fn mmap(
         &mut self,
         address: Option<NonNull<u8>>,

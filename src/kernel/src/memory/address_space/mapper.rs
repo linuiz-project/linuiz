@@ -1,3 +1,5 @@
+use core::ptr::NonNull;
+
 use crate::{
     interrupts,
     memory::{AttributeModify, PageAttributes, PageTable, PageTableEntry, PagingRegister, PMM},
@@ -22,7 +24,7 @@ pub enum MapperError {
 pub struct Mapper {
     depth: usize,
     root_frame: Address<Frame>,
-    hhdm_address: Address<Virtual>,
+    hhdm_ptr: NonNull<u8>,
     entry: PageTableEntry,
 }
 
@@ -31,25 +33,21 @@ impl Mapper {
     /// ### Safety
     ///
     /// Refer to `VirtualMapper::new()`.
-    pub unsafe fn new(
-        depth: usize,
-        phys_mapped_address: Address<Virtual>,
-        vmem_register_copy: Option<PagingRegister>,
-    ) -> Option<Self> {
+    pub unsafe fn new(depth: usize, hhdm_ptr: NonNull<u8>, vmem_register_copy: Option<PagingRegister>) -> Option<Self> {
         const VALID_DEPTHS: core::ops::RangeInclusive<usize> = 3..=5;
 
         if VALID_DEPTHS.contains(&depth)
             && let Ok(root_frame) = PMM.next_frame()
-            && let Some(root_mapped_address) = Address::<Virtual>::new(phys_mapped_address.as_u64() + root_frame.as_u64())
+            && let Some(root_mapped_address) = Address::<Virtual>::new((hhdm_ptr.addr().get() as u64) + root_frame.as_u64())
         {
             match vmem_register_copy {
-                Some(vmem_register_copy) if let Some(copy_mapped_address) =   Address::<Virtual>::new(phys_mapped_address.as_u64() + vmem_register_copy.0.as_u64()) =>{
+                Some(vmem_register_copy) if let Some(copy_mapped_address) =   Address::<Virtual>::new(hhdm_ptr.as_u64() + vmem_register_copy.0.as_u64()) =>{
                     core::ptr::copy_nonoverlapping(copy_mapped_address.as_ptr::<u8>(), root_mapped_address.as_mut_ptr::<u8>(), 0x1000);
                 },
                 _ => core::ptr::write_bytes(root_mapped_address.as_mut_ptr::<u8>(), 0, 0x1000),
             }
 
-            Some(Self{ depth, root_frame, hhdm_address: phys_mapped_address, entry: PageTableEntry::new(root_frame, PageAttributes::PRESENT) })
+            Some(Self{ depth, root_frame, hhdm_ptr, entry: PageTableEntry::new(root_frame, PageAttributes::PRESENT) })
         } else {
             None
         }
@@ -59,7 +57,7 @@ impl Mapper {
     ///
     /// * The provided higher-half direct mapped address must be valid, and;
     /// * There are no synchronization checks done to ensure this instance isn't concurrent with another context.
-    pub unsafe fn from_current(hhdm_address: Address<Virtual>) -> Self {
+    pub unsafe fn from_current(hhdm_ptr: NonNull<u8>) -> Self {
         let root_frame = PagingRegister::read().frame();
         let root_table_entry = PageTableEntry::new(root_frame, PageAttributes::PRESENT);
 
@@ -67,7 +65,7 @@ impl Mapper {
             // TODO fix this for rv64 Sv39
             depth: if crate::memory::supports_5_level_paging() && crate::memory::is_5_level_paged() { 5 } else { 4 },
             root_frame,
-            hhdm_address,
+            hhdm_ptr,
             entry: root_table_entry,
         }
     }
@@ -76,14 +74,14 @@ impl Mapper {
         interrupts::without(|| {
             // TODO try to find alternative to unwrapping here
             // ### Safety: `VirtualMapper` already requires that the physical mapping page is valid, so it can be safely passed to the page table.
-            func(unsafe { PageTable::<Ref>::new(self.depth, self.hhdm_address, &self.entry).unwrap_unchecked() })
+            func(unsafe { PageTable::<Ref>::new(self.depth, self.hhdm_ptr, &self.entry).unwrap_unchecked() })
         })
     }
 
     fn with_root_table_mut<T>(&mut self, func: impl FnOnce(PageTable<Mut>) -> T) -> T {
         interrupts::without(|| {
             // ### Safety: `VirtualMapper` already requires that the physical mapping page is valid, so it can be safely passed to the page table.
-            func(unsafe { PageTable::<Mut>::new(self.depth, self.hhdm_address, &mut self.entry).unwrap_unchecked() })
+            func(unsafe { PageTable::<Mut>::new(self.depth, self.hhdm_ptr, &mut self.entry).unwrap_unchecked() })
         })
     }
 
@@ -240,8 +238,8 @@ impl Mapper {
         })
     }
 
-    pub fn physical_mapped_address(&self) -> Address<Virtual> {
-        interrupts::without(|| self.hhdm_address)
+    pub fn physical_mapped_address(&self) -> NonNull<u8> {
+        interrupts::without(|| self.hhdm_ptr)
     }
 
     /// ### Safety

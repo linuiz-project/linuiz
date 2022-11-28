@@ -71,6 +71,8 @@ getrandom::register_custom_getrandom!({ todo!() });
 /// TODO: This ought to be dynamic or target-based?
 pub const PAGE_SIZE: usize = 0x1000;
 
+pub static KERNEL_HANDLE: spin::Lazy<uuid::Uuid> = spin::Lazy::new(|| uuid::Uuid::new_v4());
+
 #[derive(Debug, Clone, Copy)]
 pub struct Parameters {
     pub smp: bool,

@@ -1,9 +1,9 @@
-mod mapper;
 mod paging;
 
 pub mod io;
 pub use mapper::*;
 pub use paging::*;
+pub mod address_space;
 pub mod pmm;
 
 use alloc::{alloc::Global, collections::BTreeMap};
@@ -107,6 +107,8 @@ pub fn is_5_level_paged() -> bool {
                 .contains(crate::arch::x64::registers::control::CR4Flags::LA57)
     }
 }
+
+pub type PhysicalAlloactor = &'static pmm::PhysicalMemoryManager;
 
 pub static PMM: Lazy<pmm::PhysicalMemoryManager> = Lazy::new(|| unsafe {
     let memory_map = crate::boot::get_memory_map().unwrap();
