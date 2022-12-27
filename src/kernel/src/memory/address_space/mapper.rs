@@ -2,13 +2,12 @@ use core::ptr::NonNull;
 
 use crate::{
     interrupts,
-    memory::{AttributeModify, PageAttributes, PageTable, PageTableEntry, PagingRegister, PMM},
+    memory::{AttributeModify, PageAttributes, PageTable, PageTableEntry, PagingError, PagingRegister, PMM},
 };
 use lzstd::{
     mem::{Mut, Ref},
     Address, Frame, Page, Virtual,
 };
-use spin::RwLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MapperError {
@@ -20,13 +19,15 @@ pub enum MapperError {
     PagingError(crate::memory::PagingError),
 }
 
-/// FIXME: This needs to not use internal locking (i.e. not `Sync`).
 pub struct Mapper {
     depth: usize,
     root_frame: Address<Frame>,
     hhdm_ptr: NonNull<u8>,
     entry: PageTableEntry,
 }
+
+// Safety: Type has no thread-local references.
+unsafe impl Send for Mapper {}
 
 impl Mapper {
     /// Attempts to construct a new page manager. Returns `None` if the provided page table depth is not supported.
@@ -140,7 +141,7 @@ impl Mapper {
     /// ### Safety
     ///
     /// Caller must ensure calling this function does not cause memory corruption.
-    pub unsafe fn unmap(&mut self, page: Address<Page>, free_frame: bool) -> Result<(), super::PagingError> {
+    pub unsafe fn unmap(&mut self, page: Address<Page>, free_frame: bool) -> Result<(), PagingError> {
         self.with_root_table_mut(|mut root_table| {
             root_table.with_entry_mut(page, |entry| {
                 entry.map(|entry| {

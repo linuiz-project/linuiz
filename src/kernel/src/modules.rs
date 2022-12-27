@@ -54,7 +54,7 @@ pub fn load_modules() {
             // Create the driver's page manager from the kernel's higher-half table.
             // ### Safety: Kernel guarantees HHDM to be valid.
             let mut driver_page_manager = unsafe {
-                crate::memory::Mapper::new(
+                crate::memory::address_space::Mapper::new(
                     4,
                     crate::memory::get_hhdm_address(),
                     Some(crate::memory::PagingRegister::read()),

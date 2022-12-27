@@ -70,7 +70,7 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
 
     let fault_page = Address::<Page>::new(address, None).unwrap();
     // FIXME: Fabricating the virtual mapper is unsafe.
-    let mut mapper = crate::memory::Mapper::from_current(crate::memory::get_hhdm_address());
+    let mut mapper = crate::memory::address_space::Mapper::from_current(crate::memory::get_hhdm_address());
     let Some(mut fault_page_attributes) = mapper.get_page_attributes(fault_page) else { return Err(PageFaultHandlerError::AddressNotMapped) };
     if fault_page_attributes.contains(PageAttributes::DEMAND) {
         mapper
@@ -107,4 +107,30 @@ pub unsafe fn irq_handler(irq_vector: u64, ctrl_flow_context: &mut ControlContex
 
     #[cfg(target_arch = "x86_64")]
     crate::local_state::end_of_interrupt();
+}
+
+pub struct InterruptCell<T>(T);
+
+impl<T> InterruptCell<T> {
+    #[inline]
+    pub const fn new(value: T) -> Self {
+        Self(value)
+    }
+
+    #[inline]
+    pub fn set(&mut self, value: T) {
+        self.0 = value;
+    }
+
+    #[inline]
+    pub fn with(&self, func: impl FnOnce(&T) -> U) -> U {
+        let value_ref = &self.0;
+        without(|| func(value_ref))
+    }
+
+    #[inline]
+    pub fn with_mut(&mut self, func: impl FnOnce(&mut T) -> U) -> U {
+        let value_mut = &mut self.0;
+        without(|| func(value_mut))
+    }
 }

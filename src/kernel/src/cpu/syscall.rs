@@ -1,4 +1,7 @@
+use core::ffi::CStr;
+
 use crate::memory::get_hhdm_address;
+use alloc::ffi::CString;
 use lzstd::{Address, Page};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -12,8 +15,15 @@ pub enum Syscall {
 pub fn do_syscall(vector: Syscall) {
     match vector {
         Syscall::Log { level, cstr_ptr } => {
+            // TODO
+            crate::memory::address_space::with(&crate::local_state::get_uuid(), |addr_space| {
+                let addr_space = addr_space.unwrap();
+
+                CStr::from_ptr(cstr_ptr);
+            })
+
             // ### Safety: The kernel guarantees the HHDM will be valid.
-            let page_manager = unsafe { crate::memory::Mapper::from_current(get_hhdm_address()) };
+            let page_manager = unsafe { crate::memory::address_space::Mapper::from_current(get_hhdm_address()) };
 
             let mut cstr_increment_ptr = cstr_ptr;
             let mut last_char_page_base = Address::<Page>::new(Address::zero(), None).unwrap();

@@ -1,12 +1,12 @@
 mod paging;
 
 pub mod io;
-pub use mapper::*;
 pub use paging::*;
 pub mod address_space;
 pub mod pmm;
 
-use alloc::{alloc::Global, collections::BTreeMap};
+use address_space::Mapper;
+use alloc::alloc::Global;
 use core::{
     alloc::{AllocError, Allocator, Layout},
     ptr::NonNull,
@@ -15,9 +15,6 @@ use lzstd::{Address, Frame, Virtual};
 use slab::SlabAllocator;
 use spin::{Lazy, Once};
 use try_alloc::boxed::TryBox;
-use uuid::Uuid;
-
-use crate::proc::AddressSpace;
 
 pub fn get_hhdm_address() -> Address<Virtual> {
     static HHDM_ADDRESS: Once<Address<Virtual>> = Once::new();
@@ -42,10 +39,6 @@ pub fn get_kernel_mapper() -> &'static Mapper {
         unsafe { Mapper::new(4, get_hhdm_address(), None).unwrap() }
     })
 }
-
-static ADDRESS_SPACES: Lazy<
-    BTreeMap<Uuid, AddressSpace<&'static pmm::PhysicalMemoryManager>, &'static pmm::PhysicalMemoryManager>,
-> = Lazy::new(|| BTreeMap::new_in(&*PMM));
 
 #[cfg(target_arch = "x86_64")]
 pub struct PagingRegister(pub Address<Frame>, pub crate::arch::x64::registers::control::CR3Flags);
@@ -108,7 +101,7 @@ pub fn is_5_level_paged() -> bool {
     }
 }
 
-pub type PhysicalAlloactor = &'static pmm::PhysicalMemoryManager;
+pub type PhysicalAlloactor = &'static pmm::PhysicalMemoryManager<'static>;
 
 pub static PMM: Lazy<pmm::PhysicalMemoryManager> = Lazy::new(|| unsafe {
     let memory_map = crate::boot::get_memory_map().unwrap();

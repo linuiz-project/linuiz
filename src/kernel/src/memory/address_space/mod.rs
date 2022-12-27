@@ -13,19 +13,21 @@ use core::{
     ptr::NonNull,
 };
 use lzstd::{Address, Page};
-use spin::{Lazy, RwLock};
+use spin::{Lazy, Mutex, RwLock};
 use try_alloc::vec::TryVec;
 use uuid::Uuid;
 
-static ADDRESS_SPACES: Lazy<BTreeMap<Uuid, RwLock<AddressSpace<PhysicalAlloactor>>, PhysicalAlloactor>> =
-    Lazy::new(|| BTreeMap::new_in(&*super::PMM));
+static ADDRESS_SPACES: RwLock<Lazy<BTreeMap<Uuid, Mutex<AddressSpace<PhysicalAlloactor>>, PhysicalAlloactor>>> =
+    RwLock::new(Lazy::new(|| BTreeMap::new_in(&*super::PMM)));
 
 pub fn register() -> Result<Uuid, AllocError> {
     todo!()
 }
 
-pub fn get(uuid: &Uuid) -> Option<&'static RwLock<AddressSpace<PhysicalAlloactor>>> {
-    ADDRESS_SPACES.get(uuid)
+pub fn with<T>(uuid: &Uuid, func: impl FnOnce(Option<&'static AddressSpace<PhysicalAlloactor>>) -> T) -> T {
+    let addr_space = ADDRESS_SPACES.read().get(uuid).map(Mutex::lock).map(|a| &*a);
+
+    func(addr_space)
 }
 
 bitflags::bitflags! {
@@ -53,12 +55,12 @@ pub struct AddressSpace<A: Allocator + Clone> {
 }
 
 impl<A: Allocator + Clone> AddressSpace<A> {
-    pub fn new_in(size: usize, hhdm_ptr: NonNull<u8>, allocator: A) -> Result<Self, TryReserveError> {
+    pub unsafe fn new_in(size: usize, hhdm_ptr: NonNull<u8>, allocator: A) -> Result<Self, TryReserveError> {
         if size > 0 {
             let mut vec = TryVec::new_in(allocator.clone());
             vec.push(Region { len: size, free: true })?;
 
-            Self { regions: vec, allocator, mapper: Mapper::new(depth, hhdm_address, None) }
+            Ok(Self { regions: vec, allocator, mapper: Mapper::new(4 /* TODO */, hhdm_ptr, None) })
         }
     }
 
@@ -147,5 +149,22 @@ impl<A: Allocator + Clone> AddressSpace<A> {
                     .ok_or(Error)
             }
         }
+    }
+
+    // TODO
+    pub fn is_mmapped(&self, address: NonNull<u8>) -> bool {
+        self.mapper.is_mapped(Address::<Page>::from_ptr(address.as_ptr(), None))
+    }
+
+    pub fn is_range_mmapped(&self, address: NonNull<[u8]>) -> bool {
+        let base = address.addr().get();
+        for page_address in base..(base + address.len()) {
+            let page = Address::<Page>::from_u64(page_address as u64).unwrap();
+            if !self.mapper.is_mapped(page) {
+                return false;
+            }
+        }
+
+        true
     }
 }

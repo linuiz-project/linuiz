@@ -168,7 +168,7 @@ unsafe extern "C" fn _entry() -> ! {
      * Memory
      */
     {
-        use crate::memory::{Mapper, PageAttributes};
+        use crate::memory::{address_space::Mapper, PageAttributes};
         use lzstd::{LinkerSymbol, PageAlign};
 
         extern "C" {

@@ -1,9 +1,10 @@
 use crate::{
-    memory::{PagingRegister, Stack, KMALLOC},
-    proc::{task::Task, Scheduler},
+    memory::{PagingRegister, Stack, KMALLOC, address_space},
+    proc::{task::Task, Scheduler}, arch::x64::structures::idt::Exception, interrupts::InterruptCell,
 };
-use core::alloc::Allocator;
+use core::{alloc::Allocator, sync::atomic::AtomicBool};
 use try_alloc::boxed::TryBox;
+use uuid::Uuid;
 
 pub(self) const US_PER_SEC: u32 = 1000000;
 pub(self) const US_WAIT: u32 = 10000;
@@ -15,9 +16,15 @@ pub const SYSCALL_STACK_SIZE: usize = 0x4000;
 pub(crate) struct LocalState {
     syscall_stack_ptr: *const (),
     syscall_stack: Stack,
+    
     magic: u64,
     core_id: u32,
+    
+    uuid: Uuid,
     scheduler: Scheduler,
+
+    has_exception: AtomicBool,
+    exception_catch: InterruptCell< Option<fn(Exception)>>,
 
     #[cfg(target_arch = "x86_64")]
     idt: Option<TryBox<crate::arch::x64::structures::idt::InterruptDescriptorTable>>,
@@ -58,8 +65,11 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
     let local_state = LocalState {
         syscall_stack_ptr: syscall_stack.as_ptr().add(syscall_stack.len() & !0xF).cast(),
         syscall_stack,
+        
         magic: LocalState::MAGIC,
         core_id,
+
+        uuid: address_space::register().unwrap(),
         scheduler: Scheduler::new(
             false,
             Task::new(
@@ -70,6 +80,9 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
                 PagingRegister::read(),
             ),
         ),
+
+        exception_catch: InterruptCell::new(None),
+
 
         #[cfg(target_arch = "x86_64")]
         idt: {
@@ -202,6 +215,10 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
     crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::write(local_state_ptr.addr() as u64);
 }
 
+pub fn get_uuid() -> Uuid {
+    get().uuid
+}
+
 /// ### Safety
 ///
 /// Caller must ensure control flow is prepared to begin scheduling tasks on the current core.
@@ -260,4 +277,15 @@ pub unsafe fn preemption_wait(interval_wait: core::num::NonZeroU16) {
             apic::TimerMode::Periodic => unimplemented!(),
         }
     }
+}
+
+pub fn catch_exception<T>(do: impl FnOnce() -> T, err: fn(Exception)) -> T{
+    let local_state = get();
+    local_state.exception_catch.set(Some(err));
+    
+    let value = do();
+
+    local_state.exception_catch.set(None);
+
+    value
 }
