@@ -20,7 +20,45 @@ pub fn do_syscall(vector: Syscall) {
                 let addr_space = addr_space.unwrap();
 
                 CStr::from_ptr(cstr_ptr);
-            })
+            })230
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            
 
             // ### Safety: The kernel guarantees the HHDM will be valid.
             let page_manager = unsafe { crate::memory::address_space::Mapper::from_current(get_hhdm_address()) };

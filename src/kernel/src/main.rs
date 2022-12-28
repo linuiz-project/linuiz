@@ -53,6 +53,7 @@ mod arch;
 mod boot;
 mod cpu;
 mod elf;
+mod exceptions;
 mod interrupts;
 mod local_state;
 mod memory;
