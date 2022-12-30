@@ -31,15 +31,6 @@ pub fn get_hhdm_address() -> Address<Virtual> {
         .clone()
 }
 
-pub fn get_kernel_mapper() -> &'static Mapper {
-    static KERNEL_MAPPER: Once<Mapper> = Once::new();
-
-    KERNEL_MAPPER.call_once(|| {
-        // ### Safety: The kernel guarantees the HHDM will be valid.
-        unsafe { Mapper::new(4, get_hhdm_address(), None).unwrap() }
-    })
-}
-
 #[cfg(target_arch = "x86_64")]
 pub struct PagingRegister(pub Address<Frame>, pub crate::arch::x64::registers::control::CR3Flags);
 #[cfg(target_arch = "riscv64")]

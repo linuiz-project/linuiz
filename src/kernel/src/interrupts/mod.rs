@@ -123,13 +123,13 @@ impl<T> InterruptCell<T> {
     }
 
     #[inline]
-    pub fn with(&self, func: impl FnOnce(&T) -> U) -> U {
+    pub fn with<U>(&self, func: impl FnOnce(&T) -> U) -> U {
         let value_ref = &self.0;
         without(|| func(value_ref))
     }
 
     #[inline]
-    pub fn with_mut(&mut self, func: impl FnOnce(&mut T) -> U) -> U {
+    pub fn with_mut<U>(&mut self, func: impl FnOnce(&mut T) -> U) -> U {
         let value_mut = &mut self.0;
         without(|| func(value_mut))
     }

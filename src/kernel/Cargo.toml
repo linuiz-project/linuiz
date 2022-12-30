@@ -37,6 +37,7 @@ bitflags = "*"
 paste = "*"
 bytemuck = "*"
 rustc-demangle = "*"
+no-panic = "*"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 pic_8259 = { path = "../shared/src/pic_8259/" }

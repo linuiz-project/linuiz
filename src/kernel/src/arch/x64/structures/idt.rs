@@ -222,7 +222,7 @@ macro_rules! irq_stub {
 #[repr(C, u8)]
 #[derive(Debug)]
 #[allow(non_camel_case_types)]
-pub enum Exception<'a> {
+pub enum Fault<'a> {
     /// Generated upon an attempt to divide by zero.
     DivideError(&'a InterruptStackFrame, &'a GeneralRegisters),
 
@@ -317,70 +317,99 @@ pub enum Exception<'a> {
     TripleFault,
 }
 
-pub fn common_exception_handler(exception: Exception) {
-    match exception {
-         Exception::PageFault(_, _, address, _)
-             if let Ok(()) = unsafe { crate::interrupts::pf_handler(address) } => {}
+impl From<Fault<'_>> for crate::exceptions::Exception {
+    fn from(value: Fault) -> Self {
+        use crate::exceptions::{Exception, ExceptionKind, PageFaultReason};
+        use core::ptr::NonNull;
+        use x86_64::structures::idt::PageFaultErrorCode;
 
-         exception => panic!("{:#X?}", exception)
-     }
+        match value {
+            Fault::PageFault(isf, err, addr, _) => unsafe {
+                Exception::new(
+                    ExceptionKind::PageFault {
+                        ptr: NonNull::new(addr.as_ptr::<u8>()).unwrap(),
+                        reason: if err.contains(PageFaultErrorCode::PROTECTION_VIOLATION) {
+                            PageFaultReason::BadPermissions
+                        } else {
+                            PageFaultReason::InvalidPtr
+                        },
+                    },
+                    NonNull::new(isf.instruction_pointer.as_ptr::<u8>()).unwrap(),
+                    NonNull::new(isf.stack_pointer.as_ptr::<u8>()).unwrap(),
+                )
+            },
+
+            _ => todo!(),
+        }
+    }
+}
+
+pub fn common_exception_handler(exception: Fault) {
+    if let Some(exception) = crate::local_state::try_catch_exception(exception) {
+        match exception {
+            Fault::PageFault(_, _, address, _)
+                if let Ok(()) = unsafe { crate::interrupts::pf_handler(address) } => {}
+
+            exception => panic!("{:#X?}", exception)
+        }
+    }
 }
 
 exception_handler!(de, ());
 extern "sysv64" fn de_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralRegisters) {
-    common_exception_handler(Exception::DivideError(stack_frame, gprs))
+    common_exception_handler(Fault::DivideError(stack_frame, gprs))
 }
 
 exception_handler!(db, ());
 extern "sysv64" fn db_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralRegisters) {
-    common_exception_handler(Exception::Debug(stack_frame, gprs))
+    common_exception_handler(Fault::Debug(stack_frame, gprs))
 }
 
 exception_handler!(nmi, ());
 extern "sysv64" fn nmi_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralRegisters) {
-    common_exception_handler(Exception::NonMaskable(stack_frame, gprs))
+    common_exception_handler(Fault::NonMaskable(stack_frame, gprs))
 }
 
 exception_handler!(bp, ());
 extern "sysv64" fn bp_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralRegisters) {
-    common_exception_handler(Exception::Breakpoint(stack_frame, gprs))
+    common_exception_handler(Fault::Breakpoint(stack_frame, gprs))
 }
 
 exception_handler!(of, ());
 extern "sysv64" fn of_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralRegisters) {
-    common_exception_handler(Exception::Overflow(stack_frame, gprs))
+    common_exception_handler(Fault::Overflow(stack_frame, gprs))
 }
 
 exception_handler!(br, ());
 extern "sysv64" fn br_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralRegisters) {
-    common_exception_handler(Exception::BoundRangeExceeded(stack_frame, gprs))
+    common_exception_handler(Fault::BoundRangeExceeded(stack_frame, gprs))
 }
 
 exception_handler!(ud, ());
 extern "sysv64" fn ud_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralRegisters) {
-    common_exception_handler(Exception::InvalidOpcode(stack_frame, gprs))
+    common_exception_handler(Fault::InvalidOpcode(stack_frame, gprs))
 }
 
 exception_handler!(nm, ());
 extern "sysv64" fn nm_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralRegisters) {
-    common_exception_handler(Exception::DeviceNotAvailable(stack_frame, gprs))
+    common_exception_handler(Fault::DeviceNotAvailable(stack_frame, gprs))
 }
 
 exception_handler_with_error!(df, u64, !);
 extern "sysv64" fn df_handler_inner(stack_frame: &InterruptStackFrame, _: u64, gprs: &GeneralRegisters) -> ! {
-    common_exception_handler(Exception::DoubleFault(stack_frame, gprs));
+    common_exception_handler(Fault::DoubleFault(stack_frame, gprs));
     // Wait indefinite in case the above exception handler returns control flow.
     crate::interrupts::wait_loop()
 }
 
 exception_handler_with_error!(ts, u64, ());
 extern "sysv64" fn ts_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &GeneralRegisters) {
-    common_exception_handler(Exception::InvalidTSS(stack_frame, idt::SelectorErrorCode::new_truncate(error_code), gprs))
+    common_exception_handler(Fault::InvalidTSS(stack_frame, idt::SelectorErrorCode::new_truncate(error_code), gprs))
 }
 
 exception_handler_with_error!(np, u64, ());
 extern "sysv64" fn np_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &GeneralRegisters) {
-    common_exception_handler(Exception::SegmentNotPresent(
+    common_exception_handler(Fault::SegmentNotPresent(
         stack_frame,
         idt::SelectorErrorCode::new_truncate(error_code),
         gprs,
@@ -389,7 +418,7 @@ extern "sysv64" fn np_handler_inner(stack_frame: &InterruptStackFrame, error_cod
 
 exception_handler_with_error!(ss, u64, ());
 extern "sysv64" fn ss_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &GeneralRegisters) {
-    common_exception_handler(Exception::StackSegmentFault(
+    common_exception_handler(Fault::StackSegmentFault(
         stack_frame,
         idt::SelectorErrorCode::new_truncate(error_code),
         gprs,
@@ -398,7 +427,7 @@ extern "sysv64" fn ss_handler_inner(stack_frame: &InterruptStackFrame, error_cod
 
 exception_handler_with_error!(gp, u64, ());
 extern "sysv64" fn gp_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &GeneralRegisters) {
-    common_exception_handler(Exception::GeneralProtectionFault(
+    common_exception_handler(Fault::GeneralProtectionFault(
         stack_frame,
         idt::SelectorErrorCode::new_truncate(error_code),
         gprs,
@@ -412,36 +441,36 @@ extern "sysv64" fn pf_handler_inner(
     gprs: &GeneralRegisters,
 ) {
     let fault_address = crate::arch::x64::registers::control::CR2::read();
-    common_exception_handler(Exception::PageFault(stack_frame, error_code, fault_address, gprs))
+    common_exception_handler(Fault::PageFault(stack_frame, error_code, fault_address, gprs))
 }
 
 // --- reserved 15
 
 exception_handler!(mf, ());
 extern "sysv64" fn mf_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralRegisters) {
-    common_exception_handler(Exception::x87FloatingPoint(stack_frame, gprs))
+    common_exception_handler(Fault::x87FloatingPoint(stack_frame, gprs))
 }
 
 exception_handler_with_error!(ac, u64, ());
 extern "sysv64" fn ac_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &GeneralRegisters) {
-    common_exception_handler(Exception::AlignmentCheck(stack_frame, error_code, gprs))
+    common_exception_handler(Fault::AlignmentCheck(stack_frame, error_code, gprs))
 }
 
 exception_handler!(mc, !);
 extern "sysv64" fn mc_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralRegisters) -> ! {
-    common_exception_handler(Exception::MachineCheck(stack_frame, gprs));
+    common_exception_handler(Fault::MachineCheck(stack_frame, gprs));
     // Wait indefinite in case the above exception handler returns control flow.
     crate::interrupts::wait_loop()
 }
 
 exception_handler!(xm, ());
 extern "sysv64" fn xm_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralRegisters) {
-    common_exception_handler(Exception::SimdFlaotingPoint(stack_frame, gprs))
+    common_exception_handler(Fault::SimdFlaotingPoint(stack_frame, gprs))
 }
 
 exception_handler!(ve, ());
 extern "sysv64" fn ve_handler_inner(stack_frame: &InterruptStackFrame, gprs: &GeneralRegisters) {
-    common_exception_handler(Exception::Virtualization(stack_frame, gprs))
+    common_exception_handler(Fault::Virtualization(stack_frame, gprs))
 }
 
 // --- reserved 22-30

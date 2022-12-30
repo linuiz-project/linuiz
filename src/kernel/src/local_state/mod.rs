@@ -1,8 +1,9 @@
 use crate::{
-    memory::{PagingRegister, Stack, KMALLOC, address_space},
-    proc::{task::Task, Scheduler}, arch::x64::structures::idt::Exception, interrupts::InterruptCell,
+    exceptions::Exception,
+    memory::{address_space, PagingRegister, Stack, KMALLOC},
+    proc::{task::Task, Scheduler},
 };
-use core::{alloc::Allocator, sync::atomic::AtomicBool};
+use core::{alloc::Allocator, cell::UnsafeCell};
 use try_alloc::boxed::TryBox;
 use uuid::Uuid;
 
@@ -12,19 +13,24 @@ pub(self) const US_FREQ_FACTOR: u32 = US_PER_SEC / US_WAIT;
 
 pub const SYSCALL_STACK_SIZE: usize = 0x4000;
 
+pub enum ExceptionCatch {
+    Last(Exception),
+    Waiting,
+    None,
+}
+
 #[repr(C, align(0x1000))]
 pub(crate) struct LocalState {
     syscall_stack_ptr: *const (),
     syscall_stack: Stack,
-    
+
     magic: u64,
     core_id: u32,
-    
+
     uuid: Uuid,
     scheduler: Scheduler,
 
-    has_exception: AtomicBool,
-    exception_catch: InterruptCell< Option<fn(Exception)>>,
+    last_exception: UnsafeCell<ExceptionCatch>,
 
     #[cfg(target_arch = "x86_64")]
     idt: Option<TryBox<crate::arch::x64::structures::idt::InterruptDescriptorTable>>,
@@ -65,7 +71,7 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
     let local_state = LocalState {
         syscall_stack_ptr: syscall_stack.as_ptr().add(syscall_stack.len() & !0xF).cast(),
         syscall_stack,
-        
+
         magic: LocalState::MAGIC,
         core_id,
 
@@ -80,9 +86,6 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
                 PagingRegister::read(),
             ),
         ),
-
-        exception_catch: InterruptCell::new(None),
-
 
         #[cfg(target_arch = "x86_64")]
         idt: {
@@ -279,13 +282,14 @@ pub unsafe fn preemption_wait(interval_wait: core::num::NonZeroU16) {
     }
 }
 
-pub fn catch_exception<T>(do: impl FnOnce() -> T, err: fn(Exception)) -> T{
-    let local_state = get();
-    local_state.exception_catch.set(Some(err));
-    
-    let value = do();
-
-    local_state.exception_catch.set(None);
-
-    value
+pub fn try_catch_exception<T: Into<Exception>>(exception: T) -> Option<T> {
+    let last_exception = get().last_exception.get_mut();
+    match *last_exception {
+        ExceptionCatch::Last(last) => panic!("cannot stack exceptions:\nLast: {last:?}\nNew: {exception:?}"),
+        ExceptionCatch::Waiting => {
+            *last_exception = ExceptionCatch::Last(exception);
+            None
+        }
+        ExceptionCatch::None => Some(exception),
+    }
 }

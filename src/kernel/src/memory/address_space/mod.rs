@@ -24,10 +24,8 @@ pub fn register() -> Result<Uuid, AllocError> {
     todo!()
 }
 
-pub fn with<T>(uuid: &Uuid, func: impl FnOnce(Option<&'static AddressSpace<PhysicalAlloactor>>) -> T) -> T {
-    let addr_space = ADDRESS_SPACES.read().get(uuid).map(Mutex::lock).map(|a| &*a);
-
-    func(addr_space)
+pub fn with<T>(uuid: &Uuid, func: impl FnOnce(&'static AddressSpace<PhysicalAlloactor>) -> T) -> Option<T> {
+    ADDRESS_SPACES.read().get(uuid).map(Mutex::lock).map(|a| func(&*a));
 }
 
 bitflags::bitflags! {
