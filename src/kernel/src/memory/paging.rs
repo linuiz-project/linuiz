@@ -269,7 +269,7 @@ impl<'a> PageTable<'a, Mut> {
     /// Caller must ensure the provided physical mapping page and page table entry are valid.
     pub(super) unsafe fn new(
         depth: usize,
-        hhdm_address: Address<Virtual>,
+        hhdm_address: NonNull<u8>,
         entry: &'a mut PageTableEntry,
     ) -> Option<Self> {
         if depth > 0 && entry.is_present() {
