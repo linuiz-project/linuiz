@@ -472,7 +472,7 @@ pub enum RelaType {
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct Rela64 {
-    pub addr: Address<Virtual>,
+    pub addr: u64,
     pub ty: RelaType,
     pub sym_idx: u32,
     pub addend: u64,

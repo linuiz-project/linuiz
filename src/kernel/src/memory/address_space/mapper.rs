@@ -21,7 +21,7 @@ pub enum MapperError {
 
 pub struct Mapper {
     depth: usize,
-    root_frame: Address<Frame>,
+    root_address: Address,
     hhdm_ptr: NonNull<u8>,
     entry: PageTableEntry,
 }
@@ -48,7 +48,7 @@ impl Mapper {
                 _ => core::ptr::write_bytes(root_mapped_address.as_mut_ptr::<u8>(), 0, 0x1000),
             }
 
-            Some(Self{ depth, root_frame, hhdm_ptr, entry: PageTableEntry::new(root_frame, PageAttributes::PRESENT) })
+            Some(Self{ depth, root_address: root_frame, hhdm_ptr, entry: PageTableEntry::new(root_frame, PageAttributes::PRESENT) })
         } else {
             None
         }
@@ -65,7 +65,7 @@ impl Mapper {
         Self {
             // TODO fix this for rv64 Sv39
             depth: if crate::memory::supports_5_level_paging() && crate::memory::is_5_level_paged() { 5 } else { 4 },
-            root_frame,
+            root_address: root_frame,
             hhdm_ptr,
             entry: root_table_entry,
         }
@@ -251,7 +251,7 @@ impl Mapper {
         interrupts::without(|| {
             #[cfg(target_arch = "x86_64")]
             crate::arch::x64::registers::control::CR3::write(
-                self.root_frame,
+                self.root_address,
                 crate::arch::x64::registers::control::CR3Flags::empty(),
             );
 
