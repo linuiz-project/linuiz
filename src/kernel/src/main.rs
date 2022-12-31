@@ -277,7 +277,7 @@ unsafe extern "C" fn _entry() -> ! {
                             crate::memory::get_hhdm_address().as_u64() + phys_base,
                             Some(PageAlign::Align4KiB),
                         ),
-                        Address::<Frame>::from_u64_truncate(phys_base),
+                        Frame::new_truncate(phys_base as usize),
                         false,
                         page_attributes,
                     )
@@ -296,7 +296,7 @@ unsafe extern "C" fn _entry() -> ! {
                             crate::memory::get_hhdm_address().as_u64() + apic_address,
                             Some(PageAlign::Align4KiB),
                         ),
-                        Address::<Frame>::from_u64_truncate(apic_address),
+                        Frame::new_truncate(apic_address as usize),
                         false,
                         PageAttributes::MMIO,
                     )

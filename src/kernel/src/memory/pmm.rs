@@ -5,7 +5,7 @@ use core::{
     ptr::NonNull,
     sync::atomic::Ordering,
 };
-use lzstd::{Address, Frame};
+use lzstd::Frame;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
@@ -208,7 +208,7 @@ impl PhysicalMemoryManager<'_> {
         crate::interrupts::without(|| func(self.table))
     }
 
-    pub fn next_frame(&self) -> Result<Address<Frame>> {
+    pub fn next_frame(&self) -> Result<Frame> {
         self.with_table(|table| {
             table
                 .iter()
@@ -220,19 +220,18 @@ impl PhysicalMemoryManager<'_> {
                         frame_data.lock();
                         frame_data.unpeek();
 
-                        Some((index * 0x1000) as u64)
+                        Some(Frame::from_index(index))
                     } else {
                         frame_data.unpeek();
 
                         None
                     }
                 })
-                .and_then(Address::<Frame>::from_u64)
                 .ok_or(Error::NoneFree)
         })
     }
 
-    pub fn next_frames(&self, count: NonZeroUsize, alignment: NonZeroUsize) -> Result<Address<Frame>> {
+    pub fn next_frames(&self, count: NonZeroUsize, alignment: NonZeroUsize) -> Result<Frame> {
         if !alignment.is_power_of_two() {
             return Err(Error::InvalidAlignment);
         }
@@ -272,14 +271,14 @@ impl PhysicalMemoryManager<'_> {
                         // to extremely unpredictable results.
                         let start_index = self.table.len().wrapping_sub(sub_table.len());
                         let start_address = start_index.wrapping_mul(0x1000);
-                        break Address::<Frame>::from_u64(start_address as u64).ok_or(Error::Unknown);
+                        break Frame::new(start_address).ok_or(Error::Unknown);
                     }
                 }
             }
         })
     }
 
-    pub fn lock_frame(&self, frame: Address<Frame>) -> Result<()> {
+    pub fn lock_frame(&self, frame: Frame) -> Result<()> {
         self.with_table(|table| {
             let Some(frame_data) = table.get(frame.index()) else { return Err(Error::OutOfBounds) };
             frame_data.peek();
@@ -298,7 +297,7 @@ impl PhysicalMemoryManager<'_> {
         })
     }
 
-    pub fn lock_frames(&self, base: Address<Frame>, count: usize) -> Result<()> {
+    pub fn lock_frames(&self, base: Frame, count: usize) -> Result<()> {
         self.with_table(|table| {
             let start_index = base.index();
             let end_index = start_index + count;
@@ -325,7 +324,7 @@ impl PhysicalMemoryManager<'_> {
         })
     }
 
-    pub fn free_frame(&self, frame: Address<Frame>) -> Result<()> {
+    pub fn free_frame(&self, frame: Frame) -> Result<()> {
         self.with_table(|table| {
             let Some(frame_data) = table.get(frame.index()) else { return Err(Error::OutOfBounds) };
 
@@ -348,7 +347,7 @@ impl PhysicalMemoryManager<'_> {
         })
     }
 
-    pub fn modify_type(&self, frame: Address<Frame>, new_type: FrameType, old_type: Option<FrameType>) -> Result<()> {
+    pub fn modify_type(&self, frame: Frame, new_type: FrameType, old_type: Option<FrameType>) -> Result<()> {
         self.with_table(|table| {
             let Some(frame_data) = table.get(frame.index()) else { return Err(Error::OutOfBounds) };
 
@@ -396,11 +395,9 @@ unsafe impl core::alloc::Allocator for &PhysicalMemoryManager<'_> {
 
         let base_address = ptr.addr().get() - self.physical_memory.addr().get();
         for offset in (0..layout.size()).step_by(0x1000) {
-            Address::<Frame>::from_u64((base_address + offset) as u64)
-                .and_then(|address| self.free_frame(address).ok())
-                .unwrap_or_else(|| {
-                    error!("Unexpectedly failed to free frame during deallocation");
-                });
+            Frame::new(base_address + offset).and_then(|address| self.free_frame(address).ok()).unwrap_or_else(|| {
+                error!("Unexpectedly failed to free frame during deallocation");
+            });
         }
     }
 }

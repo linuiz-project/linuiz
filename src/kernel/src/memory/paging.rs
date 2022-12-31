@@ -91,7 +91,7 @@ impl PageTableEntry {
     /// Gets the frame index of the page table entry.
     #[inline]
     pub const fn get_frame(&self) -> Frame {
-        Address::<Frame>::from_u64_truncate(((self.0 & PTE_FRAME_ADDRESS_MASK) >> Self::FRAME_ADDRESS_SHIFT) * 0x1000)
+        Frame::new_truncate(self.0 & PTE_FRAME_ADDRESS_MASK)
     }
 
     /// Sets the entry's frame index.
@@ -100,7 +100,7 @@ impl PageTableEntry {
     ///
     /// Caller must ensure changing the attributes of this entry does not cause any memory corruption side effects.
     #[inline]
-    pub unsafe fn set_frame(&mut self, frame: Address<Frame>) {
+    pub unsafe fn set_frame(&mut self, frame: Frame) {
         self.0 = (self.0 & !PTE_FRAME_ADDRESS_MASK) | ((frame.index() as u64) << Self::FRAME_ADDRESS_SHIFT);
     }
 

@@ -74,7 +74,7 @@ pub unsafe fn reclaim_boot_memory() {
         .iter()
         .filter(|entry| entry.typ == LimineMemoryMapEntryType::BootloaderReclaimable)
         .flat_map(|entry| (entry.base..(entry.base + entry.len)).step_by(0x1000))
-        .map(|address| Address::<Frame>::from_u64_truncate(address))
+        .map(|address| Frame::new_truncate(address as usize))
     {
         crate::memory::PMM.modify_type(frame, FrameType::Generic, Some(FrameType::BootReclaim)).ok();
     }

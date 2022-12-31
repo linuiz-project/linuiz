@@ -92,7 +92,7 @@ impl Mapper {
     pub fn map(
         &mut self,
         page: Address<Page>,
-        frame: Address<Frame>,
+        frame: Frame,
         lock_frames: bool,
         mut attributes: PageAttributes,
     ) -> Result<(), MapperError> {
@@ -150,7 +150,7 @@ impl Mapper {
 
                     let frame = entry.get_frame();
                     // ### Safety: See above.
-                    unsafe { entry.set_frame(Address::<Frame>::zero()) };
+                    unsafe { entry.set_frame(Frame::zero()) };
 
                     if free_frame {
                         PMM.free_frame(frame).unwrap();
@@ -177,13 +177,13 @@ impl Mapper {
         self.with_root_table(|root_table| root_table.with_entry(page, |entry| entry.is_ok()))
     }
 
-    pub fn is_mapped_to(&self, page: Address<Page>, frame: Address<Frame>) -> bool {
+    pub fn is_mapped_to(&self, page: Address<Page>, frame: Frame) -> bool {
         self.with_root_table(|root_table| {
             root_table.with_entry(page, |entry| entry.map(|entry| entry.get_frame() == frame).unwrap_or(false))
         })
     }
 
-    pub fn get_mapped_to(&self, page: Address<Page>) -> Option<Address<Frame>> {
+    pub fn get_mapped_to(&self, page: Address<Page>) -> Option<Frame> {
         self.with_root_table(|root_table| {
             root_table.with_entry(page, |entry| entry.ok().map(|entry| entry.get_frame()))
         })
@@ -192,7 +192,7 @@ impl Mapper {
     pub fn map_if_not_mapped(
         &mut self,
         page: Address<Page>,
-        frame_and_lock: Option<(Address<Frame>, bool)>,
+        frame_and_lock: Option<(Frame, bool)>,
         attributes: PageAttributes,
     ) -> Result<(), MapperError> {
         match frame_and_lock {
