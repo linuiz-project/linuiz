@@ -1,8 +1,31 @@
 use core::{fmt, ptr::NonNull};
 use lzstd::{
     mem::{InteriorRef, Mut, Ref},
-    Address, Frame, Page,
+    Frame, NonNullPtr, Page,
 };
+
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Depth(usize);
+
+impl Depth {
+    #[inline]
+    pub const fn min() -> Self {
+        Self(1)
+    }
+
+    #[inline]
+    pub const fn new(depth: usize) -> Option<Self> {
+        const MAX_DEPTH: usize = 5;
+
+        (1..MAX_DEPTH).contains(&depth).then_some(Self(depth))
+    }
+
+    #[inline]
+    pub const fn get(self) -> usize {
+        self.0
+    }
+}
 
 #[cfg(target_arch = "x86_64")]
 bitflags::bitflags! {
@@ -211,19 +234,20 @@ impl<'a, RefKind: InteriorRef> PageTable<'a, RefKind> {
 
     pub fn with_entry<T>(
         &self,
-        page: Address<Page>,
+        page: Page,
+        depth: Option<Depth>,
         func: impl FnOnce(Result<&PageTableEntry, PagingError>) -> T,
     ) -> T {
         let cur_depth = self.depth;
         let hhdm_ptr = self.hhdm_ptr;
         let entry = &self.get_table()[Self::get_depth_index(cur_depth, page.address().as_usize())];
-        let page_depth = page.depth().unwrap_or(1);
+        let page_depth = depth.unwrap_or(Depth::min()).get();
 
         if cur_depth == page_depth {
             func(Ok(entry))
         } else if cur_depth > page_depth && !entry.get_attributes().contains(PageAttributes::HUGE) {
             match unsafe { PageTable::<Ref>::new(cur_depth - 1, hhdm_ptr, entry) } {
-                Some(page_table) => page_table.with_entry(page, func),
+                Some(page_table) => page_table.with_entry(page, depth, func),
                 None => func(Err(PagingError::NotMapped)),
             }
         } else if entry.get_attributes().contains(PageAttributes::HUGE) {
@@ -269,7 +293,7 @@ impl<'a> PageTable<'a, Mut> {
     /// Caller must ensure the provided physical mapping page and page table entry are valid.
     pub(super) unsafe fn new(
         depth: usize,
-        hhdm_address: NonNull<u8>,
+        hhdm_address: NonNullPtr<u8>,
         entry: &'a mut PageTableEntry,
     ) -> Option<Self> {
         if depth > 0 && entry.is_present() {
@@ -290,18 +314,19 @@ impl<'a> PageTable<'a, Mut> {
     pub fn with_entry_mut<T>(
         &mut self,
         page: Page,
+        depth: Option<Depth>,
         func: impl FnOnce(Result<&mut PageTableEntry, PagingError>) -> T,
     ) -> T {
         let cur_depth = self.depth;
         let hhdm_address = self.hhdm_ptr;
         let entry = &mut self.get_table_mut()[Self::get_depth_index(cur_depth, page.into())];
-        let page_depth = page.depth().unwrap_or(1);
+        let page_depth = depth.unwrap_or(Depth::min()).get();
 
         if cur_depth == page_depth {
             func(Ok(entry))
         } else if cur_depth > page_depth && !entry.get_attributes().contains(PageAttributes::HUGE) {
             match unsafe { PageTable::<Mut>::new(cur_depth - 1, hhdm_address, entry) } {
-                Some(mut page_table) => page_table.with_entry_mut(page, func),
+                Some(mut page_table) => page_table.with_entry_mut(page, depth, func),
                 None => func(Err(PagingError::NotMapped)),
             }
         } else if entry.get_attributes().contains(PageAttributes::HUGE) {
@@ -316,13 +341,14 @@ impl<'a> PageTable<'a, Mut> {
     /// a frame for the requested page table.
     pub fn with_entry_create<T>(
         &mut self,
-        page: Address<Page>,
+        page: Page,
+        depth: Depth,
         func: impl FnOnce(Result<&mut PageTableEntry, PagingError>) -> T,
     ) -> T {
         let cur_depth = self.depth;
         let hhdm_address = self.hhdm_ptr;
         let entry = &mut self.get_table_mut()[Self::get_depth_index(cur_depth, page.address().as_usize())];
-        let page_depth = page.depth().unwrap_or(1);
+        let page_depth = depth.get();
 
         // TODO this doesn't handle page depth correctly for creations
         // TODO possibly handle present but no frame, or frame but no present?
@@ -336,7 +362,7 @@ impl<'a> PageTable<'a, Mut> {
             func(Ok(entry))
         } else if cur_depth > page_depth && !entry.get_attributes().contains(PageAttributes::HUGE) {
             match unsafe { PageTable::<Mut>::new(cur_depth - 1, hhdm_address, entry) } {
-                Some(mut page_table) => page_table.with_entry_create(page, func),
+                Some(mut page_table) => page_table.with_entry_create(page, depth, func),
                 None => func(Err(PagingError::NotMapped)),
             }
         } else if entry.get_attributes().contains(PageAttributes::HUGE) {

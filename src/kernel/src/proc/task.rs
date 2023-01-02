@@ -1,4 +1,5 @@
 use crate::memory::Stack;
+use lzstd::NonNullPtr;
 use try_alloc::vec::TryVec;
 use uuid::Uuid;
 
@@ -9,11 +10,6 @@ pub fn queue_task(new_task: Task) {
         let mut waiting_tasks = WAITING_TASKS.lock();
         waiting_tasks.push(new_task).unwrap();
     })
-}
-
-pub enum EntryPoint {
-    Address(lzstd::Address<lzstd::Virtual>),
-    Function(fn() -> !),
 }
 
 /// Representation object for different contexts of execution in the CPU.
@@ -33,7 +29,7 @@ unsafe impl Send for Task {}
 impl Task {
     pub fn new(
         priority: u8,
-        start: EntryPoint,
+        entry: NonNullPtr<u8>,
         stack: Stack,
         arch_context: crate::cpu::ArchContext,
         root_page_table_args: crate::memory::PagingRegister,
@@ -46,13 +42,7 @@ impl Task {
             prio: priority,
             last_run: 0,
             stack,
-            ctrl_flow_context: crate::cpu::ControlContext {
-                ip: match start {
-                    EntryPoint::Address(address) => address.as_u64(),
-                    EntryPoint::Function(function) => function as usize as u64,
-                },
-                sp,
-            },
+            ctrl_flow_context: crate::cpu::ControlContext { ip: entry.as_ptr() as usize as u64, sp },
             arch_context,
         }
     }

@@ -1,5 +1,5 @@
 use core::arch::asm;
-use lzstd::{Address, Frame};
+use lzstd::Frame;
 
 bitflags::bitflags! {
     pub struct CR3Flags : usize {

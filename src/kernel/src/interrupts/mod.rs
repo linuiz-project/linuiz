@@ -1,8 +1,8 @@
 mod instructions;
+pub use instructions::*;
 
 use crate::cpu::{ArchContext, ControlContext};
-pub use instructions::*;
-use lzstd::{Address, Page, Virtual};
+use lzstd::{Page, Ptr};
 use num_enum::TryFromPrimitive;
 
 /// Delivery mode for IPIs.
@@ -65,10 +65,10 @@ pub enum PageFaultHandlerError {
 /// Do not call this function.
 #[no_mangle]
 #[repr(align(0x10))]
-pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandlerError> {
+pub unsafe fn pf_handler(address: Ptr<u8>) -> Result<(), PageFaultHandlerError> {
     use crate::memory::PageAttributes;
 
-    let fault_page = Address::<Page>::new(address, None).unwrap();
+    let fault_page = Page::try_from(*address).unwrap();
     // FIXME: Fabricating the virtual mapper is unsafe.
     let mut mapper = crate::memory::address_space::Mapper::from_current(crate::memory::get_hhdm_address());
     let Some(mut fault_page_attributes) = mapper.get_page_attributes(fault_page) else { return Err(PageFaultHandlerError::AddressNotMapped) };

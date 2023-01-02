@@ -1,5 +1,4 @@
 use crate::arch::x64::registers::GeneralRegisters;
-use lzstd::{Address, Virtual};
 use x86_64::structures::idt;
 
 pub use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, InterruptStackFrameValue};

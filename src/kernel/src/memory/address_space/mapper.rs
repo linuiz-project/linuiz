@@ -2,11 +2,11 @@ use core::ptr::NonNull;
 
 use crate::{
     interrupts,
-    memory::{AttributeModify, PageAttributes, PageTable, PageTableEntry, PagingError, PagingRegister, PMM},
+    memory::{AttributeModify, Depth, PageAttributes, PageTable, PageTableEntry, PagingError, PagingRegister, PMM},
 };
 use lzstd::{
     mem::{Mut, Ref},
-    Address, Frame, Page, Virtual,
+    Address, Frame, Page,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,7 +91,8 @@ impl Mapper {
     /// Maps the specified page to the specified frame index.
     pub fn map(
         &mut self,
-        page: Address<Page>,
+        page: Page,
+        depth: Depth,
         frame: Frame,
         lock_frames: bool,
         mut attributes: PageAttributes,
@@ -104,7 +105,7 @@ impl Mapper {
             }
 
             // If acquisition of the frame is successful, attempt to map the page to the frame index.
-            root_table.with_entry_create(page, |entry| {
+            root_table.with_entry_create(page, depth, |entry| {
                 match entry {
                     Ok(entry) => {
                         *entry = PageTableEntry::new(frame, {
@@ -141,9 +142,9 @@ impl Mapper {
     /// ### Safety
     ///
     /// Caller must ensure calling this function does not cause memory corruption.
-    pub unsafe fn unmap(&mut self, page: Address<Page>, free_frame: bool) -> Result<(), PagingError> {
+    pub unsafe fn unmap(&mut self, page: Page, depth: Option<Depth>, free_frame: bool) -> Result<(), PagingError> {
         self.with_root_table_mut(|mut root_table| {
-            root_table.with_entry_mut(page, |entry| {
+            root_table.with_entry_mut(page, depth, |entry| {
                 entry.map(|entry| {
                     // ### Safety: We've got an explicit directive from the caller to unmap this page, so the caller must ensure that's a valid operation.
                     unsafe { entry.set_attributes(PageAttributes::PRESENT, AttributeModify::Remove) };
@@ -164,53 +165,36 @@ impl Mapper {
         })
     }
 
-    pub fn auto_map(&mut self, page: Address<Page>, attributes: PageAttributes) -> Result<(), MapperError> {
+    pub fn auto_map(&mut self, page: Page, attributes: PageAttributes) -> Result<(), MapperError> {
         match PMM.next_frame() {
-            Ok(frame) => self.map(page, frame, !attributes.contains(PageAttributes::DEMAND), attributes),
+            Ok(frame) => self.map(page, Depth::min(), frame, !attributes.contains(PageAttributes::DEMAND), attributes),
             Err(_) => Err(MapperError::AllocError),
         }
     }
 
     /* STATE QUERYING */
 
-    pub fn is_mapped(&self, page: Address<Page>) -> bool {
-        self.with_root_table(|root_table| root_table.with_entry(page, |entry| entry.is_ok()))
+    pub fn is_mapped(&self, page: Page, depth: Option<Depth>) -> bool {
+        self.with_root_table(|root_table| root_table.with_entry(page, depth, |entry| entry.is_ok()))
     }
 
-    pub fn is_mapped_to(&self, page: Address<Page>, frame: Frame) -> bool {
+    pub fn is_mapped_to(&self, page: Page, frame: Frame) -> bool {
         self.with_root_table(|root_table| {
-            root_table.with_entry(page, |entry| entry.map(|entry| entry.get_frame() == frame).unwrap_or(false))
+            root_table.with_entry(page, None, |entry| entry.map(|entry| entry.get_frame() == frame).unwrap_or(false))
         })
     }
 
-    pub fn get_mapped_to(&self, page: Address<Page>) -> Option<Frame> {
+    pub fn get_mapped_to(&self, page: Page) -> Option<Frame> {
         self.with_root_table(|root_table| {
-            root_table.with_entry(page, |entry| entry.ok().map(|entry| entry.get_frame()))
+            root_table.with_entry(page, None, |entry| entry.ok().map(|entry| entry.get_frame()))
         })
-    }
-
-    pub fn map_if_not_mapped(
-        &mut self,
-        page: Address<Page>,
-        frame_and_lock: Option<(Frame, bool)>,
-        attributes: PageAttributes,
-    ) -> Result<(), MapperError> {
-        match frame_and_lock {
-            Some((frame, lock_frame)) if !self.is_mapped_to(page, frame) => {
-                self.map(page, frame, lock_frame, attributes)
-            }
-
-            None if !self.is_mapped(page) => self.auto_map(page, attributes),
-
-            _ => Ok(()),
-        }
     }
 
     /* STATE CHANGING */
 
-    pub fn get_page_attributes(&self, page: Address<Page>) -> Option<PageAttributes> {
+    pub fn get_page_attributes(&self, page: Page) -> Option<PageAttributes> {
         self.with_root_table(|root_table| {
-            root_table.with_entry(page, |entry| match entry {
+            root_table.with_entry(page, None, |entry| match entry {
                 Ok(entry) => Some(entry.get_attributes()),
                 Err(_) => None,
             })
@@ -219,12 +203,13 @@ impl Mapper {
 
     pub unsafe fn set_page_attributes(
         &mut self,
-        page: Address<Page>,
+        page: Page,
+        depth: Option<Depth>,
         attributes: PageAttributes,
         modify_mode: AttributeModify,
     ) -> Result<(), MapperError> {
         self.with_root_table_mut(|mut root_table| {
-            root_table.with_entry_mut(page, |entry| match entry {
+            root_table.with_entry_mut(page, depth, |entry| match entry {
                 Ok(entry) => {
                     entry.set_attributes(attributes, modify_mode);
 

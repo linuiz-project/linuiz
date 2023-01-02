@@ -11,20 +11,21 @@ use core::{
     alloc::{AllocError, Allocator, Layout},
     ptr::NonNull,
 };
-use lzstd::{Address, Frame, Virtual};
+use lzstd::{Frame, NonNullPtr};
 use slab::SlabAllocator;
 use spin::{Lazy, Once};
 use try_alloc::boxed::TryBox;
 
-pub fn get_hhdm_address() -> Address<Virtual> {
-    static HHDM_ADDRESS: Once<Address<Virtual>> = Once::new();
+pub fn get_hhdm_ptr() -> NonNullPtr<u8> {
+    static HHDM_ADDRESS: Once<NonNullPtr<u8>> = Once::new();
 
     HHDM_ADDRESS
         .call_once(|| {
             static LIMINE_HHDM: limine::LimineHhdmRequest = limine::LimineHhdmRequest::new(crate::boot::LIMINE_REV);
 
-            Address::<Virtual>::new(
-                LIMINE_HHDM.get_response().get().expect("bootloader provided no higher-half direct mapping").offset,
+            NonNullPtr::try_from(
+                LIMINE_HHDM.get_response().get().expect("bootloader provided no higher-half direct mapping").offset
+                    as *mut u8,
             )
             .expect("bootloader provided a non-canonical higher-half direct mapping address")
         })
@@ -116,7 +117,7 @@ pub static PMM: Lazy<pmm::PhysicalMemoryManager> = Lazy::new(|| unsafe {
                 }
             },
         }),
-        core::ptr::NonNull::new(get_hhdm_address().as_mut_ptr()).unwrap(),
+        *get_hhdm_ptr(),
     )
     .unwrap()
 });

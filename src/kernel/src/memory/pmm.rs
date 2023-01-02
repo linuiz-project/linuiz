@@ -5,7 +5,7 @@ use core::{
     ptr::NonNull,
     sync::atomic::Ordering,
 };
-use lzstd::Frame;
+use lzstd::{Frame, NonNullPtr};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
@@ -128,7 +128,7 @@ pub struct MemoryMapping {
 
 pub struct PhysicalMemoryManager<'a> {
     table: &'a [FrameData],
-    physical_memory: NonNull<u8>,
+    physical_memory: NonNullPtr<u8>,
 }
 
 // ### Safety: Type uses entirely atomic operations.
@@ -140,7 +140,7 @@ impl PhysicalMemoryManager<'_> {
     // ### Safety: Caller must guarantee the physical mapped address is valid.
     pub unsafe fn from_memory_map(
         memory_map: impl ExactSizeIterator<Item = MemoryMapping>,
-        physical_memory: NonNull<u8>,
+        physical_memory: NonNullPtr<u8>,
     ) -> Option<Self> {
         let (memory_map, memory_map_len) = {
             let memory_map_len = memory_map.len();

@@ -64,7 +64,7 @@ mod proc;
 mod rand;
 mod time;
 
-use lzstd::{Address, Frame, Page, Virtual};
+use lzstd::{Address, Frame, Page};
 
 #[cfg(not(target_arch = "x86_64"))]
 getrandom::register_custom_getrandom!({ todo!() });

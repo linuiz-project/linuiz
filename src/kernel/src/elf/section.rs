@@ -1,6 +1,6 @@
 #![allow(non_camel_case_types)]
 
-use lzstd::{Address, Virtual};
+use lzstd::{Address, NonNullPtr};
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy)]
@@ -107,8 +107,8 @@ impl Header {
     }
 
     #[inline]
-    pub const fn get_virtual_address(&self) -> Option<Address<Virtual>> {
-        Address::<Virtual>::new(self.virt_addr)
+    pub const fn get_virtual_address(&self) -> Option<NonNullPtr> {
+        NonNullPtr::try_from(self.virt_addr as usize).ok()
     }
 
     #[inline]
