@@ -125,7 +125,7 @@ impl PageTableEntry {
         Self(0)
     }
 
-    pub const fn new(frame: Address<Frame>, attributes: PageAttributes) -> Self {
+    pub fn new(frame: Address<Frame>, attributes: PageAttributes) -> Self {
         Self(((frame.index() as u64) << Self::FRAME_ADDRESS_SHIFT) | attributes.bits())
     }
 
@@ -137,7 +137,7 @@ impl PageTableEntry {
 
     /// Gets the frame index of the page table entry.
     #[inline]
-    pub const fn get_frame(&self) -> Address<Frame> {
+    pub fn get_frame(&self) -> Address<Frame> {
         Address::new_truncate((self.0 & PTE_FRAME_ADDRESS_MASK) as usize)
     }
 
@@ -264,11 +264,11 @@ impl<RefKind: InteriorRef> PageTable<'_, RefKind> {
     }
 }
 
-impl PageTable<'_, Ref> {
+impl<'a> PageTable<'a, Ref> {
     /// # Safety
     ///
     /// Caller must ensure the provided physical mapping page and page table entry are valid.
-    pub(super) unsafe fn new(depth: PageDepth, entry: &PageTableEntry) -> Option<Self> {
+    pub(super) unsafe fn new(depth: PageDepth, entry: &'a PageTableEntry) -> Option<Self> {
         if entry.is_present() {
             Some(Self { depth, entry })
         } else {
@@ -292,7 +292,7 @@ impl PageTable<'_, Ref> {
                     false if let Some(next_depth) = self.next_depth() => {
                         // Safety: If the page table entry is present, then it's a valid entry, all bits accounted.
                         match unsafe { PageTable::<Ref>::new(next_depth, entry) } {
-                            Some(mut page_table) => page_table.with_entry(page, Some(to_depth), with_fn),
+                            Some( page_table) => page_table.with_entry(page, Some(to_depth), with_fn),
                             None => with_fn(Err(PagingError::NotMapped)),
                         }
                     }
@@ -309,11 +309,11 @@ impl PageTable<'_, Ref> {
     }
 }
 
-impl PageTable<'_, Mut> {
+impl<'a> PageTable<'a, Mut> {
     /// # Safety
     ///
     /// Caller must ensure the provided physical mapping page and page table entry are valid.
-    pub(super) unsafe fn new(depth: PageDepth, entry: &mut PageTableEntry) -> Option<Self> {
+    pub(super) unsafe fn new(depth: PageDepth, entry: &'a mut PageTableEntry) -> Option<Self> {
         if entry.is_present() {
             Some(Self { depth, entry })
         } else {

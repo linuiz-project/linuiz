@@ -16,13 +16,13 @@ impl Scheduler {
 
     /// Enables the scheduler to pop tasks.
     #[inline]
-    pub const fn enable(&mut self) {
+    pub fn enable(&mut self) {
         self.enabled = true;
     }
 
     /// Disables scheduler from popping tasks. Any task pops which are already in-flight will not be cancelled.
     #[inline]
-    pub const fn disable(&mut self) {
+    pub fn disable(&mut self) {
         self.enabled = false;
     }
 

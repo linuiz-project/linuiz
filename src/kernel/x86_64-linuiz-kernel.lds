@@ -30,7 +30,7 @@ SECTIONS
     .rela.plt           : { *(.rela.plt) *(.rela.iplt) }
 
     /* text sections */
-    .text               : ALIGN(MAX_PAGE_SIZE) {
+    .text               : ALIGN(CONSTANT(MAXPAGESIZE)) {
         PROVIDE(__text_start = .);
 
         *(.plt) *(.iplt)
@@ -40,7 +40,7 @@ SECTIONS
     }
     
     /* rodata sections */
-    .rodata             : ALIGN(MAX_PAGE_SIZE) {
+    .rodata             : ALIGN(CONSTANT(MAXPAGESIZE)) {
         PROVIDE(__rodata_start = .);
 
         *(.rodata .rodata.*)
@@ -55,7 +55,7 @@ SECTIONS
     .eh_frame           : { KEEP(*(.eh_frame)) *(.eh_frame.*) }
 
     /* bss sections */
-    .bss                : ALIGN(MAX_PAGE_SIZE) {
+    .bss                : ALIGN(CONSTANT(MAXPAGESIZE)) {
         PROVIDE(__bss_start = .);
 
         KEEP(*(.gcc_except_table))
@@ -71,7 +71,7 @@ SECTIONS
     }
 
     /* data sections */
-    .data               : ALIGN(MAX_PAGE_SIZE) {
+    .data               : ALIGN(CONSTANT(MAXPAGESIZE)) {
         PROVIDE(__data_start = .);
 
         *(.got.plt) *(.igot.plt)

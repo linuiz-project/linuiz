@@ -36,13 +36,13 @@ impl Mapper {
     /// # Safety
     ///
     /// Caller must ensure the root frame points to a valid top-level page table.
-    pub const unsafe fn new_unsafe(root_frame: Address<Frame>) -> Self {
+    pub unsafe fn new_unsafe(root_frame: Address<Frame>) -> Self {
         Self { root_frame, entry: PageTableEntry::new(root_frame, PageAttributes::PRESENT) }
     }
 
     fn with_root_table<T>(&self, func: impl FnOnce(PageTable<Ref>) -> T) -> T {
         // Safety: `Self` requires that the entry be valid, so it can be safely constructed into a page table.
-        func(unsafe { PageTable::<Ref>::new(PageDepth::MAX, &mut self.entry).unwrap_unchecked() })
+        func(unsafe { PageTable::<Ref>::new(PageDepth::MAX, &self.entry).unwrap_unchecked() })
     }
 
     fn with_root_table_mut<T>(&mut self, func: impl FnOnce(PageTable<Mut>) -> T) -> T {

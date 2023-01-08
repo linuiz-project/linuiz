@@ -5,9 +5,9 @@ use crate::{
     interrupts::InterruptCell,
     memory::{PageAttributes, PhysicalAllocator},
 };
-use alloc::collections::{BTreeMap, TryReserveError};
+use alloc::collections::BTreeMap;
 use core::{
-    alloc::{AllocError, Allocator, Layout},
+    alloc::{Allocator, Layout},
     num::NonZeroUsize,
     ops::ControlFlow,
     ptr::NonNull,
@@ -19,23 +19,27 @@ use uuid::Uuid;
 
 use super::Virtual;
 
-static ADDRESS_SPACES: RwLock<
-    Lazy<BTreeMap<Uuid, InterruptCell<Mutex<AddressSpace<PhysicalAllocator>>>, PhysicalAllocator>>,
-> = RwLock::new(Lazy::new(|| BTreeMap::new_in(&*super::PMM)));
+static ADDRESS_SPACES: InterruptCell<
+    Lazy<RwLock<BTreeMap<Uuid, Mutex<AddressSpace<PhysicalAllocator>>, PhysicalAllocator>>>,
+> = InterruptCell::new(Lazy::new(|| RwLock::new(BTreeMap::new_in(&*super::PMM))));
 
-pub fn register<A: Allocator + Clone>(size: NonZeroUsize, hhdm_address: Address<Virtual>) -> Result<Uuid, AllocError> {
-    let uuid = Uuid::new_v4();
-    let address_space = unsafe { AddressSpace::new_in(size, &*super::PMM).map_err(|_| AllocError) }?;
-    crate::interrupts::without(|| ADDRESS_SPACES.write().insert(uuid, InterruptCell::new(Mutex::new(address_space))));
+pub fn register(uuid: Uuid, size: NonZeroUsize) -> Result<(), Error> {
+    let address_space = unsafe { AddressSpace::new_in(size, &*super::PMM).map_err(|_| Error) }?;
 
-    Ok(uuid)
+    ADDRESS_SPACES.with(|address_spaces| {
+        let mut guard = address_spaces.write();
+        guard.try_insert(uuid, Mutex::new(address_space)).map(|_| ()).map_err(|_| Error)
+    })
 }
 
-pub fn with<T>(uuid: &Uuid, func: impl FnOnce(&'static mut AddressSpace<PhysicalAllocator>) -> T) -> Option<T> {
-    ADDRESS_SPACES
-        .read()
-        .get(uuid)
-        .map(|addr_space_cell| addr_space_cell.with_mut(|addr_space| func(&mut *addr_space.lock())))
+pub fn with<T>(uuid: &Uuid, func: impl FnOnce(&mut AddressSpace<PhysicalAllocator>) -> T) -> Option<T> {
+    ADDRESS_SPACES.with(|address_spaces| {
+        let address_spaces = address_spaces.read();
+        address_spaces.get(uuid).map(|address_space| {
+            let mut address_space = address_space.lock();
+            func(&mut *address_space)
+        })
+    })
 }
 
 bitflags::bitflags! {
@@ -103,17 +107,18 @@ pub struct AddressSpace<A: Allocator + Clone> {
 }
 
 impl<A: Allocator + Clone> AddressSpace<A> {
-    pub unsafe fn new_in(size: NonZeroUsize, allocator: A) -> Result<Self, TryReserveError> {
+    pub unsafe fn new_in(size: NonZeroUsize, allocator: A) -> Result<Self, Error> {
         let mut vec = TryVec::new_in(allocator.clone());
-        vec.push(Region { len: size.get(), free: true }).map_err(|(_, err)| err)?;
+        vec.push(Region { len: size.get(), free: true }).map_err(|_| Error)?;
 
-        Ok(Self { regions: vec, allocator, mapper: Mapper::new().unwrap() })
+        Ok(Self { regions: vec, allocator, mapper: Mapper::new().ok_or(Error)? })
     }
 
     // TODO better error type for this function
     pub fn mmap(
         &mut self,
-        address: Option<Address<Virtual>>,
+        // TODO
+        // address: Option<Address<Virtual>>,
         layout: Layout,
         flags: MmapFlags,
     ) -> Result<NonNull<[u8]>, Error> {
@@ -201,7 +206,7 @@ impl<A: Allocator + Clone> AddressSpace<A> {
         let page = Address::new_truncate(address.get());
         // TODO we need to return the page size from `get_page_attributes` or something, so when we clear from a page fault, it clears huge pages too.
         match self.mapper.get_page_attributes(page) {
-            Some(attributes) if attributes.contains(PageAttributes::DEMAND) => {
+            Some(mut attributes) if attributes.contains(PageAttributes::DEMAND) => {
                 self.mapper
                     .auto_map(page, {
                         // remove demand bit ...

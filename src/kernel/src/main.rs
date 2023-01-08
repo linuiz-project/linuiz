@@ -2,6 +2,7 @@
 #![no_main]
 #![feature(
     result_flattening,                      // #70142 <https://github.com/rust-lang/rust/issues/70142>
+    map_try_insert,                         // #82766 <https://github.com/rust-lang/rust/issues/82766>
     asm_const,
     naked_functions,
     sync_unsafe_cell,
@@ -29,6 +30,7 @@
     btreemap_alloc,
     inline_const,
     const_option,
+    const_option_ext,
     const_trait_impl
 )]
 #![forbid(clippy::inline_asm_x86_att_syntax)]
@@ -366,8 +368,9 @@ unsafe extern "C" fn _entry() -> ! {
         debug!("Kernel is running in low memory mode; pretty stack tracing will be disabled.");
     }
 
-    debug!("Loading kernel modules...");
-    crate::modules::load_modules();
+    // TODO modules
+    // debug!("Loading kernel modules...");
+    // crate::modules::load_modules();
 
     /* smp */
     {

@@ -109,7 +109,7 @@ impl Header {
     }
 
     #[inline]
-    pub const fn get_virtual_address(&self) -> Option<Address<Virtual>> {
+    pub fn get_virtual_address(&self) -> Option<Address<Virtual>> {
         Address::new(self.virt_addr as usize)
     }
 

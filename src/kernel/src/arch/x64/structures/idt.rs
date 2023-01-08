@@ -329,20 +329,18 @@ impl From<Fault<'_>> for crate::exceptions::Exception {
         use x86_64::structures::idt::PageFaultErrorCode;
 
         match value {
-            Fault::PageFault { isf, gprs, err, address } => unsafe {
-                Exception::new(
-                    ExceptionKind::PageFault {
-                        ptr: NonNull::new(address.as_ptr()).unwrap(),
-                        reason: if err.contains(PageFaultErrorCode::PROTECTION_VIOLATION) {
-                            PageFaultReason::BadPermissions
-                        } else {
-                            PageFaultReason::NotMapped
-                        },
+            Fault::PageFault { isf, gprs: _, err, address } => Exception::new(
+                ExceptionKind::PageFault {
+                    ptr: NonNull::new(address.as_ptr()).unwrap(),
+                    reason: if err.contains(PageFaultErrorCode::PROTECTION_VIOLATION) {
+                        PageFaultReason::BadPermissions
+                    } else {
+                        PageFaultReason::NotMapped
                     },
-                    NonNull::new(isf.instruction_pointer.as_mut_ptr::<u8>()).unwrap(),
-                    NonNull::new(isf.stack_pointer.as_mut_ptr::<u8>()).unwrap(),
-                )
-            },
+                },
+                NonNull::new(isf.instruction_pointer.as_mut_ptr::<u8>()).unwrap(),
+                NonNull::new(isf.stack_pointer.as_mut_ptr::<u8>()).unwrap(),
+            ),
 
             _ => todo!(),
         }

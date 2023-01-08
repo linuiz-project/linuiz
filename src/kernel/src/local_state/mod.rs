@@ -1,9 +1,13 @@
 use crate::{
     exceptions::Exception,
-    memory::{address_space::AddressSpace, PagingRegister, PhysicalAllocator, Stack, KMALLOC},
+    memory::{address_space::AddressSpace, PhysicalAllocator, Stack, KMALLOC},
     proc::{task::Task, Scheduler},
 };
-use core::{alloc::Allocator, cell::UnsafeCell};
+use core::{
+    alloc::Allocator,
+    cell::UnsafeCell,
+    sync::atomic::{AtomicBool, Ordering},
+};
 use try_alloc::boxed::TryBox;
 
 pub(self) const US_PER_SEC: u32 = 1000000;
@@ -26,7 +30,8 @@ pub(crate) struct LocalState {
     magic: u64,
     core_id: u32,
 
-    exception_catcher: UnsafeCell<ExceptionCatcher>,
+    catching: AtomicBool,
+    exception: UnsafeCell<Option<Exception>>,
     scheduler: Scheduler,
 
     #[cfg(target_arch = "x86_64")]
@@ -72,16 +77,11 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
         magic: LocalState::MAGIC,
         core_id,
 
-        exception_catcher: UnsafeCell::new(ExceptionCatcher::Idle),
+        catching: AtomicBool::new(false),
+        exception: UnsafeCell::new(None),
         scheduler: Scheduler::new(
             false,
-            Task::new(
-                0,
-                || crate::interrupts::wait_loop(),
-                idle_task_stack,
-                crate::cpu::default_arch_context(),
-                PagingRegister::read(),
-            ),
+            Task::new(0, || crate::interrupts::wait_loop(), idle_task_stack, crate::cpu::default_arch_context()),
         ),
 
         #[cfg(target_arch = "x86_64")]
@@ -276,45 +276,39 @@ pub fn with_address_space<T>(with_fn: impl FnOnce(&mut AddressSpace<PhysicalAllo
 }
 
 pub fn provide_exception<T: Into<Exception>>(exception: T) -> Result<(), T> {
-    let last_exception = get().exception_catcher.get_mut();
-    match *last_exception {
-        ExceptionCatcher::Caught(last) => {
-            panic!("cannot stack exceptions:\nLast: {last:?}\nNew: {:?}", exception.into())
-        }
+    let local_state = get();
 
-        ExceptionCatcher::Await => {
-            *last_exception = ExceptionCatcher::Caught(exception.into());
-            Ok(())
-        }
+    if local_state.catching.load(Ordering::Relaxed) {
+        debug_assert!(local_state.exception.get_mut().is_none());
 
-        ExceptionCatcher::Idle => Err(exception),
+        *local_state.exception.get_mut() = Some(exception.into());
+
+        Ok(())
+    } else {
+        Err(exception)
     }
 }
 
-pub fn do_catch<T>(do_func: impl FnOnce() -> T) -> Result<T, Exception> {
-    let exception_catcher = &mut get().exception_catcher;
+/// # Safety
+///
+/// Caller must ensure `do_func` is effectively stackless, since no stack cleanup will occur on an exception.
+pub unsafe fn do_catch<T>(do_func: impl FnOnce() -> T) -> Result<T, Exception> {
+    let local_state = get();
 
-    match exception_catcher.get_mut() {
-        ExceptionCatcher::Caught(exception) => panic!("uncaught exception: {:?}", exception),
-        ExceptionCatcher::Await => panic!("nested exception catch"),
-        ExceptionCatcher::Idle => *exception_catcher.get_mut() = ExceptionCatcher::Await,
-    }
+    debug_assert!(local_state.exception.get_mut().is_none());
 
-    let result = do_func();
+    local_state
+        .catching
+        .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+        .expect("nested exception catching is not supported");
 
-    match exception_catcher.get_mut() {
-        ExceptionCatcher::Idle => panic!("exception catcher unexpectedly idle"),
+    let do_func_result = do_func();
+    let result = local_state.exception.get_mut().take().map_or(Ok(do_func_result), Err);
 
-        ExceptionCatcher::Caught(exception) => {
-            *exception_catcher.get_mut() = ExceptionCatcher::Idle;
+    local_state
+        .catching
+        .compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed)
+        .expect("inconsistent local catch state");
 
-            Err(*exception)
-        }
-
-        ExceptionCatcher::Await => {
-            *exception_catcher.get_mut() = ExceptionCatcher::Idle;
-
-            Ok(result)
-        }
-    }
+    result
 }

@@ -1,3 +1,5 @@
+use core::num::NonZeroUsize;
+
 use crate::memory::Stack;
 use uuid::Uuid;
 
@@ -5,7 +7,7 @@ type EntryPoint = fn() -> u32;
 
 /// Representation object for different contexts of execution in the CPU.
 pub struct Task {
-    handle: Uuid,
+    uuid: Uuid,
     prio: u8,
     last_run: u32,
     stack: Stack,
@@ -18,18 +20,18 @@ pub struct Task {
 unsafe impl Send for Task {}
 
 impl Task {
-    pub fn new(
-        priority: u8,
-        entry: EntryPoint,
-        stack: Stack,
-        arch_context: crate::cpu::ArchContext,
-        root_page_table_args: crate::memory::PagingRegister,
-    ) -> Self {
-        // ### Safety: Stack pointer is valid for its length.
+    pub fn new(priority: u8, entry: EntryPoint, stack: Stack, arch_context: crate::cpu::ArchContext) -> Self {
+        let uuid = uuid::Uuid::new_v4();
+
+        // Register the address space for this task.
+        // TODO somehow choose the size of the address space in a meaningful way?
+        crate::memory::address_space::register(uuid, NonZeroUsize::new((1 << 48) - 1).unwrap()).unwrap();
+
+        // Safety: Stack pointer is valid for its length.
         let sp = unsafe { stack.as_ptr().add(stack.len() & !0xF).addr() } as u64;
 
         Self {
-            handle: uuid::Uuid::new_v4(),
+            uuid,
             prio: priority,
             last_run: 0,
             stack,
@@ -41,7 +43,7 @@ impl Task {
     /// Returns this task's ID.
     #[inline]
     pub const fn uuid(&self) -> Uuid {
-        self.handle
+        self.uuid
     }
 
     /// Returns the [`TaskPriority`] struct for this task.

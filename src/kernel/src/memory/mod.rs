@@ -7,13 +7,13 @@ pub mod pmm;
 
 use crate::{exceptions::Exception, interrupts::InterruptCell, local_state::do_catch};
 use address_space::Mapper;
-use alloc::alloc::Global;
+use alloc::{alloc::Global, string::String};
 use core::{
     alloc::{AllocError, Allocator, Layout},
     num::NonZeroUsize,
     ptr::NonNull,
 };
-use lzstd::{Address, Frame, PAGE_MASK, PAGE_SHIFT, TABLE_INDEX_SHIFT};
+use lzstd::{Address, Frame, PAGE_MASK, PAGE_SHIFT, PAGE_SIZE, TABLE_INDEX_SHIFT};
 use slab::SlabAllocator;
 use spin::{Lazy, Mutex, Once};
 use try_alloc::boxed::TryBox;
@@ -99,14 +99,15 @@ pub fn hhdm_address() -> Address<Virtual> {
     })
 }
 
-pub fn with_kmapper<T>(func: impl FnOnce(&'static mut Mapper) -> T) -> T {
+pub fn with_kmapper<T>(func: impl FnOnce(&mut Mapper) -> T) -> T {
     static KERNEL_MAPPER: Once<InterruptCell<Mutex<Mapper>>> = Once::new();
 
     KERNEL_MAPPER
-        .call_once(|| {
-            InterruptCell::new(Mutex::new(unsafe { Mapper::new().expect("failed to create kernel space mapper") }))
+        .call_once(|| InterruptCell::new(Mutex::new(Mapper::new().expect("failed to create kernel space mapper"))))
+        .with(|mapper| {
+            let mut mapper = mapper.lock();
+            func(&mut *mapper)
         })
-        .with_mut(|mapper_mutex| func(&mut *mapper_mutex.lock()))
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -285,21 +286,43 @@ unsafe impl<const ALIGN: usize, A: Allocator> Allocator for AlignedAllocator<ALI
     }
 }
 
-unsafe fn userspace_read<T>(ptr: NonNull<[u8]>) -> Result<TryBox<[u8]>, Exception> {
+pub unsafe fn catch_read(ptr: NonNull<[u8]>) -> Result<TryBox<[u8]>, Exception> {
     let mem_range = ptr.as_uninit_slice().as_ptr_range();
-    let aligned_start = lzstd::align_down(mem_range.start.addr(), NonZeroUsize::new(0x1000).unwrap());
+    let aligned_start = lzstd::align_down(mem_range.start.addr(), NonZeroUsize::new(PAGE_SIZE).unwrap());
     let mem_end = mem_range.end.addr();
 
     let mut copied_mem = TryBox::new_slice(ptr.len(), 0u8).unwrap();
-    for (offset, page_addr) in (aligned_start..mem_end).enumerate().step_by(0x1000) {
+    for (offset, page_addr) in (aligned_start..mem_end).enumerate().step_by(PAGE_SIZE) {
         let ptr_addr = core::cmp::max(mem_range.start.addr(), page_addr);
-        let ptr_len = core::cmp::min(mem_end.saturating_sub(ptr_addr), 0x1000);
+        let ptr_len = core::cmp::min(mem_end.saturating_sub(ptr_addr), PAGE_SIZE);
 
+        // Safety: Box slice and this iterator are bound by the ptr len.
+        let to_ptr = unsafe { (&mut copied_mem).as_mut_ptr().add(offset) };
         // Safety: Copy is only invalid if the caller provided an invalid pointer.
         do_catch(|| unsafe {
-            core::ptr::copy_nonoverlapping(ptr_addr as *mut u8, (&mut copied_mem).as_mut_ptr().add(offset), ptr_len);
+            core::ptr::copy_nonoverlapping(ptr_addr as *mut u8, to_ptr, ptr_len);
         })?;
     }
 
     Ok(copied_mem)
+}
+
+// TODO TryString
+pub unsafe fn catch_read_str(mut read_ptr: NonNull<u8>) -> Result<String, Exception> {
+    let mut string = String::new();
+
+    'y: loop {
+        let read_len = read_ptr.as_ptr().align_offset(PAGE_SIZE);
+        read_ptr = NonNull::new(unsafe { read_ptr.as_ptr().add(read_len) }).unwrap();
+
+        for ch in catch_read(NonNull::slice_from_raw_parts(read_ptr, read_len))?.into_iter().copied().map(char::from) {
+            if ch == '\0' {
+                break 'y;
+            } else {
+                string.push(ch);
+            }
+        }
+    }
+
+    Ok(string)
 }
