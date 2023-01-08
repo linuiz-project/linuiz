@@ -5,37 +5,114 @@ pub use paging::*;
 pub mod address_space;
 pub mod pmm;
 
+use crate::{exceptions::Exception, interrupts::InterruptCell, local_state::do_catch};
 use address_space::Mapper;
 use alloc::alloc::Global;
 use core::{
     alloc::{AllocError, Allocator, Layout},
+    num::NonZeroUsize,
     ptr::NonNull,
 };
-use lzstd::{Frame, NonNullPtr};
+use lzstd::{Address, Frame, PAGE_MASK, PAGE_SHIFT, TABLE_INDEX_SHIFT};
 use slab::SlabAllocator;
-use spin::{Lazy, Once};
+use spin::{Lazy, Mutex, Once};
 use try_alloc::boxed::TryBox;
 
-pub fn get_hhdm_ptr() -> NonNullPtr<u8> {
-    static HHDM_ADDRESS: Once<NonNullPtr<u8>> = Once::new();
+const VIRT_CANONICAL_SHIFT: u32 =
+    ((TABLE_INDEX_SHIFT.get() * PageDepth::MAX.get().get()) + PAGE_SHIFT.get()).checked_sub(1).unwrap();
+const VIRT_CANONICAL_BITS: usize = usize::MAX >> VIRT_CANONICAL_SHIFT;
 
-    HHDM_ADDRESS
+const fn checked_virt_canonical(address: usize) -> bool {
+    matches!(address >> VIRT_CANONICAL_SHIFT, 0 | VIRT_CANONICAL_BITS)
+}
+
+const fn virt_truncate(address: usize) -> usize {
+    (((address << 16) as isize) >> 16) as usize
+}
+
+pub struct Virtual;
+impl lzstd::AddressKind for Virtual {
+    type InitType = usize;
+    type ReprType = usize;
+
+    fn new(init: Self::InitType) -> Option<Self::ReprType> {
+        checked_virt_canonical(init).then_some(init)
+    }
+
+    fn new_truncate(init: Self::InitType) -> Self::ReprType {
+        virt_truncate(init)
+    }
+}
+impl lzstd::PtrableAddressKind for Virtual {
+    fn from_ptr<T>(ptr: *mut T) -> Self::ReprType {
+        ptr.addr()
+    }
+
+    fn as_ptr(repr: Self::ReprType) -> *mut u8 {
+        repr as *mut u8
+    }
+}
+
+pub struct Page;
+impl lzstd::AddressKind for Page {
+    type InitType = usize;
+    type ReprType = usize;
+
+    fn new(init: Self::InitType) -> Option<Self::ReprType> {
+        (((init & PAGE_MASK) == 0) && checked_virt_canonical(init)).then_some(init)
+    }
+
+    fn new_truncate(init: Self::InitType) -> Self::ReprType {
+        init & !&!PAGE_MASK
+    }
+}
+impl lzstd::PtrableAddressKind for Page {
+    fn from_ptr<T>(ptr: *mut T) -> Self::ReprType {
+        ptr.addr()
+    }
+
+    fn as_ptr(repr: Self::ReprType) -> *mut u8 {
+        repr as *mut u8
+    }
+}
+impl lzstd::IndexableAddressKind for Page {
+    fn from_index(index: usize) -> Option<Self::ReprType> {
+        (index <= !(VIRT_CANONICAL_BITS >> PAGE_SHIFT.get())).then_some(index << PAGE_SHIFT.get())
+    }
+
+    fn index(repr: Self::ReprType) -> usize {
+        repr >> PAGE_SHIFT.get()
+    }
+}
+
+pub fn hhdm_address() -> Address<Virtual> {
+    static HHDM_ADDRESS: Once<Address<Virtual>> = Once::new();
+
+    *HHDM_ADDRESS.call_once(|| {
+        static LIMINE_HHDM: limine::LimineHhdmRequest = limine::LimineHhdmRequest::new(crate::boot::LIMINE_REV);
+
+        Address::new(
+            LIMINE_HHDM.get_response().get().expect("bootloader provided no higher-half direct mapping").offset
+                as usize,
+        )
+        .expect("bootloader provided a non-canonical higher-half direct mapping address")
+    })
+}
+
+pub fn with_kmapper<T>(func: impl FnOnce(&'static mut Mapper) -> T) -> T {
+    static KERNEL_MAPPER: Once<InterruptCell<Mutex<Mapper>>> = Once::new();
+
+    KERNEL_MAPPER
         .call_once(|| {
-            static LIMINE_HHDM: limine::LimineHhdmRequest = limine::LimineHhdmRequest::new(crate::boot::LIMINE_REV);
-
-            NonNullPtr::try_from(
-                LIMINE_HHDM.get_response().get().expect("bootloader provided no higher-half direct mapping").offset
-                    as *mut u8,
-            )
-            .expect("bootloader provided a non-canonical higher-half direct mapping address")
+            InterruptCell::new(Mutex::new(unsafe { Mapper::new().expect("failed to create kernel space mapper") }))
         })
-        .clone()
+        .with_mut(|mapper_mutex| func(&mut *mapper_mutex.lock()))
 }
 
 #[cfg(target_arch = "x86_64")]
-pub struct PagingRegister(pub Frame, pub crate::arch::x64::registers::control::CR3Flags);
+pub struct PagingRegister(pub Address<Frame>, pub crate::arch::x64::registers::control::CR3Flags);
 #[cfg(target_arch = "riscv64")]
-pub struct VmemRegister(pub Frame, pub u16, pub crate::arch::rv64::registers::satp::Mode);
+pub struct VmemRegister(pub Address<Frame>, pub u16, pub crate::arch::rv64::registers::satp::Mode);
 
 impl PagingRegister {
     pub fn read() -> Self {
@@ -64,7 +141,7 @@ impl PagingRegister {
     }
 
     #[inline]
-    pub const fn frame(&self) -> Frame {
+    pub const fn frame(&self) -> Address<Frame> {
         self.0
     }
 }
@@ -93,7 +170,7 @@ pub fn is_5_level_paged() -> bool {
     }
 }
 
-pub type PhysicalAlloactor = &'static pmm::PhysicalMemoryManager<'static>;
+pub type PhysicalAllocator = &'static pmm::PhysicalMemoryManager<'static>;
 
 pub static PMM: Lazy<pmm::PhysicalMemoryManager> = Lazy::new(|| unsafe {
     let memory_map = crate::boot::get_memory_map().unwrap();
@@ -117,7 +194,7 @@ pub static PMM: Lazy<pmm::PhysicalMemoryManager> = Lazy::new(|| unsafe {
                 }
             },
         }),
-        *get_hhdm_ptr(),
+        hhdm_address(),
     )
     .unwrap()
 });
@@ -206,4 +283,23 @@ unsafe impl<const ALIGN: usize, A: Allocator> Allocator for AlignedAllocator<ALI
             Err(_) => unimplemented!(),
         }
     }
+}
+
+unsafe fn userspace_read<T>(ptr: NonNull<[u8]>) -> Result<TryBox<[u8]>, Exception> {
+    let mem_range = ptr.as_uninit_slice().as_ptr_range();
+    let aligned_start = lzstd::align_down(mem_range.start.addr(), NonZeroUsize::new(0x1000).unwrap());
+    let mem_end = mem_range.end.addr();
+
+    let mut copied_mem = TryBox::new_slice(ptr.len(), 0u8).unwrap();
+    for (offset, page_addr) in (aligned_start..mem_end).enumerate().step_by(0x1000) {
+        let ptr_addr = core::cmp::max(mem_range.start.addr(), page_addr);
+        let ptr_len = core::cmp::min(mem_end.saturating_sub(ptr_addr), 0x1000);
+
+        // Safety: Copy is only invalid if the caller provided an invalid pointer.
+        do_catch(|| unsafe {
+            core::ptr::copy_nonoverlapping(ptr_addr as *mut u8, (&mut copied_mem).as_mut_ptr().add(offset), ptr_len);
+        })?;
+    }
+
+    Ok(copied_mem)
 }

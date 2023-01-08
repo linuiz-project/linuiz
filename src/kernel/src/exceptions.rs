@@ -1,14 +1,17 @@
 use core::ptr::NonNull;
 
+#[derive(Debug, Clone, Copy)]
 pub enum PageFaultReason {
     BadPermissions,
-    InvalidPtr,
+    NotMapped,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum ExceptionKind {
     PageFault { ptr: NonNull<u8>, reason: PageFaultReason },
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct Exception {
     kind: ExceptionKind,
     ip: NonNull<u8>,

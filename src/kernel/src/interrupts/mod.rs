@@ -1,8 +1,11 @@
 mod instructions;
 pub use instructions::*;
 
-use crate::cpu::{ArchContext, ControlContext};
-use lzstd::{Page, Ptr};
+use crate::{
+    cpu::{ArchContext, ControlContext},
+    memory::Virtual,
+};
+use lzstd::Address;
 use num_enum::TryFromPrimitive;
 
 /// Delivery mode for IPIs.
@@ -54,43 +57,20 @@ pub enum Vector {
 }
 
 /// Indicates what type of error the common page fault handler encountered.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PageFaultHandlerError {
-    AddressNotMapped,
-    NotDemandPaged,
-}
+#[derive(Debug, Clone, Copy)]
+pub struct PageFaultHandlerError;
 
 /// ### Safety
 ///
 /// Do not call this function.
 #[no_mangle]
 #[repr(align(0x10))]
-pub unsafe fn pf_handler(address: Ptr<u8>) -> Result<(), PageFaultHandlerError> {
-    use crate::memory::PageAttributes;
-
-    let fault_page = Page::try_from(*address).unwrap();
-    // FIXME: Fabricating the virtual mapper is unsafe.
-    let mut mapper = crate::memory::address_space::Mapper::from_current(crate::memory::get_hhdm_address());
-    let Some(mut fault_page_attributes) = mapper.get_page_attributes(fault_page) else { return Err(PageFaultHandlerError::AddressNotMapped) };
-    if fault_page_attributes.contains(PageAttributes::DEMAND) {
-        mapper
-            .auto_map(fault_page, {
-                // remove demand bit ...
-                fault_page_attributes.remove(PageAttributes::DEMAND);
-                // ... insert present bit ...
-                fault_page_attributes.insert(PageAttributes::PRESENT);
-                // ... return attributes
-                fault_page_attributes
-            })
-            .unwrap();
-
-        // ### Safety: We know the page was just mapped, and contains no relevant memory.
-        fault_page.zero_memory();
-
-        Ok(())
-    } else {
-        Err(PageFaultHandlerError::NotDemandPaged)
-    }
+pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandlerError> {
+    crate::local_state::with_address_space(|addr_space| {
+        addr_space.demand_map(address).map_err(|_| PageFaultHandlerError)
+    })
+    .ok_or(PageFaultHandlerError)
+    .flatten()
 }
 
 /// ### Safety

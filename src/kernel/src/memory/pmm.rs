@@ -1,3 +1,4 @@
+use super::Virtual;
 use bit_field::BitField;
 use core::{
     alloc::{AllocError, Layout},
@@ -5,7 +6,7 @@ use core::{
     ptr::NonNull,
     sync::atomic::Ordering,
 };
-use lzstd::{Frame, NonNullPtr};
+use lzstd::{Address, Frame};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
@@ -128,7 +129,7 @@ pub struct MemoryMapping {
 
 pub struct PhysicalMemoryManager<'a> {
     table: &'a [FrameData],
-    physical_memory: NonNullPtr<u8>,
+    physical_memory: Address<Virtual>,
 }
 
 // ### Safety: Type uses entirely atomic operations.
@@ -140,7 +141,7 @@ impl PhysicalMemoryManager<'_> {
     // ### Safety: Caller must guarantee the physical mapped address is valid.
     pub unsafe fn from_memory_map(
         memory_map: impl ExactSizeIterator<Item = MemoryMapping>,
-        physical_memory: NonNullPtr<u8>,
+        physical_memory: Address<Virtual>,
     ) -> Option<Self> {
         let (memory_map, memory_map_len) = {
             let memory_map_len = memory_map.len();
@@ -208,7 +209,7 @@ impl PhysicalMemoryManager<'_> {
         crate::interrupts::without(|| func(self.table))
     }
 
-    pub fn next_frame(&self) -> Result<Frame> {
+    pub fn next_frame(&self) -> Result<Address<Frame>> {
         self.with_table(|table| {
             table
                 .iter()
@@ -220,7 +221,7 @@ impl PhysicalMemoryManager<'_> {
                         frame_data.lock();
                         frame_data.unpeek();
 
-                        Some(Frame::from_index(index))
+                        Address::from_index(index)
                     } else {
                         frame_data.unpeek();
 
@@ -231,7 +232,7 @@ impl PhysicalMemoryManager<'_> {
         })
     }
 
-    pub fn next_frames(&self, count: NonZeroUsize, alignment: NonZeroUsize) -> Result<Frame> {
+    pub fn next_frames(&self, count: NonZeroUsize, alignment: NonZeroUsize) -> Result<Address<Frame>> {
         if !alignment.is_power_of_two() {
             return Err(Error::InvalidAlignment);
         }
@@ -271,14 +272,14 @@ impl PhysicalMemoryManager<'_> {
                         // to extremely unpredictable results.
                         let start_index = self.table.len().wrapping_sub(sub_table.len());
                         let start_address = start_index.wrapping_mul(0x1000);
-                        break Frame::new(start_address).ok_or(Error::Unknown);
+                        break Address::new(start_address).ok_or(Error::Unknown);
                     }
                 }
             }
         })
     }
 
-    pub fn lock_frame(&self, frame: Frame) -> Result<()> {
+    pub fn lock_frame(&self, frame: Address<Frame>) -> Result<()> {
         self.with_table(|table| {
             let Some(frame_data) = table.get(frame.index()) else { return Err(Error::OutOfBounds) };
             frame_data.peek();
@@ -297,7 +298,7 @@ impl PhysicalMemoryManager<'_> {
         })
     }
 
-    pub fn lock_frames(&self, base: Frame, count: usize) -> Result<()> {
+    pub fn lock_frames(&self, base: Address<Frame>, count: usize) -> Result<()> {
         self.with_table(|table| {
             let start_index = base.index();
             let end_index = start_index + count;
@@ -324,7 +325,7 @@ impl PhysicalMemoryManager<'_> {
         })
     }
 
-    pub fn free_frame(&self, frame: Frame) -> Result<()> {
+    pub fn free_frame(&self, frame: Address<Frame>) -> Result<()> {
         self.with_table(|table| {
             let Some(frame_data) = table.get(frame.index()) else { return Err(Error::OutOfBounds) };
 
@@ -347,7 +348,7 @@ impl PhysicalMemoryManager<'_> {
         })
     }
 
-    pub fn modify_type(&self, frame: Frame, new_type: FrameType, old_type: Option<FrameType>) -> Result<()> {
+    pub fn modify_type(&self, frame: Address<Frame>, new_type: FrameType, old_type: Option<FrameType>) -> Result<()> {
         self.with_table(|table| {
             let Some(frame_data) = table.get(frame.index()) else { return Err(Error::OutOfBounds) };
 
@@ -375,11 +376,12 @@ unsafe impl core::alloc::Allocator for &PhysicalMemoryManager<'_> {
             NonZeroUsize::new(layout.align() / 0x1000).unwrap_or(NonZeroUsize::MIN),
         )
         .ok()
-        .and_then(|address| {
-            physical_memory
-                .addr()
-                .checked_add(address.as_usize())
-                .map(|address| NonNull::slice_from_raw_parts(physical_memory.with_addr(address), layout.size()))
+        .map(|address| {
+            NonNull::slice_from_raw_parts(
+                // Safety: `PhysicalMemoryManager` ensures addresses are within its bounds.
+                NonNull::new(unsafe { physical_memory.as_ptr().add(address.get()) }).unwrap(),
+                layout.size(),
+            )
         })
         .ok_or(AllocError)
     }
@@ -393,11 +395,10 @@ unsafe impl core::alloc::Allocator for &PhysicalMemoryManager<'_> {
                 return;
             };
 
-        let base_address = ptr.addr().get() - self.physical_memory.addr().get();
+        let base_address = ptr.addr().get() - self.physical_memory.get();
         for offset in (0..layout.size()).step_by(0x1000) {
-            Frame::new(base_address + offset).and_then(|address| self.free_frame(address).ok()).unwrap_or_else(|| {
-                error!("Unexpectedly failed to free frame during deallocation");
-            });
+            self.free_frame(Address::new(base_address + offset).unwrap())
+                .expect("Unexpectedly failed to free frame during deallocation");
         }
     }
 }

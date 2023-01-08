@@ -1,5 +1,5 @@
-use crate::memory::get_hhdm_address;
-use lzstd::{Address, Page};
+use crate::memory::hhdm_address;
+use lzstd::Address;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Syscall {
@@ -12,14 +12,14 @@ pub enum Syscall {
 pub fn do_syscall(vector: Syscall) {
     match vector {
         Syscall::Log { level, cstr_ptr } => {
-            // ### Safety: The kernel guarantees the HHDM will be valid.
-            let page_manager = unsafe { crate::memory::address_space::Mapper::from_current(get_hhdm_address()) };
+            // Safety: The kernel guarantees the HHDM will be valid.
+            let page_manager = unsafe { crate::memory::address_space::Mapper::from_current(hhdm_address()) };
 
             let mut cstr_increment_ptr = cstr_ptr;
-            let mut last_char_page_base = Address::<Page>::new(Address::zero(), None).unwrap();
+            let mut last_char_page_base = Address::default();
             loop {
                 // Ensure the memory of the current cstr increment address is mapped.
-                let Some(char_address_base_page) = Address::<Page>::from_ptr(cstr_increment_ptr, None)
+                let Some(char_address_base_page) = Address::from_ptr(cstr_increment_ptr)
                     else {
                         warn!("Process attempted to overrun with `CStr` pointer.");
                         return;

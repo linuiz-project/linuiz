@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 #![feature(
+    result_flattening,                      // #70142 <https://github.com/rust-lang/rust/issues/70142>
     asm_const,
     naked_functions,
     sync_unsafe_cell,
@@ -18,16 +19,17 @@
     unchecked_math,
     cstr_from_bytes_until_nul,
     if_let_guard,
-    inline_const,
     exact_size_is_empty,
     fn_align,
     ptr_as_uninit,
-    const_trait_impl,
     nonzero_min_max,
     nonnull_slice_from_raw_parts,
     ptr_metadata,
     control_flow_enum,
-    btreemap_alloc
+    btreemap_alloc,
+    inline_const,
+    const_option,
+    const_trait_impl
 )]
 #![forbid(clippy::inline_asm_x86_att_syntax)]
 #![deny(clippy::semicolon_if_nothing_returned, clippy::debug_assert_with_mut_call, clippy::float_arithmetic)]
@@ -57,20 +59,17 @@ mod exceptions;
 mod interrupts;
 mod local_state;
 mod memory;
-mod modules;
+// mod modules;
 mod num;
 mod panic;
 mod proc;
 mod rand;
 mod time;
 
-use lzstd::{Address, Frame, Page};
+use lzstd::Address;
 
 #[cfg(not(target_arch = "x86_64"))]
 getrandom::register_custom_getrandom!({ todo!() });
-
-/// TODO: This ought to be dynamic or target-based?
-pub const PAGE_SIZE: usize = 0x1000;
 
 pub static KERNEL_HANDLE: spin::Lazy<uuid::Uuid> = spin::Lazy::new(|| uuid::Uuid::new_v4());
 
@@ -168,9 +167,10 @@ unsafe extern "C" fn _entry() -> ! {
     /*
      * Memory
      */
-    {
-        use crate::memory::{address_space::Mapper, PageAttributes};
-        use lzstd::{LinkerSymbol, PageAlign};
+
+    memory::with_kmapper(|kmapper| {
+        use lzstd::LinkerSymbol;
+        use memory::{address_space::Mapper, hhdm_address, PageAttributes, PageDepth};
 
         extern "C" {
             static __text_start: LinkerSymbol;
@@ -184,27 +184,22 @@ unsafe extern "C" fn _entry() -> ! {
 
             static __data_start: LinkerSymbol;
             static __data_end: LinkerSymbol;
-
-            static __section_align: LinkerSymbol;
         }
 
-        // TODO constant value for minimum page size
-        //let boot_page_table = PageTable::new(4, hhdm_address, entry)
+        debug!("Initializing kernel mapper...");
 
         fn map_range_from(
             from_mapper: &Mapper,
             to_mapper: &mut Mapper,
-            range: core::ops::Range<u64>,
+            range: core::ops::Range<usize>,
             attributes: PageAttributes,
         ) {
-            // ### Safety: Linker should have correctly set this value.
-            let page_align = unsafe { PageAlign::from_u64(__section_align.as_u64()).unwrap() };
-
-            for address in range.step_by(page_align.as_usize()).map(Address::<Virtual>::new_truncate) {
+            for address in range.step_by(0x1000) {
                 to_mapper
                     .map(
-                        Address::<Page>::new_truncate(address, Some(page_align)),
-                        from_mapper.get_mapped_to(Address::<Page>::new_truncate(address, None)).unwrap(),
+                        Address::new_truncate(address),
+                        PageDepth::MIN,
+                        from_mapper.get_mapped_to(Address::new_truncate(address)).unwrap(),
                         false,
                         attributes,
                     )
@@ -212,39 +207,37 @@ unsafe extern "C" fn _entry() -> ! {
             }
         }
 
-        debug!("Initializing kernel mapper...");
-        // ### Safety: Kernel guarantees HHDM address to be valid.
-        let boot_mapper = unsafe { Mapper::from_current(memory::get_hhdm_address()) };
-        let mut kernel_mapper = unsafe { &mut *(memory::get_kernel_mapper() as *const _ as *mut _) };
+        // Safety: All parameters are provided from valid sources.
+        let boot_mapper = unsafe { Mapper::new_unsafe(crate::memory::PagingRegister::read().frame()) };
 
         /* map the kernel segments */
         {
             map_range_from(
                 &boot_mapper,
-                &mut kernel_mapper,
+                kmapper,
                 // ### Safety: These linker symbols are guaranteed by the bootloader to be valid.
-                unsafe { __text_start.as_u64()..__text_end.as_u64() },
+                unsafe { __text_start.as_ptr::<u8>().addr()..__text_end.as_ptr::<u8>().addr() },
                 PageAttributes::RX | PageAttributes::GLOBAL,
             );
             map_range_from(
                 &boot_mapper,
-                &mut kernel_mapper,
+                kmapper,
                 // ### Safety: These linker symbols are guaranteed by the bootloader to be valid.
-                unsafe { __rodata_start.as_u64()..__rodata_end.as_u64() },
+                unsafe { __rodata_start.as_ptr::<u8>().addr()..__rodata_end.as_ptr::<u8>().addr() },
                 PageAttributes::RO | PageAttributes::GLOBAL,
             );
             map_range_from(
                 &boot_mapper,
-                &mut kernel_mapper,
+                kmapper,
                 // ### Safety: These linker symbols are guaranteed by the bootloader to be valid.
-                unsafe { __bss_start.as_u64()..__bss_end.as_u64() },
+                unsafe { __bss_start.as_ptr::<u8>().addr()..__bss_end.as_ptr::<u8>().addr() },
                 PageAttributes::RW | PageAttributes::GLOBAL,
             );
             map_range_from(
                 &boot_mapper,
-                &mut kernel_mapper,
+                kmapper,
                 // ### Safety: These linker symbols are guaranteed by the bootloader to be valid.
-                unsafe { __data_start.as_u64()..__data_end.as_u64() },
+                unsafe { __data_start.as_ptr::<u8>().addr()..__data_end.as_ptr::<u8>().addr() },
                 PageAttributes::RW | PageAttributes::GLOBAL,
             );
         }
@@ -269,15 +262,12 @@ unsafe extern "C" fn _entry() -> ! {
                         }
             };
 
-            for phys_base in (entry.base..(entry.base + entry.len)).step_by(0x1000) {
-                // TODO use huge pages here if possible
-                kernel_mapper
+            for phys_base in (entry.base..(entry.base + entry.len)).step_by(0x1000).map(|p| p as usize) {
+                kmapper
                     .map(
-                        Address::<lzstd::Page>::from_u64_truncate(
-                            crate::memory::get_hhdm_address().as_u64() + phys_base,
-                            Some(PageAlign::Align4KiB),
-                        ),
-                        Frame::new_truncate(phys_base as usize),
+                        Address::new_truncate(hhdm_address().get() + phys_base),
+                        PageDepth::MIN,
+                        Address::new_truncate(phys_base as usize),
                         false,
                         page_attributes,
                     )
@@ -289,14 +279,12 @@ unsafe extern "C" fn _entry() -> ! {
             #[cfg(target_arch = "x86_64")]
             {
                 // map APIC ...
-                let apic_address = msr::IA32_APIC_BASE::get_base_address();
-                kernel_mapper
+                let apic_address = msr::IA32_APIC_BASE::get_base_address() as usize;
+                kmapper
                     .map(
-                        Address::<Page>::from_u64_truncate(
-                            crate::memory::get_hhdm_address().as_u64() + apic_address,
-                            Some(PageAlign::Align4KiB),
-                        ),
-                        Frame::new_truncate(apic_address as usize),
+                        Address::new_truncate(hhdm_address().get() + apic_address),
+                        PageDepth::MIN,
+                        Address::new_truncate(apic_address),
                         false,
                         PageAttributes::MMIO,
                     )
@@ -306,9 +294,9 @@ unsafe extern "C" fn _entry() -> ! {
 
         debug!("Switching to kernel page tables...");
         // ### Safety: Kernel mapper has mapped all existing memory references, so commiting changes nothing from the software perspective.
-        unsafe { kernel_mapper.commit_vmem_register() }.unwrap();
+        unsafe { kmapper.commit_vmem_register() }.unwrap();
         debug!("Kernel has finalized control of page tables.");
-    }
+    });
 
     debug!("Initializing ACPI interface...");
     crate::acpi::init_interface();
@@ -399,10 +387,10 @@ unsafe extern "C" fn _entry() -> ! {
                     extern "C" fn _smp_entry(info: *const limine::LimineSmpInfo) -> ! {
                         crate::cpu::setup();
 
-                        // ### Safety: All currently referenced memory should also be mapped in the kernel page tables.
-                        unsafe { crate::memory::get_kernel_mapper().commit_vmem_register().unwrap() };
+                        // Safety: All currently referenced memory should also be mapped in the kernel page tables.
+                        crate::memory::with_kmapper(|kmapper| unsafe { kmapper.commit_vmem_register().unwrap() });
 
-                        // ### Safety: Function is called only once for this core.
+                        // Safety: Function is called only once for this core.
                         unsafe { crate::kernel_thread_setup(info.read().lapic_id) }
                     }
 

@@ -2,8 +2,8 @@ mod mapper;
 pub use mapper::*;
 
 use crate::{
-    memory::{Mapper, PageAttributes, PhysicalAlloactor},
-    PAGE_SIZE,
+    interrupts::InterruptCell,
+    memory::{PageAttributes, PhysicalAllocator},
 };
 use alloc::collections::{BTreeMap, TryReserveError};
 use core::{
@@ -12,28 +12,78 @@ use core::{
     ops::ControlFlow,
     ptr::NonNull,
 };
-use lzstd::{Address, Page};
+use lzstd::{Address, PAGE_SIZE};
 use spin::{Lazy, Mutex, RwLock};
 use try_alloc::vec::TryVec;
 use uuid::Uuid;
 
-static ADDRESS_SPACES: RwLock<Lazy<BTreeMap<Uuid, Mutex<AddressSpace<PhysicalAlloactor>>, PhysicalAlloactor>>> =
-    RwLock::new(Lazy::new(|| BTreeMap::new_in(&*super::PMM)));
+use super::Virtual;
 
-pub fn register() -> Result<Uuid, AllocError> {
-    todo!()
+static ADDRESS_SPACES: RwLock<
+    Lazy<BTreeMap<Uuid, InterruptCell<Mutex<AddressSpace<PhysicalAllocator>>>, PhysicalAllocator>>,
+> = RwLock::new(Lazy::new(|| BTreeMap::new_in(&*super::PMM)));
+
+pub fn register<A: Allocator + Clone>(size: NonZeroUsize, hhdm_address: Address<Virtual>) -> Result<Uuid, AllocError> {
+    let uuid = Uuid::new_v4();
+    let address_space = unsafe { AddressSpace::new_in(size, &*super::PMM).map_err(|_| AllocError) }?;
+    crate::interrupts::without(|| ADDRESS_SPACES.write().insert(uuid, InterruptCell::new(Mutex::new(address_space))));
+
+    Ok(uuid)
 }
 
-pub fn with<T>(uuid: &Uuid, func: impl FnOnce(&'static AddressSpace<PhysicalAlloactor>) -> T) -> Option<T> {
-    ADDRESS_SPACES.read().get(uuid).map(Mutex::lock).map(|a| func(&*a));
+pub fn with<T>(uuid: &Uuid, func: impl FnOnce(&'static mut AddressSpace<PhysicalAllocator>) -> T) -> Option<T> {
+    ADDRESS_SPACES
+        .read()
+        .get(uuid)
+        .map(|addr_space_cell| addr_space_cell.with_mut(|addr_space| func(&mut *addr_space.lock())))
 }
 
 bitflags::bitflags! {
     pub struct MmapFlags : usize {
-        const READ_ONLY = 1 << 0;
-        const READ_WRITE = 1 << 1;
-        const READ_EXECUTE = 1 << 2;
-        const NO_DEMAND = 1 << 3;
+        const READ = 0b1;
+        const READ_WRITE = 0b11;
+        const READ_EXECUTE = 0b111;
+        const NOT_DEMAND = 0b1000;
+    }
+}
+
+impl From<MmapFlags> for PageAttributes {
+    fn from(flags: MmapFlags) -> Self {
+        let mut attributes = PageAttributes::empty();
+
+        if !flags.contains(MmapFlags::NOT_DEMAND) {
+            attributes.insert(PageAttributes::DEMAND);
+        }
+
+        if flags.contains(MmapFlags::READ_EXECUTE) {
+            attributes.insert(PageAttributes::RX);
+        } else if flags.contains(MmapFlags::READ_WRITE) {
+            attributes.insert(PageAttributes::RW);
+        } else if flags.contains(MmapFlags::READ) {
+            attributes.insert(PageAttributes::RO);
+        }
+
+        attributes
+    }
+}
+
+impl From<PageAttributes> for MmapFlags {
+    fn from(attributes: PageAttributes) -> Self {
+        let mut flags = MmapFlags::empty();
+
+        if !attributes.contains(PageAttributes::DEMAND) {
+            flags.insert(MmapFlags::NOT_DEMAND)
+        }
+
+        if attributes.contains(PageAttributes::RX) {
+            flags.insert(MmapFlags::READ_EXECUTE);
+        } else if attributes.contains(PageAttributes::RW) {
+            flags.insert(MmapFlags::READ_WRITE);
+        } else if attributes.contains(PageAttributes::RO) {
+            flags.insert(MmapFlags::READ);
+        }
+
+        flags
     }
 }
 
@@ -53,18 +103,17 @@ pub struct AddressSpace<A: Allocator + Clone> {
 }
 
 impl<A: Allocator + Clone> AddressSpace<A> {
-    pub unsafe fn new_in(size: usize, hhdm_ptr: NonNull<u8>, allocator: A) -> Result<Self, TryReserveError> {
-        if size > 0 {
-            let mut vec = TryVec::new_in(allocator.clone());
-            vec.push(Region { len: size, free: true })?;
+    pub unsafe fn new_in(size: NonZeroUsize, allocator: A) -> Result<Self, TryReserveError> {
+        let mut vec = TryVec::new_in(allocator.clone());
+        vec.push(Region { len: size.get(), free: true }).map_err(|(_, err)| err)?;
 
-            Ok(Self { regions: vec, allocator, mapper: Mapper::new(4 /* TODO */, hhdm_ptr, None) })
-        }
+        Ok(Self { regions: vec, allocator, mapper: Mapper::new().unwrap() })
     }
 
+    // TODO better error type for this function
     pub fn mmap(
         &mut self,
-        address: Option<NonNull<u8>>,
+        address: Option<Address<Virtual>>,
         layout: Layout,
         flags: MmapFlags,
     ) -> Result<NonNull<[u8]>, Error> {
@@ -125,20 +174,19 @@ impl<A: Allocator + Clone> AddressSpace<A> {
                         PageAttributes::RX
                     } else if flags.contains(MmapFlags::READ_WRITE) {
                         PageAttributes::RW
-                    } else if flags.contains(MmapFlags::READ_ONLY) {
+                    } else if flags.contains(MmapFlags::READ) {
                         PageAttributes::RO
                     } else {
                         PageAttributes::empty()
                     }
                 };
-                // Demand paging is the default, but optionally the user can specify front-loading
-                // the physical page allocations.
-                if !flags.contains(MmapFlags::NO_DEMAND) {
+                // Demand paging is the default, but optionally the user can specify front-loading the physical page allocations.
+                if !flags.contains(MmapFlags::NOT_DEMAND) {
                     attributes.insert(PageAttributes::DEMAND);
                 }
                 // Finally, map all of the allocated pages in the virtual address space.
                 for page_base in (aligned_address..(aligned_address + layout.size())).step_by(PAGE_SIZE) {
-                    let page = Address::<Page>::from_u64(page_base as u64, None).ok_or(Error)?;
+                    let page = Address::new(page_base).ok_or(Error)?;
                     self.mapper.auto_map(page, attributes).map_err(|_| Error)?;
                 }
 
@@ -149,20 +197,33 @@ impl<A: Allocator + Clone> AddressSpace<A> {
         }
     }
 
-    // TODO
-    pub fn is_mmapped(&self, address: NonNull<u8>) -> bool {
-        self.mapper.is_mapped(Address::<Page>::from_ptr(address.as_ptr(), None))
+    pub fn demand_map(&mut self, address: Address<Virtual>) -> Result<(), Error> {
+        let page = Address::new_truncate(address.get());
+        // TODO we need to return the page size from `get_page_attributes` or something, so when we clear from a page fault, it clears huge pages too.
+        match self.mapper.get_page_attributes(page) {
+            Some(attributes) if attributes.contains(PageAttributes::DEMAND) => {
+                self.mapper
+                    .auto_map(page, {
+                        // remove demand bit ...
+                        attributes.remove(PageAttributes::DEMAND);
+                        // ... insert present bit ...
+                        attributes.insert(PageAttributes::PRESENT);
+                        // ... return attributes
+                        attributes
+                    })
+                    .unwrap();
+
+                // Safety: We know the page was just mapped, and contains no relevant memory.
+                unsafe { core::ptr::write_bytes(page.as_ptr(), 0, PAGE_SIZE) };
+
+                Ok(())
+            }
+
+            _ => Err(Error),
+        }
     }
 
-    pub fn is_range_mmapped(&self, address: NonNull<[u8]>) -> bool {
-        let base = address.addr().get();
-        for page_address in base..(base + address.len()) {
-            let page = Address::<Page>::from_u64(page_address as u64).unwrap();
-            if !self.mapper.is_mapped(page) {
-                return false;
-            }
-        }
-
-        true
+    pub fn is_mmapped(&self, address: Address<Virtual>) -> bool {
+        self.mapper.is_mapped(Address::new_truncate(address.get()), None)
     }
 }

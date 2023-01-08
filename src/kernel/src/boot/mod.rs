@@ -2,6 +2,8 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 use lzstd::Address;
 
+use crate::memory::Virtual;
+
 mod ignore {
     ///! This module is never exported. It is used for bootloader requests that should never be accessed in software.
 
@@ -51,16 +53,15 @@ pub fn get_kernel_modules() -> Option<&'static [limine::NonNullPtr<limine::Limin
     boot_only!({ LIMINE_MODULES.get_response().get().map(|response| response.modules()) })
 }
 
-pub fn get_rsdp_address() -> Option<Address> {
+pub fn get_rsdp_address() -> Option<Address<Virtual>> {
     static LIMINE_RSDP: limine::LimineRsdpRequest = limine::LimineRsdpRequest::new(LIMINE_REV);
 
     boot_only!({
         LIMINE_RSDP.get_response().get().and_then(|response| response.address.as_ptr()).and_then(|ptr| {
-            Address::try_from(
+            Address::new(
                 // Properly handle the bootloader's mapping of ACPI addresses in lower-half or higher-half memory space.
-                core::cmp::min(ptr.addr(), ptr.addr().wrapping_sub(crate::memory::get_hhdm_ptr().addr().get())),
+                core::cmp::min(ptr.addr(), ptr.addr().wrapping_sub(crate::memory::hhdm_address().get())),
             )
-            .ok()
         })
     })
 }
@@ -71,7 +72,6 @@ pub fn get_rsdp_address() -> Option<Address> {
 pub unsafe fn reclaim_boot_memory() {
     use crate::memory::pmm::FrameType;
     use limine::LimineMemoryMapEntryType;
-    use lzstd::Frame;
 
     assert!(!BOOT_RECLAIM.load(Ordering::Acquire));
 
@@ -80,7 +80,7 @@ pub unsafe fn reclaim_boot_memory() {
         .iter()
         .filter(|entry| entry.typ == LimineMemoryMapEntryType::BootloaderReclaimable)
         .flat_map(|entry| (entry.base..(entry.base + entry.len)).step_by(0x1000))
-        .map(|address| Frame::new_truncate(address as usize))
+        .map(|address| Address::new_truncate(address as usize))
     {
         crate::memory::PMM.modify_type(frame, FrameType::Generic, Some(FrameType::BootReclaim)).ok();
     }

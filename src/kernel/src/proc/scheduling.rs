@@ -1,8 +1,5 @@
 use crate::proc::task::Task;
 use alloc::collections::BinaryHeap;
-use core::sync::atomic::AtomicU64;
-
-static NEXT_THREAD_ID: AtomicU64 = AtomicU64::new(1);
 
 pub struct Scheduler {
     enabled: bool,
@@ -19,21 +16,19 @@ impl Scheduler {
 
     /// Enables the scheduler to pop tasks.
     #[inline]
-    pub fn enable(&mut self) {
+    pub const fn enable(&mut self) {
         self.enabled = true;
     }
 
-    /// Disables scheduler from popping tasks.
-    ///
-    /// REMARK: Any task pops which are already in-flight will not be cancelled.
+    /// Disables scheduler from popping tasks. Any task pops which are already in-flight will not be cancelled.
     #[inline]
-    pub fn disable(&mut self) {
+    pub const fn disable(&mut self) {
         self.enabled = false;
     }
 
     /// Indicates whether the scheduler is enabled.
     #[inline]
-    pub fn is_enabled(&self) -> bool {
+    pub const fn is_enabled(&self) -> bool {
         self.enabled
     }
 
@@ -56,8 +51,14 @@ impl Scheduler {
         }
     }
 
-    pub fn get_total_priority(&self) -> u64 {
+    #[inline]
+    pub const fn get_total_priority(&self) -> u64 {
         self.total_priority
+    }
+
+    #[inline]
+    pub const fn current_task(&self) -> Option<&Task> {
+        self.cur_task.as_ref()
     }
 
     /// Attempts to schedule the next task in the local task queue.

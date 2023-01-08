@@ -1,4 +1,6 @@
-use lzstd::{Address, NonNullPtr};
+use core::ptr::NonNull;
+
+use lzstd::{Address, Physical};
 
 bitflags::bitflags! {
     #[repr(transparent)]
@@ -77,13 +79,13 @@ impl Header {
     }
 
     #[inline]
-    pub fn get_virtual_address(&self) -> Option<NonNullPtr<u8>> {
-        NonNullPtr::try_from(self.virt_addr as *mut u8).ok()
+    pub fn get_virtual_address(&self) -> Option<NonNull<u8>> {
+        NonNull::new(self.virt_addr as *mut u8)
     }
 
     #[inline]
-    pub fn get_physical_address(&self) -> Option<Address> {
-        Address::new(self.phys_addr)
+    pub fn get_physical_address(&self) -> Option<Address<Physical>> {
+        Address::new(self.phys_addr as usize)
     }
 
     #[inline]

@@ -1,4 +1,5 @@
-use crate::arch::x64::registers::GeneralRegisters;
+use crate::{arch::x64::registers::GeneralRegisters, memory::Virtual};
+use lzstd::Address;
 use x86_64::structures::idt;
 
 pub use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, InterruptStackFrameValue};
@@ -278,7 +279,12 @@ pub enum Fault<'a> {
     ///     - Attempting to load the instruction TLB with a translation for a non-executable page.
     ///     - A protection cehck (privilege, r/w) failed.
     ///     - A reserved bit in the page directory table or entries is set to 1.
-    PageFault(&'a InterruptStackFrame, idt::PageFaultErrorCode, *const u8, &'a GeneralRegisters),
+    PageFault {
+        isf: &'a InterruptStackFrame,
+        gprs: &'a GeneralRegisters,
+        err: idt::PageFaultErrorCode,
+        address: Address<Virtual>,
+    },
 
     /// Occurs when the `fwait` or `wait` instruction (or any floating point instruction) is executed, and the
     /// following conditions are true:
@@ -323,18 +329,18 @@ impl From<Fault<'_>> for crate::exceptions::Exception {
         use x86_64::structures::idt::PageFaultErrorCode;
 
         match value {
-            Fault::PageFault(isf, err, addr, _) => unsafe {
+            Fault::PageFault { isf, gprs, err, address } => unsafe {
                 Exception::new(
                     ExceptionKind::PageFault {
-                        ptr: NonNull::new(addr.as_ptr::<u8>()).unwrap(),
+                        ptr: NonNull::new(address.as_ptr()).unwrap(),
                         reason: if err.contains(PageFaultErrorCode::PROTECTION_VIOLATION) {
                             PageFaultReason::BadPermissions
                         } else {
-                            PageFaultReason::InvalidPtr
+                            PageFaultReason::NotMapped
                         },
                     },
-                    NonNull::new(isf.instruction_pointer.as_ptr::<u8>()).unwrap(),
-                    NonNull::new(isf.stack_pointer.as_ptr::<u8>()).unwrap(),
+                    NonNull::new(isf.instruction_pointer.as_mut_ptr::<u8>()).unwrap(),
+                    NonNull::new(isf.stack_pointer.as_mut_ptr::<u8>()).unwrap(),
                 )
             },
 
@@ -344,13 +350,12 @@ impl From<Fault<'_>> for crate::exceptions::Exception {
 }
 
 pub fn common_exception_handler(exception: Fault) {
-    if let Some(exception) = crate::local_state::try_catch_exception(exception) {
-        match exception {
-            Fault::PageFault(_, _, address, _)
-                if let Ok(()) = unsafe { crate::interrupts::pf_handler(address) } => {}
+    match crate::local_state::provide_exception(exception) {
+        Ok(()) => {}
 
-            exception => panic!("{:#X?}", exception)
-        }
+        Err(Fault::PageFault { isf: _, gprs: _, err: _, address })
+            if unsafe { crate::interrupts::pf_handler(address).is_ok() } => {}
+        Err(exception) => panic!("{:#X?}", exception),
     }
 }
 
@@ -434,13 +439,13 @@ extern "sysv64" fn gp_handler_inner(stack_frame: &InterruptStackFrame, error_cod
 }
 
 exception_handler_with_error!(pf, idt::PageFaultErrorCode, ());
-extern "sysv64" fn pf_handler_inner(
-    stack_frame: &InterruptStackFrame,
-    error_code: idt::PageFaultErrorCode,
-    gprs: &GeneralRegisters,
-) {
-    let fault_address = crate::arch::x64::registers::control::CR2::read();
-    common_exception_handler(Fault::PageFault(stack_frame, error_code, fault_address, gprs))
+extern "sysv64" fn pf_handler_inner(isf: &InterruptStackFrame, err: idt::PageFaultErrorCode, gprs: &GeneralRegisters) {
+    common_exception_handler(Fault::PageFault {
+        isf,
+        gprs,
+        err,
+        address: crate::arch::x64::registers::control::CR2::read(),
+    })
 }
 
 // --- reserved 15

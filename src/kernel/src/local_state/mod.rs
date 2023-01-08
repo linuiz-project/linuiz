@@ -1,11 +1,10 @@
 use crate::{
     exceptions::Exception,
-    memory::{address_space, PagingRegister, Stack, KMALLOC},
+    memory::{address_space::AddressSpace, PagingRegister, PhysicalAllocator, Stack, KMALLOC},
     proc::{task::Task, Scheduler},
 };
 use core::{alloc::Allocator, cell::UnsafeCell};
 use try_alloc::boxed::TryBox;
-use uuid::Uuid;
 
 pub(self) const US_PER_SEC: u32 = 1000000;
 pub(self) const US_WAIT: u32 = 10000;
@@ -13,10 +12,10 @@ pub(self) const US_FREQ_FACTOR: u32 = US_PER_SEC / US_WAIT;
 
 pub const SYSCALL_STACK_SIZE: usize = 0x4000;
 
-pub enum ExceptionCatch {
-    Last(Exception),
-    Waiting,
-    None,
+pub enum ExceptionCatcher {
+    Caught(Exception),
+    Await,
+    Idle,
 }
 
 #[repr(C, align(0x1000))]
@@ -27,10 +26,8 @@ pub(crate) struct LocalState {
     magic: u64,
     core_id: u32,
 
-    uuid: Uuid,
+    exception_catcher: UnsafeCell<ExceptionCatcher>,
     scheduler: Scheduler,
-
-    last_exception: UnsafeCell<ExceptionCatch>,
 
     #[cfg(target_arch = "x86_64")]
     idt: Option<TryBox<crate::arch::x64::structures::idt::InterruptDescriptorTable>>,
@@ -75,12 +72,12 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
         magic: LocalState::MAGIC,
         core_id,
 
-        uuid: address_space::register().unwrap(),
+        exception_catcher: UnsafeCell::new(ExceptionCatcher::Idle),
         scheduler: Scheduler::new(
             false,
             Task::new(
                 0,
-                crate::proc::task::EntryPoint::Function(crate::interrupts::wait_loop),
+                || crate::interrupts::wait_loop(),
                 idle_task_stack,
                 crate::cpu::default_arch_context(),
                 PagingRegister::read(),
@@ -148,13 +145,8 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
         apic: {
             use crate::{arch::x64, interrupts::Vector};
 
-            let apic = apic::Apic::new(Some(|address: usize| {
-                lzstd::Address::<lzstd::Virtual>::new_truncate(
-                    crate::memory::get_hhdm_address().as_u64() + (address as u64),
-                )
-                .as_mut_ptr()
-            }))
-            .unwrap();
+            let apic =
+                apic::Apic::new(Some(|address: usize| crate::memory::hhdm_address().as_ptr().add(address))).unwrap();
 
             // Bring APIC to known state.
             apic.software_reset(255, 254, 253);
@@ -218,10 +210,6 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
     crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::write(local_state_ptr.addr() as u64);
 }
 
-pub fn get_uuid() -> Uuid {
-    get().uuid
-}
-
 /// ### Safety
 ///
 /// Caller must ensure control flow is prepared to begin scheduling tasks on the current core.
@@ -282,14 +270,51 @@ pub unsafe fn preemption_wait(interval_wait: core::num::NonZeroU16) {
     }
 }
 
-pub fn try_catch_exception<T: Into<Exception>>(exception: T) -> Option<T> {
-    let last_exception = get().last_exception.get_mut();
+/// Allows safely running a function that manipulates the current task's address space, or returns `None` if there's no current task.
+pub fn with_address_space<T>(with_fn: impl FnOnce(&mut AddressSpace<PhysicalAllocator>) -> T) -> Option<T> {
+    get().scheduler.current_task().and_then(|task| crate::memory::address_space::with(&task.uuid(), with_fn))
+}
+
+pub fn provide_exception<T: Into<Exception>>(exception: T) -> Result<(), T> {
+    let last_exception = get().exception_catcher.get_mut();
     match *last_exception {
-        ExceptionCatch::Last(last) => panic!("cannot stack exceptions:\nLast: {last:?}\nNew: {exception:?}"),
-        ExceptionCatch::Waiting => {
-            *last_exception = ExceptionCatch::Last(exception);
-            None
+        ExceptionCatcher::Caught(last) => {
+            panic!("cannot stack exceptions:\nLast: {last:?}\nNew: {:?}", exception.into())
         }
-        ExceptionCatch::None => Some(exception),
+
+        ExceptionCatcher::Await => {
+            *last_exception = ExceptionCatcher::Caught(exception.into());
+            Ok(())
+        }
+
+        ExceptionCatcher::Idle => Err(exception),
+    }
+}
+
+pub fn do_catch<T>(do_func: impl FnOnce() -> T) -> Result<T, Exception> {
+    let exception_catcher = &mut get().exception_catcher;
+
+    match exception_catcher.get_mut() {
+        ExceptionCatcher::Caught(exception) => panic!("uncaught exception: {:?}", exception),
+        ExceptionCatcher::Await => panic!("nested exception catch"),
+        ExceptionCatcher::Idle => *exception_catcher.get_mut() = ExceptionCatcher::Await,
+    }
+
+    let result = do_func();
+
+    match exception_catcher.get_mut() {
+        ExceptionCatcher::Idle => panic!("exception catcher unexpectedly idle"),
+
+        ExceptionCatcher::Caught(exception) => {
+            *exception_catcher.get_mut() = ExceptionCatcher::Idle;
+
+            Err(*exception)
+        }
+
+        ExceptionCatcher::Await => {
+            *exception_catcher.get_mut() = ExceptionCatcher::Idle;
+
+            Ok(result)
+        }
     }
 }

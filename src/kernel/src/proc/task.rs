@@ -1,16 +1,7 @@
 use crate::memory::Stack;
-use lzstd::NonNullPtr;
-use try_alloc::vec::TryVec;
 use uuid::Uuid;
 
-static WAITING_TASKS: spin::Mutex<TryVec<Task>> = spin::Mutex::new(TryVec::new());
-
-pub fn queue_task(new_task: Task) {
-    crate::interrupts::without(|| {
-        let mut waiting_tasks = WAITING_TASKS.lock();
-        waiting_tasks.push(new_task).unwrap();
-    })
-}
+type EntryPoint = fn() -> u32;
 
 /// Representation object for different contexts of execution in the CPU.
 pub struct Task {
@@ -29,7 +20,7 @@ unsafe impl Send for Task {}
 impl Task {
     pub fn new(
         priority: u8,
-        entry: NonNullPtr<u8>,
+        entry: EntryPoint,
         stack: Stack,
         arch_context: crate::cpu::ArchContext,
         root_page_table_args: crate::memory::PagingRegister,
@@ -42,22 +33,25 @@ impl Task {
             prio: priority,
             last_run: 0,
             stack,
-            ctrl_flow_context: crate::cpu::ControlContext { ip: entry.as_ptr() as usize as u64, sp },
+            ctrl_flow_context: crate::cpu::ControlContext { ip: entry as usize as u64, sp },
             arch_context,
         }
     }
 
     /// Returns this task's ID.
-    pub fn handle(&self) -> Uuid {
+    #[inline]
+    pub const fn uuid(&self) -> Uuid {
         self.handle
     }
 
     /// Returns the [`TaskPriority`] struct for this task.
-    pub fn priority(&self) -> u8 {
+    #[inline]
+    pub const fn priority(&self) -> u8 {
         self.prio
     }
 
-    pub fn last_run(&self) -> u32 {
+    #[inline]
+    pub const fn last_run(&self) -> u32 {
         self.last_run
     }
 }

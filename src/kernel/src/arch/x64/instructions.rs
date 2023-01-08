@@ -19,13 +19,15 @@ pub mod sync {
 }
 
 pub mod tlb {
-    use lzstd::{Address, Page};
+    use lzstd::Address;
+
+    use crate::memory::Page;
 
     /// Invalidates a single page from the TLB.
     #[inline]
     pub fn invlpg(page: Address<Page>) {
         unsafe {
-            core::arch::asm!("invlpg [{}]", in(reg) page.address().as_u64(), options(nostack, preserves_flags));
+            core::arch::asm!("invlpg [{}]", in(reg) page.get(), options(nostack, preserves_flags));
         }
     }
 

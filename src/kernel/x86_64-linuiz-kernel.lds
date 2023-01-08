@@ -8,8 +8,6 @@ KERN_BASE = 0xffffffff80000000;
 
 SECTIONS
 {
-    PROVIDE(__section_align =  0x200000);
-
     . = KERN_BASE + SIZEOF_HEADERS; 
 
     .hash               : { *(.hash) }
@@ -32,7 +30,7 @@ SECTIONS
     .rela.plt           : { *(.rela.plt) *(.rela.iplt) }
 
     /* text sections */
-    .text               : ALIGN(__section_align) {
+    .text               : ALIGN(MAX_PAGE_SIZE) {
         PROVIDE(__text_start = .);
 
         *(.plt) *(.iplt)
@@ -42,7 +40,7 @@ SECTIONS
     }
     
     /* rodata sections */
-    .rodata             : ALIGN(__section_align) {
+    .rodata             : ALIGN(MAX_PAGE_SIZE) {
         PROVIDE(__rodata_start = .);
 
         *(.rodata .rodata.*)
@@ -57,7 +55,7 @@ SECTIONS
     .eh_frame           : { KEEP(*(.eh_frame)) *(.eh_frame.*) }
 
     /* bss sections */
-    .bss                : ALIGN(__section_align) {
+    .bss                : ALIGN(MAX_PAGE_SIZE) {
         PROVIDE(__bss_start = .);
 
         KEEP(*(.gcc_except_table))
@@ -73,7 +71,7 @@ SECTIONS
     }
 
     /* data sections */
-    .data               : ALIGN(__section_align) {
+    .data               : ALIGN(MAX_PAGE_SIZE) {
         PROVIDE(__data_start = .);
 
         *(.got.plt) *(.igot.plt)
