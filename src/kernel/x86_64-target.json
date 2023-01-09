@@ -19,5 +19,6 @@
   "code-model": "kernel",
   "eh-frame-header": false,
   "panic-strategy": "abort",
-  "disable-redzone": true
+  "disable-redzone": true,
+  "exe-suffix": ".elf"
 }

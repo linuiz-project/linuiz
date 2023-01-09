@@ -1,7 +1,8 @@
 use clap::clap_derive::ValueEnum;
 use lza::CompressionLevel;
-use std::path::{Path, PathBuf};
-use xshell::cmd;
+use std::path::PathBuf;
+use xshell::{cmd, Result, Shell};
+use crate::Target;
 
 #[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Optimization {
@@ -38,15 +39,6 @@ pub struct Options {
     #[arg(long)]
     release: bool,
 
-    /// Whether to produce a disassembly file.
-    // TODO
-    // #[arg(short, long)]
-    // disassemble: bool,
-
-    /// Whether to output the result of `readelf` to a file.
-    #[arg(short, long)]
-    readelf: bool,
-
     /// The compression level to use when compressing init device drivers.
     #[arg(value_enum, long, default_value = "default")]
     compress: Compression,
@@ -55,12 +47,14 @@ pub struct Options {
     #[arg(short, long)]
     verbose: bool,
 
+    #[arg(long, default_value = "test_driver")]
+    drivers: Vec<String>,
+
     #[clap(value_enum, short)]
     optimize: Option<Optimization>,
 }
 
 static REQUIRED_ROOT_DIRS: [&str; 5] = ["resources/", ".hdd/", ".hdd/root/EFI/BOOT/", ".hdd/root/linuiz/", ".debug/"];
-static PACKAGED_DRIVERS: [&str; 1] = ["test_driver"];
 
 static LIMINE_DEFAULT_CFG: &str = "
     TIMEOUT=3
@@ -74,85 +68,24 @@ static LIMINE_DEFAULT_CFG: &str = "
     KASLR=yes
     ";
 
-pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
-    cmd!(shell, "git submodule update --init --recursive --remote").run()?;
-
-    let workspace_root = shell.current_dir();
-
-    // Configure rustc via the `RUSTFLAGS` environment variable.
-    let _rustflags = if !options.release {
-        Some(shell.push_env("RUSTFLAGS", "-Cforce-frame-pointers -Csymbol-mangling-version=v0"))
-    } else {
-        None
-    };
-
-    // Ensure root directories exist
-    for root_dir in REQUIRED_ROOT_DIRS {
-        let path = PathBuf::from(root_dir);
-        if !shell.path_exists(&path) {
-            shell.create_dir(path)?;
-        }
-    }
-
-    // Ensure dev disk image exists.
-    if !shell.path_exists(".hdd/disk0.img") {
-        cmd!(shell, "qemu-img create -f raw .hdd/disk0.img 256M").run()?;
-    }
-
-    /* limine */
-    {
-        let limine_cfg_path = PathBuf::from("resources/limine.cfg");
-        // create default configuration file if none are present
-        if !shell.path_exists(limine_cfg_path.clone()) {
-            shell.write_file(limine_cfg_path.clone(), LIMINE_DEFAULT_CFG)?;
-        }
-        // copy configuration to EFI image
-        shell.copy_file(limine_cfg_path.clone(), PathBuf::from(".hdd/root/EFI/BOOT/"))?;
-        // copy the resultant EFI binary
-        shell.copy_file(PathBuf::from("resources/limine/BOOTX64.EFI"), PathBuf::from(".hdd/root/EFI/BOOT/"))?;
-    }
-
-    fn disassemble(shell: &xshell::Shell, mut workspace_root: PathBuf, file_path: PathBuf) -> xshell::Result<()> {
-        match arch {
-            Architecture::rv64 => panic!("`--disassemble` options cannot be used when targeting `rv64`"),
-
-            Architecture::x64 => {
-                let output = cmd!(shell, "llvm-objdump -M intel -D {file_path}").output()?;
-                let file_name = file_path.file_name().unwrap().to_str().unwrap();
-                workspace_root.push(format!(".debug/disassembly_{file_name}"));
-                shell.write_file(workspace_root, output.stdout)?;
-            }
-        }
-
-        Ok(())
-    }
-
-    fn readelf(shell: &xshell::Shell, mut workspace_root: PathBuf, file_path: PathBuf) -> xshell::Result<()> {
-        let output = cmd!(shell, "readelf -hlS {file_path}").output()?;
-        let file_name = file_path.file_name().unwrap().to_str().unwrap();
-        workspace_root.push(format!(".debug/readelf_{file_name}"));
-        shell.write_file(workspace_root, output.stdout)?;
-
-        Ok(())
-    }
-
-    /* compile kernel */
+fn build_workspace(
+    shell: &Shell,
+    workspace_dir: PathBuf,
+    out_path: PathBuf,
+    target: Target,
+    options: &Options,
+) -> Result<()> {
+    let out_path = out_path.canonicalize().unwrap();
 
     let cargo_arguments = {
-        let out_path = {
-            let rel_path = Path::from(".hdd/root/linuiz/kernel.elf");
-            let abs_path = rel_path.canonicalize().unwrap();
-            abs_path.to_string_lossy().to_string()
-        };
+        let mut args = vec!["build", "--target", target.as_ref(), "--out-dir", out_path.to_str().unwrap()];
 
-        let mut args = vec!["build", "--out-dir", out_path.as_str()];
-
-        if options.release {
-            args.push("--release")
+        args.push(if options.release {
+            "--release"
         } else {
             // Only provide future-compatibiltiy notifications for development builds.
-            args.push("--future-incompat-report");
-        }
+            "--future-incompat-report"
+        });
 
         if options.verbose {
             args.push("-vv");
@@ -193,63 +126,67 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
         args
     };
 
-    // Compile kernel ...
-    {
-        {
-            let _dir = shell.push_dir("src/kernel/");
+    let _dir = shell.push_dir(workspace_dir);
+    cmd!(shell, "cargo {cargo_arguments...}").run()
+}
 
-            let mut cargo_arguments = cargo_arguments.clone();
-            cmd!(shell, "cargo {cargo_arguments...}").run()?;
-        }
+pub fn build(shell: &Shell, target: Target, options: Options) -> Result<()> {
+    cmd!(shell, "git submodule update --init --recursive --remote").run()?;
 
-        // if options.disassemble {
-        //     disassemble(&shell, options.arch, workspace_root.clone(), out_path.clone())?;
-        // }
+    // Configure rustc via the `RUSTFLAGS` environment variable.
+    let _rustflags = if !options.release {
+        Some(shell.push_env("RUSTFLAGS", "-Cforce-frame-pointers -Csymbol-mangling-version=v0"))
+    } else {
+        None
+    };
 
-        if options.readelf {
-            readelf(&shell, workspace_root.clone(), out_path.clone())?;
+    // Ensure root directories exist
+    for root_dir in REQUIRED_ROOT_DIRS {
+        let path = PathBuf::from(root_dir);
+        if !shell.path_exists(&path) {
+            shell.create_dir(path)?;
         }
     }
 
-    // Compile and compress drivers ...
-    {
-        let driver_data = {
-            let _dir = shell.push_dir("src/userspace/");
-
-            // Compile ...
-            let mut cargo_arguments = cargo_arguments.clone();
-            cmd!(shell, "cargo {cargo_arguments...}").run()?;
-
-            // Compress ...
-            let mut archive_builder = lza::ArchiveBuilder::new(options.compress.into());
-
-            for driver_name in PACKAGED_DRIVERS {
-                let driver_path = PathBuf::from(format!("target/x86_64-unknown-linuiz/{profile_str}/{driver_name}"));
-
-                // Compress and append driver bytes.
-                let (header, data) = archive_builder
-                    .push_data(driver_name, shell.read_binary_file(driver_path.clone())?.as_slice())
-                    .expect("failed to write data to archive");
-
-                if !options.release {
-                    println!("{:?}\nData Snippet: {:?}", header, &data[..100]);
-                }
-
-                // if options.disassemble {
-                //     disassemble(&shell, options.arch, workspace_root.clone(), driver_path.clone())?;
-                // }
-
-                if options.readelf {
-                    readelf(&shell, workspace_root.clone(), driver_path.clone())?;
-                }
-            }
-
-            archive_builder.take_data()
-        };
-
-        println!("Compression resulted in a {} byte dump.", driver_data.len());
-        shell.write_file(PathBuf::from(".hdd/root/linuiz/drivers"), driver_data)?;
+    // Ensure dev disk image exists.
+    if !shell.path_exists(".hdd/disk0.img") {
+        cmd!(shell, "qemu-img create -f raw .hdd/disk0.img 256M").run()?;
     }
 
-    Ok(())
+    /* limine */
+    {
+        let limine_cfg_path = PathBuf::from("resources/limine.cfg");
+        // create default configuration file if none are present
+        if !shell.path_exists(limine_cfg_path.clone()) {
+            shell.write_file(limine_cfg_path.clone(), LIMINE_DEFAULT_CFG)?;
+        }
+        // copy configuration to EFI image
+        shell.copy_file(limine_cfg_path.clone(), PathBuf::from(".hdd/root/EFI/BOOT/"))?;
+        // copy the resultant EFI binary
+        shell.copy_file(PathBuf::from("resources/limine/BOOTX64.EFI"), PathBuf::from(".hdd/root/EFI/BOOT/"))?;
+    }
+
+    /* compile kernel */
+    build_workspace(shell, PathBuf::from("src/kernel/"), PathBuf::from(".hdd/root/linuiz/"), target, &options)?;
+
+    /* compile & compress drivers */
+    static UNCOMPRESSED_DIR: &str = ".tmp/uncompressed/";
+    build_workspace(shell, PathBuf::from("src/userspace/"), PathBuf::from(UNCOMPRESSED_DIR), target, &options)?;
+
+    let mut archive_builder = lza::ArchiveBuilder::new(options.compress.into());
+
+    for path in shell.read_dir(UNCOMPRESSED_DIR)?.into_iter() {
+        let Some(file_name) = path.file_name().map(|name| name.to_string_lossy().into_owned())
+                    else { continue };
+
+        if options.drivers.contains(&file_name) {
+            archive_builder
+                .push_data(&file_name, shell.read_binary_file(path)?.as_slice())
+                .expect("failed to write data to archive");
+        }
+    }
+
+    let driver_data = archive_builder.take_data();
+    println!("Compression resulted in a {} byte dump.", driver_data.len());
+    shell.write_file(PathBuf::from(".hdd/root/linuiz/drivers"), driver_data)
 }

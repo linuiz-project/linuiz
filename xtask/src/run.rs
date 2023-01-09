@@ -1,12 +1,7 @@
 use clap::ValueEnum;
 use xshell::cmd;
 
-#[derive(clap::Subcommand)]
-#[allow(non_camel_case_types)]
-enum Target {
-    x86_64,
-    RV64,
-}
+use crate::Target;
 
 impl core::fmt::Display for Target {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -99,12 +94,13 @@ pub struct Options {
 
     #[arg(long)]
     no_build: bool,
-    // #[clap(flatten)]
-    // build_options: crate::build::Options,
+
+    #[clap(flatten)]
+    build_options: crate::build::Options,
 }
 
 pub fn run(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
-    // crate::build::build(shell, options.build_options)?;
+    crate::build::build(shell, options.target, options.build_options)?;
 
     let qemu_exe_str = match options.cpu {
         CPU::Rv64 => "qemu-system-riscv64",
