@@ -11,7 +11,7 @@
   "linker-flavor": "ld.lld",
   "pre-link-args": {
     "ld.lld": [
-      "-Tx86_64-linuiz-kernel.lds"
+      "-Tx86_64-linker.lds"
     ]
   },
   "executables": true,

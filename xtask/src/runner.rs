@@ -1,6 +1,22 @@
 use clap::ValueEnum;
 use xshell::cmd;
 
+#[derive(clap::Subcommand)]
+#[allow(non_camel_case_types)]
+enum Target {
+    x86_64,
+    RV64,
+}
+
+impl core::fmt::Display for Target {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::x86_64 => "x86_64-target.json",
+            Self::RV64 => "riscv64gc-unknown-none",
+        })
+    }
+}
+
 #[derive(ValueEnum, Clone, Copy, PartialEq, Eq)]
 pub enum Accelerator {
     Kvm,
@@ -55,6 +71,9 @@ impl core::fmt::Debug for BlockDriver {
 #[derive(clap::Parser)]
 #[group(skip)]
 pub struct Options {
+    #[command(subcommand)]
+    target: Target,
+
     /// CPU type to emulate.
     #[arg(value_enum, long, default_value = "qemu64")]
     cpu: CPU,
@@ -80,15 +99,12 @@ pub struct Options {
 
     #[arg(long)]
     no_build: bool,
-
-    #[clap(flatten)]
-    build_options: crate::build::Options,
+    // #[clap(flatten)]
+    // build_options: crate::build::Options,
 }
 
 pub fn run(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
-    if !options.no_build {
-        crate::build::build(shell, options.build_options)?;
-    }
+    // crate::build::build(shell, options.build_options)?;
 
     let qemu_exe_str = match options.cpu {
         CPU::Rv64 => "qemu-system-riscv64",

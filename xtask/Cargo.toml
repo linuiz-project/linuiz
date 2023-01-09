@@ -9,6 +9,7 @@ git = "https://github.com/linuiz-project/lza"
 clap = { version = "*", features = ["derive"] }
 walkdir = "*"
 xshell = "*"
+toml_edit = "*"
 
 [profile.dev]
 debug = false

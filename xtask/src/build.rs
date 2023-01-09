@@ -1,20 +1,13 @@
 use clap::clap_derive::ValueEnum;
 use lza::CompressionLevel;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use xshell::cmd;
 
 #[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Optimization {
-    P,
-    S,
-    PS,
-}
-
-#[allow(non_camel_case_types)]
-#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Architecture {
-    x64,
-    rv64,
+    Fast,
+    Small,
+    All,
 }
 
 #[derive(ValueEnum, Debug, Clone, Copy)]
@@ -41,17 +34,14 @@ impl Into<CompressionLevel> for Compression {
 #[derive(clap::Parser)]
 #[allow(non_snake_case)]
 pub struct Options {
-    /// The compilation target for this build.
-    #[arg(value_enum, long, default_value = "x64")]
-    arch: Architecture,
-
     /// Whether the current build is a release build.
     #[arg(long)]
     release: bool,
 
     /// Whether to produce a disassembly file.
-    #[arg(short, long)]
-    disassemble: bool,
+    // TODO
+    // #[arg(short, long)]
+    // disassemble: bool,
 
     /// Whether to output the result of `readelf` to a file.
     #[arg(short, long)]
@@ -61,21 +51,9 @@ pub struct Options {
     #[arg(value_enum, long, default_value = "default")]
     compress: Compression,
 
-    /// Whether to use `cargo clippy` rather than `cargo build`.
-    #[arg(short, long)]
-    clippy: bool,
-
     /// Verbose build output. Equivalent to `cargo build -vv`.
     #[arg(short, long)]
     verbose: bool,
-
-    /// Performs a `cargo clean` before building. This is useful for forcing a full recompile.
-    #[arg(long)]
-    clean: bool,
-
-    /// Whether to force the compiler to *not* use `rbp` to store the stack frame pointer. This does nothing when compiling in release.
-    #[arg(long)]
-    no_stack_traces: bool,
 
     #[clap(value_enum, short)]
     optimize: Option<Optimization>,
@@ -102,16 +80,11 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
     let workspace_root = shell.current_dir();
 
     // Configure rustc via the `RUSTFLAGS` environment variable.
-    let _rustflags = if !options.release && !options.no_stack_traces {
+    let _rustflags = if !options.release {
         Some(shell.push_env("RUSTFLAGS", "-Cforce-frame-pointers -Csymbol-mangling-version=v0"))
     } else {
         None
     };
-
-    // Clean crates if required ...
-    if options.clean {
-        crate::cargo_clean(shell)?;
-    }
 
     // Ensure root directories exist
     for root_dir in REQUIRED_ROOT_DIRS {
@@ -136,23 +109,19 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
         // copy configuration to EFI image
         shell.copy_file(limine_cfg_path.clone(), PathBuf::from(".hdd/root/EFI/BOOT/"))?;
         // copy the resultant EFI binary
-        shell.copy_file(PathBuf::from("submodules/limine/BOOTX64.EFI"), PathBuf::from(".hdd/root/EFI/BOOT/"))?;
+        shell.copy_file(PathBuf::from("resources/limine/BOOTX64.EFI"), PathBuf::from(".hdd/root/EFI/BOOT/"))?;
     }
 
-    fn disassemble(
-        shell: &xshell::Shell,
-        arch: Architecture,
-        mut workspace_root: PathBuf,
-        file_path: PathBuf,
-    ) -> xshell::Result<()> {
+    fn disassemble(shell: &xshell::Shell, mut workspace_root: PathBuf, file_path: PathBuf) -> xshell::Result<()> {
         match arch {
+            Architecture::rv64 => panic!("`--disassemble` options cannot be used when targeting `rv64`"),
+
             Architecture::x64 => {
                 let output = cmd!(shell, "llvm-objdump -M intel -D {file_path}").output()?;
                 let file_name = file_path.file_name().unwrap().to_str().unwrap();
                 workspace_root.push(format!(".debug/disassembly_{file_name}"));
                 shell.write_file(workspace_root, output.stdout)?;
             }
-            Architecture::rv64 => panic!("`--disassemble` options cannot be used when targeting `rv64`"),
         }
 
         Ok(())
@@ -168,17 +137,20 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
     }
 
     /* compile kernel */
-    let profile_str = if options.release { "release" } else { "debug" };
 
     let cargo_arguments = {
-        let mut args = vec![
-            if options.clippy { "clippy" } else { "build" },
-            "--profile",
-            if options.release { "release" } else { "dev" },
-        ];
+        let out_path = {
+            let rel_path = Path::from(".hdd/root/linuiz/kernel.elf");
+            let abs_path = rel_path.canonicalize().unwrap();
+            abs_path.to_string_lossy().to_string()
+        };
 
-        // Only provide future-compatibiltiy notifications for development builds.
-        if !options.release {
+        let mut args = vec!["build", "--out-dir", out_path.as_str()];
+
+        if options.release {
+            args.push("--release")
+        } else {
+            // Only provide future-compatibiltiy notifications for development builds.
             args.push("--future-incompat-report");
         }
 
@@ -187,46 +159,36 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
         }
 
         match options.optimize {
-            Some(Optimization::P) => {
-                args.push("--config");
-                args.push("opt-level=3");
-
-                args.push("--config");
-                args.push("lto=thin");
+            Some(Optimization::Fast) => {
+                args.extend(["--config", "opt-level=3", "--config", "lto=thin"]);
             }
 
-            Some(Optimization::S) => {
-                args.push("--config");
-                args.push("opt-level='z'");
+            Some(Optimization::Small) => args.extend([
+                "--config",
+                "opt-level='z'",
+                "--config",
+                "codegen-units=1",
+                "--config",
+                "lto=fat",
+                "--config",
+                "strip=true",
+            ]),
 
-                args.push("--config");
-                args.push("codegen-units=1");
-
-                args.push("--config");
-                args.push("lto=fat");
-
-                args.push("--config");
-                args.push("strip=true");
-            }
-
-            Some(Optimization::PS) => {
-                args.push("--config");
-                args.push("opt-level=3");
-
-                args.push("--config");
-                args.push("codegen-units=1");
-
-                args.push("--config");
-                args.push("lto=fat");
-
-                args.push("--config");
-                args.push("strip=true");
+            Some(Optimization::All) => {
+                args.extend([
+                    "--config",
+                    "opt-level=3",
+                    "--config",
+                    "codegen-units=1",
+                    "--config",
+                    "lto=fat",
+                    "--config",
+                    "strip=true",
+                ]);
             }
 
             None => {}
         }
-
-        args.push("--target");
 
         args
     };
@@ -237,23 +199,12 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
             let _dir = shell.push_dir("src/kernel/");
 
             let mut cargo_arguments = cargo_arguments.clone();
-            cargo_arguments.push(match options.arch {
-                Architecture::x64 => "x86_64-linuiz-kernel.json",
-                Architecture::rv64 => "riscv64gc-unknown-none-elf",
-            });
             cmd!(shell, "cargo {cargo_arguments...}").run()?;
         }
 
-        let out_path = PathBuf::from(".hdd/root/linuiz/kernel.elf");
-
-        shell.copy_file(
-            PathBuf::from(format!("src/kernel/target/x86_64-linuiz-kernel/{profile_str}/kernel")),
-            PathBuf::from(out_path.clone()),
-        )?;
-
-        if options.disassemble {
-            disassemble(&shell, options.arch, workspace_root.clone(), out_path.clone())?;
-        }
+        // if options.disassemble {
+        //     disassemble(&shell, options.arch, workspace_root.clone(), out_path.clone())?;
+        // }
 
         if options.readelf {
             readelf(&shell, workspace_root.clone(), out_path.clone())?;
@@ -267,10 +218,6 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
 
             // Compile ...
             let mut cargo_arguments = cargo_arguments.clone();
-            cargo_arguments.push(match options.arch {
-                Architecture::x64 => "x86_64-unknown-linuiz.json",
-                Architecture::rv64 => "riscv64gc-unknown-none-elf",
-            });
             cmd!(shell, "cargo {cargo_arguments...}").run()?;
 
             // Compress ...
@@ -288,9 +235,9 @@ pub fn build(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Erro
                     println!("{:?}\nData Snippet: {:?}", header, &data[..100]);
                 }
 
-                if options.disassemble {
-                    disassemble(&shell, options.arch, workspace_root.clone(), driver_path.clone())?;
-                }
+                // if options.disassemble {
+                //     disassemble(&shell, options.arch, workspace_root.clone(), driver_path.clone())?;
+                // }
 
                 if options.readelf {
                     readelf(&shell, workspace_root.clone(), driver_path.clone())?;
