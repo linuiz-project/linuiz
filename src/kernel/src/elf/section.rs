@@ -1,6 +1,8 @@
 #![allow(non_camel_case_types)]
 
-use lzstd::{Address, Virtual};
+use lzstd::Address;
+
+use crate::memory::Virtual;
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy)]
@@ -103,13 +105,12 @@ impl Header {
 
     #[inline]
     pub const fn get_attributes(&self) -> Attributes {
-        // TODO maybe don't truncate extra bits for os/processor-specific bits?
         Attributes::from_bits_truncate(self.attributes)
     }
 
     #[inline]
-    pub const fn get_virtual_address(&self) -> Option<Address<Virtual>> {
-        Address::<Virtual>::new(self.virt_addr)
+    pub fn get_virtual_address(&self) -> Option<Address<Virtual>> {
+        Address::new(self.virt_addr as usize)
     }
 
     #[inline]

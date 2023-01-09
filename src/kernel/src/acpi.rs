@@ -58,7 +58,7 @@ impl acpi::AcpiHandler for AcpiHandler {
 
         acpi::PhysicalMapping::new(
             address,
-            core::ptr::NonNull::new_unchecked(crate::memory::get_hhdm_address().as_mut_ptr::<u8>().add(address).cast()),
+            core::ptr::NonNull::new(crate::memory::hhdm_address().as_ptr().add(address).cast()).unwrap(),
             size,
             size,
             Self,
@@ -159,7 +159,7 @@ pub fn init_interface() {
     let tables_init = TABLES.try_call_once(|| {
         crate::boot::get_rsdp_address()
             // ### Safety: Bootloader guarantees any address provided for RDSP will be valid.
-            .and_then(|rsdp_address| unsafe { acpi::AcpiTables::from_rsdp(AcpiHandler, rsdp_address.as_usize()).ok() })
+            .and_then(|rsdp_address| unsafe { acpi::AcpiTables::from_rsdp(AcpiHandler, rsdp_address.get()).ok() })
             .map(Mutex::new)
             .ok_or(())
     });

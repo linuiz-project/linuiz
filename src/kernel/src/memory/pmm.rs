@@ -1,3 +1,4 @@
+use super::Virtual;
 use bit_field::BitField;
 use core::{
     alloc::{AllocError, Layout},
@@ -128,7 +129,7 @@ pub struct MemoryMapping {
 
 pub struct PhysicalMemoryManager<'a> {
     table: &'a [FrameData],
-    physical_memory: NonNull<u8>,
+    physical_memory: Address<Virtual>,
 }
 
 // ### Safety: Type uses entirely atomic operations.
@@ -140,7 +141,7 @@ impl PhysicalMemoryManager<'_> {
     // ### Safety: Caller must guarantee the physical mapped address is valid.
     pub unsafe fn from_memory_map(
         memory_map: impl ExactSizeIterator<Item = MemoryMapping>,
-        physical_memory: NonNull<u8>,
+        physical_memory: Address<Virtual>,
     ) -> Option<Self> {
         let (memory_map, memory_map_len) = {
             let memory_map_len = memory_map.len();
@@ -220,14 +221,13 @@ impl PhysicalMemoryManager<'_> {
                         frame_data.lock();
                         frame_data.unpeek();
 
-                        Some((index * 0x1000) as u64)
+                        Address::from_index(index)
                     } else {
                         frame_data.unpeek();
 
                         None
                     }
                 })
-                .and_then(Address::<Frame>::from_u64)
                 .ok_or(Error::NoneFree)
         })
     }
@@ -272,7 +272,7 @@ impl PhysicalMemoryManager<'_> {
                         // to extremely unpredictable results.
                         let start_index = self.table.len().wrapping_sub(sub_table.len());
                         let start_address = start_index.wrapping_mul(0x1000);
-                        break Address::<Frame>::from_u64(start_address as u64).ok_or(Error::Unknown);
+                        break Address::new(start_address).ok_or(Error::Unknown);
                     }
                 }
             }
@@ -376,11 +376,12 @@ unsafe impl core::alloc::Allocator for &PhysicalMemoryManager<'_> {
             NonZeroUsize::new(layout.align() / 0x1000).unwrap_or(NonZeroUsize::MIN),
         )
         .ok()
-        .and_then(|address| {
-            physical_memory
-                .addr()
-                .checked_add(address.as_usize())
-                .map(|address| NonNull::slice_from_raw_parts(physical_memory.with_addr(address), layout.size()))
+        .map(|address| {
+            NonNull::slice_from_raw_parts(
+                // Safety: `PhysicalMemoryManager` ensures addresses are within its bounds.
+                NonNull::new(unsafe { physical_memory.as_ptr().add(address.get()) }).unwrap(),
+                layout.size(),
+            )
         })
         .ok_or(AllocError)
     }
@@ -394,13 +395,10 @@ unsafe impl core::alloc::Allocator for &PhysicalMemoryManager<'_> {
                 return;
             };
 
-        let base_address = ptr.addr().get() - self.physical_memory.addr().get();
+        let base_address = ptr.addr().get() - self.physical_memory.get();
         for offset in (0..layout.size()).step_by(0x1000) {
-            Address::<Frame>::from_u64((base_address + offset) as u64)
-                .and_then(|address| self.free_frame(address).ok())
-                .unwrap_or_else(|| {
-                    error!("Unexpectedly failed to free frame during deallocation");
-                });
+            self.free_frame(Address::new(base_address + offset).unwrap())
+                .expect("Unexpectedly failed to free frame during deallocation");
         }
     }
 }

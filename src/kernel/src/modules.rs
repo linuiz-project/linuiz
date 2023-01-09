@@ -53,16 +53,16 @@ pub fn load_modules() {
 
             // Create the driver's page manager from the kernel's higher-half table.
             // ### Safety: Kernel guarantees HHDM to be valid.
-            let driver_page_manager = unsafe {
-                crate::memory::Mapper::new(
+            let mut driver_page_manager = unsafe {
+                crate::memory::address_space::Mapper::new(
                     4,
-                    crate::memory::get_hhdm_address(),
-                    Some(crate::memory::VmemRegister::read()),
+                    crate::memory::hhdm_address(),
+                    Some(crate::memory::PagingRegister::read()),
                 )
                 .expect("failed to create page manager for driver")
             };
 
-            let hhdm_address = crate::memory::get_hhdm_address();
+            let hhdm_address = crate::memory::hhdm_address();
 
             // Iterate the segments, and allocate them.
             for segment in elf.iter_segments() {

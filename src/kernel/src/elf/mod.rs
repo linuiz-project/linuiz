@@ -2,8 +2,6 @@ pub mod section;
 pub mod segment;
 pub mod symbol;
 
-use lzstd::{Address, Virtual};
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Endianness {
     Little,
@@ -472,7 +470,7 @@ pub enum RelaType {
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct Rela64 {
-    pub addr: Address<Virtual>,
+    pub addr: u64,
     pub ty: RelaType,
     pub sym_idx: u32,
     pub addend: u64,

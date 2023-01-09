@@ -4,11 +4,7 @@
     },
     "rust-analyzer.linkedProjects": [
         "src/kernel/Cargo.toml",
-        "src/shared/pic_8259/Cargo.toml",
-        "src/shared/uart/Cargo.toml",
-        "src/shared/port-rs/Cargo.toml",
-        "src/shared/slab/Cargo.toml",
-        "src/shared/apic/Cargo.toml",
+        "src/shared/Cargo.toml",
         "src/userspace/Cargo.toml",
         "xtask/Cargo.toml"
     ],

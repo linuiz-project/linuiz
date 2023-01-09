@@ -4,15 +4,15 @@ version = "0.0.0"
 edition = "2021"
 
 [dependencies.port-rs]
-path = "../shared/port-rs/"
+path = "../shared/src/port-rs/"
 [dependencies.uart]
-path = "../shared/uart/"
+path = "../shared/src/uart/"
 [dependencies.msr]
-path = "../shared/msr/"
+path = "../shared/src/msr/"
 [dependencies.apic]
-path = "../shared/apic/"
+path = "../shared/src/apic/"
 [dependencies.slab]
-path = "../shared/slab/"
+path = "../shared/src/slab/"
 [dependencies.lzstd]
 git = "https://github.com/linuiz-project/lzstd"
 [dependencies.spin]
@@ -29,15 +29,18 @@ git = "https://github.com/semiviral/acpi"
 log = { version = "*", default-features = false }
 num_enum = { version = "*", default-features = false }
 miniz_oxide = { version = "*", default-features = false }
+uuid = { version = "*", default-features = false, features = ["v4"] }
+getrandom = { version = "*", features = ["rdrand", "custom"] }
 limine = { version = "*", features = ["requests-section"] }
 bit_field = "*"
 bitflags = "*"
 paste = "*"
 bytemuck = "*"
 rustc-demangle = "*"
+no-panic = "*"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
-pic_8259 = { path = "../shared/pic_8259/" }
+pic_8259 = { path = "../shared/src/pic_8259/" }
 raw-cpuid = "*"
 x86_64 = "*"
 

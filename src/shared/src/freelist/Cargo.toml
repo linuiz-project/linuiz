@@ -1,0 +1,9 @@
+[package]
+name = "freelist"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies.try_alloc]
+git = "https://github.com/linuiz-project/try_alloc"
+[dependencies.spin]
+git = "https://github.com/linuiz-project/spin-rs"

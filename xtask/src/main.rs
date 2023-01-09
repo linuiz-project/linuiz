@@ -1,63 +1,69 @@
-pub mod build;
-pub mod runner;
+mod build;
+mod run;
 
 use clap::Parser;
-use xshell::cmd;
+use xshell::{cmd, Result, Shell};
+
+#[derive(Debug, Clone, Copy, clap::Subcommand)]
+#[allow(non_camel_case_types)]
+pub enum Target {
+    x86_64,
+    RV64,
+}
+
+impl AsRef<str> for Target {
+    fn as_ref(&self) -> &str {
+        match self {
+            Self::x86_64 => "x86_64-target.json",
+            Self::RV64 => "riscv64gc-unknown-none",
+        }
+    }
+}
+
+static WORKSPACE_DIRS: [&str; 3] = ["src/kernel/", "src/userspace/", "src/shared/"];
+
+fn with_crate_dirs(shell: &Shell, mut with_fn: impl FnMut(&Shell) -> Result<()>) -> Result<()> {
+    for crate_dir in WORKSPACE_DIRS {
+        let _dir = shell.push_dir(crate_dir);
+        with_fn(shell)?;
+    }
+
+    Ok(())
+}
+
+pub fn cargo_fmt(shell: &Shell) -> Result<()> {
+    with_crate_dirs(shell, |shell| cmd!(shell, "cargo fmt").run())
+}
+
+pub fn cargo_check(shell: &Shell) -> Result<()> {
+    with_crate_dirs(shell, |shell| cmd!(shell, "cargo check").run())
+}
+
+pub fn cargo_clean(shell: &Shell) -> Result<()> {
+    with_crate_dirs(&shell, |shell| cmd!(shell, "cargo clean").run())
+}
 
 #[derive(Parser)]
 #[command(rename_all = "snake_case")]
 enum Arguments {
-    Build(build::Options),
-    Run(runner::Options),
+    Check,
     Clean,
-    Metadata,
     Update,
+    Run(run::Options),
 }
 
-fn main() -> Result<(), xshell::Error> {
-    let shell = xshell::Shell::new()?;
+fn main() -> Result<()> {
+    let shell = Shell::new()?;
 
     match Arguments::parse() {
-        Arguments::Build(build_options) => {
-            build::build(&shell, build_options)
-        }
-
-        Arguments::Run(run_options) => runner::run(&shell, run_options),
-
-        Arguments::Clean => clean(&shell),
+        Arguments::Check => cargo_check(&shell),
+        Arguments::Clean => cargo_clean(&shell),
 
         Arguments::Update => {
             cmd!(shell, "git submodule update --init --recursive --remote").run()?;
-            update(&shell)
+            with_crate_dirs(&shell, |shell| cmd!(shell, "cargo update").run())
         }
 
-        Arguments::Metadata => {
-            for crate_dir in CRATE_DIRS {
-                let _dir = shell.push_dir(crate_dir);
-                cmd!(shell, "cargo metadata --format-version 1").run()?;
-            }
-
-            Ok(())
-        }
+        Arguments::Run(run_options) => run::run(&shell, run_options),
     }
-}
-
-static CRATE_DIRS: [&str; 2] = ["src/kernel/", "src/userspace/"];
-
-pub fn clean(shell: &xshell::Shell) -> xshell::Result<()> {
-    for crate_dir in CRATE_DIRS {
-        let _dir = shell.push_dir(crate_dir);
-        cmd!(shell, "cargo clean").run()?;
-    }
-
-    Ok(())
-}
-
-pub fn update(shell: &xshell::Shell) -> xshell::Result<()> {
-    for crate_dir in CRATE_DIRS {
-        let _dir = shell.push_dir(crate_dir);
-        cmd!(shell, "cargo update").run()?;
-    }
-
-    Ok(())
 }

@@ -1,9 +1,13 @@
-mod scheduler;
-
-use core::alloc::Allocator;
-
-use crate::memory::{Stack, VmemRegister, KMALLOC};
-pub use scheduler::*;
+use crate::{
+    exceptions::Exception,
+    memory::{address_space::AddressSpace, PhysicalAllocator, Stack, KMALLOC},
+    proc::{task::Task, Scheduler},
+};
+use core::{
+    alloc::Allocator,
+    cell::UnsafeCell,
+    sync::atomic::{AtomicBool, Ordering},
+};
 use try_alloc::boxed::TryBox;
 
 pub(self) const US_PER_SEC: u32 = 1000000;
@@ -12,12 +16,22 @@ pub(self) const US_FREQ_FACTOR: u32 = US_PER_SEC / US_WAIT;
 
 pub const SYSCALL_STACK_SIZE: usize = 0x4000;
 
+pub enum ExceptionCatcher {
+    Caught(Exception),
+    Await,
+    Idle,
+}
+
 #[repr(C, align(0x1000))]
 pub(crate) struct LocalState {
     syscall_stack_ptr: *const (),
     syscall_stack: Stack,
+
     magic: u64,
     core_id: u32,
+
+    catching: AtomicBool,
+    exception: UnsafeCell<Option<Exception>>,
     scheduler: Scheduler,
 
     #[cfg(target_arch = "x86_64")]
@@ -59,17 +73,15 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
     let local_state = LocalState {
         syscall_stack_ptr: syscall_stack.as_ptr().add(syscall_stack.len() & !0xF).cast(),
         syscall_stack,
+
         magic: LocalState::MAGIC,
         core_id,
+
+        catching: AtomicBool::new(false),
+        exception: UnsafeCell::new(None),
         scheduler: Scheduler::new(
             false,
-            Task::new(
-                0,
-                EntryPoint::Function(crate::interrupts::wait_loop),
-                idle_task_stack,
-                crate::cpu::default_arch_context(),
-                VmemRegister::read(),
-            ),
+            Task::new(0, || crate::interrupts::wait_loop(), idle_task_stack, crate::cpu::default_arch_context()),
         ),
 
         #[cfg(target_arch = "x86_64")]
@@ -133,13 +145,8 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
         apic: {
             use crate::{arch::x64, interrupts::Vector};
 
-            let apic = apic::Apic::new(Some(|address: usize| {
-                lzstd::Address::<lzstd::Virtual>::new_truncate(
-                    crate::memory::get_hhdm_address().as_u64() + (address as u64),
-                )
-                .as_mut_ptr()
-            }))
-            .unwrap();
+            let apic =
+                apic::Apic::new(Some(|address: usize| crate::memory::hhdm_address().as_ptr().add(address))).unwrap();
 
             // Bring APIC to known state.
             apic.software_reset(255, 254, 253);
@@ -261,4 +268,47 @@ pub unsafe fn preemption_wait(interval_wait: core::num::NonZeroU16) {
             apic::TimerMode::Periodic => unimplemented!(),
         }
     }
+}
+
+/// Allows safely running a function that manipulates the current task's address space, or returns `None` if there's no current task.
+pub fn with_address_space<T>(with_fn: impl FnOnce(&mut AddressSpace<PhysicalAllocator>) -> T) -> Option<T> {
+    get().scheduler.current_task().and_then(|task| crate::memory::address_space::with(&task.uuid(), with_fn))
+}
+
+pub fn provide_exception<T: Into<Exception>>(exception: T) -> Result<(), T> {
+    let local_state = get();
+
+    if local_state.catching.load(Ordering::Relaxed) {
+        debug_assert!(local_state.exception.get_mut().is_none());
+
+        *local_state.exception.get_mut() = Some(exception.into());
+
+        Ok(())
+    } else {
+        Err(exception)
+    }
+}
+
+/// # Safety
+///
+/// Caller must ensure `do_func` is effectively stackless, since no stack cleanup will occur on an exception.
+pub unsafe fn do_catch<T>(do_func: impl FnOnce() -> T) -> Result<T, Exception> {
+    let local_state = get();
+
+    debug_assert!(local_state.exception.get_mut().is_none());
+
+    local_state
+        .catching
+        .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+        .expect("nested exception catching is not supported");
+
+    let do_func_result = do_func();
+    let result = local_state.exception.get_mut().take().map_or(Ok(do_func_result), Err);
+
+    local_state
+        .catching
+        .compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed)
+        .expect("inconsistent local catch state");
+
+    result
 }

@@ -1,8 +1,11 @@
 mod instructions;
-
-use crate::cpu::{ArchContext, ControlContext};
 pub use instructions::*;
-use lzstd::{Address, Page, Virtual};
+
+use crate::{
+    cpu::{ArchContext, ControlContext},
+    memory::Virtual,
+};
+use lzstd::Address;
 use num_enum::TryFromPrimitive;
 
 /// Delivery mode for IPIs.
@@ -54,11 +57,8 @@ pub enum Vector {
 }
 
 /// Indicates what type of error the common page fault handler encountered.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PageFaultHandlerError {
-    AddressNotMapped,
-    NotDemandPaged,
-}
+#[derive(Debug, Clone, Copy)]
+pub struct PageFaultHandlerError;
 
 /// ### Safety
 ///
@@ -66,30 +66,11 @@ pub enum PageFaultHandlerError {
 #[no_mangle]
 #[repr(align(0x10))]
 pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandlerError> {
-    use crate::memory::PageAttributes;
-
-    let fault_page = Address::<Page>::new(address, None).unwrap();
-    let virtual_mapper = crate::memory::Mapper::from_current(crate::memory::get_hhdm_address());
-    let Some(mut fault_page_attributes) = virtual_mapper.get_page_attributes(fault_page) else { return Err(PageFaultHandlerError::AddressNotMapped) };
-    if fault_page_attributes.contains(PageAttributes::DEMAND) {
-        virtual_mapper
-            .auto_map(fault_page, {
-                // remove demand bit ...
-                fault_page_attributes.remove(PageAttributes::DEMAND);
-                // ... insert present bit ...
-                fault_page_attributes.insert(PageAttributes::PRESENT);
-                // ... return attributes
-                fault_page_attributes
-            })
-            .unwrap();
-
-        // ### Safety: We know the page was just mapped, and contains no relevant memory.
-        fault_page.zero_memory();
-
-        Ok(())
-    } else {
-        Err(PageFaultHandlerError::NotDemandPaged)
-    }
+    crate::local_state::with_address_space(|addr_space| {
+        addr_space.demand_map(address).map_err(|_| PageFaultHandlerError)
+    })
+    .ok_or(PageFaultHandlerError)
+    .flatten()
 }
 
 /// ### Safety
@@ -106,4 +87,30 @@ pub unsafe fn irq_handler(irq_vector: u64, ctrl_flow_context: &mut ControlContex
 
     #[cfg(target_arch = "x86_64")]
     crate::local_state::end_of_interrupt();
+}
+
+pub struct InterruptCell<T>(T);
+
+impl<T> InterruptCell<T> {
+    #[inline]
+    pub const fn new(value: T) -> Self {
+        Self(value)
+    }
+
+    #[inline]
+    pub fn set(&mut self, value: T) {
+        self.0 = value;
+    }
+
+    #[inline]
+    pub fn with<U>(&self, func: impl FnOnce(&T) -> U) -> U {
+        let value_ref = &self.0;
+        without(|| func(value_ref))
+    }
+
+    #[inline]
+    pub fn with_mut<U>(&mut self, func: impl FnOnce(&mut T) -> U) -> U {
+        let value_mut = &mut self.0;
+        without(|| func(value_mut))
+    }
 }

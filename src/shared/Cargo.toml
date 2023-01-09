@@ -1,0 +1,17 @@
+[workspace]
+members = [
+    "src/apic",
+    "src/bitslice",
+    "src/bump",
+    "src/freelist",
+    "src/msr",
+    "src/pic_8259",
+    "src/port-rs",
+    "src/slab",
+    "src/slob",
+    "src/uart",
+    "src/vmem",
+]
+
+[profile.dev]
+opt-level = 1
