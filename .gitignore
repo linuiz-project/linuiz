@@ -22,3 +22,5 @@ Cargo.lock
 .vscode/configurationCache.log
 .vscode/dryrun.log
 .vscode/targets.log
+
+.notarget
