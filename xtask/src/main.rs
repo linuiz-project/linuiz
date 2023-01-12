@@ -23,11 +23,10 @@ impl Target {
 static WORKSPACE_DIRS: [&str; 3] = ["src/kernel/", "src/userspace/", "src/shared/"];
 static BINARY_DIRS: [&str; 2] = ["src/kernel/", "src/userspace/"];
 
-pub fn cargo_check(shell: &Shell, target: Target) -> Result<()> {
+pub fn cargo_check(shell: &Shell) -> Result<()> {
     BINARY_DIRS.iter().try_for_each(|path| {
         let _dir = shell.push_dir(path);
-        let cargo_check = format!("cargo check --target {}", target.into_triple());
-        cmd!(shell, "{cargo_check}").run()
+        cmd!(shell, "cargo check --bins").run()
     })
 }
 
@@ -57,9 +56,10 @@ pub fn cargo_update(shell: &Shell) -> Result<()> {
 enum Arguments {
     Clean,
     Update,
+    Check,
 
     #[command(subcommand)]
-    Check(Target),
+    Target(Target),
 
     Run(run::Options),
 }
@@ -69,8 +69,20 @@ fn main() -> Result<()> {
 
     match Arguments::parse() {
         Arguments::Clean => cargo_clean(&shell),
+        Arguments::Check => cargo_check(&shell),
 
-        Arguments::Check(target) => cargo_check(&shell, target),
+        Arguments::Target(target) => WORKSPACE_DIRS.iter().try_for_each(|path| {
+            let _dir = shell.push_dir(path);
+
+            let Ok(cargo_config) = shell.read_file(".cargo/config.toml")
+                else {
+                    return Ok(())
+                };
+
+            let mut config = cargo_config.parse::<toml_edit::Document>().expect("invalid toml for cargo config");
+            config["build"]["target"] = toml_edit::value(target.into_triple());
+            shell.write_file(".cargo/config.toml", config.to_string())
+        }),
 
         Arguments::Update => {
             cmd!(shell, "git submodule update --init --recursive --remote").run()?;

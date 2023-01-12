@@ -1,8 +1,5 @@
 use clap::ValueEnum;
 use xshell::cmd;
-use crate::Target;
-
-
 
 #[derive(ValueEnum, Clone, Copy, PartialEq, Eq)]
 pub enum Accelerator {
@@ -58,9 +55,6 @@ impl core::fmt::Debug for BlockDriver {
 #[derive(clap::Parser)]
 #[group(skip)]
 pub struct Options {
-    #[command(subcommand)]
-    target: Target,
-
     /// CPU type to emulate.
     #[arg(value_enum, long, default_value = "qemu64")]
     cpu: CPU,
@@ -92,7 +86,7 @@ pub struct Options {
 }
 
 pub fn run(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
-    crate::build::build(shell, options.target, options.build_options)?;
+    crate::build::build(shell, options.build_options)?;
 
     let qemu_exe_str = match options.cpu {
         CPU::Rv64 => "qemu-system-riscv64",

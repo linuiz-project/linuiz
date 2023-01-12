@@ -14,5 +14,5 @@
   "code-model": "small",
   "eh-frame-header": false,
   "panic-strategy": "abort",
-  "disable-redzone": true,
+  "disable-redzone": true
 }

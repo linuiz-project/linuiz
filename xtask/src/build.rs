@@ -1,7 +1,5 @@
-use crate::Target;
 use clap::clap_derive::ValueEnum;
 use lza::CompressionLevel;
-use std::path::PathBuf;
 use xshell::{cmd, Result, Shell};
 
 #[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,31 +52,18 @@ pub struct Options {
     optimize: Option<Optimization>,
 }
 
-static REQUIRED_ROOT_DIRS: [&str; 5] = ["resources/", ".hdd/", ".hdd/root/EFI/BOOT/", ".hdd/root/linuiz/", ".debug/"];
+static REQUIRED_ROOT_DIRS: [&str; 3] = [".hdd/root/EFI/BOOT/", ".hdd/root/linuiz/", ".debug/"];
 
-static LIMINE_DEFAULT_CFG: &str = "
-    TIMEOUT=3
-
-    :Linuiz (limine)
-    COMMENT=Load Linuiz OS using the Stivale2 boot protocol.
-    PROTOCOL=limine
-    RESOLUTION=800x600x16
-    KERNEL_PATH=boot:///linuiz/kernel.elf
-    CMDLINE=smp:yes
-    KASLR=yes
-    ";
-
-fn build_workspace(
+fn build_workspace<P: AsRef<std::path::Path>>(
     shell: &Shell,
-    workspace_dir: PathBuf,
-    out_path: PathBuf,
-    target: Target,
+    workspace_path: P,
+    out_path: P,
     options: &Options,
 ) -> Result<()> {
-    let out_path = out_path.canonicalize().unwrap();
+    let out_path = out_path.as_ref().canonicalize().unwrap();
 
     let cargo_arguments = {
-        let mut args = vec!["build", "--target", target.into_triple(), "--out-dir", out_path.to_str().unwrap()];
+        let mut args = vec!["build", "-Z", "unstable-options", "--out-dir", out_path.to_str().unwrap()];
 
         args.push(if options.release {
             "--release"
@@ -126,11 +111,11 @@ fn build_workspace(
         args
     };
 
-    let _dir = shell.push_dir(workspace_dir);
+    let _dir = shell.push_dir(workspace_path);
     cmd!(shell, "cargo {cargo_arguments...}").run()
 }
 
-pub fn build(shell: &Shell, target: Target, options: Options) -> Result<()> {
+pub fn build(shell: &Shell, options: Options) -> Result<()> {
     cmd!(shell, "git submodule update --init --recursive --remote").run()?;
 
     // Configure rustc via the `RUSTFLAGS` environment variable.
@@ -142,9 +127,8 @@ pub fn build(shell: &Shell, target: Target, options: Options) -> Result<()> {
 
     // Ensure root directories exist
     for root_dir in REQUIRED_ROOT_DIRS {
-        let path = PathBuf::from(root_dir);
-        if !shell.path_exists(&path) {
-            shell.create_dir(path)?;
+        if !shell.path_exists(root_dir) {
+            shell.create_dir(root_dir)?;
         }
     }
 
@@ -153,29 +137,23 @@ pub fn build(shell: &Shell, target: Target, options: Options) -> Result<()> {
         cmd!(shell, "qemu-img create -f raw .hdd/disk0.img 256M").run()?;
     }
 
-    /* limine */
-    {
-        let limine_cfg_path = PathBuf::from("resources/limine.cfg");
-        // create default configuration file if none are present
-        if !shell.path_exists(limine_cfg_path.clone()) {
-            shell.write_file(limine_cfg_path.clone(), LIMINE_DEFAULT_CFG)?;
-        }
-        // copy configuration to EFI image
-        shell.copy_file(limine_cfg_path.clone(), PathBuf::from(".hdd/root/EFI/BOOT/"))?;
-        // copy the resultant EFI binary
-        shell.copy_file(PathBuf::from("resources/limine/BOOTX64.EFI"), PathBuf::from(".hdd/root/EFI/BOOT/"))?;
-    }
+    // copy configuration to EFI image
+    shell.copy_file("resources/limine.cfg", ".hdd/root/EFI/BOOT/")?;
+    // copy the EFI binary image
+    shell.copy_file("resources/limine/BOOTX64.EFI", ".hdd/root/EFI/BOOT/")?;
 
-    /* compile kernel */
-    build_workspace(shell, PathBuf::from("src/kernel/"), PathBuf::from(".hdd/root/linuiz/"), target, &options)?;
+    // compile kernel
+    build_workspace(shell, "src/kernel/", ".hdd/root/linuiz/", &options)?;
 
-    /* compile & compress drivers */
-    static UNCOMPRESSED_DIR: &str = ".tmp/uncompressed/";
-    build_workspace(shell, PathBuf::from("src/userspace/"), PathBuf::from(UNCOMPRESSED_DIR), target, &options)?;
+    // compile drivers
+    let uncompressed_dir = shell.create_temp_dir()?;
+    let uncompressed_path = uncompressed_dir.path().to_string_lossy().into_owned();
+    build_workspace(shell, "src/userspace/", &uncompressed_path, &options)?;
 
+    // compress userspace drivers and write to archive file
     let mut archive_builder = lza::ArchiveBuilder::new(options.compress.into());
 
-    for path in shell.read_dir(UNCOMPRESSED_DIR)?.into_iter() {
+    for path in shell.read_dir(uncompressed_path)?.into_iter() {
         let Some(file_name) = path.file_name().map(|name| name.to_string_lossy().into_owned())
                     else { continue };
 
@@ -188,5 +166,5 @@ pub fn build(shell: &Shell, target: Target, options: Options) -> Result<()> {
 
     let driver_data = archive_builder.take_data();
     println!("Compression resulted in a {} byte dump.", driver_data.len());
-    shell.write_file(PathBuf::from(".hdd/root/linuiz/drivers"), driver_data)
+    shell.write_file(".hdd/root/linuiz/drivers", driver_data)
 }
