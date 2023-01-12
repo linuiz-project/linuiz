@@ -52,7 +52,11 @@ pub struct Options {
     optimize: Option<Optimization>,
 }
 
-static REQUIRED_ROOT_DIRS: [&str; 3] = [".hdd/root/EFI/BOOT/", ".hdd/root/linuiz/", ".debug/"];
+static REQUIRED_ROOT_DIRS: [&str; 3] = [
+    ".hdd/",               // disk0.img
+    ".hdd/root/EFI/BOOT/", // BOOTX64.EFI
+    ".hdd/root/linuiz/",   // kernel, drivers
+];
 
 fn build_workspace<P: AsRef<std::path::Path>>(
     shell: &Shell,
