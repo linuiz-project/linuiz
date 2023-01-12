@@ -1,8 +1,8 @@
+use crate::Target;
 use clap::clap_derive::ValueEnum;
 use lza::CompressionLevel;
 use std::path::PathBuf;
 use xshell::{cmd, Result, Shell};
-use crate::Target;
 
 #[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Optimization {
@@ -78,7 +78,7 @@ fn build_workspace(
     let out_path = out_path.canonicalize().unwrap();
 
     let cargo_arguments = {
-        let mut args = vec!["build", "--target", target.as_ref(), "--out-dir", out_path.to_str().unwrap()];
+        let mut args = vec!["build", "--target", target.into_triple(), "--out-dir", out_path.to_str().unwrap()];
 
         args.push(if options.release {
             "--release"

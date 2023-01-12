@@ -1,16 +1,8 @@
 use clap::ValueEnum;
 use xshell::cmd;
-
 use crate::Target;
 
-impl core::fmt::Display for Target {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::x86_64 => "x86_64-target.json",
-            Self::RV64 => "riscv64gc-unknown-none",
-        })
-    }
-}
+
 
 #[derive(ValueEnum, Clone, Copy, PartialEq, Eq)]
 pub enum Accelerator {
