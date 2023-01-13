@@ -203,8 +203,8 @@ unsafe extern "C" fn _entry() -> ! {
                         PageDepth::MIN,
                         from_mapper
                             .get_mapped_to({
-                                let addr = Address::new_truncate(address);
-                                info!("ADDR: {:?}", addr);
+                                let addr = Address::new(address).unwrap();
+                                info!("{:?}", addr);
                                 addr
                             })
                             .unwrap(),

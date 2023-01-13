@@ -63,7 +63,7 @@ impl lzstd::AddressKind for Page {
     }
 
     fn new_truncate(init: Self::InitType) -> Self::ReprType {
-        init & !&!PAGE_MASK
+        init & !PAGE_MASK
     }
 }
 impl lzstd::PtrableAddressKind for Page {
