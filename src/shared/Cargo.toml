@@ -1,16 +1,16 @@
 [workspace]
 members = [
-    "src/apic",
-    "src/bitslice",
-    "src/bump",
-    "src/freelist",
-    "src/msr",
-    "src/pic_8259",
-    "src/port-rs",
-    "src/slab",
-    "src/slob",
-    "src/uart",
-    "src/vmem",
+    "apic",
+    "bitslice",
+    "bump",
+    "freelist",
+    "msr",
+    "pic_8259",
+    "port-rs",
+    "slab",
+    "slob",
+    "uart",
+    "vmem",
 ]
 
 [profile.dev]

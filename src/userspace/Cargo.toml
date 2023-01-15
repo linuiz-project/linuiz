@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "src/test_driver"
+    "test_driver"
 ]
 
 [profile.dev]
