@@ -2,13 +2,6 @@ use clap::clap_derive::ValueEnum;
 use lza::CompressionLevel;
 use xshell::{cmd, Result, Shell};
 
-#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Optimization {
-    Fast,
-    Small,
-    All,
-}
-
 #[derive(ValueEnum, Debug, Clone, Copy)]
 pub enum Compression {
     None,
@@ -47,9 +40,6 @@ pub struct Options {
 
     #[arg(long, default_value = "test_driver")]
     drivers: Vec<String>,
-
-    #[clap(value_enum, short)]
-    optimize: Option<Optimization>,
 }
 
 static REQUIRED_ROOT_DIRS: [&str; 3] = [
@@ -58,77 +48,7 @@ static REQUIRED_ROOT_DIRS: [&str; 3] = [
     ".hdd/root/linuiz/",   // kernel, drivers
 ];
 
-fn build_workspace<P: AsRef<std::path::Path>>(
-    shell: &Shell,
-    workspace_path: P,
-    out_path: P,
-    options: &Options,
-) -> Result<()> {
-    let out_path = out_path.as_ref().canonicalize().unwrap();
-
-    let cargo_arguments = {
-        let mut args = vec!["build", "-Z", "unstable-options", "--out-dir", out_path.to_str().unwrap()];
-
-        args.push(if options.release {
-            "--release"
-        } else {
-            // Only provide future-compatibiltiy notifications for development builds.
-            "--future-incompat-report"
-        });
-
-        if options.verbose {
-            args.push("-vv");
-        }
-
-        match options.optimize {
-            Some(Optimization::Fast) => {
-                args.extend(["--config", "opt-level=3", "--config", "lto=thin"]);
-            }
-
-            Some(Optimization::Small) => args.extend([
-                "--config",
-                "opt-level='z'",
-                "--config",
-                "codegen-units=1",
-                "--config",
-                "lto=fat",
-                "--config",
-                "strip=true",
-            ]),
-
-            Some(Optimization::All) => {
-                args.extend([
-                    "--config",
-                    "opt-level=3",
-                    "--config",
-                    "codegen-units=1",
-                    "--config",
-                    "lto=fat",
-                    "--config",
-                    "strip=true",
-                ]);
-            }
-
-            None => {}
-        }
-
-        args
-    };
-
-    let _dir = shell.push_dir(workspace_path);
-    cmd!(shell, "cargo {cargo_arguments...}").run()
-}
-
 pub fn build(shell: &Shell, options: Options) -> Result<()> {
-    cmd!(shell, "git submodule update --init --recursive --remote").run()?;
-
-    // Configure rustc via the `RUSTFLAGS` environment variable.
-    let _rustflags = if !options.release {
-        Some(shell.push_env("RUSTFLAGS", "-Cforce-frame-pointers -Csymbol-mangling-version=v0"))
-    } else {
-        None
-    };
-
     // Ensure root directories exist
     for root_dir in REQUIRED_ROOT_DIRS {
         if !shell.path_exists(root_dir) {
@@ -146,18 +66,49 @@ pub fn build(shell: &Shell, options: Options) -> Result<()> {
     // copy the EFI binary image
     shell.copy_file("resources/limine/BOOTX64.EFI", ".hdd/root/EFI/BOOT/")?;
 
-    // compile kernel
-    build_workspace(shell, "src/kernel/", ".hdd/root/linuiz/", &options)?;
+    cmd!(shell, "git submodule update --init --recursive --remote").run()?;
 
-    // compile drivers
-    let uncompressed_dir = shell.create_temp_dir()?;
-    let uncompressed_path = uncompressed_dir.path().to_string_lossy().into_owned();
-    build_workspace(shell, "src/userspace/", &uncompressed_path, &options)?;
+    // Configure rustc via the `RUSTFLAGS` environment variable.
+    // let _rustflags = if !options.release {
+    //     Some(shell.push_env("RUSTFLAGS", "-Cforce-frame-pointers -Csymbol-mangling-version=v0"))
+    // } else {
+    //     None
+    // };
+
+    let _dir = shell.push_dir("src/");
+
+    let tmp_dir_path = {
+        let dir = shell.create_temp_dir()?;
+        dir.path().to_owned()
+    };
+    let tmp_dir_path_str = tmp_dir_path.to_string_lossy();
+    let cargo_args = {
+        let mut args = vec!["--out-dir", &tmp_dir_path_str];
+
+        args.push({
+            if options.release {
+                "--release"
+            } else {
+                // Only provide future-compatibiltiy notifications for development builds.
+                "--future-incompat-report"
+            }
+        });
+
+        if options.verbose {
+            args.push("-vv");
+        }
+
+        args
+    };
+
+    cmd!(shell, "cargo build --bins -Z unstable-options {cargo_args...}").run()?;
+
+    shell.copy_file(&format!("{tmp_dir_path_str}/kernel"), "../.hdd/root/linuiz/")?;
 
     // compress userspace drivers and write to archive file
     let mut archive_builder = lza::ArchiveBuilder::new(options.compress.into());
 
-    for path in shell.read_dir(uncompressed_path)?.into_iter() {
+    for path in shell.read_dir(&tmp_dir_path)?.into_iter() {
         let Some(file_name) = path.file_name().map(|name| name.to_string_lossy().into_owned())
                     else { continue };
 
@@ -170,5 +121,5 @@ pub fn build(shell: &Shell, options: Options) -> Result<()> {
 
     let driver_data = archive_builder.take_data();
     println!("Compression resulted in a {} byte dump.", driver_data.len());
-    shell.write_file(".hdd/root/linuiz/drivers", driver_data)
+    shell.write_file("../.hdd/root/linuiz/drivers", driver_data)
 }

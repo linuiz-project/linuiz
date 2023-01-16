@@ -30,6 +30,7 @@ enum Arguments {
     #[command(subcommand)]
     Target(Target),
 
+    Build(build::Options),
     Run(run::Options),
 }
 
@@ -56,6 +57,7 @@ fn main() -> Result<()> {
             shell.write_file("src/.cargo/config.toml", config.to_string())
         }
 
+        Arguments::Build(build_options) => build::build(&shell, build_options),
         Arguments::Run(run_options) => run::run(&shell, run_options),
     }
 }
