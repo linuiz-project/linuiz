@@ -1,0 +1,21 @@
+[workspace]
+members = [
+    "kernel",
+
+    "shared/apic",
+    "shared/bitslice",
+    "shared/bump",
+    "shared/freelist",
+    "shared/msr",
+    "shared/pic_8259",
+    "shared/port-rs",
+    "shared/slab",
+    "shared/slob",
+    "shared/uart",
+    "shared/vmem",
+
+    "userspace/test_driver"
+]
+
+[profile.dev]
+opt-level = 1

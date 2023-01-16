@@ -3,5 +3,4 @@ build-std = ["core", "compiler_builtins", "alloc"]
 build-std-features = ["compiler-builtins-mem"]
 
 [build]
-target = "x86_64-target.json"
-rustflags = ["-C", "link-args=-Tx86_64-linker.lds,-code-model=kernel"]
+target = "x86_64-unknown-none"

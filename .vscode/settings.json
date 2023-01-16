@@ -3,22 +3,8 @@
         "editor.defaultFormatter": "rust-lang.rust-analyzer"
     },
     "rust-analyzer.linkedProjects": [
-        "src/kernel/Cargo.toml",
-        "src/shared/Cargo.toml",
-        "src/userspace/Cargo.toml",
+        "src/Cargo.toml",
         "xtask/Cargo.toml"
     ],
-    "rust-analyzer.cargo.target": null,
-    "rust-analyzer.checkOnSave.enable": false,
-    "rust-analyzer.checkOnSave.allTargets": false,
-    "rust-analyzer.cargo.buildScripts.enable": false,
-    "rust-analyzer.cargo.buildScripts.overrideCommand": [
-        "cargo",
-        "check",
-        "--target",
-        "x86_64-unknown-none",
-        "--workspace",
-        "--message-format=json",
-        "--all-targets"
-    ],
+    "rust-analyzer.check.allTargets": false,
 }

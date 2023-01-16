@@ -4,15 +4,15 @@ version = "0.0.0"
 edition = "2021"
 
 [dependencies.port-rs]
-path = "../shared/src/port-rs/"
+path = "../shared/port-rs/"
 [dependencies.uart]
-path = "../shared/src/uart/"
+path = "../shared/uart/"
 [dependencies.msr]
-path = "../shared/src/msr/"
+path = "../shared/msr/"
 [dependencies.apic]
-path = "../shared/src/apic/"
+path = "../shared/apic/"
 [dependencies.slab]
-path = "../shared/src/slab/"
+path = "../shared/slab/"
 [dependencies.lzstd]
 git = "https://github.com/linuiz-project/lzstd"
 [dependencies.spin]
@@ -40,12 +40,6 @@ rustc-demangle = "*"
 no-panic = "*"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
-pic_8259 = { path = "../shared/src/pic_8259/" }
+pic_8259 = { path = "../shared/pic_8259/" }
 raw-cpuid = "*"
 x86_64 = "*"
-
-[profile.dev]
-opt-level = 1
-
-[profile.release]
-# Release optimizations are specified in the xtask `Builder`. Optimization can be controlled with `-o p/s/ps`
