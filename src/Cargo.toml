@@ -1,5 +1,7 @@
 [workspace]
 members = [
+    "libsys",
+    "libkernel",
     "kernel",
 
     "shared/apic",
