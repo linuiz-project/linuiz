@@ -1,5 +1,5 @@
 [package]
-name = "kernel"
+name = "linuiz"
 version = "0.0.0"
 edition = "2021"
 
@@ -13,17 +13,19 @@ path = "../shared/msr/"
 path = "../shared/apic/"
 [dependencies.slab]
 path = "../shared/slab/"
-[dependencies.lzstd]
-git = "https://github.com/linuiz-project/lzstd"
+[dependencies.libsys]
+path = "../libsys/"
+[dependencies.libkernel]
+path = "../libkernel/"
 [dependencies.spin]
 git = "https://github.com/linuiz-project/spin-rs"
-[dependencies.lza]
-git = "https://github.com/linuiz-project/lza"
-default-features = false
 [dependencies.try_alloc]
 git = "https://github.com/linuiz-project/try_alloc"
 [dependencies.acpi]
 git = "https://github.com/semiviral/acpi"
+[dependencies.lza]
+git = "https://github.com/linuiz-project/lza"
+default-features = false
 
 [dependencies]
 log = { version = "*", default-features = false }
@@ -35,7 +37,6 @@ limine = { version = "*", features = ["requests-section"] }
 bit_field = "*"
 bitflags = "*"
 paste = "*"
-bytemuck = "*"
 rustc-demangle = "*"
 no-panic = "*"
 

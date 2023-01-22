@@ -56,7 +56,7 @@ pub fn setup() {
         //         disabling it after paging is in control of the kernel is unsupported.
         unsafe { msr::IA32_EFER::set_nxe(true) };
     } else {
-        lzstd::do_once!({
+        libsys::do_once!({
             warn!("PC does not support the NX bit; system security will be compromised (this warning is purely informational).");
         });
     }

@@ -1,4 +1,4 @@
-use lzstd::bitfield_getter;
+use libsys::bitfield_getter;
 
 #[repr(C)]
 pub struct PRDTEntry {
@@ -12,7 +12,7 @@ impl PRDTEntry {
     bitfield_getter!(bits, u32, byte_count, 0..22);
     bitfield_getter!(bits, interrupt_on_completion, 31);
 
-    pub fn set_db_addr(&mut self, addr: lzstd::Address<lzstd::Virtual>) {
+    pub fn set_db_addr(&mut self, addr: libsys::Address<libsys::Virtual>) {
         let addr_usize = addr.as_usize();
 
         self.db_addr_lower = addr_usize as u32;

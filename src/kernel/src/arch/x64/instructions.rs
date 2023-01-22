@@ -19,15 +19,13 @@ pub mod sync {
 }
 
 pub mod tlb {
-    use lzstd::Address;
-
-    use crate::memory::Page;
+    use libsys::{Address, Page};
 
     /// Invalidates a single page from the TLB.
     #[inline]
     pub fn invlpg(page: Address<Page>) {
         unsafe {
-            core::arch::asm!("invlpg [{}]", in(reg) page.get(), options(nostack, preserves_flags));
+            core::arch::asm!("invlpg [{}]", in(reg) page.get().get(), options(nostack, preserves_flags));
         }
     }
 
@@ -66,7 +64,7 @@ pub mod tlb {
     //         /// Descriptor for use when executing the `invlpcid` instruction.
     //         #[repr(C)]
     //         pub struct InvalidateDescriptor {
-    //             page: lzstd::memory::Page,
+    //             page: libsys::memory::Page,
     //             pcid: PCID,
     //         }
 

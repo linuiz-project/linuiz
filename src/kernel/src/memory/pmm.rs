@@ -6,7 +6,8 @@ use core::{
     ptr::NonNull,
     sync::atomic::Ordering,
 };
-use lzstd::{Address, Frame};
+use libsys::page_size;
+use libsys::{Address, Frame};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
@@ -162,11 +163,7 @@ impl PhysicalMemoryManager<'_> {
         };
         let total_frames = total_memory / 0x1000;
 
-        let table_size_in_bytes = lzstd::align_up(
-            total_frames * core::mem::size_of::<FrameData>(),
-            // ### Safety: Value provided is non-zero.
-            unsafe { NonZeroUsize::new_unchecked(0x1000) },
-        );
+        let table_size_in_bytes = libsys::align_up(total_frames * core::mem::size_of::<FrameData>(), page_size());
         let table_entry =
             memory_map.iter().find(|entry| entry.typ == FrameType::Generic && entry.len >= table_size_in_bytes)?;
         let table = unsafe {
@@ -379,7 +376,7 @@ unsafe impl core::alloc::Allocator for &PhysicalMemoryManager<'_> {
         .map(|address| {
             NonNull::slice_from_raw_parts(
                 // Safety: `PhysicalMemoryManager` ensures addresses are within its bounds.
-                NonNull::new(unsafe { physical_memory.as_ptr().add(address.get()) }).unwrap(),
+                NonNull::new(unsafe { physical_memory.as_ptr().add(address.get().get()) }).unwrap(),
                 layout.size(),
             )
         })

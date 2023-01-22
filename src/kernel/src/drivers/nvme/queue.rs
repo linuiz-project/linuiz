@@ -4,7 +4,7 @@ use core::{
     mem::MaybeUninit,
     sync::atomic::{AtomicU16, Ordering},
 };
-use lzstd::{
+use libsys::{
     memory::{volatile::VolatileCell, PageAlignedBox},
     Address, IndexRing, ReadWrite, {Physical, Virtual},
 };
@@ -42,7 +42,7 @@ impl QueueType for Completion {
 }
 
 pub struct Queue<'q, T: QueueType> {
-    entries: lzstd::memory::PageAlignedBox<[MaybeUninit<T::EntryType>]>,
+    entries: libsys::memory::PageAlignedBox<[MaybeUninit<T::EntryType>]>,
     doorbell: &'q VolatileCell<u32, ReadWrite>,
     cur_index: IndexRing,
     phase_tag: bool, /* this is unused for submission queues */
@@ -55,7 +55,7 @@ impl<'q, T: QueueType> Queue<'q, T> {
     ///         be 0. For all other queues, if the queue ID is already used for its respective type,
     ///         then an erroring CommandResult is returned by the controller.
     pub fn new(
-        reg0: &'q lzstd::memory::MMIO,
+        reg0: &'q libsys::memory::MMIO,
         queue_id: u16, /* may need a way to dynamically select this? */
         entry_count: u16,
     ) -> Self {
@@ -67,7 +67,7 @@ impl<'q, T: QueueType> Queue<'q, T> {
             );
 
             Self {
-                entries: Box::new_uninit_slice_in(entry_count as usize, lzstd::memory::page_aligned_allocator()),
+                entries: Box::new_uninit_slice_in(entry_count as usize, libsys::memory::page_aligned_allocator()),
                 doorbell: reg0.borrow(doorbell_offset),
                 cur_index: IndexRing::new(entry_count as usize),
                 phase_tag: true,
@@ -77,8 +77,8 @@ impl<'q, T: QueueType> Queue<'q, T> {
 
     pub fn get_phys_addr(&self) -> Address<Physical> {
         Address::<Physical>::new(
-            lzstd::memory::global_pmgr()
-                .get_mapped_to(&lzstd::memory::Page::from_ptr(self.entries.as_ptr()))
+            libsys::memory::global_pmgr()
+                .get_mapped_to(&libsys::memory::Page::from_ptr(self.entries.as_ptr()))
                 .unwrap(),
         )
     }
@@ -167,7 +167,7 @@ impl core::fmt::Debug for Queue<'_, Submission> {
 
 // impl<'q> CompletionQueue<'q> {
 //     pub fn new(
-//         reg0: &'q lzstd::memory::MMIO,
+//         reg0: &'q libsys::memory::MMIO,
 //         queue_id: u16, /* may need a way to dynamically select this? */
 //     ) -> Self {
 //         unsafe {
@@ -189,8 +189,8 @@ impl core::fmt::Debug for Queue<'_, Submission> {
 
 //     pub fn get_phys_addr(&self) -> Address<Physical> {
 //         Address::<Physical>::new(
-//             lzstd::memory::global_pmgr()
-//                 .get_mapped_to(&lzstd::memory::Page::from_ptr(self.entries.as_ptr()))
+//             libsys::memory::global_pmgr()
+//                 .get_mapped_to(&libsys::memory::Page::from_ptr(self.entries.as_ptr()))
 //                 .unwrap(),
 //         )
 //     }
@@ -242,7 +242,7 @@ impl core::fmt::Debug for Queue<'_, Submission> {
 // }
 
 // impl<'q> SubmissionQueue<'q> {
-//     pub fn new(reg0: &'q lzstd::memory::MMIO, queue_id: u16) -> Self {
+//     pub fn new(reg0: &'q libsys::memory::MMIO, queue_id: u16) -> Self {
 //         // TODO somehow validate entry size?
 
 //         unsafe {
@@ -264,8 +264,8 @@ impl core::fmt::Debug for Queue<'_, Submission> {
 
 //     pub fn get_phys_addr(&self) -> Address<Physical> {
 //         Address::<Physical>::new(
-//             lzstd::memory::global_pmgr()
-//                 .get_mapped_to(&lzstd::memory::Page::from_ptr(self.entries.as_ptr()))
+//             libsys::memory::global_pmgr()
+//                 .get_mapped_to(&libsys::memory::Page::from_ptr(self.entries.as_ptr()))
 //                 .unwrap(),
 //         )
 //     }

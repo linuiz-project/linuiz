@@ -1,7 +1,7 @@
-use crate::memory::{AttributeModify, Page, PageAttributes, PageDepth, PageTable, PageTableEntry, PagingError, PMM};
-use lzstd::{
+use crate::memory::{AttributeModify,  PageAttributes, PageDepth, PageTable, PageTableEntry, PagingError, PMM};
+use libsys::{
     mem::{Mut, Ref},
-    Address, Frame,
+    Address, Frame, Page,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,7 +27,13 @@ impl Mapper {
     pub fn new() -> Option<Self> {
         PMM.next_frame().ok().map(|root_frame| {
             // Safety: Pointer is guaranteed valid due HHDM guarantee from kernel, and renting guarantees from PMM.
-            unsafe { core::ptr::write_bytes(crate::memory::hhdm_address().as_ptr().add(root_frame.get()), 0, 0x1000) };
+            unsafe {
+                core::ptr::write_bytes(
+                    crate::memory::hhdm_address().as_ptr().add(root_frame.get().get()),
+                    0,
+                    libsys::page_size().get(),
+                )
+            };
 
             Self { root_frame, entry: PageTableEntry::new(root_frame, PageAttributes::PRESENT) }
         })

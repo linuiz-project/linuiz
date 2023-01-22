@@ -1,5 +1,7 @@
 fn main() {
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let target = std::env::var("TARGET").unwrap();
-    println!("cargo:rustc-link-arg=--script={manifest_dir}/lds/{target}.lds");
+    println!(
+        "cargo:rustc-link-arg=--script={}/lds/{}.lds",
+        std::env::var("CARGO_MANIFEST_DIR").unwrap(),
+        std::env::var("TARGET").unwrap()
+    );
 }

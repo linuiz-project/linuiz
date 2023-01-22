@@ -1,8 +1,6 @@
 #![allow(non_camel_case_types)]
 
-use lzstd::Address;
-
-use crate::memory::Virtual;
+use libsys::{Address, Virtual};
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy)]

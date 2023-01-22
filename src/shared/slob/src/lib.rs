@@ -6,7 +6,7 @@ use core::{
     ptr::NonNull,
     sync::atomic::{AtomicUsize, Ordering},
 };
-use lzstd::{Address, Page};
+use libsys::{Address, Page};
 use spin::Mutex;
 
 type SlobInt = AtomicUsize;

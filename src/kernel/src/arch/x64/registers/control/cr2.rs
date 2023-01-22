@@ -1,6 +1,4 @@
-use lzstd::Address;
-
-use crate::memory::Virtual;
+use libsys::{Address, Virtual};
 
 pub struct CR2;
 

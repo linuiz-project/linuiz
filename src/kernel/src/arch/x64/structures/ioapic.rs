@@ -2,7 +2,7 @@ use crate::interrupts;
 use acpi::platform::interrupt::{Polarity, TriggerMode};
 // use alloc::vec::Vec;
 use bit_field::BitField;
-use lzstd::mem::VolatileCell;
+use libsys::mem::VolatileCell;
 use spin::Mutex;
 
 #[repr(transparent)]
@@ -98,7 +98,7 @@ impl RedirectionEntry {
     }
 }
 
-type IoApicRegisters<'a> = Mutex<(&'a VolatileCell<u32, lzstd::WriteOnly>, &'a VolatileCell<u32, lzstd::ReadWrite>)>;
+type IoApicRegisters<'a> = Mutex<(&'a VolatileCell<u32, libsys::WriteOnly>, &'a VolatileCell<u32, libsys::ReadWrite>)>;
 
 pub struct IoApic<'a> {
     id: u8,
@@ -173,7 +173,7 @@ impl IoApic<'_> {
 //     IOAPICS.call_once(|| {
 //         todo!()
 
-//          let platform_info = lzstd::acpi::get_platform_info();
+//          let platform_info = libsys::acpi::get_platform_info();
 
 //          if let acpi::platform::interrupt::InterruptModel::Apic(apic) = &platform_info.interrupt_model {
 //              apic.io_apics
@@ -182,12 +182,12 @@ impl IoApic<'_> {
 //                  .map(|ioapic_info| unsafe {
 
 //                      let (ioregsel, ioregwin) = {
-//                          let Ok(ioapic_regs) = lzstd::memory::get().allocate_to(Address::<Frame>::new_truncate(ioapic_info.address as u64), 1)
+//                          let Ok(ioapic_regs) = libsys::memory::get().allocate_to(Address::<Frame>::new_truncate(ioapic_info.address as u64), 1)
 //                              else { panic!("failed to initialize I/O APIC") };
 
 //                          (
-//                              &*ioapic_regs.as_ptr::<VolatileCell<u32, lzstd::WriteOnly>>(),
-//                              &*ioapic_regs.as_ptr::<VolatileCell<u32, lzstd::ReadWrite>>().add(1)
+//                              &*ioapic_regs.as_ptr::<VolatileCell<u32, libsys::WriteOnly>>(),
+//                              &*ioapic_regs.as_ptr::<VolatileCell<u32, libsys::ReadWrite>>().add(1)
 //                          )
 //                      };
 

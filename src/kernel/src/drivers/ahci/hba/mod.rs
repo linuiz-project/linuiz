@@ -5,7 +5,7 @@ mod port;
 pub use command::*;
 pub use port::*;
 
-use lzstd::{memory::VolatileCell, ReadOnly};
+use libsys::{memory::VolatileCell, ReadOnly};
 
 #[repr(C)]
 pub struct Memory {
@@ -49,4 +49,4 @@ impl Memory {
     }
 }
 
-impl lzstd::memory::Volatile for Memory {}
+impl libsys::memory::Volatile for Memory {}

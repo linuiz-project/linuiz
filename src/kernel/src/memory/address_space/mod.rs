@@ -12,7 +12,7 @@ use core::{
     ops::ControlFlow,
     ptr::NonNull,
 };
-use lzstd::{Address, PAGE_SIZE};
+use libsys::{page_size, Address, Pow2Usize};
 use spin::{Lazy, Mutex, RwLock};
 use try_alloc::vec::TryVec;
 use uuid::Uuid;
@@ -122,13 +122,13 @@ impl<A: Allocator + Clone> AddressSpace<A> {
         layout: Layout,
         flags: MmapFlags,
     ) -> Result<NonNull<[u8]>, Error> {
-        let layout =
-            Layout::from_size_align(layout.size(), core::cmp::max(layout.align(), PAGE_SIZE)).map_err(|_| Error)?;
+        let layout = Layout::from_size_align(layout.size(), core::cmp::max(layout.align(), page_size().get()))
+            .map_err(|_| Error)?;
         // Safety: `Layout` does not allow `0` for alignments.
-        let layout_align = unsafe { NonZeroUsize::new_unchecked(layout.align()) };
+        let layout_align = Pow2Usize::new(layout.align()).unwrap();
 
         let search = self.regions.iter().try_fold((0usize, 0usize), |(index, address), region| {
-            let aligned_address = lzstd::align_up(address, layout_align);
+            let aligned_address = libsys::align_up(address, layout_align);
             let aligned_padding = aligned_address - address;
             let aligned_len = region.len.saturating_sub(aligned_padding);
 
@@ -143,7 +143,7 @@ impl<A: Allocator + Clone> AddressSpace<A> {
             None => Err(Error),
 
             Some((mut index, address)) => {
-                let aligned_address = lzstd::align_up(address, layout_align);
+                let aligned_address = libsys::align_up(address, layout_align);
                 let aligned_padding = aligned_address - address;
 
                 if aligned_padding > 0 {
@@ -190,7 +190,7 @@ impl<A: Allocator + Clone> AddressSpace<A> {
                     attributes.insert(PageAttributes::DEMAND);
                 }
                 // Finally, map all of the allocated pages in the virtual address space.
-                for page_base in (aligned_address..(aligned_address + layout.size())).step_by(PAGE_SIZE) {
+                for page_base in (aligned_address..(aligned_address + layout.size())).step_by(page_size().get()) {
                     let page = Address::new(page_base).ok_or(Error)?;
                     self.mapper.auto_map(page, attributes).map_err(|_| Error)?;
                 }
@@ -219,7 +219,7 @@ impl<A: Allocator + Clone> AddressSpace<A> {
                     .unwrap();
 
                 // Safety: We know the page was just mapped, and contains no relevant memory.
-                unsafe { core::ptr::write_bytes(page.as_ptr(), 0, PAGE_SIZE) };
+                unsafe { core::ptr::write_bytes(page.as_ptr(), 0, page_size().get()) };
 
                 Ok(())
             }

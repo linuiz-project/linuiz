@@ -3,7 +3,7 @@ mod device;
 pub use device::*;
 
 use alloc::vec::Vec;
-use lzstd::{sync::SingleOwner, Address, Physical};
+use libsys::{sync::SingleOwner, Address, Physical};
 use spin::RwLock;
 
 static PCI_DEVICES: RwLock<Vec<SingleOwner<Device<Standard>>>> = RwLock::new(Vec::new());
@@ -20,7 +20,7 @@ pub fn init_devices() {
     crate::tables::acpi::get_mcfg()
         .entries()
         .iter()
-        .filter(|entry| lzstd::Address::<lzstd::Physical>::is_canonical(entry.base_address))
+        .filter(|entry| libsys::Address::<libsys::Physical>::is_canonical(entry.base_address))
         .flat_map(|entry| {
             // Enumerate buses
             (entry.bus_number_start..=entry.bus_number_end)
@@ -34,7 +34,7 @@ pub fn init_devices() {
             // Allocate devices
             let device_base_address = get_device_base_address(base_address, bus_index, device_index);
             // TODO somehow test if the computed base address makes any sense.
-            let Some(device_hhdm_page) = Address::<lzstd::Page>::new(kernel_hhdm_address.as_u64(), lzstd::PageAlign::Align4KiB)
+            let Some(device_hhdm_page) = Address::<libsys::Page>::new(kernel_hhdm_address.as_u64(), libsys::PageAlign::Align4KiB)
                 .and_then(|page| page.forward_checked(device_base_address.frame_containing().index()))
                 else {
                     warn!("Failed to map device HHDM page due to overflow: {:0>2}:{:0>2}:{:0>2}.00@{:?}",

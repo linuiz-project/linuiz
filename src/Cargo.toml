@@ -1,8 +1,9 @@
 [workspace]
 members = [
+    "kernel",
+
     "libsys",
     "libkernel",
-    "kernel",
 
     "shared/apic",
     "shared/bitslice",

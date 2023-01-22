@@ -4,7 +4,7 @@ use spin::{Lazy, Mutex};
 
 pub enum Register<'a, T: port::PortReadWrite> {
     IO(ReadWritePort<T>),
-    MMIO(&'a lzstd::mem::VolatileCell<T, lzstd::ReadWrite>),
+    MMIO(&'a libsys::mem::VolatileCell<T, libsys::ReadWrite>),
 }
 
 impl<T: port::PortReadWrite> Register<'_, T> {

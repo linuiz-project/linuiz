@@ -1,14 +1,19 @@
 pub struct Physical;
 
 impl super::Addressable for Physical {
-    type InitType = usize;
-    type ReprType = usize;
+    type Init = usize;
+    type Repr = usize;
+    type Get = usize;
 
-    fn new(init: Self::InitType) -> Option<Self::ReprType> {
+    fn new(init: Self::Init) -> Option<Self::Repr> {
         crate::constants::checked_phys_canonical(init).then_some(init)
     }
 
-    fn new_truncate(init: Self::InitType) -> Self::ReprType {
-        init & !crate::constants::PHYS_NON_CANONICAL_MASK
+    fn new_truncate(init: Self::Init) -> Self::Repr {
+        init & crate::constants::phys_canonical_mask()
+    }
+
+    fn get(repr: Self::Repr) -> Self::Get {
+        repr
     }
 }

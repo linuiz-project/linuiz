@@ -1,6 +1,6 @@
 use core::ptr::NonNull;
 
-use lzstd::{Address, Physical};
+use libsys::{Address, Physical};
 
 bitflags::bitflags! {
     #[repr(transparent)]

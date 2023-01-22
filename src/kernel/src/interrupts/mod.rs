@@ -1,11 +1,8 @@
 mod instructions;
 pub use instructions::*;
 
-use crate::{
-    cpu::{ArchContext, ControlContext},
-    memory::Virtual,
-};
-use lzstd::Address;
+use crate::cpu::{ArchContext, ControlContext};
+use libsys::{Address, Virtual};
 use num_enum::TryFromPrimitive;
 
 /// Delivery mode for IPIs.

@@ -56,19 +56,17 @@ mod acpi;
 mod arch;
 mod boot;
 mod cpu;
-mod elf;
 mod exceptions;
 mod interrupts;
 mod local_state;
 mod memory;
 // mod modules;
-mod num;
 mod panic;
 mod proc;
-mod rand;
 mod time;
 
-use lzstd::Address;
+use libkernel::LinkerSymbol;
+use libsys::Address;
 
 #[cfg(not(target_arch = "x86_64"))]
 getrandom::register_custom_getrandom!({ todo!() });
@@ -171,7 +169,6 @@ unsafe extern "C" fn _entry() -> ! {
      */
 
     memory::with_kmapper(|kmapper| {
-        use lzstd::LinkerSymbol;
         use memory::{address_space::Mapper, hhdm_address, PageAttributes, PageDepth};
 
         extern "C" {
@@ -318,7 +315,7 @@ unsafe extern "C" fn _entry() -> ! {
             (kernel_file.base.as_ptr().unwrap(), kernel_file.length as usize)
         };
 
-        let kernel_elf = crate::elf::Elf::from_bytes(
+        let kernel_elf = libkernel::elf::Elf::from_bytes(
             // ### Safety: Kernel file is guaranteed to be valid by bootloader.
             unsafe { core::slice::from_raw_parts(kernel_file_base, kernel_file_len) },
         )
@@ -328,7 +325,7 @@ unsafe extern "C" fn _entry() -> ! {
             let names_section = names_section.data();
 
             for section in kernel_elf.iter_sections() {
-                use crate::elf::symbol::Symbol;
+                use libkernel::elf::symbol::Symbol;
                 use try_alloc::boxed::TryBox;
 
                 let names_section_offset = section.get_names_section_offset();
@@ -344,7 +341,16 @@ unsafe extern "C" fn _entry() -> ! {
                     else { continue };
 
                 match section_name {
-                    ".symtab" if section_data.len() > 0 && let Ok(symbols) = bytemuck::try_cast_slice::<u8, Symbol>(section.data()) => {
+                    ".symtab" if section_data.len() > 0 => {
+                        let symbols = {
+                            let (pre, symbols, post) = section_data.align_to::<Symbol>();
+
+                            debug_assert!(pre.is_empty());
+                            debug_assert!(post.is_empty());
+
+                            symbols
+                        };
+
                         let Ok(mut symbols_copy) = TryBox::new_slice(symbols.len(), Symbol::default()) else { continue };
 
                         crate::interrupts::without(|| {
@@ -499,7 +505,7 @@ unsafe extern "C" fn _entry() -> ! {
         //     //     let pm1a_evt_blk =
         //     //         &crate::tables::acpi::get_fadt().pm1a_event_block().expect("no `PM1a_EVT_BLK` found in FADT");
 
-        //     //     let mut reg = lzstd::acpi::Register::<u16>::IO(crate::memory::io::ReadWritePort::new(
+        //     //     let mut reg = libsys::acpi::Register::<u16>::IO(crate::memory::io::ReadWritePort::new(
         //     //         (pm1a_evt_blk.address + ((pm1a_evt_blk.bit_width / 8) as u64)) as u16,
         //     //     ));
 

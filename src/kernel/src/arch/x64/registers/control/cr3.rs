@@ -1,5 +1,5 @@
 use core::arch::asm;
-use lzstd::{Address, Frame};
+use libsys::{Address, Frame};
 
 bitflags::bitflags! {
     pub struct CR3Flags : usize {
@@ -12,7 +12,7 @@ pub struct CR3;
 
 impl CR3 {
     pub unsafe fn write(address: Address<Frame>, flags: CR3Flags) {
-        asm!("mov cr3, {}", in(reg) address.get() | flags.bits(), options(nostack));
+        asm!("mov cr3, {}", in(reg) address.get().get() | flags.bits(), options(nostack));
     }
 
     pub fn read() -> (Address<Frame>, CR3Flags) {

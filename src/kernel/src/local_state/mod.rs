@@ -161,7 +161,7 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
 
                 let frequency = x64::cpuid::CPUID.get_processor_frequency_info().map_or_else(
                     || {
-                        lzstd::do_once!({
+                        libsys::do_once!({
                             trace!("Processors do not support TSC frequency reporting via CPUID.");
                         });
 

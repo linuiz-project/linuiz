@@ -1,89 +1,22 @@
 mod paging;
 
 pub mod io;
+use libsys::page_size;
 pub use paging::*;
 pub mod address_space;
 pub mod pmm;
 
 use crate::{exceptions::Exception, interrupts::InterruptCell, local_state::do_catch};
 use address_space::Mapper;
-use alloc::{alloc::Global, string::String};
+use alloc::{alloc::Global, borrow::Cow, string::String};
 use core::{
     alloc::{AllocError, Allocator, Layout},
-    num::NonZeroUsize,
     ptr::NonNull,
 };
-use lzstd::{Address, Frame, PAGE_MASK, PAGE_SHIFT, PAGE_SIZE, TABLE_INDEX_SHIFT};
+use libsys::{Address, Frame, Virtual};
 use slab::SlabAllocator;
 use spin::{Lazy, Mutex, Once};
-use try_alloc::boxed::TryBox;
-
-const VIRT_CANONICAL_SHIFT: u32 =
-    ((TABLE_INDEX_SHIFT.get() * PageDepth::MAX.get().get()) + PAGE_SHIFT.get()).checked_sub(1).unwrap();
-const VIRT_CANONICAL_BITS: usize = usize::MAX >> VIRT_CANONICAL_SHIFT;
-
-const fn checked_virt_canonical(address: usize) -> bool {
-    matches!(address >> VIRT_CANONICAL_SHIFT, 0 | VIRT_CANONICAL_BITS)
-}
-
-const fn virt_truncate(address: usize) -> usize {
-    (((address << 16) as isize) >> 16) as usize
-}
-
-pub struct Virtual;
-impl lzstd::AddressKind for Virtual {
-    type InitType = usize;
-    type ReprType = usize;
-
-    fn new(init: Self::InitType) -> Option<Self::ReprType> {
-        checked_virt_canonical(init).then_some(init)
-    }
-
-    fn new_truncate(init: Self::InitType) -> Self::ReprType {
-        virt_truncate(init)
-    }
-}
-impl lzstd::PtrableAddressKind for Virtual {
-    fn from_ptr<T>(ptr: *mut T) -> Self::ReprType {
-        ptr.addr()
-    }
-
-    fn as_ptr(repr: Self::ReprType) -> *mut u8 {
-        repr as *mut u8
-    }
-}
-
-pub struct Page;
-impl lzstd::AddressKind for Page {
-    type InitType = usize;
-    type ReprType = usize;
-
-    fn new(init: Self::InitType) -> Option<Self::ReprType> {
-        (((init & PAGE_MASK) == 0) && checked_virt_canonical(init)).then_some(init)
-    }
-
-    fn new_truncate(init: Self::InitType) -> Self::ReprType {
-        init & !PAGE_MASK
-    }
-}
-impl lzstd::PtrableAddressKind for Page {
-    fn from_ptr<T>(ptr: *mut T) -> Self::ReprType {
-        ptr.addr()
-    }
-
-    fn as_ptr(repr: Self::ReprType) -> *mut u8 {
-        repr as *mut u8
-    }
-}
-impl lzstd::IndexableAddressKind for Page {
-    fn from_index(index: usize) -> Option<Self::ReprType> {
-        (index <= !(VIRT_CANONICAL_BITS >> PAGE_SHIFT.get())).then_some(index << PAGE_SHIFT.get())
-    }
-
-    fn index(repr: Self::ReprType) -> usize {
-        repr >> PAGE_SHIFT.get()
-    }
-}
+use try_alloc::{boxed::TryBox, vec::TryVec};
 
 pub fn hhdm_address() -> Address<Virtual> {
     static HHDM_ADDRESS: Once<Address<Virtual>> = Once::new();
@@ -288,13 +221,13 @@ unsafe impl<const ALIGN: usize, A: Allocator> Allocator for AlignedAllocator<ALI
 
 pub unsafe fn catch_read(ptr: NonNull<[u8]>) -> Result<TryBox<[u8]>, Exception> {
     let mem_range = ptr.as_uninit_slice().as_ptr_range();
-    let aligned_start = lzstd::align_down(mem_range.start.addr(), NonZeroUsize::new(PAGE_SIZE).unwrap());
+    let aligned_start = libsys::align_down(mem_range.start.addr(), page_size());
     let mem_end = mem_range.end.addr();
 
     let mut copied_mem = TryBox::new_slice(ptr.len(), 0u8).unwrap();
-    for (offset, page_addr) in (aligned_start..mem_end).enumerate().step_by(PAGE_SIZE) {
+    for (offset, page_addr) in (aligned_start..mem_end).enumerate().step_by(page_size().get()) {
         let ptr_addr = core::cmp::max(mem_range.start.addr(), page_addr);
-        let ptr_len = core::cmp::min(mem_end.saturating_sub(ptr_addr), PAGE_SIZE);
+        let ptr_len = core::cmp::min(mem_end.saturating_sub(ptr_addr), page_size().get());
 
         // Safety: Box slice and this iterator are bound by the ptr len.
         let to_ptr = unsafe { (&mut copied_mem).as_mut_ptr().add(offset) };
@@ -308,21 +241,23 @@ pub unsafe fn catch_read(ptr: NonNull<[u8]>) -> Result<TryBox<[u8]>, Exception> 
 }
 
 // TODO TryString
-pub unsafe fn catch_read_str(mut read_ptr: NonNull<u8>) -> Result<String, Exception> {
-    let mut string = String::new();
-
+pub unsafe fn catch_read_str<'a>(mut read_ptr: NonNull<u8>) -> Result<Cow<'a, str>, Exception> {
+    let mut strlen = 0;
     'y: loop {
-        let read_len = read_ptr.as_ptr().align_offset(PAGE_SIZE);
-        read_ptr = NonNull::new(unsafe { read_ptr.as_ptr().add(read_len) }).unwrap();
+        let read_len = read_ptr.as_ptr().align_offset(page_size().get());
+        read_ptr = NonNull::new(unsafe { read_ptr.as_ptr().add(page_size().get() - read_len) }).unwrap();
 
-        for ch in catch_read(NonNull::slice_from_raw_parts(read_ptr, read_len))?.into_iter().copied().map(char::from) {
-            if ch == '\0' {
-                break 'y;
+        for byte in catch_read(NonNull::slice_from_raw_parts(read_ptr, read_len))?.into_iter() {
+            if byte.ne(&b'\0') {
+                strlen += 1;
             } else {
-                string.push(ch);
+                break 'y;
             }
         }
     }
 
-    Ok(string)
+    let mut buffer = TryVec::with_capacity(strlen);
+    buffer.copy_from_slice(core::slice::from_raw_parts(read_ptr.as_ptr(), strlen));
+
+    Ok(String::from_utf8(buffer))
 }

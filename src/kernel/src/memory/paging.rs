@@ -1,8 +1,8 @@
-use super::{hhdm_address, Page};
+use super::hhdm_address;
 use core::{fmt, num::NonZeroU32};
-use lzstd::{
+use libsys::{
     mem::{InteriorRef, Mut, Ref},
-    Address, Frame, PAGE_SHIFT, PAGE_SIZE, TABLE_INDEX_SHIFT,
+    page_shift, page_size, table_index_shift, Address, Frame, Page,
 };
 
 #[repr(transparent)]
@@ -47,7 +47,7 @@ impl PageDepth {
 
     #[inline]
     pub const fn align(self) -> usize {
-        PAGE_SIZE.checked_shl(TABLE_INDEX_SHIFT.get() * self.0.get()).unwrap()
+        page_size().get().checked_shl(table_index_shift().get() * self.0.get()).unwrap()
     }
 }
 
@@ -247,12 +247,12 @@ impl<RefKind: InteriorRef> PageTable<'_, RefKind> {
     /// Returned pointer must not be used mutably in immutable `&self` contexts.
     unsafe fn get_entry_ptr(&self, page: Address<Page>) -> *mut PageTableEntry {
         // Safety: Type requires that the internal entry has a valid frame.
-        let table_ptr = unsafe { hhdm_address().as_ptr().add(self.get_frame().get()) };
+        let table_ptr = unsafe { hhdm_address().as_ptr().add(self.get_frame().get().get()) };
         let entry_index = {
-            let index_shift = (self.depth().get().get() - 1) * TABLE_INDEX_SHIFT.get();
-            let index_mask = (1 << TABLE_INDEX_SHIFT.get()) - 1;
+            let index_shift = (self.depth().get().get() - 1) * table_index_shift().get();
+            let index_mask = (1 << table_index_shift().get()) - 1;
 
-            (page.get() >> index_shift >> PAGE_SHIFT.get()) & index_mask
+            (page.get().get() >> index_shift >> page_shift().get()) & index_mask
         };
         // Safety: `entry_index` guarantees a value that does not exceed the table size.
         unsafe { table_ptr.cast::<PageTableEntry>().add(entry_index) }

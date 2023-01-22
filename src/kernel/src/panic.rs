@@ -1,6 +1,6 @@
 use spin::Once;
 
-pub static KERNEL_SYMBOLS: Once<&'static [crate::elf::symbol::Symbol]> = Once::new();
+pub static KERNEL_SYMBOLS: Once<&'static [libkernel::elf::symbol::Symbol]> = Once::new();
 pub static KERNEL_STRINGS: Once<&'static [u8]> = Once::new();
 
 const MAXIMUM_STACK_TRACE_DEPTH: usize = 16;
@@ -98,7 +98,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
         for fn_address in stack_traces.iter().rev().filter_map(|fn_address| *fn_address) {
             if let Some(fn_symbol) = symtab
                     .iter()
-                    .filter(|symbol| symbol.get_type() == crate::elf::symbol::Type::Function)
+                    .filter(|symbol| symbol.get_type() == libkernel::elf::symbol::Type::Function)
                     .find(|symbol| {
                         let symbol_start = symbol.get_value();
                         let symbol_end = symbol_start + (symbol.get_size() as u64);

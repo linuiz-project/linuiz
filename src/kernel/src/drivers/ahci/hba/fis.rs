@@ -35,8 +35,8 @@ pub struct Hw2Dev {
 }
 
 impl Hw2Dev {
-    lzstd::bitfield_getter!(bits1, u8, port_multiplier, 0..4);
-    lzstd::bitfield_getter!(bits1, command_control, 7);
+    libsys::bitfield_getter!(bits1, u8, port_multiplier, 0..4);
+    libsys::bitfield_getter!(bits1, command_control, 7);
 
     pub const fn read(sector_base: usize, sector_count: u16) -> Self {
         Self {

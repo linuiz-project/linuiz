@@ -2,7 +2,7 @@ pub mod hba;
 
 use alloc::vec::Vec;
 use bit_field::BitField;
-use lzstd::io::pci::{standard::StandardRegister, PCIeDevice, Standard};
+use libsys::io::pci::{standard::StandardRegister, PCIeDevice, Standard};
 
 pub const ATA_DEV_BUSY: u8 = 0x80;
 pub const ATA_DEV_DRQ: u8 = 0x08;
@@ -47,7 +47,7 @@ impl<'ahci> AHCI<'ahci> {
     pub fn from_pcie_device(device: &'ahci PCIeDevice<Standard>) -> Self {
         assert_eq!(
             device.class(),
-            lzstd::io::pci::DeviceClass::MassStorageController,
+            libsys::io::pci::DeviceClass::MassStorageController,
             "Device provided for AHCI driver must be MassStorageController."
         );
         assert_eq!(

@@ -4,7 +4,7 @@ pub mod queue;
 use alloc::{boxed::Box, collections::BTreeMap};
 use bit_field::BitField;
 use core::{convert::TryFrom, fmt, marker::PhantomData, mem::MaybeUninit, sync::atomic::AtomicU16};
-use lzstd::{
+use libsys::{
     io::pci::{standard::StandardRegister, PCIeDevice, Standard},
     memory::{
         page_aligned_allocator,
@@ -311,7 +311,7 @@ pub enum ControllerEnableError {
 
 pub struct Controller<'dev> {
     device: &'dev PCIeDevice<Standard>,
-    msix: lzstd::io::pci::standard::MSIX<'dev>,
+    msix: libsys::io::pci::standard::MSIX<'dev>,
     next_sub_queue_id: AtomicU16,
     next_com_queue_id: AtomicU16,
     admin_sub: Mutex<queue::Queue<'dev, queue::Submission>>,
@@ -384,7 +384,7 @@ impl<'dev> Controller<'dev> {
             //      i.e. separate interrupts for completions, DMA, etc.
             //      or a single interrupts per device? ***** this seems limiting
             crate::interrupts::Vector::Storage0 as u8,
-            lzstd::InterruptDeliveryMode::Fixed,
+            libsys::InterruptDeliveryMode::Fixed,
         );
         nvme.msix[0].set_masked(false);
 
@@ -472,7 +472,7 @@ impl<'dev> Controller<'dev> {
                 let memory = PageAlignedBox::<Identify>::new_uninit_in(page_aligned_allocator());
                 let phys_addr = Address::<Physical>::new(
                     crate::memory::get_kernel_page_manager()
-                        .get_mapped_to(&lzstd::memory::Page::from_ptr(memory.as_ptr()))
+                        .get_mapped_to(&libsys::memory::Page::from_ptr(memory.as_ptr()))
                         .unwrap(),
                 );
 
@@ -549,7 +549,7 @@ pub enum PendingCommand {
 }
 
 pub fn exec_driver() {
-    use lzstd::io::pci;
+    use libsys::io::pci;
 
     let nvme: Controller = crate::PCIE_DEVICES
         .iter()

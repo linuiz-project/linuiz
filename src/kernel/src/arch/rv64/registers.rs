@@ -77,7 +77,7 @@ pub mod stvec {
 pub mod satp {
     ///! Wrapper module for the `satp` control register.
     use bit_field::BitField;
-    use lzstd::{Address, Physical};
+    use libsys::{Address, Physical};
     use num_enum::TryFromPrimitive;
 
     #[repr(u8)]

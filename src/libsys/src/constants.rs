@@ -1,19 +1,38 @@
 pub use x86_64::*;
 mod x86_64 {
+    use crate::Pow2Usize;
     use core::num::NonZeroU32;
 
-    pub const PAGE_SHIFT: NonZeroU32 = NonZeroU32::new(12).unwrap();
-    pub const PAGE_SIZE: usize = 1 << PAGE_SHIFT.get();
-    pub const PAGE_MASK: usize = PAGE_SIZE.checked_sub(1).unwrap();
+    pub const fn page_shift() -> NonZeroU32 {
+        NonZeroU32::new(12).unwrap()
+    }
 
-    pub const TABLE_INDEX_SHIFT: NonZeroU32 = NonZeroU32::new(9).unwrap();
-    pub const TABLE_INDEX_SIZE: usize = 1 << TABLE_INDEX_SHIFT.get();
-    pub const TABLE_INDEX_MASK: usize = TABLE_INDEX_SIZE.checked_sub(1).unwrap();
+    pub const fn page_size() -> Pow2Usize {
+        Pow2Usize::new(1 << page_shift().get()).unwrap()
+    }
 
-    pub const PHYS_NON_CANONICAL_MASK: usize = 0xFFF0_0000_0000_0000;
+    pub const fn page_mask() -> usize {
+        page_size().get().checked_sub(1).unwrap()
+    }
+
+    pub const fn table_index_shift() -> NonZeroU32 {
+        NonZeroU32::new(9).unwrap()
+    }
+
+    pub const fn table_index_size() -> Pow2Usize {
+        Pow2Usize::new(1 << table_index_shift().get()).unwrap()
+    }
+
+    pub const fn table_index_mask() -> usize {
+        table_index_size().get().checked_sub(1).unwrap()
+    }
+
+    pub const fn phys_canonical_mask() -> usize {
+        0x000F_FFFF_FFFF_FFFF
+    }
 
     pub const fn checked_phys_canonical(address: usize) -> bool {
-        (address & PHYS_NON_CANONICAL_MASK) == 0
+        (address & !phys_canonical_mask()) == 0
     }
 
     #[inline]
@@ -26,7 +45,7 @@ mod x86_64 {
             core::arch::asm!("mov {}, cr4", out(reg) cr4, options(nomem, pure));
 
             let paging_depth = if (cr4 & CR4_LA57_BIT) > 0 { 3 } else { 4 };
-            NonZeroU32::new_unchecked((TABLE_INDEX_SHIFT.get() * paging_depth) + PAGE_SHIFT.get())
+            NonZeroU32::new_unchecked((table_index_shift().get() * paging_depth) + page_shift().get())
         }
     }
 

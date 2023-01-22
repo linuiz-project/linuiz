@@ -1,6 +1,5 @@
 #![allow(dead_code)]
 
-#[macro_export]
 macro_rules! little_endian {
     ($name:ident, $num_ty:ty) => {
         #[repr(transparent)]
@@ -34,7 +33,7 @@ macro_rules! little_endian {
     };
 }
 
-crate::little_endian!(LittleEndianU8, u8);
-crate::little_endian!(LittleEndianU16, u16);
-crate::little_endian!(LittleEndianU32, u32);
-crate::little_endian!(LittleEndianU64, u64);
+little_endian!(LittleEndianU8, u8);
+little_endian!(LittleEndianU16, u16);
+little_endian!(LittleEndianU32, u32);
+little_endian!(LittleEndianU64, u64);

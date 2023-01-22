@@ -1,8 +1,5 @@
 use core::sync::atomic::{AtomicBool, Ordering};
-
-use lzstd::Address;
-
-use crate::memory::Virtual;
+use libsys::{Address, Virtual};
 
 mod ignore {
     ///! This module is never exported. It is used for bootloader requests that should never be accessed in software.
