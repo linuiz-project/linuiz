@@ -8,7 +8,7 @@ pub mod pmm;
 
 use crate::{exceptions::Exception, interrupts::InterruptCell, local_state::do_catch};
 use address_space::Mapper;
-use alloc::{alloc::Global, borrow::Cow, string::String};
+use alloc::{alloc::Global, string::String};
 use core::{
     alloc::{AllocError, Allocator, Layout},
     ptr::NonNull,
@@ -16,7 +16,7 @@ use core::{
 use libsys::{Address, Frame, Virtual};
 use slab::SlabAllocator;
 use spin::{Lazy, Mutex, Once};
-use try_alloc::{boxed::TryBox, vec::TryVec};
+use try_alloc::boxed::TryBox;
 
 pub fn hhdm_address() -> Address<Virtual> {
     static HHDM_ADDRESS: Once<Address<Virtual>> = Once::new();
@@ -24,8 +24,13 @@ pub fn hhdm_address() -> Address<Virtual> {
     *HHDM_ADDRESS.call_once(|| {
         static LIMINE_HHDM: limine::LimineHhdmRequest = limine::LimineHhdmRequest::new(crate::boot::LIMINE_REV);
 
+        let offset = LIMINE_HHDM.get_response().get().expect("bootloader provided no higher-half direct mapping").offset;
+        info!("{:#X?}", offset);
+
+        
+
         Address::new(
-            LIMINE_HHDM.get_response().get().expect("bootloader provided no higher-half direct mapping").offset
+            offset
                 as usize,
         )
         .expect("bootloader provided a non-canonical higher-half direct mapping address")
@@ -241,7 +246,7 @@ pub unsafe fn catch_read(ptr: NonNull<[u8]>) -> Result<TryBox<[u8]>, Exception> 
 }
 
 // TODO TryString
-pub unsafe fn catch_read_str<'a>(mut read_ptr: NonNull<u8>) -> Result<Cow<'a, str>, Exception> {
+pub unsafe fn catch_read_str<'a>(mut read_ptr: NonNull<u8>) -> Result<String, Exception> {
     let mut strlen = 0;
     'y: loop {
         let read_len = read_ptr.as_ptr().align_offset(page_size().get());
@@ -256,8 +261,5 @@ pub unsafe fn catch_read_str<'a>(mut read_ptr: NonNull<u8>) -> Result<Cow<'a, st
         }
     }
 
-    let mut buffer = TryVec::with_capacity(strlen);
-    buffer.copy_from_slice(core::slice::from_raw_parts(read_ptr.as_ptr(), strlen));
-
-    Ok(String::from_utf8(buffer))
+    Ok(String::from_utf8_lossy(core::slice::from_raw_parts(read_ptr.as_ptr(), strlen)).into_owned())
 }

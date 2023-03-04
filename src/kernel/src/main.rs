@@ -201,7 +201,7 @@ unsafe extern "C" fn _entry() -> ! {
                         from_mapper
                             .get_mapped_to({
                                 let addr = Address::new(address).unwrap();
-                                info!("{:?}", addr);
+                                info!("{:X?}", addr);
                                 addr
                             })
                             .unwrap(),

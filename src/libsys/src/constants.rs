@@ -50,15 +50,15 @@ mod x86_64 {
     }
 
     #[inline]
-    pub fn virt_noncanonical_mask() -> usize {
+    pub fn virt_canonical_mask() -> usize {
         let shift = virt_canonical_shift().get();
-        usize::MAX >> shift << shift
+        usize::MAX << shift >> shift
     }
 
     pub fn checked_virt_canonical(address: usize) -> bool {
-        let canonical_extension_bits = virt_noncanonical_mask();
         let extension_bits = address >> virt_canonical_shift().get();
+        let virt_upper_bits_mask = usize::MAX >> virt_canonical_shift().get();
 
-        extension_bits == 0 || extension_bits == canonical_extension_bits
+        extension_bits == 0 || extension_bits == virt_upper_bits_mask
     }
 }

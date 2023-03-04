@@ -1,4 +1,4 @@
-use crate::{checked_virt_canonical, page_mask, page_shift, virt_noncanonical_mask, Address, Virtual};
+use crate::{checked_virt_canonical, page_mask, page_shift, virt_canonical_mask, Address, Virtual};
 
 pub struct Page;
 
@@ -32,8 +32,8 @@ impl super::PtrAddressable for Page {
 
 impl super::IndexAddressable for Page {
     fn from_index(index: usize) -> Option<Self::Repr> {
-        let noncanonical_bits = !(virt_noncanonical_mask() >> page_shift().get());
-        ((index & noncanonical_bits) == 0).then_some(index << page_shift().get())
+        let non_canonical_bits = !(virt_canonical_mask() >> page_shift().get());
+        ((index & non_canonical_bits) == 0).then_some(index << page_shift().get())
     }
 
     fn index(repr: Self::Repr) -> usize {

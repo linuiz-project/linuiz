@@ -10,13 +10,13 @@ pub enum Endianness {
 }
 
 impl Endianness {
-    const fn from_u8(value: u8) -> Self {
-        match value {
-            0x1 => Self::Little,
-            0x2 => Self::Big,
-            other => Self::Other(other),
-        }
-    }
+    // const fn from_u8(value: u8) -> Self {
+    //     match value {
+    //         0x1 => Self::Little,
+    //         0x2 => Self::Big,
+    //         other => Self::Other(other),
+    //     }
+    // }
 }
 
 #[allow(dead_code, non_camel_case_types)]
@@ -44,29 +44,29 @@ pub enum Abi {
 }
 
 impl Abi {
-    const fn from_u8(value: u8) -> Self {
-        match value {
-            0x0 => Self::SystemV,
-            0x1 => Self::HP_UX,
-            0x2 => Self::NetBSD,
-            0x3 => Self::Linux,
-            0x4 => Self::GNU_Hard,
-            0x5 => Self::Solaris,
-            0x7 => Self::AIX,
-            0x8 => Self::IRIX,
-            0x9 => Self::FreeBSD,
-            0xA => Self::Tru64,
-            0xB => Self::Novell_Modesto,
-            0xC => Self::OpenBSD,
-            0xD => Self::OpenVMS,
-            0xE => Self::NonStop_Kernel,
-            0xF => Self::AROS,
-            0x10 => Self::Fenix_OS,
-            0x11 => Self::CloudABI,
-            0x12 => Self::Status_Technologies_OpenVOS,
-            other => Self::Other(other),
-        }
-    }
+    // const fn from_u8(value: u8) -> Self {
+    //     match value {
+    //         0x0 => Self::SystemV,
+    //         0x1 => Self::HP_UX,
+    //         0x2 => Self::NetBSD,
+    //         0x3 => Self::Linux,
+    //         0x4 => Self::GNU_Hard,
+    //         0x5 => Self::Solaris,
+    //         0x7 => Self::AIX,
+    //         0x8 => Self::IRIX,
+    //         0x9 => Self::FreeBSD,
+    //         0xA => Self::Tru64,
+    //         0xB => Self::Novell_Modesto,
+    //         0xC => Self::OpenBSD,
+    //         0xD => Self::OpenVMS,
+    //         0xE => Self::NonStop_Kernel,
+    //         0xF => Self::AROS,
+    //         0x10 => Self::Fenix_OS,
+    //         0x11 => Self::CloudABI,
+    //         0x12 => Self::Status_Technologies_OpenVOS,
+    //         other => Self::Other(other),
+    //     }
+    // }
 }
 
 #[allow(dead_code, non_camel_case_types)]

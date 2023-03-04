@@ -1,3 +1,5 @@
+use std::ffi::OsStr;
+
 use clap::clap_derive::ValueEnum;
 use lza::CompressionLevel;
 use xshell::{cmd, Result, Shell};
@@ -75,13 +77,11 @@ pub fn build(shell: &Shell, options: Options) -> Result<()> {
     //     None
     // };
 
+    let root_dir = shell.current_dir();
     let _dir = shell.push_dir("src/");
+    let tmp_dir = shell.create_temp_dir()?;
+    let tmp_dir_path_str = tmp_dir.path().to_string_lossy();
 
-    let tmp_dir_path = {
-        let dir = shell.create_temp_dir()?;
-        dir.path().to_owned()
-    };
-    let tmp_dir_path_str = tmp_dir_path.to_string_lossy();
     let cargo_args = {
         let mut args = vec!["--out-dir", &tmp_dir_path_str];
 
@@ -103,23 +103,22 @@ pub fn build(shell: &Shell, options: Options) -> Result<()> {
 
     cmd!(shell, "cargo build --bins -Z unstable-options {cargo_args...}").run()?;
 
-    shell.copy_file(&format!("{tmp_dir_path_str}/kernel"), "../.hdd/root/linuiz/")?;
+    shell.copy_file(&format!("{tmp_dir_path_str}/kernel"), root_dir.join(".hdd/root/linuiz/"))?;
 
     // compress userspace drivers and write to archive file
     let mut archive_builder = lza::ArchiveBuilder::new(options.compress.into());
 
-    for path in shell.read_dir(&tmp_dir_path)?.into_iter() {
-        let Some(file_name) = path.file_name().map(|name| name.to_string_lossy().into_owned())
-                    else { continue };
-
-        if options.drivers.contains(&file_name) {
-            archive_builder
-                .push_data(&file_name, shell.read_binary_file(path)?.as_slice())
-                .expect("failed to write data to archive");
+    for path in shell.read_dir(&*tmp_dir_path_str)?.into_iter() {
+        if let Some(file_name) = path.file_name().map(OsStr::to_string_lossy) {
+            if options.drivers.iter().any(|s| s.eq(&file_name)) {
+                archive_builder
+                    .push_data(&file_name, shell.read_binary_file(&path)?.as_slice())
+                    .expect("failed to write data to archive");
+            }
         }
     }
 
     let driver_data = archive_builder.take_data();
     println!("Compression resulted in a {} byte dump.", driver_data.len());
-    shell.write_file("../.hdd/root/linuiz/drivers", driver_data)
+    shell.write_file(root_dir.join(".hdd/root/linuiz/drivers"), driver_data)
 }
