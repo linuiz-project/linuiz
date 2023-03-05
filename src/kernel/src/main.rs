@@ -198,13 +198,7 @@ unsafe extern "C" fn _entry() -> ! {
                     .map(
                         Address::new_truncate(address),
                         PageDepth::MIN,
-                        from_mapper
-                            .get_mapped_to({
-                                let addr = Address::new(address).unwrap();
-                                info!("{:X?}", addr);
-                                addr
-                            })
-                            .unwrap(),
+                        from_mapper.get_mapped_to(Address::new(address).unwrap()).unwrap(),
                         false,
                         attributes,
                     )

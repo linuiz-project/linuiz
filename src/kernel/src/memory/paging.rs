@@ -129,12 +129,6 @@ impl PageTableEntry {
         Self(((frame.index() as u64) << Self::FRAME_ADDRESS_SHIFT) | attributes.bits())
     }
 
-    /// Whether the page table entry is present or usable the memory controller.
-    #[inline]
-    pub const fn is_present(&self) -> bool {
-        self.get_attributes().contains(PageAttributes::PRESENT)
-    }
-
     /// Gets the frame index of the page table entry.
     #[inline]
     pub fn get_frame(&self) -> Address<Frame> {
@@ -155,6 +149,16 @@ impl PageTableEntry {
     #[inline]
     pub const fn get_attributes(&self) -> PageAttributes {
         PageAttributes::from_bits_truncate(self.0)
+    }
+
+    #[inline]
+    pub const fn is_present(&self) -> bool {
+        self.get_attributes().contains(PageAttributes::PRESENT)
+    }
+
+    #[inline]
+    pub const fn is_huge(&self) -> bool {
+        self.get_attributes().contains(PageAttributes::HUGE)
     }
 
     /// Sets the attributes of this page table entry.
@@ -245,7 +249,7 @@ impl<RefKind: InteriorRef> PageTable<'_, RefKind> {
     /// # Safety
     ///
     /// Returned pointer must not be used mutably in immutable `&self` contexts.
-    unsafe fn get_entry_ptr(&self, page: Address<Page>) -> *mut PageTableEntry {
+    unsafe fn get_sub_entry_ptr(&self, page: Address<Page>) -> *mut PageTableEntry {
         // Safety: Type requires that the internal entry has a valid frame.
         let table_ptr = unsafe { hhdm_address().as_ptr().add(self.get_frame().get().get()) };
         let entry_index = {
@@ -258,9 +262,9 @@ impl<RefKind: InteriorRef> PageTable<'_, RefKind> {
         unsafe { table_ptr.cast::<PageTableEntry>().add(entry_index) }
     }
 
-    fn get_entry(&self, page: Address<Page>) -> &PageTableEntry {
+    fn get(&self, page: Address<Page>) -> &PageTableEntry {
         // Safety: The provided invariants being met, this will dereference a valid pointer for the type.
-        unsafe { self.get_entry_ptr(page).as_ref().unwrap() }
+        unsafe { self.get_sub_entry_ptr(page).as_ref().unwrap() }
     }
 }
 
@@ -270,6 +274,7 @@ impl<'a> PageTable<'a, Ref> {
     /// Caller must ensure the provided physical mapping page and page table entry are valid.
     pub(super) unsafe fn new(depth: PageDepth, entry: &'a PageTableEntry) -> Option<Self> {
         if entry.is_present() {
+            info!("{:?} {:?}", depth, entry);
             Some(Self { depth, entry })
         } else {
             None
@@ -280,31 +285,39 @@ impl<'a> PageTable<'a, Ref> {
         &self,
         page: Address<Page>,
         to_depth: Option<PageDepth>,
-        with_fn: impl FnOnce(Result<&PageTableEntry, PagingError>) -> T,
-    ) -> T {
-        let entry = self.get_entry(page);
-        let is_huge = entry.get_attributes().contains(PageAttributes::HUGE);
+        with_fn: impl FnOnce(&PageTableEntry) -> T,
+    ) -> Result<T, PagingError> {
+        if to_depth.contains(&self.depth()) || (to_depth.is_none() && self.is_huge()) {
+            Ok(with_fn(self.entry))
+        } else {
+            let sub_entry = self.get(page);
+
+            if sub_entry.is_huge() {
+                Err(PagingError::WalkInterrupted)
+            } else if !sub_entry.is_present() {
+
+            }
+        }
 
         match to_depth {
-            Some(to_depth) if self.depth() == to_depth => with_fn(Ok(entry)),
-            Some(to_depth) if self.depth() > to_depth => {
-                match is_huge {
-                    false if let Some(next_depth) = self.next_depth() => {
-                        // Safety: If the page table entry is present, then it's a valid entry, all bits accounted.
-                        match unsafe { PageTable::<Ref>::new(next_depth, entry) } {
-                            Some( page_table) => page_table.with_entry(page, Some(to_depth), with_fn),
-                            None => with_fn(Err(PagingError::NotMapped)),
-                        }
-                    }
+            Some(to_depth)  => ,
 
-                    true => with_fn(Err(PagingError::WalkInterrupted)),
-                    false => with_fn(Err(PagingError::DepthUnderflow)),
+
+
+
+            (None, true) => Ok(with_fn(self.entry)),
+
+            (to_depth, false) => {
+                let sub_entry = self.get(page);
+                let next_depth = self.next_depth().expect("depth overrun during traversal");
+
+                match unsafe { PageTable::<Ref>::new(next_depth, sub_entry) } {
+                    Some(page_table) => page_table.with_entry(page, to_depth, with_fn),
+                    None => Err(PagingError::NotMapped),
                 }
             }
 
-            None if is_huge => with_fn(Ok(entry)),
-
-            _ => with_fn(Err(PagingError::Unknown)),
+            (_, true) => ,
         }
     }
 }
@@ -321,9 +334,9 @@ impl<'a> PageTable<'a, Mut> {
         }
     }
 
-    fn get_entry_mut(&self, page: Address<Page>) -> &mut PageTableEntry {
+    fn get_mut(&self, page: Address<Page>) -> &mut PageTableEntry {
         // Safety: The provided invariants being met, this will dereference a valid pointer for the type.
-        unsafe { self.get_entry_ptr(page).as_mut().unwrap() }
+        unsafe { self.get_sub_entry_ptr(page).as_mut().unwrap() }
     }
 
     pub fn with_entry_mut<T>(
@@ -332,29 +345,21 @@ impl<'a> PageTable<'a, Mut> {
         to_depth: Option<PageDepth>,
         with_fn: impl FnOnce(Result<&mut PageTableEntry, PagingError>) -> T,
     ) -> T {
-        let entry = self.get_entry_mut(page);
-        let is_huge = entry.get_attributes().contains(PageAttributes::HUGE);
+        match (to_depth, self.entry.get_attributes().contains(PageAttributes::HUGE)) {
+            (Some(to_depth), _) if self.depth() == to_depth => with_fn(Ok(self.entry)),
+            (None, true) => with_fn(Ok(self.entry)),
 
-        match to_depth {
-            Some(to_depth) if self.depth() == to_depth => with_fn(Ok(entry)),
-            Some(to_depth) if self.depth() > to_depth => {
-                match is_huge {
-                    false if let Some(next_depth) = self.next_depth() => {
-                        // Safety: If the page table entry is present, then it's a valid entry, all bits accounted.
-                        match unsafe { PageTable::<Mut>::new(next_depth, entry) } {
-                            Some(mut page_table) => page_table.with_entry_mut(page, Some(to_depth), with_fn),
-                            None => with_fn(Err(PagingError::NotMapped)),
-                        }
-                    }
+            (to_depth, false) => {
+                let sub_entry = self.get_mut(page);
+                let next_depth = self.next_depth().expect("depth overrun during traversal");
 
-                    true => with_fn(Err(PagingError::WalkInterrupted)),
-                    false => with_fn(Err(PagingError::DepthUnderflow)),
+                match unsafe { PageTable::<Mut>::new(next_depth, sub_entry) } {
+                    Some(mut page_table) => page_table.with_entry_mut(page, to_depth, with_fn),
+                    None => with_fn(Err(PagingError::NotMapped)),
                 }
             }
 
-            None if is_huge => with_fn(Ok(entry)),
-
-            _ => with_fn(Err(PagingError::Unknown)),
+            (_, true) => with_fn(Err(PagingError::WalkInterrupted)),
         }
     }
 
@@ -367,7 +372,7 @@ impl<'a> PageTable<'a, Mut> {
         to_depth: PageDepth,
         with_fn: impl FnOnce(Result<&mut PageTableEntry, PagingError>) -> T,
     ) -> T {
-        let entry = self.get_entry_mut(page);
+        let entry = self.get_mut(page);
         let is_huge = entry.get_attributes().contains(PageAttributes::HUGE);
 
         // TODO this doesn't handle page depth correctly for creations
