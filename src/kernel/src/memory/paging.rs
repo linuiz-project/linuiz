@@ -216,6 +216,24 @@ pub enum PagingError {
     Unknown,
 }
 
+pub enum PageTableStep<'a, RefKind: InteriorRef> {
+    Table(PageTable<'a, RefKind>),
+    Entry(<RefKind as InteriorRef>::RefType<'a, PageTableEntry>)
+}
+
+pub struct PageTableIterator<'a, RefKind: InteriorRef> {
+    page: Address<Page>,
+    root_table: &'a PageTable<'a, RefKind>
+}
+
+impl<'a, RefKind: InteriorRef> Iterator for PageTableIterator<'a, RefKind> {
+    type Item = PageTableStep<'a, RefKind>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        
+    }
+}
+
 pub struct PageTable<'a, RefKind: InteriorRef> {
     depth: PageDepth,
     entry: <RefKind as InteriorRef>::RefType<'a, PageTableEntry>,
@@ -287,6 +305,7 @@ impl<'a> PageTable<'a, Ref> {
         to_depth: Option<PageDepth>,
         with_fn: impl FnOnce(&PageTableEntry) -> T,
     ) -> Result<T, PagingError> {
+        
         if to_depth.contains(&self.depth()) || (to_depth.is_none() && self.is_huge()) {
             Ok(with_fn(self.entry))
         } else {
