@@ -8,7 +8,6 @@
     slice_ptr_get,                  // #74265 <https://github.com/rust-lang/rust/issues/74265>
     maybe_uninit_slice,             // #63569 <https://github.com/rust-lang/rust/issues/63569>
     int_roundings,                  // #88581 <https://github.com/rust-lang/rust/issues/88581>
-    nonzero_min_max,                // #89065 <https://github.com/rust-lang/rust/issues/89065>
     const_mut_refs,
     const_option,
     const_option_ext,

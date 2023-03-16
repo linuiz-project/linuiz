@@ -1,6 +1,6 @@
 #![no_std]
 #![no_main]
-#![feature(sync_unsafe_cell, naked_functions, asm_const, cstr_from_bytes_until_nul)]
+#![feature(sync_unsafe_cell, naked_functions, asm_const)]
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {

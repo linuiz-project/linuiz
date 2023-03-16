@@ -9,3 +9,6 @@ rustflags = [
     "-C", "code-model=kernel",
     "-C", "embed-bitcode=yes"
 ]
+
+[registries.crates-io]
+protocol = "sparse"
