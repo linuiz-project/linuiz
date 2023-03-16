@@ -79,7 +79,10 @@ pub struct Options {
     block: BlockDriver,
 
     #[arg(long)]
-    no_build: bool,
+    nobuild: bool,
+
+    #[arg(long)]
+    nodisplay: bool,
 
     #[clap(flatten)]
     build_options: crate::build::Options,
@@ -139,6 +142,11 @@ pub fn run(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Error>
             arguments.push("format=raw,file=fat:rw:.hdd/root/");
         }
     };
+
+    if options.nodisplay {
+        arguments.push("-display");
+        arguments.push("none");
+    }
 
     cmd!(
         shell,
