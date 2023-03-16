@@ -18,12 +18,10 @@
     raw_ref_op,
     let_chains,
     unchecked_math,
-    cstr_from_bytes_until_nul,
     if_let_guard,
     exact_size_is_empty,
     fn_align,
     ptr_as_uninit,
-    nonzero_min_max,
     nonnull_slice_from_raw_parts,
     ptr_metadata,
     control_flow_enum,
@@ -31,7 +29,8 @@
     inline_const,
     const_option,
     const_option_ext,
-    const_trait_impl
+    const_trait_impl,
+    const_cmp
 )]
 #![forbid(clippy::inline_asm_x86_att_syntax)]
 #![deny(clippy::semicolon_if_nothing_returned, clippy::debug_assert_with_mut_call, clippy::float_arithmetic)]
