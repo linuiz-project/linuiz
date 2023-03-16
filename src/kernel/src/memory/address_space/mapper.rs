@@ -15,6 +15,7 @@ pub enum MapperError {
 }
 
 pub struct Mapper {
+    depth: PageDepth,
     root_frame: Address<Frame>,
     entry: PageTableEntry,
 }
@@ -24,7 +25,7 @@ unsafe impl Send for Mapper {}
 
 impl Mapper {
     /// Attempts to construct a new page manager. Returns `None` if the PMM could not provide a root frame.
-    pub fn new() -> Option<Self> {
+    pub fn new(depth: PageDepth) -> Option<Self> {
         PMM.next_frame().ok().map(|root_frame| {
             // Safety: Pointer is guaranteed valid due HHDM guarantee from kernel, and renting guarantees from PMM.
             unsafe {
@@ -35,25 +36,26 @@ impl Mapper {
                 )
             };
 
-            Self { root_frame, entry: PageTableEntry::new(root_frame, PageAttributes::PRESENT) }
+            Self { depth, root_frame, entry: PageTableEntry::new(root_frame, PageAttributes::PRESENT) }
         })
     }
 
-    /// # Safety
+    /// ### Safety
     ///
-    /// Caller must ensure the root frame points to a valid top-level page table.
-    pub unsafe fn new_unsafe(root_frame: Address<Frame>) -> Self {
-        Self { root_frame, entry: PageTableEntry::new(root_frame, PageAttributes::PRESENT) }
+    /// - The root frame must point to a valid top-level page table.
+    /// - There must only exist one copy of provided page table tree at any time.
+    pub unsafe fn new_unsafe(depth: PageDepth, root_frame: Address<Frame>) -> Self {
+        Self { depth, root_frame, entry: PageTableEntry::new(root_frame, PageAttributes::PRESENT) }
     }
 
     fn root_table(&self) -> PageTableEntryCell<Ref> {
-        // Safety: `Self` requires that the entry be valid, so it can be safely constructed into a page table.
-        unsafe { PageTableEntryCell::<Ref>::new(PageDepth::MAX, &self.entry).unwrap_unchecked() }
+        // Safety: `Self` requires that the entry be valid.
+        unsafe { PageTableEntryCell::<Ref>::new(self.depth, &self.entry).unwrap_unchecked() }
     }
 
     fn root_table_mut(&mut self) -> PageTableEntryCell<Mut> {
-        // Safety: `Self` requires that the entry be valid, so it can be safely constructed into a page table.
-        unsafe { PageTableEntryCell::<Mut>::new(PageDepth::MAX, &mut self.entry).unwrap_unchecked() }
+        // Safety: `Self` requires that the entry be valid.
+        unsafe { PageTableEntryCell::<Mut>::new(self.depth, &mut self.entry).unwrap_unchecked() }
     }
 
     /* MAP / UNMAP */

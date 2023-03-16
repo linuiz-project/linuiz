@@ -35,6 +35,10 @@ impl PageDepth {
         }
     });
 
+    pub fn current() -> Self {
+        Self(crate::memory::current_paging_levels())
+    }
+
     #[inline]
     pub const fn min_align() -> usize {
         Self::MIN.align()

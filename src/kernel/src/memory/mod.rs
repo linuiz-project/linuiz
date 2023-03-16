@@ -24,16 +24,11 @@ pub fn hhdm_address() -> Address<Virtual> {
     *HHDM_ADDRESS.call_once(|| {
         static LIMINE_HHDM: limine::LimineHhdmRequest = limine::LimineHhdmRequest::new(crate::boot::LIMINE_REV);
 
-        let offset = LIMINE_HHDM.get_response().get().expect("bootloader provided no higher-half direct mapping").offset;
+        let offset =
+            LIMINE_HHDM.get_response().get().expect("bootloader provided no higher-half direct mapping").offset;
         info!("{:#X?}", offset);
 
-        
-
-        Address::new(
-            offset
-                as usize,
-        )
-        .expect("bootloader provided a non-canonical higher-half direct mapping address")
+        Address::new(offset as usize).expect("bootloader provided a non-canonical higher-half direct mapping address")
     })
 }
 
@@ -41,7 +36,11 @@ pub fn with_kmapper<T>(func: impl FnOnce(&mut Mapper) -> T) -> T {
     static KERNEL_MAPPER: Once<InterruptCell<Mutex<Mapper>>> = Once::new();
 
     KERNEL_MAPPER
-        .call_once(|| InterruptCell::new(Mutex::new(Mapper::new().expect("failed to create kernel space mapper"))))
+        .call_once(|| {
+            InterruptCell::new(Mutex::new(
+                Mapper::new(PageDepth::current()).expect("failed to create kernel space mapper"),
+            ))
+        })
         .with(|mapper| {
             let mut mapper = mapper.lock();
             func(&mut *mapper)
@@ -106,6 +105,17 @@ pub fn is_5_level_paged() -> bool {
         supports_5_level_paging()
             && crate::arch::x64::registers::control::CR4::read()
                 .contains(crate::arch::x64::registers::control::CR4Flags::LA57)
+    }
+}
+
+pub fn current_paging_levels() -> u32 {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_5_level_paged() {
+            5
+        } else {
+            4
+        }
     }
 }
 

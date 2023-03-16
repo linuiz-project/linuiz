@@ -111,7 +111,8 @@ impl<A: Allocator + Clone> AddressSpace<A> {
         let mut vec = TryVec::new_in(allocator.clone());
         vec.push(Region { len: size.get(), free: true }).map_err(|_| Error)?;
 
-        Ok(Self { regions: vec, allocator, mapper: Mapper::new().ok_or(Error)? })
+        // TODO select the page depth to use, or take it from a parameter>
+        Ok(Self { regions: vec, allocator, mapper: Mapper::new(super::PageDepth::current()).ok_or(Error)? })
     }
 
     // TODO better error type for this function

@@ -204,7 +204,7 @@ unsafe extern "C" fn _entry() -> ! {
                     .map(
                         Address::new_truncate(address),
                         PageDepth::MIN,
-                        from_mapper.get_mapped_to(Address::new(address).unwrap()).unwrap(),
+                        from_mapper.get_mapped_to(Address::new_truncate(address)).unwrap(),
                         false,
                         attributes,
                     )
@@ -213,7 +213,8 @@ unsafe extern "C" fn _entry() -> ! {
         }
 
         // Safety: All parameters are provided from valid sources.
-        let boot_mapper = unsafe { Mapper::new_unsafe(crate::memory::PagingRegister::read().frame()) };
+        let boot_mapper =
+            unsafe { Mapper::new_unsafe(PageDepth::current(), crate::memory::PagingRegister::read().frame()) };
 
         /* map the kernel segments */
         {
