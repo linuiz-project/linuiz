@@ -1,5 +1,9 @@
+use crate::psize;
+
 bitflags::bitflags! {
-    pub struct CR4Flags : u64 {
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct CR4Flags : psize {
         const VME           = 1 << 0;
         const PVI           = 1 << 1;
         const TSD           = 1 << 2;
@@ -31,7 +35,7 @@ pub struct CR4;
 impl CR4 {
     #[inline]
     pub fn read() -> CR4Flags {
-        let value: u64;
+        let value: psize;
 
         unsafe {
             core::arch::asm!(
@@ -41,9 +45,12 @@ impl CR4 {
             );
         }
 
-        unsafe { CR4Flags::from_bits_unchecked(value) }
+        CR4Flags::from_bits_truncate(value) 
     }
 
+    /// ### Safety
+    ///
+    /// Incorrect flags may violate any number of safety guarantees.
     #[inline]
     pub unsafe fn write(value: CR4Flags) {
         core::arch::asm!(
@@ -53,6 +60,9 @@ impl CR4 {
         );
     }
 
+    /// ### Safety
+    ///
+    /// Incorrect flags may violate any number of safety guarantees.
     #[inline]
     pub unsafe fn enable(flags: CR4Flags) {
         let mut new_flags = CR4::read();
@@ -61,6 +71,9 @@ impl CR4 {
         CR4::write(new_flags);
     }
 
+    /// ### Safety
+    ///
+    /// Incorrect flags may violate any number of safety guarantees.
     #[inline]
     pub unsafe fn disable(flags: CR4Flags) {
         let mut new_flags = CR4::read();

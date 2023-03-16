@@ -4,6 +4,7 @@ use libsys::{Address, Physical};
 
 bitflags::bitflags! {
     #[repr(transparent)]
+    #[derive(Debug, Clone, Copy)]
     pub struct Flags : u32 {
         const EXECUTABLE    = 1 << 0;
         const WRITABLE      = 1 << 1;

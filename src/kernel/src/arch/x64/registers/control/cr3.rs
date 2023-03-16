@@ -1,8 +1,12 @@
 use core::arch::asm;
 use libsys::{Address, Frame};
 
+use crate::psize;
+
 bitflags::bitflags! {
-    pub struct CR3Flags : usize {
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct CR3Flags : psize {
         const PAGE_LEVEL_WRITE_THROUGH = 1 << 3;
         const PAGE_LEVEL_CACHE_DISABLE = 1 << 4;
     }
@@ -11,8 +15,12 @@ bitflags::bitflags! {
 pub struct CR3;
 
 impl CR3 {
+    /// ### Safety
+    ///
+    /// Incorrect flags may violate any number of safety guarantees.
+    #[inline]
     pub unsafe fn write(address: Address<Frame>, flags: CR3Flags) {
-        asm!("mov cr3, {}", in(reg) address.get().get() | flags.bits(), options(nostack));
+        asm!("mov cr3, {}", in(reg) (address.get().get() as psize) | flags.bits(), options(nostack));
     }
 
     pub fn read() -> (Address<Frame>, CR3Flags) {
@@ -22,7 +30,7 @@ impl CR3 {
             asm!("mov {}, cr3", out(reg) value, options(nostack, nomem));
         }
 
-        (Address::new_truncate(value & !CR3Flags::all().bits()), CR3Flags::from_bits_truncate(value))
+        (Address::new_truncate(value & !0xFFF), CR3Flags::from_bits_truncate(value as psize))
     }
 
     #[inline]

@@ -83,14 +83,14 @@ impl InterruptLines {
     /// Low bits of the interrupt lines.
     #[inline]
     #[allow(clippy::cast_possible_truncation)]
-    pub const fn low(self) -> u8 {
+    pub const fn low_bits(&self) -> u8 {
         self.bits() as u8
     }
 
     /// High bits of the interrupt lines.
     #[inline]
     #[allow(clippy::cast_possible_truncation)]
-    pub const fn high(self) -> u8 {
+    pub const fn high_bits(&self) -> u8 {
         (self.bits() >> 8) as u8
     }
 
@@ -181,9 +181,9 @@ impl Pics {
         io_wait();
 
         // Write masks to data port, specifying which interrupts are ignored.
-        self.0[0].data.write(!enabled.low() & !(1 << 2) /* never mask cascade */);
+        self.0[0].data.write(!enabled.low_bits() & !(1 << 2) /* never mask cascade */);
         io_wait();
-        self.0[1].data.write(!enabled.high());
+        self.0[1].data.write(!enabled.high_bits());
     }
 
     /// Indicates whether any of the chained PICs handle the given interrupt.

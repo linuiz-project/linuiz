@@ -43,7 +43,7 @@ pub fn with<T>(uuid: &Uuid, func: impl FnOnce(&mut AddressSpace<PhysicalAllocato
 }
 
 bitflags::bitflags! {
-    pub struct MmapFlags : usize {
+    pub struct MmapFlags : u16 {
         const READ = 0b1;
         const READ_WRITE = 0b11;
         const READ_EXECUTE = 0b111;

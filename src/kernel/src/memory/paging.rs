@@ -79,7 +79,8 @@ impl PageDepth {
 #[cfg(target_arch = "x86_64")]
 bitflags::bitflags! {
     #[repr(transparent)]
-    pub struct PageAttributes: u64 {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct PageAttributes : u64 {
         const PRESENT = 1 << 0;
         const WRITABLE = 1 << 1;
         const USER = 1 << 2;

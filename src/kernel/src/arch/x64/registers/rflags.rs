@@ -2,7 +2,8 @@ use bitflags::bitflags;
 
 bitflags! {
     #[repr(transparent)]
-    pub struct RFlags: u64 {
+    #[derive(Debug, Clone, Copy)]
+    pub struct RFlags : u64 {
         /// Set by hardware if the last arithmetic operation generated a carry out of the most-significant
         /// bit of the result.
         const CARRY_FLAG = 1 << 0;
@@ -60,7 +61,7 @@ bitflags! {
 impl RFlags {
     #[inline]
     pub fn read() -> Self {
-        unsafe { Self::from_bits_unchecked(Self::read_raw()) }
+        Self::from_bits_truncate(Self::read_raw()) 
     }
 
     #[inline]
@@ -79,8 +80,11 @@ impl RFlags {
         result
     }
 
+/// ### Safety
+/// 
+/// Incorrect flags may violate any number of safety guarantees.
     #[inline]
-    pub unsafe fn write(flags: Self, set: bool) {
+    pub unsafe fn set_flags(flags: Self, set: bool) {
         let mut old_flags = Self::read();
         old_flags.set(flags, set);
 

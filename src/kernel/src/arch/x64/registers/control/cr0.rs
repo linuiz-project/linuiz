@@ -1,5 +1,9 @@
+use crate::psize;
+
 bitflags::bitflags! {
-    pub struct CR0Flags : u64 {
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct CR0Flags : psize {
         const PE = 1 << 0;
         const MP = 1 << 1;
         const EM = 1 << 2;
@@ -19,7 +23,7 @@ pub struct CR0;
 impl CR0 {
     #[inline]
     pub fn read() -> CR0Flags {
-        let value: u64;
+        let value: psize;
 
         unsafe {
             core::arch::asm!(
@@ -29,7 +33,7 @@ impl CR0 {
             );
         }
 
-        unsafe { CR0Flags::from_bits_unchecked(value) }
+        CR0Flags::from_bits_truncate(value) 
     }
 
     #[inline]

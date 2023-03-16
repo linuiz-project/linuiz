@@ -53,6 +53,7 @@ impl Type {
 
 bitflags::bitflags! {
     #[repr(transparent)]
+    #[derive(Debug, Clone, Copy)]
     pub struct Attributes : u64 {
         const WRITE = 1 << 0;
         const ALLOC = 1 << 1;
