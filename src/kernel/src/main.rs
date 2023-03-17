@@ -203,7 +203,7 @@ unsafe extern "C" fn _entry() -> ! {
                 to_mapper
                     .map(
                         Address::new_truncate(address),
-                        PageDepth::MIN,
+                        PageDepth::min() ,
                         from_mapper.get_mapped_to(Address::new_truncate(address)).unwrap(),
                         false,
                         attributes,
@@ -217,36 +217,34 @@ unsafe extern "C" fn _entry() -> ! {
             unsafe { Mapper::new_unsafe(PageDepth::current(), crate::memory::PagingRegister::read().frame()) };
 
         /* map the kernel segments */
-        {
-            map_range_from(
-                &boot_mapper,
-                kmapper,
-                // ### Safety: These linker symbols are guaranteed by the bootloader to be valid.
-                unsafe { __text_start.as_ptr::<u8>().addr()..__text_end.as_ptr::<u8>().addr() },
-                PageAttributes::RX | PageAttributes::GLOBAL,
-            );
-            map_range_from(
-                &boot_mapper,
-                kmapper,
-                // ### Safety: These linker symbols are guaranteed by the bootloader to be valid.
-                unsafe { __rodata_start.as_ptr::<u8>().addr()..__rodata_end.as_ptr::<u8>().addr() },
-                PageAttributes::RO | PageAttributes::GLOBAL,
-            );
-            map_range_from(
-                &boot_mapper,
-                kmapper,
-                // ### Safety: These linker symbols are guaranteed by the bootloader to be valid.
-                unsafe { __bss_start.as_ptr::<u8>().addr()..__bss_end.as_ptr::<u8>().addr() },
-                PageAttributes::RW | PageAttributes::GLOBAL,
-            );
-            map_range_from(
-                &boot_mapper,
-                kmapper,
-                // ### Safety: These linker symbols are guaranteed by the bootloader to be valid.
-                unsafe { __data_start.as_ptr::<u8>().addr()..__data_end.as_ptr::<u8>().addr() },
-                PageAttributes::RW | PageAttributes::GLOBAL,
-            );
-        }
+        map_range_from(
+            &boot_mapper,
+            kmapper,
+            // ### Safety: These linker symbols are guaranteed by the bootloader to be valid.
+            unsafe { __text_start.as_ptr::<u8>().addr()..__text_end.as_ptr::<u8>().addr() },
+            PageAttributes::RX | PageAttributes::GLOBAL,
+        );
+        map_range_from(
+            &boot_mapper,
+            kmapper,
+            // ### Safety: These linker symbols are guaranteed by the bootloader to be valid.
+            unsafe { __rodata_start.as_ptr::<u8>().addr()..__rodata_end.as_ptr::<u8>().addr() },
+            PageAttributes::RO | PageAttributes::GLOBAL,
+        );
+        map_range_from(
+            &boot_mapper,
+            kmapper,
+            // ### Safety: These linker symbols are guaranteed by the bootloader to be valid.
+            unsafe { __bss_start.as_ptr::<u8>().addr()..__bss_end.as_ptr::<u8>().addr() },
+            PageAttributes::RW | PageAttributes::GLOBAL,
+        );
+        map_range_from(
+            &boot_mapper,
+            kmapper,
+            // ### Safety: These linker symbols are guaranteed by the bootloader to be valid.
+            unsafe { __data_start.as_ptr::<u8>().addr()..__data_end.as_ptr::<u8>().addr() },
+            PageAttributes::RW | PageAttributes::GLOBAL,
+        );
 
         for entry in crate::boot::get_memory_map().unwrap() {
             let page_attributes = {
@@ -272,7 +270,7 @@ unsafe extern "C" fn _entry() -> ! {
                 kmapper
                     .map(
                         Address::new_truncate(hhdm_address().get() + phys_base),
-                        PageDepth::MIN,
+                        PageDepth::min(),
                         Address::new_truncate(phys_base as usize),
                         false,
                         page_attributes,
@@ -289,7 +287,7 @@ unsafe extern "C" fn _entry() -> ! {
                 kmapper
                     .map(
                         Address::new_truncate(hhdm_address().get() + apic_address),
-                        PageDepth::MIN,
+                        PageDepth::min(),
                         Address::new_truncate(apic_address),
                         false,
                         PageAttributes::MMIO,

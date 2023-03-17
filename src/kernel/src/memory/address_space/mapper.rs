@@ -67,25 +67,26 @@ impl Mapper {
         to_depth: PageDepth,
         frame: Address<Frame>,
         lock_frame: bool,
-        mut attributes: PageAttributes,
+        attributes: PageAttributes,
     ) -> Result<(), MapperError> {
         if lock_frame {
-            // If the acquisition of the frame fails, return the error.
+            // If the acquisition of the frame fails, return an error.
             PMM.lock_frame(frame).map_err(|_| MapperError::AllocError)?;
         }
 
         // If acquisition of the frame is successful, attempt to map the page to the frame index.
         let result = self
             .root_table_mut()
-            .with_entry_create(page, to_depth, |entry| {
-                *entry = PageTableEntry::new(frame, {
-                    // Make sure the `HUGE` bit is automatically set for huge pages.
-                    if to_depth > PageDepth::MIN {
-                        attributes.insert(PageAttributes::HUGE);
-                    }
+            // Safety: Frame does not contain any data.
+            .with_entry_create(page, to_depth, |entry| unsafe {
+                if to_depth > PageDepth::min() {
+                    debug_assert!(
+                        attributes.contains(PageAttributes::HUGE),
+                        "attributes missing huge bit for huge mapping"
+                    );
+                }
 
-                    attributes
-                });
+                entry.set(frame, attributes);
 
                 #[cfg(target_arch = "x86_64")]
                 crate::arch::x64::instructions::tlb::invlpg(page);
@@ -114,11 +115,11 @@ impl Mapper {
     ) -> Result<(), MapperError> {
         self.root_table_mut()
             .with_entry_mut(page, to_depth, |entry| {
-                // ### Safety: We've got an explicit directive from the caller to unmap this page, so the caller must ensure that's a valid operation.
+                // Safety: We've got an explicit directive from the caller to unmap this page, so the caller must ensure that's a valid operation.
                 unsafe { entry.set_attributes(PageAttributes::PRESENT, AttributeModify::Remove) };
 
                 let frame = entry.get_frame();
-                // ### Safety: See above.
+                // Safety: See above.
                 unsafe { entry.set_frame(Address::new_truncate(0)) };
 
                 if free_frame {
@@ -135,7 +136,7 @@ impl Mapper {
     pub fn auto_map(&mut self, page: Address<Page>, attributes: PageAttributes) -> Result<(), MapperError> {
         match PMM.next_frame() {
             Ok(frame) => {
-                self.map(page, PageDepth::MIN, frame, !attributes.contains(PageAttributes::DEMAND), attributes)
+                self.map(page, PageDepth::min(), frame, !attributes.contains(PageAttributes::DEMAND), attributes)
             }
             Err(_) => Err(MapperError::AllocError),
         }
@@ -152,12 +153,7 @@ impl Mapper {
     }
 
     pub fn get_mapped_to(&self, page: Address<Page>) -> Option<Address<Frame>> {
-        self.root_table()
-            .with_entry(page, None, |entry| {
-                info!("{:?}", entry);
-                entry.get_frame()
-            })
-            .ok()
+        self.root_table().with_entry(page, None, |entry| entry.get_frame()).ok()
     }
 
     /* STATE CHANGING */
