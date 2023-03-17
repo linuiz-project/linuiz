@@ -36,20 +36,26 @@ mod x86_64 {
     }
 
     #[inline]
-    pub fn virt_canonical_shift() -> NonZeroU32 {
-        const CR4_LA57_BIT: usize = 1 << 12;
+    fn paging_depth() -> u32 {
+        #[cfg(target_arch = "x86_64")]
+        {
+            const CR4_LA57_BIT: usize = 1 << 12;
 
-        // Safety: `asm!` is used safely, and `NonZeroU32` is guaranteed >0.
-        unsafe {
             let cr4: usize;
-            core::arch::asm!("mov {}, cr4", out(reg) cr4, options(nomem, pure));
+            unsafe { core::arch::asm!("mov {}, cr4", out(reg) cr4, options(nomem, pure)) };
 
-            let paging_depth = if (cr4 & CR4_LA57_BIT) > 0 { 3 } else { 4 };
-            NonZeroU32::new_unchecked((table_index_shift().get() * paging_depth) + page_shift().get())
+            if (cr4 & CR4_LA57_BIT) > 0 {
+                4
+            } else {
+                5
+            }
         }
     }
 
-    #[inline]
+    pub fn virt_canonical_shift() -> NonZeroU32 {
+        NonZeroU32::new((table_index_shift().get() * paging_depth()) + page_shift().get()).unwrap()
+    }
+
     pub fn virt_canonical_mask() -> usize {
         let shift = virt_canonical_shift().get();
         usize::MAX << shift >> shift

@@ -1,4 +1,4 @@
-use crate::{checked_virt_canonical, page_mask, page_shift, virt_canonical_mask, Address, Virtual};
+use crate::{page_mask, page_shift, virt_canonical_mask, Address, Virtual};
 
 pub struct Page;
 
@@ -8,7 +8,7 @@ impl super::Addressable for Page {
     type Get = Address<Virtual>;
 
     fn new(init: Self::Init) -> Option<Self::Repr> {
-        (((init & page_mask()) == 0) && checked_virt_canonical(init)).then_some(init)
+        (((init & page_mask()) == 0) && crate::checked_virt_canonical(init)).then_some(init)
     }
 
     fn new_truncate(init: Self::Init) -> Self::Repr {

@@ -13,7 +13,7 @@ impl super::Addressable for Virtual {
 
     fn new_truncate(init: Self::Init) -> Self::Repr {
         let shift = Self::Init::BITS - virt_canonical_shift().get();
-        (((init << shift) as isize) << shift) as Self::Repr
+        (((init << shift) as isize) >> shift) as Self::Repr
     }
 
     fn get(repr: Self::Repr) -> Self::Get {
