@@ -82,7 +82,7 @@ pub struct Options {
     nobuild: bool,
 
     #[arg(long)]
-    nodisplay: bool,
+    nographic: bool,
 
     #[clap(flatten)]
     build_options: crate::build::Options,
@@ -143,9 +143,8 @@ pub fn run(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Error>
         }
     };
 
-    if options.nodisplay {
-        arguments.push("-display");
-        arguments.push("none");
+    if options.nographic {
+        arguments.push("-nographic");
     }
 
     cmd!(
