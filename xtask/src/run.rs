@@ -125,6 +125,10 @@ pub fn run(sh: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
     arguments.push(&device_string);
 
     if options.log {
+        if !sh.path_exists(".debug/") {
+            sh.create_dir(".debug/")?;
+        }
+
         arguments.push("-d");
         arguments.push("int,guest_errors");
         arguments.push("-D");
@@ -154,13 +158,13 @@ pub fn run(sh: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
         sh,
         "
         {qemu_exe_str}
-            {arguments...}
             -no-shutdown
             -no-reboot
             -serial mon:stdio
             -drive format=raw,file=.hdd/disk0.img,id=disk1,if=none
             -net none
             -M smm=off
+            {arguments...}
         "
     );
 
