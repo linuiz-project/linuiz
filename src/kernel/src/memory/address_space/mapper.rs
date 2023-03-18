@@ -50,12 +50,12 @@ impl Mapper {
 
     fn root_table(&self) -> PageTableEntryCell<Ref> {
         // Safety: `Self` requires that the entry be valid.
-        unsafe { PageTableEntryCell::<Ref>::new(self.depth, &self.entry).unwrap_unchecked() }
+        unsafe { PageTableEntryCell::<Ref>::new(self.depth, &self.entry) }
     }
 
     fn root_table_mut(&mut self) -> PageTableEntryCell<Mut> {
         // Safety: `Self` requires that the entry be valid.
-        unsafe { PageTableEntryCell::<Mut>::new(self.depth, &mut self.entry).unwrap_unchecked() }
+        unsafe { PageTableEntryCell::<Mut>::new(self.depth, &mut self.entry) }
     }
 
     /* MAP / UNMAP */

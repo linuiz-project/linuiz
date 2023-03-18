@@ -24,7 +24,7 @@ impl const PartialOrd for PageDepth {
 impl PageDepth {
     #[inline]
     pub const fn min() -> Self {
-        Self(1)
+        Self(0)
     }
 
     #[inline]
@@ -322,12 +322,8 @@ impl<'a> PageTableEntryCell<'a, Ref> {
     ///
     /// - Page table entry must point to a valid page table.
     /// - Page table depth must be correct for the provided table.
-    pub(super) unsafe fn new(depth: PageDepth, entry: &'a PageTableEntry) -> Option<Self> {
-        if entry.is_present() {
-            Some(Self { depth, entry })
-        } else {
-            None
-        }
+    pub(super) unsafe fn new(depth: PageDepth, entry: &'a PageTableEntry) -> Self {
+        Self { depth, entry }
     }
 
     pub fn with_entry<T>(
@@ -344,10 +340,7 @@ impl<'a> PageTableEntryCell<'a, Ref> {
                 if !sub_entry.is_present() {
                     Err(PagingError::NotMapped)
                 } else {
-                    match unsafe { PageTableEntryCell::<Ref>::new(next_depth, sub_entry) } {
-                        Some(sub_entry_cell) => sub_entry_cell.with_entry(page, to_depth, with_fn),
-                        None => Err(PagingError::NotMapped),
-                    }
+                     unsafe { PageTableEntryCell::<Ref>::new(next_depth, sub_entry) }.with_entry(page, to_depth, with_fn)
                 }
             }
 
@@ -362,12 +355,8 @@ impl<'a> PageTableEntryCell<'a, Mut> {
     ///
     /// - Page table entry must point to a valid page table.
     /// - Page table depth must be correct for the provided table.
-    pub(super) unsafe fn new(depth: PageDepth, entry: &'a mut PageTableEntry) -> Option<Self> {
-        if entry.is_present() {
-            Some(Self { depth, entry })
-        } else {
-            None
-        }
+    pub(super) unsafe fn new(depth: PageDepth, entry: &'a mut PageTableEntry) -> Self {
+        Self { depth, entry }
     }
 
     fn get_mut(&self, page: Address<Page>) -> &mut PageTableEntry {
@@ -392,10 +381,8 @@ impl<'a> PageTableEntryCell<'a, Mut> {
                 if !sub_entry.is_present() {
                     Err(PagingError::NotMapped)
                 } else {
-                    match unsafe { PageTableEntryCell::<Mut>::new(next_depth, sub_entry) } {
-                        Some(mut sub_entry_cell) => sub_entry_cell.with_entry_mut(page, to_depth, with_fn),
-                        None => Err(PagingError::NotMapped),
-                    }
+                     unsafe { PageTableEntryCell::<Mut>::new(next_depth, sub_entry) }
+                    .with_entry_mut(page, to_depth, with_fn)
                 }
             }
 
@@ -417,11 +404,9 @@ impl<'a> PageTableEntryCell<'a, Mut> {
             (Ordering::Equal, _, _) => Ok(with_fn(self.entry)),
 
             (Ordering::Greater, false, Some(next_depth)) => {
-                let sub_entry = self.get_mut(page);
-
-                if !sub_entry.is_present() {
+                if !self.is_present() {
                     debug_assert!(
-                        sub_entry.get_frame() == Address::default(),
+                        self.get_frame() == Address::default(),
                         "page table entry is non-present, but has a present frame address"
                     );
 
@@ -430,17 +415,23 @@ impl<'a> PageTableEntryCell<'a, Mut> {
                         return Err(PagingError::NoMoreFrames)
                     };
 
+                    // Clear the frame to avoid corrupted PTEs.
+                    // Safety: Frame was just allocated, and so is unused outside this context.
+                    unsafe {
+                        core::ptr::write_bytes(hhdm_address().as_ptr().add(frame.get().get()), 0x0, page_size().get());
+                    }
+
                     // Set the entry frame and set attributes to make a valid PTE.
                     // Safety: Entry currently points to no memory.
                     unsafe {
-                        sub_entry.set(frame, PageAttributes::PTE);
+                        self.set(frame, PageAttributes::PTE);
                     }
                 }
 
                 // Safety: If the page table entry is present, then it's a valid entry, all bits accounted.
-                match unsafe { PageTableEntryCell::<Mut>::new(next_depth, sub_entry) } {
-                    Some(mut sub_entry_cell) => sub_entry_cell.with_entry_create(page, to_depth, with_fn),
-                    None => Err(PagingError::NotMapped),
+                unsafe {
+                    PageTableEntryCell::<Mut>::new(next_depth, self.get_mut(page))
+                        .with_entry_create(page, to_depth, with_fn)
                 }
             }
 

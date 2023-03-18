@@ -201,7 +201,6 @@ unsafe extern "C" fn _entry() -> ! {
 
         debug!("Initializing kernel mapper...");
 
-        trace!("Kernel mapper frame: {:X?}", kmapper.root_frame);
 
         fn map_range_from(
             from_mapper: &Mapper,
@@ -232,33 +231,33 @@ unsafe extern "C" fn _entry() -> ! {
         map_range_from(
             &boot_mapper,
             kmapper,
-            // ### Safety: These linker symbols are guaranteed by the bootloader to be valid.
+            // Safety: These linker symbols are guaranteed by the bootloader to be valid.
             unsafe { __text_start.as_ptr::<u8>().addr()..__text_end.as_ptr::<u8>().addr() },
             PageAttributes::RX | PageAttributes::GLOBAL,
         );
         map_range_from(
             &boot_mapper,
             kmapper,
-            // ### Safety: These linker symbols are guaranteed by the bootloader to be valid.
+            // Safety: These linker symbols are guaranteed by the bootloader to be valid.
             unsafe { __rodata_start.as_ptr::<u8>().addr()..__rodata_end.as_ptr::<u8>().addr() },
             PageAttributes::RO | PageAttributes::GLOBAL,
         );
         map_range_from(
             &boot_mapper,
             kmapper,
-            // ### Safety: These linker symbols are guaranteed by the bootloader to be valid.
+            // Safety: These linker symbols are guaranteed by the bootloader to be valid.
             unsafe { __bss_start.as_ptr::<u8>().addr()..__bss_end.as_ptr::<u8>().addr() },
             PageAttributes::RW | PageAttributes::GLOBAL,
         );
         map_range_from(
             &boot_mapper,
             kmapper,
-            // ### Safety: These linker symbols are guaranteed by the bootloader to be valid.
+            // Safety: These linker symbols are guaranteed by the bootloader to be valid.
             unsafe { __data_start.as_ptr::<u8>().addr()..__data_end.as_ptr::<u8>().addr() },
             PageAttributes::RW | PageAttributes::GLOBAL,
         );
 
-        for entry in crate::boot::get_memory_map().unwrap() {
+    for entry in crate::boot::get_memory_map().unwrap() {
             let page_attributes = {
                 use limine::LimineMemoryMapEntryType;
 
