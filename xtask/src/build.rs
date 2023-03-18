@@ -50,25 +50,25 @@ static REQUIRED_ROOT_DIRS: [&str; 3] = [
     ".hdd/root/linuiz/",   // kernel, drivers
 ];
 
-pub fn build(shell: &Shell, options: Options) -> Result<()> {
+pub fn build(sh: &Shell, options: Options) -> Result<()> {
     // Ensure root directories exist
     for root_dir in REQUIRED_ROOT_DIRS {
-        if !shell.path_exists(root_dir) {
-            shell.create_dir(root_dir)?;
+        if !sh.path_exists(root_dir) {
+            sh.create_dir(root_dir)?;
         }
     }
 
     // Ensure dev disk image exists.
-    if !shell.path_exists(".hdd/disk0.img") {
-        cmd!(shell, "qemu-img create -f raw .hdd/disk0.img 256M").run()?;
+    if !sh.path_exists(".hdd/disk0.img") {
+        cmd!(sh, "qemu-img create -f raw .hdd/disk0.img 256M").run()?;
     }
 
     // copy configuration to EFI image
-    shell.copy_file("resources/limine.cfg", ".hdd/root/EFI/BOOT/")?;
+    sh.copy_file("resources/limine.cfg", ".hdd/root/EFI/BOOT/")?;
     // copy the EFI binary image
-    shell.copy_file("resources/limine/BOOTX64.EFI", ".hdd/root/EFI/BOOT/")?;
+    sh.copy_file("resources/limine/BOOTX64.EFI", ".hdd/root/EFI/BOOT/")?;
 
-    cmd!(shell, "git submodule update --init --recursive --remote").run()?;
+    cmd!(sh, "git submodule update --init --recursive --remote").run()?;
 
     // Configure rustc via the `RUSTFLAGS` environment variable.
     // let _rustflags = if !options.release {
@@ -77,9 +77,9 @@ pub fn build(shell: &Shell, options: Options) -> Result<()> {
     //     None
     // };
 
-    let root_dir = shell.current_dir();
-    let _dir = shell.push_dir("src/");
-    let tmp_dir = shell.create_temp_dir()?;
+    let root_dir = sh.current_dir();
+    let _dir = sh.push_dir("src/");
+    let tmp_dir = sh.create_temp_dir()?;
     let tmp_dir_path_str = tmp_dir.path().to_string_lossy();
 
     let cargo_args = {
@@ -101,18 +101,18 @@ pub fn build(shell: &Shell, options: Options) -> Result<()> {
         args
     };
 
-    cmd!(shell, "cargo build --bins -Z unstable-options {cargo_args...}").run()?;
+    cmd!(sh, "cargo build --bins -Z unstable-options {cargo_args...}").run()?;
 
-    shell.copy_file(&format!("{tmp_dir_path_str}/kernel"), root_dir.join(".hdd/root/linuiz/"))?;
+    sh.copy_file(&format!("{tmp_dir_path_str}/kernel"), root_dir.join(".hdd/root/linuiz/"))?;
 
     // compress userspace drivers and write to archive file
     let mut archive_builder = lza::ArchiveBuilder::new(options.compress.into());
 
-    for path in shell.read_dir(&*tmp_dir_path_str)?.into_iter() {
+    for path in sh.read_dir(&*tmp_dir_path_str)?.into_iter() {
         if let Some(file_name) = path.file_name().map(OsStr::to_string_lossy) {
             if options.drivers.iter().any(|s| s.eq(&file_name)) {
                 archive_builder
-                    .push_data(&file_name, shell.read_binary_file(&path)?.as_slice())
+                    .push_data(&file_name, sh.read_binary_file(&path)?.as_slice())
                     .expect("failed to write data to archive");
             }
         }
@@ -120,5 +120,5 @@ pub fn build(shell: &Shell, options: Options) -> Result<()> {
 
     let driver_data = archive_builder.take_data();
     println!("Compression resulted in a {} byte dump.", driver_data.len());
-    shell.write_file(root_dir.join(".hdd/root/linuiz/drivers"), driver_data)
+    sh.write_file(root_dir.join(".hdd/root/linuiz/drivers"), driver_data)
 }

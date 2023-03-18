@@ -40,24 +40,24 @@ fn in_workspace_with(shell: &Shell, with_fn: impl Fn(&Shell) -> Result<()>) -> R
 }
 
 fn main() -> Result<()> {
-    let shell = Shell::new()?;
+    let sh = Shell::new()?;
 
     match Arguments::parse() {
-        Arguments::Clean => in_workspace_with(&shell, |sh| cmd!(sh, "cargo clean").run()),
-        Arguments::Check => in_workspace_with(&shell, |sh| cmd!(sh, "cargo check --bins").run()),
-        Arguments::Update => in_workspace_with(&shell, |sh| cmd!(sh, "cargo update").run())
-            .and_then(|_| cmd!(shell, "git submodule update --init --recursive --remote").run()),
+        Arguments::Clean => in_workspace_with(&sh, |sh| cmd!(sh, "cargo clean").run()),
+        Arguments::Check => in_workspace_with(&sh, |sh| cmd!(sh, "cargo check --bins").run()),
+        Arguments::Update => in_workspace_with(&sh, |sh| cmd!(sh, "cargo update").run())
+            .and_then(|_| cmd!(sh, "git submodule update --init --recursive --remote").run()),
 
         Arguments::Target(target) => {
-            let mut config = shell
+            let mut config = sh
                 .read_file("src/.cargo/config.toml")?
                 .parse::<toml_edit::Document>()
                 .expect("invalid cargo config");
             config["build"]["target"] = toml_edit::value(target.to_string());
-            shell.write_file("src/.cargo/config.toml", config.to_string())
+            sh.write_file("src/.cargo/config.toml", config.to_string())
         }
 
-        Arguments::Build(build_options) => build::build(&shell, build_options),
-        Arguments::Run(run_options) => run::run(&shell, run_options),
+        Arguments::Build(build_options) => build::build(&sh, build_options),
+        Arguments::Run(run_options) => run::run(&sh, run_options),
     }
 }

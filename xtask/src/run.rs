@@ -86,10 +86,13 @@ pub struct Options {
 
     #[clap(flatten)]
     build_options: crate::build::Options,
+
+    #[arg(long)]
+    mock: bool,
 }
 
-pub fn run(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
-    crate::build::build(shell, options.build_options)?;
+pub fn run(sh: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
+    crate::build::build(sh, options.build_options)?;
 
     let qemu_exe_str = match options.cpu {
         CPU::Rv64 => "qemu-system-riscv64",
@@ -147,8 +150,8 @@ pub fn run(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Error>
         arguments.push("-nographic");
     }
 
-    cmd!(
-        shell,
+    let cmd = cmd!(
+        sh,
         "
         {qemu_exe_str}
             {arguments...}
@@ -159,8 +162,12 @@ pub fn run(shell: &xshell::Shell, options: Options) -> Result<(), xshell::Error>
             -net none
             -M smm=off
         "
-    )
-    .run()?;
+    );
 
-    Ok(())
+    if options.mock {
+        println!("cmd: {}", cmd.to_string());
+        Ok(())
+    } else {
+        cmd.run()
+    }
 }
