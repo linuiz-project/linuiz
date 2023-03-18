@@ -8,7 +8,7 @@ git = "https://github.com/linuiz-project/lza"
 [dependencies]
 clap = { version = "*", features = ["derive"] }
 walkdir = "*"
-xshell = "*"
+xshell = "=0.2.2"
 toml_edit = "*"
 
 [profile.dev]
