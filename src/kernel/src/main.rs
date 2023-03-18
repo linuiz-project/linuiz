@@ -123,7 +123,15 @@ static PARAMETERS: spin::Lazy<Parameters> = spin::Lazy::new(|| {
 #[doc(hidden)]
 #[allow(clippy::too_many_lines)]
 unsafe extern "C" fn _entry() -> ! {
-    log::set_max_level(log::LevelFilter::Trace);
+    #[cfg(debug_assertions)]
+    {
+        log::set_max_level(log::LevelFilter::Trace);
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        log::set_max_level(log::LevelFilter::Info);
+    }
+
     log::set_logger({
         static UART: spin::Lazy<crate::memory::io::Serial> = spin::Lazy::new(|| {
             // ### Safety: Function is called only once, when the `Lazy` is initialized.
@@ -193,17 +201,21 @@ unsafe extern "C" fn _entry() -> ! {
 
         debug!("Initializing kernel mapper...");
 
+        trace!("Kernel mapper frame: {:X?}", kmapper.root_frame);
+
         fn map_range_from(
             from_mapper: &Mapper,
             to_mapper: &mut Mapper,
             range: core::ops::Range<usize>,
             attributes: PageAttributes,
         ) {
+            trace!("{:X?} [{:?}]", range, attributes);
+
             for address in range.step_by(0x1000) {
                 to_mapper
                     .map(
                         Address::new_truncate(address),
-                        PageDepth::min() ,
+                        PageDepth::min(),
                         from_mapper.get_mapped_to(Address::new_truncate(address)).unwrap(),
                         false,
                         attributes,
@@ -297,7 +309,7 @@ unsafe extern "C" fn _entry() -> ! {
         }
 
         debug!("Switching to kernel page tables...");
-        // ### Safety: Kernel mapper has mapped all existing memory references, so commiting changes nothing from the software perspective.
+        // Safety: Kernel mappings should be identical to the bootloader mappings.
         unsafe { kmapper.commit_vmem_register() }.unwrap();
         debug!("Kernel has finalized control of page tables.");
     });

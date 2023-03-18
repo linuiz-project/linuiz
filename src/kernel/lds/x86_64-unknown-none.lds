@@ -46,13 +46,13 @@ SECTIONS
         *(.rodata .rodata.*)
         *(.eh_frame_hdr)
 
+        . = ALIGN(8);
+        PROVIDE(__eh_frame = .);
+        KEEP(*(.eh_frame .eh_frame.*))
+
         PROVIDE(__rodata_end = .);
     }
-    
 
-    . = ALIGN(8);
-    PROVIDE(__eh_frame = .);
-    .eh_frame           : { KEEP(*(.eh_frame)) *(.eh_frame.*) }
 
     /* bss sections */
     .bss                : ALIGN(CONSTANT(MAXPAGESIZE)) {
