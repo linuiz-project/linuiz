@@ -26,7 +26,6 @@ pub fn hhdm_address() -> Address<Virtual> {
 
         let offset =
             LIMINE_HHDM.get_response().get().expect("bootloader provided no higher-half direct mapping").offset;
-        info!("{:#X?}", offset);
 
         Address::new(offset as usize).expect("bootloader provided a non-canonical higher-half direct mapping address")
     })

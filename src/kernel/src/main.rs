@@ -74,8 +74,26 @@ mod time;
 use libkernel::LinkerSymbol;
 use libsys::Address;
 
-#[cfg(not(target_arch = "x86_64"))]
-getrandom::register_custom_getrandom!({ todo!() });
+getrandom::register_custom_getrandom!(get_random);
+fn get_random(buf: &mut [u8]) -> Result<(), getrandom::Error> {
+    // Safety: ?????
+    let rdrand64 = || {
+        let mut val = 0;
+        (unsafe { core::arch::x86_64::_rdrand64_step(&mut val) } == 1).then_some(val)
+    };
+    // Safety: ?????
+    let rdseed64 = || {
+        let mut val = 0;
+        (unsafe { core::arch::x86_64::_rdseed64_step(&mut val) } == 1).then_some(val)
+    };
+
+    for chunk in buf.chunks_mut(core::mem::size_of::<u64>()) {
+        let val_bytes = rdrand64().or_else(|| rdseed64()).ok_or(getrandom::Error::UNSUPPORTED)?.to_ne_bytes();
+        chunk.copy_from_slice(&(val_bytes[..chunk.len()]));
+    }
+
+    Ok(())
+}
 
 pub static KERNEL_HANDLE: spin::Lazy<uuid::Uuid> = spin::Lazy::new(|| uuid::Uuid::new_v4());
 
@@ -201,7 +219,6 @@ unsafe extern "C" fn _entry() -> ! {
 
         debug!("Initializing kernel mapper...");
 
-
         fn map_range_from(
             from_mapper: &Mapper,
             to_mapper: &mut Mapper,
@@ -257,7 +274,7 @@ unsafe extern "C" fn _entry() -> ! {
             PageAttributes::RW | PageAttributes::GLOBAL,
         );
 
-    for entry in crate::boot::get_memory_map().unwrap() {
+        for entry in crate::boot::get_memory_map().unwrap() {
             let page_attributes = {
                 use limine::LimineMemoryMapEntryType;
 
