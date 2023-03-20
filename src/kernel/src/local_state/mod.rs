@@ -55,9 +55,11 @@ impl LocalState {
 fn get() -> &'static mut LocalState {
     #[cfg(target_arch = "x86_64")]
     {
-        // ### Safety: If MSR is not null, then the `LocalState` has been initialized.
-        unsafe { ((crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::read()) as *mut LocalState).as_mut() }
-            .unwrap()
+        // Safety: If MSR is not null, then the `LocalState` has been initialized.
+        match unsafe { (crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::read() as *mut LocalState).as_mut() } {
+            Some(local_state) => local_state,
+            None => panic!("kernel thread {} has not initialized local state", crate::cpu::read_id()),
+        }
     }
 }
 
@@ -117,7 +119,7 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
                 VirtAddr::from_ptr(
                     KMALLOC
                         .allocate(
-                            // ### Safety: Values provided are known-valid.
+                            // Safety: Values provided are known-valid.
                             unsafe { core::alloc::Layout::from_size_align_unchecked(pages.get() * 0x1000, 0x10) },
                         )
                         .unwrap()
@@ -204,7 +206,10 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
         },
     };
 
-    let local_state_ptr = TryBox::leak(TryBox::new_in(local_state, &*crate::memory::PMM).unwrap()) as *mut LocalState;
+    let local_state_box =
+        TryBox::new_in(local_state, &*crate::memory::PMM).expect("failed to allocate space for local state");
+    let local_state_ptr = TryBox::leak(local_state_box) as *mut LocalState;
+    trace!("Thread {} local state allocation: {:#X?}", core_id, local_state_ptr);
 
     #[cfg(target_arch = "x86_64")]
     crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::write(local_state_ptr.addr() as u64);

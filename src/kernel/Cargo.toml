@@ -32,13 +32,15 @@ log = { version = "*", default-features = false }
 num_enum = { version = "*", default-features = false }
 miniz_oxide = { version = "*", default-features = false }
 uuid = { version = "*", default-features = false, features = ["v4"] }
-getrandom = { version = "*", features = ["rdrand", "custom"] }
+getrandom = { version = "*", features = ["custom"] }
 limine = { version = "*", features = ["requests-section"] }
 bit_field = "*"
 bitflags = "*"
 paste = "*"
 rustc-demangle = "*"
 no-panic = "*"
+rand_core = "*"
+rand_pcg = "*"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 pic_8259 = { path = "../shared/pic_8259/" }

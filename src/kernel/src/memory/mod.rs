@@ -36,9 +36,9 @@ pub fn with_kmapper<T>(func: impl FnOnce(&mut Mapper) -> T) -> T {
 
     KERNEL_MAPPER
         .call_once(|| {
-            InterruptCell::new(Mutex::new(
-                Mapper::new(PageDepth::current()).expect("failed to create kernel space mapper"),
-            ))
+            debug!("Creating kernel-space address mapper.");
+            
+            InterruptCell::new(Mutex::new(Mapper::new(PageDepth::current()).unwrap()))
         })
         .with(|mapper| {
             let mut mapper = mapper.lock();

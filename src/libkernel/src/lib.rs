@@ -8,7 +8,6 @@ mod num;
 pub use num::*;
 
 pub mod elf;
-pub mod rand;
 
 extern "C" {
     pub type LinkerSymbol;
