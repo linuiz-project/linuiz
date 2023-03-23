@@ -6,13 +6,8 @@ use crate::{
     memory::{PageAttributes, PhysicalAllocator},
 };
 use alloc::collections::BTreeMap;
-use core::{
-    alloc::{Allocator, Layout},
-    num::NonZeroUsize,
-    ops::ControlFlow,
-    ptr::NonNull,
-};
-use libsys::{page_size, Address, Pow2Usize};
+use core::{alloc::Allocator, num::NonZeroUsize, ops::Range, ptr::NonNull};
+use libsys::{page_size, Address, Page};
 use spin::{Lazy, Mutex, RwLock};
 use try_alloc::vec::TryVec;
 use uuid::Uuid;
@@ -24,7 +19,7 @@ static ADDRESS_SPACES: InterruptCell<
 > = InterruptCell::new(Lazy::new(|| RwLock::new(BTreeMap::new_in(&*super::PMM))));
 
 pub fn register(uuid: Uuid, size: NonZeroUsize) -> Result<(), Error> {
-    let address_space = unsafe { AddressSpace::new_in(size, &*super::PMM).map_err(|_| Error) }?;
+    let address_space = unsafe { AddressSpace::new(size, &*super::PMM).map_err(|_| Error) }?;
 
     ADDRESS_SPACES.with(|address_spaces| {
         let mut guard = address_spaces.write();
@@ -91,121 +86,110 @@ impl From<PageAttributes> for MmapFlags {
     }
 }
 
+// TODO better error type for this class of functions
 #[derive(Debug, Clone, Copy)]
 pub struct Error;
 
-#[derive(Debug, Clone, Copy)]
-struct Region {
-    len: usize,
-    free: bool,
+#[repr(transparent)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Region(Range<usize>);
+
+impl Ord for Region {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.0.start.cmp(&other.0.start)
+    }
+}
+
+impl PartialOrd for Region {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        self.0.start.partial_cmp(&other.0.start)
+    }
 }
 
 pub struct AddressSpace<A: Allocator + Clone> {
-    regions: TryVec<Region, A>,
-    allocator: A,
+    free: TryVec<Region, A>,
+    used: TryVec<Region, A>,
     mapper: Mapper,
 }
 
 impl<A: Allocator + Clone> AddressSpace<A> {
-    pub unsafe fn new_in(size: NonZeroUsize, allocator: A) -> Result<Self, Error> {
-        let mut vec = TryVec::new_in(allocator.clone());
-        vec.push(Region { len: size.get(), free: true }).map_err(|_| Error)?;
+    pub unsafe fn new(size: NonZeroUsize, allocator: A) -> Result<Self, Error> {
+        let mut regions = TryVec::new_in(allocator.clone());
+        regions.push(Region(0..size.get())).map_err(|_| Error)?;
 
-        // TODO select the page depth to use, or take it from a parameter>
-        Ok(Self { regions: vec, allocator, mapper: Mapper::new(super::PageDepth::current()).ok_or(Error)? })
+        Ok(Self {
+            free: regions,
+            used: TryVec::new_in(allocator.clone()),
+            mapper: Mapper::new(super::PageDepth::current()).ok_or(Error)?,
+        })
     }
 
-    // TODO better error type for this function
     pub fn mmap(
         &mut self,
-        // TODO
-        // address: Option<Address<Virtual>>,
-        layout: Layout,
+        // TODO address: Option<Address<Page>>,
+        pages: NonZeroUsize,
         flags: MmapFlags,
     ) -> Result<NonNull<[u8]>, Error> {
-        let layout = Layout::from_size_align(layout.size(), core::cmp::max(layout.align(), page_size().get()))
-            .map_err(|_| Error)?;
-        // Safety: `Layout` does not allow `0` for alignments.
-        let layout_align = Pow2Usize::new(layout.align()).unwrap();
+        let size = pages.get() * page_size().get();
 
-        let search = self.regions.iter().try_fold((0usize, 0usize), |(index, address), region| {
-            let aligned_address = libsys::align_up(address, layout_align);
-            let aligned_padding = aligned_address - address;
-            let aligned_len = region.len.saturating_sub(aligned_padding);
+        assert!(size.is_power_of_two());
 
-            if aligned_len < layout.size() {
-                ControlFlow::Continue((index + 1, address + region.len))
-            } else {
-                ControlFlow::Break((index, address))
-            }
-        });
+        let search_index = self.free.iter().position(|region| region.0.len() >= size).ok_or(Error)?;
 
-        match search.break_value() {
-            None => Err(Error),
+        let used_range = {
+            let region = self.free.get_mut(search_index).unwrap();
+            let used_region_start = region.0.start;
+            let used_region_end = region.0.start + size;
+            let free_region_end = region.0.end;
+            // Update the free region's bounds to carve out the used region.
+            region.0 = used_region_end..free_region_end;
 
-            Some((mut index, address)) => {
-                let aligned_address = libsys::align_up(address, layout_align);
-                let aligned_padding = aligned_address - address;
+            used_region_start..used_region_end
+        };
+        // Push a clone of the new used region to used list.
+        self.used.push(Region(used_range.clone())).map_err(|_| Error)?;
 
-                if aligned_padding > 0 {
-                    if let Some(region) = self.regions.get_mut(index) && region.free {
-                        region.len += aligned_padding;
-                    } else {
-                        self.regions.insert(index, Region { len: aligned_padding, free: true }).map_err(|_| Error)?;
-                        index += 1;
-                    }
-                }
-
-                let remaining_len = {
-                    let region = self.regions.get_mut(index).ok_or(Error)?;
-                    region.len -= aligned_padding;
-                    region.free = false;
-
-                    let len = region.len;
-                    region.len = layout.size();
-                    len - region.len
-                };
-
-                if remaining_len > 0 {
-                    if let Some(region) = self.regions.get_mut(index.saturating_add(1)) && region.free {
-                        region.len += remaining_len;
-                    } else {
-                        self.regions.insert(index + 1, Region { len: remaining_len, free: true }).map_err(|_| Error)?;
-                    }
-                }
-
-                // Set up paging attributes based on provided mmap flags.
-                let mut attributes = {
-                    if flags.contains(MmapFlags::READ_EXECUTE) {
-                        PageAttributes::RX
-                    } else if flags.contains(MmapFlags::READ_WRITE) {
-                        PageAttributes::RW
-                    } else if flags.contains(MmapFlags::READ) {
-                        PageAttributes::RO
-                    } else {
-                        PageAttributes::empty()
-                    }
-                };
-                // Demand paging is the default, but optionally the user can specify front-loading the physical page allocations.
-                if !flags.contains(MmapFlags::NOT_DEMAND) {
-                    attributes.insert(PageAttributes::DEMAND);
-                }
-                // Finally, map all of the allocated pages in the virtual address space.
-                for page_base in (aligned_address..(aligned_address + layout.size())).step_by(page_size().get()) {
-                    let page = Address::new(page_base).ok_or(Error)?;
-                    self.mapper.auto_map(page, attributes).map_err(|_| Error)?;
-                }
-
-                NonNull::new(aligned_address as *mut u8)
-                    .map(|ptr| NonNull::slice_from_raw_parts(ptr, layout.size()))
-                    .ok_or(Error)
-            }
-        }
+        // Safety: Memory range was taken from the freelist, and so is guaranteed to be unused.
+        unsafe { self.mmap_exact_impl(used_range, flags) }
     }
 
-    pub fn demand_map(&mut self, address: Address<Virtual>) -> Result<(), Error> {
-        let page = Address::new_truncate(address.get());
-        // TODO we need to return the page size from `get_page_attributes` or something, so when we clear from a page fault, it clears huge pages too.
+    /// Internal function taking exact address range parameters to map a region of memory.
+    ///
+    /// ### Safety
+    ///
+    /// This function has next to no safety checks, and so should only be called when it is
+    /// known for certain that the provided memory range is valid for the mapping with the
+    /// provided memory map flags.
+    unsafe fn mmap_exact_impl(&mut self, range: Range<usize>, flags: MmapFlags) -> Result<NonNull<[u8]>, Error> {
+        // Set up paging attributes based on provided mmap flags.
+        let mut attributes = {
+            if flags.contains(MmapFlags::READ_EXECUTE) {
+                PageAttributes::RX
+            } else if flags.contains(MmapFlags::READ_WRITE) {
+                PageAttributes::RW
+            } else if flags.contains(MmapFlags::READ) {
+                PageAttributes::RO
+            } else {
+                PageAttributes::empty()
+            }
+        };
+
+        // Demand paging is the default, but optionally the user can specify front-loading the physical page allocations.
+        if !flags.contains(MmapFlags::NOT_DEMAND) {
+            attributes.insert(PageAttributes::DEMAND);
+        }
+
+        // Finally, map all of the allocated pages in the virtual address space.
+        for page_base in range.clone().step_by(page_size().get()) {
+            let page = Address::new(page_base).ok_or(Error)?;
+            self.mapper.auto_map(page, attributes).map_err(|_| Error)?;
+        }
+
+        NonNull::new(range.start as *mut u8).map(|ptr| NonNull::slice_from_raw_parts(ptr, range.len())).ok_or(Error)
+    }
+
+    /// Attempts to map a page to a real frame, only if the [`PageAttributes::DEMAND`] bit is set.
+    pub fn try_map_demand_page(&mut self, page: Address<Page>) -> Result<(), Error> {
         match self.mapper.get_page_attributes(page) {
             Some(mut attributes) if attributes.contains(PageAttributes::DEMAND) => {
                 self.mapper
@@ -218,9 +202,6 @@ impl<A: Allocator + Clone> AddressSpace<A> {
                         attributes
                     })
                     .unwrap();
-
-                // Safety: We know the page was just mapped, and contains no relevant memory.
-                unsafe { core::ptr::write_bytes(page.as_ptr(), 0, page_size().get()) };
 
                 Ok(())
             }

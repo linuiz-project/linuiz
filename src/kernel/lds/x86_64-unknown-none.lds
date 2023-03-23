@@ -6,6 +6,8 @@ ENTRY(_entry)
 /* Place kernel in the last 2GB of virtual memory. */
 KERN_BASE = 0xffffffff80000000;
 
+SEGMENT_ALIGN = CONSTANT(MAXPAGESIZE);
+
 SECTIONS
 {
     . = KERN_BASE + SIZEOF_HEADERS; 
@@ -30,7 +32,7 @@ SECTIONS
     .rela.plt           : { *(.rela.plt) *(.rela.iplt) }
 
     /* text sections */
-    .text               : ALIGN(CONSTANT(MAXPAGESIZE)) {
+    .text               : ALIGN(SEGMENT_ALIGN) {
         PROVIDE(__text_start = .);
 
         *(.plt) *(.iplt)
@@ -40,7 +42,7 @@ SECTIONS
     }
     
     /* rodata sections */
-    .rodata             : ALIGN(CONSTANT(MAXPAGESIZE)) {
+    .rodata             : ALIGN(SEGMENT_ALIGN) {
         PROVIDE(__rodata_start = .);
 
         *(.rodata .rodata.*)
@@ -55,7 +57,7 @@ SECTIONS
 
 
     /* bss sections */
-    .bss                : ALIGN(CONSTANT(MAXPAGESIZE)) {
+    .bss                : ALIGN(SEGMENT_ALIGN) {
         PROVIDE(__bss_start = .);
 
         KEEP(*(.gcc_except_table))
@@ -71,7 +73,7 @@ SECTIONS
     }
 
     /* data sections */
-    .data               : ALIGN(CONSTANT(MAXPAGESIZE)) {
+    .data               : ALIGN(SEGMENT_ALIGN) {
         PROVIDE(__data_start = .);
 
         *(.got.plt) *(.igot.plt)

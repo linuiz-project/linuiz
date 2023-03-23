@@ -77,15 +77,9 @@ impl Scheduler {
             cur_task.arch_context = *arch_context;
             // TODO cur_task.root_page_table_args = PagingRegister::read();
 
+            trace!("Reclaiming task: {:?}", cur_task.uuid());
             self.push_task(cur_task);
         }
-
-        // {
-        //     let mut waiting_tasks = WAITING_TASKS.lock();
-        //     if waiting_tasks.len() > 0 && let Some(new_task) = waiting_tasks.pop_front() {
-        //         self.push_task(new_task);
-        //     }
-        // }
 
         unsafe {
             if let Some(next_task) = self.pop_task() {
@@ -96,6 +90,7 @@ impl Scheduler {
                 // Set current page tables.
                 // TODO PagingRegister::write(&next_task.root_page_table_args);
 
+                trace!("SWitching task: {:?}", next_task.uuid());
                 self.cur_task = Some(next_task);
             } else {
                 let default_task = &self.idle_task;
@@ -106,6 +101,7 @@ impl Scheduler {
 
                 // Set current page tables.
                 // TODO PagingRegister::write(&default_task.root_page_table_args);
+                trace!("Switching idle task.");
             };
 
             crate::local_state::preemption_wait(core::num::NonZeroU16::new_unchecked(TIME_SLICE));

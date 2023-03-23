@@ -1,6 +1,8 @@
 use spin::Mutex;
 use uart::{Data, Uart};
 
+use crate::interrupts::InterruptCell;
+
 struct UartWriter(Uart<Data>);
 
 impl UartWriter {
@@ -50,7 +52,7 @@ impl core::fmt::Write for UartWriter {
     }
 }
 
-pub struct Serial(Mutex<UartWriter>);
+pub struct Serial(InterruptCell<Mutex<UartWriter>>);
 
 impl Serial {
     /// ### Safety
@@ -102,7 +104,7 @@ impl Serial {
                 | ModemControl::AUXILIARY_OUTPUT_2,
         );
 
-        Self(Mutex::new(UartWriter(uart)))
+        Self(InterruptCell::new(Mutex::new(UartWriter(uart))))
     }
 }
 
@@ -113,16 +115,15 @@ impl log::Log for Serial {
 
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
-            use core::fmt::Write;
-
             // TODO tell the time
             let ticks = 0;
             let whole_time = ticks / 1000;
             let frac_time = ticks % 1000;
+            self.0.with(|uart| {
+                use core::fmt::Write;
 
-            let mut uart = self.0.lock();
+                let mut uart = uart.lock();
 
-            crate::interrupts::without(|| {
                 uart.write_fmt(format_args!(
                     "[{whole_time:wwidth$}.{frac_time:0fwidth$}][{level}] {args}\n",
                     level = record.level(),
@@ -130,7 +131,7 @@ impl log::Log for Serial {
                     wwidth = 4,
                     fwidth = 3
                 ))
-                .ok()
+                .unwrap();
             });
         }
     }

@@ -38,6 +38,8 @@ pub(crate) struct LocalState {
     idt: Option<TryBox<crate::arch::x64::structures::idt::InterruptDescriptorTable>>,
     #[cfg(target_arch = "x86_64")]
     tss: TryBox<crate::arch::x64::structures::tss::TaskStateSegment>,
+
+    // TODO abstract this into some interrupt controller-esque structure
     #[cfg(target_arch = "x86_64")]
     apic: (apic::Apic, u64),
 }
@@ -224,16 +226,20 @@ pub unsafe fn begin_scheduling() {
     assert!(!local_state.scheduler.is_enabled());
     local_state.scheduler.enable();
 
-    // ### Safety: Value provided is non-zero, and enable/reload is expected / appropriate.
     #[cfg(target_arch = "x86_64")]
-    unsafe {
-        local_state.apic.0.get_timer().set_masked(false);
+    {
+        assert!(local_state.apic.0.get_timer().get_masked());
+
+        // Safety: Calling `begin_scheduling` implies this state change is expected.
+        unsafe {
+            local_state.apic.0.get_timer().set_masked(false);
+        }
     }
 
     trace!("Core #{} scheduled.", local_state.core_id);
 
-    // ### Safety: Value provided is non-zero.
-    preemption_wait(core::num::NonZeroU16::new_unchecked(1));
+    // Safety: Calling `begin_scheduling` implies this function is expected to be called.
+    unsafe { preemption_wait(core::num::NonZeroU16::MIN) };
 }
 
 /// ### Safety
@@ -261,7 +267,7 @@ pub unsafe fn preemption_wait(interval_wait: core::num::NonZeroU16) {
     {
         let (apic, timer_interval) = &get().apic;
         match apic.get_timer().get_mode() {
-            // ### Safety: Control flow expects timer initial count to be changed.
+            // Safety: Control flow expects timer initial count to be changed.
             apic::TimerMode::OneShot => unsafe {
                 apic.set_timer_initial_count((timer_interval * (interval_wait.get() as u64)) as u32)
             },
@@ -294,7 +300,7 @@ pub fn provide_exception<T: Into<Exception>>(exception: T) -> Result<(), T> {
     }
 }
 
-/// # Safety
+/// ### Safety
 ///
 /// Caller must ensure `do_func` is effectively stackless, since no stack cleanup will occur on an exception.
 pub unsafe fn do_catch<T>(do_func: impl FnOnce() -> T) -> Result<T, Exception> {

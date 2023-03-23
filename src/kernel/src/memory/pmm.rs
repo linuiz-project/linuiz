@@ -6,7 +6,7 @@ use core::{
     ptr::NonNull,
     sync::atomic::Ordering,
 };
-use libsys::page_size;
+use libsys::page_shift;
 use libsys::{Address, Frame};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -163,7 +163,7 @@ impl PhysicalMemoryManager<'_> {
         };
         let total_frames = total_memory / 0x1000;
 
-        let table_size_in_bytes = libsys::align_up(total_frames * core::mem::size_of::<FrameData>(), page_size());
+        let table_size_in_bytes = libsys::align_up(total_frames * core::mem::size_of::<FrameData>(), page_shift());
         let table_entry =
             memory_map.iter().find(|entry| entry.typ == FrameType::Generic && entry.len >= table_size_in_bytes)?;
         let table = unsafe {

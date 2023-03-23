@@ -8,6 +8,8 @@
 mod macros;
 
 mod address;
+use core::num::NonZeroU32;
+
 pub use address::*;
 
 mod constants;
@@ -50,8 +52,8 @@ impl Pow2Usize {
 }
 
 #[inline]
-pub const fn align_up(value: usize, alignment: Pow2Usize) -> usize {
-    (value.wrapping_neg() & alignment.get().wrapping_neg()).wrapping_neg()
+pub const fn align_up(value: usize, alignment_bits: NonZeroU32) -> usize {
+    (value.wrapping_neg() & (1usize << alignment_bits.get()).wrapping_neg()).wrapping_neg()
 }
 
 #[inline]

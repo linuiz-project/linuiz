@@ -64,7 +64,7 @@ pub struct PageFaultHandlerError;
 #[repr(align(0x10))]
 pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandlerError> {
     crate::local_state::with_address_space(|addr_space| {
-        addr_space.demand_map(address).map_err(|_| PageFaultHandlerError)
+        addr_space.try_map_demand_page(Address::new_truncate(address.get())).map_err(|_| PageFaultHandlerError)
     })
     .ok_or(PageFaultHandlerError)
     .flatten()
