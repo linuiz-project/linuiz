@@ -168,7 +168,7 @@ impl<A: Allocator + Clone> AddressSpace<A> {
     }
 
     /// Attempts to map a page to a real frame, only if the [`PageAttributes::DEMAND`] bit is set.
-    pub fn try_revive_demanded_page(&mut self, page: Address<Page>) -> Result<(), Error> {
+    pub fn try_demand(&mut self, page: Address<Page>) -> Result<(), Error> {
         self.mapper
             .get_page_attributes(page)
             .filter(|attributes| attributes.contains(PageAttributes::DEMAND))

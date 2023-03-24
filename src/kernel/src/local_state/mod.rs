@@ -282,7 +282,7 @@ pub unsafe fn set_preemption_wait(interval_wait: core::num::NonZeroU16) {
 }
 
 /// Allows safely running a function that manipulates the current task's address space, or returns `None` if there's no current task.
-pub fn with_address_space<T>(with_fn: impl FnOnce(&mut AddressSpace<PhysicalAllocator>) -> T) -> Option<T> {
+pub fn with_current_address_space<T>(with_fn: impl FnOnce(&mut AddressSpace<PhysicalAllocator>) -> T) -> Option<T> {
     get().scheduler.current_task().map(|task| crate::interrupts::without(|| task.with_address_space(with_fn)))
 }
 

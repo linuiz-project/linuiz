@@ -7,7 +7,7 @@ use num_enum::TryFromPrimitive;
 
 /// Delivery mode for IPIs.
 #[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
 pub enum InterruptDeliveryMode {
     Fixed = 0b000,
     LowPriority = 0b001,
@@ -59,21 +59,23 @@ pub struct PageFaultHandlerError;
 
 /// ### Safety
 ///
-/// Do not call this function.
+/// This function should only be called in the case of passing context to handle a page fault.
+/// Calling this function outside the context of a page fault is undefined behaviour.
 #[no_mangle]
 #[repr(align(0x10))]
 pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandlerError> {
-    crate::local_state::with_address_space(|addr_space| {
-        addr_space.try_revive_demanded_page(Address::new_truncate(address.get())).map_err(|_| PageFaultHandlerError)
+    crate::local_state::with_current_address_space(|addr_space| {
+        addr_space.try_demand(Address::new_truncate(address.get())).ok()
     })
-    .ok_or(PageFaultHandlerError)
     .flatten()
+    .ok_or(PageFaultHandlerError)
 }
 
 /// ### Safety
 ///
-/// Do not call this function.
-#[no_mangle]
+/// This function should only be called in the case of passing context to handle an interrupt.
+/// Calling this function outside the context of an interrupt is undefined behaviour.
+#[doc(hidden)]
 #[repr(align(0x10))]
 pub unsafe fn irq_handler(irq_vector: u64, ctrl_flow_context: &mut ControlContext, arch_context: &mut ArchContext) {
     match Vector::try_from(irq_vector) {
@@ -86,6 +88,7 @@ pub unsafe fn irq_handler(irq_vector: u64, ctrl_flow_context: &mut ControlContex
     crate::local_state::end_of_interrupt();
 }
 
+/// Provides access to the contained instance of `T`, ensuring interrupts are disabled while it is borrowed.
 pub struct InterruptCell<T>(T);
 
 impl<T> InterruptCell<T> {
