@@ -181,15 +181,12 @@ impl Mapper {
 
     /// ### Safety
     ///
-    /// Caller must ensure that committing this mapper's parameters to the virtual memory register will
-    ///         not result in undefined behaviour.
-    pub unsafe fn commit_vmem_register(&self) -> Result<(), MapperError> {
+    /// Caller must ensure that switching the currently active address space will not cause undefined behaviour.
+    pub unsafe fn swap_into(&self) {
         #[cfg(target_arch = "x86_64")]
         crate::arch::x64::registers::control::CR3::write(
             self.root_frame,
             crate::arch::x64::registers::control::CR3Flags::empty(),
         );
-
-        Ok(())
     }
 }

@@ -306,7 +306,7 @@ unsafe extern "C" fn _entry() -> ! {
 
         debug!("Switching to kernel page tables...");
         // Safety: Kernel mappings should be identical to the bootloader mappings.
-        unsafe { kmapper.commit_vmem_register() }.unwrap();
+        unsafe { kmapper.swap_into() };
         debug!("Kernel has finalized control of page tables.");
     });
 
@@ -410,7 +410,7 @@ unsafe extern "C" fn _entry() -> ! {
                         crate::cpu::setup();
 
                         // Safety: All currently referenced memory should also be mapped in the kernel page tables.
-                        crate::memory::with_kmapper(|kmapper| unsafe { kmapper.commit_vmem_register().unwrap() });
+                        crate::memory::with_kmapper(|kmapper| unsafe { kmapper.swap_into() });
 
                         // Safety: Function is called only once for this core.
                         unsafe { crate::kernel_thread_setup(info.read().lapic_id) }

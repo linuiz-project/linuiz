@@ -1,48 +1,17 @@
 mod mapper;
 pub use mapper::*;
 
-use crate::{
-    interrupts::InterruptCell,
-    memory::{PageAttributes, PhysicalAllocator},
-};
-use alloc::collections::BTreeMap;
-use core::{alloc::Allocator, num::NonZeroUsize, ops::Range, ptr::NonNull};
-use libsys::{page_size, Address, Page};
-use spin::{Lazy, Mutex, RwLock};
+use crate::memory::PageAttributes;
+use core::{alloc::Allocator, cmp::Ordering, num::NonZeroUsize, ops::Range, ptr::NonNull};
+use libsys::{page_size, Address, Page, Virtual};
 use try_alloc::vec::TryVec;
-use uuid::Uuid;
-
-use super::Virtual;
-
-static ADDRESS_SPACES: InterruptCell<
-    Lazy<RwLock<BTreeMap<Uuid, Mutex<AddressSpace<PhysicalAllocator>>, PhysicalAllocator>>>,
-> = InterruptCell::new(Lazy::new(|| RwLock::new(BTreeMap::new_in(&*super::PMM))));
-
-pub fn register(uuid: Uuid, size: NonZeroUsize) -> Result<(), Error> {
-    let address_space = unsafe { AddressSpace::new(size, &*super::PMM).map_err(|_| Error) }?;
-
-    ADDRESS_SPACES.with(|address_spaces| {
-        let mut guard = address_spaces.write();
-        guard.try_insert(uuid, Mutex::new(address_space)).map(|_| ()).map_err(|_| Error)
-    })
-}
-
-pub fn with<T>(uuid: &Uuid, func: impl FnOnce(&mut AddressSpace<PhysicalAllocator>) -> T) -> Option<T> {
-    ADDRESS_SPACES.with(|address_spaces| {
-        let address_spaces = address_spaces.read();
-        address_spaces.get(uuid).map(|address_space| {
-            let mut address_space = address_space.lock();
-            func(&mut *address_space)
-        })
-    })
-}
 
 bitflags::bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct MmapFlags : u16 {
-        const READ = 0b1;
-        const READ_WRITE = 0b11;
-        const READ_EXECUTE = 0b111;
-        const NOT_DEMAND = 0b1000;
+        const READ_EXECUTE  = 1 << 1;
+        const READ_WRITE    = 1 << 2;
+        const NOT_DEMAND    = 1 << 8;
     }
 }
 
@@ -50,39 +19,21 @@ impl From<MmapFlags> for PageAttributes {
     fn from(flags: MmapFlags) -> Self {
         let mut attributes = PageAttributes::empty();
 
-        if !flags.contains(MmapFlags::NOT_DEMAND) {
-            attributes.insert(PageAttributes::DEMAND);
-        }
-
-        if flags.contains(MmapFlags::READ_EXECUTE) {
-            attributes.insert(PageAttributes::RX);
-        } else if flags.contains(MmapFlags::READ_WRITE) {
+        // RW and RX are mutually exclusive, so always else-if the bit checks.
+        if flags.contains(MmapFlags::READ_WRITE) {
             attributes.insert(PageAttributes::RW);
-        } else if flags.contains(MmapFlags::READ) {
+        } else if flags.contains(MmapFlags::READ_EXECUTE) {
+            attributes.insert(PageAttributes::RX);
+        } else {
             attributes.insert(PageAttributes::RO);
         }
 
+        if !flags.contains(MmapFlags::NOT_DEMAND) {
+            attributes.remove(PageAttributes::PRESENT);
+            attributes.insert(PageAttributes::DEMAND);
+        }
+
         attributes
-    }
-}
-
-impl From<PageAttributes> for MmapFlags {
-    fn from(attributes: PageAttributes) -> Self {
-        let mut flags = MmapFlags::empty();
-
-        if !attributes.contains(PageAttributes::DEMAND) {
-            flags.insert(MmapFlags::NOT_DEMAND)
-        }
-
-        if attributes.contains(PageAttributes::RX) {
-            flags.insert(MmapFlags::READ_EXECUTE);
-        } else if attributes.contains(PageAttributes::RW) {
-            flags.insert(MmapFlags::READ_WRITE);
-        } else if attributes.contains(PageAttributes::RO) {
-            flags.insert(MmapFlags::READ);
-        }
-
-        flags
     }
 }
 
@@ -91,18 +42,51 @@ impl From<PageAttributes> for MmapFlags {
 pub struct Error;
 
 #[repr(transparent)]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 struct Region(Range<usize>);
 
+impl Eq for Region {}
+impl PartialEq for Region {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.contains(&other.0.start) || self.0.contains(&other.0.end)
+    }
+}
+
 impl Ord for Region {
-    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        self.0.start.cmp(&other.0.start)
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self.0.start.cmp(&other.0.start), self.0.end.cmp(&other.0.end)) {
+            (Ordering::Greater, Ordering::Greater) => Ordering::Less,
+            (Ordering::Less, Ordering::Less) => Ordering::Greater,
+            _ => Ordering::Equal,
+        }
     }
 }
 
 impl PartialOrd for Region {
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        self.0.start.partial_cmp(&other.0.start)
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Region {
+    pub fn new(start: Address<Page>, end: Address<Page>) -> Self {
+        Self(start.get().get()..end.get().get())
+    }
+
+    pub fn start(&self) -> Address<Page> {
+        Address::new_truncate(self.0.start)
+    }
+
+    pub fn end(&self) -> Address<Page> {
+        Address::new_truncate(self.0.end)
+    }
+
+    pub fn size(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn contains(&self, address: Address<Virtual>) -> bool {
+        self.0.contains(&address.get())
     }
 }
 
@@ -113,12 +97,12 @@ pub struct AddressSpace<A: Allocator + Clone> {
 }
 
 impl<A: Allocator + Clone> AddressSpace<A> {
-    pub unsafe fn new(size: NonZeroUsize, allocator: A) -> Result<Self, Error> {
-        let mut regions = TryVec::new_in(allocator.clone());
-        regions.push(Region(0..size.get())).map_err(|_| Error)?;
+    pub fn new(size: NonZeroUsize, allocator: A) -> Result<Self, Error> {
+        let mut free = TryVec::new_in(allocator.clone());
+        free.push(Region(0..size.get())).map_err(|_| Error)?;
 
         Ok(Self {
-            free: regions,
+            free,
             used: TryVec::new_in(allocator.clone()),
             mapper: Mapper::new(super::PageDepth::current()).ok_or(Error)?,
         })
@@ -131,26 +115,29 @@ impl<A: Allocator + Clone> AddressSpace<A> {
         flags: MmapFlags,
     ) -> Result<NonNull<[u8]>, Error> {
         let size = pages.get() * page_size().get();
-
         assert!(size.is_power_of_two());
 
-        let search_index = self.free.iter().position(|region| region.0.len() >= size).ok_or(Error)?;
+        let (found_index, found_region) = self
+            .free
+            .iter()
+            .enumerate()
+            .find_map(|(index, region)| (region.size() >= size).then_some((index, region.clone())))
+            .ok_or(Error)?;
 
-        let used_range = {
-            let region = self.free.get_mut(search_index).unwrap();
-            let used_region_start = region.0.start;
-            let used_region_end = region.0.start + size;
-            let free_region_end = region.0.end;
-            // Update the free region's bounds to carve out the used region.
-            region.0 = used_region_end..free_region_end;
-
-            used_region_start..used_region_end
-        };
-        // Push a clone of the new used region to used list.
-        self.used.push(Region(used_range.clone())).map_err(|_| Error)?;
+        let new_free_start = Address::new(found_region.start().get().get() + size).unwrap();
+        let new_used = Region::new(found_region.start(), new_free_start);
+        let new_free = Region::new(new_free_start, found_region.end());
 
         // Safety: Memory range was taken from the freelist, and so is guaranteed to be unused.
-        unsafe { self.mmap_exact_impl(used_range, flags) }
+        let memory_ptr = unsafe { self.mmap_exact_impl(new_used.start(), new_used.end(), flags)? };
+
+        // Replace old free region with updated bounds.
+        self.free[found_index] = new_free;
+
+        let sorted_index = self.used.binary_search(&new_used).expect("overlapping memory mapped regions detected");
+        self.used.insert(sorted_index, new_used).map_err(|_| Error)?;
+
+        Ok(memory_ptr)
     }
 
     /// Internal function taking exact address range parameters to map a region of memory.
@@ -160,38 +147,30 @@ impl<A: Allocator + Clone> AddressSpace<A> {
     /// This function has next to no safety checks, and so should only be called when it is
     /// known for certain that the provided memory range is valid for the mapping with the
     /// provided memory map flags.
-    unsafe fn mmap_exact_impl(&mut self, range: Range<usize>, flags: MmapFlags) -> Result<NonNull<[u8]>, Error> {
-        // Set up paging attributes based on provided mmap flags.
-        let mut attributes = {
-            if flags.contains(MmapFlags::READ_EXECUTE) {
-                PageAttributes::RX
-            } else if flags.contains(MmapFlags::READ_WRITE) {
-                PageAttributes::RW
-            } else if flags.contains(MmapFlags::READ) {
-                PageAttributes::RO
-            } else {
-                PageAttributes::empty()
-            }
-        };
-
-        // Demand paging is the default, but optionally the user can specify front-loading the physical page allocations.
-        if !flags.contains(MmapFlags::NOT_DEMAND) {
-            attributes.insert(PageAttributes::DEMAND);
-        }
-
+    unsafe fn mmap_exact_impl(
+        &mut self,
+        start: Address<Page>,
+        end: Address<Page>,
+        flags: MmapFlags,
+    ) -> Result<NonNull<[u8]>, Error> {
+        let address_range = start.get().get()..end.get().get();
         // Finally, map all of the allocated pages in the virtual address space.
-        for page_base in range.clone().step_by(page_size().get()) {
+        for page_base in address_range.step_by(page_size().get()) {
             let page = Address::new(page_base).ok_or(Error)?;
-            self.mapper.auto_map(page, attributes).map_err(|_| Error)?;
+            self.mapper.auto_map(page, PageAttributes::from(flags)).map_err(|_| Error)?;
         }
 
-        NonNull::new(range.start as *mut u8).map(|ptr| NonNull::slice_from_raw_parts(ptr, range.len())).ok_or(Error)
+        NonNull::new(start.as_ptr())
+            .map(|ptr| NonNull::slice_from_raw_parts(ptr, end.get().get() - start.get().get()))
+            .ok_or(Error)
     }
 
     /// Attempts to map a page to a real frame, only if the [`PageAttributes::DEMAND`] bit is set.
-    pub fn try_map_demand_page(&mut self, page: Address<Page>) -> Result<(), Error> {
-        match self.mapper.get_page_attributes(page) {
-            Some(mut attributes) if attributes.contains(PageAttributes::DEMAND) => {
+    pub fn try_revive_demanded_page(&mut self, page: Address<Page>) -> Result<(), Error> {
+        self.mapper
+            .get_page_attributes(page)
+            .filter(|attributes| attributes.contains(PageAttributes::DEMAND))
+            .map(|mut attributes| {
                 self.mapper
                     .auto_map(page, {
                         // remove demand bit ...
@@ -201,16 +180,19 @@ impl<A: Allocator + Clone> AddressSpace<A> {
                         // ... return attributes
                         attributes
                     })
-                    .unwrap();
-
-                Ok(())
-            }
-
-            _ => Err(Error),
-        }
+                    .unwrap()
+            })
+            .ok_or(Error)
     }
 
     pub fn is_mmapped(&self, address: Address<Virtual>) -> bool {
         self.mapper.is_mapped(Address::new_truncate(address.get()), None)
+    }
+
+    /// ### Safety
+    ///
+    /// Caller must ensure that switching the currently active address space will not cause undefined behaviour.
+    pub unsafe fn swap_into(&self) {
+        self.mapper.swap_into()
     }
 }

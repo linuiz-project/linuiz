@@ -67,44 +67,51 @@ impl Scheduler {
         ctrl_flow_context: &mut crate::cpu::ControlContext,
         arch_context: &mut crate::cpu::ArchContext,
     ) {
-        const TIME_SLICE: u16 = 5;
-
         debug_assert!(!crate::interrupts::are_enabled());
 
         // Move the current task, if any, back into the scheduler queue.
         if let Some(mut cur_task) = self.cur_task.take() {
             cur_task.ctrl_flow_context = *ctrl_flow_context;
             cur_task.arch_context = *arch_context;
-            // TODO cur_task.root_page_table_args = PagingRegister::read();
 
             trace!("Reclaiming task: {:?}", cur_task.uuid());
             self.push_task(cur_task);
         }
 
+        // Pop a new task from the task queue, or simply switch in the idle task.
+        if let Some(next_task) = self.pop_task() {
+            trace!("Switching task: {:?}", next_task.uuid());
+
+            *ctrl_flow_context = next_task.ctrl_flow_context;
+            *arch_context = next_task.arch_context;
+            next_task.with_address_space(|address_space| {
+                // Safety: New task requires its own address space.
+                unsafe { address_space.swap_into() }
+            });
+
+            trace!("Switched task: {:?}", next_task.uuid());
+
+            self.cur_task = Some(next_task);
+        } else {
+            trace!("Switching idle task.");
+
+            let default_task = &self.idle_task;
+            *ctrl_flow_context = default_task.ctrl_flow_context;
+            *arch_context = default_task.arch_context;
+            default_task.with_address_space(|address_space| {
+                // Safety: New task requires its own address space.
+                unsafe { address_space.swap_into() }
+            });
+
+            trace!("Switched idle task.");
+        };
+
+        // TODO have some kind of queue of preemption waits, to ensure we select the shortest one.
+        // Safety: Just having switched tasks, no preemption wait should supercede this one.
         unsafe {
-            if let Some(next_task) = self.pop_task() {
-                // Modify interrupt contexts (usually, the registers).
-                *ctrl_flow_context = next_task.ctrl_flow_context;
-                *arch_context = next_task.arch_context;
+            const TIME_SLICE: core::num::NonZeroU16 = core::num::NonZeroU16::new(5).unwrap();
 
-                // Set current page tables.
-                // TODO PagingRegister::write(&next_task.root_page_table_args);
-
-                trace!("SWitching task: {:?}", next_task.uuid());
-                self.cur_task = Some(next_task);
-            } else {
-                let default_task = &self.idle_task;
-
-                // Modify interrupt contexts (usually, the registers).
-                *ctrl_flow_context = default_task.ctrl_flow_context;
-                *arch_context = default_task.arch_context;
-
-                // Set current page tables.
-                // TODO PagingRegister::write(&default_task.root_page_table_args);
-                trace!("Switching idle task.");
-            };
-
-            crate::local_state::preemption_wait(core::num::NonZeroU16::new_unchecked(TIME_SLICE));
+            crate::local_state::set_preemption_wait(TIME_SLICE);
         }
     }
 }

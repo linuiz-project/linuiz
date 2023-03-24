@@ -239,7 +239,7 @@ pub unsafe fn begin_scheduling() {
     trace!("Core #{} scheduled.", local_state.core_id);
 
     // Safety: Calling `begin_scheduling` implies this function is expected to be called.
-    unsafe { preemption_wait(core::num::NonZeroU16::MIN) };
+    unsafe { set_preemption_wait(core::num::NonZeroU16::MIN) };
 }
 
 /// ### Safety
@@ -262,7 +262,7 @@ pub unsafe fn end_of_interrupt() {
 /// ### Safety
 ///
 /// Caller must ensure that setting a new preemption wait will not cause undefined behaviour.
-pub unsafe fn preemption_wait(interval_wait: core::num::NonZeroU16) {
+pub unsafe fn set_preemption_wait(interval_wait: core::num::NonZeroU16) {
     #[cfg(target_arch = "x86_64")]
     {
         let (apic, timer_interval) = &get().apic;
@@ -283,7 +283,7 @@ pub unsafe fn preemption_wait(interval_wait: core::num::NonZeroU16) {
 
 /// Allows safely running a function that manipulates the current task's address space, or returns `None` if there's no current task.
 pub fn with_address_space<T>(with_fn: impl FnOnce(&mut AddressSpace<PhysicalAllocator>) -> T) -> Option<T> {
-    get().scheduler.current_task().and_then(|task| crate::memory::address_space::with(&task.uuid(), with_fn))
+    get().scheduler.current_task().map(|task| crate::interrupts::without(|| task.with_address_space(with_fn)))
 }
 
 pub fn provide_exception<T: Into<Exception>>(exception: T) -> Result<(), T> {

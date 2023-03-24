@@ -1,6 +1,7 @@
 use core::num::NonZeroUsize;
 
-use crate::memory::Stack;
+use crate::memory::{address_space::AddressSpace, PhysicalAllocator, Stack};
+use spin::Mutex;
 use uuid::Uuid;
 
 type EntryPoint = fn() -> u32;
@@ -12,6 +13,7 @@ pub struct Task {
     last_run: u32,
     stack: Stack,
     //pcid: Option<PCID>,
+    address_space: Mutex<AddressSpace<PhysicalAllocator>>,
     pub ctrl_flow_context: crate::cpu::ControlContext,
     pub arch_context: crate::cpu::ArchContext,
 }
@@ -21,20 +23,17 @@ unsafe impl Send for Task {}
 
 impl Task {
     pub fn new(priority: u8, entry: EntryPoint, stack: Stack, arch_context: crate::cpu::ArchContext) -> Self {
-        let uuid = uuid::Uuid::new_v4();
-
-        // Register the address space for this task.
-        // TODO somehow choose the size of the address space in a meaningful way?
-        crate::memory::address_space::register(uuid, NonZeroUsize::new((1 << 48) - 1).unwrap()).unwrap();
-
         // Safety: Stack pointer is valid for its length.
         let sp = unsafe { stack.as_ptr().add(stack.len() & !0xF).addr() } as u64;
 
         Self {
-            uuid,
+            uuid: uuid::Uuid::new_v4(),
             prio: priority,
             last_run: 0,
             stack,
+            address_space: Mutex::new(
+                AddressSpace::new(NonZeroUsize::new((1 << 48) - 1).unwrap(), &*crate::memory::PMM).unwrap(),
+            ),
             ctrl_flow_context: crate::cpu::ControlContext { ip: entry as usize as u64, sp },
             arch_context,
         }
@@ -55,6 +54,11 @@ impl Task {
     #[inline]
     pub const fn last_run(&self) -> u32 {
         self.last_run
+    }
+
+    pub fn with_address_space<T>(&self, with_fn: impl FnOnce(&mut AddressSpace<PhysicalAllocator>) -> T) -> T {
+        let mut address_space = self.address_space.lock();
+        with_fn(&mut *address_space)
     }
 }
 
