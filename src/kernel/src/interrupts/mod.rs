@@ -95,19 +95,12 @@ impl<T> InterruptCell<T> {
     }
 
     #[inline]
-    pub fn set(&mut self, value: T) {
-        self.0 = value;
-    }
-
-    #[inline]
     pub fn with<U>(&self, func: impl FnOnce(&T) -> U) -> U {
-        let value_ref = &self.0;
-        without(|| func(value_ref))
+        without(|| func(&self.0))
     }
 
     #[inline]
     pub fn with_mut<U>(&mut self, func: impl FnOnce(&mut T) -> U) -> U {
-        let value_mut = &mut self.0;
-        without(|| func(value_mut))
+        without(|| func(&mut self.0))
     }
 }

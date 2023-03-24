@@ -1,12 +1,11 @@
 use spin::Mutex;
 use uart::{Data, Uart};
-
 use crate::interrupts::InterruptCell;
 
 struct UartWriter(Uart<Data>);
 
 impl UartWriter {
-    fn write_bytes(&mut self, bytes: core::str::Bytes) {
+    fn write_bytes(&mut self, bytes: impl Iterator<Item = u8>) {
         for (index, byte) in bytes.enumerate() {
             if (index % 14) == 0 {
                 while !self.0.read_line_status().contains(uart::LineStatus::TRANSMIT_EMPTY_IDLE) {
@@ -40,7 +39,7 @@ impl core::fmt::Write for UartWriter {
             }
 
             self.0.write_data({
-                let mut buffer = [0u8; 1];
+                let mut buffer = [0u8; 4];
                 c.encode_utf8(&mut buffer);
                 buffer[0]
             });
