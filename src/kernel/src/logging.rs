@@ -12,7 +12,7 @@ impl log::Log for Serial {
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
             // TODO tell the time
-            let ticks = 0;
+            let ticks = 1;
             let whole_time = ticks / 1000;
             let frac_time = ticks % 1000;
             self.0.with(|uart| {

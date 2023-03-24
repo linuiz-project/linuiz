@@ -76,6 +76,11 @@ impl Scheduler {
 
             trace!("Reclaiming task: {:?}", cur_task.uuid());
             self.push_task(cur_task);
+        } else {
+            self.idle_task.ctrl_flow_context = *ctrl_flow_context;
+            self.idle_task.arch_context = *arch_context;
+
+            trace!("Reclaiming idle task.");
         }
 
         // Pop a new task from the task queue, or simply switch in the idle task.
