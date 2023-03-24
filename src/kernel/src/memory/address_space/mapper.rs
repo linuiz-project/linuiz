@@ -189,4 +189,13 @@ impl Mapper {
             crate::arch::x64::registers::control::CR3Flags::empty(),
         );
     }
+
+    pub fn view_root_page_table<'a>(&'a self) -> &'a [PageTableEntry; const { libsys::table_index_size().get() }] {
+        // Safety: Root frame is guaranteed to be valid within the HHDM.
+        let table_ptr = unsafe { crate::memory::hhdm_address().as_ptr().add(self.root_frame.get().get()).cast() };
+        // Safety: Root frame is guaranteed to be valid for PTEs for the length of the table index size.
+        let table = unsafe { core::slice::from_raw_parts(table_ptr, libsys::table_index_size().get()) };
+        // Safety: Table was created to match the size required by return type.
+        unsafe { table.try_into().unwrap_unchecked() }
+    }
 }

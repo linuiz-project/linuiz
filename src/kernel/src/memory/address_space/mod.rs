@@ -104,7 +104,9 @@ impl<A: Allocator + Clone> AddressSpace<A> {
         Ok(Self {
             free,
             used: TryVec::new_in(allocator.clone()),
-            mapper: Mapper::new(super::PageDepth::current()).ok_or(Error)?,
+            mapper: unsafe {
+                Mapper::new_unsafe(super::PageDepth::current(), super::new_kmapped_page_table().ok_or(Error)?)
+            },
         })
     }
 

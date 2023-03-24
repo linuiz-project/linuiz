@@ -2,7 +2,7 @@ use super::hhdm_address;
 use core::{cmp::Ordering, fmt, ptr::NonNull};
 use libsys::{
     mem::{InteriorRef, Mut, Ref},
-    page_shift, page_size, table_index_mask, table_index_shift, Address, Frame, Page,
+    page_shift, page_size, table_index_mask, table_index_shift, table_index_size, Address, Frame, Page,
 };
 
 #[repr(transparent)]
@@ -296,7 +296,7 @@ impl<RefKind: InteriorRef> PageTableEntryCell<'_, RefKind> {
             (page.get().get() >> index_shift >> page_shift().get()) & table_index_mask()
         };
 
-        debug_assert!(entry_index <= table_index_mask(), "entry index exceeds maximum");
+        debug_assert!(entry_index < table_index_size().get(), "entry index exceeds maximum");
 
         // Safety: Type requires that the internal entry has a valid frame.
         let table_ptr = unsafe { hhdm_address().as_ptr().add(self.get_frame().get().get()).cast::<PageTableEntry>() };
@@ -340,7 +340,7 @@ impl<'a> PageTableEntryCell<'a, Ref> {
                 if !sub_entry.is_present() {
                     Err(PagingError::NotMapped)
                 } else {
-                     unsafe { PageTableEntryCell::<Ref>::new(next_depth, sub_entry) }.with_entry(page, to_depth, with_fn)
+                    unsafe { PageTableEntryCell::<Ref>::new(next_depth, sub_entry) }.with_entry(page, to_depth, with_fn)
                 }
             }
 
@@ -381,8 +381,8 @@ impl<'a> PageTableEntryCell<'a, Mut> {
                 if !sub_entry.is_present() {
                     Err(PagingError::NotMapped)
                 } else {
-                     unsafe { PageTableEntryCell::<Mut>::new(next_depth, sub_entry) }
-                    .with_entry_mut(page, to_depth, with_fn)
+                    unsafe { PageTableEntryCell::<Mut>::new(next_depth, sub_entry) }
+                        .with_entry_mut(page, to_depth, with_fn)
                 }
             }
 

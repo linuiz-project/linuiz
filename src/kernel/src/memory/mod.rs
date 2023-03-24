@@ -1,7 +1,7 @@
 mod paging;
 
 pub mod io;
-use libsys::page_size;
+use libsys::{page_size, table_index_size};
 pub use paging::*;
 pub mod address_space;
 pub mod pmm;
@@ -31,19 +31,39 @@ pub fn hhdm_address() -> Address<Virtual> {
     })
 }
 
+pub unsafe fn hhdm_offset(frame: Address<Frame>) -> Option<Address<libsys::Page>> {
+    Address::new(hhdm_address().as_ptr().add(frame.get().get()).addr())
+}
+
 pub fn with_kmapper<T>(func: impl FnOnce(&mut Mapper) -> T) -> T {
     static KERNEL_MAPPER: Once<InterruptCell<Mutex<Mapper>>> = Once::new();
 
     KERNEL_MAPPER
         .call_once(|| {
             debug!("Creating kernel-space address mapper.");
-            
+
             InterruptCell::new(Mutex::new(Mapper::new(PageDepth::current()).unwrap()))
         })
         .with(|mapper| {
             let mut mapper = mapper.lock();
             func(&mut *mapper)
         })
+}
+
+pub fn new_kmapped_page_table() -> Option<Address<Frame>> {
+    let table_frame = PMM.next_frame().ok()?;
+
+    // Safety: Frame is provided by allocator, and so guaranteed to be within the HHDM, and is frame-sized.
+    let new_table = unsafe {
+        core::slice::from_raw_parts_mut(
+            hhdm_offset(table_frame).unwrap().as_ptr().cast::<PageTableEntry>(),
+            table_index_size().get(),
+        )
+    };
+    new_table.fill(PageTableEntry::empty());
+    with_kmapper(|kmapper| new_table.copy_from_slice(kmapper.view_root_page_table()));
+
+    Some(table_frame)
 }
 
 #[cfg(target_arch = "x86_64")]

@@ -1,4 +1,6 @@
+#[cfg(target_arch = "x86_64")]
 pub use x86_64::*;
+#[cfg(target_arch = "x86_64")]
 mod x86_64 {
     use crate::Pow2Usize;
     use core::num::NonZeroU32;
@@ -37,18 +39,15 @@ mod x86_64 {
 
     #[inline]
     fn paging_depth() -> u32 {
-        #[cfg(target_arch = "x86_64")]
-        {
-            const CR4_LA57_BIT: usize = 1 << 12;
+        const CR4_LA57_BIT: usize = 1 << 12;
 
-            let cr4: usize;
-            unsafe { core::arch::asm!("mov {}, cr4", out(reg) cr4, options(nomem, pure)) };
+        let cr4: usize;
+        unsafe { core::arch::asm!("mov {}, cr4", out(reg) cr4, options(nomem, pure)) };
 
-            if (cr4 & CR4_LA57_BIT) > 0 {
-                4
-            } else {
-                5
-            }
+        if (cr4 & CR4_LA57_BIT) > 0 {
+            4
+        } else {
+            5
         }
     }
 
