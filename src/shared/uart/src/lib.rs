@@ -1,10 +1,9 @@
 #![no_std]
 #![allow(dead_code)]
 
-use core::marker::PhantomData;
-
 use bit_field::BitField;
 use bitflags::bitflags;
+use core::marker::PhantomData;
 
 /// Address of the first COM port.
 /// This port is VERY likely to be at this address.
@@ -238,7 +237,8 @@ impl<M: Mode> Uart<M> {
         clear_rx: bool,
         clear_tx: bool,
         dma_mode_1: bool,
-        /* todo enable_64_byte_buffer */ size: FifoSize,
+        size: FifoSize,
+        /* todo enable_64_byte_buffer */
     ) {
         self.write(
             WriteOffset::FifoControl,
@@ -370,5 +370,92 @@ impl Uart<Data> {
         self.write(WriteOffset::LineControl, self.read_line_control().as_u8() | (1 << 7));
 
         Uart::<Configure>(self.0, PhantomData)
+    }
+}
+
+pub const UART_FIFO_QUEUE_LEN: usize = 14;
+
+pub struct UartWriter {
+    uart: Uart<Data>,
+    queue_accumulator: usize,
+}
+
+impl UartWriter {
+    /// ### Safety
+    ///
+    /// This function expects to be called only once per UART device.
+    pub unsafe fn new(mut uart: Uart<Data>) -> Self {
+        // Bring UART to a known state.
+        uart.write_line_control(LineControl::empty());
+        uart.write_interrupt_enable(InterruptEnable::empty());
+
+        // Configure the baud rate (tx/rx speed).
+        let mut uart = uart.configure_mode();
+        uart.set_baud(Baud::B115200);
+        let mut uart = uart.data_mode();
+
+        // Configure total UART state.
+        uart.write_line_control(LineControl {
+            bits: DataBits::Eight,
+            parity: ParityMode::None,
+            extra_stop: false,
+            break_signal: false,
+        });
+        uart.enable_fifo(true, true, false, FifoSize::Fourteen);
+
+        // Test the UART to ensure it's functioning correctly.
+        uart.write_model_control(
+            ModemControl::REQUEST_TO_SEND
+                | ModemControl::AUXILIARY_OUTPUT_1
+                | ModemControl::AUXILIARY_OUTPUT_2
+                | ModemControl::LOOPBACK_MODE,
+        );
+        uart.write_data(0x1F);
+        assert_eq!(uart.read_data(), 0x1F);
+
+        // Configure modem control for actual UART usage.
+        uart.write_model_control(
+            ModemControl::TERMINAL_READY
+                | ModemControl::REQUEST_TO_SEND
+                | ModemControl::AUXILIARY_OUTPUT_1
+                | ModemControl::AUXILIARY_OUTPUT_2,
+        );
+
+        Self { uart, queue_accumulator: 0 }
+    }
+
+    fn queue_index(&self) -> usize {
+        self.queue_accumulator % UART_FIFO_QUEUE_LEN
+    }
+
+    fn write_bytes(&mut self, bytes: impl Iterator<Item = u8>) {
+        bytes.for_each(|b| self.write_byte(b));
+    }
+
+    fn write_byte(&mut self, byte: u8) {
+        if self.queue_index() == UART_FIFO_QUEUE_LEN {
+            while !self.uart.read_line_status().contains(LineStatus::TRANSMIT_EMPTY_IDLE) {
+                core::hint::spin_loop();
+            }
+        } else {
+            while !self.uart.read_line_status().contains(LineStatus::TRANSMIT_EMPTY) {
+                core::hint::spin_loop();
+            }
+        }
+
+        self.uart.write_data(byte);
+        self.queue_accumulator += 1;
+    }
+}
+
+impl core::fmt::Write for UartWriter {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        s.chars().try_for_each(|c| self.write_char(c))
+    }
+
+    fn write_char(&mut self, c: char) -> core::fmt::Result {
+        self.write_byte(u8::try_from(c).unwrap_or(b'?'));
+
+        Ok(())
     }
 }
