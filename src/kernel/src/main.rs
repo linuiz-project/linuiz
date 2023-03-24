@@ -67,6 +67,7 @@ mod interrupts;
 mod local_state;
 mod memory;
 // mod modules;
+mod logging;
 mod panic;
 mod proc;
 mod rand;
@@ -121,24 +122,8 @@ static PARAMETERS: spin::Lazy<Parameters> = spin::Lazy::new(|| {
 #[doc(hidden)]
 #[allow(clippy::too_many_lines)]
 unsafe extern "C" fn _entry() -> ! {
-    #[cfg(debug_assertions)]
-    {
-        log::set_max_level(log::LevelFilter::Trace);
-    }
-    #[cfg(not(debug_assertions))]
-    {
-        log::set_max_level(log::LevelFilter::Info);
-    }
-
-    log::set_logger({
-        static UART: spin::Lazy<crate::memory::io::Serial> = spin::Lazy::new(|| {
-            // ### Safety: Function is called only once, when the `Lazy` is initialized.
-            unsafe { crate::memory::io::Serial::init() }
-        });
-
-        &*UART
-    })
-    .unwrap();
+    // Logging isn't set up, so we'll just spin loop if we fail to initialize it.
+    logging::init().unwrap_or_else(|_| crate::interrupts::wait_loop());
 
     /* misc. boot info */
     {
