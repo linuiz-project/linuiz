@@ -78,44 +78,7 @@ use libsys::Address;
 
 pub static KERNEL_HANDLE: spin::Lazy<uuid::Uuid> = spin::Lazy::new(|| uuid::Uuid::new_v4());
 
-#[derive(Debug, Clone, Copy)]
-pub struct Parameters {
-    pub smp: bool,
-    pub symbolinfo: bool,
-    pub low_memory: bool,
-}
-
-impl Default for Parameters {
-    fn default() -> Self {
-        Self { smp: true, symbolinfo: false, low_memory: false }
-    }
-}
-
-static PARAMETERS: spin::Lazy<Parameters> = spin::Lazy::new(|| {
-    crate::boot::get_kernel_file()
-        .and_then(|kernel_file| kernel_file.cmdline.to_str())
-        .and_then(|cmdline_cstr| cmdline_cstr.to_str().ok())
-        .map(|cmdline| {
-            let mut parameters = Parameters::default();
-
-            for parameter in cmdline.split(' ') {
-                match parameter.split_once(':') {
-                    Some(("smp", "on")) => parameters.smp = true,
-                    Some(("smp", "off")) => parameters.smp = false,
-
-                    None if parameter == "symbolinfo" => parameters.symbolinfo = true,
-                    None if parameter == "lomem" => parameters.low_memory = true,
-
-                    _ => warn!("Unhandled cmdline parameter: {:?}", parameter),
-                }
-            }
-
-            parameters
-        })
-        .unwrap_or_default()
-});
-
-/// Safety
+/// ### Safety
 ///
 /// Do not call this function.
 #[no_mangle]
@@ -123,7 +86,7 @@ static PARAMETERS: spin::Lazy<Parameters> = spin::Lazy::new(|| {
 #[allow(clippy::too_many_lines)]
 unsafe extern "C" fn _entry() -> ! {
     // Logging isn't set up, so we'll just spin loop if we fail to initialize it.
-    logging::init().unwrap_or_else(|_| crate::interrupts::wait_loop());
+    crate::logging::init().unwrap_or_else(|_| crate::interrupts::wait_loop());
 
     /* misc. boot info */
     {
@@ -165,8 +128,8 @@ unsafe extern "C" fn _entry() -> ! {
      * Memory
      */
 
-    memory::with_kmapper(|kmapper| {
-        use memory::{address_space::Mapper, hhdm_address, PageAttributes, PageDepth};
+    crate::memory::with_kmapper(|kmapper| {
+        use crate::memory::{address_space::Mapper, hhdm_address, PageAttributes, PageDepth};
 
         extern "C" {
             static __text_start: LinkerSymbol;
@@ -299,7 +262,7 @@ unsafe extern "C" fn _entry() -> ! {
     crate::acpi::init_interface();
 
     /* symbols */
-    if !PARAMETERS.low_memory {
+    if !crate::boot::PARAMETERS.low_memory {
         debug!("Parsing kernel symbols...");
 
         let (kernel_file_base, kernel_file_len) = {
@@ -390,7 +353,7 @@ unsafe extern "C" fn _entry() -> ! {
             for cpu_info in smp_response.cpus().iter_mut().filter(|info| info.lapic_id != bsp_lapic_id) {
                 trace!("Starting processor: ID P{}/L{}", cpu_info.processor_id, cpu_info.lapic_id);
 
-                cpu_info.goto_address = if PARAMETERS.smp {
+                cpu_info.goto_address = if crate::boot::PARAMETERS.smp {
                     extern "C" fn _smp_entry(info: *const limine::LimineSmpInfo) -> ! {
                         crate::cpu::setup();
 
@@ -398,7 +361,7 @@ unsafe extern "C" fn _entry() -> ! {
                         crate::memory::with_kmapper(|kmapper| unsafe { kmapper.swap_into() });
 
                         // Safety: Function is called only once for this core.
-                        unsafe { crate::kernel_thread_setup(info.read().lapic_id) }
+                        unsafe { kernel_thread_setup(info.read().lapic_id) }
                     }
 
                     _smp_entry

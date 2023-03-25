@@ -3,6 +3,10 @@ name = "kernel"
 version = "0.0.0"
 edition = "2021"
 
+[[bin]]
+path = "src/init.rs"
+name = "linuiz"
+
 [dependencies.port-rs]
 path = "../shared/port-rs/"
 [dependencies.uart]

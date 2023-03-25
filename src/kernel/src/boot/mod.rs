@@ -1,3 +1,6 @@
+mod params;
+pub use params::*;
+
 use core::sync::atomic::{AtomicBool, Ordering};
 use libsys::{Address, Virtual};
 
@@ -17,6 +20,8 @@ mod ignore {
             }
         });
 }
+
+
 
 pub const LIMINE_REV: u64 = 0;
 
@@ -84,3 +89,4 @@ pub unsafe fn reclaim_boot_memory() {
 
     BOOT_RECLAIM.store(true, Ordering::Release);
 }
+
