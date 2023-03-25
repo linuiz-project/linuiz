@@ -115,7 +115,7 @@ static PARAMETERS: spin::Lazy<Parameters> = spin::Lazy::new(|| {
         .unwrap_or_default()
 });
 
-/// ### Safety
+/// Safety
 ///
 /// Do not call this function.
 #[no_mangle]
@@ -308,7 +308,7 @@ unsafe extern "C" fn _entry() -> ! {
         };
 
         let kernel_elf = libkernel::elf::Elf::from_bytes(
-            // ### Safety: Kernel file is guaranteed to be valid by bootloader.
+            // Safety: Kernel file is guaranteed to be valid by bootloader.
             unsafe { core::slice::from_raw_parts(kernel_file_base, kernel_file_len) },
         )
         .expect("failed to parse kernel executable");
@@ -404,7 +404,7 @@ unsafe extern "C" fn _entry() -> ! {
                     _smp_entry
                 } else {
                     extern "C" fn _idle_forever(_: *const limine::LimineSmpInfo) -> ! {
-                        // ### Safety: Murder isn't legal. Is this?
+                        // Safety: Murder isn't legal. Is this?
                         unsafe { crate::interrupts::halt_and_catch_fire() }
                     }
 
@@ -423,7 +423,7 @@ unsafe extern "C" fn _entry() -> ! {
     kernel_thread_setup(0)
 }
 
-/// ### Safety
+/// Safety
 ///
 /// This function invariantly assumes it will be called only once per core.
 #[inline(never)]

@@ -40,7 +40,7 @@ impl Mapper {
         })
     }
 
-    /// ### Safety
+    /// Safety
     ///
     /// - The root frame must point to a valid top-level page table.
     /// - There must only exist one copy of provided page table tree at any time.
@@ -104,7 +104,7 @@ impl Mapper {
 
     /// Unmaps the given page, optionally freeing the frame the page points to within the given [`FrameManager`].
     ///
-    /// ### Safety
+    /// Safety
     ///
     /// Caller must ensure calling this function does not cause memory corruption.
     pub unsafe fn unmap(
@@ -179,7 +179,7 @@ impl Mapper {
             .map_err(MapperError::PagingError)
     }
 
-    /// ### Safety
+    /// Safety
     ///
     /// Caller must ensure that switching the currently active address space will not cause undefined behaviour.
     pub unsafe fn swap_into(&self) {

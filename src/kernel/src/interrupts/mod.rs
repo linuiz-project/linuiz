@@ -57,7 +57,7 @@ pub enum Vector {
 #[derive(Debug, Clone, Copy)]
 pub struct PageFaultHandlerError;
 
-/// ### Safety
+/// Safety
 ///
 /// This function should only be called in the case of passing context to handle a page fault.
 /// Calling this function outside the context of a page fault is undefined behaviour.
@@ -71,7 +71,7 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
     .ok_or(PageFaultHandlerError)
 }
 
-/// ### Safety
+/// Safety
 ///
 /// This function should only be called in the case of passing context to handle an interrupt.
 /// Calling this function outside the context of an interrupt is undefined behaviour.

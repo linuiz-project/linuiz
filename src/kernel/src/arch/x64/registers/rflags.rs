@@ -61,7 +61,7 @@ bitflags! {
 impl RFlags {
     #[inline]
     pub fn read() -> Self {
-        Self::from_bits_truncate(Self::read_raw()) 
+        Self::from_bits_truncate(Self::read_raw())
     }
 
     #[inline]
@@ -80,9 +80,9 @@ impl RFlags {
         result
     }
 
-/// ### Safety
-/// 
-/// Incorrect flags may violate any number of safety guarantees.
+    /// Safety
+    ///
+    /// Incorrect flags may violate any number of safety guarantees.
     #[inline]
     pub unsafe fn set_flags(flags: Self, set: bool) {
         let mut old_flags = Self::read();

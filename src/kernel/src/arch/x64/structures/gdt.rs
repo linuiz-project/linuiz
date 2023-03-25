@@ -49,7 +49,7 @@ pub fn user_data_selector() -> SegmentSelector {
 }
 
 pub fn load() {
-    // ### Safety:  This would technically be unsafe, but since we know the GDT's structure
+    // Safety:  This would technically be unsafe, but since we know the GDT's structure
     //          deterministically, running this function over and over would not change
     //          software execution at all. So, it's safe to execute all of this code.
     unsafe {

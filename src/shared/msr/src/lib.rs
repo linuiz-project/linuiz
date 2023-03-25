@@ -8,7 +8,7 @@
 
 use bit_field::BitField;
 
-/// ### Safety
+/// Safety
 ///
 /// * Caller must ensure the address is valid.
 #[inline]
@@ -30,7 +30,7 @@ pub unsafe fn rdmsr(address: u32) -> u64 {
     value
 }
 
-/// ### Safety
+/// Safety
 ///
 /// * Caller must ensure the address is valid.
 /// * Caller must ensure writing the value to the MSR address will not result in undefined behaviour.
@@ -72,27 +72,27 @@ impl IA32_APIC_BASE {
     /// Gets the 8th bit of the IA32_APIC_BASE MSR, which indicates whether the current APIC resides on the boot processor.
     #[inline]
     pub fn get_is_bsp() -> bool {
-        // ### Safety: MSR address is valid.
+        // Safety: MSR address is valid.
         unsafe { rdmsr(0x1B).get_bit(8) }
     }
 
     /// Gets the 10th bit of the IA32_APIC_BASE MSR, indicating the enabled state of x2 APIC mode.
     pub fn get_is_x2_mode() -> bool {
-        // ### Safety: MSR address is valid.
+        // Safety: MSR address is valid.
         unsafe { rdmsr(0x1B).get_bit(10) }
     }
 
     /// Gets the 11th bit of the IA32_APIC_BASE MSR, getting the enable state of the APIC.
     #[inline]
     pub fn get_hw_enabled() -> bool {
-        // ### Safety: MSR address is valid.
+        // Safety: MSR address is valid.
         unsafe { rdmsr(0x1B).get_bit(11) }
     }
 
     /// Gets bits 12..36 of the IA32_APIC_BASE MSR, representing the base address of the APIC.
     #[inline]
     pub fn get_base_address() -> u64 {
-        // ### Safety: MSR address is valid.
+        // Safety: MSR address is valid.
         unsafe { rdmsr(0x1B) & 0xFFFFFF000 }
     }
 }
@@ -104,13 +104,13 @@ impl IA32_EFER {
     /// Gets the IA32_EFER.LMA (long-mode active) bit.
     #[inline]
     pub fn get_lma() -> bool {
-        // ### Safety: MSR address is valid.
+        // Safety: MSR address is valid.
         unsafe { rdmsr(0xC0000080).get_bit(10) }
     }
 
     /// Sets the IA32_EFER.LME (long-mode enable) bit.
     ///
-    /// ### Safety
+    /// Safety
     ///
     /// This function does not check if long mode is supported, or if the core is prepared to enter it.
     #[inline]
@@ -120,7 +120,7 @@ impl IA32_EFER {
 
     /// Sets the IA32_EFER.SCE (syscall/syret enable) bit.
     ///
-    /// ### Safety
+    /// Safety
     ///
     /// Caller must ensure software expects system calls to be enabled or disabled.
     #[inline]
@@ -131,13 +131,13 @@ impl IA32_EFER {
     /// Gets the IA32_EFER.NXE (no-execute enable) bit.
     #[inline]
     pub fn get_nxe() -> bool {
-        // ### Safety: MSR address is valid.
+        // Safety: MSR address is valid.
         unsafe { rdmsr(0xC0000080).get_bit(11) }
     }
 
     /// Sets the IA32_EFER.NXE (no-execute enable) bit.
     ///
-    /// ### Safety
+    /// Safety
     ///
     /// This function does not check if the NX bit is actually supported.
     #[inline]
@@ -159,7 +159,7 @@ impl IA32_STAR {
     /// > Target stack segment:      Reads a non-NULL selector from IA32_STAR\[63:48\] + 8
     /// > ...
     ///
-    /// ### Safety
+    /// Safety
     ///
     /// * Caller must ensure the low and high selectors are valid.
     #[inline]
@@ -172,7 +172,7 @@ pub struct IA32_LSTAR;
 impl IA32_LSTAR {
     /// Sets the `rip` value that's jumped to when the `syscall` instruction is executed.
     ///
-    /// ### Safety
+    /// Safety
     ///
     /// Caller must ensure the given function pointer is valid for a syscall instruction pointer.
     #[inline]
@@ -187,7 +187,7 @@ pub struct IA32_FMASK;
 impl IA32_FMASK {
     /// Sets `rflags` upon a `syscall` based on masking the bits in the given value.
     ///
-    /// ### Safety
+    /// Safety
     ///
     /// * Caller must ensure the function jumped to upon a `syscall` can properly handle
     /// the provided `rflags` value.
@@ -201,7 +201,7 @@ pub struct IA32_TSC_DEADLINE;
 impl IA32_TSC_DEADLINE {
     /// Sets the timestamp counter deadline.
     ///
-    /// ### Safety
+    /// Safety
     ///
     /// * Caller must ensure writing to the MSR will not result in undefined behaviour.
     #[inline]

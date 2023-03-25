@@ -8,7 +8,7 @@ pub fn setup() {
     };
 
     // Set CR0 flags.
-    // ### Safety: We set `CR0` once, and setting it again during kernel execution is not supported.
+    // Safety: We set `CR0` once, and setting it again during kernel execution is not supported.
     unsafe { CR0::write(CR0Flags::PE | CR0Flags::MP | CR0Flags::ET | CR0Flags::NE | CR0Flags::WP | CR0Flags::PG) };
 
     // Set CR4 flags.
@@ -46,13 +46,13 @@ pub fn setup() {
         flags.insert(CR4Flags::SMAP);
     }
 
-    // ### Safety: Initialize the CR4 register with all CPU & kernel supported features.
+    // Safety: Initialize the CR4 register with all CPU & kernel supported features.
     unsafe { CR4::write(flags) };
 
     // Enable use of the `NO_EXECUTE` page attribute, if supported.
     if cpuid::EXT_FUNCTION_INFO.as_ref().map_or(false, cpuid::ExtendedProcessorFeatureIdentifiers::has_execute_disable)
     {
-        // ### Safety: Setting `IA32_EFER.NXE` in this context is safe because the bootloader does not use the `NX` bit. However, the kernel does, so
+        // Safety: Setting `IA32_EFER.NXE` in this context is safe because the bootloader does not use the `NX` bit. However, the kernel does, so
         //         disabling it after paging is in control of the kernel is unsupported.
         unsafe { msr::IA32_EFER::set_nxe(true) };
     } else {
@@ -65,12 +65,12 @@ pub fn setup() {
     crate::arch::x64::structures::load_static_tables();
 
     // Setup system call interface.
-    // ### Safety: Parameters are set according to the IA-32 SDM, and so should have no undetermined side-effects.
+    // Safety: Parameters are set according to the IA-32 SDM, and so should have no undetermined side-effects.
     unsafe {
         // Configure system call environment registers.
         msr::IA32_STAR::set_selectors(gdt::kernel_code_selector().index(), gdt::kernel_data_selector().index());
         msr::IA32_LSTAR::set_syscall({
-            /// ### Safety
+            /// Safety
             ///
             /// This function should never be called by software.
             #[naked]
@@ -132,7 +132,7 @@ pub fn setup() {
     }
 }
 
-/// ### Safety
+/// Safety
 ///
 /// This function should never be called by software.
 unsafe extern "sysv64" fn syscall_handler(

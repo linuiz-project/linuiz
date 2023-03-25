@@ -2,7 +2,7 @@ use core::arch::asm;
 
 /// Enables interrupts for the current core.
 ///
-/// ### Safety
+/// Safety
 ///
 /// Enabling interrupts early can result in unexpected behaviour.
 #[inline]
@@ -16,7 +16,7 @@ pub unsafe fn enable() {
 
 /// Disables interrupts for the current core.
 ///
-/// ### Safety
+/// Safety
 ///
 /// Disabling interrupts can cause the system to become unresponsive if they are not re-enabled.
 #[inline]

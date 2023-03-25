@@ -43,7 +43,7 @@ pub fn init_devices() {
                     return;
                 };
 
-            // ### Safety: HHDM is guaranteed to be valid by the kernel.
+            // Safety: HHDM is guaranteed to be valid by the kernel.
             //         Additionally, if this mapping is invalid, it will be unmapped later on in this context.
             unsafe {
                 kernel_page_manager
@@ -51,7 +51,7 @@ pub fn init_devices() {
                     .unwrap()
             };
 
-            // ### Safety: We should be reading known-good memory here, according to the PCI spec. The following `if` test will verify that.
+            // Safety: We should be reading known-good memory here, according to the PCI spec. The following `if` test will verify that.
             let vendor_id =
                 unsafe { device_hhdm_page.address().as_ptr::<crate::num::LittleEndianU16>().read_volatile() }.get();
             if vendor_id > u16::MIN && vendor_id < u16::MAX {
@@ -61,7 +61,7 @@ pub fn init_devices() {
                 );
 
                 if let DeviceVariant::Standard(pci_device) =
-                    // ### Safety: Base pointer, at this point, has been verified as known-good.
+                    // Safety: Base pointer, at this point, has been verified as known-good.
                     unsafe { new_device(device_hhdm_page.address().as_mut_ptr()) }
                 {
                     trace!("{:#?}", pci_device);
@@ -70,7 +70,7 @@ pub fn init_devices() {
                 // TODO handle PCI-to-PCI busses
             } else {
                 // Unmap the unused device MMIO
-                // ### Safety: HHDM is guaranteed to be valid by the kernel.
+                // Safety: HHDM is guaranteed to be valid by the kernel.
                 //         Additionally, this page was just previously mapped, and so is a known-valid mapping (hence the `.unwrap()`).
                 unsafe { kernel_page_manager.unmap(device_hhdm_page, false, kernel_frame_manager).unwrap() };
             }

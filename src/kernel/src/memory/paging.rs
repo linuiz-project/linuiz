@@ -168,7 +168,7 @@ impl PageTableEntry {
 
     /// Sets the entry's data.
     ///
-    /// ### Safety
+    /// Safety
     ///
     /// Caller must ensure changing the attributes of this entry does not cause memory corruption.
     pub unsafe fn set(&mut self, frame: Address<Frame>, attributes: PageAttributes) {
@@ -183,7 +183,7 @@ impl PageTableEntry {
 
     /// Sets the entry's frame index.
     ///
-    /// ### Safety
+    /// Safety
     ///
     /// Caller must ensure changing the attributes of this entry does not cause memory corruption.
     #[inline]
@@ -199,7 +199,7 @@ impl PageTableEntry {
 
     /// Sets the attributes of this page table entry.
     ///
-    /// ### Safety
+    /// Safety
     ///
     /// Caller must ensure changing the attributes of this entry does not cause any memory corruption side effects.
     pub unsafe fn set_attributes(&mut self, new_attributes: PageAttributes, modify_mode: AttributeModify) {
@@ -233,7 +233,7 @@ impl PageTableEntry {
 
     /// Clears the page table entry of data, setting all bits to zero.
     ///
-    /// ### Safety
+    /// Safety
     ///
     /// Caller must ensure there are no contexts which rely on the subtables this entry points to.
     #[inline]
@@ -318,7 +318,7 @@ impl<RefKind: InteriorRef> PageTableEntryCell<'_, RefKind> {
 }
 
 impl<'a> PageTableEntryCell<'a, Ref> {
-    /// ### Safety
+    /// Safety
     ///
     /// - Page table entry must point to a valid page table.
     /// - Page table depth must be correct for the provided table.
@@ -351,7 +351,7 @@ impl<'a> PageTableEntryCell<'a, Ref> {
 }
 
 impl<'a> PageTableEntryCell<'a, Mut> {
-    /// ### Safety
+    /// Safety
     ///
     /// - Page table entry must point to a valid page table.
     /// - Page table depth must be correct for the provided table.

@@ -86,7 +86,7 @@ impl PagingRegister {
         }
     }
 
-    /// ### Safety
+    /// Safety
     ///
     /// Writing to this register has the chance to externally invalidate memory references.
     pub unsafe fn write(args: &Self) {
@@ -246,7 +246,7 @@ unsafe impl<const ALIGN: usize, A: Allocator> Allocator for AlignedAllocator<ALI
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
         match layout.align_to(ALIGN) {
-            // ### Safety: This function shares the same invariants as `GlobalAllocator::deallocate`.
+            // Safety: This function shares the same invariants as `GlobalAllocator::deallocate`.
             Ok(layout) => unsafe { self.0.deallocate(ptr, layout) },
             Err(_) => unimplemented!(),
         }

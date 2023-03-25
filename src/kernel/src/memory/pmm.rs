@@ -133,13 +133,13 @@ pub struct PhysicalMemoryManager<'a> {
     physical_memory: Address<Virtual>,
 }
 
-// ### Safety: Type uses entirely atomic operations.
+// Safety: Type uses entirely atomic operations.
 unsafe impl Send for PhysicalMemoryManager<'_> {}
-// ### Safety: Type uses entirely atomic operations.
+// Safety: Type uses entirely atomic operations.
 unsafe impl Sync for PhysicalMemoryManager<'_> {}
 
 impl PhysicalMemoryManager<'_> {
-    // ### Safety: Caller must guarantee the physical mapped address is valid.
+    // Safety: Caller must guarantee the physical mapped address is valid.
     pub unsafe fn from_memory_map(
         memory_map: impl ExactSizeIterator<Item = MemoryMapping>,
         physical_memory: Address<Virtual>,

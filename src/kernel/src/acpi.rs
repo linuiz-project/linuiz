@@ -12,14 +12,14 @@ impl<T: port::PortReadWrite> Register<'_, T> {
         match generic_address.address_space {
             acpi::address::AddressSpace::SystemMemory => {
                 Some(Self::MMIO(
-                    // ### Safety: There's no meaningful way to validate the address provided by the `GenericAddress` structure.
+                    // Safety: There's no meaningful way to validate the address provided by the `GenericAddress` structure.
                     unsafe { &*(generic_address.address as *const _) },
                 ))
             }
 
             acpi::address::AddressSpace::SystemIo => {
                 Some(Self::IO(
-                    // ### Safety: There's no meaningful way to validate the port provided by the `GenericAddress` structure.
+                    // Safety: There's no meaningful way to validate the port provided by the `GenericAddress` structure.
                     unsafe {
                         #[allow(clippy::cast_possible_truncation)]
                         ReadWritePort::<T>::new(generic_address.address as PortAddress)
@@ -158,7 +158,7 @@ static TABLES: spin::Once<Mutex<acpi::AcpiTables<AcpiHandler>>> = spin::Once::ne
 pub fn init_interface() {
     let tables_init = TABLES.try_call_once(|| {
         crate::boot::get_rsdp_address()
-            // ### Safety: Bootloader guarantees any address provided for RDSP will be valid.
+            // Safety: Bootloader guarantees any address provided for RDSP will be valid.
             .and_then(|rsdp_address| unsafe { acpi::AcpiTables::from_rsdp(AcpiHandler, rsdp_address.get()).ok() })
             .map(Mutex::new)
             .ok_or(())
@@ -196,7 +196,7 @@ pub static PLATFORM_INFO: Lazy<
 });
 
 // struct AmlContextWrapper(aml::AmlContext);
-// // ### Safety: TODO
+// // Safety: TODO
 // unsafe impl Sync for AmlContextWrapper {}
 
 // static AML_CONTEXT: Once<AmlContextWrapper> = Once::new();
@@ -211,7 +211,7 @@ pub static PLATFORM_INFO: Lazy<
 //             {
 //                 let dsdt_table = rsdp.dsdt.as_ref().expect("machine has no DSDT");
 
-//                 // ### Safety: We can be reasonably certain the provided base address and length are valid.
+//                 // Safety: We can be reasonably certain the provided base address and length are valid.
 //                 let dsdt_stream = unsafe {
 //                     core::slice::from_raw_parts(
 //                         (dsdt_table.address + kernel_hhdm_address) as *const u8,
@@ -224,7 +224,7 @@ pub static PLATFORM_INFO: Lazy<
 
 //             {
 //                 for sdst_table in &get_rsdp().ssdts {
-//                     // ### Safety: We can be reasonably certain the provided base address and length are valid.
+//                     // Safety: We can be reasonably certain the provided base address and length are valid.
 //                     let sdst_stream = unsafe {
 //                         core::slice::from_raw_parts(
 //                             (sdst_table.address + kernel_hhdm_address) as *const u8,

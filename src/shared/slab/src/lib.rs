@@ -116,9 +116,9 @@ pub struct SlabAllocator<A: Allocator> {
     allocator: A,
 }
 
-// ### Safety: Type does not use thread-specific logic.
+// Safety: Type does not use thread-specific logic.
 unsafe impl<A: Allocator + Copy> Send for SlabAllocator<A> {}
-// ### Safety: Type's mutable conversions are synchronized via `spin::Mutex`.
+// Safety: Type's mutable conversions are synchronized via `spin::Mutex`.
 unsafe impl<A: Allocator + Copy> Sync for SlabAllocator<A> {}
 
 impl<A: Allocator + Copy> SlabAllocator<A> {

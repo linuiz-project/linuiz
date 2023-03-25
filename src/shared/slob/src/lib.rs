@@ -42,7 +42,7 @@ impl<'a> Slob<'a> {
         let mask_bit_offset = cur_block_index - floor_block_index;
         let mask_bit_count = usize::min(ceil_block_index, end_block_index) - cur_block_index;
 
-        // ### Safety: The above calculations for `floor_block_index` and `ceil_block_index` ensure the shift will be <64.
+        // Safety: The above calculations for `floor_block_index` and `ceil_block_index` ensure the shift will be <64.
         let mask_bits = unsafe { u64::MAX.unchecked_shr((u64::BITS as u64) - (mask_bit_count as u64)) }
             .checked_shl(mask_bit_offset as u32)
             .unwrap();
@@ -71,7 +71,7 @@ impl<'a> Slob<'a> {
             let new_page = base_address.forward_checked(page_offset).ok_or(AllocError)?;
             map_page_fn(new_page).map_err(AllocError)?;
             // Clear the newly allocated table page.
-            // ### Safety: We know no important memory is stored here to be overwritten, because we just mapped it.
+            // Safety: We know no important memory is stored here to be overwritten, because we just mapped it.
             unsafe { new_page.zero_memory() };
         }
 
@@ -80,7 +80,7 @@ impl<'a> Slob<'a> {
         let new_table_base_page = base_address.forward_checked(current_len).unwrap();
 
         let new_table =
-        // ### Safety: We know the address is pointer-aligned, and that the address range is valid for clearing via `write_bytes`.        
+        // Safety: We know the address is pointer-aligned, and that the address range is valid for clearing via `write_bytes`.        
         unsafe {
             let new_table_ptr = new_table_base_page.address().as_mut_ptr::<SuperBlock>();
             // Ensure we clear the new table's contents before making a slice of it.
@@ -92,7 +92,7 @@ impl<'a> Slob<'a> {
         (&mut new_table[..table.len()]).copy_from_slice(table);
 
         // Clear old table bytes.
-        // ### Safety: Old table memory is no longer used.
+        // Safety: Old table memory is no longer used.
         unsafe {
             core::ptr::write_bytes(table.as_mut_ptr(), 0, table.len());
         }
@@ -160,7 +160,7 @@ unsafe impl core::alloc::Allocator for Slob<'_> {
 
                 // No properly sized region was found, so grow list.
                 Self::grow(
-                    // ### Safety: Value is known to be non-zero.
+                    // Safety: Value is known to be non-zero.
                     unsafe { NonZeroUsize::new_unchecked(size_in_blocks) },
                     &mut *table,
                     self.base_address,

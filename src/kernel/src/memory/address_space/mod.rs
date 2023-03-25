@@ -144,7 +144,7 @@ impl<A: Allocator + Clone> AddressSpace<A> {
 
     /// Internal function taking exact address range parameters to map a region of memory.
     ///
-    /// ### Safety
+    /// Safety
     ///
     /// This function has next to no safety checks, and so should only be called when it is
     /// known for certain that the provided memory range is valid for the mapping with the
@@ -191,7 +191,7 @@ impl<A: Allocator + Clone> AddressSpace<A> {
         self.mapper.is_mapped(Address::new_truncate(address.get()), None)
     }
 
-    /// ### Safety
+    /// Safety
     ///
     /// Caller must ensure that switching the currently active address space will not cause undefined behaviour.
     pub unsafe fn swap_into(&self) {

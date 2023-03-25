@@ -67,7 +67,7 @@ fn get() -> &'static mut LocalState {
 
 /// Initializes the core-local state structure.
 ///
-/// ### Safety
+/// Safety
 ///
 /// This function invariantly assumes it will only be called once.
 pub unsafe fn init(core_id: u32, timer_frequency: u16) {
@@ -217,7 +217,7 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
     crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::write(local_state_ptr.addr() as u64);
 }
 
-/// ### Safety
+/// Safety
 ///
 /// Caller must ensure control flow is prepared to begin scheduling tasks on the current core.
 pub unsafe fn begin_scheduling() {
@@ -242,7 +242,7 @@ pub unsafe fn begin_scheduling() {
     unsafe { set_preemption_wait(core::num::NonZeroU16::MIN) };
 }
 
-/// ### Safety
+/// Safety
 ///
 /// Caller must ensure that context switching to a new task will not cause undefined behaviour.
 pub unsafe fn next_task(
@@ -259,7 +259,7 @@ pub unsafe fn end_of_interrupt() {
     get().apic.0.end_of_interrupt()
 }
 
-/// ### Safety
+/// Safety
 ///
 /// Caller must ensure that setting a new preemption wait will not cause undefined behaviour.
 pub unsafe fn set_preemption_wait(interval_wait: core::num::NonZeroU16) {
@@ -300,7 +300,7 @@ pub fn provide_exception<T: Into<Exception>>(exception: T) -> Result<(), T> {
     }
 }
 
-/// ### Safety
+/// Safety
 ///
 /// Caller must ensure `do_func` is effectively stackless, since no stack cleanup will occur on an exception.
 pub unsafe fn do_catch<T>(do_func: impl FnOnce() -> T) -> Result<T, Exception> {

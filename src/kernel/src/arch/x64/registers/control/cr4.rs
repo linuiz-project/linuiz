@@ -45,10 +45,10 @@ impl CR4 {
             );
         }
 
-        CR4Flags::from_bits_truncate(value) 
+        CR4Flags::from_bits_truncate(value)
     }
 
-    /// ### Safety
+    /// Safety
     ///
     /// Incorrect flags may violate any number of safety guarantees.
     #[inline]
@@ -60,7 +60,7 @@ impl CR4 {
         );
     }
 
-    /// ### Safety
+    /// Safety
     ///
     /// Incorrect flags may violate any number of safety guarantees.
     #[inline]
@@ -71,7 +71,7 @@ impl CR4 {
         CR4::write(new_flags);
     }
 
-    /// ### Safety
+    /// Safety
     ///
     /// Incorrect flags may violate any number of safety guarantees.
     #[inline]

@@ -180,7 +180,7 @@ impl Mode for Configure {}
 
 pub struct Uart<M: Mode>(UartAddress, PhantomData<M>);
 
-/// ### Safety
+/// Safety
 ///
 /// Type constructor requires that the inner address be `Send`-able.
 unsafe impl<M: Mode> Send for Uart<M> {}
@@ -188,7 +188,7 @@ unsafe impl<M: Mode> Send for Uart<M> {}
 impl<M: Mode> Uart<M> {
     #[inline]
     fn read(&self, offset: ReadOffset) -> u8 {
-        // ### Safety: Constructor for `Uart` requires a valid base address.
+        // Safety: Constructor for `Uart` requires a valid base address.
         unsafe {
             match self.0 {
                 UartAddress::Io(port) => {
@@ -209,7 +209,7 @@ impl<M: Mode> Uart<M> {
 
     #[inline]
     fn write(&mut self, offset: WriteOffset, value: u8) {
-        // ### Safety: Constructor for `Uart` requires a valid base address.
+        // Safety: Constructor for `Uart` requires a valid base address.
         unsafe {
             match self.0 {
                 UartAddress::Io(port) => {
@@ -337,7 +337,7 @@ impl Uart<Configure> {
 }
 
 impl Uart<Data> {
-    /// ### Safety
+    /// Safety
     ///
     /// Provided address must be `Send`-able (i.e. can be used on any CPU core).
     pub unsafe fn new(address: UartAddress) -> Self {
@@ -381,7 +381,7 @@ pub struct UartWriter {
 }
 
 impl UartWriter {
-    /// ### Safety
+    /// Safety
     ///
     /// This function expects to be called only once per UART device.
     pub unsafe fn new(mut uart: Uart<Data>) -> Self {

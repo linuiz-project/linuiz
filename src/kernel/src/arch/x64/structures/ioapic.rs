@@ -107,9 +107,9 @@ pub struct IoApic<'a> {
     ioregs: IoApicRegisters<'a>,
 }
 
-// ### Safety: Non-read-only mutations are behind a [`spin::Mutex`].
+// Safety: Non-read-only mutations are behind a [`spin::Mutex`].
 unsafe impl Send for IoApic<'_> {}
-// ### Safety: Non-read-only mutations are behind a [`spin::Mutex`].
+// Safety: Non-read-only mutations are behind a [`spin::Mutex`].
 unsafe impl Sync for IoApic<'_> {}
 
 impl IoApic<'_> {

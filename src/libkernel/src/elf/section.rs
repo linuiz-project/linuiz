@@ -86,9 +86,9 @@ pub struct Header {
     entry_size: u64,
 }
 
-// ### Safety: Type is composed of simple primitive numerics.
+// Safety: Type is composed of simple primitive numerics.
 unsafe impl bytemuck::AnyBitPattern for Header {}
-// ### Safety: Type is composed of simple primitive numerics.
+// Safety: Type is composed of simple primitive numerics.
 unsafe impl bytemuck::Zeroable for Header {}
 
 impl Header {

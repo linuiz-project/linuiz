@@ -19,9 +19,9 @@ mod clock {
         max_timestamp: u64,
     }
 
-    // ### Safety: Addresses for type values are required to be globally accessible.
+    // Safety: Addresses for type values are required to be globally accessible.
     unsafe impl Send for Clock<'_> {}
-    // ### Safety: Addresses for type values are required to be globally accessible.
+    // Safety: Addresses for type values are required to be globally accessible.
     unsafe impl Sync for Clock<'_> {}
 
     impl<'a> Clock<'a> {

@@ -15,7 +15,7 @@ bitflags::bitflags! {
 pub struct CR3;
 
 impl CR3 {
-    /// ### Safety
+    /// Safety
     ///
     /// Incorrect flags may violate any number of safety guarantees.
     #[inline]

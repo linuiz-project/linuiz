@@ -7,7 +7,7 @@ pub fn load_modules() {
         .and_then(|modules| {
             modules.iter().find(|module| module.path.to_str().unwrap().to_str().unwrap().ends_with("drivers"))
         })
-        // ### Safety: Kernel promises HHDM to be valid, and the module pointer should be in the HHDM, so this should be valid for `u8`.
+        // Safety: Kernel promises HHDM to be valid, and the module pointer should be in the HHDM, so this should be valid for `u8`.
         .map(|drivers_module| unsafe {
             core::slice::from_raw_parts(drivers_module.base.as_ptr().unwrap(), drivers_module.length as usize)
         })
@@ -52,7 +52,7 @@ pub fn load_modules() {
             use libsys::PageAlign;
 
             // Create the driver's page manager from the kernel's higher-half table.
-            // ### Safety: Kernel guarantees HHDM to be valid.
+            // Safety: Kernel guarantees HHDM to be valid.
             let mut driver_page_manager = unsafe {
                 crate::memory::address_space::Mapper::new(
                     4,
@@ -72,11 +72,11 @@ pub fn load_modules() {
                     segment::Type::Loadable => {
                         let memory_start = segment.get_virtual_address().unwrap().as_usize();
                         let memory_end = memory_start + segment.get_memory_layout().unwrap().size();
-                        // ### Safety: Value provided is non-zero.
+                        // Safety: Value provided is non-zero.
                         let start_page_index = libsys::align_down_div(memory_start, unsafe {
                             core::num::NonZeroUsize::new_unchecked(0x1000)
                         });
-                        // ### Safety: Value provided is non-zero.
+                        // Safety: Value provided is non-zero.
                         let end_page_index =
                             libsys::align_up_div(memory_end, unsafe { core::num::NonZeroUsize::new_unchecked(0x1000) });
                         let mut data_offset = 0;
@@ -96,7 +96,7 @@ pub fn load_modules() {
                                     .unwrap();
                             driver_page_manager.auto_map(page, page_attributes | PageAttributes::USER).unwrap();
 
-                            // ### Safety: HHDM is guaranteed by kernel to be valid, and the frame being pointed to was just allocated.
+                            // Safety: HHDM is guaranteed by kernel to be valid, and the frame being pointed to was just allocated.
                             let memory_hhdm = unsafe {
                                 core::slice::from_raw_parts_mut(
                                     hhdm_address

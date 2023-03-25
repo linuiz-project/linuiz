@@ -199,12 +199,12 @@ impl Apic {
     /// Reads the given register from the local APIC. Panics if APIC is not properly initialized.
     fn read_register(&self, register: Register) -> u64 {
         match self.0 {
-            // ### Safety: Address provided for xAPIC mapping is required to be valid.
+            // Safety: Address provided for xAPIC mapping is required to be valid.
             Type::xAPIC(address) => unsafe {
                 address.add(register.xapic_offset()).cast::<u32>().read_volatile() as u64
             },
 
-            // ### Safety: MSR addresses are known-valid from IA32 SDM.
+            // Safety: MSR addresses are known-valid from IA32 SDM.
             Type::x2APIC => unsafe { msr::rdmsr(register.x2apic_msr()) },
         }
     }
@@ -303,7 +303,7 @@ impl Apic {
     ///     - LINT0 & LINT1 are unmasked and assigned to the `LINT0_VECTOR` (253) and `LINT1_VECTOR` (254), respectively.
     ///     - The spurious register is configured with the `SPURIOUS_VECTOR` (255).
     ///
-    /// ### Safety
+    /// Safety
     ///
     /// The caller must guarantee that software is in a state that is ready to accept
     ///         the APIC performing a software reset.

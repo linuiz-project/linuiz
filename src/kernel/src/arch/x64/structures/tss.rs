@@ -23,7 +23,7 @@ pub fn ptr_as_descriptor(tss_ptr: core::ptr::NonNull<TaskStateSegment>) -> gdt::
     gdt::Descriptor::SystemSegment(low, high)
 }
 
-/// ### Safety
+/// Safety
 ///
 /// * Descriptor must be valid as the core's task state segment.
 /// *
