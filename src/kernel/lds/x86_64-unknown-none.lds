@@ -12,6 +12,19 @@ SECTIONS
 {
     . = KERN_BASE + SIZEOF_HEADERS; 
 
+    .eh_frame_hdr       : {
+        PROVIDE(__eh_frame_hdr = .);
+        *(.eh_frame_hdr)
+    }
+
+    .eh_frame           : ALIGN(0x8) {
+        PROVIDE(__eh_frame = .);
+        KEEP(*(.eh_frame .eh_frame.*))
+    }
+
+    .gcc_except_table   : { KEEP(*(.gcc_except_table)) }
+
+
     /* text sections */
     .text               : ALIGN(SEGMENT_ALIGN) {
         PROVIDE(__text_start = .);
@@ -21,17 +34,12 @@ SECTIONS
     
         PROVIDE(__text_end = .);
     }
-    
+
     /* rodata sections */
     .rodata             : ALIGN(SEGMENT_ALIGN) {
         PROVIDE(__rodata_start = .);
 
         *(.rodata .rodata.*)
-        *(.eh_frame_hdr)
-
-        . = ALIGN(8);
-        PROVIDE(__eh_frame = .);
-        KEEP(*(.eh_frame .eh_frame.*))
 
         PROVIDE(__rodata_end = .);
     }
@@ -41,7 +49,6 @@ SECTIONS
     .bss                : ALIGN(SEGMENT_ALIGN) {
         PROVIDE(__bss_start = .);
 
-        KEEP(*(.gcc_except_table))
         *(.tbss .tbss.*)
         *(.bss .bss.*)
 
