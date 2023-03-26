@@ -3,8 +3,6 @@ name = "xtask"
 version = "0.1.0"
 edition = "2021"
 
-[dependencies.lza]
-git = "https://github.com/pyre-project/lza"
 [dependencies]
 clap = { version = "*", features = ["derive"] }
 xshell = "=0.2.2"
