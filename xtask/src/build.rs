@@ -1,6 +1,4 @@
 use std::{fs::File, io::Error, path::Path};
-
-use clap::clap_derive::ValueEnum;
 use xshell::{cmd, Result, Shell};
 
 #[derive(clap::Parser)]
@@ -9,7 +7,6 @@ pub struct Options {
     /// Whether the current build is a release build.
     #[arg(long)]
     release: bool,
-
 
     /// Verbose build output. Equivalent to `cargo build -vv`.
     #[arg(short, long)]

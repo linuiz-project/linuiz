@@ -36,27 +36,29 @@ macro_rules! boot_only {
 }
 
 pub fn get_memory_map() -> Option<&'static [limine::NonNullPtr<limine::LimineMemmapEntry>]> {
-    static LIMINE_MMAP: limine::LimineMemmapRequest = limine::LimineMemmapRequest::new(LIMINE_REV);
-
-    boot_only!({ LIMINE_MMAP.get_response().get().map(|response| response.memmap()) })
+    boot_only!({
+        static LIMINE_MMAP: limine::LimineMemmapRequest = limine::LimineMemmapRequest::new(LIMINE_REV);
+        LIMINE_MMAP.get_response().get().map(|response| response.memmap())
+    })
 }
 
 pub fn get_kernel_file() -> Option<&'static limine::LimineFile> {
-    static LIMINE_KERNEL_FILE: limine::LimineKernelFileRequest = limine::LimineKernelFileRequest::new(LIMINE_REV);
-
-    boot_only!({ LIMINE_KERNEL_FILE.get_response().get().and_then(|response| response.kernel_file.get()) })
+    boot_only!({
+        static LIMINE_KERNEL_FILE: limine::LimineKernelFileRequest = limine::LimineKernelFileRequest::new(LIMINE_REV);
+        LIMINE_KERNEL_FILE.get_response().get().and_then(|response| response.kernel_file.get())
+    })
 }
 
 pub fn get_kernel_modules() -> Option<&'static [limine::NonNullPtr<limine::LimineFile>]> {
-    static LIMINE_MODULES: limine::LimineModuleRequest = limine::LimineModuleRequest::new(LIMINE_REV);
-
-    boot_only!({ LIMINE_MODULES.get_response().get().map(|response| response.modules()) })
+    boot_only!({
+        static LIMINE_MODULES: limine::LimineModuleRequest = limine::LimineModuleRequest::new(LIMINE_REV);
+        LIMINE_MODULES.get_response().get().map(|response| response.modules())
+    })
 }
 
 pub fn get_rsdp_address() -> Option<Address<Virtual>> {
-    static LIMINE_RSDP: limine::LimineRsdpRequest = limine::LimineRsdpRequest::new(LIMINE_REV);
-
     boot_only!({
+        static LIMINE_RSDP: limine::LimineRsdpRequest = limine::LimineRsdpRequest::new(LIMINE_REV);
         LIMINE_RSDP.get_response().get().and_then(|response| response.address.as_ptr()).and_then(|ptr| {
             Address::new(
                 // Properly handle the bootloader's mapping of ACPI addresses in lower-half or higher-half memory space.

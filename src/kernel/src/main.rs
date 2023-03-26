@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 #![feature(
+    is_some_and,                            // #93050 <https://github.com/rust-lang/rust/issues/93050>
     result_flattening,                      // #70142 <https://github.com/rust-lang/rust/issues/70142>
     map_try_insert,                         // #82766 <https://github.com/rust-lang/rust/issues/82766>
     asm_const,

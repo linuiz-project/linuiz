@@ -1,3 +1,5 @@
+mod drivers;
+
 use libkernel::LinkerSymbol;
 use libsys::Address;
 
@@ -203,8 +205,8 @@ unsafe extern "C" fn _entry() -> ! {
     }
 
     // TODO
-    // debug!("Unpacking kernel drivers...");
-    // drivers::load_drivers();
+    debug!("Unpacking kernel drivers...");
+    drivers::load_drivers();
 
     /* smp */
     {
