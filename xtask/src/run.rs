@@ -140,7 +140,7 @@ pub fn run(sh: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
             arguments.push("-bios");
             arguments.push("resources/fw_jump.fd");
             arguments.push("-kernel");
-            arguments.push(".hdd/root/linuiz/kernel_rv64.elf");
+            arguments.push(".hdd/root/pyre/kernel_rv64.elf");
         }
         _ => {
             arguments.push("-bios");

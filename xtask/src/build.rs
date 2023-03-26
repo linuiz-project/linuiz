@@ -47,7 +47,7 @@ pub struct Options {
 static REQUIRED_ROOT_DIRS: [&str; 3] = [
     ".hdd/",               // disk0.img
     ".hdd/root/EFI/BOOT/", // BOOTX64.EFI
-    ".hdd/root/linuiz/",   // kernel, drivers
+    ".hdd/root/pyre/",     // kernel, drivers
 ];
 
 pub fn build(sh: &Shell, options: Options) -> Result<()> {
@@ -103,7 +103,7 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
 
     cmd!(sh, "cargo build --bins -Z unstable-options {cargo_args...}").run()?;
 
-    sh.copy_file(&format!("{tmp_dir_path_str}/kernel"), root_dir.join(".hdd/root/linuiz/"))?;
+    sh.copy_file(&format!("{tmp_dir_path_str}/pyre"), root_dir.join(".hdd/root/pyre/"))?;
 
     // compress userspace drivers and write to archive file
     let mut archive_builder = lza::ArchiveBuilder::new(options.compress.into());
@@ -120,5 +120,5 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
 
     let driver_data = archive_builder.take_data();
     println!("Compression resulted in a {} byte dump.", driver_data.len());
-    sh.write_file(root_dir.join(".hdd/root/linuiz/drivers"), driver_data)
+    sh.write_file(root_dir.join(".hdd/root/pyre/drivers"), driver_data)
 }
