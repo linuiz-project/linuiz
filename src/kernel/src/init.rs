@@ -265,7 +265,8 @@ unsafe extern "C" fn _entry() -> ! {
     if !crate::boot::PARAMETERS.low_memory {
         match load_kernel_symbols() {
             Ok(symbols) => {
-                crate::interrupts::without(|| crate::panic::KERNEL_SYMBOLS.call_once(|| symbols));
+                let symbols = crate::interrupts::without(|| crate::panic::KERNEL_SYMBOLS.call_once(|| symbols));
+                trace!("Kernel symbols:\n{:?}", symbols);
             }
 
             Err(err) => {
@@ -376,19 +377,19 @@ fn load_kernel_symbols() -> Result<&'static [(&'static str, elf::symbol::Symbol)
 
 fn load_drivers() {
     let drivers_data = crate::boot::get_kernel_modules()
-        // Find the drives module, and map the `Option<>` to it.
+        // Find module with a valid string name equal to "drivers".
         .and_then(|modules| {
-            modules.iter().find(|module| module.path.to_str().unwrap().to_str().unwrap().ends_with("drivers"))
+            modules.iter().find(|module| {
+                module.path.to_str().and_then(|cstr| cstr.to_str().ok()).filter(|name| name.eq(&"drivers")).is_some()
+            })
         })
-        // Safety: Kernel promises HHDM to be valid, and the module pointer should be in the HHDM, so this should be valid for `u8`.
+        // Safety: Bootloader promises the pointer and length to be a valid memory region so long as bootloader memory is unreclaimed.
         .map(|drivers_module| unsafe {
             core::slice::from_raw_parts(drivers_module.base.as_ptr().unwrap(), drivers_module.length as usize)
         })
         .expect("no drivers provided");
 
-    let archive = tar_no_std::TarArchiveRef::new(drivers_data);
-
-    for archive_entry in archive.entries() {
+    for archive_entry in tar_no_std::TarArchiveRef::new(drivers_data).entries() {
         use crate::memory::{PageAttributes, PageDepth};
         use libsys::{page_shift, page_size};
 

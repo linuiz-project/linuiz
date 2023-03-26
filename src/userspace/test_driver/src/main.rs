@@ -9,8 +9,6 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 
 #[no_mangle]
 extern "C" fn _start() -> ! {
-   loop{}
-   
     let log_message = core::ffi::CStr::from_bytes_until_nul(b"process logging test\0").unwrap();
 
     for _ in 0..10 {

@@ -6,7 +6,7 @@ ENTRY(_entry)
 /* Place kernel in the last 2GB of virtual memory. */
 KERN_BASE = 0xffffffff80000000;
 
-SEGMENT_ALIGN = CONSTANT(MAXPAGESIZE);
+PROVIDE(SEGMENT_ALIGN = CONSTANT(MAXPAGESIZE));
 
 SECTIONS
 {
