@@ -72,11 +72,18 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
 
     // Configure rustc via the `RUSTFLAGS` environment variable.
     let _rustflags = {
+        let mut rustflags = Vec::new();
+        rustflags.push("-C relocation_model=static");
+        rustflags.push("-C code-model=kernel");
+        rustflags.push("-C embed-bitcode=yes");
+
+        // For debug builds, we always enable frame pointers for pretty stack tracing.
         if !options.release {
-            Some(sh.push_env("RUSTFLAGS", "-Cforce-frame-pointers -Csymbol-mangling-version=v0"))
-        } else {
-            None
+            rustflags.push("-C force-frame-pointers");
+            rustflags.push("-C symbol-mangling-version=v0");
         }
+
+        sh.push_env("RUSTFLAGS", rustflags.join(" "))
     };
 
     let root_dir = sh.current_dir();
