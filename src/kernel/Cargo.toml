@@ -27,14 +27,10 @@ git = "https://github.com/pyre-project/spin-rs"
 git = "https://github.com/pyre-project/try_alloc"
 [dependencies.acpi]
 git = "https://github.com/semiviral/acpi"
-[dependencies.lza]
-git = "https://github.com/pyre-project/lza"
-default-features = false
 
 [dependencies]
 log = { version = "*", default-features = false }
 num_enum = { version = "*", default-features = false }
-miniz_oxide = { version = "*", default-features = false }
 uuid = { version = "*", default-features = false, features = ["v4"] }
 getrandom = { version = "*", features = ["custom"] }
 limine = { version = "*", features = ["requests-section"] }
@@ -45,6 +41,7 @@ rustc-demangle = "*"
 no-panic = "*"
 rand_core = "*"
 rand_pcg = "*"
+tar-no-std = "*"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 pic_8259 = { path = "../shared/pic_8259/" }

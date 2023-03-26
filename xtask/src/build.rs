@@ -121,18 +121,15 @@ fn build_drivers_archive(
     // compress userspace drivers and write to archive file
     let mut archive_builder = tar::Builder::new(archive_file);
     files
-        // Filter & map the driver path to also include the file name.
-        .filter_map(|path| {
+        // Filter out any drivers that don't need to be included.
+        .filter(|path| {
             path.file_name()
-                .map(|driver_name| driver_name.to_string_lossy().to_string())
-                .map(|driver_name| (path, driver_name))
+                .map(std::ffi::OsStr::to_string_lossy)
+                .filter(|driver_name| include_drivers.iter().any(|s| s.eq(driver_name)))
+                .is_some()
         })
-        // Filter out the driver names that shouldn't be included.
-        .filter(|(_, driver_name)| include_drivers.iter().any(|s| s.eq(driver_name)))
         // Attempt to package & write the drivers to the tar archive on disk.
-        .try_for_each(|(path, driver_name)| {
-            archive_builder.append_file(&driver_name.to_string(), &mut File::open(path)?)
-        })?;
+        .try_for_each(|path| archive_builder.append_file(&path, &mut File::open(&path)?))?;
 
     archive_builder.finish()
 }

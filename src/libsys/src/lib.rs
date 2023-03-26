@@ -57,16 +57,16 @@ pub const fn align_up(value: usize, alignment_bits: NonZeroU32) -> usize {
 }
 
 #[inline]
-pub const fn align_up_div(value: usize, alignment: Pow2Usize) -> usize {
-    ((value + alignment.get()) - 1) / alignment.get()
+pub const fn align_up_div(value: usize, alignment_bits: NonZeroU32) -> usize {
+    align_up(value, alignment_bits) / (1usize << alignment_bits.get())
 }
 
 #[inline]
-pub const fn align_down(value: usize, alignment: Pow2Usize) -> usize {
-    value & !(alignment.get() - 1)
+pub const fn align_down(value: usize, alignment_bits: NonZeroU32) -> usize {
+    value & !((1usize << alignment_bits.get()) - 1)
 }
 
 #[inline]
-pub const fn align_down_div(value: usize, alignment: Pow2Usize) -> usize {
-    align_down(value, alignment) / alignment.get()
+pub const fn align_down_div(value: usize, alignment_bits: NonZeroU32) -> usize {
+    align_down(value, alignment_bits) / (1usize << alignment_bits.get())
 }

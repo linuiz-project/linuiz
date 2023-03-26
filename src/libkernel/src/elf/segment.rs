@@ -1,6 +1,4 @@
-use core::ptr::NonNull;
-
-use libsys::{Address, Physical};
+use libsys::{Address, Physical, Virtual};
 
 bitflags::bitflags! {
     #[repr(transparent)]
@@ -80,8 +78,8 @@ impl Header {
     }
 
     #[inline]
-    pub fn get_virtual_address(&self) -> Option<NonNull<u8>> {
-        NonNull::new(self.virt_addr as *mut u8)
+    pub fn get_virtual_address(&self) -> Option<Address<Virtual>> {
+        Address::new(self.virt_addr as usize)
     }
 
     #[inline]

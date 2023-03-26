@@ -80,7 +80,7 @@ pub static KERNEL_HANDLE: spin::Lazy<uuid::Uuid> = spin::Lazy::new(|| uuid::Uuid
 
 /// ### Safety
 ///
-/// Do not call this function.
+/// This function should only ever be called by the bootloader.
 #[no_mangle]
 #[doc(hidden)]
 #[allow(clippy::too_many_lines)]
@@ -361,7 +361,7 @@ unsafe extern "C" fn _entry() -> ! {
                         crate::memory::with_kmapper(|kmapper| unsafe { kmapper.swap_into() });
 
                         // Safety: Function is called only once for this core.
-                        unsafe { kernel_thread_setup(info.read().lapic_id) }
+                        unsafe { kernel_core_setup(info.read().lapic_id) }
                     }
 
                     _smp_entry
@@ -383,14 +383,14 @@ unsafe extern "C" fn _entry() -> ! {
     crate::boot::reclaim_boot_memory();
     debug!("Bootloader memory reclaimed.");
 
-    kernel_thread_setup(0)
+    kernel_core_setup(0)
 }
 
-/// Safety
+/// ### Safety
 ///
-/// This function invariantly assumes it will be called only once per core.
+/// This function should only ever be called once per core.
 #[inline(never)]
-pub(self) unsafe fn kernel_thread_setup(core_id: u32) -> ! {
+pub(self) unsafe fn kernel_core_setup(core_id: u32) -> ! {
     crate::local_state::init(core_id, 1000);
 
     // Ensure we enable interrupts prior to enabling the scheduler.
@@ -400,3 +400,142 @@ pub(self) unsafe fn kernel_thread_setup(core_id: u32) -> ! {
     // This interrupt wait loop is necessary to ensure the core can jump into the scheduler.
     crate::interrupts::wait_loop()
 }
+
+pub fn load_drivers() {
+    let drivers_data = crate::boot::get_kernel_modules()
+        // Find the drives module, and map the `Option<>` to it.
+        .and_then(|modules| {
+            modules.iter().find(|module| module.path.to_str().unwrap().to_str().unwrap().ends_with("drivers"))
+        })
+        // Safety: Kernel promises HHDM to be valid, and the module pointer should be in the HHDM, so this should be valid for `u8`.
+        .map(|drivers_module| unsafe {
+            core::slice::from_raw_parts(drivers_module.base.as_ptr().unwrap(), drivers_module.length as usize)
+        })
+        .expect("no drivers provided");
+
+    let archive = tar_no_std::TarArchiveRef::new(drivers_data);
+
+    for archive_entry in archive.entries() {
+        use crate::memory::{PageAttributes, PageDepth};
+        use libkernel::elf::segment;
+        use libsys::{page_shift, page_size};
+
+        debug!("Processing archive entry for driver: {}", archive_entry.filename());
+
+        let driver_elf =
+            libkernel::elf::Elf::from_bytes(archive_entry.data()).expect("failed to parse driver blob into valid ELF");
+
+        trace!("{:?}", driver_elf);
+
+        // Create the driver's page manager from the kernel's higher-half table.
+        // Safety: Kernel guarantees HHDM to be valid.
+        let mut driver_mapper = unsafe {
+            crate::memory::address_space::Mapper::new_unsafe(
+                PageDepth::new(4),
+                crate::memory::new_kmapped_page_table().unwrap(),
+            )
+        };
+
+        // Iterate the segments, and allocate them.
+        for segment in driver_elf.iter_segments() {
+            trace!("{:?}", segment);
+
+            match segment.get_type() {
+                segment::Type::Loadable => {
+                    let memory_size = segment.get_memory_layout().unwrap().size();
+                    let memory_start = segment.get_virtual_address().unwrap().get();
+                    let memory_end = memory_start + memory_size;
+
+                    // Align the start address to ensure we iterate page-aligned addresses.
+                    let memory_start_aligned = libsys::align_down(memory_start, page_shift());
+                    for page_base in (memory_start_aligned..memory_end).step_by(page_size().get()) {
+                        let page = Address::new(page_base).unwrap();
+                        // Auto map the virtual address to a physical page.
+                        driver_mapper
+                            .auto_map(page, {
+                                // This doesn't support RWX pages. I'm not sure it ever should.
+                                if segment.get_flags().contains(segment::Flags::EXECUTABLE) {
+                                    PageAttributes::RX
+                                } else if segment.get_flags().contains(segment::Flags::WRITABLE) {
+                                    PageAttributes::RW
+                                } else {
+                                    PageAttributes::RO
+                                }
+                            })
+                            .unwrap();
+                    }
+
+                    let segment_slice = segment.data();
+                    // Safety: `memory_start` pointer is valid as we just mapped all of the requisite pages for `memory_size` length.
+                    let memory_slice = unsafe { core::slice::from_raw_parts(memory_start as *mut u8, memory_size) };
+                    // Copy segment data into the new memory region.
+                    memory_slice[..segment_slice.len()].copy_from_slice(segment_slice);
+                    // Clear any left over bytes to 0. This is useful for the bss region, for example.
+                    (&memory_slice[segment_slice.len()..]).fill(0x0);
+                }
+
+                _ => {}
+            }
+        }
+    }
+}
+
+/* load driver */
+
+// Push ELF as global task.
+
+// let stack_address = {
+//     const TASK_STACK_BASE_ADDRESS: Address<Page> = Address::<Page>::new_truncate(
+//         Address::<Virtual>::new_truncate(128 << 39),
+//         Some(PageAlign::Align2MiB),
+//     );
+//     // TODO make this a dynamic configuration
+//     const TASK_STACK_PAGE_COUNT: usize = 2;
+
+//     for page in (0..TASK_STACK_PAGE_COUNT)
+//         .map(|offset| TASK_STACK_BASE_ADDRESS.forward_checked(offset).unwrap())
+//     {
+//         driver_page_manager
+//             .map(
+//                 page,
+//                 Address::<Frame>::zero(),
+//                 false,
+//                 PageAttributes::WRITABLE
+//                     | PageAttributes::NO_EXECUTE
+//                     | PageAttributes::DEMAND
+//                     | PageAttributes::USER
+//                     | PageAttributes::HUGE,
+//             )
+//             .unwrap();
+//     }
+
+//     TASK_STACK_BASE_ADDRESS.forward_checked(TASK_STACK_PAGE_COUNT).unwrap()
+// };
+
+// TODO
+// let task = crate::local_state::Task::new(
+//     u8::MIN,
+//     // TODO account for memory base when passing entry offset
+//     crate::local_state::EntryPoint::Address(
+//         Address::<Virtual>::new(elf.get_entry_offset() as u64).unwrap(),
+//     ),
+//     stack_address.address(),
+//     {
+//         #[cfg(target_arch = "x86_64")]
+//         {
+//             (
+//                 crate::arch::x64::registers::GeneralRegisters::empty(),
+//                 crate::arch::x64::registers::SpecialRegisters::flags_with_user_segments(
+//                     crate::arch::x64::registers::RFlags::INTERRUPT_FLAG,
+//                 ),
+//             )
+//         }
+//     },
+//     #[cfg(target_arch = "x86_64")]
+//     {
+//         // TODO do not error here ?
+//         driver_page_manager.read_vmem_register().unwrap()
+//     },
+// );
+
+// crate::local_state::queue_task(task);
