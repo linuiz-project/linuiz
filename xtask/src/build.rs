@@ -3,27 +3,6 @@ use std::{fs::File, io::Error, path::Path};
 use clap::clap_derive::ValueEnum;
 use xshell::{cmd, Result, Shell};
 
-#[derive(ValueEnum, Debug, Clone, Copy)]
-pub enum Compression {
-    None,
-    Fast,
-    Small,
-    Smallest,
-    Default,
-}
-
-impl Into<CompressionLevel> for Compression {
-    fn into(self) -> CompressionLevel {
-        match self {
-            Compression::None => CompressionLevel::NoCompression,
-            Compression::Fast => CompressionLevel::BestSpeed,
-            Compression::Small => CompressionLevel::BestCompression,
-            Compression::Smallest => CompressionLevel::UberCompression,
-            Compression::Default => CompressionLevel::DefaultLevel,
-        }
-    }
-}
-
 #[derive(clap::Parser)]
 #[allow(non_snake_case)]
 pub struct Options {
@@ -31,9 +10,6 @@ pub struct Options {
     #[arg(long)]
     release: bool,
 
-    /// The compression level to use when compressing init device drivers.
-    #[arg(value_enum, long, default_value = "default")]
-    compress: Compression,
 
     /// Verbose build output. Equivalent to `cargo build -vv`.
     #[arg(short, long)]
