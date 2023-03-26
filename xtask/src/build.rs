@@ -1,4 +1,4 @@
-use std::ffi::OsStr;
+use std::{fs::File, io::Error, path::PathBuf};
 
 use clap::clap_derive::ValueEnum;
 use lza::CompressionLevel;
@@ -102,23 +102,37 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
     };
 
     cmd!(sh, "cargo build --bins -Z unstable-options {cargo_args...}").run()?;
+    // Copy the output kernel binary to the virtual HDD.
+    sh.copy_file(&format!("{tmp_dir_path_str}/pyre"), root_dir.join(".hdd/root/pyre/kernel"))?;
 
-    sh.copy_file(&format!("{tmp_dir_path_str}/pyre"), root_dir.join(".hdd/root/pyre/"))?;
+    let archive_file =
+        File::create(&format!("{tmp_dir_path_str}/drivers")).expect("failed to create or open the driver package file");
+    build_drivers_archive(archive_file, &options.drivers, sh.read_dir(&*tmp_dir_path_str)?.into_iter())
+        .expect("error attempting to package drivers");
 
+    Ok(())
+}
+
+fn build_drivers_archive(
+    archive_file: File,
+    include_drivers: &[String],
+    files: impl Iterator<Item = PathBuf>,
+) -> Result<(), Error> {
     // compress userspace drivers and write to archive file
-    let mut archive_builder = lza::ArchiveBuilder::new(options.compress.into());
+    let mut archive_builder = tar::Builder::new(archive_file);
+    files
+        // Filter & map the driver path to also include the file name.
+        .filter_map(|path| {
+            path.file_name()
+                .map(|driver_name| driver_name.to_string_lossy().to_string())
+                .map(|driver_name| (path, driver_name))
+        })
+        // Filter out the driver names that shouldn't be included.
+        .filter(|(_, driver_name)| include_drivers.iter().any(|s| s.eq(driver_name)))
+        // Attempt to package & write the drivers to the tar archive on disk.
+        .try_for_each(|(path, driver_name)| {
+            archive_builder.append_file(&driver_name.to_string(), &mut File::open(path)?)
+        })?;
 
-    for path in sh.read_dir(&*tmp_dir_path_str)?.into_iter() {
-        if let Some(file_name) = path.file_name().map(OsStr::to_string_lossy) {
-            if options.drivers.iter().any(|s| s.eq(&file_name)) {
-                archive_builder
-                    .push_data(&file_name, sh.read_binary_file(&path)?.as_slice())
-                    .expect("failed to write data to archive");
-            }
-        }
-    }
-
-    let driver_data = archive_builder.take_data();
-    println!("Compression resulted in a {} byte dump.", driver_data.len());
-    sh.write_file(root_dir.join(".hdd/root/pyre/drivers"), driver_data)
+    archive_builder.finish()
 }

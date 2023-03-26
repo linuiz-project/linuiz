@@ -7,9 +7,9 @@ edition = "2021"
 git = "https://github.com/pyre-project/lza"
 [dependencies]
 clap = { version = "*", features = ["derive"] }
-walkdir = "*"
 xshell = "=0.2.2"
 toml_edit = "*"
+tar = "*"
 
 [profile.dev]
 debug = false
