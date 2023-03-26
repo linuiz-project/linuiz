@@ -42,7 +42,6 @@ SECTIONS
         PROVIDE(__bss_start = .);
 
         KEEP(*(.gcc_except_table))
-        *(.got) *(.igot)
         *(.tbss .tbss.*)
         *(.bss .bss.*)
 
@@ -53,6 +52,7 @@ SECTIONS
     .data               : ALIGN(SEGMENT_ALIGN) {
         PROVIDE(__data_start = .);
 
+        *(.got) *(.igot)
         *(.got.plt) *(.igot.plt)
         *(.tdata .tdata.*)
         *(.data .data.*)

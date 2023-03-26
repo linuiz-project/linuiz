@@ -113,7 +113,7 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
 
     cmd!(sh, "cargo build --bins -Z unstable-options {cargo_args...}").run()?;
     // Copy the output kernel binary to the virtual HDD.
-    sh.copy_file(tmp_dir_path.join("pyre"), root_dir.join(".hdd/root/pyre/kernel"))?;
+    sh.copy_file(tmp_dir_path.join("kernel"), root_dir.join(".hdd/root/pyre/"))?;
 
     build_drivers_archive(tmp_dir_path, sh.read_dir(tmp_dir_path)?.into_iter(), &options.drivers)
         .expect("error attempting to package drivers");
