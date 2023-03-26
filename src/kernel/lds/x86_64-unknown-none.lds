@@ -16,6 +16,20 @@ SECTIONS
     .gnu.hash           : { *(.gnu.hash) }
     .dynsym             : { *(.dynsym) }
     .dynstr             : { *(.dynstr) }
+    .rela.dyn           :
+    {
+        *(.rela.dyn)
+        *(.rela.text    .rela.text.*)
+        *(.rela.rodata  .rela.rodata.*)
+        *(.rela.data.rel.ro*)
+        *(.rela.got)
+        *(.rela.data    .rela.data.*)
+        *(.rela.tdata   .rela.tdata.*)
+        *(.rela.tbss    .rela.tbss.*)
+        *(.rela.bss     .rela.bss.*)
+        *(.rela.ifunc)
+    }
+    .rela.plt           : { *(.rela.plt) *(.rela.iplt) }
     .dynamic            : { *(.dynamic) }
 
     /* text sections */
@@ -42,30 +56,11 @@ SECTIONS
         PROVIDE(__rodata_end = .);
     }
 
-    .relro              : {
-        *(.rela.plt) *(.rela.iplt)
-        *(.rela.dyn)
-        *(.rela.text    .rela.text.*)
-        *(.rela.rodata  .rela.rodata.*)
-        *(.rela.data.rel.ro*)
-        *(.rela.got)
-        *(.rela.data    .rela.data.*)
-        *(.rela.tdata   .rela.tdata.*)
-        *(.rela.tbss    .rela.tbss.*)
-        *(.rela.bss     .rela.bss.*)
-        *(.rela.ifunc)
 
-        /* aligned data sections */
-        . = ALIGN(SEGMENT_ALIGN);
-        PROVIDE(__data_start = .);
-        *(.got.plt) *(.igot.plt)
-        *(.data .data.*)
-        *(.limine_reqs)
-        PROVIDE(__data_end = .);
-
-        /* aligned bss sections */
-        . = ALIGN(SEGMENT_ALIGN);
+    /* bss sections */
+    .bss                : ALIGN(SEGMENT_ALIGN) {
         PROVIDE(__bss_start = .);
+
         KEEP(*(.gcc_except_table))
         *(.tdata .tdata.*)
         *(.tbss .tbss.*)
@@ -73,7 +68,19 @@ SECTIONS
         *(.data.rel.ro .data.rel.ro.*)
         *(.got) *(.igot)
         *(.bss .bss.*)
+
         PROVIDE(__bss_end = .);
+    }
+
+    /* data sections */
+    .data               : ALIGN(SEGMENT_ALIGN) {
+        PROVIDE(__data_start = .);
+
+        *(.got.plt) *(.igot.plt)
+        *(.data .data.*)
+        *(.limine_reqs)
+
+        PROVIDE(__data_end = .);
     }
 
     .strtab             : ALIGN(SEGMENT_ALIGN) {

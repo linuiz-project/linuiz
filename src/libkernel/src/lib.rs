@@ -7,8 +7,6 @@
 mod num;
 pub use num::*;
 
-pub mod elf;
-
 extern "C" {
     pub type LinkerSymbol;
 }
@@ -17,6 +15,10 @@ impl LinkerSymbol {
     #[inline]
     pub fn as_ptr<T>(&'static self) -> *const T {
         self as *const _ as *const T
+    }
+
+    pub fn as_usize(&'static self) -> usize {
+        self as *const Self as usize
     }
 }
 

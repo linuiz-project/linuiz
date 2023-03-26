@@ -255,7 +255,7 @@ unsafe impl<const ALIGN: usize, A: Allocator> Allocator for AlignedAllocator<ALI
 
 pub unsafe fn catch_read(ptr: NonNull<[u8]>) -> Result<TryBox<[u8]>, Exception> {
     let mem_range = ptr.as_uninit_slice().as_ptr_range();
-    let aligned_start = libsys::align_down(mem_range.start.addr(), page_size());
+    let aligned_start = libsys::align_down(mem_range.start.addr(), libsys::page_shift());
     let mem_end = mem_range.end.addr();
 
     let mut copied_mem = TryBox::new_slice(ptr.len(), 0u8).unwrap();

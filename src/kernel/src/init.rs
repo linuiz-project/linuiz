@@ -263,81 +263,21 @@ unsafe extern "C" fn _entry() -> ! {
 
     /* symbols */
     if !crate::boot::PARAMETERS.low_memory {
-        debug!("Parsing kernel symbols...");
+        match load_kernel_symbols() {
+            Ok(symbols) => {
+                crate::interrupts::without(|| crate::panic::KERNEL_SYMBOLS.call_once(|| symbols));
+            }
 
-        let (kernel_file_base, kernel_file_len) = {
-            let kernel_file = crate::boot::get_kernel_file().expect("failed to get kernel file");
-            (kernel_file.base.as_ptr().unwrap(), kernel_file.length as usize)
-        };
-
-        let kernel_elf = libkernel::elf::Elf::from_bytes(
-            // Safety: Kernel file is guaranteed to be valid by bootloader.
-            unsafe { core::slice::from_raw_parts(kernel_file_base, kernel_file_len) },
-        )
-        .expect("failed to parse kernel executable");
-
-        if let Some(names_section) = kernel_elf.get_section_names_section() {
-            let names_section = names_section.data();
-
-            for section in kernel_elf.iter_sections() {
-                use libkernel::elf::symbol::Symbol;
-                use try_alloc::boxed::TryBox;
-
-                let names_section_offset = section.get_names_section_offset();
-                // Check if names section offset is greater than the length of the names section.
-                if names_section.len() < names_section_offset {
-                    continue;
-                }
-
-                let section_data = section.data();
-                let Some(section_name) = core::ffi::CStr::from_bytes_until_nul(&names_section[names_section_offset..])
-                        .ok()
-                        .and_then(|cstr| cstr.to_str().ok())
-                    else { continue };
-
-                match section_name {
-                    ".symtab" if section_data.len() > 0 => {
-                        let symbols = {
-                            let (pre, symbols, post) = section_data.align_to::<Symbol>();
-
-                            debug_assert!(pre.is_empty());
-                            debug_assert!(post.is_empty());
-
-                            symbols
-                        };
-
-                        let Ok(mut symbols_copy) = TryBox::new_slice(symbols.len(), Symbol::default()) else { continue };
-
-                        crate::interrupts::without(|| {
-                            crate::panic::KERNEL_SYMBOLS.call_once(|| {
-                                symbols_copy.copy_from_slice(symbols);
-                                TryBox::leak(symbols_copy)
-                            });
-                        });
-                    }
-
-                    ".strtab" if section_data.len() > 0 => {
-                        let Ok(mut strings_copy) = TryBox::new_slice(section_data.len(), 0) else { continue };
-
-                        crate::interrupts::without(|| {
-                            crate::panic::KERNEL_STRINGS.call_once(|| {
-                                strings_copy.copy_from_slice(section.data());
-                                TryBox::leak(strings_copy)
-                            });
-                        });
-                    }
-
-                    _ => {}
-                }
+            Err(err) => {
+                warn!("Failed to load kernel symbols: {:?}", err);
             }
         }
     } else {
-        debug!("Kernel is running in low memory mode; pretty stack tracing will be disabled.");
+        debug!("Kernel is running in low memory mode; stack tracing will be disabled.");
     }
 
-    // TODO modules
-    // debug!("Loading kernel modules...");
-    // crate::modules::load_modules();
+    debug!("Unpacking kernel drivers...");
+    load_drivers();
 
     /* smp */
     {
@@ -380,7 +320,17 @@ unsafe extern "C" fn _entry() -> ! {
     }
 
     debug!("Reclaiming bootloader memory...");
-    crate::boot::reclaim_boot_memory();
+    crate::boot::reclaim_boot_memory({
+        extern "C" {
+            static __strtab_start: LinkerSymbol;
+            static __strtab_end: LinkerSymbol;
+
+            static __symtab_start: LinkerSymbol;
+            static __symtab_end: LinkerSymbol;
+        }
+
+        &[__strtab_start.as_usize()..__strtab_end.as_usize(), __symtab_start.as_usize()..__symtab_end.as_usize()]
+    });
     debug!("Bootloader memory reclaimed.");
 
     kernel_core_setup(0)
@@ -401,7 +351,30 @@ pub(self) unsafe fn kernel_core_setup(core_id: u32) -> ! {
     crate::interrupts::wait_loop()
 }
 
-pub fn load_drivers() {
+fn load_kernel_symbols() -> Result<&'static [(&'static str, elf::symbol::Symbol)], elf::parse::ParseError> {
+    debug!("Loading kernel symbols...");
+
+    let (kernel_file_base, kernel_file_len) = {
+        let kernel_file = crate::boot::get_kernel_file().expect("failed to get kernel file");
+        (kernel_file.base.as_ptr().unwrap(), kernel_file.length as usize)
+    };
+
+    // Safety: Kernel file is guaranteed to be valid by bootloader.
+    let kernel_elf_data = unsafe { core::slice::from_raw_parts(kernel_file_base, kernel_file_len) };
+    let kernel_elf = elf::ElfBytes::<elf::endian::AnyEndian>::minimal_parse(kernel_elf_data)?;
+    let (symbol_table, string_table) = kernel_elf.symbol_table()?.expect("kernel file has no symbol table");
+
+    let mut vec = try_alloc::vec::TryVec::with_capacity_in(symbol_table.len(), &*crate::memory::PMM)
+        .expect("failed to allocate vector for kernel symbols");
+
+    symbol_table.into_iter().for_each(|symbol| {
+        vec.push((string_table.get(symbol.st_name as usize).unwrap_or("Unidentified"), symbol)).unwrap()
+    });
+
+    Ok(alloc::vec::Vec::leak(vec.into_vec()))
+}
+
+fn load_drivers() {
     let drivers_data = crate::boot::get_kernel_modules()
         // Find the drives module, and map the `Option<>` to it.
         .and_then(|modules| {
@@ -417,15 +390,15 @@ pub fn load_drivers() {
 
     for archive_entry in archive.entries() {
         use crate::memory::{PageAttributes, PageDepth};
-        use libkernel::elf::segment;
         use libsys::{page_shift, page_size};
 
         debug!("Processing archive entry for driver: {}", archive_entry.filename());
 
-        let driver_elf =
-            libkernel::elf::Elf::from_bytes(archive_entry.data()).expect("failed to parse driver blob into valid ELF");
-
-        trace!("{:?}", driver_elf);
+        let Ok(driver_elf) = elf::ElfBytes::<elf::endian::AnyEndian>::minimal_parse(archive_entry.data())
+        else {
+            warn!("failed to parse driver blob into valid ELF.");
+            continue
+        };
 
         // Create the driver's page manager from the kernel's higher-half table.
         // Safety: Kernel guarantees HHDM to be valid.
@@ -436,27 +409,31 @@ pub fn load_drivers() {
             )
         };
 
+        let Some(driver_elf_segments) = driver_elf.segments() else { continue };
+
         // Iterate the segments, and allocate them.
-        for segment in driver_elf.iter_segments() {
+        for segment in driver_elf_segments {
             trace!("{:?}", segment);
 
-            match segment.get_type() {
-                segment::Type::Loadable => {
-                    let memory_size = segment.get_memory_layout().unwrap().size();
-                    let memory_start = segment.get_virtual_address().unwrap().get();
+            match segment.p_type {
+                0x1 => {
+                    let memory_size = segment.p_memsz as usize;
+                    let memory_start = segment.p_vaddr as usize;
                     let memory_end = memory_start + memory_size;
 
                     // Align the start address to ensure we iterate page-aligned addresses.
                     let memory_start_aligned = libsys::align_down(memory_start, page_shift());
                     for page_base in (memory_start_aligned..memory_end).step_by(page_size().get()) {
+                        use bit_field::BitField;
+
                         let page = Address::new(page_base).unwrap();
                         // Auto map the virtual address to a physical page.
                         driver_mapper
                             .auto_map(page, {
                                 // This doesn't support RWX pages. I'm not sure it ever should.
-                                if segment.get_flags().contains(segment::Flags::EXECUTABLE) {
+                                if segment.p_flags.get_bit(1) {
                                     PageAttributes::RX
-                                } else if segment.get_flags().contains(segment::Flags::WRITABLE) {
+                                } else if segment.p_flags.get_bit(2) {
                                     PageAttributes::RW
                                 } else {
                                     PageAttributes::RO
@@ -465,13 +442,13 @@ pub fn load_drivers() {
                             .unwrap();
                     }
 
-                    let segment_slice = segment.data();
+                    let segment_slice = driver_elf.segment_data(&segment).expect("driver segment parse failure");
                     // Safety: `memory_start` pointer is valid as we just mapped all of the requisite pages for `memory_size` length.
-                    let memory_slice = unsafe { core::slice::from_raw_parts(memory_start as *mut u8, memory_size) };
+                    let memory_slice = unsafe { core::slice::from_raw_parts_mut(memory_start as *mut u8, memory_size) };
                     // Copy segment data into the new memory region.
                     memory_slice[..segment_slice.len()].copy_from_slice(segment_slice);
                     // Clear any left over bytes to 0. This is useful for the bss region, for example.
-                    (&memory_slice[segment_slice.len()..]).fill(0x0);
+                    (&mut memory_slice[segment_slice.len()..]).fill(0x0);
                 }
 
                 _ => {}

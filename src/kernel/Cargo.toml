@@ -34,11 +34,11 @@ num_enum = { version = "*", default-features = false }
 uuid = { version = "*", default-features = false, features = ["v4"] }
 getrandom = { version = "*", features = ["custom"] }
 limine = { version = "*", features = ["requests-section"] }
+elf = { version = "*", default-features = false, features = ["nightly"] }
 bit_field = "*"
 bitflags = "*"
 paste = "*"
 rustc-demangle = "*"
-no-panic = "*"
 rand_core = "*"
 rand_pcg = "*"
 tar-no-std = "*"

@@ -21,8 +21,6 @@ mod ignore {
         });
 }
 
-
-
 pub const LIMINE_REV: u64 = 0;
 
 static BOOT_RECLAIM: AtomicBool = AtomicBool::new(false);
@@ -71,7 +69,7 @@ pub fn get_rsdp_address() -> Option<Address<Virtual>> {
 /// # Safety
 ///
 /// No dangling references can remain to bootloader types or memory, as it may be concurrently overwritten.
-pub unsafe fn reclaim_boot_memory() {
+pub unsafe fn reclaim_boot_memory(skip_ranges: &[core::ops::Range<usize>]) {
     use crate::memory::pmm::FrameType;
     use limine::LimineMemoryMapEntryType;
 
@@ -82,11 +80,11 @@ pub unsafe fn reclaim_boot_memory() {
         .iter()
         .filter(|entry| entry.typ == LimineMemoryMapEntryType::BootloaderReclaimable)
         .flat_map(|entry| (entry.base..(entry.base + entry.len)).step_by(0x1000))
-        .map(|address| Address::new_truncate(address as usize))
+        .map(|address| Address::<libsys::Frame>::new_truncate(address as usize))
+        .filter(|address| skip_ranges.iter().any(|skip| skip.contains(&address.get().get())))
     {
         crate::memory::PMM.modify_type(frame, FrameType::Generic, Some(FrameType::BootReclaim)).ok();
     }
 
     BOOT_RECLAIM.store(true, Ordering::Release);
 }
-

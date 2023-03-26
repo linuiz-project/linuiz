@@ -1,4 +1,4 @@
-use std::{fs::File, io::Error, path::PathBuf};
+use std::{fs::File, io::Error, path::Path};
 
 use clap::clap_derive::ValueEnum;
 use lza::CompressionLevel;
@@ -71,19 +71,22 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
     cmd!(sh, "git submodule update --init --recursive --remote").run()?;
 
     // Configure rustc via the `RUSTFLAGS` environment variable.
-    // let _rustflags = if !options.release {
-    //     Some(shell.push_env("RUSTFLAGS", "-Cforce-frame-pointers -Csymbol-mangling-version=v0"))
-    // } else {
-    //     None
-    // };
+    let _rustflags = {
+        if !options.release {
+            Some(sh.push_env("RUSTFLAGS", "-Cforce-frame-pointers -Csymbol-mangling-version=v0"))
+        } else {
+            None
+        }
+    };
 
     let root_dir = sh.current_dir();
     let _dir = sh.push_dir("src/");
     let tmp_dir = sh.create_temp_dir()?;
-    let tmp_dir_path_str = tmp_dir.path().to_string_lossy();
+    let tmp_dir_path = tmp_dir.path();
+    let tmp_path_dir_str = tmp_dir_path.to_string_lossy();
 
     let cargo_args = {
-        let mut args = vec!["--out-dir", &tmp_dir_path_str];
+        let mut args = vec!["--out-dir", &tmp_path_dir_str];
 
         args.push({
             if options.release {
@@ -103,33 +106,37 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
 
     cmd!(sh, "cargo build --bins -Z unstable-options {cargo_args...}").run()?;
     // Copy the output kernel binary to the virtual HDD.
-    sh.copy_file(&format!("{tmp_dir_path_str}/pyre"), root_dir.join(".hdd/root/pyre/kernel"))?;
+    sh.copy_file(tmp_dir_path.join("pyre"), root_dir.join(".hdd/root/pyre/kernel"))?;
 
-    let archive_file =
-        File::create(&format!("{tmp_dir_path_str}/drivers")).expect("failed to create or open the driver package file");
-    build_drivers_archive(archive_file, &options.drivers, sh.read_dir(&*tmp_dir_path_str)?.into_iter())
+    build_drivers_archive(tmp_dir_path, sh.read_dir(tmp_dir_path)?.into_iter(), &options.drivers)
         .expect("error attempting to package drivers");
 
     Ok(())
 }
 
-fn build_drivers_archive(
-    archive_file: File,
+fn build_drivers_archive<P: AsRef<Path>>(
+    tmp_dir_path: P,
+    files: impl Iterator<Item = std::path::PathBuf>,
     include_drivers: &[String],
-    files: impl Iterator<Item = PathBuf>,
 ) -> Result<(), Error> {
+    let tmp_dir_path = tmp_dir_path.as_ref();
+
     // compress userspace drivers and write to archive file
-    let mut archive_builder = tar::Builder::new(archive_file);
+    let mut archive_builder = tar::Builder::new(
+        File::create(tmp_dir_path.join("drivers")).expect("failed to create or open the driver package file"),
+    );
+
     files
-        // Filter out any drivers that don't need to be included.
-        .filter(|path| {
-            path.file_name()
+        .filter(|p| {
+            p.file_name()
                 .map(std::ffi::OsStr::to_string_lossy)
                 .filter(|driver_name| include_drivers.iter().any(|s| s.eq(driver_name)))
                 .is_some()
         })
-        // Attempt to package & write the drivers to the tar archive on disk.
-        .try_for_each(|path| archive_builder.append_file(&path, &mut File::open(&path)?))?;
+        .try_for_each(|path| {
+            let rel_path = path.strip_prefix(tmp_dir_path).unwrap();
+            archive_builder.append_file(&rel_path, &mut File::open(&path)?)
+        })?;
 
     archive_builder.finish()
 }
