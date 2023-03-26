@@ -16,20 +16,7 @@ SECTIONS
     .gnu.hash           : { *(.gnu.hash) }
     .dynsym             : { *(.dynsym) }
     .dynstr             : { *(.dynstr) }
-    .rela.dyn           :
-    {
-        *(.rela.dyn)
-        *(.rela.text    .rela.text.*)
-        *(.rela.rodata  .rela.rodata.*)
-        *(.rela.data.rel.ro*)
-        *(.rela.got)
-        *(.rela.data    .rela.data.*)
-        *(.rela.tdata   .rela.tdata.*)
-        *(.rela.tbss    .rela.tbss.*)
-        *(.rela.bss     .rela.bss.*)
-        *(.rela.ifunc)
-    }
-    .rela.plt           : { *(.rela.plt) *(.rela.iplt) }
+    .dynamic            : { *(.dynamic) }
 
     /* text sections */
     .text               : ALIGN(SEGMENT_ALIGN) {
@@ -55,32 +42,50 @@ SECTIONS
         PROVIDE(__rodata_end = .);
     }
 
+    .relro              : {
+        *(.rela.plt) *(.rela.iplt)
+        *(.rela.dyn)
+        *(.rela.text    .rela.text.*)
+        *(.rela.rodata  .rela.rodata.*)
+        *(.rela.data.rel.ro*)
+        *(.rela.got)
+        *(.rela.data    .rela.data.*)
+        *(.rela.tdata   .rela.tdata.*)
+        *(.rela.tbss    .rela.tbss.*)
+        *(.rela.bss     .rela.bss.*)
+        *(.rela.ifunc)
 
-    /* bss sections */
-    .bss                : ALIGN(SEGMENT_ALIGN) {
+        /* aligned data sections */
+        . = ALIGN(SEGMENT_ALIGN);
+        PROVIDE(__data_start = .);
+        *(.got.plt) *(.igot.plt)
+        *(.data .data.*)
+        *(.limine_reqs)
+        PROVIDE(__data_end = .);
+
+        /* aligned bss sections */
+        . = ALIGN(SEGMENT_ALIGN);
         PROVIDE(__bss_start = .);
-
         KEEP(*(.gcc_except_table))
         *(.tdata .tdata.*)
         *(.tbss .tbss.*)
         *(.data.rel.ro.local .data.rel.ro.local.*)
         *(.data.rel.ro .data.rel.ro.*)
-        *(.dynamic)
         *(.got) *(.igot)
         *(.bss .bss.*)
-
         PROVIDE(__bss_end = .);
     }
 
-    /* data sections */
-    .data               : ALIGN(SEGMENT_ALIGN) {
-        PROVIDE(__data_start = .);
+    .strtab             : ALIGN(SEGMENT_ALIGN) {
+        PROVIDE(__strtab_start = .);
+        *(.strtab)
+        PROVIDE(__strtab_end = .);
+    }
 
-        *(.got.plt) *(.igot.plt)
-        *(.data .data.*)
-        *(.limine_reqs)
-
-        PROVIDE(__data_end = .);
+    .symtab             : ALIGN(SEGMENT_ALIGN) {
+        PROVIDE(__symtab_start = .);
+        *(.symtab)
+        PROVIDE(__symtab_end = .);
     }
 
     .comment              0 : { *(.comment) }
@@ -104,6 +109,5 @@ SECTIONS
     .debug_weaknames      0 : { *(.debug_weaknames) }
     .line                 0 : { *(.line) }
     .shstrtab             0 : { *(.shstrtab) }
-    .strtab               0 : { *(.strtab) }
-    .symtab               0 : { *(.symtab) }
+
 }
