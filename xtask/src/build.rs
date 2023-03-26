@@ -1,7 +1,6 @@
 use std::{fs::File, io::Error, path::Path};
 
 use clap::clap_derive::ValueEnum;
-use lza::CompressionLevel;
 use xshell::{cmd, Result, Shell};
 
 #[derive(ValueEnum, Debug, Clone, Copy)]
