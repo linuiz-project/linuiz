@@ -12,26 +12,6 @@ SECTIONS
 {
     . = KERN_BASE + SIZEOF_HEADERS; 
 
-    .hash               : { *(.hash) }
-    .gnu.hash           : { *(.gnu.hash) }
-    .dynsym             : { *(.dynsym) }
-    .dynstr             : { *(.dynstr) }
-    .rela.dyn           :
-    {
-        *(.rela.dyn)
-        *(.rela.text    .rela.text.*)
-        *(.rela.rodata  .rela.rodata.*)
-        *(.rela.data.rel.ro*)
-        *(.rela.got)
-        *(.rela.data    .rela.data.*)
-        *(.rela.tdata   .rela.tdata.*)
-        *(.rela.tbss    .rela.tbss.*)
-        *(.rela.bss     .rela.bss.*)
-        *(.rela.ifunc)
-    }
-    .rela.plt           : { *(.rela.plt) *(.rela.iplt) }
-    .dynamic            : { *(.dynamic) }
-
     /* text sections */
     .text               : ALIGN(SEGMENT_ALIGN) {
         PROVIDE(__text_start = .);
@@ -62,11 +42,8 @@ SECTIONS
         PROVIDE(__bss_start = .);
 
         KEEP(*(.gcc_except_table))
-        *(.tdata .tdata.*)
-        *(.tbss .tbss.*)
-        *(.data.rel.ro.local .data.rel.ro.local.*)
-        *(.data.rel.ro .data.rel.ro.*)
         *(.got) *(.igot)
+        *(.tbss .tbss.*)
         *(.bss .bss.*)
 
         PROVIDE(__bss_end = .);
@@ -77,6 +54,7 @@ SECTIONS
         PROVIDE(__data_start = .);
 
         *(.got.plt) *(.igot.plt)
+        *(.tdata .tdata.*)
         *(.data .data.*)
         *(.limine_reqs)
 
