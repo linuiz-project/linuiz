@@ -38,7 +38,7 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
     // copy configuration to EFI image
     sh.copy_file("resources/limine.cfg", ".hdd/root/EFI/BOOT/")?;
     // copy the EFI binary image
-    sh.copy_file("resources/limine/BOOTX64.EFI", ".hdd/root/EFI/BOOT/")?;
+    sh.copy_file("resources/BOOTX64.EFI", ".hdd/root/EFI/BOOT/")?;
 
     cmd!(sh, "git submodule update --init --recursive --remote").run()?;
 
