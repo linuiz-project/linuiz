@@ -2,20 +2,21 @@
 
 **Pyre OS** is a semi-modular operating system written in the Rust programming language. Its intent is to find the best of both worlds: combine the excellent IPC performance of modular kernel configurations, with the extremely low memory overhead of monolithic kernels.
 
-As it stands, there is very little user-facing functionality. The bootloader (Limine + Limine boot protocol) can be configured via the `resources/limine.cfg` file. OVMF is used for the UEFI firmware.
+As it stands, there is very little user-facing functionality. The bootloader (Limine + Limine boot protocol) can be configured via the `resources/limine.cfg` file. At time of writing, there are a few configurables for the kernel:
+    - `--nosmp` will park the additional CPU cores
+    - `--symbolinfo` will retain symbol info, even in release builds (use for kernel stack traces)
+    - `--lomem` will do several different things in an attempt to lower memory usage
 
-Driver ELF loading (and general userspace process loading) is coming soon.
+Currently, drivers are packaged and loaded as a tarball, but will yet be loaded into userspace and ran (this is WIP).
 
 
-## Running the OS
-In order to build and run Pyre OS, you'll require a few things:
-- QEMU installed and in your PATH
-- LLVM installed and in your PATH
-- Rust (rustup/cargo) installed and configured to use latest nightly.
+## Building / Running the OS
 
-Some additional requirements:
-- To utilize the `-d` disassembly and `-r` readelf flags, you'll need both `llvm-objdump` and `readelf` binaries in your PATH.
+### Prerequisites
+    - cargo + rustup installed and in your PATH.
 
-Once you've met those requirements——open a terminal, navigate to the root working directory of the project (`pyre/`), type the following commands:
-- `cargo xtask build --target x64`
-- `cargo xtask run --cpu qemu64 --smp 4 --log`
+### Building
+To build, simply run `cargo xtask build` within the root project directory. The resultant binaries will be output to `.hdd/root/pyre/`.
+
+### Running
+`cargo xtask run` will both build and run the OS (so build flags can be passed to this command as well).
