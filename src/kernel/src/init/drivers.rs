@@ -90,7 +90,7 @@ fn with_kernel_module<T>(name: &str, with_fn: impl FnOnce(&NonNullPtr<LimineFile
         .expect("boot memory has been reclaimed")
         .iter()
         .find(|module| get_module_name(module).is_some_and(|n| n.eq(name)))
-        .map(move |module| with_fn(module))
+        .map(|module| with_fn(module))
 }
 
 fn get_module_name<'a>(module: &'a NonNullPtr<LimineFile>) -> Option<&'a str> {

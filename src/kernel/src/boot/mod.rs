@@ -52,7 +52,7 @@ pub fn get_kernel_file() -> Option<&'static limine::LimineFile> {
 pub fn get_kernel_modules() -> Option<&'static [limine::NonNullPtr<limine::LimineFile>]> {
     boot_only!({
         static LIMINE_MODULES: limine::LimineModuleRequest = limine::LimineModuleRequest::new(LIMINE_REV);
-        LIMINE_MODULES.get_response().get().map(|response| response.modules())
+        LIMINE_MODULES.get_response().get().map(limine::LimineModuleResponse::modules)
     })
 }
 
