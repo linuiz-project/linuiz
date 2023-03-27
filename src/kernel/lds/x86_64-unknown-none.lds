@@ -12,18 +12,17 @@ SECTIONS
 {
     . = KERN_BASE + SIZEOF_HEADERS; 
 
+    .gcc_except_table   : { KEEP(*(.gcc_except_table)) }
+
+    /* eh_frame sections */
     .eh_frame_hdr       : {
         PROVIDE(__eh_frame_hdr = .);
         *(.eh_frame_hdr)
     }
-
     .eh_frame           : ALIGN(0x8) {
         PROVIDE(__eh_frame = .);
         KEEP(*(.eh_frame .eh_frame.*))
     }
-
-    .gcc_except_table   : { KEEP(*(.gcc_except_table)) }
-
 
     /* text sections */
     .text               : ALIGN(SEGMENT_ALIGN) {
@@ -31,7 +30,7 @@ SECTIONS
 
         *(.plt) *(.iplt)
         *(.text .text.*)
-    
+
         PROVIDE(__text_end = .);
     }
 
@@ -45,15 +44,16 @@ SECTIONS
     }
 
 
-    /* bss sections */
-    .bss                : ALIGN(SEGMENT_ALIGN) {
-        PROVIDE(__bss_start = .);
+    .tbss               : { *(.tbss .tbss.*) }
+    .tdata              : { *(.tdata .tdata.*) }
 
-        *(.tbss .tbss.*)
-        *(.bss .bss.*)
-
-        PROVIDE(__bss_end = .);
+    /* relro data */
+    .dynamic                : { *(.dynamic) }
+    .data.rel.ro        : {
+        *(.data.rel.ro.local .data.rel.ro.local.*)
+        *(.data.rel.ro .data.rel.ro.*)
     }
+    . = DATA_SEGMENT_RELRO_END(0, .);
 
     /* data sections */
     .data               : ALIGN(SEGMENT_ALIGN) {
@@ -61,24 +61,30 @@ SECTIONS
 
         *(.got) *(.igot)
         *(.got.plt) *(.igot.plt)
-        *(.tdata .tdata.*)
         *(.data .data.*)
         *(.limine_reqs)
 
         PROVIDE(__data_end = .);
     }
 
-    .strtab             : ALIGN(SEGMENT_ALIGN) {
-        PROVIDE(__strtab_start = .);
-        *(.strtab)
-        PROVIDE(__strtab_end = .);
+    /* bss sections */
+    .bss                : ALIGN(SEGMENT_ALIGN) {
+        PROVIDE(__bss_start = .);
+
+        *(.dynbss)
+        *(.bss .bss.*)
+
+        PROVIDE(__bss_end = .);
     }
 
-    .symtab             : ALIGN(SEGMENT_ALIGN) {
-        PROVIDE(__symtab_start = .);
-        *(.symtab)
-        PROVIDE(__symtab_end = .);
-    }
+    . = DATA_SEGMENT_END(.);
+
+    /* symbols */
+    . = ALIGN(SEGMENT_ALIGN);
+    PROVIDE(__symbols_start = .);
+    .symtab             : { *(.symtab) }
+    .strtab             : { *(.strtab) }
+    PROVIDE(__symbols_end = .);
 
     .comment              0 : { *(.comment) }
     .debug                0 : { *(.debug) }

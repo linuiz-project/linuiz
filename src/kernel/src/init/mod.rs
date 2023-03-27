@@ -134,7 +134,7 @@ unsafe extern "C" fn _entry() -> ! {
                 use limine::LimineMemoryMapEntryType;
 
                 match entry.typ {
-                            LimineMemoryMapEntryType::Usable
+                    LimineMemoryMapEntryType::Usable
                             | LimineMemoryMapEntryType::AcpiNvs
                             | LimineMemoryMapEntryType::AcpiReclaimable
                             | LimineMemoryMapEntryType::BootloaderReclaimable
@@ -251,14 +251,11 @@ unsafe extern "C" fn _entry() -> ! {
     debug!("Reclaiming bootloader memory...");
     crate::boot::reclaim_boot_memory({
         extern "C" {
-            static __strtab_start: LinkerSymbol;
-            static __strtab_end: LinkerSymbol;
-
-            static __symtab_start: LinkerSymbol;
-            static __symtab_end: LinkerSymbol;
+            static __symbols_start: LinkerSymbol;
+            static __symbols_end: LinkerSymbol;
         }
 
-        &[__strtab_start.as_usize()..__strtab_end.as_usize(), __symtab_start.as_usize()..__symtab_end.as_usize()]
+        &[__symbols_start.as_usize()..__symbols_end.as_usize()]
     });
     debug!("Bootloader memory reclaimed.");
 

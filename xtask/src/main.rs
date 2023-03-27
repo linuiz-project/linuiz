@@ -45,14 +45,11 @@ fn main() -> Result<()> {
     match Arguments::parse() {
         Arguments::Clean => in_workspace_with(&sh, |sh| cmd!(sh, "cargo clean").run()),
         Arguments::Check => in_workspace_with(&sh, |sh| cmd!(sh, "cargo check --bins").run()),
-        Arguments::Update => in_workspace_with(&sh, |sh| cmd!(sh, "cargo update").run())
-            .and_then(|_| cmd!(sh, "git submodule update --init --recursive --remote").run()),
+        Arguments::Update => in_workspace_with(&sh, |sh| cmd!(sh, "cargo update").run()),
 
         Arguments::Target(target) => {
-            let mut config = sh
-                .read_file("src/.cargo/config.toml")?
-                .parse::<toml_edit::Document>()
-                .expect("invalid cargo config");
+            let mut config =
+                sh.read_file("src/.cargo/config.toml")?.parse::<toml_edit::Document>().expect("invalid cargo config");
             config["build"]["target"] = toml_edit::value(target.to_string());
             sh.write_file("src/.cargo/config.toml", config.to_string())
         }

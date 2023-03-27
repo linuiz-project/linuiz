@@ -40,8 +40,6 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
     // copy the EFI binary image
     sh.copy_file("resources/BOOTX64.EFI", ".hdd/root/EFI/BOOT/")?;
 
-    cmd!(sh, "git submodule update --init --recursive --remote").run()?;
-
     // Configure rustc via the `RUSTFLAGS` environment variable.
     let _rustflags = {
         let mut rustflags = Vec::new();
