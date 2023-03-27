@@ -42,13 +42,6 @@ pub fn get_memory_map() -> Option<&'static [limine::NonNullPtr<limine::LimineMem
     })
 }
 
-pub fn get_kernel_file() -> Option<&'static limine::LimineFile> {
-    boot_only!({
-        static LIMINE_KERNEL_FILE: limine::LimineKernelFileRequest = limine::LimineKernelFileRequest::new(LIMINE_REV);
-        LIMINE_KERNEL_FILE.get_response().get().and_then(|response| response.kernel_file.get())
-    })
-}
-
 pub fn get_kernel_modules() -> Option<&'static [limine::NonNullPtr<limine::LimineFile>]> {
     boot_only!({
         static LIMINE_MODULES: limine::LimineModuleRequest = limine::LimineModuleRequest::new(LIMINE_REV);

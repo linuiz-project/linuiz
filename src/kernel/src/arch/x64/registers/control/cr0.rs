@@ -33,7 +33,7 @@ impl CR0 {
             );
         }
 
-        CR0Flags::from_bits_truncate(value) 
+        CR0Flags::from_bits_truncate(value)
     }
 
     #[inline]

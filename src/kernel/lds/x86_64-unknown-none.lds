@@ -1,85 +1,54 @@
 OUTPUT_FORMAT(elf64-x86-64)
 OUTPUT_ARCH(i386:x86-64)
-
 ENTRY(_entry)
 
 /* Place kernel in the last 2GB of virtual memory. */
 KERN_BASE = 0xffffffff80000000;
-
-PROVIDE(SEGMENT_ALIGN = CONSTANT(MAXPAGESIZE));
+SEGMENT_ALIGN = CONSTANT(MAXPAGESIZE);
 
 SECTIONS
 {
     . = KERN_BASE + SIZEOF_HEADERS; 
 
-    .gcc_except_table   : { KEEP(*(.gcc_except_table)) }
+    .hash                   : { *(.hash) }
+    .gnu.hash               : { *(.gnu.hash) }
+    .dynsym                 : { *(.dynsym) }
+    .dynstr                 : { *(.dynstr) }
+    .rela                   : { *(.rela*) }
+    .rodata                 : { *(.rodata .rodata.*) }
+    PROVIDE(__build_id = .);
+    .note.gnu.build-id      : { KEEP(*(.note.gnu.build-id)) }
+    PROVIDE(__eh_frame_hdr = .);
+    .eh_frame_hdr           : { *(.eh_frame_hdr) }
+    PROVIDE(__eh_frame = .);
+    .eh_frame               : { KEEP(*(.eh_frame)) }
+    .gcc_except_table       : { KEEP(*(.gcc_except_table)) }
 
-    /* eh_frame sections */
-    .eh_frame_hdr       : {
-        PROVIDE(__eh_frame_hdr = .);
-        *(.eh_frame_hdr)
-    }
-    .eh_frame           : ALIGN(0x8) {
-        PROVIDE(__eh_frame = .);
-        KEEP(*(.eh_frame .eh_frame.*))
-    }
+    . = ALIGN(SEGMENT_ALIGN);
+    .plt                    : { *(.plt) *(.iplt) }
+    .text                   : { *(.text .text.*) }
 
-    /* text sections */
-    .text               : ALIGN(SEGMENT_ALIGN) {
-        PROVIDE(__text_start = .);
+    . = ALIGN(SEGMENT_ALIGN);
+    .tdata                  : { *(.tdata .tdata.*) }
+    .tbss                   : { *(.tbss .tbss.*) }
 
-        *(.plt) *(.iplt)
-        *(.text .text.*)
-
-        PROVIDE(__text_end = .);
-    }
-
-    /* rodata sections */
-    .rodata             : ALIGN(SEGMENT_ALIGN) {
-        PROVIDE(__rodata_start = .);
-
-        *(.rodata .rodata.*)
-
-        PROVIDE(__rodata_end = .);
-    }
-
-
-    .tbss               : { *(.tbss .tbss.*) }
-    .tdata              : { *(.tdata .tdata.*) }
-
-    /* relro data */
-    .dynamic                : { *(.dynamic) }
-    .data.rel.ro        : {
+    .data.rel.ro            :
+    {
         *(.data.rel.ro.local .data.rel.ro.local.*)
         *(.data.rel.ro .data.rel.ro.*)
     }
+
+    .dynamic                : { *(.dynamic) }
+
     . = DATA_SEGMENT_RELRO_END(0, .);
 
-    /* data sections */
-    .data               : ALIGN(SEGMENT_ALIGN) {
-        PROVIDE(__data_start = .);
-
-        *(.got) *(.igot)
-        *(.got.plt) *(.igot.plt)
-        *(.data .data.*)
-        *(.limine_reqs)
-
-        PROVIDE(__data_end = .);
-    }
-
-    /* bss sections */
-    .bss                : ALIGN(SEGMENT_ALIGN) {
-        PROVIDE(__bss_start = .);
-
-        *(.dynbss)
-        *(.bss .bss.*)
-
-        PROVIDE(__bss_end = .);
-    }
+    .got                    : { *(.got) *(.igot) }
+    .got.plt                : { *(.got.plt) *(.igot.plt) }
+    .data                   : ALIGN(SEGMENT_ALIGN) { *(.data .data.*) KEEP(*(.limine_reqs)) }
+    .bss                    : ALIGN(SEGMENT_ALIGN) { *(.dynbss) *(.bss .bss.*) }
 
     . = DATA_SEGMENT_END(.);
 
-    /* symbols */
     . = ALIGN(SEGMENT_ALIGN);
     PROVIDE(__symbols_start = .);
     .symtab             : { *(.symtab) }

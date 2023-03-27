@@ -1,4 +1,3 @@
-
 #[derive(Debug, Clone, Copy)]
 pub struct Parameters {
     pub smp: bool,
@@ -13,25 +12,27 @@ impl Default for Parameters {
 }
 
 pub static PARAMETERS: spin::Lazy<Parameters> = spin::Lazy::new(|| {
-    crate::boot::get_kernel_file()
-        .and_then(|kernel_file| kernel_file.cmdline.to_str())
-        .and_then(|cmdline_cstr| cmdline_cstr.to_str().ok())
-        .map(|cmdline| {
-            let mut parameters = Parameters::default();
+    return Parameters::default();
 
-            for parameter in cmdline.split(' ') {
-                match parameter.split_once(':') {
-                    Some(("smp", "on")) => parameters.smp = true,
-                    Some(("smp", "off")) => parameters.smp = false,
+    // crate::boot::get_kernel_file()
+    //     .and_then(|kernel_file| kernel_file.cmdline.to_str())
+    //     .and_then(|cmdline_cstr| cmdline_cstr.to_str().ok())
+    //     .map(|cmdline| {
+    //         let mut parameters = Parameters::default();
 
-                    None if parameter == "symbolinfo" => parameters.symbolinfo = true,
-                    None if parameter == "lomem" => parameters.low_memory = true,
+    //         for parameter in cmdline.split(' ') {
+    //             match parameter.split_once(':') {
+    //                 Some(("smp", "on")) => parameters.smp = true,
+    //                 Some(("smp", "off")) => parameters.smp = false,
 
-                    _ => warn!("Unhandled cmdline parameter: {:?}", parameter),
-                }
-            }
+    //                 None if parameter == "symbolinfo" => parameters.symbolinfo = true,
+    //                 None if parameter == "lomem" => parameters.low_memory = true,
 
-            parameters
-        })
-        .unwrap_or_default()
+    //                 _ => warn!("Unhandled cmdline parameter: {:?}", parameter),
+    //             }
+    //         }
+
+    //         parameters
+    //     })
+    //     .unwrap_or_default()
 });
