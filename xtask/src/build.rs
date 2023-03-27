@@ -58,6 +58,8 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
 
     let root_dir = sh.current_dir();
     let _dir = sh.push_dir("src/");
+    cmd!(sh, "cargo fmt").run()?;
+
     let tmp_dir = sh.create_temp_dir()?;
     let tmp_dir_path = tmp_dir.path();
     let tmp_path_dir_str = tmp_dir_path.to_string_lossy();
