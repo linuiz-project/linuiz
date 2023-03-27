@@ -85,23 +85,28 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
     // Copy the output kernel binary to the virtual HDD.
     sh.copy_file(tmp_dir_path.join("kernel"), root_dir.join(".hdd/root/pyre/"))?;
 
-    build_drivers_archive(tmp_dir_path, sh.read_dir(tmp_dir_path)?.into_iter(), &options.drivers)
-        .expect("error attempting to package drivers");
+    build_drivers_archive(
+        tmp_dir_path,
+        &root_dir.join(".hdd/root/pyre/drivers"),
+        sh.read_dir(tmp_dir_path)?.into_iter(),
+        &options.drivers,
+    )
+    .expect("error attempting to package drivers");
 
     Ok(())
 }
 
 fn build_drivers_archive<P: AsRef<Path>>(
-    tmp_dir_path: P,
+    drivers_path: P,
+    archive_path: P,
     files: impl Iterator<Item = std::path::PathBuf>,
     include_drivers: &[String],
 ) -> Result<(), Error> {
-    let tmp_dir_path = tmp_dir_path.as_ref();
+    let drivers_path = drivers_path.as_ref();
 
     // compress userspace drivers and write to archive file
-    let mut archive_builder = tar::Builder::new(
-        File::create(tmp_dir_path.join("drivers")).expect("failed to create or open the driver package file"),
-    );
+    let mut archive_builder =
+        tar::Builder::new(File::create(archive_path).expect("failed to create or open the driver package file"));
 
     files
         .filter(|p| {
@@ -111,7 +116,9 @@ fn build_drivers_archive<P: AsRef<Path>>(
                 .is_some()
         })
         .try_for_each(|path| {
-            let rel_path = path.strip_prefix(tmp_dir_path).unwrap();
+            println!("Packaging driver: {:?}", path.file_name().unwrap());
+
+            let rel_path = path.strip_prefix(drivers_path).unwrap();
             archive_builder.append_file(&rel_path, &mut File::open(&path)?)
         })?;
 
