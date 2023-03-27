@@ -1,6 +1,3 @@
-mod params;
-pub use params::*;
-
 use core::sync::atomic::{AtomicBool, Ordering};
 use libsys::{Address, Virtual};
 

@@ -93,7 +93,7 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
             use crate::arch::x64::structures::idt;
 
             // TODO use fallible allocations for this
-            if !crate::boot::PARAMETERS.low_memory {
+            if !crate::init::get_parameters().low_memory {
                 Some({
                     let mut idt = TryBox::new(idt::InterruptDescriptorTable::new()).unwrap();
 

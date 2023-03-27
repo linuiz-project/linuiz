@@ -1,9 +1,14 @@
 mod drivers;
+mod params;
 
 use libkernel::LinkerSymbol;
 use libsys::{page_size, Address};
 
 pub static KERNEL_HANDLE: spin::Lazy<uuid::Uuid> = spin::Lazy::new(|| uuid::Uuid::new_v4());
+
+pub fn get_parameters() -> &'static params::Parameters {
+    params::PARAMETERS.get().expect("parameters have not yet been parsed")
+}
 
 /// ### Safety
 ///
@@ -77,6 +82,32 @@ unsafe extern "C" fn _entry() -> ! {
             .get()
             .and_then(|response| response.kernel_file.get())
             .expect("bootloader did not provide kernel file data");
+
+        /* parse parameters */
+        params::PARAMETERS.call_once(|| {
+            kernel_file
+                .cmdline
+                .to_str()
+                .and_then(|cmdline| cmdline.to_str().ok())
+                .map(|cmdline| {
+                    let mut params = params::Parameters::default();
+
+                    for parameter in cmdline.split(' ') {
+                        match parameter.split_once(':') {
+                            Some(("smp", "on")) => params.smp = true,
+                            Some(("smp", "off")) => params.smp = false,
+
+                            None if parameter == "symbolinfo" => params.symbolinfo = true,
+                            None if parameter == "lomem" => params.low_memory = true,
+
+                            _ => warn!("Unhandled cmdline parameter: {:?}", parameter),
+                        }
+                    }
+
+                    params
+                })
+                .unwrap_or(params::Parameters::default())
+        });
 
         // Safety: Bootloader guarantees the provided information to be correct.
         let kernel_elf = elf::ElfBytes::<elf::endian::AnyEndian>::minimal_parse(unsafe {
@@ -197,7 +228,7 @@ unsafe extern "C" fn _entry() -> ! {
         });
 
         /* load symbols */
-        if !crate::boot::PARAMETERS.low_memory {
+        if !get_parameters().low_memory {
             if let Ok(Some((symbol_table, string_table))) = kernel_elf.symbol_table() {
                 let mut vec = try_alloc::vec::TryVec::with_capacity_in(symbol_table.len(), &*crate::memory::PMM)
                     .expect("failed to allocate vector for kernel symbols");
@@ -240,7 +271,7 @@ unsafe extern "C" fn _entry() -> ! {
             for cpu_info in smp_response.cpus().iter_mut().filter(|info| info.lapic_id != bsp_lapic_id) {
                 trace!("Starting processor: ID P{}/L{}", cpu_info.processor_id, cpu_info.lapic_id);
 
-                cpu_info.goto_address = if crate::boot::PARAMETERS.smp {
+                if get_parameters().smp {
                     extern "C" fn _smp_entry(info: *const limine::LimineSmpInfo) -> ! {
                         crate::cpu::setup();
 
@@ -251,15 +282,15 @@ unsafe extern "C" fn _entry() -> ! {
                         unsafe { kernel_core_setup(info.read().lapic_id) }
                     }
 
-                    _smp_entry
+                    cpu_info.goto_address = _smp_entry;
                 } else {
                     extern "C" fn _idle_forever(_: *const limine::LimineSmpInfo) -> ! {
                         // Safety: Murder isn't legal. Is this?
                         unsafe { crate::interrupts::halt_and_catch_fire() }
                     }
 
-                    _idle_forever
-                };
+                    cpu_info.goto_address = _idle_forever;
+                }
             }
         } else {
             debug!("Bootloader has not provided any SMP information.");
