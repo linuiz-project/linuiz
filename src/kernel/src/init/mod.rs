@@ -85,28 +85,9 @@ unsafe extern "C" fn _entry() -> ! {
 
         /* parse parameters */
         params::PARAMETERS.call_once(|| {
-            kernel_file
-                .cmdline
-                .to_str()
-                .and_then(|cmdline| cmdline.to_str().ok())
-                .map(|cmdline| {
-                    let mut params = params::Parameters::default();
-
-                    for parameter in cmdline.split(' ') {
-                        match parameter.split_once(':') {
-                            Some(("smp", "on")) => params.smp = true,
-                            Some(("smp", "off")) => params.smp = false,
-
-                            None if parameter == "symbolinfo" => params.symbolinfo = true,
-                            None if parameter == "lomem" => params.low_memory = true,
-
-                            _ => warn!("Unhandled cmdline parameter: {:?}", parameter),
-                        }
-                    }
-
-                    params
-                })
-                .unwrap_or(params::Parameters::default())
+            // Attempt to read a valid UTF-8 str from the kernel file's command line value, or use an empty string.
+            let cmdline = kernel_file.cmdline.to_str().and_then(|cmdline| cmdline.to_str().ok()).unwrap_or("");
+            params::Parameters::parse(cmdline)
         });
 
         // Safety: Bootloader guarantees the provided information to be correct.
