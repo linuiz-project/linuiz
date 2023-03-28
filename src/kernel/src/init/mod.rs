@@ -115,7 +115,7 @@ unsafe extern "C" fn _entry() -> ! {
                 .for_each(|phdr| {
                     use bit_field::BitField;
 
-                    trace!("{:X?}", phdr);
+                    debug!("{:X?}", phdr);
 
                     let base_offset = (phdr.p_vaddr as usize) - KERN_BASE.as_usize();
                     let offset_end = base_offset + (phdr.p_memsz as usize);
@@ -217,10 +217,9 @@ unsafe extern "C" fn _entry() -> ! {
                 symbol_table.into_iter().for_each(|symbol| {
                     vec.push((string_table.get(symbol.st_name as usize).unwrap_or("Unidentified"), symbol)).unwrap()
                 });
-                let symbols = alloc::vec::Vec::leak(vec.into_vec());
-                trace!("Kernel symbols:\n{:?}", symbols);
-
-                crate::interrupts::without(|| crate::panic::KERNEL_SYMBOLS.call_once(|| symbols));
+                crate::interrupts::without(|| {
+                    crate::panic::KERNEL_SYMBOLS.call_once(|| alloc::vec::Vec::leak(vec.into_vec()))
+                });
             } else {
                 warn!("Failed to load any kernel symbols; stack tracing will be disabled.");
             }
