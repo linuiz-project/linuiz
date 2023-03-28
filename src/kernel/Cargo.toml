@@ -17,8 +17,6 @@ path = "../shared/slab/"
 path = "../libsys/"
 [dependencies.libkernel]
 path = "../libkernel/"
-[dependencies.spin]
-git = "https://github.com/pyre-project/spin-rs"
 [dependencies.try_alloc]
 git = "https://github.com/pyre-project/try_alloc"
 [dependencies.acpi]
@@ -31,6 +29,7 @@ uuid = { version = "*", default-features = false, features = ["v4"] }
 getrandom = { version = "*", features = ["custom"] }
 limine = { version = "*", features = ["requests-section", "into-uuid"] }
 elf = { version = "*", default-features = false, features = ["nightly"] }
+spin = "*"
 bit_field = "*"
 bitflags = "*"
 paste = "*"
