@@ -1,29 +1,44 @@
 #![no_std]
-#![allow(dead_code)]
+#![forbid(clippy::inline_asm_x86_att_syntax)]
+#![deny(clippy::semicolon_if_nothing_returned, clippy::debug_assert_with_mut_call, clippy::float_arithmetic)]
+#![warn(clippy::cargo, clippy::pedantic, clippy::undocumented_unsafe_blocks)]
+#![allow(
+    clippy::cast_lossless,
+    clippy::enum_glob_use,
+    clippy::inline_always,
+    clippy::items_after_statements,
+    clippy::must_use_candidate,
+    clippy::unreadable_literal,
+    clippy::wildcard_imports
+)]
+
+#[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+pub use x86::*;
+#[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+mod x86 {
+    use super::UartAddress;
+
+    /// Address of the first COM port.
+    /// This port is VERY likely to be at this address.
+    pub const COM1: UartAddress = UartAddress::Io(0x3F8);
+    /// Address of the second COM port.
+    /// This port is likely to be at this address.
+    pub const COM2: UartAddress = UartAddress::Io(0x2F8);
+    /// Address of the third COM port.
+    /// This address is configurable on some BIOS, so it is not a very reliable port address.
+    pub const COM3: UartAddress = UartAddress::Io(0x3E8);
+    /// Address of the fourth COM port.
+    /// This address is configurable on some BIOS, so it is not a very reliable port address.
+    pub const COM4: UartAddress = UartAddress::Io(0x2E8);
+}
 
 use bit_field::BitField;
 use bitflags::bitflags;
 use core::marker::PhantomData;
 
-/// Address of the first COM port.
-/// This port is VERY likely to be at this address.
-#[cfg(target_arch = "x86_64")]
-pub const COM1: UartAddress = UartAddress::Io(0x3F8);
-/// Address of the second COM port.
-/// This port is likely to be at this address.
-#[cfg(target_arch = "x86_64")]
-pub const COM2: UartAddress = UartAddress::Io(0x2F8);
-/// Address of the third COM port.
-/// This address is configurable on some BIOSes, so it is not a very reliable port address.
-#[cfg(target_arch = "x86_64")]
-pub const COM3: UartAddress = UartAddress::Io(0x3E8);
-/// Address of the fourth COM port.
-/// This address is configurable on some BIOSes, so it is not a very reliable port address.
-#[cfg(target_arch = "x86_64")]
-pub const COM4: UartAddress = UartAddress::Io(0x2E8);
-
 bitflags! {
     #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct InterruptEnable : u8 {
         /// Interrupt when received data is available.
         const RECEIVED_DATA = 1 << 0;
@@ -110,6 +125,7 @@ impl LineControl {
 
 bitflags! {
     #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct ModemControl : u8 {
         const TERMINAL_READY = 1 << 0;
         const REQUEST_TO_SEND = 1 << 1;
@@ -121,6 +137,7 @@ bitflags! {
 
 bitflags! {
     #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct LineStatus : u8 {
         const DATA_AVAILABLE = 1 << 0;
         const OVERRUN_ERROR = 1 << 1;
@@ -135,6 +152,7 @@ bitflags! {
 
 bitflags! {
     #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct ModemStatus : u8 {
         const CLEAR_TO_SEND_CHANGED = 1 << 0;
         const DATA_SET_READY_CHANGED= 1 << 1;
@@ -153,6 +171,7 @@ pub enum UartAddress {
 }
 
 #[repr(usize)]
+#[allow(dead_code)]
 enum ReadOffset {
     Data0 = 0x0,
     Data1 = 0x1,
@@ -179,11 +198,6 @@ pub struct Configure;
 impl Mode for Configure {}
 
 pub struct Uart<M: Mode>(UartAddress, PhantomData<M>);
-
-/// Safety
-///
-/// Type constructor requires that the inner address be `Send`-able.
-unsafe impl<M: Mode> Send for Uart<M> {}
 
 impl<M: Mode> Uart<M> {
     #[inline]
@@ -240,10 +254,13 @@ impl<M: Mode> Uart<M> {
         size: FifoSize,
         /* todo enable_64_byte_buffer */
     ) {
-        self.write(
-            WriteOffset::FifoControl,
-            *1.set_bit(1, clear_rx).set_bit(2, clear_tx).set_bit(3, dma_mode_1).set_bits(6..8, size as u8),
-        )
+        let mut control_bits = 1u8;
+        control_bits.set_bit(1, clear_rx);
+        control_bits.set_bit(2, clear_tx);
+        control_bits.set_bit(3, dma_mode_1);
+        control_bits.set_bits(6..8, size as u8);
+
+        self.write(WriteOffset::FifoControl, control_bits);
     }
 
     #[inline]
@@ -261,8 +278,7 @@ impl<M: Mode> Uart<M> {
                 0b000 => ParityMode::None,
                 0b001 => ParityMode::Odd,
                 0b011 => ParityMode::Even,
-                0b101 => ParityMode::High,
-                0b111 => ParityMode::High,
+                0b101 | 0b111 => ParityMode::High,
                 _ => unimplemented!(),
             },
             extra_stop: line_control_raw.get_bit(2),
@@ -304,8 +320,9 @@ impl Uart<Configure> {
 
     #[inline]
     fn write_divisor_latch(&mut self, value: u16) {
-        self.write(WriteOffset::Data0, value.to_le() as u8);
-        self.write(WriteOffset::Data1, (value.to_le() >> 8) as u8);
+        let value_le_bytes = value.to_le_bytes();
+        self.write(WriteOffset::Data0, value_le_bytes[0]);
+        self.write(WriteOffset::Data1, value_le_bytes[1]);
     }
 
     pub fn get_baud(&self) -> Baud {
@@ -337,9 +354,10 @@ impl Uart<Configure> {
 }
 
 impl Uart<Data> {
-    /// Safety
+    /// ### Safety
     ///
-    /// Provided address must be `Send`-able (i.e. can be used on any CPU core).
+    /// - Provided address must be valid for reading as a UART device.
+    /// - Provided address must not be otherwise mutably aliased.
     pub unsafe fn new(address: UartAddress) -> Self {
         Self(address, PhantomData)
     }
@@ -381,10 +399,7 @@ pub struct UartWriter {
 }
 
 impl UartWriter {
-    /// Safety
-    ///
-    /// This function expects to be called only once per UART device.
-    pub unsafe fn new(mut uart: Uart<Data>) -> Self {
+    pub fn new(mut uart: Uart<Data>) -> Option<Self> {
         // Bring UART to a known state.
         uart.write_line_control(LineControl::empty());
         uart.write_interrupt_enable(InterruptEnable::empty());
@@ -410,8 +425,12 @@ impl UartWriter {
                 | ModemControl::AUXILIARY_OUTPUT_2
                 | ModemControl::LOOPBACK_MODE,
         );
-        uart.write_data(0x1F);
-        assert_eq!(uart.read_data(), 0x1F);
+
+        const TEST_VALUE: u8 = 0x1F;
+        uart.write_data(TEST_VALUE);
+        if uart.read_data().ne(&TEST_VALUE) {
+            return None;
+        }
 
         // Configure modem control for actual UART usage.
         uart.write_model_control(
@@ -421,15 +440,11 @@ impl UartWriter {
                 | ModemControl::AUXILIARY_OUTPUT_2,
         );
 
-        Self { uart, queue_accumulator: 0 }
+        Some(Self { uart, queue_accumulator: 0 })
     }
 
     fn queue_index(&self) -> usize {
         self.queue_accumulator % UART_FIFO_QUEUE_LEN
-    }
-
-    fn write_bytes(&mut self, bytes: impl Iterator<Item = u8>) {
-        bytes.for_each(|b| self.write_byte(b));
     }
 
     fn write_byte(&mut self, byte: u8) {
