@@ -17,8 +17,13 @@ pub fn get_parameters() -> &'static params::Parameters {
 #[doc(hidden)]
 #[allow(clippy::too_many_lines)]
 unsafe extern "C" fn _entry() -> ! {
-    // Logging isn't set up, so we'll just spin loop if we fail to initialize it.
-    crate::logging::init().unwrap_or_else(|_| crate::interrupts::wait_loop());
+    if cfg!(debug_assertions) {
+        // Logging isn't set up, so we'll just spin loop if we fail to initialize it.
+        crate::logging::init().unwrap_or_else(|_| crate::interrupts::wait_loop());
+    } else {
+        // Logging failed to initialize, but just continue to boot (only in release).
+        crate::logging::init().ok();
+    }
 
     /* misc. boot info */
     {
@@ -99,7 +104,7 @@ unsafe extern "C" fn _entry() -> ! {
         /* load and map segments */
 
         crate::memory::with_kmapper(|kmapper| {
-            use crate::memory::{hhdm_address, PageAttributes, PageDepth};
+            use crate::memory::{hhdm_address, paging::Attributes, PageDepth};
             use limine::LimineMemoryMapEntryType;
 
             const PT_LOAD: u32 = 0x1;
@@ -115,17 +120,17 @@ unsafe extern "C" fn _entry() -> ! {
                 .for_each(|phdr| {
                     use bit_field::BitField;
 
-                    trace!("{:X?}", phdr);
+                    debug!("{:X?}", phdr);
 
                     let base_offset = (phdr.p_vaddr as usize) - KERN_BASE.as_usize();
                     let offset_end = base_offset + (phdr.p_memsz as usize);
                     let page_attributes = {
                         if phdr.p_flags.get_bit(PT_FLAG_EXEC_BIT) {
-                            PageAttributes::RX
+                            Attributes::RX
                         } else if phdr.p_flags.get_bit(PT_FLAG_WRITE_BIT) {
-                            PageAttributes::RW
+                            Attributes::RW
                         } else {
-                            PageAttributes::RO
+                            Attributes::RO
                         }
                     };
 
@@ -159,10 +164,10 @@ unsafe extern "C" fn _entry() -> ! {
                             | LimineMemoryMapEntryType::AcpiReclaimable
                             | LimineMemoryMapEntryType::BootloaderReclaimable
                             // TODO handle the PATs or something to make this WC
-                            | LimineMemoryMapEntryType::Framebuffer => Some((entry, PageAttributes::RW)),
+                            | LimineMemoryMapEntryType::Framebuffer => Some((entry, Attributes::RW)),
 
                             LimineMemoryMapEntryType::Reserved | LimineMemoryMapEntryType::KernelAndModules => {
-                                Some((entry, PageAttributes::RO))
+                                Some((entry, Attributes::RO))
                             }
 
                             LimineMemoryMapEntryType::BadMemory => None,
@@ -197,7 +202,7 @@ unsafe extern "C" fn _entry() -> ! {
                         PageDepth::min(),
                         Address::new_truncate(apic_address),
                         false,
-                        PageAttributes::MMIO,
+                        Attributes::MMIO,
                     )
                     .unwrap();
             }
@@ -217,10 +222,9 @@ unsafe extern "C" fn _entry() -> ! {
                 symbol_table.into_iter().for_each(|symbol| {
                     vec.push((string_table.get(symbol.st_name as usize).unwrap_or("Unidentified"), symbol)).unwrap()
                 });
-                let symbols = alloc::vec::Vec::leak(vec.into_vec());
-                trace!("Kernel symbols:\n{:?}", symbols);
-
-                crate::interrupts::without(|| crate::panic::KERNEL_SYMBOLS.call_once(|| symbols));
+                crate::interrupts::without(|| {
+                    crate::panic::KERNEL_SYMBOLS.call_once(|| alloc::vec::Vec::leak(vec.into_vec()))
+                });
             } else {
                 warn!("Failed to load any kernel symbols; stack tracing will be disabled.");
             }

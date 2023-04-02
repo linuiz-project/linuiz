@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 #![feature(
+    error_in_core,                          // #103765 <https://github.com/rust-lang/rust/issues/103765>
     is_some_and,                            // #93050 <https://github.com/rust-lang/rust/issues/93050>
     result_flattening,                      // #70142 <https://github.com/rust-lang/rust/issues/70142>
     map_try_insert,                         // #82766 <https://github.com/rust-lang/rust/issues/82766>
@@ -23,7 +24,6 @@
     exact_size_is_empty,
     fn_align,
     ptr_as_uninit,
-    nonnull_slice_from_raw_parts,
     ptr_metadata,
     control_flow_enum,
     btreemap_alloc,
@@ -73,3 +73,21 @@ mod panic;
 mod proc;
 mod rand;
 mod time;
+
+#[macro_export]
+macro_rules! default_display_impl {
+    ($name:ident) => {
+        impl core::fmt::Display for $name {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                core::fmt::Debug::fmt(self, f)
+            }
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! err_result_type {
+    ($name:ident) => {
+        pub type Result<T> = core::result::Result<T, $name>;
+    };
+}

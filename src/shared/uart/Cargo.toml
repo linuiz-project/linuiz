@@ -1,8 +1,0 @@
-[package]
-name = "uart"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-bitflags = "*"
-bit_field = "*"

@@ -1,97 +1,32 @@
-use super::hhdm_address;
+use crate::memory::{hhdm_address, PageDepth};
 use core::{cmp::Ordering, fmt, ptr::NonNull};
 use libsys::{
     mem::{InteriorRef, Mut, Ref},
-    page_shift, page_size, table_index_mask, table_index_shift, table_index_size, Address, Frame, Page,
+    page_shift, page_size, table_index_mask, table_index_shift, table_index_size, Address, Frame, Page, Virtual,
 };
 
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, Eq, Ord)]
-pub struct PageDepth(u32);
+#[derive(Debug)]
+pub enum Error {
+    /// The underlying allocator is out of memory.
+    AllocError,
 
-impl const PartialEq for PageDepth {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.eq(&other.0)
-    }
+    /// Unexpected huge page was encountered.
+    HugePage,
+
+    /// The specified page is not mapped.
+    NotMapped(Address<Virtual>),
 }
 
-impl const PartialOrd for PageDepth {
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        self.0.partial_cmp(&other.0)
-    }
-}
+impl core::error::Error for Error {}
 
-impl PageDepth {
-    #[inline]
-    pub const fn min() -> Self {
-        Self(0)
-    }
-
-    #[inline]
-    pub const fn max() -> Self {
-        Self({
-            #[cfg(feature = "hugemem")]
-            {
-                5
-            }
-
-            #[cfg(not(feature = "hugemem"))]
-            {
-                4
-            }
-        })
-    }
-
-    pub fn current() -> Self {
-        Self(crate::memory::current_paging_levels())
-    }
-
-    #[inline]
-    pub const fn min_align() -> usize {
-        Self::min().align()
-    }
-
-    #[inline]
-    pub const fn max_align() -> usize {
-        Self::max().align()
-    }
-
-    #[inline]
-    pub const fn new(depth: u32) -> Self {
-        Self(depth)
-    }
-
-    #[inline]
-    pub const fn get(self) -> u32 {
-        self.0
-    }
-
-    #[inline]
-    pub const fn align(self) -> usize {
-        page_size().get().checked_shl(table_index_shift().get() * self.get()).unwrap()
-    }
-
-    #[inline]
-    pub const fn next(self) -> Option<Self> {
-        self.get().checked_sub(1).map(PageDepth::new)
-    }
-
-    #[inline]
-    pub const fn is_min(self) -> bool {
-        self == Self::min()
-    }
-
-    #[inline]
-    pub const fn is_max(self) -> bool {
-        self == Self::max()
-    }
-}
+crate::default_display_impl!(Error);
+crate::err_result_type!(Error);
 
 #[cfg(target_arch = "x86_64")]
 bitflags::bitflags! {
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct PageAttributes : u64 {
+    pub struct Attributes : u64 {
         const PRESENT = 1 << 0;
         const WRITABLE = 1 << 1;
         const USER = 1 << 2;
@@ -116,7 +51,7 @@ bitflags::bitflags! {
 #[cfg(target_arch = "riscv64")]
 bitflags::bitflags! {
     #[repr(transparent)]
-    pub struct PageAttributes: u64 {
+    pub struct Attributes: u64 {
         const VALID = 1 << 0;
         const READ = 1 << 1;
         const WRITE = 1 << 2;
@@ -151,9 +86,9 @@ pub enum AttributeModify {
 // TODO impl table levels for attribute masking on x86
 #[repr(transparent)]
 #[derive(Clone, Copy)]
-pub struct PageTableEntry(u64);
+pub struct TableEntry(u64);
 
-impl PageTableEntry {
+impl TableEntry {
     const FRAME_ADDRESS_SHIFT: u32 = PTE_FRAME_ADDRESS_MASK.trailing_zeros();
 
     /// Returns an empty `Self`. All bits of this entry will be 0.
@@ -162,7 +97,7 @@ impl PageTableEntry {
         Self(0)
     }
 
-    pub fn new(frame: Address<Frame>, attributes: PageAttributes) -> Self {
+    pub fn new(frame: Address<Frame>, attributes: Attributes) -> Self {
         Self(((frame.index() as u64) << Self::FRAME_ADDRESS_SHIFT) | attributes.bits())
     }
 
@@ -171,7 +106,7 @@ impl PageTableEntry {
     /// Safety
     ///
     /// Caller must ensure changing the attributes of this entry does not cause memory corruption.
-    pub unsafe fn set(&mut self, frame: Address<Frame>, attributes: PageAttributes) {
+    pub unsafe fn set(&mut self, frame: Address<Frame>, attributes: Attributes) {
         self.0 = ((frame.index() as u64) << Self::FRAME_ADDRESS_SHIFT) | attributes.bits();
     }
 
@@ -193,8 +128,8 @@ impl PageTableEntry {
 
     /// Gets the attributes of this page table entry.
     #[inline]
-    pub const fn get_attributes(&self) -> PageAttributes {
-        PageAttributes::from_bits_truncate(self.0)
+    pub const fn get_attributes(&self) -> Attributes {
+        Attributes::from_bits_truncate(self.0)
     }
 
     /// Sets the attributes of this page table entry.
@@ -202,8 +137,8 @@ impl PageTableEntry {
     /// Safety
     ///
     /// Caller must ensure changing the attributes of this entry does not cause any memory corruption side effects.
-    pub unsafe fn set_attributes(&mut self, new_attributes: PageAttributes, modify_mode: AttributeModify) {
-        let mut attributes = PageAttributes::from_bits_truncate(self.0);
+    pub unsafe fn set_attributes(&mut self, new_attributes: Attributes, modify_mode: AttributeModify) {
+        let mut attributes = Attributes::from_bits_truncate(self.0);
 
         match modify_mode {
             AttributeModify::Set => attributes = new_attributes,
@@ -215,20 +150,20 @@ impl PageTableEntry {
         #[cfg(target_arch = "x86_64")]
         if !crate::arch::x64::registers::msr::IA32_EFER::get_nxe() {
             // This bit is reserved if NXE is not supported. For now, this means silently removing it for compatability.
-            attributes.remove(PageAttributes::NO_EXECUTE);
+            attributes.remove(Attributes::NO_EXECUTE);
         }
 
-        self.0 = (self.0 & !PageAttributes::all().bits()) | attributes.bits();
+        self.0 = (self.0 & !Attributes::all().bits()) | attributes.bits();
     }
 
     #[inline]
     pub const fn is_present(&self) -> bool {
-        self.get_attributes().contains(PageAttributes::PRESENT)
+        self.get_attributes().contains(Attributes::PRESENT)
     }
 
     #[inline]
     pub const fn is_huge(&self) -> bool {
-        self.get_attributes().contains(PageAttributes::HUGE)
+        self.get_attributes().contains(Attributes::HUGE)
     }
 
     /// Clears the page table entry of data, setting all bits to zero.
@@ -242,7 +177,7 @@ impl PageTableEntry {
     }
 }
 
-impl fmt::Debug for PageTableEntry {
+impl fmt::Debug for TableEntry {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_tuple("Page Table Entry")
@@ -253,35 +188,26 @@ impl fmt::Debug for PageTableEntry {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PagingError {
-    NotMapped,
-    WalkInterrupted,
-    DepthUnderflow,
-    NoMoreFrames,
-    Unknown,
-}
-
-pub struct PageTableEntryCell<'a, RefKind: InteriorRef> {
+pub struct TableEntryCell<'a, RefKind: InteriorRef> {
     depth: PageDepth,
-    entry: <RefKind as InteriorRef>::RefType<'a, PageTableEntry>,
+    entry: <RefKind as InteriorRef>::RefType<'a, TableEntry>,
 }
 
-impl<RefKind: InteriorRef> core::ops::Deref for PageTableEntryCell<'_, RefKind> {
-    type Target = PageTableEntry;
+impl<RefKind: InteriorRef> core::ops::Deref for TableEntryCell<'_, RefKind> {
+    type Target = TableEntry;
 
     fn deref(&self) -> &Self::Target {
         RefKind::shared_ref(&self.entry)
     }
 }
 
-impl core::ops::DerefMut for PageTableEntryCell<'_, Mut> {
+impl core::ops::DerefMut for TableEntryCell<'_, Mut> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut *self.entry
     }
 }
 
-impl<RefKind: InteriorRef> PageTableEntryCell<'_, RefKind> {
+impl<RefKind: InteriorRef> TableEntryCell<'_, RefKind> {
     #[inline]
     pub const fn depth(&self) -> PageDepth {
         self.depth
@@ -290,7 +216,7 @@ impl<RefKind: InteriorRef> PageTableEntryCell<'_, RefKind> {
     /// # Safety
     ///
     /// Returned pointer must not be used mutably in immutable `&self` contexts.
-    unsafe fn get_sub_entry_ptr(&self, page: Address<Page>) -> NonNull<PageTableEntry> {
+    unsafe fn get_sub_entry_ptr(&self, page: Address<Page>) -> NonNull<TableEntry> {
         let entry_index = {
             let index_shift = (self.depth().get() - 1) * table_index_shift().get();
             (page.get().get() >> index_shift >> page_shift().get()) & table_index_mask()
@@ -299,16 +225,16 @@ impl<RefKind: InteriorRef> PageTableEntryCell<'_, RefKind> {
         debug_assert!(entry_index < table_index_size().get(), "entry index exceeds maximum");
 
         // Safety: Type requires that the internal entry has a valid frame.
-        let table_ptr = unsafe { hhdm_address().as_ptr().add(self.get_frame().get().get()).cast::<PageTableEntry>() };
+        let table_ptr = unsafe { hhdm_address().as_ptr().add(self.get_frame().get().get()).cast::<TableEntry>() };
         // Safety: `entry_index` guarantees a value that does not exceed the table size.
         let entry_ptr = unsafe { table_ptr.add(entry_index) };
 
-        debug_assert!(entry_ptr.is_aligned_to(core::mem::align_of::<PageTableEntry>()));
+        debug_assert!(entry_ptr.is_aligned_to(core::mem::align_of::<TableEntry>()));
 
         NonNull::new(entry_ptr).unwrap()
     }
 
-    fn get(&self, page: Address<Page>) -> &PageTableEntry {
+    fn get(&self, page: Address<Page>) -> &TableEntry {
         // Safety:
         //  - Pointer is not used mutably.
         //  - Reference is guaranteed by the function to be properly aligned.
@@ -317,12 +243,12 @@ impl<RefKind: InteriorRef> PageTableEntryCell<'_, RefKind> {
     }
 }
 
-impl<'a> PageTableEntryCell<'a, Ref> {
+impl<'a> TableEntryCell<'a, Ref> {
     /// Safety
     ///
     /// - Page table entry must point to a valid page table.
     /// - Page table depth must be correct for the provided table.
-    pub(super) unsafe fn new(depth: PageDepth, entry: &'a PageTableEntry) -> Self {
+    pub(super) unsafe fn new(depth: PageDepth, entry: &'a TableEntry) -> Self {
         Self { depth, entry }
     }
 
@@ -330,36 +256,36 @@ impl<'a> PageTableEntryCell<'a, Ref> {
         &self,
         page: Address<Page>,
         to_depth: Option<PageDepth>,
-        with_fn: impl FnOnce(&PageTableEntry) -> T,
-    ) -> Result<T, PagingError> {
+        with_fn: impl FnOnce(&TableEntry) -> T,
+    ) -> Result<T> {
         match (self.depth().cmp(&to_depth.unwrap_or(PageDepth::min())), self.is_huge(), self.depth().next()) {
             (Ordering::Equal, _, _) => Ok(with_fn(self.entry)),
             (Ordering::Greater, false, Some(next_depth)) => {
                 let sub_entry = self.get(page);
 
                 if !sub_entry.is_present() {
-                    Err(PagingError::NotMapped)
+                    Err(Error::NotMapped(page.get()))
                 } else {
-                    unsafe { PageTableEntryCell::<Ref>::new(next_depth, sub_entry) }.with_entry(page, to_depth, with_fn)
+                    unsafe { TableEntryCell::<Ref>::new(next_depth, sub_entry) }.with_entry(page, to_depth, with_fn)
                 }
             }
 
-            (Ordering::Greater, true, _) => Err(PagingError::WalkInterrupted),
-            _ => Err(PagingError::DepthUnderflow),
+            (Ordering::Greater, true, _) => Err(Error::HugePage),
+            _ => panic!("page table walk in expected state"),
         }
     }
 }
 
-impl<'a> PageTableEntryCell<'a, Mut> {
+impl<'a> TableEntryCell<'a, Mut> {
     /// Safety
     ///
     /// - Page table entry must point to a valid page table.
     /// - Page table depth must be correct for the provided table.
-    pub(super) unsafe fn new(depth: PageDepth, entry: &'a mut PageTableEntry) -> Self {
+    pub(super) unsafe fn new(depth: PageDepth, entry: &'a mut TableEntry) -> Self {
         Self { depth, entry }
     }
 
-    fn get_mut(&self, page: Address<Page>) -> &mut PageTableEntry {
+    fn get_mut(&self, page: Address<Page>) -> &mut TableEntry {
         // Safety:
         //  - Pointer is used mutably in an `&mut self` context.
         //  - Reference is guaranteed by the function to be properly aligned.
@@ -371,23 +297,22 @@ impl<'a> PageTableEntryCell<'a, Mut> {
         &mut self,
         page: Address<Page>,
         to_depth: Option<PageDepth>,
-        with_fn: impl FnOnce(&mut PageTableEntry) -> T,
-    ) -> Result<T, PagingError> {
+        with_fn: impl FnOnce(&mut TableEntry) -> T,
+    ) -> Result<T> {
         match (self.depth().cmp(&to_depth.unwrap_or(PageDepth::min())), self.is_huge(), self.depth().next()) {
             (Ordering::Equal, _, _) => Ok(with_fn(self.entry)),
             (Ordering::Greater, false, Some(next_depth)) => {
                 let sub_entry = self.get_mut(page);
 
                 if !sub_entry.is_present() {
-                    Err(PagingError::NotMapped)
+                    Err(Error::NotMapped(page.get()))
                 } else {
-                    unsafe { PageTableEntryCell::<Mut>::new(next_depth, sub_entry) }
-                        .with_entry_mut(page, to_depth, with_fn)
+                    unsafe { TableEntryCell::<Mut>::new(next_depth, sub_entry) }.with_entry_mut(page, to_depth, with_fn)
                 }
             }
 
-            (Ordering::Greater, true, _) => Err(PagingError::WalkInterrupted),
-            _ => Err(PagingError::DepthUnderflow),
+            (Ordering::Greater, true, _) => Err(Error::HugePage),
+            _ => panic!("page table walk in expected state"),
         }
     }
 
@@ -398,8 +323,8 @@ impl<'a> PageTableEntryCell<'a, Mut> {
         &mut self,
         page: Address<Page>,
         to_depth: PageDepth,
-        with_fn: impl FnOnce(&mut PageTableEntry) -> T,
-    ) -> Result<T, PagingError> {
+        with_fn: impl FnOnce(&mut TableEntry) -> T,
+    ) -> Result<T> {
         match (self.depth().cmp(&to_depth), self.is_huge(), self.depth().next()) {
             (Ordering::Equal, _, _) => Ok(with_fn(self.entry)),
 
@@ -412,7 +337,7 @@ impl<'a> PageTableEntryCell<'a, Mut> {
 
                     let Ok(frame) = crate::memory::PMM.next_frame()
                     else {
-                        return Err(PagingError::NoMoreFrames)
+                        return Err(Error::AllocError)
                     };
 
                     // Clear the frame to avoid corrupted PTEs.
@@ -424,19 +349,19 @@ impl<'a> PageTableEntryCell<'a, Mut> {
                     // Set the entry frame and set attributes to make a valid PTE.
                     // Safety: Entry currently points to no memory.
                     unsafe {
-                        self.set(frame, PageAttributes::PTE);
+                        self.set(frame, Attributes::PTE);
                     }
                 }
 
                 // Safety: If the page table entry is present, then it's a valid entry, all bits accounted.
                 unsafe {
-                    PageTableEntryCell::<Mut>::new(next_depth, self.get_mut(page))
+                    TableEntryCell::<Mut>::new(next_depth, self.get_mut(page))
                         .with_entry_create(page, to_depth, with_fn)
                 }
             }
 
-            (Ordering::Greater, true, _) => Err(PagingError::WalkInterrupted),
-            _ => Err(PagingError::DepthUnderflow),
+            (Ordering::Greater, true, _) => Err(Error::HugePage),
+            _ => panic!("page table walk in expected state"),
         }
     }
 }

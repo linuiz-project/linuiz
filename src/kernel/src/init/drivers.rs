@@ -8,17 +8,17 @@ pub fn load_drivers() {
     })
     .expect("no drivers data to load");
 
-    with_driver_elfs_from_data(drivers_data, |driver_elf| load_driver_elf(driver_elf));
+    with_driver_elfs_from_data(drivers_data, |name, elf| load_driver_elf(name, elf));
 }
 
-fn load_driver_elf(driver_elf: &ElfBytes<AnyEndian>) {
-    use crate::memory::{PageAttributes, PageDepth};
+fn load_driver_elf(name: &str, driver_elf: &ElfBytes<AnyEndian>) {
+    use crate::memory::PageDepth;
     use libsys::{page_shift, page_size, Address};
 
     // Create the driver's page manager from the kernel's higher-half table.
     // Safety: Kernel guarantees HHDM to be valid.
     let mut driver_mapper = unsafe {
-        crate::memory::address_space::Mapper::new_unsafe(
+        crate::memory::address_space::mapper::Mapper::new_unsafe(
             PageDepth::new(4),
             crate::memory::new_kmapped_page_table().unwrap(),
         )
@@ -41,17 +41,20 @@ fn load_driver_elf(driver_elf: &ElfBytes<AnyEndian>) {
                 for page_base in (memory_start_aligned..memory_end).step_by(page_size().get()) {
                     use bit_field::BitField;
 
-                    let page = Address::new(page_base).unwrap();
                     // Auto map the virtual address to a physical page.
+                    let page = Address::new(page_base).unwrap();
+                    trace!("{:?} auto map {:X?}", name, page);
                     driver_mapper
                         .auto_map(page, {
+                            use crate::memory::paging::Attributes;
+
                             // This doesn't support RWX pages. I'm not sure it ever should.
                             if segment.p_flags.get_bit(1) {
-                                PageAttributes::RX
+                                Attributes::RX
                             } else if segment.p_flags.get_bit(2) {
-                                PageAttributes::RW
+                                Attributes::RW
                             } else {
-                                PageAttributes::RO
+                                Attributes::RO
                             }
                         })
                         .unwrap();
@@ -71,9 +74,10 @@ fn load_driver_elf(driver_elf: &ElfBytes<AnyEndian>) {
     }
 }
 
-fn with_driver_elfs_from_data(drivers_data: &[u8], mut with_fn: impl FnMut(&ElfBytes<AnyEndian>)) {
+fn with_driver_elfs_from_data(drivers_data: &[u8], mut with_fn: impl FnMut(&str, &ElfBytes<AnyEndian>)) {
     for archive_entry in tar_no_std::TarArchiveRef::new(drivers_data).entries() {
-        debug!("Processing archive entry for driver: {}", archive_entry.filename());
+        let archive_entry_filename = archive_entry.filename();
+        debug!("Processing archive entry for driver: {}", archive_entry_filename);
 
         let Ok(driver_elf) = elf::ElfBytes::<elf::endian::AnyEndian>::minimal_parse(archive_entry.data())
         else {
@@ -81,7 +85,7 @@ fn with_driver_elfs_from_data(drivers_data: &[u8], mut with_fn: impl FnMut(&ElfB
             return
         };
 
-        with_fn(&driver_elf);
+        with_fn(&archive_entry_filename, &driver_elf);
     }
 }
 
@@ -89,7 +93,7 @@ fn with_kernel_module<T>(name: &str, with_fn: impl FnOnce(&NonNullPtr<LimineFile
     crate::boot::get_kernel_modules()
         .expect("boot memory has been reclaimed")
         .iter()
-        .find(|module| get_module_name(module).is_some_and(|n| n.eq(name)))
+        .find(|module| get_module_name(module).is_some_and(|n| n.ends_with(name)))
         .map(|module| with_fn(module))
 }
 

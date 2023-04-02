@@ -5,8 +5,6 @@ edition = "2021"
 
 [dependencies.port-rs]
 path = "../shared/port-rs/"
-[dependencies.uart]
-path = "../shared/uart/"
 [dependencies.msr]
 path = "../shared/msr/"
 [dependencies.apic]
@@ -17,20 +15,21 @@ path = "../shared/slab/"
 path = "../libsys/"
 [dependencies.libkernel]
 path = "../libkernel/"
-[dependencies.spin]
-git = "https://github.com/pyre-project/spin-rs"
-[dependencies.try_alloc]
-git = "https://github.com/pyre-project/try_alloc"
 [dependencies.acpi]
 git = "https://github.com/semiviral/acpi"
 
 [dependencies]
+# pyre-project dependencies
+try_alloc = { git = "https://github.com/pyre-project/try_alloc" }
+uart = "*"
+# third-party dependencies
 log = { version = "*", default-features = false }
 num_enum = { version = "*", default-features = false }
 uuid = { version = "*", default-features = false, features = ["v4"] }
 getrandom = { version = "*", features = ["custom"] }
 limine = { version = "*", features = ["requests-section", "into-uuid"] }
 elf = { version = "*", default-features = false, features = ["nightly"] }
+spin = "*"
 bit_field = "*"
 bitflags = "*"
 paste = "*"
