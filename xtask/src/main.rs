@@ -26,6 +26,7 @@ enum Arguments {
     Clean,
     Update,
     Check,
+    Fmt,
 
     #[command(subcommand)]
     Target(Target),
@@ -46,6 +47,7 @@ fn main() -> Result<()> {
         Arguments::Clean => in_workspace_with(&sh, |sh| cmd!(sh, "cargo clean").run()),
         Arguments::Check => in_workspace_with(&sh, |sh| cmd!(sh, "cargo check --bins").run()),
         Arguments::Update => in_workspace_with(&sh, |sh| cmd!(sh, "cargo update").run()),
+        Arguments::Fmt => in_workspace_with(&sh, |sh| cmd!(sh, "cargo fmt").run()),
 
         Arguments::Target(target) => {
             let mut config =
