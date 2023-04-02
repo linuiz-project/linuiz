@@ -19,7 +19,8 @@ jobs:
           override: true
       - uses: actions-rs/cargo@v1
         with:
-          command: xtask check
+          command: xtask
+          args: check
 
   fmt:
     name: Rustfmt
@@ -34,8 +35,8 @@ jobs:
       - run: rustup component add rustfmt
       - uses: actions-rs/cargo@v1
         with:
-          command: xtask fmt
-          args: -- --all --check
+          command: xtask
+          args: fmt -- --all --check
 
   # clippy:
   #   name: Clippy
