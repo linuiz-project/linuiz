@@ -15,7 +15,7 @@ impl core::fmt::Display for Target {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::x86_64 => "x86_64-unknown-none",
-            Self::riscv64gc => "riscv64gc-unknown-none",
+            Self::riscv64gc => "riscv64gc-unknown-none-elf",
         })
     }
 }
