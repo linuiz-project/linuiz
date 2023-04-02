@@ -1,18 +1,6 @@
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, Eq, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PageDepth(u32);
-
-impl const PartialEq for PageDepth {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.eq(&other.0)
-    }
-}
-
-impl const PartialOrd for PageDepth {
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        self.0.partial_cmp(&other.0)
-    }
-}
 
 impl PageDepth {
     #[inline]
@@ -61,7 +49,7 @@ impl PageDepth {
 
     #[inline]
     pub const fn align(self) -> usize {
-        libsys::page_size().get().checked_shl(libsys::table_index_shift().get() * self.get()).unwrap()
+        libsys::page_size().checked_shl(libsys::table_index_shift().get() * self.get()).unwrap()
     }
 
     #[inline]
@@ -70,12 +58,12 @@ impl PageDepth {
     }
 
     #[inline]
-    pub const fn is_min(self) -> bool {
+    pub fn is_min(self) -> bool {
         self == Self::min()
     }
 
     #[inline]
-    pub const fn is_max(self) -> bool {
+    pub fn is_max(self) -> bool {
         self == Self::max()
     }
 }

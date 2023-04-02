@@ -9,12 +9,12 @@ mod x86_64 {
         NonZeroU32::new(12).unwrap()
     }
 
-    pub const fn page_size() -> Pow2Usize {
-        Pow2Usize::new(1 << page_shift().get()).unwrap()
+    pub const fn page_size() -> usize {
+        1 << page_shift().get()
     }
 
     pub const fn page_mask() -> usize {
-        page_size().get().checked_sub(1).unwrap()
+        page_size().checked_sub(1).unwrap()
     }
 
     pub const fn table_index_shift() -> NonZeroU32 {

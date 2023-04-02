@@ -18,9 +18,6 @@ pub struct Task {
     pub arch_context: crate::cpu::ArchContext,
 }
 
-// TODO safety
-unsafe impl Send for Task {}
-
 impl Task {
     pub fn new(priority: u8, entry: EntryPoint, stack: Stack, arch_context: crate::cpu::ArchContext) -> Self {
         // Safety: Stack pointer is valid for its length.
@@ -58,7 +55,7 @@ impl Task {
 
     pub fn with_address_space<T>(&self, with_fn: impl FnOnce(&mut AddressSpace<PhysicalAllocator>) -> T) -> T {
         let mut address_space = self.address_space.lock();
-        with_fn(&mut *address_space)
+        with_fn(&mut address_space)
     }
 }
 

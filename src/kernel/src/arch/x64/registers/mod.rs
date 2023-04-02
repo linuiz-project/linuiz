@@ -1,4 +1,4 @@
-#![allow(dead_code)]
+#![allow(dead_code, clippy::upper_case_acronyms)]
 
 mod rflags;
 
@@ -13,6 +13,10 @@ macro_rules! basic_raw_register {
         pub struct $register_ident;
 
         impl $register_ident {
+            /// ### Safety
+            ///
+            /// Writing directly to a register circumvents the compiler. It is the job of the developer
+            /// to ensure that this does not cause undefined behaviour.
             #[inline]
             pub unsafe fn write(value: u64) {
                 core::arch::asm!(concat!("mov ", stringify!($register_ident), ", {}"), in(reg) value, options(nomem, nostack));
@@ -22,6 +26,7 @@ macro_rules! basic_raw_register {
             pub fn read() -> u64 {
                 let value: u64;
 
+                // Safety: Reading a value out of a register does not cause undefined behaviour.
                 unsafe {
                     core::arch::asm!(concat!("mov {}, ", stringify!($register_ident)), out(reg) value, options(nomem, nostack));
                 }
@@ -37,6 +42,10 @@ macro_rules! basic_ptr_register {
         pub struct $register_ident;
 
         impl $register_ident {
+            /// ### Safety
+            ///
+            /// Writing directly to a register circumvents the compiler. It is the job of the developer
+            /// to ensure that this does not cause undefined behaviour.
             #[inline]
             pub unsafe fn write(ptr: *const ()) {
                 core::arch::asm!(concat!("mov ", stringify!($register_ident), ", {}"), in(reg) ptr, options(nomem, nostack, preserves_flags));
@@ -45,6 +54,8 @@ macro_rules! basic_ptr_register {
             #[inline]
             pub fn read() -> *const () {
                 let ptr: *const ();
+
+                // Safety: We are only reading values here.
                 unsafe {
                     core::arch::asm!(concat!("mov {}, ", stringify!($register_ident)), out(reg) ptr, options(nomem, nostack, preserves_flags));
                     ptr
@@ -71,13 +82,13 @@ pub mod stack {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct SpecialRegisters {
+pub struct Stateful {
     pub cs: u64,
     pub ss: u64,
     pub flags: crate::arch::x64::registers::RFlags,
 }
 
-impl SpecialRegisters {
+impl Stateful {
     pub fn with_kernel_segments(flags: crate::arch::x64::registers::RFlags) -> Self {
         Self {
             cs: crate::arch::x64::structures::gdt::kernel_code_selector().0 as u64,
@@ -97,7 +108,7 @@ impl SpecialRegisters {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
-pub struct GeneralRegisters {
+pub struct GeneralPurpose {
     pub rax: u64,
     pub rbx: u64,
     pub rcx: u64,
@@ -115,7 +126,7 @@ pub struct GeneralRegisters {
     pub r15: u64,
 }
 
-impl GeneralRegisters {
+impl GeneralPurpose {
     pub const fn empty() -> Self {
         Self {
             rax: 0,

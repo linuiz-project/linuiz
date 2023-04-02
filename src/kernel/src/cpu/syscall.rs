@@ -8,7 +8,7 @@ pub enum Syscall {
     Log { level: log::Level, cstr_ptr: *const core::ffi::c_char },
 }
 
-pub fn do_syscall(vector: Syscall) {
+pub fn process(vector: Syscall) {
     match vector {
         Syscall::Log { level, cstr_ptr } => {
             log!(

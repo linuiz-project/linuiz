@@ -8,6 +8,7 @@ use num_enum::TryFromPrimitive;
 /// Delivery mode for IPIs.
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum InterruptDeliveryMode {
     Fixed = 0b000,
     LowPriority = 0b001,
@@ -20,6 +21,7 @@ pub enum InterruptDeliveryMode {
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum DeliveryMode {
     Fixed = 0b000,
     LowPriority = 0b001,
@@ -50,7 +52,7 @@ pub enum Vector {
     Error = 0x3C,
     LINT0 = 0x3D,
     LINT1 = 0x3E,
-    SPURIOUS = 0x3F,
+    Spurious = 0x3F,
 }
 
 /// Indicates what type of error the common page fault handler encountered.
@@ -61,7 +63,7 @@ pub struct PageFaultHandlerError;
 ///
 /// This function should only be called in the case of passing context to handle a page fault.
 /// Calling this function more than once and/or outside the context of a page fault is undefined behaviour.
-#[no_mangle]
+#[doc(hidden)]
 #[repr(align(0x10))]
 pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandlerError> {
     crate::local_state::with_current_address_space(|addr_space| {

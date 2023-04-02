@@ -37,6 +37,7 @@ impl CR4 {
     pub fn read() -> CR4Flags {
         let value: psize;
 
+        // Safety: Reading into a register has no side effects.
         unsafe {
             core::arch::asm!(
                 "mov {}, cr4",

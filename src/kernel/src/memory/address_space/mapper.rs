@@ -20,18 +20,18 @@ unsafe impl Send for Mapper {}
 impl Mapper {
     /// Attempts to construct a new page manager. Returns `None` if the PMM could not provide a root frame.
     pub fn new(depth: PageDepth) -> Option<Self> {
-        PMM.next_frame().ok().map(|root_frame| {
-            // Safety: Pointer is guaranteed valid due HHDM guarantee from kernel, and renting guarantees from PMM.
-            unsafe {
-                core::ptr::write_bytes(
-                    crate::memory::hhdm_address().as_ptr().add(root_frame.get().get()),
-                    0,
-                    libsys::page_size().get(),
-                )
-            };
+        let root_frame = PMM.next_frame().ok()?;
 
-            Self { depth, root_frame, entry: paging::TableEntry::new(root_frame, paging::Attributes::PRESENT) }
-        })
+        // Safety: PMM promises rented frames to be within the HHDM.
+        unsafe {
+            core::ptr::write_bytes(
+                crate::memory::hhdm_address().as_ptr().add(root_frame.get().get()),
+                0x0,
+                libsys::page_size(),
+            );
+        }
+
+        Some(Self { depth, root_frame, entry: paging::TableEntry::new(root_frame, paging::Attributes::PRESENT) })
     }
 
     /// Safety
@@ -42,7 +42,7 @@ impl Mapper {
         Self { depth, root_frame, entry: paging::TableEntry::new(root_frame, paging::Attributes::PRESENT) }
     }
 
-    fn root_table(&self) -> paging::TableEntryCell<Ref> {
+    const fn root_table(&self) -> paging::TableEntryCell<Ref> {
         // Safety: `Self` requires that the entry be valid.
         unsafe { paging::TableEntryCell::<Ref>::new(self.depth, &self.entry) }
     }
@@ -174,7 +174,7 @@ impl Mapper {
         );
     }
 
-    pub fn view_root_page_table<'a>(&'a self) -> &'a [paging::TableEntry; const { libsys::table_index_size().get() }] {
+    pub fn view_root_page_table(&self) -> &[paging::TableEntry; const { libsys::table_index_size().get() }] {
         // Safety: Root frame is guaranteed to be valid within the HHDM.
         let table_ptr = unsafe { crate::memory::hhdm_address().as_ptr().add(self.root_frame.get().get()).cast() };
         // Safety: Root frame is guaranteed to be valid for PTEs for the length of the table index size.

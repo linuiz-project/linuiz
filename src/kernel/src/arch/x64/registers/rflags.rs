@@ -68,6 +68,7 @@ impl RFlags {
     fn read_raw() -> u64 {
         let result: u64;
 
+        // Safety: Instruction block has no side effects.
         unsafe {
             core::arch::asm!(
                 "pushf",
@@ -80,9 +81,9 @@ impl RFlags {
         result
     }
 
-    /// Safety
+    /// ## Safety
     ///
-    /// Incorrect flags may violate any number of safety guarantees.
+    /// Providing an invalid (in general, or for the current context) set of flags in undefined behaviour.
     #[inline]
     pub unsafe fn set_flags(flags: Self, set: bool) {
         let mut old_flags = Self::read();

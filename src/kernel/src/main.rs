@@ -10,7 +10,6 @@
     sync_unsafe_cell,
     panic_info_message,
     allocator_api,
-    once_cell,
     pointer_is_aligned,
     slice_ptr_get,
     strict_provenance,
@@ -33,7 +32,7 @@
     const_trait_impl,
     const_cmp
 )]
-#![forbid(clippy::inline_asm_x86_att_syntax)]
+#![forbid(clippy::inline_asm_x86_att_syntax, clippy::missing_const_for_fn)]
 #![deny(clippy::semicolon_if_nothing_returned, clippy::debug_assert_with_mut_call, clippy::float_arithmetic)]
 #![warn(clippy::cargo, clippy::pedantic, clippy::undocumented_unsafe_blocks)]
 #![allow(
@@ -44,6 +43,9 @@
     clippy::must_use_candidate,
     clippy::unreadable_literal,
     clippy::wildcard_imports,
+    // While ideally this is warned against, the number of situations in which pointer alignment up-casting
+    // is acceptable seem to far outweigh the circumstances within the kernel where it is inappropriate.
+    clippy::cast_ptr_alignment,
     dead_code
 )]
 #![cfg_attr(target_arch = "x86_64", feature(abi_x86_interrupt))]

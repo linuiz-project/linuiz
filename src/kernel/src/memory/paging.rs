@@ -6,6 +6,7 @@ use libsys::{
 };
 
 #[derive(Debug)]
+#[allow(clippy::enum_variant_names)]
 pub enum Error {
     /// The underlying allocator is out of memory.
     AllocError,
@@ -112,7 +113,7 @@ impl TableEntry {
 
     /// Gets the frame index of the page table entry.
     #[inline]
-    pub fn get_frame(&self) -> Address<Frame> {
+    pub fn get_frame(self) -> Address<Frame> {
         Address::new_truncate((self.0 & PTE_FRAME_ADDRESS_MASK) as usize)
     }
 
@@ -128,7 +129,7 @@ impl TableEntry {
 
     /// Gets the attributes of this page table entry.
     #[inline]
-    pub const fn get_attributes(&self) -> Attributes {
+    pub const fn get_attributes(self) -> Attributes {
         Attributes::from_bits_truncate(self.0)
     }
 
@@ -157,12 +158,12 @@ impl TableEntry {
     }
 
     #[inline]
-    pub const fn is_present(&self) -> bool {
+    pub const fn is_present(self) -> bool {
         self.get_attributes().contains(Attributes::PRESENT)
     }
 
     #[inline]
-    pub const fn is_huge(&self) -> bool {
+    pub const fn is_huge(self) -> bool {
         self.get_attributes().contains(Attributes::HUGE)
     }
 
@@ -248,7 +249,7 @@ impl<'a> TableEntryCell<'a, Ref> {
     ///
     /// - Page table entry must point to a valid page table.
     /// - Page table depth must be correct for the provided table.
-    pub(super) unsafe fn new(depth: PageDepth, entry: &'a TableEntry) -> Self {
+    pub(super) const unsafe fn new(depth: PageDepth, entry: &'a TableEntry) -> Self {
         Self { depth, entry }
     }
 
@@ -263,10 +264,13 @@ impl<'a> TableEntryCell<'a, Ref> {
             (Ordering::Greater, false, Some(next_depth)) => {
                 let sub_entry = self.get(page);
 
-                if !sub_entry.is_present() {
-                    Err(Error::NotMapped(page.get()))
-                } else {
+                if sub_entry.is_present() {
+                    // Safety: Since the state of the page tables can not be fully modelled or controlled within the kernel itself,
+                    //          we can't be 100% certain this is safe. However, in the case that it isn't, there's a near-certain
+                    //          chance that the entire kernel will explode shortly after reading bad data like this.
                     unsafe { TableEntryCell::<Ref>::new(next_depth, sub_entry) }.with_entry(page, to_depth, with_fn)
+                } else {
+                    Err(Error::NotMapped(page.get()))
                 }
             }
 
@@ -285,6 +289,7 @@ impl<'a> TableEntryCell<'a, Mut> {
         Self { depth, entry }
     }
 
+    #[allow(clippy::mut_from_ref)]
     fn get_mut(&self, page: Address<Page>) -> &mut TableEntry {
         // Safety:
         //  - Pointer is used mutably in an `&mut self` context.
@@ -304,10 +309,13 @@ impl<'a> TableEntryCell<'a, Mut> {
             (Ordering::Greater, false, Some(next_depth)) => {
                 let sub_entry = self.get_mut(page);
 
-                if !sub_entry.is_present() {
-                    Err(Error::NotMapped(page.get()))
-                } else {
+                if sub_entry.is_present() {
+                    // Safety: Since the state of the page tables can not be fully modelled or controlled within the kernel itself,
+                    //          we can't be 100% certain this is safe. However, in the case that it isn't, there's a near-certain
+                    //          chance that the entire kernel will explode shortly after reading bad data like this.
                     unsafe { TableEntryCell::<Mut>::new(next_depth, sub_entry) }.with_entry_mut(page, to_depth, with_fn)
+                } else {
+                    Err(Error::NotMapped(page.get()))
                 }
             }
 
@@ -343,7 +351,7 @@ impl<'a> TableEntryCell<'a, Mut> {
                     // Clear the frame to avoid corrupted PTEs.
                     // Safety: Frame was just allocated, and so is unused outside this context.
                     unsafe {
-                        core::ptr::write_bytes(hhdm_address().as_ptr().add(frame.get().get()), 0x0, page_size().get());
+                        core::ptr::write_bytes(hhdm_address().as_ptr().add(frame.get().get()), 0x0, page_size());
                     }
 
                     // Set the entry frame and set attributes to make a valid PTE.

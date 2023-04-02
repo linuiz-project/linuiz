@@ -14,9 +14,7 @@ impl Parameters {
             return me;
         }
 
-        let mut args = cmdline.split(' ');
-
-        while let Some(arg) = args.next() {
+        for arg in cmdline.split(' ') {
             match arg {
                 "--nosmp" => me.smp = false,
                 "--symbolinfo" => me.symbolinfo = true,

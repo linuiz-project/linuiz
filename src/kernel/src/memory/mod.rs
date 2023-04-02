@@ -28,7 +28,7 @@ pub fn hhdm_address() -> Address<Virtual> {
         let offset =
             LIMINE_HHDM.get_response().get().expect("bootloader provided no higher-half direct mapping").offset;
 
-        Address::new(offset as usize).expect("bootloader provided a non-canonical higher-half direct mapping address")
+        Address::new(offset.try_into().unwrap()).expect("bootloader provided a non-canonical higher-half direct mapping address")
     })
 }
 
@@ -47,7 +47,7 @@ pub fn with_kmapper<T>(func: impl FnOnce(&mut Mapper) -> T) -> T {
         })
         .with(|mapper| {
             let mut mapper = mapper.lock();
-            func(&mut *mapper)
+            func(&mut mapper)
         })
 }
 
@@ -109,8 +109,7 @@ pub fn supports_5_level_paging() -> bool {
     {
         crate::arch::x64::cpuid::EXT_FEATURE_INFO
             .as_ref()
-            .map(|ext_feature_info| ext_feature_info.has_la57())
-            .unwrap_or(false)
+            .map_or(false, raw_cpuid::ExtendedFeatures::has_la57)
     }
 
     #[cfg(target_arch = "riscv64")]
@@ -141,12 +140,14 @@ pub fn current_paging_levels() -> u32 {
 
 pub type PhysicalAllocator = &'static pmm::PhysicalMemoryManager<'static>;
 
-pub static PMM: Lazy<pmm::PhysicalMemoryManager> = Lazy::new(|| unsafe {
+pub static PMM: Lazy<pmm::PhysicalMemoryManager> = Lazy::new(|| 
+    // Safety: We're very careful here. (this safety message sucks)
+    unsafe {
     let memory_map = crate::boot::get_memory_map().unwrap();
     pmm::PhysicalMemoryManager::from_memory_map(
         memory_map.iter().map(|entry| pmm::MemoryMapping {
-            base: entry.base as usize,
-            len: entry.len as usize,
+            base: entry.base.try_into().unwrap(),
+            len: entry.len.try_into().unwrap(),
             typ: {
                 use limine::LimineMemoryMapEntryType;
                 use pmm::FrameType;
@@ -204,6 +205,7 @@ mod global_allocator_impl {
     static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator;
 }
 
+#[allow(clippy::module_name_repetitions)]
 pub unsafe fn out_of_memory() -> ! {
     panic!("Kernel ran out of memory during initialization.")
 }
@@ -261,12 +263,12 @@ pub unsafe fn catch_read(ptr: NonNull<[u8]>) -> Result<TryBox<[u8]>, Exception> 
     let mem_end = mem_range.end.addr();
 
     let mut copied_mem = TryBox::new_slice(ptr.len(), 0u8).unwrap();
-    for (offset, page_addr) in (aligned_start..mem_end).enumerate().step_by(page_size().get()) {
+    for (offset, page_addr) in (aligned_start..mem_end).enumerate().step_by(page_size()) {
         let ptr_addr = core::cmp::max(mem_range.start.addr(), page_addr);
-        let ptr_len = core::cmp::min(mem_end.saturating_sub(ptr_addr), page_size().get());
+        let ptr_len = core::cmp::min(mem_end.saturating_sub(ptr_addr), page_size());
 
         // Safety: Box slice and this iterator are bound by the ptr len.
-        let to_ptr = unsafe { (&mut copied_mem).as_mut_ptr().add(offset) };
+        let to_ptr = unsafe { copied_mem.as_mut_ptr().add(offset) };
         // Safety: Copy is only invalid if the caller provided an invalid pointer.
         do_catch(|| unsafe {
             core::ptr::copy_nonoverlapping(ptr_addr as *mut u8, to_ptr, ptr_len);
@@ -277,13 +279,17 @@ pub unsafe fn catch_read(ptr: NonNull<[u8]>) -> Result<TryBox<[u8]>, Exception> 
 }
 
 // TODO TryString
-pub unsafe fn catch_read_str<'a>(mut read_ptr: NonNull<u8>) -> Result<String, Exception> {
+pub unsafe fn catch_read_str(mut read_ptr: NonNull<u8>) -> Result<String, Exception> {
     let mut strlen = 0;
     'y: loop {
-        let read_len = read_ptr.as_ptr().align_offset(page_size().get());
-        read_ptr = NonNull::new(unsafe { read_ptr.as_ptr().add(page_size().get() - read_len) }).unwrap();
+        let read_len = read_ptr.as_ptr().align_offset(page_size());
+        read_ptr = NonNull::new(
+            // Safety: This pointer isn't used without first being validated.
+            unsafe { read_ptr.as_ptr().add(page_size() - read_len) },
+        )
+        .unwrap();
 
-        for byte in catch_read(NonNull::slice_from_raw_parts(read_ptr, read_len))?.into_iter() {
+        for byte in catch_read(NonNull::slice_from_raw_parts(read_ptr, read_len))?.iter() {
             if byte.ne(&b'\0') {
                 strlen += 1;
             } else {

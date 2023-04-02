@@ -2,6 +2,12 @@
 name = "pic_8259"
 version = "0.1.0"
 edition = "2021"
+description = "Software controller for the 8259 chained PICs."
+license = "BSD-3-Clause"
+repository = "https://github.com/pyre-project/pyre/src/shared/pic_8259/"
+readme = ""
+keywords = []
+categories = []
 
 [dependencies.port-rs]
 path = "../port-rs/"

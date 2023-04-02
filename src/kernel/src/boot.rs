@@ -1,5 +1,5 @@
 use core::sync::atomic::{AtomicBool, Ordering};
-use libsys::{Address, Virtual};
+use libsys::{page_size, Address, Virtual};
 
 mod ignore {
     ///! This module is never exported. It is used for bootloader requests that should never be accessed in software.
@@ -35,7 +35,7 @@ macro_rules! boot_only {
 pub fn get_memory_map() -> Option<&'static [limine::NonNullPtr<limine::LimineMemmapEntry>]> {
     boot_only!({
         static LIMINE_MMAP: limine::LimineMemmapRequest = limine::LimineMemmapRequest::new(LIMINE_REV);
-        LIMINE_MMAP.get_response().get().map(|response| response.memmap())
+        LIMINE_MMAP.get_response().get().map(limine::LimineMemmapResponse::memmap)
     })
 }
 
@@ -71,8 +71,8 @@ pub unsafe fn reclaim_boot_memory(skip_ranges: &[core::ops::Range<usize>]) {
         .unwrap()
         .iter()
         .filter(|entry| entry.typ == LimineMemoryMapEntryType::BootloaderReclaimable)
-        .flat_map(|entry| (entry.base..(entry.base + entry.len)).step_by(0x1000))
-        .map(|address| Address::<libsys::Frame>::new_truncate(address as usize))
+        .flat_map(|entry| (entry.base..(entry.base + entry.len)).step_by(page_size()))
+        .map(|address| Address::<libsys::Frame>::new_truncate(address.try_into().unwrap()))
         .filter(|address| skip_ranges.iter().any(|skip| skip.contains(&address.get().get())))
     {
         crate::memory::PMM.modify_type(frame, FrameType::Generic, Some(FrameType::BootReclaim)).ok();

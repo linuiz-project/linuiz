@@ -4,7 +4,7 @@ mod params;
 use libkernel::LinkerSymbol;
 use libsys::{page_size, Address};
 
-pub static KERNEL_HANDLE: spin::Lazy<uuid::Uuid> = spin::Lazy::new(|| uuid::Uuid::new_v4());
+pub static KERNEL_HANDLE: spin::Lazy<uuid::Uuid> = spin::Lazy::new(uuid::Uuid::new_v4);
 
 pub fn get_parameters() -> &'static params::Parameters {
     params::PARAMETERS.get().expect("parameters have not yet been parsed")
@@ -37,12 +37,14 @@ unsafe extern "C" fn _entry() -> ! {
                 boot_info
                     .name
                     .as_ptr()
+                    // Safety: Bootloader pretty-promises to not kill us here.
                     .map(|ptr| unsafe { CStr::from_ptr(ptr) })
                     .and_then(|cstr| cstr.to_str().ok())
                     .unwrap_or("Unknown"),
                 boot_info
                     .version
                     .as_ptr()
+                    // Safety: Bootloader pretty-promises to not kill us here.
                     .map(|ptr| unsafe { CStr::from_ptr(ptr) })
                     .and_then(|cstr| cstr.to_str().ok())
                     .unwrap_or("0"),
@@ -76,10 +78,12 @@ unsafe extern "C" fn _entry() -> ! {
         }
 
         // Extract kernel address information.
-        let (kernel_paddr, kernel_vaddr) = LIMINE_KERNEL_ADDR
+        let (kernel_phys_addr, kernel_virt_addr) = LIMINE_KERNEL_ADDR
             .get_response()
             .get()
-            .map(|response| (response.physical_base as usize, response.virtual_base as usize))
+            .map(|response| {
+                (usize::try_from(response.physical_base).unwrap(), usize::try_from(response.virtual_base).unwrap())
+            })
             .expect("bootloader did not provide kernel address info");
         // Take reference to kernel file data.
         let kernel_file = LIMINE_KERNEL_FILE
@@ -97,7 +101,7 @@ unsafe extern "C" fn _entry() -> ! {
 
         // Safety: Bootloader guarantees the provided information to be correct.
         let kernel_elf = elf::ElfBytes::<elf::endian::AnyEndian>::minimal_parse(unsafe {
-            core::slice::from_raw_parts(kernel_file.base.as_ptr().unwrap(), kernel_file.length as usize)
+            core::slice::from_raw_parts(kernel_file.base.as_ptr().unwrap(), kernel_file.length.try_into().unwrap())
         })
         .expect("kernel file is not a valid ELF");
 
@@ -122,8 +126,8 @@ unsafe extern "C" fn _entry() -> ! {
 
                     debug!("{:X?}", phdr);
 
-                    let base_offset = (phdr.p_vaddr as usize) - KERN_BASE.as_usize();
-                    let offset_end = base_offset + (phdr.p_memsz as usize);
+                    let base_offset = usize::try_from(phdr.p_vaddr).unwrap() - KERN_BASE.as_usize();
+                    let offset_end = base_offset + usize::try_from(phdr.p_memsz).unwrap();
                     let page_attributes = {
                         if phdr.p_flags.get_bit(PT_FLAG_EXEC_BIT) {
                             Attributes::RX
@@ -135,12 +139,12 @@ unsafe extern "C" fn _entry() -> ! {
                     };
 
                     (base_offset..offset_end)
-                        .step_by(page_size().get())
+                        .step_by(page_size())
                         // Tuple the memory offset to the respect physical and virtual addresses.
                         .map(|mem_offset| {
                             (
-                                Address::new(kernel_paddr + mem_offset).unwrap(),
-                                Address::new(kernel_vaddr + mem_offset).unwrap(),
+                                Address::new(kernel_phys_addr + mem_offset).unwrap(),
+                                Address::new(kernel_virt_addr + mem_offset).unwrap(),
                             )
                         })
                         // Attempt to map the page to the frame.
@@ -176,8 +180,8 @@ unsafe extern "C" fn _entry() -> ! {
                 // Flatten the enumeration of every page in the entry.
                 .flat_map(|(entry, attributes)| {
                     (entry.base..(entry.base + entry.len))
-                        .step_by(page_size().get())
-                        .map(move |phys_base| (phys_base as usize, attributes))
+                        .step_by(page_size())
+                        .map(move |phys_base| (phys_base.try_into().unwrap(), attributes))
                 })
                 // Attempt to map each of the entry's pages.
                 .try_for_each(|(phys_base, attributes)| {
@@ -195,7 +199,7 @@ unsafe extern "C" fn _entry() -> ! {
             debug!("Mapping the architecture-specific memory.");
             #[cfg(target_arch = "x86_64")]
             {
-                let apic_address = msr::IA32_APIC_BASE::get_base_address() as usize;
+                let apic_address = msr::IA32_APIC_BASE::get_base_address().try_into().unwrap();
                 kmapper
                     .map(
                         Address::new_truncate(hhdm_address().get() + apic_address),
@@ -214,22 +218,20 @@ unsafe extern "C" fn _entry() -> ! {
         });
 
         /* load symbols */
-        if !get_parameters().low_memory {
-            if let Ok(Some((symbol_table, string_table))) = kernel_elf.symbol_table() {
-                let mut vec = try_alloc::vec::TryVec::with_capacity_in(symbol_table.len(), &*crate::memory::PMM)
-                    .expect("failed to allocate vector for kernel symbols");
-
-                symbol_table.into_iter().for_each(|symbol| {
-                    vec.push((string_table.get(symbol.st_name as usize).unwrap_or("Unidentified"), symbol)).unwrap()
-                });
-                crate::interrupts::without(|| {
-                    crate::panic::KERNEL_SYMBOLS.call_once(|| alloc::vec::Vec::leak(vec.into_vec()))
-                });
-            } else {
-                warn!("Failed to load any kernel symbols; stack tracing will be disabled.");
-            }
-        } else {
+        if get_parameters().low_memory {
             debug!("Kernel is running in low memory mode; stack tracing will be disabled.");
+        } else if let Ok(Some((symbol_table, string_table))) = kernel_elf.symbol_table() {
+            let mut vec = try_alloc::vec::TryVec::with_capacity_in(symbol_table.len(), &*crate::memory::PMM)
+                .expect("failed to allocate vector for kernel symbols");
+
+            symbol_table.into_iter().for_each(|symbol| {
+                vec.push((string_table.get(symbol.st_name as usize).unwrap_or("Unidentified"), symbol)).unwrap();
+            });
+            crate::interrupts::without(|| {
+                crate::panic::KERNEL_SYMBOLS.call_once(|| alloc::vec::Vec::leak(vec.into_vec()))
+            });
+        } else {
+            warn!("Failed to load any kernel symbols; stack tracing will be disabled.");
         }
     }
 
@@ -240,7 +242,7 @@ unsafe extern "C" fn _entry() -> ! {
 
     // TODO
     debug!("Unpacking kernel drivers...");
-    drivers::load_drivers();
+    drivers::load();
 
     /* smp */
     {

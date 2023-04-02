@@ -47,7 +47,7 @@ pub(crate) struct LocalState {
 impl LocalState {
     const MAGIC: u64 = 0x1234_B33F_D3AD_C0DE;
 
-    fn is_valid_magic(&self) -> bool {
+    const fn is_valid_magic(&self) -> bool {
         self.magic == LocalState::MAGIC
     }
 }
@@ -67,9 +67,10 @@ fn get() -> &'static mut LocalState {
 
 /// Initializes the core-local state structure.
 ///
-/// Safety
+/// ### Safety
 ///
 /// This function invariantly assumes it will only be called once.
+#[allow(clippy::too_many_lines)]
 pub unsafe fn init(core_id: u32, timer_frequency: u16) {
     let Ok(syscall_stack) = crate::memory::allocate_kernel_stack::<SYSCALL_STACK_SIZE>() else { crate::memory::out_of_memory() };
     let Ok(idle_task_stack) = crate::memory::allocate_kernel_stack::<0x10>() else { crate::memory::out_of_memory() };
@@ -92,20 +93,15 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
         idt: {
             use crate::arch::x64::structures::idt;
 
-            // TODO use fallible allocations for this
-            if !crate::init::get_parameters().low_memory {
-                Some({
-                    let mut idt = TryBox::new(idt::InterruptDescriptorTable::new()).unwrap();
+            crate::init::get_parameters().low_memory.then(|| {
+                let mut idt = TryBox::new(idt::InterruptDescriptorTable::new()).unwrap();
 
-                    idt::set_exception_handlers(&mut *idt);
-                    idt::set_stub_handlers(&mut *idt);
-                    idt.load_unsafe();
+                idt::set_exception_handlers(&mut idt);
+                idt::set_stub_handlers(&mut idt);
+                idt.load_unsafe();
 
-                    idt
-                })
-            } else {
-                None
-            }
+                idt
+            })
         },
         #[cfg(target_arch = "x86_64")]
         tss: {
@@ -256,7 +252,7 @@ pub unsafe fn next_task(
 #[inline]
 pub unsafe fn end_of_interrupt() {
     #[cfg(target_arch = "x86_64")]
-    get().apic.0.end_of_interrupt()
+    get().apic.0.end_of_interrupt();
 }
 
 /// Safety
@@ -267,15 +263,19 @@ pub unsafe fn set_preemption_wait(interval_wait: core::num::NonZeroU16) {
     {
         let (apic, timer_interval) = &get().apic;
         match apic.get_timer().get_mode() {
-            // Safety: Control flow expects timer initial count to be changed.
+            // Safety: Control flow expects timer initial count to be set.
             apic::TimerMode::OneShot => unsafe {
-                apic.set_timer_initial_count((timer_interval * (interval_wait.get() as u64)) as u32)
+                let final_count = timer_interval * u64::from(interval_wait.get());
+                apic.set_timer_initial_count(final_count.try_into().unwrap_or(u32::MAX));
             },
+
+            // Safety: Control flow expects the TSC deadline to be set.
             apic::TimerMode::TscDeadline => unsafe {
                 crate::arch::x64::registers::msr::IA32_TSC_DEADLINE::set(
                     core::arch::x86_64::_rdtsc() + (timer_interval * (interval_wait.get() as u64)),
-                )
+                );
             },
+
             apic::TimerMode::Periodic => unimplemented!(),
         }
     }

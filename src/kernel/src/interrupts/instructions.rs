@@ -48,13 +48,19 @@ pub fn without<R>(func: impl FnOnce() -> R) -> R {
     let interrupts_enabled = are_enabled();
 
     if interrupts_enabled {
-        unsafe { disable() };
+        // Safety: Interrupts are expected to be disabled, and are later re-enabled.
+        unsafe {
+            disable();
+        }
     }
 
     let return_value = func();
 
     if interrupts_enabled {
-        unsafe { enable() };
+        // Safety: Interrupts were previously enabled.
+        unsafe {
+            enable();
+        }
     }
 
     return_value
@@ -63,6 +69,20 @@ pub fn without<R>(func: impl FnOnce() -> R) -> R {
 /// Waits for the next interrupt on the current core.
 #[inline]
 pub fn wait() {
+    assert!(are_enabled());
+
+    // Safety: Interrupts are checked-enabled.
+    unsafe { wait_unchecked() }
+}
+
+/// Waits for the next interrupt on the current core.
+///
+/// ### Safety
+///
+/// If interrupts are not enabled, this function will cause a deadlock.
+#[inline]
+pub unsafe fn wait_unchecked() {
+    // Safety: Control flow expects to wait for the next interrupt.
     unsafe {
         #[cfg(target_arch = "x86_64")]
         asm!("hlt", options(nostack, nomem, preserves_flags));
@@ -76,10 +96,18 @@ pub fn wait() {
 #[inline]
 pub fn wait_loop() -> ! {
     loop {
-        wait();
+        // Safety: We never recover from this, so it doesn't matter if a deadlock occurs.
+        unsafe {
+            wait_unchecked();
+        }
     }
 }
 
+/// Murder, in cold electrons, the current core.
+///
+/// ### Safety
+///
+/// Murdering a CPU core is undefined behaviour.
 #[inline]
 pub unsafe fn halt_and_catch_fire() -> ! {
     disable();

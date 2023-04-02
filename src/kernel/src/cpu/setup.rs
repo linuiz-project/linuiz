@@ -132,9 +132,10 @@ pub fn setup() {
     }
 }
 
-/// Safety
+/// ### Safety
 ///
 /// This function should never be called by software.
+#[allow(clippy::similar_names, clippy::no_effect_underscore_binding)]
 unsafe extern "sysv64" fn syscall_handler(
     vector: u64,
     arg0: u64,
@@ -146,7 +147,6 @@ unsafe extern "sysv64" fn syscall_handler(
     ret_sp: u64,
     mut syscall_context: crate::cpu::SyscallContext,
 ) -> crate::cpu::ControlContext {
-    // Take a reference to the syscall context, to avoid not mutating the in-memory representation.
     let _syscall_context = &mut syscall_context;
 
     let syscall = match vector {
@@ -162,7 +162,7 @@ unsafe extern "sysv64" fn syscall_handler(
             };
 
             match log_level {
-                Ok(level) => Some(super::Syscall::Log { level, cstr_ptr: arg1 as usize as *const _ }),
+                Ok(level) => Some(super::Syscall::Log { level, cstr_ptr: usize::try_from(arg1).unwrap() as *const _ }),
                 Err(invalid_level) => {
                     warn!("Invalid log level provided: {}", invalid_level);
                     None
@@ -176,9 +176,10 @@ unsafe extern "sysv64" fn syscall_handler(
         }
     };
 
-    match syscall {
-        Some(syscall) => super::do_syscall(syscall),
-        None => warn!("Failed to execute system call."),
+    if let Some(syscall) = syscall {
+        super::process(syscall);
+    } else {
+        warn!("Failed to execute system call.");
     }
 
     crate::cpu::ControlContext { ip: ret_ip, sp: ret_sp }

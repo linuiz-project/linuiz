@@ -7,6 +7,7 @@ use mapper::Mapper;
 use try_alloc::vec::TryVec;
 
 #[derive(Debug)]
+#[allow(clippy::enum_variant_names)]
 pub enum Error {
     /// Indicates an allocation error occured in the backing allocator.
     AllocError,
@@ -37,7 +38,7 @@ impl From<paging::Error> for Error {
         match value {
             paging::Error::AllocError => Error::AllocError,
             paging::Error::NotMapped(addr) => Error::NotMapped(addr),
-            err => Error::Paging(err),
+            paging::Error::HugePage => Error::Paging(paging::Error::HugePage),
         }
     }
 }
@@ -138,7 +139,10 @@ impl<A: Allocator + Clone> AddressSpace<A> {
 
         Ok(Self {
             free,
-            used: TryVec::new_in(allocator.clone()),
+            used: TryVec::new_in(allocator),
+
+            // Safety: Mapper depth is known-valid (from current), and the mapped page table is
+            //          promised-valid from the kernel itself.
             mapper: unsafe {
                 Mapper::new_unsafe(
                     super::PageDepth::current(),
@@ -154,8 +158,7 @@ impl<A: Allocator + Clone> AddressSpace<A> {
         pages: NonZeroUsize,
         flags: MmapFlags,
     ) -> Result<NonNull<[u8]>> {
-        let size = pages.get() * page_size().get();
-        assert!(size.is_power_of_two());
+        let size = pages.get() * page_size();
 
         let (found_index, found_region) = self
             .free
@@ -195,7 +198,7 @@ impl<A: Allocator + Clone> AddressSpace<A> {
     ) -> Result<NonNull<[u8]>> {
         let address_range = start.get().get()..end.get().get();
         // Finally, map all of the allocated pages in the virtual address space.
-        for page_base in address_range.step_by(page_size().get()) {
+        for page_base in address_range.step_by(page_size()) {
             let page = Address::new(page_base).ok_or(Error::MalformedAddress)?;
             self.mapper.auto_map(page, Attributes::from(flags)).map_err(Error::from)?;
         }
@@ -209,7 +212,8 @@ impl<A: Allocator + Clone> AddressSpace<A> {
         self.mapper
             .get_page_attributes(page)
             .filter(|attributes| attributes.contains(Attributes::DEMAND))
-            .map(|mut attributes| {
+            .ok_or(Error::NotMapped(page.get()))
+            .and_then(|mut attributes| {
                 self.mapper
                     .auto_map(page, {
                         // remove demand bit ...
@@ -219,9 +223,8 @@ impl<A: Allocator + Clone> AddressSpace<A> {
                         // ... return attributes
                         attributes
                     })
-                    .unwrap()
+                    .map_err(Error::from)
             })
-            .ok_or(Error::NotMapped(page.get()))
     }
 
     pub fn is_mmapped(&self, address: Address<Virtual>) -> bool {
@@ -232,6 +235,6 @@ impl<A: Allocator + Clone> AddressSpace<A> {
     ///
     /// Caller must ensure that switching the currently active address space will not cause undefined behaviour.
     pub unsafe fn swap_into(&self) {
-        self.mapper.swap_into()
+        self.mapper.swap_into();
     }
 }

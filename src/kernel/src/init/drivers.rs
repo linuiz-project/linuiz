@@ -1,16 +1,17 @@
 use elf::{endian::AnyEndian, ElfBytes};
 use limine::{LimineFile, NonNullPtr};
 
-pub fn load_drivers() {
+pub fn load() {
     // Safety: Bootloader promises the pointer and length to be a valid memory region so long as bootloader memory is unreclaimed.
     let drivers_data = with_kernel_module("drivers", |module| unsafe {
-        core::slice::from_raw_parts(module.base.as_ptr().unwrap(), module.length as usize)
+        core::slice::from_raw_parts(module.base.as_ptr().unwrap(), usize::try_from(module.length).unwrap())
     })
     .expect("no drivers data to load");
 
-    with_driver_elfs_from_data(drivers_data, |name, elf| load_driver_elf(name, elf));
+    with_driver_elfs_from_data(drivers_data, load_driver_elf);
 }
 
+#[allow(clippy::single_match)]
 fn load_driver_elf(name: &str, driver_elf: &ElfBytes<AnyEndian>) {
     use crate::memory::PageDepth;
     use libsys::{page_shift, page_size, Address};
@@ -31,14 +32,14 @@ fn load_driver_elf(name: &str, driver_elf: &ElfBytes<AnyEndian>) {
         trace!("{:?}", segment);
 
         match segment.p_type {
-            0x1 => {
-                let memory_size = segment.p_memsz as usize;
-                let memory_start = segment.p_vaddr as usize;
+            elf::abi::PT_LOAD => {
+                let memory_size = usize::try_from(segment.p_memsz).unwrap();
+                let memory_start = usize::try_from(segment.p_vaddr).unwrap();
                 let memory_end = memory_start + memory_size;
 
                 // Align the start address to ensure we iterate page-aligned addresses.
                 let memory_start_aligned = libsys::align_down(memory_start, page_shift());
-                for page_base in (memory_start_aligned..memory_end).step_by(page_size().get()) {
+                for page_base in (memory_start_aligned..memory_end).step_by(page_size()) {
                     use bit_field::BitField;
 
                     // Auto map the virtual address to a physical page.
@@ -66,7 +67,7 @@ fn load_driver_elf(name: &str, driver_elf: &ElfBytes<AnyEndian>) {
                 // Copy segment data into the new memory region.
                 memory_slice[..segment_slice.len()].copy_from_slice(segment_slice);
                 // Clear any left over bytes to 0. This is useful for the bss region, for example.
-                (&mut memory_slice[segment_slice.len()..]).fill(0x0);
+                memory_slice[segment_slice.len()..].fill(0x0);
             }
 
             _ => {}
@@ -94,9 +95,9 @@ fn with_kernel_module<T>(name: &str, with_fn: impl FnOnce(&NonNullPtr<LimineFile
         .expect("boot memory has been reclaimed")
         .iter()
         .find(|module| get_module_name(module).is_some_and(|n| n.ends_with(name)))
-        .map(|module| with_fn(module))
+        .map(with_fn)
 }
 
-fn get_module_name<'a>(module: &'a NonNullPtr<LimineFile>) -> Option<&'a str> {
+fn get_module_name(module: &NonNullPtr<LimineFile>) -> Option<&str> {
     module.path.to_str().and_then(|cstr| cstr.to_str().ok())
 }

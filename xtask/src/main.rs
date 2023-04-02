@@ -31,6 +31,7 @@ enum Arguments {
     Clean,
     Update,
     Check,
+    Clippy,
     Fmt(Fmt),
 
     #[command(subcommand)]
@@ -50,8 +51,9 @@ fn main() -> Result<()> {
 
     match Arguments::parse() {
         Arguments::Clean => in_workspace_with(&sh, |sh| cmd!(sh, "cargo clean").run()),
-        Arguments::Check => in_workspace_with(&sh, |sh| cmd!(sh, "cargo check --bins").run()),
         Arguments::Update => in_workspace_with(&sh, |sh| cmd!(sh, "cargo update").run()),
+        Arguments::Check => in_workspace_with(&sh, |sh| cmd!(sh, "cargo check --bins").run()),
+        Arguments::Clippy => in_workspace_with(&sh, |sh| cmd!(sh, "cargo clippy").run()),
         Arguments::Fmt(fmt) => {
             let args = &fmt.args;
             in_workspace_with(&sh, |sh| cmd!(sh, "cargo fmt {args...}").run())

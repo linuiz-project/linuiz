@@ -7,6 +7,7 @@ impl CR2 {
     pub fn read() -> Address<Virtual> {
         let value: usize;
 
+        // Safety: Reading CR2 has no side effects.
         unsafe {
             core::arch::asm!("mov {}, cr2", out(reg) value, options(nomem, nostack, preserves_flags));
         }

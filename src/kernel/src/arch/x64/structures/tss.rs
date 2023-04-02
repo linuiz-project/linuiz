@@ -1,3 +1,5 @@
+#![allow(clippy::module_name_repetitions)]
+
 use super::gdt;
 
 pub use x86_64::{instructions::tables::load_tss, structures::tss::TaskStateSegment};

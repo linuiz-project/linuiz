@@ -71,8 +71,8 @@ pub fn init() -> Result<(), Error> {
     static SERIAL_UART: spin::Lazy<Option<Serial>> = spin::Lazy::new(|| {
         crate::interrupts::without(|| {
             UartWriter::new(
-                // Safety: Constructor is called only once.
                 #[cfg(target_arch = "x86_64")]
+                // Safety: Constructor is called only once, with a hopefully-valid address.
                 unsafe {
                     Uart::<Data>::new(uart::COM1)
                 },

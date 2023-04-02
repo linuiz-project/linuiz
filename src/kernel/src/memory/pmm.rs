@@ -6,7 +6,7 @@ use core::{
     ptr::NonNull,
     sync::atomic::Ordering,
 };
-use libsys::page_shift;
+use libsys::{page_mask, page_shift, page_size};
 use libsys::{Address, Frame};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,23 +159,24 @@ impl PhysicalMemoryManager<'_> {
 
         let total_memory = {
             let last_entry = memory_map.last()?;
-            ((last_entry.base + last_entry.len) & !0xFFF) as usize
+            (last_entry.base + last_entry.len) & !page_mask()
         };
-        let total_frames = total_memory / 0x1000;
+        let total_frames = total_memory / page_size();
 
         let table_size_in_bytes = libsys::align_up(total_frames * core::mem::size_of::<FrameData>(), page_shift());
         let table_entry =
             memory_map.iter().find(|entry| entry.typ == FrameType::Generic && entry.len >= table_size_in_bytes)?;
+        // Safety: Unless the memory map lied to us, this memory is valid for a `&[FrameData; total_frames]`.
         let table = unsafe {
             core::slice::from_raw_parts(
-                physical_memory.as_ptr().add(table_entry.base as usize).cast::<FrameData>(),
+                physical_memory.as_ptr().add(table_entry.base).cast::<FrameData>(),
                 total_frames,
             )
         };
 
         memory_map
             .iter()
-            .map(|entry| (entry.base / 0x1000, entry.len / 0x1000, entry.typ))
+            .map(|entry| (entry.base / page_size(), entry.len / page_size(), entry.typ))
             .flat_map(|(base_index, count, typ)| (base_index..(base_index + count)).map(move |index| (index, typ)))
             .for_each(|(index, typ)| {
                 let frame_data = &table[index];
@@ -185,7 +186,7 @@ impl PhysicalMemoryManager<'_> {
             });
 
         // Ensure the table pages are reserved, so as to not be locked by any of the `_next` functions.
-        table.iter().skip((table_entry.base / 0x1000) as usize).take(table_size_in_bytes / 0x1000).for_each(
+        table.iter().skip(table_entry.base / page_size()).take(table_size_in_bytes / page_size()).for_each(
             |frame_data| {
                 frame_data.peek();
                 frame_data.set_type(FrameType::Reserved);
@@ -198,7 +199,7 @@ impl PhysicalMemoryManager<'_> {
 
     #[inline]
     pub const fn total_memory(&self) -> usize {
-        self.table.len() * 0x1000
+        self.table.len() * page_size()
     }
 
     #[inline]
@@ -235,7 +236,7 @@ impl PhysicalMemoryManager<'_> {
         }
 
         self.with_table(|mut sub_table| {
-            let alignment = core::cmp::max(alignment.get() / 0x1000, 1);
+            let alignment = core::cmp::max(alignment.get() / page_size(), 1);
 
             // Loop the table and attempt to locate a viable range of blocks.
             loop {
@@ -247,30 +248,26 @@ impl PhysicalMemoryManager<'_> {
                 let pages = &sub_table[..count.get()];
                 pages.iter().for_each(FrameData::peek);
 
-                match pages
+                if let Some((index, _)) = pages
                     .iter()
                     .map(FrameData::data)
                     .enumerate()
                     .rfind(|(_, (locked, ty))| *locked || *ty != FrameType::Generic)
                 {
-                    Some((index, _)) => {
-                        pages.iter().for_each(FrameData::unpeek);
-                        let aligned_index = ((index + 1) + (alignment - 1)) / alignment;
-                        sub_table = &sub_table[aligned_index..];
+                    pages.iter().for_each(FrameData::unpeek);
+                    let aligned_index = ((index + 1) + (alignment - 1)) / alignment;
+                    sub_table = &sub_table[aligned_index..];
+                } else {
+                    for frame_data in pages.iter() {
+                        frame_data.lock();
+                        frame_data.unpeek();
                     }
 
-                    None => {
-                        pages.iter().for_each(|frame_data| {
-                            frame_data.lock();
-                            frame_data.unpeek();
-                        });
-
-                        // Use wrapping arithmetic here to make any errors in computation painfully obvious due
-                        // to extremely unpredictable results.
-                        let start_index = self.table.len().wrapping_sub(sub_table.len());
-                        let start_address = start_index.wrapping_mul(0x1000);
-                        break Address::new(start_address).ok_or(Error::Unknown);
-                    }
+                    // Use wrapping arithmetic here to make any errors in computation painfully obvious due
+                    // to extremely unpredictable results.
+                    let start_index = self.table.len().wrapping_sub(sub_table.len());
+                    let start_address = start_index.wrapping_mul(page_size());
+                    break Address::new(start_address).ok_or(Error::Unknown);
                 }
             }
         })
@@ -282,15 +279,15 @@ impl PhysicalMemoryManager<'_> {
             frame_data.peek();
 
             let (locked, _) = frame_data.data();
-            if !locked {
+            if locked {
+                frame_data.unpeek();
+
+                Err(Error::NotFree)
+            } else {
                 frame_data.lock();
                 frame_data.unpeek();
 
                 Ok(())
-            } else {
-                frame_data.unpeek();
-
-                Err(Error::NotFree)
             }
         })
     }
@@ -308,10 +305,10 @@ impl PhysicalMemoryManager<'_> {
             table.iter().for_each(FrameData::peek);
 
             if table.iter().map(FrameData::data).all(|(locked, _)| !locked) {
-                table.iter().for_each(|frame_data| {
+                for frame_data in table.iter() {
                     frame_data.lock();
                     frame_data.unpeek();
-                });
+                }
 
                 Ok(())
             } else {
@@ -364,13 +361,14 @@ impl PhysicalMemoryManager<'_> {
     }
 }
 
+// Safety: All invariants are cared for in this impl.
 unsafe impl core::alloc::Allocator for &PhysicalMemoryManager<'_> {
     fn allocate(&self, layout: core::alloc::Layout) -> core::result::Result<NonNull<[u8]>, AllocError> {
-        let layout = layout.align_to(0x1000).map_err(|_| AllocError)?.pad_to_align();
+        let layout = layout.align_to(page_size()).map_err(|_| AllocError)?.pad_to_align();
         let physical_memory = self.physical_memory;
         self.next_frames(
-            NonZeroUsize::new(layout.size() / 0x1000).unwrap(),
-            NonZeroUsize::new(layout.align() / 0x1000).unwrap_or(NonZeroUsize::MIN),
+            NonZeroUsize::new(layout.size() / page_size()).unwrap(),
+            NonZeroUsize::new(layout.align() / page_size()).unwrap_or(NonZeroUsize::MIN),
         )
         .ok()
         .map(|address| {
@@ -384,16 +382,16 @@ unsafe impl core::alloc::Allocator for &PhysicalMemoryManager<'_> {
     }
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
-        debug_assert!(ptr.as_ptr().is_aligned_to(0x1000));
+        debug_assert!(ptr.as_ptr().is_aligned_to(page_size()));
 
-        let Ok(layout) = layout.align_to(0x1000).map(|layout| layout.pad_to_align())
+        let Ok(layout) = layout.align_to(page_size()).map(|layout| layout.pad_to_align())
             else {
                 error!("Unexpectedly failed to align deallocation layout.");
                 return;
             };
 
         let base_address = ptr.addr().get() - self.physical_memory.get();
-        for offset in (0..layout.size()).step_by(0x1000) {
+        for offset in (0..layout.size()).step_by(page_size()) {
             self.free_frame(Address::new(base_address + offset).unwrap())
                 .expect("Unexpectedly failed to free frame during deallocation");
         }

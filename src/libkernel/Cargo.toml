@@ -2,6 +2,12 @@
 name = "libkernel"
 version = "0.1.0"
 edition = "2021"
+description = "Pyre kernel library."
+license = "BSD-3-Clause"
+repository = "https://github.com/pyre-project/pyre/src/libkernel/"
+readme = ""
+keywords = []
+categories = []
 
 [dependencies.libsys]
 path = "../libsys/"

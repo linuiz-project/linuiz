@@ -25,6 +25,7 @@ impl CR0 {
     pub fn read() -> CR0Flags {
         let value: psize;
 
+        // Safety: Reading CR0 has no side effects.
         unsafe {
             core::arch::asm!(
                 "mov {}, cr0",

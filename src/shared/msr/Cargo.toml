@@ -2,6 +2,12 @@
 name = "msr"
 version = "0.1.0"
 edition = "2021"
+description = "Software wrappers over the x86 MSRs."
+license = "BSD-3-Clause"
+repository = "https://github.com/pyre-project/pyre/src/shared/msr/"
+readme = ""
+keywords = []
+categories = []
 
 [dependencies]
 bit_field = "*"
