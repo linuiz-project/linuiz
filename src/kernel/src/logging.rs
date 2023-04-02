@@ -1,8 +1,15 @@
 use crate::interrupts::InterruptCell;
 use spin::Mutex;
-use uart::UartWriter;
+use uart::{Data, Uart, UartWriter};
 
 pub struct Serial(InterruptCell<Mutex<UartWriter>>);
+
+// Safety: Interior address is not thread-specific.
+unsafe impl Send for Serial {}
+// Safety: This isn't actually safe. It relies entirely on only
+//         one `Serial` being created and used at a time.
+//         So basically, TODO.
+unsafe impl Sync for Serial {}
 
 impl log::Log for Serial {
     fn enabled(&self, _: &log::Metadata) -> bool {
@@ -35,7 +42,23 @@ impl log::Log for Serial {
     fn flush(&self) {}
 }
 
-pub fn init() -> Result<(), log::SetLoggerError> {
+#[derive(Debug)]
+pub enum Error {
+    SetLoggerError,
+    NoLoggerError,
+}
+
+impl core::error::Error for Error {}
+
+impl From<log::SetLoggerError> for Error {
+    fn from(_: log::SetLoggerError) -> Self {
+        Self::SetLoggerError
+    }
+}
+
+crate::default_display_impl!(Error);
+
+pub fn init() -> Result<(), Error> {
     #[cfg(debug_assertions)]
     {
         log::set_max_level(log::LevelFilter::Trace);
@@ -45,23 +68,20 @@ pub fn init() -> Result<(), log::SetLoggerError> {
         log::set_max_level(log::LevelFilter::Info);
     }
 
-    log::set_logger({
-        static SERIAL_UART: spin::Lazy<Serial> = spin::Lazy::new(|| {
-            crate::interrupts::without(|| {
+    static SERIAL_UART: spin::Lazy<Option<Serial>> = spin::Lazy::new(|| {
+        crate::interrupts::without(|| {
+            UartWriter::new(
                 // Safety: Constructor is called only once.
-                let uart_writer = unsafe {
-                    UartWriter::new(
-                        #[cfg(target_arch = "x86_64")]
-                        {
-                            uart::Uart::<uart::Data>::new(uart::COM1)
-                        },
-                    )
-                };
+                #[cfg(target_arch = "x86_64")]
+                unsafe {
+                    Uart::<Data>::new(uart::COM1)
+                },
+            )
+            .map(Mutex::new)
+            .map(InterruptCell::new)
+            .map(Serial)
+        })
+    });
 
-                Serial(InterruptCell::new(Mutex::new(uart_writer)))
-            })
-        });
-
-        &*SERIAL_UART
-    })
+    SERIAL_UART.as_ref().ok_or(Error::NoLoggerError).and_then(|serial| log::set_logger(serial).map_err(Error::from))
 }

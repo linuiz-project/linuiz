@@ -12,13 +12,13 @@ pub fn load_drivers() {
 }
 
 fn load_driver_elf(name: &str, driver_elf: &ElfBytes<AnyEndian>) {
-    use crate::memory::{PageAttributes, PageDepth};
+    use crate::memory::PageDepth;
     use libsys::{page_shift, page_size, Address};
 
     // Create the driver's page manager from the kernel's higher-half table.
     // Safety: Kernel guarantees HHDM to be valid.
     let mut driver_mapper = unsafe {
-        crate::memory::address_space::Mapper::new_unsafe(
+        crate::memory::address_space::mapper::Mapper::new_unsafe(
             PageDepth::new(4),
             crate::memory::new_kmapped_page_table().unwrap(),
         )
@@ -46,13 +46,15 @@ fn load_driver_elf(name: &str, driver_elf: &ElfBytes<AnyEndian>) {
                     trace!("{:?} auto map {:X?}", name, page);
                     driver_mapper
                         .auto_map(page, {
+                            use crate::memory::paging::Attributes;
+
                             // This doesn't support RWX pages. I'm not sure it ever should.
                             if segment.p_flags.get_bit(1) {
-                                PageAttributes::RX
+                                Attributes::RX
                             } else if segment.p_flags.get_bit(2) {
-                                PageAttributes::RW
+                                Attributes::RW
                             } else {
-                                PageAttributes::RO
+                                Attributes::RO
                             }
                         })
                         .unwrap();

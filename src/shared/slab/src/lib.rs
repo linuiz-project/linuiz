@@ -2,7 +2,6 @@
 #![feature(
     allocator_api,                  // #32838 <https://github.com/rust-lang/rust/issues/32838>
     strict_provenance,              // #95228 <https://github.com/rust-lang/rust/issues/95228>
-    nonnull_slice_from_raw_parts,   // #71941 <https://github.com/rust-lang/rust/issues/71941>
     pointer_is_aligned,             // #96284 <https://github.com/rust-lang/rust/issues/96284>
     ptr_as_uninit,                  // #75402 <https://github.com/rust-lang/rust/issues/75402>
     slice_ptr_get,                  // #74265 <https://github.com/rust-lang/rust/issues/74265>

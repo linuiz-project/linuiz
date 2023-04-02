@@ -57,10 +57,10 @@ pub enum Vector {
 #[derive(Debug, Clone, Copy)]
 pub struct PageFaultHandlerError;
 
-/// Safety
+/// ### Safety
 ///
 /// This function should only be called in the case of passing context to handle a page fault.
-/// Calling this function outside the context of a page fault is undefined behaviour.
+/// Calling this function more than once and/or outside the context of a page fault is undefined behaviour.
 #[no_mangle]
 #[repr(align(0x10))]
 pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandlerError> {
@@ -71,10 +71,10 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
     .ok_or(PageFaultHandlerError)
 }
 
-/// Safety
+/// ### Safety
 ///
 /// This function should only be called in the case of passing context to handle an interrupt.
-/// Calling this function outside the context of an interrupt is undefined behaviour.
+/// Calling this function more than once and/or outside the context of an interrupt is undefined behaviour.
 #[doc(hidden)]
 #[repr(align(0x10))]
 pub unsafe fn irq_handler(irq_vector: u64, ctrl_flow_context: &mut ControlContext, arch_context: &mut ArchContext) {

@@ -82,6 +82,7 @@ pub mod tlb {
     //     }
 }
 
+// TODO proper core::error::Error impls.
 #[derive(Debug, Clone, Copy)]
 pub enum RdRandError {
     NotSupported,

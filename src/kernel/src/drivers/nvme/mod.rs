@@ -303,6 +303,7 @@ impl InterruptMask {
     }
 }
 
+// TODO proper core::error::Error impl
 #[derive(Debug)]
 pub enum ControllerEnableError {
     FatalStatus,

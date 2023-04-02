@@ -1,19 +1,20 @@
-mod paging;
+mod page_depth;
+pub use page_depth::*;
 
-pub mod io;
-use libsys::{page_size, table_index_size};
-pub use paging::*;
 pub mod address_space;
+pub mod io;
+pub mod paging;
 pub mod pmm;
 
-use crate::{exceptions::Exception, interrupts::InterruptCell, local_state::do_catch};
-use address_space::Mapper;
+use crate::{
+    exceptions::Exception, interrupts::InterruptCell, local_state::do_catch, memory::address_space::mapper::Mapper,
+};
 use alloc::{alloc::Global, string::String};
 use core::{
     alloc::{AllocError, Allocator, Layout},
     ptr::NonNull,
 };
-use libsys::{Address, Frame, Virtual};
+use libsys::{page_size, table_index_size, Address, Frame, Virtual};
 use slab::SlabAllocator;
 use spin::{Lazy, Mutex, Once};
 use try_alloc::boxed::TryBox;
@@ -56,11 +57,11 @@ pub fn new_kmapped_page_table() -> Option<Address<Frame>> {
     // Safety: Frame is provided by allocator, and so guaranteed to be within the HHDM, and is frame-sized.
     let new_table = unsafe {
         core::slice::from_raw_parts_mut(
-            hhdm_offset(table_frame).unwrap().as_ptr().cast::<PageTableEntry>(),
+            hhdm_offset(table_frame).unwrap().as_ptr().cast::<paging::TableEntry>(),
             table_index_size().get(),
         )
     };
-    new_table.fill(PageTableEntry::empty());
+    new_table.fill(paging::TableEntry::empty());
     with_kmapper(|kmapper| new_table.copy_from_slice(kmapper.view_root_page_table()));
 
     Some(table_frame)
@@ -167,6 +168,7 @@ pub static PMM: Lazy<pmm::PhysicalMemoryManager> = Lazy::new(|| unsafe {
     .unwrap()
 });
 
+// TODO decide if we even need this? Perhaps just rely on the PMM for *all* allocations.
 pub static KMALLOC: Lazy<SlabAllocator<&pmm::PhysicalMemoryManager>> = Lazy::new(|| SlabAllocator::new_in(11, &*PMM));
 
 mod global_allocator_impl {
