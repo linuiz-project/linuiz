@@ -15,9 +15,14 @@ impl core::fmt::Display for Target {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::x86_64 => "x86_64-unknown-none",
-            Self::riscv64gc => "riscv64gc-unknown-none",
+            Self::riscv64gc => "riscv64gc-unknown-none-elf",
         })
     }
+}
+
+#[derive(Parser)]
+struct Fmt {
+    args: Vec<String>,
 }
 
 #[derive(Parser)]
@@ -26,6 +31,7 @@ enum Arguments {
     Clean,
     Update,
     Check,
+    Fmt(Fmt),
 
     #[command(subcommand)]
     Target(Target),
@@ -46,6 +52,10 @@ fn main() -> Result<()> {
         Arguments::Clean => in_workspace_with(&sh, |sh| cmd!(sh, "cargo clean").run()),
         Arguments::Check => in_workspace_with(&sh, |sh| cmd!(sh, "cargo check --bins").run()),
         Arguments::Update => in_workspace_with(&sh, |sh| cmd!(sh, "cargo update").run()),
+        Arguments::Fmt(fmt) => {
+            let args = &fmt.args;
+            in_workspace_with(&sh, |sh| cmd!(sh, "cargo fmt {args...}").run())
+        }
 
         Arguments::Target(target) => {
             let mut config =
