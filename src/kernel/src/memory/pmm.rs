@@ -6,7 +6,7 @@ use core::{
     ptr::NonNull,
     sync::atomic::Ordering,
 };
-use libsys::{page_mask, page_shift, page_size};
+use libsys::{page_shift, page_size};
 use libsys::{Address, Frame};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,11 +121,10 @@ impl FrameData {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct MemoryMapping {
-    pub base: usize,
-    pub len: usize,
-    pub typ: FrameType,
+    pub range: core::ops::Range<usize>,
+    pub ty: FrameType,
 }
 
 pub struct PhysicalMemoryManager<'a> {
@@ -148,10 +147,10 @@ impl PhysicalMemoryManager<'_> {
             let memory_map_len = memory_map.len();
             // # Remark
             // 64 possible memory map entries feels like a reasonable limit.
-            // If this limit becomes constrining, it may be increased or set
+            // If this limit becomes constraining, it may be increased or set
             // dynamically (at compile-time) with a build option.
             // #### notation: lomem feature
-            let mut array = [MemoryMapping { base: 0, len: 0, typ: FrameType::Unusable }; 64];
+            let mut array = [const { MemoryMapping { range: 0..0, ty: FrameType::Unusable } }; 64];
             memory_map.enumerate().for_each(|(index, entry)| array[index] = entry);
             (array, memory_map_len)
         };
@@ -159,25 +158,25 @@ impl PhysicalMemoryManager<'_> {
 
         let total_memory = {
             let last_entry = memory_map.last()?;
-            (last_entry.base + last_entry.len) & !page_mask()
+            libsys::align_up(last_entry.range.end, page_shift())
         };
         let total_frames = total_memory / page_size();
 
         let table_size_in_bytes = libsys::align_up(total_frames * core::mem::size_of::<FrameData>(), page_shift());
-        let table_entry =
-            memory_map.iter().find(|entry| entry.typ == FrameType::Generic && entry.len >= table_size_in_bytes)?;
+        let table_entry = memory_map
+            .iter()
+            .find(|entry| entry.ty == FrameType::Generic && entry.range.len() >= table_size_in_bytes)?;
         // Safety: Unless the memory map lied to us, this memory is valid for a `&[FrameData; total_frames]`.
         let table = unsafe {
             core::slice::from_raw_parts(
-                physical_memory.as_ptr().add(table_entry.base).cast::<FrameData>(),
+                physical_memory.as_ptr().add(table_entry.range.start).cast::<FrameData>(),
                 total_frames,
             )
         };
 
         memory_map
             .iter()
-            .map(|entry| (entry.base / page_size(), entry.len / page_size(), entry.typ))
-            .flat_map(|(base_index, count, typ)| (base_index..(base_index + count)).map(move |index| (index, typ)))
+            .flat_map(|entry| entry.range.clone().step_by(page_size()).map(|base| (base / page_size(), entry.ty)))
             .for_each(|(index, typ)| {
                 let frame_data = &table[index];
                 frame_data.peek();
@@ -186,7 +185,7 @@ impl PhysicalMemoryManager<'_> {
             });
 
         // Ensure the table pages are reserved, so as to not be locked by any of the `_next` functions.
-        table.iter().skip(table_entry.base / page_size()).take(table_size_in_bytes / page_size()).for_each(
+        table.iter().skip(table_entry.range.start / page_size()).take(table_size_in_bytes / page_size()).for_each(
             |frame_data| {
                 frame_data.peek();
                 frame_data.set_type(FrameType::Reserved);

@@ -19,6 +19,10 @@ impl Parameters {
                 "--nosmp" => me.smp = false,
                 "--symbolinfo" => me.symbolinfo = true,
                 "--lomem" => me.low_memory = true,
+
+                // ignore
+                "" => {}
+
                 other => warn!("Unknown command line argument: {:?}", other),
             }
         }

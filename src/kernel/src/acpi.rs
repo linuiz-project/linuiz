@@ -170,19 +170,11 @@ pub fn init_interface() {
 }
 
 pub static FADT: Lazy<Option<Mutex<PhysicalMapping<AcpiHandler, acpi::fadt::Fadt>>>> = Lazy::new(|| {
-    TABLES
-        .get()
-        .map(Mutex::lock)
-        .and_then(|tables| tables.find_table::<acpi::fadt::Fadt>().ok())
-        .map(Mutex::new)
+    TABLES.get().map(Mutex::lock).and_then(|tables| tables.find_table::<acpi::fadt::Fadt>().ok()).map(Mutex::new)
 });
 
 pub static MCFG: Lazy<Option<Mutex<PhysicalMapping<AcpiHandler, acpi::mcfg::Mcfg>>>> = Lazy::new(|| {
-    TABLES
-        .get()
-        .map(Mutex::lock)
-        .and_then(|tables| tables.find_table::<acpi::mcfg::Mcfg>().ok())
-        .map(Mutex::new)
+    TABLES.get().map(Mutex::lock).and_then(|tables| tables.find_table::<acpi::mcfg::Mcfg>().ok()).map(Mutex::new)
 });
 
 pub static PLATFORM_INFO: Lazy<

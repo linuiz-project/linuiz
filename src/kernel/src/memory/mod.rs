@@ -23,12 +23,17 @@ pub fn hhdm_address() -> Address<Virtual> {
     static HHDM_ADDRESS: Once<Address<Virtual>> = Once::new();
 
     *HHDM_ADDRESS.call_once(|| {
-        static LIMINE_HHDM: limine::LimineHhdmRequest = limine::LimineHhdmRequest::new(crate::boot::LIMINE_REV);
+        static LIMINE_HHDM: limine::HhdmRequest = limine::HhdmRequest::new(crate::boot::LIMINE_REV);
 
-        let offset =
-            LIMINE_HHDM.get_response().get().expect("bootloader provided no higher-half direct mapping").offset;
-
-        Address::new(offset.try_into().unwrap()).expect("bootloader provided a non-canonical higher-half direct mapping address")
+        Address::new(
+            LIMINE_HHDM
+                .get_response()
+                .expect("bootloader provided no higher-half direct mapping")
+                .offset()
+                .try_into()
+                .unwrap(),
+        )
+        .expect("bootloader provided a non-canonical higher-half direct mapping address")
     })
 }
 
@@ -107,9 +112,7 @@ impl PagingRegister {
 pub fn supports_5_level_paging() -> bool {
     #[cfg(target_arch = "x86_64")]
     {
-        crate::arch::x64::cpuid::EXT_FEATURE_INFO
-            .as_ref()
-            .map_or(false, raw_cpuid::ExtendedFeatures::has_la57)
+        crate::arch::x64::cpuid::EXT_FEATURE_INFO.as_ref().map_or(false, raw_cpuid::ExtendedFeatures::has_la57)
     }
 
     #[cfg(target_arch = "riscv64")]
@@ -140,33 +143,30 @@ pub fn current_paging_levels() -> u32 {
 
 pub type PhysicalAllocator = &'static pmm::PhysicalMemoryManager<'static>;
 
-pub static PMM: Lazy<pmm::PhysicalMemoryManager> = Lazy::new(|| 
-    // Safety: We're very careful here. (this safety message sucks)
-    unsafe {
+pub static PMM: Lazy<pmm::PhysicalMemoryManager> = Lazy::new(|| {
     let memory_map = crate::boot::get_memory_map().unwrap();
-    pmm::PhysicalMemoryManager::from_memory_map(
-        memory_map.iter().map(|entry| pmm::MemoryMapping {
-            base: entry.base.try_into().unwrap(),
-            len: entry.len.try_into().unwrap(),
-            typ: {
-                use limine::LimineMemoryMapEntryType;
-                use pmm::FrameType;
+    let memory_map_iter = memory_map.iter().map(|entry| {
+        use limine::MemoryMapEntryType;
+        use pmm::FrameType;
 
-                match entry.typ {
-                    LimineMemoryMapEntryType::Usable => FrameType::Generic,
-                    LimineMemoryMapEntryType::BootloaderReclaimable => FrameType::BootReclaim,
-                    LimineMemoryMapEntryType::AcpiReclaimable => FrameType::AcpiReclaim,
-                    LimineMemoryMapEntryType::KernelAndModules
-                    | LimineMemoryMapEntryType::Reserved
-                    | LimineMemoryMapEntryType::AcpiNvs
-                    | LimineMemoryMapEntryType::Framebuffer => FrameType::Reserved,
-                    LimineMemoryMapEntryType::BadMemory => FrameType::Unusable,
-                }
-            },
-        }),
-        hhdm_address(),
-    )
-    .unwrap()
+        let entry_range = entry.range();
+        let mapping_range = entry_range.start.try_into().unwrap()..entry_range.end.try_into().unwrap();
+        let mapping_ty = match entry.ty() {
+            MemoryMapEntryType::Usable => FrameType::Generic,
+            MemoryMapEntryType::BootloaderReclaimable => FrameType::BootReclaim,
+            MemoryMapEntryType::AcpiReclaimable => FrameType::AcpiReclaim,
+            MemoryMapEntryType::KernelAndModules
+            | MemoryMapEntryType::Reserved
+            | MemoryMapEntryType::AcpiNvs
+            | MemoryMapEntryType::Framebuffer => FrameType::Reserved,
+            MemoryMapEntryType::BadMemory => FrameType::Unusable,
+        };
+
+        pmm::MemoryMapping { range: mapping_range, ty: mapping_ty }
+    });
+
+    // Safety: Bootloader guarantees valid memory map entries in the boot memory map.
+    unsafe { pmm::PhysicalMemoryManager::from_memory_map(memory_map_iter, hhdm_address()).unwrap() }
 });
 
 // TODO decide if we even need this? Perhaps just rely on the PMM for *all* allocations.
