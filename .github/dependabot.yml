@@ -5,11 +5,6 @@ updates:
     directory: "/src/"
     schedule:
       interval: "weekly"
-  # Enable crate version updates for the xtask crate
-  - package-ecosystem: "cargo"
-    directory: "/xtask/"
-    schedule:
-      interval: "weekly"
   # Enable version updates for Github Actions
   - package-ecosystem: "github-actions"
     directory: "/"
