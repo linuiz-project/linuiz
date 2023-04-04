@@ -150,10 +150,8 @@ unsafe extern "sysv64" fn irq_handoff(
     stack_frame: &mut crate::arch::x64::structures::idt::InterruptStackFrame,
     general_context: &mut crate::arch::x64::registers::GeneralPurpose,
 ) {
-    let mut control_flow_context = crate::cpu::ControlContext {
-        ip: stack_frame.instruction_pointer.as_u64(),
-        sp: stack_frame.stack_pointer.as_u64(),
-    };
+    let mut control_flow_context =
+        crate::cpu::Control { ip: stack_frame.instruction_pointer.as_u64(), sp: stack_frame.stack_pointer.as_u64() };
 
     let mut arch_context = (
         *general_context,

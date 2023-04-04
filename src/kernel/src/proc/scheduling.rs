@@ -64,7 +64,7 @@ impl Scheduler {
     /// Attempts to schedule the next task in the local task queue.
     pub fn next_task(
         &mut self,
-        ctrl_flow_context: &mut crate::cpu::ControlContext,
+        ctrl_flow_context: &mut crate::cpu::Control,
         arch_context: &mut crate::cpu::ArchContext,
     ) {
         debug_assert!(!crate::interrupts::are_enabled());

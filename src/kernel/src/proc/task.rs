@@ -14,7 +14,7 @@ pub struct Task {
     stack: Stack,
     //pcid: Option<PCID>,
     address_space: Mutex<AddressSpace<PhysicalAllocator>>,
-    pub ctrl_flow_context: crate::cpu::ControlContext,
+    pub ctrl_flow_context: crate::cpu::Control,
     pub arch_context: crate::cpu::ArchContext,
 }
 
@@ -31,7 +31,7 @@ impl Task {
             address_space: Mutex::new(
                 AddressSpace::new(NonZeroUsize::new((1 << 48) - 1).unwrap(), &*crate::memory::PMM).unwrap(),
             ),
-            ctrl_flow_context: crate::cpu::ControlContext { ip: entry as usize as u64, sp },
+            ctrl_flow_context: crate::cpu::Control { ip: entry as usize as u64, sp },
             arch_context,
         }
     }

@@ -241,10 +241,7 @@ pub unsafe fn begin_scheduling() {
 /// Safety
 ///
 /// Caller must ensure that context switching to a new task will not cause undefined behaviour.
-pub unsafe fn next_task(
-    ctrl_flow_context: &mut crate::cpu::ControlContext,
-    arch_context: &mut crate::cpu::ArchContext,
-) {
+pub unsafe fn next_task(ctrl_flow_context: &mut crate::cpu::Control, arch_context: &mut crate::cpu::ArchContext) {
     let local_state = get();
     local_state.scheduler.next_task(ctrl_flow_context, arch_context);
 }

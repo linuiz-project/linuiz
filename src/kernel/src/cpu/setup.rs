@@ -146,7 +146,7 @@ unsafe extern "sysv64" fn syscall_handler(
     ret_ip: u64,
     ret_sp: u64,
     mut syscall_context: crate::cpu::SyscallContext,
-) -> crate::cpu::ControlContext {
+) -> crate::cpu::Control {
     let _syscall_context = &mut syscall_context;
 
     let syscall = match vector {
@@ -182,5 +182,5 @@ unsafe extern "sysv64" fn syscall_handler(
         warn!("Failed to execute system call.");
     }
 
-    crate::cpu::ControlContext { ip: ret_ip, sp: ret_sp }
+    crate::cpu::Control { ip: ret_ip, sp: ret_sp }
 }

@@ -18,7 +18,7 @@ pub enum Error {
     /// Indicates a provided address was not usable by the function.
     InvalidAddress,
 
-    OverlappingAddress, 
+    OverlappingAddress,
 
     NotMapped(Address<Virtual>),
 
@@ -131,7 +131,7 @@ impl<A: Allocator + Clone> AddressSpace<A> {
         }
 
         // Safety: Memory range was taken from the freelist, and so is guaranteed to be unused.
-        Ok(unsafe { self.map_direct(Address::new(new_free.end).unwrap(), page_count, flags)? })
+        Ok(unsafe { self.invoke_mapper(Address::new(new_free.end).unwrap(), page_count, flags)? })
     }
 
     fn map_exact(
@@ -146,18 +146,35 @@ impl<A: Allocator + Clone> AddressSpace<A> {
 
         let index = self
             .free
-            
-            .iter().try_find(|region| {
-                use core::cmp::Ordering;
+            .iter()
+            .enumerate()
+            .find_map(|(index, region)| {
+                let start_contained = region.contains(&req_region_start);
+                let end_contained = region.contains(&req_region_end);
 
-                match (region.contains(&req_region_start), region.contains(&req_region_end)) {
-                    (true, true) => Ok(region),
-                    (false, true) =>
-                }
+                (start_contained == end_contained).then_some(index)
             })
             // We are going to insert, so if the region mapping doesn't exist, just fail fast.
-            .map_err(|_| Error::InvalidAddress)?;
+            .ok_or(Error::InvalidAddress)?;
 
+        let found_copy = self.free[index].clone();
+        let pre_range = found_copy.start..req_region_start;
+        let post_range = req_region_end..found_copy.end;
+
+        match (pre_range.len(), post_range.len()) {
+            (0, 0) => {
+                self.free.remove(index);
+            }
+
+            (0, _) => self.free[index] = post_range,
+            (_, 0) => self.free[index] = pre_range,
+            (_, _) => {
+                self.free[index] = pre_range;
+                self.free.insert(index + 1, post_range);
+            }
+        }
+
+        unsafe { self.invoke_mapper(address, page_count, flags) }
     }
 
     /// Internal function taking exact address range parameters to map a region of memory.
@@ -167,7 +184,7 @@ impl<A: Allocator + Clone> AddressSpace<A> {
     /// This function has next to no safety checks, and so should only be called when it is
     /// known for certain that the provided memory range is valid for the mapping with the
     /// provided memory map flags.
-    unsafe fn map_direct(
+    unsafe fn invoke_mapper(
         &mut self,
         address: Address<Page>,
         page_count: NonZeroUsize,
