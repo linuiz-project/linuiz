@@ -2,7 +2,12 @@ version: 2
 updates:
   # Enable crate version updates for the main crate
   - package-ecosystem: "cargo"
-    directory: "/"
+    directory: "/src/"
+    schedule:
+      interval: "weekly"
+  # Enable crate version updates for the xtask crate
+  - package-ecosystem: "cargo"
+    directory: "/xtask/"
     schedule:
       interval: "weekly"
   # Enable version updates for Github Actions
