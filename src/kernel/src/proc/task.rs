@@ -4,7 +4,7 @@ use crate::memory::{address_space::AddressSpace, PhysicalAllocator, Stack};
 use spin::Mutex;
 use uuid::Uuid;
 
-type EntryPoint = fn() -> u32;
+pub type EntryPoint = fn() -> u32;
 
 /// Representation object for different contexts of execution in the CPU.
 pub struct Task {

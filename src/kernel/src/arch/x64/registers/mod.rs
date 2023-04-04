@@ -81,7 +81,7 @@ pub mod stack {
     basic_ptr_register! {RSP}
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Stateful {
     pub cs: u64,
     pub ss: u64,
@@ -89,7 +89,7 @@ pub struct Stateful {
 }
 
 impl Stateful {
-    pub fn with_kernel_segments(flags: crate::arch::x64::registers::RFlags) -> Self {
+    pub fn kernel_state(flags: crate::arch::x64::registers::RFlags) -> Self {
         Self {
             cs: crate::arch::x64::structures::gdt::kernel_code_selector().0 as u64,
             ss: crate::arch::x64::structures::gdt::kernel_data_selector().0 as u64,
@@ -97,7 +97,7 @@ impl Stateful {
         }
     }
 
-    pub fn flags_with_user_segments(flags: crate::arch::x64::registers::RFlags) -> Self {
+    pub fn user_state(flags: crate::arch::x64::registers::RFlags) -> Self {
         Self {
             cs: crate::arch::x64::structures::gdt::user_code_selector().0 as u64,
             ss: crate::arch::x64::structures::gdt::user_data_selector().0 as u64,
@@ -107,7 +107,7 @@ impl Stateful {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 pub struct GeneralPurpose {
     pub rax: u64,
     pub rbx: u64,
@@ -148,8 +148,8 @@ impl GeneralPurpose {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
 #[repr(C, packed)]
+#[derive(Debug, Default, Clone)]
 pub struct PreservedRegistersSysv64 {
     r15: u64,
     r14: u64,

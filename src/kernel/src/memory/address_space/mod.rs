@@ -1,10 +1,10 @@
 pub mod mapper;
 
 use crate::memory::{paging, paging::Attributes};
-use core::{alloc::Allocator, cmp::Ordering, num::NonZeroUsize, ops::Range, ptr::NonNull};
+use alloc::vec::Vec;
+use core::{alloc::Allocator, num::NonZeroUsize, ops::Range, ptr::NonNull};
 use libsys::{page_size, Address, Page, Virtual};
 use mapper::Mapper;
-use try_alloc::vec::TryVec;
 
 #[derive(Debug)]
 #[allow(clippy::enum_variant_names)]
@@ -17,6 +17,8 @@ pub enum Error {
 
     /// Indicates a provided address was not usable by the function.
     InvalidAddress,
+
+    OverlappingAddress, 
 
     NotMapped(Address<Virtual>),
 
@@ -77,69 +79,18 @@ impl From<MmapFlags> for Attributes {
     }
 }
 
-#[repr(transparent)]
-#[derive(Debug, Clone)]
-struct Region(Range<usize>);
-
-impl Eq for Region {}
-impl PartialEq for Region {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.contains(&other.0.start) || self.0.contains(&other.0.end)
-    }
-}
-
-impl Ord for Region {
-    fn cmp(&self, other: &Self) -> Ordering {
-        match (self.0.start.cmp(&other.0.start), self.0.end.cmp(&other.0.end)) {
-            (Ordering::Greater, Ordering::Greater) => Ordering::Less,
-            (Ordering::Less, Ordering::Less) => Ordering::Greater,
-            _ => Ordering::Equal,
-        }
-    }
-}
-
-impl PartialOrd for Region {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Region {
-    pub fn new(start: Address<Page>, end: Address<Page>) -> Self {
-        Self(start.get().get()..end.get().get())
-    }
-
-    pub fn start(&self) -> Address<Page> {
-        Address::new_truncate(self.0.start)
-    }
-
-    pub fn end(&self) -> Address<Page> {
-        Address::new_truncate(self.0.end)
-    }
-
-    pub fn size(&self) -> usize {
-        self.0.len()
-    }
-
-    pub fn contains(&self, address: Address<Virtual>) -> bool {
-        self.0.contains(&address.get())
-    }
-}
-
 pub struct AddressSpace<A: Allocator + Clone> {
-    free: TryVec<Region, A>,
-    used: TryVec<Region, A>,
+    free: Vec<Range<usize>, A>,
     mapper: Mapper,
 }
 
 impl<A: Allocator + Clone> AddressSpace<A> {
     pub fn new(size: NonZeroUsize, allocator: A) -> Result<Self> {
-        let mut free = TryVec::new_in(allocator.clone());
-        free.push(Region(0..size.get())).map_err(|_| Error::AllocError)?;
+        let mut free = Vec::new_in(allocator.clone());
+        free.push(0..size.get());
 
         Ok(Self {
             free,
-            used: TryVec::new_in(allocator),
 
             // Safety: Mapper depth is known-valid (from current), and the mapped page table is
             //          promised-valid from the kernel itself.
@@ -152,59 +103,86 @@ impl<A: Allocator + Clone> AddressSpace<A> {
         })
     }
 
-    pub fn mmap(
+    pub fn map(
         &mut self,
-        // TODO address: Option<Address<Page>>,
-        pages: NonZeroUsize,
+        address: Option<Address<Page>>,
+        page_count: NonZeroUsize,
         flags: MmapFlags,
     ) -> Result<NonNull<[u8]>> {
-        let size = pages.get() * page_size();
+        if let Some(address) = address {
+            self.map_exact(address, page_count, flags)
+        } else {
+            self.map_auto(page_count, flags)
+        }
+    }
 
-        let (found_index, found_region) = self
-            .free
-            .iter()
-            .enumerate()
-            .find_map(|(index, region)| (region.size() >= size).then_some((index, region.clone())))
-            .ok_or(Error::AllocError)?;
+    fn map_auto(&mut self, page_count: NonZeroUsize, flags: MmapFlags) -> Result<NonNull<[u8]>> {
+        let size = page_count.get() * page_size();
 
-        let new_free_start = Address::new(found_region.start().get().get() + size).unwrap();
-        let new_used = Region::new(found_region.start(), new_free_start);
-        let new_free = Region::new(new_free_start, found_region.end());
+        let index = self.free.iter().position(|region| region.len() >= size).ok_or(Error::AllocError)?;
+        let found_copy = self.free[index].clone();
+        let new_free = found_copy.start..(found_copy.end - size);
+
+        // Update the free region, or remove it if it's now empty.
+        if new_free.len() > 0 {
+            self.free[index] = new_free;
+        } else {
+            self.free.remove(index);
+        }
 
         // Safety: Memory range was taken from the freelist, and so is guaranteed to be unused.
-        let memory_ptr = unsafe { self.mmap_exact_impl(new_used.start(), new_used.end(), flags)? };
+        Ok(unsafe { self.map_direct(Address::new(new_free.end).unwrap(), page_count, flags)? })
+    }
 
-        // Replace old free region with updated bounds.
-        self.free[found_index] = new_free;
+    fn map_exact(
+        &mut self,
+        address: Address<Page>,
+        page_count: NonZeroUsize,
+        flags: MmapFlags,
+    ) -> Result<NonNull<[u8]>> {
+        let size = page_count.get() * page_size();
+        let req_region_start = address.get().get();
+        let req_region_end = req_region_start + size;
 
-        let sorted_index = self.used.binary_search(&new_used).expect("overlapping memory mapped regions detected");
-        self.used.insert(sorted_index, new_used).map_err(|_| Error::AllocError)?;
+        let index = self
+            .free
+            
+            .iter().try_find(|region| {
+                use core::cmp::Ordering;
 
-        Ok(memory_ptr)
+                match (region.contains(&req_region_start), region.contains(&req_region_end)) {
+                    (true, true) => Ok(region),
+                    (false, true) =>
+                }
+            })
+            // We are going to insert, so if the region mapping doesn't exist, just fail fast.
+            .map_err(|_| Error::InvalidAddress)?;
+
     }
 
     /// Internal function taking exact address range parameters to map a region of memory.
     ///
-    /// Safety
+    /// ### Safety
     ///
     /// This function has next to no safety checks, and so should only be called when it is
     /// known for certain that the provided memory range is valid for the mapping with the
     /// provided memory map flags.
-    unsafe fn mmap_exact_impl(
+    unsafe fn map_direct(
         &mut self,
-        start: Address<Page>,
-        end: Address<Page>,
+        address: Address<Page>,
+        page_count: NonZeroUsize,
         flags: MmapFlags,
     ) -> Result<NonNull<[u8]>> {
-        let address_range = start.get().get()..end.get().get();
-        // Finally, map all of the allocated pages in the virtual address space.
-        for page_base in address_range.step_by(page_size()) {
-            let page = Address::new(page_base).ok_or(Error::MalformedAddress)?;
-            self.mapper.auto_map(page, Attributes::from(flags)).map_err(Error::from)?;
-        }
+        (0..page_count.get())
+            .map(|offset| offset * page_size())
+            .map(|offset_base| address.get().get() + offset_base)
+            .map(|address| Address::new(address))
+            .try_for_each(|page| {
+                let page = page.ok_or(Error::MalformedAddress)?;
+                self.mapper.auto_map(page, Attributes::from(flags)).map_err(Error::from)
+            });
 
-        let start_ptr = NonNull::new(start.as_ptr()).expect("start pointer was null");
-        Ok(NonNull::slice_from_raw_parts(start_ptr, end.get().get() - start.get().get()))
+        Ok(NonNull::slice_from_raw_parts(NonNull::new(address.as_ptr()).unwrap(), page_count.get() * page_size()))
     }
 
     /// Attempts to map a page to a real frame, only if the [`PageAttributes::DEMAND`] bit is set.
@@ -229,6 +207,14 @@ impl<A: Allocator + Clone> AddressSpace<A> {
 
     pub fn is_mmapped(&self, address: Address<Virtual>) -> bool {
         self.mapper.is_mapped(Address::new_truncate(address.get()), None)
+    }
+
+    pub fn with_mapper<T>(&self, with_fn: impl FnOnce(&Mapper) -> T) -> T {
+        with_fn(&self.mapper)
+    }
+
+    pub unsafe fn with_mapper_mut<T>(&mut self, with_fn: impl FnOnce(&mut Mapper) -> T) -> T {
+        with_fn(&mut self.mapper)
     }
 
     /// ### Safety

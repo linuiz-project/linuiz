@@ -1,6 +1,3 @@
-#[cfg(target_arch = "x86_64")]
-use crate::arch::x64;
-
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct ControlContext {
@@ -9,14 +6,31 @@ pub struct ControlContext {
 }
 
 #[cfg(target_arch = "x86_64")]
-pub type ArchContext = (x64::registers::GeneralPurpose, x64::registers::Stateful);
+pub use x64_Context::*;
 #[cfg(target_arch = "x86_64")]
-pub type SyscallContext = x64::registers::PreservedRegistersSysv64;
+mod x64_Context {
+    use crate::arch::x64::registers;
 
-#[cfg(target_arch = "x86_64")]
-pub fn default_arch_context() -> ArchContext {
-    (
-        x64::registers::GeneralPurpose::empty(),
-        x64::registers::Stateful::with_kernel_segments(x64::registers::RFlags::INTERRUPT_FLAG),
-    )
+    pub type SyscallContext = registers::PreservedRegistersSysv64;
+
+    pub struct ArchContext {
+        gprs: registers::GeneralPurpose,
+        state: registers::Stateful,
+    }
+
+    impl ArchContext {
+        pub const fn kernel_context() -> Self {
+            Self {
+                gprs: registers::GeneralPurpose::default(),
+                state: registers::Stateful::kernel_state(registers::RFlags::INTERRUPT_FLAG),
+            }
+        }
+
+        pub const fn user_context() -> Self {
+            Self {
+                gprs: registers::GeneralPurpose::default(),
+                state: registers::Stateful::user_state(registers::RFlags::INTERRUPT_FLAG),
+            }
+        }
+    }
 }

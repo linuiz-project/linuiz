@@ -1,4 +1,4 @@
-// mod drivers;
+mod drivers;
 mod params;
 
 use libkernel::LinkerSymbol;
@@ -212,11 +212,17 @@ unsafe extern "C" fn _entry() -> ! {
     debug!("Initializing ACPI interface...");
     crate::acpi::init_interface();
 
-    /* symbols */
+    /* load drivers */
+    {
+        use crate::proc::{Artifact, task::Task};
 
-    // TODO
-    // debug!("Unpacking kernel drivers...");
-    // drivers::load();
+        debug!("Unpacking kernel drivers...");
+        let artifacts = drivers::load_artifacts().unwrap().into_vec();
+
+        for (entry, mapper) in artifacts.into_iter().map(Artifact::decompose) {
+            let task = Task::new(0, entry, stack, crate::cpu::ArchContext::user_context())
+        }
+    }
 
     /* smp */
     {
