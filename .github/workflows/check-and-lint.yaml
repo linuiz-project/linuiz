@@ -8,20 +8,32 @@ name: Check and Lint
 
 jobs:
   check:
-    name: Check & Fmt
+    name: Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: nightly
-          components: rust-src, rustfmt
+          components: rust-src
           profile: minimal
           override: true
       - uses: actions-rs/cargo@v1
         with:
           command: xtask
           args: check
+
+  rustfmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          components: rustfmt
+          profile: minimal
+          override: true
       - uses: actions-rs/cargo@v1
         with:
           command: xtask
