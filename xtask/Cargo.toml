@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "*", features = ["derive"] }
-xshell = "=0.2.2"
+xshell = "=0.2.3"
 toml_edit = "*"
 tar = "*"
 
