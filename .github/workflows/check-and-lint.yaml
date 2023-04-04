@@ -8,36 +8,45 @@ name: Check and Lint
 
 jobs:
   check:
-    name: Check
+    name: Check & Fmt
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
       - uses: actions-rs/toolchain@v1
         with:
-          profile: minimal
           toolchain: nightly
-          components: rust-src
+          components: rust-src, rustfmt
+          profile: minimal
           override: true
       - uses: actions-rs/cargo@v1
         with:
           command: xtask
           args: check
-
-  fmt:
-    name: Rustfmt
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly
-          components: rustfmt
-          override: true
       - uses: actions-rs/cargo@v1
         with:
           command: xtask
           args: fmt -- --all --check
+
+  check-xtask:
+    name: Check xTask
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: xtask/
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+      - uses: actions-rs/cargo@v1
+        with:
+          command: check
+      - uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all --check
 
   # clippy:
   #   name: Clippy
