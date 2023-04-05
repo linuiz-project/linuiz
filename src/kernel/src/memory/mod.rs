@@ -56,8 +56,8 @@ pub fn with_kmapper<T>(func: impl FnOnce(&mut Mapper) -> T) -> T {
         })
 }
 
-pub fn new_kmapped_page_table() -> Option<Address<Frame>> {
-    let table_frame = PMM.next_frame().ok()?;
+pub fn new_kmapped_page_table() -> crate::memory::pmm::Result<Address<Frame>> {
+    let table_frame = PMM.next_frame()?;
 
     // Safety: Frame is provided by allocator, and so guaranteed to be within the HHDM, and is frame-sized.
     let new_table = unsafe {
@@ -69,7 +69,7 @@ pub fn new_kmapped_page_table() -> Option<Address<Frame>> {
     new_table.fill(paging::TableEntry::empty());
     with_kmapper(|kmapper| new_table.copy_from_slice(kmapper.view_root_page_table()));
 
-    Some(table_frame)
+    Ok(table_frame)
 }
 
 #[cfg(target_arch = "x86_64")]
