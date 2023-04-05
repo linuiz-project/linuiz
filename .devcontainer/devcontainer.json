@@ -1,0 +1,17 @@
+{
+	"name": "Codespaces Rust Starter",
+	"extensions": [
+		"matklad.rust-analyzer",
+		"serayuzgur.crates",
+		"github.copilot",
+		"tamasfe.even-better-toml",
+	],
+	"dockerFile": "Dockerfile",
+	"settings": {
+		"editor.formatOnSave": true,
+		"files.exclude": {
+			"**/CODE_OF_CONDUCT.md": true,
+			"**/LICENSE": true
+		}
+	}
+}
