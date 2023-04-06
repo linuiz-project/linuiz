@@ -220,7 +220,7 @@ unsafe extern "C" fn _entry() -> ! {
         let artifacts = drivers::load_artifacts().unwrap().into_vec();
 
         for (entry, mapper) in artifacts.into_iter().map(Artifact::decompose) {
-            let task = Task::new(0, entry, stack, crate::cpu::ArchContext::user_context())
+            let task = Task::new(0, entry, stack, crate::cpu::ArchContext::user_context());
         }
     }
 

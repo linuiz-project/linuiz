@@ -93,3 +93,10 @@ macro_rules! err_result_type {
         pub type Result<T> = core::result::Result<T, $name>;
     };
 }
+
+#[cfg(target_pointer_width = "64")]
+#[allow(non_camel_case_types)]
+pub type uptr = u64;
+#[cfg(target_pointer_width = "64")]
+#[allow(non_camel_case_types)]
+pub type iptr = i64;
