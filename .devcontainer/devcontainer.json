@@ -2,7 +2,7 @@
 	"name": "Codespaces Rust Starter",
 	"dockerFile": "Dockerfile",
 	"extensions": [
-		"matklad.rust-analyzer",
+		"rust-lang.rust-analyzer",
 		"serayuzgur.crates",
 		"github.copilot",
 		"tamasfe.even-better-toml",

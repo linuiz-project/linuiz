@@ -2,11 +2,8 @@ apt-get update;
 apt-get install -y \
     curl \
     git \
-    gnupg2 \
-    sudo \
-    build-essential \
-    openssl \
-    qemu
+    qemu \
+    qemu-utils
     
 curl https://sh.rustup.rs -sSf | sh -s -- --profile minimal --default-toolchain nightly --component rustfmt,clippy -y
 source "$HOME/.cargo/env"
