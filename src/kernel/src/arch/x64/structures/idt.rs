@@ -1,4 +1,4 @@
-use crate::arch::x64::registers::GeneralPurpose;
+use crate::{arch::x64::registers::{GeneralPurpose, State, RFlags}, cpu::ArchContext};
 use libsys::{Address, Virtual};
 use x86_64::structures::idt;
 
@@ -148,19 +148,20 @@ macro_rules! exception_handler_with_error {
 unsafe extern "sysv64" fn irq_handoff(
     irq_number: u64,
     stack_frame: &mut crate::arch::x64::structures::idt::InterruptStackFrame,
-    general_context: &mut crate::arch::x64::registers::GeneralPurpose,
+    arch_context: &mut crate::cpu::Registers,
 ) {
     let mut control_flow_context =
         crate::cpu::Control { ip: stack_frame.instruction_pointer.as_u64(), sp: stack_frame.stack_pointer.as_u64() };
 
-    let mut arch_context = (
-        *general_context,
-        crate::arch::x64::registers::Stateful {
+    let mut arch_context =ArchContext {
+        gprs: *general_context,
+        state: State {
             cs: stack_frame.code_segment,
             ss: stack_frame.stack_segment,
-            flags: crate::arch::x64::registers::RFlags::from_bits_truncate(stack_frame.cpu_flags),
+            flags: RFlags::from_bits_truncate(stack_frame.cpu_flags),
         },
-    );
+        control: 
+    };
 
     // Safety: function pointer is guaranteed by the `set_interrupt_handler()` function to be valid.
     unsafe { crate::interrupts::irq_handler(irq_number, &mut control_flow_context, &mut arch_context) };

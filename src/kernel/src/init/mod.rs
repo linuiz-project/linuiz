@@ -1,14 +1,15 @@
-mod drivers;
 mod params;
-
-use libkernel::LinkerSymbol;
-use libsys::{page_size, Address};
-
-pub static KERNEL_HANDLE: spin::Lazy<uuid::Uuid> = spin::Lazy::new(uuid::Uuid::new_v4);
 
 pub fn get_parameters() -> &'static params::Parameters {
     params::PARAMETERS.get().expect("parameters have not yet been parsed")
 }
+
+use libkernel::LinkerSymbol;
+use libsys::{page_size, Address};
+
+use crate::memory::{address_space::{AddressSpace, mapper::Mapper}, PageDepth};
+
+pub static KERNEL_HANDLE: spin::Lazy<uuid::Uuid> = spin::Lazy::new(uuid::Uuid::new_v4);
 
 /// ### Safety
 ///
@@ -84,7 +85,7 @@ unsafe extern "C" fn _entry() -> ! {
         /* load and map segments */
 
         crate::memory::with_kmapper(|kmapper| {
-            use crate::memory::{hhdm_address, paging::Attributes, PageDepth};
+            use crate::memory::{hhdm_address, paging::Attributes};
             use limine::MemoryMapEntryType;
 
             const PT_LOAD: u32 = 0x1;
@@ -214,14 +215,45 @@ unsafe extern "C" fn _entry() -> ! {
 
     /* load drivers */
     {
-        use crate::proc::{Artifact, task::Task};
+        use crate::proc::{task::{Task, EntryPoint},};
+        use elf::{endian::AnyEndian, ElfBytes};
+
+        #[limine::limine_tag]
+        static LIMINE_MODULES: limine::ModuleRequest = limine::ModuleRequest::new(crate::boot::LIMINE_REV);
 
         debug!("Unpacking kernel drivers...");
-        let artifacts = drivers::load_artifacts().unwrap().into_vec();
 
-        for (entry, mapper) in artifacts.into_iter().map(Artifact::decompose) {
-            let task = Task::new(0, entry, stack, crate::cpu::ArchContext::user_context());
-        }
+        if let Some(modules) = LIMINE_MODULES.get_response() {
+            for module in modules
+                .modules()
+                .iter()
+                // Filter out modules that don't end with our driver postfix.
+                .filter(|module| module.path().ends_with("drivers"))
+            {
+                let archive = tar_no_std::TarArchiveRef::new(module.data());
+                for entry in archive.entries() {
+                    debug!("Attempting to parse driver blob: {}", entry.filename());
+
+                    let Ok(elf) = ElfBytes::<AnyEndian>::minimal_parse(entry.data()) 
+                    else {
+                        warn!("Failed to parse driver blob into ELF");
+                        continue;
+                    };
+
+                    let entry_point = core::mem::transmute::<_, EntryPoint>(elf.ehdr.e_entry);
+                    let address_space = AddressSpace::new(crate::memory::address_space::DEFAULT_USERSPACE_SIZE, Mapper::new_unsafe(PageDepth::current(), crate::memory::new_kmapped_page_table().unwrap()), &*crate::memory::PMM);
+                    let task = Task::new(0, entry_point, address_space, crate::cpu::ArchContext::user_default());
+
+                    crate::proc::TASKS.lock().push_back(task);
+                }
+            }
+        } else {
+            error!("Bootloader did not provide an init module.");
+        };
+
+        // for (entry, mapper) in artifacts.into_iter().map(Artifact::decompose) {
+        //     let task = Task::new(0, entry, stack, crate::cpu::ArchContext::user_context())
+        // }
     }
 
     /* smp */

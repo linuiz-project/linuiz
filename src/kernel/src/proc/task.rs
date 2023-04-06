@@ -1,6 +1,8 @@
-use core::num::NonZeroUsize;
-
-use crate::memory::{address_space::AddressSpace, PhysicalAllocator, Stack};
+use crate::memory::{
+    address_space::{AddressSpace, MmapFlags},
+    PhysicalAllocator,
+};
+use core::{num::NonZeroUsize,};
 use spin::Mutex;
 use uuid::Uuid;
 
@@ -11,7 +13,6 @@ pub struct Task {
     uuid: Uuid,
     prio: u8,
     last_run: u32,
-    stack: Stack,
     //pcid: Option<PCID>,
     address_space: Mutex<AddressSpace<PhysicalAllocator>>,
     pub ctrl_flow_context: crate::cpu::Control,
@@ -19,19 +20,29 @@ pub struct Task {
 }
 
 impl Task {
-    pub fn new(priority: u8, entry: EntryPoint, stack: Stack, arch_context: crate::cpu::ArchContext) -> Self {
-        // Safety: Stack pointer is valid for its length.
-        let sp = unsafe { stack.as_ptr().add(stack.len() & !0xF).addr() } as u64;
+    pub fn new(
+        priority: u8,
+        entry: EntryPoint,
+        address_space: AddressSpace<PhysicalAllocator>,
+        arch_context: crate::cpu::ArchContext,
+    ) -> Self {
+        const STACK_PAGES: NonZeroUsize = NonZeroUsize::new(16).unwrap();
 
         Self {
             uuid: uuid::Uuid::new_v4(),
             prio: priority,
             last_run: 0,
-            stack,
-            address_space: Mutex::new(
-                AddressSpace::new(NonZeroUsize::new((1 << 48) - 1).unwrap(), &*crate::memory::PMM).unwrap(),
-            ),
-            ctrl_flow_context: crate::cpu::Control { ip: entry as usize as u64, sp },
+            address_space: Mutex::new(address_space),
+            ctrl_flow_context: crate::cpu::Control {
+                ip: entry as usize as u64,
+                sp: {
+                    let stack =
+                        address_space.m_map(None, NonZeroUsize::new(16).unwrap(), MmapFlags::READ_WRITE).unwrap();
+
+                    // Safety: Stack pointer is valid for its length.
+                    unsafe { stack.get_unchecked_mut(stack.len()).addr().get().try_into().unwrap() }
+                },
+            },
             arch_context,
         }
     }

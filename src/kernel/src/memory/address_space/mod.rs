@@ -79,31 +79,32 @@ impl From<MmapFlags> for Attributes {
     }
 }
 
+pub const DEFAULT_USERSPACE_SIZE: NonZeroUsize = NonZeroUsize::new(1 << 47).unwrap();
+
 pub struct AddressSpace<A: Allocator + Clone> {
     free: Vec<Range<usize>, A>,
     mapper: Mapper,
 }
 
 impl<A: Allocator + Clone> AddressSpace<A> {
-    pub fn new(size: NonZeroUsize, allocator: A) -> Result<Self> {
-        let mut free = Vec::new_in(allocator.clone());
+    pub fn new(size: NonZeroUsize, mapper: Mapper, allocator: A) -> Self {
+        let mut free = Vec::new_in(allocator);
         free.push(0..size.get());
 
-        Ok(Self {
-            free,
-
-            // Safety: Mapper depth is known-valid (from current), and the mapped page table is
-            //          promised-valid from the kernel itself.
-            mapper: unsafe {
-                Mapper::new_unsafe(
-                    super::PageDepth::current(),
-                    super::new_kmapped_page_table().ok_or(Error::AllocError)?,
-                )
-            },
-        })
+        Self { free, mapper }
     }
 
-    pub fn map(
+    pub fn new_userspace() -> Self {
+        Self::new(
+            DEFAULT_USERSPACE_SIZE,
+            unsafe {
+                Mapper::new_unsafe(super::PageDepth::current(), crate::memory::new_kmapped_page_table().unwrap())
+            },
+            &*super::PMM,
+        )
+    }
+
+    pub fn m_map(
         &mut self,
         address: Option<Address<Page>>,
         page_count: NonZeroUsize,
