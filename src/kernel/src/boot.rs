@@ -1,6 +1,8 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 use libsys::{page_size, Address, Virtual};
 
+use crate::memory::Hhdm;
+
 mod ignore {
     ///! This module is never exported. It is used for bootloader requests that should never be accessed in software.
 
@@ -49,7 +51,7 @@ pub fn get_rsdp_address() -> Option<Address<Virtual>> {
         LIMINE_RSDP.get_response().and_then(limine::RsdpResponse::address).and_then(|ptr| {
             Address::new(
                 // Properly handle the bootloader's mapping of ACPI addresses in lower-half or higher-half memory space.
-                core::cmp::min(ptr.addr().get(), ptr.addr().get().wrapping_sub(crate::memory::hhdm_address().get())),
+                core::cmp::min(ptr.addr().get(), ptr.addr().get().wrapping_sub(Hhdm::address().get())),
             )
         })
     })
@@ -59,7 +61,7 @@ pub fn get_rsdp_address() -> Option<Address<Virtual>> {
 ///
 /// No dangling references can remain to bootloader types or memory, as it may be concurrently overwritten.
 pub unsafe fn reclaim_boot_memory(skip_ranges: &[core::ops::Range<usize>]) {
-    use crate::memory::pmm::FrameType;
+    use crate::memory::alloc::pmm::{FrameType, PMM};
 
     assert!(!BOOT_RECLAIM.load(Ordering::Acquire));
 
@@ -71,7 +73,7 @@ pub unsafe fn reclaim_boot_memory(skip_ranges: &[core::ops::Range<usize>]) {
         .map(|address| Address::<libsys::Frame>::new_truncate(address.try_into().unwrap()))
         .filter(|address| skip_ranges.iter().any(|skip| skip.contains(&address.get().get())))
     {
-        crate::memory::PMM.modify_type(frame, FrameType::Generic, Some(FrameType::BootReclaim)).ok();
+        PMM.modify_type(frame, FrameType::Generic, Some(FrameType::BootReclaim)).ok();
     }
 
     BOOT_RECLAIM.store(true, Ordering::Release);

@@ -9,6 +9,33 @@ use core::{
 use libsys::{page_shift, page_size};
 use libsys::{Address, Frame};
 
+pub type PhysicalAllocator = &'static PhysicalMemoryManager<'static>;
+
+pub static PMM: spin::Lazy<PhysicalMemoryManager> = spin::Lazy::new(|| {
+    let memory_map = crate::boot::get_memory_map().unwrap();
+    let memory_map_iter = memory_map.iter().map(|entry| {
+        use limine::MemoryMapEntryType;
+
+        let entry_range = entry.range();
+        let mapping_range = entry_range.start.try_into().unwrap()..entry_range.end.try_into().unwrap();
+        let mapping_ty = match entry.ty() {
+            MemoryMapEntryType::Usable => FrameType::Generic,
+            MemoryMapEntryType::BootloaderReclaimable => FrameType::BootReclaim,
+            MemoryMapEntryType::AcpiReclaimable => FrameType::AcpiReclaim,
+            MemoryMapEntryType::KernelAndModules
+            | MemoryMapEntryType::Reserved
+            | MemoryMapEntryType::AcpiNvs
+            | MemoryMapEntryType::Framebuffer => FrameType::Reserved,
+            MemoryMapEntryType::BadMemory => FrameType::Unusable,
+        };
+
+        MemoryMapping { range: mapping_range, ty: mapping_ty }
+    });
+
+    // Safety: Bootloader guarantees valid memory map entries in the boot memory map.
+    unsafe { PhysicalMemoryManager::from_memory_map(memory_map_iter, crate::memory::Hhdm::address()).unwrap() }
+});
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
     /// There are not enough free frames to satisfy the request.

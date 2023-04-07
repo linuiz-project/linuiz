@@ -4,12 +4,9 @@ pub use context::*;
 mod scheduling;
 pub use scheduling::*;
 
-use alloc::collections::VecDeque;
-
-
 use crate::memory::{
     address_space::{AddressSpace, MmapFlags},
-    PhysicalAllocator,
+    alloc::pmm::PhysicalAllocator,
 };
 use core::num::NonZeroUsize;
 use spin::Mutex;
@@ -33,12 +30,7 @@ pub struct Process {
 }
 
 impl Process {
-    pub fn new(
-        priority: Priority,
-        entry: ProcessEntry,
-        regsiters: Option<Registers>,
-        address_space: AddressSpace<PhysicalAllocator>,
-    ) -> Self {
+    pub fn new(priority: Priority, entry: ProcessEntry, address_space: AddressSpace<PhysicalAllocator>) -> Self {
         const STACK_PAGES: NonZeroUsize = NonZeroUsize::new(16).unwrap();
 
         Self {
@@ -50,7 +42,7 @@ impl Process {
                     ip: (entry as usize).try_into().unwrap(),
                     sp: address_space.map(None, STACK_PAGES, MmapFlags::READ_WRITE).unwrap().addr().get() as u64,
                 },
-                regsiters,
+                Registers::default(),
             ),
         }
     }

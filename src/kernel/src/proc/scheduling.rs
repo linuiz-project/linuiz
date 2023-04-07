@@ -1,5 +1,8 @@
-use crate::{proc::{Context, Process, State}, memory::Stack};
-use alloc::collections::{BinaryHeap, VecDeque};
+use crate::{
+    memory::Stack,
+    proc::{Context, Process, Registers, State},
+};
+use alloc::collections::VecDeque;
 
 pub static PROCESSES: spin::Mutex<VecDeque<Process>> = spin::Mutex::new(VecDeque::new());
 
@@ -92,23 +95,17 @@ impl Scheduler {
             let old_value = self.process.replace(next_process);
             assert!(old_value.is_none());
         } else {
-            
-            static IDLE_STACK: Stack<0x10>  = Stack::new();
+            static IDLE_STACK: Stack<0x10> = Stack::new();
 
-            const IDLE_CONTEXT: Context = Context::new(State {
-                ip: crate::interrupts::wait_loop as usize as u64,
-                sp: IDLE_STACK. as usize as u64`,
-            });
+            const IDLE_CONTEXT: Context = Context::new(
+                State { ip: crate::interrupts::wait_loop as usize as u64, sp: IDLE_STACK.top().get() as u64 },
+                Registers::default(),
+            );
 
             trace!("Switching idle task.");
 
-            let default_task = &self.idle_task;
-            *ctrl_flow_context = default_task.ctrl_flow_context;
-            *arch_context = default_task.arch_context;
-            default_task.with_address_space(|address_space| {
-                // Safety: New task requires its own address space.
-                unsafe { address_space.swap_into() }
-            });
+            *state = *IDLE_CONTEXT.state();
+            *registers = *IDLE_CONTEXT.regs();
 
             trace!("Switched idle task.");
         };

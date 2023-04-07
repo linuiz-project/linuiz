@@ -2,6 +2,11 @@ use acpi::PhysicalMapping;
 use port::{PortAddress, ReadWritePort};
 use spin::{Lazy, Mutex};
 
+use crate::memory::{
+    alloc::{pmm::PhysicalMemoryManager, KMALLOC},
+    Hhdm,
+};
+
 pub enum Register<'a, T: port::PortReadWrite> {
     Io(ReadWritePort<T>),
     Mmio(&'a libsys::mem::VolatileCell<T, libsys::ReadWrite>),
@@ -58,7 +63,7 @@ impl acpi::AcpiHandler for AcpiHandler {
 
         acpi::PhysicalMapping::new(
             address,
-            core::ptr::NonNull::new(crate::memory::hhdm_address().as_ptr().add(address).cast()).unwrap(),
+            core::ptr::NonNull::new(Hhdm::ptr().add(address).cast()).unwrap(),
             size,
             size,
             Self,
@@ -177,15 +182,14 @@ pub static MCFG: Lazy<Option<Mutex<PhysicalMapping<AcpiHandler, acpi::mcfg::Mcfg
     TABLES.get().map(Mutex::lock).and_then(|tables| tables.find_table::<acpi::mcfg::Mcfg>().ok()).map(Mutex::new)
 });
 
-pub static PLATFORM_INFO: Lazy<
-    Option<Mutex<acpi::PlatformInfo<&slab::SlabAllocator<&crate::memory::pmm::PhysicalMemoryManager>>>>,
-> = Lazy::new(|| {
-    TABLES
-        .get()
-        .map(Mutex::lock)
-        .and_then(|tables| acpi::PlatformInfo::new_in(&*tables, &*crate::memory::KMALLOC).ok())
-        .map(Mutex::new)
-});
+pub static PLATFORM_INFO: Lazy<Option<Mutex<acpi::PlatformInfo<&slab::SlabAllocator<&PhysicalMemoryManager>>>>> =
+    Lazy::new(|| {
+        TABLES
+            .get()
+            .map(Mutex::lock)
+            .and_then(|tables| acpi::PlatformInfo::new_in(&*tables, &*KMALLOC).ok())
+            .map(Mutex::new)
+    });
 
 // struct AmlContextWrapper(aml::AmlContext);
 // // Safety: TODO

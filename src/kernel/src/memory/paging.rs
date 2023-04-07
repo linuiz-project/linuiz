@@ -1,9 +1,107 @@
-use crate::memory::{hhdm_address, PageDepth};
-use core::{cmp::Ordering, fmt, ptr::NonNull};
+use crate::memory::Hhdm;
+use core::{cmp::Ordering, fmt, num::NonZeroU32, ptr::NonNull};
 use libsys::{
     mem::{InteriorRef, Mut, Ref},
     page_shift, page_size, table_index_mask, table_index_shift, table_index_size, Address, Frame, Page, Virtual,
 };
+
+pub struct Info;
+
+impl Info {
+    pub fn max_paging_levels() -> NonZeroU32 {
+        static PAGING_LEVELS: spin::Once<NonZeroU32> = spin::Once::new();
+
+        PAGING_LEVELS
+            .call_once(|| {
+                #[cfg(target_arch = "x86_64")]
+                {
+                    let has_5_level_paging = crate::arch::x64::cpuid::EXT_FEATURE_INFO
+                        .as_ref()
+                        .map_or(false, raw_cpuid::ExtendedFeatures::has_la57);
+
+                    if has_5_level_paging {
+                        NonZeroU32::new(5).unwrap()
+                    } else {
+                        NonZeroU32::new(4).unwrap()
+                    }
+                }
+            })
+            .clone()
+    }
+
+    pub fn current_paging_level() -> NonZeroU32 {
+        #[cfg(target_arch = "x86_64")]
+        {
+            use crate::arch::x64::registers::control;
+
+            if control::CR4::read().contains(control::CR4Flags::LA57) {
+                NonZeroU32::new(5).unwrap()
+            } else {
+                NonZeroU32::new(4).unwrap()
+            }
+        }
+    }
+}
+
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct PageDepth(u32);
+
+impl PageDepth {
+    #[inline]
+    pub const fn min() -> Self {
+        Self(0)
+    }
+
+    #[inline]
+    pub const fn max() -> Self {
+        Self(Info::max_paging_levels().get())
+    }
+
+    pub fn current() -> Self {
+        Self(Info::current_paging_level().get())
+    }
+
+    #[inline]
+    pub const fn min_align() -> usize {
+        Self::min().align()
+    }
+
+    #[inline]
+    pub const fn max_align() -> usize {
+        Self::max().align()
+    }
+
+    #[inline]
+    pub const fn new(depth: u32) -> Self {
+        Self(depth)
+    }
+
+    #[inline]
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+
+    #[inline]
+    pub const fn align(self) -> usize {
+        libsys::page_size().checked_shl(libsys::table_index_shift().get() * self.get()).unwrap()
+    }
+
+    #[inline]
+    pub const fn next(self) -> Option<Self> {
+        self.get().checked_sub(1).map(PageDepth::new)
+    }
+
+    #[inline]
+    pub fn is_min(self) -> bool {
+        self == Self::min()
+    }
+
+    #[inline]
+    pub fn is_max(self) -> bool {
+        self == Self::max()
+    }
+}
 
 #[derive(Debug)]
 #[allow(clippy::enum_variant_names)]
@@ -226,7 +324,7 @@ impl<RefKind: InteriorRef> TableEntryCell<'_, RefKind> {
         debug_assert!(entry_index < table_index_size().get(), "entry index exceeds maximum");
 
         // Safety: Type requires that the internal entry has a valid frame.
-        let table_ptr = unsafe { hhdm_address().as_ptr().add(self.get_frame().get().get()).cast::<TableEntry>() };
+        let table_ptr = unsafe { Hhdm::offset(self.get_frame()).unwrap().as_ptr().cast::<TableEntry>() };
         // Safety: `entry_index` guarantees a value that does not exceed the table size.
         let entry_ptr = unsafe { table_ptr.add(entry_index) };
 
@@ -343,20 +441,13 @@ impl<'a> TableEntryCell<'a, Mut> {
                         "page table entry is non-present, but has a present frame address"
                     );
 
-                    let Ok(frame) = crate::memory::PMM.next_frame()
-                    else {
-                        return Err(Error::AllocError)
-                    };
+                    let frame = crate::memory::alloc::pmm::PMM.next_frame().map_err(|_| Error::AllocError)?;
 
-                    // Clear the frame to avoid corrupted PTEs.
                     // Safety: Frame was just allocated, and so is unused outside this context.
                     unsafe {
-                        core::ptr::write_bytes(hhdm_address().as_ptr().add(frame.get().get()), 0x0, page_size());
-                    }
-
-                    // Set the entry frame and set attributes to make a valid PTE.
-                    // Safety: Entry currently points to no memory.
-                    unsafe {
+                        // Clear the frame to avoid corrupted PTEs.
+                        core::ptr::write_bytes(Hhdm::offset(frame).unwrap().as_ptr(), 0x0, page_size());
+                        // Set the entry frame and set attributes to make a valid PTE.
                         self.set(frame, Attributes::PTE);
                     }
                 }
