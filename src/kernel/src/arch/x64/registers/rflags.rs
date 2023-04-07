@@ -2,7 +2,7 @@ use bitflags::bitflags;
 
 bitflags! {
     #[repr(transparent)]
-    #[derive(Debug, Clone, Copy)]
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
     pub struct RFlags : u64 {
         /// Set by hardware if the last arithmetic operation generated a carry out of the most-significant
         /// bit of the result.

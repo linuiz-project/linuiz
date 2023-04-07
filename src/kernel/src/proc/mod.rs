@@ -20,7 +20,7 @@ pub enum Priority {
     Critical = 4,
 }
 
-pub type ProcessEntry = extern "C" fn(args: &[&core::ffi::CStr]) -> u32;
+pub type EntryPoint = extern "C" fn(args: &[&core::ffi::CStr]) -> u32;
 
 pub struct Process {
     id: Uuid,
@@ -30,7 +30,7 @@ pub struct Process {
 }
 
 impl Process {
-    pub fn new(priority: Priority, entry: ProcessEntry, address_space: AddressSpace<PhysicalAllocator>) -> Self {
+    pub fn new(priority: Priority, entry: EntryPoint, address_space: AddressSpace<PhysicalAllocator>) -> Self {
         const STACK_PAGES: NonZeroUsize = NonZeroUsize::new(16).unwrap();
 
         Self {

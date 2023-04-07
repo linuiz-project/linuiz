@@ -1,13 +1,21 @@
 use crate::{
     exceptions::Exception,
-    memory::{address_space::AddressSpace, ExactStack, PhysicalAllocator, KMALLOC},
-    proc::{task::Task, Scheduler},
+    memory::{
+        address_space::AddressSpace,
+        alloc::{
+            pmm::{PhysicalAllocator, PMM},
+            KMALLOC,
+        },
+        Stack,
+    },
+    proc::Scheduler,
 };
 use core::{
     alloc::Allocator,
     cell::UnsafeCell,
     sync::atomic::{AtomicBool, Ordering},
 };
+use libsys::{Address, Virtual};
 use try_alloc::boxed::TryBox;
 
 pub(self) const US_PER_SEC: u32 = 1000000;
@@ -24,8 +32,7 @@ pub enum ExceptionCatcher {
 
 #[repr(C, align(0x1000))]
 pub(crate) struct LocalState {
-    syscall_stack_ptr: *const (),
-    syscall_stack: ExactStack,
+    syscall_stack_addr: Address<Virtual>,
 
     magic: u64,
     core_id: u32,
@@ -72,22 +79,15 @@ fn get() -> &'static mut LocalState {
 /// This function invariantly assumes it will only be called once.
 #[allow(clippy::too_many_lines)]
 pub unsafe fn init(core_id: u32, timer_frequency: u16) {
-    let Ok(syscall_stack) = crate::memory::allocate_kernel_stack::<SYSCALL_STACK_SIZE>() else { crate::memory::out_of_memory() };
-    let Ok(idle_task_stack) = crate::memory::allocate_kernel_stack::<0x10>() else { crate::memory::out_of_memory() };
-
     let local_state = LocalState {
-        syscall_stack_ptr: syscall_stack.as_ptr().add(syscall_stack.len() & !0xF).cast(),
-        syscall_stack,
+        syscall_stack_addr: TryBox::leak(TryBox::new(Stack::<0x16000>::new()).unwrap()).top(),
 
         magic: LocalState::MAGIC,
         core_id,
 
         catching: AtomicBool::new(false),
         exception: UnsafeCell::new(None),
-        scheduler: Scheduler::new(
-            false,
-            Task::new(0, || crate::interrupts::wait_loop(), idle_task_stack, crate::cpu::default_arch_context()),
-        ),
+        scheduler: Scheduler::new(false),
 
         #[cfg(target_arch = "x86_64")]
         idt: {
@@ -145,8 +145,7 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
         apic: {
             use crate::{arch::x64, interrupts::Vector};
 
-            let apic =
-                apic::Apic::new(Some(|address: usize| crate::memory::hhdm_address().as_ptr().add(address))).unwrap();
+            let apic = apic::Apic::new(Some(|address: usize| crate::memory::Hhdm::ptr().add(address))).unwrap();
 
             // Bring APIC to known state.
             apic.software_reset(255, 254, 253);
@@ -204,8 +203,7 @@ pub unsafe fn init(core_id: u32, timer_frequency: u16) {
         },
     };
 
-    let local_state_box =
-        TryBox::new_in(local_state, &*crate::memory::PMM).expect("failed to allocate space for local state");
+    let local_state_box = TryBox::new_in(local_state, &*PMM).expect("failed to allocate space for local state");
     let local_state_ptr = TryBox::leak(local_state_box) as *mut LocalState;
     trace!("Thread {} local state allocation: {:#X?}", core_id, local_state_ptr);
 
@@ -241,9 +239,9 @@ pub unsafe fn begin_scheduling() {
 /// Safety
 ///
 /// Caller must ensure that context switching to a new task will not cause undefined behaviour.
-pub unsafe fn next_task(ctrl_flow_context: &mut crate::cpu::Control, arch_context: &mut crate::cpu::ArchContext) {
+pub unsafe fn next_task(state: &mut crate::proc::State, regs: &mut crate::proc::Registers) {
     let local_state = get();
-    local_state.scheduler.next_task(ctrl_flow_context, arch_context);
+    local_state.scheduler.next_task(state, regs);
 }
 
 #[inline]
@@ -280,7 +278,7 @@ pub unsafe fn set_preemption_wait(interval_wait: core::num::NonZeroU16) {
 
 /// Allows safely running a function that manipulates the current task's address space, or returns `None` if there's no current task.
 pub fn with_current_address_space<T>(with_fn: impl FnOnce(&mut AddressSpace<PhysicalAllocator>) -> T) -> Option<T> {
-    get().scheduler.current_task().map(|task| crate::interrupts::without(|| task.with_address_space(with_fn)))
+    get().scheduler.process().map(|task| crate::interrupts::without(|| task.with_address_space(with_fn)))
 }
 
 pub fn provide_exception<T: Into<Exception>>(exception: T) -> Result<(), T> {

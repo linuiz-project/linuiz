@@ -1,7 +1,8 @@
 use crate::memory::{
+    alloc::pmm::PMM,
     paging,
-    paging::{Error, Result},
-    PageDepth, PMM,
+    paging::{Error, PageDepth, Result},
+    Hhdm,
 };
 use libsys::{
     mem::{Mut, Ref},
@@ -24,11 +25,7 @@ impl Mapper {
 
         // Safety: PMM promises rented frames to be within the HHDM.
         unsafe {
-            core::ptr::write_bytes(
-                crate::memory::hhdm_address().as_ptr().add(root_frame.get().get()),
-                0x0,
-                libsys::page_size(),
-            );
+            core::ptr::write_bytes(Hhdm::offset(root_frame).unwrap().as_ptr(), 0x0, libsys::page_size());
         }
 
         Some(Self { depth, root_frame, entry: paging::TableEntry::new(root_frame, paging::Attributes::PRESENT) })
@@ -176,7 +173,7 @@ impl Mapper {
 
     pub fn view_root_page_table(&self) -> &[paging::TableEntry; const { libsys::table_index_size().get() }] {
         // Safety: Root frame is guaranteed to be valid within the HHDM.
-        let table_ptr = unsafe { crate::memory::hhdm_address().as_ptr().add(self.root_frame.get().get()).cast() };
+        let table_ptr = Hhdm::offset(self.root_frame).unwrap().as_ptr().cast();
         // Safety: Root frame is guaranteed to be valid for PTEs for the length of the table index size.
         let table = unsafe { core::slice::from_raw_parts(table_ptr, libsys::table_index_size().get()) };
         // Safety: Table was created to match the size required by return type.

@@ -34,6 +34,10 @@ impl Scheduler {
         self.enabled
     }
 
+    pub fn process(&self) -> Option<&Process> {
+        self.process.as_ref()
+    }
+
     // /// Pushes a new task to the scheduling queue.
     // pub fn push_task(&mut self, task: Task) {
     //     self.total_priority += task.priority() as u64;
@@ -64,7 +68,7 @@ impl Scheduler {
     // }
 
     /// Attempts to schedule the next task in the local task queue.
-    pub fn next_task(&mut self, state: &mut super::State, registers: &mut super::Registers) {
+    pub fn next_task(&mut self, state: &mut super::State, regs: &mut super::Registers) {
         debug_assert!(!crate::interrupts::are_enabled());
 
         let mut processes = PROCESSES.lock();
@@ -72,7 +76,7 @@ impl Scheduler {
         // Move the current task, if any, back into the scheduler queue.
         if let Some(mut process) = self.process.take() {
             *process.context.state_mut() = *state;
-            *process.context.regs_mut() = *registers;
+            *process.context.regs_mut() = *regs;
 
             trace!("Reclaiming task: {:?}", process.uuid());
             processes.push_back(process);
@@ -83,7 +87,7 @@ impl Scheduler {
             trace!("Switching task: {:?}", next_process.uuid());
 
             *state = *next_process.context.state();
-            *registers = *next_process.context.regs();
+            *regs = *next_process.context.regs();
 
             next_process.with_address_space(|address_space| {
                 // Safety: New task requires its own address space.
@@ -105,7 +109,7 @@ impl Scheduler {
             trace!("Switching idle task.");
 
             *state = *IDLE_CONTEXT.state();
-            *registers = *IDLE_CONTEXT.regs();
+            *regs = *IDLE_CONTEXT.regs();
 
             trace!("Switched idle task.");
         };

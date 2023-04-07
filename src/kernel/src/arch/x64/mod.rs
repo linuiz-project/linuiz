@@ -1,6 +1,7 @@
 pub mod instructions;
 pub mod registers;
 pub mod structures;
+pub mod syscall;
 
 pub mod cpuid {
     pub use raw_cpuid::*;

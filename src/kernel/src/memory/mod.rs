@@ -74,6 +74,14 @@ impl<const SIZE: usize> Stack<SIZE> {
     }
 }
 
+impl<const SIZE: usize> core::ops::Deref for Stack<SIZE> {
+    type Target = [u8; SIZE];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 pub fn with_kmapper<T>(func: impl FnOnce(&mut Mapper) -> T) -> T {
     static KERNEL_MAPPER: Once<InterruptCell<Mutex<Mapper>>> = Once::new();
 

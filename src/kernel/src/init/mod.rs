@@ -7,7 +7,7 @@ pub fn get_parameters() -> &'static params::Parameters {
 use libkernel::LinkerSymbol;
 use libsys::{page_size, Address};
 
-use crate::memory::{address_space::{AddressSpace, mapper::Mapper}, PageDepth};
+use crate::memory::{address_space::{AddressSpace, mapper::Mapper}, paging::PageDepth, alloc::pmm::PMM};
 
 pub static KERNEL_HANDLE: spin::Lazy<uuid::Uuid> = spin::Lazy::new(uuid::Uuid::new_v4);
 
@@ -85,7 +85,7 @@ unsafe extern "C" fn _entry() -> ! {
         /* load and map segments */
 
         crate::memory::with_kmapper(|kmapper| {
-            use crate::memory::{hhdm_address, paging::Attributes};
+            use crate::memory::{Hhdm, paging::Attributes};
             use limine::MemoryMapEntryType;
 
             const PT_LOAD: u32 = 0x1;
@@ -161,7 +161,7 @@ unsafe extern "C" fn _entry() -> ! {
                 // Attempt to map each of the entry's pages.
                 .try_for_each(|(phys_base, attributes)| {
                     kmapper.map(
-                        Address::new_truncate(hhdm_address().get() + phys_base),
+                        Address::new_truncate(Hhdm::address().get() + phys_base),
                         PageDepth::min(),
                         Address::new_truncate(phys_base),
                         false,
@@ -177,7 +177,7 @@ unsafe extern "C" fn _entry() -> ! {
                 let apic_address = msr::IA32_APIC_BASE::get_base_address().try_into().unwrap();
                 kmapper
                     .map(
-                        Address::new_truncate(hhdm_address().get() + apic_address),
+                        Address::new_truncate(Hhdm::address().get() + apic_address),
                         PageDepth::min(),
                         Address::new_truncate(apic_address),
                         false,
@@ -196,7 +196,7 @@ unsafe extern "C" fn _entry() -> ! {
         if get_parameters().low_memory {
             debug!("Kernel is running in low memory mode; stack tracing will be disabled.");
         } else if let Ok(Some((symbol_table, string_table))) = kernel_elf.symbol_table() {
-            let mut vec = try_alloc::vec::TryVec::with_capacity_in(symbol_table.len(), &*crate::memory::PMM)
+            let mut vec = try_alloc::vec::TryVec::with_capacity_in(symbol_table.len(), &*PMM)
                 .expect("failed to allocate vector for kernel symbols");
 
             symbol_table.into_iter().for_each(|symbol| {
@@ -215,7 +215,7 @@ unsafe extern "C" fn _entry() -> ! {
 
     /* load drivers */
     {
-        use crate::proc::{task::{Task, EntryPoint},};
+        use crate::proc::{Process, EntryPoint, Priority};
         use elf::{endian::AnyEndian, ElfBytes};
 
         #[limine::limine_tag]
@@ -241,8 +241,8 @@ unsafe extern "C" fn _entry() -> ! {
                     };
 
                     let entry_point = core::mem::transmute::<_, EntryPoint>(elf.ehdr.e_entry);
-                    let address_space = AddressSpace::new(crate::memory::address_space::DEFAULT_USERSPACE_SIZE, Mapper::new_unsafe(PageDepth::current(), crate::memory::new_kmapped_page_table().unwrap()), &*crate::memory::PMM);
-                    let task = Task::new(0, entry_point, address_space, crate::cpu::ArchContext::user_default());
+                    let address_space = AddressSpace::new(crate::memory::address_space::DEFAULT_USERSPACE_SIZE, Mapper::new_unsafe(PageDepth::current(), crate::memory::new_kmapped_page_table().unwrap()), &*PMM);
+                    let task = Process::new(Priority::Normal, entry_point, address_space);
 
                     crate::proc::PROCESSES.lock().push_back(task);
                 }

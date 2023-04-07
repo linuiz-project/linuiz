@@ -1,36 +1,27 @@
 use crate::uptr;
 
 #[cfg(target_arch = "x86_64")]
-mod arch_context {
-    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-    pub struct General {
-        pub rax: u64,
-        pub rbx: u64,
-        pub rcx: u64,
-        pub rdx: u64,
-        pub rsi: u64,
-        pub rdi: u64,
-        pub rbp: u64,
-        pub r8: u64,
-        pub r9: u64,
-        pub r10: u64,
-        pub r11: u64,
-        pub r12: u64,
-        pub r13: u64,
-        pub r14: u64,
-        pub r15: u64,
-    }
-
-    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-    pub struct Segment {
-        pub cs: u16,
-        pub ss: u16,
-    }
-
-    pub type Registers = (General, Segment);
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Registers {
+    pub rax: u64,
+    pub rbx: u64,
+    pub rcx: u64,
+    pub rdx: u64,
+    pub rsi: u64,
+    pub rdi: u64,
+    pub rbp: u64,
+    pub r8: u64,
+    pub r9: u64,
+    pub r10: u64,
+    pub r11: u64,
+    pub r12: u64,
+    pub r13: u64,
+    pub r14: u64,
+    pub r15: u64,
+    pub rfl: crate::arch::x64::registers::RFlags,
+    pub cs: u64,
+    pub ss: u64,
 }
-
-pub use arch_context::*;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct State {

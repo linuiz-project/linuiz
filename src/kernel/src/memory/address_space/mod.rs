@@ -6,6 +6,8 @@ use core::{alloc::Allocator, num::NonZeroUsize, ops::Range, ptr::NonNull};
 use libsys::{page_size, Address, Page, Virtual};
 use mapper::Mapper;
 
+use super::paging::PageDepth;
+
 #[derive(Debug)]
 #[allow(clippy::enum_variant_names)]
 pub enum Error {
@@ -94,13 +96,11 @@ impl<A: Allocator + Clone> AddressSpace<A> {
         Self { free, mapper }
     }
 
-    pub fn new_userspace() -> Self {
+    pub fn new_userspace(allocator: A) -> Self {
         Self::new(
             DEFAULT_USERSPACE_SIZE,
-            unsafe {
-                Mapper::new_unsafe(super::PageDepth::current(), crate::memory::new_kmapped_page_table().unwrap())
-            },
-            &*super::PMM,
+            unsafe { Mapper::new_unsafe(PageDepth::current(), crate::memory::new_kmapped_page_table().unwrap()) },
+            allocator,
         )
     }
 

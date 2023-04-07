@@ -80,11 +80,9 @@ pub fn setup() {
                         cld
                         cli                         # always ensure interrupts are disabled within system calls
                         mov rax, rsp                # save the userspace rsp
-
                         swapgs                      # `swapgs` to switch to kernel stack
                         mov rsp, gs:0x0             # switch to kernel stack
                         swapgs                      # `swapgs` to allow software to use `IA32_KERNEL_GS_BASE` again
-
                         # preserve registers according to SysV ABI spec
                         push rax    # this pushes the userspace `rsp`
                         push r11    # save usersapce `rflags`
@@ -94,18 +92,14 @@ pub fn setup() {
                         push r13
                         push r14
                         push r15
-
                         # push return context as stack arguments
                         push rax
                         push rcx
-
                         # caller already passed their own arguments in relevant registers
                         call {}
-
                         pop rcx     # store target `rip` in `rcx`
                         pop rax     # store target `rsp` in `rax`
                         mov [rsp + (7 * 8)], rax   # update userspace `rsp` on stack
-
                         # restore preserved registers
                         pop r15
                         pop r14
@@ -115,10 +109,9 @@ pub fn setup() {
                         pop rbx
                         pop r11     # restore userspace `rflags`
                         pop rsp     # this restores userspace `rsp`
-
                         sysretq
                         ",
-                    sym syscall_handler,
+                    sym crate::cpu::syscall::sanitize,
                     options(noreturn)
                 )
             }
@@ -130,57 +123,4 @@ pub fn setup() {
         // Enable `syscall`/`sysret`.
         msr::IA32_EFER::set_sce(true);
     }
-}
-
-/// ### Safety
-///
-/// This function should never be called by software.
-#[allow(clippy::similar_names, clippy::no_effect_underscore_binding)]
-unsafe extern "sysv64" fn syscall_handler(
-    vector: u64,
-    arg0: u64,
-    arg1: u64,
-    _arg2: u64,
-    _arg3: u64,
-    _arg4: u64,
-    ret_ip: u64,
-    ret_sp: u64,
-    mut syscall_context: crate::cpu::SyscallContext,
-) -> crate::cpu::Control {
-    let _syscall_context = &mut syscall_context;
-
-    let syscall = match vector {
-        0x100 => {
-            use log::Level;
-
-            let log_level = match arg0 {
-                1 => Ok(Level::Error),
-                2 => Ok(Level::Warn),
-                3 => Ok(Level::Info),
-                4 => Ok(Level::Debug),
-                arg0 => Err(arg0),
-            };
-
-            match log_level {
-                Ok(level) => Some(super::Syscall::Log { level, cstr_ptr: usize::try_from(arg1).unwrap() as *const _ }),
-                Err(invalid_level) => {
-                    warn!("Invalid log level provided: {}", invalid_level);
-                    None
-                }
-            }
-        }
-
-        vector => {
-            warn!("Unhandled system call vector: {:#X}", vector);
-            None
-        }
-    };
-
-    if let Some(syscall) = syscall {
-        super::process(syscall);
-    } else {
-        warn!("Failed to execute system call.");
-    }
-
-    crate::cpu::Control { ip: ret_ip, sp: ret_sp }
 }
