@@ -210,7 +210,15 @@ pub unsafe fn out_of_memory() -> ! {
     panic!("Kernel ran out of memory during initialization.")
 }
 
-pub type Stack = TryBox<[core::mem::MaybeUninit<u8>], AlignedAllocator<0x10>>;
+pub struct Stack<const SIZE: usize>([u8; SIZE]);
+
+impl<const SIZE: usize> core::ops::Deref for Stack<SIZE> {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 pub fn allocate_kernel_stack<const SIZE: usize>() -> Result<Stack, AllocError> {
     TryBox::new_uninit_slice_in(SIZE, AlignedAllocator::new())

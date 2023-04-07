@@ -244,7 +244,7 @@ unsafe extern "C" fn _entry() -> ! {
                     let address_space = AddressSpace::new(crate::memory::address_space::DEFAULT_USERSPACE_SIZE, Mapper::new_unsafe(PageDepth::current(), crate::memory::new_kmapped_page_table().unwrap()), &*crate::memory::PMM);
                     let task = Task::new(0, entry_point, address_space, crate::cpu::ArchContext::user_default());
 
-                    crate::proc::TASKS.lock().push_back(task);
+                    crate::proc::PROCESSES.lock().push_back(task);
                 }
             }
         } else {

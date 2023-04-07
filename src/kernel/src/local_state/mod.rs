@@ -1,6 +1,6 @@
 use crate::{
     exceptions::Exception,
-    memory::{address_space::AddressSpace, PhysicalAllocator, Stack, KMALLOC},
+    memory::{address_space::AddressSpace, ExactStack, PhysicalAllocator, KMALLOC},
     proc::{task::Task, Scheduler},
 };
 use core::{
@@ -25,7 +25,7 @@ pub enum ExceptionCatcher {
 #[repr(C, align(0x1000))]
 pub(crate) struct LocalState {
     syscall_stack_ptr: *const (),
-    syscall_stack: Stack,
+    syscall_stack: ExactStack,
 
     magic: u64,
     core_id: u32,

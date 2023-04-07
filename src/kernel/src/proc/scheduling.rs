@@ -1,17 +1,16 @@
-use crate::proc::task::Task;
-use alloc::collections::BinaryHeap;
+use crate::{proc::{Context, Process, State}, memory::Stack};
+use alloc::collections::{BinaryHeap, VecDeque};
+
+pub static PROCESSES: spin::Mutex<VecDeque<Process>> = spin::Mutex::new(VecDeque::new());
 
 pub struct Scheduler {
     enabled: bool,
-    total_priority: u64,
-    idle_task: Task,
-    cur_task: Option<Task>,
-    tasks: BinaryHeap<Task>,
+    process: Option<Process>,
 }
 
 impl Scheduler {
-    pub fn new(enabled: bool, idle_task: Task) -> Self {
-        Self { enabled, total_priority: 0, idle_task, cur_task: None, tasks: BinaryHeap::new() }
+    pub fn new(enabled: bool) -> Self {
+        Self { enabled, process: None }
     }
 
     /// Enables the scheduler to pop tasks.
@@ -32,72 +31,75 @@ impl Scheduler {
         self.enabled
     }
 
-    /// Pushes a new task to the scheduling queue.
-    pub fn push_task(&mut self, task: Task) {
-        self.total_priority += task.priority() as u64;
-        self.tasks.push(task);
-    }
+    // /// Pushes a new task to the scheduling queue.
+    // pub fn push_task(&mut self, task: Task) {
+    //     self.total_priority += task.priority() as u64;
+    //     self.tasks.push(task);
+    // }
 
-    /// If the scheduler is enabled, attempts to return a new task from
-    /// the task queue. Returns `None` if the queue is empty.
-    pub fn pop_task(&mut self) -> Option<Task> {
-        if self.enabled {
-            self.tasks.pop().map(|task| {
-                self.total_priority -= task.priority() as u64;
-                task
-            })
-        } else {
-            None
-        }
-    }
+    // /// If the scheduler is enabled, attempts to return a new task from
+    // /// the task queue. Returns `None` if the queue is empty.
+    // pub fn pop_task(&mut self) -> Option<Task> {
+    //     if self.enabled {
+    //         self.tasks.pop().map(|task| {
+    //             self.total_priority -= task.priority() as u64;
+    //             task
+    //         })
+    //     } else {
+    //         None
+    //     }
+    // }
 
-    #[inline]
-    pub const fn get_total_priority(&self) -> u64 {
-        self.total_priority
-    }
+    // #[inline]
+    // pub const fn get_total_priority(&self) -> u64 {
+    //     self.total_priority
+    // }
 
-    #[inline]
-    pub const fn current_task(&self) -> Option<&Task> {
-        self.cur_task.as_ref()
-    }
+    // #[inline]
+    // pub const fn current_task(&self) -> Option<&Task> {
+    //     self.cur_task.as_ref()
+    // }
 
     /// Attempts to schedule the next task in the local task queue.
-    pub fn next_task(
-        &mut self,
-        state: &mut super::State,
-        regsters: &mut super::Registers,
-    ) {
+    pub fn next_task(&mut self, state: &mut super::State, registers: &mut super::Registers) {
         debug_assert!(!crate::interrupts::are_enabled());
 
+        let mut processes = PROCESSES.lock();
+
         // Move the current task, if any, back into the scheduler queue.
-        if let Some(mut cur_task) = self.cur_task.take() {
-            cur_task.ctrl_flow_context = *s;
-            cur_task.arch_context = *arch_context;
+        if let Some(mut process) = self.process.take() {
+            *process.context.state_mut() = *state;
+            *process.context.regs_mut() = *registers;
 
-            trace!("Reclaiming task: {:?}", cur_task.uuid());
-            self.push_task(cur_task);
-        } else {
-            self.idle_task.ctrl_flow_context = *ctrl_flow_context;
-            self.idle_task.arch_context = *arch_context;
-
-            trace!("Reclaiming idle task.");
+            trace!("Reclaiming task: {:?}", process.uuid());
+            processes.push_back(process);
         }
 
         // Pop a new task from the task queue, or simply switch in the idle task.
-        if let Some(next_task) = self.pop_task() {
-            trace!("Switching task: {:?}", next_task.uuid());
+        if let Some(next_process) = processes.pop_front() {
+            trace!("Switching task: {:?}", next_process.uuid());
 
-            *ctrl_flow_context = next_task.ctrl_flow_context;
-            *arch_context = next_task.arch_context;
-            next_task.with_address_space(|address_space| {
+            *state = *next_process.context.state();
+            *registers = *next_process.context.regs();
+
+            next_process.with_address_space(|address_space| {
                 // Safety: New task requires its own address space.
                 unsafe { address_space.swap_into() }
             });
 
-            trace!("Switched task: {:?}", next_task.uuid());
+            trace!("Switched task: {:?}", next_process.uuid());
 
-            self.cur_task = Some(next_task);
+            let old_value = self.process.replace(next_process);
+            assert!(old_value.is_none());
         } else {
+            
+            static IDLE_STACK: Stack<0x10>  = Stack::new();
+
+            const IDLE_CONTEXT: Context = Context::new(State {
+                ip: crate::interrupts::wait_loop as usize as u64,
+                sp: IDLE_STACK. as usize as u64`,
+            });
+
             trace!("Switching idle task.");
 
             let default_task = &self.idle_task;

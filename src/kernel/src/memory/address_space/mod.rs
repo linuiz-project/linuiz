@@ -104,7 +104,7 @@ impl<A: Allocator + Clone> AddressSpace<A> {
         )
     }
 
-    pub fn m_map(
+    pub fn map(
         &mut self,
         address: Option<Address<Page>>,
         page_count: NonZeroUsize,

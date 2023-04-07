@@ -2,7 +2,7 @@ use crate::uptr;
 
 #[cfg(target_arch = "x86_64")]
 mod arch_context {
-    #[derive(Debug, Default)]
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
     pub struct General {
         pub rax: u64,
         pub rbx: u64,
@@ -21,7 +21,7 @@ mod arch_context {
         pub r15: u64,
     }
 
-    #[derive(Debug, Default)]
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
     pub struct Segment {
         pub cs: u16,
         pub ss: u16,
@@ -32,16 +32,18 @@ mod arch_context {
 
 pub use arch_context::*;
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct State {
     pub ip: uptr,
     pub sp: uptr,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Context(State, Registers);
 
 impl Context {
-    pub fn new(state: State, regs: Option<Registers>) -> Self {
-        Self(state, regs.unwrap_or_default())
+    pub fn new(state: State, regs: Registers) -> Self {
+        Self(state, regs)
     }
 
     pub fn state(&self) -> &State {
