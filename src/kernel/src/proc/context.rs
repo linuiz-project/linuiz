@@ -2,8 +2,8 @@ use crate::uptr;
 
 #[cfg(target_arch = "x86_64")]
 mod arch_context {
-
-    pub struct Registers {
+    #[derive(Debug, Default)]
+    pub struct General {
         pub rax: u64,
         pub rbx: u64,
         pub rcx: u64,
@@ -20,16 +20,43 @@ mod arch_context {
         pub r14: u64,
         pub r15: u64,
     }
+
+    #[derive(Debug, Default)]
+    pub struct Segment {
+        pub cs: u16,
+        pub ss: u16,
+    }
+
+    pub type Registers = (General, Segment);
 }
 
-use arch_context::*;
-
-pub struct Context {
-    state: State,
-    registers: arch_context::Registers,
-}
+pub use arch_context::*;
 
 pub struct State {
     pub ip: uptr,
     pub sp: uptr,
+}
+
+pub struct Context(State, Registers);
+
+impl Context {
+    pub fn new(state: State, regs: Option<Registers>) -> Self {
+        Self(state, regs.unwrap_or_default())
+    }
+
+    pub fn state(&self) -> &State {
+        &self.0
+    }
+
+    pub fn state_mut(&mut self) -> &mut State {
+        &mut self.0
+    }
+
+    pub fn regs(&self) -> &Registers {
+        &self.1
+    }
+
+    pub fn regs_mut(&mut self) -> &mut Registers {
+        &mut self.1
+    }
 }

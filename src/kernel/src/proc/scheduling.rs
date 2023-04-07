@@ -64,14 +64,14 @@ impl Scheduler {
     /// Attempts to schedule the next task in the local task queue.
     pub fn next_task(
         &mut self,
-        ctrl_flow_context: &mut crate::cpu::Control,
-        arch_context: &mut crate::cpu::ArchContext,
+        state: &mut super::State,
+        regsters: &mut super::Registers,
     ) {
         debug_assert!(!crate::interrupts::are_enabled());
 
         // Move the current task, if any, back into the scheduler queue.
         if let Some(mut cur_task) = self.cur_task.take() {
-            cur_task.ctrl_flow_context = *ctrl_flow_context;
+            cur_task.ctrl_flow_context = *s;
             cur_task.arch_context = *arch_context;
 
             trace!("Reclaiming task: {:?}", cur_task.uuid());
