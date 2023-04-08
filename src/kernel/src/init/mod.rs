@@ -218,51 +218,51 @@ unsafe extern "C" fn _entry() -> ! {
     crate::acpi::init_interface();
 
     /* load drivers */
-    {
-        use crate::proc::{EntryPoint, Priority, Process};
-        use elf::{endian::AnyEndian, ElfBytes};
+    // {
+    //     use crate::proc::{EntryPoint, Priority, Process};
+    //     use elf::{endian::AnyEndian, ElfBytes};
 
-        #[limine::limine_tag]
-        static LIMINE_MODULES: limine::ModuleRequest = limine::ModuleRequest::new(crate::boot::LIMINE_REV);
+    //     #[limine::limine_tag]
+    //     static LIMINE_MODULES: limine::ModuleRequest = limine::ModuleRequest::new(crate::boot::LIMINE_REV);
 
-        debug!("Unpacking kernel drivers...");
+    //     debug!("Unpacking kernel drivers...");
 
-        if let Some(modules) = LIMINE_MODULES.get_response() {
-            for module in modules
-                .modules()
-                .iter()
-                // Filter out modules that don't end with our driver postfix.
-                .filter(|module| module.path().ends_with("drivers"))
-            {
-                let archive = tar_no_std::TarArchiveRef::new(module.data());
-                for entry in archive.entries() {
-                    debug!("Attempting to parse driver blob: {}", entry.filename());
+    //     if let Some(modules) = LIMINE_MODULES.get_response() {
+    //         for module in modules
+    //             .modules()
+    //             .iter()
+    //             // Filter out modules that don't end with our driver postfix.
+    //             .filter(|module| module.path().ends_with("drivers"))
+    //         {
+    //             let archive = tar_no_std::TarArchiveRef::new(module.data());
+    //             for entry in archive.entries() {
+    //                 debug!("Attempting to parse driver blob: {}", entry.filename());
 
-                    let Ok(elf) = ElfBytes::<AnyEndian>::minimal_parse(entry.data())
-                    else {
-                        warn!("Failed to parse driver blob into ELF");
-                        continue;
-                    };
+    //                 let Ok(elf) = ElfBytes::<AnyEndian>::minimal_parse(entry.data())
+    //                 else {
+    //                     warn!("Failed to parse driver blob into ELF");
+    //                     continue;
+    //                 };
 
-                    let entry_point = core::mem::transmute::<_, EntryPoint>(elf.ehdr.e_entry);
-                    let address_space = AddressSpace::new(
-                        crate::memory::address_space::DEFAULT_USERSPACE_SIZE,
-                        Mapper::new_unsafe(PageDepth::current(), crate::memory::new_kmapped_page_table().unwrap()),
-                        &*PMM,
-                    );
-                    let task = Process::new(Priority::Normal, entry_point, address_space);
+    //                 let entry_point = core::mem::transmute::<_, EntryPoint>(elf.ehdr.e_entry);
+    //                 let address_space = AddressSpace::new(
+    //                     crate::memory::address_space::DEFAULT_USERSPACE_SIZE,
+    //                     Mapper::new_unsafe(PageDepth::current(), crate::memory::new_kmapped_page_table().unwrap()),
+    //                     &*PMM,
+    //                 );
+    //                 let task = Process::new(Priority::Normal, entry_point, address_space);
 
-                    crate::proc::PROCESSES.lock().push_back(task);
-                }
-            }
-        } else {
-            error!("Bootloader did not provide an init module.");
-        };
+    //                 crate::proc::PROCESSES.lock().push_back(task);
+    //             }
+    //         }
+    //     } else {
+    //         error!("Bootloader did not provide an init module.");
+    //     };
 
-        // for (entry, mapper) in artifacts.into_iter().map(Artifact::decompose) {
-        //     let task = Task::new(0, entry, stack, crate::cpu::ArchContext::user_context())
-        // }
-    }
+    //     // for (entry, mapper) in artifacts.into_iter().map(Artifact::decompose) {
+    //     //     let task = Task::new(0, entry, stack, crate::cpu::ArchContext::user_context())
+    //     // }
+    // }
 
     /* smp */
     {

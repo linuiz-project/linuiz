@@ -23,6 +23,8 @@ pub enum Priority {
 
 pub type EntryPoint = extern "C" fn(args: &[&core::ffi::CStr]) -> u32;
 
+pub type Context = (State, Registers);
+
 pub struct Process {
     id: Uuid,
     priority: Priority,
@@ -40,12 +42,12 @@ impl Process {
             id: uuid::Uuid::new_v4(),
             priority,
             address_space: Mutex::new(address_space),
-            context: Context::new(
+            context: (
                 State {
                     ip: (entry as usize).try_into().unwrap(),
                     sp: unsafe { stack.as_non_null_ptr().as_ptr().add(stack.len()).addr() as u64 },
                 },
-                Registers::default(),
+                Registers::user_default(),
             ),
         }
     }

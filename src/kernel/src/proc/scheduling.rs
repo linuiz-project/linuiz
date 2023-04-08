@@ -75,8 +75,8 @@ impl Scheduler {
 
         // Move the current task, if any, back into the scheduler queue.
         if let Some(mut process) = self.process.take() {
-            *process.context.state_mut() = *state;
-            *process.context.regs_mut() = *regs;
+            process.context.0 = *state;
+            process.context.1 = *regs;
 
             trace!("Reclaiming task: {:?}", process.uuid());
             processes.push_back(process);
@@ -86,8 +86,8 @@ impl Scheduler {
         if let Some(next_process) = processes.pop_front() {
             trace!("Switching task: {:?}", next_process.uuid());
 
-            *state = *next_process.context.state();
-            *regs = *next_process.context.regs();
+            *state = next_process.context.0;
+            *regs = next_process.context.1;
 
             next_process.with_address_space(|address_space| {
                 // Safety: New task requires its own address space.
@@ -99,12 +99,13 @@ impl Scheduler {
             let old_value = self.process.replace(next_process);
             assert!(old_value.is_none());
         } else {
-            static IDLE_STACK: Stack<0x10> = Stack::new();
+            #[link_section = ".bss"]
+            static IDLE_STACK: Stack<0x100> = Stack::new();
 
             trace!("Switching idle task.");
 
-            *state = State { ip: crate::interrupts::wait_loop as u64, sp: IDLE_STACK.top().get() as u64 };
-            *regs = Registers::default();
+            *state = State { ip: crate::interrupts::wait_loop as u64, sp: unsafe { IDLE_STACK.top().get() as u64 } };
+            *regs = Registers::user_default();
 
             trace!("Switched idle task.");
         };

@@ -1,7 +1,7 @@
 use crate::uptr;
 
 #[cfg(target_arch = "x86_64")]
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Registers {
     pub rax: u64,
     pub rbx: u64,
@@ -23,38 +23,33 @@ pub struct Registers {
     pub ss: u64,
 }
 
+impl Registers {
+    pub fn user_default() -> Self {
+        Self {
+            rax: 0,
+            rbx: 0,
+            rcx: 0,
+            rdx: 0,
+            rsi: 0,
+            rdi: 0,
+            rbp: 0,
+            r8: 0,
+            r9: 0,
+            r10: 0,
+            r11: 0,
+            r12: 0,
+            r13: 0,
+            r14: 0,
+            r15: 0,
+            rfl: crate::arch::x64::registers::RFlags::INTERRUPT_FLAG,
+            cs: crate::arch::x64::structures::gdt::kernel_code_selector().0 as u64,
+            ss: crate::arch::x64::structures::gdt::kernel_data_selector().0 as u64,
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct State {
     pub ip: uptr,
     pub sp: uptr,
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct Context(State, Registers);
-
-impl Context {
-    #[inline]
-    pub const fn new(state: State, regs: Registers) -> Self {
-        Self(state, regs)
-    }
-
-    #[inline]
-    pub const fn state(&self) -> &State {
-        &self.0
-    }
-
-    #[inline]
-    pub fn state_mut(&mut self) -> &mut State {
-        &mut self.0
-    }
-
-    #[inline]
-    pub const fn regs(&self) -> &Registers {
-        &self.1
-    }
-
-    #[inline]
-    pub fn regs_mut(&mut self) -> &mut Registers {
-        &mut self.1
-    }
 }
