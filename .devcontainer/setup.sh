@@ -3,6 +3,8 @@ apt-get install -y \
     curl \
     git \
     qemu \
+    qemu-system-x86 \
+    qemu-system-misc \
     qemu-utils
     
 curl https://sh.rustup.rs -sSf | sh -s -- --profile minimal --default-toolchain nightly --component rustfmt,clippy -y
