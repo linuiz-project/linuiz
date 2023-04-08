@@ -64,7 +64,8 @@ impl Hhdm {
 pub struct Stack<const SIZE: usize>([u8; SIZE]);
 
 impl<const SIZE: usize> Stack<SIZE> {
-    pub fn new() -> Self {
+    #[inline]
+    pub const fn new() -> Self {
         Self([0u8; SIZE])
     }
 

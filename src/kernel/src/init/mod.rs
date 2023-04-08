@@ -7,7 +7,11 @@ pub fn get_parameters() -> &'static params::Parameters {
 use libkernel::LinkerSymbol;
 use libsys::{page_size, Address};
 
-use crate::memory::{address_space::{AddressSpace, mapper::Mapper}, paging::PageDepth, alloc::pmm::PMM};
+use crate::memory::{
+    address_space::{mapper::Mapper, AddressSpace},
+    alloc::pmm::PMM,
+    paging::PageDepth,
+};
 
 pub static KERNEL_HANDLE: spin::Lazy<uuid::Uuid> = spin::Lazy::new(uuid::Uuid::new_v4);
 
@@ -85,7 +89,7 @@ unsafe extern "C" fn _entry() -> ! {
         /* load and map segments */
 
         crate::memory::with_kmapper(|kmapper| {
-            use crate::memory::{Hhdm, paging::Attributes};
+            use crate::memory::{paging::Attributes, Hhdm};
             use limine::MemoryMapEntryType;
 
             const PT_LOAD: u32 = 0x1;
@@ -215,7 +219,7 @@ unsafe extern "C" fn _entry() -> ! {
 
     /* load drivers */
     {
-        use crate::proc::{Process, EntryPoint, Priority};
+        use crate::proc::{EntryPoint, Priority, Process};
         use elf::{endian::AnyEndian, ElfBytes};
 
         #[limine::limine_tag]
@@ -234,14 +238,18 @@ unsafe extern "C" fn _entry() -> ! {
                 for entry in archive.entries() {
                     debug!("Attempting to parse driver blob: {}", entry.filename());
 
-                    let Ok(elf) = ElfBytes::<AnyEndian>::minimal_parse(entry.data()) 
+                    let Ok(elf) = ElfBytes::<AnyEndian>::minimal_parse(entry.data())
                     else {
                         warn!("Failed to parse driver blob into ELF");
                         continue;
                     };
 
                     let entry_point = core::mem::transmute::<_, EntryPoint>(elf.ehdr.e_entry);
-                    let address_space = AddressSpace::new(crate::memory::address_space::DEFAULT_USERSPACE_SIZE, Mapper::new_unsafe(PageDepth::current(), crate::memory::new_kmapped_page_table().unwrap()), &*PMM);
+                    let address_space = AddressSpace::new(
+                        crate::memory::address_space::DEFAULT_USERSPACE_SIZE,
+                        Mapper::new_unsafe(PageDepth::current(), crate::memory::new_kmapped_page_table().unwrap()),
+                        &*PMM,
+                    );
                     let task = Process::new(Priority::Normal, entry_point, address_space);
 
                     crate::proc::PROCESSES.lock().push_back(task);

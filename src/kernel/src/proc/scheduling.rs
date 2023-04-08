@@ -1,6 +1,6 @@
 use crate::{
     memory::Stack,
-    proc::{Context, Process, Registers, State},
+    proc::{Process, Registers, State},
 };
 use alloc::collections::VecDeque;
 
@@ -101,15 +101,10 @@ impl Scheduler {
         } else {
             static IDLE_STACK: Stack<0x10> = Stack::new();
 
-            const IDLE_CONTEXT: Context = Context::new(
-                State { ip: crate::interrupts::wait_loop as usize as u64, sp: IDLE_STACK.top().get() as u64 },
-                Registers::default(),
-            );
-
             trace!("Switching idle task.");
 
-            *state = *IDLE_CONTEXT.state();
-            *regs = *IDLE_CONTEXT.regs();
+            *state = State { ip: crate::interrupts::wait_loop as u64, sp: IDLE_STACK.top().get() as u64 };
+            *regs = Registers::default();
 
             trace!("Switched idle task.");
         };

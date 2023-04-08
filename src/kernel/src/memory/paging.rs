@@ -54,7 +54,7 @@ impl PageDepth {
     }
 
     #[inline]
-    pub const fn max() -> Self {
+    pub fn max() -> Self {
         Self(Info::max_paging_levels().get())
     }
 
@@ -68,7 +68,7 @@ impl PageDepth {
     }
 
     #[inline]
-    pub const fn max_align() -> usize {
+    pub fn max_align() -> usize {
         Self::max().align()
     }
 
@@ -323,8 +323,7 @@ impl<RefKind: InteriorRef> TableEntryCell<'_, RefKind> {
 
         debug_assert!(entry_index < table_index_size().get(), "entry index exceeds maximum");
 
-        // Safety: Type requires that the internal entry has a valid frame.
-        let table_ptr = unsafe { Hhdm::offset(self.get_frame()).unwrap().as_ptr().cast::<TableEntry>() };
+        let table_ptr = Hhdm::offset(self.get_frame()).unwrap().as_ptr().cast::<TableEntry>();
         // Safety: `entry_index` guarantees a value that does not exceed the table size.
         let entry_ptr = unsafe { table_ptr.add(entry_index) };
 

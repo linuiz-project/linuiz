@@ -12,6 +12,7 @@ use core::num::NonZeroUsize;
 use spin::Mutex;
 use uuid::Uuid;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Priority {
     Idle = 0,
     Low = 1,
@@ -30,8 +31,10 @@ pub struct Process {
 }
 
 impl Process {
-    pub fn new(priority: Priority, entry: EntryPoint, address_space: AddressSpace<PhysicalAllocator>) -> Self {
+    pub fn new(priority: Priority, entry: EntryPoint, mut address_space: AddressSpace<PhysicalAllocator>) -> Self {
         const STACK_PAGES: NonZeroUsize = NonZeroUsize::new(16).unwrap();
+
+        let stack = address_space.map(None, STACK_PAGES, MmapFlags::READ_WRITE).unwrap();
 
         Self {
             id: uuid::Uuid::new_v4(),
@@ -40,7 +43,7 @@ impl Process {
             context: Context::new(
                 State {
                     ip: (entry as usize).try_into().unwrap(),
-                    sp: address_space.map(None, STACK_PAGES, MmapFlags::READ_WRITE).unwrap().addr().get() as u64,
+                    sp: unsafe { stack.as_non_null_ptr().as_ptr().add(stack.len()).addr() as u64 },
                 },
                 Registers::default(),
             ),

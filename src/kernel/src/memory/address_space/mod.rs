@@ -126,7 +126,7 @@ impl<A: Allocator + Clone> AddressSpace<A> {
 
         // Update the free region, or remove it if it's now empty.
         if new_free.len() > 0 {
-            self.free[index] = new_free;
+            self.free[index] = new_free.clone();
         } else {
             self.free.remove(index);
         }

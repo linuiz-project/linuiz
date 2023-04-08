@@ -80,5 +80,3 @@ pub mod stack {
     basic_ptr_register! {RBP}
     basic_ptr_register! {RSP}
 }
-
-

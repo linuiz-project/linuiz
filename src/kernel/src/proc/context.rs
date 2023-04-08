@@ -33,22 +33,27 @@ pub struct State {
 pub struct Context(State, Registers);
 
 impl Context {
-    pub fn new(state: State, regs: Registers) -> Self {
+    #[inline]
+    pub const fn new(state: State, regs: Registers) -> Self {
         Self(state, regs)
     }
 
-    pub fn state(&self) -> &State {
+    #[inline]
+    pub const fn state(&self) -> &State {
         &self.0
     }
 
+    #[inline]
     pub fn state_mut(&mut self) -> &mut State {
         &mut self.0
     }
 
-    pub fn regs(&self) -> &Registers {
+    #[inline]
+    pub const fn regs(&self) -> &Registers {
         &self.1
     }
 
+    #[inline]
     pub fn regs_mut(&mut self) -> &mut Registers {
         &mut self.1
     }
