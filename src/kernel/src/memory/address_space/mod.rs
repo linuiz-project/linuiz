@@ -1,6 +1,6 @@
 pub mod mapper;
 
-use crate::memory::{paging, paging::Attributes};
+use crate::memory::{paging, paging::TableEntryFlags};
 use alloc::vec::Vec;
 use core::{alloc::Allocator, num::NonZeroUsize, ops::Range, ptr::NonNull};
 use libsys::{page_size, Address, Page, Virtual};
@@ -59,22 +59,22 @@ bitflags::bitflags! {
     }
 }
 
-impl From<MmapFlags> for Attributes {
+impl From<MmapFlags> for TableEntryFlags {
     fn from(flags: MmapFlags) -> Self {
-        let mut attributes = Attributes::empty();
+        let mut attributes = TableEntryFlags::empty();
 
         // RW and RX are mutually exclusive, so always else-if the bit checks.
         if flags.contains(MmapFlags::READ_WRITE) {
-            attributes.insert(Attributes::RW);
+            attributes.insert(TableEntryFlags::RW);
         } else if flags.contains(MmapFlags::READ_EXECUTE) {
-            attributes.insert(Attributes::RX);
+            attributes.insert(TableEntryFlags::RX);
         } else {
-            attributes.insert(Attributes::RO);
+            attributes.insert(TableEntryFlags::RO);
         }
 
         if !flags.contains(MmapFlags::NOT_DEMAND) {
-            attributes.remove(Attributes::PRESENT);
-            attributes.insert(Attributes::DEMAND);
+            attributes.remove(TableEntryFlags::PRESENT);
+            attributes.insert(TableEntryFlags::DEMAND);
         }
 
         attributes
@@ -197,7 +197,7 @@ impl<A: Allocator + Clone> AddressSpace<A> {
             .map(|address| Address::new(address))
             .try_for_each(|page| {
                 let page = page.ok_or(Error::MalformedAddress)?;
-                self.mapper.auto_map(page, Attributes::from(flags)).map_err(Error::from)
+                self.mapper.auto_map(page, TableEntryFlags::from(flags)).map_err(Error::from)
             });
 
         Ok(NonNull::slice_from_raw_parts(NonNull::new(address.as_ptr()).unwrap(), page_count.get() * page_size()))
@@ -207,15 +207,15 @@ impl<A: Allocator + Clone> AddressSpace<A> {
     pub fn try_demand(&mut self, page: Address<Page>) -> Result<()> {
         self.mapper
             .get_page_attributes(page)
-            .filter(|attributes| attributes.contains(Attributes::DEMAND))
+            .filter(|attributes| attributes.contains(TableEntryFlags::DEMAND))
             .ok_or(Error::NotMapped(page.get()))
             .and_then(|mut attributes| {
                 self.mapper
                     .auto_map(page, {
                         // remove demand bit ...
-                        attributes.remove(Attributes::DEMAND);
+                        attributes.remove(TableEntryFlags::DEMAND);
                         // ... insert present bit ...
-                        attributes.insert(Attributes::PRESENT);
+                        attributes.insert(TableEntryFlags::PRESENT);
                         // ... return attributes
                         attributes
                     })

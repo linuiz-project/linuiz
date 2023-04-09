@@ -67,7 +67,7 @@ pub struct PageFaultHandlerError;
 #[doc(hidden)]
 #[repr(align(0x10))]
 pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandlerError> {
-    crate::local_state::with_current_address_space(|addr_space| {
+    crate::local::with_current_address_space(|addr_space| {
         addr_space.try_demand(Address::new_truncate(address.get())).ok()
     })
     .flatten()
@@ -82,13 +82,13 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
 #[repr(align(0x10))]
 pub unsafe fn irq_handler(irq_vector: u64, state: &mut State, regs: &mut Registers) {
     match Vector::try_from(irq_vector) {
-        Ok(Vector::Timer) => crate::local_state::next_task(state, regs),
+        Ok(Vector::Timer) => crate::local::next_task(state, regs),
 
         _vector_result => {}
     }
 
     #[cfg(target_arch = "x86_64")]
-    crate::local_state::end_of_interrupt();
+    crate::local::end_of_interrupt();
 }
 
 /// Provides access to the contained instance of `T`, ensuring interrupts are disabled while it is borrowed.

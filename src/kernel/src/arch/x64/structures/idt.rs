@@ -336,7 +336,7 @@ impl From<Fault<'_>> for crate::exceptions::Exception {
 }
 
 pub fn common_exception_handler(exception: Fault) {
-    match crate::local_state::provide_exception(exception) {
+    match crate::local::provide_exception(exception) {
         Ok(()) => {}
 
         Err(Fault::PageFault { isf: _, gprs: _, err: _, address })

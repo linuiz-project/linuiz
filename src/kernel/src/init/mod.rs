@@ -89,7 +89,7 @@ unsafe extern "C" fn _entry() -> ! {
         /* load and map segments */
 
         crate::memory::with_kmapper(|kmapper| {
-            use crate::memory::{paging::Attributes, Hhdm};
+            use crate::memory::{paging::TableEntryFlags, Hhdm};
             use limine::MemoryMapEntryType;
 
             const PT_LOAD: u32 = 0x1;
@@ -111,11 +111,11 @@ unsafe extern "C" fn _entry() -> ! {
                     let offset_end = base_offset + usize::try_from(phdr.p_memsz).unwrap();
                     let page_attributes = {
                         if phdr.p_flags.get_bit(PT_FLAG_EXEC_BIT) {
-                            Attributes::RX
+                            TableEntryFlags::RX
                         } else if phdr.p_flags.get_bit(PT_FLAG_WRITE_BIT) {
-                            Attributes::RW
+                            TableEntryFlags::RW
                         } else {
-                            Attributes::RO
+                            TableEntryFlags::RO
                         }
                     };
 
@@ -149,10 +149,10 @@ unsafe extern "C" fn _entry() -> ! {
                             | MemoryMapEntryType::AcpiReclaimable
                             | MemoryMapEntryType::BootloaderReclaimable
                             // TODO handle the PATs or something to make this WC
-                            | MemoryMapEntryType::Framebuffer => Some((entry, Attributes::RW)),
+                            | MemoryMapEntryType::Framebuffer => Some((entry, TableEntryFlags::RW)),
 
                             MemoryMapEntryType::Reserved | MemoryMapEntryType::KernelAndModules => {
-                                Some((entry, Attributes::RO))
+                                Some((entry, TableEntryFlags::RO))
                             }
 
                             MemoryMapEntryType::BadMemory => None,
@@ -185,7 +185,7 @@ unsafe extern "C" fn _entry() -> ! {
                         PageDepth::min(),
                         Address::new_truncate(apic_address),
                         false,
-                        Attributes::MMIO,
+                        TableEntryFlags::MMIO,
                     )
                     .unwrap();
             }
@@ -218,51 +218,51 @@ unsafe extern "C" fn _entry() -> ! {
     crate::acpi::init_interface();
 
     /* load drivers */
-    // {
-    //     use crate::proc::{EntryPoint, Priority, Process};
-    //     use elf::{endian::AnyEndian, ElfBytes};
+    {
+        use crate::proc::{EntryPoint, Priority, Process};
+        use elf::{endian::AnyEndian, ElfBytes};
 
-    //     #[limine::limine_tag]
-    //     static LIMINE_MODULES: limine::ModuleRequest = limine::ModuleRequest::new(crate::boot::LIMINE_REV);
+        #[limine::limine_tag]
+        static LIMINE_MODULES: limine::ModuleRequest = limine::ModuleRequest::new(crate::boot::LIMINE_REV);
 
-    //     debug!("Unpacking kernel drivers...");
+        debug!("Unpacking kernel drivers...");
 
-    //     if let Some(modules) = LIMINE_MODULES.get_response() {
-    //         for module in modules
-    //             .modules()
-    //             .iter()
-    //             // Filter out modules that don't end with our driver postfix.
-    //             .filter(|module| module.path().ends_with("drivers"))
-    //         {
-    //             let archive = tar_no_std::TarArchiveRef::new(module.data());
-    //             for entry in archive.entries() {
-    //                 debug!("Attempting to parse driver blob: {}", entry.filename());
+        if let Some(modules) = LIMINE_MODULES.get_response() {
+            for module in modules
+                .modules()
+                .iter()
+                // Filter out modules that don't end with our driver postfix.
+                .filter(|module| module.path().ends_with("drivers"))
+            {
+                let archive = tar_no_std::TarArchiveRef::new(module.data());
+                for entry in archive.entries() {
+                    debug!("Attempting to parse driver blob: {}", entry.filename());
 
-    //                 let Ok(elf) = ElfBytes::<AnyEndian>::minimal_parse(entry.data())
-    //                 else {
-    //                     warn!("Failed to parse driver blob into ELF");
-    //                     continue;
-    //                 };
+                    let Ok(elf) = ElfBytes::<AnyEndian>::minimal_parse(entry.data())
+                     else {
+                         warn!("Failed to parse driver blob into ELF");
+                         continue;
+                     };
 
-    //                 let entry_point = core::mem::transmute::<_, EntryPoint>(elf.ehdr.e_entry);
-    //                 let address_space = AddressSpace::new(
-    //                     crate::memory::address_space::DEFAULT_USERSPACE_SIZE,
-    //                     Mapper::new_unsafe(PageDepth::current(), crate::memory::new_kmapped_page_table().unwrap()),
-    //                     &*PMM,
-    //                 );
-    //                 let task = Process::new(Priority::Normal, entry_point, address_space);
+                    let entry_point = core::mem::transmute::<_, EntryPoint>(elf.ehdr.e_entry);
+                    let address_space = AddressSpace::new(
+                        crate::memory::address_space::DEFAULT_USERSPACE_SIZE,
+                        Mapper::new_unsafe(PageDepth::current(), crate::memory::new_kmapped_page_table().unwrap()),
+                        &*PMM,
+                    );
+                    let task = Process::new(Priority::Normal, entry_point, address_space);
 
-    //                 crate::proc::PROCESSES.lock().push_back(task);
-    //             }
-    //         }
-    //     } else {
-    //         error!("Bootloader did not provide an init module.");
-    //     };
+                    crate::proc::PROCESSES.lock().push_back(task);
+                }
+            }
+        } else {
+            error!("Bootloader did not provide an init module.");
+        };
 
-    //     // for (entry, mapper) in artifacts.into_iter().map(Artifact::decompose) {
-    //     //     let task = Task::new(0, entry, stack, crate::cpu::ArchContext::user_context())
-    //     // }
-    // }
+        // for (entry, mapper) in artifacts.into_iter().map(Artifact::decompose) {
+        //     let task = Task::new(0, entry, stack, crate::cpu::ArchContext::user_context())
+        // }
+    }
 
     /* smp */
     {
@@ -330,11 +330,11 @@ unsafe extern "C" fn _entry() -> ! {
 /// This function should only ever be called once per core.
 #[inline(never)]
 pub(self) unsafe fn kernel_core_setup(core_id: u32) -> ! {
-    crate::local_state::init(core_id, 1000);
+    crate::local::init(core_id, 1000);
 
     // Ensure we enable interrupts prior to enabling the scheduler.
     crate::interrupts::enable();
-    crate::local_state::begin_scheduling();
+    crate::local::begin_scheduling();
 
     // This interrupt wait loop is necessary to ensure the core can jump into the scheduler.
     crate::interrupts::wait_loop()

@@ -7,7 +7,7 @@ pub mod io;
 pub mod paging;
 
 use crate::{
-    exceptions::Exception, interrupts::InterruptCell, local_state::do_catch, memory::address_space::mapper::Mapper,
+    exceptions::Exception, interrupts::InterruptCell, local::do_catch, memory::address_space::mapper::Mapper,
 };
 use ::alloc::string::String;
 use core::ptr::NonNull;

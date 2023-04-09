@@ -125,7 +125,7 @@ crate::err_result_type!(Error);
 bitflags::bitflags! {
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct Attributes : u64 {
+    pub struct TableEntryFlags : u64 {
         const PRESENT = 1 << 0;
         const WRITABLE = 1 << 1;
         const USER = 1 << 2;
@@ -150,7 +150,7 @@ bitflags::bitflags! {
 #[cfg(target_arch = "riscv64")]
 bitflags::bitflags! {
     #[repr(transparent)]
-    pub struct Attributes: u64 {
+    pub struct TableEntryFlags: u64 {
         const VALID = 1 << 0;
         const READ = 1 << 1;
         const WRITE = 1 << 2;
@@ -196,7 +196,7 @@ impl TableEntry {
         Self(0)
     }
 
-    pub fn new(frame: Address<Frame>, attributes: Attributes) -> Self {
+    pub fn new(frame: Address<Frame>, attributes: TableEntryFlags) -> Self {
         Self(((frame.index() as u64) << Self::FRAME_ADDRESS_SHIFT) | attributes.bits())
     }
 
@@ -205,7 +205,7 @@ impl TableEntry {
     /// Safety
     ///
     /// Caller must ensure changing the attributes of this entry does not cause memory corruption.
-    pub unsafe fn set(&mut self, frame: Address<Frame>, attributes: Attributes) {
+    pub unsafe fn set(&mut self, frame: Address<Frame>, attributes: TableEntryFlags) {
         self.0 = ((frame.index() as u64) << Self::FRAME_ADDRESS_SHIFT) | attributes.bits();
     }
 
@@ -227,8 +227,8 @@ impl TableEntry {
 
     /// Gets the attributes of this page table entry.
     #[inline]
-    pub const fn get_attributes(self) -> Attributes {
-        Attributes::from_bits_truncate(self.0)
+    pub const fn get_attributes(self) -> TableEntryFlags {
+        TableEntryFlags::from_bits_truncate(self.0)
     }
 
     /// Sets the attributes of this page table entry.
@@ -236,8 +236,8 @@ impl TableEntry {
     /// Safety
     ///
     /// Caller must ensure changing the attributes of this entry does not cause any memory corruption side effects.
-    pub unsafe fn set_attributes(&mut self, new_attributes: Attributes, modify_mode: AttributeModify) {
-        let mut attributes = Attributes::from_bits_truncate(self.0);
+    pub unsafe fn set_attributes(&mut self, new_attributes: TableEntryFlags, modify_mode: AttributeModify) {
+        let mut attributes = TableEntryFlags::from_bits_truncate(self.0);
 
         match modify_mode {
             AttributeModify::Set => attributes = new_attributes,
@@ -249,20 +249,20 @@ impl TableEntry {
         #[cfg(target_arch = "x86_64")]
         if !crate::arch::x64::registers::msr::IA32_EFER::get_nxe() {
             // This bit is reserved if NXE is not supported. For now, this means silently removing it for compatability.
-            attributes.remove(Attributes::NO_EXECUTE);
+            attributes.remove(TableEntryFlags::NO_EXECUTE);
         }
 
-        self.0 = (self.0 & !Attributes::all().bits()) | attributes.bits();
+        self.0 = (self.0 & !TableEntryFlags::all().bits()) | attributes.bits();
     }
 
     #[inline]
     pub const fn is_present(self) -> bool {
-        self.get_attributes().contains(Attributes::PRESENT)
+        self.get_attributes().contains(TableEntryFlags::PRESENT)
     }
 
     #[inline]
     pub const fn is_huge(self) -> bool {
-        self.get_attributes().contains(Attributes::HUGE)
+        self.get_attributes().contains(TableEntryFlags::HUGE)
     }
 
     /// Clears the page table entry of data, setting all bits to zero.
@@ -342,11 +342,11 @@ impl<RefKind: InteriorRef> TableEntryCell<'_, RefKind> {
 }
 
 impl<'a> TableEntryCell<'a, Ref> {
-    /// Safety
+    /// ### Safety
     ///
     /// - Page table entry must point to a valid page table.
     /// - Page table depth must be correct for the provided table.
-    pub(super) const unsafe fn new(depth: PageDepth, entry: &'a TableEntry) -> Self {
+    pub const unsafe fn new(depth: PageDepth, entry: &'a TableEntry) -> Self {
         Self { depth, entry }
     }
 
@@ -378,11 +378,11 @@ impl<'a> TableEntryCell<'a, Ref> {
 }
 
 impl<'a> TableEntryCell<'a, Mut> {
-    /// Safety
+    /// ### Safety
     ///
     /// - Page table entry must point to a valid page table.
     /// - Page table depth must be correct for the provided table.
-    pub(super) unsafe fn new(depth: PageDepth, entry: &'a mut TableEntry) -> Self {
+    pub unsafe fn new(depth: PageDepth, entry: &'a mut TableEntry) -> Self {
         Self { depth, entry }
     }
 
@@ -447,7 +447,7 @@ impl<'a> TableEntryCell<'a, Mut> {
                         // Clear the frame to avoid corrupted PTEs.
                         core::ptr::write_bytes(Hhdm::offset(frame).unwrap().as_ptr(), 0x0, page_size());
                         // Set the entry frame and set attributes to make a valid PTE.
-                        self.set(frame, Attributes::PTE);
+                        self.set(frame, TableEntryFlags::PTE);
                     }
                 }
 
