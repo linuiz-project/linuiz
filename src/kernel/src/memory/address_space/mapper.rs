@@ -175,7 +175,7 @@ impl Mapper {
         );
     }
 
-    pub fn view_root_page_table(&self) -> &[paging::TableEntry; const { libsys::table_index_size().get() }] {
+    pub fn view_page_table(&self) -> &[paging::TableEntry; const { libsys::table_index_size().get() }] {
         // Safety: Root frame is guaranteed to be valid within the HHDM.
         let table_ptr = Hhdm::offset(self.root_frame).unwrap().as_ptr().cast();
         // Safety: Root frame is guaranteed to be valid for PTEs for the length of the table index size.

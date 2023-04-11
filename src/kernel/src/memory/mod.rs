@@ -1,14 +1,9 @@
-mod page_depth;
-pub use page_depth::*;
-
 pub mod address_space;
 pub mod alloc;
 pub mod io;
 pub mod paging;
 
-use crate::{
-    exceptions::Exception, interrupts::InterruptCell, local::do_catch, memory::address_space::mapper::Mapper,
-};
+use crate::{exceptions::Exception, interrupts::InterruptCell, local::do_catch, memory::address_space::mapper::Mapper};
 use ::alloc::string::String;
 use core::ptr::NonNull;
 use libsys::{page_size, table_index_size, Address, Frame, Page, Virtual};
@@ -98,7 +93,7 @@ pub fn with_kmapper<T>(func: impl FnOnce(&mut Mapper) -> T) -> T {
         })
 }
 
-pub fn new_kmapped_page_table() -> alloc::pmm::Result<Address<Frame>> {
+pub fn copy_kernel_page_table() -> alloc::pmm::Result<Address<Frame>> {
     let table_frame = alloc::pmm::PMM.next_frame()?;
 
     // Safety: Frame is provided by allocator, and so guaranteed to be within the HHDM, and is frame-sized.
@@ -109,7 +104,7 @@ pub fn new_kmapped_page_table() -> alloc::pmm::Result<Address<Frame>> {
         )
     };
     new_table.fill(paging::TableEntry::empty());
-    with_kmapper(|kmapper| new_table.copy_from_slice(kmapper.view_root_page_table()));
+    with_kmapper(|kmapper| new_table.copy_from_slice(kmapper.view_page_table()));
 
     Ok(table_frame)
 }

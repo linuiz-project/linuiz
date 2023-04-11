@@ -99,7 +99,7 @@ impl<A: Allocator + Clone> AddressSpace<A> {
     pub fn new_userspace(allocator: A) -> Self {
         Self::new(
             DEFAULT_USERSPACE_SIZE,
-            unsafe { Mapper::new_unsafe(PageDepth::current(), crate::memory::new_kmapped_page_table().unwrap()) },
+            unsafe { Mapper::new_unsafe(PageDepth::current(), crate::memory::copy_kernel_page_table().unwrap()) },
             allocator,
         )
     }

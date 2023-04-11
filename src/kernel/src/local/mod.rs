@@ -1,19 +1,20 @@
 use crate::{
     exceptions::Exception,
     memory::{
-        address_space::AddressSpace,
+        address_space::{mapper::Mapper, AddressSpace},
         alloc::{
             pmm::{PhysicalAllocator, PMM},
             KMALLOC,
         },
-        paging, Stack,
+        paging::{self, PageDepth},
+        Stack,
     },
     proc::Scheduler,
 };
 use core::{
     alloc::Allocator,
     cell::UnsafeCell,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::atomic::{AtomicBool, Ordering}, num::NonZeroU64,
 };
 use libsys::{Address, Virtual};
 use try_alloc::boxed::TryBox;
@@ -40,7 +41,7 @@ macro_rules! core_local {
     };
 }
 
-core_local!(pub core_id -> u32, || crate::cpu::read_id());
+core_local!(core_id -> u32, || crate::cpu::read_id());
 core_local!(scheduler -> Scheduler, || Scheduler::new(false));
 
 #[cfg(target_arch = "x86_64")]
@@ -57,6 +58,8 @@ core_local!(tss -> crate::arch::x64::structures::tss::TaskStateSegment, || {
 core_local!(apic -> apic::Apic, || {
     apic::Apic::new(Some(|address: usize| unsafe { crate::memory::Hhdm::ptr().add(address) })).unwrap()
 });
+
+core_local!(timer_interval -> NonZeroU64, || NonZeroU64::MAX);
 
 pub const SYSCALL_STACK_SIZE: usize = 0x4000;
 
@@ -138,7 +141,7 @@ pub unsafe fn init(timer_frequency: u16) {
             (frequency / (timer_frequency as u32)) as u64
         };
 
-        (apic, timer_interval)
+        with_timer_interval(with_fn)
     });
 
     with_idt(|idt| {
@@ -186,53 +189,65 @@ pub unsafe fn init(timer_frequency: u16) {
 
     debug_assert_eq!(__core_local_start.as_usize() & libsys::page_mask(), 0);
 
+    let local_kmapper_table = crate::memory::copy_kernel_page_table().unwrap();
+    let local_mapper = Mapper::new_unsafe(PageDepth::current(), local_kmapper_table);
     let core_local_range = __core_local_start.as_usize()..__core_local_end.as_usize();
     for page_base in core_local_range.step_by(libsys::page_size()) {
-        crate::memory::with_kmapper(|kmapper| {
-            let core_local_pml4_frame = PMM.next_frame().unwrap();
-            let pml4_vaddr = crate::memory::Hhdm::offset(core_local_pml4_frame).unwrap();
-
-            let pml4 = paging::TableEntryCell::<libsys::mem::Mut>::new(
-                paging::PageDepth::current(),
-                &mut paging::TableEntry::new(
-                    core_local_pml4_frame,
-                    paging::TableEntryFlags::PRESENT | paging::TableEntryFlags::WRITABLE,
-                ),
-            );
-
-            pml4.with_entry_mut(page, Some(paging::PageDepth::current()), |entry| {
-                
-            })
-        })
+        let page = Address::new(page_base).unwrap();
+        local_mapper.auto_map(page, paging::TableEntryFlags::RW).unwrap();
     }
 
-    #[cfg(target_arch = "x86_64")]
-    crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::write(local_state_ptr.addr() as u64);
+    // #[cfg(target_arch = "x86_64")]
+    // crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::write(local_state_ptr.addr() as u64);
 }
 
 /// Safety
 ///
 /// Caller must ensure control flow is prepared to begin scheduling tasks on the current core.
-pub unsafe fn begin_scheduling() {
-    let local_state = get();
+unsafe fn enable_scheduler() {
+    with_scheduler(|scheduler| {
+        assert!(!scheduler.is_enabled());
+        scheduler.enable();
+    });
+}
 
-    assert!(!local_state.scheduler.is_enabled());
-    local_state.scheduler.enable();
-
-    #[cfg(target_arch = "x86_64")]
-    {
-        assert!(local_state.apic.0.get_timer().get_masked());
+unsafe fn enable_timer() {
+    with_apic(|apic| {
+        assert!(apic.get_timer().get_masked());
 
         // Safety: Calling `begin_scheduling` implies this state change is expected.
         unsafe {
-            local_state.apic.0.get_timer().set_masked(false);
+            apic.get_timer().set_masked(false);
         }
-    }
+    })
+}
 
-    trace!("Core #{} scheduled.", local_state.core_id);
+pub unsafe fn begin_scheduling() {
+    enable_scheduler();
+    enable_timer();
 
+    with_apic(|apic| {
+        match apic.get_timer().get_mode() {
+            // Safety: Control flow expects timer initial count to be set.
+            apic::TimerMode::OneShot => unsafe {
+                let final_count = timer_interval * u64::from(interval_wait.get());
+                apic.set_timer_initial_count(final_count.try_into().unwrap_or(u32::MAX));
+            },
+
+            // Safety: Control flow expects the TSC deadline to be set.
+            apic::TimerMode::TscDeadline => unsafe {
+                crate::arch::x64::registers::msr::IA32_TSC_DEADLINE::set(
+                    core::arch::x86_64::_rdtsc() + (timer_interval * (interval_wait.get() as u64)),
+                );
+            },
+
+            apic::TimerMode::Periodic => unimplemented!(),
+        }
+    });
     // Safety: Calling `begin_scheduling` implies this function is expected to be called.
     unsafe { set_preemption_wait(core::num::NonZeroU16::MIN) };
+
+    with_core_id(|id| trace!("Core #{} scheduled.", id));
 }
 
 /// Safety
@@ -256,22 +271,6 @@ pub unsafe fn set_preemption_wait(interval_wait: core::num::NonZeroU16) {
     #[cfg(target_arch = "x86_64")]
     {
         let (apic, timer_interval) = &get().apic;
-        match apic.get_timer().get_mode() {
-            // Safety: Control flow expects timer initial count to be set.
-            apic::TimerMode::OneShot => unsafe {
-                let final_count = timer_interval * u64::from(interval_wait.get());
-                apic.set_timer_initial_count(final_count.try_into().unwrap_or(u32::MAX));
-            },
-
-            // Safety: Control flow expects the TSC deadline to be set.
-            apic::TimerMode::TscDeadline => unsafe {
-                crate::arch::x64::registers::msr::IA32_TSC_DEADLINE::set(
-                    core::arch::x86_64::_rdtsc() + (timer_interval * (interval_wait.get() as u64)),
-                );
-            },
-
-            apic::TimerMode::Periodic => unimplemented!(),
-        }
     }
 }
 

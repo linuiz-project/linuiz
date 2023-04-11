@@ -247,7 +247,7 @@ unsafe extern "C" fn _entry() -> ! {
                     let entry_point = core::mem::transmute::<_, EntryPoint>(elf.ehdr.e_entry);
                     let address_space = AddressSpace::new(
                         crate::memory::address_space::DEFAULT_USERSPACE_SIZE,
-                        Mapper::new_unsafe(PageDepth::current(), crate::memory::new_kmapped_page_table().unwrap()),
+                        Mapper::new_unsafe(PageDepth::current(), crate::memory::copy_kernel_page_table().unwrap()),
                         &*PMM,
                     );
                     let task = Process::new(Priority::Normal, entry_point, address_space);
@@ -334,7 +334,7 @@ pub(self) unsafe fn kernel_core_setup(core_id: u32) -> ! {
 
     // Ensure we enable interrupts prior to enabling the scheduler.
     crate::interrupts::enable();
-    crate::local::begin_scheduling();
+    crate::local::enable_scheduler();
 
     // This interrupt wait loop is necessary to ensure the core can jump into the scheduler.
     crate::interrupts::wait_loop()

@@ -101,6 +101,10 @@ impl PageDepth {
     pub fn is_max(self) -> bool {
         self == Self::max()
     }
+
+    pub fn index_address(self, index: usize) -> Option<Address<Virtual>> {
+        (index < table_index_size()).then_some(0).and(Address::new(index * self.align()))
+    }
 }
 
 #[derive(Debug)]

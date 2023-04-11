@@ -2,7 +2,6 @@
 pub use x86_64::*;
 #[cfg(target_arch = "x86_64")]
 mod x86_64 {
-    use crate::Pow2Usize;
     use core::num::NonZeroU32;
 
     pub const fn page_shift() -> NonZeroU32 {
@@ -21,12 +20,12 @@ mod x86_64 {
         NonZeroU32::new(9).unwrap()
     }
 
-    pub const fn table_index_size() -> Pow2Usize {
-        Pow2Usize::new(1 << table_index_shift().get()).unwrap()
+    pub const fn table_index_size() -> usize {
+        1 << table_index_shift().get()
     }
 
     pub const fn table_index_mask() -> usize {
-        table_index_size().get().checked_sub(1).unwrap()
+        table_index_size().checked_sub(1).unwrap()
     }
 
     pub const fn phys_canonical_mask() -> usize {
