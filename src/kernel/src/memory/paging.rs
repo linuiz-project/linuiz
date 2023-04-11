@@ -325,7 +325,7 @@ impl<RefKind: InteriorRef> TableEntryCell<'_, RefKind> {
             (page.get().get() >> index_shift >> page_shift().get()) & table_index_mask()
         };
 
-        debug_assert!(entry_index < table_index_size().get(), "entry index exceeds maximum");
+        debug_assert!(entry_index < table_index_size(), "entry index exceeds maximum");
 
         let table_ptr = Hhdm::offset(self.get_frame()).unwrap().as_ptr().cast::<TableEntry>();
         // Safety: `entry_index` guarantees a value that does not exceed the table size.

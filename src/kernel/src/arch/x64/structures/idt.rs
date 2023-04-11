@@ -336,14 +336,22 @@ impl From<Fault<'_>> for crate::exceptions::Exception {
 }
 
 pub fn common_exception_handler(exception: Fault) {
-    match crate::local::provide_exception(exception) {
-        Ok(()) => {}
+    // match crate::local::provide_exception(exception) {
+    //     Ok(()) => {}
 
-        Err(Fault::PageFault { isf: _, gprs: _, err: _, address })
+    //     Err(Fault::PageFault { isf: _, gprs: _, err: _, address })
+    //         // Safety: Function is called once per this page fault exception.
+    //         if unsafe { crate::interrupts::pf_handler(address).is_ok() } => {}
+
+    //     Err(exception) => panic!("{:#X?}", exception),
+    // }
+
+    match exception {
+        Fault::PageFault { isf: _, gprs: _, err: _, address }
             // Safety: Function is called once per this page fault exception.
             if unsafe { crate::interrupts::pf_handler(address).is_ok() } => {}
 
-        Err(exception) => panic!("{:#X?}", exception),
+        exception => panic!("{:#X?}", exception),
     }
 }
 

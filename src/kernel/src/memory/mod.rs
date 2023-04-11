@@ -4,7 +4,7 @@ pub mod mapper;
 pub mod paging;
 
 use self::mapper::Mapper;
-use crate::{exceptions::Exception, interrupts::InterruptCell, local::do_catch};
+use crate::{exceptions::Exception, interrupts::InterruptCell};
 use ::alloc::string::String;
 use core::ptr::NonNull;
 use libsys::{page_size, table_index_size, Address, Frame, Page, Virtual};
@@ -20,6 +20,7 @@ impl Hhdm {
         static HHDM_ADDRESS: Once<Hhdm> = Once::new();
 
         *HHDM_ADDRESS.call_once(|| {
+            #[limine::limine_tag]
             static LIMINE_HHDM: limine::HhdmRequest = limine::HhdmRequest::new(crate::boot::LIMINE_REV);
 
             let address = Address::new(
@@ -101,7 +102,7 @@ pub fn copy_kernel_page_table() -> alloc::pmm::Result<Address<Frame>> {
     let new_table = unsafe {
         core::slice::from_raw_parts_mut(
             Hhdm::offset(table_frame).unwrap().as_ptr().cast::<paging::TableEntry>(),
-            table_index_size().get(),
+            table_index_size(),
         )
     };
     new_table.fill(paging::TableEntry::empty());
@@ -165,7 +166,7 @@ pub unsafe fn catch_read(ptr: NonNull<[u8]>) -> Result<TryBox<[u8]>, Exception> 
         // Safety: Box slice and this iterator are bound by the ptr len.
         let to_ptr = unsafe { copied_mem.as_mut_ptr().add(offset) };
         // Safety: Copy is only invalid if the caller provided an invalid pointer.
-        do_catch(|| unsafe {
+        crate::local::do_catch(|| unsafe {
             core::ptr::copy_nonoverlapping(ptr_addr as *mut u8, to_ptr, ptr_len);
         })?;
     }

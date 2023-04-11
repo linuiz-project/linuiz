@@ -60,6 +60,8 @@ unsafe extern "C" fn _entry() -> ! {
             static KERN_BASE: LinkerSymbol;
         }
 
+        debug!("Preparing kernel memory system.");
+
         // Extract kernel address information.
         let (kernel_phys_addr, kernel_virt_addr) = LIMINE_KERNEL_ADDR
             .get_response()
@@ -213,51 +215,51 @@ unsafe extern "C" fn _entry() -> ! {
     crate::acpi::init_interface();
 
     /* load drivers */
-    {
-        use crate::proc::{EntryPoint, Priority, Process};
-        use elf::{endian::AnyEndian, ElfBytes};
+    // {
+    //     use crate::proc::{EntryPoint, Priority, Process};
+    //     use elf::{endian::AnyEndian, ElfBytes};
 
-        #[limine::limine_tag]
-        static LIMINE_MODULES: limine::ModuleRequest = limine::ModuleRequest::new(crate::boot::LIMINE_REV);
+    //     #[limine::limine_tag]
+    //     static LIMINE_MODULES: limine::ModuleRequest = limine::ModuleRequest::new(crate::boot::LIMINE_REV);
 
-        debug!("Unpacking kernel drivers...");
+    //     debug!("Unpacking kernel drivers...");
 
-        if let Some(modules) = LIMINE_MODULES.get_response() {
-            for module in modules
-                .modules()
-                .iter()
-                // Filter out modules that don't end with our driver postfix.
-                .filter(|module| module.path().ends_with("drivers"))
-            {
-                let archive = tar_no_std::TarArchiveRef::new(module.data());
-                for entry in archive.entries() {
-                    debug!("Attempting to parse driver blob: {}", entry.filename());
+    //     if let Some(modules) = LIMINE_MODULES.get_response() {
+    //         for module in modules
+    //             .modules()
+    //             .iter()
+    //             // Filter out modules that don't end with our driver postfix.
+    //             .filter(|module| module.path().ends_with("drivers"))
+    //         {
+    //             let archive = tar_no_std::TarArchiveRef::new(module.data());
+    //             for entry in archive.entries() {
+    //                 debug!("Attempting to parse driver blob: {}", entry.filename());
 
-                    let Ok(elf) = ElfBytes::<AnyEndian>::minimal_parse(entry.data())
-                     else {
-                         warn!("Failed to parse driver blob into ELF");
-                         continue;
-                     };
+    //                 let Ok(elf) = ElfBytes::<AnyEndian>::minimal_parse(entry.data())
+    //                  else {
+    //                      warn!("Failed to parse driver blob into ELF");
+    //                      continue;
+    //                  };
 
-                    let entry_point = core::mem::transmute::<_, EntryPoint>(elf.ehdr.e_entry);
-                    let address_space = AddressSpace::new(
-                        crate::memory::address_space::DEFAULT_USERSPACE_SIZE,
-                        Mapper::new_unsafe(PageDepth::current(), crate::memory::copy_kernel_page_table().unwrap()),
-                        &*PMM,
-                    );
-                    let task = Process::new(Priority::Normal, entry_point, address_space);
+    //                 let entry_point = core::mem::transmute::<_, EntryPoint>(elf.ehdr.e_entry);
+    //                 let address_space = AddressSpace::new(
+    //                     crate::proc::DEFAULT_USERSPACE_SIZE,
+    //                     Mapper::new_unsafe(PageDepth::current(), crate::memory::copy_kernel_page_table().unwrap()),
+    //                     &*PMM,
+    //                 );
+    //                 let task = Process::new(Priority::Normal, entry_point, address_space);
 
-                    crate::proc::PROCESSES.lock().push_back(task);
-                }
-            }
-        } else {
-            error!("Bootloader did not provide an init module.");
-        };
+    //                 crate::proc::PROCESSES.lock().push_back(task);
+    //             }
+    //         }
+    //     } else {
+    //         error!("Bootloader did not provide an init module.");
+    //     };
 
-        // for (entry, mapper) in artifacts.into_iter().map(Artifact::decompose) {
-        //     let task = Task::new(0, entry, stack, crate::cpu::ArchContext::user_context())
-        // }
-    }
+    //     // for (entry, mapper) in artifacts.into_iter().map(Artifact::decompose) {
+    //     //     let task = Task::new(0, entry, stack, crate::cpu::ArchContext::user_context())
+    //     // }
+    // }
 
     /* smp */
     {
@@ -280,14 +282,14 @@ unsafe extern "C" fn _entry() -> ! {
                     trace!("Starting processor: ID P{}/L{}", cpu_info.processor_id(), cpu_info.lapic_id());
 
                     if get_parameters().smp {
-                        extern "C" fn _smp_entry(info: &limine::CpuInfo) -> ! {
+                        extern "C" fn _smp_entry(_: &limine::CpuInfo) -> ! {
                             crate::cpu::setup();
 
                             // Safety: All currently referenced memory should also be mapped in the kernel page tables.
                             crate::memory::with_kmapper(|kmapper| unsafe { kmapper.swap_into() });
 
                             // Safety: Function is called only once for this core.
-                            unsafe { kernel_core_setup(info.lapic_id()) }
+                            unsafe { kernel_core_setup() }
                         }
 
                         // If smp is enabled, jump to the smp entry function.
@@ -317,19 +319,19 @@ unsafe extern "C" fn _entry() -> ! {
     });
     debug!("Bootloader memory reclaimed.");
 
-    kernel_core_setup(0)
+    kernel_core_setup()
 }
 
 /// ### Safety
 ///
 /// This function should only ever be called once per core.
 #[inline(never)]
-pub(self) unsafe fn kernel_core_setup(core_id: u32) -> ! {
-    crate::local::init(core_id, 1000);
+pub(self) unsafe fn kernel_core_setup() -> ! {
+    crate::local::init(1000);
 
     // Ensure we enable interrupts prior to enabling the scheduler.
     crate::interrupts::enable();
-    crate::local::enable_scheduler();
+    crate::local::begin_scheduling();
 
     // This interrupt wait loop is necessary to ensure the core can jump into the scheduler.
     crate::interrupts::wait_loop()

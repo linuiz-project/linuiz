@@ -1,4 +1,8 @@
-use crate::memory::{mapper::Mapper, paging, paging::Attributes, paging::PageDepth};
+use crate::memory::{
+    mapper::Mapper,
+    paging,
+    paging::{PageDepth, TableEntryFlags},
+};
 use alloc::vec::Vec;
 use core::{alloc::Allocator, num::NonZeroUsize, ops::Range, ptr::NonNull};
 use libsys::{page_size, Address, Page, Virtual};
@@ -193,9 +197,10 @@ impl<A: Allocator + Clone> AddressSpace<A> {
             .try_for_each(|page| {
                 let page = page.ok_or(Error::MalformedAddress)?;
                 self.mapper.auto_map(page, TableEntryFlags::from(flags)).map_err(Error::from)
-            });
-
-        Ok(NonNull::slice_from_raw_parts(NonNull::new(address.as_ptr()).unwrap(), page_count.get() * page_size()))
+            })
+            .map(|_| {
+                NonNull::slice_from_raw_parts(NonNull::new(address.as_ptr()).unwrap(), page_count.get() * page_size())
+            })
     }
 
     /// Attempts to map a page to a real frame, only if the [`PageAttributes::DEMAND`] bit is set.

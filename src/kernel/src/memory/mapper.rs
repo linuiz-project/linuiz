@@ -175,11 +175,11 @@ impl Mapper {
         );
     }
 
-    pub fn view_page_table(&self) -> &[paging::TableEntry; const { libsys::table_index_size().get() }] {
+    pub fn view_page_table(&self) -> &[paging::TableEntry; const { libsys::table_index_size() }] {
         // Safety: Root frame is guaranteed to be valid within the HHDM.
         let table_ptr = Hhdm::offset(self.root_frame).unwrap().as_ptr().cast();
         // Safety: Root frame is guaranteed to be valid for PTEs for the length of the table index size.
-        let table = unsafe { core::slice::from_raw_parts(table_ptr, libsys::table_index_size().get()) };
+        let table = unsafe { core::slice::from_raw_parts(table_ptr, libsys::table_index_size()) };
         // Safety: Table was created to match the size required by return type.
         unsafe { table.try_into().unwrap_unchecked() }
     }

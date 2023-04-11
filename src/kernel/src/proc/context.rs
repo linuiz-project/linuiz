@@ -1,6 +1,7 @@
 use crate::uptr;
 
 #[cfg(target_arch = "x86_64")]
+#[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Registers {
     pub rax: u64,
@@ -48,6 +49,7 @@ impl Registers {
     }
 }
 
+#[repr(C)]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct State {
     pub ip: uptr,

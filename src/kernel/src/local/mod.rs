@@ -1,65 +1,42 @@
 use crate::{
     exceptions::Exception,
-    memory::{
-        address_space::{mapper::Mapper, AddressSpace},
-        alloc::{
-            pmm::{PhysicalAllocator, PMM},
-            KMALLOC,
-        },
-        paging::{self, PageDepth},
-        Stack,
-    },
-    proc::Scheduler,
+    memory::alloc::{pmm::PhysicalAllocator, KMALLOC},
+    proc::{AddressSpace, Scheduler},
 };
+use alloc::boxed::Box;
 use core::{
     alloc::Allocator,
     cell::UnsafeCell,
-    sync::atomic::{AtomicBool, Ordering}, num::NonZeroU64,
+    num::NonZeroU64,
+    ptr::NonNull,
+    sync::atomic::{AtomicBool, Ordering},
 };
-use libsys::{Address, Virtual};
-use try_alloc::boxed::TryBox;
 
 pub(self) const US_PER_SEC: u32 = 1000000;
 pub(self) const US_WAIT: u32 = 10000;
 pub(self) const US_FREQ_FACTOR: u32 = US_PER_SEC / US_WAIT;
 
-bitflags::bitflags! {}
-macro_rules! core_local {
-    ($vis:vis $name:ident -> $ty:ty, $init:expr) => {
-        paste::paste! {
-            pub fn [<with_ $name>]<T>(with_fn: impl FnOnce(&mut $ty) -> T) -> T {
-                #[doc(hidden)]
-                #[link_section = ".core_local"]
-                #[allow(non_upper_case_globals)]
-                static [<___ $name>]: spin::Once<spin::Mutex<$ty>> = spin::Once::new();
+pub const STACK_SIZE: usize = 0x10000;
 
-                let lock = ([<___ $name>]).call_once(|| spin::Mutex::new(($init)()));
-                let mut guard = lock.lock();
-                with_fn(&mut guard)
-            }
-        }
-    };
+struct State {
+    syscall_stack_ptr: NonNull<u8>,
+    syscall_stack: [u8; STACK_SIZE],
+
+    core_id: u32,
+    scheduler: Scheduler,
+
+    #[cfg(target_arch = "x86_64")]
+    idt: crate::arch::x64::structures::idt::InterruptDescriptorTable,
+    #[cfg(target_arch = "x86_64")]
+    tss: crate::arch::x64::structures::tss::TaskStateSegment,
+    #[cfg(target_arch = "x86_64")]
+    apic: apic::Apic,
+
+    timer_interval: Option<NonZeroU64>,
+
+    catch_exception: AtomicBool,
+    exception: UnsafeCell<Option<Exception>>,
 }
-
-core_local!(core_id -> u32, || crate::cpu::read_id());
-core_local!(scheduler -> Scheduler, || Scheduler::new(false));
-
-#[cfg(target_arch = "x86_64")]
-core_local!(idt -> crate::arch::x64::structures::idt::InterruptDescriptorTable, || {
-    crate::arch::x64::structures::idt::InterruptDescriptorTable::new()
-});
-
-#[cfg(target_arch = "x86_64")]
-core_local!(tss -> crate::arch::x64::structures::tss::TaskStateSegment, || {
-    crate::arch::x64::structures::tss::TaskStateSegment::new()
-});
-
-#[cfg(target_arch = "x86_64")]
-core_local!(apic -> apic::Apic, || {
-    apic::Apic::new(Some(|address: usize| unsafe { crate::memory::Hhdm::ptr().add(address) })).unwrap()
-});
-
-core_local!(timer_interval -> NonZeroU64, || NonZeroU64::MAX);
 
 pub const SYSCALL_STACK_SIZE: usize = 0x4000;
 
@@ -69,8 +46,9 @@ pub enum ExceptionCatcher {
     Idle,
 }
 
-// catching: AtomicBool,
-// exception: UnsafeCell<Option<Exception>>,
+// TODO
+//
+//
 
 /// Initializes the core-local state structure.
 ///
@@ -79,15 +57,77 @@ pub enum ExceptionCatcher {
 /// This function invariantly assumes it will only be called once.
 #[allow(clippy::too_many_lines)]
 pub unsafe fn init(timer_frequency: u16) {
-    extern "C" {
-        static __core_local_start: libkernel::LinkerSymbol;
-        static __core_local_end: libkernel::LinkerSymbol;
+    let mut state = Box::new(State {
+        syscall_stack_ptr: NonNull::dangling(),
+        syscall_stack: [0u8; STACK_SIZE],
+
+        core_id: crate::cpu::read_id(),
+        scheduler: Scheduler::new(false),
+
+        #[cfg(target_arch = "x86_64")]
+        idt: crate::arch::x64::structures::idt::InterruptDescriptorTable::new(),
+        #[cfg(target_arch = "x86_64")]
+        tss: crate::arch::x64::structures::tss::TaskStateSegment::new(),
+        #[cfg(target_arch = "x86_64")]
+        apic: apic::Apic::new(Some(|address: usize| crate::memory::Hhdm::ptr().add(address))).unwrap(),
+
+        timer_interval: None,
+
+        catch_exception: AtomicBool::new(false),
+        exception: UnsafeCell::new(None),
+    });
+
+    /* init IDT */
+    {
+        use crate::arch::x64::structures::idt;
+
+        let idt = &mut state.idt;
+        idt::set_exception_handlers(idt);
+        idt::set_stub_handlers(idt);
+        idt.load_unsafe();
     }
 
-    with_apic(|apic| {
+    /* init TSS */
+    {
+        use crate::arch::{
+            reexport::x86_64::VirtAddr,
+            x64::structures::{idt::StackTableIndex, tss},
+        };
+        use core::num::NonZeroUsize;
+
+        fn allocate_tss_stack(pages: NonZeroUsize) -> VirtAddr {
+            VirtAddr::from_ptr(
+                KMALLOC
+                    .allocate(
+                        // Safety: Values provided are known-valid.
+                        unsafe { core::alloc::Layout::from_size_align_unchecked(pages.get() * 0x1000, 0x10) },
+                    )
+                    .unwrap()
+                    .as_non_null_ptr()
+                    .as_ptr(),
+            )
+        }
+
+        let tss = &mut state.tss;
+
+        // TODO guard pages for these stacks ?
+        tss.privilege_stack_table[0] = allocate_tss_stack(NonZeroUsize::new_unchecked(5));
+        tss.interrupt_stack_table[StackTableIndex::Debug as usize] = allocate_tss_stack(NonZeroUsize::new_unchecked(2));
+        tss.interrupt_stack_table[StackTableIndex::NonMaskable as usize] =
+            allocate_tss_stack(NonZeroUsize::new_unchecked(2));
+        tss.interrupt_stack_table[StackTableIndex::DoubleFault as usize] =
+            allocate_tss_stack(NonZeroUsize::new_unchecked(2));
+        tss.interrupt_stack_table[StackTableIndex::MachineCheck as usize] =
+            allocate_tss_stack(NonZeroUsize::new_unchecked(2));
+
+        tss::load_local(tss::ptr_as_descriptor(NonNull::new(tss as *const _ as *mut _).unwrap()))
+    }
+
+    /* init APIC */
+    {
         use crate::{arch::x64, interrupts::Vector};
 
-        let apic = apic::Apic::new(Some(|address: usize| crate::memory::Hhdm::ptr().add(address))).unwrap();
+        let apic = &mut state.apic;
 
         // Bring APIC to known state.
         apic.software_reset(255, 254, 253);
@@ -141,176 +181,133 @@ pub unsafe fn init(timer_frequency: u16) {
             (frequency / (timer_frequency as u32)) as u64
         };
 
-        with_timer_interval(with_fn)
-    });
-
-    with_idt(|idt| {
-        use crate::arch::x64::structures::idt;
-
-        idt::set_exception_handlers(&mut idt);
-        idt::set_stub_handlers(&mut idt);
-        idt.load_unsafe();
-
-        idt
-    });
-
-    with_tss(|tss| {
-        use crate::arch::{
-            reexport::x86_64::VirtAddr,
-            x64::structures::{idt::StackTableIndex, tss},
-        };
-        use core::num::NonZeroUsize;
-
-        let Ok(mut tss) = TryBox::new(tss::TaskStateSegment::new()) else { crate::memory::out_of_memory() };
-
-        fn allocate_tss_stack(pages: NonZeroUsize) -> VirtAddr {
-            VirtAddr::from_ptr(
-                KMALLOC
-                    .allocate(
-                        // Safety: Values provided are known-valid.
-                        unsafe { core::alloc::Layout::from_size_align_unchecked(pages.get() * 0x1000, 0x10) },
-                    )
-                    .unwrap()
-                    .as_non_null_ptr()
-                    .as_ptr(),
-            )
-        }
-
-        // TODO guard pages for these stacks ?
-        tss.privilege_stack_table[0] = allocate_tss_stack(NonZeroUsize::new_unchecked(5));
-        tss.interrupt_stack_table[StackTableIndex::Debug as usize] = allocate_tss_stack(NonZeroUsize::new_unchecked(2));
-        tss.interrupt_stack_table[StackTableIndex::NonMaskable as usize] =
-            allocate_tss_stack(NonZeroUsize::new_unchecked(2));
-        tss.interrupt_stack_table[StackTableIndex::DoubleFault as usize] =
-            allocate_tss_stack(NonZeroUsize::new_unchecked(2));
-        tss.interrupt_stack_table[StackTableIndex::MachineCheck as usize] =
-            allocate_tss_stack(NonZeroUsize::new_unchecked(2));
-    });
-
-    debug_assert_eq!(__core_local_start.as_usize() & libsys::page_mask(), 0);
-
-    let local_kmapper_table = crate::memory::copy_kernel_page_table().unwrap();
-    let local_mapper = Mapper::new_unsafe(PageDepth::current(), local_kmapper_table);
-    let core_local_range = __core_local_start.as_usize()..__core_local_end.as_usize();
-    for page_base in core_local_range.step_by(libsys::page_size()) {
-        let page = Address::new(page_base).unwrap();
-        local_mapper.auto_map(page, paging::TableEntryFlags::RW).unwrap();
+        state.timer_interval = NonZeroU64::new(timer_interval);
     }
 
-    // #[cfg(target_arch = "x86_64")]
-    // crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::write(local_state_ptr.addr() as u64);
+    state.syscall_stack_ptr = NonNull::new(state.syscall_stack.as_mut_ptr().add(state.syscall_stack.len())).unwrap();
+    let state_ptr = Box::leak(state) as *mut State;
+    #[cfg(target_arch = "x86_64")]
+    crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::write(state_ptr.addr() as u64);
 }
 
-/// Safety
-///
-/// Caller must ensure control flow is prepared to begin scheduling tasks on the current core.
-unsafe fn enable_scheduler() {
-    with_scheduler(|scheduler| {
-        assert!(!scheduler.is_enabled());
-        scheduler.enable();
-    });
+fn get_state_ptr() -> Option<NonNull<State>> {
+    let kernel_gs_usize = usize::try_from(crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::read()).unwrap();
+    NonNull::new(kernel_gs_usize as *mut State)
 }
 
-unsafe fn enable_timer() {
-    with_apic(|apic| {
-        assert!(apic.get_timer().get_masked());
+fn get_state() -> &'static State {
+    unsafe { get_state_ptr().expect("state uninitialized").as_ref() }
+}
 
-        // Safety: Calling `begin_scheduling` implies this state change is expected.
-        unsafe {
-            apic.get_timer().set_masked(false);
-        }
-    })
+fn get_state_mut() -> &'static mut State {
+    unsafe { get_state_ptr().expect("state uninitialized").as_mut() }
+}
+
+/// Returns the generated ID for the local core.
+pub fn get_core_id() -> u32 {
+    get_state().core_id
 }
 
 pub unsafe fn begin_scheduling() {
-    enable_scheduler();
-    enable_timer();
+    let state = get_state_mut();
 
-    with_apic(|apic| {
+    // Enable scheduler ...
+    let scheduler = &mut state.scheduler;
+    assert!(!scheduler.is_enabled());
+    scheduler.enable();
+
+    // Enable APIC timer ...
+    let apic = &mut state.apic;
+    assert!(apic.get_timer().get_masked());
+    // Safety: Calling `begin_scheduling` implies this state change is expected.
+    unsafe {
+        apic.get_timer().set_masked(false);
+    }
+
+    // Safety: Calling `begin_scheduling` implies this function is expected to be called.
+    unsafe {
+        set_preemption_wait(core::num::NonZeroU16::MIN);
+    }
+}
+
+/// ### Safety
+///
+/// Caller must ensure that context switching to a new task will not cause undefined behaviour.
+pub unsafe fn next_task(state: &mut crate::proc::State, regs: &mut crate::proc::Registers) {
+    get_state_mut().scheduler.next_task(state, regs);
+}
+
+pub unsafe fn end_of_interrupt() {
+    #[cfg(target_arch = "x86_64")]
+    get_state().apic.end_of_interrupt();
+}
+
+/// ### Safety
+///
+/// Caller must ensure that setting a new preemption wait will not cause undefined behaviour.
+pub unsafe fn set_preemption_wait(interval_wait: core::num::NonZeroU16) {
+    let state = get_state_mut();
+    let timer_interval = state.timer_interval.unwrap();
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        let apic = &mut state.apic;
+
         match apic.get_timer().get_mode() {
             // Safety: Control flow expects timer initial count to be set.
             apic::TimerMode::OneShot => unsafe {
-                let final_count = timer_interval * u64::from(interval_wait.get());
+                let final_count = timer_interval.get() * u64::from(interval_wait.get());
                 apic.set_timer_initial_count(final_count.try_into().unwrap_or(u32::MAX));
             },
 
             // Safety: Control flow expects the TSC deadline to be set.
             apic::TimerMode::TscDeadline => unsafe {
                 crate::arch::x64::registers::msr::IA32_TSC_DEADLINE::set(
-                    core::arch::x86_64::_rdtsc() + (timer_interval * (interval_wait.get() as u64)),
+                    core::arch::x86_64::_rdtsc() + (timer_interval.get() * u64::from(interval_wait.get())),
                 );
             },
 
             apic::TimerMode::Periodic => unimplemented!(),
         }
-    });
-    // Safety: Calling `begin_scheduling` implies this function is expected to be called.
-    unsafe { set_preemption_wait(core::num::NonZeroU16::MIN) };
-
-    with_core_id(|id| trace!("Core #{} scheduled.", id));
-}
-
-/// Safety
-///
-/// Caller must ensure that context switching to a new task will not cause undefined behaviour.
-pub unsafe fn next_task(state: &mut crate::proc::State, regs: &mut crate::proc::Registers) {
-    let local_state = get();
-    local_state.scheduler.next_task(state, regs);
-}
-
-#[inline]
-pub unsafe fn end_of_interrupt() {
-    #[cfg(target_arch = "x86_64")]
-    get().apic.0.end_of_interrupt();
-}
-
-/// Safety
-///
-/// Caller must ensure that setting a new preemption wait will not cause undefined behaviour.
-pub unsafe fn set_preemption_wait(interval_wait: core::num::NonZeroU16) {
-    #[cfg(target_arch = "x86_64")]
-    {
-        let (apic, timer_interval) = &get().apic;
     }
 }
 
 /// Allows safely running a function that manipulates the current task's address space, or returns `None` if there's no current task.
 pub fn with_current_address_space<T>(with_fn: impl FnOnce(&mut AddressSpace<PhysicalAllocator>) -> T) -> Option<T> {
-    get().scheduler.process().map(|task| crate::interrupts::without(|| task.with_address_space(with_fn)))
+    get_state_mut().scheduler.process_mut().map(|process| process.with_address_space(with_fn))
 }
 
 pub fn provide_exception<T: Into<Exception>>(exception: T) -> Result<(), T> {
-    let local_state = get();
+    let state = get_state_mut();
+    if state.catch_exception.load(Ordering::Relaxed) {
+        let exception_cell = state.exception.get_mut();
 
-    if local_state.catching.load(Ordering::Relaxed) {
-        debug_assert!(local_state.exception.get_mut().is_none());
-
-        *local_state.exception.get_mut() = Some(exception.into());
-
+        debug_assert!(exception_cell.is_none());
+        *exception_cell = Some(exception.into());
         Ok(())
     } else {
         Err(exception)
     }
 }
 
-/// Safety
+/// ### Safety
 ///
 /// Caller must ensure `do_func` is effectively stackless, since no stack cleanup will occur on an exception.
 pub unsafe fn do_catch<T>(do_func: impl FnOnce() -> T) -> Result<T, Exception> {
-    let local_state = get();
+    let state = get_state_mut();
 
-    debug_assert!(local_state.exception.get_mut().is_none());
+    debug_assert!(state.exception.get_mut().is_none());
 
-    local_state
-        .catching
+    state
+        .catch_exception
         .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
         .expect("nested exception catching is not supported");
 
     let do_func_result = do_func();
-    let result = local_state.exception.get_mut().take().map_or(Ok(do_func_result), Err);
+    let result = state.exception.get_mut().take().map_or(Ok(do_func_result), Err);
 
-    local_state
-        .catching
+    state
+        .catch_exception
         .compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed)
         .expect("inconsistent local catch state");
 

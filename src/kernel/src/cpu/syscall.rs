@@ -1,4 +1,5 @@
 #[cfg(target_arch = "x86_64")]
+#[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Registers {
     pub r15: u64,
@@ -24,7 +25,7 @@ pub unsafe extern "sysv64" fn sanitize(
     _arg4: u64,
     ret_ip: u64,
     ret_sp: u64,
-    mut regs: Registers,
+    mut _regs: Registers,
 ) -> crate::proc::State {
     let syscall = match vector {
         0x100 => {
