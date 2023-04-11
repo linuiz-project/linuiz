@@ -4,14 +4,9 @@ pub fn get_parameters() -> &'static params::Parameters {
     params::PARAMETERS.get().expect("parameters have not yet been parsed")
 }
 
+use crate::memory::{alloc::pmm::PMM, paging::PageDepth};
 use libkernel::LinkerSymbol;
 use libsys::{page_size, Address};
-
-use crate::memory::{
-    address_space::{mapper::Mapper, AddressSpace},
-    alloc::pmm::PMM,
-    paging::PageDepth,
-};
 
 pub static KERNEL_HANDLE: spin::Lazy<uuid::Uuid> = spin::Lazy::new(uuid::Uuid::new_v4);
 

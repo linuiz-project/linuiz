@@ -1,9 +1,10 @@
-pub mod address_space;
 pub mod alloc;
 pub mod io;
+pub mod mapper;
 pub mod paging;
 
-use crate::{exceptions::Exception, interrupts::InterruptCell, local::do_catch, memory::address_space::mapper::Mapper};
+use self::mapper::Mapper;
+use crate::{exceptions::Exception, interrupts::InterruptCell, local::do_catch};
 use ::alloc::string::String;
 use core::ptr::NonNull;
 use libsys::{page_size, table_index_size, Address, Frame, Page, Virtual};
