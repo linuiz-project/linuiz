@@ -2,7 +2,6 @@
 #![no_main]
 #![feature(
     error_in_core,                          // #103765 <https://github.com/rust-lang/rust/issues/103765>
-    is_some_and,                            // #93050 <https://github.com/rust-lang/rust/issues/93050>
     result_flattening,                      // #70142 <https://github.com/rust-lang/rust/issues/70142>
     map_try_insert,                         // #82766 <https://github.com/rust-lang/rust/issues/82766>
     asm_const,
@@ -68,7 +67,7 @@ mod cpu;
 mod exceptions;
 mod init;
 mod interrupts;
-mod local_state;
+mod local;
 mod logging;
 mod memory;
 mod panic;

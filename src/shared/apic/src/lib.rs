@@ -1,6 +1,5 @@
 #![no_std]
 #![allow(non_camel_case_types, non_upper_case_globals)]
-#![feature(exclusive_range_pattern)]
 
 use bit_field::BitField;
 use core::marker::PhantomData;
@@ -178,7 +177,7 @@ pub const x2APIC_BASE_MSR_ADDR: u32 = 0x800;
 /// Type for representing the mode of the core-local APIC.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Type {
-    xAPIC(*mut u8),
+    xAPIC(usize),
     x2APIC,
 }
 
@@ -195,7 +194,7 @@ impl Apic {
             let map_xapic_fn = map_xapic_fn.expect("no mapping function provided for xAPIC");
             let xapic_ptr = map_xapic_fn(xAPIC_BASE_ADDR);
 
-            Some(Self(Type::xAPIC(xapic_ptr)))
+            Some(Self(Type::xAPIC(xapic_ptr as usize)))
         } else {
             None
         }
@@ -206,7 +205,7 @@ impl Apic {
         match self.0 {
             // Safety: Address provided for xAPIC mapping is required to be valid.
             Type::xAPIC(address) => unsafe {
-                address.add(register.xapic_offset()).cast::<u32>().read_volatile() as u64
+                (address as *mut u8).add(register.xapic_offset()).cast::<u32>().read_volatile() as u64
             },
 
             // Safety: MSR addresses are known-valid from IA32 SDM.
@@ -219,7 +218,9 @@ impl Apic {
     /// Writing an invalid value to a register is undefined behaviour.
     unsafe fn write_register(&self, register: Register, value: u64) {
         match self.0 {
-            Type::xAPIC(address) => address.add(register.xapic_offset()).cast::<u32>().write_volatile(value as u32),
+            Type::xAPIC(address) => {
+                (address as *mut u8).add(register.xapic_offset()).cast::<u32>().write_volatile(value as u32)
+            }
             Type::x2APIC => msr::wrmsr(register.x2apic_msr(), value),
         }
     }
@@ -420,7 +421,7 @@ impl<T: LocalVectorVariant> LocalVector<'_, T> {
     #[inline]
     pub fn get_vector(&self) -> Option<u8> {
         match self.0.read_register(T::REGISTER).get_bits(0..8) {
-            0..32 => None,
+            vector if (0..32).contains(&vector) => None,
             vector => Some(vector as u8),
         }
     }
