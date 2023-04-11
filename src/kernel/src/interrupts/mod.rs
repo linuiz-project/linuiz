@@ -1,13 +1,15 @@
 mod instructions;
 pub use instructions::*;
 
-use crate::cpu::{ArchContext, ControlContext};
 use libsys::{Address, Virtual};
 use num_enum::TryFromPrimitive;
+
+use crate::proc::{Registers, State};
 
 /// Delivery mode for IPIs.
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum InterruptDeliveryMode {
     Fixed = 0b000,
     LowPriority = 0b001,
@@ -20,6 +22,7 @@ pub enum InterruptDeliveryMode {
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum DeliveryMode {
     Fixed = 0b000,
     LowPriority = 0b001,
@@ -50,7 +53,7 @@ pub enum Vector {
     Error = 0x3C,
     LINT0 = 0x3D,
     LINT1 = 0x3E,
-    SPURIOUS = 0x3F,
+    Spurious = 0x3F,
 }
 
 /// Indicates what type of error the common page fault handler encountered.
@@ -61,10 +64,10 @@ pub struct PageFaultHandlerError;
 ///
 /// This function should only be called in the case of passing context to handle a page fault.
 /// Calling this function more than once and/or outside the context of a page fault is undefined behaviour.
-#[no_mangle]
+#[doc(hidden)]
 #[repr(align(0x10))]
 pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandlerError> {
-    crate::local_state::with_current_address_space(|addr_space| {
+    crate::local::with_current_address_space(|addr_space| {
         addr_space.try_demand(Address::new_truncate(address.get())).ok()
     })
     .flatten()
@@ -77,15 +80,15 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
 /// Calling this function more than once and/or outside the context of an interrupt is undefined behaviour.
 #[doc(hidden)]
 #[repr(align(0x10))]
-pub unsafe fn irq_handler(irq_vector: u64, ctrl_flow_context: &mut ControlContext, arch_context: &mut ArchContext) {
+pub unsafe fn irq_handler(irq_vector: u64, state: &mut State, regs: &mut Registers) {
     match Vector::try_from(irq_vector) {
-        Ok(Vector::Timer) => crate::local_state::next_task(ctrl_flow_context, arch_context),
+        Ok(Vector::Timer) => crate::local::next_task(state, regs),
 
         _vector_result => {}
     }
 
     #[cfg(target_arch = "x86_64")]
-    crate::local_state::end_of_interrupt();
+    crate::local::end_of_interrupt();
 }
 
 /// Provides access to the contained instance of `T`, ensuring interrupts are disabled while it is borrowed.

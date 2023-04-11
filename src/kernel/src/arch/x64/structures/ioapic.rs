@@ -10,7 +10,7 @@ pub struct RedirectionEntry(u64);
 
 impl RedirectionEntry {
     pub fn get_vector(&self) -> u8 {
-        self.0.get_bits(0..8) as u8
+        self.0.get_bits(0..8).try_into().unwrap()
     }
 
     pub fn set_vector(&mut self, vector: u8) {
@@ -21,7 +21,7 @@ impl RedirectionEntry {
     }
 
     pub fn get_delivery_mode(&self) -> interrupts::DeliveryMode {
-        interrupts::DeliveryMode::try_from(self.0.get_bits(8..11) as u8)
+        interrupts::DeliveryMode::try_from(u8::try_from(self.0.get_bits(8..11)).unwrap())
             .expect("unexpectedly failed to convert interrupt delivery mode")
     }
 
@@ -90,7 +90,7 @@ impl RedirectionEntry {
     }
 
     pub fn get_destination_id(&self) -> u8 {
-        self.0.get_bits(56..64) as u8
+        self.0.get_bits(56..64).try_into().unwrap()
     }
 
     pub fn set_destination_id(&mut self, dest_id: u8) {

@@ -102,13 +102,13 @@ impl InterruptLines {
 }
 
 /// Simple PIC type for manipulating the master or slave PIC of the 8259 chained PICs.
-struct PIC {
+struct Pic {
     offset: u8,
     command: WriteOnlyPort<u8>,
     data: ReadWritePort<u8>,
 }
 
-impl PIC {
+impl Pic {
     /// Returns whether or not the PIC handles the given interrupt.
     #[inline]
     fn handles_interrupt(&self, interrupt: InterruptOffset) -> bool {
@@ -125,26 +125,30 @@ impl PIC {
 
 /// A pair of chained PIC controllers.
 ///
-/// REMARK: This is the standard setup on x86.
-pub struct Pics([PIC; 2]);
+/// This is the standard setup on x86.
+pub struct ChainedPic([Pic; 2]);
 
-impl Pics {
+impl ChainedPic {
     /// Create a new interface for the standard PIC1 and PIC2 controllers, specifying the desired interrupt offsets.
+    ///
+    /// ### Safety
+    ///
+    /// `base_irq` must be a valid, nominal value for the current environment.
     pub const unsafe fn new(base_irq: u8) -> Self {
         Self([
-            PIC { offset: base_irq, command: WriteOnlyPort::new(0x20), data: ReadWritePort::new(0x21) },
-            PIC { offset: base_irq + 8, command: WriteOnlyPort::new(0xA0), data: ReadWritePort::new(0xA1) },
+            Pic { offset: base_irq, command: WriteOnlyPort::new(0x20), data: ReadWritePort::new(0x21) },
+            Pic { offset: base_irq + 8, command: WriteOnlyPort::new(0xA0), data: ReadWritePort::new(0xA1) },
         ])
     }
 
     /// Initializes the chained PICs. They're initialized together (at the same time) because
     /// I/O operations might not be intantaneous on older processors.
     ///
-    /// Safety
+    /// ### Safety
     ///
     /// Setting new enabled interrupt lines has the possibility of adversely affecting control flow
-    ///         unrelated to this function, or even this core's context. It is thus the responsibility of the
-    ///         caller to ensure modifying the enabled lines will not result in unwanted behaviour.
+    /// unrelated to this function, or even this core's context. It is thus the responsibility of the
+    /// caller to ensure modifying the enabled lines will not result in unwanted behaviour.
     pub unsafe fn init(&mut self, enabled: InterruptLines) {
         // We need to add a delay between writes to the PICs, especially on older motherboards.
         // This is because the PIC may not be fast enough to react to the previous command before

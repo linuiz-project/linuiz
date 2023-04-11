@@ -1,12 +1,13 @@
 pub mod instructions;
 pub mod registers;
 pub mod structures;
+pub mod syscall;
 
 pub mod cpuid {
     pub use raw_cpuid::*;
     use spin::Lazy;
 
-    pub static CPUID: Lazy<CpuId> = Lazy::new(|| CpuId::new());
+    pub static CPUID: Lazy<CpuId> = Lazy::new(CpuId::new);
     pub static FEATURE_INFO: Lazy<FeatureInfo> = Lazy::new(|| CPUID.get_feature_info().expect("no CPUID.01H support"));
     pub static EXT_FEATURE_INFO: Lazy<Option<ExtendedFeatures>> = Lazy::new(|| CPUID.get_extended_feature_info());
     pub static EXT_FUNCTION_INFO: Lazy<Option<ExtendedProcessorFeatureIdentifiers>> =
@@ -15,6 +16,7 @@ pub mod cpuid {
 }
 
 /// Gets the ID of the current core.
+#[allow(clippy::map_unwrap_or)]
 pub fn get_cpu_id() -> u32 {
     use cpuid::{CPUID, FEATURE_INFO};
 

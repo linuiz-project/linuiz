@@ -1,10 +1,7 @@
-mod contexts;
 mod setup;
-mod syscall;
-
-pub use contexts::*;
 pub use setup::*;
-pub use syscall::*;
+
+pub mod syscall;
 
 pub fn read_id() -> u32 {
     #[cfg(target_arch = "x86_64")]

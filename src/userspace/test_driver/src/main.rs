@@ -39,5 +39,7 @@ extern "C" fn _start() -> ! {
         }
     }
 
-    loop {}
+    loop {
+        core::hint::spin_loop();
+    }
 }

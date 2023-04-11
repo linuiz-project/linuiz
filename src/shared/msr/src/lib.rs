@@ -8,7 +8,7 @@
 
 use bit_field::BitField;
 
-/// Safety
+/// ### Safety
 ///
 /// * Caller must ensure the address is valid.
 #[inline]
@@ -30,7 +30,7 @@ pub unsafe fn rdmsr(address: u32) -> u64 {
     value
 }
 
-/// Safety
+/// ### Safety
 ///
 /// * Caller must ensure the address is valid.
 /// * Caller must ensure writing the value to the MSR address will not result in undefined behaviour.
@@ -55,6 +55,10 @@ macro_rules! generic_msr {
                 unsafe { $crate::rdmsr($addr) }
             }
 
+            /// ### Safety
+            ///
+            /// Writing arbitrary data to an MSR is undefined behaviour. Caller must ensure
+            /// what is written is valid for the given MSR address.
             #[inline]
             pub unsafe fn write(value: u64) {
                 $crate::wrmsr($addr, value);
@@ -110,7 +114,7 @@ impl IA32_EFER {
 
     /// Sets the IA32_EFER.LME (long-mode enable) bit.
     ///
-    /// Safety
+    /// ### Safety
     ///
     /// This function does not check if long mode is supported, or if the core is prepared to enter it.
     #[inline]
@@ -120,7 +124,7 @@ impl IA32_EFER {
 
     /// Sets the IA32_EFER.SCE (syscall/syret enable) bit.
     ///
-    /// Safety
+    /// ### Safety
     ///
     /// Caller must ensure software expects system calls to be enabled or disabled.
     #[inline]
@@ -137,7 +141,7 @@ impl IA32_EFER {
 
     /// Sets the IA32_EFER.NXE (no-execute enable) bit.
     ///
-    /// Safety
+    /// ### Safety
     ///
     /// This function does not check if the NX bit is actually supported.
     #[inline]
@@ -159,9 +163,9 @@ impl IA32_STAR {
     /// > Target stack segment:      Reads a non-NULL selector from IA32_STAR\[63:48\] + 8
     /// > ...
     ///
-    /// Safety
+    /// ### Safety
     ///
-    /// * Caller must ensure the low and high selectors are valid.
+    /// Invalid low and high selectors will likely result in a #GP upon syscall.
     #[inline]
     pub unsafe fn set_selectors(kcode_index: u16, kdata_index: u16) {
         wrmsr(0xC0000081, (((kdata_index << 3) as u64) << 48) | (((kcode_index << 3) as u64) << 32));
@@ -172,12 +176,12 @@ pub struct IA32_LSTAR;
 impl IA32_LSTAR {
     /// Sets the `rip` value that's jumped to when the `syscall` instruction is executed.
     ///
-    /// Safety
+    /// ### Safety
     ///
     /// Caller must ensure the given function pointer is valid for a syscall instruction pointer.
     #[inline]
     pub unsafe fn set_syscall(func: unsafe extern "sysv64" fn()) {
-        wrmsr(0xC0000082, func as u64);
+        wrmsr(0xC0000082, func as usize as u64);
     }
 }
 
@@ -187,10 +191,9 @@ pub struct IA32_FMASK;
 impl IA32_FMASK {
     /// Sets `rflags` upon a `syscall` based on masking the bits in the given value.
     ///
-    /// Safety
+    /// ### Safety
     ///
-    /// * Caller must ensure the function jumped to upon a `syscall` can properly handle
-    /// the provided `rflags` value.
+    /// An invalid rflags value will result in undefined behaviour when entering a syscall handler.
     #[inline]
     pub unsafe fn set_rflags_mask(rflags: u64) {
         wrmsr(0xC0000084, rflags);
@@ -201,9 +204,9 @@ pub struct IA32_TSC_DEADLINE;
 impl IA32_TSC_DEADLINE {
     /// Sets the timestamp counter deadline.
     ///
-    /// Safety
+    /// ### Safety
     ///
-    /// * Caller must ensure writing to the MSR will not result in undefined behaviour.
+    /// Writing an invalid or unexpected deadline to this function could result in a deadlock.
     #[inline]
     pub unsafe fn set(value: u64) {
         wrmsr(0x6E0, value);

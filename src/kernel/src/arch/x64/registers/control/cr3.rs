@@ -26,6 +26,7 @@ impl CR3 {
     pub fn read() -> (Address<Frame>, CR3Flags) {
         let value: usize;
 
+        // Safety: Reading CR3 has no side effects.
         unsafe {
             asm!("mov {}, cr3", out(reg) value, options(nostack, nomem));
         }
@@ -37,6 +38,7 @@ impl CR3 {
     pub fn refresh() {
         let value: usize;
 
+        // Safety: Refreshing the CR3 register has no side effects (it merely purges the TLB).
         unsafe {
             asm!("mov {0}, cr3", out(reg) value, options(nostack, preserves_flags));
             asm!("mov cr3, {0}", in(reg) value, options(nostack, preserves_flags));

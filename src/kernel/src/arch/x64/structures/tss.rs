@@ -1,3 +1,5 @@
+#![allow(clippy::module_name_repetitions)]
+
 use super::gdt;
 
 pub use x86_64::{instructions::tables::load_tss, structures::tss::TaskStateSegment};
@@ -26,8 +28,7 @@ pub fn ptr_as_descriptor(tss_ptr: core::ptr::NonNull<TaskStateSegment>) -> gdt::
 /// Safety
 ///
 /// * Descriptor must be valid as the core's task state segment.
-/// *
-/// Caller must ensure loading a new TSS will not result in undefined behaviour.
+/// * Caller must ensure loading a new TSS will not result in undefined behaviour.
 pub unsafe fn load_local(descriptor: gdt::Descriptor) {
     crate::interrupts::without(|| {
         // Store current GDT pointer to restore later.

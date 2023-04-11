@@ -2,23 +2,28 @@ use acpi::PhysicalMapping;
 use port::{PortAddress, ReadWritePort};
 use spin::{Lazy, Mutex};
 
+use crate::memory::{
+    alloc::{pmm::PhysicalMemoryManager, KMALLOC},
+    Hhdm,
+};
+
 pub enum Register<'a, T: port::PortReadWrite> {
-    IO(ReadWritePort<T>),
-    MMIO(&'a libsys::mem::VolatileCell<T, libsys::ReadWrite>),
+    Io(ReadWritePort<T>),
+    Mmio(&'a libsys::mem::VolatileCell<T, libsys::ReadWrite>),
 }
 
 impl<T: port::PortReadWrite> Register<'_, T> {
     pub const fn new(generic_address: &acpi::address::GenericAddress) -> Option<Self> {
         match generic_address.address_space {
             acpi::address::AddressSpace::SystemMemory => {
-                Some(Self::MMIO(
+                Some(Self::Mmio(
                     // Safety: There's no meaningful way to validate the address provided by the `GenericAddress` structure.
                     unsafe { &*(generic_address.address as *const _) },
                 ))
             }
 
             acpi::address::AddressSpace::SystemIo => {
-                Some(Self::IO(
+                Some(Self::Io(
                     // Safety: There's no meaningful way to validate the port provided by the `GenericAddress` structure.
                     unsafe {
                         #[allow(clippy::cast_possible_truncation)]
@@ -34,16 +39,16 @@ impl<T: port::PortReadWrite> Register<'_, T> {
     #[inline]
     pub fn read(&self) -> T {
         match self {
-            Register::IO(port) => port.read(),
-            Register::MMIO(addr) => addr.read(),
+            Register::Io(port) => port.read(),
+            Register::Mmio(addr) => addr.read(),
         }
     }
 
     #[inline]
     pub fn write(&mut self, value: T) {
         match self {
-            Register::IO(port) => port.write(value),
-            Register::MMIO(addr) => addr.write(value),
+            Register::Io(port) => port.write(value),
+            Register::Mmio(addr) => addr.write(value),
         }
     }
 }
@@ -58,7 +63,7 @@ impl acpi::AcpiHandler for AcpiHandler {
 
         acpi::PhysicalMapping::new(
             address,
-            core::ptr::NonNull::new(crate::memory::hhdm_address().as_ptr().add(address).cast()).unwrap(),
+            core::ptr::NonNull::new(Hhdm::ptr().add(address).cast()).unwrap(),
             size,
             size,
             Self,
@@ -170,30 +175,21 @@ pub fn init_interface() {
 }
 
 pub static FADT: Lazy<Option<Mutex<PhysicalMapping<AcpiHandler, acpi::fadt::Fadt>>>> = Lazy::new(|| {
-    TABLES
-        .get()
-        .map(|mutex| mutex.lock())
-        .and_then(|tables| tables.find_table::<acpi::fadt::Fadt>().ok())
-        .map(Mutex::new)
+    TABLES.get().map(Mutex::lock).and_then(|tables| tables.find_table::<acpi::fadt::Fadt>().ok()).map(Mutex::new)
 });
 
 pub static MCFG: Lazy<Option<Mutex<PhysicalMapping<AcpiHandler, acpi::mcfg::Mcfg>>>> = Lazy::new(|| {
-    TABLES
-        .get()
-        .map(|mutex| mutex.lock())
-        .and_then(|tables| tables.find_table::<acpi::mcfg::Mcfg>().ok())
-        .map(Mutex::new)
+    TABLES.get().map(Mutex::lock).and_then(|tables| tables.find_table::<acpi::mcfg::Mcfg>().ok()).map(Mutex::new)
 });
 
-pub static PLATFORM_INFO: Lazy<
-    Option<Mutex<acpi::PlatformInfo<&slab::SlabAllocator<&crate::memory::pmm::PhysicalMemoryManager>>>>,
-> = Lazy::new(|| {
-    TABLES
-        .get()
-        .map(|mutex| mutex.lock())
-        .and_then(|tables| acpi::PlatformInfo::new_in(&*tables, &*crate::memory::KMALLOC).ok())
-        .map(Mutex::new)
-});
+pub static PLATFORM_INFO: Lazy<Option<Mutex<acpi::PlatformInfo<&slab::SlabAllocator<&PhysicalMemoryManager>>>>> =
+    Lazy::new(|| {
+        TABLES
+            .get()
+            .map(Mutex::lock)
+            .and_then(|tables| acpi::PlatformInfo::new_in(&*tables, &*KMALLOC).ok())
+            .map(Mutex::new)
+    });
 
 // struct AmlContextWrapper(aml::AmlContext);
 // // Safety: TODO

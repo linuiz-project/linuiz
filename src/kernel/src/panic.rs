@@ -27,12 +27,12 @@ fn trace_frame_pointer(
 
         if stack_frame.return_address == 0x0 {
             break;
-        } else {
-            *stack_trace_address = Some(stack_frame.return_address);
-
-            frame_ptr = stack_frame.prev_frame_ptr;
-            stack_trace_index += 1;
         }
+
+        *stack_trace_address = Some(stack_frame.return_address);
+
+        frame_ptr = stack_frame.prev_frame_ptr;
+        stack_trace_index += 1;
     }
 
     false
@@ -61,12 +61,10 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     if let Some(symbols) = KERNEL_SYMBOLS.get() {
         let (stack_traces, trace_overflow) = {
             let mut stack_trace_addresses = STACK_TRACE_ADDRESSES.lock();
-            let trace_overflow = trace_frame_pointer(&mut stack_trace_addresses);
-            let stack_trace_addresses_clone = stack_trace_addresses.clone();
-            // Ensure we reset the stack trace addresses for other panicks.
+            // Stack trace addresses may have been set by other panicks.
             stack_trace_addresses.fill(None);
 
-            (stack_trace_addresses_clone, trace_overflow)
+            (*stack_trace_addresses, trace_frame_pointer(&mut stack_trace_addresses))
         };
 
         error!("----------STACK-TRACE---------");
@@ -75,9 +73,10 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
         fn print_stack_trace_entry<D: core::fmt::Display>(entry_num: usize, fn_address: u64, symbol_name: Option<D>) {
             let tab_len = 4 + (entry_num * 2);
 
-            match symbol_name {
-                Some(name) => error!("{entry_num:.<tab_len$}0x{fn_address:0<16X} {name:#}"),
-                None => error!("{entry_num:.<tab_len$}0x{fn_address:0<16X} !!! no function found !!!"),
+            if let Some(symbol_name) = symbol_name {
+                error!("{entry_num:.<tab_len$}0x{fn_address:0<16X} {symbol_name:#}");
+            } else {
+                error!("{entry_num:.<tab_len$}0x{fn_address:0<16X} !!! no function found !!!");
             }
         }
 

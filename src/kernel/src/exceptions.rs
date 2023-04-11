@@ -19,7 +19,7 @@ pub struct Exception {
 }
 
 impl Exception {
-    pub fn new(kind: ExceptionKind, ip: NonNull<u8>, sp: NonNull<u8>) -> Self {
+    pub const fn new(kind: ExceptionKind, ip: NonNull<u8>, sp: NonNull<u8>) -> Self {
         Self { kind, ip, sp }
     }
 }
