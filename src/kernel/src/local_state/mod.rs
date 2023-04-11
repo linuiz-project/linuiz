@@ -1,14 +1,13 @@
 use crate::{
     exceptions::Exception,
     memory::{
-        address_space::AddressSpace,
         alloc::{
             pmm::{PhysicalAllocator, PMM},
             KMALLOC,
         },
         Stack,
     },
-    proc::Scheduler,
+    proc::{AddressSpace, Scheduler},
 };
 use core::{
     alloc::Allocator,

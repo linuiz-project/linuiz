@@ -1,12 +1,7 @@
-pub mod mapper;
-
-use crate::memory::{paging, paging::Attributes};
+use crate::memory::{mapper::Mapper, paging, paging::Attributes, paging::PageDepth};
 use alloc::vec::Vec;
 use core::{alloc::Allocator, num::NonZeroUsize, ops::Range, ptr::NonNull};
 use libsys::{page_size, Address, Page, Virtual};
-use mapper::Mapper;
-
-use super::paging::PageDepth;
 
 #[derive(Debug)]
 #[allow(clippy::enum_variant_names)]

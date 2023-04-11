@@ -4,10 +4,10 @@ pub use context::*;
 mod scheduling;
 pub use scheduling::*;
 
-use crate::memory::{
-    address_space::{AddressSpace, MmapFlags},
-    alloc::pmm::PhysicalAllocator,
-};
+mod address_space;
+pub use address_space::*;
+
+use crate::memory::alloc::pmm::PhysicalAllocator;
 use core::num::NonZeroUsize;
 use spin::Mutex;
 use uuid::Uuid;
