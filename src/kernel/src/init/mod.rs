@@ -215,51 +215,52 @@ unsafe extern "C" fn _entry() -> ! {
     crate::acpi::init_interface();
 
     /* load drivers */
-    // {
-    //     use crate::proc::{EntryPoint, Priority, Process};
-    //     use elf::{endian::AnyEndian, ElfBytes};
+    {
+        use crate::proc::{AddressSpace, EntryPoint, Priority, Process, DEFAULT_USERSPACE_SIZE};
+        use elf::{endian::AnyEndian, ElfBytes};
 
-    //     #[limine::limine_tag]
-    //     static LIMINE_MODULES: limine::ModuleRequest = limine::ModuleRequest::new(crate::boot::LIMINE_REV);
+        #[limine::limine_tag]
+        static LIMINE_MODULES: limine::ModuleRequest = limine::ModuleRequest::new(crate::boot::LIMINE_REV);
 
-    //     debug!("Unpacking kernel drivers...");
+        debug!("Unpacking kernel drivers...");
 
-    //     if let Some(modules) = LIMINE_MODULES.get_response() {
-    //         for module in modules
-    //             .modules()
-    //             .iter()
-    //             // Filter out modules that don't end with our driver postfix.
-    //             .filter(|module| module.path().ends_with("drivers"))
-    //         {
-    //             let archive = tar_no_std::TarArchiveRef::new(module.data());
-    //             for entry in archive.entries() {
-    //                 debug!("Attempting to parse driver blob: {}", entry.filename());
+        let Some(driver_module) = LIMINE_MODULES
+            .get_response()
+            .flat_map(|modules| modules.modules.iter())
+            .find(|module| module.path.ends_with("drivers"))
+        else {
+            warn!("No drivers module found; skipping driver loading.");
+            return;
+        };
 
-    //                 let Ok(elf) = ElfBytes::<AnyEndian>::minimal_parse(entry.data())
-    //                  else {
-    //                      warn!("Failed to parse driver blob into ELF");
-    //                      continue;
-    //                  };
+        let archive = tar_no_std::TarArchiveRef::new(module.data());
+        for entry in archive.entries() {
+            debug!("Attempting to parse driver blob: {}", entry.filename());
 
-    //                 let entry_point = core::mem::transmute::<_, EntryPoint>(elf.ehdr.e_entry);
-    //                 let address_space = AddressSpace::new(
-    //                     crate::proc::DEFAULT_USERSPACE_SIZE,
-    //                     Mapper::new_unsafe(PageDepth::current(), crate::memory::copy_kernel_page_table().unwrap()),
-    //                     &*PMM,
-    //                 );
-    //                 let task = Process::new(Priority::Normal, entry_point, address_space);
+            let Ok(elf) = ElfBytes::<AnyEndian>::minimal_parse(entry.data())
+                     else {
+                         warn!("Failed to parse driver blob into ELF");
+                         continue;
+                     };
 
-    //                 crate::proc::PROCESSES.lock().push_back(task);
-    //             }
-    //         }
-    //     } else {
-    //         error!("Bootloader did not provide an init module.");
-    //     };
+            let entry_point = core::mem::transmute::<_, EntryPoint>(elf.ehdr.e_entry);
+            let address_space = AddressSpace::new(
+                DEFAULT_USERSPACE_SIZE,
+                crate::memory::mapper::Mapper::new_unsafe(
+                    PageDepth::current(),
+                    crate::memory::copy_kernel_page_table().unwrap(),
+                ),
+                &*PMM,
+            );
+            let task = Process::new(Priority::Normal, entry_point, address_space);
 
-    //     // for (entry, mapper) in artifacts.into_iter().map(Artifact::decompose) {
-    //     //     let task = Task::new(0, entry, stack, crate::cpu::ArchContext::user_context())
-    //     // }
-    // }
+            crate::proc::PROCESSES.lock().push_back(task);
+        }
+
+        // for (entry, mapper) in artifacts.into_iter().map(Artifact::decompose) {
+        //     let task = Task::new(0, entry, stack, crate::cpu::ArchContext::user_context())
+        // }
+    }
 
     /* smp */
     {
@@ -335,6 +336,26 @@ pub(self) unsafe fn kernel_core_setup() -> ! {
 
     // This interrupt wait loop is necessary to ensure the core can jump into the scheduler.
     crate::interrupts::wait_loop()
+}
+
+macro_rules! call_once {
+    ($($vis:vis fn $name:ident($($arg:tt)*) $body:block)) => {
+        call_once!($vis fn $fname($($arg)*) -> () $body)
+    }
+
+    ($($vis:vis fn $name:ident($($arg:tt)*) -> $t:ty $body:block)) => {
+        $vis:vis fn $name($($arg)*) -> $t {
+            use core::sync::atomic::{AtomicBool, Ordering};
+
+            static CALLED: AtomicBool = AtomicBool::new(false);
+
+            if CALLED.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_ok() {
+                    $body
+            } else {
+                panic!("{} called more than once", stringify!($name));
+            }
+        }
+    };
 }
 
 /* load driver */
