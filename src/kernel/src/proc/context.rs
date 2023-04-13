@@ -1,5 +1,3 @@
-use crate::uptr;
-
 #[cfg(target_arch = "x86_64")]
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +50,6 @@ impl Registers {
 #[repr(C)]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct State {
-    pub ip: uptr,
-    pub sp: uptr,
+    pub ip: u64,
+    pub sp: u64,
 }

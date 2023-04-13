@@ -196,11 +196,11 @@ fn get_state_ptr() -> Option<NonNull<State>> {
 }
 
 fn get_state() -> &'static State {
-    unsafe { get_state_ptr().expect("state uninitialized").as_ref() }
+    unsafe { get_state_ptr().expect("core state uninitialized").as_ref() }
 }
 
 fn get_state_mut() -> &'static mut State {
-    unsafe { get_state_ptr().expect("state uninitialized").as_mut() }
+    unsafe { get_state_ptr().expect("core state uninitialized").as_mut() }
 }
 
 /// Returns the generated ID for the local core.
