@@ -300,15 +300,22 @@ call_once!(
 
         debug!("Unpacking kernel drivers...");
 
-        let Some(driver_module) = LIMINE_MODULES
-        .get_response()
-        .map(limine::ModuleResponse::modules)
-        .and_then(|modules| modules.iter().find(|module| module.path().ends_with("drivers"))) else {
+        let Some(modules) = LIMINE_MODULES.get_response() else {
+            warn!("Bootloader provided no modules; skipping driver loading.");
+            return;
+        };
+        debug!("Found drivers module response: rev {}", modules.revision());
+
+        let modules = modules.modules();
+        debug!("Found {} modules.", modules.len());
+
+        let Some(drivers_module) = modules.iter().find(|module|{  module.path().ends_with("drivers")}) else {
             warn!("No drivers module found; skipping driver loading.");
             return;
         };
+        debug!("Found drivers module: {} ({} bytes)", drivers_module.path(), drivers_module.data().len());
 
-        let archive = tar_no_std::TarArchiveRef::new(driver_module.data());
+        let archive = tar_no_std::TarArchiveRef::new(drivers_module.data());
         for entry in archive.entries() {
             debug!("Attempting to parse driver blob: {}", entry.filename());
 

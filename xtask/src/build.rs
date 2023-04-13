@@ -12,6 +12,11 @@ pub struct Options {
     #[arg(short, long)]
     verbose: bool,
 
+    /// Whether to print the kernel's build fingerprint.
+    /// This can be useful for debugging constant rebuilds.
+    #[arg(long)]
+    fingerprint: bool,
+
     #[arg(long, default_value = "test_driver")]
     drivers: Vec<String>,
 }
@@ -39,6 +44,16 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
     sh.copy_file("resources/limine.cfg", ".hdd/root/EFI/BOOT/")?;
     // copy the EFI binary image
     sh.copy_file("resources/BOOTX64.EFI", ".hdd/root/EFI/BOOT/")?;
+
+    let _cargo_log = {
+        let mut cargo_log = Vec::new();
+
+        if options.fingerprint {
+            cargo_log.push("cargo::core::compiler::fingerprint=info");
+        }
+
+        sh.push_env("CARGO_LOG", cargo_log.join(" "))
+    };
 
     // Configure rustc via the `RUSTFLAGS` environment variable.
     let _rustflags = {
