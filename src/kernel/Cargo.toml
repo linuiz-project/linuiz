@@ -38,7 +38,7 @@ paste = "1.0"
 rustc-demangle = "0.1"
 rand_core = "0.6"
 rand_pcg = "0.3"
-tar-no-std = "0.1"
+tar-no-std = "0.2"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 pic_8259 = { path = "../shared/pic_8259/" }
