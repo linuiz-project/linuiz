@@ -103,6 +103,8 @@ call_once!(
 
         if let Some(boot_info) = BOOT_INFO.get_response() {
             info!("Bootloader Info     {} v{} (rev {})", boot_info.name(), boot_info.version(), boot_info.revision());
+        } else {
+            info!("No bootloader info available.");
         }
 
         // Vendor strings from the CPU need to be enumerated per-platform.
@@ -274,14 +276,16 @@ call_once!(
             if get_parameters().low_memory {
                 debug!("Kernel is running in low memory mode; stack tracing will be disabled.");
             } else if let Ok(Some((symbol_table, string_table))) = kernel_elf.symbol_table() {
-                let mut vec = try_alloc::vec::TryVec::with_capacity_in(symbol_table.len(), &*PMM)
-                    .expect("failed to allocate vector for kernel symbols");
+                debug!("Loading kernel symbol table...");
 
-                symbol_table.into_iter().for_each(|symbol| {
-                    vec.push((string_table.get(symbol.st_name as usize).unwrap_or("Unidentified"), symbol)).unwrap();
-                });
-                crate::interrupts::without(|| {
-                    crate::panic::KERNEL_SYMBOLS.call_once(|| alloc::vec::Vec::leak(vec.into_vec()))
+                crate::panic::KERNEL_SYMBOLS.call_once(|| {
+                    let symbols_iter = symbol_table
+                        .into_iter()
+                        .map(|symbol| (string_table.get(symbol.st_name as usize).unwrap_or("Unidentified"), symbol));
+                    let vec = alloc::vec::Vec::from_iter(symbols_iter);
+                    debug!("Loaded {} kernel symbols.", vec.len());
+
+                    alloc::vec::Vec::leak(vec)
                 });
             } else {
                 warn!("Failed to load any kernel symbols; stack tracing will be disabled.");
@@ -304,16 +308,16 @@ call_once!(
             warn!("Bootloader provided no modules; skipping driver loading.");
             return;
         };
-        debug!("Found drivers module response: rev {}", modules.revision());
+
+        trace!("{:?}", modules);
 
         let modules = modules.modules();
-        debug!("Found {} modules.", modules.len());
+        trace!("Found modules: {:X?}", modules);
 
-        let Some(drivers_module) = modules.iter().find(|module|{  module.path().ends_with("drivers")}) else {
+        let Some(drivers_module) = modules.iter().find(|module| module.path().ends_with("drivers")) else {
             warn!("No drivers module found; skipping driver loading.");
             return;
         };
-        debug!("Found drivers module: {} ({} bytes)", drivers_module.path(), drivers_module.data().len());
 
         let archive = tar_no_std::TarArchiveRef::new(drivers_module.data());
         for entry in archive.entries() {
@@ -323,6 +327,8 @@ call_once!(
                 warn!("Failed to parse driver blob into ELF");
                 continue;
             };
+
+            trace!("Driver blob is ELF: {:X?}", elf.ehdr);
 
             let entry_point = unsafe { core::mem::transmute::<_, EntryPoint>(elf.ehdr.e_entry) };
             let address_space = AddressSpace::new(
