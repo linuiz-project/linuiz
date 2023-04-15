@@ -111,8 +111,8 @@ impl Scheduler {
 
             trace!("Switching idle task.");
 
-            *state = State { ip: crate::interrupts::wait_loop as u64, sp: IDLE_STACK.top().get() as u64 };
-            *regs = Registers::user_default();
+            *state = State::user(crate::interrupts::wait_loop as u64, IDLE_STACK.top().get() as u64);
+            *regs = Registers::default();
 
             trace!("Switched idle task.");
         };

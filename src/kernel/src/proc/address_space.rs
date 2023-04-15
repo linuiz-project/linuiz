@@ -59,24 +59,26 @@ bitflags::bitflags! {
 }
 
 impl From<MmapFlags> for TableEntryFlags {
-    fn from(flags: MmapFlags) -> Self {
-        let mut attributes = TableEntryFlags::empty();
+    fn from(mmap_flags: MmapFlags) -> Self {
+        let mut entry_flags = TableEntryFlags::empty();
 
         // RW and RX are mutually exclusive, so always else-if the bit checks.
-        if flags.contains(MmapFlags::READ_WRITE) {
-            attributes.insert(TableEntryFlags::RW);
-        } else if flags.contains(MmapFlags::READ_EXECUTE) {
-            attributes.insert(TableEntryFlags::RX);
+        if mmap_flags.contains(MmapFlags::READ_WRITE) {
+            entry_flags.insert(TableEntryFlags::RW);
+        } else if mmap_flags.contains(MmapFlags::READ_EXECUTE) {
+            entry_flags.insert(TableEntryFlags::RX);
         } else {
-            attributes.insert(TableEntryFlags::RO);
+            entry_flags.insert(TableEntryFlags::RO);
         }
 
-        if !flags.contains(MmapFlags::NOT_DEMAND) {
-            attributes.remove(TableEntryFlags::PRESENT);
-            attributes.insert(TableEntryFlags::DEMAND);
+        if !mmap_flags.contains(MmapFlags::NOT_DEMAND) {
+            entry_flags.remove(TableEntryFlags::PRESENT);
+            entry_flags.insert(TableEntryFlags::DEMAND);
         }
 
-        attributes
+        entry_flags.insert(TableEntryFlags::USER);
+
+        entry_flags
     }
 }
 
@@ -207,6 +209,8 @@ impl<A: Allocator + Clone> AddressSpace<A> {
 
     /// Attempts to map a page to a real frame, only if the [`PageAttributes::DEMAND`] bit is set.
     pub fn try_demand(&mut self, page: Address<Page>) -> Result<()> {
+        trace!("Attempting to demand map page: {:?}", page);
+
         self.mapper
             .get_page_attributes(page)
             .filter(|attributes| attributes.contains(TableEntryFlags::DEMAND))
