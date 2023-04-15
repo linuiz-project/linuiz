@@ -331,16 +331,13 @@ call_once!(
             trace!("Driver blob is ELF: {:X?}", elf.ehdr);
 
             let entry_point = unsafe { core::mem::transmute::<_, EntryPoint>(elf.ehdr.e_entry) };
-            let address_space = AddressSpace::new(
-                DEFAULT_USERSPACE_SIZE,
-                unsafe {
-                    crate::memory::mapper::Mapper::new_unsafe(
-                        PageDepth::current(),
-                        crate::memory::copy_kernel_page_table().unwrap(),
-                    )
-                },
-                &*PMM,
-            );
+            let mapper = unsafe {
+                crate::memory::mapper::Mapper::new_unsafe(
+                    PageDepth::current(),
+                    crate::memory::copy_kernel_page_table().unwrap(),
+                )
+            };
+            let address_space = AddressSpace::new(DEFAULT_USERSPACE_SIZE, mapper, &*PMM);
             let task = Process::new(Priority::Normal, entry_point, address_space);
 
             crate::proc::PROCESSES.lock().push_back(task);

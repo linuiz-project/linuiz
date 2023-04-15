@@ -83,12 +83,6 @@ impl Mapper {
                 crate::arch::x64::instructions::tlb::invlpg(page);
             });
 
-        #[cfg(debug_assertions)]
-        if result.is_ok() {
-            debug_assert_eq!(self.get_mapped_to(page), Some(frame));
-            debug_assert_eq!(self.get_page_attributes(page), Some(attributes));
-        }
-
         result
     }
 

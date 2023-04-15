@@ -90,7 +90,7 @@ pub struct AddressSpace<A: Allocator + Clone> {
 impl<A: Allocator + Clone> AddressSpace<A> {
     pub fn new(size: NonZeroUsize, mapper: Mapper, allocator: A) -> Self {
         let mut free = Vec::new_in(allocator);
-        free.push(0..size.get());
+        free.push(page_size()..size.get());
 
         Self { free, mapper }
     }
@@ -112,16 +112,17 @@ impl<A: Allocator + Clone> AddressSpace<A> {
         if let Some(address) = address {
             self.map_exact(address, page_count, flags)
         } else {
-            self.map_auto(page_count, flags)
+            self.map_any(page_count, flags)
         }
     }
 
-    fn map_auto(&mut self, page_count: NonZeroUsize, flags: MmapFlags) -> Result<NonNull<[u8]>> {
+    #[cfg_attr(debug_assertions, inline(never))]
+    fn map_any(&mut self, page_count: NonZeroUsize, flags: MmapFlags) -> Result<NonNull<[u8]>> {
         let size = page_count.get() * page_size();
 
         let index = self.free.iter().position(|region| region.len() >= size).ok_or(Error::AllocError)?;
         let found_copy = self.free[index].clone();
-        let new_free = found_copy.start..(found_copy.end - size);
+        let new_free = (found_copy.start + size)..found_copy.end;
 
         // Update the free region, or remove it if it's now empty.
         if new_free.len() > 0 {
@@ -131,9 +132,10 @@ impl<A: Allocator + Clone> AddressSpace<A> {
         }
 
         // Safety: Memory range was taken from the freelist, and so is guaranteed to be unused.
-        Ok(unsafe { self.invoke_mapper(Address::new(new_free.end).unwrap(), page_count, flags)? })
+        Ok(unsafe { self.invoke_mapper(Address::new(new_free.start).unwrap(), page_count, flags)? })
     }
 
+    #[cfg_attr(debug_assertions, inline(never))]
     fn map_exact(
         &mut self,
         address: Address<Page>,
@@ -192,7 +194,7 @@ impl<A: Allocator + Clone> AddressSpace<A> {
     ) -> Result<NonNull<[u8]>> {
         (0..page_count.get())
             .map(|offset| offset * page_size())
-            .map(|offset_base| address.get().get() + offset_base)
+            .map(|offset| address.get().get() + offset)
             .map(|address| Address::new(address))
             .try_for_each(|page| {
                 let page = page.ok_or(Error::MalformedAddress)?;
