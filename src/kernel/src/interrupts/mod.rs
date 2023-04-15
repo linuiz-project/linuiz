@@ -1,10 +1,10 @@
 mod instructions;
 pub use instructions::*;
 
-use libsys::{Address, Virtual};
-use num_enum::TryFromPrimitive;
+mod handlers;
+pub use handlers::*;
 
-use crate::proc::{Registers, State};
+use num_enum::TryFromPrimitive;
 
 /// Delivery mode for IPIs.
 #[repr(u32)]
@@ -54,41 +54,6 @@ pub enum Vector {
     LINT0 = 0x3D,
     LINT1 = 0x3E,
     Spurious = 0x3F,
-}
-
-/// Indicates what type of error the common page fault handler encountered.
-#[derive(Debug, Clone, Copy)]
-pub struct PageFaultHandlerError;
-
-/// ### Safety
-///
-/// This function should only be called in the case of passing context to handle a page fault.
-/// Calling this function more than once and/or outside the context of a page fault is undefined behaviour.
-#[doc(hidden)]
-#[repr(align(0x10))]
-pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandlerError> {
-    crate::local::with_current_address_space(|addr_space| {
-        addr_space.try_demand(Address::new_truncate(address.get())).ok()
-    })
-    .flatten()
-    .ok_or(PageFaultHandlerError)
-}
-
-/// ### Safety
-///
-/// This function should only be called in the case of passing context to handle an interrupt.
-/// Calling this function more than once and/or outside the context of an interrupt is undefined behaviour.
-#[doc(hidden)]
-#[repr(align(0x10))]
-pub unsafe fn irq_handler(irq_vector: u64, state: &mut State, regs: &mut Registers) {
-    match Vector::try_from(irq_vector) {
-        Ok(Vector::Timer) => crate::local::next_task(state, regs),
-
-        _vector_result => {}
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    crate::local::end_of_interrupt();
 }
 
 /// Provides access to the contained instance of `T`, ensuring interrupts are disabled while it is borrowed.
