@@ -153,6 +153,39 @@ macro_rules! irq_stub {
     };
 }
 
+/// ### Safety
+///
+/// This function should not be called from software.
+unsafe extern "sysv64" fn irq_handoff(
+    irq_number: u64,
+    isf: &mut crate::arch::x64::structures::idt::InterruptStackFrame,
+    regs: &mut Registers,
+) {
+    use crate::arch::reexport::x86_64::VirtAddr;
+
+    let mut proc_state = State {
+        ip: isf.instruction_pointer.as_u64(),
+        sp: isf.stack_pointer.as_u64(),
+        rfl: RFlags::from_bits_retain(isf.cpu_flags),
+        cs: isf.code_segment,
+        ss: isf.stack_segment,
+    };
+
+    trace!("{:?}", isf);
+
+    crate::interrupts::handle_irq(irq_number, &mut proc_state, regs);
+
+    isf.as_mut().write(crate::arch::x64::structures::idt::InterruptStackFrameValue {
+        instruction_pointer: VirtAddr::new(proc_state.ip),
+        code_segment: proc_state.cs,
+        cpu_flags: proc_state.rfl.bits(),
+        stack_pointer: VirtAddr::new(proc_state.sp),
+        stack_segment: proc_state.ss,
+    });
+
+    trace!("{:?}", isf);
+}
+
 /// x64 exception wrapper type.
 #[repr(C, u8)]
 #[derive(Debug)]
@@ -280,35 +313,6 @@ impl From<Fault<'_>> for crate::exceptions::Exception {
             _ => todo!(),
         }
     }
-}
-
-/// ### Safety
-///
-/// This function should not be called from software.
-unsafe extern "sysv64" fn irq_handoff(
-    irq_number: u64,
-    isf: &mut crate::arch::x64::structures::idt::InterruptStackFrame,
-    regs: &mut Registers,
-) {
-    use crate::arch::reexport::x86_64::VirtAddr;
-
-    let mut proc_state = State {
-        ip: isf.instruction_pointer.as_u64(),
-        sp: isf.stack_pointer.as_u64(),
-        rfl: RFlags::from_bits_retain(isf.cpu_flags),
-        cs: isf.code_segment,
-        ss: isf.stack_segment,
-    };
-
-    crate::interrupts::handle_irq(irq_number, &mut proc_state, regs);
-
-    isf.as_mut().write(crate::arch::x64::structures::idt::InterruptStackFrameValue {
-        instruction_pointer: VirtAddr::new(proc_state.ip),
-        code_segment: proc_state.cs,
-        cpu_flags: proc_state.rfl.bits(),
-        stack_pointer: VirtAddr::new(proc_state.sp),
-        stack_segment: proc_state.ss,
-    });
 }
 
 pub fn common_exception_handler(exception: Fault) {
