@@ -91,7 +91,7 @@ pub struct Options {
     mock: bool,
 
     #[arg(short, long)]
-    gdb: bool,
+    debug: bool,
 }
 
 pub fn run(sh: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
@@ -102,67 +102,7 @@ pub fn run(sh: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
         _ => "qemu-system-x86_64",
     };
 
-    let mut arguments = vec![];
-
-    arguments.push("-machine");
-    arguments.push(match options.cpu {
-        CPU::Rv64 => "virt",
-        CPU::Host | CPU::Max | CPU::Qemu64 if options.accel == Accelerator::Kvm => "q35,accel=kvm",
-        _ => "q35",
-    });
-
-    arguments.push("-cpu");
-    arguments.push(options.cpu.as_str());
-
-    arguments.push("-smp");
-    let smp_string = options.smp.to_string();
-    arguments.push(&smp_string);
-
-    arguments.push("-m");
-    let memory_string = format!("{}M", options.ram);
-    arguments.push(&memory_string);
-
-    // TODO this doesn't work for AHCI
-    arguments.push("-device");
-    let device_string = format!("{:?},drive=disk1,serial=deadbeef", options.block);
-    arguments.push(&device_string);
-
-    if options.log {
-        if !sh.path_exists(".debug/") {
-            sh.create_dir(".debug/")?;
-        }
-
-        arguments.push("-d");
-        arguments.push("int,guest_errors");
-        arguments.push("-D");
-        arguments.push(".debug/qemu.log");
-    }
-
-    match options.cpu {
-        CPU::Rv64 => {
-            arguments.push("-bios");
-            arguments.push("resources/fw_jump.fd");
-            arguments.push("-kernel");
-            arguments.push(".hdd/root/pyre/kernel_rv64.elf");
-        }
-        _ => {
-            arguments.push("-bios");
-            arguments.push("resources/OVMF.fd");
-            arguments.push("-drive");
-            arguments.push("format=raw,file=fat:rw:.hdd/root/");
-        }
-    };
-
-    if options.nographic {
-        arguments.push("-nographic");
-    }
-
-    if options.gdb {
-        arguments.push("-s");
-        arguments.push("-S");
-    }
-
-    let cmd = cmd!(
+    let mut cmd = cmd!(
         sh,
         "
         {qemu_exe_str}
@@ -172,9 +112,52 @@ pub fn run(sh: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
             -drive format=raw,file=.hdd/disk0.img,id=disk1,if=none
             -net none
             -M smm=off
-            {arguments...}
         "
     );
+
+    cmd = cmd.args([
+        "-machine",
+        match options.cpu {
+            CPU::Rv64 => "virt",
+            CPU::Host | CPU::Max | CPU::Qemu64 if options.accel == Accelerator::Kvm => "q35,accel=kvm",
+            _ => "q35",
+        },
+    ]);
+
+    cmd = cmd
+        // cpu
+        .args(["-cpu", options.cpu.as_str()])
+        // smp
+        .arg("--smp")
+        .arg(options.smp.to_string())
+        // memory
+        .arg("-m")
+        .arg(format!("{}M", options.ram))
+        // disk
+        .arg("-device")
+        // TODO this doesn't work for AHCI
+        .arg(format!("{:?},drive=disk1,serial=deadbeef", options.block));
+
+    if options.log {
+        if !sh.path_exists(".debug/") {
+            sh.create_dir(".debug/")?;
+        }
+
+        cmd = cmd.args(["-d", "int,guest_errors", "-D", ".debug/qemu.log"]);
+    }
+
+    cmd = match options.cpu {
+        CPU::Rv64 => cmd.args(["-bios", "resources/fw_jump.fd", "-kernel", ".hdd/root/pyre/kernel_rv64.elf"]),
+        _ => cmd.args(["-bios", "resources/OVMF.fd", "-drive", "format=raw,file=fat:rw:.hdd/root/"]),
+    };
+
+    if options.nographic {
+        cmd = cmd.arg("-nographic");
+    }
+
+    if options.debug {
+        cmd = cmd.args(["-S", "-s"]);
+    }
 
     if options.mock {
         println!("cmd: {}", cmd.to_string());
