@@ -1,0 +1,15 @@
+{
+    "configurations": [
+        {
+            "name": "CLI Debug",
+            "type": "lldb",
+            "request": "custom",
+            "targetCreateCommands": [
+                "target create ${workspaceFolder}/.hdd/root/pyre/kernel"
+            ],
+            "processCreateCommands": [
+                "gdb-remote localhost:1234"
+            ],
+        }
+    ]
+}
