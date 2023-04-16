@@ -62,12 +62,6 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
         rustflags.push("-C code-model=kernel");
         rustflags.push("-C embed-bitcode=yes");
 
-        // For debug builds, we always enable frame pointers for pretty stack tracing.
-        if !options.release {
-            rustflags.push("-C force-frame-pointers");
-            rustflags.push("-C symbol-mangling-version=v0");
-        }
-
         sh.push_env("RUSTFLAGS", rustflags.join(" "))
     };
 

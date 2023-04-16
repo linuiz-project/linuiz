@@ -44,12 +44,14 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
         info.message().unwrap_or(&format_args!("no panic message"))
     );
 
-    if let Some(symbols) = KERNEL_SYMBOLS.get() {
-        let stack_traces = trace_frame_pointers();
-        let trace_len = stack_traces.iter().position(|e| *e == 0).unwrap_or(stack_traces.len());
+    // TODO use unwinding crate to get a backtrace
+    // if let Some(symbols) = KERNEL_SYMBOLS.get() {
+    //     let stack_traces = trace_frame_pointers();
+    //     trace!("Raw stack traces: {:#X?}", stack_traces);
 
-        print_stack_trace(symbols, &stack_traces[..trace_len]);
-    }
+    //     let trace_len = stack_traces.iter().position(|e| *e == 0).unwrap_or(stack_traces.len());
+    //     print_stack_trace(symbols, &stack_traces[..trace_len]);
+    // }
 
     // Safety: It's dead, Jim.
     unsafe { crate::interrupts::halt_and_catch_fire() }

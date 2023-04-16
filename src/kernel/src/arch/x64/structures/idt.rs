@@ -1,25 +1,11 @@
-use crate::proc::{Registers, State};
+use crate::{
+    arch::x64::registers::RFlags,
+    proc::{Registers, State},
+};
 use libsys::{Address, Virtual};
 use x86_64::structures::idt;
 
 pub use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, InterruptStackFrameValue};
-
-macro_rules! push_fptr {
-    ($ip_off:expr, $sp_off:expr) => {
-        concat!(
-            "mov rbp, [rsp + (",
-            stringify!($ip_off),
-            " * 8)]
-            push rbp                # push instruction pointer
-            mov rbp, [rsp + ((",
-            stringify!($sp_off),
-            " + 1) * 8)]
-            push rbp                # push stack pointer
-            mov rbp, rsp
-            "
-        )
-    };
-}
 
 macro_rules! push_gprs {
     () => {
@@ -77,16 +63,13 @@ macro_rules! exception_handler {
                     core::arch::asm!(
                         "cld",
                         push_gprs!(),
-                        push_fptr!(15, 18),
                         "
                         # move stack frame into first parameter
-                        lea rdi, [rsp + (17 * 8)]
+                        lea rdi, [rsp + (15 * 8)]
                         # Move cached gprs pointer into second parameter.
-                        lea rsi, [rsp + (2 * 8)]
+                        mov rsi, rsp
 
                         call {}
-
-                        add rsp, 0x10       # 'pop' fake stack frame
                         ",
                         pop_gprs!(),
                         "iretq",
@@ -112,19 +95,15 @@ macro_rules! exception_handler_with_error {
                     core::arch::asm!(
                         "cld",
                         push_gprs!(),
-                        push_fptr!(16, 19),
                         "
                         # Move stack frame into first parameter.
-                        lea rdi, [rsp + (18 * 8)]
+                        lea rdi, [rsp + (16 * 8)]
                         # Move error code into second parameter.
-                        mov rsi, [rsp + (17 * 8)]
+                        mov rsi, [rsp + (15 * 8)]
                         # Move cached gprs pointer into third parameter.
-                        lea rdx, [rsp + (2 * 8)]
+                        mov rdx, rsp
 
                         call {}
-
-                        # 'pop' fake stack frame
-                        add rsp, 0x10
                         ",
                         pop_gprs!(),
                         "
@@ -142,32 +121,6 @@ macro_rules! exception_handler_with_error {
     };
 }
 
-/// Safety
-///
-/// This function should not be called from software.
-unsafe extern "sysv64" fn irq_handoff(
-    irq_number: u64,
-    stack_frame: &mut crate::arch::x64::structures::idt::InterruptStackFrame,
-    regs: &mut Registers,
-) {
-    use crate::arch::reexport::x86_64::VirtAddr;
-
-    let mut state = State { ip: stack_frame.instruction_pointer.as_u64(), sp: stack_frame.stack_pointer.as_u64() };
-
-    unsafe {
-        crate::interrupts::irq_handler(irq_number, &mut state, regs);
-    }
-
-    // Safety: The stack frame *has* to be modified to switch contexts within this interrupt.
-    stack_frame.as_mut().write(crate::arch::x64::structures::idt::InterruptStackFrameValue {
-        instruction_pointer: VirtAddr::new(state.ip),
-        stack_pointer: VirtAddr::new(state.sp),
-        code_segment: regs.cs,
-        stack_segment: regs.ss,
-        cpu_flags: regs.rfl.bits(),
-    });
-}
-
 macro_rules! irq_stub {
     ($irq_vector:literal) => {
         paste::paste! {
@@ -178,21 +131,15 @@ macro_rules! irq_stub {
                     core::arch::asm!(
                         "cld",
                         push_gprs!(),
-                        push_fptr!(15, 18),
                         "
-                        push {}
-
-                        # Move IRQ vector into first parameter
-                        mov rdi, [rsp + (0 * 8)] 
+                        # Move IRQ vector into first parameter.
+                        mov rdi, {}
                         # Move stack frame into second parameter.
-                        lea rsi, [rsp + (18 * 8)]
+                        lea rsi, [rsp + (15 * 8)]
                         # Move cached gprs pointer into third parameter.
-                        lea rdx, [rsp + (3 * 8)]
+                        mov rdx, rsp
 
                         call {}
-
-                        # 'pop' vector and fake stack frame
-                        add rsp, 0x18
                         ",
                         pop_gprs!(),
                         "iretq",
@@ -335,6 +282,35 @@ impl From<Fault<'_>> for crate::exceptions::Exception {
     }
 }
 
+/// ### Safety
+///
+/// This function should not be called from software.
+unsafe extern "sysv64" fn irq_handoff(
+    irq_number: u64,
+    isf: &mut crate::arch::x64::structures::idt::InterruptStackFrame,
+    regs: &mut Registers,
+) {
+    use crate::arch::reexport::x86_64::VirtAddr;
+
+    let mut proc_state = State {
+        ip: isf.instruction_pointer.as_u64(),
+        sp: isf.stack_pointer.as_u64(),
+        rfl: RFlags::from_bits_retain(isf.cpu_flags),
+        cs: isf.code_segment,
+        ss: isf.stack_segment,
+    };
+
+    crate::interrupts::handle_irq(irq_number, &mut proc_state, regs);
+
+    isf.as_mut().write(crate::arch::x64::structures::idt::InterruptStackFrameValue {
+        instruction_pointer: VirtAddr::new(proc_state.ip),
+        code_segment: proc_state.cs,
+        cpu_flags: proc_state.rfl.bits(),
+        stack_pointer: VirtAddr::new(proc_state.sp),
+        stack_segment: proc_state.ss,
+    });
+}
+
 pub fn common_exception_handler(exception: Fault) {
     // match crate::local::provide_exception(exception) {
     //     Ok(()) => {}
@@ -345,6 +321,8 @@ pub fn common_exception_handler(exception: Fault) {
 
     //     Err(exception) => panic!("{:#X?}", exception),
     // }
+
+    trace!("Handling exception: {:X?}", exception);
 
     match exception {
         Fault::PageFault { isf: _, gprs: _, err: _, address }

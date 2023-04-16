@@ -43,11 +43,10 @@ impl Process {
             priority,
             address_space: Mutex::new(address_space),
             context: (
-                State {
-                    ip: (entry as usize).try_into().unwrap(),
-                    sp: unsafe { stack.as_non_null_ptr().as_ptr().add(stack.len()).addr() as u64 },
-                },
-                Registers::user_default(),
+                State::user((entry as usize).try_into().unwrap(), unsafe {
+                    stack.as_non_null_ptr().as_ptr().add(stack.len()).addr() as u64
+                }),
+                Registers::default(),
             ),
         }
     }

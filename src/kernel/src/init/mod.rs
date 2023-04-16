@@ -98,8 +98,15 @@ call_once!(
 
 call_once!(
     fn print_boot_info() {
+        extern "C" {
+            static __build_id: LinkerSymbol;
+        }
+
         #[limine::limine_tag]
         static BOOT_INFO: limine::BootInfoRequest = limine::BootInfoRequest::new(crate::boot::LIMINE_REV);
+
+        // Safety: Symbol is provided by linker script.
+        info!("Build ID            {}", unsafe { __build_id.as_usize() });
 
         if let Some(boot_info) = BOOT_INFO.get_response() {
             info!("Bootloader Info     {} v{} (rev {})", boot_info.name(), boot_info.version(), boot_info.revision());

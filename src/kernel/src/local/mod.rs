@@ -111,7 +111,7 @@ pub unsafe fn init(timer_frequency: u16) {
         let tss = &mut state.tss;
 
         // TODO guard pages for these stacks ?
-        tss.privilege_stack_table[0] = allocate_tss_stack(NonZeroUsize::new_unchecked(5));
+        tss.privilege_stack_table[0] = allocate_tss_stack(NonZeroUsize::new_unchecked(8));
         tss.interrupt_stack_table[StackTableIndex::Debug as usize] = allocate_tss_stack(NonZeroUsize::new_unchecked(2));
         tss.interrupt_stack_table[StackTableIndex::NonMaskable as usize] =
             allocate_tss_stack(NonZeroUsize::new_unchecked(2));
@@ -230,11 +230,8 @@ pub unsafe fn begin_scheduling() {
     }
 }
 
-/// ### Safety
-///
-/// Caller must ensure that context switching to a new task will not cause undefined behaviour.
-pub unsafe fn next_task(state: &mut crate::proc::State, regs: &mut crate::proc::Registers) {
-    get_state_mut().scheduler.next_task(state, regs);
+pub unsafe fn with_scheduler<R>(func: impl FnOnce(&mut crate::proc::Scheduler) -> R) -> R {
+    func(&mut get_state_mut().scheduler)
 }
 
 pub unsafe fn end_of_interrupt() {

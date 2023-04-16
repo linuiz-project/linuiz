@@ -29,9 +29,9 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
 /// Calling this function more than once and/or outside the context of an interrupt is undefined behaviour.
 #[doc(hidden)]
 #[repr(align(0x10))]
-pub unsafe fn irq_handler(irq_vector: u64, state: &mut State, regs: &mut Registers) {
+pub unsafe fn handle_irq(irq_vector: u64, state: &mut State, regs: &mut Registers) {
     match Vector::try_from(irq_vector) {
-        Ok(Vector::Timer) => crate::local::next_task(state, regs),
+        Ok(Vector::Timer) => crate::local::with_scheduler(|scheduler| scheduler.next_task(state, regs)),
 
         Err(err) => panic!("Invalid interrupt vector: {:X?}", err),
         vector_result => unimplemented!("Unhandled interrupt: {:?}", vector_result),

@@ -89,6 +89,9 @@ pub struct Options {
 
     #[arg(long)]
     mock: bool,
+
+    #[arg(short, long)]
+    gdb: bool,
 }
 
 pub fn run(sh: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
@@ -152,6 +155,11 @@ pub fn run(sh: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
 
     if options.nographic {
         arguments.push("-nographic");
+    }
+
+    if options.gdb {
+        arguments.push("-s");
+        arguments.push("-S");
     }
 
     let cmd = cmd!(

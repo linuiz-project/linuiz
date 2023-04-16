@@ -58,6 +58,7 @@ impl Hhdm {
     }
 }
 
+#[repr(align(0x10))]
 pub struct Stack<const SIZE: usize>([u8; SIZE]);
 
 impl<const SIZE: usize> Stack<SIZE> {
@@ -66,9 +67,9 @@ impl<const SIZE: usize> Stack<SIZE> {
         Self([0u8; SIZE])
     }
 
-    pub fn top(&self) -> Address<Virtual> {
+    pub fn top(&self) -> NonNull<u8> {
         // Safety: Pointer is valid for the length of the slice.
-        Address::from_ptr(unsafe { self.0.as_ptr().add(self.0.len()).cast_mut() })
+        NonNull::new(unsafe { self.0.as_ptr().add(self.0.len()).cast_mut() }).unwrap()
     }
 }
 
