@@ -36,7 +36,7 @@ impl Process {
     pub fn new(priority: Priority, entry: EntryPoint, mut address_space: AddressSpace<PhysicalAllocator>) -> Self {
         const STACK_PAGES: NonZeroUsize = NonZeroUsize::new(16).unwrap();
 
-        let stack = address_space.map(None, STACK_PAGES, MmapFlags::READ_WRITE).unwrap();
+        let stack = address_space.mmap(None, STACK_PAGES, MmapFlags::READ_WRITE).unwrap();
 
         Self {
             id: uuid::Uuid::new_v4(),
@@ -66,3 +66,6 @@ impl Process {
         with_fn(&mut address_space)
     }
 }
+
+pub const PT_FLAG_EXEC_BIT: usize = 0;
+pub const PT_FLAG_WRITE_BIT: usize = 1;

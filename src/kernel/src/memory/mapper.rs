@@ -110,16 +110,13 @@ impl Mapper {
         })
     }
 
-    pub fn auto_map(&mut self, page: Address<Page>, attributes: paging::TableEntryFlags) -> Result<()> {
+    pub fn auto_map(&mut self, page: Address<Page>, flags: paging::TableEntryFlags) -> Result<()> {
         match PMM.next_frame() {
-            Ok(frame) => self.map(
-                page,
-                PageDepth::min(),
-                frame,
-                !attributes.contains(paging::TableEntryFlags::DEMAND),
-                attributes,
-            ),
-            Err(_) => Err(Error::AllocError),
+            Ok(frame) => self.map(page, PageDepth::min(), frame, false, flags),
+            Err(err) => {
+                trace!("Auto alloc PMM error: {:?}", err);
+                Err(Error::AllocError)
+            }
         }
     }
 

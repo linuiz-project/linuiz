@@ -170,7 +170,6 @@ call_once!(
                 use crate::memory::{paging::TableEntryFlags, Hhdm};
                 use limine::MemoryMapEntryType;
 
-                const PT_LOAD: u32 = 0x1;
                 const PT_FLAG_EXEC_BIT: usize = 0;
                 const PT_FLAG_WRITE_BIT: usize = 1;
 
@@ -179,7 +178,7 @@ call_once!(
                     .segments()
                     .expect("kernel file has no segments")
                     .into_iter()
-                    .filter(|ph| ph.p_type == PT_LOAD)
+                    .filter(|ph| ph.p_type == elf::abi::PT_LOAD)
                     .for_each(|phdr| {
                         use bit_field::BitField;
 
@@ -301,56 +300,112 @@ call_once!(
     }
 );
 
-call_once!(
-    fn load_drivers() {
-        use crate::proc::{AddressSpace, EntryPoint, Priority, Process, DEFAULT_USERSPACE_SIZE};
-        use elf::{endian::AnyEndian, ElfBytes};
+// call_once!(
+fn load_drivers() {
+    use crate::proc::{AddressSpace, EntryPoint, Priority, Process, DEFAULT_USERSPACE_SIZE};
+    use elf::{endian::AnyEndian, ElfBytes};
 
-        #[limine::limine_tag]
-        static LIMINE_MODULES: limine::ModuleRequest = limine::ModuleRequest::new(crate::boot::LIMINE_REV);
+    #[limine::limine_tag]
+    static LIMINE_MODULES: limine::ModuleRequest = limine::ModuleRequest::new(crate::boot::LIMINE_REV);
 
-        debug!("Unpacking kernel drivers...");
+    debug!("Unpacking kernel drivers...");
 
-        let Some(modules) = LIMINE_MODULES.get_response() else {
+    let Some(modules) = LIMINE_MODULES.get_response() else {
             warn!("Bootloader provided no modules; skipping driver loading.");
             return;
         };
+    trace!("{:?}", modules);
 
-        trace!("{:?}", modules);
+    let modules = modules.modules();
+    trace!("Found modules: {:X?}", modules);
 
-        let modules = modules.modules();
-        trace!("Found modules: {:X?}", modules);
-
-        let Some(drivers_module) = modules.iter().find(|module| module.path().ends_with("drivers")) else {
+    let Some(drivers_module) = modules.iter().find(|module| module.path().ends_with("drivers")) else {
             warn!("No drivers module found; skipping driver loading.");
             return;
         };
 
-        let archive = tar_no_std::TarArchiveRef::new(drivers_module.data());
-        for entry in archive.entries() {
+    let archive = tar_no_std::TarArchiveRef::new(drivers_module.data());
+    archive
+        .entries()
+        .into_iter()
+        .filter_map(|entry| {
             debug!("Attempting to parse driver blob: {}", entry.filename());
 
             let Ok(elf) = ElfBytes::<AnyEndian>::minimal_parse(entry.data()) else {
                 warn!("Failed to parse driver blob into ELF");
-                continue;
+                return None
             };
 
             trace!("Driver blob is ELF: {:X?}", elf.ehdr);
-
+            Some(elf)
+        })
+        .for_each(|elf| {
+            let phdrs = elf.segments().expect("driver blob has no loadable segments.");
             let entry_point = unsafe { core::mem::transmute::<_, EntryPoint>(elf.ehdr.e_entry) };
-            let mapper = unsafe {
-                crate::memory::mapper::Mapper::new_unsafe(
-                    PageDepth::current(),
-                    crate::memory::copy_kernel_page_table().unwrap(),
-                )
-            };
-            let address_space = AddressSpace::new(DEFAULT_USERSPACE_SIZE, mapper, &*PMM);
+            let mut address_space = AddressSpace::new(
+                DEFAULT_USERSPACE_SIZE,
+                unsafe {
+                    crate::memory::mapper::Mapper::new_unsafe(
+                        PageDepth::current(),
+                        crate::memory::copy_kernel_page_table().unwrap(),
+                    )
+                },
+                &*PMM,
+            );
+
+            for phdr in phdrs.iter().filter(|phdr| phdr.p_type == elf::abi::PT_LOAD) {
+                use crate::proc::{MmapFlags, PT_FLAG_EXEC_BIT, PT_FLAG_WRITE_BIT};
+                use bit_field::BitField;
+
+                trace!("Processing segment: {:?}", phdr);
+
+                let size_offset = usize::try_from(phdr.p_vaddr).unwrap() & libsys::page_mask();
+                let total_size = size_offset + usize::try_from(phdr.p_memsz).unwrap();
+                let page_count = libsys::align_up_div(total_size, libsys::page_shift());
+                let segment_vaddr = Address::new_truncate(phdr.p_vaddr as usize);
+                let page_count = core::num::NonZeroUsize::new(page_count.try_into().unwrap()).unwrap();
+
+                address_space
+                    .mmap(Some(segment_vaddr), page_count, MmapFlags::NOT_DEMAND | MmapFlags::READ_WRITE)
+                    .unwrap();
+
+                let segment_data = elf.segment_data(&phdr).unwrap();
+                unsafe {
+                    trace!("Copying elf data...");
+                    core::ptr::copy_nonoverlapping(segment_data.as_ptr(), segment_vaddr.as_ptr(), segment_data.len());
+
+                    if phdr.p_memsz > phdr.p_filesz {
+                        trace!("Zeroing elf data...");
+                        core::ptr::write_bytes(
+                            segment_vaddr.as_ptr().add(segment_data.len()),
+                            0x0,
+                            usize::try_from(phdr.p_memsz - phdr.p_filesz).unwrap(),
+                        );
+                    }
+                }
+
+                address_space
+                    .set_mmap_flags(
+                        segment_vaddr,
+                        page_count,
+                        MmapFlags::NOT_DEMAND
+                            | if phdr.p_flags.get_bit(PT_FLAG_WRITE_BIT) {
+                                MmapFlags::READ_EXECUTE
+                            } else if phdr.p_flags.get_bit(PT_FLAG_EXEC_BIT) {
+                                MmapFlags::READ_WRITE
+                            } else {
+                                MmapFlags::empty()
+                            },
+                    )
+                    .unwrap();
+            }
+
             let task = Process::new(Priority::Normal, entry_point, address_space);
 
             crate::proc::PROCESSES.lock().push_back(task);
-        }
-    }
-);
+        });
+}
+// );
 
 call_once!(
     fn setup_smp() {

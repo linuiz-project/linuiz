@@ -450,8 +450,16 @@ impl<'a> TableEntryCell<'a, Mut> {
                     unsafe {
                         // Clear the frame to avoid corrupted PTEs.
                         core::ptr::write_bytes(Hhdm::offset(frame).unwrap().as_ptr(), 0x0, page_size());
+
+                        let mut flags = TableEntryFlags::PTE;
+                        // Insert the USER bit in all non-leaf entries.
+                        // This is primarily for compatibility with the x86 paging scheme.
+                        if self.depth() != PageDepth::min() {
+                            flags.insert(TableEntryFlags::USER);
+                        }
+
                         // Set the entry frame and set attributes to make a valid PTE.
-                        self.set(frame, TableEntryFlags::PTE);
+                        self.set(frame, flags);
                     }
                 }
 

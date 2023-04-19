@@ -60,7 +60,7 @@ bitflags::bitflags! {
 
 impl From<MmapFlags> for TableEntryFlags {
     fn from(mmap_flags: MmapFlags) -> Self {
-        let mut entry_flags = TableEntryFlags::empty();
+        let mut entry_flags = TableEntryFlags::PRESENT | TableEntryFlags::USER;
 
         // RW and RX are mutually exclusive, so always else-if the bit checks.
         if mmap_flags.contains(MmapFlags::READ_WRITE) {
@@ -75,8 +75,6 @@ impl From<MmapFlags> for TableEntryFlags {
             entry_flags.remove(TableEntryFlags::PRESENT);
             entry_flags.insert(TableEntryFlags::DEMAND);
         }
-
-        entry_flags.insert(TableEntryFlags::USER);
 
         entry_flags
     }
@@ -105,7 +103,7 @@ impl<A: Allocator + Clone> AddressSpace<A> {
         )
     }
 
-    pub fn map(
+    pub fn mmap(
         &mut self,
         address: Option<Address<Page>>,
         page_count: NonZeroUsize,
@@ -200,7 +198,10 @@ impl<A: Allocator + Clone> AddressSpace<A> {
             .map(|address| Address::new(address))
             .try_for_each(|page| {
                 let page = page.ok_or(Error::MalformedAddress)?;
-                self.mapper.auto_map(page, TableEntryFlags::from(flags)).map_err(Error::from)
+                let flags = TableEntryFlags::from(flags);
+
+                trace!("Invoking mapper: {:X?} {:?}", page, flags);
+                self.mapper.auto_map(page, flags).map_err(Error::from)
             })
             .map(|_| {
                 NonNull::slice_from_raw_parts(NonNull::new(address.as_ptr()).unwrap(), page_count.get() * page_size())
@@ -225,6 +226,23 @@ impl<A: Allocator + Clone> AddressSpace<A> {
                         // ... return attributes
                         attributes
                     })
+                    .map_err(Error::from)
+            })
+    }
+
+    pub fn set_mmap_flags(&mut self, address: Address<Page>, page_count: NonZeroUsize, flags: MmapFlags) -> Result<()> {
+        (0..page_count.get())
+            .map(|offset| offset * page_size())
+            .map(|offset| address.get().get() + offset)
+            .map(|address| Address::new(address))
+            .try_for_each(|page| unsafe {
+                self.mapper
+                    .set_page_attributes(
+                        page.ok_or(Error::InvalidAddress)?,
+                        None,
+                        TableEntryFlags::from(flags),
+                        paging::AttributeModify::Set,
+                    )
                     .map_err(Error::from)
             })
     }
