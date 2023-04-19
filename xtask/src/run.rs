@@ -59,6 +59,7 @@ pub struct Options {
     #[arg(value_enum, long, default_value = "qemu64")]
     cpu: CPU,
 
+    /// Emulation accelerator to use.
     #[arg(value_enum, long, default_value = "none")]
     accel: Accelerator,
 
@@ -78,24 +79,30 @@ pub struct Options {
     #[arg(value_enum, long, default_value = "virtio")]
     block: BlockDriver,
 
+    /// Skips invoking the build pipeline for the kernel.
     #[arg(long)]
     nobuild: bool,
 
+    /// Runs the kernel in serial-only mode (no graphics driving).
     #[arg(long)]
     nographic: bool,
 
     #[clap(flatten)]
     build_options: crate::build::Options,
 
+    /// Skips execution and only prints the QEMU command that would have been executed.
     #[arg(long)]
     mock: bool,
 
+    /// Puts QEMU in GDB debug mode, awaiting signal from the debugger to begin execution.
     #[arg(short, long)]
-    debug: bool,
+    gdb: bool,
 }
 
 pub fn run(sh: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
-    crate::build::build(sh, options.build_options)?;
+    if !options.nobuild {
+        crate::build::build(sh, options.build_options)?;
+    }
 
     let qemu_exe_str = match options.cpu {
         CPU::Rv64 => "qemu-system-riscv64",
@@ -155,7 +162,7 @@ pub fn run(sh: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
         cmd = cmd.arg("-nographic");
     }
 
-    if options.debug {
+    if options.gdb {
         cmd = cmd.args(["-S", "-s"]);
     }
 
