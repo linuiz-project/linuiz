@@ -16,54 +16,62 @@ pub struct PageFaultHandlerError;
 #[repr(align(0x10))]
 pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandlerError> {
     crate::local::with_scheduler(|scheduler| {
+        use crate::memory::paging::TableEntryFlags;
+
         let process = scheduler.process_mut().ok_or(PageFaultHandlerError)?;
-        let page_phdr = process
+        let elf_vaddr = process.load_address_to_elf_vaddr(address).unwrap();
+        let phdr = process
             .elf_segments()
             .iter()
             .filter(|phdr| phdr.p_type == elf::abi::PT_LOAD)
-            .find(|phdr| (phdr.p_vaddr..(phdr.p_vaddr + phdr.p_memsz)).contains(&u64::try_from(address.get()).unwrap()))
+            .find(|phdr| (phdr.p_vaddr..(phdr.p_vaddr + phdr.p_memsz)).contains(&u64::try_from(elf_vaddr).unwrap()))
             .ok_or(PageFaultHandlerError)?
             .clone();
 
-        // Convert some relevant phdr fields to `usize` for working with.
-        let vaddr = usize::try_from(page_phdr.p_vaddr).unwrap();
-        let file_size = usize::try_from(page_phdr.p_filesz).unwrap();
-        // Convert the virtual address to a page address.
-        let page_address = Address::<Page>::new_truncate(address.get());
-        let mem_offset = vaddr - page_address.get().get();
-        // Calculate the portion of the memory range which resides within the ELF itself.
-        let file_offset = usize::try_from(page_phdr.p_offset).unwrap() + mem_offset;
-        let file_portion = file_offset..usize::min(vaddr + file_size, file_offset + page_size());
+        // Small check to help ensure the phdr alignments are page-fit.
+        debug_assert_eq!(phdr.p_align & (libsys::page_mask() as u64), 0);
+        trace!("Demand mapping from segment: {:?}", phdr);
 
-        // Map the page into memory.
+        // Map the page as RW so we can copy the ELF data in.
         let mapped_memory = process
             .address_space_mut()
-            .mmap(Some(page_address), core::num::NonZeroUsize::MIN, crate::proc::MmapPermissions::ReadWrite)
+            .mmap(
+                Some(Address::<Page>::new_truncate(address.get())),
+                core::num::NonZeroUsize::MIN,
+                crate::proc::MmapPermissions::ReadWrite,
+            )
             .unwrap();
 
-        // Find the ELF data.
-        let elf_data = match process.elf_data() {
-            ElfData::Memory(elf_memory) => &elf_memory[file_portion],
+        // Calculate the range of bytes we will be reading from the ELF file.
+        let file_offset = usize::try_from(phdr.p_offset).unwrap();
+        let file_slice_len = usize::min(usize::try_from(phdr.p_filesz).unwrap(), page_size());
+        // Subslice the ELF memory to get the requisite segment data.
+        let file_slice = match process.elf_data() {
+            ElfData::Memory(elf_memory) => &elf_memory[file_offset..(file_offset + file_slice_len)],
             ElfData::File(_) => unimplemented!(),
         };
 
         // Load the ELF data.
         let mapped_memory = mapped_memory.as_uninit_slice_mut();
-        let (copy_memory, clear_memory) = mapped_memory.split_at_mut(elf_data.len());
-        // Copy the data into memory.
-        copy_memory.copy_from_slice(unsafe { elf_data.align_to().1 });
-        // Zero the remaining bytes, according to ELF spec.
-        clear_memory.fill(core::mem::MaybeUninit::new(0x0));
+        // Front padding is all of the bytes before the file offset.
+        let (front_pad, mapped_memory) = mapped_memory.split_at_mut(file_offset % mapped_memory.len());
+        // End padding is all of the bytes after the file offset + file slice length.
+        let (mapped_memory, end_pad) = mapped_memory.split_at_mut(file_slice.len());
+        // Zero the padding bytes, according to ELF spec.
+        front_pad.fill(core::mem::MaybeUninit::new(0x0));
+        end_pad.fill(core::mem::MaybeUninit::new(0x0));
+        // Copy the ELF data into memory
+        // Safety: In-place cast to a transparently aligned type.
+        mapped_memory.copy_from_slice(unsafe { file_slice.align_to().1 });
 
-        use crate::memory::paging::TableEntryFlags;
         process
             .address_space_mut()
             .set_flags(
-                page_address,
+                Address::<Page>::new_truncate(address.get()),
                 core::num::NonZeroUsize::MIN,
                 TableEntryFlags::PRESENT
                     | TableEntryFlags::USER
-                    | TableEntryFlags::from(crate::proc::segment_type_to_mmap_permissions(page_phdr.p_type)),
+                    | TableEntryFlags::from(crate::proc::segment_type_to_mmap_permissions(phdr.p_type)),
             )
             .unwrap();
 

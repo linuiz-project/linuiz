@@ -3,6 +3,7 @@ use bit_field::BitField;
 pub use context::*;
 
 mod scheduling;
+use libsys::{Address, Virtual};
 pub use scheduling::*;
 
 mod address_space;
@@ -24,6 +25,8 @@ pub fn segment_type_to_mmap_permissions(segment_ty: u32) -> MmapPermissions {
         MmapPermissions::ReadOnly
     }
 }
+
+pub static PROCESS_BASE: usize = 0x20000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Priority {
@@ -48,6 +51,7 @@ pub struct Process {
     priority: Priority,
     address_space: AddressSpace,
     context: Context,
+    load_offset: usize,
     elf_header: FileHeader<AnyEndian>,
     elf_segments: Box<[ProgramHeader]>,
     elf_data: ElfData,
@@ -57,6 +61,7 @@ impl Process {
     pub fn new(
         priority: Priority,
         mut address_space: AddressSpace,
+        load_offset: usize,
         elf_header: FileHeader<AnyEndian>,
         elf_segments: Box<[ProgramHeader]>,
         elf_data: ElfData,
@@ -70,11 +75,12 @@ impl Process {
             priority,
             address_space,
             context: (
-                State::user(elf_header.e_entry, unsafe {
+                State::user(u64::try_from(load_offset).unwrap() + elf_header.e_entry, unsafe {
                     stack.as_non_null_ptr().as_ptr().add(stack.len()).addr() as u64
                 }),
                 Registers::default(),
             ),
+            load_offset,
             elf_header,
             elf_segments,
             elf_data,
@@ -114,5 +120,10 @@ impl Process {
     #[inline]
     pub const fn elf_data(&self) -> &ElfData {
         &self.elf_data
+    }
+
+    #[inline]
+    pub fn load_address_to_elf_vaddr(&self, address: Address<Virtual>) -> Option<usize> {
+        address.get().checked_sub(self.load_offset)
     }
 }

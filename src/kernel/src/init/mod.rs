@@ -387,6 +387,7 @@ fn load_drivers() {
             let task = Process::new(
                 Priority::Normal,
                 AddressSpace::new_userspace(),
+                0x10000,
                 elf.ehdr,
                 elf_segments_copy,
                 crate::proc::ElfData::Memory(elf_memory),
