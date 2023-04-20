@@ -4,7 +4,12 @@ pub fn get_parameters() -> &'static params::Parameters {
     params::PARAMETERS.get().expect("parameters have not yet been parsed")
 }
 
-use crate::memory::{alloc::pmm::PMM, paging::PageDepth};
+use core::mem::MaybeUninit;
+
+use crate::memory::{
+    alloc::{pmm::PMM, AlignedAllocator},
+    paging::PageDepth,
+};
 use libkernel::LinkerSymbol;
 use libsys::{page_size, Address};
 
@@ -302,8 +307,8 @@ call_once!(
 
 // call_once!(
 fn load_drivers() {
-    use crate::proc::{AddressSpace, EntryPoint, Priority, Process, DEFAULT_USERSPACE_SIZE};
-    use elf::{endian::AnyEndian, ElfBytes};
+    use crate::proc::{AddressSpace, Priority, Process, DEFAULT_USERSPACE_SIZE};
+    use elf::endian::AnyEndian;
 
     #[limine::limine_tag]
     static LIMINE_MODULES: limine::ModuleRequest = limine::ModuleRequest::new(crate::boot::LIMINE_REV);
@@ -328,21 +333,47 @@ fn load_drivers() {
     archive
         .entries()
         .into_iter()
-        .filter_map(|entry| {
+        .filter(|entry| {
             debug!("Attempting to parse driver blob: {}", entry.filename());
 
-            let Ok(elf) = ElfBytes::<AnyEndian>::minimal_parse(entry.data()) else {
-                warn!("Failed to parse driver blob into ELF");
-                return None
-            };
-
-            trace!("Driver blob is ELF: {:X?}", elf.ehdr);
-            Some(elf)
+            match elf::file::parse_ident::<AnyEndian>(entry.data()) {
+                Ok(_) => true,
+                Err(err) => {
+                    warn!("Failed to parse driver blob into ELF: {:?}", err);
+                    false
+                }
+            }
         })
-        .for_each(|elf| {
-            let phdrs = elf.segments().expect("driver blob has no loadable segments.");
-            let entry_point = unsafe { core::mem::transmute::<_, EntryPoint>(elf.ehdr.e_entry) };
-            let mut address_space = AddressSpace::new(
+        .for_each(|entry| {
+            // for phdr in phdrs.iter().filter(|phdr| phdr.p_type == elf::abi::PT_LOAD) {
+            //     use crate::proc::{MmapPermissions, PT_FLAG_EXEC_BIT, PT_FLAG_WRITE_BIT};
+            //     use bit_field::BitField;
+
+            //     trace!("Processing segment: {:?}", phdr);
+
+            //     let size_offset = usize::try_from(phdr.p_vaddr).unwrap() & libsys::page_mask();
+            //     let total_size = size_offset + usize::try_from(phdr.p_memsz).unwrap();
+            //     let page_count = libsys::align_up_div(total_size, libsys::page_shift());
+            //     let segment_vaddr = Address::new_truncate(phdr.p_vaddr as usize);
+            //     let page_count = core::num::NonZeroUsize::new(page_count.try_into().unwrap()).unwrap();
+
+            //     address_space
+            //         .mmap(
+            //             Some(segment_vaddr),
+            //             page_count,
+            //             false,
+            //             if phdr.p_flags.get_bit(PT_FLAG_WRITE_BIT) {
+            //                 MmapPermissions::ReadWrite
+            //             } else if phdr.p_flags.get_bit(PT_FLAG_EXEC_BIT) {
+            //                 MmapPermissions::ReadExecute
+            //             } else {
+            //                 MmapPermissions::ReadOnly
+            //             },
+            //         )
+            //         .unwrap();
+            // }
+
+            let address_space = AddressSpace::new(
                 DEFAULT_USERSPACE_SIZE,
                 unsafe {
                     crate::memory::mapper::Mapper::new_unsafe(
@@ -353,54 +384,17 @@ fn load_drivers() {
                 &*PMM,
             );
 
-            for phdr in phdrs.iter().filter(|phdr| phdr.p_type == elf::abi::PT_LOAD) {
-                use crate::proc::{MmapFlags, PT_FLAG_EXEC_BIT, PT_FLAG_WRITE_BIT};
-                use bit_field::BitField;
+            // Safety: In-place transmutation of initialized bytes for the purpose of copying safely.
+            let archive_data = unsafe { entry.data().align_to::<MaybeUninit<u8>>().1 };
+            // Allocate space for the ELF data, properly aligned in memory.
+            let mut elf_copy =
+                crate::proc::ElfData::new_uninit_slice_in(archive_data.len(), AlignedAllocator::new_in(&*PMM));
+            // Copy the ELF data from the archive entry.
+            elf_copy.copy_from_slice(archive_data);
+            // Safety: The ELF data buffer is now initialized with the contents of the ELF.
+            let elf_copy = unsafe { elf_copy.assume_init() };
 
-                trace!("Processing segment: {:?}", phdr);
-
-                let size_offset = usize::try_from(phdr.p_vaddr).unwrap() & libsys::page_mask();
-                let total_size = size_offset + usize::try_from(phdr.p_memsz).unwrap();
-                let page_count = libsys::align_up_div(total_size, libsys::page_shift());
-                let segment_vaddr = Address::new_truncate(phdr.p_vaddr as usize);
-                let page_count = core::num::NonZeroUsize::new(page_count.try_into().unwrap()).unwrap();
-
-                address_space
-                    .mmap(Some(segment_vaddr), page_count, MmapFlags::NOT_DEMAND | MmapFlags::READ_WRITE)
-                    .unwrap();
-
-                let segment_data = elf.segment_data(&phdr).unwrap();
-                unsafe {
-                    trace!("Copying elf data...");
-                    core::ptr::copy_nonoverlapping(segment_data.as_ptr(), segment_vaddr.as_ptr(), segment_data.len());
-
-                    if phdr.p_memsz > phdr.p_filesz {
-                        trace!("Zeroing elf data...");
-                        core::ptr::write_bytes(
-                            segment_vaddr.as_ptr().add(segment_data.len()),
-                            0x0,
-                            usize::try_from(phdr.p_memsz - phdr.p_filesz).unwrap(),
-                        );
-                    }
-                }
-
-                address_space
-                    .set_mmap_flags(
-                        segment_vaddr,
-                        page_count,
-                        MmapFlags::NOT_DEMAND
-                            | if phdr.p_flags.get_bit(PT_FLAG_WRITE_BIT) {
-                                MmapFlags::READ_EXECUTE
-                            } else if phdr.p_flags.get_bit(PT_FLAG_EXEC_BIT) {
-                                MmapFlags::READ_WRITE
-                            } else {
-                                MmapFlags::empty()
-                            },
-                    )
-                    .unwrap();
-            }
-
-            let task = Process::new(Priority::Normal, entry_point, address_space);
+            let task = Process::new(Priority::Normal, address_space, elf_copy);
 
             crate::proc::PROCESSES.lock().push_back(task);
         });

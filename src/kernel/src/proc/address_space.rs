@@ -49,34 +49,20 @@ impl From<paging::Error> for Error {
 crate::default_display_impl!(Error);
 crate::err_result_type!(Error);
 
-bitflags::bitflags! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct MmapFlags : u16 {
-        const READ_EXECUTE  = 1 << 1;
-        const READ_WRITE    = 1 << 2;
-        const NOT_DEMAND    = 1 << 8;
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MmapPermissions {
+    ReadExecute,
+    ReadWrite,
+    ReadOnly,
 }
 
-impl From<MmapFlags> for TableEntryFlags {
-    fn from(mmap_flags: MmapFlags) -> Self {
-        let mut entry_flags = TableEntryFlags::PRESENT | TableEntryFlags::USER;
-
-        // RW and RX are mutually exclusive, so always else-if the bit checks.
-        if mmap_flags.contains(MmapFlags::READ_WRITE) {
-            entry_flags.insert(TableEntryFlags::RW);
-        } else if mmap_flags.contains(MmapFlags::READ_EXECUTE) {
-            entry_flags.insert(TableEntryFlags::RX);
-        } else {
-            entry_flags.insert(TableEntryFlags::RO);
+impl From<MmapPermissions> for TableEntryFlags {
+    fn from(permissions: MmapPermissions) -> Self {
+        match permissions {
+            MmapPermissions::ReadExecute => TableEntryFlags::RX,
+            MmapPermissions::ReadWrite => TableEntryFlags::RW,
+            MmapPermissions::ReadOnly => TableEntryFlags::RO,
         }
-
-        if !mmap_flags.contains(MmapFlags::NOT_DEMAND) {
-            entry_flags.remove(TableEntryFlags::PRESENT);
-            entry_flags.insert(TableEntryFlags::DEMAND);
-        }
-
-        entry_flags
     }
 }
 
@@ -107,17 +93,18 @@ impl<A: Allocator + Clone> AddressSpace<A> {
         &mut self,
         address: Option<Address<Page>>,
         page_count: NonZeroUsize,
-        flags: MmapFlags,
+        lazy: bool,
+        permissions: MmapPermissions,
     ) -> Result<NonNull<[u8]>> {
         if let Some(address) = address {
-            self.map_exact(address, page_count, flags)
+            self.map_exact(address, page_count, lazy, permissions)
         } else {
-            self.map_any(page_count, flags)
+            self.map_any(page_count, lazy, permissions)
         }
     }
 
     #[cfg_attr(debug_assertions, inline(never))]
-    fn map_any(&mut self, page_count: NonZeroUsize, flags: MmapFlags) -> Result<NonNull<[u8]>> {
+    fn map_any(&mut self, page_count: NonZeroUsize, lazy: bool, permissions: MmapPermissions) -> Result<NonNull<[u8]>> {
         let size = page_count.get() * page_size();
 
         let index = self.free.iter().position(|region| region.len() >= size).ok_or(Error::AllocError)?;
@@ -132,7 +119,7 @@ impl<A: Allocator + Clone> AddressSpace<A> {
         }
 
         // Safety: Memory range was taken from the freelist, and so is guaranteed to be unused.
-        Ok(unsafe { self.invoke_mapper(Address::new(new_free.start).unwrap(), page_count, flags)? })
+        Ok(unsafe { self.invoke_mapper(Address::new(new_free.start).unwrap(), page_count, lazy, permissions)? })
     }
 
     #[cfg_attr(debug_assertions, inline(never))]
@@ -140,7 +127,9 @@ impl<A: Allocator + Clone> AddressSpace<A> {
         &mut self,
         address: Address<Page>,
         page_count: NonZeroUsize,
-        flags: MmapFlags,
+
+        lazy: bool,
+        permissions: MmapPermissions,
     ) -> Result<NonNull<[u8]>> {
         let size = page_count.get() * page_size();
         let req_region_start = address.get().get();
@@ -176,7 +165,7 @@ impl<A: Allocator + Clone> AddressSpace<A> {
             }
         }
 
-        unsafe { self.invoke_mapper(address, page_count, flags) }
+        unsafe { self.invoke_mapper(address, page_count, lazy, permissions) }
     }
 
     /// Internal function taking exact address range parameters to map a region of memory.
@@ -190,7 +179,9 @@ impl<A: Allocator + Clone> AddressSpace<A> {
         &mut self,
         address: Address<Page>,
         page_count: NonZeroUsize,
-        flags: MmapFlags,
+
+        lazy: bool,
+        permissions: MmapPermissions,
     ) -> Result<NonNull<[u8]>> {
         (0..page_count.get())
             .map(|offset| offset * page_size())
@@ -198,7 +189,9 @@ impl<A: Allocator + Clone> AddressSpace<A> {
             .map(|address| Address::new(address))
             .try_for_each(|page| {
                 let page = page.ok_or(Error::MalformedAddress)?;
-                let flags = TableEntryFlags::from(flags);
+                let flags = TableEntryFlags::USER
+                    | TableEntryFlags::from(permissions)
+                    | if lazy { TableEntryFlags::DEMAND } else { TableEntryFlags::PRESENT };
 
                 trace!("Invoking mapper: {:X?} {:?}", page, flags);
                 self.mapper.auto_map(page, flags).map_err(Error::from)
@@ -226,23 +219,6 @@ impl<A: Allocator + Clone> AddressSpace<A> {
                         // ... return attributes
                         attributes
                     })
-                    .map_err(Error::from)
-            })
-    }
-
-    pub fn set_mmap_flags(&mut self, address: Address<Page>, page_count: NonZeroUsize, flags: MmapFlags) -> Result<()> {
-        (0..page_count.get())
-            .map(|offset| offset * page_size())
-            .map(|offset| address.get().get() + offset)
-            .map(|address| Address::new(address))
-            .try_for_each(|page| unsafe {
-                self.mapper
-                    .set_page_attributes(
-                        page.ok_or(Error::InvalidAddress)?,
-                        None,
-                        TableEntryFlags::from(flags),
-                        paging::AttributeModify::Set,
-                    )
                     .map_err(Error::from)
             })
     }
