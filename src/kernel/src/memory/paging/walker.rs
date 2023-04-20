@@ -44,7 +44,6 @@ impl<'a> Walker<'a> {
 
                     Self::walk_impl(table, cur_depth.next(), target_depth, func)?;
                 } else {
-                    debug!("{:?} >= {:?}", cur_depth, target_depth);
                     let steps = core::iter::Step::steps_between(&cur_depth, &target_depth).unwrap();
                     let iterations = table_index_size().pow(steps.try_into().unwrap());
 

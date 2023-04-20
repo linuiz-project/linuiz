@@ -2,7 +2,6 @@
 #![feature(
     strict_provenance,          // #95228 <https://github.com/rust-lang/rust/issues/95228>
     const_option,
-    const_bool_to_option,
 )]
 
 mod macros;
@@ -41,7 +40,7 @@ pub struct Pow2Usize(usize);
 
 impl Pow2Usize {
     #[inline]
-    pub const fn new(value: usize) -> Option<Self> {
+    pub fn new(value: usize) -> Option<Self> {
         value.is_power_of_two().then_some(Self(value))
     }
 

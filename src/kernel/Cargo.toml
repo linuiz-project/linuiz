@@ -12,9 +12,9 @@ path = "../shared/apic/"
 [dependencies.slab]
 path = "../shared/slab/"
 [dependencies.libsys]
-path = "../libsys/"
+path = "../shared/libsys/"
 [dependencies.libkernel]
-path = "../libkernel/"
+path = "../shared/libkernel/"
 [dependencies.acpi]
 git = "https://github.com/semiviral/acpi"
 
@@ -42,5 +42,15 @@ tar-no-std = "0.2"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 pic_8259 = { path = "../shared/pic_8259/" }
-raw-cpuid = "10.0"
+raw-cpuid = "11.0"
 x86_64 = "0.14"
+
+
+[profile.dev]
+opt-level = 1
+overflow-checks = true
+lto = "off"
+
+[profile.release]
+lto = true
+codegen-units = 1

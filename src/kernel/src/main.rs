@@ -31,8 +31,7 @@
     inline_const,
     const_option,
     const_option_ext,
-    const_trait_impl,
-    const_cmp
+    const_trait_impl
 )]
 #![forbid(clippy::inline_asm_x86_att_syntax, clippy::missing_const_for_fn)]
 #![deny(clippy::semicolon_if_nothing_returned, clippy::debug_assert_with_mut_call, clippy::float_arithmetic)]

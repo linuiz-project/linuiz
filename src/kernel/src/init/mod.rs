@@ -373,14 +373,23 @@ fn load_drivers() {
             // Copy the ELF data from the archive entry.
             elf_copy.copy_from_slice(archive_data);
             // Safety: The ELF data buffer is now initialized with the contents of the ELF.
-            let elf_copy = unsafe { elf_copy.assume_init() };
+            let elf_memory = unsafe { elf_copy.assume_init() };
+
+            // for shdr in elf.section_headers().unwrap().iter() {
+            //     info!("SHDR {:?}", shdr);
+            //     let Ok(relas) = elf.section_data_as_relas(&shdr) else { continue };
+
+            //     for rela in relas {}
+            // }
+
+            // loop {}
 
             let task = Process::new(
                 Priority::Normal,
                 AddressSpace::new_userspace(),
                 elf.ehdr,
                 elf_segments_copy,
-                crate::proc::ElfData::Memory(elf_copy),
+                crate::proc::ElfData::Memory(elf_memory),
             );
 
             crate::proc::PROCESSES.lock().push_back(task);
