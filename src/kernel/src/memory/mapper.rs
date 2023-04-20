@@ -94,7 +94,7 @@ impl Mapper {
     pub unsafe fn unmap(&mut self, page: Address<Page>, to_depth: Option<PageDepth>, free_frame: bool) -> Result<()> {
         self.root_table_mut().with_entry_mut(page, to_depth, |entry| {
             // Safety: We've got an explicit directive from the caller to unmap this page, so the caller must ensure that's a valid operation.
-            unsafe { entry.set_attributes(paging::TableEntryFlags::PRESENT, paging::AttributeModify::Remove) };
+            unsafe { entry.set_attributes(paging::TableEntryFlags::PRESENT, paging::FlagsModify::Remove) };
 
             let frame = entry.get_frame();
             // Safety: See above.
@@ -145,7 +145,7 @@ impl Mapper {
         page: Address<Page>,
         depth: Option<PageDepth>,
         attributes: paging::TableEntryFlags,
-        modify_mode: paging::AttributeModify,
+        modify_mode: paging::FlagsModify,
     ) -> Result<()> {
         self.root_table_mut().with_entry_mut(page, depth, |entry| {
             entry.set_attributes(attributes, modify_mode);
@@ -159,6 +159,8 @@ impl Mapper {
     ///
     /// Caller must ensure that switching the currently active address space will not cause undefined behaviour.
     pub unsafe fn swap_into(&self) {
+        trace!("Swapping address space to: {:X?}", self.root_frame);
+
         #[cfg(target_arch = "x86_64")]
         crate::arch::x64::registers::control::CR3::write(
             self.root_frame,

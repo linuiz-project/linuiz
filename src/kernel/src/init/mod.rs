@@ -6,10 +6,7 @@ pub fn get_parameters() -> &'static params::Parameters {
 
 use core::mem::MaybeUninit;
 
-use crate::memory::{
-    alloc::{pmm::PMM, AlignedAllocator},
-    paging::PageDepth,
-};
+use crate::memory::{alloc::AlignedAllocator, paging::PageDepth};
 use libkernel::LinkerSymbol;
 use libsys::{page_size, Address};
 
@@ -110,8 +107,9 @@ call_once!(
         #[limine::limine_tag]
         static BOOT_INFO: limine::BootInfoRequest = limine::BootInfoRequest::new(crate::boot::LIMINE_REV);
 
+        // TODO the printed build ID is not correct
         // Safety: Symbol is provided by linker script.
-        info!("Build ID            {}", unsafe { __build_id.as_usize() });
+        info!("Build ID            {:X}", unsafe { __build_id.as_usize() });
 
         if let Some(boot_info) = BOOT_INFO.get_response() {
             info!("Bootloader Info     {} v{} (rev {})", boot_info.name(), boot_info.version(), boot_info.revision());
@@ -175,9 +173,6 @@ call_once!(
                 use crate::memory::{paging::TableEntryFlags, Hhdm};
                 use limine::MemoryMapEntryType;
 
-                const PT_FLAG_EXEC_BIT: usize = 0;
-                const PT_FLAG_WRITE_BIT: usize = 1;
-
                 /* load kernel segments */
                 kernel_elf
                     .segments()
@@ -185,23 +180,13 @@ call_once!(
                     .into_iter()
                     .filter(|ph| ph.p_type == elf::abi::PT_LOAD)
                     .for_each(|phdr| {
-                        use bit_field::BitField;
-
                         debug!("{:X?}", phdr);
 
                         // Safety: `KERNEL_BASE` is a linker symbol to an in-executable memory location, so it is guaranteed to
                         //         be valid (and is never written to).
                         let base_offset = usize::try_from(phdr.p_vaddr).unwrap() - unsafe { KERN_BASE.as_usize() };
                         let offset_end = base_offset + usize::try_from(phdr.p_memsz).unwrap();
-                        let page_attributes = {
-                            if phdr.p_flags.get_bit(PT_FLAG_EXEC_BIT) {
-                                TableEntryFlags::RX
-                            } else if phdr.p_flags.get_bit(PT_FLAG_WRITE_BIT) {
-                                TableEntryFlags::RW
-                            } else {
-                                TableEntryFlags::RO
-                            }
-                        };
+                        let flags = TableEntryFlags::from(crate::proc::segment_type_to_mmap_permissions(phdr.p_flags));
 
                         (base_offset..offset_end)
                             .step_by(page_size())
@@ -214,8 +199,8 @@ call_once!(
                             })
                             // Attempt to map the page to the frame.
                             .try_for_each(|(paddr, vaddr)| {
-                                trace!("Map   paddr: {:X?}   vaddr: {:X?}   attrs {:?}", paddr, vaddr, page_attributes);
-                                kmapper.map(vaddr, PageDepth::min(), paddr, false, page_attributes)
+                                trace!("Map   paddr: {:X?}   vaddr: {:X?}   flags {:?}", paddr, vaddr, flags);
+                                kmapper.map(vaddr, PageDepth::min(), paddr, false, flags)
                             })
                             .expect("failed to map kernel segments");
                     });
@@ -307,7 +292,7 @@ call_once!(
 
 // call_once!(
 fn load_drivers() {
-    use crate::proc::{AddressSpace, Priority, Process, DEFAULT_USERSPACE_SIZE};
+    use crate::proc::{AddressSpace, Priority, Process};
     use elf::endian::AnyEndian;
 
     #[limine::limine_tag]
@@ -324,27 +309,27 @@ fn load_drivers() {
     let modules = modules.modules();
     trace!("Found modules: {:X?}", modules);
 
-    let Some(drivers_module) = modules.iter().find(|module| module.path().ends_with("drivers")) else {
-            warn!("No drivers module found; skipping driver loading.");
-            return;
-        };
+    let Some(drivers_module) = modules.iter().find(|module| module.path().ends_with("drivers"))
+    else {
+        panic!("no drivers module found")
+    };
 
     let archive = tar_no_std::TarArchiveRef::new(drivers_module.data());
     archive
         .entries()
         .into_iter()
-        .filter(|entry| {
+        .filter_map(|entry| {
             debug!("Attempting to parse driver blob: {}", entry.filename());
 
-            match elf::file::parse_ident::<AnyEndian>(entry.data()) {
-                Ok(_) => true,
+            match elf::ElfBytes::<AnyEndian>::minimal_parse(entry.data()) {
+                Ok(elf) => Some((entry, elf)),
                 Err(err) => {
-                    warn!("Failed to parse driver blob into ELF: {:?}", err);
-                    false
+                    error!("Failed to parse driver blob into ELF: {:?}", err);
+                    None
                 }
             }
         })
-        .for_each(|entry| {
+        .for_each(|(entry, elf)| {
             // for phdr in phdrs.iter().filter(|phdr| phdr.p_type == elf::abi::PT_LOAD) {
             //     use crate::proc::{MmapPermissions, PT_FLAG_EXEC_BIT, PT_FLAG_WRITE_BIT};
             //     use bit_field::BitField;
@@ -373,28 +358,30 @@ fn load_drivers() {
             //         .unwrap();
             // }
 
-            let address_space = AddressSpace::new(
-                DEFAULT_USERSPACE_SIZE,
-                unsafe {
-                    crate::memory::mapper::Mapper::new_unsafe(
-                        PageDepth::current(),
-                        crate::memory::copy_kernel_page_table().unwrap(),
-                    )
-                },
-                &*PMM,
-            );
+            // Get and copy the ELF segments into a small box.
+            let Some(elf_segments) = elf.segments()
+            else {
+                error!("ELF has no segments.");
+                return
+            };
+            let elf_segments_copy = alloc::boxed::Box::from_iter(elf_segments.iter());
 
             // Safety: In-place transmutation of initialized bytes for the purpose of copying safely.
             let archive_data = unsafe { entry.data().align_to::<MaybeUninit<u8>>().1 };
             // Allocate space for the ELF data, properly aligned in memory.
-            let mut elf_copy =
-                crate::proc::ElfData::new_uninit_slice_in(archive_data.len(), AlignedAllocator::new_in(&*PMM));
+            let mut elf_copy = crate::proc::ElfMemory::new_uninit_slice_in(archive_data.len(), AlignedAllocator::new());
             // Copy the ELF data from the archive entry.
             elf_copy.copy_from_slice(archive_data);
             // Safety: The ELF data buffer is now initialized with the contents of the ELF.
             let elf_copy = unsafe { elf_copy.assume_init() };
 
-            let task = Process::new(Priority::Normal, address_space, elf_copy);
+            let task = Process::new(
+                Priority::Normal,
+                AddressSpace::new_userspace(),
+                elf.ehdr,
+                elf_segments_copy,
+                crate::proc::ElfData::Memory(elf_copy),
+            );
 
             crate::proc::PROCESSES.lock().push_back(task);
         });

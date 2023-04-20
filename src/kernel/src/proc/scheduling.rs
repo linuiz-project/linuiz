@@ -96,10 +96,10 @@ impl Scheduler {
             *state = next_process.context.0;
             *regs = next_process.context.1;
 
-            next_process.with_address_space(|address_space| {
-                // Safety: New task requires its own address space.
-                unsafe { address_space.swap_into() }
-            });
+            // Safety: New task requires its own address space.
+            unsafe {
+                next_process.address_space.swap_into();
+            }
 
             trace!("Switched task: {:?}", next_process.uuid());
 

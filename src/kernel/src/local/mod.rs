@@ -1,8 +1,4 @@
-use crate::{
-    exceptions::Exception,
-    memory::alloc::{pmm::PhysicalAllocator, KMALLOC},
-    proc::{AddressSpace, Scheduler},
-};
+use crate::{exceptions::Exception, memory::alloc::KMALLOC, proc::Scheduler};
 use alloc::boxed::Box;
 use core::{
     alloc::Allocator,
@@ -267,11 +263,6 @@ pub unsafe fn set_preemption_wait(interval_wait: core::num::NonZeroU16) {
             apic::TimerMode::Periodic => unimplemented!(),
         }
     }
-}
-
-/// Allows safely running a function that manipulates the current task's address space, or returns `None` if there's no current task.
-pub fn with_current_address_space<T>(with_fn: impl FnOnce(&mut AddressSpace<PhysicalAllocator>) -> T) -> Option<T> {
-    get_state_mut().scheduler.process_mut().map(|process| process.with_address_space(with_fn))
 }
 
 pub fn provide_exception<T: Into<Exception>>(exception: T) -> Result<(), T> {

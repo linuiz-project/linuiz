@@ -171,8 +171,6 @@ unsafe extern "sysv64" fn irq_handoff(
         ss: isf.stack_segment,
     };
 
-    trace!("{:?}", isf);
-
     crate::interrupts::handle_irq(irq_number, &mut proc_state, regs);
 
     isf.as_mut().write(crate::arch::x64::structures::idt::InterruptStackFrameValue {
@@ -182,8 +180,6 @@ unsafe extern "sysv64" fn irq_handoff(
         stack_pointer: VirtAddr::new(proc_state.sp),
         stack_segment: proc_state.ss,
     });
-
-    trace!("{:?}", isf);
 }
 
 /// x64 exception wrapper type.
