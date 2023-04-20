@@ -60,7 +60,7 @@ pub unsafe extern "sysv64" fn sanitize(
         warn!("Failed to execute system call.");
     }
 
-    crate::proc::State { ip: ret_ip, sp: ret_sp }
+    crate::proc::State::user(ret_ip, ret_sp)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

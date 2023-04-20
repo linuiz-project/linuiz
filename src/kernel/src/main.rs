@@ -4,6 +4,9 @@
     error_in_core,                          // #103765 <https://github.com/rust-lang/rust/issues/103765>
     result_flattening,                      // #70142 <https://github.com/rust-lang/rust/issues/70142>
     map_try_insert,                         // #82766 <https://github.com/rust-lang/rust/issues/82766>
+    new_uninit,                             // #63291 <https://github.com/rust-lang/rust/issues/63291>
+    try_trait_v2,                           // #84277 <https://github.com/rust-lang/rust/issues/84277>
+    step_trait,                             // #42168 <https://github.com/rust-lang/rust/issues/42168>
     asm_const,
     naked_functions,
     sync_unsafe_cell,
@@ -28,8 +31,7 @@
     inline_const,
     const_option,
     const_option_ext,
-    const_trait_impl,
-    const_cmp
+    const_trait_impl
 )]
 #![forbid(clippy::inline_asm_x86_att_syntax, clippy::missing_const_for_fn)]
 #![deny(clippy::semicolon_if_nothing_returned, clippy::debug_assert_with_mut_call, clippy::float_arithmetic)]
@@ -52,13 +54,6 @@
 extern crate alloc;
 #[macro_use]
 extern crate log;
-
-#[cfg(target_pointer_width = "32")]
-#[allow(non_camel_case_types)]
-pub type psize = u32;
-#[cfg(target_pointer_width = "64")]
-#[allow(non_camel_case_types)]
-pub type psize = u64;
 
 mod acpi;
 mod arch;
@@ -92,10 +87,3 @@ macro_rules! err_result_type {
         pub type Result<T> = core::result::Result<T, $name>;
     };
 }
-
-#[cfg(target_pointer_width = "64")]
-#[allow(non_camel_case_types)]
-pub type uptr = u64;
-#[cfg(target_pointer_width = "64")]
-#[allow(non_camel_case_types)]
-pub type iptr = i64;

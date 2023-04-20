@@ -18,11 +18,10 @@ SECTIONS
     .rodata                 : { *(.rodata .rodata.*) }
     PROVIDE(__build_id = .);
     .note.gnu.build-id      : { KEEP(*(.note.gnu.build-id)) }
-    PROVIDE(__eh_frame_hdr = .);
-    .eh_frame_hdr           : { *(.eh_frame_hdr) }
-    PROVIDE(__eh_frame = .);
-    .eh_frame               : { KEEP(*(.eh_frame)) }
     .gcc_except_table       : { KEEP(*(.gcc_except_table)) }
+
+    .eh_frame_hdr           : { KEEP(*(.eh_frame_hdr)) }
+    .eh_frame               : { KEEP(*(.eh_frame)) }
 
     . = ALIGN(SEGMENT_ALIGN);
     .plt                    : { *(.plt) *(.iplt) }

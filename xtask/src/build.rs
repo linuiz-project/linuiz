@@ -12,6 +12,11 @@ pub struct Options {
     #[arg(short, long)]
     verbose: bool,
 
+    /// Whether to print the kernel's build fingerprint.
+    /// This can be useful for debugging constant rebuilds.
+    #[arg(long)]
+    fingerprint: bool,
+
     #[arg(long, default_value = "test_driver")]
     drivers: Vec<String>,
 }
@@ -40,41 +45,33 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
     // copy the EFI binary image
     sh.copy_file("resources/BOOTX64.EFI", ".hdd/root/EFI/BOOT/")?;
 
-    // Configure rustc via the `RUSTFLAGS` environment variable.
-    let _rustflags = {
-        let mut rustflags = Vec::new();
-        rustflags.push("-C relocation_model=static");
-        rustflags.push("-C code-model=kernel");
-        rustflags.push("-C embed-bitcode=yes");
+    let _cargo_log = {
+        let mut cargo_log = Vec::new();
 
-        // For debug builds, we always enable frame pointers for pretty stack tracing.
-        if !options.release {
-            rustflags.push("-C force-frame-pointers");
-            rustflags.push("-C symbol-mangling-version=v0");
+        if options.fingerprint {
+            cargo_log.push("cargo::core::compiler::fingerprint=info");
         }
 
-        sh.push_env("RUSTFLAGS", rustflags.join(" "))
+        sh.push_env("CARGO_LOG", cargo_log.join(" "))
     };
 
     let root_dir = sh.current_dir();
-    let _dir = sh.push_dir("src/");
-    cmd!(sh, "cargo fmt").run()?;
 
     let tmp_dir = sh.create_temp_dir()?;
     let tmp_dir_path = tmp_dir.path();
     let tmp_path_dir_str = tmp_dir_path.to_string_lossy();
 
     let cargo_args = {
-        let mut args = vec!["--out-dir", &tmp_path_dir_str];
-
-        args.push({
+        let mut args = vec![
+            "--out-dir",
+            &tmp_path_dir_str,
             if options.release {
                 "--release"
             } else {
                 // Only provide future-compatibiltiy notifications for development builds.
                 "--future-incompat-report"
-            }
-        });
+            },
+        ];
 
         if options.verbose {
             args.push("-vv");
@@ -83,9 +80,28 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
         args
     };
 
-    cmd!(sh, "cargo build --bins -Z unstable-options {cargo_args...}").run()?;
-    // Copy the output kernel binary to the virtual HDD.
-    sh.copy_file(tmp_dir_path.join("kernel"), root_dir.join(".hdd/root/pyre/"))?;
+    /* compile kernel */
+    {
+        let _dir = sh.push_dir("src/kernel/");
+        // Configure rustc via the `RUSTFLAGS` environment variable for the kernel build.
+        let _rustflags = sh.push_env("RUSTFLAGS", vec!["-C code-model=kernel", "-C embed-bitcode=yes"].join(" "));
+
+        cmd!(sh, "cargo fmt").run()?;
+        let local_args = &cargo_args;
+        cmd!(sh, "cargo build --bins -Z unstable-options {local_args...}").run()?;
+
+        // Copy the output kernel binary to the virtual HDD.
+        sh.copy_file(tmp_dir_path.join("kernel"), root_dir.join(".hdd/root/pyre/"))?;
+    }
+
+    /* compile userspace */
+    {
+        let _dir = sh.push_dir("src/userspace/");
+
+        cmd!(sh, "cargo fmt").run()?;
+        let local_args = &cargo_args;
+        cmd!(sh, "cargo build --bins -Z unstable-options {local_args...}").run()?;
+    }
 
     build_drivers_archive(
         tmp_dir_path,

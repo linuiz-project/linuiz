@@ -8,12 +8,13 @@ pub static PROCESSES: spin::Mutex<VecDeque<Process>> = spin::Mutex::new(VecDeque
 
 pub struct Scheduler {
     enabled: bool,
+    idle_stack: Stack<0x1000>,
     process: Option<Process>,
 }
 
 impl Scheduler {
     pub fn new(enabled: bool) -> Self {
-        Self { enabled, process: None }
+        Self { enabled, idle_stack: Stack::new(), process: None }
     }
 
     /// Enables the scheduler to pop tasks.
@@ -95,24 +96,23 @@ impl Scheduler {
             *state = next_process.context.0;
             *regs = next_process.context.1;
 
-            next_process.with_address_space(|address_space| {
-                // Safety: New task requires its own address space.
-                unsafe { address_space.swap_into() }
-            });
+            // Safety: New task requires its own address space.
+            unsafe {
+                next_process.address_space.swap_into();
+            }
 
             trace!("Switched task: {:?}", next_process.uuid());
 
             let old_value = self.process.replace(next_process);
             assert!(old_value.is_none());
         } else {
-            // This is linked to .bss directly rather than marked as a `static mut` to avoid actualy mutable usage.
-            #[link_section = ".bss"]
-            static IDLE_STACK: Stack<0x100> = Stack::new();
+            #[link_section = ".data"]
+            static IDLE_STACK: Stack<0x1000> = Stack::new();
 
             trace!("Switching idle task.");
 
-            *state = State { ip: crate::interrupts::wait_loop as u64, sp: IDLE_STACK.top().get() as u64 };
-            *regs = Registers::user_default();
+            *state = State::kernel(crate::interrupts::wait_loop as u64, self.idle_stack.top().addr().get() as u64);
+            *regs = Registers::default();
 
             trace!("Switched idle task.");
         };

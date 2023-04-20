@@ -1,5 +1,7 @@
+pub mod walker;
+
 use crate::memory::Hhdm;
-use core::{cmp::Ordering, fmt, num::NonZeroU32, ptr::NonNull};
+use core::{cmp::Ordering, fmt, iter::Step, num::NonZeroU32, ptr::NonNull};
 use libsys::{
     mem::{InteriorRef, Mut, Ref},
     page_shift, page_size, table_index_mask, table_index_shift, table_index_size, Address, Frame, Page, Virtual,
@@ -73,8 +75,8 @@ impl PageDepth {
     }
 
     #[inline]
-    pub const fn new(depth: u32) -> Self {
-        Self(depth)
+    pub fn new(depth: u32) -> Option<Self> {
+        (Self::min().0..=Self::max().0).contains(&depth).then_some(Self(depth))
     }
 
     #[inline]
@@ -88,8 +90,13 @@ impl PageDepth {
     }
 
     #[inline]
-    pub const fn next(self) -> Option<Self> {
-        self.get().checked_sub(1).map(PageDepth::new)
+    pub fn next(self) -> Self {
+        Step::forward(self, 1)
+    }
+
+    #[inline]
+    pub fn next_checked(self) -> Option<Self> {
+        Step::forward_checked(self, 1)
     }
 
     #[inline]
@@ -104,6 +111,20 @@ impl PageDepth {
 
     pub fn index_address(self, index: usize) -> Option<Address<Virtual>> {
         (index < table_index_size()).then_some(0).and(Address::new(index * self.align()))
+    }
+}
+
+impl Step for PageDepth {
+    fn steps_between(start: &Self, end: &Self) -> Option<usize> {
+        Step::steps_between(&end.0, &start.0)
+    }
+
+    fn forward_checked(start: Self, count: usize) -> Option<Self> {
+        count.try_into().ok().and_then(|count| start.0.checked_sub(count)).and_then(Self::new)
+    }
+
+    fn backward_checked(start: Self, count: usize) -> Option<Self> {
+        count.try_into().ok().and_then(|count| start.0.checked_add(count)).and_then(Self::new)
     }
 }
 
@@ -179,7 +200,7 @@ pub const PTE_FRAME_ADDRESS_MASK: u64 = 0x000FFFFF_FFFFF000;
 pub const PTE_FRAME_ADDRESS_MASK: u64 = 0x003FFFFF_FFFFFC00;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AttributeModify {
+pub enum FlagsModify {
     Set,
     Insert,
     Remove,
@@ -240,14 +261,14 @@ impl TableEntry {
     /// Safety
     ///
     /// Caller must ensure changing the attributes of this entry does not cause any memory corruption side effects.
-    pub unsafe fn set_attributes(&mut self, new_attributes: TableEntryFlags, modify_mode: AttributeModify) {
+    pub unsafe fn set_attributes(&mut self, new_attributes: TableEntryFlags, modify_mode: FlagsModify) {
         let mut attributes = TableEntryFlags::from_bits_truncate(self.0);
 
         match modify_mode {
-            AttributeModify::Set => attributes = new_attributes,
-            AttributeModify::Insert => attributes.insert(new_attributes),
-            AttributeModify::Remove => attributes.remove(new_attributes),
-            AttributeModify::Toggle => attributes.toggle(new_attributes),
+            FlagsModify::Set => attributes = new_attributes,
+            FlagsModify::Insert => attributes.insert(new_attributes),
+            FlagsModify::Remove => attributes.remove(new_attributes),
+            FlagsModify::Toggle => attributes.toggle(new_attributes),
         }
 
         #[cfg(target_arch = "x86_64")]
@@ -360,7 +381,7 @@ impl<'a> TableEntryCell<'a, Ref> {
         to_depth: Option<PageDepth>,
         with_fn: impl FnOnce(&TableEntry) -> T,
     ) -> Result<T> {
-        match (self.depth().cmp(&to_depth.unwrap_or(PageDepth::min())), self.is_huge(), self.depth().next()) {
+        match (self.depth().cmp(&to_depth.unwrap_or(PageDepth::min())), self.is_huge(), self.depth().next_checked()) {
             (Ordering::Equal, _, _) => Ok(with_fn(self.entry)),
             (Ordering::Greater, false, Some(next_depth)) => {
                 let sub_entry = self.get(page);
@@ -405,7 +426,7 @@ impl<'a> TableEntryCell<'a, Mut> {
         to_depth: Option<PageDepth>,
         with_fn: impl FnOnce(&mut TableEntry) -> T,
     ) -> Result<T> {
-        match (self.depth().cmp(&to_depth.unwrap_or(PageDepth::min())), self.is_huge(), self.depth().next()) {
+        match (self.depth().cmp(&to_depth.unwrap_or(PageDepth::min())), self.is_huge(), self.depth().next_checked()) {
             (Ordering::Equal, _, _) => Ok(with_fn(self.entry)),
             (Ordering::Greater, false, Some(next_depth)) => {
                 let sub_entry = self.get_mut(page);
@@ -434,7 +455,7 @@ impl<'a> TableEntryCell<'a, Mut> {
         to_depth: PageDepth,
         with_fn: impl FnOnce(&mut TableEntry) -> T,
     ) -> Result<T> {
-        match (self.depth().cmp(&to_depth), self.is_huge(), self.depth().next()) {
+        match (self.depth().cmp(&to_depth), self.is_huge(), self.depth().next_checked()) {
             (Ordering::Equal, _, _) => Ok(with_fn(self.entry)),
 
             (Ordering::Greater, false, Some(next_depth)) => {
@@ -450,8 +471,16 @@ impl<'a> TableEntryCell<'a, Mut> {
                     unsafe {
                         // Clear the frame to avoid corrupted PTEs.
                         core::ptr::write_bytes(Hhdm::offset(frame).unwrap().as_ptr(), 0x0, page_size());
+
+                        let mut flags = TableEntryFlags::PTE;
+                        // Insert the USER bit in all non-leaf entries.
+                        // This is primarily for compatibility with the x86 paging scheme.
+                        if self.depth() != PageDepth::min() {
+                            flags.insert(TableEntryFlags::USER);
+                        }
+
                         // Set the entry frame and set attributes to make a valid PTE.
-                        self.set(frame, TableEntryFlags::PTE);
+                        self.set(frame, flags);
                     }
                 }
 

@@ -1,9 +1,7 @@
-use crate::psize;
-
 bitflags::bitflags! {
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct CR4Flags : psize {
+    pub struct CR4Flags : u64 {
         const VME           = 1 << 0;
         const PVI           = 1 << 1;
         const TSD           = 1 << 2;
@@ -35,7 +33,7 @@ pub struct CR4;
 impl CR4 {
     #[inline]
     pub fn read() -> CR4Flags {
-        let value: psize;
+        let value: u64;
 
         // Safety: Reading into a register has no side effects.
         unsafe {
@@ -49,7 +47,7 @@ impl CR4 {
         CR4Flags::from_bits_truncate(value)
     }
 
-    /// Safety
+    /// ### Safety
     ///
     /// Incorrect flags may violate any number of safety guarantees.
     #[inline]
@@ -61,7 +59,7 @@ impl CR4 {
         );
     }
 
-    /// Safety
+    /// ### Safety
     ///
     /// Incorrect flags may violate any number of safety guarantees.
     #[inline]
@@ -72,7 +70,7 @@ impl CR4 {
         CR4::write(new_flags);
     }
 
-    /// Safety
+    /// ### Safety
     ///
     /// Incorrect flags may violate any number of safety guarantees.
     #[inline]

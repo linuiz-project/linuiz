@@ -1,0 +1,2 @@
+[workspace]
+members = ["libsys", "libkernel", "apic", "msr", "pic_8259", "port-rs", "slab"]

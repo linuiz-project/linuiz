@@ -4,6 +4,8 @@ mod run;
 use clap::Parser;
 use xshell::{cmd, Result, Shell};
 
+static WORKSPACE_DIRS: [&str; 3] = ["src/kernel", "src/shared", "src/userspace"];
+
 #[derive(Debug, Clone, Copy, clap::Subcommand)]
 #[allow(non_camel_case_types)]
 pub enum Target {
@@ -42,8 +44,12 @@ enum Arguments {
 }
 
 fn in_workspace_with(shell: &Shell, with_fn: impl Fn(&Shell) -> Result<()>) -> Result<()> {
-    let _dir = shell.push_dir("src/");
-    with_fn(shell)
+    for dir in WORKSPACE_DIRS {
+        let _dir = shell.push_dir(dir);
+        with_fn(shell)?
+    }
+
+    Ok(())
 }
 
 fn main() -> Result<()> {

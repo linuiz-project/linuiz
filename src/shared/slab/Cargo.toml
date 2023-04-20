@@ -3,9 +3,8 @@ name = "slab"
 version = "0.1.0"
 edition = "2021"
 
-[dependencies.spin]
-git = "https://github.com/pyre-project/spin-rs"
 [dependencies.try_alloc]
 git = "https://github.com/pyre-project/try_alloc"
 [dependencies]
 log = "*"
+spin = "*"

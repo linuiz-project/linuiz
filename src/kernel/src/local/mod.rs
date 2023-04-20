@@ -1,8 +1,4 @@
-use crate::{
-    exceptions::Exception,
-    memory::alloc::{pmm::PhysicalAllocator, KMALLOC},
-    proc::{AddressSpace, Scheduler},
-};
+use crate::{exceptions::Exception, memory::alloc::KMALLOC, proc::Scheduler};
 use alloc::boxed::Box;
 use core::{
     alloc::Allocator,
@@ -111,7 +107,7 @@ pub unsafe fn init(timer_frequency: u16) {
         let tss = &mut state.tss;
 
         // TODO guard pages for these stacks ?
-        tss.privilege_stack_table[0] = allocate_tss_stack(NonZeroUsize::new_unchecked(5));
+        tss.privilege_stack_table[0] = allocate_tss_stack(NonZeroUsize::new_unchecked(8));
         tss.interrupt_stack_table[StackTableIndex::Debug as usize] = allocate_tss_stack(NonZeroUsize::new_unchecked(2));
         tss.interrupt_stack_table[StackTableIndex::NonMaskable as usize] =
             allocate_tss_stack(NonZeroUsize::new_unchecked(2));
@@ -196,11 +192,11 @@ fn get_state_ptr() -> Option<NonNull<State>> {
 }
 
 fn get_state() -> &'static State {
-    unsafe { get_state_ptr().expect("state uninitialized").as_ref() }
+    unsafe { get_state_ptr().expect("core state uninitialized").as_ref() }
 }
 
 fn get_state_mut() -> &'static mut State {
-    unsafe { get_state_ptr().expect("state uninitialized").as_mut() }
+    unsafe { get_state_ptr().expect("core state uninitialized").as_mut() }
 }
 
 /// Returns the generated ID for the local core.
@@ -230,11 +226,8 @@ pub unsafe fn begin_scheduling() {
     }
 }
 
-/// ### Safety
-///
-/// Caller must ensure that context switching to a new task will not cause undefined behaviour.
-pub unsafe fn next_task(state: &mut crate::proc::State, regs: &mut crate::proc::Registers) {
-    get_state_mut().scheduler.next_task(state, regs);
+pub unsafe fn with_scheduler<R>(func: impl FnOnce(&mut crate::proc::Scheduler) -> R) -> R {
+    func(&mut get_state_mut().scheduler)
 }
 
 pub unsafe fn end_of_interrupt() {
@@ -270,11 +263,6 @@ pub unsafe fn set_preemption_wait(interval_wait: core::num::NonZeroU16) {
             apic::TimerMode::Periodic => unimplemented!(),
         }
     }
-}
-
-/// Allows safely running a function that manipulates the current task's address space, or returns `None` if there's no current task.
-pub fn with_current_address_space<T>(with_fn: impl FnOnce(&mut AddressSpace<PhysicalAllocator>) -> T) -> Option<T> {
-    get_state_mut().scheduler.process_mut().map(|process| process.with_address_space(with_fn))
 }
 
 pub fn provide_exception<T: Into<Exception>>(exception: T) -> Result<(), T> {
