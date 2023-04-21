@@ -14,7 +14,7 @@ pub use address::*;
 mod constants;
 pub use constants::*;
 
-
+pub mod syscall;
 
 pub const KIBIBYTE: u64 = 0x400; // 1024
 pub const MIBIBYTE: u64 = KIBIBYTE * KIBIBYTE;

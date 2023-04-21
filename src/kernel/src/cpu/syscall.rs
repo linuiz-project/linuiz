@@ -23,60 +23,60 @@ pub unsafe extern "sysv64" fn sanitize(
     _arg2: u64,
     _arg3: u64,
     _arg4: u64,
-    ret_ip: u64,
-    ret_sp: u64,
-    mut _regs: Registers,
-) -> crate::proc::State {
+    ret_ip: &mut u64,
+    ret_sp: &mut u64,
+    regs: &mut Registers,
+) -> Result<()> {
     let syscall = match vector {
-        0x100 => {
-            use log::Level;
+        libsys::syscall::Vector::SyslogInfo => SyscallScheme::Klog {
+            level: log::Level::Info,
+            str_ptr: usize::try_from(arg0).unwrap() as *mut u8,
+            str_len: usize::try_from(arg1).unwrap(),
+        },
 
-            let log_level = match arg0 {
-                1 => Ok(Level::Error),
-                2 => Ok(Level::Warn),
-                3 => Ok(Level::Info),
-                4 => Ok(Level::Debug),
-                arg0 => Err(arg0),
-            };
+        libsys::syscall::Vector::SyslogError => SyscallScheme::Klog {
+            level: log::Level::Error,
+            str_ptr: usize::try_from(arg0).unwrap() as *mut u8,
+            str_len: usize::try_from(arg1).unwrap(),
+        },
 
-            match log_level {
-                Ok(level) => Some(Syscall::Log { level, cstr_ptr: usize::try_from(arg1).unwrap() as *const _ }),
-                Err(invalid_level) => {
-                    warn!("Invalid log level provided: {}", invalid_level);
-                    None
-                }
-            }
-        }
+        libsys::syscall::Vector::SyslogDebug => SyscallScheme::Klog {
+            level: log::Level::Debug,
+            str_ptr: usize::try_from(arg0).unwrap() as *mut u8,
+            str_len: usize::try_from(arg1).unwrap(),
+        },
 
-        vector => {
-            warn!("Unhandled system call vector: {:#X}", vector);
-            None
-        }
+        libsys::syscall::Vector::SyslogTrace => SyscallScheme::Klog {
+            level: log::Level::Trace,
+            str_ptr: usize::try_from(arg0).unwrap() as *mut u8,
+            str_len: usize::try_from(arg1).unwrap(),
+        },
+
+        vector => SyscallScheme::UnhandledVector,
     };
 
-    if let Some(syscall) = syscall {
-        process(syscall);
-    } else {
-        warn!("Failed to execute system call.");
-    }
+    process(syscall);
 
     crate::proc::State::user(ret_ip, ret_sp)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Syscall {
-    /// Logs to the kernel standard output.
-    ///
-    /// Vector: 0x100
-    Log { level: log::Level, cstr_ptr: *const core::ffi::c_char },
+pub enum SyscallScheme {
+    UnhandledVector(u64),
+
+    Klog { level: log::Level, str_ptr: *const u8, str_len: usize },
 }
 
-pub fn process(vector: Syscall) {
+pub fn process(vector: Syscall) -> libsys::syscall::Result<()> {
     match vector {
-        Syscall::Log { level, cstr_ptr } => {
+        SyscallScheme::UnhandledVector(vector) => {
+            warn!("Unhandled system call vector: {:#X}", vector);
+        }
+
+        SyscallScheme::Klog { level, str_ptr, str_len } => {
             log!(
                 level,
-                "Syscall: Log: {:?}",
+                "[LOG]: {}",
                 // Safety: If pointer is null, we panic.
                 // TODO do not panic.
                 unsafe {

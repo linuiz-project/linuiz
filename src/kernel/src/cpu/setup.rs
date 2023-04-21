@@ -79,13 +79,16 @@ pub fn setup() {
                     "
                         cld
                         cli                         # always ensure interrupts are disabled within system calls
+
                         mov rax, rsp                # save the userspace rsp
                         swapgs                      # `swapgs` to switch to kernel stack
                         mov rsp, gs:0x0             # switch to kernel stack
                         swapgs                      # `swapgs` to allow software to use `IA32_KERNEL_GS_BASE` again
-                        # preserve registers according to SysV ABI spec
+
                         push rax    # this pushes the userspace `rsp`
                         push r11    # save usersapce `rflags`
+
+                        # preserve registers according to SysV ABI spec
                         push rbx
                         push rbp
                         push r12
@@ -95,8 +98,18 @@ pub fn setup() {
                         # push return context as stack arguments
                         push rax
                         push rcx
+
+                        sub rsp, 0x18           # make space for stack args
+                        lea r13, [rsp + 0x10]   # load registers ptr
+                        lea r14, [rsp + 0x8]    # load ip ptr
+                        lea r15, [rsp + 0x0]    # load sp ptr
+
                         # caller already passed their own arguments in relevant registers
                         call {}
+
+
+
+
                         pop rcx     # store target `rip` in `rcx`
                         pop rax     # store target `rsp` in `rax`
                         mov [rsp + (7 * 8)], rax   # update userspace `rsp` on stack
