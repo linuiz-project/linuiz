@@ -78,15 +78,16 @@ pub fn setup() {
                 core::arch::asm!(
                     "
                         cld
-                        cli                         # always ensure interrupts are disabled within system calls
+                        cli     # interrupts must be disabled within syscalls
 
                         mov rax, rsp                # save the userspace rsp
                         swapgs                      # `swapgs` to switch to kernel stack
                         mov rsp, gs:0x0             # switch to kernel stack
                         swapgs                      # `swapgs` to allow software to use `IA32_KERNEL_GS_BASE` again
 
-                        push rax    # this pushes the userspace `rsp`
-                        push r11    # save usersapce `rflags`
+                        push rax    # push userspace `rsp`
+                        push r11    # push usersapce `rflags`
+                        push rcx    # push userspace `rip`
 
                         # preserve registers according to SysV ABI spec
                         push rbx
@@ -95,24 +96,22 @@ pub fn setup() {
                         push r13
                         push r14
                         push r15
-                        # push return context as stack arguments
-                        push rax
-                        push rcx
 
                         sub rsp, 0x18           # make space for stack args
-                        lea r13, [rsp + 0x10]   # load registers ptr
+                        lea r13, [rsp + 0x0]   # load registers ptr
                         lea r14, [rsp + 0x8]    # load ip ptr
                         lea r15, [rsp + 0x0]    # load sp ptr
 
-                        # caller already passed their own arguments in relevant registers
+                        # push stack arguments
+                        push r15
+                        push r14
+                        push r13
+
+                        # caller passed arguments
                         call {}
+                        # return values in rax:rdx
 
-
-
-
-                        pop rcx     # store target `rip` in `rcx`
-                        pop rax     # store target `rsp` in `rax`
-                        mov [rsp + (7 * 8)], rax   # update userspace `rsp` on stack
+                        
                         # restore preserved registers
                         pop r15
                         pop r14
@@ -120,8 +119,11 @@ pub fn setup() {
                         pop r12
                         pop rbp
                         pop rbx
+
+                        pop rcx     # restore userspace `rip`
                         pop r11     # restore userspace `rflags`
-                        pop rsp     # this restores userspace `rsp`
+                        pop rsp     # restore userspace `rsp`
+                        
                         sysretq
                         ",
                     sym crate::cpu::syscall::sanitize,

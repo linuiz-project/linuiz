@@ -2,9 +2,11 @@ use num_enum::TryFromPrimitive;
 
 #[repr(C)]
 #[derive(Debug)]
-pub enum SyscallResult<T> {
-    Ok(T),
-    Err(Error),
+pub enum SyscallResult {
+    Ok,
+    Ok(u64),
+    InvalidPtr(*const u8),
+    NonUtf8Str,
 }
 
 #[repr(u32)]
@@ -23,7 +25,7 @@ pub enum Vector {
     SyslogTrace = 0x103,
 }
 
-pub fn syslog_info(str: &str) -> Result<()> {
+pub fn syslog_info(str: &str) -> SyscallResult {
     let str_ptr = str.as_ptr();
     let str_len = str.len();
 }

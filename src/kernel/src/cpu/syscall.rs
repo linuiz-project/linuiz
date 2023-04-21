@@ -1,3 +1,5 @@
+use libsys::syscall::{Vector, SyscallResult};
+
 #[cfg(target_arch = "x86_64")]
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,25 +30,25 @@ pub unsafe extern "sysv64" fn sanitize(
     regs: &mut Registers,
 ) -> Result<()> {
     let syscall = match vector {
-        libsys::syscall::Vector::SyslogInfo => SyscallScheme::Klog {
+        Vector::SyslogInfo => SyscallScheme::Klog {
             level: log::Level::Info,
             str_ptr: usize::try_from(arg0).unwrap() as *mut u8,
             str_len: usize::try_from(arg1).unwrap(),
         },
 
-        libsys::syscall::Vector::SyslogError => SyscallScheme::Klog {
+        Vector::SyslogError => SyscallScheme::Klog {
             level: log::Level::Error,
             str_ptr: usize::try_from(arg0).unwrap() as *mut u8,
             str_len: usize::try_from(arg1).unwrap(),
         },
 
-        libsys::syscall::Vector::SyslogDebug => SyscallScheme::Klog {
+        Vector::SyslogDebug => SyscallScheme::Klog {
             level: log::Level::Debug,
             str_ptr: usize::try_from(arg0).unwrap() as *mut u8,
             str_len: usize::try_from(arg1).unwrap(),
         },
 
-        libsys::syscall::Vector::SyslogTrace => SyscallScheme::Klog {
+        Vector::SyslogTrace => SyscallScheme::Klog {
             level: log::Level::Trace,
             str_ptr: usize::try_from(arg0).unwrap() as *mut u8,
             str_len: usize::try_from(arg1).unwrap(),
@@ -67,7 +69,7 @@ pub enum SyscallScheme {
     Klog { level: log::Level, str_ptr: *const u8, str_len: usize },
 }
 
-pub fn process(vector: Syscall) -> libsys::syscall::Result<()> {
+pub fn process(scheme: SyscallScheme) -> libsys::syscall::Result<()> {
     match vector {
         SyscallScheme::UnhandledVector(vector) => {
             warn!("Unhandled system call vector: {:#X}", vector);
@@ -76,7 +78,7 @@ pub fn process(vector: Syscall) -> libsys::syscall::Result<()> {
         SyscallScheme::Klog { level, str_ptr, str_len } => {
             log!(
                 level,
-                "[LOG]: {}",
+                "[KLOG]: {}",
                 // Safety: If pointer is null, we panic.
                 // TODO do not panic.
                 unsafe {
