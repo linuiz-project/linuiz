@@ -290,113 +290,77 @@ call_once!(
     }
 );
 
-// call_once!(
-fn load_drivers() {
-    use crate::proc::{AddressSpace, Priority, Process};
-    use elf::endian::AnyEndian;
+call_once!(
+    fn load_drivers() {
+        use crate::proc::{AddressSpace, Priority, Process};
+        use elf::endian::AnyEndian;
 
-    #[limine::limine_tag]
-    static LIMINE_MODULES: limine::ModuleRequest = limine::ModuleRequest::new(crate::boot::LIMINE_REV);
+        #[limine::limine_tag]
+        static LIMINE_MODULES: limine::ModuleRequest = limine::ModuleRequest::new(crate::boot::LIMINE_REV);
 
-    debug!("Unpacking kernel drivers...");
+        debug!("Unpacking kernel drivers...");
 
-    let Some(modules) = LIMINE_MODULES.get_response() else {
+        let Some(modules) = LIMINE_MODULES.get_response() else {
             warn!("Bootloader provided no modules; skipping driver loading.");
             return;
         };
-    trace!("{:?}", modules);
+        trace!("{:?}", modules);
 
-    let modules = modules.modules();
-    trace!("Found modules: {:X?}", modules);
+        let modules = modules.modules();
+        trace!("Found modules: {:X?}", modules);
 
-    let Some(drivers_module) = modules.iter().find(|module| module.path().ends_with("drivers"))
+        let Some(drivers_module) = modules.iter().find(|module| module.path().ends_with("drivers"))
     else {
         panic!("no drivers module found")
     };
 
-    let archive = tar_no_std::TarArchiveRef::new(drivers_module.data());
-    archive
-        .entries()
-        .into_iter()
-        .filter_map(|entry| {
-            debug!("Attempting to parse driver blob: {}", entry.filename());
+        let archive = tar_no_std::TarArchiveRef::new(drivers_module.data());
+        archive
+            .entries()
+            .into_iter()
+            .filter_map(|entry| {
+                debug!("Attempting to parse driver blob: {}", entry.filename());
 
-            match elf::ElfBytes::<AnyEndian>::minimal_parse(entry.data()) {
-                Ok(elf) => Some((entry, elf)),
-                Err(err) => {
-                    error!("Failed to parse driver blob into ELF: {:?}", err);
-                    None
+                match elf::ElfBytes::<AnyEndian>::minimal_parse(entry.data()) {
+                    Ok(elf) => Some((entry, elf)),
+                    Err(err) => {
+                        error!("Failed to parse driver blob into ELF: {:?}", err);
+                        None
+                    }
                 }
-            }
-        })
-        .for_each(|(entry, elf)| {
-            // for phdr in phdrs.iter().filter(|phdr| phdr.p_type == elf::abi::PT_LOAD) {
-            //     use crate::proc::{MmapPermissions, PT_FLAG_EXEC_BIT, PT_FLAG_WRITE_BIT};
-            //     use bit_field::BitField;
-
-            //     trace!("Processing segment: {:?}", phdr);
-
-            //     let size_offset = usize::try_from(phdr.p_vaddr).unwrap() & libsys::page_mask();
-            //     let total_size = size_offset + usize::try_from(phdr.p_memsz).unwrap();
-            //     let page_count = libsys::align_up_div(total_size, libsys::page_shift());
-            //     let segment_vaddr = Address::new_truncate(phdr.p_vaddr as usize);
-            //     let page_count = core::num::NonZeroUsize::new(page_count.try_into().unwrap()).unwrap();
-
-            //     address_space
-            //         .mmap(
-            //             Some(segment_vaddr),
-            //             page_count,
-            //             false,
-            //             if phdr.p_flags.get_bit(PT_FLAG_WRITE_BIT) {
-            //                 MmapPermissions::ReadWrite
-            //             } else if phdr.p_flags.get_bit(PT_FLAG_EXEC_BIT) {
-            //                 MmapPermissions::ReadExecute
-            //             } else {
-            //                 MmapPermissions::ReadOnly
-            //             },
-            //         )
-            //         .unwrap();
-            // }
-
-            // Get and copy the ELF segments into a small box.
-            let Some(elf_segments) = elf.segments()
+            })
+            .for_each(|(entry, elf)| {
+                // Get and copy the ELF segments into a small box.
+                let Some(elf_segments) = elf.segments()
             else {
                 error!("ELF has no segments.");
                 return
             };
-            let elf_segments_copy = alloc::boxed::Box::from_iter(elf_segments.iter());
+                let elf_segments_copy = alloc::boxed::Box::from_iter(elf_segments.iter());
 
-            // Safety: In-place transmutation of initialized bytes for the purpose of copying safely.
-            let archive_data = unsafe { entry.data().align_to::<MaybeUninit<u8>>().1 };
-            // Allocate space for the ELF data, properly aligned in memory.
-            let mut elf_copy = crate::proc::ElfMemory::new_uninit_slice_in(archive_data.len(), AlignedAllocator::new());
-            // Copy the ELF data from the archive entry.
-            elf_copy.copy_from_slice(archive_data);
-            // Safety: The ELF data buffer is now initialized with the contents of the ELF.
-            let elf_memory = unsafe { elf_copy.assume_init() };
+                // Safety: In-place transmutation of initialized bytes for the purpose of copying safely.
+                let archive_data = unsafe { entry.data().align_to::<MaybeUninit<u8>>().1 };
+                // Allocate space for the ELF data, properly aligned in memory.
+                let mut elf_copy =
+                    crate::proc::ElfMemory::new_uninit_slice_in(archive_data.len(), AlignedAllocator::new());
+                // Copy the ELF data from the archive entry.
+                elf_copy.copy_from_slice(archive_data);
+                // Safety: The ELF data buffer is now initialized with the contents of the ELF.
+                let elf_memory = unsafe { elf_copy.assume_init() };
 
-            // for shdr in elf.section_headers().unwrap().iter() {
-            //     info!("SHDR {:?}", shdr);
-            //     let Ok(relas) = elf.section_data_as_relas(&shdr) else { continue };
+                let task = Process::new(
+                    Priority::Normal,
+                    AddressSpace::new_userspace(),
+                    0x10000,
+                    elf.ehdr,
+                    elf_segments_copy,
+                    crate::proc::ElfData::Memory(elf_memory),
+                );
 
-            //     for rela in relas {}
-            // }
-
-            // loop {}
-
-            let task = Process::new(
-                Priority::Normal,
-                AddressSpace::new_userspace(),
-                0x10000,
-                elf.ehdr,
-                elf_segments_copy,
-                crate::proc::ElfData::Memory(elf_memory),
-            );
-
-            crate::proc::PROCESSES.lock().push_back(task);
-        });
-}
-// );
+                crate::proc::PROCESSES.lock().push_back(task);
+            });
+    }
+);
 
 call_once!(
     fn setup_smp() {

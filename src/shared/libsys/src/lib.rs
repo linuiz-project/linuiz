@@ -14,11 +14,7 @@ pub use address::*;
 mod constants;
 pub use constants::*;
 
-pub mod mem;
 
-pub struct ReadOnly;
-pub struct WriteOnly;
-pub struct ReadWrite;
 
 pub const KIBIBYTE: u64 = 0x400; // 1024
 pub const MIBIBYTE: u64 = KIBIBYTE * KIBIBYTE;
@@ -32,22 +28,6 @@ pub const fn to_kibibytes(value: u64) -> u64 {
 #[inline]
 pub const fn to_mibibytes(value: u64) -> u64 {
     value / MIBIBYTE
-}
-
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Pow2Usize(usize);
-
-impl Pow2Usize {
-    #[inline]
-    pub fn new(value: usize) -> Option<Self> {
-        value.is_power_of_two().then_some(Self(value))
-    }
-
-    #[inline]
-    pub const fn get(self) -> usize {
-        self.0
-    }
 }
 
 #[inline]

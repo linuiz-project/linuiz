@@ -4,8 +4,14 @@
     exclusive_range_pattern,        // #37854 <https://github.com/rust-lang/rust/issues/37854>
 )]
 
+pub mod mem;
+
 mod num;
 pub use num::*;
+
+pub struct ReadOnly;
+pub struct WriteOnly;
+pub struct ReadWrite;
 
 extern "C" {
     pub type LinkerSymbol;

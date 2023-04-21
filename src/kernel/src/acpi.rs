@@ -9,7 +9,7 @@ use crate::memory::{
 
 pub enum Register<'a, T: port::PortReadWrite> {
     Io(ReadWritePort<T>),
-    Mmio(&'a libsys::mem::VolatileCell<T, libsys::ReadWrite>),
+    Mmio(&'a libkernel::mem::VolatileCell<T, libkernel::ReadWrite>),
 }
 
 impl<T: port::PortReadWrite> Register<'_, T> {
