@@ -1,6 +1,7 @@
 #![no_std]
 #![feature(
     strict_provenance,          // #95228 <https://github.com/rust-lang/rust/issues/95228>
+    try_trait_v2,               // #84277 <https://github.com/rust-lang/rust/issues/84277>
     const_option,
 )]
 
@@ -15,6 +16,8 @@ mod constants;
 pub use constants::*;
 
 pub mod syscall;
+
+extern crate alloc;
 
 pub const KIBIBYTE: u64 = 0x400; // 1024
 pub const MIBIBYTE: u64 = KIBIBYTE * KIBIBYTE;

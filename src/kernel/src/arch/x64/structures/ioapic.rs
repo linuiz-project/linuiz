@@ -2,7 +2,7 @@ use crate::interrupts;
 use acpi::platform::interrupt::{Polarity, TriggerMode};
 // use alloc::vec::Vec;
 use bit_field::BitField;
-use libsys::mem::VolatileCell;
+use libkernel::mem::VolatileCell;
 use spin::Mutex;
 
 #[repr(transparent)]
@@ -98,7 +98,8 @@ impl RedirectionEntry {
     }
 }
 
-type IoApicRegisters<'a> = Mutex<(&'a VolatileCell<u32, libsys::WriteOnly>, &'a VolatileCell<u32, libsys::ReadWrite>)>;
+type IoApicRegisters<'a> =
+    Mutex<(&'a VolatileCell<u32, libkernel::WriteOnly>, &'a VolatileCell<u32, libkernel::ReadWrite>)>;
 
 pub struct IoApic<'a> {
     id: u8,

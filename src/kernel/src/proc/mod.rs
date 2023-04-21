@@ -88,7 +88,7 @@ impl Process {
     }
 
     #[inline]
-    pub const fn uuid(&self) -> uuid::Uuid {
+    pub const fn id(&self) -> uuid::Uuid {
         self.id
     }
 

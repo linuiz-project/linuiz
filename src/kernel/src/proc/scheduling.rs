@@ -85,13 +85,13 @@ impl Scheduler {
             process.context.0 = *state;
             process.context.1 = *regs;
 
-            trace!("Reclaiming task: {:?}", process.uuid());
+            trace!("Reclaiming task: {:?}", process.id());
             processes.push_back(process);
         }
 
         // Pop a new task from the task queue, or simply switch in the idle task.
         if let Some(next_process) = processes.pop_front() {
-            trace!("Switching task: {:?}", next_process.uuid());
+            trace!("Switching task: {:?}", next_process.id());
 
             *state = next_process.context.0;
             *regs = next_process.context.1;
@@ -101,7 +101,7 @@ impl Scheduler {
                 next_process.address_space.swap_into();
             }
 
-            trace!("Switched task: {:?}", next_process.uuid());
+            trace!("Switched task: {:?}", next_process.id());
 
             let old_value = self.process.replace(next_process);
             assert!(old_value.is_none());

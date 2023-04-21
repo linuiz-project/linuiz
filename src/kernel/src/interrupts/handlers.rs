@@ -19,6 +19,7 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
         use crate::memory::paging::TableEntryFlags;
 
         let process = scheduler.process_mut().ok_or(PageFaultHandlerError)?;
+        info!("{:?}", process.id());
         let elf_vaddr = process.load_address_to_elf_vaddr(address).unwrap();
         let phdr = process
             .elf_segments()
