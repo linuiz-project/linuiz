@@ -41,6 +41,8 @@ pub(super) unsafe extern "sysv64" fn _syscall_entry() {
         call {}
         # return values in rax:rdx
 
+        add rsp, 0x18
+
         # restore preserved registers
         pop r15
         pop r14
@@ -97,25 +99,25 @@ pub unsafe extern "sysv64" fn sanitize(
     _regs: &mut Registers,
 ) -> Result {
     let syscall = match Vector::try_from(vector) {
-        Ok(Vector::SyslogInfo) => SyscallScheme::Klog {
+        Ok(Vector::KlogInfo) => SyscallScheme::Klog {
             level: log::Level::Info,
             str_ptr: usize::try_from(arg0).map_err(Result::from)? as *mut u8,
             str_len: usize::try_from(arg1).map_err(Result::from)?,
         },
 
-        Ok(Vector::SyslogError) => SyscallScheme::Klog {
+        Ok(Vector::KlogError) => SyscallScheme::Klog {
             level: log::Level::Error,
             str_ptr: usize::try_from(arg0).map_err(Result::from)? as *mut u8,
             str_len: usize::try_from(arg1).map_err(Result::from)?,
         },
 
-        Ok(Vector::SyslogDebug) => SyscallScheme::Klog {
+        Ok(Vector::KlogDebug) => SyscallScheme::Klog {
             level: log::Level::Debug,
             str_ptr: usize::try_from(arg0).map_err(Result::from)? as *mut u8,
             str_len: usize::try_from(arg1).map_err(Result::from)?,
         },
 
-        Ok(Vector::SyslogTrace) => SyscallScheme::Klog {
+        Ok(Vector::KlogTrace) => SyscallScheme::Klog {
             level: log::Level::Trace,
             str_ptr: usize::try_from(arg0).map_err(Result::from)? as *mut u8,
             str_len: usize::try_from(arg1).map_err(Result::from)?,

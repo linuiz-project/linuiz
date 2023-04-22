@@ -14,6 +14,7 @@ pub(self) const US_FREQ_FACTOR: u32 = US_PER_SEC / US_WAIT;
 
 pub const STACK_SIZE: usize = 0x10000;
 
+#[repr(C)]
 struct State {
     syscall_stack_ptr: NonNull<u8>,
     syscall_stack: [u8; STACK_SIZE],

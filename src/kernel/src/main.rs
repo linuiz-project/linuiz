@@ -4,6 +4,7 @@
     error_in_core,                          // #103765 <https://github.com/rust-lang/rust/issues/103765>
     result_flattening,                      // #70142 <https://github.com/rust-lang/rust/issues/70142>
     map_try_insert,                         // #82766 <https://github.com/rust-lang/rust/issues/82766>
+    drain_filter,                           // #43244 <https://github.com/rust-lang/rust/issues/43244>
     new_uninit,                             // #63291 <https://github.com/rust-lang/rust/issues/63291>
     try_trait_v2,                           // #84277 <https://github.com/rust-lang/rust/issues/84277>
     step_trait,                             // #42168 <https://github.com/rust-lang/rust/issues/42168>

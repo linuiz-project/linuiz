@@ -22,8 +22,8 @@ static GDT_DATA: spin::Lazy<GdtData> = spin::Lazy::new(|| {
     // Details can be found in the description of the `syscall` and `sysret` instructions in the IA32 Software Developer's Manual.
     let kcode = gdt.add_entry(Descriptor::kernel_code_segment());
     let kdata = gdt.add_entry(Descriptor::kernel_data_segment());
-    let ucode = gdt.add_entry(Descriptor::user_code_segment());
     let udata = gdt.add_entry(Descriptor::user_data_segment());
+    let ucode = gdt.add_entry(Descriptor::user_code_segment());
 
     GdtData { gdt, kcode, kdata, ucode, udata }
 });

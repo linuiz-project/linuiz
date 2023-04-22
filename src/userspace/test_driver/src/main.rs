@@ -23,7 +23,7 @@ unsafe impl core::alloc::GlobalAlloc for FakeAllocator {
 
 #[no_mangle]
 extern "C" fn _start() -> ! {
-    libsys::syscall::syslog_info("testing once");
+    libsys::syscall::klog_info("klog info syscall test");
 
     loop {
         core::hint::spin_loop();

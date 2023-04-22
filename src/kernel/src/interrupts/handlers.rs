@@ -19,8 +19,9 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
         use crate::memory::paging::TableEntryFlags;
 
         let process = scheduler.process_mut().ok_or(PageFaultHandlerError)?;
-        info!("{:?}", process.id());
-        let elf_vaddr = process.load_address_to_elf_vaddr(address).unwrap();
+        let elf_vaddr = process
+            .load_address_to_elf_vaddr(address)
+            .unwrap_or_else(|| panic!("failed to calculate ELF address for page fault: {:X?}", address));
         let phdr = process
             .elf_segments()
             .iter()
@@ -55,15 +56,28 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
         // Load the ELF data.
         let mapped_memory = mapped_memory.as_uninit_slice_mut();
         // Front padding is all of the bytes before the file offset.
-        let (front_pad, mapped_memory) = mapped_memory.split_at_mut(file_offset % mapped_memory.len());
+        let (front_pad, remaining) = mapped_memory.split_at_mut(file_offset % mapped_memory.len());
         // End padding is all of the bytes after the file offset + file slice length.
-        let (mapped_memory, end_pad) = mapped_memory.split_at_mut(file_slice.len());
+        let (file_memory, end_pad) = remaining.split_at_mut(file_slice.len());
         // Zero the padding bytes, according to ELF spec.
         front_pad.fill(core::mem::MaybeUninit::new(0x0));
         end_pad.fill(core::mem::MaybeUninit::new(0x0));
         // Copy the ELF data into memory
         // Safety: In-place cast to a transparently aligned type.
-        mapped_memory.copy_from_slice(unsafe { file_slice.align_to().1 });
+        file_memory.copy_from_slice(unsafe { file_slice.align_to().1 });
+
+        // Process any relocations.
+        let load_offset = process.load_offset();
+        let phdr_mem_range = phdr.p_vaddr..(phdr.p_vaddr + phdr.p_memsz);
+        process.elf_relas().drain_filter(|rela| {
+            if phdr_mem_range.contains(&u64::try_from(rela.address.get()).unwrap()) {
+                info!("Processing relocation: {:X?}", rela);
+                rela.address.as_ptr().add(load_offset).cast::<usize>().write(rela.value);
+                true
+            } else {
+                false
+            }
+        });
 
         process
             .address_space_mut()

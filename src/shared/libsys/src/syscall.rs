@@ -4,10 +4,10 @@ use num_enum::TryFromPrimitive;
 #[repr(u64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive, Hash)]
 pub enum Vector {
-    SyslogInfo = 0x100,
-    SyslogError = 0x101,
-    SyslogDebug = 0x102,
-    SyslogTrace = 0x103,
+    KlogInfo = 0x100,
+    KlogError = 0x101,
+    KlogDebug = 0x102,
+    KlogTrace = 0x103,
 }
 
 #[repr(C)]
@@ -61,29 +61,29 @@ impl From<core::str::Utf8Error> for Result {
     }
 }
 
-pub fn syslog_info(str: &str) -> Result {
+pub fn klog_info(str: &str) -> Result {
     let str_ptr = str.as_ptr();
     let str_len = str.len();
 
-    let low: u64;
-    let high: u64;
-
+    // Safety: It isn't.
     unsafe {
+        let low: u64;
+        let high: u64;
+
         asm!(
             "syscall",
-            in("rdi") str_ptr,
-            in("rsi") str_len,
+            in("rdi") Vector::KlogInfo as u64,
+            in("rsi") str_ptr,
+            inout("rdx") str_len => high,
             out("rax") low,
-            out("rdx") high,
             // callee saved registers
             out("rcx") _,
             out("r8") _,
             out("r9") _,
             out("r11") _,
-            options(nostack, nomem)
-        )
-    }
+            options(nostack, nomem, preserves_flags)
+        );
 
-    let result = ((high as u128) << u64::BITS) | (low as u128);
-    unsafe { core::mem::transmute(result) }
+        core::mem::transmute([low, high])
+    }
 }

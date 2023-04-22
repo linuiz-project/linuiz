@@ -86,133 +86,123 @@ pub(self) unsafe fn kernel_core_setup() -> ! {
     crate::interrupts::wait_loop()
 }
 
-call_once!(
-    fn setup_logging() {
-        if cfg!(debug_assertions) {
-            // Logging isn't set up, so we'll just spin loop if we fail to initialize it.
-            crate::logging::init().unwrap_or_else(|_| crate::interrupts::wait_loop());
-        } else {
-            // Logging failed to initialize, but just continue to boot (only in release).
-            crate::logging::init().ok();
-        }
+fn setup_logging() {
+    if cfg!(debug_assertions) {
+        // Logging isn't set up, so we'll just spin loop if we fail to initialize it.
+        crate::logging::init().unwrap_or_else(|_| crate::interrupts::wait_loop());
+    } else {
+        // Logging failed to initialize, but just continue to boot (only in release).
+        crate::logging::init().ok();
     }
-);
+}
 
-call_once!(
-    fn print_boot_info() {
-        extern "C" {
-            static __build_id: LinkerSymbol;
-        }
-
-        #[limine::limine_tag]
-        static BOOT_INFO: limine::BootInfoRequest = limine::BootInfoRequest::new(crate::boot::LIMINE_REV);
-
-        // TODO the printed build ID is not correct
-        // Safety: Symbol is provided by linker script.
-        info!("Build ID            {:X}", unsafe { __build_id.as_usize() });
-
-        if let Some(boot_info) = BOOT_INFO.get_response() {
-            info!("Bootloader Info     {} v{} (rev {})", boot_info.name(), boot_info.version(), boot_info.revision());
-        } else {
-            info!("No bootloader info available.");
-        }
-
-        // Vendor strings from the CPU need to be enumerated per-platform.
-        #[cfg(target_arch = "x86_64")]
-        if let Some(vendor_info) = crate::arch::x64::cpuid::VENDOR_INFO.as_ref() {
-            info!("Vendor              {}", vendor_info.as_str());
-        } else {
-            info!("Vendor              Unknown");
-        }
+fn print_boot_info() {
+    extern "C" {
+        static __build_id: LinkerSymbol;
     }
-);
 
-call_once!(
-    fn setup_memory() {
-        {
-            #[limine::limine_tag]
-            static LIMINE_KERNEL_ADDR: limine::KernelAddressRequest =
-                limine::KernelAddressRequest::new(crate::boot::LIMINE_REV);
-            #[limine::limine_tag]
-            static LIMINE_KERNEL_FILE: limine::KernelFileRequest =
-                limine::KernelFileRequest::new(crate::boot::LIMINE_REV);
+    #[limine::limine_tag]
+    static BOOT_INFO: limine::BootInfoRequest = limine::BootInfoRequest::new(crate::boot::LIMINE_REV);
 
-            extern "C" {
-                static KERN_BASE: LinkerSymbol;
-            }
+    // TODO the printed build ID is not correct
+    // Safety: Symbol is provided by linker script.
+    info!("Build ID            {:X}", unsafe { __build_id.as_usize() });
 
-            debug!("Preparing kernel memory system.");
+    if let Some(boot_info) = BOOT_INFO.get_response() {
+        info!("Bootloader Info     {} v{} (rev {})", boot_info.name(), boot_info.version(), boot_info.revision());
+    } else {
+        info!("No bootloader info available.");
+    }
 
-            // Extract kernel address information.
-            let (kernel_phys_addr, kernel_virt_addr) = LIMINE_KERNEL_ADDR
-                .get_response()
-                .map(|response| {
-                    (
-                        usize::try_from(response.physical_base()).unwrap(),
-                        usize::try_from(response.virtual_base()).unwrap(),
-                    )
-                })
-                .expect("bootloader did not provide kernel address info");
+    // Vendor strings from the CPU need to be enumerated per-platform.
+    #[cfg(target_arch = "x86_64")]
+    if let Some(vendor_info) = crate::arch::x64::cpuid::VENDOR_INFO.as_ref() {
+        info!("Vendor              {}", vendor_info.as_str());
+    } else {
+        info!("Vendor              Unknown");
+    }
+}
 
-            // Take reference to kernel file data.
-            let kernel_file = LIMINE_KERNEL_FILE
-                .get_response()
-                .map(limine::KernelFileResponse::file)
-                .expect("bootloader did not provide kernel file data");
+fn setup_memory() {
+    #[limine::limine_tag]
+    static LIMINE_KERNEL_ADDR: limine::KernelAddressRequest =
+        limine::KernelAddressRequest::new(crate::boot::LIMINE_REV);
+    #[limine::limine_tag]
+    static LIMINE_KERNEL_FILE: limine::KernelFileRequest = limine::KernelFileRequest::new(crate::boot::LIMINE_REV);
 
-            /* parse parameters */
-            params::PARAMETERS.call_once(|| params::Parameters::parse(kernel_file.cmdline()));
+    extern "C" {
+        static KERN_BASE: LinkerSymbol;
+    }
 
-            // Safety: Bootloader guarantees the provided information to be correct.
-            let kernel_elf = elf::ElfBytes::<elf::endian::AnyEndian>::minimal_parse(kernel_file.data())
-                .expect("kernel file is not a valid ELF");
+    debug!("Preparing kernel memory system.");
 
-            /* load and map segments */
+    // Extract kernel address information.
+    let (kernel_phys_addr, kernel_virt_addr) = LIMINE_KERNEL_ADDR
+        .get_response()
+        .map(|response| {
+            (usize::try_from(response.physical_base()).unwrap(), usize::try_from(response.virtual_base()).unwrap())
+        })
+        .expect("bootloader did not provide kernel address info");
 
-            crate::memory::with_kmapper(|kmapper| {
-                use crate::memory::{paging::TableEntryFlags, Hhdm};
-                use limine::MemoryMapEntryType;
+    // Take reference to kernel file data.
+    let kernel_file = LIMINE_KERNEL_FILE
+        .get_response()
+        .map(limine::KernelFileResponse::file)
+        .expect("bootloader did not provide kernel file data");
 
-                /* load kernel segments */
-                kernel_elf
-                    .segments()
-                    .expect("kernel file has no segments")
-                    .into_iter()
-                    .filter(|ph| ph.p_type == elf::abi::PT_LOAD)
-                    .for_each(|phdr| {
-                        debug!("{:X?}", phdr);
+    /* parse parameters */
+    params::PARAMETERS.call_once(|| params::Parameters::parse(kernel_file.cmdline()));
 
-                        // Safety: `KERNEL_BASE` is a linker symbol to an in-executable memory location, so it is guaranteed to
-                        //         be valid (and is never written to).
-                        let base_offset = usize::try_from(phdr.p_vaddr).unwrap() - unsafe { KERN_BASE.as_usize() };
-                        let offset_end = base_offset + usize::try_from(phdr.p_memsz).unwrap();
-                        let flags = TableEntryFlags::from(crate::proc::segment_type_to_mmap_permissions(phdr.p_flags));
+    // Safety: Bootloader guarantees the provided information to be correct.
+    let kernel_elf = elf::ElfBytes::<elf::endian::AnyEndian>::minimal_parse(kernel_file.data())
+        .expect("kernel file is not a valid ELF");
 
-                        (base_offset..offset_end)
-                            .step_by(page_size())
-                            // Tuple the memory offset to the respect physical and virtual addresses.
-                            .map(|mem_offset| {
-                                (
-                                    Address::new(kernel_phys_addr + mem_offset).unwrap(),
-                                    Address::new(kernel_virt_addr + mem_offset).unwrap(),
-                                )
-                            })
-                            // Attempt to map the page to the frame.
-                            .try_for_each(|(paddr, vaddr)| {
-                                trace!("Map   paddr: {:X?}   vaddr: {:X?}   flags {:?}", paddr, vaddr, flags);
-                                kmapper.map(vaddr, PageDepth::min(), paddr, false, flags)
-                            })
-                            .expect("failed to map kernel segments");
-                    });
+    /* load and map segments */
 
-                /* map the higher-half direct map */
-                debug!("Mapping the higher-half direct map.");
-                crate::boot::get_memory_map()
-                    .expect("bootloader memory map is required to map HHDM")
-                    .iter()
-                    // Filter bad memory, or provide the entry's page attributes.
-                    .filter_map(|entry| {
-                        match entry.ty() {
+    crate::memory::with_kmapper(|kmapper| {
+        use crate::memory::{paging::TableEntryFlags, Hhdm};
+        use limine::MemoryMapEntryType;
+
+        /* load kernel segments */
+        kernel_elf
+            .segments()
+            .expect("kernel file has no segments")
+            .into_iter()
+            .filter(|ph| ph.p_type == elf::abi::PT_LOAD)
+            .for_each(|phdr| {
+                debug!("{:X?}", phdr);
+
+                // Safety: `KERNEL_BASE` is a linker symbol to an in-executable memory location, so it is guaranteed to
+                //         be valid (and is never written to).
+                let base_offset = usize::try_from(phdr.p_vaddr).unwrap() - unsafe { KERN_BASE.as_usize() };
+                let offset_end = base_offset + usize::try_from(phdr.p_memsz).unwrap();
+                let flags = TableEntryFlags::from(crate::proc::segment_type_to_mmap_permissions(phdr.p_flags));
+
+                (base_offset..offset_end)
+                    .step_by(page_size())
+                    // Tuple the memory offset to the respect physical and virtual addresses.
+                    .map(|mem_offset| {
+                        (
+                            Address::new(kernel_phys_addr + mem_offset).unwrap(),
+                            Address::new(kernel_virt_addr + mem_offset).unwrap(),
+                        )
+                    })
+                    // Attempt to map the page to the frame.
+                    .try_for_each(|(paddr, vaddr)| {
+                        trace!("Map   paddr: {:X?}   vaddr: {:X?}   flags {:?}", paddr, vaddr, flags);
+                        kmapper.map(vaddr, PageDepth::min(), paddr, false, flags)
+                    })
+                    .expect("failed to map kernel segments");
+            });
+
+        /* map the higher-half direct map */
+        debug!("Mapping the higher-half direct map.");
+        crate::boot::get_memory_map()
+            .expect("bootloader memory map is required to map HHDM")
+            .iter()
+            // Filter bad memory, or provide the entry's page attributes.
+            .filter_map(|entry| {
+                match entry.ty() {
                     MemoryMapEntryType::Usable
                             | MemoryMapEntryType::AcpiNvs
                             | MemoryMapEntryType::AcpiReclaimable
@@ -226,189 +216,203 @@ call_once!(
 
                             MemoryMapEntryType::BadMemory => None,
                         }
-                    })
-                    // Flatten the enumeration of every page in the entry.
-                    .flat_map(|(entry, attributes)| {
-                        entry
-                            .range()
-                            .step_by(page_size())
-                            .map(move |phys_base| (phys_base.try_into().unwrap(), attributes))
-                    })
-                    // Attempt to map each of the entry's pages.
-                    .try_for_each(|(phys_base, attributes)| {
-                        kmapper.map(
-                            Address::new_truncate(Hhdm::address().get() + phys_base),
-                            PageDepth::min(),
-                            Address::new_truncate(phys_base),
-                            false,
-                            attributes,
-                        )
-                    })
-                    .expect("failed mapping the HHDM");
+            })
+            // Flatten the enumeration of every page in the entry.
+            .flat_map(|(entry, attributes)| {
+                entry.range().step_by(page_size()).map(move |phys_base| (phys_base.try_into().unwrap(), attributes))
+            })
+            // Attempt to map each of the entry's pages.
+            .try_for_each(|(phys_base, attributes)| {
+                kmapper.map(
+                    Address::new_truncate(Hhdm::address().get() + phys_base),
+                    PageDepth::min(),
+                    Address::new_truncate(phys_base),
+                    false,
+                    attributes,
+                )
+            })
+            .expect("failed mapping the HHDM");
 
-                /* map architecture-specific memory */
-                debug!("Mapping the architecture-specific memory.");
-                #[cfg(target_arch = "x86_64")]
-                {
-                    let apic_address = msr::IA32_APIC_BASE::get_base_address().try_into().unwrap();
-                    kmapper
-                        .map(
-                            Address::new_truncate(Hhdm::address().get() + apic_address),
-                            PageDepth::min(),
-                            Address::new_truncate(apic_address),
-                            false,
-                            TableEntryFlags::MMIO,
-                        )
-                        .unwrap();
-                }
-
-                debug!("Switching to kernel page tables...");
-                // Safety: Kernel mappings should be identical to the bootloader mappings.
-                unsafe { kmapper.swap_into() };
-                debug!("Kernel has finalized control of page tables.");
-            });
-
-            /* load symbols */
-            if get_parameters().low_memory {
-                debug!("Kernel is running in low memory mode; stack tracing will be disabled.");
-            } else if let Ok(Some((symbol_table, string_table))) = kernel_elf.symbol_table() {
-                debug!("Loading kernel symbol table...");
-
-                crate::panic::KERNEL_SYMBOLS.call_once(|| {
-                    let symbols_iter = symbol_table
-                        .into_iter()
-                        .map(|symbol| (string_table.get(symbol.st_name as usize).unwrap_or("Unidentified"), symbol));
-                    let vec = alloc::vec::Vec::from_iter(symbols_iter);
-                    debug!("Loaded {} kernel symbols.", vec.len());
-
-                    alloc::vec::Vec::leak(vec)
-                });
-            } else {
-                warn!("Failed to load any kernel symbols; stack tracing will be disabled.");
-            }
+        /* map architecture-specific memory */
+        debug!("Mapping the architecture-specific memory.");
+        #[cfg(target_arch = "x86_64")]
+        {
+            let apic_address = msr::IA32_APIC_BASE::get_base_address().try_into().unwrap();
+            kmapper
+                .map(
+                    Address::new_truncate(Hhdm::address().get() + apic_address),
+                    PageDepth::min(),
+                    Address::new_truncate(apic_address),
+                    false,
+                    TableEntryFlags::MMIO,
+                )
+                .unwrap();
         }
+
+        debug!("Switching to kernel page tables...");
+        // Safety: Kernel mappings should be identical to the bootloader mappings.
+        unsafe { kmapper.swap_into() };
+        debug!("Kernel has finalized control of page tables.");
+    });
+
+    /* load symbols */
+    if get_parameters().low_memory {
+        debug!("Kernel is running in low memory mode; stack tracing will be disabled.");
+    } else if let Ok(Some((symbol_table, string_table))) = kernel_elf.symbol_table() {
+        debug!("Loading kernel symbol table...");
+
+        crate::panic::KERNEL_SYMBOLS.call_once(|| {
+            let symbols_iter = symbol_table
+                .into_iter()
+                .map(|symbol| (string_table.get(symbol.st_name as usize).unwrap_or("Unidentified"), symbol));
+            let vec = alloc::vec::Vec::from_iter(symbols_iter);
+            debug!("Loaded {} kernel symbols.", vec.len());
+
+            alloc::vec::Vec::leak(vec)
+        });
+    } else {
+        warn!("Failed to load any kernel symbols; stack tracing will be disabled.");
     }
-);
+}
 
-call_once!(
-    fn load_drivers() {
-        use crate::proc::{AddressSpace, Priority, Process};
-        use elf::endian::AnyEndian;
+fn load_drivers() {
+    use crate::proc::{AddressSpace, Priority, Process};
+    use elf::endian::AnyEndian;
 
-        #[limine::limine_tag]
-        static LIMINE_MODULES: limine::ModuleRequest = limine::ModuleRequest::new(crate::boot::LIMINE_REV);
+    #[limine::limine_tag]
+    static LIMINE_MODULES: limine::ModuleRequest = limine::ModuleRequest::new(crate::boot::LIMINE_REV);
 
-        debug!("Unpacking kernel drivers...");
+    debug!("Unpacking kernel drivers...");
 
-        let Some(modules) = LIMINE_MODULES.get_response() else {
+    let Some(modules) = LIMINE_MODULES.get_response() else {
             warn!("Bootloader provided no modules; skipping driver loading.");
             return;
         };
-        trace!("{:?}", modules);
+    trace!("{:?}", modules);
 
-        let modules = modules.modules();
-        trace!("Found modules: {:X?}", modules);
+    let modules = modules.modules();
+    trace!("Found modules: {:X?}", modules);
 
-        let Some(drivers_module) = modules.iter().find(|module| module.path().ends_with("drivers"))
+    let Some(drivers_module) = modules.iter().find(|module| module.path().ends_with("drivers"))
     else {
         panic!("no drivers module found")
     };
 
-        let archive = tar_no_std::TarArchiveRef::new(drivers_module.data());
-        archive
-            .entries()
-            .into_iter()
-            .filter_map(|entry| {
-                debug!("Attempting to parse driver blob: {}", entry.filename());
+    let archive = tar_no_std::TarArchiveRef::new(drivers_module.data());
+    archive
+        .entries()
+        .into_iter()
+        .filter_map(|entry| {
+            debug!("Attempting to parse driver blob: {}", entry.filename());
 
-                match elf::ElfBytes::<AnyEndian>::minimal_parse(entry.data()) {
-                    Ok(elf) => Some((entry, elf)),
-                    Err(err) => {
-                        error!("Failed to parse driver blob into ELF: {:?}", err);
-                        None
-                    }
+            match elf::ElfBytes::<AnyEndian>::minimal_parse(entry.data()) {
+                Ok(elf) => Some((entry, elf)),
+                Err(err) => {
+                    error!("Failed to parse driver blob into ELF: {:?}", err);
+                    None
                 }
-            })
-            .for_each(|(entry, elf)| {
-                // Get and copy the ELF segments into a small box.
-                let Some(elf_segments) = elf.segments()
+            }
+        })
+        .for_each(|(entry, elf)| {
+            // Get and copy the ELF segments into a small box.
+            let Some(elf_segments) = elf.segments()
             else {
                 error!("ELF has no segments.");
                 return
             };
-                let elf_segments_copy = alloc::boxed::Box::from_iter(elf_segments.iter());
+            let elf_segments_copy = alloc::boxed::Box::from_iter(elf_segments.iter());
 
-                // Safety: In-place transmutation of initialized bytes for the purpose of copying safely.
-                let archive_data = unsafe { entry.data().align_to::<MaybeUninit<u8>>().1 };
-                // Allocate space for the ELF data, properly aligned in memory.
-                let mut elf_copy =
-                    crate::proc::ElfMemory::new_uninit_slice_in(archive_data.len(), AlignedAllocator::new());
-                // Copy the ELF data from the archive entry.
-                elf_copy.copy_from_slice(archive_data);
-                // Safety: The ELF data buffer is now initialized with the contents of the ELF.
-                let elf_memory = unsafe { elf_copy.assume_init() };
+            // Safety: In-place transmutation of initialized bytes for the purpose of copying safely.
+            let archive_data = unsafe { entry.data().align_to::<MaybeUninit<u8>>().1 };
+            // Allocate space for the ELF data, properly aligned in memory.
+            let mut elf_copy = crate::proc::ElfMemory::new_uninit_slice_in(archive_data.len(), AlignedAllocator::new());
+            // Copy the ELF data from the archive entry.
+            elf_copy.copy_from_slice(archive_data);
+            // Safety: The ELF data buffer is now initialized with the contents of the ELF.
+            let elf_memory = unsafe { elf_copy.assume_init() };
 
-                let task = Process::new(
-                    Priority::Normal,
-                    AddressSpace::new_userspace(),
-                    0x10000,
-                    elf.ehdr,
-                    elf_segments_copy,
-                    crate::proc::ElfData::Memory(elf_memory),
-                );
+            let (Ok((Some(shdrs), Some(_))), Ok(Some((_, _)))) = (elf.section_headers_with_strtab(), elf.symbol_table())
+            else { panic!("Error retrieving ELF relocation metadata.") };
 
-                crate::proc::PROCESSES.lock().push_back(task);
-            });
-    }
-);
+            let load_offset = crate::proc::MIN_LOAD_OFFSET;
 
-call_once!(
-    fn setup_smp() {
-        #[limine::limine_tag]
-        static LIMINE_SMP: limine::SmpRequest = limine::SmpRequest::new(crate::boot::LIMINE_REV)
-            // Enable x2APIC mode if available.
-            .flags(0b1);
+            let elf_relas = shdrs
+                .iter()
+                .filter(|shdr| shdr.sh_type == elf::abi::SHT_RELA)
+                .flat_map(|shdr| elf.section_data_as_relas(&shdr).unwrap())
+                .map(|rela| {
+                    use crate::proc::ElfRela;
 
-        // Safety: `LIMINE_SMP` is only ever accessed within this individual context, and is effectively
-        //          dropped as soon as this context goes out of scope.
-        let limine_smp = unsafe { &mut *(&raw const LIMINE_SMP).cast_mut() };
+                    match rela.r_type {
+                        elf::abi::R_X86_64_RELATIVE => ElfRela {
+                            address: Address::new(usize::try_from(rela.r_offset).unwrap()).unwrap(),
+                            value: load_offset + usize::try_from(rela.r_addend).unwrap(),
+                        },
 
-        debug!("Detecting and starting additional cores.");
-
-        limine_smp.get_response_mut().map(limine::SmpResponse::cpus).map_or_else(
-            || debug!("Bootloader detected no additional CPU cores."),
-            // Iterate all of the CPUs, and jump them to the SMP function.
-            |cpus| {
-                for cpu_info in cpus {
-                    trace!("Starting processor: ID P{}/L{}", cpu_info.processor_id(), cpu_info.lapic_id());
-
-                    if get_parameters().smp {
-                        extern "C" fn _smp_entry(_: &limine::CpuInfo) -> ! {
-                            crate::cpu::setup();
-
-                            // Safety: All currently referenced memory should also be mapped in the kernel page tables.
-                            crate::memory::with_kmapper(|kmapper| unsafe { kmapper.swap_into() });
-
-                            // Safety: Function is called only once for this core.
-                            unsafe { kernel_core_setup() }
-                        }
-
-                        // If smp is enabled, jump to the smp entry function.
-                        cpu_info.jump_to(_smp_entry, None);
-                    } else {
-                        extern "C" fn _idle_forever(_: &limine::CpuInfo) -> ! {
-                            // Safety: Murder isn't legal. Is this?
-                            unsafe { crate::interrupts::halt_and_catch_fire() }
-                        }
-
-                        // If smp is disabled, jump to the park function for the core.
-                        cpu_info.jump_to(_idle_forever, None);
+                        _ => unimplemented!(),
                     }
+                })
+                .collect();
+
+            let task = Process::new(
+                Priority::Normal,
+                AddressSpace::new_userspace(),
+                load_offset,
+                elf.ehdr,
+                elf_segments_copy,
+                elf_relas,
+                crate::proc::ElfData::Memory(elf_memory),
+            );
+
+            crate::proc::PROCESSES.lock().push_back(task);
+        });
+}
+
+fn setup_smp() {
+    #[limine::limine_tag]
+    static LIMINE_SMP: limine::SmpRequest = limine::SmpRequest::new(crate::boot::LIMINE_REV)
+        // Enable x2APIC mode if available.
+        .flags(0b1);
+
+    // Safety: `LIMINE_SMP` is only ever accessed within this individual context, and is effectively
+    //          dropped as soon as this context goes out of scope.
+    let limine_smp = unsafe { &mut *(&raw const LIMINE_SMP).cast_mut() };
+
+    debug!("Detecting and starting additional cores.");
+
+    limine_smp.get_response_mut().map(limine::SmpResponse::cpus).map_or_else(
+        || debug!("Bootloader detected no additional CPU cores."),
+        // Iterate all of the CPUs, and jump them to the SMP function.
+        |cpus| {
+            for cpu_info in cpus {
+                trace!("Starting processor: ID P{}/L{}", cpu_info.processor_id(), cpu_info.lapic_id());
+
+                if get_parameters().smp {
+                    extern "C" fn _smp_entry(_: &limine::CpuInfo) -> ! {
+                        crate::cpu::setup();
+
+                        // Safety: All currently referenced memory should also be mapped in the kernel page tables.
+                        crate::memory::with_kmapper(|kmapper| unsafe { kmapper.swap_into() });
+
+                        // Safety: Function is called only once for this core.
+                        unsafe { kernel_core_setup() }
+                    }
+
+                    // If smp is enabled, jump to the smp entry function.
+                    cpu_info.jump_to(_smp_entry, None);
+                } else {
+                    extern "C" fn _idle_forever(_: &limine::CpuInfo) -> ! {
+                        // Safety: Murder isn't legal. Is this?
+                        unsafe { crate::interrupts::halt_and_catch_fire() }
+                    }
+
+                    // If smp is disabled, jump to the park function for the core.
+                    cpu_info.jump_to(_idle_forever, None);
                 }
-            },
-        );
-    }
-);
+            }
+        },
+    );
+}
 
 /* load driver */
 

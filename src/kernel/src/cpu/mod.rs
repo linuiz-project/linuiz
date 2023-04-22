@@ -77,7 +77,7 @@ pub fn setup() {
     // Safety: Parameters are set according to the IA-32 SDM, and so should have no undetermined side-effects.
     unsafe {
         // Configure system call environment registers.
-        msr::IA32_STAR::set_selectors(gdt::kernel_code_selector().index(), gdt::kernel_data_selector().index());
+        msr::IA32_STAR::set_selectors(gdt::kernel_code_selector().0, gdt::kernel_data_selector().0);
         msr::IA32_LSTAR::set_syscall(syscall::_syscall_entry);
         // We don't want to keep any flags set within the syscall (especially the interrupt flag).
         msr::IA32_FMASK::set_rflags_mask(RFlags::all().bits());

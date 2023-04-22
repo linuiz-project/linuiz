@@ -167,8 +167,8 @@ impl IA32_STAR {
     ///
     /// Invalid low and high selectors will likely result in a #GP upon syscall.
     #[inline]
-    pub unsafe fn set_selectors(kcode_index: u16, kdata_index: u16) {
-        wrmsr(0xC0000081, (((kdata_index << 3) as u64) << 48) | (((kcode_index << 3) as u64) << 32));
+    pub unsafe fn set_selectors(kcode: u16, kdata: u16) {
+        wrmsr(0xC0000081, ((kdata as u64) << 48) | ((kcode as u64) << 32));
     }
 }
 
