@@ -62,13 +62,17 @@ pub enum ElfData {
 pub struct Process {
     id: uuid::Uuid,
     priority: Priority,
+
     address_space: AddressSpace,
     context: Context,
     load_offset: usize,
+
     elf_header: FileHeader<AnyEndian>,
     elf_segments: Box<[ProgramHeader]>,
     elf_relas: Vec<ElfRela>,
     elf_data: ElfData,
+
+    exit: bool,
 }
 
 impl Process {
@@ -100,6 +104,8 @@ impl Process {
             elf_segments,
             elf_relas,
             elf_data,
+
+            exit: false,
         }
     }
 
@@ -152,4 +158,27 @@ impl Process {
     pub fn elf_relas(&mut self) -> &mut Vec<ElfRela> {
         &mut self.elf_relas
     }
+
+    #[inline]
+    pub const fn get_exit(&self) -> bool {
+        self.exit
+    }
+
+    /// ### Safety
+    ///
+    /// Changing the exit mode of a process is implicitly undefined behaviour, as any
+    /// external state the process is modifying may be orphaned.
+    #[inline]
+    pub unsafe fn set_exit(&mut self, exit: bool) {
+        self.exit = exit;
+    }
+}
+
+#[link_section = ".entry_stub"]
+fn _proc_entry_stub(main_fn: extern "sysv64" fn() -> i32) {
+    // local process setup
+
+    let _result = main_fn();
+
+    // syscall exit
 }

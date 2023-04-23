@@ -61,7 +61,7 @@ crate::default_display_impl!(Error);
 pub fn init() -> Result<(), Error> {
     #[cfg(debug_assertions)]
     {
-        log::set_max_level(log::LevelFilter::Debug);
+        log::set_max_level(log::LevelFilter::Trace);
     }
     #[cfg(not(debug_assertions))]
     {

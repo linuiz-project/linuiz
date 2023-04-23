@@ -1,3 +1,5 @@
+use core::sync::atomic::AtomicUsize;
+
 use libsys::syscall::{Result, Vector};
 
 /// ### Safety
@@ -15,9 +17,10 @@ pub(super) unsafe extern "sysv64" fn _syscall_entry() {
         mov rsp, gs:0x0             # switch to kernel stack
         swapgs                      # `swapgs` to allow software to use `IA32_KERNEL_GS_BASE` again
 
-        push rax    # push userspace `rsp`
-        push r11    # push usersapce `rflags`
-        push rcx    # push userspace `rip`
+        push rax        # push userspace `rsp`
+        push r11        # push usersapce `rflags`
+        push rcx        # push userspace `rip`
+        mov rcx, r10    # 4th argument into `rcx`
 
         # preserve registers according to SysV ABI spec
         push rbx
@@ -41,6 +44,7 @@ pub(super) unsafe extern "sysv64" fn _syscall_entry() {
         call {}
         # return values in rax:rdx
 
+        # clean up stack arguments
         add rsp, 0x18
 
         # restore preserved registers
@@ -81,6 +85,9 @@ pub enum SyscallScheme {
     UnhandledVector(u64),
 
     Klog { level: log::Level, str_ptr: *const u8, str_len: usize },
+
+    ProcExit,
+    ProcYield,
 }
 
 /// ### Safety
@@ -104,24 +111,24 @@ pub unsafe extern "sysv64" fn sanitize(
             str_ptr: usize::try_from(arg0).map_err(Result::from)? as *mut u8,
             str_len: usize::try_from(arg1).map_err(Result::from)?,
         },
-
         Ok(Vector::KlogError) => SyscallScheme::Klog {
             level: log::Level::Error,
             str_ptr: usize::try_from(arg0).map_err(Result::from)? as *mut u8,
             str_len: usize::try_from(arg1).map_err(Result::from)?,
         },
-
         Ok(Vector::KlogDebug) => SyscallScheme::Klog {
             level: log::Level::Debug,
             str_ptr: usize::try_from(arg0).map_err(Result::from)? as *mut u8,
             str_len: usize::try_from(arg1).map_err(Result::from)?,
         },
-
         Ok(Vector::KlogTrace) => SyscallScheme::Klog {
             level: log::Level::Trace,
             str_ptr: usize::try_from(arg0).map_err(Result::from)? as *mut u8,
             str_len: usize::try_from(arg1).map_err(Result::from)?,
         },
+
+        Ok(Vector::ProcExit) => SyscallScheme::ProcExit,
+        Ok(Vector::ProcYield) => SyscallScheme::ProcYield,
 
         Err(err) => SyscallScheme::UnhandledVector(err.number),
     };
@@ -130,6 +137,8 @@ pub unsafe extern "sysv64" fn sanitize(
 }
 
 pub fn process(scheme: SyscallScheme) -> Result {
+    static DEBUG_KLOG_MAX: AtomicUsize = AtomicUsize::new(0);
+
     match scheme {
         SyscallScheme::UnhandledVector(vector) => {
             warn!("Unhandled system call vector: {:#X}", vector);
@@ -138,11 +147,31 @@ pub fn process(scheme: SyscallScheme) -> Result {
         }
 
         SyscallScheme::Klog { level, str_ptr, str_len } => {
-            let str =
-                core::str::from_utf8(unsafe { core::slice::from_raw_parts(str_ptr, str_len) }).map_err(Result::from)?;
-            log!(level, "[KLOG]: {}", str);
+            if DEBUG_KLOG_MAX.load(core::sync::atomic::Ordering::Acquire) == 40 {
+                core::hint::spin_loop();
+            } else {
+                let str = core::str::from_utf8(unsafe { core::slice::from_raw_parts(str_ptr, str_len) })
+                    .map_err(Result::from)?;
+                log!(level, "[KLOG]: {}", str);
+                DEBUG_KLOG_MAX.fetch_add(1, core::sync::atomic::Ordering::Release);
+            }
 
             Result::Ok
         }
+
+        SyscallScheme::ProcExit => {
+            crate::local::with_scheduler(|scheduler| {
+                // TODO we actually need to kill the process somehow. This allows it to run again.
+                let process = scheduler.process_mut().expect("attempted to retrieve process from unscheduled core");
+                // `set_exit` is called via user intent.
+                unsafe {
+                    process.set_exit(true);
+                }
+
+                Result::Ok
+            })
+        }
+
+        SyscallScheme::ProcYield => todo!(),
     }
 }

@@ -45,41 +45,14 @@ impl Scheduler {
         self.process.as_mut()
     }
 
-    // /// Pushes a new task to the scheduling queue.
-    // pub fn push_task(&mut self, task: Task) {
-    //     self.total_priority += task.priority() as u64;
-    //     self.tasks.push(task);
-    // }
-
-    // /// If the scheduler is enabled, attempts to return a new task from
-    // /// the task queue. Returns `None` if the queue is empty.
-    // pub fn pop_task(&mut self) -> Option<Task> {
-    //     if self.enabled {
-    //         self.tasks.pop().map(|task| {
-    //             self.total_priority -= task.priority() as u64;
-    //             task
-    //         })
-    //     } else {
-    //         None
-    //     }
-    // }
-
-    // #[inline]
-    // pub const fn get_total_priority(&self) -> u64 {
-    //     self.total_priority
-    // }
-
-    // #[inline]
-    // pub const fn current_task(&self) -> Option<&Task> {
-    //     self.cur_task.as_ref()
-    // }
-
     /// Attempts to schedule the next task in the local task queue.
     pub fn next_task(&mut self, state: &mut super::State, regs: &mut super::Registers) {
         debug_assert!(!crate::interrupts::are_enabled());
 
+        crate::local::print_timer_interval(1);
         let mut processes = PROCESSES.lock();
 
+        crate::local::print_timer_interval(2);
         // Move the current task, if any, back into the scheduler queue.
         if let Some(mut process) = self.process.take() {
             process.context.0 = *state;
@@ -89,8 +62,22 @@ impl Scheduler {
             processes.push_back(process);
         }
 
+        crate::local::print_timer_interval(3);
+        let next_process = loop {
+            match processes.pop_front() {
+                // This effectively allows us to kill the process by dropping it.
+                Some(process) if process.get_exit() => {
+                    debug!("Exiting process: {:?}", process.id());
+                    continue;
+                }
+                Some(process) => break Some(process),
+                None => break None,
+            }
+        };
+
+        crate::local::print_timer_interval(4);
         // Pop a new task from the task queue, or simply switch in the idle task.
-        if let Some(next_process) = processes.pop_front() {
+        if let Some(next_process) = next_process {
             trace!("Switching task: {:?}", next_process.id());
 
             *state = next_process.context.0;
@@ -104,11 +91,8 @@ impl Scheduler {
             trace!("Switched task: {:?}", next_process.id());
 
             let old_value = self.process.replace(next_process);
-            assert!(old_value.is_none());
+            debug_assert!(old_value.is_none());
         } else {
-            #[link_section = ".data"]
-            static IDLE_STACK: Stack<0x1000> = Stack::new();
-
             trace!("Switching idle task.");
 
             *state = State::kernel(crate::interrupts::wait_loop as u64, self.idle_stack.top().addr().get() as u64);
@@ -117,6 +101,7 @@ impl Scheduler {
             trace!("Switched idle task.");
         };
 
+        crate::local::print_timer_interval(5);
         // TODO have some kind of queue of preemption waits, to ensure we select the shortest one.
         // Safety: Just having switched tasks, no preemption wait should supercede this one.
         unsafe {
