@@ -45,12 +45,20 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
             .unwrap();
 
         // Calculate the range of bytes we will be reading from the ELF file.
-        let file_start = usize::try_from(phdr.p_offset).unwrap();
-        let file_end_total = file_start + usize::try_from(phdr.p_filesz).unwrap();
-        let file_end_clamped = libsys::align_down(file_end_total, libsys::page_shift());
+
+        let segment_vaddr = usize::try_from(phdr.p_vaddr).unwrap();
+        // This calculation represents the byte offset of the faulting address from the segment start.
+        let segment_offset = elf_vaddr - segment_vaddr;
+        // Using the byte offset we just calculated, we can apply that offset to the
+        //  beginning of the segment to get the ELF's file memory.
+        let file_start = usize::try_from(phdr.p_offset).unwrap() + segment_offset;
+        // Then, with the file size, we calculate the end of the absolute file range.
+        let file_end = file_start + usize::try_from(phdr.p_filesz).unwrap();
+        let file_range = file_start..file_end;
+
         // Subslice the ELF memory to get the requisite segment data.
         let file_slice = match process.elf_data() {
-            ElfData::Memory(elf_memory) => &elf_memory[file_start..file_end_clamped],
+            ElfData::Memory(elf_memory) => &elf_memory[file_range],
             ElfData::File(_) => unimplemented!(),
         };
 
@@ -58,14 +66,18 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
         let mapped_memory = mapped_memory.as_uninit_slice_mut();
         // Front padding is all of the bytes before the file offset.
         let (front_pad, remaining) = mapped_memory.split_at_mut(file_start % mapped_memory.len());
+        // Clamp the file slice length to ensure we don't try to split out-of-bounds.
+        let file_memory_split_index = usize::min(file_slice.len(), remaining.len());
         // End padding is all of the bytes after the file offset + file slice length.
-        let (file_memory, end_pad) = remaining.split_at_mut(file_slice.len());
+        let (file_memory, end_pad) = remaining.split_at_mut(file_memory_split_index);
         // Zero the padding bytes, according to ELF spec.
         front_pad.fill(core::mem::MaybeUninit::new(0x0));
         end_pad.fill(core::mem::MaybeUninit::new(0x0));
-        // Copy the ELF data into memory
         // Safety: In-place cast to a transparently aligned type.
-        file_memory.copy_from_slice(unsafe { file_slice.align_to().1 });
+        // Clamping the file slice ensures we don't copy out-of-bounds.
+        let file_slice_clamped = &file_slice[..file_memory.len()];
+        // Copy the ELF data into memory.
+        file_memory.copy_from_slice(unsafe { file_slice_clamped.align_to().1 });
 
         // Process any relocations.
         let load_offset = process.load_offset();
