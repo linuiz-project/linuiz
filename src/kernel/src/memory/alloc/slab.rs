@@ -30,12 +30,9 @@ impl<A: Allocator> Slab<A> {
         let memory = Box::new_zeroed_slice_in(SLAB_LENGTH, allocator);
         let item_count = memory.len() / item_layout.pad_to_align().size().next_power_of_two();
 
-        assert!(item_count >= usize::try_from(u8::BITS).unwrap(), "{:?}", item_layout);
+        assert!(item_count >= usize::try_from(u8::BITS).unwrap());
 
-        let slf =
-            Self { item_layout, memory: unsafe { memory.assume_init() }, remaining: item_count, count: item_count };
-        info!("{:?}", slf);
-        slf
+        Self { item_layout, memory: unsafe { memory.assume_init() }, remaining: item_count, count: item_count }
     }
 
     #[inline]
