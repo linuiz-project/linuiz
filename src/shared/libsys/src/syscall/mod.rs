@@ -1,4 +1,6 @@
-use core::arch::asm;
+pub mod klog;
+pub mod proc;
+
 use num_enum::TryFromPrimitive;
 
 #[repr(u64)]
@@ -8,6 +10,9 @@ pub enum Vector {
     KlogError = 0x101,
     KlogDebug = 0x102,
     KlogTrace = 0x103,
+
+    ProcExit = 0x200,
+    ProcYield = 0x201,
 }
 
 #[repr(C)]
@@ -58,32 +63,5 @@ impl From<core::num::TryFromIntError> for Result {
 impl From<core::str::Utf8Error> for Result {
     fn from(_: core::str::Utf8Error) -> Self {
         Self::Utf8Error
-    }
-}
-
-pub fn klog_info(str: &str) -> Result {
-    let str_ptr = str.as_ptr();
-    let str_len = str.len();
-
-    // Safety: It isn't.
-    unsafe {
-        let low: u64;
-        let high: u64;
-
-        asm!(
-            "syscall",
-            in("rdi") Vector::KlogInfo as u64,
-            in("rsi") str_ptr,
-            inout("rdx") str_len => high,
-            out("rax") low,
-            // callee saved registers
-            out("rcx") _,
-            out("r8") _,
-            out("r9") _,
-            out("r11") _,
-            options(nostack, nomem, preserves_flags)
-        );
-
-        core::mem::transmute([low, high])
     }
 }
