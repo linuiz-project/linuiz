@@ -1,4 +1,5 @@
 pub mod pmm;
+pub mod slab;
 
 use alloc::alloc::Global;
 use core::{
@@ -6,12 +7,11 @@ use core::{
     ptr::NonNull,
 };
 use libsys::Virtual;
-use slab::SlabAllocator;
 use spin::Lazy;
 
 // TODO decide if we even need this? Perhaps just rely on the PMM for *all* allocations.
-pub static KMALLOC: Lazy<SlabAllocator<&pmm::PhysicalMemoryManager>> =
-    Lazy::new(|| SlabAllocator::new_in(11, &*pmm::PMM));
+pub static KMALLOC: Lazy<slab::SlabAllocator<&pmm::PhysicalMemoryManager>> =
+    Lazy::new(|| slab::SlabAllocator::new_in(11, &*pmm::PMM));
 
 mod global_allocator_impl {
     use super::KMALLOC;
