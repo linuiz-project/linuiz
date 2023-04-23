@@ -2,7 +2,7 @@ use crate::{
     interrupts::Vector,
     proc::{ElfData, Registers, State},
 };
-use libsys::{page_size, Address, Page, Virtual};
+use libsys::{Address, Page, Virtual};
 
 /// Indicates what type of error the common page fault handler encountered.
 #[derive(Debug, Clone, Copy)]
@@ -45,18 +45,19 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
             .unwrap();
 
         // Calculate the range of bytes we will be reading from the ELF file.
-        let file_offset = usize::try_from(phdr.p_offset).unwrap();
-        let file_slice_len = usize::min(usize::try_from(phdr.p_filesz).unwrap(), page_size());
+        let file_start = usize::try_from(phdr.p_offset).unwrap();
+        let file_end_total = file_start + usize::try_from(phdr.p_filesz).unwrap();
+        let file_end_clamped = libsys::align_down(file_end_total, libsys::page_shift());
         // Subslice the ELF memory to get the requisite segment data.
         let file_slice = match process.elf_data() {
-            ElfData::Memory(elf_memory) => &elf_memory[file_offset..(file_offset + file_slice_len)],
+            ElfData::Memory(elf_memory) => &elf_memory[file_start..file_end_clamped],
             ElfData::File(_) => unimplemented!(),
         };
 
         // Load the ELF data.
         let mapped_memory = mapped_memory.as_uninit_slice_mut();
         // Front padding is all of the bytes before the file offset.
-        let (front_pad, remaining) = mapped_memory.split_at_mut(file_offset % mapped_memory.len());
+        let (front_pad, remaining) = mapped_memory.split_at_mut(file_start % mapped_memory.len());
         // End padding is all of the bytes after the file offset + file slice length.
         let (file_memory, end_pad) = remaining.split_at_mut(file_slice.len());
         // Zero the padding bytes, according to ELF spec.
