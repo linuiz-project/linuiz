@@ -69,6 +69,11 @@ fn main() -> Result<()> {
         cmd!(sh, "curl -s -o build/root/EFI/BOOT/BOOTX64.EFI {LIMINE_UEFI_IMAGE_URL}").run()?;
     }
 
+    // Ensure the binaries have their `.cargo/config.toml`s.
+    if !sh.path_exists("src/kernel/.cargo/config.toml") || !sh.path_exists("src/userspace/.cargo/config.toml") {
+        target::update_target(&sh, target::Target::x86_64)?;
+    }
+
     match Arguments::parse() {
         Arguments::Clean => in_workspace_with(&sh, |sh| cmd!(sh, "cargo clean").run()),
         Arguments::Check => in_workspace_with(&sh, |sh| cmd!(sh, "cargo check --bins").run()),
