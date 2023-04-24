@@ -2,10 +2,12 @@
 	"name": "Codespaces Rust Starter",
 	"dockerFile": "Dockerfile",
 	"extensions": [
+		"vadimcn.vscode-lldb",
 		"rust-lang.rust-analyzer",
 		"serayuzgur.crates",
 		"github.copilot",
 		"tamasfe.even-better-toml",
+		"ms-vscode.hexeditor"
 	],
 	"settings": {
 		"editor.formatOnSave": true,
