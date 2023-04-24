@@ -18,7 +18,6 @@
     slice_ptr_get,
     strict_provenance,
     core_intrinsics,
-    alloc_error_handler,
     exclusive_range_pattern,
     raw_ref_op,
     let_chains,

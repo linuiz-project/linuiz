@@ -102,11 +102,3 @@ fn print_stack_trace(symbols: &[(&str, Symbol)], stack_traces: &[u64]) {
 
     error!("----------STACK-TRACE----------");
 }
-
-#[alloc_error_handler]
-fn alloc_error(error: core::alloc::Layout) -> ! {
-    error!("KERNEL ALLOCATOR PANIC: {:?}", error);
-
-    // Safety: It's dead, Jim.
-    unsafe { crate::interrupts::halt_and_catch_fire() }
-}
