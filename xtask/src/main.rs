@@ -1,5 +1,6 @@
 mod build;
 mod run;
+mod target;
 
 use clap::Parser;
 use std::path::Path;
@@ -22,22 +23,6 @@ MODULE_PATH=boot:///pyre/drivers
 KASLR=yes
 "#;
 
-#[derive(Debug, Clone, Copy, clap::Subcommand)]
-#[allow(non_camel_case_types)]
-pub enum Target {
-    x86_64,
-    riscv64gc,
-}
-
-impl core::fmt::Display for Target {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::x86_64 => "x86_64-unknown-none",
-            Self::riscv64gc => "riscv64gc-unknown-none-elf",
-        })
-    }
-}
-
 #[derive(Parser)]
 struct Fmt {
     args: Vec<String>,
@@ -53,7 +38,7 @@ enum Arguments {
     Fmt(Fmt),
 
     #[command(subcommand)]
-    Target(Target),
+    Target(target::Target),
 
     Build(build::Options),
     Run(run::Options),
@@ -61,6 +46,9 @@ enum Arguments {
 
 fn main() -> Result<()> {
     let sh = Shell::new()?;
+
+    // Ensure we use the 'sparse' cargo repository protocol
+    sh.set_var("CARGO_REGISTRIES_CRATES_IO_PROTOCOL", "sparse");
 
     // Validate all of the relevant files
     create_path_if_not_exists(&sh, "build/root/EFI/BOOT/")?;
@@ -91,13 +79,7 @@ fn main() -> Result<()> {
             in_workspace_with(&sh, |sh| cmd!(sh, "cargo fmt {args...}").run())
         }
 
-        Arguments::Target(target) => {
-            let mut config =
-                sh.read_file("src/.cargo/config.toml")?.parse::<toml_edit::Document>().expect("invalid cargo config");
-            config["build"]["target"] = toml_edit::value(target.to_string());
-            sh.write_file("src/.cargo/config.toml", config.to_string())
-        }
-
+        Arguments::Target(target) => target::update_target(&sh, target),
         Arguments::Build(build_options) => build::build(&sh, build_options),
         Arguments::Run(run_options) => run::run(&sh, run_options),
     }
