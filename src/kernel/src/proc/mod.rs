@@ -146,11 +146,6 @@ impl Process {
     }
 
     #[inline]
-    pub fn load_address_to_elf_vaddr(&self, address: Address<Virtual>) -> Option<usize> {
-        address.get().checked_sub(self.load_offset)
-    }
-
-    #[inline]
     pub fn elf_relas(&mut self) -> &mut Vec<ElfRela> {
         &mut self.elf_relas
     }
