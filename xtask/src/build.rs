@@ -22,11 +22,6 @@ pub struct Options {
 }
 
 pub fn build(sh: &Shell, options: Options) -> Result<()> {
-    // copy configuration to EFI image
-    sh.copy_file("resources/limine.cfg", "build/root/EFI/BOOT/")?;
-    // copy the EFI binary image
-    sh.copy_file("resources/BOOTX64.EFI", "build/root/EFI/BOOT/")?;
-
     let _cargo_log = {
         let mut cargo_log = Vec::new();
 

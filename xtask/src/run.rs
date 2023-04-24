@@ -155,7 +155,7 @@ pub fn run(sh: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
 
     cmd = match options.cpu {
         CPU::Rv64 => unimplemented!(),
-        _ => cmd.args(["-bios", "resources/OVMF.fd", "-drive", "format=raw,file=fat:rw:build/root/"]),
+        _ => cmd.args(["-bios", "/usr/share/ovmf/OVMF.fd", "-drive", "format=raw,file=fat:rw:build/root/"]),
     };
 
     if options.nographic {

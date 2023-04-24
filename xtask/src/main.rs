@@ -63,7 +63,7 @@ fn main() -> Result<()> {
     let sh = Shell::new()?;
 
     // Validate all of the relevant files
-    create_path_if_not_exists(&sh, "build/root/EFI/")?;
+    create_path_if_not_exists(&sh, "build/root/EFI/BOOT/")?;
     create_path_if_not_exists(&sh, "build/root/pyre/")?;
     // Ensure dev disk image exists.
     if !sh.path_exists("build/disk0.img") {
@@ -71,35 +71,24 @@ fn main() -> Result<()> {
     }
 
     // Ensure a valid bootloader configuration exists.
-    if !sh.path_exists("build/root/EFI/limine.cfg") {
-        sh.write_file("build/root/EFI/limine.cfg", LIMINE_DEFAULT_CFG)?;
+    if !sh.path_exists("build/root/EFI/BOOT/limine.cfg") {
+        sh.write_file("build/root/EFI/BOOT/limine.cfg", LIMINE_DEFAULT_CFG)?;
     }
 
     // Download UEFI boot image.
-    if !sh.path_exists("build/root/EFI/BOOTX64.EFI") {
+    if !sh.path_exists("build/root/EFI/BOOT/BOOTX64.EFI") {
         println!("Downloading limine UEFI boot image.");
-        cmd!(sh, "curl -s -o build/root/EFI/BOOTX64.EFI {LIMINE_UEFI_IMAGE_URL}").run()?;
+        cmd!(sh, "curl -s -o build/root/EFI/BOOT/BOOTX64.EFI {LIMINE_UEFI_IMAGE_URL}").run()?;
     }
 
     match Arguments::parse() {
         Arguments::Clean => in_workspace_with(&sh, |sh| cmd!(sh, "cargo clean").run()),
         Arguments::Check => in_workspace_with(&sh, |sh| cmd!(sh, "cargo check --bins").run()),
+        Arguments::Update => in_workspace_with(&sh, |sh| cmd!(sh, "cargo update").run()),
         Arguments::Clippy => in_workspace_with(&sh, |sh| cmd!(sh, "cargo clippy").run()),
         Arguments::Fmt(fmt) => {
             let args = &fmt.args;
             in_workspace_with(&sh, |sh| cmd!(sh, "cargo fmt {args...}").run())
-        }
-
-        Arguments::Update => {
-            // update crates ...
-            in_workspace_with(&sh, |sh| cmd!(sh, "cargo update").run())?;
-            
-            // update edk2 submodule ...
-            cmd!(sh, "git submodule update --init --recursive").run()?;
-
-            
-
-            Ok(())
         }
 
         Arguments::Target(target) => {
