@@ -18,7 +18,7 @@ Currently, drivers are packaged and loaded as a tarball, but will yet be loaded 
  - cargo + rustup installed and in your PATH.
 
 ### Building
-To build, simply run `cargo xtask build` within the root project directory. The resultant binaries will be output to `.hdd/root/pyre/`.
+To build, simply run `cargo xtask build` within the root project directory. The resultant binaries will be output to `build/root/pyre/`.
 
 ### Running
 `cargo xtask run` will both build and run the OS (so build flags can be passed to this command as well).

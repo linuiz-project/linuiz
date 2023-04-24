@@ -116,7 +116,7 @@ pub fn run(sh: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
             -no-shutdown
             -no-reboot
             -serial mon:stdio
-            -drive format=raw,file=.hdd/disk0.img,id=disk1,if=none
+            -drive format=raw,file=build/disk0.img,id=disk1,if=none
             -net none
             -M smm=off
         "
@@ -154,8 +154,8 @@ pub fn run(sh: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
     }
 
     cmd = match options.cpu {
-        CPU::Rv64 => cmd.args(["-bios", "resources/fw_jump.fd", "-kernel", ".hdd/root/pyre/kernel_rv64.elf"]),
-        _ => cmd.args(["-bios", "resources/OVMF.fd", "-drive", "format=raw,file=fat:rw:.hdd/root/"]),
+        CPU::Rv64 => unimplemented!(),
+        _ => cmd.args(["-bios", "resources/OVMF.fd", "-drive", "format=raw,file=fat:rw:build/root/"]),
     };
 
     if options.nographic {

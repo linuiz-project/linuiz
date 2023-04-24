@@ -12,7 +12,7 @@ Cargo.lock
 *.img
 
 .debug/**
-.hdd/**
+/build/**
 
 # Added by cargo
 

@@ -2,9 +2,25 @@ mod build;
 mod run;
 
 use clap::Parser;
+use std::path::Path;
 use xshell::{cmd, Result, Shell};
 
 static WORKSPACE_DIRS: [&str; 3] = ["src/kernel", "src/shared", "src/userspace"];
+
+static LIMINE_UEFI_IMAGE_URL: &str =
+    "https://raw.githubusercontent.com/limine-bootloader/limine/v4.x-branch-binary/BOOTX64.EFI";
+static LIMINE_DEFAULT_CFG: &str = r#"
+TIMEOUT=3
+SERIAL=yes
+
+:Pyre (limine)
+COMMENT=Load Pyre OS using the Limine boot protocol.
+PROTOCOL=limine
+RESOLUTION=800x600x16
+KERNEL_PATH=boot:///pyre/kernel
+MODULE_PATH=boot:///pyre/drivers
+KASLR=yes
+"#;
 
 #[derive(Debug, Clone, Copy, clap::Subcommand)]
 #[allow(non_camel_case_types)]
@@ -43,26 +59,47 @@ enum Arguments {
     Run(run::Options),
 }
 
-fn in_workspace_with(shell: &Shell, with_fn: impl Fn(&Shell) -> Result<()>) -> Result<()> {
-    for dir in WORKSPACE_DIRS {
-        let _dir = shell.push_dir(dir);
-        with_fn(shell)?
-    }
-
-    Ok(())
-}
-
 fn main() -> Result<()> {
     let sh = Shell::new()?;
 
+    // Validate all of the relevant files
+    create_path_if_not_exists(&sh, "build/root/EFI/")?;
+    create_path_if_not_exists(&sh, "build/root/pyre/")?;
+    // Ensure dev disk image exists.
+    if !sh.path_exists("build/disk0.img") {
+        cmd!(sh, "qemu-img create -f raw build/disk0.img 256M").run()?;
+    }
+
+    // Ensure a valid bootloader configuration exists.
+    if !sh.path_exists("build/root/EFI/limine.cfg") {
+        sh.write_file("build/root/EFI/limine.cfg", LIMINE_DEFAULT_CFG)?;
+    }
+
+    // Download UEFI boot image.
+    if !sh.path_exists("build/root/EFI/BOOTX64.EFI") {
+        println!("Downloading limine UEFI boot image.");
+        cmd!(sh, "curl -s -o build/root/EFI/BOOTX64.EFI {LIMINE_UEFI_IMAGE_URL}").run()?;
+    }
+
     match Arguments::parse() {
         Arguments::Clean => in_workspace_with(&sh, |sh| cmd!(sh, "cargo clean").run()),
-        Arguments::Update => in_workspace_with(&sh, |sh| cmd!(sh, "cargo update").run()),
         Arguments::Check => in_workspace_with(&sh, |sh| cmd!(sh, "cargo check --bins").run()),
         Arguments::Clippy => in_workspace_with(&sh, |sh| cmd!(sh, "cargo clippy").run()),
         Arguments::Fmt(fmt) => {
             let args = &fmt.args;
             in_workspace_with(&sh, |sh| cmd!(sh, "cargo fmt {args...}").run())
+        }
+
+        Arguments::Update => {
+            // update crates ...
+            in_workspace_with(&sh, |sh| cmd!(sh, "cargo update").run())?;
+            
+            // update edk2 submodule ...
+            cmd!(sh, "git submodule update --init --recursive").run()?;
+
+            
+
+            Ok(())
         }
 
         Arguments::Target(target) => {
@@ -75,4 +112,21 @@ fn main() -> Result<()> {
         Arguments::Build(build_options) => build::build(&sh, build_options),
         Arguments::Run(run_options) => run::run(&sh, run_options),
     }
+}
+
+fn in_workspace_with(shell: &Shell, with_fn: impl Fn(&Shell) -> Result<()>) -> Result<()> {
+    for dir in WORKSPACE_DIRS {
+        let _dir = shell.push_dir(dir);
+        with_fn(shell)?
+    }
+
+    Ok(())
+}
+
+fn create_path_if_not_exists<P: AsRef<Path>>(sh: &Shell, path: P) -> Result<()> {
+    if !sh.path_exists(path.as_ref()) {
+        sh.create_dir(path.as_ref())?;
+    }
+
+    Ok(())
 }
