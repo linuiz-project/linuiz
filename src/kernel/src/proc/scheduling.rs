@@ -49,10 +49,8 @@ impl Scheduler {
     pub fn next_task(&mut self, state: &mut super::State, regs: &mut super::Registers) {
         debug_assert!(!crate::interrupts::are_enabled());
 
-        crate::local::print_timer_interval(1);
         let mut processes = PROCESSES.lock();
 
-        crate::local::print_timer_interval(2);
         // Move the current task, if any, back into the scheduler queue.
         if let Some(mut process) = self.process.take() {
             process.context.0 = *state;
@@ -62,22 +60,8 @@ impl Scheduler {
             processes.push_back(process);
         }
 
-        crate::local::print_timer_interval(3);
-        let next_process = loop {
-            match processes.pop_front() {
-                // This effectively allows us to kill the process by dropping it.
-                Some(process) if process.get_exit() => {
-                    debug!("Exiting process: {:?}", process.id());
-                    continue;
-                }
-                Some(process) => break Some(process),
-                None => break None,
-            }
-        };
-
-        crate::local::print_timer_interval(4);
         // Pop a new task from the task queue, or simply switch in the idle task.
-        if let Some(next_process) = next_process {
+        if let Some(next_process) = processes.pop_front() {
             trace!("Switching task: {:?}", next_process.id());
 
             *state = next_process.context.0;
@@ -101,7 +85,6 @@ impl Scheduler {
             trace!("Switched idle task.");
         };
 
-        crate::local::print_timer_interval(5);
         // TODO have some kind of queue of preemption waits, to ensure we select the shortest one.
         // Safety: Just having switched tasks, no preemption wait should supercede this one.
         unsafe {
@@ -109,5 +92,13 @@ impl Scheduler {
 
             crate::local::set_preemption_wait(TIME_SLICE);
         }
+    }
+
+    pub fn exit_task(&mut self, state: &mut super::State, regs: &mut super::Registers) {
+        debug_assert!(!crate::interrupts::are_enabled());
+
+        let _ = self.process.take().expect("cannot exit without process");
+
+        self.next_task(state, regs);
     }
 }

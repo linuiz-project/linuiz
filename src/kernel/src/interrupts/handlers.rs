@@ -34,58 +34,51 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
         debug_assert_eq!(phdr.p_align & (libsys::page_mask() as u64), 0);
         trace!("Demand mapping from segment: {:?}", phdr);
 
+        let load_offset = process.load_offset();
+        let segment_vaddr = usize::try_from(phdr.p_vaddr).unwrap();
+        let segment_vaddr_aligned = libsys::align_down(segment_vaddr, libsys::page_shift());
+        let segment_offset = usize::try_from(phdr.p_offset).unwrap();
+        let segment_file_size = usize::try_from(phdr.p_filesz).unwrap();
+        let segment_mem_size = usize::try_from(phdr.p_filesz).unwrap();
+        let segment_file_end = segment_offset + segment_file_size;
+
+        let segment_page = Address::new_truncate(load_offset + segment_vaddr);
+        let segment_page_count = libsys::align_up_div(segment_mem_size, libsys::page_shift());
+
         // Map the page as RW so we can copy the ELF data in.
         let mapped_memory = process
             .address_space_mut()
             .mmap(
-                Some(Address::<Page>::new_truncate(address.get())),
-                core::num::NonZeroUsize::MIN,
+                Some(segment_page),
+                core::num::NonZeroUsize::new(segment_page_count).unwrap(),
                 crate::proc::MmapPermissions::ReadWrite,
             )
             .unwrap();
-
-        // Calculate the range of bytes we will be reading from the ELF file.
-
-        let segment_vaddr = usize::try_from(phdr.p_vaddr).unwrap();
-        // This calculation represents the byte offset of the faulting address from the segment start.
-        let segment_offset = elf_vaddr - segment_vaddr;
-        // Using the byte offset we just calculated, we can apply that offset to the
-        //  beginning of the segment to get the ELF's file memory.
-        let file_start = usize::try_from(phdr.p_offset).unwrap() + segment_offset;
-        // Then, with the file size, we calculate the end of the absolute file range.
-        let file_end = file_start + usize::try_from(phdr.p_filesz).unwrap();
-        let file_range = file_start..file_end;
-
-        // Subslice the ELF memory to get the requisite segment data.
-        let file_slice = match process.elf_data() {
-            ElfData::Memory(elf_memory) => &elf_memory[file_range],
-            ElfData::File(_) => unimplemented!(),
-        };
-
-        // Load the ELF data.
         let mapped_memory = mapped_memory.as_uninit_slice_mut();
-        // Front padding is all of the bytes before the file offset.
-        let (front_pad, remaining) = mapped_memory.split_at_mut(file_start % mapped_memory.len());
-        // Clamp the file slice length to ensure we don't try to split out-of-bounds.
-        let file_memory_split_index = usize::min(file_slice.len(), remaining.len());
-        // End padding is all of the bytes after the file offset + file slice length.
-        let (file_memory, end_pad) = remaining.split_at_mut(file_memory_split_index);
-        // Zero the padding bytes, according to ELF spec.
-        front_pad.fill(core::mem::MaybeUninit::new(0x0));
-        end_pad.fill(core::mem::MaybeUninit::new(0x0));
-        // Safety: In-place cast to a transparently aligned type.
-        // Clamping the file slice ensures we don't copy out-of-bounds.
-        let file_slice_clamped = &file_slice[..file_memory.len()];
-        // Copy the ELF data into memory.
-        file_memory.copy_from_slice(unsafe { file_slice_clamped.align_to().1 });
+        let memory_padding = segment_vaddr - segment_vaddr_aligned;
+
+        if segment_file_size > 0 {
+            let file_slice = match process.elf_data() {
+                ElfData::Memory(elf_memory) => elf_memory,
+                ElfData::File(_) => unimplemented!(),
+            };
+            let copy_file_slice = &file_slice[segment_offset..segment_file_end];
+
+            let memory_copy_range = memory_padding..(memory_padding + copy_file_slice.len());
+            mapped_memory[memory_copy_range].copy_from_slice(unsafe { copy_file_slice.align_to().1 });
+        }
+
+        if segment_mem_size > segment_file_size {
+            mapped_memory[(memory_padding + segment_file_end)..].fill(core::mem::MaybeUninit::new(0x0));
+        }
 
         // Process any relocations.
-        let load_offset = process.load_offset();
-        let phdr_mem_range = phdr.p_vaddr..(phdr.p_vaddr + phdr.p_memsz);
+        let phdr_mem_range = segment_vaddr..(segment_vaddr + segment_mem_size);
         process.elf_relas().drain_filter(|rela| {
-            if phdr_mem_range.contains(&u64::try_from(rela.address.get()).unwrap()) {
+            if phdr_mem_range.contains(&rela.address.get()) {
                 info!("Processing relocation: {:X?}", rela);
                 rela.address.as_ptr().add(load_offset).cast::<usize>().write(rela.value);
+
                 true
             } else {
                 false

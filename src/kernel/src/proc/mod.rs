@@ -71,8 +71,6 @@ pub struct Process {
     elf_segments: Box<[ProgramHeader]>,
     elf_relas: Vec<ElfRela>,
     elf_data: ElfData,
-
-    exit: bool,
 }
 
 impl Process {
@@ -104,8 +102,6 @@ impl Process {
             elf_segments,
             elf_relas,
             elf_data,
-
-            exit: false,
         }
     }
 
@@ -157,20 +153,6 @@ impl Process {
     #[inline]
     pub fn elf_relas(&mut self) -> &mut Vec<ElfRela> {
         &mut self.elf_relas
-    }
-
-    #[inline]
-    pub const fn get_exit(&self) -> bool {
-        self.exit
-    }
-
-    /// ### Safety
-    ///
-    /// Changing the exit mode of a process is implicitly undefined behaviour, as any
-    /// external state the process is modifying may be orphaned.
-    #[inline]
-    pub unsafe fn set_exit(&mut self, exit: bool) {
-        self.exit = exit;
     }
 }
 

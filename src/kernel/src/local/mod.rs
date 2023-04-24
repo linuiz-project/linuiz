@@ -246,10 +246,6 @@ pub fn with_scheduler<R>(func: impl FnOnce(&mut crate::proc::Scheduler) -> R) ->
     func(&mut get_state_mut().scheduler)
 }
 
-pub fn print_timer_interval(id: usize) {
-    info!("TIMER INTERVAL {} {:?}", id, get_state().timer_interval);
-}
-
 pub unsafe fn end_of_interrupt() {
     #[cfg(target_arch = "x86_64")]
     get_state().apic.end_of_interrupt();
@@ -269,7 +265,6 @@ pub unsafe fn set_preemption_wait(interval_wait: core::num::NonZeroU16) {
         match apic.get_timer().get_mode() {
             // Safety: Control flow expects timer initial count to be set.
             apic::TimerMode::OneShot => unsafe {
-                info!("{} * {}", timer_interval.get(), interval_wait.get());
                 let final_count = timer_interval.get() * u64::from(interval_wait.get());
                 apic.set_timer_initial_count(final_count.try_into().unwrap_or(u32::MAX));
             },
