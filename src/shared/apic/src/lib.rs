@@ -5,7 +5,7 @@ use bit_field::BitField;
 use core::marker::PhantomData;
 use msr::IA32_APIC_BASE;
 
-#[repr(u8)]
+#[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeliveryMode {
     Fixed = 0b000,
@@ -18,7 +18,7 @@ pub enum DeliveryMode {
 }
 
 /// Various valid modes for APIC timer to operate in.
-#[repr(u64)]
+#[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TimerMode {
     OneShot = 0b00,
@@ -26,14 +26,15 @@ pub enum TimerMode {
     TscDeadline = 0b10,
 }
 
-impl TimerMode {
-    #[inline]
-    const fn from_u64(value: u64) -> Self {
+impl TryFrom<u32> for TimerMode {
+    type Error = u32;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
         match value {
-            0b00 => Self::OneShot,
-            0b01 => Self::Periodic,
-            0b10 => Self::TscDeadline,
-            _ => unimplemented!(),
+            0b00 => Ok(Self::OneShot),
+            0b01 => Ok(Self::Periodic),
+            0b10 => Ok(Self::TscDeadline),
+            value => Err(value),
         }
     }
 }
@@ -54,7 +55,7 @@ pub enum TimerDivisor {
 
 impl TimerDivisor {
     /// Converts the given [TimerDivisor] to its numeric counterpart.
-    pub const fn as_divide_value(self) -> u64 {
+    pub const fn as_divide_value(self) -> u8 {
         match self {
             TimerDivisor::Div2 => 2,
             TimerDivisor::Div4 => 4,
@@ -70,7 +71,7 @@ impl TimerDivisor {
 
 bitflags::bitflags! {
     #[repr(transparent)]
-    pub struct ErrorStatusFlags : u8 {
+    pub struct ErrorStatusFlags : u32 {
         const SEND_CHECKSUM_ERROR = 1 << 0;
         const RECEIVE_CHECKSUM_ERROR = 1 << 1;
         const SEND_ACCEPT_ERROR = 1 << 2;
@@ -82,29 +83,42 @@ bitflags::bitflags! {
     }
 }
 
-pub struct InterruptCommand(u64);
+#[derive(Debug, Clone, Copy)]
+pub struct InterruptCommand {
+    apic_id: u32,
+    cmd: u32,
+}
 
 impl InterruptCommand {
-    pub const fn new(vector: u8, apic_id: u32, delivery_mode: DeliveryMode, is_logical: bool, is_assert: bool) -> Self {
-        Self(
-            (vector as u64)
-                | ((delivery_mode as u64) << 8)
-                | ((is_logical as u64) << 11)
-                | ((is_assert as u64) << 14)
-                | ((apic_id as u64) << 32),
-        )
+    pub fn new(vector: u8, apic_id: u32, delivery_mode: DeliveryMode, is_logical: bool, is_assert: bool) -> Self {
+        Self {
+            apic_id,
+            cmd: *0u32
+                .set_bits(0..8, vector.into())
+                .set_bits(8..11, delivery_mode as u32)
+                .set_bit(11, is_logical)
+                .set_bit(14, is_assert),
+        }
     }
 
-    pub const fn new_init(apic_id: u32) -> Self {
+    #[inline]
+    pub fn new_init(apic_id: u32) -> Self {
         Self::new(0, apic_id, DeliveryMode::INIT, false, true)
     }
 
-    pub const fn new_sipi(vector: u8, apic_id: u32) -> Self {
+    #[inline]
+    pub fn new_sipi(vector: u8, apic_id: u32) -> Self {
         Self::new(vector, apic_id, DeliveryMode::StartUp, false, true)
     }
 
-    pub const fn get_raw(&self) -> u64 {
-        self.0
+    #[inline]
+    pub const fn get_id(self) -> u32 {
+        self.apic_id
+    }
+
+    #[inline]
+    pub const fn get_cmd(self) -> u32 {
+        self.cmd
     }
 }
 
@@ -144,7 +158,8 @@ pub enum Register {
     IRR192 = 0x26,
     IRR224 = 0x27,
     ERR = 0x28,
-    ICR = 0x30,
+    ICRL = 0x30,
+    ICRH = 0x31,
     LVT_TIMER = 0x32,
     LVT_THERMAL = 0x33,
     LVT_PERF = 0x34,
@@ -177,7 +192,7 @@ pub const x2APIC_BASE_MSR_ADDR: u32 = 0x800;
 /// Type for representing the mode of the core-local APIC.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Type {
-    xAPIC(usize),
+    xAPIC(*mut u8),
     x2APIC,
 }
 
@@ -192,36 +207,30 @@ impl Apic {
             Some(Self(Type::x2APIC))
         } else if is_xapic {
             let map_xapic_fn = map_xapic_fn.expect("no mapping function provided for xAPIC");
-            let xapic_ptr = map_xapic_fn(xAPIC_BASE_ADDR);
-
-            Some(Self(Type::xAPIC(xapic_ptr as usize)))
+            Some(Self(Type::xAPIC(map_xapic_fn(IA32_APIC_BASE::get_base_address().try_into().unwrap()))))
         } else {
             None
         }
     }
 
     /// Reads the given register from the local APIC.
-    fn read_register(&self, register: Register) -> u64 {
+    fn read_register(&self, register: Register) -> u32 {
         match self.0 {
             // Safety: Address provided for xAPIC mapping is required to be valid.
-            Type::xAPIC(address) => unsafe {
-                (address as *mut u8).add(register.xapic_offset()).cast::<u32>().read_volatile() as u64
-            },
+            Type::xAPIC(xapic_ptr) => unsafe { xapic_ptr.add(register.xapic_offset()).cast::<u32>().read_volatile() },
 
             // Safety: MSR addresses are known-valid from IA32 SDM.
-            Type::x2APIC => unsafe { msr::rdmsr(register.x2apic_msr()) },
+            Type::x2APIC => unsafe { msr::rdmsr(register.x2apic_msr()).try_into().unwrap() },
         }
     }
 
     /// ### Safety
     ///
     /// Writing an invalid value to a register is undefined behaviour.
-    unsafe fn write_register(&self, register: Register, value: u64) {
+    unsafe fn write_register(&self, register: Register, value: u32) {
         match self.0 {
-            Type::xAPIC(address) => {
-                (address as *mut u8).add(register.xapic_offset()).cast::<u32>().write_volatile(value as u32)
-            }
-            Type::x2APIC => msr::wrmsr(register.x2apic_msr(), value),
+            Type::xAPIC(xapic_ptr) => xapic_ptr.add(register.xapic_offset()).cast::<u32>().write_volatile(value),
+            Type::x2APIC => msr::wrmsr(register.x2apic_msr(), value.into()),
         }
     }
 
@@ -260,7 +269,7 @@ impl Apic {
 
     #[inline]
     pub fn get_error_status(&self) -> ErrorStatusFlags {
-        ErrorStatusFlags::from_bits_truncate(self.read_register(Register::ERR) as u8)
+        ErrorStatusFlags::from_bits_truncate(self.read_register(Register::ERR))
     }
 
     /// ### Safety
@@ -268,7 +277,8 @@ impl Apic {
     /// An invalid or unexpcted interrupt command could potentially put the core in an unusable state.
     #[inline]
     pub unsafe fn send_int_cmd(&self, interrupt_command: InterruptCommand) {
-        self.write_register(Register::ICR, interrupt_command.get_raw());
+        self.write_register(Register::ICRL, interrupt_command.get_id());
+        self.write_register(Register::ICRH, interrupt_command.get_cmd());
     }
 
     /// ### Safety
@@ -278,7 +288,7 @@ impl Apic {
     /// cause the same sorts of UB that [`set_timer_initial_count`] can cause.
     #[inline]
     pub unsafe fn set_timer_divisor(&self, divisor: TimerDivisor) {
-        self.write_register(Register::TIMER_DIVISOR, divisor.as_divide_value());
+        self.write_register(Register::TIMER_DIVISOR, divisor.as_divide_value().into());
     }
 
     /// ### Safety
@@ -288,7 +298,7 @@ impl Apic {
     /// is instead interrupted later than expected.
     #[inline]
     pub unsafe fn set_timer_initial_count(&self, count: u32) {
-        self.write_register(Register::TIMER_INT_CNT, count as u64);
+        self.write_register(Register::TIMER_INT_CNT, count);
     }
 
     #[inline]
@@ -340,7 +350,8 @@ impl Apic {
         self.sw_disable();
 
         self.write_register(Register::TPR, 0x0);
-        self.write_register(Register::SPR, *self.read_register(Register::SPR).set_bits(0..8, spr_vector as u64));
+        let modified_spr = *self.read_register(Register::SPR).set_bits(0..8, spr_vector.into());
+        self.write_register(Register::SPR, modified_spr);
 
         self.sw_enable();
 
@@ -434,7 +445,7 @@ impl<T: LocalVectorVariant> LocalVector<'_, T> {
     pub unsafe fn set_vector(&self, vector: u8) -> &Self {
         assert!(vector >= 32, "interrupt vectors 0..32 are reserved");
 
-        self.0.write_register(T::REGISTER, *self.0.read_register(T::REGISTER).set_bits(0..8, vector as u64));
+        self.0.write_register(T::REGISTER, *self.0.read_register(T::REGISTER).set_bits(0..8, vector.into()));
 
         self
     }
@@ -452,7 +463,7 @@ impl<T: GenericVectorVariant> LocalVector<'_, T> {
     /// Setting the incorrect delivery mode may result in interrupts not being received
     /// correctly, or being sent to all cores at once.
     pub unsafe fn set_delivery_mode(&self, mode: DeliveryMode) -> &Self {
-        self.0.write_register(T::REGISTER, *self.0.read_register(T::REGISTER).set_bits(8..11, mode as u64));
+        self.0.write_register(T::REGISTER, *self.0.read_register(T::REGISTER).set_bits(8..11, mode as u32));
 
         self
     }
@@ -461,7 +472,7 @@ impl<T: GenericVectorVariant> LocalVector<'_, T> {
 impl LocalVector<'_, Timer> {
     #[inline]
     pub fn get_mode(&self) -> TimerMode {
-        TimerMode::from_u64(self.0.read_register(<Timer as LocalVectorVariant>::REGISTER).get_bits(17..19))
+        TimerMode::try_from(self.0.read_register(<Timer as LocalVectorVariant>::REGISTER).get_bits(17..19)).unwrap()
     }
 
     /// ### Safety
@@ -476,7 +487,7 @@ impl LocalVector<'_, Timer> {
 
         self.0.write_register(
             <Timer as LocalVectorVariant>::REGISTER,
-            *self.0.read_register(<Timer as LocalVectorVariant>::REGISTER).set_bits(17..19, mode as u64),
+            *self.0.read_register(<Timer as LocalVectorVariant>::REGISTER).set_bits(17..19, mode as u32),
         );
 
         if tsc_dl_support {

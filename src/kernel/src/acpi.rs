@@ -9,7 +9,7 @@ use crate::memory::{
 
 pub enum Register<'a, T: port::PortReadWrite> {
     Io(ReadWritePort<T>),
-    Mmio(&'a libsys::mem::VolatileCell<T, libsys::ReadWrite>),
+    Mmio(&'a libkernel::mem::VolatileCell<T, libkernel::ReadWrite>),
 }
 
 impl<T: port::PortReadWrite> Register<'_, T> {
@@ -182,14 +182,15 @@ pub static MCFG: Lazy<Option<Mutex<PhysicalMapping<AcpiHandler, acpi::mcfg::Mcfg
     TABLES.get().map(Mutex::lock).and_then(|tables| tables.find_table::<acpi::mcfg::Mcfg>().ok()).map(Mutex::new)
 });
 
-pub static PLATFORM_INFO: Lazy<Option<Mutex<acpi::PlatformInfo<&slab::SlabAllocator<&PhysicalMemoryManager>>>>> =
-    Lazy::new(|| {
-        TABLES
-            .get()
-            .map(Mutex::lock)
-            .and_then(|tables| acpi::PlatformInfo::new_in(&*tables, &*KMALLOC).ok())
-            .map(Mutex::new)
-    });
+pub static PLATFORM_INFO: Lazy<
+    Option<Mutex<acpi::PlatformInfo<&crate::memory::alloc::slab::SlabAllocator<&PhysicalMemoryManager>>>>,
+> = Lazy::new(|| {
+    TABLES
+        .get()
+        .map(Mutex::lock)
+        .and_then(|tables| acpi::PlatformInfo::new_in(&*tables, &*KMALLOC).ok())
+        .map(Mutex::new)
+});
 
 // struct AmlContextWrapper(aml::AmlContext);
 // // Safety: TODO

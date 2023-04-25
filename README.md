@@ -1,24 +1,34 @@
-# **Pyre OS**
+## What is it?
 
-*Pyre* is a semi-modular operating system written in the Rust programming language. Its intent is to find the best of both worlds: combine the excellent IPC performance of modular kernel configurations, with the extremely low memory overhead of monolithic kernels.
+*Pyre* is a semi-modular multi-archutecture operating system written in the Rust programming language.
 
-As it stands, there is very little user-facing functionality. The bootloader (Limine + Limine boot protocol) can be configured via the `resources/limine.cfg` file. At time of writing, there are a few configurables for the kernel:
+## Why is it?
 
-- `--nosmp` will park the additional CPU cores
-- `--symbolinfo` will retain symbol info, even in release builds (use for kernel stack traces)
-- `--lomem` will do several different things in an attempt to lower memory usage
+Pyre is an experiment that seeks to abridge the differences between many separate programming and kernel design paradigms. 
+Additionally, Pyre aims to seamlessly integrate a windowing into the command-line experience—creating a hybrid that allows traditionally technical environments to be more accessible.
 
-Currently, drivers are packaged and loaded as a tarball, but will yet be loaded into userspace and ran (this is WIP).
+<br />
 
 
-## **Building / Running the OS**
----
+# **Testing It Out**
 
-**Prerequisites:**
- - cargo + rustup installed and in your PATH.
+## Building
+The build process is mostly automated via the `cargo xtask` pattern, although the following **prerequisites** must be met:
+  - `cargo` and `rustup` installed and in your `PATH`.
+  - The following packages installed:
 
-### Building
-To build, simply run `cargo xtask build` within the root project directory. The resultant binaries will be output to `.hdd/root/pyre/`.
+    &ensp;`git`, `ovmf`, `gcc`, `qemu`, `qemu-utils`
 
-### Running
-`cargo xtask run` will both build and run the OS (so build flags can be passed to this command as well).
+  - Depending on the architecture you wish to target, you may need one of the following:
+
+    &ensp;`qemu-system-x86`, `qemu-system-arm`, or `qemu-system-misc` *(for risc-v)*
+
+    &ensp;Others can be listed with `apt list | grep qemu-system`
+
+<br />
+
+## Running
+
+To run the OS with its default configuration, simply call: `cargo xtask run`
+
+<!-- TODO list some common options related to the command  -->

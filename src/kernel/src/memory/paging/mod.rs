@@ -2,8 +2,8 @@ pub mod walker;
 
 use crate::memory::Hhdm;
 use core::{cmp::Ordering, fmt, iter::Step, num::NonZeroU32, ptr::NonNull};
+use libkernel::mem::{InteriorRef, Mut, Ref};
 use libsys::{
-    mem::{InteriorRef, Mut, Ref},
     page_shift, page_size, table_index_mask, table_index_shift, table_index_size, Address, Frame, Page, Virtual,
 };
 

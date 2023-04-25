@@ -21,30 +21,7 @@ pub struct Options {
     drivers: Vec<String>,
 }
 
-static REQUIRED_ROOT_DIRS: [&str; 3] = [
-    ".hdd/",               // disk0.img
-    ".hdd/root/EFI/BOOT/", // BOOTX64.EFI
-    ".hdd/root/pyre/",     // kernel, drivers
-];
-
 pub fn build(sh: &Shell, options: Options) -> Result<()> {
-    // Ensure root directories exist
-    for root_dir in REQUIRED_ROOT_DIRS {
-        if !sh.path_exists(root_dir) {
-            sh.create_dir(root_dir)?;
-        }
-    }
-
-    // Ensure dev disk image exists.
-    if !sh.path_exists(".hdd/disk0.img") {
-        cmd!(sh, "qemu-img create -f raw .hdd/disk0.img 256M").run()?;
-    }
-
-    // copy configuration to EFI image
-    sh.copy_file("resources/limine.cfg", ".hdd/root/EFI/BOOT/")?;
-    // copy the EFI binary image
-    sh.copy_file("resources/BOOTX64.EFI", ".hdd/root/EFI/BOOT/")?;
-
     let _cargo_log = {
         let mut cargo_log = Vec::new();
 
@@ -91,7 +68,7 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
         cmd!(sh, "cargo build --bins -Z unstable-options {local_args...}").run()?;
 
         // Copy the output kernel binary to the virtual HDD.
-        sh.copy_file(tmp_dir_path.join("kernel"), root_dir.join(".hdd/root/pyre/"))?;
+        sh.copy_file(tmp_dir_path.join("kernel"), root_dir.join("build/root/pyre/"))?;
     }
 
     /* compile userspace */
@@ -105,7 +82,7 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
 
     build_drivers_archive(
         tmp_dir_path,
-        &root_dir.join(".hdd/root/pyre/drivers"),
+        &root_dir.join("build/root/pyre/drivers"),
         sh.read_dir(tmp_dir_path)?.into_iter(),
         &options.drivers,
     )

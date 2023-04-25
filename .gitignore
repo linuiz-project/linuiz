@@ -12,7 +12,7 @@ Cargo.lock
 *.img
 
 .debug/**
-.hdd/**
+/build/**
 
 # Added by cargo
 
@@ -25,3 +25,6 @@ Cargo.lock
 .vscode/targets.log
 
 !xtask/Cargo.lock
+
+# Ignore `.cargo/` configs
+**/.cargo

@@ -4,10 +4,8 @@ use crate::memory::{
     paging::{Error, PageDepth, Result},
     Hhdm,
 };
-use libsys::{
-    mem::{Mut, Ref},
-    Address, Frame, Page,
-};
+use libkernel::mem::{Mut, Ref};
+use libsys::{Address, Frame, Page};
 
 pub struct Mapper {
     depth: PageDepth,

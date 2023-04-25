@@ -65,7 +65,7 @@ pub fn init() -> Result<(), Error> {
     }
     #[cfg(not(debug_assertions))]
     {
-        log::set_max_level(log::LevelFilter::Info);
+        log::set_max_level(log::LevelFilter::Trace);
     }
 
     static SERIAL_UART: spin::Lazy<Option<Serial>> = spin::Lazy::new(|| {

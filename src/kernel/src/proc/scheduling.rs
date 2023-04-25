@@ -45,37 +45,8 @@ impl Scheduler {
         self.process.as_mut()
     }
 
-    // /// Pushes a new task to the scheduling queue.
-    // pub fn push_task(&mut self, task: Task) {
-    //     self.total_priority += task.priority() as u64;
-    //     self.tasks.push(task);
-    // }
-
-    // /// If the scheduler is enabled, attempts to return a new task from
-    // /// the task queue. Returns `None` if the queue is empty.
-    // pub fn pop_task(&mut self) -> Option<Task> {
-    //     if self.enabled {
-    //         self.tasks.pop().map(|task| {
-    //             self.total_priority -= task.priority() as u64;
-    //             task
-    //         })
-    //     } else {
-    //         None
-    //     }
-    // }
-
-    // #[inline]
-    // pub const fn get_total_priority(&self) -> u64 {
-    //     self.total_priority
-    // }
-
-    // #[inline]
-    // pub const fn current_task(&self) -> Option<&Task> {
-    //     self.cur_task.as_ref()
-    // }
-
     /// Attempts to schedule the next task in the local task queue.
-    pub fn next_task(&mut self, state: &mut super::State, regs: &mut super::Registers) {
+    pub fn yield_task(&mut self, state: &mut super::State, regs: &mut super::Registers) {
         debug_assert!(!crate::interrupts::are_enabled());
 
         let mut processes = PROCESSES.lock();
@@ -85,13 +56,29 @@ impl Scheduler {
             process.context.0 = *state;
             process.context.1 = *regs;
 
-            trace!("Reclaiming task: {:?}", process.uuid());
+            trace!("Reclaiming task: {:?}", process.id());
             processes.push_back(process);
         }
 
+        self.next_task(&mut processes, state, regs);
+    }
+
+    pub fn exit_task(&mut self, state: &mut super::State, regs: &mut super::Registers) {
+        debug_assert!(!crate::interrupts::are_enabled());
+
+        // TODO add process to reap queue to reclaim address space memory
+        let _ = self.process.take().expect("cannot exit without process");
+
+        let mut processes = PROCESSES.lock();
+        self.next_task(&mut processes, state, regs);
+
+        unsafe { exit_into(regs, state) }
+    }
+
+    fn next_task(&mut self, processes: &mut VecDeque<Process>, state: &mut State, regs: &mut Registers) {
         // Pop a new task from the task queue, or simply switch in the idle task.
         if let Some(next_process) = processes.pop_front() {
-            trace!("Switching task: {:?}", next_process.uuid());
+            trace!("Switching task: {:?}", next_process.id());
 
             *state = next_process.context.0;
             *regs = next_process.context.1;
@@ -101,14 +88,11 @@ impl Scheduler {
                 next_process.address_space.swap_into();
             }
 
-            trace!("Switched task: {:?}", next_process.uuid());
+            trace!("Switched task: {:?}", next_process.id());
 
             let old_value = self.process.replace(next_process);
-            assert!(old_value.is_none());
+            debug_assert!(old_value.is_none());
         } else {
-            #[link_section = ".data"]
-            static IDLE_STACK: Stack<0x1000> = Stack::new();
-
             trace!("Switching idle task.");
 
             *state = State::kernel(crate::interrupts::wait_loop as u64, self.idle_stack.top().addr().get() as u64);
@@ -120,9 +104,49 @@ impl Scheduler {
         // TODO have some kind of queue of preemption waits, to ensure we select the shortest one.
         // Safety: Just having switched tasks, no preemption wait should supercede this one.
         unsafe {
-            const TIME_SLICE: core::num::NonZeroU16 = core::num::NonZeroU16::new(5).unwrap();
+            const TIME_SLICE: core::num::NonZeroU16 = core::num::NonZeroU16::new(500).unwrap();
 
             crate::local::set_preemption_wait(TIME_SLICE);
         }
     }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[naked]
+unsafe extern "sysv64" fn exit_into(regs: &mut Registers, state: &mut State) -> ! {
+    const ISF_SIZE: usize = core::mem::size_of::<x86_64::structures::idt::InterruptStackFrame>();
+
+    core::arch::asm!(
+        "
+        mov rax, rdi    # registers ptr
+
+        sub rsp, {0}    # make space for stack frame
+        # state ptr is already in `rsi` from args
+        mov rdi, rsp    # dest is stack address
+        mov rcx, {0}    # set the copy length
+
+        cld             # clear direction for op
+        rep movsb       # copy memory
+
+        mov rbx, [rax + (1 * 8)]
+        mov rcx, [rax + (2 * 8)]
+        mov rdx, [rax + (3 * 8)]
+        mov rsi, [rax + (4 * 8)]
+        mov rdi, [rax + (5 * 8)]
+        mov rbp, [rax + (6 * 8)]
+        mov r8, [rax + (7 * 8)]
+        mov r9, [rax + (8 * 8)]
+        mov r10, [rax + (9 * 8)]
+        mov r11, [rax + (10 * 8)]
+        mov r12, [rax + (11 * 8)]
+        mov r13, [rax + (12 * 8)]
+        mov r14, [rax + (13 * 8)]
+        mov r15, [rax + (14 * 8)]
+        mov rax, [rax + (0 * 8)]
+
+        iretq
+        ",
+        const ISF_SIZE,
+        options(noreturn)
+    )
 }

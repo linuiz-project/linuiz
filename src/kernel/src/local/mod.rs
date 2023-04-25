@@ -1,9 +1,10 @@
-use crate::{exceptions::Exception, memory::alloc::KMALLOC, proc::Scheduler};
+use crate::{exceptions::Exception, proc::Scheduler};
 use alloc::boxed::Box;
 use core::{
-    alloc::Allocator,
     cell::UnsafeCell,
+    mem::MaybeUninit,
     num::NonZeroU64,
+    ops::DerefMut,
     ptr::NonNull,
     sync::atomic::{AtomicBool, Ordering},
 };
@@ -14,17 +15,19 @@ pub(self) const US_FREQ_FACTOR: u32 = US_PER_SEC / US_WAIT;
 
 pub const STACK_SIZE: usize = 0x10000;
 
+#[repr(C)]
 struct State {
-    syscall_stack_ptr: NonNull<u8>,
-    syscall_stack: [u8; STACK_SIZE],
+    syscall_stack_ptr: NonNull<MaybeUninit<u8>>,
+    syscall_stack: Box<[MaybeUninit<u8>]>,
 
     core_id: u32,
     scheduler: Scheduler,
 
     #[cfg(target_arch = "x86_64")]
-    idt: crate::arch::x64::structures::idt::InterruptDescriptorTable,
+    idt: Box<crate::arch::x64::structures::idt::InterruptDescriptorTable>,
     #[cfg(target_arch = "x86_64")]
-    tss: crate::arch::x64::structures::tss::TaskStateSegment,
+    tss: Box<crate::arch::x64::structures::tss::TaskStateSegment>,
+
     #[cfg(target_arch = "x86_64")]
     apic: apic::Apic,
 
@@ -34,17 +37,13 @@ struct State {
     exception: UnsafeCell<Option<Exception>>,
 }
 
-pub const SYSCALL_STACK_SIZE: usize = 0x4000;
+pub const SYSCALL_STACK_SIZE: usize = 0x40000;
 
 pub enum ExceptionCatcher {
     Caught(Exception),
     Await,
     Idle,
 }
-
-// TODO
-//
-//
 
 /// Initializes the core-local state structure.
 ///
@@ -53,17 +52,60 @@ pub enum ExceptionCatcher {
 /// This function invariantly assumes it will only be called once.
 #[allow(clippy::too_many_lines)]
 pub unsafe fn init(timer_frequency: u16) {
+    let syscall_stack = Box::new_zeroed_slice(STACK_SIZE);
+
+    #[cfg(target_arch = "x86_64")]
+    let idt = {
+        use crate::arch::x64::structures::idt;
+
+        let mut idt = Box::new(idt::InterruptDescriptorTable::new());
+
+        idt::set_exception_handlers(&mut idt);
+        idt::set_stub_handlers(&mut idt);
+        idt.load_unsafe();
+
+        idt
+    };
+
+    #[cfg(target_arch = "x86_64")]
+    let tss = {
+        use crate::arch::{
+            reexport::x86_64::VirtAddr,
+            x64::structures::{idt::StackTableIndex, tss},
+        };
+        use core::num::NonZeroUsize;
+
+        const TSS_STACK_PAGES: NonZeroUsize = NonZeroUsize::new(16).unwrap();
+
+        fn allocate_tss_stack(pages: NonZeroUsize) -> VirtAddr {
+            VirtAddr::from_ptr(Box::into_raw(Box::<[u8]>::new_uninit_slice(pages.get() * 0x1000)).addr() as *const u8)
+        }
+
+        let mut tss = Box::new(tss::TaskStateSegment::new());
+        // TODO guard pages for these stacks ?
+        tss.privilege_stack_table[0] = allocate_tss_stack(TSS_STACK_PAGES);
+        tss.interrupt_stack_table[StackTableIndex::Debug as usize] = allocate_tss_stack(TSS_STACK_PAGES);
+        tss.interrupt_stack_table[StackTableIndex::NonMaskable as usize] = allocate_tss_stack(TSS_STACK_PAGES);
+        tss.interrupt_stack_table[StackTableIndex::DoubleFault as usize] = allocate_tss_stack(TSS_STACK_PAGES);
+        tss.interrupt_stack_table[StackTableIndex::MachineCheck as usize] = allocate_tss_stack(TSS_STACK_PAGES);
+
+        tss::load_local(tss::ptr_as_descriptor(NonNull::new(tss.deref_mut()).unwrap()));
+
+        tss
+    };
+
     let mut state = Box::new(State {
-        syscall_stack_ptr: NonNull::dangling(),
-        syscall_stack: [0u8; STACK_SIZE],
+        syscall_stack_ptr: NonNull::new(syscall_stack.as_ptr_range().end.cast_mut()).unwrap(),
+        syscall_stack,
 
         core_id: crate::cpu::read_id(),
         scheduler: Scheduler::new(false),
 
         #[cfg(target_arch = "x86_64")]
-        idt: crate::arch::x64::structures::idt::InterruptDescriptorTable::new(),
+        idt,
         #[cfg(target_arch = "x86_64")]
-        tss: crate::arch::x64::structures::tss::TaskStateSegment::new(),
+        tss,
+
         #[cfg(target_arch = "x86_64")]
         apic: apic::Apic::new(Some(|address: usize| crate::memory::Hhdm::ptr().add(address))).unwrap(),
 
@@ -72,52 +114,6 @@ pub unsafe fn init(timer_frequency: u16) {
         catch_exception: AtomicBool::new(false),
         exception: UnsafeCell::new(None),
     });
-
-    /* init IDT */
-    {
-        use crate::arch::x64::structures::idt;
-
-        let idt = &mut state.idt;
-        idt::set_exception_handlers(idt);
-        idt::set_stub_handlers(idt);
-        idt.load_unsafe();
-    }
-
-    /* init TSS */
-    {
-        use crate::arch::{
-            reexport::x86_64::VirtAddr,
-            x64::structures::{idt::StackTableIndex, tss},
-        };
-        use core::num::NonZeroUsize;
-
-        fn allocate_tss_stack(pages: NonZeroUsize) -> VirtAddr {
-            VirtAddr::from_ptr(
-                KMALLOC
-                    .allocate(
-                        // Safety: Values provided are known-valid.
-                        unsafe { core::alloc::Layout::from_size_align_unchecked(pages.get() * 0x1000, 0x10) },
-                    )
-                    .unwrap()
-                    .as_non_null_ptr()
-                    .as_ptr(),
-            )
-        }
-
-        let tss = &mut state.tss;
-
-        // TODO guard pages for these stacks ?
-        tss.privilege_stack_table[0] = allocate_tss_stack(NonZeroUsize::new_unchecked(8));
-        tss.interrupt_stack_table[StackTableIndex::Debug as usize] = allocate_tss_stack(NonZeroUsize::new_unchecked(2));
-        tss.interrupt_stack_table[StackTableIndex::NonMaskable as usize] =
-            allocate_tss_stack(NonZeroUsize::new_unchecked(2));
-        tss.interrupt_stack_table[StackTableIndex::DoubleFault as usize] =
-            allocate_tss_stack(NonZeroUsize::new_unchecked(2));
-        tss.interrupt_stack_table[StackTableIndex::MachineCheck as usize] =
-            allocate_tss_stack(NonZeroUsize::new_unchecked(2));
-
-        tss::load_local(tss::ptr_as_descriptor(NonNull::new(tss as *const _ as *mut _).unwrap()))
-    }
 
     /* init APIC */
     {
@@ -226,7 +222,7 @@ pub unsafe fn begin_scheduling() {
     }
 }
 
-pub unsafe fn with_scheduler<R>(func: impl FnOnce(&mut crate::proc::Scheduler) -> R) -> R {
+pub fn with_scheduler<R>(func: impl FnOnce(&mut crate::proc::Scheduler) -> R) -> R {
     func(&mut get_state_mut().scheduler)
 }
 

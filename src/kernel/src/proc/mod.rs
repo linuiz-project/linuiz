@@ -1,17 +1,24 @@
 mod context;
+
 use bit_field::BitField;
 pub use context::*;
 
 mod scheduling;
-use libsys::{Address, Virtual};
+use libsys::{page_size, Address, Virtual};
 pub use scheduling::*;
 
 mod address_space;
 pub use address_space::*;
 
 use crate::memory::alloc::AlignedAllocator;
-use alloc::{boxed::Box, string::String};
+use alloc::{boxed::Box, string::String, vec::Vec};
+use core::num::NonZeroUsize;
 use elf::{endian::AnyEndian, file::FileHeader, segment::ProgramHeader};
+
+pub const STACK_SIZE: NonZeroUsize = NonZeroUsize::new((libsys::MIBIBYTE as usize) - page_size()).unwrap();
+pub const STACK_PAGES: NonZeroUsize = NonZeroUsize::new(STACK_SIZE.get() / page_size()).unwrap();
+pub const STACK_START: NonZeroUsize = NonZeroUsize::new(page_size()).unwrap();
+pub const MIN_LOAD_OFFSET: usize = STACK_START.get() + STACK_SIZE.get();
 
 pub const PT_FLAG_EXEC_BIT: usize = 0;
 pub const PT_FLAG_WRITE_BIT: usize = 1;
@@ -37,10 +44,17 @@ pub enum Priority {
     Critical = 4,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct ElfRela {
+    pub address: Address<Virtual>,
+    pub value: usize,
+}
+
 pub type Context = (State, Registers);
 pub type ElfAllocator = AlignedAllocator<{ libsys::page_size() }>;
 pub type ElfMemory = Box<[u8], ElfAllocator>;
 
+#[derive(Debug)]
 pub enum ElfData {
     Memory(ElfMemory),
     File(String),
@@ -49,11 +63,14 @@ pub enum ElfData {
 pub struct Process {
     id: uuid::Uuid,
     priority: Priority,
+
     address_space: AddressSpace,
     context: Context,
     load_offset: usize,
+
     elf_header: FileHeader<AnyEndian>,
     elf_segments: Box<[ProgramHeader]>,
+    elf_relas: Vec<ElfRela>,
     elf_data: ElfData,
 }
 
@@ -64,11 +81,12 @@ impl Process {
         load_offset: usize,
         elf_header: FileHeader<AnyEndian>,
         elf_segments: Box<[ProgramHeader]>,
+        elf_relas: Vec<ElfRela>,
         elf_data: ElfData,
     ) -> Self {
-        const STACK_PAGES: core::num::NonZeroUsize = core::num::NonZeroUsize::new(16).unwrap();
-
-        let stack = address_space.mmap(None, STACK_PAGES, MmapPermissions::ReadWrite).unwrap();
+        let stack = address_space
+            .mmap(Some(Address::new_truncate(STACK_START.get())), STACK_PAGES, MmapPermissions::ReadWrite)
+            .unwrap();
 
         Self {
             id: uuid::Uuid::new_v4(),
@@ -83,12 +101,13 @@ impl Process {
             load_offset,
             elf_header,
             elf_segments,
+            elf_relas,
             elf_data,
         }
     }
 
     #[inline]
-    pub const fn uuid(&self) -> uuid::Uuid {
+    pub const fn id(&self) -> uuid::Uuid {
         self.id
     }
 
@@ -108,6 +127,11 @@ impl Process {
     }
 
     #[inline]
+    pub const fn load_offset(&self) -> usize {
+        self.load_offset
+    }
+
+    #[inline]
     pub const fn elf_header(&self) -> &FileHeader<AnyEndian> {
         &self.elf_header
     }
@@ -123,7 +147,20 @@ impl Process {
     }
 
     #[inline]
-    pub fn load_address_to_elf_vaddr(&self, address: Address<Virtual>) -> Option<usize> {
-        address.get().checked_sub(self.load_offset)
+    pub fn elf_relas(&mut self) -> &mut Vec<ElfRela> {
+        &mut self.elf_relas
+    }
+}
+
+impl core::fmt::Debug for Process {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Process")
+            .field("ID", &self.id)
+            .field("Priority", &self.priority)
+            .field("Address Space", &self.address_space)
+            .field("Context", &self.context)
+            .field("ELF Load Offset", &self.load_offset)
+            .field("ELF Header", &self.elf_header)
+            .finish()
     }
 }
