@@ -55,13 +55,10 @@ macro_rules! exception_handler {
     ($exception_name:ident, $return_type:ty) => {
         paste::paste! {
             #[naked]
-            extern "x86-interrupt" fn [<$exception_name _handler>](
-                stack_frame: InterruptStackFrame,
-            ) -> $return_type {
+            extern "x86-interrupt" fn [<$exception_name _handler>](stack_frame: InterruptStackFrame) -> $return_type {
                 // Safety: When has perfect assembly ever caused undefined behaviour?
                 unsafe {
                     core::arch::asm!(
-                        "cld",
                         push_gprs!(),
                         "
                         # move stack frame into first parameter
@@ -93,7 +90,6 @@ macro_rules! exception_handler_with_error {
                 // Safety: When has perfect assembly ever caused undefined behaviour?
                 unsafe {
                     core::arch::asm!(
-                        "cld",
                         push_gprs!(),
                         "
                         # Move stack frame into first parameter.
@@ -103,7 +99,10 @@ macro_rules! exception_handler_with_error {
                         # Move cached gprs pointer into third parameter.
                         mov rdx, rsp
 
+                        # align stack for SysV
+                        sub rsp, 0x8
                         call {}
+                        add rsp, 0x8
                         ",
                         pop_gprs!(),
                         "
@@ -129,7 +128,6 @@ macro_rules! irq_stub {
                 // Safety: This is literally perfect assembly. It's safe because it's perfect.
                 unsafe {
                     core::arch::asm!(
-                        "cld",
                         push_gprs!(),
                         "
                         # Move IRQ vector into first parameter.

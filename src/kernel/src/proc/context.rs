@@ -27,9 +27,9 @@ mod context_impl {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct State {
         pub ip: u64,
-        pub sp: u64,
-        pub rfl: RFlags,
         pub cs: u64,
+        pub rfl: RFlags,
+        pub sp: u64,
         pub ss: u64,
     }
 

@@ -10,7 +10,7 @@ use libsys::syscall::{Result, Vector};
 ///
 /// This function should never be called by software.
 #[allow(clippy::similar_names, clippy::no_effect_underscore_binding)]
-pub(self) fn sanitize(
+pub(self) fn process(
     vector: u64,
     arg0: u64,
     arg1: u64,

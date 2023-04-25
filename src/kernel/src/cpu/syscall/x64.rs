@@ -103,7 +103,7 @@ unsafe extern "sysv64" fn translate(
     tmp_regs.r14 = regs.r14;
     tmp_regs.r15 = regs.r15;
 
-    let result = super::sanitize(vector, arg0, arg1, arg2, arg3, arg4, &mut tmp_state, &mut tmp_regs);
+    let result = super::process(vector, arg0, arg1, arg2, arg3, arg4, &mut tmp_state, &mut tmp_regs);
 
     *ip = tmp_state.ip;
     *sp = tmp_state.sp;

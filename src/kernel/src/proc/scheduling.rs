@@ -66,10 +66,13 @@ impl Scheduler {
     pub fn exit_task(&mut self, state: &mut super::State, regs: &mut super::Registers) {
         debug_assert!(!crate::interrupts::are_enabled());
 
+        // TODO add process to reap queue to reclaim address space memory
         let _ = self.process.take().expect("cannot exit without process");
 
         let mut processes = PROCESSES.lock();
         self.next_task(&mut processes, state, regs);
+
+        unsafe { exit_into(regs, state) }
     }
 
     fn next_task(&mut self, processes: &mut VecDeque<Process>, state: &mut State, regs: &mut Registers) {
@@ -106,4 +109,44 @@ impl Scheduler {
             crate::local::set_preemption_wait(TIME_SLICE);
         }
     }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[naked]
+unsafe extern "sysv64" fn exit_into(regs: &mut Registers, state: &mut State) -> ! {
+    const ISF_SIZE: usize = core::mem::size_of::<x86_64::structures::idt::InterruptStackFrame>();
+
+    core::arch::asm!(
+        "
+        mov rax, rdi    # registers ptr
+
+        sub rsp, {0}    # make space for stack frame
+        # state ptr is already in `rsi` from args
+        mov rdi, rsp    # dest is stack address
+        mov rcx, {0}    # set the copy length
+
+        cld             # clear direction for op
+        rep movsb       # copy memory
+
+        mov rbx, [rax + (1 * 8)]
+        mov rcx, [rax + (2 * 8)]
+        mov rdx, [rax + (3 * 8)]
+        mov rsi, [rax + (4 * 8)]
+        mov rdi, [rax + (5 * 8)]
+        mov rbp, [rax + (6 * 8)]
+        mov r8, [rax + (7 * 8)]
+        mov r9, [rax + (8 * 8)]
+        mov r10, [rax + (9 * 8)]
+        mov r11, [rax + (10 * 8)]
+        mov r12, [rax + (11 * 8)]
+        mov r13, [rax + (12 * 8)]
+        mov r14, [rax + (13 * 8)]
+        mov r15, [rax + (14 * 8)]
+        mov rax, [rax + (0 * 8)]
+
+        iretq
+        ",
+        const ISF_SIZE,
+        options(noreturn)
+    )
 }
