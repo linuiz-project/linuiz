@@ -5,11 +5,10 @@ pub mod paging;
 
 use self::mapper::Mapper;
 use crate::{exceptions::Exception, interrupts::InterruptCell};
-use ::alloc::string::String;
+use ::alloc::{boxed::Box, string::String};
 use core::ptr::NonNull;
 use libsys::{page_size, table_index_size, Address, Frame, Page, Virtual};
 use spin::{Mutex, Once};
-use try_alloc::boxed::TryBox;
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -154,12 +153,12 @@ pub unsafe fn out_of_memory() -> ! {
     panic!("Kernel ran out of memory during initialization.")
 }
 
-pub unsafe fn catch_read(ptr: NonNull<[u8]>) -> Result<TryBox<[u8]>, Exception> {
+pub unsafe fn catch_read(ptr: NonNull<[u8]>) -> Result<Box<[u8]>, Exception> {
     let mem_range = ptr.as_uninit_slice().as_ptr_range();
     let aligned_start = libsys::align_down(mem_range.start.addr(), libsys::page_shift());
     let mem_end = mem_range.end.addr();
 
-    let mut copied_mem = TryBox::new_slice(ptr.len(), 0u8).unwrap();
+    let mut copied_mem = Box::new_slice(ptr.len(), 0u8).unwrap();
     for (offset, page_addr) in (aligned_start..mem_end).enumerate().step_by(page_size()) {
         let ptr_addr = core::cmp::max(mem_range.start.addr(), page_addr);
         let ptr_len = core::cmp::min(mem_end.saturating_sub(ptr_addr), page_size());
