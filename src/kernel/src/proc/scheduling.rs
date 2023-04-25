@@ -46,7 +46,7 @@ impl Scheduler {
     }
 
     /// Attempts to schedule the next task in the local task queue.
-    pub fn next_task(&mut self, state: &mut super::State, regs: &mut super::Registers) {
+    pub fn yield_task(&mut self, state: &mut super::State, regs: &mut super::Registers) {
         debug_assert!(!crate::interrupts::are_enabled());
 
         let mut processes = PROCESSES.lock();
@@ -60,6 +60,19 @@ impl Scheduler {
             processes.push_back(process);
         }
 
+        self.next_task(&mut processes, state, regs);
+    }
+
+    pub fn exit_task(&mut self, state: &mut super::State, regs: &mut super::Registers) {
+        debug_assert!(!crate::interrupts::are_enabled());
+
+        let _ = self.process.take().expect("cannot exit without process");
+
+        let mut processes = PROCESSES.lock();
+        self.next_task(&mut processes, state, regs);
+    }
+
+    fn next_task(&mut self, processes: &mut VecDeque<Process>, state: &mut State, regs: &mut Registers) {
         // Pop a new task from the task queue, or simply switch in the idle task.
         if let Some(next_process) = processes.pop_front() {
             trace!("Switching task: {:?}", next_process.id());
@@ -88,17 +101,9 @@ impl Scheduler {
         // TODO have some kind of queue of preemption waits, to ensure we select the shortest one.
         // Safety: Just having switched tasks, no preemption wait should supercede this one.
         unsafe {
-            const TIME_SLICE: core::num::NonZeroU16 = core::num::NonZeroU16::new(5).unwrap();
+            const TIME_SLICE: core::num::NonZeroU16 = core::num::NonZeroU16::new(500).unwrap();
 
             crate::local::set_preemption_wait(TIME_SLICE);
         }
-    }
-
-    pub fn exit_task(&mut self, state: &mut super::State, regs: &mut super::Registers) {
-        debug_assert!(!crate::interrupts::are_enabled());
-
-        let _ = self.process.take().expect("cannot exit without process");
-
-        self.next_task(state, regs);
     }
 }

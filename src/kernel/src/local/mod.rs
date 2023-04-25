@@ -1,10 +1,10 @@
-use crate::{exceptions::Exception, memory::alloc::KMALLOC, proc::Scheduler};
+use crate::{exceptions::Exception, proc::Scheduler};
 use alloc::boxed::Box;
 use core::{
-    alloc::Allocator,
     cell::UnsafeCell,
     mem::MaybeUninit,
     num::NonZeroU64,
+    ops::DerefMut,
     ptr::NonNull,
     sync::atomic::{AtomicBool, Ordering},
 };
@@ -45,10 +45,6 @@ pub enum ExceptionCatcher {
     Idle,
 }
 
-// TODO
-//
-//
-
 /// Initializes the core-local state structure.
 ///
 /// ### Safety
@@ -79,32 +75,21 @@ pub unsafe fn init(timer_frequency: u16) {
         };
         use core::num::NonZeroUsize;
 
+        const TSS_STACK_PAGES: NonZeroUsize = NonZeroUsize::new(16).unwrap();
+
         fn allocate_tss_stack(pages: NonZeroUsize) -> VirtAddr {
-            VirtAddr::from_ptr(
-                KMALLOC
-                    .allocate(
-                        // Safety: Values provided are known-valid.
-                        unsafe { core::alloc::Layout::from_size_align_unchecked(pages.get() * 0x1000, 0x10) },
-                    )
-                    .unwrap()
-                    .as_non_null_ptr()
-                    .as_ptr(),
-            )
+            VirtAddr::from_ptr(Box::into_raw(Box::<[u8]>::new_uninit_slice(pages.get() * 0x1000)).addr() as *const u8)
         }
 
         let mut tss = Box::new(tss::TaskStateSegment::new());
-
         // TODO guard pages for these stacks ?
-        tss.privilege_stack_table[0] = allocate_tss_stack(NonZeroUsize::new_unchecked(8));
-        tss.interrupt_stack_table[StackTableIndex::Debug as usize] = allocate_tss_stack(NonZeroUsize::new_unchecked(2));
-        tss.interrupt_stack_table[StackTableIndex::NonMaskable as usize] =
-            allocate_tss_stack(NonZeroUsize::new_unchecked(2));
-        tss.interrupt_stack_table[StackTableIndex::DoubleFault as usize] =
-            allocate_tss_stack(NonZeroUsize::new_unchecked(2));
-        tss.interrupt_stack_table[StackTableIndex::MachineCheck as usize] =
-            allocate_tss_stack(NonZeroUsize::new_unchecked(2));
+        tss.privilege_stack_table[0] = allocate_tss_stack(TSS_STACK_PAGES);
+        tss.interrupt_stack_table[StackTableIndex::Debug as usize] = allocate_tss_stack(TSS_STACK_PAGES);
+        tss.interrupt_stack_table[StackTableIndex::NonMaskable as usize] = allocate_tss_stack(TSS_STACK_PAGES);
+        tss.interrupt_stack_table[StackTableIndex::DoubleFault as usize] = allocate_tss_stack(TSS_STACK_PAGES);
+        tss.interrupt_stack_table[StackTableIndex::MachineCheck as usize] = allocate_tss_stack(TSS_STACK_PAGES);
 
-        tss::load_local(tss::ptr_as_descriptor(NonNull::new(&raw mut *tss).unwrap()));
+        tss::load_local(tss::ptr_as_descriptor(NonNull::new(tss.deref_mut()).unwrap()));
 
         tss
     };
@@ -129,11 +114,6 @@ pub unsafe fn init(timer_frequency: u16) {
         catch_exception: AtomicBool::new(false),
         exception: UnsafeCell::new(None),
     });
-
-    /* init IDT */
-    {}
-
-    /* init TSS */
 
     /* init APIC */
     {

@@ -11,7 +11,7 @@ use spin::Lazy;
 
 // TODO decide if we even need this? Perhaps just rely on the PMM for *all* allocations.
 pub static KMALLOC: Lazy<slab::SlabAllocator<&pmm::PhysicalMemoryManager>> =
-    Lazy::new(|| slab::SlabAllocator::new_in(11, &*pmm::PMM));
+    Lazy::new(|| slab::SlabAllocator::new_in(&*pmm::PMM));
 
 mod global_allocator_impl {
     use super::KMALLOC;

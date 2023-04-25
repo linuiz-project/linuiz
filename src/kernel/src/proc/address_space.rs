@@ -162,12 +162,14 @@ impl AddressSpace {
         page_count: NonZeroUsize,
         flags: TableEntryFlags,
     ) -> Result<NonNull<[u8]>> {
-        (0..page_count.get())
-            .map(|offset| Address::new_truncate(address.get().get() + (offset * page_size())))
+        let mapping_size = page_count.get() * page_size();
+        (0..mapping_size)
+            .step_by(page_size())
+            .map(|offset| Address::new_truncate(address.get().get() + offset))
             .try_for_each(|offset_page| self.0.auto_map(offset_page, flags))
             .map_err(Error::from)?;
 
-        Ok(NonNull::slice_from_raw_parts(NonNull::new(address.as_ptr()).unwrap(), page_count.get() * page_size()))
+        Ok(NonNull::slice_from_raw_parts(NonNull::new(address.as_ptr()).unwrap(), mapping_size))
     }
 
     pub unsafe fn set_flags(
@@ -194,5 +196,11 @@ impl AddressSpace {
     /// Caller must ensure that switching the currently active address space will not cause undefined behaviour.
     pub unsafe fn swap_into(&self) {
         self.0.swap_into();
+    }
+}
+
+impl core::fmt::Debug for AddressSpace {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_tuple("AddressSpace").field(&self.0.view_page_table().as_ptr()).finish()
     }
 }

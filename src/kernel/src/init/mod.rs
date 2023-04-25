@@ -262,13 +262,16 @@ fn setup_memory() {
         debug!("Loading kernel symbol table...");
 
         crate::panic::KERNEL_SYMBOLS.call_once(|| {
-            let symbols_iter = symbol_table
-                .into_iter()
-                .map(|symbol| (string_table.get(symbol.st_name as usize).unwrap_or("Unidentified"), symbol));
-            let vec = alloc::vec::Vec::from_iter(symbols_iter);
-            debug!("Loaded {} kernel symbols.", vec.len());
+            use alloc::vec::Vec;
 
-            alloc::vec::Vec::leak(vec)
+            let mut symbols = Vec::with_capacity(symbol_table.len());
+            symbols.extend(symbol_table.iter().map(|symbol| {
+                let symbol_name = string_table.get(symbol.st_name as usize).unwrap_or("Unidentified");
+                (symbol_name, symbol)
+            }));
+            debug!("Loaded {} kernel symbols.", symbols.len());
+
+            Vec::leak(symbols)
         });
     } else {
         warn!("Failed to load any kernel symbols; stack tracing will be disabled.");

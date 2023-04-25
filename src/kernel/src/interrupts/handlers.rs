@@ -13,6 +13,7 @@ pub struct PageFaultHandlerError;
 /// This function should only be called in the case of passing context to handle a page fault.
 /// Calling this function more than once and/or outside the context of a page fault is undefined behaviour.
 #[doc(hidden)]
+#[inline(never)]
 #[repr(align(0x10))]
 pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandlerError> {
     crate::local::with_scheduler(|scheduler| {
@@ -35,11 +36,11 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
         debug_assert_eq!(phdr.p_align & (libsys::page_mask() as u64), 0);
 
         let fault_page = Address::<Page>::new_truncate(address.get());
-        trace!("Demand mapping {:?} from segment: {:?}", fault_page.as_ptr(), phdr);
+        trace!("Demand mapping {:X?} from segment: {:X?}", fault_page.as_ptr(), phdr);
 
         let fault_vaddr = fault_page.get().get() - process.load_offset();
         let segment_vaddr = usize::try_from(phdr.p_vaddr).unwrap();
-        let segment_file_size = usize::try_from(phdr.p_vaddr).unwrap();
+        let segment_file_size = usize::try_from(phdr.p_filesz).unwrap();
 
         let fault_segment_offset = fault_vaddr.checked_sub(segment_vaddr).unwrap_or(0);
         let segment_front_pad = segment_vaddr.checked_sub(fault_vaddr).unwrap_or(0);
@@ -60,6 +61,7 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
 
         let (front_pad, remaining) = mapped_memory.split_at_mut(segment_front_pad);
         let (file_memory, end_pad) = remaining.split_at_mut(segment_range.len());
+
         front_pad.fill(core::mem::MaybeUninit::new(0x0));
         end_pad.fill(core::mem::MaybeUninit::new(0x0));
 
@@ -106,11 +108,11 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
 /// This function should only be called in the case of passing context to handle an interrupt.
 /// Calling this function more than once and/or outside the context of an interrupt is undefined behaviour.
 #[doc(hidden)]
+#[inline(never)]
 #[repr(align(0x10))]
 pub unsafe fn handle_irq(irq_vector: u64, state: &mut State, regs: &mut Registers) {
     match Vector::try_from(irq_vector) {
-        Ok(Vector::Timer) => crate::local::with_scheduler(|scheduler| scheduler.next_task(state, regs)),
-
+        Ok(Vector::Timer) => crate::local::with_scheduler(|scheduler| scheduler.yield_task(state, regs)),
         Err(err) => panic!("Invalid interrupt vector: {:X?}", err),
         vector_result => unimplemented!("Unhandled interrupt: {:?}", vector_result),
     }

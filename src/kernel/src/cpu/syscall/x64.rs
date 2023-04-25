@@ -18,8 +18,8 @@ pub(in crate::cpu) unsafe extern "sysv64" fn _syscall_entry() {
         swapgs                      # `swapgs` to allow software to use `IA32_KERNEL_GS_BASE` again
 
         push rax        # push userspace `rsp`
-        push r11        # push usersapce `rflags`
         push rcx        # push userspace `rip`
+        push r11        # push usersapce `rflags`
         mov rcx, r10    # 4th argument into `rcx`
 
         # preserve registers according to SysV ABI spec
@@ -32,9 +32,9 @@ pub(in crate::cpu) unsafe extern "sysv64" fn _syscall_entry() {
 
         # `r13`, `r14`, `r15` are scratch
         lea r12, [rsp + 0x0]        # load registers ptr
-        lea r13, [rsp + (7 + 0x8)]  # load rflags
-        lea r14, [rsp + (8 * 0x8)]  # load sp ptr
-        lea r15, [rsp + (6 * 0x8)]  # load ip ptr
+        lea r13, [rsp + (8 * 0x8)]  # load sp ptr
+        lea r14, [rsp + (7 * 0x8)]  # load ip ptr
+        lea r15, [rsp + (6 + 0x8)]  # load rflags
 
         # push stack arguments
         push r15
@@ -57,8 +57,8 @@ pub(in crate::cpu) unsafe extern "sysv64" fn _syscall_entry() {
         pop rbp
         pop rbx
 
-        pop rcx     # restore userspace `rip`
         pop r11     # restore userspace `rflags`
+        pop rcx     # restore userspace `rip`
         pop rsp     # restore userspace `rsp`
 
         sysretq
@@ -87,10 +87,10 @@ unsafe extern "sysv64" fn translate(
     arg2: u64,
     arg3: u64,
     arg4: u64,
-    ip: &mut u64,
-    sp: &mut u64,
-    rfl: &mut RFlags,
     regs: &mut Registers,
+    sp: &mut u64,
+    ip: &mut u64,
+    rfl: &mut RFlags,
 ) -> Result {
     let mut tmp_state = State::user(*ip, *sp);
     let mut tmp_regs = crate::proc::Registers::default();

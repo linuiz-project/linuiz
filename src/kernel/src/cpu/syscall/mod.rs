@@ -32,7 +32,7 @@ pub(self) fn sanitize(
         Ok(Vector::KlogTrace) => process_klog(log::Level::Trace, arg0, arg1),
 
         Ok(Vector::ProcExit) => crate::local::with_scheduler(|scheduler| {
-            info!("Exiting task: {:?}", scheduler.process().map(crate::proc::Process::id));
+            debug!("Exiting task: {:?}", scheduler.process().map(crate::proc::Process::id));
             scheduler.exit_task(state, regs);
 
             Result::Ok

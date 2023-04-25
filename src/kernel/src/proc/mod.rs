@@ -54,6 +54,7 @@ pub type Context = (State, Registers);
 pub type ElfAllocator = AlignedAllocator<{ libsys::page_size() }>;
 pub type ElfMemory = Box<[u8], ElfAllocator>;
 
+#[derive(Debug)]
 pub enum ElfData {
     Memory(ElfMemory),
     File(String),
@@ -151,11 +152,15 @@ impl Process {
     }
 }
 
-#[link_section = ".entry_stub"]
-fn _proc_entry_stub(main_fn: extern "sysv64" fn() -> i32) {
-    // local process setup
-
-    let _result = main_fn();
-
-    // syscall exit
+impl core::fmt::Debug for Process {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Process")
+            .field("ID", &self.id)
+            .field("Priority", &self.priority)
+            .field("Address Space", &self.address_space)
+            .field("Context", &self.context)
+            .field("ELF Load Offset", &self.load_offset)
+            .field("ELF Header", &self.elf_header)
+            .finish()
+    }
 }

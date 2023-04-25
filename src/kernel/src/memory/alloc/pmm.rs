@@ -256,6 +256,7 @@ impl PhysicalMemoryManager<'_> {
         })
     }
 
+    // TODO alignment_bits instead of alignment
     pub fn next_frames(&self, count: NonZeroUsize, alignment: NonZeroUsize) -> Result<Address<Frame>> {
         if !alignment.is_power_of_two() {
             return Err(Error::InvalidAlignment);
