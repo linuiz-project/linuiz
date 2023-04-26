@@ -127,8 +127,8 @@ impl<A: Allocator> Slab<A> {
         let index = offset / self.block_size();
 
         let ledger = self.ledger();
-        assert!(ledger.get(index).is_some());
-        assert!(ledger.get(index).unwrap());
+        assert!(ledger.get(index).is_some(), "len is {} but index is {}", ledger.len(), index);
+        assert!(ledger.get(index).unwrap(), "bit is {:?}", *ledger.get(index).unwrap());
         ledger.set(index, false);
         self.remaining += 1;
 
