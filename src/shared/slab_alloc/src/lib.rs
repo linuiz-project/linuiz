@@ -1,44 +1,58 @@
+#![cfg_attr(not(test), no_std)]
+#![feature(
+    allocator_api,          // #32838 <https://github.com/rust-lang/rust/issues/32838>
+    new_uninit,             // #63291 <https://github.com/rust-lang/rust/issues/63291>
+    pointer_is_aligned,     // #96284 <https://github.com/rust-lang/rust/issues/96284>
+    ptr_sub_ptr,            // #95892 <https://github.com/rust-lang/rust/issues/95892>
+    drain_filter,           // #43244 <https://github.com/rust-lang/rust/issues/43244>
+)]
+
+extern crate alloc;
+
+#[cfg(test)]
+mod tests;
+
 use alloc::{boxed::Box, vec::Vec};
 use bitvec::slice::BitSlice;
 use core::{
     alloc::{AllocError, Allocator, Layout},
+    num::NonZeroUsize,
     ptr::NonNull,
 };
-use libsys::page_size;
 use spin::Mutex;
 
-/// ## Remark
-/// This align shouldn't be constant; it needs to be dynamic based upon:
-/// * Cache line size
-/// * Available memory
-/// * Desired memory profile    
-const SLAB_LENGTH: usize = 0x1000;
+fn check_valid_slab_size(slab_size: NonZeroUsize) {
+    assert!(slab_size.is_power_of_two());
+    assert!(slab_size.get() >= (u8::BITS as usize));
+}
 
 struct Slab<A: Allocator> {
-    block_size: usize,
+    block_size: NonZeroUsize,
     memory: Box<[u8], A>,
     remaining: usize,
 }
 
-fn slabs_can_handle_allocation(size: usize, item_layout: Layout) -> bool {
-    let item_count = size / item_layout.pad_to_align().size().next_power_of_two();
-    item_count >= usize::try_from(u8::BITS).unwrap()
-}
-
 impl<A: Allocator> Slab<A> {
-    fn new_in(item_layout: Layout, allocator: A) -> Self {
-        let memory = Box::new_zeroed_slice_in(page_size(), allocator);
+    fn new_in(slab_size: NonZeroUsize, item_layout: Layout, allocator: A) -> Self {
+        assert!(slab_size.is_power_of_two());
+
+        let memory = Box::new_zeroed_slice_in(slab_size.get(), allocator);
         let block_size = item_layout.pad_to_align().size().next_power_of_two();
-
         let block_count = memory.len() / block_size;
-        assert!(u32::try_from(block_count).unwrap() >= u8::BITS);
 
-        Self { block_size, memory: unsafe { memory.assume_init() }, remaining: block_count }
+        #[cfg(test)]
+        println!("SLAB {:?}", memory.as_ptr_range());
+
+        Self {
+            block_size: NonZeroUsize::new(block_size).unwrap(),
+            memory: unsafe { memory.assume_init() },
+            remaining: block_count,
+        }
     }
 
     #[inline]
     const fn len(&self) -> usize {
-        self.memory.len() / self.block_size
+        self.memory.len() / self.block_size()
     }
 
     #[inline]
@@ -52,13 +66,29 @@ impl<A: Allocator> Slab<A> {
     }
 
     #[inline]
-    fn block_size(&self) -> usize {
-        self.block_size
+    const fn is_full(&self) -> bool {
+        self.remaining == self.len()
+    }
+
+    #[inline]
+    const fn block_size(&self) -> usize {
+        self.block_size.get()
     }
 
     #[inline]
     fn ledger_bytes(&self) -> usize {
         self.len() / (u8::BITS as usize)
+    }
+
+    #[inline]
+    fn ledger_bytes_aligned(&self) -> usize {
+        (self.ledger_bytes().wrapping_neg() & (1usize << self.block_size().trailing_zeros()).wrapping_neg())
+            .wrapping_neg()
+    }
+
+    fn non_ledger_memory(&mut self) -> &mut [u8] {
+        let ledger_bytes_aligned = self.ledger_bytes_aligned();
+        self.memory.get_mut(ledger_bytes_aligned..).unwrap()
     }
 
     fn ledger(&mut self) -> &mut BitSlice<u8> {
@@ -81,26 +111,25 @@ impl<A: Allocator> Slab<A> {
         self.remaining -= 1;
 
         let block_size = self.block_size();
-        let block_size_align_bits = core::num::NonZeroU32::new(block_size.trailing_zeros()).unwrap();
-        let ledger_bytes_aligned = libsys::align_up(self.ledger_bytes(), block_size_align_bits);
+        let offset = index * block_size;
+        let offset_range = offset..(offset + block_size);
+        let block_memory = self.non_ledger_memory().get_mut(offset_range.clone()).unwrap();
 
-        let offset = ledger_bytes_aligned + (index * block_size);
-        let block_memory = &mut self.memory[offset..(offset + block_size)];
         Some(NonNull::new(block_memory as *mut [u8]).unwrap())
     }
 
     pub unsafe fn return_item(&mut self, ptr: NonNull<u8>) {
-        // TODO check ledger_byte_range to ensure pointer isn't within that
-
         let ptr = ptr.as_ptr();
 
-        assert!(ptr.is_aligned_to(self.block_size()));
         assert!(self.owns_ptr(ptr.cast_const()));
 
         let offset = ptr.sub_ptr(self.memory.as_ptr());
         let index = offset / self.block_size();
 
-        self.ledger().set(index, false);
+        let ledger = self.ledger();
+        assert!(ledger.get(index).is_some());
+        assert!(ledger.get(index).unwrap());
+        ledger.set(index, false);
         self.remaining += 1;
 
         debug_assert!(self.remaining() <= self.len());
@@ -118,6 +147,7 @@ impl<A: Allocator> core::fmt::Debug for Slab<A> {
 }
 
 pub struct SlabAllocator<A: Allocator> {
+    slab_size: NonZeroUsize,
     slabs: Mutex<Vec<Slab<A>, A>>,
     allocator: A,
 }
@@ -129,17 +159,21 @@ unsafe impl<A: Allocator> Sync for SlabAllocator<A> {}
 
 impl<A: Allocator + Clone> SlabAllocator<A> {
     #[inline]
-    pub fn new_in(allocator: A) -> Self {
-        Self { slabs: Mutex::new(Vec::new_in(allocator.clone())), allocator }
+    pub fn new_in(slab_size: NonZeroUsize, allocator: A) -> Self {
+        check_valid_slab_size(slab_size);
+
+        Self { slab_size, slabs: Mutex::new(Vec::new_in(allocator.clone())), allocator }
+    }
+
+    fn max_slabbed_allocation_size(&self) -> usize {
+        self.slab_size.get() / (u8::BITS as usize)
     }
 }
 
 unsafe impl<A: Allocator + Clone> Allocator for SlabAllocator<A> {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        trace!("Allocation request: {:?}", layout);
-
         let allocation = {
-            if !slabs_can_handle_allocation(SLAB_LENGTH, layout) {
+            if layout.size() > self.max_slabbed_allocation_size() {
                 self.allocator.allocate(layout)
             } else {
                 let mut slabs = self.slabs.lock();
@@ -154,7 +188,7 @@ unsafe impl<A: Allocator + Clone> Allocator for SlabAllocator<A> {
                     .find_map(|slab| slab.next_item());
 
                 if item.is_none() {
-                    slabs.push(Slab::new_in(layout, self.allocator.clone()));
+                    slabs.push(Slab::new_in(self.slab_size, layout, self.allocator.clone()));
                     let slab = slabs.last_mut().unwrap();
                     let old_item = item.replace(slab.next_item().unwrap());
 
@@ -165,23 +199,23 @@ unsafe impl<A: Allocator + Clone> Allocator for SlabAllocator<A> {
             }
         };
 
-        trace!("Allocation served: {:?}", allocation);
-
         allocation
     }
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
-        if !slabs_can_handle_allocation(SLAB_LENGTH, layout) {
+        if layout.size() > self.max_slabbed_allocation_size() {
             self.allocator.deallocate(ptr, layout);
         } else {
             let mut slabs = self.slabs.lock();
-            let slab = slabs
-                .iter_mut()
-                .filter(|slab| slab.check_fits_layout(layout))
-                .find(|slab| slab.owns_ptr(ptr.as_ptr()))
-                .expect("deallocation requested, but no slab owns pointer");
+            slabs.drain_filter(|slab| {
+                if slab.check_fits_layout(layout) && slab.owns_ptr(ptr.as_ptr()) {
+                    slab.return_item(ptr);
 
-            slab.return_item(ptr);
+                    slab.is_full()
+                } else {
+                    false
+                }
+            });
         }
     }
 }
