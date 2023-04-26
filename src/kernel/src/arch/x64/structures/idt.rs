@@ -1,6 +1,6 @@
 use crate::{
     arch::x64::registers::RFlags,
-    proc::{Registers, State},
+    task::{Registers, State},
 };
 use libsys::{Address, Virtual};
 use x86_64::structures::idt;

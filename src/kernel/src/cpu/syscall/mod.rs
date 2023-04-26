@@ -3,7 +3,7 @@ mod x64;
 #[cfg(target_arch = "x86_64")]
 pub use x64::*;
 
-use crate::proc::{Registers, State};
+use crate::task::{Registers, State};
 use libsys::syscall::{Result, Vector};
 
 /// ### Safety
@@ -31,13 +31,8 @@ pub(self) fn process(
         Ok(Vector::KlogDebug) => process_klog(log::Level::Debug, arg0, arg1),
         Ok(Vector::KlogTrace) => process_klog(log::Level::Trace, arg0, arg1),
 
-        Ok(Vector::ProcExit) => crate::local::with_scheduler(|scheduler| {
-            debug!("Exiting task: {:?}", scheduler.process().map(crate::proc::Process::id));
-            scheduler.exit_task(state, regs);
-
-            Result::Ok
-        }),
-        Ok(Vector::ProcYield) => todo!(),
+        Ok(Vector::TaskExit) => crate::local::with_scheduler(|scheduler| scheduler.exit_task(state, regs)),
+        Ok(Vector::TaskYield) => crate::local::with_scheduler(|scheduler| scheduler.yield_task(state, regs)),
     }
 }
 

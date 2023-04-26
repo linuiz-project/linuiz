@@ -1,20 +1,20 @@
 use crate::{
     memory::Stack,
-    proc::{Process, Registers, State},
+    task::{Registers, State, Task},
 };
 use alloc::collections::VecDeque;
 
-pub static PROCESSES: spin::Mutex<VecDeque<Process>> = spin::Mutex::new(VecDeque::new());
+pub static PROCESSES: spin::Mutex<VecDeque<Task>> = spin::Mutex::new(VecDeque::new());
 
 pub struct Scheduler {
     enabled: bool,
     idle_stack: Stack<0x1000>,
-    process: Option<Process>,
+    task: Option<Task>,
 }
 
 impl Scheduler {
     pub fn new(enabled: bool) -> Self {
-        Self { enabled, idle_stack: Stack::new(), process: None }
+        Self { enabled, idle_stack: Stack::new(), task: None }
     }
 
     /// Enables the scheduler to pop tasks.
@@ -36,38 +36,58 @@ impl Scheduler {
     }
 
     #[inline]
-    pub const fn process(&self) -> Option<&Process> {
-        self.process.as_ref()
+    pub const fn process(&self) -> Option<&Task> {
+        self.task.as_ref()
     }
 
     #[inline]
-    pub fn process_mut(&mut self) -> Option<&mut Process> {
-        self.process.as_mut()
+    pub fn task_mut(&mut self) -> Option<&mut Task> {
+        self.task.as_mut()
     }
 
-    /// Attempts to schedule the next task in the local task queue.
-    pub fn yield_task(&mut self, state: &mut super::State, regs: &mut super::Registers) {
+    pub fn interrupt_task(&mut self, state: &mut State, regs: &mut Registers) {
         debug_assert!(!crate::interrupts::are_enabled());
 
         let mut processes = PROCESSES.lock();
 
         // Move the current task, if any, back into the scheduler queue.
-        if let Some(mut process) = self.process.take() {
+        if let Some(mut process) = self.task.take() {
+            trace!("Interrupting task: {:?}", process.id());
+
             process.context.0 = *state;
             process.context.1 = *regs;
 
-            trace!("Reclaiming task: {:?}", process.id());
             processes.push_back(process);
         }
 
         self.next_task(&mut processes, state, regs);
     }
 
-    pub fn exit_task(&mut self, state: &mut super::State, regs: &mut super::Registers) {
+    /// Attempts to schedule the next task in the local task queue.
+    pub fn yield_task(&mut self, state: &mut State, regs: &mut Registers) -> ! {
+        debug_assert!(!crate::interrupts::are_enabled());
+
+        let mut processes = PROCESSES.lock();
+
+        let mut process = self.task.take().expect("cannot yield without process");
+        trace!("Yielding task: {:?}", process.id());
+
+        process.context.0 = *state;
+        process.context.1 = *regs;
+
+        processes.push_back(process);
+
+        self.next_task(&mut processes, state, regs);
+
+        unsafe { exit_into(regs, state) }
+    }
+
+    pub fn exit_task(&mut self, state: &mut State, regs: &mut Registers) -> ! {
         debug_assert!(!crate::interrupts::are_enabled());
 
         // TODO add process to reap queue to reclaim address space memory
-        let _ = self.process.take().expect("cannot exit without process");
+        let process = self.task.take().expect("cannot exit without process");
+        trace!("Exiting process: {:?}", process.id());
 
         let mut processes = PROCESSES.lock();
         self.next_task(&mut processes, state, regs);
@@ -75,11 +95,9 @@ impl Scheduler {
         unsafe { exit_into(regs, state) }
     }
 
-    fn next_task(&mut self, processes: &mut VecDeque<Process>, state: &mut State, regs: &mut Registers) {
+    fn next_task(&mut self, processes: &mut VecDeque<Task>, state: &mut State, regs: &mut Registers) {
         // Pop a new task from the task queue, or simply switch in the idle task.
         if let Some(next_process) = processes.pop_front() {
-            trace!("Switching task: {:?}", next_process.id());
-
             *state = next_process.context.0;
             *regs = next_process.context.1;
 
@@ -89,12 +107,9 @@ impl Scheduler {
             }
 
             trace!("Switched task: {:?}", next_process.id());
-
-            let old_value = self.process.replace(next_process);
+            let old_value = self.task.replace(next_process);
             debug_assert!(old_value.is_none());
         } else {
-            trace!("Switching idle task.");
-
             *state = State::kernel(crate::interrupts::wait_loop as u64, self.idle_stack.top().addr().get() as u64);
             *regs = Registers::default();
 
@@ -104,7 +119,7 @@ impl Scheduler {
         // TODO have some kind of queue of preemption waits, to ensure we select the shortest one.
         // Safety: Just having switched tasks, no preemption wait should supercede this one.
         unsafe {
-            const TIME_SLICE: core::num::NonZeroU16 = core::num::NonZeroU16::new(500).unwrap();
+            const TIME_SLICE: core::num::NonZeroU16 = core::num::NonZeroU16::new(5).unwrap();
 
             crate::local::set_preemption_wait(TIME_SLICE);
         }

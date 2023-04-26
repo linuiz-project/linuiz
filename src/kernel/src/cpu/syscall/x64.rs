@@ -1,6 +1,6 @@
 use libsys::syscall::Result;
 
-use crate::{arch::x64::registers::RFlags, proc::State};
+use crate::{arch::x64::registers::RFlags, task::State};
 
 /// ### Safety
 ///
@@ -93,7 +93,7 @@ unsafe extern "sysv64" fn translate(
     rfl: &mut RFlags,
 ) -> Result {
     let mut tmp_state = State::user(*ip, *sp);
-    let mut tmp_regs = crate::proc::Registers::default();
+    let mut tmp_regs = crate::task::Registers::default();
 
     tmp_state.rfl = *rfl;
     tmp_regs.rbx = regs.rbx;

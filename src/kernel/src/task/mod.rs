@@ -33,7 +33,7 @@ pub fn segment_type_to_mmap_permissions(segment_ty: u32) -> MmapPermissions {
     }
 }
 
-pub static PROCESS_BASE: usize = 0x20000;
+pub static TASK_LOAD_BASE: usize = 0x20000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Priority {
@@ -60,7 +60,7 @@ pub enum ElfData {
     File(String),
 }
 
-pub struct Process {
+pub struct Task {
     id: uuid::Uuid,
     priority: Priority,
 
@@ -74,7 +74,7 @@ pub struct Process {
     elf_data: ElfData,
 }
 
-impl Process {
+impl Task {
     pub fn new(
         priority: Priority,
         mut address_space: AddressSpace,
@@ -152,9 +152,9 @@ impl Process {
     }
 }
 
-impl core::fmt::Debug for Process {
+impl core::fmt::Debug for Task {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("Process")
+        f.debug_struct("Task")
             .field("ID", &self.id)
             .field("Priority", &self.priority)
             .field("Address Space", &self.address_space)

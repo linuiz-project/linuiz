@@ -176,7 +176,7 @@ fn setup_memory() {
                 //         be valid (and is never written to).
                 let base_offset = usize::try_from(phdr.p_vaddr).unwrap() - unsafe { KERN_BASE.as_usize() };
                 let offset_end = base_offset + usize::try_from(phdr.p_memsz).unwrap();
-                let flags = TableEntryFlags::from(crate::proc::segment_type_to_mmap_permissions(phdr.p_flags));
+                let flags = TableEntryFlags::from(crate::task::segment_type_to_mmap_permissions(phdr.p_flags));
 
                 (base_offset..offset_end)
                     .step_by(page_size())
@@ -279,7 +279,7 @@ fn setup_memory() {
 }
 
 fn load_drivers() {
-    use crate::proc::{AddressSpace, Priority, Process};
+    use crate::task::{AddressSpace, Priority, Task};
     use elf::endian::AnyEndian;
 
     #[limine::limine_tag]
@@ -328,7 +328,7 @@ fn load_drivers() {
             // Safety: In-place transmutation of initialized bytes for the purpose of copying safely.
             let archive_data = unsafe { entry.data().align_to::<MaybeUninit<u8>>().1 };
             // Allocate space for the ELF data, properly aligned in memory.
-            let mut elf_copy = crate::proc::ElfMemory::new_uninit_slice_in(archive_data.len(), AlignedAllocator::new());
+            let mut elf_copy = crate::task::ElfMemory::new_uninit_slice_in(archive_data.len(), AlignedAllocator::new());
             // Copy the ELF data from the archive entry.
             elf_copy.copy_from_slice(archive_data);
             // Safety: The ELF data buffer is now initialized with the contents of the ELF.
@@ -337,14 +337,14 @@ fn load_drivers() {
             let (Ok((Some(shdrs), Some(_))), Ok(Some((_, _)))) = (elf.section_headers_with_strtab(), elf.symbol_table())
             else { panic!("Error retrieving ELF relocation metadata.") };
 
-            let load_offset = crate::proc::MIN_LOAD_OFFSET;
+            let load_offset = crate::task::MIN_LOAD_OFFSET;
 
             let elf_relas = shdrs
                 .iter()
                 .filter(|shdr| shdr.sh_type == elf::abi::SHT_RELA)
                 .flat_map(|shdr| elf.section_data_as_relas(&shdr).unwrap())
                 .map(|rela| {
-                    use crate::proc::ElfRela;
+                    use crate::task::ElfRela;
 
                     match rela.r_type {
                         elf::abi::R_X86_64_RELATIVE => ElfRela {
@@ -357,17 +357,17 @@ fn load_drivers() {
                 })
                 .collect();
 
-            let task = Process::new(
+            let task = Task::new(
                 Priority::Normal,
                 AddressSpace::new_userspace(),
                 load_offset,
                 elf.ehdr,
                 elf_segments_copy,
                 elf_relas,
-                crate::proc::ElfData::Memory(elf_memory),
+                crate::task::ElfData::Memory(elf_memory),
             );
 
-            crate::proc::PROCESSES.lock().push_back(task);
+            crate::task::PROCESSES.lock().push_back(task);
         });
 }
 

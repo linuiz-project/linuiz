@@ -1,6 +1,6 @@
 use crate::{
     interrupts::Vector,
-    proc::{ElfData, Registers, State},
+    task::{ElfData, Registers, State},
 };
 use libsys::{Address, Page, Virtual};
 
@@ -20,9 +20,9 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
         use crate::memory::paging::TableEntryFlags;
         use libsys::page_size;
 
-        let process = scheduler.process_mut().ok_or(PageFaultHandlerError)?;
-        let fault_elf_vaddr = address.get() - process.load_offset();
-        let phdr = process
+        let task = scheduler.task_mut().ok_or(PageFaultHandlerError)?;
+        let fault_elf_vaddr = address.get() - task.load_offset();
+        let phdr = task
             .elf_segments()
             .iter()
             .filter(|phdr| phdr.p_type == elf::abi::PT_LOAD)
@@ -38,7 +38,7 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
         let fault_page = Address::<Page>::new_truncate(address.get());
         trace!("Demand mapping {:X?} from segment: {:X?}", fault_page.as_ptr(), phdr);
 
-        let fault_vaddr = fault_page.get().get() - process.load_offset();
+        let fault_vaddr = fault_page.get().get() - task.load_offset();
         let segment_vaddr = usize::try_from(phdr.p_vaddr).unwrap();
         let segment_file_size = usize::try_from(phdr.p_filesz).unwrap();
 
@@ -53,9 +53,9 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
         let segment_range = padded_segment_offset..segment_range_end;
 
         // Map the page as RW so we can copy the ELF data in.
-        let mapped_memory = process
+        let mapped_memory = task
             .address_space_mut()
-            .mmap(Some(fault_page), core::num::NonZeroUsize::MIN, crate::proc::MmapPermissions::ReadWrite)
+            .mmap(Some(fault_page), core::num::NonZeroUsize::MIN, crate::task::MmapPermissions::ReadWrite)
             .unwrap();
         let mapped_memory = mapped_memory.as_uninit_slice_mut();
 
@@ -66,7 +66,7 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
         end_pad.fill(core::mem::MaybeUninit::new(0x0));
 
         if file_memory.len() > 0 {
-            match process.elf_data() {
+            match task.elf_data() {
                 ElfData::Memory(data) => {
                     file_memory.copy_from_slice(unsafe { data.get(segment_range).unwrap().align_to().1 });
                 }
@@ -75,9 +75,9 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
         }
 
         // Process any relocations.
-        let load_offset = process.load_offset();
+        let load_offset = task.load_offset();
         let fault_page_mem_range = fault_vaddr..(fault_vaddr + page_size());
-        process.elf_relas().drain_filter(|rela| {
+        task.elf_relas().drain_filter(|rela| {
             if fault_page_mem_range.contains(&rela.address.get()) {
                 trace!("Processing relocation: {:X?}", rela);
                 rela.address.as_ptr().add(load_offset).cast::<usize>().write(rela.value);
@@ -88,14 +88,13 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
             }
         });
 
-        process
-            .address_space_mut()
+        task.address_space_mut()
             .set_flags(
                 fault_page,
                 core::num::NonZeroUsize::MIN,
                 TableEntryFlags::PRESENT
                     | TableEntryFlags::USER
-                    | TableEntryFlags::from(crate::proc::segment_type_to_mmap_permissions(phdr.p_type)),
+                    | TableEntryFlags::from(crate::task::segment_type_to_mmap_permissions(phdr.p_type)),
             )
             .unwrap();
 
@@ -112,7 +111,7 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
 #[repr(align(0x10))]
 pub unsafe fn handle_irq(irq_vector: u64, state: &mut State, regs: &mut Registers) {
     match Vector::try_from(irq_vector) {
-        Ok(Vector::Timer) => crate::local::with_scheduler(|scheduler| scheduler.yield_task(state, regs)),
+        Ok(Vector::Timer) => crate::local::with_scheduler(|scheduler| scheduler.interrupt_task(state, regs)),
         Err(err) => panic!("Invalid interrupt vector: {:X?}", err),
         vector_result => unimplemented!("Unhandled interrupt: {:?}", vector_result),
     }

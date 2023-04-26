@@ -1,4 +1,4 @@
-use crate::{exceptions::Exception, proc::Scheduler};
+use crate::{exceptions::Exception, task::Scheduler};
 use alloc::boxed::Box;
 use core::{
     cell::UnsafeCell,
@@ -222,7 +222,7 @@ pub unsafe fn begin_scheduling() {
     }
 }
 
-pub fn with_scheduler<R>(func: impl FnOnce(&mut crate::proc::Scheduler) -> R) -> R {
+pub fn with_scheduler<R>(func: impl FnOnce(&mut crate::task::Scheduler) -> R) -> R {
     func(&mut get_state_mut().scheduler)
 }
 

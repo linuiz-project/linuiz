@@ -67,8 +67,8 @@ mod local;
 mod logging;
 mod memory;
 mod panic;
-mod proc;
 mod rand;
+mod task;
 mod time;
 
 #[macro_export]
