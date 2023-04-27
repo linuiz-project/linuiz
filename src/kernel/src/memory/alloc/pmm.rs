@@ -1,11 +1,16 @@
+use crate::interrupts::InterruptCell;
+
 use super::Virtual;
 use bit_field::BitField;
+use bitvec::slice::BitSlice;
+use spin::Mutex;
 use core::{
     alloc::{AllocError, Layout},
     num::NonZeroUsize,
     ptr::NonNull,
     sync::atomic::Ordering,
 };
+use std::sync::atomic::AtomicUsize;
 use libsys::{page_shift, page_size};
 use libsys::{Address, Frame};
 
@@ -89,74 +94,8 @@ impl FrameType {
     }
 }
 
-#[derive(Debug)]
-pub struct FrameData(core::sync::atomic::AtomicU8);
-
-impl FrameData {
-    const LOCKED_SHIFT: usize = 7;
-    const PEEKED_SHIFT: usize = 6;
-    const LOCKED_BIT: u8 = 1 << Self::LOCKED_SHIFT;
-    const PEEKED_BIT: u8 = 1 << Self::PEEKED_SHIFT;
-    const TYPE_RANGE: core::ops::Range<usize> = 0..4;
-
-    #[inline]
-    fn lock(&self) {
-        let lock_result = self.0.fetch_or(Self::LOCKED_BIT, Ordering::AcqRel);
-        debug_assert!(!lock_result.get_bit(Self::LOCKED_SHIFT));
-    }
-
-    #[inline]
-    fn free(&self) {
-        let free_result = self.0.fetch_xor(Self::LOCKED_BIT, Ordering::AcqRel);
-        debug_assert!(free_result.get_bit(Self::LOCKED_SHIFT));
-    }
-
-    #[inline]
-    fn try_peek(&self) -> bool {
-        !self.0.fetch_or(Self::PEEKED_BIT, Ordering::AcqRel).get_bit(Self::PEEKED_SHIFT)
-    }
-
-    #[inline]
-    fn peek(&self) {
-        while !self.try_peek() {
-            core::hint::spin_loop();
-        }
-    }
-
-    #[inline]
-    fn unpeek(&self) {
-        let unpeek_result = self.0.fetch_and(!Self::PEEKED_BIT, Ordering::AcqRel);
-        debug_assert!(unpeek_result.get_bit(Self::PEEKED_SHIFT));
-    }
-
-    #[inline]
-    fn set_type(&self, new_type: FrameType) {
-        debug_assert!(self.0.load(Ordering::Acquire).get_bit(Self::PEEKED_SHIFT));
-
-        self.0
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |mut value| {
-                Some(*value.set_bits(Self::TYPE_RANGE, new_type.as_u8()))
-            })
-            .ok();
-    }
-
-    fn data(&self) -> (bool, FrameType) {
-        debug_assert!(self.0.load(Ordering::Acquire).get_bit(Self::PEEKED_SHIFT));
-
-        let raw = self.0.load(Ordering::Relaxed);
-        (raw.get_bit(Self::LOCKED_SHIFT), FrameType::from_u8(raw.get_bits(Self::TYPE_RANGE)))
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct MemoryMapping {
-    pub range: core::ops::Range<usize>,
-    pub ty: FrameType,
-}
-
-pub struct PhysicalMemoryManager<'a> {
-    table: &'a [FrameData],
-    physical_memory: Address<Virtual>,
+struct PhysicalMemoryManager<'a> {
+    table: InterruptCell<Mutex<&'a mut BitSlice>>
 }
 
 // Safety: Type uses entirely atomic operations.
@@ -165,6 +104,38 @@ unsafe impl Send for PhysicalMemoryManager<'_> {}
 unsafe impl Sync for PhysicalMemoryManager<'_> {}
 
 impl PhysicalMemoryManager<'_> {
+
+    fn with_table<T>(&self, func: impl FnOnce(&BitSlice) -> T) -> T {
+        self.table.with(|table| {
+            let table = table.lock();
+            func(&table)
+        })
+    }
+
+    fn with_table_mut<T>(&self, func: impl FnOnce(&mut BitSlice) -> T) -> T {
+        self.table.with_mut(|table| {
+            let mut table = table.lock();
+            func(&mut table)
+        })
+    }
+
+    pub fn next_frame(&self) -> Result<Address<Frame>> {
+        self.with_table(|table| {
+            let index = table.first_zero().ok_or(Error::NoneFree)?;
+            let address = Address::new(index).ok_or(Error::)
+            table.first_zero().and_then(|index| Address::new(1 << index))
+        })
+    }
+}
+
+pub struct PhysicalMemoryManager<'a> {
+    table: &'a [FrameData],
+    physical_memory: Address<Virtual>,
+}
+
+
+
+impl PhysiacalMemoryManager<'_> {
     // Safety: Caller must guarantee the physical mapped address is valid.
     pub unsafe fn from_memory_map(
         memory_map: impl ExactSizeIterator<Item = MemoryMapping>,
