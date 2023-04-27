@@ -1,18 +1,18 @@
 use crate::interrupts::InterruptCell;
-
 use super::Virtual;
 use bit_field::BitField;
 use bitvec::slice::BitSlice;
-use spin::Mutex;
 use core::{
     alloc::{AllocError, Layout},
-    num::NonZeroUsize,
+    num::{NonZeroU32, NonZeroUsize},
+    ops::Shr,
     ptr::NonNull,
     sync::atomic::Ordering,
 };
-use std::sync::atomic::AtomicUsize;
 use libsys::{page_shift, page_size};
 use libsys::{Address, Frame};
+use spin::{Mutex, RwLock};
+use std::sync::atomic::AtomicUsize;
 
 pub type PhysicalAllocator = &'static PhysicalMemoryManager<'static>;
 
@@ -95,7 +95,7 @@ impl FrameType {
 }
 
 struct PhysicalMemoryManager<'a> {
-    table: InterruptCell<Mutex<&'a mut BitSlice>>
+    table: InterruptCell<RwLock<&'a mut BitSlice<AtomicUsize>>>,
 }
 
 // Safety: Type uses entirely atomic operations.
@@ -104,27 +104,40 @@ unsafe impl Send for PhysicalMemoryManager<'_> {}
 unsafe impl Sync for PhysicalMemoryManager<'_> {}
 
 impl PhysicalMemoryManager<'_> {
-
-    fn with_table<T>(&self, func: impl FnOnce(&BitSlice) -> T) -> T {
+    #[inline]
+    pub fn total_memory(&self) -> usize {
         self.table.with(|table| {
-            let table = table.lock();
-            func(&table)
-        })
-    }
-
-    fn with_table_mut<T>(&self, func: impl FnOnce(&mut BitSlice) -> T) -> T {
-        self.table.with_mut(|table| {
-            let mut table = table.lock();
-            func(&mut table)
+            let table = table.read();
+            table.len() * libsys::page_size()
         })
     }
 
     pub fn next_frame(&self) -> Result<Address<Frame>> {
-        self.with_table(|table| {
-            let index = table.first_zero().ok_or(Error::NoneFree)?;
-            let address = Address::new(index).ok_or(Error::)
-            table.first_zero().and_then(|index| Address::new(1 << index))
+        self.table.with(|table| {
+            let table = table.write();
+            table.first_zero().map(|index| Address::new(index << page_shift().get()).unwrap()).ok_or(Error::NoneFree)
         })
+    }
+
+    pub fn next_frames(&self, count: usize, align_bits: NonZeroU32) -> Result<Address<Frame>> {
+        let align_index_skip = u32::max(1, align_bits.get() >> page_shift().get());
+        self.table.with(|table| {
+            let mut table = table.write();
+            table
+                .windows(count)
+                .enumerate()
+                .step_by(align_index_skip)
+                .find(|(_, window)| window.not_any())
+                .map(|(index, bits)| {
+                    bits.fill(true);
+                    Address::new(index << page_shift().get()).unwrap()
+                })
+                .ok_or(Error::NoneFree)
+        })
+    }
+
+    pub fn lock_frame(&self, address: Address<Frame>) -> Result<()> {
+
     }
 }
 
@@ -132,8 +145,6 @@ pub struct PhysicalMemoryManager<'a> {
     table: &'a [FrameData],
     physical_memory: Address<Virtual>,
 }
-
-
 
 impl PhysiacalMemoryManager<'_> {
     // Safety: Caller must guarantee the physical mapped address is valid.
