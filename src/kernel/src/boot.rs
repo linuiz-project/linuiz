@@ -65,16 +65,17 @@ pub unsafe fn reclaim_boot_memory(skip_ranges: &[core::ops::Range<usize>]) {
 
     assert!(!BOOT_RECLAIM.load(Ordering::Acquire));
 
-    for frame in get_memory_map()
-        .unwrap()
-        .iter()
-        .filter(|entry| entry.ty() == limine::MemoryMapEntryType::BootloaderReclaimable)
-        .flat_map(|entry| entry.range().step_by(page_size()))
-        .map(|address| Address::<libsys::Frame>::new_truncate(address.try_into().unwrap()))
-        .filter(|address| skip_ranges.iter().any(|skip| skip.contains(&address.get().get())))
-    {
-        PMM.modify_type(frame, FrameType::Generic, Some(FrameType::BootReclaim)).ok();
-    }
+    // TODO
+    // for frame in get_memory_map()
+    //     .unwrap()
+    //     .iter()
+    //     .filter(|entry| entry.ty() == limine::MemoryMapEntryType::BootloaderReclaimable)
+    //     .flat_map(|entry| entry.range().step_by(page_size()))
+    //     .map(|address| Address::<libsys::Frame>::new_truncate(address.try_into().unwrap()))
+    //     .filter(|address| skip_ranges.iter().any(|skip| skip.contains(&address.get().get())))
+    // {
+    //     PMM.modify_type(frame, FrameType::Generic, Some(FrameType::BootReclaim)).ok();
+    // }
 
-    BOOT_RECLAIM.store(true, Ordering::Release);
+    // BOOT_RECLAIM.store(true, Ordering::Release);
 }

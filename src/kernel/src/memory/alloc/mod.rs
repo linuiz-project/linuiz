@@ -5,7 +5,6 @@ use core::{
     alloc::{AllocError, Allocator, Layout},
     ptr::NonNull,
 };
-use libsys::Virtual;
 use spin::Lazy;
 
 // TODO decide if we even need this? Perhaps just rely on the PMM for *all* allocations.
