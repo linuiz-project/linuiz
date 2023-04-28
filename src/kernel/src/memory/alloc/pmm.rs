@@ -1,9 +1,10 @@
-use crate::interrupts::InterruptCell;
 use super::Virtual;
+use crate::{interrupts::InterruptCell, memory::Hhdm};
+use alloc::vec::Vec;
 use bit_field::BitField;
 use bitvec::slice::BitSlice;
 use core::{
-    alloc::{AllocError, Layout},
+    alloc::{AllocError, Allocator, Layout},
     num::{NonZeroU32, NonZeroUsize},
     ops::Shr,
     ptr::NonNull,
@@ -94,16 +95,56 @@ impl FrameType {
     }
 }
 
-struct PhysicalMemoryManager<'a> {
+pub struct PhysicalMemoryManager<'a> {
+    map: Vec<u8, &'a FrameAllocator<'a>>,
+    allocator: FrameAllocator<'a>,
+}
+
+struct FrameAllocator<'a> {
     table: InterruptCell<RwLock<&'a mut BitSlice<AtomicUsize>>>,
 }
 
 // Safety: Type uses entirely atomic operations.
-unsafe impl Send for PhysicalMemoryManager<'_> {}
+unsafe impl Send for FrameAllocator<'_> {}
 // Safety: Type uses entirely atomic operations.
-unsafe impl Sync for PhysicalMemoryManager<'_> {}
+unsafe impl Sync for FrameAllocator<'_> {}
 
-impl PhysicalMemoryManager<'_> {
+unsafe impl Allocator for &FrameAllocator<'_> {
+    fn allocate(&self, layout: Layout) -> core::result::Result<NonNull<[u8]>, AllocError> {
+        assert!(layout.align() <= page_size());
+
+        let count = NonZeroUsize::new(libsys::align_up_div(layout.size(), page_shift())).ok_or(AllocError)?;
+        let frame = {
+            if layout.size() <= page_size() {
+                self.next_frame()
+            } else {
+                self.next_frames(count, Some(page_shift()))
+            }
+        }
+        .map_err(|_| AllocError)?;
+        let address = Hhdm::offset(frame).ok_or(AllocError)?;
+
+        Ok(unsafe { NonNull::slice_from_raw_parts(NonNull::new(address.as_ptr()).unwrap(), page_size()) })
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        assert!(layout.align() <= page_size());
+
+        let offset = ptr.as_ptr().sub_ptr(Hhdm::address().as_ptr());
+        let address = Address::new(offset).unwrap();
+
+        if layout.size() <= page_size() {
+            self.free_frame(address);
+        } else {
+            let frame_count = libsys::align_up_div(layout.size(), page_shift());
+            for index_offset in 0..frame_count {
+                self.free_frame(Address::from_index(address.index() + index_offset).unwrap());
+            }
+        }
+    }
+}
+
+impl FrameAllocator<'_> {
     #[inline]
     pub fn total_memory(&self) -> usize {
         self.table.with(|table| {
@@ -119,17 +160,18 @@ impl PhysicalMemoryManager<'_> {
         })
     }
 
-    pub fn next_frames(&self, count: usize, align_bits: NonZeroU32) -> Result<Address<Frame>> {
-        let align_index_skip = u32::max(1, align_bits.get() >> page_shift().get());
+    pub fn next_frames(&self, count: NonZeroUsize, align_bits: Option<NonZeroU32>) -> Result<Address<Frame>> {
+        let align_bits = align_bits.unwrap_or(NonZeroU32::MIN).get();
+        let align_index_skip = u32::max(1, align_bits >> page_shift().get());
         self.table.with(|table| {
             let mut table = table.write();
             table
-                .windows(count)
+                .windows(count.get())
                 .enumerate()
                 .step_by(align_index_skip)
                 .find(|(_, window)| window.not_any())
                 .map(|(index, bits)| {
-                    for index in index..(index + count) {
+                    for index in index..(index + count.get()) {
                         bits.set_aliased(index, true);
                     }
 
@@ -140,7 +182,35 @@ impl PhysicalMemoryManager<'_> {
     }
 
     pub fn lock_frame(&self, address: Address<Frame>) -> Result<()> {
-    self.table.wi
+        self.table.with(|table| {
+            let table = table.read();
+            let index = address.index();
+
+            if index >= table.len() {
+                Err(Error::OutOfBounds)
+            } else {
+                debug_assert!(!table.get(index));
+                table.set_aliased(index, true);
+
+                Ok(())
+            }
+        })
+    }
+
+    pub fn free_frame(&self, address: Address<Frame>) -> Result<()> {
+        self.table.with(|table| {
+            let table = table.read();
+            let index = address.index();
+
+            if index >= table.len() {
+                Err(Error::OutOfBounds)
+            } else {
+                debug_assert!(table.get(index));
+                table.set_aliased(index, false);
+
+                Ok(())
+            }
+        })
     }
 }
 
