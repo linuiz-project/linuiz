@@ -129,7 +129,10 @@ impl PhysicalMemoryManager<'_> {
                 .step_by(align_index_skip)
                 .find(|(_, window)| window.not_any())
                 .map(|(index, bits)| {
-                    bits.fill(true);
+                    for index in index..(index + count) {
+                        bits.set_aliased(index, true);
+                    }
+
                     Address::new(index << page_shift().get()).unwrap()
                 })
                 .ok_or(Error::NoneFree)
@@ -137,7 +140,7 @@ impl PhysicalMemoryManager<'_> {
     }
 
     pub fn lock_frame(&self, address: Address<Frame>) -> Result<()> {
-
+    self.table.wi
     }
 }
 
