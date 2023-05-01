@@ -74,6 +74,10 @@ fn main() -> Result<()> {
         target::update_target(&sh, target::Target::x86_64)?;
     }
 
+    if !sh.path_exists(".debug/") {
+        sh.create_dir(".debug/")?;
+    }
+
     match Arguments::parse() {
         Arguments::Clean => in_workspace_with(&sh, |sh| cmd!(sh, "cargo clean").run()),
         Arguments::Check => in_workspace_with(&sh, |sh| cmd!(sh, "cargo check --bins").run()),

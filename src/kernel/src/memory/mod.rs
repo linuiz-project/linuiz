@@ -1,3 +1,6 @@
+mod hhdm;
+pub use hhdm::*;
+
 pub mod alloc;
 pub mod io;
 pub mod mapper;
@@ -7,55 +10,8 @@ use self::mapper::Mapper;
 use crate::interrupts::InterruptCell;
 
 use core::ptr::NonNull;
-use libsys::{table_index_size, Address, Frame, Page, Virtual};
-use spin::{Mutex, Once};
-
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Hhdm(Address<Page>);
-
-impl Hhdm {
-    fn get() -> Self {
-        static HHDM_ADDRESS: Once<Hhdm> = Once::new();
-
-        *HHDM_ADDRESS.call_once(|| {
-            #[limine::limine_tag]
-            static LIMINE_HHDM: limine::HhdmRequest = limine::HhdmRequest::new(crate::boot::LIMINE_REV);
-
-            let address = Address::new(
-                LIMINE_HHDM
-                    .get_response()
-                    .expect("bootloader provided no higher-half direct mapping")
-                    .offset()
-                    .try_into()
-                    .unwrap(),
-            )
-            .unwrap();
-
-            Self(address)
-        })
-    }
-
-    #[inline]
-    pub fn page() -> Address<Page> {
-        Self::get().0
-    }
-
-    #[inline]
-    pub fn address() -> Address<Virtual> {
-        Self::get().0.get()
-    }
-
-    #[inline]
-    pub fn ptr() -> *mut u8 {
-        Self::address().as_ptr()
-    }
-
-    #[inline]
-    pub fn offset(frame: Address<Frame>) -> Option<Address<Page>> {
-        Address::new(Self::address().get() + frame.get().get())
-    }
-}
+use libsys::{table_index_size, Address, Frame};
+use spin::{Lazy, Mutex};
 
 #[repr(align(0x10))]
 pub struct Stack<const SIZE: usize>([u8; SIZE]);
@@ -81,18 +37,16 @@ impl<const SIZE: usize> core::ops::Deref for Stack<SIZE> {
 }
 
 pub fn with_kmapper<T>(func: impl FnOnce(&mut Mapper) -> T) -> T {
-    static KERNEL_MAPPER: Once<InterruptCell<Mutex<Mapper>>> = Once::new();
+    static KERNEL_MAPPER: Lazy<InterruptCell<Mutex<Mapper>>> = Lazy::new(|| {
+        debug!("Creating kernel-space address mapper.");
 
-    KERNEL_MAPPER
-        .call_once(|| {
-            debug!("Creating kernel-space address mapper.");
+        InterruptCell::new(Mutex::new(Mapper::new(paging::PageDepth::current()).unwrap()))
+    });
 
-            InterruptCell::new(Mutex::new(Mapper::new(paging::PageDepth::current()).unwrap()))
-        })
-        .with(|mapper| {
-            let mut mapper = mapper.lock();
-            func(&mut mapper)
-        })
+    KERNEL_MAPPER.with(|mapper| {
+        let mut mapper = mapper.lock();
+        func(&mut mapper)
+    })
 }
 
 pub fn copy_kernel_page_table() -> alloc::pmm::Result<Address<Frame>> {
@@ -101,11 +55,11 @@ pub fn copy_kernel_page_table() -> alloc::pmm::Result<Address<Frame>> {
     // Safety: Frame is provided by allocator, and so guaranteed to be within the HHDM, and is frame-sized.
     let new_table = unsafe {
         core::slice::from_raw_parts_mut(
-            Hhdm::offset(table_frame).unwrap().as_ptr().cast::<paging::TableEntry>(),
+            Hhdm::offset(table_frame).unwrap().as_ptr().cast::<paging::PageTableEntry>(),
             table_index_size(),
         )
     };
-    new_table.fill(paging::TableEntry::empty());
+    new_table.fill(paging::PageTableEntry::empty());
     with_kmapper(|kmapper| new_table.copy_from_slice(kmapper.view_page_table()));
 
     Ok(table_frame)

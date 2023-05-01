@@ -175,8 +175,11 @@ impl FrameAllocator<'_> {
 
     pub fn next_frame(&self) -> Result<Address<Frame>> {
         self.table.with(|table| {
-            let table = table.write();
-            table.first_zero().map(|index| Address::new(index << page_shift().get()).unwrap()).ok_or(Error::NoneFree)
+            let mut table = table.write();
+            let index = table.first_zero().ok_or(Error::NoneFree)?;
+            table.set(index, true);
+
+            Ok(Address::new(index << page_shift().get()).unwrap())
         })
     }
 
@@ -184,20 +187,17 @@ impl FrameAllocator<'_> {
         let align_bits = align_bits.unwrap_or(NonZeroU32::MIN).get();
         let align_index_skip = u32::max(1, align_bits >> page_shift().get());
         self.table.with(|table| {
-            let table = table.write();
-            table
+            let mut table = table.write();
+            let index = table
                 .windows(count.get())
                 .enumerate()
                 .step_by(align_index_skip.try_into().unwrap())
-                .find(|(_, window)| window.not_any())
-                .map(|(index, bits)| {
-                    for index in index..(index + count.get()) {
-                        bits.set_aliased(index, true);
-                    }
+                .find_map(|(index, window)| window.not_any().then_some(index))
+                .ok_or(Error::NoneFree)?;
+            let window = table.get_mut(index..(index + count.get())).unwrap();
+            window.fill(true);
 
-                    Address::new(index << page_shift().get()).unwrap()
-                })
-                .ok_or(Error::NoneFree)
+            Ok(Address::new(index << page_shift().get()).unwrap())
         })
     }
 

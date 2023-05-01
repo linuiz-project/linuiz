@@ -91,8 +91,8 @@ pub struct Options {
     build_options: crate::build::Options,
 
     /// Skips execution and only prints the QEMU command that would have been executed.
-    #[arg(long)]
-    mock: bool,
+    #[arg(short, long)]
+    norun: bool,
 
     /// Puts QEMU in GDB debug mode, awaiting signal from the debugger to begin execution.
     #[arg(short, long)]
@@ -109,7 +109,50 @@ pub fn run(sh: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
         _ => "qemu-system-x86_64",
     };
 
-    let mut cmd = cmd!(
+    let options_machine = match (options.cpu, options.accel) {
+        (CPU::Rv64, Accelerator::None) => "virt",
+        (CPU::Rv64, accel) => panic!("invalid accelerator for RISC-V: {:?}", accel),
+
+        (_, Accelerator::Kvm) => "q35,accel=kvm",
+        (_, Accelerator::None) => "q35",
+    };
+
+    let options_smp_owned = options.smp.to_string();
+    let options_smp = options_smp_owned.as_str();
+
+    let options_cpu = options.cpu.as_str();
+
+    let options_ram_owned = format!("{}M", options.ram);
+    let options_ram = options_ram_owned.as_str();
+
+    let options_device_owned = format!("{:?},drive=disk1,serial=deadbeef", options.block);
+    let options_device = options_device_owned.as_str();
+
+    let mut optional_args = vec![];
+
+    if options.log {
+        optional_args.extend_from_slice(&["-d", "int,guest_errors", "-D", ".debug/qemu.log"]);
+    }
+
+    match options.cpu {
+        CPU::Rv64 => unimplemented!(),
+        _ => optional_args.extend_from_slice(&[
+            "-bios",
+            "/usr/share/ovmf/OVMF.fd",
+            "-drive",
+            "format=raw,file=fat:rw:build/root/",
+        ]),
+    };
+
+    if options.nographic {
+        optional_args.push("-nographic");
+    }
+
+    if options.gdb {
+        optional_args.extend_from_slice(&["-S", "-s"]);
+    }
+
+    let cmd = cmd!(
         sh,
         "
         {qemu_exe_str}
@@ -119,54 +162,16 @@ pub fn run(sh: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
             -drive format=raw,file=build/disk0.img,id=disk1,if=none
             -net none
             -M smm=off
+            -machine {options_machine}
+            -cpu {options_cpu}
+            -smp {options_smp}
+            -m {options_ram}
+            -device {options_device}
+            {optional_args...}
         "
     );
 
-    cmd = cmd.args([
-        "-machine",
-        match options.cpu {
-            CPU::Rv64 => "virt",
-            CPU::Host | CPU::Max | CPU::Qemu64 if options.accel == Accelerator::Kvm => "q35,accel=kvm",
-            _ => "q35",
-        },
-    ]);
-
-    cmd = cmd
-        // cpu
-        .args(["-cpu", options.cpu.as_str()])
-        // smp
-        .arg("--smp")
-        .arg(options.smp.to_string())
-        // memory
-        .arg("-m")
-        .arg(format!("{}M", options.ram))
-        // disk
-        .arg("-device")
-        // TODO this doesn't work for AHCI
-        .arg(format!("{:?},drive=disk1,serial=deadbeef", options.block));
-
-    if options.log {
-        if !sh.path_exists(".debug/") {
-            sh.create_dir(".debug/")?;
-        }
-
-        cmd = cmd.args(["-d", "int,guest_errors", "-D", ".debug/qemu.log"]);
-    }
-
-    cmd = match options.cpu {
-        CPU::Rv64 => unimplemented!(),
-        _ => cmd.args(["-bios", "/usr/share/ovmf/OVMF.fd", "-drive", "format=raw,file=fat:rw:build/root/"]),
-    };
-
-    if options.nographic {
-        cmd = cmd.arg("-nographic");
-    }
-
-    if options.gdb {
-        cmd = cmd.args(["-S", "-s"]);
-    }
-
-    if options.mock {
+    if options.norun {
         println!("cmd: {}", cmd.to_string());
         Ok(())
     } else {

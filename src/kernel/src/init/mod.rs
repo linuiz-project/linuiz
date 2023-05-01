@@ -136,6 +136,8 @@ fn setup_memory() {
 
     debug!("Preparing kernel memory system.");
 
+    crate::memory::Hhdm::initialize();
+
     // Extract kernel address information.
     let (kernel_phys_addr, kernel_virt_addr) = LIMINE_KERNEL_ADDR
         .get_response()
@@ -162,6 +164,59 @@ fn setup_memory() {
     crate::memory::with_kmapper(|kmapper| {
         use crate::memory::{paging::TableEntryFlags, Hhdm};
         use limine::MemoryMapEntryType;
+
+        /* map the higher-half direct map */
+        debug!("Mapping the higher-half direct map.");
+        crate::boot::get_memory_map()
+            .expect("bootloader memory map is required to map HHDM")
+            .iter()
+            // Filter bad memory, or provide the entry's page attributes.
+            .filter_map(|entry| {
+                match entry.ty() {
+                    MemoryMapEntryType::Usable
+                            | MemoryMapEntryType::AcpiNvs
+                            | MemoryMapEntryType::AcpiReclaimable
+                            | MemoryMapEntryType::BootloaderReclaimable
+                            // TODO handle the PATs or something to make this WC
+                            | MemoryMapEntryType::Framebuffer => Some((entry, TableEntryFlags::RW)),
+
+                            MemoryMapEntryType::Reserved | MemoryMapEntryType::KernelAndModules => {
+                                Some((entry, TableEntryFlags::RO))
+                            }
+
+                            MemoryMapEntryType::BadMemory => None,
+                        }
+            })
+            // Flatten the enumeration of every page in the entry.
+            .flat_map(|(entry, attributes)| {
+                entry.range().step_by(page_size()).map(move |phys_base| (phys_base.try_into().unwrap(), attributes))
+            })
+            // Attempt to map each of the entry's pages.
+            .try_for_each(|(phys_base, attributes)| {
+                // trace!("HHDM Mapping: {:X?}", phys_base);
+
+                let frame = Address::new(phys_base).unwrap();
+                let hhdm_address = Hhdm::offset(frame).unwrap();
+
+                kmapper.map(hhdm_address, PageDepth::min(), Address::new_truncate(phys_base), false, attributes)
+            })
+            .expect("failed mapping the HHDM");
+
+        /* map architecture-specific memory */
+        debug!("Mapping the architecture-specific memory.");
+        #[cfg(target_arch = "x86_64")]
+        {
+            let apic_address = msr::IA32_APIC_BASE::get_base_address().try_into().unwrap();
+            kmapper
+                .map(
+                    Address::new_truncate(Hhdm::address().get() + apic_address),
+                    PageDepth::min(),
+                    Address::new_truncate(apic_address),
+                    false,
+                    TableEntryFlags::MMIO,
+                )
+                .unwrap();
+        }
 
         /* load kernel segments */
         kernel_elf
@@ -194,60 +249,6 @@ fn setup_memory() {
                     })
                     .expect("failed to map kernel segments");
             });
-
-        /* map the higher-half direct map */
-        debug!("Mapping the higher-half direct map.");
-        crate::boot::get_memory_map()
-            .expect("bootloader memory map is required to map HHDM")
-            .iter()
-            // Filter bad memory, or provide the entry's page attributes.
-            .filter_map(|entry| {
-                match entry.ty() {
-                    MemoryMapEntryType::Usable
-                            | MemoryMapEntryType::AcpiNvs
-                            | MemoryMapEntryType::AcpiReclaimable
-                            | MemoryMapEntryType::BootloaderReclaimable
-                            // TODO handle the PATs or something to make this WC
-                            | MemoryMapEntryType::Framebuffer => Some((entry, TableEntryFlags::RW)),
-
-                            MemoryMapEntryType::Reserved | MemoryMapEntryType::KernelAndModules => {
-                                Some((entry, TableEntryFlags::RO))
-                            }
-
-                            MemoryMapEntryType::BadMemory => None,
-                        }
-            })
-            // Flatten the enumeration of every page in the entry.
-            .flat_map(|(entry, attributes)| {
-                entry.range().step_by(page_size()).map(move |phys_base| (phys_base.try_into().unwrap(), attributes))
-            })
-            // Attempt to map each of the entry's pages.
-            .try_for_each(|(phys_base, attributes)| {
-                kmapper.map(
-                    Address::new_truncate(Hhdm::address().get() + phys_base),
-                    PageDepth::min(),
-                    Address::new_truncate(phys_base),
-                    false,
-                    attributes,
-                )
-            })
-            .expect("failed mapping the HHDM");
-
-        /* map architecture-specific memory */
-        debug!("Mapping the architecture-specific memory.");
-        #[cfg(target_arch = "x86_64")]
-        {
-            let apic_address = msr::IA32_APIC_BASE::get_base_address().try_into().unwrap();
-            kmapper
-                .map(
-                    Address::new_truncate(Hhdm::address().get() + apic_address),
-                    PageDepth::min(),
-                    Address::new_truncate(apic_address),
-                    false,
-                    TableEntryFlags::MMIO,
-                )
-                .unwrap();
-        }
 
         debug!("Switching to kernel page tables...");
         // Safety: Kernel mappings should be identical to the bootloader mappings.

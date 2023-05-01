@@ -18,6 +18,7 @@ pub const STACK_SIZE: usize = 0x10000;
 #[repr(C)]
 struct State {
     syscall_stack_ptr: NonNull<MaybeUninit<u8>>,
+    // TODO use Stack<>
     syscall_stack: Box<[MaybeUninit<u8>]>,
 
     core_id: u32,

@@ -10,7 +10,7 @@ use libsys::{Address, Frame, Page};
 pub struct Mapper {
     depth: PageDepth,
     root_frame: Address<Frame>,
-    entry: paging::TableEntry,
+    entry: paging::PageTableEntry,
 }
 
 // Safety: Type has no thread-local references.
@@ -20,13 +20,19 @@ impl Mapper {
     /// Attempts to construct a new page manager. Returns `None` if the PMM could not provide a root frame.
     pub fn new(depth: PageDepth) -> Option<Self> {
         let root_frame = PMM.next_frame().ok()?;
+        trace!("New mapper root frame: {:X}", root_frame);
 
         // Safety: PMM promises rented frames to be within the HHDM.
         unsafe {
-            core::ptr::write_bytes(Hhdm::offset(root_frame).unwrap().as_ptr(), 0x0, libsys::page_size());
+            let hhdm_offset_address = Hhdm::offset(root_frame).unwrap();
+            core::ptr::write_bytes(hhdm_offset_address.as_ptr(), 0x0, libsys::page_size());
         }
 
-        Some(Self { depth, root_frame, entry: paging::TableEntry::new(root_frame, paging::TableEntryFlags::PRESENT) })
+        Some(Self {
+            depth,
+            root_frame,
+            entry: paging::PageTableEntry::new(root_frame, paging::TableEntryFlags::PRESENT),
+        })
     }
 
     /// Safety
@@ -34,17 +40,17 @@ impl Mapper {
     /// - The root frame must point to a valid top-level page table.
     /// - There must only exist one copy of provided page table tree at any time.
     pub unsafe fn new_unsafe(depth: PageDepth, root_frame: Address<Frame>) -> Self {
-        Self { depth, root_frame, entry: paging::TableEntry::new(root_frame, paging::TableEntryFlags::PRESENT) }
+        Self { depth, root_frame, entry: paging::PageTableEntry::new(root_frame, paging::TableEntryFlags::PRESENT) }
     }
 
-    const fn root_table(&self) -> paging::TableEntryCell<Ref> {
+    const fn root_table(&self) -> paging::PageTable<Ref> {
         // Safety: `Self` requires that the entry be valid.
-        unsafe { paging::TableEntryCell::<Ref>::new(self.depth, &self.entry) }
+        unsafe { paging::PageTable::<Ref>::new(self.depth, &self.entry) }
     }
 
-    fn root_table_mut(&mut self) -> paging::TableEntryCell<Mut> {
+    fn root_table_mut(&mut self) -> paging::PageTable<Mut> {
         // Safety: `Self` requires that the entry be valid.
-        unsafe { paging::TableEntryCell::<Mut>::new(self.depth, &mut self.entry) }
+        unsafe { paging::PageTable::<Mut>::new(self.depth, &mut self.entry) }
     }
 
     /* MAP / UNMAP */
@@ -67,7 +73,7 @@ impl Mapper {
         let result = self
             .root_table_mut()
             // Safety: Frame does not contain any data.
-            .with_entry_create(page, to_depth, |entry| unsafe {
+            .with_entry_create(page, to_depth, |entry| {
                 if to_depth > PageDepth::min() {
                     debug_assert!(
                         attributes.contains(paging::TableEntryFlags::HUGE),
@@ -75,7 +81,7 @@ impl Mapper {
                     );
                 }
 
-                entry.set(frame, attributes);
+                *entry = paging::PageTableEntry::new(frame, attributes);
 
                 #[cfg(target_arch = "x86_64")]
                 crate::arch::x64::instructions::tlb::invlpg(page);
@@ -157,7 +163,7 @@ impl Mapper {
     ///
     /// Caller must ensure that switching the currently active address space will not cause undefined behaviour.
     pub unsafe fn swap_into(&self) {
-        trace!("Swapping address space to: {:X?}", self.root_frame);
+        trace!("Swapping address space to: {:X}", self.root_frame);
 
         #[cfg(target_arch = "x86_64")]
         crate::arch::x64::registers::control::CR3::write(
@@ -166,7 +172,7 @@ impl Mapper {
         );
     }
 
-    pub fn view_page_table(&self) -> &[paging::TableEntry; const { libsys::table_index_size() }] {
+    pub fn view_page_table(&self) -> &[paging::PageTableEntry; const { libsys::table_index_size() }] {
         // Safety: Root frame is guaranteed to be valid within the HHDM.
         let table_ptr = Hhdm::offset(self.root_frame).unwrap().as_ptr().cast();
         // Safety: Root frame is guaranteed to be valid for PTEs for the length of the table index size.

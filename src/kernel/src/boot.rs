@@ -1,5 +1,5 @@
 use core::sync::atomic::{AtomicBool, Ordering};
-use libsys::{page_size, Address, Virtual};
+use libsys::{Address, Virtual};
 
 use crate::memory::Hhdm;
 
