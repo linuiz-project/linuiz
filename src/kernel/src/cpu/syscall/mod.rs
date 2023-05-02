@@ -40,7 +40,9 @@ fn process_klog(level: log::Level, str_ptr_arg: u64, str_len_arg: u64) -> Result
     let str_ptr = usize::try_from(str_ptr_arg).map_err(Result::from)? as *mut u8;
     let str_len = usize::try_from(str_len_arg).map_err(Result::from)?;
 
-    let str = core::str::from_utf8(unsafe { core::slice::from_raw_parts(str_ptr, str_len) }).map_err(Result::from)?;
+    // Safety: TODO
+    let str_slice = unsafe { core::slice::from_raw_parts(str_ptr, str_len) };
+    let str = core::str::from_utf8(str_slice).map_err(Result::from)?;
     log!(level, "[KLOG]: {}", str);
 
     Result::Ok

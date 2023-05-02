@@ -253,12 +253,12 @@ impl Apic {
     }
 
     pub fn get_id(&self) -> u32 {
-        self.read_register(Register::ID).get_bits(24..32) as u32
+        self.read_register(Register::ID).get_bits(24..32)
     }
 
     #[inline]
     pub fn get_version(&self) -> u32 {
-        self.read_register(Register::VERSION) as u32
+        self.read_register(Register::VERSION)
     }
 
     // TODO maybe unsafe?
@@ -303,7 +303,7 @@ impl Apic {
 
     #[inline]
     pub fn get_timer_current_count(&self) -> u32 {
-        self.read_register(Register::TIMER_CUR_CNT) as u32
+        self.read_register(Register::TIMER_CUR_CNT)
     }
 
     #[inline]

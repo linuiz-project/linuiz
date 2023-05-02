@@ -1,7 +1,9 @@
+use libsys::ureg;
+
 bitflags::bitflags! {
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct CR4Flags : u64 {
+    pub struct CR4Flags : ureg {
         const VME           = 1 << 0;
         const PVI           = 1 << 1;
         const TSD           = 1 << 2;
@@ -33,7 +35,7 @@ pub struct CR4;
 impl CR4 {
     #[inline]
     pub fn read() -> CR4Flags {
-        let value: u64;
+        let value: ureg;
 
         // Safety: Reading into a register has no side effects.
         unsafe {

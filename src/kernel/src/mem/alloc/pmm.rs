@@ -143,14 +143,13 @@ unsafe impl Send for FrameAllocator<'_> {}
 unsafe impl Sync for FrameAllocator<'_> {}
 
 impl FrameAllocator<'_> {
-    pub fn new(free_regions: impl Iterator<Item = Range<usize>> + Clone, total_memory: usize) -> Option<Self> {
+    pub fn new(free_regions: impl Iterator<Item = Range<usize>>, total_memory: usize) -> Option<Self> {
         let total_frames = total_memory / page_size();
         let table_slice_len = total_frames / (usize::BITS as usize);
         let table_size_in_bytes = table_slice_len * core::mem::size_of::<usize>();
         let table_size_in_frames = libsys::align_up_div(table_size_in_bytes, page_shift());
 
         let select_entry = free_regions
-            .clone()
             .filter(|region| (region.start & page_mask()) == 0)
             .find(|region| region.len() >= table_size_in_bytes)?;
         let select_entry_frame_index = select_entry.start / page_size();
@@ -160,7 +159,7 @@ impl FrameAllocator<'_> {
         let table = BitSlice::from_slice_mut(table);
 
         // Ensure the table pages are reserved.
-        (&mut table[select_entry_frame_index..(select_entry_frame_index + table_size_in_frames)]).fill(true);
+        table[select_entry_frame_index..(select_entry_frame_index + table_size_in_frames)].fill(true);
 
         Some(Self { table: InterruptCell::new(spin::RwLock::new(table)) })
     }

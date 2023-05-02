@@ -113,7 +113,7 @@ impl<A: Allocator> Slab<A> {
         let block_size = self.block_size();
         let offset = index * block_size;
         let offset_range = offset..(offset + block_size);
-        let block_memory = self.non_ledger_memory().get_mut(offset_range.clone()).unwrap();
+        let block_memory = self.non_ledger_memory().get_mut(offset_range).unwrap();
 
         Some(NonNull::new(block_memory as *mut [u8]).unwrap())
     }
