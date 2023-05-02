@@ -69,3 +69,25 @@ mod cpu_types {
     #[cfg(any(target_arch = "x86", target_arch = "riscv32"))]
     pub type ureg = u32;
 }
+
+pub trait Truncate {
+    type Into;
+
+    fn truncate_into(self) -> Self::Into;
+}
+
+impl Truncate for ureg {
+    type Into = usize;
+
+    fn truncate_into(self) -> Self::Into {
+        self as usize
+    }
+}
+
+impl Truncate for usize {
+    type Into = ureg;
+
+    fn truncate_into(self) -> Self::Into {
+        self as ureg
+    }
+}
