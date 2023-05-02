@@ -1,7 +1,7 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 use libsys::{Address, Virtual};
 
-use crate::memory::Hhdm;
+use crate::mem::Hhdm;
 
 mod ignore {
     ///! This module is never exported. It is used for bootloader requests that should never be accessed in software.
@@ -61,7 +61,7 @@ pub fn get_rsdp_address() -> Option<Address<Virtual>> {
 ///
 /// No dangling references can remain to bootloader types or memory, as it may be concurrently overwritten.
 pub unsafe fn reclaim_boot_memory(skip_ranges: &[core::ops::Range<usize>]) {
-    use crate::memory::alloc::pmm::{FrameType, PMM};
+    use crate::mem::alloc::pmm::{FrameType, PMM};
 
     assert!(!BOOT_RECLAIM.load(Ordering::Acquire));
 

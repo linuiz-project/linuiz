@@ -3,6 +3,7 @@
 #![feature(
     error_in_core,                          // #103765 <https://github.com/rust-lang/rust/issues/103765>
     result_flattening,                      // #70142 <https://github.com/rust-lang/rust/issues/70142>
+    iter_advance_by,                        // #77404 <https://github.com/rust-lang/rust/issues/77404>
     map_try_insert,                         // #82766 <https://github.com/rust-lang/rust/issues/82766>
     drain_filter,                           // #43244 <https://github.com/rust-lang/rust/issues/43244>
     new_uninit,                             // #63291 <https://github.com/rust-lang/rust/issues/63291>
@@ -32,7 +33,7 @@
     inline_const,
     const_option,
     const_option_ext,
-    const_trait_impl
+    const_trait_impl,
 )]
 #![forbid(clippy::inline_asm_x86_att_syntax, clippy::missing_const_for_fn)]
 #![deny(clippy::semicolon_if_nothing_returned, clippy::debug_assert_with_mut_call, clippy::float_arithmetic)]
@@ -65,7 +66,7 @@ mod init;
 mod interrupts;
 mod local;
 mod logging;
-mod memory;
+mod mem;
 mod panic;
 mod rand;
 mod task;

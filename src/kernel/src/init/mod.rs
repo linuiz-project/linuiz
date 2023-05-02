@@ -4,36 +4,12 @@ pub fn get_parameters() -> &'static params::Parameters {
     params::PARAMETERS.get().expect("parameters have not yet been parsed")
 }
 
+use crate::mem::{alloc::AlignedAllocator, paging::PageDepth};
 use core::mem::MaybeUninit;
-
-use crate::memory::{alloc::AlignedAllocator, paging::PageDepth};
 use libkernel::LinkerSymbol;
 use libsys::{page_size, Address};
 
 pub static KERNEL_HANDLE: spin::Lazy<uuid::Uuid> = spin::Lazy::new(uuid::Uuid::new_v4);
-
-#[macro_export]
-macro_rules! call_once {
-    () => {};
-
-    ($vis:vis fn $name:ident($($arg:tt)*) $body:block) => {
-        crate::call_once!($vis fn $name($($arg)*) -> () $body);
-    };
-
-    ($vis:vis fn $name:ident($($arg:tt)*) -> $t:ty $body:block) => {
-        $vis fn $name($($arg)*) -> $t {
-            use core::sync::atomic::{AtomicBool, Ordering};
-
-            static CALLED: AtomicBool = AtomicBool::new(false);
-
-            if CALLED.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_ok() {
-                    $body
-            } else {
-                panic!("{} called more than once", stringify!($name));
-            }
-        }
-    };
-}
 
 /// ### Safety
 ///
@@ -123,6 +99,7 @@ fn print_boot_info() {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn setup_memory() {
     #[limine::limine_tag]
     static LIMINE_KERNEL_ADDR: limine::KernelAddressRequest =
@@ -136,7 +113,7 @@ fn setup_memory() {
 
     debug!("Preparing kernel memory system.");
 
-    crate::memory::Hhdm::initialize();
+    crate::mem::Hhdm::initialize();
 
     // Extract kernel address information.
     let (kernel_phys_addr, kernel_virt_addr) = LIMINE_KERNEL_ADDR
@@ -161,8 +138,8 @@ fn setup_memory() {
 
     /* load and map segments */
 
-    crate::memory::with_kmapper(|kmapper| {
-        use crate::memory::{paging::TableEntryFlags, Hhdm};
+    crate::mem::with_kmapper(|kmapper| {
+        use crate::mem::{paging::TableEntryFlags, Hhdm};
         use limine::MemoryMapEntryType;
 
         /* map the higher-half direct map */
@@ -187,18 +164,32 @@ fn setup_memory() {
                             MemoryMapEntryType::BadMemory => None,
                         }
             })
-            // Flatten the enumeration of every page in the entry.
-            .flat_map(|(entry, attributes)| {
-                entry.range().step_by(page_size()).map(move |phys_base| (phys_base.try_into().unwrap(), attributes))
-            })
-            // Attempt to map each of the entry's pages.
-            .try_for_each(|(phys_base, attributes)| {
-                // trace!("HHDM Mapping: {:X?}", phys_base);
+            .try_for_each(|(mmap_entry, flags)| {
+                use crate::mem::paging;
+                use libsys::{page_shift, Frame};
 
-                let frame = Address::new(phys_base).unwrap();
-                let hhdm_address = Hhdm::offset(frame).unwrap();
+                let huge_page_depth = PageDepth::new(1).unwrap();
 
-                kmapper.map(hhdm_address, PageDepth::min(), Address::new_truncate(phys_base), false, attributes)
+                let region_range = mmap_entry.range();
+                let region_address = Address::<Frame>::new(usize::try_from(region_range.start).unwrap()).unwrap();
+                let region_size = usize::try_from(region_range.end - region_range.start).unwrap();
+                let mut remaining_len = region_size;
+
+                while remaining_len > 0 {
+                    let offset = libsys::align_down(region_size - remaining_len, page_shift());
+                    let frame = Address::new(region_address.get().get() + offset).unwrap();
+                    let page = Hhdm::offset(frame).unwrap();
+
+                    if remaining_len > huge_page_depth.align() && page.as_ptr().is_aligned_to(huge_page_depth.align()) {
+                        kmapper.map(page, huge_page_depth, frame, false, flags | TableEntryFlags::HUGE)?;
+                        remaining_len -= huge_page_depth.align();
+                    } else {
+                        kmapper.map(page, PageDepth::min(), frame, false, flags)?;
+                        remaining_len -= page_size();
+                    }
+                }
+
+                paging::Result::Ok(())
             })
             .expect("failed mapping the HHDM");
 
@@ -305,7 +296,6 @@ fn load_drivers() {
     let archive = tar_no_std::TarArchiveRef::new(drivers_module.data());
     archive
         .entries()
-        .into_iter()
         .filter_map(|entry| {
             debug!("Attempting to parse driver blob: {}", entry.filename());
 
@@ -319,12 +309,11 @@ fn load_drivers() {
         })
         .for_each(|(entry, elf)| {
             // Get and copy the ELF segments into a small box.
-            let Some(elf_segments) = elf.segments()
+            let Some(segments_copy) = elf.segments().map(|segments| segments.into_iter().collect())
             else {
                 error!("ELF has no segments.");
                 return
             };
-            let elf_segments_copy = alloc::boxed::Box::from_iter(elf_segments.iter());
 
             // Safety: In-place transmutation of initialized bytes for the purpose of copying safely.
             let archive_data = unsafe { entry.data().align_to::<MaybeUninit<u8>>().1 };
@@ -340,7 +329,7 @@ fn load_drivers() {
 
             let load_offset = crate::task::MIN_LOAD_OFFSET;
 
-            let elf_relas = shdrs
+            let relas = shdrs
                 .iter()
                 .filter(|shdr| shdr.sh_type == elf::abi::SHT_RELA)
                 .flat_map(|shdr| elf.section_data_as_relas(&shdr).unwrap())
@@ -363,8 +352,8 @@ fn load_drivers() {
                 AddressSpace::new_userspace(),
                 load_offset,
                 elf.ehdr,
-                elf_segments_copy,
-                elf_relas,
+                segments_copy,
+                relas,
                 crate::task::ElfData::Memory(elf_memory),
             );
 
@@ -396,7 +385,7 @@ fn setup_smp() {
                         crate::cpu::setup();
 
                         // Safety: All currently referenced memory should also be mapped in the kernel page tables.
-                        crate::memory::with_kmapper(|kmapper| unsafe { kmapper.swap_into() });
+                        crate::mem::with_kmapper(|kmapper| unsafe { kmapper.swap_into() });
 
                         // Safety: Function is called only once for this core.
                         unsafe { kernel_core_setup() }

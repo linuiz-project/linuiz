@@ -1,4 +1,4 @@
-use crate::memory::{
+use crate::mem::{
     alloc::pmm::PMM,
     paging,
     paging::{Error, PageDepth, Result},
@@ -172,7 +172,7 @@ impl Mapper {
         );
     }
 
-    pub fn view_page_table(&self) -> &[paging::PageTableEntry; const { libsys::table_index_size() }] {
+    pub fn view_page_table(&self) -> &[paging::PageTableEntry; libsys::table_index_size()] {
         // Safety: Root frame is guaranteed to be valid within the HHDM.
         let table_ptr = Hhdm::offset(self.root_frame).unwrap().as_ptr().cast();
         // Safety: Root frame is guaranteed to be valid for PTEs for the length of the table index size.

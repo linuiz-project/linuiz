@@ -1,4 +1,4 @@
-use crate::{interrupts::InterruptCell, memory::Hhdm};
+use crate::{interrupts::InterruptCell, mem::Hhdm};
 use bitvec::slice::BitSlice;
 use core::{
     alloc::{AllocError, Allocator, Layout},
@@ -209,7 +209,6 @@ impl FrameAllocator<'_> {
             if index >= table.len() {
                 Err(Error::OutOfBounds)
             } else {
-                debug_assert!(!table.get(index).unwrap());
                 table.set_aliased(index, true);
 
                 Ok(())
@@ -225,7 +224,6 @@ impl FrameAllocator<'_> {
             if index >= table.len() {
                 Err(Error::OutOfBounds)
             } else {
-                debug_assert!(table.get(index).unwrap());
                 table.set_aliased(index, false);
 
                 Ok(())

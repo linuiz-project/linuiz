@@ -2,7 +2,7 @@ use acpi::PhysicalMapping;
 use port::{PortAddress, ReadWritePort};
 use spin::{Lazy, Mutex};
 
-use crate::memory::{
+use crate::mem::{
     alloc::{pmm::PhysicalMemoryManager, KMALLOC},
     Hhdm,
 };

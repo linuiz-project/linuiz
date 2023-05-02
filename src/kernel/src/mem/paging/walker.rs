@@ -1,7 +1,7 @@
 use core::ops::ControlFlow;
 
 use super::{PageDepth, PageTableEntry};
-use crate::memory::Hhdm;
+use crate::mem::Hhdm;
 use libsys::table_index_size;
 
 pub struct Walker<'a> {

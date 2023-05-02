@@ -17,20 +17,19 @@ pub struct PageFaultHandlerError;
 #[repr(align(0x10))]
 pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandlerError> {
     crate::local::with_scheduler(|scheduler| {
-        use crate::memory::paging::TableEntryFlags;
+        use crate::mem::paging::TableEntryFlags;
         use libsys::page_size;
 
         let task = scheduler.task_mut().ok_or(PageFaultHandlerError)?;
         let fault_elf_vaddr = address.get() - task.load_offset();
-        let phdr = task
+        let phdr = *task
             .elf_segments()
             .iter()
             .filter(|phdr| phdr.p_type == elf::abi::PT_LOAD)
             .find(|phdr| {
                 (phdr.p_vaddr..(phdr.p_vaddr + phdr.p_memsz)).contains(&u64::try_from(fault_elf_vaddr).unwrap())
             })
-            .ok_or(PageFaultHandlerError)?
-            .clone();
+            .ok_or(PageFaultHandlerError)?;
 
         // Small check to help ensure the phdr alignments are page-fit.
         debug_assert_eq!(phdr.p_align & (libsys::page_mask() as u64), 0);
@@ -42,8 +41,8 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
         let segment_vaddr = usize::try_from(phdr.p_vaddr).unwrap();
         let segment_file_size = usize::try_from(phdr.p_filesz).unwrap();
 
-        let fault_segment_offset = fault_vaddr.checked_sub(segment_vaddr).unwrap_or(0);
-        let segment_front_pad = segment_vaddr.checked_sub(fault_vaddr).unwrap_or(0);
+        let fault_segment_offset = fault_vaddr.saturating_sub(segment_vaddr);
+        let segment_front_pad = segment_vaddr.saturating_sub(fault_vaddr);
 
         let fault_segment_range = fault_segment_offset..(fault_segment_offset + page_size());
         let padded_segment_offset = fault_segment_offset + segment_front_pad;
@@ -65,10 +64,12 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
         front_pad.fill(core::mem::MaybeUninit::new(0x0));
         end_pad.fill(core::mem::MaybeUninit::new(0x0));
 
-        if file_memory.len() > 0 {
+        if file_memory.is_empty() {
             match task.elf_data() {
                 ElfData::Memory(data) => {
-                    file_memory.copy_from_slice(unsafe { data.get(segment_range).unwrap().align_to().1 });
+                    // Safety: Same-sized reinterpret for copying.
+                    let copy_data = unsafe { data.get(segment_range).unwrap().align_to().1 };
+                    file_memory.copy_from_slice(copy_data);
                 }
                 ElfData::File(_) => unimplemented!(),
             }

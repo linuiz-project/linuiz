@@ -9,7 +9,7 @@ use libsys::syscall::{Result, Vector};
 /// ### Safety
 ///
 /// This function should never be called by software.
-#[allow(clippy::similar_names, clippy::no_effect_underscore_binding)]
+#[allow(clippy::too_many_arguments)]
 pub(self) fn process(
     vector: u64,
     arg0: u64,

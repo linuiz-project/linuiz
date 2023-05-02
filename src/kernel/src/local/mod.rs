@@ -4,7 +4,6 @@ use core::{
     cell::UnsafeCell,
     mem::MaybeUninit,
     num::NonZeroU64,
-    ops::DerefMut,
     ptr::NonNull,
     sync::atomic::{AtomicBool, Ordering},
 };
@@ -90,7 +89,7 @@ pub unsafe fn init(timer_frequency: u16) {
         tss.interrupt_stack_table[StackTableIndex::DoubleFault as usize] = allocate_tss_stack(TSS_STACK_PAGES);
         tss.interrupt_stack_table[StackTableIndex::MachineCheck as usize] = allocate_tss_stack(TSS_STACK_PAGES);
 
-        tss::load_local(tss::ptr_as_descriptor(NonNull::new(tss.deref_mut()).unwrap()));
+        tss::load_local(tss::ptr_as_descriptor(NonNull::new(&mut *tss).unwrap()));
 
         tss
     };
@@ -108,7 +107,7 @@ pub unsafe fn init(timer_frequency: u16) {
         tss,
 
         #[cfg(target_arch = "x86_64")]
-        apic: apic::Apic::new(Some(|address: usize| crate::memory::Hhdm::ptr().add(address))).unwrap(),
+        apic: apic::Apic::new(Some(|address: usize| crate::mem::Hhdm::ptr().add(address))).unwrap(),
 
         timer_interval: None,
 
@@ -189,10 +188,12 @@ fn get_state_ptr() -> Option<NonNull<State>> {
 }
 
 fn get_state() -> &'static State {
+    // Safety: If the pointer is non-null, the kernel guarantees it will be initialized.
     unsafe { get_state_ptr().expect("core state uninitialized").as_ref() }
 }
 
 fn get_state_mut() -> &'static mut State {
+    // Safety: If the pointer is non-null, the kernel guarantees it will be initialized.
     unsafe { get_state_ptr().expect("core state uninitialized").as_mut() }
 }
 

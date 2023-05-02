@@ -1,5 +1,5 @@
 use crate::{
-    memory::Stack,
+    mem::Stack,
     task::{Registers, State, Task},
 };
 use alloc::collections::VecDeque;
@@ -13,7 +13,7 @@ pub struct Scheduler {
 }
 
 impl Scheduler {
-    pub fn new(enabled: bool) -> Self {
+    pub const fn new(enabled: bool) -> Self {
         Self { enabled, idle_stack: Stack::new(), task: None }
     }
 
@@ -79,6 +79,7 @@ impl Scheduler {
 
         self.next_task(&mut processes, state, regs);
 
+        // Safety: Context switch is expected, and proper registers have been replaced / loaded.
         unsafe { exit_into(regs, state) }
     }
 
@@ -92,6 +93,7 @@ impl Scheduler {
         let mut processes = PROCESSES.lock();
         self.next_task(&mut processes, state, regs);
 
+        // Safety: Context switch is expected, and proper registers have been replaced / loaded.
         unsafe { exit_into(regs, state) }
     }
 
@@ -110,7 +112,8 @@ impl Scheduler {
             let old_value = self.task.replace(next_process);
             debug_assert!(old_value.is_none());
         } else {
-            *state = State::kernel(crate::interrupts::wait_loop as u64, self.idle_stack.top().addr().get() as u64);
+            *state =
+                State::kernel(crate::interrupts::wait_loop as usize as u64, self.idle_stack.top().addr().get() as u64);
             *regs = Registers::default();
 
             trace!("Switched idle task.");

@@ -1,4 +1,4 @@
-use crate::memory::{
+use crate::mem::{
     mapper::Mapper,
     paging,
     paging::{PageDepth, TableEntryFlags},
@@ -72,12 +72,13 @@ pub const DEFAULT_USERSPACE_SIZE: NonZeroUsize = NonZeroUsize::new(1 << 47).unwr
 pub struct AddressSpace(Mapper);
 
 impl AddressSpace {
-    pub fn new(mapper: Mapper) -> Self {
+    #[inline]
+    pub const fn new(mapper: Mapper) -> Self {
         Self(mapper)
     }
 
     pub fn new_userspace() -> Self {
-        Self::new(unsafe { Mapper::new_unsafe(PageDepth::current(), crate::memory::copy_kernel_page_table().unwrap()) })
+        Self::new(unsafe { Mapper::new_unsafe(PageDepth::current(), crate::mem::copy_kernel_page_table().unwrap()) })
     }
 
     pub fn mmap(

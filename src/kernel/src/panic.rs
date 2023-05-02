@@ -21,7 +21,7 @@ fn trace_frame_pointers() -> [u64; MAXIMUM_STACK_TRACE_DEPTH] {
     let mut frame_ptr: *const StackFrame;
     // Safety: Does not corrupt any auxiliary state.
     unsafe { core::arch::asm!("mov {}, rbp", out(reg) frame_ptr, options(nostack, nomem, preserves_flags)) };
-    for stack_trace_address in stack_trace_addresses.iter_mut() {
+    for stack_trace_address in &mut stack_trace_addresses {
         // Safety: Stack frame pointer should be valid, if `rbp` is being used correctly.
         // TODO add checks somehow to ensure `rbp` is being used to store the stack base.
         let Some(stack_frame) = (unsafe { frame_ptr.as_ref() }) else { break };
@@ -82,7 +82,7 @@ fn print_stack_trace(symbols: &[(&str, Symbol)], stack_traces: &[u64]) {
                     let symbol_start = symbol.st_value;
                     let symbol_end = symbol_start + symbol.st_size;
 
-                    (symbol_start..symbol_end).contains(&fn_address)
+                    (symbol_start..symbol_end).contains(fn_address)
                 });
 
             if let Some((symbol_name, symbol)) = symbol {
