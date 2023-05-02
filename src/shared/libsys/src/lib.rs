@@ -52,3 +52,20 @@ pub const fn align_down(value: usize, alignment_bits: NonZeroU32) -> usize {
 pub const fn align_down_div(value: usize, alignment_bits: NonZeroU32) -> usize {
     align_down(value, alignment_bits) / (1usize << alignment_bits.get())
 }
+
+pub use cpu_types::*;
+mod cpu_types {
+    #![allow(non_camel_case_types)]
+
+    #[cfg(target_pointer_width = "128")]
+    pub type uptr = u128;
+    #[cfg(target_pointer_width = "64")]
+    pub type uptr = u64;
+    #[cfg(target_pointer_width = "32")]
+    pub type uptr = u32;
+
+    #[cfg(any(target_arch = "x86_64", target_arch = "riscv64", target_arch = "aarch64"))]
+    pub type ureg = u64;
+    #[cfg(any(target_arch = "x86", target_arch = "riscv32"))]
+    pub type ureg = u32;
+}
