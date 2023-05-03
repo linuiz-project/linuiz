@@ -226,17 +226,13 @@ fn setup_memory() {
 
                 (base_offset..offset_end)
                     .step_by(page_size())
-                    // Tuple the memory offset to the respect physical and virtual addresses.
-                    .map(|mem_offset| {
-                        (
-                            Address::new(kernel_phys_addr + mem_offset).unwrap(),
-                            Address::new(kernel_virt_addr + mem_offset).unwrap(),
-                        )
-                    })
                     // Attempt to map the page to the frame.
-                    .try_for_each(|(paddr, vaddr)| {
-                        trace!("Map   paddr: {:X?}   vaddr: {:X?}   flags {:?}", paddr, vaddr, flags);
-                        kmapper.map(vaddr, PageDepth::min(), paddr, false, flags)
+                    .try_for_each(|mem_offset| {
+                        let phys_addr = Address::new(kernel_phys_addr + mem_offset).unwrap();
+                        let virt_addr = Address::new(kernel_virt_addr + mem_offset).unwrap();
+
+                        trace!("Map  {:X?} -> {:X?}   {:?}", virt_addr, phys_addr, flags);
+                        kmapper.map(virt_addr, PageDepth::min(), phys_addr, false, flags)
                     })
                     .expect("failed to map kernel segments");
             });
