@@ -1,6 +1,23 @@
-use elf::symbol::Symbol;
+use elf::{
+    endian::AnyEndian,
+    string_table::StringTable,
+    symbol::{Symbol, SymbolTable},
+};
+use libsys::{Address, Virtual};
 
-pub static KERNEL_SYMBOLS: spin::Once<&[(&str, elf::symbol::Symbol)]> = spin::Once::new();
+pub static KERNEL_SYMBOLS: spin::Once<(SymbolTable<'static, AnyEndian>, StringTable<'static>)> = spin::Once::new();
+
+fn get_symbol(address: Address<Virtual>) -> Option<(Option<&'static str>, Symbol)> {
+    KERNEL_SYMBOLS.get().and_then(|(symbols, strings)| {
+        let symbol = symbols.iter().find(|symbol| {
+            let symbol_region = symbol.st_value..(symbol.st_value + symbol.st_size);
+            symbol_region.contains(&address.get().try_into().unwrap())
+        })?;
+        let symbol_name = strings.get(symbol.st_name as usize).ok();
+
+        Some((symbol_name, symbol))
+    })
+}
 
 const MAXIMUM_STACK_TRACE_DEPTH: usize = 16;
 
@@ -9,7 +26,7 @@ const MAXIMUM_STACK_TRACE_DEPTH: usize = 16;
 /// #### Remark
 ///
 /// This function should *never* panic or abort.
-fn trace_frame_pointers() -> [u64; MAXIMUM_STACK_TRACE_DEPTH] {
+fn trace_frame_pointers() -> [Address<Virtual>; MAXIMUM_STACK_TRACE_DEPTH] {
     #[repr(C)]
     #[derive(Debug)]
     struct StackFrame {
@@ -17,7 +34,7 @@ fn trace_frame_pointers() -> [u64; MAXIMUM_STACK_TRACE_DEPTH] {
         return_address: u64,
     }
 
-    let mut stack_trace_addresses = [0u64; MAXIMUM_STACK_TRACE_DEPTH];
+    let mut stack_trace_addresses = [{ Address::new_truncate(0) }; MAXIMUM_STACK_TRACE_DEPTH];
     let mut frame_ptr: *const StackFrame;
     // Safety: Does not corrupt any auxiliary state.
     unsafe { core::arch::asm!("mov {}, rbp", out(reg) frame_ptr, options(nostack, nomem, preserves_flags)) };
@@ -26,7 +43,7 @@ fn trace_frame_pointers() -> [u64; MAXIMUM_STACK_TRACE_DEPTH] {
         // TODO add checks somehow to ensure `rbp` is being used to store the stack base.
         let Some(stack_frame) = (unsafe { frame_ptr.as_ref() }) else { break };
 
-        *stack_trace_address = stack_frame.return_address;
+        *stack_trace_address = Address::new_truncate(stack_frame.return_address.try_into().unwrap());
         frame_ptr = stack_frame.prev_frame_ptr;
     }
 
@@ -44,21 +61,21 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
         info.message().unwrap_or(&format_args!("no panic message"))
     );
 
-    // TODO use unwinding crate to get a backtrace
-    // if let Some(symbols) = KERNEL_SYMBOLS.get() {
-    //     let stack_traces = trace_frame_pointers();
-    //     trace!("Raw stack traces: {:#X?}", stack_traces);
-
-    //     let trace_len = stack_traces.iter().position(|e| *e == 0).unwrap_or(stack_traces.len());
-    //     print_stack_trace(symbols, &stack_traces[..trace_len]);
-    // }
+    let stack_traces = trace_frame_pointers();
+    trace!("Raw stack traces: {:#X?}", stack_traces);
+    let trace_len = stack_traces.iter().position(|e| e.get() == 0).unwrap_or(stack_traces.len());
+    print_stack_trace(&stack_traces[..trace_len]);
 
     // Safety: It's dead, Jim.
     unsafe { crate::interrupts::halt_and_catch_fire() }
 }
 
-fn print_stack_trace(symbols: &[(&str, Symbol)], stack_traces: &[u64]) {
-    fn print_stack_trace_entry<D: core::fmt::Display>(entry_num: usize, fn_address: u64, symbol_name: Option<D>) {
+fn print_stack_trace(stack_traces: &[Address<Virtual>]) {
+    fn print_stack_trace_entry<D: core::fmt::Display>(
+        entry_num: usize,
+        fn_address: Address<Virtual>,
+        symbol_name: Option<D>,
+    ) {
         let tab_len = 4 + (entry_num * 2);
 
         if let Some(symbol_name) = symbol_name {
@@ -77,21 +94,14 @@ fn print_stack_trace(symbols: &[(&str, Symbol)], stack_traces: &[u64]) {
         .map(|(trace_index, fn_address)| {
             const SYMBOL_TYPE_FUNCTION: u8 = 2;
 
-            let symbol =
-                symbols.iter().filter(|(_, symbol)| symbol.st_symtype() == SYMBOL_TYPE_FUNCTION).find(|(_, symbol)| {
-                    let symbol_start = symbol.st_value;
-                    let symbol_end = symbol_start + symbol.st_size;
-
-                    (symbol_start..symbol_end).contains(fn_address)
-                });
-
-            if let Some((symbol_name, symbol)) = symbol {
-                match rustc_demangle::try_demangle(symbol_name) {
-                    Ok(demangled) => print_stack_trace_entry(trace_index, symbol.st_value, Some(demangled)),
-                    Err(_) => print_stack_trace_entry(trace_index, symbol.st_value, Some(symbol_name)),
+            if let Some((Some(symbol_name), _)) = get_symbol(*fn_address) {
+                if let Ok(demangled) = rustc_demangle::try_demangle(symbol_name) {
+                    print_stack_trace_entry(trace_index, *fn_address, Some(demangled));
+                } else {
+                    print_stack_trace_entry(trace_index, *fn_address, Some(symbol_name));
                 }
             } else {
-                print_stack_trace_entry::<u8>(trace_index, *fn_address, None);
+                print_stack_trace_entry::<&str>(trace_index, *fn_address, None);
             }
         })
         .count();

@@ -226,17 +226,13 @@ fn setup_memory() {
 
                 (base_offset..offset_end)
                     .step_by(page_size())
-                    // Tuple the memory offset to the respect physical and virtual addresses.
-                    .map(|mem_offset| {
-                        (
-                            Address::new(kernel_phys_addr + mem_offset).unwrap(),
-                            Address::new(kernel_virt_addr + mem_offset).unwrap(),
-                        )
-                    })
                     // Attempt to map the page to the frame.
-                    .try_for_each(|(paddr, vaddr)| {
-                        trace!("Map   paddr: {:X?}   vaddr: {:X?}   flags {:?}", paddr, vaddr, flags);
-                        kmapper.map(vaddr, PageDepth::min(), paddr, false, flags)
+                    .try_for_each(|mem_offset| {
+                        let phys_addr = Address::new(kernel_phys_addr + mem_offset).unwrap();
+                        let virt_addr = Address::new(kernel_virt_addr + mem_offset).unwrap();
+
+                        trace!("Map  {:X?} -> {:X?}   {:?}", virt_addr, phys_addr, flags);
+                        kmapper.map(virt_addr, PageDepth::min(), phys_addr, false, flags)
                     })
                     .expect("failed to map kernel segments");
             });
@@ -250,21 +246,9 @@ fn setup_memory() {
     /* load symbols */
     if get_parameters().low_memory {
         debug!("Kernel is running in low memory mode; stack tracing will be disabled.");
-    } else if let Ok(Some((symbol_table, string_table))) = kernel_elf.symbol_table() {
+    } else if let Ok(Some(tables)) = kernel_elf.symbol_table() {
         debug!("Loading kernel symbol table...");
-
-        crate::panic::KERNEL_SYMBOLS.call_once(|| {
-            use alloc::vec::Vec;
-
-            let mut symbols = Vec::with_capacity(symbol_table.len());
-            symbols.extend(symbol_table.iter().map(|symbol| {
-                let symbol_name = string_table.get(symbol.st_name as usize).unwrap_or("Unidentified");
-                (symbol_name, symbol)
-            }));
-            debug!("Loaded {} kernel symbols.", symbols.len());
-
-            Vec::leak(symbols)
-        });
+        crate::panic::KERNEL_SYMBOLS.call_once(|| tables);
     } else {
         warn!("Failed to load any kernel symbols; stack tracing will be disabled.");
     }
