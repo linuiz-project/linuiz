@@ -3,7 +3,7 @@ use port::{PortAddress, ReadWritePort};
 use spin::{Lazy, Mutex};
 
 use crate::mem::{
-    alloc::{pmm::PhysicalMemoryManager, KMALLOC},
+    alloc::{pmm::PhysicalAllocator, KMALLOC},
     Hhdm,
 };
 
@@ -182,14 +182,9 @@ pub static MCFG: Lazy<Option<Mutex<PhysicalMapping<AcpiHandler, acpi::mcfg::Mcfg
     TABLES.get().map(Mutex::lock).and_then(|tables| tables.find_table::<acpi::mcfg::Mcfg>().ok()).map(Mutex::new)
 });
 
-pub static PLATFORM_INFO: Lazy<Option<Mutex<acpi::PlatformInfo<&slab_alloc::SlabAllocator<&PhysicalMemoryManager>>>>> =
-    Lazy::new(|| {
-        TABLES
-            .get()
-            .map(Mutex::lock)
-            .and_then(|tables| acpi::PlatformInfo::new_in(&*tables, &*KMALLOC).ok())
-            .map(Mutex::new)
-    });
+pub static PLATFORM_INFO: Lazy<Option<Mutex<acpi::PlatformInfo<PhysicalAllocator>>>> = Lazy::new(|| {
+    TABLES.get().map(Mutex::lock).and_then(|tables| acpi::PlatformInfo::new_in(&*tables, *KMALLOC).ok()).map(Mutex::new)
+});
 
 // struct AmlContextWrapper(aml::AmlContext);
 // // Safety: TODO

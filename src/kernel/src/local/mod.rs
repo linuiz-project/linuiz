@@ -1,16 +1,25 @@
-use crate::{exceptions::Exception, task::Scheduler};
+use crate::{cpu::exceptions::Exception, interrupts::InterruptCell, task::Scheduler};
 use alloc::boxed::Box;
-use core::{
-    cell::UnsafeCell,
-    mem::MaybeUninit,
-    num::NonZeroU64,
-    ptr::NonNull,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use core::{cell::UnsafeCell, mem::MaybeUninit, num::NonZeroU64, ptr::NonNull, sync::atomic::AtomicBool};
 
 pub(self) const US_PER_SEC: u32 = 1000000;
 pub(self) const US_WAIT: u32 = 10000;
 pub(self) const US_FREQ_FACTOR: u32 = US_PER_SEC / US_WAIT;
+
+pub type Result<T> = core::result::Result<T, Error>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Error {
+    NotInitialized,
+}
+
+impl core::error::Error for Error {}
+
+impl core::fmt::Display for Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::fmt::Debug::fmt(&self, f)
+    }
+}
 
 pub const STACK_SIZE: usize = 0x10000;
 
@@ -21,7 +30,7 @@ struct State {
     syscall_stack: Box<[MaybeUninit<u8>]>,
 
     core_id: u32,
-    scheduler: Scheduler,
+    scheduler: InterruptCell<Scheduler>,
 
     #[cfg(target_arch = "x86_64")]
     idt: Box<crate::arch::x64::structures::idt::InterruptDescriptorTable>,
@@ -99,7 +108,7 @@ pub unsafe fn init(timer_frequency: u16) {
         syscall_stack,
 
         core_id: crate::cpu::read_id(),
-        scheduler: Scheduler::new(false),
+        scheduler: InterruptCell::new(Scheduler::new(false)),
 
         #[cfg(target_arch = "x86_64")]
         idt,
@@ -182,36 +191,35 @@ pub unsafe fn init(timer_frequency: u16) {
     crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::write(state_ptr.addr() as u64);
 }
 
-fn get_state_ptr() -> Option<NonNull<State>> {
+fn get_state_ptr() -> Result<NonNull<State>> {
     let kernel_gs_usize = usize::try_from(crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::read()).unwrap();
-    NonNull::new(kernel_gs_usize as *mut State)
+    NonNull::new(kernel_gs_usize as *mut State).ok_or(Error::NotInitialized)
 }
 
-fn get_state() -> &'static State {
+fn get_state() -> Result<&'static State> {
     // Safety: If the pointer is non-null, the kernel guarantees it will be initialized.
-    unsafe { get_state_ptr().expect("core state uninitialized").as_ref() }
+    unsafe { get_state_ptr().map(|ptr| ptr.as_ref()) }
 }
 
-fn get_state_mut() -> &'static mut State {
+fn get_state_mut() -> Result<&'static mut State> {
     // Safety: If the pointer is non-null, the kernel guarantees it will be initialized.
-    unsafe { get_state_ptr().expect("core state uninitialized").as_mut() }
+    unsafe { get_state_ptr().map(|mut ptr| ptr.as_mut()) }
 }
 
 /// Returns the generated ID for the local core.
-pub fn get_core_id() -> u32 {
-    get_state().core_id
+pub fn get_core_id() -> Result<u32> {
+    get_state().map(|state| state.core_id)
 }
 
-pub unsafe fn begin_scheduling() {
-    let state = get_state_mut();
-
+pub unsafe fn begin_scheduling() -> Result<()> {
     // Enable scheduler ...
-    let scheduler = &mut state.scheduler;
-    assert!(!scheduler.is_enabled());
-    scheduler.enable();
+    with_scheduler(|scheduler| {
+        assert!(!scheduler.is_enabled());
+        scheduler.enable();
+    })?;
 
     // Enable APIC timer ...
-    let apic = &mut state.apic;
+    let apic = &mut get_state_mut()?.apic;
     assert!(apic.get_timer().get_masked());
     // Safety: Calling `begin_scheduling` implies this state change is expected.
     unsafe {
@@ -220,24 +228,31 @@ pub unsafe fn begin_scheduling() {
 
     // Safety: Calling `begin_scheduling` implies this function is expected to be called.
     unsafe {
-        set_preemption_wait(core::num::NonZeroU16::MIN);
+        set_preemption_wait(core::num::NonZeroU16::MIN)?;
     }
+
+    Ok(())
 }
 
-pub fn with_scheduler<R>(func: impl FnOnce(&mut crate::task::Scheduler) -> R) -> R {
-    func(&mut get_state_mut().scheduler)
+pub fn with_scheduler<O>(func: impl FnOnce(&mut crate::task::Scheduler) -> O) -> Result<O> {
+    get_state_mut().map(|state| state.scheduler.with_mut(func))
 }
 
-pub unsafe fn end_of_interrupt() {
+/// Ends the current interrupt context for the interrupt controller.
+///
+/// On platforms that don't require an EOI, this is a no-op.
+pub unsafe fn end_of_interrupt() -> Result<()> {
     #[cfg(target_arch = "x86_64")]
-    get_state().apic.end_of_interrupt();
+    get_state().map(|state| state.apic.end_of_interrupt())?;
+
+    Ok(())
 }
 
 /// ### Safety
 ///
 /// Caller must ensure that setting a new preemption wait will not cause undefined behaviour.
-pub unsafe fn set_preemption_wait(interval_wait: core::num::NonZeroU16) {
-    let state = get_state_mut();
+pub unsafe fn set_preemption_wait(interval_wait: core::num::NonZeroU16) -> Result<()> {
+    let state = get_state_mut()?;
     let timer_interval = state.timer_interval.unwrap();
 
     #[cfg(target_arch = "x86_64")]
@@ -261,41 +276,43 @@ pub unsafe fn set_preemption_wait(interval_wait: core::num::NonZeroU16) {
             apic::TimerMode::Periodic => unimplemented!(),
         }
     }
+
+    Ok(())
 }
 
-pub fn provide_exception<T: Into<Exception>>(exception: T) -> Result<(), T> {
-    let state = get_state_mut();
-    if state.catch_exception.load(Ordering::Relaxed) {
-        let exception_cell = state.exception.get_mut();
+// pub fn provide_exception<T: Into<Exception>>(exception: T) -> core::result::Result<(), T> {
+//     let state = get_state_mut();
+//     if state.catch_exception.load(Ordering::Relaxed) {
+//         let exception_cell = state.exception.get_mut();
 
-        debug_assert!(exception_cell.is_none());
-        *exception_cell = Some(exception.into());
-        Ok(())
-    } else {
-        Err(exception)
-    }
-}
+//         debug_assert!(exception_cell.is_none());
+//         *exception_cell = Some(exception.into());
+//         Ok(())
+//     } else {
+//         Err(exception)
+//     }
+// }
 
-/// ### Safety
-///
-/// Caller must ensure `do_func` is effectively stackless, since no stack cleanup will occur on an exception.
-pub unsafe fn do_catch<T>(do_func: impl FnOnce() -> T) -> Result<T, Exception> {
-    let state = get_state_mut();
+// /// ### Safety
+// ///
+// /// Caller must ensure `do_func` is effectively stackless, since no stack cleanup will occur on an exception.
+// pub unsafe fn do_catch<T>(do_func: impl FnOnce() -> T) -> core::result::Result<T, Exception> {
+//     let state = get_state_mut();
 
-    debug_assert!(state.exception.get_mut().is_none());
+//     debug_assert!(state.exception.get_mut().is_none());
 
-    state
-        .catch_exception
-        .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
-        .expect("nested exception catching is not supported");
+//     state
+//         .catch_exception
+//         .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+//         .expect("nested exception catching is not supported");
 
-    let do_func_result = do_func();
-    let result = state.exception.get_mut().take().map_or(Ok(do_func_result), Err);
+//     let do_func_result = do_func();
+//     let result = state.exception.get_mut().take().map_or(Ok(do_func_result), Err);
 
-    state
-        .catch_exception
-        .compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed)
-        .expect("inconsistent local catch state");
+//     state
+//         .catch_exception
+//         .compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed)
+//         .expect("inconsistent local catch state");
 
-    result
-}
+//     result
+// }

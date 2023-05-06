@@ -1,12 +1,20 @@
-use crate::{
-    interrupts::Vector,
-    task::{ElfData, Registers, State},
-};
+use crate::task::ElfData;
 use libsys::{Address, Page, Virtual};
 
 /// Indicates what type of error the common page fault handler encountered.
-#[derive(Debug, Clone, Copy)]
-pub struct PageFaultHandlerError;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Error {
+    CoreState,
+    Process,
+    ElfData,
+}
+
+impl core::error::Error for Error {}
+impl core::fmt::Display for Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::fmt::Debug::fmt(self, f)
+    }
+}
 
 /// ### Safety
 ///
@@ -14,13 +22,12 @@ pub struct PageFaultHandlerError;
 /// Calling this function more than once and/or outside the context of a page fault is undefined behaviour.
 #[doc(hidden)]
 #[inline(never)]
-#[repr(align(0x10))]
-pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandlerError> {
+pub unsafe fn handler(address: Address<Virtual>) -> Result<(), Error> {
     crate::local::with_scheduler(|scheduler| {
         use crate::mem::paging::TableEntryFlags;
         use libsys::page_size;
 
-        let task = scheduler.task_mut().ok_or(PageFaultHandlerError)?;
+        let task = scheduler.task_mut().ok_or(Error::Process)?;
         let fault_elf_vaddr = address.get() - task.load_offset();
         let phdr = *task
             .elf_segments()
@@ -29,7 +36,7 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
             .find(|phdr| {
                 (phdr.p_vaddr..(phdr.p_vaddr + phdr.p_memsz)).contains(&u64::try_from(fault_elf_vaddr).unwrap())
             })
-            .ok_or(PageFaultHandlerError)?;
+            .ok_or(Error::ElfData)?;
 
         // Small check to help ensure the phdr alignments are page-fit.
         debug_assert_eq!(phdr.p_align & (libsys::page_mask() as u64), 0);
@@ -101,22 +108,6 @@ pub unsafe fn pf_handler(address: Address<Virtual>) -> Result<(), PageFaultHandl
 
         Ok(())
     })
-}
-
-/// ### Safety
-///
-/// This function should only be called in the case of passing context to handle an interrupt.
-/// Calling this function more than once and/or outside the context of an interrupt is undefined behaviour.
-#[doc(hidden)]
-#[inline(never)]
-#[repr(align(0x10))]
-pub unsafe fn handle_irq(irq_vector: u64, state: &mut State, regs: &mut Registers) {
-    match Vector::try_from(irq_vector) {
-        Ok(Vector::Timer) => crate::local::with_scheduler(|scheduler| scheduler.interrupt_task(state, regs)),
-        Err(err) => panic!("Invalid interrupt vector: {:X?}", err),
-        vector_result => unimplemented!("Unhandled interrupt: {:?}", vector_result),
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    crate::local::end_of_interrupt();
+    .map_err(|_| Error::CoreState)
+    .flatten()
 }

@@ -47,20 +47,21 @@ macro_rules! basic_ptr_register {
             /// Writing directly to a register circumvents the compiler. It is the job of the developer
             /// to ensure that this does not cause undefined behaviour.
             #[inline]
-            pub unsafe fn write(ptr: *const ()) {
-                core::arch::asm!(concat!("mov ", stringify!($register_ident), ", {}"), in(reg) ptr, options(nomem, nostack, preserves_flags));
+            pub unsafe fn write(value: libsys::ureg) {
+                core::arch::asm!(concat!("mov ", stringify!($register_ident), ", {}"), in(reg) value, options(nomem, nostack, preserves_flags));
             }
 
             #[inline]
-            pub fn read() -> *const () {
-                let ptr: *const ();
+            pub fn read() -> libsys::ureg {
+                let value: libsys::ureg;
+
 
                 // Safety: We are only reading values here.
                 unsafe {
-                    core::arch::asm!(concat!("mov {}, ", stringify!($register_ident)), out(reg) ptr, options(nomem, nostack, preserves_flags));
-
-                    ptr
+                    core::arch::asm!(concat!("mov {}, ", stringify!($register_ident)), out(reg) value, options(nomem, nostack, preserves_flags));
                 }
+
+                value
             }
         }
     }

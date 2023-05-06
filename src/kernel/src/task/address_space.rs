@@ -51,6 +51,7 @@ crate::default_display_impl!(Error);
 crate::err_result_type!(Error);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(clippy::enum_variant_names)]
 pub enum MmapPermissions {
     ReadExecute,
     ReadWrite,

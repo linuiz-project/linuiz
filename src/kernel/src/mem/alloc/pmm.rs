@@ -146,22 +146,31 @@ impl FrameAllocator<'_> {
     pub fn new(free_regions: impl Iterator<Item = Range<usize>>, total_memory: usize) -> Option<Self> {
         let total_frames = total_memory / page_size();
         let table_slice_len = total_frames / (usize::BITS as usize);
-        let table_size_in_bytes = table_slice_len * core::mem::size_of::<usize>();
-        let table_size_in_frames = libsys::align_up_div(table_size_in_bytes, page_shift());
+        let table_size_in_frames = libsys::align_up_div(table_slice_len * core::mem::size_of::<usize>(), page_shift());
+        let table_size_in_bytes = table_size_in_frames * page_size();
 
-        let select_entry = free_regions
+        let select_region = free_regions
             .filter(|region| (region.start & page_mask()) == 0)
-            .find(|region| region.len() >= table_size_in_bytes)?;
-        let select_entry_frame_index = select_entry.start / page_size();
+            .find(|region| region.len() >= table_size_in_bytes)
+            .map(|region| region.start..(region.start + table_size_in_bytes))?;
 
-        // Safety: Unless the memory map lied to us, this memory is valid for a `&[FrameData; total_frames]`.
-        let table = unsafe { core::slice::from_raw_parts_mut(select_entry.start as *mut AtomicUsize, table_slice_len) };
-        let table = BitSlice::from_slice_mut(table);
+        assert_eq!(select_region.start & page_mask(), 0);
+        assert_eq!(select_region.end & page_mask(), 0);
+
+        // Safety: Memory map describes HHDM, so this pointer into it will be valid if the bootloader memory map is.s
+        let ledger_start_ptr = unsafe { Hhdm::ptr().add(select_region.start) };
+        // Safety: Unless the memory map lied to us, this memory is valid for a `&[AtomicUsize; total_frames]`.
+        let ledger = BitSlice::from_slice_mut(unsafe {
+            core::slice::from_raw_parts_mut(ledger_start_ptr.cast::<AtomicUsize>(), table_slice_len)
+        });
+        ledger.fill(false);
 
         // Ensure the table pages are reserved.
-        table[select_entry_frame_index..(select_entry_frame_index + table_size_in_frames)].fill(true);
+        let ledger_start_index = select_region.start / page_size();
+        let ledger_end_index = select_region.end / page_size();
+        ledger[ledger_start_index..ledger_end_index].fill(true);
 
-        Some(Self { table: InterruptCell::new(spin::RwLock::new(table)) })
+        Some(Self { table: InterruptCell::new(spin::RwLock::new(ledger)) })
     }
 
     #[inline]

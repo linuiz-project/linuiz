@@ -10,4 +10,4 @@ keywords = []
 categories = []
 
 [dependencies]
-bit_field = "*"
+bit_field = "0.10"

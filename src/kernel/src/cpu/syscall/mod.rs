@@ -31,8 +31,8 @@ pub(self) fn process(
         Ok(Vector::KlogDebug) => process_klog(log::Level::Debug, arg0, arg1),
         Ok(Vector::KlogTrace) => process_klog(log::Level::Trace, arg0, arg1),
 
-        Ok(Vector::TaskExit) => crate::local::with_scheduler(|scheduler| scheduler.exit_task(state, regs)),
-        Ok(Vector::TaskYield) => crate::local::with_scheduler(|scheduler| scheduler.yield_task(state, regs)),
+        Ok(Vector::TaskExit) => crate::local::with_scheduler(|scheduler| scheduler.exit_task(state, regs)).unwrap(),
+        Ok(Vector::TaskYield) => crate::local::with_scheduler(|scheduler| scheduler.yield_task(state, regs)).unwrap(),
     }
 }
 

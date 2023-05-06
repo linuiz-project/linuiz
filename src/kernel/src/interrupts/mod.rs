@@ -56,7 +56,7 @@ pub enum Vector {
     Spurious = 0x3F,
 }
 
-/// Provides access to the contained instance of `T`, ensuring interrupts are disabled while it is borrowed.
+/// Provides access to the contained instance of `T`, ensuring interrupts are disabled before it is borrowed.
 pub struct InterruptCell<T>(T);
 
 impl<T> InterruptCell<T> {

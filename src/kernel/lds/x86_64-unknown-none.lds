@@ -2,13 +2,14 @@ OUTPUT_FORMAT(elf64-x86-64)
 OUTPUT_ARCH(i386:x86-64)
 ENTRY(_entry)
 
-/* Place kernel in the last 2GB of virtual memory. */
-KERN_BASE = 0xffffffff80000000;
+KERN_BASE = 0xffffffff80000000;         /* Place kernel in the last 2GB of virtual memory. */
 SEGMENT_ALIGN = CONSTANT(MAXPAGESIZE);
 
 SECTIONS
 {
     . = KERN_BASE + SIZEOF_HEADERS; 
+
+    PROVIDE(__executable_start = .);
 
     .hash                   : { *(.hash) }
     .gnu.hash               : { *(.gnu.hash) }
@@ -16,16 +17,20 @@ SECTIONS
     .dynstr                 : { *(.dynstr) }
     .rela                   : { *(.rela*) }
     .rodata                 : { *(.rodata .rodata.*) }
-    PROVIDE(__build_id = .);
-    .note.gnu.build-id      : { KEEP(*(.note.gnu.build-id)) }
-    .gcc_except_table       : { KEEP(*(.gcc_except_table)) }
 
-    .eh_frame_hdr           : { KEEP(*(.eh_frame_hdr)) }
-    .eh_frame               : { KEEP(*(.eh_frame)) }
+    .note.gnu.build-id      : {
+        PROVIDE(__build_id = .);
+        KEEP(*(.note.gnu.build-id))
+    }
+
+    .eh_frame_hdr           : { *(.eh_frame_hdr) }
+    .eh_frame               : ALIGN(0x8) { *(.eh_frame .eh_frame.*) }
+    .gcc_except_table       : { KEEP(*(.gcc_except_table)) }
 
     . = ALIGN(SEGMENT_ALIGN);
     .plt                    : { *(.plt) *(.iplt) }
     .text                   : { *(.text .text.*) }
+    PROVIDE(__etext = .);
 
     . = ALIGN(SEGMENT_ALIGN);
     .tdata                  : { *(.tdata .tdata.*) }

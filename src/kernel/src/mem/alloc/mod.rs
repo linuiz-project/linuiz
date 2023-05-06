@@ -8,9 +8,7 @@ use core::{
 use spin::Lazy;
 
 // TODO decide if we even need this? Perhaps just rely on the PMM for *all* allocations.
-pub static KMALLOC: Lazy<slab_alloc::SlabAllocator<&pmm::PhysicalMemoryManager>> = Lazy::new(|| {
-    slab_alloc::SlabAllocator::new_in(core::num::NonZeroUsize::new(libsys::page_size()).unwrap(), &*pmm::PMM)
-});
+pub static KMALLOC: Lazy<pmm::PhysicalAllocator> = Lazy::new(|| &*pmm::PMM);
 
 mod global_allocator_impl {
     use super::KMALLOC;
@@ -23,10 +21,13 @@ mod global_allocator_impl {
 
     unsafe impl GlobalAlloc for GlobalAllocator {
         unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-            KMALLOC.allocate(layout).map_or(core::ptr::null_mut(), |ptr| ptr.as_non_null_ptr().as_ptr())
+            let ptr = KMALLOC.allocate(layout).map_or(core::ptr::null_mut(), |ptr| ptr.as_non_null_ptr().as_ptr());
+            trace!("Allocation @{:?}   {:?}", ptr, layout);
+            ptr
         }
 
         unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            trace!("Deallocation @{:?}   {:?}", ptr, layout);
             KMALLOC.deallocate(NonNull::new(ptr).unwrap(), layout);
         }
     }

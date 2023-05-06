@@ -1,8 +1,5 @@
 mod params;
-
-pub fn get_parameters() -> &'static params::Parameters {
-    params::PARAMETERS.get().expect("parameters have not yet been parsed")
-}
+pub use params::*;
 
 use crate::mem::{alloc::AlignedAllocator, paging::PageDepth};
 use core::mem::MaybeUninit;
@@ -11,40 +8,43 @@ use libsys::{page_size, Address};
 
 pub static KERNEL_HANDLE: spin::Lazy<uuid::Uuid> = spin::Lazy::new(uuid::Uuid::new_v4);
 
-/// ### Safety
-///
-/// This function should only ever be called by the bootloader.
-#[no_mangle]
-#[doc(hidden)]
 #[allow(clippy::too_many_lines)]
-unsafe extern "C" fn _entry() -> ! {
-    setup_logging();
+pub unsafe extern "C" fn init() -> ! {
+    use core::sync::atomic::{AtomicBool, Ordering};
 
-    print_boot_info();
+    static HAS_INIT: AtomicBool = AtomicBool::new(false);
 
-    crate::cpu::setup();
+    if HAS_INIT.compare_exchange(false, true, Ordering::Release, Ordering::Relaxed).is_err() {
+        panic!("`init()` has already been called!");
+    } else {
+        setup_logging();
 
-    setup_memory();
+        print_boot_info();
 
-    debug!("Initializing ACPI interface...");
-    crate::acpi::init_interface();
+        crate::cpu::setup();
 
-    load_drivers();
+        setup_memory();
 
-    setup_smp();
+        debug!("Initializing ACPI interface...");
+        crate::acpi::init_interface();
 
-    debug!("Reclaiming bootloader memory...");
-    crate::boot::reclaim_boot_memory({
-        extern "C" {
-            static __symbols_start: LinkerSymbol;
-            static __symbols_end: LinkerSymbol;
-        }
+        load_drivers();
 
-        &[__symbols_start.as_usize()..__symbols_end.as_usize()]
-    });
-    debug!("Bootloader memory reclaimed.");
+        setup_smp();
 
-    kernel_core_setup()
+        debug!("Reclaiming bootloader memory...");
+        crate::boot::reclaim_boot_memory({
+            extern "C" {
+                static __symbols_start: LinkerSymbol;
+                static __symbols_end: LinkerSymbol;
+            }
+
+            &[__symbols_start.as_usize()..__symbols_end.as_usize()]
+        });
+        debug!("Bootloader memory reclaimed.");
+
+        kernel_core_setup()
+    }
 }
 
 /// ### Safety
@@ -56,12 +56,13 @@ pub(self) unsafe fn kernel_core_setup() -> ! {
 
     // Ensure we enable interrupts prior to enabling the scheduler.
     crate::interrupts::enable();
-    crate::local::begin_scheduling();
+    crate::local::begin_scheduling().unwrap();
 
     // This interrupt wait loop is necessary to ensure the core can jump into the scheduler.
     crate::interrupts::wait_loop()
 }
 
+#[inline(never)]
 fn setup_logging() {
     if cfg!(debug_assertions) {
         // Logging isn't set up, so we'll just spin loop if we fail to initialize it.
@@ -72,17 +73,10 @@ fn setup_logging() {
     }
 }
 
+#[inline(never)]
 fn print_boot_info() {
-    extern "C" {
-        static __build_id: LinkerSymbol;
-    }
-
     #[limine::limine_tag]
     static BOOT_INFO: limine::BootInfoRequest = limine::BootInfoRequest::new(crate::boot::LIMINE_REV);
-
-    // TODO the printed build ID is not correct
-    // Safety: Symbol is provided by linker script.
-    info!("Build ID            {:X}", unsafe { __build_id.as_usize() });
 
     if let Some(boot_info) = BOOT_INFO.get_response() {
         info!("Bootloader Info     {} v{} (rev {})", boot_info.name(), boot_info.version(), boot_info.revision());
@@ -99,13 +93,12 @@ fn print_boot_info() {
     }
 }
 
+#[inline(never)]
 #[allow(clippy::too_many_lines)]
 fn setup_memory() {
     #[limine::limine_tag]
     static LIMINE_KERNEL_ADDR: limine::KernelAddressRequest =
         limine::KernelAddressRequest::new(crate::boot::LIMINE_REV);
-    #[limine::limine_tag]
-    static LIMINE_KERNEL_FILE: limine::KernelFileRequest = limine::KernelFileRequest::new(crate::boot::LIMINE_REV);
 
     extern "C" {
         static KERN_BASE: LinkerSymbol;
@@ -124,13 +117,7 @@ fn setup_memory() {
         .expect("bootloader did not provide kernel address info");
 
     // Take reference to kernel file data.
-    let kernel_file = LIMINE_KERNEL_FILE
-        .get_response()
-        .map(limine::KernelFileResponse::file)
-        .expect("bootloader did not provide kernel file data");
-
-    /* parse parameters */
-    params::PARAMETERS.call_once(|| params::Parameters::parse(kernel_file.cmdline()));
+    let kernel_file = crate::boot::kernel_file().expect("bootloader provided no kernel file");
 
     // Safety: Bootloader guarantees the provided information to be correct.
     let kernel_elf = elf::ElfBytes::<elf::endian::AnyEndian>::minimal_parse(kernel_file.data())
@@ -242,18 +229,9 @@ fn setup_memory() {
         unsafe { kmapper.swap_into() };
         debug!("Kernel has finalized control of page tables.");
     });
-
-    /* load symbols */
-    if get_parameters().low_memory {
-        debug!("Kernel is running in low memory mode; stack tracing will be disabled.");
-    } else if let Ok(Some(tables)) = kernel_elf.symbol_table() {
-        debug!("Loading kernel symbol table...");
-        crate::panic::KERNEL_SYMBOLS.call_once(|| tables);
-    } else {
-        warn!("Failed to load any kernel symbols; stack tracing will be disabled.");
-    }
 }
 
+#[inline(never)]
 fn load_drivers() {
     use crate::task::{AddressSpace, Priority, Task};
     use elf::endian::AnyEndian;
@@ -364,7 +342,7 @@ fn setup_smp() {
             for cpu_info in cpus {
                 trace!("Starting processor: ID P{}/L{}", cpu_info.processor_id(), cpu_info.lapic_id());
 
-                if get_parameters().smp {
+                if PARAMETERS.smp {
                     extern "C" fn _smp_entry(_: &limine::CpuInfo) -> ! {
                         crate::cpu::setup();
 
@@ -390,63 +368,3 @@ fn setup_smp() {
         },
     );
 }
-
-/* load driver */
-
-// Push ELF as global task.
-
-// let stack_address = {
-//     const TASK_STACK_BASE_ADDRESS: Address<Page> = Address::<Page>::new_truncate(
-//         Address::<Virtual>::new_truncate(128 << 39),
-//         Some(PageAlign::Align2MiB),
-//     );
-//     // TODO make this a dynamic configuration
-//     const TASK_STACK_PAGE_COUNT: usize = 2;
-
-//     for page in (0..TASK_STACK_PAGE_COUNT)
-//         .map(|offset| TASK_STACK_BASE_ADDRESS.forward_checked(offset).unwrap())
-//     {
-//         driver_page_manager
-//             .map(
-//                 page,
-//                 Address::<Frame>::zero(),
-//                 false,
-//                 PageAttributes::WRITABLE
-//                     | PageAttributes::NO_EXECUTE
-//                     | PageAttributes::DEMAND
-//                     | PageAttributes::USER
-//                     | PageAttributes::HUGE,
-//             )
-//             .unwrap();
-//     }
-
-//     TASK_STACK_BASE_ADDRESS.forward_checked(TASK_STACK_PAGE_COUNT).unwrap()
-// };
-
-// TODO
-// let task = crate::local_state::Task::new(
-//     u8::MIN,
-//     // TODO account for memory base when passing entry offset
-//     crate::local_state::EntryPoint::Address(
-//         Address::<Virtual>::new(elf.get_entry_offset() as u64).unwrap(),
-//     ),
-//     stack_address.address(),
-//     {
-//         #[cfg(target_arch = "x86_64")]
-//         {
-//             (
-//                 crate::arch::x64::registers::GeneralRegisters::empty(),
-//                 crate::arch::x64::registers::SpecialRegisters::flags_with_user_segments(
-//                     crate::arch::x64::registers::RFlags::INTERRUPT_FLAG,
-//                 ),
-//             )
-//         }
-//     },
-//     #[cfg(target_arch = "x86_64")]
-//     {
-//         // TODO do not error here ?
-//         driver_page_manager.read_vmem_register().unwrap()
-//     },
-// );
-
-// crate::local_state::queue_task(task);

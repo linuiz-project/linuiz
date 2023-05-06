@@ -35,9 +35,9 @@
     const_option_ext,
     const_trait_impl,
 )]
-#![forbid(clippy::inline_asm_x86_att_syntax, clippy::missing_const_for_fn)]
+#![forbid(clippy::inline_asm_x86_att_syntax)]
 #![deny(clippy::semicolon_if_nothing_returned, clippy::debug_assert_with_mut_call, clippy::float_arithmetic)]
-#![warn(clippy::cargo, clippy::pedantic, clippy::undocumented_unsafe_blocks)]
+#![warn(clippy::cargo, clippy::pedantic, clippy::undocumented_unsafe_blocks, clippy::missing_const_for_fn)]
 #![allow(
     clippy::cast_lossless,
     clippy::enum_glob_use,
@@ -61,7 +61,6 @@ mod acpi;
 mod arch;
 mod boot;
 mod cpu;
-mod exceptions;
 mod init;
 mod interrupts;
 mod local;
@@ -88,4 +87,22 @@ macro_rules! err_result_type {
     ($name:ident) => {
         pub type Result<T> = core::result::Result<T, $name>;
     };
+}
+
+/// ### Safety
+///
+/// This function should only ever be called by the bootloader.
+#[no_mangle]
+#[doc(hidden)]
+#[allow(clippy::too_many_lines)]
+unsafe extern "C" fn _entry() -> ! {
+    core::arch::asm!(
+        "
+        xor rbp, rbp
+
+        call {}
+        ",
+        sym init::init,
+        options(noreturn)
+    )
 }

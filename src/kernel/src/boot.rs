@@ -57,6 +57,13 @@ pub fn get_rsdp_address() -> Option<Address<Virtual>> {
     })
 }
 
+pub fn kernel_file() -> Option<&'static limine::File> {
+    #[limine::limine_tag]
+    static LIMINE_KERNEL_FILE: limine::KernelFileRequest = limine::KernelFileRequest::new(crate::boot::LIMINE_REV);
+
+    LIMINE_KERNEL_FILE.get_response().map(limine::KernelFileResponse::file)
+}
+
 /// # Safety
 ///
 /// No dangling references can remain to bootloader types or memory, as it may be concurrently overwritten.

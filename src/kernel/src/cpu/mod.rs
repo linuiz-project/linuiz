@@ -1,3 +1,4 @@
+pub mod exceptions;
 pub mod syscall;
 
 pub fn read_id() -> u32 {
