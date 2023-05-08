@@ -21,9 +21,11 @@ mod global_allocator_impl {
 
     unsafe impl GlobalAlloc for GlobalAllocator {
         unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-            let ptr = KMALLOC.allocate(layout).map_or(core::ptr::null_mut(), |ptr| ptr.as_non_null_ptr().as_ptr());
-            trace!("Allocation @{:?}   {:?}", ptr, layout);
-            ptr
+            KMALLOC.allocate(layout).map_or(core::ptr::null_mut(), |ptr| {
+                trace!("Allocation {:?} -> @{:X?}   0x{:X?}", layout, ptr, ptr.as_ref().len());
+
+                ptr.as_non_null_ptr().as_ptr()
+            })
         }
 
         unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {

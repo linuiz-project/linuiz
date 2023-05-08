@@ -13,11 +13,12 @@ extern crate alloc;
 mod tests;
 
 use alloc::{boxed::Box, vec::Vec};
-use bitvec::slice::BitSlice;
+use bitvec::{prelude::BitArray, slice::BitSlice, vec::BitVec};
 use core::{
     alloc::{AllocError, Allocator, Layout},
     num::NonZeroUsize,
     ptr::NonNull,
+    sync::atomic::AtomicU8,
 };
 use spin::Mutex;
 
@@ -26,33 +27,30 @@ fn check_valid_slab_size(slab_size: NonZeroUsize) {
     assert!(slab_size.get() >= (u8::BITS as usize));
 }
 
-struct Slab<A: Allocator> {
-    block_size: NonZeroUsize,
-    memory: Box<[u8], A>,
+struct SlabManager<A: Allocator> {
+    ledger: BitVec<AtomicU8>,
+    slabs: Vec<Box<[u8], A>, A>,
     remaining: usize,
+    slab_size: NonZeroUsize,
+    block_size: NonZeroUsize,
+    allocator: A,
 }
 
-impl<A: Allocator> Slab<A> {
-    fn new_in(slab_size: NonZeroUsize, item_layout: Layout, allocator: A) -> Self {
-        assert!(slab_size.is_power_of_two());
-
-        let memory = Box::new_zeroed_slice_in(slab_size.get(), allocator);
-        let block_size = item_layout.pad_to_align().size().next_power_of_two();
-        let block_count = memory.len() / block_size;
-
-        #[cfg(test)]
-        println!("SLAB {:?}", memory.as_ptr_range());
-
+impl<A: Allocator + Clone> SlabManager<A> {
+    fn new_in(slab_size: NonZeroUsize, block_size: NonZeroUsize, allocator: A) -> Self {
         Self {
-            block_size: NonZeroUsize::new(block_size).unwrap(),
-            memory: unsafe { memory.assume_init() },
-            remaining: block_count,
+            ledger: BitVec::new(),
+            slabs: Vec::new_in(allocator.clone()),
+            remaining: 0,
+            slab_size,
+            block_size,
+            allocator,
         }
     }
 
     #[inline]
     const fn len(&self) -> usize {
-        self.memory.len() / self.block_size()
+        self.ledger.len()
     }
 
     #[inline]
@@ -76,63 +74,28 @@ impl<A: Allocator> Slab<A> {
     }
 
     #[inline]
-    fn ledger_bytes(&self) -> usize {
-        self.len() / (u8::BITS as usize)
-    }
-
-    #[inline]
-    fn ledger_bytes_aligned(&self) -> usize {
-        (self.ledger_bytes().wrapping_neg() & (1usize << self.block_size().trailing_zeros()).wrapping_neg())
-            .wrapping_neg()
-    }
-
-    fn non_ledger_memory(&mut self) -> &mut [u8] {
-        let ledger_bytes_aligned = self.ledger_bytes_aligned();
-        self.memory.get_mut(ledger_bytes_aligned..).unwrap()
-    }
-
-    fn ledger(&mut self) -> &mut BitSlice<u8> {
-        BitSlice::from_slice_mut(self.memory.get_mut(..self.ledger_bytes()).unwrap())
-    }
-
-    #[inline]
     pub fn check_fits_layout(&self, layout: Layout) -> bool {
         self.block_size() >= layout.align() && self.block_size() == layout.size().next_power_of_two()
     }
 
-    #[inline]
-    pub fn owns_ptr(&self, ptr: *const u8) -> bool {
-        self.memory.as_ptr_range().contains(&ptr.cast())
-    }
-
-    pub fn next_item(&mut self) -> Option<NonNull<[u8]>> {
-        let index = self.ledger().iter_zeros().next()?;
-        self.ledger().set(index, true);
+    pub fn take_object(&mut self) -> Option<NonNull<[u8]>> {
+        let index = self.ledger.first_zero()?;
+        self.ledger.set(index, true);
         self.remaining -= 1;
 
-        let block_size = self.block_size();
-        let offset = index * block_size;
-        let offset_range = offset..(offset + block_size);
-        let block_memory = self.non_ledger_memory().get_mut(offset_range).unwrap();
+        let bits_per_slab = self.len() / self.slabs.len();
+        let slab_index = index / bits_per_slab;
+        let slab_block_index = index % bits_per_slab;
+        let slab_block_offset = slab_block_index * self.block_size();
 
-        Some(NonNull::new(block_memory as *mut [u8]).unwrap())
+        let slab =
+            self.slabs[slab_block_index].get_mut(slab_block_offset..(slab_block_offset + self.block_size())).unwrap();
+
+        Some(NonNull::new(slab as *mut [u8]).unwrap())
     }
 
-    pub unsafe fn return_item(&mut self, ptr: NonNull<u8>) {
-        let ptr = ptr.as_ptr();
-
-        assert!(self.owns_ptr(ptr.cast_const()));
-
-        let offset = ptr.sub_ptr(self.memory.as_ptr());
-        let index = offset / self.block_size();
-
-        let ledger = self.ledger();
-        assert!(ledger.get(index).is_some(), "len is {} but index is {}", ledger.len(), index);
-        assert!(ledger.get(index).unwrap(), "bit is {:?}", *ledger.get(index).unwrap());
-        ledger.set(index, false);
-        self.remaining += 1;
-
-        debug_assert!(self.remaining() <= self.len());
+    pub unsafe fn return_object(&mut self, ptr: NonNull<u8>) {
+        // TODO
     }
 }
 
@@ -211,7 +174,7 @@ unsafe impl<A: Allocator + Clone> Allocator for SlabAllocator<A> {
                 if slab.check_fits_layout(layout) && slab.owns_ptr(ptr.as_ptr()) {
                     slab.return_item(ptr);
 
-                    slab.is_full()
+                    slab.is_empty()
                 } else {
                     false
                 }

@@ -1,7 +1,7 @@
 use crate::mem::{
     mapper::Mapper,
     paging,
-    paging::{PageDepth, TableEntryFlags},
+    paging::{TableDepth, TableEntryFlags},
 };
 use core::{num::NonZeroUsize, ptr::NonNull};
 use libsys::{page_size, Address, Page, Virtual};
@@ -42,7 +42,7 @@ impl From<paging::Error> for Error {
         match value {
             paging::Error::AllocError => Error::AllocError,
             paging::Error::NotMapped(addr) => Error::NotMapped(addr),
-            paging::Error::HugePage => Error::Paging(paging::Error::HugePage),
+            err => Error::Paging(err),
         }
     }
 }
@@ -79,7 +79,7 @@ impl AddressSpace {
     }
 
     pub fn new_userspace() -> Self {
-        Self::new(unsafe { Mapper::new_unsafe(PageDepth::current(), crate::mem::copy_kernel_page_table().unwrap()) })
+        Self::new(unsafe { Mapper::new_unsafe(TableDepth::current(), crate::mem::copy_kernel_page_table().unwrap()) })
     }
 
     pub fn mmap(
@@ -100,7 +100,7 @@ impl AddressSpace {
     #[cfg_attr(debug_assertions, inline(never))]
     fn map_any(&mut self, page_count: NonZeroUsize, permissions: MmapPermissions) -> Result<NonNull<[u8]>> {
         let walker = unsafe {
-            paging::walker::Walker::new(self.0.view_page_table(), PageDepth::current(), PageDepth::new(1).unwrap())
+            paging::walker::Walker::new(self.0.view_page_table(), TableDepth::current(), TableDepth::new(1).unwrap())
                 .unwrap()
         };
 

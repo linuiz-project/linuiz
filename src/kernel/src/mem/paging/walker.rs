@@ -1,20 +1,19 @@
 use core::ops::ControlFlow;
 
-use super::{PageDepth, PageTableEntry};
-use crate::mem::Hhdm;
+use super::{PageTableEntry, TableDepth};
 use libsys::table_index_size;
 
 pub struct Walker<'a> {
     root_table: &'a [PageTableEntry],
-    root_depth: PageDepth,
-    target_depth: PageDepth,
+    root_depth: TableDepth,
+    target_depth: TableDepth,
 }
 
 impl<'a> Walker<'a> {
     /// ### Safety
     ///
     /// The provided page table must me a valid root-level table.
-    pub unsafe fn new(table: &'a [PageTableEntry], depth: PageDepth, target_depth: PageDepth) -> Option<Self> {
+    pub unsafe fn new(table: &'a [PageTableEntry], depth: TableDepth, target_depth: TableDepth) -> Option<Self> {
         (depth >= target_depth).then_some(Self { root_table: table, root_depth: depth, target_depth })
     }
 
@@ -26,8 +25,8 @@ impl<'a> Walker<'a> {
 
     fn walk_impl<E>(
         table: &[PageTableEntry],
-        cur_depth: PageDepth,
-        target_depth: PageDepth,
+        cur_depth: TableDepth,
+        target_depth: TableDepth,
         func: &mut impl FnMut(Option<&PageTableEntry>) -> ControlFlow<E>,
     ) -> ControlFlow<E> {
         if cur_depth == target_depth {
@@ -37,7 +36,7 @@ impl<'a> Walker<'a> {
                 if entry.is_present() {
                     let table = unsafe {
                         core::slice::from_raw_parts(
-                            Hhdm::offset(entry.get_frame()).unwrap().as_ptr().cast(),
+                            crate::mem::HHDM.offset(entry.get_frame()).unwrap().as_ptr().cast(),
                             libsys::table_index_size(),
                         )
                     };

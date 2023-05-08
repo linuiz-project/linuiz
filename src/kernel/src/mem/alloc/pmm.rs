@@ -1,4 +1,4 @@
-use crate::{interrupts::InterruptCell, mem::Hhdm};
+use crate::{interrupts::InterruptCell, mem::HHDM};
 use bitvec::slice::BitSlice;
 use core::{
     alloc::{AllocError, Allocator, Layout},
@@ -16,14 +16,17 @@ pub type PhysicalAllocator = &'static PhysicalMemoryManager<'static>;
 pub static PMM: spin::Lazy<PhysicalMemoryManager> = spin::Lazy::new(|| {
     let memory_map = crate::boot::get_memory_map().unwrap();
 
-    let free_regions = memory_map.iter().map(|region| {
-        let region = region.range();
-        let region_start = usize::try_from(region.start).unwrap();
-        let region_end = usize::try_from(region.end).unwrap();
+    let free_regions = memory_map.iter().filter_map(|entry| {
+        (entry.ty() == limine::MemoryMapEntryType::Usable).then(|| {
+            let region = entry.range();
+            let region_start = usize::try_from(region.start).unwrap();
+            let region_end = usize::try_from(region.end).unwrap();
 
-        region_start..region_end
+            region_start..region_end
+        })
     });
-    let total_memory = usize::try_from(memory_map.iter().last().unwrap().range().end).unwrap();
+    let total_memory = usize::try_from(memory_map.iter().max_by_key(|e| e.range().end).unwrap().range().end).unwrap();
+    trace!("Total phyiscal memory: {:#X}", total_memory);
 
     PhysicalMemoryManager { allocator: FrameAllocator::new(free_regions, total_memory).unwrap() }
 });
@@ -98,28 +101,29 @@ impl<'a> core::ops::Deref for PhysicalMemoryManager<'a> {
     }
 }
 
+// Safety: PMM utilizes interior mutability & Correct:tm: logic.
 unsafe impl Allocator for &PhysicalMemoryManager<'_> {
     fn allocate(&self, layout: Layout) -> core::result::Result<NonNull<[u8]>, AllocError> {
         assert!(layout.align() <= page_size());
 
-        let count = NonZeroUsize::new(libsys::align_up_div(layout.size(), page_shift())).ok_or(AllocError)?;
-        let frame = {
-            if layout.size() <= page_size() {
-                self.next_frame()
-            } else {
-                self.next_frames(count, Some(page_shift()))
+        let frame_count = libsys::align_up_div(layout.size(), page_shift());
+        let frame = match frame_count.cmp(&1usize) {
+            core::cmp::Ordering::Greater => {
+                self.next_frames(NonZeroUsize::new(frame_count).unwrap(), Some(page_shift()))
             }
+            core::cmp::Ordering::Equal => self.next_frame(),
+            core::cmp::Ordering::Less => unreachable!(),
         }
         .map_err(|_| AllocError)?;
-        let address = Hhdm::offset(frame).ok_or(AllocError)?;
+        let address = HHDM.offset(frame).ok_or(AllocError)?;
 
-        Ok(NonNull::slice_from_raw_parts(NonNull::new(address.as_ptr()).unwrap(), page_size()))
+        Ok(NonNull::slice_from_raw_parts(NonNull::new(address.as_ptr()).unwrap(), frame_count * page_size()))
     }
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
         assert!(layout.align() <= page_size());
 
-        let offset = ptr.as_ptr().sub_ptr(Hhdm::address().as_ptr());
+        let offset = ptr.as_ptr().sub_ptr(HHDM.address().as_ptr());
         let address = Address::new(offset).unwrap();
 
         if layout.size() <= page_size() {
@@ -145,7 +149,8 @@ unsafe impl Sync for FrameAllocator<'_> {}
 impl FrameAllocator<'_> {
     pub fn new(free_regions: impl Iterator<Item = Range<usize>>, total_memory: usize) -> Option<Self> {
         let total_frames = total_memory / page_size();
-        let table_slice_len = total_frames / (usize::BITS as usize);
+        let table_slice_len =
+            libsys::align_up_div(total_frames, NonZeroU32::new(usize::BITS.trailing_zeros()).unwrap());
         let table_size_in_frames = libsys::align_up_div(table_slice_len * core::mem::size_of::<usize>(), page_shift());
         let table_size_in_bytes = table_size_in_frames * page_size();
 
@@ -157,13 +162,18 @@ impl FrameAllocator<'_> {
         assert_eq!(select_region.start & page_mask(), 0);
         assert_eq!(select_region.end & page_mask(), 0);
 
+        trace!("Selecting PMM ledger region: {:X?}", select_region);
+
         // Safety: Memory map describes HHDM, so this pointer into it will be valid if the bootloader memory map is.s
-        let ledger_start_ptr = unsafe { Hhdm::ptr().add(select_region.start) };
+        let ledger_start_ptr = unsafe { HHDM.ptr().add(select_region.start) };
         // Safety: Unless the memory map lied to us, this memory is valid for a `&[AtomicUsize; total_frames]`.
         let ledger = BitSlice::from_slice_mut(unsafe {
             core::slice::from_raw_parts_mut(ledger_start_ptr.cast::<AtomicUsize>(), table_slice_len)
         });
         ledger.fill(false);
+
+        // Fill the extant bits, as the physical memory bitslice may not be exactly divisible by `usize::BITS`.
+        ledger[total_frames..(table_slice_len * (usize::BITS as usize))].fill(true);
 
         // Ensure the table pages are reserved.
         let ledger_start_index = select_region.start / page_size();

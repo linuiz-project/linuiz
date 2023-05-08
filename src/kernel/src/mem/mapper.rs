@@ -1,14 +1,14 @@
 use crate::mem::{
     alloc::pmm::PMM,
     paging,
-    paging::{Error, PageDepth, Result},
-    Hhdm,
+    paging::{Error, Result, TableDepth},
+    HHDM,
 };
 use libkernel::mem::{Mut, Ref};
 use libsys::{Address, Frame, Page};
 
 pub struct Mapper {
-    depth: PageDepth,
+    depth: TableDepth,
     root_frame: Address<Frame>,
     entry: paging::PageTableEntry,
 }
@@ -18,13 +18,13 @@ unsafe impl Send for Mapper {}
 
 impl Mapper {
     /// Attempts to construct a new page manager. Returns `None` if the PMM could not provide a root frame.
-    pub fn new(depth: PageDepth) -> Option<Self> {
+    pub fn new(depth: TableDepth) -> Option<Self> {
         let root_frame = PMM.next_frame().ok()?;
         trace!("New mapper root frame: {:X}", root_frame);
 
         // Safety: PMM promises rented frames to be within the HHDM.
         unsafe {
-            let hhdm_offset_address = Hhdm::offset(root_frame).unwrap();
+            let hhdm_offset_address = HHDM.offset(root_frame).unwrap();
             core::ptr::write_bytes(hhdm_offset_address.as_ptr(), 0x0, libsys::page_size());
         }
 
@@ -39,7 +39,7 @@ impl Mapper {
     ///
     /// - The root frame must point to a valid top-level page table.
     /// - There must only exist one copy of provided page table tree at any time.
-    pub unsafe fn new_unsafe(depth: PageDepth, root_frame: Address<Frame>) -> Self {
+    pub unsafe fn new_unsafe(depth: TableDepth, root_frame: Address<Frame>) -> Self {
         Self { depth, root_frame, entry: paging::PageTableEntry::new(root_frame, paging::TableEntryFlags::PRESENT) }
     }
 
@@ -59,22 +59,25 @@ impl Mapper {
     pub fn map(
         &mut self,
         page: Address<Page>,
-        to_depth: PageDepth,
+        depth: TableDepth,
         frame: Address<Frame>,
         lock_frame: bool,
         attributes: paging::TableEntryFlags,
     ) -> Result<()> {
         if lock_frame {
             // If the acquisition of the frame fails, return an error.
-            PMM.lock_frame(frame).map_err(|_| Error::AllocError)?;
+            PMM.lock_frame(frame).map_err(|err| match err {
+                super::alloc::pmm::Error::OutOfBounds => Error::FrameBounds,
+                _ => Error::AllocError,
+            })?;
         }
 
         // If acquisition of the frame is successful, attempt to map the page to the frame index.
         let result = self
             .root_table_mut()
             // Safety: Frame does not contain any data.
-            .with_entry_create(page, to_depth, |entry| {
-                if to_depth > PageDepth::min() {
+            .with_entry_create(page, depth, |entry| {
+                if depth > TableDepth::min() {
                     debug_assert!(
                         attributes.contains(paging::TableEntryFlags::HUGE),
                         "attributes missing huge bit for huge mapping"
@@ -95,7 +98,7 @@ impl Mapper {
     /// Safety
     ///
     /// Caller must ensure calling this function does not cause memory corruption.
-    pub unsafe fn unmap(&mut self, page: Address<Page>, to_depth: Option<PageDepth>, free_frame: bool) -> Result<()> {
+    pub unsafe fn unmap(&mut self, page: Address<Page>, to_depth: Option<TableDepth>, free_frame: bool) -> Result<()> {
         self.root_table_mut().with_entry_mut(page, to_depth, |entry| {
             // Safety: We've got an explicit directive from the caller to unmap this page, so the caller must ensure that's a valid operation.
             unsafe { entry.set_attributes(paging::TableEntryFlags::PRESENT, paging::FlagsModify::Remove) };
@@ -116,7 +119,7 @@ impl Mapper {
 
     pub fn auto_map(&mut self, page: Address<Page>, flags: paging::TableEntryFlags) -> Result<()> {
         match PMM.next_frame() {
-            Ok(frame) => self.map(page, PageDepth::min(), frame, false, flags),
+            Ok(frame) => self.map(page, TableDepth::min(), frame, false, flags),
             Err(err) => {
                 trace!("Auto alloc PMM error: {:?}", err);
                 Err(Error::AllocError)
@@ -126,7 +129,7 @@ impl Mapper {
 
     /* STATE QUERYING */
 
-    pub fn is_mapped(&self, page: Address<Page>, depth: Option<PageDepth>) -> bool {
+    pub fn is_mapped(&self, page: Address<Page>, depth: Option<TableDepth>) -> bool {
         self.root_table().with_entry(page, depth, |_| ()).is_ok()
     }
 
@@ -147,7 +150,7 @@ impl Mapper {
     pub unsafe fn set_page_attributes(
         &mut self,
         page: Address<Page>,
-        depth: Option<PageDepth>,
+        depth: Option<TableDepth>,
         attributes: paging::TableEntryFlags,
         modify_mode: paging::FlagsModify,
     ) -> Result<()> {
@@ -174,7 +177,7 @@ impl Mapper {
 
     pub fn view_page_table(&self) -> &[paging::PageTableEntry; libsys::table_index_size()] {
         // Safety: Root frame is guaranteed to be valid within the HHDM.
-        let table_ptr = Hhdm::offset(self.root_frame).unwrap().as_ptr().cast();
+        let table_ptr = HHDM.offset(self.root_frame).unwrap().as_ptr().cast();
         // Safety: Root frame is guaranteed to be valid for PTEs for the length of the table index size.
         let table = unsafe { core::slice::from_raw_parts(table_ptr, libsys::table_index_size()) };
         // Safety: Table was created to match the size required by return type.

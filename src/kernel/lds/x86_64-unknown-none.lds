@@ -2,12 +2,12 @@ OUTPUT_FORMAT(elf64-x86-64)
 OUTPUT_ARCH(i386:x86-64)
 ENTRY(_entry)
 
-KERN_BASE = 0xffffffff80000000;         /* Place kernel in the last 2GB of virtual memory. */
+KERNEL_BASE = 0xffffffff80000000;         /* Place kernel in the last 2GB of virtual memory. */
 SEGMENT_ALIGN = CONSTANT(MAXPAGESIZE);
 
 SECTIONS
 {
-    . = KERN_BASE + SIZEOF_HEADERS; 
+    . = KERNEL_BASE + SIZEOF_HEADERS; 
 
     PROVIDE(__executable_start = .);
 

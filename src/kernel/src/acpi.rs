@@ -4,7 +4,7 @@ use spin::{Lazy, Mutex};
 
 use crate::mem::{
     alloc::{pmm::PhysicalAllocator, KMALLOC},
-    Hhdm,
+    HHDM,
 };
 
 pub enum Register<'a, T: port::PortReadWrite> {
@@ -63,7 +63,7 @@ impl acpi::AcpiHandler for AcpiHandler {
 
         acpi::PhysicalMapping::new(
             address,
-            core::ptr::NonNull::new(Hhdm::ptr().add(address).cast()).unwrap(),
+            core::ptr::NonNull::new(HHDM.ptr().add(address).cast()).unwrap(),
             size,
             size,
             Self,

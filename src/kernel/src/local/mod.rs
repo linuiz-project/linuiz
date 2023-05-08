@@ -116,7 +116,7 @@ pub unsafe fn init(timer_frequency: u16) {
         tss,
 
         #[cfg(target_arch = "x86_64")]
-        apic: apic::Apic::new(Some(|address: usize| crate::mem::Hhdm::ptr().add(address))).unwrap(),
+        apic: apic::Apic::new(Some(|address: usize| crate::mem::HHDM.ptr().add(address))).unwrap(),
 
         timer_interval: None,
 

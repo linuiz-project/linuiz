@@ -1,12 +1,8 @@
 pub mod walker;
-
-use crate::mem::Hhdm;
 use bit_field::BitField;
 use core::{fmt, iter::Step, num::NonZeroU32};
 use libkernel::mem::{InteriorRef, Mut, Ref};
-use libsys::{
-    page_shift, page_size, table_index_mask, table_index_shift, table_index_size, Address, Frame, Page, Virtual,
-};
+use libsys::{page_shift, table_index_mask, table_index_shift, table_index_size, Address, Frame, Page, Virtual};
 
 pub struct Info;
 
@@ -46,12 +42,17 @@ impl Info {
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct PageDepth(u32);
+pub struct TableDepth(u32);
 
-impl PageDepth {
+impl TableDepth {
     #[inline]
     pub const fn min() -> Self {
         Self(0)
+    }
+
+    #[inline]
+    pub const fn min_upper() -> Self {
+        Self(3)
     }
 
     #[inline]
@@ -76,6 +77,15 @@ impl PageDepth {
     #[inline]
     pub fn new(depth: u32) -> Option<Self> {
         (Self::min().0..=Self::max().0).contains(&depth).then_some(Self(depth))
+    }
+
+    #[inline]
+    pub const fn new_mappable<const DEPTH: u32>() -> Option<Self> {
+        if DEPTH >= Self::min().get() && DEPTH <= Self::min_upper().get() {
+            Some(Self(DEPTH))
+        } else {
+            None
+        }
     }
 
     #[inline]
@@ -111,22 +121,28 @@ impl PageDepth {
     pub fn index_of(self, address: Address<Virtual>) -> Option<usize> {
         self.get()
             .checked_sub(1)
-            .map(|d| d * table_index_shift().get())
+            .map(|depth| depth * table_index_shift().get())
             .map(|index_shift| (address.get() >> index_shift >> page_shift().get()) & table_index_mask())
     }
 }
 
-impl Step for PageDepth {
+impl Step for TableDepth {
     fn steps_between(start: &Self, end: &Self) -> Option<usize> {
         Step::steps_between(&end.0, &start.0)
     }
 
     fn forward_checked(start: Self, count: usize) -> Option<Self> {
-        count.try_into().ok().and_then(|count| start.0.checked_sub(count)).and_then(Self::new)
+        let count = u32::try_from(count).expect("step count too large");
+        let total = start.0.checked_sub(count).expect("step count overflowed");
+
+        Self::new(total)
     }
 
     fn backward_checked(start: Self, count: usize) -> Option<Self> {
-        count.try_into().ok().and_then(|count| start.0.checked_add(count)).and_then(Self::new)
+        let count = u32::try_from(count).expect("step count too large");
+        let total = start.0.checked_add(count).expect("step count overflowed");
+
+        Self::new(total)
     }
 }
 
@@ -135,6 +151,9 @@ impl Step for PageDepth {
 pub enum Error {
     /// The underlying allocator is out of memory.
     AllocError,
+
+    /// An attempted mapping sits outside the physical memory bounds.
+    FrameBounds,
 
     /// Unexpected huge page was encountered.
     HugePage,
@@ -246,7 +265,7 @@ impl PageTableEntry {
     /// Caller must ensure changing the attributes of this entry does not cause memory corruption.
     #[inline]
     pub unsafe fn set_frame(&mut self, frame: Address<Frame>) {
-        self.0.set_bits(Self::FRAME_ADDRESS_RANGE, u64::try_from(frame.get().get()).unwrap() >> page_shift().get());
+        self.0.set_bits(Self::FRAME_ADDRESS_RANGE, frame.index().try_into().unwrap());
     }
 
     /// Gets the attributes of this page table entry.
@@ -306,7 +325,7 @@ impl fmt::Debug for PageTableEntry {
 }
 
 pub struct PageTable<'a, RefKind: InteriorRef> {
-    depth: PageDepth,
+    depth: TableDepth,
     entry: <RefKind as InteriorRef>::RefType<'a, PageTableEntry>,
 }
 
@@ -326,12 +345,12 @@ impl core::ops::DerefMut for PageTable<'_, Mut> {
 
 impl<RefKind: InteriorRef> PageTable<'_, RefKind> {
     #[inline]
-    pub const fn depth(&self) -> PageDepth {
+    pub const fn depth(&self) -> TableDepth {
         self.depth
     }
 
     fn table_ptr(&self) -> *mut PageTableEntry {
-        Hhdm::offset(self.get_frame()).unwrap().as_ptr().cast()
+        crate::mem::HHDM.offset(self.get_frame()).unwrap().as_ptr().cast()
     }
 
     pub fn entries(&self) -> &[PageTableEntry] {
@@ -345,14 +364,14 @@ impl<'a> PageTable<'a, Ref> {
     ///
     /// - Page table entry must point to a valid page table.
     /// - Page table depth must be correct for the provided table.
-    pub const unsafe fn new(depth: PageDepth, entry: &'a PageTableEntry) -> Self {
+    pub const unsafe fn new(depth: TableDepth, entry: &'a PageTableEntry) -> Self {
         Self { depth, entry }
     }
 
     pub fn with_entry<T>(
         &self,
         page: Address<Page>,
-        to_depth: Option<PageDepth>,
+        to_depth: Option<TableDepth>,
         with_fn: impl FnOnce(&PageTableEntry) -> T,
     ) -> Result<T> {
         if let Some(to_depth) = to_depth && self.depth() == to_depth {
@@ -365,7 +384,7 @@ impl<'a> PageTable<'a, Ref> {
             if sub_entry.is_present() {
                 // Safety: Since the state of the page tables can not be fully modelled or controlled within the kernel itself,
                 //          we can't be 100% certain this is safe. However, in the case that it isn't, there's a near-certain
-                //          chance that the entire kernel will explode shortly after reading bad data like this.
+                //          chance that the entire kernel will explode shortly after reading bad data like this as a page table.
                 (unsafe { PageTable::<Ref>::new(next_depth, sub_entry) }).with_entry(page, to_depth, with_fn)
             } else {
                 Err(Error::NotMapped(page.get()))
@@ -381,7 +400,7 @@ impl<'a> PageTable<'a, Mut> {
     ///
     /// - Page table entry must point to a valid page table.
     /// - Page table depth must be correct for the provided table.
-    pub unsafe fn new(depth: PageDepth, entry: &'a mut PageTableEntry) -> Self {
+    pub unsafe fn new(depth: TableDepth, entry: &'a mut PageTableEntry) -> Self {
         Self { depth, entry }
     }
 
@@ -393,7 +412,7 @@ impl<'a> PageTable<'a, Mut> {
     pub fn with_entry_mut<T>(
         &mut self,
         page: Address<Page>,
-        to_depth: Option<PageDepth>,
+        to_depth: Option<TableDepth>,
         with_fn: impl FnOnce(&mut PageTableEntry) -> T,
     ) -> Result<T> {
         if let Some(to_depth) = to_depth && self.depth() == to_depth {
@@ -406,7 +425,7 @@ impl<'a> PageTable<'a, Mut> {
             if sub_entry.is_present() {
                 // Safety: Since the state of the page tables can not be fully modelled or controlled within the kernel itself,
                 //          we can't be 100% certain this is safe. However, in the case that it isn't, there's a near-certain
-                //          chance that the entire kernel will explode shortly after reading bad data like this.
+                //          chance that the entire kernel will explode shortly after reading bad data like this as a page table.
                 (unsafe { PageTable::<Mut>::new(next_depth, sub_entry) }).with_entry_mut(page, to_depth, with_fn)
             } else {
                 Err(Error::NotMapped(page.get()))
@@ -422,7 +441,7 @@ impl<'a> PageTable<'a, Mut> {
     pub fn with_entry_create<T>(
         &mut self,
         page: Address<Page>,
-        to_depth: PageDepth,
+        to_depth: TableDepth,
         with_fn: impl FnOnce(&mut PageTableEntry) -> T,
     ) -> Result<T> {
         if self.depth() == to_depth {
@@ -436,23 +455,21 @@ impl<'a> PageTable<'a, Mut> {
                     self.entry
                 );
 
-                let frame = crate::mem::alloc::pmm::PMM.next_frame().map_err(|_| Error::AllocError)?;
-
-                // Safety: Frame was just allocated, and so is unused outside this context.
-                unsafe {
-                    // Clear the frame to avoid corrupted PTEs.
-                    core::ptr::write_bytes(Hhdm::offset(frame).unwrap().as_ptr(), 0x0, page_size());
-
-                    let mut flags = TableEntryFlags::PTE;
-                    // Insert the USER bit in all non-leaf entries.
-                    // This is primarily for compatibility with the x86 paging scheme.
-                    if !self.depth().is_min() {
-                        flags.insert(TableEntryFlags::USER);
-                    }
-
-                    // Set the entry frame and set attributes to make a valid PTE.
-                    *self.entry = PageTableEntry::new(frame, flags);
+                let mut flags = TableEntryFlags::PTE;
+                // Insert the USER bit in all non-leaf entries.
+                // This is for compatibility with the x86 paging scheme.
+                if !self.depth().is_min() {
+                    flags.insert(TableEntryFlags::USER);
                 }
+
+                // Set the entry frame and set attributes to make a valid PTE.
+                *self.entry = PageTableEntry::new(
+                    crate::mem::alloc::pmm::PMM.next_frame().map_err(|_| Error::AllocError)?,
+                    flags,
+                );
+
+                // Clear the table to avoid corrupted PTEs.
+                self.entries_mut().fill(PageTableEntry::empty());
             }
 
             let next_depth = self.depth().next_checked().unwrap();

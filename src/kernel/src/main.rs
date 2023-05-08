@@ -4,6 +4,9 @@
     error_in_core,                          // #103765 <https://github.com/rust-lang/rust/issues/103765>
     result_flattening,                      // #70142 <https://github.com/rust-lang/rust/issues/70142>
     iter_advance_by,                        // #77404 <https://github.com/rust-lang/rust/issues/77404>
+    iter_array_chunks,                      // #100450 <https://github.com/rust-lang/rust/issues/100450>
+    iter_next_chunk,                        // #98326 <https://github.com/rust-lang/rust/issues/98326>
+    array_windows,                          // #75027 <https://github.com/rust-lang/rust/issues/75027>
     map_try_insert,                         // #82766 <https://github.com/rust-lang/rust/issues/82766>
     drain_filter,                           // #43244 <https://github.com/rust-lang/rust/issues/43244>
     new_uninit,                             // #63291 <https://github.com/rust-lang/rust/issues/63291>

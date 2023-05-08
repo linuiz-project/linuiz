@@ -29,7 +29,10 @@ getrandom = { version = "0.2", features = ["custom"] }
 num_enum = { version = "0.6", default-features = false }
 uuid = { version = "1.3", default-features = false, features = ["v4"] }
 elf = { version = "0.7", default-features = false, features = ["nightly"] }
-bitvec = { version = "1.0", default-features = false, features = ["atomic"] }
+bitvec = { version = "1.0", default-features = false, features = [
+    "atomic",
+    "alloc",
+] }
 spin = "0.9.0"
 bit_field = "0.10"
 bitflags = "2.0"

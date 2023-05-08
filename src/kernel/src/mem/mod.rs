@@ -40,7 +40,7 @@ pub fn with_kmapper<T>(func: impl FnOnce(&mut Mapper) -> T) -> T {
     static KERNEL_MAPPER: Lazy<InterruptCell<Mutex<Mapper>>> = Lazy::new(|| {
         debug!("Creating kernel-space address mapper.");
 
-        InterruptCell::new(Mutex::new(Mapper::new(paging::PageDepth::current()).unwrap()))
+        InterruptCell::new(Mutex::new(Mapper::new(paging::TableDepth::current()).unwrap()))
     });
 
     KERNEL_MAPPER.with(|mapper| {
@@ -55,7 +55,7 @@ pub fn copy_kernel_page_table() -> alloc::pmm::Result<Address<Frame>> {
     // Safety: Frame is provided by allocator, and so guaranteed to be within the HHDM, and is frame-sized.
     let new_table = unsafe {
         core::slice::from_raw_parts_mut(
-            Hhdm::offset(table_frame).unwrap().as_ptr().cast::<paging::PageTableEntry>(),
+            HHDM.offset(table_frame).unwrap().as_ptr().cast::<paging::PageTableEntry>(),
             table_index_size(),
         )
     };

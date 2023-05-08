@@ -1,7 +1,7 @@
 mod params;
 pub use params::*;
 
-use crate::mem::{alloc::AlignedAllocator, paging::PageDepth};
+use crate::mem::{alloc::AlignedAllocator, paging::TableDepth};
 use core::mem::MaybeUninit;
 use libkernel::LinkerSymbol;
 use libsys::{page_size, Address};
@@ -50,7 +50,6 @@ pub unsafe extern "C" fn init() -> ! {
 /// ### Safety
 ///
 /// This function should only ever be called once per core.
-#[inline(never)]
 pub(self) unsafe fn kernel_core_setup() -> ! {
     crate::local::init(1000);
 
@@ -62,7 +61,6 @@ pub(self) unsafe fn kernel_core_setup() -> ! {
     crate::interrupts::wait_loop()
 }
 
-#[inline(never)]
 fn setup_logging() {
     if cfg!(debug_assertions) {
         // Logging isn't set up, so we'll just spin loop if we fail to initialize it.
@@ -73,7 +71,6 @@ fn setup_logging() {
     }
 }
 
-#[inline(never)]
 fn print_boot_info() {
     #[limine::limine_tag]
     static BOOT_INFO: limine::BootInfoRequest = limine::BootInfoRequest::new(crate::boot::LIMINE_REV);
@@ -93,20 +90,13 @@ fn print_boot_info() {
     }
 }
 
-#[inline(never)]
 #[allow(clippy::too_many_lines)]
 fn setup_memory() {
     #[limine::limine_tag]
     static LIMINE_KERNEL_ADDR: limine::KernelAddressRequest =
         limine::KernelAddressRequest::new(crate::boot::LIMINE_REV);
 
-    extern "C" {
-        static KERN_BASE: LinkerSymbol;
-    }
-
     debug!("Preparing kernel memory system.");
-
-    crate::mem::Hhdm::initialize();
 
     // Extract kernel address information.
     let (kernel_phys_addr, kernel_virt_addr) = LIMINE_KERNEL_ADDR
@@ -126,74 +116,75 @@ fn setup_memory() {
     /* load and map segments */
 
     crate::mem::with_kmapper(|kmapper| {
-        use crate::mem::{paging::TableEntryFlags, Hhdm};
+        use crate::mem::{paging::TableEntryFlags, HHDM};
         use limine::MemoryMapEntryType;
 
         /* map the higher-half direct map */
         debug!("Mapping the higher-half direct map.");
-        crate::boot::get_memory_map()
+        let mut mmap_iter = crate::boot::get_memory_map()
             .expect("bootloader memory map is required to map HHDM")
             .iter()
-            // Filter bad memory, or provide the entry's page attributes.
-            .filter_map(|entry| {
-                match entry.ty() {
-                    MemoryMapEntryType::Usable
-                            | MemoryMapEntryType::AcpiNvs
-                            | MemoryMapEntryType::AcpiReclaimable
-                            | MemoryMapEntryType::BootloaderReclaimable
-                            // TODO handle the PATs or something to make this WC
-                            | MemoryMapEntryType::Framebuffer => Some((entry, TableEntryFlags::RW)),
+            .map(|entry| (entry.range(), entry.ty()))
+            .peekable();
 
-                            MemoryMapEntryType::Reserved | MemoryMapEntryType::KernelAndModules => {
-                                Some((entry, TableEntryFlags::RO))
-                            }
+        while let Some((mut acc_range, acc_ty)) = mmap_iter.next() {
+            // accumulate identical entries ...
+            while let Some((peek_range, peek_ty)) = mmap_iter.peek() {
+                if acc_range.end == peek_range.start && acc_ty == *peek_ty {
+                    acc_range = acc_range.start..peek_range.end;
+                    mmap_iter.next();
+                } else {
+                    break;
+                }
+            }
 
-                            MemoryMapEntryType::BadMemory => None,
-                        }
-            })
-            .try_for_each(|(mmap_entry, flags)| {
-                use crate::mem::paging;
-                use libsys::{page_shift, Frame};
+            if let Some((flags, lock_frame)) = {
+                match acc_ty {
+                    MemoryMapEntryType::Usable => Some((TableEntryFlags::RW, false)),
 
-                let huge_page_depth = PageDepth::new(1).unwrap();
+                    MemoryMapEntryType::AcpiNvs
+                    | MemoryMapEntryType::AcpiReclaimable
+                    | MemoryMapEntryType::BootloaderReclaimable
+                    | MemoryMapEntryType::Framebuffer => Some((TableEntryFlags::RW, true)),
 
-                let region_range = mmap_entry.range();
-                let region_address = Address::<Frame>::new(usize::try_from(region_range.start).unwrap()).unwrap();
-                let region_size = usize::try_from(region_range.end - region_range.start).unwrap();
-                let mut remaining_len = region_size;
+                    MemoryMapEntryType::Reserved | MemoryMapEntryType::KernelAndModules => {
+                        Some((TableEntryFlags::RO, true))
+                    }
 
-                while remaining_len > 0 {
-                    let offset = libsys::align_down(region_size - remaining_len, page_shift());
-                    let frame = Address::new(region_address.get().get() + offset).unwrap();
-                    let page = Hhdm::offset(frame).unwrap();
+                    MemoryMapEntryType::BadMemory => None,
+                }
+            } {
+                const HUGE_PAGE_DEPTH: TableDepth = TableDepth::new_mappable::<1>().unwrap();
 
-                    if remaining_len > huge_page_depth.align() && page.as_ptr().is_aligned_to(huge_page_depth.align()) {
-                        kmapper.map(page, huge_page_depth, frame, false, flags | TableEntryFlags::HUGE)?;
-                        remaining_len -= huge_page_depth.align();
+                trace!("HHDM Map  {:#X?}  {:?} -> {:?}   lock {}", acc_range, acc_ty, flags, lock_frame);
+
+                let mut region_range =
+                    usize::try_from(acc_range.start).unwrap()..usize::try_from(acc_range.end).unwrap();
+
+                while !region_range.is_empty() {
+                    if region_range.len() > HUGE_PAGE_DEPTH.align()
+                        && region_range.start.trailing_zeros() >= HUGE_PAGE_DEPTH.align().trailing_zeros()
+                    {
+                        let frame = Address::new(region_range.start).unwrap();
+                        let page = HHDM.offset(frame).unwrap();
+                        region_range.advance_by(HUGE_PAGE_DEPTH.align()).unwrap();
+
+                        kmapper
+                            .map(page, HUGE_PAGE_DEPTH, frame, lock_frame, flags | TableEntryFlags::HUGE)
+                            .expect("failed multi-page HHDM mapping");
                     } else {
-                        kmapper.map(page, PageDepth::min(), frame, false, flags)?;
-                        remaining_len -= page_size();
+                        let frame = Address::new(region_range.start).unwrap();
+                        let page = HHDM.offset(frame).unwrap();
+                        region_range.advance_by(page_size()).unwrap();
+
+                        kmapper
+                            .map(page, TableDepth::min(), frame, lock_frame, flags)
+                            .expect("failed single page HHDM mapping");
                     }
                 }
-
-                paging::Result::Ok(())
-            })
-            .expect("failed mapping the HHDM");
-
-        /* map architecture-specific memory */
-        debug!("Mapping the architecture-specific memory.");
-        #[cfg(target_arch = "x86_64")]
-        {
-            let apic_address = msr::IA32_APIC_BASE::get_base_address().try_into().unwrap();
-            kmapper
-                .map(
-                    Address::new_truncate(Hhdm::address().get() + apic_address),
-                    PageDepth::min(),
-                    Address::new_truncate(apic_address),
-                    false,
-                    TableEntryFlags::MMIO,
-                )
-                .unwrap();
+            } else {
+                trace!("HHDM Map (!! bad memory !!) @{:#X?}", acc_range);
+            };
         }
 
         /* load kernel segments */
@@ -203,23 +194,26 @@ fn setup_memory() {
             .into_iter()
             .filter(|ph| ph.p_type == elf::abi::PT_LOAD)
             .for_each(|phdr| {
+                extern "C" {
+                    static KERNEL_BASE: LinkerSymbol;
+                }
+
                 debug!("{:X?}", phdr);
 
-                // Safety: `KERNEL_BASE` is a linker symbol to an in-executable memory location, so it is guaranteed to
-                //         be valid (and is never written to).
-                let base_offset = usize::try_from(phdr.p_vaddr).unwrap() - unsafe { KERN_BASE.as_usize() };
-                let offset_end = base_offset + usize::try_from(phdr.p_memsz).unwrap();
+                // Safety: `KERNEL_BASE` is a linker symbol to an in-executable memory location, so it is guaranteed to be valid (and is never written to).
+                let base_offset = usize::try_from(phdr.p_vaddr).unwrap() - unsafe { KERNEL_BASE.as_usize() };
+                let base_offset_end = base_offset + usize::try_from(phdr.p_memsz).unwrap();
                 let flags = TableEntryFlags::from(crate::task::segment_type_to_mmap_permissions(phdr.p_flags));
 
-                (base_offset..offset_end)
+                (base_offset..base_offset_end)
                     .step_by(page_size())
                     // Attempt to map the page to the frame.
-                    .try_for_each(|mem_offset| {
-                        let phys_addr = Address::new(kernel_phys_addr + mem_offset).unwrap();
-                        let virt_addr = Address::new(kernel_virt_addr + mem_offset).unwrap();
+                    .try_for_each(|offset| {
+                        let phys_addr = Address::new(kernel_phys_addr + offset).unwrap();
+                        let virt_addr = Address::new(kernel_virt_addr + offset).unwrap();
 
                         trace!("Map  {:X?} -> {:X?}   {:?}", virt_addr, phys_addr, flags);
-                        kmapper.map(virt_addr, PageDepth::min(), phys_addr, false, flags)
+                        kmapper.map(virt_addr, TableDepth::min(), phys_addr, true, flags)
                     })
                     .expect("failed to map kernel segments");
             });
@@ -231,7 +225,6 @@ fn setup_memory() {
     });
 }
 
-#[inline(never)]
 fn load_drivers() {
     use crate::task::{AddressSpace, Priority, Task};
     use elf::endian::AnyEndian;
@@ -277,20 +270,21 @@ fn load_drivers() {
                 return
             };
 
+            trace!("Copying ELF data into memory to resolve fault...");
             // Safety: In-place transmutation of initialized bytes for the purpose of copying safely.
             let archive_data = unsafe { entry.data().align_to::<MaybeUninit<u8>>().1 };
             // Allocate space for the ELF data, properly aligned in memory.
-            let mut elf_copy = crate::task::ElfMemory::new_uninit_slice_in(archive_data.len(), AlignedAllocator::new());
+            let mut elf_copy = crate::task::ElfMemory::new_zeroed_slice_in(archive_data.len(), AlignedAllocator::new());
             // Copy the ELF data from the archive entry.
             elf_copy.copy_from_slice(archive_data);
-            // Safety: The ELF data buffer is now initialized with the contents of the ELF.
-            let elf_memory = unsafe { elf_copy.assume_init() };
+            trace!("ELF data copied into memory.");
 
             let (Ok((Some(shdrs), Some(_))), Ok(Some((_, _)))) = (elf.section_headers_with_strtab(), elf.symbol_table())
             else { panic!("Error retrieving ELF relocation metadata.") };
 
             let load_offset = crate::task::MIN_LOAD_OFFSET;
 
+            trace!("Processing relocations localized to fault page.");
             let relas = shdrs
                 .iter()
                 .filter(|shdr| shdr.sh_type == elf::abi::SHT_RELA)
@@ -316,7 +310,8 @@ fn load_drivers() {
                 elf.ehdr,
                 segments_copy,
                 relas,
-                crate::task::ElfData::Memory(elf_memory),
+                // Safety: The ELF data buffer is now initialized with the contents of the ELF.
+                crate::task::ElfData::Memory(unsafe { elf_copy.assume_init() }),
             );
 
             crate::task::PROCESSES.lock().push_back(task);

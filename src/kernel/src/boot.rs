@@ -1,8 +1,6 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 use libsys::{Address, Virtual};
 
-use crate::mem::Hhdm;
-
 mod ignore {
     ///! This module is never exported. It is used for bootloader requests that should never be accessed in software.
 
@@ -51,7 +49,7 @@ pub fn get_rsdp_address() -> Option<Address<Virtual>> {
         LIMINE_RSDP.get_response().and_then(limine::RsdpResponse::address).and_then(|ptr| {
             Address::new(
                 // Properly handle the bootloader's mapping of ACPI addresses in lower-half or higher-half memory space.
-                core::cmp::min(ptr.addr().get(), ptr.addr().get().wrapping_sub(Hhdm::address().get())),
+                core::cmp::min(ptr.addr().get(), ptr.addr().get().wrapping_sub(crate::mem::HHDM.address().get())),
             )
         })
     })
