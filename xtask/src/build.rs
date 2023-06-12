@@ -1,5 +1,6 @@
 use std::{fs::File, io::Error, path::Path};
-use xshell::{cmd, Result, Shell};
+use xshell::{cmd, Shell};
+use anyhow::Result;
 
 #[derive(clap::Parser)]
 #[allow(non_snake_case)]
@@ -112,7 +113,7 @@ fn build_drivers_archive<P: AsRef<Path>>(
             println!("Packaging driver: {:?}", path.file_name().unwrap());
 
             let rel_path = path.strip_prefix(drivers_path).unwrap();
-            archive_builder.append_file(&rel_path, &mut File::open(&path)?)
+            archive_builder.append_file(rel_path, &mut File::open(&path)?)
         })?;
 
     archive_builder.finish()

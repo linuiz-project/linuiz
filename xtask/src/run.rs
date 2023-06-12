@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use clap::ValueEnum;
 use xshell::cmd;
 
@@ -17,20 +18,20 @@ impl core::fmt::Debug for Accelerator {
 }
 
 #[derive(ValueEnum, Debug, Clone, Copy)]
-pub enum CPU {
+pub enum Cpu {
     Host,
     Max,
     Qemu64,
     Rv64,
 }
 
-impl CPU {
+impl Cpu {
     pub const fn as_str(&self) -> &str {
         match self {
-            CPU::Host => "host",
-            CPU::Max => "max",
-            CPU::Qemu64 => "qemu64",
-            CPU::Rv64 => "rv64",
+            Cpu::Host => "host",
+            Cpu::Max => "max",
+            Cpu::Qemu64 => "qemu64",
+            Cpu::Rv64 => "rv64",
         }
     }
 }
@@ -57,7 +58,7 @@ impl core::fmt::Debug for BlockDriver {
 pub struct Options {
     /// CPU type to emulate.
     #[arg(value_enum, long, default_value = "qemu64")]
-    cpu: CPU,
+    cpu: Cpu,
 
     /// Emulation accelerator to use.
     #[arg(value_enum, long, default_value = "none")]
@@ -99,19 +100,19 @@ pub struct Options {
     gdb: bool,
 }
 
-pub fn run(sh: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
+pub fn run(sh: &xshell::Shell, options: Options) -> Result<()> {
     if !options.nobuild {
         crate::build::build(sh, options.build_options)?;
     }
 
     let qemu_exe_str = match options.cpu {
-        CPU::Rv64 => "qemu-system-riscv64",
+        Cpu::Rv64 => "qemu-system-riscv64",
         _ => "qemu-system-x86_64",
     };
 
     let options_machine = match (options.cpu, options.accel) {
-        (CPU::Rv64, Accelerator::None) => "virt",
-        (CPU::Rv64, accel) => panic!("invalid accelerator for RISC-V: {:?}", accel),
+        (Cpu::Rv64, Accelerator::None) => "virt",
+        (Cpu::Rv64, accel) => panic!("invalid accelerator for RISC-V: {:?}", accel),
 
         (_, Accelerator::Kvm) => "q35,accel=kvm",
         (_, Accelerator::None) => "q35",
@@ -135,7 +136,7 @@ pub fn run(sh: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
     }
 
     match options.cpu {
-        CPU::Rv64 => unimplemented!(),
+        Cpu::Rv64 => unimplemented!(),
         _ => optional_args.extend_from_slice(&[
             "-bios",
             "/usr/share/ovmf/OVMF.fd",
@@ -175,6 +176,6 @@ pub fn run(sh: &xshell::Shell, options: Options) -> Result<(), xshell::Error> {
         println!("cmd: {}", cmd.to_string());
         Ok(())
     } else {
-        cmd.run()
+        cmd.run().with_context(|| "failed running OS")
     }
 }
