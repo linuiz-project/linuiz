@@ -2,7 +2,7 @@ mod params;
 pub use params::*;
 
 use crate::mem::{alloc::AlignedAllocator, paging::TableDepth};
-use core::mem::MaybeUninit;
+use core::{mem::MaybeUninit, ops::Range};
 use libkernel::LinkerSymbol;
 use libsys::{page_size, Address};
 
@@ -123,7 +123,10 @@ fn setup_memory() {
         crate::boot::get_memory_map()
             .expect("bootloader memory map is required to map HHDM")
             .iter()
-            .map(|entry| (entry.range(), entry.ty()))
+            .map(|entry| {
+                let range = entry.range();
+                (usize::try_from(range.start).unwrap()..usize::try_from(range.end).unwrap(), entry.ty())
+            })
             .enumerate()
             .cycle()
             .try_reduce(|(last_index, (last_range, last_ty)), (index, (range, ty))| {
@@ -132,6 +135,46 @@ fn setup_memory() {
                 if last_range.end == range.start && last_ty == ty {
                     ControlFlow::Continue((index, (last_range.start..range.end, last_ty)))
                 } else {
+                    fn map_hhdm_range(
+                        mapper: &mut crate::mem::mapper::Mapper,
+                        mut range: Range<usize>,
+                        flags: TableEntryFlags,
+                        lock_frames: bool,
+                    ) -> Result<(), ()> {
+                        const HUGE_PAGE_DEPTH: TableDepth = TableDepth::new_mappable::<1>().unwrap();
+
+                        trace!("HHDM Map  {:#X?}  {:?}   lock {}", range, flags, lock_frames);
+
+                        while !range.is_empty() {
+                            if range.len() > HUGE_PAGE_DEPTH.align()
+                                && range.start.trailing_zeros() >= HUGE_PAGE_DEPTH.align().trailing_zeros()
+                            {
+                                let frame = Address::new(range.start).unwrap();
+                                let page = HHDM.offset(frame).unwrap();
+                                range.advance_by(HUGE_PAGE_DEPTH.align()).unwrap();
+
+                                mapper
+                                    .map(page, HUGE_PAGE_DEPTH, frame, lock_frames, flags | TableEntryFlags::HUGE)
+                                    .expect("failed multi-page HHDM mapping");
+                            } else {
+                                let frame = Address::new(range.start).unwrap();
+                                let page = HHDM.offset(frame).unwrap();
+                                range.advance_by(page_size()).unwrap();
+
+                                mapper
+                                    .map(page, TableDepth::min(), frame, lock_frames, flags)
+                                    .expect("failed single page HHDM mapping");
+                            }
+                        }
+
+                        Ok(())
+                    }
+
+                    if last_range.end < range.start {
+                        let tween_range = last_range.end..range.start;
+                        map_hhdm_range(kmapper, tween_range, TableEntryFlags::RO, true).unwrap();
+                    }
+
                     let mmap_args = {
                         match last_ty {
                             MemoryMapEntryType::Usable => Some((TableEntryFlags::RW, false)),
@@ -149,42 +192,8 @@ fn setup_memory() {
                         }
                     };
 
-                    if let Some((flags, lock_frame)) = mmap_args {
-                        const HUGE_PAGE_DEPTH: TableDepth = TableDepth::new_mappable::<1>().unwrap();
-
-                        trace!(
-                            "HHDM Map({})  {:#X?}  {:?} -> {:?}   lock {}",
-                            index,
-                            last_range,
-                            last_ty,
-                            flags,
-                            lock_frame
-                        );
-
-                        let mut region_range =
-                            usize::try_from(last_range.start).unwrap()..usize::try_from(last_range.end).unwrap();
-
-                        while !region_range.is_empty() {
-                            if region_range.len() > HUGE_PAGE_DEPTH.align()
-                                && region_range.start.trailing_zeros() >= HUGE_PAGE_DEPTH.align().trailing_zeros()
-                            {
-                                let frame = Address::new(region_range.start).unwrap();
-                                let page = HHDM.offset(frame).unwrap();
-                                region_range.advance_by(HUGE_PAGE_DEPTH.align()).unwrap();
-
-                                kmapper
-                                    .map(page, HUGE_PAGE_DEPTH, frame, lock_frame, flags | TableEntryFlags::HUGE)
-                                    .expect("failed multi-page HHDM mapping");
-                            } else {
-                                let frame = Address::new(region_range.start).unwrap();
-                                let page = HHDM.offset(frame).unwrap();
-                                region_range.advance_by(page_size()).unwrap();
-
-                                kmapper
-                                    .map(page, TableDepth::min(), frame, lock_frame, flags)
-                                    .expect("failed single page HHDM mapping");
-                            }
-                        }
+                    if let Some((flags, lock_frames)) = mmap_args {
+                        map_hhdm_range(kmapper, last_range, flags, lock_frames).unwrap();
                     } else {
                         trace!("HHDM Map (!! bad memory !!) @{:#X?}", last_range);
                     }
@@ -280,12 +289,11 @@ fn load_drivers() {
                 return
             };
 
-            trace!("Copying ELF data into memory...");
             // Safety: In-place transmutation of initialized bytes for the purpose of copying safely.
             let archive_data = unsafe { entry.data().align_to::<MaybeUninit<u8>>().1 };
-            // Allocate space for the ELF data, properly aligned in memory.
+            trace!("Allocating memory for ELF data...");
             let mut elf_copy = crate::task::ElfMemory::new_zeroed_slice_in(archive_data.len(), AlignedAllocator::new());
-            // Copy the ELF data from the archive entry.
+            trace!("Copying ELF data into memory...");
             elf_copy.copy_from_slice(archive_data);
             trace!("ELF data copied into memory.");
 
