@@ -20,8 +20,10 @@ Cargo.lock
 .vscode/dryrun.log
 .vscode/targets.log
 
-# Keep xtask lockfile
+# Keep executable lockfiles
 !xtask/Cargo.lock
+!**/kernel/Cargo.lock
+!**/userspace/Cargo.lock
 
 # Ignore build/run artifacts
 /.debug/
