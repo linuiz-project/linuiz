@@ -1,13 +1,13 @@
-# **Pyre OS**
+# **Linuiz OS**
 
 ## What is it?
 
-*Pyre* is a semi-modular multi-archutecture operating system written in the Rust programming language.
+*Linuiz* is a semi-modular multi-archutecture operating system written in the Rust programming language.
 
 ## Why is it?
 
-Pyre is an experiment that seeks to abridge the differences between many separate programming and kernel design paradigms. 
-Additionally, Pyre aims to seamlessly integrate a windowing into the command-line experience—creating a hybrid that allows traditionally technical environments to be more accessible.
+Linuiz is an experiment that seeks to abridge the differences between many separate programming and kernel design paradigms. 
+Additionally, Linuiz aims to seamlessly integrate a windowing into the command-line experience—creating a hybrid that allows traditionally technical environments to be more accessible.
 
 <br />
 

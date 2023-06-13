@@ -20,7 +20,7 @@ git = "https://github.com/semiviral/acpi"
 
 [dependencies]
 uart = "0.1"
-limine = { git = "https://github.com/pyre-project/limine-rs/", features = [
+limine = { git = "https://github.com/linuiz-project/limine-rs/", features = [
     "requests-section",
 ] }
 # third-party dependencies

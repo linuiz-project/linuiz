@@ -19,12 +19,12 @@ static LIMINE_DEFAULT_CFG: &str = r#"
 TIMEOUT=3
 SERIAL=yes
 
-:Pyre (limine)
-COMMENT=Load Pyre OS using the Limine boot protocol.
+:Linuiz (limine)
+COMMENT=Load Linuiz OS using the Limine boot protocol.
 PROTOCOL=limine
 RESOLUTION=800x600x16
-KERNEL_PATH=boot:///pyre/kernel
-MODULE_PATH=boot:///pyre/drivers
+KERNEL_PATH=boot:///linuiz/kernel
+MODULE_PATH=boot:///linuiz/drivers
 KASLR=yes
 "#;
 
@@ -60,6 +60,9 @@ fn main() -> Result<()> {
 
     let tmp_dir = sh.create_temp_dir()?;
 
+    let mut limine_download = false;
+    let mut ovmf_download = false;
+
     if !sh.path_exists(".debug/") {
         sh.create_dir(".debug/")?;
     }
@@ -74,7 +77,7 @@ fn main() -> Result<()> {
 
     // Validate all of the relevant files
     create_path_if_not_exists(&sh, "build/root/EFI/BOOT/")?;
-    create_path_if_not_exists(&sh, "build/root/pyre/")?;
+    create_path_if_not_exists(&sh, "build/root/linuiz/")?;
     // Ensure dev disk image exists.
     if !sh.path_exists("build/disk0.img") {
         cmd!(sh, "qemu-img create -f raw build/disk0.img 256M").run()?;
@@ -87,6 +90,7 @@ fn main() -> Result<()> {
 
     if !sh.path_exists("build/root/EFI/BOOT/BOOTX64.EFI") {
         download_limine_binary(&sh)?;
+        limine_download = true;
     }
 
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
@@ -96,6 +100,7 @@ fn main() -> Result<()> {
         || !sh.path_exists(AARCH64_VARS)
     {
         download_ovmf_binaries(&sh, &tmp_dir)?;
+        ovmf_download = true;
     }
 
     match Arguments::parse() {
@@ -109,8 +114,14 @@ fn main() -> Result<()> {
 
         Arguments::Update => {
             in_workspace_with(&sh, |sh| cmd!(sh, "cargo update").run().with_context(|| "`cargo update` failed"))?;
-            download_limine_binary(&sh)?;
-            download_ovmf_binaries(&sh, &tmp_dir)?;
+
+            if !limine_download {
+                download_limine_binary(&sh)?;
+            }
+
+            if !ovmf_download {
+                download_ovmf_binaries(&sh, &tmp_dir)?;
+            }
         }
 
         Arguments::Clippy => {

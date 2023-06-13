@@ -1,6 +1,6 @@
+use anyhow::Result;
 use std::{fs::File, io::Error, path::Path};
 use xshell::{cmd, Shell};
-use anyhow::Result;
 
 #[derive(clap::Parser)]
 #[allow(non_snake_case)]
@@ -67,7 +67,7 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
         cmd!(sh, "cargo build -Z unstable-options {local_args...}").run()?;
 
         // Copy the output kernel binary to the virtual HDD.
-        sh.copy_file(tmp_dir_path.join("kernel"), root_dir.join("build/root/pyre/"))?;
+        sh.copy_file(tmp_dir_path.join("kernel"), root_dir.join("build/root/linuiz/"))?;
     }
 
     /* compile userspace */
@@ -81,7 +81,7 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
 
     build_drivers_archive(
         tmp_dir_path,
-        &root_dir.join("build/root/pyre/drivers"),
+        &root_dir.join("build/root/linuiz/drivers"),
         sh.read_dir(tmp_dir_path)?.into_iter(),
         &options.drivers,
     )
