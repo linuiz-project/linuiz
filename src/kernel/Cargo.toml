@@ -33,9 +33,9 @@ bitvec = { version = "1.0", default-features = false, features = [
     "atomic",
     "alloc",
 ] }
-spin = "0.9.0"
+spin = "0.9"
 bit_field = "0.10"
-bitflags = "2.0"
+bitflags = "2.3"
 paste = "1.0"
 rustc-demangle = "0.1"
 rand_core = "0.6"
@@ -50,9 +50,10 @@ x86_64 = "0.14"
 
 [profile.dev]
 opt-level = 0
+codegen-units = 16
 overflow-checks = true
 lto = "off"
 
 [profile.release]
-lto = true
 codegen-units = 1
+lto = "fat"

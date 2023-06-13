@@ -2,11 +2,11 @@
     "[rust]": {
         "editor.defaultFormatter": "rust-lang.rust-analyzer"
     },
+    "rust-analyzer.check.allTargets": false,
     "rust-analyzer.linkedProjects": [
         "src/kernel/Cargo.toml",
         "src/shared/Cargo.toml",
         "src/userspace/Cargo.toml",
         "xtask/Cargo.toml"
     ],
-    "rust-analyzer.check.allTargets": false,
 }
