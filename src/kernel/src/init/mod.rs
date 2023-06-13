@@ -119,73 +119,83 @@ fn setup_memory() {
         use crate::mem::{paging::TableEntryFlags, HHDM};
         use limine::MemoryMapEntryType;
 
-        /* map the higher-half direct map */
         debug!("Mapping the higher-half direct map.");
-        let mut mmap_iter = crate::boot::get_memory_map()
+        crate::boot::get_memory_map()
             .expect("bootloader memory map is required to map HHDM")
             .iter()
             .map(|entry| (entry.range(), entry.ty()))
-            .peekable();
+            .enumerate()
+            .cycle()
+            .try_reduce(|(last_index, (last_range, last_ty)), (index, (range, ty))| {
+                use core::ops::ControlFlow;
 
-        while let Some((mut acc_range, acc_ty)) = mmap_iter.next() {
-            // accumulate identical entries ...
-            while let Some((peek_range, peek_ty)) = mmap_iter.peek() {
-                if acc_range.end == peek_range.start && acc_ty == *peek_ty {
-                    acc_range = acc_range.start..peek_range.end;
-                    mmap_iter.next();
+                if last_range.end == range.start && last_ty == ty {
+                    ControlFlow::Continue((index, (last_range.start..range.end, last_ty)))
                 } else {
-                    break;
-                }
-            }
+                    let mmap_args = {
+                        match last_ty {
+                            MemoryMapEntryType::Usable => Some((TableEntryFlags::RW, false)),
 
-            if let Some((flags, lock_frame)) = {
-                match acc_ty {
-                    MemoryMapEntryType::Usable => Some((TableEntryFlags::RW, false)),
+                            MemoryMapEntryType::AcpiNvs
+                            | MemoryMapEntryType::AcpiReclaimable
+                            | MemoryMapEntryType::BootloaderReclaimable
+                            | MemoryMapEntryType::Framebuffer => Some((TableEntryFlags::RW, true)),
 
-                    MemoryMapEntryType::AcpiNvs
-                    | MemoryMapEntryType::AcpiReclaimable
-                    | MemoryMapEntryType::BootloaderReclaimable
-                    | MemoryMapEntryType::Framebuffer => Some((TableEntryFlags::RW, true)),
+                            MemoryMapEntryType::Reserved | MemoryMapEntryType::KernelAndModules => {
+                                Some((TableEntryFlags::RO, true))
+                            }
 
-                    MemoryMapEntryType::Reserved | MemoryMapEntryType::KernelAndModules => {
-                        Some((TableEntryFlags::RO, true))
-                    }
+                            MemoryMapEntryType::BadMemory => None,
+                        }
+                    };
 
-                    MemoryMapEntryType::BadMemory => None,
-                }
-            } {
-                const HUGE_PAGE_DEPTH: TableDepth = TableDepth::new_mappable::<1>().unwrap();
+                    if let Some((flags, lock_frame)) = mmap_args {
+                        const HUGE_PAGE_DEPTH: TableDepth = TableDepth::new_mappable::<1>().unwrap();
 
-                trace!("HHDM Map  {:#X?}  {:?} -> {:?}   lock {}", acc_range, acc_ty, flags, lock_frame);
+                        trace!(
+                            "HHDM Map({})  {:#X?}  {:?} -> {:?}   lock {}",
+                            index,
+                            last_range,
+                            last_ty,
+                            flags,
+                            lock_frame
+                        );
 
-                let mut region_range =
-                    usize::try_from(acc_range.start).unwrap()..usize::try_from(acc_range.end).unwrap();
+                        let mut region_range =
+                            usize::try_from(last_range.start).unwrap()..usize::try_from(last_range.end).unwrap();
 
-                while !region_range.is_empty() {
-                    if region_range.len() > HUGE_PAGE_DEPTH.align()
-                        && region_range.start.trailing_zeros() >= HUGE_PAGE_DEPTH.align().trailing_zeros()
-                    {
-                        let frame = Address::new(region_range.start).unwrap();
-                        let page = HHDM.offset(frame).unwrap();
-                        region_range.advance_by(HUGE_PAGE_DEPTH.align()).unwrap();
+                        while !region_range.is_empty() {
+                            if region_range.len() > HUGE_PAGE_DEPTH.align()
+                                && region_range.start.trailing_zeros() >= HUGE_PAGE_DEPTH.align().trailing_zeros()
+                            {
+                                let frame = Address::new(region_range.start).unwrap();
+                                let page = HHDM.offset(frame).unwrap();
+                                region_range.advance_by(HUGE_PAGE_DEPTH.align()).unwrap();
 
-                        kmapper
-                            .map(page, HUGE_PAGE_DEPTH, frame, lock_frame, flags | TableEntryFlags::HUGE)
-                            .expect("failed multi-page HHDM mapping");
+                                kmapper
+                                    .map(page, HUGE_PAGE_DEPTH, frame, lock_frame, flags | TableEntryFlags::HUGE)
+                                    .expect("failed multi-page HHDM mapping");
+                            } else {
+                                let frame = Address::new(region_range.start).unwrap();
+                                let page = HHDM.offset(frame).unwrap();
+                                region_range.advance_by(page_size()).unwrap();
+
+                                kmapper
+                                    .map(page, TableDepth::min(), frame, lock_frame, flags)
+                                    .expect("failed single page HHDM mapping");
+                            }
+                        }
                     } else {
-                        let frame = Address::new(region_range.start).unwrap();
-                        let page = HHDM.offset(frame).unwrap();
-                        region_range.advance_by(page_size()).unwrap();
+                        trace!("HHDM Map (!! bad memory !!) @{:#X?}", last_range);
+                    }
 
-                        kmapper
-                            .map(page, TableDepth::min(), frame, lock_frame, flags)
-                            .expect("failed single page HHDM mapping");
+                    if last_index < index {
+                        ControlFlow::Continue((index, (range, ty)))
+                    } else {
+                        ControlFlow::Break(())
                     }
                 }
-            } else {
-                trace!("HHDM Map (!! bad memory !!) @{:#X?}", acc_range);
-            };
-        }
+            });
 
         /* load kernel segments */
         kernel_elf
@@ -270,7 +280,7 @@ fn load_drivers() {
                 return
             };
 
-            trace!("Copying ELF data into memory to resolve fault...");
+            trace!("Copying ELF data into memory...");
             // Safety: In-place transmutation of initialized bytes for the purpose of copying safely.
             let archive_data = unsafe { entry.data().align_to::<MaybeUninit<u8>>().1 };
             // Allocate space for the ELF data, properly aligned in memory.
@@ -280,7 +290,9 @@ fn load_drivers() {
             trace!("ELF data copied into memory.");
 
             let (Ok((Some(shdrs), Some(_))), Ok(Some((_, _)))) = (elf.section_headers_with_strtab(), elf.symbol_table())
-            else { panic!("Error retrieving ELF relocation metadata.") };
+            else {
+                panic!("Error retrieving ELF relocation metadata.")
+            };
 
             let load_offset = crate::task::MIN_LOAD_OFFSET;
 

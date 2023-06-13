@@ -138,8 +138,10 @@ pub fn run(sh: &xshell::Shell, options: Options) -> Result<()> {
     match options.cpu {
         Cpu::Rv64 => unimplemented!(),
         _ => optional_args.extend_from_slice(&[
-            "-bios",
-            "/usr/share/ovmf/OVMF.fd",
+            "-drive",
+            "if=pflash,index=0,readonly=on,format=raw,file=build/ovmf/x64/code.fd",
+            "-drive",
+            "if=pflash,index=1,format=raw,file=build/ovmf/x64/vars.fd",
             "-drive",
             "format=raw,file=fat:rw:build/root/",
         ]),

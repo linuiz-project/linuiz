@@ -4,12 +4,15 @@ mod target;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use std::path::Path;
-use xshell::{cmd, Shell};
+use std::{
+    fs::File,
+    io::{copy, BufReader, Cursor},
+    path::Path,
+};
+use xshell::{cmd, Shell, TempDir};
 
 static WORKSPACE_DIRS: [&str; 3] = ["src/kernel", "src/shared", "src/userspace"];
 
-static UEFI_FIRMWARE_IMAGE_URL: &str = "https://github.com/rust-osdev/ovmf-prebuilt/releases/download/edk2-stable202211-r1/edk2-stable202211-r1-bin.tar.xz";
 static LIMINE_UEFI_IMAGE_URL: &str =
     "https://raw.githubusercontent.com/limine-bootloader/limine/v4.x-branch-binary/BOOTX64.EFI";
 static LIMINE_DEFAULT_CFG: &str = r#"
@@ -24,6 +27,12 @@ KERNEL_PATH=boot:///pyre/kernel
 MODULE_PATH=boot:///pyre/drivers
 KASLR=yes
 "#;
+
+static UEFI_FIRMWARE_IMAGE_URL: &str = "https://github.com/rust-osdev/ovmf-prebuilt/releases/download/edk2-stable202211-r1/edk2-stable202211-r1-bin.tar.xz";
+static X64_CODE: &str = "build/ovmf/x64/code.fd";
+static X64_VARS: &str = "build/ovmf/x64/vars.fd";
+static AARCH64_CODE: &str = "build/ovmf/aarch64/code.fd";
+static AARCH64_VARS: &str = "build/ovmf/aarch64/vars.fd";
 
 #[derive(Parser)]
 struct Fmt {
@@ -48,6 +57,8 @@ enum Arguments {
 
 fn main() -> Result<()> {
     let sh = Shell::new()?;
+
+    let tmp_dir = sh.create_temp_dir()?;
 
     if !sh.path_exists(".debug/") {
         sh.create_dir(".debug/")?;
@@ -74,77 +85,57 @@ fn main() -> Result<()> {
         sh.write_file("build/root/EFI/BOOT/limine.cfg", LIMINE_DEFAULT_CFG)?;
     }
 
-    // Download UEFI boot image.
     if !sh.path_exists("build/root/EFI/BOOT/BOOTX64.EFI") {
-        println!("Downloading limine UEFI boot image.");
-        cmd!(sh, "curl -o build/root/EFI/BOOT/BOOTX64.EFI {LIMINE_UEFI_IMAGE_URL}").run()?;
+        download_limine_binary(&sh)?;
     }
 
-    if !sh.path_exists("build/OVMF_CODE.fd") || !sh.path_exists("build/OVMF_VARS.fd") {
-        println!("Downloading UEFI firmware image.");
-
-        let tmp_dir = sh.create_temp_dir()?;
-        let tar_path = tmp_dir.path().join("ovmf_prebuild.tar.xz");
-        cmd!(sh, "curl -o {tar_path} {UEFI_FIRMWARE_IMAGE_URL}").run()?;
-
-        let mut archive =
-            tar::Archive::new(std::fs::File::open(tar_path).with_context(|| "failed opening OVMF image TAR")?);
-
-        archive.entries().with_context(|| "archive has no entries")?.flatten().try_fold(
-            (false, false),
-            |(has_code, has_vars), mut entry| {
-                let path = entry.path().map(|path| path.to_string_lossy().into_owned());
-                match path.as_deref() {
-                    Ok("x64/code.fd") => {
-                        println!("Found entry for EFI code: {:?}", entry.path());
-
-                        entry
-                            .unpack_in("build/OVMF_CODE.fd")
-                            .with_context(|| "could not unpack OVMF_CODE.fd")
-                            .map(|_| (true, has_vars))
-                    }
-
-                    Ok("x64/vars.fd") => {
-                        println!("Found entry for EFI vars: {:?}", entry.path());
-
-                        entry
-                            .unpack_in("build/OVMF_VARS.fd")
-                            .with_context(|| "could not unpack OVMF_VARS.fd")
-                            .map(|_| (has_code, true))
-                    }
-
-                    _ => {
-                        println!("Found entry, skipping: {:?}", entry.path());
-
-                        Ok((has_code, has_vars))
-                    }
-                }
-            },
-        )?;
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    if !sh.path_exists(X64_CODE)
+        || !sh.path_exists(X64_VARS)
+        || !sh.path_exists(AARCH64_CODE)
+        || !sh.path_exists(AARCH64_VARS)
+    {
+        download_ovmf_binaries(&sh, &tmp_dir)?;
     }
 
     match Arguments::parse() {
         Arguments::Clean => {
-            in_workspace_with(&sh, |sh| cmd!(sh, "cargo clean").run().with_context(|| "`cargo clean` failed"))
-        }
-        Arguments::Check => {
-            in_workspace_with(&sh, |sh| cmd!(sh, "cargo check --bins").run().with_context(|| "`cargo check` failed"))
-        }
-        Arguments::Update => {
-            in_workspace_with(&sh, |sh| cmd!(sh, "cargo update").run().with_context(|| "`cargo update` failed"))
-        }
-        Arguments::Clippy => {
-            in_workspace_with(&sh, |sh| cmd!(sh, "cargo clippy").run().with_context(|| "`cargo clippy` failed"))
-        }
-        Arguments::Fmt(fmt) => {
-            let args = &fmt.args;
-            in_workspace_with(&sh, |sh| cmd!(sh, "cargo fmt {args...}").run().with_context(|| "`cargo fmt` failed"))
+            in_workspace_with(&sh, |sh| cmd!(sh, "cargo clean").run().with_context(|| "`cargo clean` failed"))?;
         }
 
-        Arguments::Target(target) => target::update_target(&sh, target).with_context(|| "failed to"),
-        Arguments::Build(build_options) => build::build(&sh, build_options),
-        Arguments::Run(run_options) => run::run(&sh, run_options),
+        Arguments::Check => {
+            in_workspace_with(&sh, |sh| cmd!(sh, "cargo check --bins").run().with_context(|| "`cargo check` failed"))?;
+        }
+
+        Arguments::Update => {
+            in_workspace_with(&sh, |sh| cmd!(sh, "cargo update").run().with_context(|| "`cargo update` failed"))?;
+            download_limine_binary(&sh)?;
+            download_ovmf_binaries(&sh, &tmp_dir)?;
+        }
+
+        Arguments::Clippy => {
+            in_workspace_with(&sh, |sh| cmd!(sh, "cargo clippy").run().with_context(|| "`cargo clippy` failed"))?;
+        }
+
+        Arguments::Fmt(fmt) => {
+            let args = &fmt.args;
+            in_workspace_with(&sh, |sh| cmd!(sh, "cargo fmt {args...}").run().with_context(|| "`cargo fmt` failed"))?;
+        }
+
+        Arguments::Target(target) => {
+            target::update_target(&sh, target).with_context(|| "failed to update targets")?;
+        }
+
+        Arguments::Build(build_options) => {
+            build::build(&sh, build_options)?;
+        }
+
+        Arguments::Run(run_options) => {
+            run::run(&sh, run_options)?;
+        }
     }
+
+    Ok(())
 }
 
 fn in_workspace_with(shell: &Shell, with_fn: impl Fn(&Shell) -> Result<()>) -> Result<()> {
@@ -160,6 +151,59 @@ fn create_path_if_not_exists<P: AsRef<Path>>(sh: &Shell, path: P) -> Result<()> 
     if !sh.path_exists(path.as_ref()) {
         sh.create_dir(path.as_ref())?;
     }
+
+    Ok(())
+}
+
+fn download_limine_binary(sh: &Shell) -> Result<()> {
+    println!("Downloading limine UEFI boot image.");
+
+    let out_path = "build/root/EFI/BOOT/BOOTX64.EFI";
+    let response = reqwest::blocking::get(LIMINE_UEFI_IMAGE_URL)?;
+    copy(&mut Cursor::new(response.bytes()?), &mut File::create(out_path)?)?;
+
+    assert!(sh.path_exists(out_path));
+
+    Ok(())
+}
+
+fn download_ovmf_binaries(sh: &Shell, tmp_dir: &TempDir) -> Result<()> {
+    println!("Downloading UEFI firmware binaries.");
+
+    sh.create_dir("build/ovmf/x64/")?;
+    sh.create_dir("build/ovmf/aarch64/")?;
+
+    let tar_path = tmp_dir.path().join("ovmf_prebuilts.tar.xz");
+
+    let response = reqwest::blocking::get(UEFI_FIRMWARE_IMAGE_URL)?;
+    copy(&mut Cursor::new(response.bytes()?), &mut File::create(tar_path.clone())?)?;
+
+    let mut archive_compressed = BufReader::new(File::open(tar_path)?);
+    let mut archive_decompressed = Vec::new();
+    lzma_rs::xz_decompress(&mut archive_compressed, &mut archive_decompressed)?;
+
+    let archive_stream = BufReader::new(archive_decompressed.as_slice());
+    let mut archive = tar::Archive::new(archive_stream);
+
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let path = entry.path()?.to_string_lossy().into_owned();
+
+        if path.ends_with("x64/code.fd") {
+            entry.unpack(X64_CODE)?;
+        } else if path.ends_with("x64/vars.fd") {
+            entry.unpack(X64_VARS)?;
+        } else if path.ends_with("aarch64/code.fd") {
+            entry.unpack(AARCH64_CODE)?;
+        } else if path.ends_with("aarch64/vars.fd") {
+            entry.unpack(AARCH64_VARS)?;
+        }
+    }
+
+    assert!(sh.path_exists(X64_CODE));
+    assert!(sh.path_exists(X64_VARS));
+    assert!(sh.path_exists(AARCH64_CODE));
+    assert!(sh.path_exists(AARCH64_VARS));
 
     Ok(())
 }

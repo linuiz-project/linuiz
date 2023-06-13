@@ -7,6 +7,7 @@
     iter_array_chunks,                      // #100450 <https://github.com/rust-lang/rust/issues/100450>
     iter_next_chunk,                        // #98326 <https://github.com/rust-lang/rust/issues/98326>
     array_windows,                          // #75027 <https://github.com/rust-lang/rust/issues/75027>
+    iterator_try_reduce,                    // #87053 <https://github.com/rust-lang/rust/issues/87053>
     map_try_insert,                         // #82766 <https://github.com/rust-lang/rust/issues/82766>
     drain_filter,                           // #43244 <https://github.com/rust-lang/rust/issues/43244>
     new_uninit,                             // #63291 <https://github.com/rust-lang/rust/issues/63291>
