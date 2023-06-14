@@ -146,26 +146,23 @@ impl Step for TableDepth {
     }
 }
 
-#[derive(Debug)]
-#[allow(clippy::enum_variant_names)]
-pub enum Error {
-    /// The underlying allocator is out of memory.
-    AllocError,
+crate::error_impl! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[allow(clippy::enum_variant_names)]
+    pub enum Error {
+        /// The underlying allocator is out of memory.
+        AllocError => None,
 
-    /// An attempted mapping sits outside the physical memory bounds.
-    FrameBounds,
+        /// An attempted mapping sits outside the physical memory bounds.
+        FrameBounds => None,
 
-    /// Unexpected huge page was encountered.
-    HugePage,
+        /// Unexpected huge page was encountered.
+        HugePage => None,
 
-    /// The specified page is not mapped.
-    NotMapped(Address<Virtual>),
+        /// The specified page is not mapped.
+        NotMapped { addr: Address<Virtual> } => None
+    }
 }
-
-impl core::error::Error for Error {}
-
-crate::default_display_impl!(Error);
-crate::err_result_type!(Error);
 
 #[cfg(target_arch = "x86_64")]
 bitflags::bitflags! {
@@ -387,7 +384,7 @@ impl<'a> PageTable<'a, Ref> {
                 //          chance that the entire kernel will explode shortly after reading bad data like this as a page table.
                 (unsafe { PageTable::<Ref>::new(next_depth, sub_entry) }).with_entry(page, to_depth, with_fn)
             } else {
-                Err(Error::NotMapped(page.get()))
+                Err(Error::NotMapped { addr: page.get() })
             }
         } else {
             Err(Error::HugePage)
@@ -428,7 +425,7 @@ impl<'a> PageTable<'a, Mut> {
                 //          chance that the entire kernel will explode shortly after reading bad data like this as a page table.
                 (unsafe { PageTable::<Mut>::new(next_depth, sub_entry) }).with_entry_mut(page, to_depth, with_fn)
             } else {
-                Err(Error::NotMapped(page.get()))
+                Err(Error::NotMapped { addr: page.get() })
             }
         } else {
             Err(Error::HugePage)

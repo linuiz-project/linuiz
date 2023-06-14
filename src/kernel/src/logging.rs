@@ -42,13 +42,13 @@ impl log::Log for Serial {
     fn flush(&self) {}
 }
 
-#[derive(Debug)]
-pub enum Error {
-    SetLoggerError,
-    NoLoggerError,
+crate::error_impl! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Error {
+        SetLoggerError => None,
+        NoLoggerError => None
+    }
 }
-
-impl core::error::Error for Error {}
 
 impl From<log::SetLoggerError> for Error {
     fn from(_: log::SetLoggerError) -> Self {
@@ -56,9 +56,7 @@ impl From<log::SetLoggerError> for Error {
     }
 }
 
-crate::default_display_impl!(Error);
-
-pub fn init() -> Result<(), Error> {
+pub fn init() -> Result<()> {
     #[cfg(debug_assertions)]
     {
         log::set_max_level(log::LevelFilter::Trace);

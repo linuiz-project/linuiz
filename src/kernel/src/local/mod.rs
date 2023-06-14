@@ -6,18 +6,10 @@ pub(self) const US_PER_SEC: u32 = 1000000;
 pub(self) const US_WAIT: u32 = 10000;
 pub(self) const US_FREQ_FACTOR: u32 = US_PER_SEC / US_WAIT;
 
-pub type Result<T> = core::result::Result<T, Error>;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Error {
-    NotInitialized,
-}
-
-impl core::error::Error for Error {}
-
-impl core::fmt::Display for Error {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        core::fmt::Debug::fmt(&self, f)
+crate::error_impl! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Error {
+        NotInitialized => None
     }
 }
 

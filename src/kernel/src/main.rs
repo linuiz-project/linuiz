@@ -65,6 +65,7 @@ mod acpi;
 mod arch;
 mod boot;
 mod cpu;
+mod error;
 mod init;
 mod interrupts;
 mod local;
@@ -74,24 +75,6 @@ mod panic;
 mod rand;
 mod task;
 mod time;
-
-#[macro_export]
-macro_rules! default_display_impl {
-    ($name:ident) => {
-        impl core::fmt::Display for $name {
-            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-                core::fmt::Debug::fmt(self, f)
-            }
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! err_result_type {
-    ($name:ident) => {
-        pub type Result<T> = core::result::Result<T, $name>;
-    };
-}
 
 /// ### Safety
 ///

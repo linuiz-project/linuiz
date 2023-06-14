@@ -3,6 +3,7 @@
         "editor.defaultFormatter": "rust-lang.rust-analyzer"
     },
     "rust-analyzer.check.allTargets": false,
+    "rust-analyzer.showUnlinkedFileNotification": false,
     "rust-analyzer.linkedProjects": [
         "src/kernel/Cargo.toml",
         "src/shared/Cargo.toml",

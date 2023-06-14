@@ -4,7 +4,6 @@ use bit_field::BitField;
 pub use context::*;
 
 mod scheduling;
-use libsys::{page_size, Address, Virtual};
 pub use scheduling::*;
 
 mod address_space;
@@ -14,7 +13,9 @@ use crate::mem::alloc::AlignedAllocator;
 use alloc::{boxed::Box, string::String, vec::Vec};
 use core::num::NonZeroUsize;
 use elf::{endian::AnyEndian, file::FileHeader, segment::ProgramHeader};
+use libsys::{page_size, Address, Virtual};
 
+#[allow(clippy::cast_possible_truncation)]
 pub const STACK_SIZE: NonZeroUsize = NonZeroUsize::new((libsys::MIBIBYTE as usize) - page_size()).unwrap();
 pub const STACK_PAGES: NonZeroUsize = NonZeroUsize::new(STACK_SIZE.get() / page_size()).unwrap();
 pub const STACK_START: NonZeroUsize = NonZeroUsize::new(page_size()).unwrap();
@@ -161,6 +162,6 @@ impl core::fmt::Debug for Task {
             .field("Context", &self.context)
             .field("ELF Load Offset", &self.load_offset)
             .field("ELF Header", &self.elf_header)
-            .finish()
+            .finish_non_exhaustive()
     }
 }

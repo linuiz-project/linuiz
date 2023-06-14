@@ -1,18 +1,13 @@
 use crate::task::ElfData;
 use libsys::{Address, Page, Virtual};
 
-/// Indicates what type of error the common page fault handler encountered.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Error {
-    CoreState,
-    Process,
-    ElfData,
-}
-
-impl core::error::Error for Error {}
-impl core::fmt::Display for Error {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        core::fmt::Debug::fmt(self, f)
+crate::error_impl! {
+    /// Indicates what type of error the common page fault handler encountered.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Error {
+        CoreState => None,
+        Process => None,
+        ElfData => None
     }
 }
 
@@ -22,7 +17,7 @@ impl core::fmt::Display for Error {
 /// Calling this function more than once and/or outside the context of a page fault is undefined behaviour.
 #[doc(hidden)]
 #[inline(never)]
-pub unsafe fn handler(address: Address<Virtual>) -> Result<(), Error> {
+pub unsafe fn handler(address: Address<Virtual>) -> Result<()> {
     crate::local::with_scheduler(|scheduler| {
         use crate::mem::paging::TableEntryFlags;
         use libsys::page_size;

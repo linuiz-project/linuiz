@@ -6,49 +6,39 @@ use crate::mem::{
 use core::{num::NonZeroUsize, ptr::NonNull};
 use libsys::{page_size, Address, Page, Virtual};
 
-#[derive(Debug)]
-#[allow(clippy::enum_variant_names)]
-pub enum Error {
-    /// Indicates an allocation error occured in the backing allocator.
-    AllocError,
+crate::error_impl! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[allow(clippy::enum_variant_names)]
+    pub enum Error {
+        /// Indicates an allocation error occured in the backing allocator.
+        AllocError => None,
 
-    /// Indicates a malformed raw address was provided to an `Address` constructor.
-    MalformedAddress,
+        /// Indicates a malformed raw address was provided to an `Address` constructor.
+        MalformedAddress => None,
 
-    /// Indicates a provided address was not usable by the function.
-    InvalidAddress,
+        /// Indicates a provided address was not usable by the function.
+        InvalidAddress => None,
 
-    OverlappingAddress,
+        OverlappingAddress => None,
 
-    AddressOverrun,
+        AddressOverrun => None,
 
-    NotMapped(Address<Virtual>),
+        NotMapped { addr: Address<Virtual> } => None,
 
-    /// Provides the error that occured within the internal `Mapper`.
-    Paging(paging::Error),
-}
-
-impl core::error::Error for Error {
-    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
-        match self {
-            Self::Paging(err) => Some(err),
-            _ => None,
-        }
+        /// Provides the error that occured within the internal `Mapper`.
+        Paging { err: paging::Error } => Some(err)
     }
 }
 
 impl From<paging::Error> for Error {
     fn from(value: paging::Error) -> Self {
         match value {
-            paging::Error::AllocError => Error::AllocError,
-            paging::Error::NotMapped(addr) => Error::NotMapped(addr),
-            err => Error::Paging(err),
+            paging::Error::AllocError => Self::AllocError,
+            paging::Error::NotMapped { addr } => Self::NotMapped { addr },
+            err => Self::Paging { err },
         }
     }
 }
-
-crate::default_display_impl!(Error);
-crate::err_result_type!(Error);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(clippy::enum_variant_names)]
