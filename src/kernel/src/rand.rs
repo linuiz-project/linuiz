@@ -1,4 +1,7 @@
+#![allow(clippy::no_mangle_with_rust_abi)]
+
 getrandom::register_custom_getrandom!(prng_custom_getrandom);
+
 #[allow(clippy::unnecessary_wraps)]
 fn prng_custom_getrandom(buf: &mut [u8]) -> Result<(), getrandom::Error> {
     for chunk in buf.chunks_mut(core::mem::size_of::<u64>()) {

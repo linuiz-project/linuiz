@@ -2,8 +2,11 @@ OUTPUT_FORMAT(elf64-x86-64)
 OUTPUT_ARCH(i386:x86-64)
 ENTRY(_entry)
 
-KERNEL_BASE = 0xffffffff80000000;         /* Place kernel in the last 2GB of virtual memory. */
+/* Place kernel in the last 2GB of virtual memory. */
+KERNEL_BASE = 0xffffffff80000000;
 SEGMENT_ALIGN = CONSTANT(MAXPAGESIZE);
+/* SEGMENT_ALIGN = 0x200000; */
+
 
 SECTIONS
 {
@@ -80,5 +83,4 @@ SECTIONS
     .debug_weaknames      0 : { *(.debug_weaknames) }
     .line                 0 : { *(.line) }
     .shstrtab             0 : { *(.shstrtab) }
-
 }

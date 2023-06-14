@@ -161,7 +161,7 @@ unsafe extern "sysv64" fn exit_into(regs: &mut Registers, state: &mut State) -> 
         mov r14, [rax + (13 * 8)]
         mov r15, [rax + (14 * 8)]
         mov rax, [rax + (0 * 8)]
-    4: jmp 4b
+
         iretq
         ",
         const ISF_SIZE,

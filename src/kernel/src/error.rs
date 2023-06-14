@@ -5,7 +5,7 @@ macro_rules! error_impl {
         $(#[$outer:meta])*
         $vis:vis enum $Error:ident {
             $(
-                $(#[$inner:ident $($args:tt)*])*
+                $(#[$inner:meta])*
                 $Variant:ident$({
                     $($VarName:ident: $VarTy:ty),+
                 })? => $SourceExpr:expr
@@ -15,7 +15,7 @@ macro_rules! error_impl {
         $(#[$outer])*
         $vis enum $Error {
             $(
-                $(#[$inner $($args)*])*
+                $(#[$inner])*
                 $Variant$({ $($VarName: $VarTy),* })*
             ),*
         }
