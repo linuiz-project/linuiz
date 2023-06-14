@@ -9,7 +9,7 @@ use libsys::{Address, Virtual};
 
 pub static KERNEL_SYMBOLS: spin::Lazy<Option<(SymbolTable<'static, AnyEndian>, StringTable<'static>)>> =
     spin::Lazy::new(|| {
-        elf::ElfBytes::<elf::endian::AnyEndian>::minimal_parse(crate::boot::kernel_file()?.data())
+        elf::ElfBytes::<elf::endian::AnyEndian>::minimal_parse(crate::boot::kernel_file().unwrap().data())
             .ok()?
             .symbol_table()
             .ok()

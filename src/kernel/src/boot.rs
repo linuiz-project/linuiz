@@ -18,48 +18,67 @@ mod ignore {
     });
 }
 
+crate::error_impl! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Error {
+        BootExpired => None,
+        NoKernelFile => None,
+        NoRsdpAddress => None,
+        NoMemoryMap => None
+    }
+}
+
 pub const LIMINE_REV: u64 = 0;
 
 static BOOT_RECLAIM: AtomicBool = AtomicBool::new(false);
 
 macro_rules! boot_only {
     ($code:block) => {{
-        if BOOT_RECLAIM.load(Ordering::Acquire) {
-            None
+        if !BOOT_RECLAIM.load(Ordering::Acquire) {
+            Ok($code)
         } else {
-            $code
+            Err(Error::BootExpired)
         }
     }};
 }
 
-pub fn get_memory_map() -> Option<&'static [&'static limine::MemmapEntry]> {
+pub fn get_memory_map() -> Result<&'static [&'static limine::MemmapEntry]> {
     boot_only!({
         #[limine::limine_tag]
         static LIMINE_MMAP: limine::MemmapRequest = limine::MemmapRequest::new(LIMINE_REV);
 
-        LIMINE_MMAP.get_response().map(limine::MemmapResponse::get_memmap)
+        LIMINE_MMAP.get_response().map(limine::MemmapResponse::get_memmap).ok_or(Error::NoMemoryMap)
     })
+    .flatten()
 }
 
-pub fn get_rsdp_address() -> Option<Address<Virtual>> {
+pub fn get_rsdp_address() -> Result<Address<Virtual>> {
     boot_only!({
         #[limine::limine_tag]
         static LIMINE_RSDP: limine::RsdpRequest = limine::RsdpRequest::new(LIMINE_REV);
 
-        LIMINE_RSDP.get_response().and_then(limine::RsdpResponse::address).and_then(|ptr| {
-            Address::new(
-                // Properly handle the bootloader's mapping of ACPI addresses in lower-half or higher-half memory space.
-                core::cmp::min(ptr.addr().get(), ptr.addr().get().wrapping_sub(crate::mem::HHDM.address().get())),
-            )
-        })
+        LIMINE_RSDP
+            .get_response()
+            .and_then(limine::RsdpResponse::address)
+            .and_then(|ptr| {
+                Address::new(
+                    // Properly handle the bootloader's mapping of ACPI addresses in lower-half or higher-half memory space.
+                    core::cmp::min(ptr.addr().get(), ptr.addr().get().wrapping_sub(crate::mem::HHDM.address().get())),
+                )
+            })
+            .ok_or(Error::NoRsdpAddress)
     })
+    .flatten()
 }
 
-pub fn kernel_file() -> Option<&'static limine::File> {
-    #[limine::limine_tag]
-    static LIMINE_KERNEL_FILE: limine::KernelFileRequest = limine::KernelFileRequest::new(crate::boot::LIMINE_REV);
+pub fn kernel_file() -> Result<&'static limine::File> {
+    boot_only!({
+        #[limine::limine_tag]
+        static LIMINE_KERNEL_FILE: limine::KernelFileRequest = limine::KernelFileRequest::new(crate::boot::LIMINE_REV);
 
-    LIMINE_KERNEL_FILE.get_response().map(limine::KernelFileResponse::file)
+        LIMINE_KERNEL_FILE.get_response().map(limine::KernelFileResponse::file).ok_or(Error::NoKernelFile)
+    })
+    .flatten()
 }
 
 /// # Safety

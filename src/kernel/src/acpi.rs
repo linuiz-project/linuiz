@@ -1,11 +1,18 @@
-use acpi::PhysicalMapping;
-use port::{PortAddress, ReadWritePort};
-use spin::{Lazy, Mutex};
-
 use crate::mem::{
     alloc::{KernelAllocator, KMALLOC},
     HHDM,
 };
+use acpi::PhysicalMapping;
+use port::{PortAddress, ReadWritePort};
+use spin::{Lazy, Mutex};
+
+crate::error_impl! {
+    #[derive(Debug)]
+    pub enum Error {
+        Acpi { err: acpi::AcpiError } => None,
+        Boot { err: crate::boot::Error } => Some(err)
+    }
+}
 
 pub enum Register<'a, T: port::PortReadWrite> {
     Io(ReadWritePort<T>),
@@ -160,18 +167,17 @@ impl acpi::AcpiHandler for AcpiHandler {
 
 static TABLES: spin::Once<Mutex<acpi::AcpiTables<AcpiHandler>>> = spin::Once::new();
 
-pub fn init_interface() {
-    let tables_init = TABLES.try_call_once(|| {
-        crate::boot::get_rsdp_address()
-            // Safety: Bootloader guarantees any address provided for RDSP will be valid.
-            .and_then(|rsdp_address| unsafe { acpi::AcpiTables::from_rsdp(AcpiHandler, rsdp_address.get()).ok() })
-            .map(Mutex::new)
-            .ok_or(())
-    });
+pub fn init_interface() -> Result<()> {
+    TABLES.try_call_once(|| {
+        let rsdp_address = crate::boot::get_rsdp_address().map_err(|err| Error::Boot { err })?;
+        // Safety: Bootloader guarantees any address provided for RDSP will be valid.
+        let acpi_tables = unsafe { acpi::AcpiTables::from_rsdp(AcpiHandler, rsdp_address.get()) }
+            .map_err(|err| Error::Acpi { err })?;
 
-    if tables_init.is_err() {
-        warn!("ACPI interface failed to initialize. System will continue with a limited feature set.");
-    }
+        Ok(Mutex::new(acpi_tables))
+    })?;
+
+    Ok(())
 }
 
 pub static FADT: Lazy<Option<Mutex<PhysicalMapping<AcpiHandler, acpi::fadt::Fadt>>>> = Lazy::new(|| {

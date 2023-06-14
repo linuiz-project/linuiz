@@ -8,45 +8,50 @@ use core::mem::MaybeUninit;
 use libkernel::LinkerSymbol;
 use libsys::Address;
 
+crate::error_impl! {
+    #[derive(Debug)]
+    pub enum Error {
+        Memory { err: memory::Error } => Some(err)
+    }
+}
+
 pub static KERNEL_HANDLE: spin::Lazy<uuid::Uuid> = spin::Lazy::new(uuid::Uuid::new_v4);
 
 #[allow(clippy::too_many_lines)]
 pub unsafe extern "C" fn init() -> ! {
     use core::sync::atomic::{AtomicBool, Ordering};
 
-    static HAS_INIT: AtomicBool = AtomicBool::new(false);
+    static INIT: AtomicBool = AtomicBool::new(false);
+    assert!(!INIT.load(Ordering::Acquire), "`init()` has already been called!");
+    INIT.store(true, Ordering::Release);
 
-    if HAS_INIT.compare_exchange(false, true, Ordering::Release, Ordering::Relaxed).is_err() {
-        panic!("`init()` has already been called!");
-    } else {
-        setup_logging();
+    setup_logging();
 
-        print_boot_info();
+    print_boot_info();
 
-        crate::cpu::setup();
+    crate::cpu::setup();
 
-        memory::setup();
+    memory::setup().unwrap();
 
-        debug!("Initializing ACPI interface...");
-        crate::acpi::init_interface();
+    debug!("Initializing ACPI interface...");
+    crate::acpi::init_interface().unwrap();
 
-        load_drivers();
+    load_drivers();
 
-        setup_smp();
+    setup_smp();
 
-        debug!("Reclaiming bootloader memory...");
-        crate::boot::reclaim_boot_memory({
-            extern "C" {
-                static __symbols_start: LinkerSymbol;
-                static __symbols_end: LinkerSymbol;
-            }
+    debug!("Reclaiming bootloader memory...");
+    crate::boot::reclaim_boot_memory({
+        extern "C" {
+            static __symbols_start: LinkerSymbol;
+            static __symbols_end: LinkerSymbol;
+        }
 
-            &[__symbols_start.as_usize()..__symbols_end.as_usize()]
-        });
-        debug!("Bootloader memory reclaimed.");
+        &[__symbols_start.as_usize()..__symbols_end.as_usize()]
+    });
+    debug!("Bootloader memory reclaimed.");
 
-        kernel_core_setup()
-    }
+    kernel_core_setup()
 }
 
 /// ### Safety

@@ -50,12 +50,6 @@ crate::error_impl! {
     }
 }
 
-impl From<log::SetLoggerError> for Error {
-    fn from(_: log::SetLoggerError) -> Self {
-        Self::SetLoggerError
-    }
-}
-
 pub fn init() -> Result<()> {
     #[cfg(debug_assertions)]
     {
@@ -81,5 +75,8 @@ pub fn init() -> Result<()> {
         })
     });
 
-    SERIAL_UART.as_ref().ok_or(Error::NoLoggerError).and_then(|serial| log::set_logger(serial).map_err(Error::from))
+    let uart = SERIAL_UART.as_ref().ok_or(Error::NoLoggerError)?;
+    log::set_logger(uart).map_err(|_| Error::SetLoggerError)?;
+
+    Ok(())
 }
