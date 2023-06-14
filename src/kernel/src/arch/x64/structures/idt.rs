@@ -7,7 +7,7 @@ use x86_64::structures::idt;
 
 pub use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, InterruptStackFrameValue};
 
-macro_rules! push_stack_frame {
+macro_rules! push_ret_frame {
     ($ip_off:expr) => {
         concat!(
             "mov rax, [rsp + (",
@@ -76,7 +76,7 @@ macro_rules! exception_handler {
                     core::arch::asm!(
                         "cld",
                         push_gprs!(),
-                        push_stack_frame!(15),
+                        push_ret_frame!(15),
                         "
                         # move stack frame into first parameter
                         lea rdi, [rsp + (15 * 8)]
@@ -113,12 +113,12 @@ macro_rules! exception_handler_with_error {
                     core::arch::asm!(
                         "cld",
                         push_gprs!(),
-                        push_stack_frame!(16),
+                        push_ret_frame!(16),
                         "
                         # Move stack frame into first parameter.
-                        lea rdi, [rsp + (16 * 8)]
+                        lea rdi, [rsp + (18 * 8)]
                         # Move error code into second parameter.
-                        mov rsi, [rsp + (15 * 8)]
+                        mov rsi, [rsp + (17 * 8)]
                         # Move cached gprs pointer into third parameter.
                         mov rdx, rsp
 
@@ -157,12 +157,12 @@ macro_rules! irq_stub {
                     core::arch::asm!(
                         "cld",
                         push_gprs!(),
-                        push_stack_frame!(15),
+                        push_ret_frame!(15),
                         "
                         # Move IRQ vector into first parameter.
                         mov rdi, {}
                         # Move stack frame into second parameter.
-                        lea rsi, [rsp + (15 * 8)]
+                        lea rsi, [rsp + (17 * 8)]
                         # Move cached gprs pointer into third parameter.
                         mov rdx, rsp
 
