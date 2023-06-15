@@ -375,7 +375,6 @@ impl<'dev> Controller<'dev> {
         //          enabled when the controller starts.
         //
         //          I'm unsure what behaviour exists on real hardware.
-
         nvme.msix.set_enable(true);
         nvme.msix.set_function_mask(false);
         nvme.msix[0].configure(
@@ -383,7 +382,7 @@ impl<'dev> Controller<'dev> {
             // Specific vector should be dynamically selected
             // TODO possibly dynamically selected with special attributes per vector?
             //      i.e. separate interrupts for completions, DMA, etc.
-            //      or a single interrupts per device? ***** this seems limiting
+            //      or a single interrupts per device? <<< this seems limiting
             crate::interrupts::Vector::Storage0 as u8,
             libsys::InterruptDeliveryMode::Fixed,
         );

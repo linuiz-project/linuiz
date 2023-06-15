@@ -51,11 +51,6 @@ impl TableDepth {
     }
 
     #[inline]
-    pub const fn min_upper() -> Self {
-        Self(3)
-    }
-
-    #[inline]
     pub fn max() -> Self {
         Self(Info::max_paging_levels().get())
     }
@@ -77,15 +72,6 @@ impl TableDepth {
     #[inline]
     pub fn new(depth: u32) -> Option<Self> {
         (Self::min().0..=Self::max().0).contains(&depth).then_some(Self(depth))
-    }
-
-    #[inline]
-    pub const fn new_mappable<const DEPTH: u32>() -> Option<Self> {
-        if DEPTH >= Self::min().get() && DEPTH <= Self::min_upper().get() {
-            Some(Self(DEPTH))
-        } else {
-            None
-        }
     }
 
     #[inline]
@@ -371,7 +357,7 @@ impl<'a> PageTable<'a, Ref> {
         to_depth: Option<TableDepth>,
         with_fn: impl FnOnce(&PageTableEntry) -> T,
     ) -> Result<T> {
-        if let Some(to_depth) = to_depth && self.depth() == to_depth {
+        if self.depth() == to_depth.unwrap_or(TableDepth::min()) {
             Ok(with_fn(self.entry))
         } else if !self.is_huge() {
             let next_depth = self.depth().next_checked().unwrap();
@@ -412,7 +398,7 @@ impl<'a> PageTable<'a, Mut> {
         to_depth: Option<TableDepth>,
         with_fn: impl FnOnce(&mut PageTableEntry) -> T,
     ) -> Result<T> {
-        if let Some(to_depth) = to_depth && self.depth() == to_depth {
+        if self.depth() == to_depth.unwrap_or(TableDepth::min()) {
             Ok(with_fn(self.entry))
         } else if !self.is_huge() {
             let next_depth = self.depth().next_checked().unwrap();

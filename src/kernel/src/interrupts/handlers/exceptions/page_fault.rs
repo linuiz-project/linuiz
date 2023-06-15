@@ -6,8 +6,9 @@ crate::error_impl! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum Error {
         CoreState => None,
-        Process => None,
-        ElfData => None
+        NoTask => None,
+        ElfData => None,
+        UnhandledAddress { addr: Address<Virtual> } => None
     }
 }
 
@@ -22,8 +23,9 @@ pub unsafe fn handler(address: Address<Virtual>) -> Result<()> {
         use crate::mem::paging::TableEntryFlags;
         use libsys::page_size;
 
-        let task = scheduler.task_mut().ok_or(Error::Process)?;
-        let fault_elf_vaddr = address.get() - task.load_offset();
+        let task = scheduler.task_mut().ok_or(Error::NoTask)?;
+        let fault_elf_vaddr =
+            address.get().checked_sub(task.load_offset()).ok_or(Error::UnhandledAddress { addr: address })?;
         let phdr = *task
             .elf_segments()
             .iter()
@@ -37,8 +39,9 @@ pub unsafe fn handler(address: Address<Virtual>) -> Result<()> {
         debug_assert_eq!(phdr.p_align & (libsys::page_mask() as u64), 0);
 
         let fault_page = Address::<Page>::new_truncate(address.get());
-        trace!("Demand mapping {:X?} from segment: {:X?}", fault_page.as_ptr(), phdr);
+        debug!("Demand mapping {:X?} from segment: {:X?}", fault_page.as_ptr(), phdr);
 
+        trace!("Calculating addresses and offsets for mapping.");
         let fault_vaddr = fault_page.get().get() - task.load_offset();
         let segment_vaddr = usize::try_from(phdr.p_vaddr).unwrap();
         let segment_file_size = usize::try_from(phdr.p_filesz).unwrap();
@@ -54,6 +57,7 @@ pub unsafe fn handler(address: Address<Virtual>) -> Result<()> {
         let segment_range = padded_segment_offset..segment_range_end;
 
         // Map the page as RW so we can copy the ELF data in.
+        trace!("Mapping the demand page RW so data can be copied.");
         let mapped_memory = task
             .address_space_mut()
             .mmap(Some(fault_page), core::num::NonZeroUsize::MIN, crate::task::MmapPermissions::ReadWrite)
@@ -63,6 +67,7 @@ pub unsafe fn handler(address: Address<Virtual>) -> Result<()> {
         let (front_pad, remaining) = mapped_memory.split_at_mut(segment_front_pad);
         let (file_memory, end_pad) = remaining.split_at_mut(segment_range.len());
 
+        trace!("Copying memory into demand mapping.");
         front_pad.fill(core::mem::MaybeUninit::new(0x0));
         end_pad.fill(core::mem::MaybeUninit::new(0x0));
 
@@ -78,6 +83,7 @@ pub unsafe fn handler(address: Address<Virtual>) -> Result<()> {
         }
 
         // Process any relocations.
+        trace!("Processing demand mapping relocations.");
         let load_offset = task.load_offset();
         let fault_page_mem_range = fault_vaddr..(fault_vaddr + page_size());
         task.elf_relas().drain_filter(|rela| {
@@ -91,15 +97,18 @@ pub unsafe fn handler(address: Address<Virtual>) -> Result<()> {
             }
         });
 
+        trace!("Properly calculating page's attributes.");
         task.address_space_mut()
             .set_flags(
                 fault_page,
-                core::num::NonZeroUsize::MIN,
+                core::num::NonZeroUsize::new(1).unwrap(),
                 TableEntryFlags::PRESENT
                     | TableEntryFlags::USER
-                    | TableEntryFlags::from(crate::task::segment_type_to_mmap_permissions(phdr.p_type)),
+                    | TableEntryFlags::from(crate::task::segment_to_mmap_permissions(phdr.p_type)),
             )
             .unwrap();
+
+        trace!("Demand mapping complete.");
 
         Ok(())
     })

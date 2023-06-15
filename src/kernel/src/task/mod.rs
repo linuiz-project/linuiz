@@ -9,7 +9,7 @@ pub use scheduling::*;
 mod address_space;
 pub use address_space::*;
 
-use crate::mem::alloc::AlignedAllocator;
+use crate::mem::{alloc::AlignedAllocator, Stack};
 use alloc::{boxed::Box, string::String, vec::Vec};
 use core::num::NonZeroUsize;
 use elf::{endian::AnyEndian, file::FileHeader, segment::ProgramHeader};
@@ -24,13 +24,12 @@ pub const MIN_LOAD_OFFSET: usize = STACK_START.get() + STACK_SIZE.get();
 pub const PT_FLAG_EXEC_BIT: usize = 0;
 pub const PT_FLAG_WRITE_BIT: usize = 1;
 
-pub fn segment_type_to_mmap_permissions(segment_ty: u32) -> MmapPermissions {
-    if segment_ty.get_bit(PT_FLAG_WRITE_BIT) {
-        MmapPermissions::ReadWrite
-    } else if segment_ty.get_bit(PT_FLAG_EXEC_BIT) {
-        MmapPermissions::ReadExecute
-    } else {
-        MmapPermissions::ReadOnly
+pub fn segment_to_mmap_permissions(segment_ty: u32) -> MmapPermissions {
+    match (segment_ty.get_bit(PT_FLAG_WRITE_BIT), segment_ty.get_bit(PT_FLAG_EXEC_BIT)) {
+        (true, false) => MmapPermissions::ReadWrite,
+        (false, true) => MmapPermissions::ReadExecute,
+        (false, false) => MmapPermissions::ReadOnly,
+        (true, true) => panic!("ELF section is WX"),
     }
 }
 

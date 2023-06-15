@@ -76,19 +76,21 @@ pub unsafe fn init(timer_frequency: u16) {
         };
         use core::num::NonZeroUsize;
 
-        const TSS_STACK_PAGES: NonZeroUsize = NonZeroUsize::new(16).unwrap();
+        fn allocate_tss_stack() -> VirtAddr {
+            use crate::mem::Stack;
 
-        fn allocate_tss_stack(pages: NonZeroUsize) -> VirtAddr {
-            VirtAddr::from_ptr(Box::into_raw(Box::<[u8]>::new_uninit_slice(pages.get() * 0x1000)).addr() as *const u8)
+            const TSS_STACK_SIZE: NonZeroUsize = NonZeroUsize::new(0x16000).unwrap();
+
+            VirtAddr::from_ptr(Box::leak(Box::new(Stack::<{ TSS_STACK_SIZE.get() }>::new())).as_ptr_range().end)
         }
 
         let mut tss = Box::new(tss::TaskStateSegment::new());
-        // TODO guard pages for these stacks ?
-        tss.privilege_stack_table[0] = allocate_tss_stack(TSS_STACK_PAGES);
-        tss.interrupt_stack_table[StackTableIndex::Debug as usize] = allocate_tss_stack(TSS_STACK_PAGES);
-        tss.interrupt_stack_table[StackTableIndex::NonMaskable as usize] = allocate_tss_stack(TSS_STACK_PAGES);
-        tss.interrupt_stack_table[StackTableIndex::DoubleFault as usize] = allocate_tss_stack(TSS_STACK_PAGES);
-        tss.interrupt_stack_table[StackTableIndex::MachineCheck as usize] = allocate_tss_stack(TSS_STACK_PAGES);
+        // TODO guard pages for these stacks
+        tss.privilege_stack_table[0] = allocate_tss_stack();
+        tss.interrupt_stack_table[StackTableIndex::Debug as usize] = allocate_tss_stack();
+        tss.interrupt_stack_table[StackTableIndex::NonMaskable as usize] = allocate_tss_stack();
+        tss.interrupt_stack_table[StackTableIndex::DoubleFault as usize] = allocate_tss_stack();
+        tss.interrupt_stack_table[StackTableIndex::MachineCheck as usize] = allocate_tss_stack();
 
         tss::load_local(tss::ptr_as_descriptor(NonNull::new(&mut *tss).unwrap()));
 

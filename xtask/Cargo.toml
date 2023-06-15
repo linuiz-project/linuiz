@@ -10,10 +10,10 @@ reqwest = { version = "0.11", default-features = false, features = [
     "native-tls",
     "blocking",
 ] }
+tar = { version = "0.4", default-features = false }
 anyhow = "1.0"
 xshell = "0.2"
 toml = "0.7"
-tar = "0.4"
 lzma-rs = "0.3"
 
 [profile.dev]

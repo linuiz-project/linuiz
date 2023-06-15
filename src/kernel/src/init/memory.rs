@@ -109,7 +109,7 @@ pub fn setup() -> Result<()> {
                 // Safety: `KERNEL_BASE` is a linker symbol to an in-executable memory location, so it is guaranteed to be valid (and is never written to).
                 let base_offset = usize::try_from(phdr.p_vaddr).unwrap() - unsafe { KERNEL_BASE.as_usize() };
                 let base_offset_end = base_offset + usize::try_from(phdr.p_memsz).unwrap();
-                let flags = TableEntryFlags::from(crate::task::segment_type_to_mmap_permissions(phdr.p_flags));
+                let flags = TableEntryFlags::from(crate::task::segment_to_mmap_permissions(phdr.p_flags));
 
                 (base_offset..base_offset_end)
                     .step_by(page_size())
@@ -142,22 +142,22 @@ fn map_hhdm_range(
 ) -> Result<()> {
     use crate::mem::HHDM;
 
-    const HUGE_PAGE_DEPTH: TableDepth = TableDepth::new_mappable::<1>().unwrap();
+    let huge_page_depth = TableDepth::new(1).unwrap();
 
     trace!("HHDM Map  {:#X?}  {:?}   lock {}", range, flags, lock_frames);
 
     while !range.is_empty() {
-        if range.len() > HUGE_PAGE_DEPTH.align()
-            && range.start.trailing_zeros() >= HUGE_PAGE_DEPTH.align().trailing_zeros()
+        if range.len() > huge_page_depth.align()
+            && range.start.trailing_zeros() >= huge_page_depth.align().trailing_zeros()
         {
             // Map a huge page
 
             let frame = Address::new(range.start).unwrap();
             let page = HHDM.offset(frame).unwrap();
-            range.advance_by(HUGE_PAGE_DEPTH.align()).unwrap();
+            range.advance_by(huge_page_depth.align()).unwrap();
 
             mapper
-                .map(page, HUGE_PAGE_DEPTH, frame, lock_frames, flags | TableEntryFlags::HUGE)
+                .map(page, huge_page_depth, frame, lock_frames, flags | TableEntryFlags::HUGE)
                 .map_err(|err| Error::Paging { err })?;
         } else {
             // Map a standard page

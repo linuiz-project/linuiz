@@ -21,7 +21,9 @@ crate::error_impl! {
 
         OverlappingAddress => None,
 
-        AddressOverrun => None,
+        AddressOverrun { value: usize } => None,
+
+        AddressIndexOverrun { index: usize } => None,
 
         NotMapped { addr: Address<Virtual> } => None,
 
@@ -133,9 +135,6 @@ impl AddressSpace {
         page_count: NonZeroUsize,
         permissions: MmapPermissions,
     ) -> Result<NonNull<[u8]>> {
-        let size = page_count.get() * page_size();
-        let _end_address = Address::<Page>::new(address.get().get() + size).ok_or(Error::AddressOverrun);
-
         unsafe {
             self.invoke_mapper(
                 address,
@@ -170,13 +169,17 @@ impl AddressSpace {
         page_count: NonZeroUsize,
         flags: TableEntryFlags,
     ) -> Result<()> {
-        let size = page_count.get() * page_size();
-        let _end_address = Address::<Page>::new(address.get().get() + size).ok_or(Error::AddressOverrun);
+        for index_offset in 0..page_count.get() {
+            let offset_index = address.index() + index_offset;
+            let offset_address =
+                Address::from_index(offset_index).ok_or(Error::AddressIndexOverrun { index: offset_index })?;
 
-        (0..size)
-            .map(|offset| Address::new_truncate(address.get().get() + offset))
-            .try_for_each(|offset_page| self.0.set_page_attributes(offset_page, None, flags, paging::FlagsModify::Set))
-            .map_err(Error::from)
+            self.0
+                .set_page_attributes(offset_address, None, flags, paging::FlagsModify::Set)
+                .map_err(|err| Error::Paging { err })?
+        }
+
+        Ok(())
     }
 
     pub fn is_mmapped(&self, address: Address<Page>) -> bool {

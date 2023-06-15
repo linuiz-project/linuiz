@@ -6,7 +6,7 @@ mod page_fault;
 #[doc(hidden)]
 #[inline(never)]
 pub fn ex_handler(exception: ArchException) {
-    trace!("Handling exception: {:X?}", exception);
+    trace!("Handling exception: {:#X?}", exception);
 
     match exception {
         // Safety: Function is called once per this page fault exception.
@@ -16,6 +16,6 @@ pub fn ex_handler(exception: ArchException) {
             }
         },
 
-        exception => panic!("unhandled exception: {:?}", exception),
+        _ => panic!("could not handle exception!"),
     };
 }
