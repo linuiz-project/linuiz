@@ -8,11 +8,27 @@ use x86_64::structures::idt;
 pub use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, InterruptStackFrameValue};
 
 macro_rules! push_ret_frame {
-    ($ip_off:expr) => {
+    ($ip_off:literal) => {
         concat!(
-            "mov rax, [rsp + (",
+            "
+            # copy code segment to `rax`
+            mov rax, [rsp + ((",
+            stringify!($ip_off),
+            " + 1) * 8)]
+
+            # We don't want to try and trace a fault in the kernel back to
+            # userspace, so we check if we're coming from the kernel.
+            cmp rax, 0x8    # are we coming from kernel code?
+            je 2f           # if so, don't zero the frame pointer
+            xor rbp, rbp    # if not, zero the frame pointer
+            2:
+
+            # copy ip to `rax`
+            mov rax, [rsp + (",
             stringify!($ip_off),
             " * 8)]
+
+            # push return frame
             push rax                # push instruction pointer
             push rbp                # push frame pointer
             mov rbp, rsp
@@ -79,17 +95,17 @@ macro_rules! exception_handler {
                         push_ret_frame!(15),
                         "
                         # move stack frame into first parameter
-                        lea rdi, [rsp + (15 * 8)]
+                        lea rdi, [rsp + (17 * 8)]
                         # Move cached gprs pointer into second parameter.
-                        mov rsi, rsp
+                        lea rsi, [rsp + (2 * 8)]
 
                         call {}
 
-                        # 'pop' stack frame
-                        add rsp, 0x10
+                        add rsp, 0x10   # 'pop' stack frame
+                        ", pop_gprs!(), "
+
+                        iretq
                         ",
-                        pop_gprs!(),
-                        "iretq",
                         sym [<$exception_name _handler_inner>],
                         options(noreturn)
                     )
@@ -120,20 +136,16 @@ macro_rules! exception_handler_with_error {
                         # Move error code into second parameter.
                         mov rsi, [rsp + (17 * 8)]
                         # Move cached gprs pointer into third parameter.
-                        mov rdx, rsp
+                        lea rdx, [rsp + (2 * 8)]
 
                         # align stack for SysV
                         sub rsp, 0x8
                         
                         call {}
 
-                        # 'pop' align & stack frame
-                        add rsp, 0x18
-                        ",
-                        pop_gprs!(),
-                        "
-                        # 'pop' error code
-                        add rsp, 0x8
+                        add rsp, 0x18   # 'pop' sysv fn-align & stack frame
+                        ", pop_gprs!(), "
+                        add rsp, 0x8    # 'pop' error code
 
                         iretq
                         ",
@@ -159,20 +171,21 @@ macro_rules! irq_stub {
                         push_gprs!(),
                         push_ret_frame!(15),
                         "
+
                         # Move IRQ vector into first parameter.
                         mov rdi, {}
                         # Move stack frame into second parameter.
                         lea rsi, [rsp + (17 * 8)]
                         # Move cached gprs pointer into third parameter.
-                        mov rdx, rsp
+                        lea rdx, [rsp + (2 * 8)]
 
                         call {}
 
-                        # 'pop' stack frame
-                        add rsp, 0x10
+                        add rsp, 0x10   # 'pop' stack frame
+                        ", pop_gprs!(), "
+
+                        iretq
                         ",
-                        pop_gprs!(),
-                        "iretq",
                         const $irq_vector,
                         sym irq_handoff,
                         options(noreturn)
@@ -320,6 +333,12 @@ extern "sysv64" fn ve_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Re
 // --- reserved 22-30
 
 // --- triple fault (can't handle)
+
+/// Loads the IDT from the interrupt descriptor table register.
+pub unsafe fn get_current() -> Option<&'static mut InterruptDescriptorTable> {
+    let idt_pointer = x86_64::instructions::tables::sidt();
+    idt_pointer.base.as_mut_ptr::<InterruptDescriptorTable>().as_mut()
+}
 
 /// Defines set indexes which specified interrupts will use for stacks.
 #[repr(usize)]
@@ -812,9 +831,3 @@ irq_stub!(252);
 irq_stub!(253);
 irq_stub!(254);
 irq_stub!(255);
-
-/// Loads the IDT from the interrupt descriptor table register.
-pub unsafe fn get_current() -> Option<&'static mut InterruptDescriptorTable> {
-    let idt_pointer = x86_64::instructions::tables::sidt();
-    idt_pointer.base.as_mut_ptr::<InterruptDescriptorTable>().as_mut()
-}
