@@ -1,4 +1,4 @@
-use crate::{checked_virt_canonical, virt_canonical_shift};
+use crate::{checked_virt_canonical, virt_noncanonical_shift};
 
 pub struct Virtual;
 
@@ -12,8 +12,8 @@ impl super::Addressable for Virtual {
     }
 
     fn new_truncate(init: Self::Init) -> Self::Repr {
-        let shift = Self::Init::BITS - virt_canonical_shift().get();
-        (((init << shift) as isize) >> shift) as Self::Repr
+        let sign_extension_shift = Self::Init::BITS - virt_noncanonical_shift().get();
+        (((init << sign_extension_shift) as isize) >> sign_extension_shift) as Self::Repr
     }
 
     fn get(repr: Self::Repr) -> Self::Get {

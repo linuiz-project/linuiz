@@ -43,26 +43,22 @@ mod x86_64 {
         let cr4: usize;
         unsafe { core::arch::asm!("mov {}, cr4", out(reg) cr4, options(nomem, pure)) };
 
-        if (cr4 & CR4_LA57_BIT) > 0 {
+        if (cr4 & CR4_LA57_BIT) == 0 {
             4
         } else {
             5
         }
     }
 
-    pub fn virt_canonical_shift() -> NonZeroU32 {
-        NonZeroU32::new((table_index_shift().get() * paging_depth()) + page_shift().get()).unwrap()
-    }
+    pub fn virt_noncanonical_shift() -> NonZeroU32 {
+        let table_indexes_shift = table_index_shift().get() * paging_depth();
+        let total_shift = table_indexes_shift + page_shift().get();
 
-    pub fn virt_canonical_mask() -> usize {
-        let shift = virt_canonical_shift().get();
-        usize::MAX << shift >> shift
+        NonZeroU32::new(total_shift).unwrap()
     }
 
     pub fn checked_virt_canonical(address: usize) -> bool {
-        let extension_bits = address >> virt_canonical_shift().get();
-        let virt_upper_bits_mask = usize::MAX >> virt_canonical_shift().get();
-
-        extension_bits == 0 || extension_bits == virt_upper_bits_mask
+        let sign_extension_check_shift = virt_noncanonical_shift().get().checked_sub(1).unwrap();
+        matches!(address >> sign_extension_check_shift, 0 | 0x1ffff)
     }
 }
