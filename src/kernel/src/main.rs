@@ -7,6 +7,7 @@
     iter_array_chunks,                      // #100450 <https://github.com/rust-lang/rust/issues/100450>
     iter_next_chunk,                        // #98326 <https://github.com/rust-lang/rust/issues/98326>
     array_windows,                          // #75027 <https://github.com/rust-lang/rust/issues/75027>
+    maybe_uninit_slice,                     // #63569 <https://github.com/rust-lang/rust/issues/63569>
     iterator_try_reduce,                    // #87053 <https://github.com/rust-lang/rust/issues/87053>
     map_try_insert,                         // #82766 <https://github.com/rust-lang/rust/issues/82766>
     drain_filter,                           // #43244 <https://github.com/rust-lang/rust/issues/43244>
@@ -41,9 +42,14 @@
 )]
 #![forbid(clippy::inline_asm_x86_att_syntax)]
 #![deny(clippy::semicolon_if_nothing_returned, clippy::debug_assert_with_mut_call, clippy::float_arithmetic)]
-#![warn(clippy::cargo, clippy::pedantic, clippy::undocumented_unsafe_blocks, clippy::missing_const_for_fn)]
+#![warn(
+    clippy::cargo,
+    clippy::pedantic,
+    clippy::undocumented_unsafe_blocks,
+    clippy::missing_const_for_fn,
+    clippy::cast_lossless
+)]
 #![allow(
-    clippy::cast_lossless,
     clippy::enum_glob_use,
     clippy::inline_always,
     clippy::items_after_statements,
@@ -58,6 +64,7 @@
 #![cfg_attr(target_arch = "x86_64", feature(abi_x86_interrupt))]
 
 extern crate alloc;
+
 #[macro_use]
 extern crate log;
 

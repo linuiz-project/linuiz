@@ -15,7 +15,7 @@ pub enum Vector {
     TaskYield = 0x201,
 }
 
-#[repr(C)]
+#[repr(u64)]
 #[derive(Debug)]
 pub enum Result {
     Ok,

@@ -1,6 +1,6 @@
 use crate::{cpu::exceptions::Exception, interrupts::InterruptCell, task::Scheduler};
 use alloc::boxed::Box;
-use core::{cell::UnsafeCell, mem::MaybeUninit, num::NonZeroU64, ptr::NonNull, sync::atomic::AtomicBool};
+use core::{cell::UnsafeCell, num::NonZeroU64, ptr::NonNull, sync::atomic::AtomicBool};
 
 pub(self) const US_PER_SEC: u32 = 1000000;
 pub(self) const US_WAIT: u32 = 10000;
@@ -17,10 +17,6 @@ pub const STACK_SIZE: usize = 0x10000;
 
 #[repr(C)]
 struct State {
-    syscall_stack_ptr: NonNull<MaybeUninit<u8>>,
-    // TODO use Stack<>
-    syscall_stack: Box<[MaybeUninit<u8>]>,
-
     core_id: u32,
     scheduler: InterruptCell<Scheduler>,
 
@@ -53,8 +49,6 @@ pub enum ExceptionCatcher {
 /// This function invariantly assumes it will only be called once.
 #[allow(clippy::too_many_lines)]
 pub unsafe fn init(timer_frequency: u16) {
-    let syscall_stack = Box::new_zeroed_slice(STACK_SIZE);
-
     #[cfg(target_arch = "x86_64")]
     let idt = {
         use crate::arch::x64::structures::idt;
@@ -98,9 +92,6 @@ pub unsafe fn init(timer_frequency: u16) {
     };
 
     let mut state = Box::new(State {
-        syscall_stack_ptr: NonNull::new(syscall_stack.as_ptr_range().end.cast_mut()).unwrap(),
-        syscall_stack,
-
         core_id: crate::cpu::read_id(),
         scheduler: InterruptCell::new(Scheduler::new(false)),
 
@@ -148,15 +139,15 @@ pub unsafe fn init(timer_frequency: u16) {
                     crate::time::SYSTEM_CLOCK.spin_wait_us(US_WAIT);
                     let end_tsc = core::arch::x86_64::_rdtsc();
 
-                    (end_tsc - start_tsc) * (US_FREQ_FACTOR as u64)
+                    (end_tsc - start_tsc) * u64::from(US_FREQ_FACTOR)
                 },
                 |info| {
-                    (info.bus_frequency() as u64)
-                        / ((info.processor_base_frequency() as u64) * (info.processor_max_frequency() as u64))
+                    u64::from(info.bus_frequency())
+                        / (u64::from(info.processor_base_frequency()) * u64::from(info.processor_max_frequency()))
                 },
             );
 
-            frequency / (timer_frequency as u64)
+            frequency / u64::from(timer_frequency)
         } else {
             apic.sw_enable();
             apic.set_timer_divisor(apic::TimerDivisor::Div1);
@@ -173,16 +164,16 @@ pub unsafe fn init(timer_frequency: u16) {
             // Ensure we reset the APIC timer to avoid any errant interrupts.
             apic.set_timer_initial_count(0);
 
-            (frequency / (timer_frequency as u32)) as u64
+            u64::from(frequency / u32::from(timer_frequency))
         };
 
         state.timer_interval = NonZeroU64::new(timer_interval);
     }
 
-    state.syscall_stack_ptr = NonNull::new(state.syscall_stack.as_mut_ptr().add(state.syscall_stack.len())).unwrap();
-    let state_ptr = Box::leak(state) as *mut State;
+    let state_address = Box::into_raw(state).addr();
+
     #[cfg(target_arch = "x86_64")]
-    crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::write(state_ptr.addr() as u64);
+    crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::write(state_address as u64);
 }
 
 fn get_state_ptr() -> Result<NonNull<State>> {

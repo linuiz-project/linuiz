@@ -1,8 +1,8 @@
+pub mod exceptions;
+pub mod traps;
+
 mod instructions;
 pub use instructions::*;
-
-mod handlers;
-pub use handlers::*;
 
 use num_enum::TryFromPrimitive;
 
@@ -54,6 +54,8 @@ pub enum Vector {
     LINT0 = 0x3D,
     LINT1 = 0x3E,
     Spurious = 0x3F,
+
+    Syscall = 0x80,
 }
 
 /// Provides access to the contained instance of `T`, ensuring interrupts are disabled before it is borrowed.

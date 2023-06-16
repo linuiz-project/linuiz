@@ -23,8 +23,8 @@ pub mod prng {
             {
                 // Safety: ???
                 unsafe {
-                    let state_low = core::arch::x86_64::_rdtsc() as u128;
-                    let state_high = core::arch::x86_64::_rdtsc() as u128;
+                    let state_low = u128::from(core::arch::x86_64::_rdtsc());
+                    let state_high = u128::from(core::arch::x86_64::_rdtsc());
                     state_low | (state_high << 64)
                 }
             }

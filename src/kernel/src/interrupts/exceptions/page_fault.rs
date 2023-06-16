@@ -1,4 +1,3 @@
-use crate::task::ElfData;
 use libsys::{Address, Page, Virtual};
 
 crate::error_impl! {
@@ -20,7 +19,8 @@ crate::error_impl! {
 #[inline(never)]
 pub unsafe fn handler(address: Address<Virtual>) -> Result<()> {
     crate::local::with_scheduler(|scheduler| {
-        use crate::mem::paging::TableEntryFlags;
+        use crate::{mem::paging::TableEntryFlags, task::ElfData};
+        use core::mem::MaybeUninit;
         use libsys::page_size;
 
         let task = scheduler.task_mut().ok_or(Error::NoTask)?;
@@ -67,20 +67,31 @@ pub unsafe fn handler(address: Address<Virtual>) -> Result<()> {
         let (front_pad, remaining) = mapped_memory.split_at_mut(segment_front_pad);
         let (file_memory, end_pad) = remaining.split_at_mut(segment_range.len());
 
-        trace!("Copying memory into demand mapping.");
-        front_pad.fill(core::mem::MaybeUninit::new(0x0));
-        end_pad.fill(core::mem::MaybeUninit::new(0x0));
+        trace!(
+            "Copying memory into demand mapping: {:#X}..{:#X}..{:#X}.",
+            front_pad.len(),
+            file_memory.len(),
+            end_pad.len()
+        );
+        front_pad.fill(MaybeUninit::uninit());
+        end_pad.fill(MaybeUninit::uninit());
 
-        if file_memory.is_empty() {
+        if !file_memory.is_empty() {
             match task.elf_data() {
                 ElfData::Memory(data) => {
                     // Safety: Same-sized reinterpret for copying.
-                    let copy_data = unsafe { data.get(segment_range).unwrap().align_to().1 };
+                    let (pre, copy_data, post) = unsafe { data.get(segment_range).unwrap().align_to() };
+                    assert!(pre.is_empty());
+                    assert!(post.is_empty());
+
                     file_memory.copy_from_slice(copy_data);
                 }
                 ElfData::File(_) => unimplemented!(),
             }
         }
+
+        // Safety: Array has been initialized with values.
+        let _mapped_memory = unsafe { MaybeUninit::slice_assume_init_mut(mapped_memory) };
 
         // Process any relocations.
         trace!("Processing demand mapping relocations.");

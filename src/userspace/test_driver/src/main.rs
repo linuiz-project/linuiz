@@ -24,8 +24,8 @@ unsafe impl core::alloc::GlobalAlloc for FakeAllocator {
 #[no_mangle]
 extern "C" fn _start() -> ! {
     loop {
-        // libsys::syscall::klog::error("klog syscall test 1");
-        // libsys::syscall::klog::error("klog syscall test 2");
+        libsys::syscall::klog::info("klog syscall test 1");
+        libsys::syscall::klog::info("klog syscall test 2");
         libsys::syscall::task::yield_task();
     }
 }

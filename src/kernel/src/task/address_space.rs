@@ -71,7 +71,14 @@ impl AddressSpace {
     }
 
     pub fn new_userspace() -> Self {
-        Self::new(unsafe { Mapper::new_unsafe(TableDepth::current(), crate::mem::copy_kernel_page_table().unwrap()) })
+        Self::new(unsafe { Mapper::new_unsafe(TableDepth::max(), crate::mem::copy_kernel_page_table().unwrap()) })
+    }
+
+    pub fn is_current(&self) -> bool {
+        let root_frame = self.0.root_frame();
+        let cr3_frame = crate::mem::PagingRegister::read().frame();
+
+        root_frame == cr3_frame
     }
 
     pub fn mmap(
@@ -92,8 +99,7 @@ impl AddressSpace {
     #[cfg_attr(debug_assertions, inline(never))]
     fn map_any(&mut self, page_count: NonZeroUsize, permissions: MmapPermissions) -> Result<NonNull<[u8]>> {
         let walker = unsafe {
-            paging::walker::Walker::new(self.0.view_page_table(), TableDepth::current(), TableDepth::new(1).unwrap())
-                .unwrap()
+            paging::walker::Walker::new(self.0.view_page_table(), TableDepth::max(), TableDepth::min()).unwrap()
         };
 
         let mut index = 0;
@@ -176,7 +182,7 @@ impl AddressSpace {
 
             self.0
                 .set_page_attributes(offset_address, None, flags, paging::FlagsModify::Set)
-                .map_err(|err| Error::Paging { err })?
+                .map_err(|err| Error::Paging { err })?;
         }
 
         Ok(())

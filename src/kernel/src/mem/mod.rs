@@ -40,7 +40,7 @@ pub fn with_kmapper<T>(func: impl FnOnce(&mut Mapper) -> T) -> T {
     static KERNEL_MAPPER: Lazy<InterruptCell<Mutex<Mapper>>> = Lazy::new(|| {
         debug!("Creating kernel-space address mapper.");
 
-        InterruptCell::new(Mutex::new(Mapper::new(paging::TableDepth::current()).unwrap()))
+        InterruptCell::new(Mutex::new(Mapper::new(paging::TableDepth::max()).unwrap()))
     });
 
     KERNEL_MAPPER.with(|mapper| {

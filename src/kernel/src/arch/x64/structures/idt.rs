@@ -7,36 +7,6 @@ use x86_64::structures::idt;
 
 pub use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, InterruptStackFrameValue};
 
-macro_rules! push_ret_frame {
-    ($ip_off:literal) => {
-        concat!(
-            "
-            # copy code segment to `rax`
-            mov rax, [rsp + ((",
-            stringify!($ip_off),
-            " + 1) * 8)]
-
-            # We don't want to try and trace a fault in the kernel back to
-            # userspace, so we check if we're coming from the kernel.
-            cmp rax, 0x8    # are we coming from kernel code?
-            je 2f           # if so, don't zero the frame pointer
-            xor rbp, rbp    # if not, zero the frame pointer
-            2:
-
-            # copy ip to `rax`
-            mov rax, [rsp + (",
-            stringify!($ip_off),
-            " * 8)]
-
-            # push return frame
-            push rax                # push instruction pointer
-            push rbp                # push frame pointer
-            mov rbp, rsp
-            "
-        )
-    };
-}
-
 macro_rules! push_gprs {
     () => {
         "
@@ -81,11 +51,40 @@ macro_rules! pop_gprs {
     };
 }
 
+macro_rules! push_ret_frame {
+    ($ip_off:literal) => {
+        concat!(
+            "
+            # copy code segment to `rax`
+            mov rax, [rsp + (",
+            stringify!($ip_off + 1),
+            " * 8)]
+
+            # We don't want to try and trace a fault in the kernel back to
+            # userspace, so we check if we're coming from the kernel.
+            cmp rax, 0x8    # are we coming from kernel code?
+            je 2f           # if so, don't zero the frame pointer
+            xor rbp, rbp    # if not, zero the frame pointer
+            2:
+
+            # copy ip to `rax`
+            mov rax, [rsp + (",
+            stringify!($ip_off),
+            " * 8)]
+
+            # push return frame
+            push rax                # push instruction pointer
+            push rbp                # push frame pointer
+            mov rbp, rsp
+            "
+        )
+    };
+}
+
 macro_rules! exception_handler {
     ($exception_name:ident, $return_type:ty) => {
         paste::paste! {
             #[naked]
-            #[doc(hidden)]
             extern "x86-interrupt" fn [<$exception_name _handler>](stack_frame: InterruptStackFrame) -> $return_type {
                 // Safety: When has perfect assembly ever caused undefined behaviour?
                 unsafe {
@@ -119,7 +118,6 @@ macro_rules! exception_handler_with_error {
     ($exception_name:ident, $error_ty:ty, $return_type:ty) => {
         paste::paste! {
             #[naked]
-            #[doc(hidden)]
             extern "x86-interrupt" fn [<$exception_name _handler>](
                 stack_frame: InterruptStackFrame,
                 error_code: $error_ty
@@ -140,7 +138,7 @@ macro_rules! exception_handler_with_error {
 
                         # align stack for SysV
                         sub rsp, 0x8
-                        
+
                         call {}
 
                         add rsp, 0x18   # 'pop' sysv fn-align & stack frame
@@ -162,7 +160,6 @@ macro_rules! irq_stub {
     ($irq_vector:literal) => {
         paste::paste! {
             #[naked]
-            #[doc(hidden)]
             extern "x86-interrupt" fn [<irq_ $irq_vector>](_: crate::arch::x64::structures::idt::InterruptStackFrame) {
                 // Safety: This is literally perfect assembly. It's safe because it's perfect.
                 unsafe {
@@ -381,6 +378,9 @@ pub fn set_exception_handlers(idt: &mut InterruptDescriptorTable) {
 
 #[allow(clippy::too_many_lines)]
 pub fn set_stub_handlers(idt: &mut InterruptDescriptorTable) {
+    // userspace syscall vector
+    idt[128].set_handler_fn(irq_128).set_privilege_level(x86_64::PrivilegeLevel::Ring3);
+
     idt[32].set_handler_fn(irq_32);
     idt[33].set_handler_fn(irq_33);
     idt[34].set_handler_fn(irq_34);
@@ -477,7 +477,6 @@ pub fn set_stub_handlers(idt: &mut InterruptDescriptorTable) {
     idt[125].set_handler_fn(irq_125);
     idt[126].set_handler_fn(irq_126);
     idt[127].set_handler_fn(irq_127);
-    idt[128].set_handler_fn(irq_128);
     idt[129].set_handler_fn(irq_129);
     idt[130].set_handler_fn(irq_130);
     idt[131].set_handler_fn(irq_131);

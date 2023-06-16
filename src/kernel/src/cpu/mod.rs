@@ -1,5 +1,5 @@
 pub mod exceptions;
-pub mod syscall;
+// pub mod syscall;
 
 pub fn read_id() -> u32 {
     #[cfg(target_arch = "x86_64")]
@@ -75,14 +75,14 @@ pub fn setup() {
     crate::arch::x64::structures::load_static_tables();
 
     // Setup system call interface.
-    // Safety: Parameters are set according to the IA-32 SDM, and so should have no undetermined side-effects.
-    unsafe {
-        // Configure system call environment registers.
-        msr::IA32_STAR::set_selectors(gdt::kernel_code_selector().0, gdt::kernel_data_selector().0);
-        msr::IA32_LSTAR::set_syscall(syscall::_syscall_entry);
-        // We don't want to keep any flags set within the syscall (especially the interrupt flag).
-        msr::IA32_FMASK::set_rflags_mask(RFlags::all().bits());
-        // Enable `syscall`/`sysret`.
-        msr::IA32_EFER::set_sce(true);
-    }
+    // // Safety: Parameters are set according to the IA-32 SDM, and so should have no undetermined side-effects.
+    // unsafe {
+    //     // Configure system call environment registers.
+    //     msr::IA32_STAR::set_selectors(gdt::kernel_code_selector().0, gdt::kernel_data_selector().0);
+    //     msr::IA32_LSTAR::set_syscall(syscall::_syscall_entry);
+    //     // We don't want to keep any flags set within the syscall (especially the interrupt flag).
+    //     msr::IA32_FMASK::set_rflags_mask(RFlags::all().bits());
+    //     // Enable `syscall`/`sysret`.
+    //     msr::IA32_EFER::set_sce(true);
+    // }
 }

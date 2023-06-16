@@ -1,44 +1,8 @@
 pub mod walker;
 use bit_field::BitField;
-use core::{fmt, iter::Step, num::NonZeroU32};
+use core::{fmt, iter::Step};
 use libkernel::mem::{InteriorRef, Mut, Ref};
 use libsys::{page_shift, table_index_mask, table_index_shift, table_index_size, Address, Frame, Page, Virtual};
-
-pub struct Info;
-
-impl Info {
-    pub fn max_paging_levels() -> NonZeroU32 {
-        static PAGING_LEVELS: spin::Once<NonZeroU32> = spin::Once::new();
-
-        *PAGING_LEVELS.call_once(|| {
-            #[cfg(target_arch = "x86_64")]
-            {
-                let has_5_level_paging = crate::arch::x64::cpuid::EXT_FEATURE_INFO
-                    .as_ref()
-                    .map_or(false, raw_cpuid::ExtendedFeatures::has_la57);
-
-                if has_5_level_paging {
-                    NonZeroU32::new(5).unwrap()
-                } else {
-                    NonZeroU32::new(4).unwrap()
-                }
-            }
-        })
-    }
-
-    pub fn current_paging_level() -> NonZeroU32 {
-        #[cfg(target_arch = "x86_64")]
-        {
-            use crate::arch::x64::registers::control;
-
-            if control::CR4::read().contains(control::CR4Flags::LA57) {
-                NonZeroU32::new(5).unwrap()
-            } else {
-                NonZeroU32::new(4).unwrap()
-            }
-        }
-    }
-}
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -52,11 +16,18 @@ impl TableDepth {
 
     #[inline]
     pub fn max() -> Self {
-        Self(Info::max_paging_levels().get())
-    }
+        Self({
+            #[cfg(target_arch = "x86_64")]
+            {
+                use crate::arch::x64::registers::control;
 
-    pub fn current() -> Self {
-        Self(Info::current_paging_level().get())
+                if control::CR4::read().contains(control::CR4Flags::LA57) {
+                    5
+                } else {
+                    4
+                }
+            }
+        })
     }
 
     #[inline]

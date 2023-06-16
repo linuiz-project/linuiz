@@ -10,8 +10,8 @@ mod context_impl {
         pub rbx: u64,
         pub rcx: u64,
         pub rdx: u64,
-        pub rsi: u64,
         pub rdi: u64,
+        pub rsi: u64,
         pub rbp: u64,
         pub r8: u64,
         pub r9: u64,
@@ -39,8 +39,8 @@ mod context_impl {
                 ip,
                 sp,
                 rfl: RFlags::INTERRUPT_FLAG,
-                cs: gdt::kernel_code_selector().0 as u64,
-                ss: gdt::kernel_data_selector().0 as u64,
+                cs: gdt::kernel_code_selector().0.into(),
+                ss: gdt::kernel_data_selector().0.into(),
             }
         }
 
@@ -49,8 +49,8 @@ mod context_impl {
                 ip,
                 sp,
                 rfl: RFlags::INTERRUPT_FLAG,
-                cs: gdt::user_code_selector().0 as u64,
-                ss: gdt::user_data_selector().0 as u64,
+                cs: gdt::user_code_selector().0.into(),
+                ss: gdt::user_data_selector().0.into(),
             }
         }
     }

@@ -9,7 +9,7 @@ pub use scheduling::*;
 mod address_space;
 pub use address_space::*;
 
-use crate::mem::{alloc::AlignedAllocator, Stack};
+use crate::mem::alloc::AlignedAllocator;
 use alloc::{boxed::Box, string::String, vec::Vec};
 use core::num::NonZeroUsize;
 use elf::{endian::AnyEndian, file::FileHeader, segment::ProgramHeader};
