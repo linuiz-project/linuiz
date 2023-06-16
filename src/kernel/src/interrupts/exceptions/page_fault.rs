@@ -18,7 +18,7 @@ crate::error_impl! {
 #[doc(hidden)]
 #[inline(never)]
 pub unsafe fn handler(address: Address<Virtual>) -> Result<()> {
-    crate::local::with_scheduler(|scheduler| {
+    crate::cpu::state::with_scheduler(|scheduler| {
         use crate::{mem::paging::TableEntryFlags, task::ElfData};
         use core::mem::MaybeUninit;
         use libsys::page_size;

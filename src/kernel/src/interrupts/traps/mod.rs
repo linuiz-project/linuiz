@@ -13,7 +13,7 @@ use crate::{
 #[inline(never)]
 pub unsafe fn handle_trap(irq_vector: u64, state: &mut State, regs: &mut Registers) {
     match Vector::try_from(irq_vector) {
-        Ok(Vector::Timer) => crate::local::with_scheduler(|scheduler| scheduler.interrupt_task(state, regs))
+        Ok(Vector::Timer) => crate::cpu::state::with_scheduler(|scheduler| scheduler.interrupt_task(state, regs))
             .expect("local state is not initialized"),
 
         Ok(Vector::Syscall) => handle_syscall(state, regs),
@@ -22,7 +22,7 @@ pub unsafe fn handle_trap(irq_vector: u64, state: &mut State, regs: &mut Registe
         vector_result => unimplemented!("Unhandled interrupt: {:?}", vector_result),
     }
 
-    crate::local::end_of_interrupt().unwrap();
+    crate::cpu::state::end_of_interrupt().unwrap();
 }
 
 fn handle_syscall(state: &mut State, regs: &mut Registers) {

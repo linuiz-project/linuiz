@@ -74,7 +74,7 @@ pub fn get_rsdp_address() -> Result<Address<Virtual>> {
 pub fn kernel_file() -> Result<&'static limine::File> {
     boot_only!({
         #[limine::limine_tag]
-        static LIMINE_KERNEL_FILE: limine::KernelFileRequest = limine::KernelFileRequest::new(crate::boot::LIMINE_REV);
+        static LIMINE_KERNEL_FILE: limine::KernelFileRequest = limine::KernelFileRequest::new(LIMINE_REV);
 
         LIMINE_KERNEL_FILE.get_response().map(limine::KernelFileResponse::file).ok_or(Error::NoKernelFile)
     })

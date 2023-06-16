@@ -1,4 +1,4 @@
-use crate::{cpu::exceptions::Exception, task::Registers};
+use crate::{interrupts::exceptions::Exception, task::Registers};
 use libsys::{Address, Virtual};
 use x86_64::structures::idt::{InterruptStackFrame, PageFaultErrorCode, SelectorErrorCode};
 
@@ -103,7 +103,7 @@ pub enum ArchException<'a> {
 
 impl From<ArchException<'_>> for Exception {
     fn from(value: ArchException) -> Self {
-        use crate::cpu::exceptions::{ExceptionKind, PageFaultReason};
+        use crate::interrupts::exceptions::{ExceptionKind, PageFaultReason};
         use core::ptr::NonNull;
 
         match value {

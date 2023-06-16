@@ -10,7 +10,7 @@ crate::error_impl! {
     #[derive(Debug)]
     pub enum Error {
         Acpi { err: acpi::AcpiError } => None,
-        Boot { err: crate::boot::Error } => Some(err)
+        Boot { err: crate::init::boot::Error } => Some(err)
     }
 }
 
@@ -169,7 +169,7 @@ static TABLES: spin::Once<Mutex<acpi::AcpiTables<AcpiHandler>>> = spin::Once::ne
 
 pub fn init_interface() -> Result<()> {
     TABLES.try_call_once(|| {
-        let rsdp_address = crate::boot::get_rsdp_address().map_err(|err| Error::Boot { err })?;
+        let rsdp_address = crate::init::boot::get_rsdp_address().map_err(|err| Error::Boot { err })?;
         // Safety: Bootloader guarantees any address provided for RDSP will be valid.
         let acpi_tables = unsafe { acpi::AcpiTables::from_rsdp(AcpiHandler, rsdp_address.get()) }
             .map_err(|err| Error::Acpi { err })?;

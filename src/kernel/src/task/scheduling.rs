@@ -120,7 +120,7 @@ impl Scheduler {
         unsafe {
             const TIME_SLICE: core::num::NonZeroU16 = core::num::NonZeroU16::new(5).unwrap();
 
-            crate::local::set_preemption_wait(TIME_SLICE).unwrap();
+            crate::cpu::state::set_preemption_wait(TIME_SLICE).unwrap();
         }
     }
 }

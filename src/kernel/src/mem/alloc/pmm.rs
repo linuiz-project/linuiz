@@ -14,7 +14,7 @@ use spin::RwLock;
 pub type PhysicalAllocator = &'static PhysicalMemoryManager<'static>;
 
 pub static PMM: spin::Lazy<PhysicalMemoryManager> = spin::Lazy::new(|| {
-    let memory_map = crate::boot::get_memory_map().unwrap();
+    let memory_map = crate::init::boot::get_memory_map().unwrap();
 
     let free_regions = memory_map.iter().filter_map(|entry| {
         (entry.ty() == limine::MemoryMapEntryType::Usable).then(|| {

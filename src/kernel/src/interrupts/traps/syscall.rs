@@ -36,11 +36,11 @@ pub(super) fn process(
         Ok(Vector::KlogTrace) => Some(process_klog(log::Level::Trace, arg0, arg1)),
 
         Ok(Vector::TaskExit) => {
-            crate::local::with_scheduler(|scheduler| scheduler.kill_task(state, regs)).unwrap();
+            crate::cpu::state::with_scheduler(|scheduler| scheduler.kill_task(state, regs)).unwrap();
             None
         }
         Ok(Vector::TaskYield) => {
-            crate::local::with_scheduler(|scheduler| scheduler.yield_task(state, regs)).unwrap();
+            crate::cpu::state::with_scheduler(|scheduler| scheduler.yield_task(state, regs)).unwrap();
             None
         }
     }

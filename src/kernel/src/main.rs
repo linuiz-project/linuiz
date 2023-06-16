@@ -70,12 +70,10 @@ extern crate log;
 
 mod acpi;
 mod arch;
-mod boot;
 mod cpu;
 mod error;
 mod init;
 mod interrupts;
-mod local;
 mod logging;
 mod mem;
 mod panic;

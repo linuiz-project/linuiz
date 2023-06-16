@@ -1,7 +1,10 @@
+mod arch;
 mod memory;
 
 mod params;
 pub use params::*;
+
+pub mod boot;
 
 use crate::mem::alloc::AlignedAllocator;
 use core::mem::MaybeUninit;
@@ -29,7 +32,7 @@ pub unsafe extern "C" fn init() -> ! {
 
     print_boot_info();
 
-    crate::cpu::setup();
+    arch::cpu_setup();
 
     memory::setup().unwrap();
 
@@ -41,7 +44,7 @@ pub unsafe extern "C" fn init() -> ! {
     setup_smp();
 
     debug!("Reclaiming bootloader memory...");
-    crate::boot::reclaim_boot_memory({
+    crate::init::boot::reclaim_boot_memory({
         extern "C" {
             static __symbols_start: LinkerSymbol;
             static __symbols_end: LinkerSymbol;
@@ -58,11 +61,11 @@ pub unsafe extern "C" fn init() -> ! {
 ///
 /// This function should only ever be called once per core.
 pub(self) unsafe fn kernel_core_setup() -> ! {
-    crate::local::init(1000);
+    crate::cpu::state::init(1000);
 
     // Ensure we enable interrupts prior to enabling the scheduler.
     crate::interrupts::enable();
-    crate::local::begin_scheduling().unwrap();
+    crate::cpu::state::begin_scheduling().unwrap();
 
     // This interrupt wait loop is necessary to ensure the core can jump into the scheduler.
     crate::interrupts::wait_loop()
@@ -80,7 +83,7 @@ fn setup_logging() {
 
 fn print_boot_info() {
     #[limine::limine_tag]
-    static BOOT_INFO: limine::BootInfoRequest = limine::BootInfoRequest::new(crate::boot::LIMINE_REV);
+    static BOOT_INFO: limine::BootInfoRequest = limine::BootInfoRequest::new(crate::init::boot::LIMINE_REV);
 
     if let Some(boot_info) = BOOT_INFO.get_response() {
         info!("Bootloader Info     {} v{} (rev {})", boot_info.name(), boot_info.version(), boot_info.revision());
@@ -102,7 +105,7 @@ fn load_drivers() {
     use elf::endian::AnyEndian;
 
     #[limine::limine_tag]
-    static LIMINE_MODULES: limine::ModuleRequest = limine::ModuleRequest::new(crate::boot::LIMINE_REV);
+    static LIMINE_MODULES: limine::ModuleRequest = limine::ModuleRequest::new(crate::init::boot::LIMINE_REV);
 
     debug!("Unpacking kernel drivers...");
 
@@ -193,7 +196,7 @@ fn load_drivers() {
 
 fn setup_smp() {
     #[limine::limine_tag]
-    static LIMINE_SMP: limine::SmpRequest = limine::SmpRequest::new(crate::boot::LIMINE_REV)
+    static LIMINE_SMP: limine::SmpRequest = limine::SmpRequest::new(crate::init::boot::LIMINE_REV)
         // Enable x2APIC mode if available.
         .flags(0b1);
 
@@ -212,7 +215,7 @@ fn setup_smp() {
 
                 if PARAMETERS.smp {
                     extern "C" fn _smp_entry(_: &limine::CpuInfo) -> ! {
-                        crate::cpu::setup();
+                        arch::cpu_setup();
 
                         // Safety: All currently referenced memory should also be mapped in the kernel page tables.
                         crate::mem::with_kmapper(|kmapper| unsafe { kmapper.swap_into() });

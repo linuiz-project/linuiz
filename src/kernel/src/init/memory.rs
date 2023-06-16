@@ -8,7 +8,7 @@ crate::error_impl! {
         KernelAddress => None,
         KernelElf { err: elf::ParseError } => Some(err),
         Paging { err: paging::Error } => Some(err),
-        Boot { err: crate::boot::Error } => Some(err)
+        Boot { err: crate::init::boot::Error } => Some(err)
     }
 }
 
@@ -20,7 +20,7 @@ struct KernelAddresses {
 fn get_kernel_addresses() -> Result<KernelAddresses> {
     #[limine::limine_tag]
     static LIMINE_KERNEL_ADDR: limine::KernelAddressRequest =
-        limine::KernelAddressRequest::new(crate::boot::LIMINE_REV);
+        limine::KernelAddressRequest::new(crate::init::boot::LIMINE_REV);
 
     LIMINE_KERNEL_ADDR
         .get_response()
@@ -39,7 +39,7 @@ pub fn setup() -> Result<()> {
     debug!("Preparing kernel memory system.");
 
     // Take reference to kernel file data.
-    let kernel_file = crate::boot::kernel_file().map_err(|err| Error::Boot { err })?;
+    let kernel_file = crate::init::boot::kernel_file().map_err(|err| Error::Boot { err })?;
     // Safety: Bootloader guarantees the provided information to be correct.
     let kernel_elf = elf::ElfBytes::<elf::endian::AnyEndian>::minimal_parse(kernel_file.data())
         .map_err(|err| Error::KernelElf { err })?;
@@ -48,7 +48,7 @@ pub fn setup() -> Result<()> {
 
     debug!("Mapping the higher-half direct map.");
     crate::mem::with_kmapper(|kmapper| {
-        let mmap_iter = &mut crate::boot::get_memory_map().map_err(|err| Error::Boot { err })?.iter().map(|entry| {
+        let mmap_iter = &mut crate::init::boot::get_memory_map().map_err(|err| Error::Boot { err })?.iter().map(|entry| {
             let range = entry.range();
             (usize::try_from(range.start).unwrap()..usize::try_from(range.end).unwrap(), entry.ty())
         });

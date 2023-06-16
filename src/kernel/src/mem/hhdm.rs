@@ -2,7 +2,7 @@ use libsys::{Address, Frame, Page, Virtual};
 
 pub static HHDM: spin::Lazy<Hhdm> = spin::Lazy::new(|| {
     #[limine::limine_tag]
-    static LIMINE_HHDM: limine::HhdmRequest = limine::HhdmRequest::new(crate::boot::LIMINE_REV);
+    static LIMINE_HHDM: limine::HhdmRequest = limine::HhdmRequest::new(crate::init::boot::LIMINE_REV);
 
     let hhdm_address = LIMINE_HHDM
         .get_response()
