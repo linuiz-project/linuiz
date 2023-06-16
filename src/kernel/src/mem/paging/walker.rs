@@ -29,26 +29,30 @@ impl<'a> Walker<'a> {
         target_depth: TableDepth,
         func: &mut impl FnMut(Option<&PageTableEntry>) -> ControlFlow<E>,
     ) -> ControlFlow<E> {
-        if cur_depth == target_depth {
-            table.iter().try_for_each(|entry| func(Some(entry)))?;
-        } else if cur_depth > target_depth {
-            for entry in table {
-                if entry.is_present() {
-                    let table = unsafe {
-                        core::slice::from_raw_parts(
-                            crate::mem::HHDM.offset(entry.get_frame()).unwrap().as_ptr().cast(),
-                            libsys::table_index_size(),
-                        )
-                    };
+        use core::cmp::Ordering;
 
-                    Self::walk_impl(table, cur_depth.next(), target_depth, func)?;
-                } else {
-                    let steps = core::iter::Step::steps_between(&cur_depth, &target_depth).unwrap();
-                    let iterations = table_index_size().pow(steps.try_into().unwrap());
+        match cur_depth.cmp(&target_depth) {
+            Ordering::Equal => table.iter().try_for_each(|entry| func(Some(entry)))?,
 
-                    (0..iterations).try_for_each(|_| func(None))?;
+            Ordering::Greater => {
+                for entry in table {
+                    if entry.is_present() {
+                        let table = unsafe {
+                            core::slice::from_raw_parts(
+                                crate::mem::HHDM.offset(entry.get_frame()).unwrap().as_ptr().cast(),
+                                libsys::table_index_size(),
+                            )
+                        };
+                        Self::walk_impl(table, cur_depth.next(), target_depth, func)?;
+                    } else {
+                        let steps = core::iter::Step::steps_between(&cur_depth, &target_depth).unwrap();
+                        let iterations = table_index_size().pow(steps.try_into().unwrap());
+                        (0..iterations).try_for_each(|_| func(None))?;
+                    }
                 }
             }
+
+            Ordering::Less => unreachable!(),
         }
 
         core::ops::ControlFlow::Continue(())

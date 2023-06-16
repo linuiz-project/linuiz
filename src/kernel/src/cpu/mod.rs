@@ -13,8 +13,7 @@ pub fn setup() {
     use crate::arch::x64::{
         cpuid,
         registers::control::{CR0Flags, CR4Flags, CR0, CR4},
-        registers::{msr, RFlags},
-        structures::gdt,
+        registers::msr,
     };
 
     // Set CR0 flags.

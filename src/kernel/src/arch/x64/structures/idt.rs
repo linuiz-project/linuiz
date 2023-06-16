@@ -224,69 +224,69 @@ unsafe extern "sysv64" fn irq_handoff(
 
 exception_handler!(de, ());
 extern "sysv64" fn de_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    ex_handler(ArchException::DivideError(stack_frame, gprs));
+    ex_handler(&ArchException::DivideError(stack_frame, gprs));
 }
 
 exception_handler!(db, ());
 extern "sysv64" fn db_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    ex_handler(ArchException::Debug(stack_frame, gprs));
+    ex_handler(&ArchException::Debug(stack_frame, gprs));
 }
 
 exception_handler!(nmi, ());
 extern "sysv64" fn nmi_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    ex_handler(ArchException::NonMaskable(stack_frame, gprs));
+    ex_handler(&ArchException::NonMaskable(stack_frame, gprs));
 }
 
 exception_handler!(bp, ());
 extern "sysv64" fn bp_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    ex_handler(ArchException::Breakpoint(stack_frame, gprs));
+    ex_handler(&ArchException::Breakpoint(stack_frame, gprs));
 }
 
 exception_handler!(of, ());
 extern "sysv64" fn of_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    ex_handler(ArchException::Overflow(stack_frame, gprs));
+    ex_handler(&ArchException::Overflow(stack_frame, gprs));
 }
 
 exception_handler!(br, ());
 extern "sysv64" fn br_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    ex_handler(ArchException::BoundRangeExceeded(stack_frame, gprs));
+    ex_handler(&ArchException::BoundRangeExceeded(stack_frame, gprs));
 }
 
 exception_handler!(ud, ());
 extern "sysv64" fn ud_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    ex_handler(ArchException::InvalidOpcode(stack_frame, gprs));
+    ex_handler(&ArchException::InvalidOpcode(stack_frame, gprs));
 }
 
 exception_handler!(nm, ());
 extern "sysv64" fn nm_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    ex_handler(ArchException::DeviceNotAvailable(stack_frame, gprs));
+    ex_handler(&ArchException::DeviceNotAvailable(stack_frame, gprs));
 }
 
 exception_handler_with_error!(df, u64, !);
 extern "sysv64" fn df_handler_inner(stack_frame: &InterruptStackFrame, _: u64, gprs: &Registers) -> ! {
-    ex_handler(ArchException::DoubleFault(stack_frame, gprs));
+    ex_handler(&ArchException::DoubleFault(stack_frame, gprs));
     // Wait indefinite in case the above exception handler returns control flow.
     crate::interrupts::wait_loop()
 }
 
 exception_handler_with_error!(ts, u64, ());
 extern "sysv64" fn ts_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &Registers) {
-    ex_handler(ArchException::InvalidTSS(stack_frame, idt::SelectorErrorCode::new_truncate(error_code), gprs));
+    ex_handler(&ArchException::InvalidTSS(stack_frame, idt::SelectorErrorCode::new_truncate(error_code), gprs));
 }
 
 exception_handler_with_error!(np, u64, ());
 extern "sysv64" fn np_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &Registers) {
-    ex_handler(ArchException::SegmentNotPresent(stack_frame, idt::SelectorErrorCode::new_truncate(error_code), gprs));
+    ex_handler(&ArchException::SegmentNotPresent(stack_frame, idt::SelectorErrorCode::new_truncate(error_code), gprs));
 }
 
 exception_handler_with_error!(ss, u64, ());
 extern "sysv64" fn ss_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &Registers) {
-    ex_handler(ArchException::StackSegmentFault(stack_frame, idt::SelectorErrorCode::new_truncate(error_code), gprs));
+    ex_handler(&ArchException::StackSegmentFault(stack_frame, idt::SelectorErrorCode::new_truncate(error_code), gprs));
 }
 
 exception_handler_with_error!(gp, u64, ());
 extern "sysv64" fn gp_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &Registers) {
-    ex_handler(ArchException::GeneralProtectionFault(
+    ex_handler(&ArchException::GeneralProtectionFault(
         stack_frame,
         idt::SelectorErrorCode::new_truncate(error_code),
         gprs,
@@ -295,36 +295,36 @@ extern "sysv64" fn gp_handler_inner(stack_frame: &InterruptStackFrame, error_cod
 
 exception_handler_with_error!(pf, idt::PageFaultErrorCode, ());
 extern "sysv64" fn pf_handler_inner(stack_frame: &InterruptStackFrame, err: idt::PageFaultErrorCode, gprs: &Registers) {
-    ex_handler(ArchException::PageFault(stack_frame, gprs, err, crate::arch::x64::registers::control::CR2::read()));
+    ex_handler(&ArchException::PageFault(stack_frame, gprs, err, crate::arch::x64::registers::control::CR2::read()));
 }
 
 // --- reserved 15
 
 exception_handler!(mf, ());
 extern "sysv64" fn mf_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    ex_handler(ArchException::x87FloatingPoint(stack_frame, gprs));
+    ex_handler(&ArchException::x87FloatingPoint(stack_frame, gprs));
 }
 
 exception_handler_with_error!(ac, u64, ());
 extern "sysv64" fn ac_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &Registers) {
-    ex_handler(ArchException::AlignmentCheck(stack_frame, error_code, gprs));
+    ex_handler(&ArchException::AlignmentCheck(stack_frame, error_code, gprs));
 }
 
 exception_handler!(mc, !);
 extern "sysv64" fn mc_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) -> ! {
-    ex_handler(ArchException::MachineCheck(stack_frame, gprs));
+    ex_handler(&ArchException::MachineCheck(stack_frame, gprs));
     // Wait indefinite in case the above exception handler returns control flow.
     crate::interrupts::wait_loop()
 }
 
 exception_handler!(xm, ());
 extern "sysv64" fn xm_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    ex_handler(ArchException::SimdFlaotingPoint(stack_frame, gprs));
+    ex_handler(&ArchException::SimdFlaotingPoint(stack_frame, gprs));
 }
 
 exception_handler!(ve, ());
 extern "sysv64" fn ve_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    ex_handler(ArchException::Virtualization(stack_frame, gprs));
+    ex_handler(&ArchException::Virtualization(stack_frame, gprs));
 }
 
 // --- reserved 22-30

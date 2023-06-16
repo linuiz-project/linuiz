@@ -35,7 +35,7 @@ mod clock {
                  Some(Self {
                      ty: Type::Acpi(register),
                      frequency: 3579545,
-                     max_timestamp: (if pm_timer.supports_32bit { u32::MAX } else { 0xFFFFFF }) as u64
+                     max_timestamp: u64::from(if pm_timer.supports_32bit { u32::MAX } else { 0xFFFFFF })
                  })
 
              } else {
@@ -62,14 +62,14 @@ mod clock {
         #[inline]
         pub fn get_timestamp(&self) -> u64 {
             match &self.ty {
-                Type::Acpi(register) => register.read() as u64,
+                Type::Acpi(register) => u64::from(register.read()),
             }
         }
 
         /// Spin-waits for the given number of microseconds.
         pub fn spin_wait_us(&self, microseconds: u32) {
             let ticks_per_us = self.frequency() / 1000000;
-            let mut total_ticks = (microseconds as u64) * ticks_per_us;
+            let mut total_ticks = u64::from(microseconds) * ticks_per_us;
             let mut current_tick = self.get_timestamp();
 
             while total_ticks > 0 {

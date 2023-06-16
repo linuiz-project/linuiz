@@ -17,7 +17,7 @@ impl RedirectionEntry {
         // TODO InterruptVector type for 32..256 vector checking?
         assert!((32..=255).contains(&vector), "provided vector must be within 32..256");
 
-        self.0.set_bits(0..8, vector as u64);
+        self.0.set_bits(0..8, vector.into());
     }
 
     pub fn get_delivery_mode(&self) -> interrupts::DeliveryMode {
@@ -94,7 +94,7 @@ impl RedirectionEntry {
     }
 
     pub fn set_destination_id(&mut self, dest_id: u8) {
-        self.0.set_bits(56..64, dest_id as u64);
+        self.0.set_bits(56..64, dest_id.into());
     }
 }
 
@@ -140,7 +140,7 @@ impl IoApic<'_> {
         ioregs.0.write(reg_base_index + 1);
         let high_bits = ioregs.1.read();
 
-        RedirectionEntry(((high_bits as u64) << 32) | (low_bits as u64))
+        RedirectionEntry((u64::from(high_bits) << 32) | u64::from(low_bits))
     }
 
     pub fn set_redirection(&self, global_irq_num: u32, redirection: &RedirectionEntry) {
