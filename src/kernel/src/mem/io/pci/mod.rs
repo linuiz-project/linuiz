@@ -1,78 +1,91 @@
 mod device;
-
 pub use device::*;
+use libkernel::LittleEndianU16;
 
-use alloc::vec::Vec;
-use libsys::{sync::SingleOwner, Address, Physical};
-use spin::RwLock;
+use crate::mem::{
+    alloc::pmm::PMM,
+    paging::{self, TableDepth},
+    with_kmapper, HHDM,
+};
+use alloc::{collections::BTreeMap, vec::Vec};
+use libsys::{Address, Frame, Page, Physical};
+use spin::{Mutex, RwLock};
+use uuid::Uuid;
 
-static PCI_DEVICES: RwLock<Vec<SingleOwner<Device<Standard>>>> = RwLock::new(Vec::new());
-
-pub const fn get_device_base_address(base: u64, bus_index: u8, device_index: u8) -> Address<Physical> {
-    Address::<Physical>::new_truncate(base + (((bus_index as u64) << 20) | ((device_index as u64) << 15)))
+crate::error_impl! {
+    #[derive(Debug)]
+    pub enum Error {
+        NoninitTables => None,
+        AcpiError { err: acpi::AcpiError } => None,
+        Paging { err: paging::Error } => Some(err)
+    }
 }
 
-pub fn init_devices() {
-    let kernel_hhdm_address = crate::memory::get_hhdm_address();
-    let kernel_page_manager = crate::memory::get_kernel_virtual_mapper();
-    let mut pci_devices = PCI_DEVICES.write();
+static PCI_DEVICES: Mutex<Vec<Device<Standard>>> = Mutex::new(Vec::new());
+static OWNED_DEVICES: Mutex<BTreeMap<Uuid, Device<Standard>>> = Mutex::new(BTreeMap::new());
 
-    crate::tables::acpi::get_mcfg()
-        .entries()
-        .iter()
-        .filter(|entry| libsys::Address::<libsys::Physical>::is_canonical(entry.base_address))
-        .flat_map(|entry| {
-            // Enumerate buses
-            (entry.bus_number_start..=entry.bus_number_end)
-                .map(|bus_index| (entry.base_address, entry.pci_segment_group, bus_index))
-        })
-        .flat_map(|(base_address, segment_index, bus_index)| {
-            // Enumerate devices
-            (0..32).map(move |device_index| (base_address, segment_index, bus_index, device_index as u8))
-        })
-        .for_each(|(base_address, segment_index, bus_index, device_index)| {
-            // Allocate devices
-            let device_base_address = get_device_base_address(base_address, bus_index, device_index);
-            // TODO somehow test if the computed base address makes any sense.
-            let Some(device_hhdm_page) = Address::<libsys::Page>::new(kernel_hhdm_address.as_u64(), libsys::PageAlign::Align4KiB)
-                .and_then(|page| page.forward_checked(device_base_address.frame_containing().index()))
-                else {
-                    warn!("Failed to map device HHDM page due to overflow: {:0>2}:{:0>2}:{:0>2}.00@{:?}",
-                    segment_index, bus_index, device_index, device_base_address);
+pub fn get_device_base_address(base: u64, bus_index: u8, device_index: u8) -> Address<Frame> {
+    let bus_index = u64::from(bus_index);
+    let device_index = u64::From(device_index);
 
-                    return;
-                };
+    Address::new(base + (bus_index << 20) | (device_index << 15)).unwrap()
+}
 
-            // Safety: HHDM is guaranteed to be valid by the kernel.
-            //         Additionally, if this mapping is invalid, it will be unmapped later on in this context.
-            unsafe {
-                kernel_page_manager
-                    .map_mmio(device_hhdm_page, device_base_address.frame_containing(), kernel_frame_manager)
-                    .unwrap()
-            };
+pub fn init_devices() -> Result<()> {
+    with_kmapper(|kmapper| {
+        let pci_devices = PCI_DEVICES.lock();
 
-            // Safety: We should be reading known-good memory here, according to the PCI spec. The following `if` test will verify that.
-            let vendor_id =
-                unsafe { device_hhdm_page.address().as_ptr::<crate::num::LittleEndianU16>().read_volatile() }.get();
-            if vendor_id > u16::MIN && vendor_id < u16::MAX {
-                debug!(
-                    "Configuring PCIe device: [{:0>2}:{:0>2}:{:0>2}.00@{:?}]",
-                    segment_index, bus_index, device_index, device_base_address
-                );
+        let acpi_tables = crate::acpi::TABLES.get().ok_or(Error::NoninitTables)?.lock();
+        let pci_regions = acpi::PciConfigRegions::new(&acpi_tables, &*PMM).map_err(|err| Error::AcpiError { err })?;
 
-                if let DeviceVariant::Standard(pci_device) =
-                    // Safety: Base pointer, at this point, has been verified as known-good.
-                    unsafe { new_device(device_hhdm_page.address().as_mut_ptr()) }
-                {
-                    trace!("{:#?}", pci_device);
-                    pci_devices.push(SingleOwner::new(pci_device));
-                }
-                // TODO handle PCI-to-PCI busses
-            } else {
-                // Unmap the unused device MMIO
+        pci_regions
+            .iter()
+            .filter_map(|entry| {
+                Address::<Physical>::new(entry.physical_address)
+                    .map(move |address| (address, entry.segment_group, entry.bus_range))
+            })
+            .flat_map(|(base_address, segment_index, bus_range)| {
+                bus_range.map(move |bus_index| (base_address, segment_index, bus_index))
+            })
+            .flat_map(|(base_address, segment_index, bus_index)| {
+                (0u8..32u8).map(move |device_index| (base_address, segment_index, bus_index, device_index))
+            })
+            .try_for_each(|(base_address, segment_index, bus_index, device_index)| {
+                let device_base_address = get_device_base_address(base_address, bus_index, device_index);
+                let device_page = HHDM.offset(device_base_address).unwrap();
+
                 // Safety: HHDM is guaranteed to be valid by the kernel.
-                //         Additionally, this page was just previously mapped, and so is a known-valid mapping (hence the `.unwrap()`).
-                unsafe { kernel_page_manager.unmap(device_hhdm_page, false, kernel_frame_manager).unwrap() };
-            }
-        });
+                //         Additionally, if this mapping is invalid, it will be unmapped later on in this context.
+                unsafe {
+                    kmapper.auto_map(device_page, paging::TableEntryFlags::RW)?;
+                }
+
+                // Safety: We should be reading known-good memory here, according to the PCI spec. The following `if` test will verify that.
+                let vendor_id = unsafe { device_page.as_ptr().cast::<LittleEndianU16>().read_volatile() };
+                if vendor_id > u16::MIN && vendor_id < u16::MAX {
+                    debug!(
+                        "Configuring PCIe device: [{:0>2}:{:0>2}:{:0>2}.00@{:?}]",
+                        segment_index, bus_index, device_index, device_base_address
+                    );
+
+                    if let DeviceVariant::Standard(pci_device) =
+                        // Safety: Base pointer, at this point, has been verified as known-good.
+                        unsafe { new_device(device_page.as_ptr()) }
+                    {
+                        trace!("{:#?}", pci_device);
+                        // pci_devices.push(SingleOwner::new(pci_device));
+                    }
+                    // TODO handle PCI-to-PCI busses
+                } else {
+                    // Unmap the unused device MMIO
+                    // Safety: HHDM is guaranteed to be valid by the kernel.
+                    //         Additionally, this page was just previously mapped, and so is a known-valid mapping (hence the `.unwrap()`).
+                    unsafe {
+                        kmapper.unmap(device_page, None, true);
+                    }
+                }
+            })
+    })?;
+
+    Ok(())
 }

@@ -39,6 +39,8 @@ pub unsafe extern "C" fn init() -> ! {
     debug!("Initializing ACPI interface...");
     crate::acpi::init_interface().unwrap();
 
+    crate::mem::io::pci::init_devices().unwrap();
+
     load_drivers();
 
     setup_smp();

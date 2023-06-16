@@ -48,10 +48,11 @@ pub fn setup() -> Result<()> {
 
     debug!("Mapping the higher-half direct map.");
     crate::mem::with_kmapper(|kmapper| {
-        let mmap_iter = &mut crate::init::boot::get_memory_map().map_err(|err| Error::Boot { err })?.iter().map(|entry| {
-            let range = entry.range();
-            (usize::try_from(range.start).unwrap()..usize::try_from(range.end).unwrap(), entry.ty())
-        });
+        let mmap_iter =
+            &mut crate::init::boot::get_memory_map().map_err(|err| Error::Boot { err })?.iter().map(|entry| {
+                let range = entry.range();
+                (usize::try_from(range.start).unwrap()..usize::try_from(range.end).unwrap(), entry.ty())
+            });
 
         let mut last_end = 0;
         while let Some((mut acc_range, acc_ty)) = mmap_iter.next() {

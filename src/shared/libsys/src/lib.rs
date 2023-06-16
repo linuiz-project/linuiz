@@ -8,16 +8,17 @@
 mod macros;
 
 mod address;
-use core::num::NonZeroU32;
-
 pub use address::*;
 
 mod constants;
 pub use constants::*;
 
+// pub mod sync;
 pub mod syscall;
 
 extern crate alloc;
+
+use core::num::NonZeroU32;
 
 pub const KIBIBYTE: u64 = 0x400; // 1024
 pub const MIBIBYTE: u64 = KIBIBYTE * KIBIBYTE;

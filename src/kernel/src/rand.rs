@@ -24,6 +24,11 @@ pub mod prng {
                 // Safety: ???
                 unsafe {
                     let state_low = u128::from(core::arch::x86_64::_rdtsc());
+
+                    for _ in 0..(100 * state_low) {
+                        core::hint::spin_loop();
+                    }
+
                     let state_high = u128::from(core::arch::x86_64::_rdtsc());
                     state_low | (state_high << 64)
                 }

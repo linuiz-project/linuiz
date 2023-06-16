@@ -165,7 +165,7 @@ impl acpi::AcpiHandler for AcpiHandler {
 //     }
 // }
 
-static TABLES: spin::Once<Mutex<acpi::AcpiTables<AcpiHandler>>> = spin::Once::new();
+pub static TABLES: spin::Once<Mutex<acpi::AcpiTables<AcpiHandler>>> = spin::Once::new();
 
 pub fn init_interface() -> Result<()> {
     TABLES.try_call_once(|| {
