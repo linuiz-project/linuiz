@@ -32,14 +32,12 @@ fn get_kernel_addresses() -> Result<KernelAddresses> {
 }
 
 #[allow(clippy::too_many_lines)]
-pub fn setup() -> Result<()> {
+pub fn setup(kernel_file: &limine::File) -> Result<()> {
     // Extract kernel address information.
     let kernel_addresses = get_kernel_addresses()?;
 
     debug!("Preparing kernel memory system.");
 
-    // Take reference to kernel file data.
-    let kernel_file = crate::init::boot::kernel_file().map_err(|err| Error::Boot { err })?;
     // Safety: Bootloader guarantees the provided information to be correct.
     let kernel_elf = elf::ElfBytes::<elf::endian::AnyEndian>::minimal_parse(kernel_file.data())
         .map_err(|err| Error::KernelElf { err })?;

@@ -11,25 +11,38 @@ use libsys::{page_mask, page_shift, page_size};
 use libsys::{Address, Frame};
 use spin::RwLock;
 
+#[derive(Debug, Clone, Copy)]
+pub struct InitError;
+
 pub type PhysicalAllocator = &'static PhysicalMemoryManager<'static>;
 
-pub static PMM: spin::Lazy<PhysicalMemoryManager> = spin::Lazy::new(|| {
-    let memory_map = crate::init::boot::get_memory_map().unwrap();
+static PMM: spin::Once<PhysicalMemoryManager> = spin::Once::new();
 
-    let free_regions = memory_map.iter().filter_map(|entry| {
-        (entry.ty() == limine::MemoryMapEntryType::Usable).then(|| {
-            let region = entry.range();
-            let region_start = usize::try_from(region.start).unwrap();
-            let region_end = usize::try_from(region.end).unwrap();
+pub fn init(memory_map: &[&limine::MemmapEntry]) -> core::result::Result<(), InitError> {
+    PMM.try_call_once(|| {
+        let free_regions = memory_map.iter().filter_map(|entry| {
+            (entry.ty() == limine::MemoryMapEntryType::Usable).then(|| {
+                let region = entry.range();
+                let region_start = usize::try_from(region.start).unwrap();
+                let region_end = usize::try_from(region.end).unwrap();
 
-            region_start..region_end
-        })
-    });
-    let total_memory = usize::try_from(memory_map.iter().max_by_key(|e| e.range().end).unwrap().range().end).unwrap();
-    trace!("Total phyiscal memory: {:#X}", total_memory);
+                region_start..region_end
+            })
+        });
 
-    PhysicalMemoryManager { allocator: FrameAllocator::new(free_regions, total_memory).unwrap() }
-});
+        let max_key = memory_map.iter().max_by_key(|e| e.range().end).ok_or(InitError)?;
+        let total_memory = usize::try_from(max_key.range().end).unwrap();
+        trace!("Total phyiscal memory: {:#X}", total_memory);
+
+        Ok(PhysicalMemoryManager { allocator: FrameAllocator::new(free_regions, total_memory).ok_or(InitError)? })
+    })?;
+
+    Ok(())
+}
+
+pub fn get() -> PhysicalAllocator {
+    PMM.get().expect("physical memory manager has not been initialized")
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {

@@ -50,7 +50,7 @@ pub fn with_kmapper<T>(func: impl FnOnce(&mut Mapper) -> T) -> T {
 }
 
 pub fn copy_kernel_page_table() -> alloc::pmm::Result<Address<Frame>> {
-    let table_frame = alloc::pmm::PMM.next_frame()?;
+    let table_frame = alloc::pmm::get().next_frame()?;
 
     // Safety: Frame is provided by allocator, and so guaranteed to be within the HHDM, and is frame-sized.
     let new_table = unsafe {

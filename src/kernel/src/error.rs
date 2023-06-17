@@ -9,7 +9,7 @@ macro_rules! error_impl {
                 $Variant:ident$({
                     $($VarName:ident: $VarTy:ty),+
                 })? => $SourceExpr:expr
-            ),+
+            ),+ $(,)?
         }
     ) => {
         $(#[$outer])*

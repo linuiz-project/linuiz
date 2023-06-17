@@ -8,7 +8,6 @@ pub mod boot;
 
 use crate::mem::alloc::AlignedAllocator;
 use core::mem::MaybeUninit;
-use libkernel::LinkerSymbol;
 use libsys::Address;
 
 crate::error_impl! {
@@ -24,19 +23,27 @@ pub static KERNEL_HANDLE: spin::Lazy<uuid::Uuid> = spin::Lazy::new(uuid::Uuid::n
 pub unsafe extern "C" fn init() -> ! {
     use core::sync::atomic::{AtomicBool, Ordering};
 
+    #[limine::limine_tag]
+    static LIMINE_KERNEL_FILE: limine::KernelFileRequest = limine::KernelFileRequest::new(boot::LIMINE_REV);
+
     static INIT: AtomicBool = AtomicBool::new(false);
     assert!(!INIT.load(Ordering::Acquire), "`init()` has already been called!");
     INIT.store(true, Ordering::Release);
 
     setup_logging();
-
+    arch::cpu_setup();
     print_boot_info();
 
-    arch::cpu_setup();
+    let kernel_file = LIMINE_KERNEL_FILE
+        .get_response()
+        .map(limine::KernelFileResponse::file)
+        .expect("bootloader did not respond to kernel file request");
 
-    memory::setup().unwrap();
+    params::parse(kernel_file.cmdline());
+    crate::mem::alloc::pmm::init(boot::get_memory_map().unwrap()).unwrap();
+    crate::panic::symbols::parse(kernel_file).unwrap();
+    memory::setup(kernel_file).unwrap();
 
-    debug!("Initializing ACPI interface...");
     crate::acpi::init_interface().unwrap();
 
     crate::mem::io::pci::init_devices().unwrap();
@@ -45,16 +52,7 @@ pub unsafe extern "C" fn init() -> ! {
 
     setup_smp();
 
-    debug!("Reclaiming bootloader memory...");
-    crate::init::boot::reclaim_boot_memory({
-        extern "C" {
-            static __symbols_start: LinkerSymbol;
-            static __symbols_end: LinkerSymbol;
-        }
-
-        &[__symbols_start.as_usize()..__symbols_end.as_usize()]
-    });
-    debug!("Bootloader memory reclaimed.");
+    crate::init::boot::reclaim_memory().unwrap();
 
     kernel_core_setup()
 }
@@ -218,7 +216,7 @@ fn setup_smp() {
             for cpu_info in cpus {
                 trace!("Starting processor: ID P{}/L{}", cpu_info.processor_id(), cpu_info.lapic_id());
 
-                if PARAMETERS.smp {
+                if params::get().smp {
                     extern "C" fn _smp_entry(_: &limine::CpuInfo) -> ! {
                         arch::cpu_setup();
 

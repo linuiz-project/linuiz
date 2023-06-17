@@ -418,7 +418,7 @@ impl<'a> PageTable<'a, Mut> {
 
                 // Set the entry frame and set attributes to make a valid PTE.
                 *self.entry = PageTableEntry::new(
-                    crate::mem::alloc::pmm::PMM.next_frame().map_err(|_| Error::AllocError)?,
+                    crate::mem::alloc::pmm::get().next_frame().map_err(|_| Error::AllocError)?,
                     flags,
                 );
 

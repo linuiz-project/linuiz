@@ -37,7 +37,12 @@ impl Default for Parameters {
     }
 }
 
-pub static PARAMETERS: spin::Lazy<Parameters> = spin::Lazy::new(|| match crate::init::boot::kernel_file() {
-    Ok(kernel_file) => Parameters::parse(kernel_file.cmdline()),
-    Err(_) => Parameters::default(),
-});
+static PARAMETERS: spin::Once<Parameters> = spin::Once::new();
+
+pub fn parse(cmdline: &str) {
+    PARAMETERS.call_once(|| Parameters::parse(cmdline));
+}
+
+pub fn get() -> &'static Parameters {
+    PARAMETERS.get().expect("parameters have not been parsed")
+}

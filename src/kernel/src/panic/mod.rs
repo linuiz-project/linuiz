@@ -1,32 +1,7 @@
+pub mod symbols;
+
 use core::ptr::NonNull;
-
-use elf::{
-    endian::AnyEndian,
-    string_table::StringTable,
-    symbol::{Symbol, SymbolTable},
-};
 use libsys::{Address, Virtual};
-
-pub static KERNEL_SYMBOLS: spin::Lazy<Option<(SymbolTable<'static, AnyEndian>, StringTable<'static>)>> =
-    spin::Lazy::new(|| {
-        elf::ElfBytes::<elf::endian::AnyEndian>::minimal_parse(crate::init::boot::kernel_file().unwrap().data())
-            .ok()?
-            .symbol_table()
-            .ok()
-            .flatten()
-    });
-
-fn get_symbol(address: Address<Virtual>) -> Option<(Option<&'static str>, Symbol)> {
-    KERNEL_SYMBOLS.as_ref().and_then(|(symbols, strings)| {
-        let symbol = symbols.iter().find(|symbol| {
-            let symbol_region = symbol.st_value..(symbol.st_value + symbol.st_size);
-            symbol_region.contains(&address.get().try_into().unwrap())
-        })?;
-        let symbol_name = strings.get(symbol.st_name as usize).ok();
-
-        Some((symbol_name, symbol))
-    })
-}
 
 #[repr(C)]
 #[derive(Debug)]
@@ -96,7 +71,7 @@ fn stack_trace() {
     for (depth, trace_address) in stack_tracer.enumerate() {
         const SYMBOL_TYPE_FUNCTION: u8 = 2;
 
-        if let Some((Some(symbol_name), _)) = get_symbol(trace_address) {
+        if let Some((_, Some(symbol_name))) = symbols::get(trace_address) {
             if let Ok(demangled) = rustc_demangle::try_demangle(symbol_name) {
                 print_stack_trace_entry(depth, trace_address, demangled);
             } else {

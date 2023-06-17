@@ -1,5 +1,5 @@
 use crate::mem::{
-    alloc::pmm::PMM,
+    alloc::pmm,
     paging,
     paging::{Error, Result, TableDepth},
     HHDM,
@@ -17,12 +17,12 @@ pub struct Mapper {
 unsafe impl Send for Mapper {}
 
 impl Mapper {
-    /// Attempts to construct a new page manager. Returns `None` if the PMM could not provide a root frame.
+    /// Attempts to construct a new page manager. Returns `None` if the pmm::get() could not provide a root frame.
     pub fn new(depth: TableDepth) -> Option<Self> {
-        let root_frame = PMM.next_frame().ok()?;
+        let root_frame = pmm::get().next_frame().ok()?;
         trace!("New mapper root frame: {:X}", root_frame);
 
-        // Safety: PMM promises rented frames to be within the HHDM.
+        // Safety: pmm::get() promises rented frames to be within the HHDM.
         unsafe {
             let hhdm_offset_address = HHDM.offset(root_frame).unwrap();
             core::ptr::write_bytes(hhdm_offset_address.as_ptr(), 0x0, libsys::page_size());
@@ -66,7 +66,7 @@ impl Mapper {
     ) -> Result<()> {
         if lock_frame {
             // If the acquisition of the frame fails, return an error.
-            PMM.lock_frame(frame).map_err(|err| match err {
+            pmm::get().lock_frame(frame).map_err(|err| match err {
                 super::alloc::pmm::Error::OutOfBounds => Error::FrameBounds,
                 _ => Error::AllocError,
             })?;
@@ -108,7 +108,7 @@ impl Mapper {
             unsafe { entry.set_frame(Address::new_truncate(0)) };
 
             if free_frame {
-                PMM.free_frame(frame).unwrap();
+                pmm::get().free_frame(frame).unwrap();
             }
 
             // Invalidate the page in the TLB.
@@ -118,10 +118,10 @@ impl Mapper {
     }
 
     pub fn auto_map(&mut self, page: Address<Page>, flags: paging::TableEntryFlags) -> Result<()> {
-        match PMM.next_frame() {
+        match pmm::get().next_frame() {
             Ok(frame) => self.map(page, TableDepth::min(), frame, false, flags),
             Err(err) => {
-                trace!("Auto alloc PMM error: {:?}", err);
+                trace!("Auto alloc pmm::get() error: {:?}", err);
                 Err(Error::AllocError)
             }
         }

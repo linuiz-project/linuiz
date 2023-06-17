@@ -1,7 +1,7 @@
 mod device;
 pub use device::*;
 
-use crate::mem::{alloc::pmm::PMM, paging, with_kmapper, HHDM};
+use crate::mem::{alloc::pmm, paging, with_kmapper, HHDM};
 use alloc::{collections::BTreeMap, vec::Vec};
 use core::ptr::NonNull;
 use libkernel::{LittleEndian, LittleEndianU16};
@@ -33,7 +33,8 @@ pub fn init_devices() -> Result<()> {
         let pci_devices = PCI_DEVICES.lock();
 
         let acpi_tables = crate::acpi::TABLES.get().ok_or(Error::NoninitTables)?.lock();
-        let pci_regions = acpi::PciConfigRegions::new(&acpi_tables, &*PMM).map_err(|err| Error::AcpiError { err })?;
+        let pci_regions =
+            acpi::PciConfigRegions::new(&acpi_tables, pmm::get()).map_err(|err| Error::AcpiError { err })?;
 
         pci_regions
             .iter()
