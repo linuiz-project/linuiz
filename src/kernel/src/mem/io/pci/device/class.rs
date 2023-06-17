@@ -5,6 +5,11 @@ pub enum Class {
     DisplayController(DisplayController),
     Bridge(Bridge),
 
+    ProcessingAccelerator { subclass: u8, prog_if: u8 },
+    NonEssentialInstrumentation { subclass: u8, prog_if: u8 },
+    Coprocessor { subclass: u8, prog_if: u8 },
+    VendorSpecific { subclass: u8, prog_if: u8 },
+
     Unknown { class: u8, subclass: u8, prog_if: u8 },
 }
 
@@ -69,6 +74,11 @@ impl Class {
             (0x6, 0x8, 0x1) => Class::Bridge(Bridge::RACEway(RACEwayBridge::EndpointMode)),
             (0x6, 0x9, 0x0) => Class::Bridge(Bridge::InfiniBand2Pci),
             (0x6, 0x80, 0x0) => Class::Bridge(Bridge::Other),
+
+            (0x12, subclass, prog_if) => Class::ProcessingAccelerator { subclass, prog_if },
+            (0x13, subclass, prog_if) => Class::NonEssentialInstrumentation { subclass, prog_if },
+            (0x40, subclass, prog_if) => Class::Coprocessor { subclass, prog_if },
+            (0xFF, subclass, prog_if) => Class::VendorSpecific { subclass, prog_if },
 
             (class, subclass, prog_if) => Class::Unknown { class, subclass, prog_if },
         }

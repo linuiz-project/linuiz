@@ -111,11 +111,11 @@ fn load_drivers() {
 
     debug!("Unpacking kernel drivers...");
 
-    let Some(modules) = LIMINE_MODULES.get_response() else {
-            warn!("Bootloader provided no modules; skipping driver loading.");
-            return;
-        };
-    trace!("{:?}", modules);
+    let Some(modules) = LIMINE_MODULES.get_response()
+    else {
+        warn!("Bootloader provided no modules; skipping driver loading.");
+        return
+    };
 
     let modules = modules.modules();
     trace!("Found modules: {:X?}", modules);
@@ -155,7 +155,7 @@ fn load_drivers() {
             elf_copy.copy_from_slice(archive_data);
             trace!("ELF data copied into memory.");
 
-            let (Ok((Some(shdrs), Some(_))), Ok(Some((_, _)))) = (elf.section_headers_with_strtab(), elf.symbol_table())
+            let Ok((Some(shdrs), Some(_))) = elf.section_headers_with_strtab()
             else {
                 panic!("Error retrieving ELF relocation metadata.")
             };
@@ -163,23 +163,26 @@ fn load_drivers() {
             let load_offset = crate::task::MIN_LOAD_OFFSET;
 
             trace!("Processing relocations localized to fault page.");
-            let relas = shdrs
+            let mut relas = alloc::vec::Vec::with_capacity(shdrs.len());
+
+            shdrs
                 .iter()
                 .filter(|shdr| shdr.sh_type == elf::abi::SHT_RELA)
                 .flat_map(|shdr| elf.section_data_as_relas(&shdr).unwrap())
-                .map(|rela| {
+                .for_each(|rela| {
                     use crate::task::ElfRela;
 
                     match rela.r_type {
-                        elf::abi::R_X86_64_RELATIVE => ElfRela {
+                        elf::abi::R_X86_64_RELATIVE => relas.push(ElfRela {
                             address: Address::new(usize::try_from(rela.r_offset).unwrap()).unwrap(),
                             value: load_offset + usize::try_from(rela.r_addend).unwrap(),
-                        },
+                        }),
 
                         _ => unimplemented!(),
                     }
-                })
-                .collect();
+                });
+
+            trace!("Finished processing relocations, pushing task.");
 
             let task = Task::new(
                 Priority::Normal,

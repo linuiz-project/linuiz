@@ -84,12 +84,16 @@ impl Task {
         elf_relas: Vec<ElfRela>,
         elf_data: ElfData,
     ) -> Self {
+        trace!("Generating a random ID for new task.");
+        let id = uuid::Uuid::new_v4();
+
+        trace!("Allocating userspace stack for task: {:?}.", id);
         let stack = address_space
             .mmap(Some(Address::new_truncate(STACK_START.get())), STACK_PAGES, MmapPermissions::ReadWrite)
             .unwrap();
 
         Self {
-            id: uuid::Uuid::new_v4(),
+            id,
             priority,
             address_space,
             context: (
