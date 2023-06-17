@@ -8,16 +8,17 @@
 mod macros;
 
 mod address;
-use core::num::NonZeroU32;
-
 pub use address::*;
 
 mod constants;
 pub use constants::*;
 
+// pub mod sync;
 pub mod syscall;
 
 extern crate alloc;
+
+use core::num::NonZeroU32;
 
 pub const KIBIBYTE: u64 = 0x400; // 1024
 pub const MIBIBYTE: u64 = KIBIBYTE * KIBIBYTE;
@@ -51,4 +52,43 @@ pub const fn align_down(value: usize, alignment_bits: NonZeroU32) -> usize {
 #[inline]
 pub const fn align_down_div(value: usize, alignment_bits: NonZeroU32) -> usize {
     align_down(value, alignment_bits) / (1usize << alignment_bits.get())
+}
+
+pub use cpu_types::*;
+mod cpu_types {
+    #![allow(non_camel_case_types)]
+
+    #[cfg(target_pointer_width = "128")]
+    pub type uptr = u128;
+    #[cfg(target_pointer_width = "64")]
+    pub type uptr = u64;
+    #[cfg(target_pointer_width = "32")]
+    pub type uptr = u32;
+
+    #[cfg(any(target_arch = "x86_64", target_arch = "riscv64", target_arch = "aarch64"))]
+    pub type ureg = u64;
+    #[cfg(any(target_arch = "x86", target_arch = "riscv32"))]
+    pub type ureg = u32;
+}
+
+pub trait Truncate {
+    type Into;
+
+    fn truncate_into(self) -> Self::Into;
+}
+
+impl Truncate for ureg {
+    type Into = usize;
+
+    fn truncate_into(self) -> Self::Into {
+        self as usize
+    }
+}
+
+impl Truncate for usize {
+    type Into = ureg;
+
+    fn truncate_into(self) -> Self::Into {
+        self as ureg
+    }
 }

@@ -3,8 +3,13 @@
 #![feature(
     error_in_core,                          // #103765 <https://github.com/rust-lang/rust/issues/103765>
     result_flattening,                      // #70142 <https://github.com/rust-lang/rust/issues/70142>
+    iter_advance_by,                        // #77404 <https://github.com/rust-lang/rust/issues/77404>
+    iter_array_chunks,                      // #100450 <https://github.com/rust-lang/rust/issues/100450>
+    iter_next_chunk,                        // #98326 <https://github.com/rust-lang/rust/issues/98326>
+    array_windows,                          // #75027 <https://github.com/rust-lang/rust/issues/75027>
+    maybe_uninit_slice,                     // #63569 <https://github.com/rust-lang/rust/issues/63569>
+    iterator_try_reduce,                    // #87053 <https://github.com/rust-lang/rust/issues/87053>
     map_try_insert,                         // #82766 <https://github.com/rust-lang/rust/issues/82766>
-    drain_filter,                           // #43244 <https://github.com/rust-lang/rust/issues/43244>
     new_uninit,                             // #63291 <https://github.com/rust-lang/rust/issues/63291>
     try_trait_v2,                           // #84277 <https://github.com/rust-lang/rust/issues/84277>
     step_trait,                             // #42168 <https://github.com/rust-lang/rust/issues/42168>
@@ -32,13 +37,18 @@
     inline_const,
     const_option,
     const_option_ext,
-    const_trait_impl
+    const_trait_impl,
 )]
-#![forbid(clippy::inline_asm_x86_att_syntax, clippy::missing_const_for_fn)]
+#![forbid(clippy::inline_asm_x86_att_syntax)]
 #![deny(clippy::semicolon_if_nothing_returned, clippy::debug_assert_with_mut_call, clippy::float_arithmetic)]
-#![warn(clippy::cargo, clippy::pedantic, clippy::undocumented_unsafe_blocks)]
+#![warn(
+    clippy::cargo,
+    clippy::pedantic,
+    clippy::undocumented_unsafe_blocks,
+    clippy::missing_const_for_fn,
+    clippy::cast_lossless
+)]
 #![allow(
-    clippy::cast_lossless,
     clippy::enum_glob_use,
     clippy::inline_always,
     clippy::items_after_statements,
@@ -53,38 +63,37 @@
 #![cfg_attr(target_arch = "x86_64", feature(abi_x86_interrupt))]
 
 extern crate alloc;
+
 #[macro_use]
 extern crate log;
 
 mod acpi;
 mod arch;
-mod boot;
 mod cpu;
-mod exceptions;
+mod error;
 mod init;
 mod interrupts;
-mod local;
 mod logging;
-mod memory;
+mod mem;
 mod panic;
-mod proc;
 mod rand;
+mod task;
 mod time;
 
-#[macro_export]
-macro_rules! default_display_impl {
-    ($name:ident) => {
-        impl core::fmt::Display for $name {
-            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-                core::fmt::Debug::fmt(self, f)
-            }
-        }
-    };
-}
+/// ### Safety
+///
+/// This function should only ever be called by the bootloader.
+#[no_mangle]
+#[doc(hidden)]
+#[allow(clippy::too_many_lines)]
+unsafe extern "C" fn _entry() -> ! {
+    core::arch::asm!(
+        "
+        xor rbp, rbp
 
-#[macro_export]
-macro_rules! err_result_type {
-    ($name:ident) => {
-        pub type Result<T> = core::result::Result<T, $name>;
-    };
+        call {}
+        ",
+        sym init::init,
+        options(noreturn)
+    )
 }

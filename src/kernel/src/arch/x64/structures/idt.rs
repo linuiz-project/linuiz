@@ -1,8 +1,8 @@
 use crate::{
     arch::x64::registers::RFlags,
-    proc::{Registers, State},
+    interrupts::exceptions::{ex_handler, ArchException},
+    task::{Registers, State},
 };
-use libsys::{Address, Virtual};
 use x86_64::structures::idt;
 
 pub use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, InterruptStackFrameValue};
@@ -51,6 +51,36 @@ macro_rules! pop_gprs {
     };
 }
 
+macro_rules! push_ret_frame {
+    ($ip_off:literal) => {
+        concat!(
+            "
+            # copy code segment to `rax`
+            mov rax, [rsp + (",
+            stringify!($ip_off + 1),
+            " * 8)]
+
+            # We don't want to try and trace a fault in the kernel back to
+            # userspace, so we check if we're coming from the kernel.
+            cmp rax, 0x8    # are we coming from kernel code?
+            je 2f           # if so, don't zero the frame pointer
+            xor rbp, rbp    # if not, zero the frame pointer
+            2:
+
+            # copy ip to `rax`
+            mov rax, [rsp + (",
+            stringify!($ip_off),
+            " * 8)]
+
+            # push return frame
+            push rax                # push instruction pointer
+            push rbp                # push frame pointer
+            mov rbp, rsp
+            "
+        )
+    };
+}
+
 macro_rules! exception_handler {
     ($exception_name:ident, $return_type:ty) => {
         paste::paste! {
@@ -59,17 +89,22 @@ macro_rules! exception_handler {
                 // Safety: When has perfect assembly ever caused undefined behaviour?
                 unsafe {
                     core::arch::asm!(
+                        "cld",
                         push_gprs!(),
+                        push_ret_frame!(15),
                         "
                         # move stack frame into first parameter
-                        lea rdi, [rsp + (15 * 8)]
+                        lea rdi, [rsp + (17 * 8)]
                         # Move cached gprs pointer into second parameter.
-                        mov rsi, rsp
+                        lea rsi, [rsp + (2 * 8)]
 
                         call {}
+
+                        add rsp, 0x10   # 'pop' stack frame
+                        ", pop_gprs!(), "
+
+                        iretq
                         ",
-                        pop_gprs!(),
-                        "iretq",
                         sym [<$exception_name _handler_inner>],
                         options(noreturn)
                     )
@@ -90,24 +125,25 @@ macro_rules! exception_handler_with_error {
                 // Safety: When has perfect assembly ever caused undefined behaviour?
                 unsafe {
                     core::arch::asm!(
+                        "cld",
                         push_gprs!(),
+                        push_ret_frame!(16),
                         "
                         # Move stack frame into first parameter.
-                        lea rdi, [rsp + (16 * 8)]
+                        lea rdi, [rsp + (18 * 8)]
                         # Move error code into second parameter.
-                        mov rsi, [rsp + (15 * 8)]
+                        mov rsi, [rsp + (17 * 8)]
                         # Move cached gprs pointer into third parameter.
-                        mov rdx, rsp
+                        lea rdx, [rsp + (2 * 8)]
 
                         # align stack for SysV
                         sub rsp, 0x8
+
                         call {}
-                        add rsp, 0x8
-                        ",
-                        pop_gprs!(),
-                        "
-                        # 'pop' error code
-                        add rsp, 0x8
+
+                        add rsp, 0x18   # 'pop' sysv fn-align & stack frame
+                        ", pop_gprs!(), "
+                        add rsp, 0x8    # 'pop' error code
 
                         iretq
                         ",
@@ -128,19 +164,25 @@ macro_rules! irq_stub {
                 // Safety: This is literally perfect assembly. It's safe because it's perfect.
                 unsafe {
                     core::arch::asm!(
+                        "cld",
                         push_gprs!(),
+                        push_ret_frame!(15),
                         "
+
                         # Move IRQ vector into first parameter.
                         mov rdi, {}
                         # Move stack frame into second parameter.
-                        lea rsi, [rsp + (15 * 8)]
+                        lea rsi, [rsp + (17 * 8)]
                         # Move cached gprs pointer into third parameter.
-                        mov rdx, rsp
+                        lea rdx, [rsp + (2 * 8)]
 
                         call {}
+
+                        add rsp, 0x10   # 'pop' stack frame
+                        ", pop_gprs!(), "
+
+                        iretq
                         ",
-                        pop_gprs!(),
-                        "iretq",
                         const $irq_vector,
                         sym irq_handoff,
                         options(noreturn)
@@ -169,7 +211,7 @@ unsafe extern "sysv64" fn irq_handoff(
         ss: isf.stack_segment,
     };
 
-    crate::interrupts::handle_irq(irq_number, &mut proc_state, regs);
+    crate::interrupts::traps::handle_trap(irq_number, &mut proc_state, regs);
 
     isf.as_mut().write(crate::arch::x64::structures::idt::InterruptStackFrameValue {
         instruction_pointer: VirtAddr::new(proc_state.ip),
@@ -180,230 +222,71 @@ unsafe extern "sysv64" fn irq_handoff(
     });
 }
 
-/// x64 exception wrapper type.
-#[repr(C, u8)]
-#[derive(Debug)]
-#[allow(non_camel_case_types)]
-pub enum Fault<'a> {
-    /// Generated upon an attempt to divide by zero.
-    DivideError(&'a InterruptStackFrame, &'a Registers),
-
-    /// Exception generated due to various conditions, outlined within the IA-32 SDM.
-    /// Debug registers will be updated to provide context to this exception.
-    Debug(&'a InterruptStackFrame, &'a Registers),
-
-    /// Typically caused by unrecoverable RAM or other hardware errors.
-    NonMaskable(&'a InterruptStackFrame, &'a Registers),
-
-    /// Occurs when `int3` is called in software.
-    Breakpoint(&'a InterruptStackFrame, &'a Registers),
-
-    /// Occurs when the `into` instruction is executed with the `OVERFLOW` bit set in RFlags.
-    Overflow(&'a InterruptStackFrame, &'a Registers),
-
-    /// Occurs when the `bound` instruction is executed and fails its check.
-    BoundRangeExceeded(&'a InterruptStackFrame, &'a Registers),
-
-    /// Occurs when the processor tries to execute an invalid or undefined opcode.
-    InvalidOpcode(&'a InterruptStackFrame, &'a Registers),
-
-    /// Generated when there is no FPU available, but an FPU-reliant instruction is executed.
-    DeviceNotAvailable(&'a InterruptStackFrame, &'a Registers),
-
-    /// Occurs when an exception is unhandled or when an exception occurs while the CPU is
-    /// trying to call an exception handler.
-    DoubleFault(&'a InterruptStackFrame, &'a Registers),
-
-    /// Occurs when an invalid segment selector is referenced as part of a task switch, or as a
-    /// result of a control transfer through a gate descriptor, which results in an invalid
-    /// stack-segment reference using an SS selector in the TSS
-    InvalidTSS(&'a InterruptStackFrame, idt::SelectorErrorCode, &'a Registers),
-
-    /// Occurs when trying to load a segment or gate which has its `PRESENT` bit unset.
-    SegmentNotPresent(&'a InterruptStackFrame, idt::SelectorErrorCode, &'a Registers),
-
-    /// Occurs when:
-    ///     - Loading a stack-segment referencing a segment descriptor which is not present;
-    ///     - Any `push`/`pop` instruction or any instruction using `esp`/`ebp` as a base register
-    ///         is executed, while the stack address is not in canonical form;
-    ///     - The stack-limit check fails.
-    StackSegmentFault(&'a InterruptStackFrame, idt::SelectorErrorCode, &'a Registers),
-
-    /// Occurs when:
-    ///     - Segment error (privilege, type, limit, r/w rights).
-    ///     - Executing a privileged instruction while CPL isn't supervisor (CPL0)
-    ///     - Writing a `1` in a reserved register field or writing invalid value combinations (e.g. `CR0` with `PE` unset and `PG` set).
-    ///     - Referencing or accessing a null descriptor.
-    GeneralProtectionFault(&'a InterruptStackFrame, idt::SelectorErrorCode, &'a Registers),
-
-    /// Occurs when:
-    ///     - A page directory or table entry is not present in physical memory.
-    ///     - Attempting to load the instruction TLB with a translation for a non-executable page.
-    ///     - A protection cehck (privilege, r/w) failed.
-    ///     - A reserved bit in the page directory table or entries is set to 1.
-    PageFault {
-        isf: &'a InterruptStackFrame,
-        gprs: &'a Registers,
-        err: idt::PageFaultErrorCode,
-        address: Address<Virtual>,
-    },
-
-    /// Occurs when the `fwait` or `wait` instruction (or any floating point instruction) is executed, and the
-    /// following conditions are true:
-    ///     - `CR0.NE` is set.
-    ///     - An unmasked x87 floating point exception is pending (i.e. the exception bit in the x87 floating point status-word register is set).
-    x87FloatingPoint(&'a InterruptStackFrame, &'a Registers),
-
-    /// Occurs when alignment checking is enabled and an unaligned memory data reference is performed.
-    ///
-    /// REMARK: Alignment checks are only performed when in usermode (CPL3).
-    AlignmentCheck(&'a InterruptStackFrame, u64, &'a Registers),
-
-    /// Exception is model-specific and processor implementations are not required to support it.
-    ///
-    /// REMARK: It uses model-specific registers (MSRs) to provide error information.
-    ///         It is disabled by default. Set `CR4.MCE` to enable it.
-    MachineCheck(&'a InterruptStackFrame, &'a Registers),
-
-    /* VIRTUALIZATION EXCEPTIONS (not supported) */
-    /// Occurs when an unmasked 128-bit media floating-point exception occurs and the `CR4.OSXMMEXCPT` bit
-    /// is set. If it is not set, this error condition will trigger an invalid opcode exception instead.
-    SimdFlaotingPoint(&'a InterruptStackFrame, &'a Registers),
-
-    /// Occurs only on processors that support setting the `EPT-violation` bit for VM execution control.
-    Virtualization(&'a InterruptStackFrame, &'a Registers),
-
-    /// Occurs under several conditions on the `ret`/`iret`/`rstorssp`/`setssbsy` instructions.
-    ControlProtection(&'a InterruptStackFrame, &'a Registers),
-
-    HypervisorInjection(&'a InterruptStackFrame, &'a Registers),
-
-    VMMCommunication(&'a InterruptStackFrame, &'a Registers),
-
-    /// Not an exception; it will never be handled by an interrupt handler. It is included here for completeness.
-    TripleFault,
-}
-
-impl From<Fault<'_>> for crate::exceptions::Exception {
-    fn from(value: Fault) -> Self {
-        use crate::exceptions::{Exception, ExceptionKind, PageFaultReason};
-        use core::ptr::NonNull;
-        use x86_64::structures::idt::PageFaultErrorCode;
-
-        match value {
-            Fault::PageFault { isf, gprs: _, err, address } => Exception::new(
-                ExceptionKind::PageFault {
-                    ptr: NonNull::new(address.as_ptr()).unwrap(),
-                    reason: if err.contains(PageFaultErrorCode::PROTECTION_VIOLATION) {
-                        PageFaultReason::BadPermissions
-                    } else {
-                        PageFaultReason::NotMapped
-                    },
-                },
-                NonNull::new(isf.instruction_pointer.as_mut_ptr::<u8>()).unwrap(),
-                NonNull::new(isf.stack_pointer.as_mut_ptr::<u8>()).unwrap(),
-            ),
-
-            _ => todo!(),
-        }
-    }
-}
-
-pub fn common_exception_handler(exception: Fault) {
-    // match crate::local::provide_exception(exception) {
-    //     Ok(()) => {}
-
-    //     Err(Fault::PageFault { isf: _, gprs: _, err: _, address })
-    //         // Safety: Function is called once per this page fault exception.
-    //         if unsafe { crate::interrupts::pf_handler(address).is_ok() } => {}
-
-    //     Err(exception) => panic!("{:#X?}", exception),
-    // }
-
-    trace!("Handling exception: {:X?}", exception);
-
-    match exception {
-        Fault::PageFault { isf: _, gprs: _, err: _, address }
-            // Safety: Function is called once per this page fault exception.
-            if unsafe { crate::interrupts::pf_handler(address).is_ok() } => {}
-
-        exception => panic!("{:#X?}", exception),
-    }
-}
-
 exception_handler!(de, ());
 extern "sysv64" fn de_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    common_exception_handler(Fault::DivideError(stack_frame, gprs));
+    ex_handler(&ArchException::DivideError(stack_frame, gprs));
 }
 
 exception_handler!(db, ());
 extern "sysv64" fn db_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    common_exception_handler(Fault::Debug(stack_frame, gprs));
+    ex_handler(&ArchException::Debug(stack_frame, gprs));
 }
 
 exception_handler!(nmi, ());
 extern "sysv64" fn nmi_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    common_exception_handler(Fault::NonMaskable(stack_frame, gprs));
+    ex_handler(&ArchException::NonMaskable(stack_frame, gprs));
 }
 
 exception_handler!(bp, ());
 extern "sysv64" fn bp_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    common_exception_handler(Fault::Breakpoint(stack_frame, gprs));
+    ex_handler(&ArchException::Breakpoint(stack_frame, gprs));
 }
 
 exception_handler!(of, ());
 extern "sysv64" fn of_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    common_exception_handler(Fault::Overflow(stack_frame, gprs));
+    ex_handler(&ArchException::Overflow(stack_frame, gprs));
 }
 
 exception_handler!(br, ());
 extern "sysv64" fn br_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    common_exception_handler(Fault::BoundRangeExceeded(stack_frame, gprs));
+    ex_handler(&ArchException::BoundRangeExceeded(stack_frame, gprs));
 }
 
 exception_handler!(ud, ());
 extern "sysv64" fn ud_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    common_exception_handler(Fault::InvalidOpcode(stack_frame, gprs));
+    ex_handler(&ArchException::InvalidOpcode(stack_frame, gprs));
 }
 
 exception_handler!(nm, ());
 extern "sysv64" fn nm_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    common_exception_handler(Fault::DeviceNotAvailable(stack_frame, gprs));
+    ex_handler(&ArchException::DeviceNotAvailable(stack_frame, gprs));
 }
 
 exception_handler_with_error!(df, u64, !);
 extern "sysv64" fn df_handler_inner(stack_frame: &InterruptStackFrame, _: u64, gprs: &Registers) -> ! {
-    common_exception_handler(Fault::DoubleFault(stack_frame, gprs));
+    ex_handler(&ArchException::DoubleFault(stack_frame, gprs));
     // Wait indefinite in case the above exception handler returns control flow.
     crate::interrupts::wait_loop()
 }
 
 exception_handler_with_error!(ts, u64, ());
 extern "sysv64" fn ts_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &Registers) {
-    common_exception_handler(Fault::InvalidTSS(stack_frame, idt::SelectorErrorCode::new_truncate(error_code), gprs));
+    ex_handler(&ArchException::InvalidTSS(stack_frame, idt::SelectorErrorCode::new_truncate(error_code), gprs));
 }
 
 exception_handler_with_error!(np, u64, ());
 extern "sysv64" fn np_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &Registers) {
-    common_exception_handler(Fault::SegmentNotPresent(
-        stack_frame,
-        idt::SelectorErrorCode::new_truncate(error_code),
-        gprs,
-    ));
+    ex_handler(&ArchException::SegmentNotPresent(stack_frame, idt::SelectorErrorCode::new_truncate(error_code), gprs));
 }
 
 exception_handler_with_error!(ss, u64, ());
 extern "sysv64" fn ss_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &Registers) {
-    common_exception_handler(Fault::StackSegmentFault(
-        stack_frame,
-        idt::SelectorErrorCode::new_truncate(error_code),
-        gprs,
-    ));
+    ex_handler(&ArchException::StackSegmentFault(stack_frame, idt::SelectorErrorCode::new_truncate(error_code), gprs));
 }
 
 exception_handler_with_error!(gp, u64, ());
 extern "sysv64" fn gp_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &Registers) {
-    common_exception_handler(Fault::GeneralProtectionFault(
+    ex_handler(&ArchException::GeneralProtectionFault(
         stack_frame,
         idt::SelectorErrorCode::new_truncate(error_code),
         gprs,
@@ -411,47 +294,48 @@ extern "sysv64" fn gp_handler_inner(stack_frame: &InterruptStackFrame, error_cod
 }
 
 exception_handler_with_error!(pf, idt::PageFaultErrorCode, ());
-extern "sysv64" fn pf_handler_inner(isf: &InterruptStackFrame, err: idt::PageFaultErrorCode, gprs: &Registers) {
-    common_exception_handler(Fault::PageFault {
-        isf,
-        gprs,
-        err,
-        address: crate::arch::x64::registers::control::CR2::read(),
-    });
+extern "sysv64" fn pf_handler_inner(stack_frame: &InterruptStackFrame, err: idt::PageFaultErrorCode, gprs: &Registers) {
+    ex_handler(&ArchException::PageFault(stack_frame, gprs, err, crate::arch::x64::registers::control::CR2::read()));
 }
 
 // --- reserved 15
 
 exception_handler!(mf, ());
 extern "sysv64" fn mf_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    common_exception_handler(Fault::x87FloatingPoint(stack_frame, gprs));
+    ex_handler(&ArchException::x87FloatingPoint(stack_frame, gprs));
 }
 
 exception_handler_with_error!(ac, u64, ());
 extern "sysv64" fn ac_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &Registers) {
-    common_exception_handler(Fault::AlignmentCheck(stack_frame, error_code, gprs));
+    ex_handler(&ArchException::AlignmentCheck(stack_frame, error_code, gprs));
 }
 
 exception_handler!(mc, !);
 extern "sysv64" fn mc_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) -> ! {
-    common_exception_handler(Fault::MachineCheck(stack_frame, gprs));
+    ex_handler(&ArchException::MachineCheck(stack_frame, gprs));
     // Wait indefinite in case the above exception handler returns control flow.
     crate::interrupts::wait_loop()
 }
 
 exception_handler!(xm, ());
 extern "sysv64" fn xm_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    common_exception_handler(Fault::SimdFlaotingPoint(stack_frame, gprs));
+    ex_handler(&ArchException::SimdFlaotingPoint(stack_frame, gprs));
 }
 
 exception_handler!(ve, ());
 extern "sysv64" fn ve_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    common_exception_handler(Fault::Virtualization(stack_frame, gprs));
+    ex_handler(&ArchException::Virtualization(stack_frame, gprs));
 }
 
 // --- reserved 22-30
 
 // --- triple fault (can't handle)
+
+/// Loads the IDT from the interrupt descriptor table register.
+pub unsafe fn get_current() -> Option<&'static mut InterruptDescriptorTable> {
+    let idt_pointer = x86_64::instructions::tables::sidt();
+    idt_pointer.base.as_mut_ptr::<InterruptDescriptorTable>().as_mut()
+}
 
 /// Defines set indexes which specified interrupts will use for stacks.
 #[repr(usize)]
@@ -494,6 +378,9 @@ pub fn set_exception_handlers(idt: &mut InterruptDescriptorTable) {
 
 #[allow(clippy::too_many_lines)]
 pub fn set_stub_handlers(idt: &mut InterruptDescriptorTable) {
+    // userspace syscall vector
+    idt[128].set_handler_fn(irq_128).set_privilege_level(x86_64::PrivilegeLevel::Ring3);
+
     idt[32].set_handler_fn(irq_32);
     idt[33].set_handler_fn(irq_33);
     idt[34].set_handler_fn(irq_34);
@@ -590,7 +477,6 @@ pub fn set_stub_handlers(idt: &mut InterruptDescriptorTable) {
     idt[125].set_handler_fn(irq_125);
     idt[126].set_handler_fn(irq_126);
     idt[127].set_handler_fn(irq_127);
-    idt[128].set_handler_fn(irq_128);
     idt[129].set_handler_fn(irq_129);
     idt[130].set_handler_fn(irq_130);
     idt[131].set_handler_fn(irq_131);
@@ -944,9 +830,3 @@ irq_stub!(252);
 irq_stub!(253);
 irq_stub!(254);
 irq_stub!(255);
-
-/// Loads the IDT from the interrupt descriptor table register.
-pub unsafe fn get_current() -> Option<&'static mut InterruptDescriptorTable> {
-    let idt_pointer = x86_64::instructions::tables::sidt();
-    idt_pointer.base.as_mut_ptr::<InterruptDescriptorTable>().as_mut()
-}

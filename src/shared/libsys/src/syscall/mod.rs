@@ -1,5 +1,5 @@
 pub mod klog;
-pub mod proc;
+pub mod task;
 
 use num_enum::TryFromPrimitive;
 
@@ -11,11 +11,11 @@ pub enum Vector {
     KlogDebug = 0x102,
     KlogTrace = 0x103,
 
-    ProcExit = 0x200,
-    ProcYield = 0x201,
+    TaskExit = 0x200,
+    TaskYield = 0x201,
 }
 
-#[repr(C)]
+#[repr(u64)]
 #[derive(Debug)]
 pub enum Result {
     Ok,

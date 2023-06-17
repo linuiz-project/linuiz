@@ -27,5 +27,5 @@ pub fn get_cpu_id() -> u32 {
         .and_then(|mut iter| iter.next())
         .map(|info| info.x2apic_id())
         // ... and finally, this leaf as an absolute fallback.
-        .unwrap_or_else(|| FEATURE_INFO.initial_local_apic_id() as u32)
+        .unwrap_or_else(|| FEATURE_INFO.initial_local_apic_id().into())
 }

@@ -5,7 +5,7 @@
             "type": "lldb",
             "request": "custom",
             "targetCreateCommands": [
-                "target create ${workspaceFolder}/build/root/pyre/kernel"
+                "target create ${workspaceFolder}/build/root/linuiz/kernel"
             ],
             "processCreateCommands": [
                 "gdb-remote localhost:1234"

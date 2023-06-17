@@ -7,3 +7,9 @@ edition = "2021"
 
 [dependencies]
 num_enum = { version = "0.6", default-features = false }
+log = { version = "0.4", default-features = false, optional = true }
+uuid = { version = "1.3", default-features = false }
+
+[features]
+default = ["logging"]
+logging = ["log"]

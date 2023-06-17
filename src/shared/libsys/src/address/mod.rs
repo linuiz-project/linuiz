@@ -98,3 +98,15 @@ impl<I, Repr: fmt::Debug, K: Addressable<Init = I, Repr = Repr>> fmt::Debug for 
         f.debug_tuple("Address").field(&self.0).finish()
     }
 }
+
+impl<I, Repr: fmt::LowerHex, K: Addressable<Init = I, Repr = Repr>> fmt::LowerHex for Address<K> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("Address({:#x})", self.0))
+    }
+}
+
+impl<I, Repr: fmt::UpperHex, K: Addressable<Init = I, Repr = Repr>> fmt::UpperHex for Address<K> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("Address({:#X})", self.0))
+    }
+}

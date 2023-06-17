@@ -1,2 +1,11 @@
 [workspace]
-members = ["libsys", "libkernel", "apic", "msr", "pic_8259", "port-rs"]
+resolver = "2"
+members = [
+    "libsys",
+    "libkernel",
+    "apic",
+    "msr",
+    "pic_8259",
+    "port-rs",
+    "slab_alloc",
+]

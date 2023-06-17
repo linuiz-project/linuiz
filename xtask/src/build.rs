@@ -1,5 +1,6 @@
+use anyhow::Result;
 use std::{fs::File, io::Error, path::Path};
-use xshell::{cmd, Result, Shell};
+use xshell::{cmd, Shell};
 
 #[derive(clap::Parser)]
 #[allow(non_snake_case)]
@@ -60,15 +61,13 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
     /* compile kernel */
     {
         let _dir = sh.push_dir("src/kernel/");
-        // Configure rustc via the `RUSTFLAGS` environment variable for the kernel build.
-        let _rustflags = sh.push_env("RUSTFLAGS", vec!["-C code-model=kernel", "-C embed-bitcode=yes"].join(" "));
 
         cmd!(sh, "cargo fmt").run()?;
         let local_args = &cargo_args;
-        cmd!(sh, "cargo build --bins -Z unstable-options {local_args...}").run()?;
+        cmd!(sh, "cargo build -Z unstable-options {local_args...}").run()?;
 
         // Copy the output kernel binary to the virtual HDD.
-        sh.copy_file(tmp_dir_path.join("kernel"), root_dir.join("build/root/pyre/"))?;
+        sh.copy_file(tmp_dir_path.join("kernel"), root_dir.join("build/root/linuiz/"))?;
     }
 
     /* compile userspace */
@@ -77,12 +76,12 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
 
         cmd!(sh, "cargo fmt").run()?;
         let local_args = &cargo_args;
-        cmd!(sh, "cargo build --bins -Z unstable-options {local_args...}").run()?;
+        cmd!(sh, "cargo build -Z unstable-options {local_args...}").run()?;
     }
 
     build_drivers_archive(
         tmp_dir_path,
-        &root_dir.join("build/root/pyre/drivers"),
+        &root_dir.join("build/root/linuiz/drivers"),
         sh.read_dir(tmp_dir_path)?.into_iter(),
         &options.drivers,
     )
@@ -114,7 +113,7 @@ fn build_drivers_archive<P: AsRef<Path>>(
             println!("Packaging driver: {:?}", path.file_name().unwrap());
 
             let rel_path = path.strip_prefix(drivers_path).unwrap();
-            archive_builder.append_file(&rel_path, &mut File::open(&path)?)
+            archive_builder.append_file(rel_path, &mut File::open(&path)?)
         })?;
 
     archive_builder.finish()

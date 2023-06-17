@@ -25,7 +25,7 @@ pub fn trace(str: &str) -> Result {
 }
 
 fn klog(offset: KlogVectorOffset, str: &str) -> Result {
-    let klog_vector = (Vector::KlogInfo as u64) + (offset as u64);
+    let vector = (Vector::KlogInfo as u64) + (offset as u64);
     let str_ptr = str.as_ptr();
     let str_len = str.len();
 
@@ -35,17 +35,10 @@ fn klog(offset: KlogVectorOffset, str: &str) -> Result {
         let high: u64;
 
         core::arch::asm!(
-            "syscall",
-            in("rdi") klog_vector,
-            in("rsi") str_ptr,
-            inout("rdx") str_len => high,
-            out("rax") low,
-            // callee saved registers
-            out("rcx") _,
-            out("r8") _,
-            out("r9") _,
-            out("r10") _,
-            out("r11") _,
+            "int 0x80",
+            in("rax") vector,
+            inout("rdi") str_ptr => low,
+            inout("rsi") str_len => high,
             options(nostack, nomem, preserves_flags)
         );
 

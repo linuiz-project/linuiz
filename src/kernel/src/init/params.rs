@@ -37,4 +37,7 @@ impl Default for Parameters {
     }
 }
 
-pub static PARAMETERS: spin::Once<Parameters> = spin::Once::new();
+pub static PARAMETERS: spin::Lazy<Parameters> = spin::Lazy::new(|| match crate::init::boot::kernel_file() {
+    Ok(kernel_file) => Parameters::parse(kernel_file.cmdline()),
+    Err(_) => Parameters::default(),
+});

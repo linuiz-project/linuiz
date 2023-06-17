@@ -1,5 +1,6 @@
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use xshell::{Result, Shell};
+use xshell::Shell;
 
 #[derive(Debug, Clone, Copy, clap::Subcommand)]
 #[allow(non_camel_case_types)]
@@ -78,14 +79,17 @@ fn update_target_path<P: AsRef<std::path::Path>>(
 ) -> Result<()> {
     let config = sh
         .read_file(path.as_ref())
-        .map_err(|_| ())
-        .and_then(|config_file| {
-            toml::from_str::<ConfigOptions>(&config_file).map_err(|_| ()).map(|mut config| {
-                config.build.target = target.to_string();
-                config
-            })
+        .with_context(|| format!("configuration toml doesn't exist: {:?}", path.as_ref()))
+        .and_then(|config_str| {
+            toml::from_str::<ConfigOptions>(&config_str)
+                .with_context(|| format!("configuration toml is malformed: {:?}", path.as_ref()))
+        })
+        .map(|mut config| {
+            config.build.target = target.to_string();
+            config
         })
         .unwrap_or_else(|_| default());
 
-    sh.write_file(path.as_ref(), toml::to_string_pretty(&config).unwrap())
+    let config_pretty_str = toml::to_string_pretty(&config).with_context(|| "failed prettifying config TOML")?;
+    sh.write_file(path.as_ref(), config_pretty_str).with_context(|| "failed writing prettified TOML")
 }

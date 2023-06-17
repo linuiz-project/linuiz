@@ -1,8 +1,13 @@
+#![allow(clippy::no_mangle_with_rust_abi)]
+
 getrandom::register_custom_getrandom!(prng_custom_getrandom);
+
 #[allow(clippy::unnecessary_wraps)]
 fn prng_custom_getrandom(buf: &mut [u8]) -> Result<(), getrandom::Error> {
-    for chunk in buf.chunks_mut(core::mem::size_of::<u64>()) {
+    trace!("[RAND] RANDOMIZING BYTES FOR BUFFER: []:{}", buf.len());
+    for (index, chunk) in buf.chunks_mut(core::mem::size_of::<u64>()).enumerate() {
         let rng_bytes = prng::next_u64().to_ne_bytes();
+        trace!("[RAND] Chunk {}: {:?}", index, rng_bytes);
         chunk.copy_from_slice(&rng_bytes[..chunk.len()]);
     }
 
@@ -20,8 +25,13 @@ pub mod prng {
             {
                 // Safety: ???
                 unsafe {
-                    let state_low = core::arch::x86_64::_rdtsc() as u128;
-                    let state_high = core::arch::x86_64::_rdtsc() as u128;
+                    let state_low = u128::from(core::arch::x86_64::_rdtsc());
+
+                    for _ in 0..(state_low & 0xFF) {
+                        core::hint::spin_loop();
+                    }
+
+                    let state_high = u128::from(core::arch::x86_64::_rdtsc());
                     state_low | (state_high << 64)
                 }
             }
