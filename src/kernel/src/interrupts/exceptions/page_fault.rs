@@ -97,14 +97,15 @@ pub unsafe fn handler(address: Address<Virtual>) -> Result<()> {
         trace!("Processing demand mapping relocations.");
         let load_offset = task.load_offset();
         let fault_page_mem_range = fault_vaddr..(fault_vaddr + page_size());
-        task.elf_relas().drain_filter(|rela| {
+
+        task.elf_relas().retain(|rela| {
             if fault_page_mem_range.contains(&rela.address.get()) {
                 trace!("Processing relocation: {:X?}", rela);
                 rela.address.as_ptr().add(load_offset).cast::<usize>().write(rela.value);
 
-                true
-            } else {
                 false
+            } else {
+                true
             }
         });
 

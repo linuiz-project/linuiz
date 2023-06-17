@@ -11,7 +11,6 @@ Cargo.lock
 **/*.rs.bk
 *.img
 
-
 # Added by cargo
 **/target
 
@@ -26,8 +25,8 @@ Cargo.lock
 !**/userspace/Cargo.lock
 
 # Ignore build/run artifacts
-/.debug/
-/build/
+/.debug
+/build
 
 # Ignore `.cargo/` configs
 **/.cargo

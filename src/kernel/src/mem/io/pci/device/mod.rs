@@ -1,13 +1,25 @@
+mod class;
+pub use class::*;
+
 pub mod standard;
 
-use core::{fmt, marker::PhantomData};
+use bit_field::BitField;
+use core::{fmt, marker::PhantomData, ptr::NonNull};
+use libkernel::{LittleEndian, LittleEndianU16, LittleEndianU32, LittleEndianU8};
 use libsys::{Address, Physical};
 
-use crate::num::LittleEndianU32;
+crate::error_impl! {
+    #[derive(Debug)]
+    pub enum Error {
+        InvalidHeaderType { value: u8 } => None,
+        InvalidBarSpace { value: u8 } => None,
+        BarIndexOverflow { index: usize } => None
+    }
+}
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy)]
-pub struct Command(u32);
+pub struct Command(u16);
 
 // TODO impl command bits
 // impl CommandRegister {
@@ -55,21 +67,22 @@ pub struct Command(u32);
 
 bitflags::bitflags! {
     #[repr(transparent)]
-    pub struct Status : u32 {
-        const INTERRUPT_STATUS = 1 << 19;
-        const CAPABILITIES = 1 << 20;
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Status : u16 {
+        const INTERRUPT_STATUS = 1 << 3;
+        const CAPABILITIES = 1 << 4;
         /// * Not applicable to PCIe.
-        const CAPABILITITY_66MHZ = 1 << 21;
+        const CAPABILITITY_66MHZ = 1 << 5;
         /// * Not applicable to PCIe.
-        const FAST_BACK2BACK_CAPABLE = 1 << 23;
-        const MASTER_DATA_PARITY_ERROR = 1 << 24;
+        const FAST_BACK2BACK_CAPABLE = 1 << 7;
+        const MASTER_DATA_PARITY_ERROR = 1 << 8;
         /// * Not applicable to PCIe.
-        const DEVSEL_TIMING = 3 << 25;
-        const SIGNALED_TARGET_ABORT = 1 << 27;
-        const RECEIVED_TARGET_ABORT = 1 << 28;
-        const RECEIVED_MASTER_ABORT =  1 << 29;
-        const SIGNALED_SYSTEM_ERROR = 1 << 30;
-        const DETECTED_PARITY_ERROR = 1 << 31;
+        const DEVSEL_TIMING = 3 << 9;
+        const SIGNALED_TARGET_ABORT = 1 << 11;
+        const RECEIVED_TARGET_ABORT = 1 << 12;
+        const RECEIVED_MASTER_ABORT =  1 << 13;
+        const SIGNALED_SYSTEM_ERROR = 1 << 14;
+        const DETECTED_PARITY_ERROR = 1 << 15;
     }
 }
 
@@ -79,110 +92,84 @@ bitflags::bitflags! {
 //     }
 // }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Class {
-    Unclassified(Unclassified),
-    MassStorageController(MassStorageController),
-    Other(u8, u8, u8),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Unclassified {
-    NonVgaCompatible,
-    VgaCompatible,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MassStorageController {
-    Scsi,
-    Ide,
-    Floppy,
-    Ipi,
-    Raid,
-    AtaSingleStep,
-    AtaContinuous,
-    SataVendorSpecific,
-    SataAhci,
-    Sas,
-    Other,
-}
-
-pub trait DeviceType {
+pub trait Kind {
     const REGISTER_COUNT: usize;
 }
 
 pub struct Standard;
-impl DeviceType for Standard {
+impl Kind for Standard {
     const REGISTER_COUNT: usize = 6;
 }
 
 pub struct PCI2PCI;
-impl DeviceType for PCI2PCI {
+impl Kind for PCI2PCI {
     const REGISTER_COUNT: usize = 2;
 }
 
 pub struct PCI2CardBus;
-impl DeviceType for PCI2CardBus {
+impl Kind for PCI2CardBus {
     const REGISTER_COUNT: usize = 8;
 }
 
 #[derive(Debug)]
-pub enum DeviceVariant {
+pub enum Devices {
     Standard(Device<Standard>),
     PCI2PCI(Device<PCI2PCI>),
     PCI2CardBus(Device<PCI2CardBus>),
 }
 
-pub struct Device<T: DeviceType> {
-    base_ptr: *mut LittleEndianU32,
-    phantom: PhantomData<T>,
-}
+pub struct Device<T: Kind>(NonNull<u8>, PhantomData<T>);
 
 // Safety: PCI MMIO (and so, the pointers used for it) utilize the global HHDM, and so can be sent between threads.
-unsafe impl<T: DeviceType> Send for Device<T> {}
+unsafe impl<T: Kind> Send for Device<T> {}
 
 /// Safety
 ///
 /// Caller must ensure that the provided base pointer is a valid (and mapped) PCI MMIO header base.
-pub unsafe fn new_device(base_ptr: *mut LittleEndianU32) -> DeviceVariant {
-    let header_type = (unsafe { base_ptr.add(0x3).read_volatile().get() } >> 16) & 0x3F;
+pub unsafe fn new(ptr: NonNull<u8>) -> Result<Devices> {
+    let header_ty = unsafe { ptr.as_ptr().cast::<LittleEndianU8>().add(14).read_volatile() };
 
-    // mask off the multifunction bit
-    match header_type {
-        0x0 => DeviceVariant::Standard(Device::<Standard> { base_ptr, phantom: PhantomData }),
-        0x1 => DeviceVariant::PCI2PCI(Device { base_ptr, phantom: PhantomData }),
-        0x2 => DeviceVariant::PCI2CardBus(Device::<PCI2CardBus> { base_ptr, phantom: PhantomData }),
-        header_type => {
-            panic!("Header type is invalid (must be 0..=2): {}", header_type,)
-        }
+    match header_ty.get().get_bits(0..7) {
+        0x0 => Ok(Devices::Standard(Device::<Standard>(ptr, PhantomData))),
+        0x1 => Ok(Devices::PCI2PCI(Device(ptr, PhantomData))),
+        0x2 => Ok(Devices::PCI2CardBus(Device::<PCI2CardBus>(ptr, PhantomData))),
+        value => Err(Error::InvalidHeaderType { value }),
     }
 }
 
-impl<T: DeviceType> Device<T> {
+impl<T: Kind> Device<T> {
+    const ROW_SIZE: usize = core::mem::size_of::<LittleEndianU32>();
+
+    unsafe fn read_offset<U: LittleEndian>(&self, offset: usize) -> U::NativeType {
+        self.0.as_ptr().add(offset).cast::<U>().read_volatile().get()
+    }
+
+    unsafe fn write_offset<U: LittleEndian>(&mut self, offset: usize, value: U::NativeType) {
+        self.0.as_ptr().add(offset).cast::<U>().write_volatile(U::from(value));
+    }
+
     pub fn get_vendor_id(&self) -> u16 {
-        unsafe { (self.base_ptr.add(0x0).read_volatile().get() >> 0) as u16 }
+        unsafe { self.read_offset::<LittleEndianU16>(0) }
     }
 
     pub fn get_device_id(&self) -> u16 {
-        unsafe { (self.base_ptr.add(0x0).read_volatile().get() >> 16) as u16 }
+        unsafe { self.read_offset::<LittleEndianU16>(2) }
     }
 
     pub fn get_command(&self) -> Command {
-        Command(unsafe { (self.base_ptr.add(0x1).read_volatile().get() >> 0) & 0xFFFF })
+        Command(unsafe { self.read_offset::<LittleEndianU16>(Self::ROW_SIZE) })
     }
 
-    pub fn set_command(&self, value: Command) {
-        unsafe {
-            self.base_ptr.add(0x1).write_volatile(LittleEndianU32::new(self.get_status().bits() | (value.0 as u32)))
-        }
+    pub fn set_command(&mut self, command: Command) {
+        unsafe { self.write_offset::<LittleEndianU16>(Self::ROW_SIZE, command.0) }
     }
 
     pub fn get_status(&self) -> Status {
-        Status::from_bits_truncate(unsafe { self.base_ptr.add(0x1).read_volatile().get() })
+        Status::from_bits_truncate(unsafe { self.read_offset::<LittleEndianU16>(Self::ROW_SIZE + 2) })
     }
 
     pub fn get_revision_id(&self) -> u8 {
-        unsafe { (self.base_ptr.add(0x2).read_volatile().get() >> 0) as u8 }
+        unsafe { self.read_offset::<LittleEndianU8>(2 * Self::ROW_SIZE) }
     }
 
     pub fn get_class(&self) -> Class {
@@ -190,123 +177,92 @@ impl<T: DeviceType> Device<T> {
         //  0x  00      | 00        | 00
         //      Class   | Subclass  | Program interface
 
-        match unsafe { self.base_ptr.add(0x2).read_volatile().get() >> 8 } {
-            // Unclassified
-            0x00_00_00 => Class::Unclassified(Unclassified::NonVgaCompatible),
-            0x00_01_00 => Class::Unclassified(Unclassified::VgaCompatible),
+        let row_offset = 2 * Self::ROW_SIZE;
+        let class = unsafe { self.read_offset::<LittleEndianU8>(row_offset + 3) };
+        let subclass = unsafe { self.read_offset::<LittleEndianU8>(row_offset + 2) };
+        let prog_if = unsafe { self.read_offset::<LittleEndianU8>(row_offset + 1) };
 
-            // Mass storage
-            0x01_00_00 => Class::MassStorageController(MassStorageController::Scsi),
-            0x01_01_00..0x01_01_FF => Class::MassStorageController(MassStorageController::Ide),
-            0x01_02_00 => Class::MassStorageController(MassStorageController::Floppy),
-            0x01_03_00 => Class::MassStorageController(MassStorageController::Ipi),
-            0x01_04_00 => Class::MassStorageController(MassStorageController::Raid),
-            0x01_05_20 => Class::MassStorageController(MassStorageController::AtaSingleStep),
-            0x01_05_30 => Class::MassStorageController(MassStorageController::AtaContinuous),
-            0x01_06_00 => Class::MassStorageController(MassStorageController::SataVendorSpecific),
-            0x01_06_01 => Class::MassStorageController(MassStorageController::SataAhci),
-            0x01_07_00 => Class::MassStorageController(MassStorageController::Sas),
-            0x01_80_00 => Class::MassStorageController(MassStorageController::Other),
-
-            class => Class::Other((class >> 16) as u8, (class >> 8) as u8, (class >> 0) as u8),
-        }
+        Class::parse(class, subclass, prog_if)
     }
 
     pub fn get_cache_line_size(&self) -> u8 {
-        unsafe { (self.base_ptr.add(0x3).read_volatile().get() >> 0) as u8 }
+        unsafe { self.read_offset::<LittleEndianU8>(3 * Self::ROW_SIZE) }
     }
 
     pub fn get_latency_timer(&self) -> u8 {
-        unsafe { (self.base_ptr.add(0x3).read_volatile().get() >> 8) as u8 }
+        unsafe { self.read_offset::<LittleEndianU8>((3 * Self::ROW_SIZE) + 1) }
     }
 
     pub fn get_header_type(&self) -> u8 {
-        unsafe { ((self.base_ptr.add(0x3).read_volatile().get() >> 16) & 0x3F) as u8 }
+        unsafe { self.read_offset::<LittleEndianU8>((3 * Self::ROW_SIZE) + 2) }.get_bits(0..7)
     }
 
     pub fn get_multi_function(&self) -> bool {
-        (unsafe { self.base_ptr.add(0x3).read_volatile().get() } & (1 << 23)) > 0
+        unsafe { self.read_offset::<LittleEndianU8>((3 * Self::ROW_SIZE) + 2) }.get_bit(7)
     }
 
-    pub fn get_bar(&self, index: usize) -> Option<BAR> {
-        use bit_field::BitField;
+    pub fn get_bar(&mut self, index: usize) -> Result<Bar> {
+        if index >= T::REGISTER_COUNT {
+            return Err(Error::BarIndexOverflow { index });
+        }
 
-        assert!(index < T::REGISTER_COUNT);
+        let bar_offset = (4 + index) * Self::ROW_SIZE;
+        let bar = unsafe { self.read_offset::<LittleEndianU32>(bar_offset) };
 
-        // Safety: PCI spec indicates the address space always contains BARs.
-        let base_bar_ptr = unsafe { self.base_ptr.add(0x4) };
-
-        // We need to check if this BAR is the upper-half of a 64-bit BAR
-        // Safety: The lower and upper bound of the index are already checked, so we know the following BAR pointer is valid.
-        if index > 0 && unsafe { base_bar_ptr.add(index - 1).read_volatile() }.get().get_bits(0..3).eq(&0b100) {
-            None
+        if bar.get_bit(0) {
+            Ok(Bar::IOSpace { address: bar & !0b11, size: 0 })
         } else {
-            // Safety: See above about PCI spec.
-            let bar_ptr = unsafe { base_bar_ptr.add(index) };
-            // Safety: See above about PCI spec.
-            let bar_data = unsafe { bar_ptr.read_volatile() }.get();
+            match bar.get_bits(1..3) {
+                0b00 => {
+                    // Safety: See above about PCI spec.
+                    let size = unsafe {
+                        self.write_offset::<LittleEndianU32>(bar_offset, u32::MAX);
+                        let size = !(self.read_offset::<LittleEndianU32>(bar_offset) & !0xF) + 1;
+                        self.write_offset::<LittleEndianU32>(bar_offset, bar);
+                        size
+                    };
 
-            // Check whether BAAR is IO space
-            if bar_data.get_bit(0) {
-                Some(BAR::IOSpace { address: bar_data & !0b11, size: 0 })
-            } else {
-                match bar_data.get_bits(1..3) {
-                    0b00 => Some({
-                        // Safety: See above about PCI spec.
-                        let size = unsafe {
-                            bar_ptr.write_volatile(LittleEndianU32::new(u32::MAX));
-                            let bar_size = !(bar_ptr.read_volatile().get() & !0b1111) + 1;
-
-                            bar_ptr.write_volatile(LittleEndianU32::new(bar_data));
-
-                            bar_size
-                        };
-
-                        BAR::MemorySpace32 {
-                            address: (bar_data & !0b1111) as usize as *mut u32,
-                            size,
-                            prefetch: bar_data.get_bit(3),
-                        }
-                    }),
-
-                    0b10 => Some({
-                        // Safety: See above about PCI spec.
-                        let bar_high_ptr = unsafe { bar_ptr.add(0x1) };
-                        // Safety: See above about PCI spec.
-                        let bar_high_data = unsafe { bar_high_ptr.read_volatile() }.get();
-
-                        // Safety: See above about PCI spec.
-                        let size = unsafe {
-                            bar_ptr.write_volatile(LittleEndianU32::new(u32::MAX));
-                            bar_ptr.add(1).write_volatile(LittleEndianU32::new(u32::MAX));
-                            let bar_values =
-                                ((bar_ptr.read_volatile().get() as u64) << 32) | (bar_ptr.read_volatile().get() as u64);
-                            let bar_size = !(bar_values & !0b1111) + 1;
-
-                            bar_ptr.write_volatile(LittleEndianU32::new(bar_data));
-                            bar_high_ptr.write_volatile(LittleEndianU32::new(bar_high_data));
-
-                            bar_size
-                        };
-
-                        BAR::MemorySpace64 {
-                            address: (((bar_high_data as u64) << 32) | ((bar_data as u64) & !0b1111)) as usize
-                                as *mut u64,
-                            size,
-                            prefetch: bar_data.get_bit(3),
-                        }
-                    }),
-
-                    type_bits => {
-                        warn!("Unsupported `type` bits for PCI BAR: {:b}", type_bits);
-                        None
-                    }
+                    Ok(Bar::MemorySpace32 {
+                        address: Address::new(usize::try_from(bar).unwrap()).unwrap(),
+                        size,
+                        prefetch: bar.get_bit(3),
+                    })
                 }
+
+                0b10 => {
+                    let high_bar_offset = bar_offset + Self::ROW_SIZE;
+                    let high_bar = unsafe { self.read_offset::<LittleEndianU32>(high_bar_offset) };
+
+                    // Safety: See above about PCI spec.
+                    let size = unsafe {
+                        self.write_offset::<LittleEndianU32>(bar_offset, u32::MAX);
+                        self.write_offset::<LittleEndianU32>(high_bar_offset, u32::MAX);
+
+                        let size_low = u64::from(self.read_offset::<LittleEndianU32>(bar_offset) & !0xF);
+                        let size_high = u64::from(self.read_offset::<LittleEndianU32>(high_bar_offset));
+                        let size = ((size_high << 32) | size_low) + 1;
+
+                        self.write_offset::<LittleEndianU32>(bar_offset, bar);
+                        self.write_offset::<LittleEndianU32>(high_bar_offset, high_bar);
+
+                        size
+                    };
+
+                    let address = (u64::from(high_bar) << 32) | (u64::from(bar) & !0xF);
+
+                    Ok(Bar::MemorySpace64 {
+                        address: Address::new(usize::try_from(address).unwrap()).unwrap(),
+                        size,
+                        prefetch: address.get_bit(3),
+                    })
+                }
+
+                invalid_space => Err(Error::InvalidBarSpace { value: invalid_space.try_into().unwrap() }),
             }
         }
     }
 
-    pub fn generic_debut_fmt(&self, debug_struct: &mut fmt::DebugStruct) {
+    pub fn generic_debug_fmt(&self, debug_struct: &mut fmt::DebugStruct) {
         debug_struct
             .field("ID", &format_args!("{:4X}:{:4X}", self.get_vendor_id(), self.get_device_id()))
             .field("Command", &format_args!("{:?}", self.get_command()))
@@ -320,128 +276,38 @@ impl<T: DeviceType> Device<T> {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum BAR {
-    MemorySpace32 { address: *mut u32, size: u32, prefetch: bool },
-    MemorySpace64 { address: *mut u64, size: u64, prefetch: bool },
+pub enum Bar {
+    MemorySpace32 { address: Address<Physical>, size: u32, prefetch: bool },
+    MemorySpace64 { address: Address<Physical>, size: u64, prefetch: bool },
     IOSpace { address: u32, size: u32 },
 }
 
-impl BAR {
+#[allow(clippy::match_same_arms)]
+impl Bar {
     pub fn is_unused(&self) -> bool {
-        use bit_field::BitField;
-
         match self {
-            BAR::MemorySpace32 { address, size: _, prefetch: _ } => address.is_null(),
-            BAR::MemorySpace64 { address, size: _, prefetch: _ } => address.is_null(),
-            BAR::IOSpace { address, size: _ } => address.get_bits(2..32) == 0,
+            Bar::MemorySpace32 { address, size: _, prefetch: _ } => address.get() == 0,
+            Bar::MemorySpace64 { address, size: _, prefetch: _ } => address.get() == 0,
+            Bar::IOSpace { address, size: _ } => address.get_bits(2..32) == 0,
         }
     }
 
-    pub const fn get_size(&self) -> usize {
+    pub fn get_size(&self) -> usize {
         match self {
-            BAR::MemorySpace32 { address: _, size, prefetch: _ } => *size as usize,
-            BAR::MemorySpace64 { address: _, size, prefetch: _ } => *size as usize,
-            BAR::IOSpace { address: _, size } => *size as usize,
+            Bar::MemorySpace32 { address: _, size, prefetch: _ } => usize::try_from(*size).unwrap(),
+            Bar::MemorySpace64 { address: _, size, prefetch: _ } => usize::try_from(*size).unwrap(),
+            Bar::IOSpace { address: _, size } => usize::try_from(*size).unwrap(),
         }
     }
 
     pub fn get_address(&self) -> Address<Physical> {
         match self {
-            BAR::MemorySpace32 { address, size: _, prefetch: _ } => Address::<Physical>::new_truncate(*address as u64),
-            BAR::MemorySpace64 { address, size: _, prefetch: _ } => Address::<Physical>::new_truncate(*address as u64),
-            BAR::IOSpace { address, size: _ } => Address::<Physical>::new_truncate(*address as u64),
+            Bar::MemorySpace32 { address, size: _, prefetch: _ } => *address,
+            Bar::MemorySpace64 { address, size: _, prefetch: _ } => *address,
+            Bar::IOSpace { address, size: _ } => Address::new(usize::try_from(*address).unwrap()).unwrap(),
         }
     }
 }
-
-// pub struct DeviceRegisterIterator {
-//     base: *mut u32,
-//     max_base: *mut u32,
-// }
-
-// impl DeviceRegisterIterator {
-//     unsafe fn new(base: *mut u32, register_count: usize) -> Self {
-//         Self { base, max_base: base.add(register_count) }
-//     }
-// }
-
-// impl Iterator for DeviceRegisterIterator {
-//     type Item = BAR;
-
-//     fn next(&mut self) -> Option<Self::Item> {
-//         if self.base < self.max_base {
-//             unsafe {
-//                 let register_raw = self.base.read_volatile();
-
-//                 let register = {
-//                     use bit_field::BitField;
-
-//                     if register_raw == 0 {
-//                         BAR::None
-//                     } else if register_raw.get_bit(0) {
-//                         self.base.write_volatile(u32::MAX);
-//                         let mem_usage = !(self.base.read_volatile() & !0b11) + 1;
-//                         self.base.write_volatile(register_raw);
-
-//                         BAR::IOSpace(register_raw, mem_usage as usize)
-//                     } else {
-//                         match register_raw.get_bits(1..3) {
-//                             // REMARK:
-//                             //  This little dance with the reads & writes is just fucking magic?
-//                             //  Who comes up with this shit?
-//                             0b00 => {
-//                                 // Write all 1's to register.
-//                                 self.base.write_volatile(u32::MAX);
-//                                 // Record memory usage by masking address bits, NOT'ing, and adding one.
-//                                 let mem_usage = !(self.base.read_volatile() & !0b1111) + 1;
-//                                 // Write original value back into register.
-//                                 self.base.write_volatile(register_raw);
-
-//                                 BAR::MemorySpace32(register_raw, mem_usage as usize)
-//                             }
-//                             // And because of MMIO volatility, it's even dumber for 64-bit registers
-//                             0b10 => {
-//                                 let base_next = self.base.add(1);
-//                                 // Record value of next register to restore later.
-//                                 let register_raw_next = base_next.read_volatile();
-
-//                                 // Write all 1's into double-wide register.
-//                                 self.base.write(u32::MAX);
-//                                 base_next.write(u32::MAX);
-
-//                                 // Record raw values of double-wide register.
-//                                 let register_raw_u64 =
-//                                     (self.base.read_volatile() as u64) | ((base_next.read_volatile() as u64) << 32);
-
-//                                 // Record memory usage of double-wide register.
-//                                 let mem_usage = !(register_raw_u64 & !0b1111) + 1;
-
-//                                 // Write old raw values back into double-wide register.
-//                                 self.base.write_volatile(register_raw);
-//                                 base_next.write_volatile(register_raw_next);
-
-//                                 BAR::MemorySpace64(
-//                                     (register_raw as u64) | ((register_raw_next as u64) << 32),
-//                                     mem_usage as usize,
-//                                 )
-//                             }
-//                             _ => panic!("invalid register type: 0b{:b}", register_raw),
-//                         }
-//                     }
-//                 };
-
-//                 match register {
-//                     BAR::MemorySpace64(_, _) => self.base = self.base.add(2),
-//                     _ => self.base = self.base.add(1),
-//                 }
-
-//                 Some(register)
-//             }
-//         } else {
-//             None
-//         }
-//     }
-// }
 
 impl core::fmt::Debug for Device<PCI2PCI> {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {

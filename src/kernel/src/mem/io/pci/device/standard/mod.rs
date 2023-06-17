@@ -1,27 +1,28 @@
-mod capabilities;
-pub use capabilities::*;
+// mod capabilities;
+// pub use capabilities::*;
 
-use crate::memory::io::pci::{Device, DeviceType, Standard, BAR};
+use crate::mem::io::pci::{Bar, Device, Kind, Standard};
 use bit_field::BitField;
+use libkernel::{LittleEndianU16, LittleEndianU32, LittleEndianU8};
 
 impl Device<Standard> {
     pub fn cardbus_cis_ptr(&self) -> Option<usize> {
-        match unsafe { self.base_ptr.add(0xA).read_volatile() }.get() {
+        match unsafe { self.read_offset::<LittleEndianU32>(Self::ROW_SIZE * 0xA) } {
             0x0 => None,
             value => Some(value as usize),
         }
     }
 
     pub fn subsystem_vendor_id(&self) -> u16 {
-        unsafe { self.base_ptr.add(0xB).read_volatile() }.get() as u16
+        unsafe { self.read_offset::<LittleEndianU16>(Self::ROW_SIZE * 0xB) }
     }
 
     pub fn subsystem_id(&self) -> u16 {
-        (unsafe { self.base_ptr.add(0xB).read_volatile() }.get() >> 16) as u16
+        unsafe { self.read_offset::<LittleEndianU16>((Self::ROW_SIZE * 0xB) + 2) }
     }
 
     pub fn expansion_rom_base_addr(&self) -> Option<usize> {
-        match unsafe { self.base_ptr.add(0xC).read_volatile() }.get() {
+        match unsafe { self.read_offset::<LittleEndianU32>(Self::ROW_SIZE * 0xC) } {
             0x0 => None,
             value => Some(value as usize),
         }
@@ -31,51 +32,51 @@ impl Device<Standard> {
     //     CapablitiesIterator::new(&self.mmio, unsafe { (self.mmio.read::<u8>(0x34).assume_init() & !0b11) as usize })
     // }
 
-    pub fn get_capability<T: capabilities::Capability>(&self) -> Option<T> {
-        let initial_capability_offset = unsafe { self.base_ptr.add(0xD).read_volatile() }.get() as u8;
-        let capabilities_iterator = CapablitiesIterator::new(self.base_ptr, initial_capability_offset);
+    // pub fn get_capability<T: capabilities::Capability>(&self) -> Option<T> {
+    //     let initial_capability_offset = unsafe { self.read_offset::<LittleEndianU8>(Self::ROW_SIZE * 0xD) };
+    //     let capabilities_iterator = CapablitiesIterator::new(self);
 
-        for (capability_type, capability_base_ptr) in capabilities_iterator {
-            if capability_type == T::TYPE_CODE {
-                return Some(unsafe {
-                    T::from_base_ptr(
-                        capability_base_ptr,
-                        [
-                            self.get_bar(0),
-                            self.get_bar(1),
-                            self.get_bar(2),
-                            self.get_bar(3),
-                            self.get_bar(4),
-                            self.get_bar(5),
-                        ],
-                    )
-                });
-            }
-        }
+    //     for (capability_type, capability_base_ptr) in capabilities_iterator {
+    //         if capability_type == T::TYPE_CODE {
+    //             return Some(unsafe {
+    //                 T::from_base_ptr(
+    //                     capability_base_ptr,
+    //                     [
+    //                         self.get_bar(0),
+    //                         self.get_bar(1),
+    //                         self.get_bar(2),
+    //                         self.get_bar(3),
+    //                         self.get_bar(4),
+    //                         self.get_bar(5),
+    //                     ],
+    //                 )
+    //             });
+    //         }
+    //     }
 
-        None
-    }
+    //     None
+    // }
 
     pub fn interrupt_line(&self) -> Option<u8> {
-        match unsafe { self.base_ptr.add(0xF).read_volatile() }.get().get_bits(0..8) {
+        match unsafe { self.read_offset::<LittleEndianU8>(Self::ROW_SIZE * 0xF) } {
             0xFF => None,
             value => Some(value as u8),
         }
     }
 
     pub fn interrupt_pin(&self) -> Option<u8> {
-        match unsafe { self.base_ptr.add(0xF).read_volatile() }.get().get_bits(8..16) {
+        match unsafe { self.read_offset::<LittleEndianU8>((Self::ROW_SIZE * 0xF) + 1) } {
             0x0 => None,
             value => Some(value as u8),
         }
     }
 
     pub fn min_grant(&self) -> u8 {
-        unsafe { self.base_ptr.add(0xF).read_volatile() }.get().get_bits(16..24) as u8
+        unsafe { self.read_offset::<LittleEndianU8>((Self::ROW_SIZE * 0xF) + 2) }
     }
 
     pub fn max_latency(&self) -> u8 {
-        unsafe { self.base_ptr.read_volatile() }.get().get_bits(24..32) as u8
+        unsafe { self.read_offset::<LittleEndianU8>((Self::ROW_SIZE * 0xF) + 3) }
     }
 }
 
@@ -83,7 +84,7 @@ impl core::fmt::Debug for Device<Standard> {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let debug_struct = &mut formatter.debug_struct("PCIe Device (Standard)");
 
-        self.generic_debut_fmt(debug_struct);
+        self.generic_debug_fmt(debug_struct);
         debug_struct
             .field("Cardbus CIS Pointer", &self.cardbus_cis_ptr())
             .field("Subsystem Vendor ID", &self.subsystem_vendor_id())
