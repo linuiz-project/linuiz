@@ -29,8 +29,8 @@ KASLR=yes
 "#;
 
 static UEFI_FIRMWARE_IMAGE_URL: &str = "https://github.com/rust-osdev/ovmf-prebuilt/releases/download/edk2-stable202211-r1/edk2-stable202211-r1-bin.tar.xz";
-static X64_CODE: &str = "build/ovmf/x64/code.fd";
-static X64_VARS: &str = "build/ovmf/x64/vars.fd";
+static X86_64_CODE: &str = "build/ovmf/x86_64/code.fd";
+static X86_64_VARS: &str = "build/ovmf/x86_64/vars.fd";
 static AARCH64_CODE: &str = "build/ovmf/aarch64/code.fd";
 static AARCH64_VARS: &str = "build/ovmf/aarch64/vars.fd";
 
@@ -94,8 +94,8 @@ fn main() -> Result<()> {
     }
 
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-    if !sh.path_exists(X64_CODE)
-        || !sh.path_exists(X64_VARS)
+    if !sh.path_exists(X86_64_CODE)
+        || !sh.path_exists(X86_64_VARS)
         || !sh.path_exists(AARCH64_CODE)
         || !sh.path_exists(AARCH64_VARS)
     {
@@ -181,7 +181,7 @@ fn download_limine_binary(sh: &Shell) -> Result<()> {
 fn download_ovmf_binaries(sh: &Shell, tmp_dir: &TempDir) -> Result<()> {
     println!("Downloading UEFI firmware binaries.");
 
-    sh.create_dir("build/ovmf/x64/")?;
+    sh.create_dir("build/ovmf/x86_64/")?;
     sh.create_dir("build/ovmf/aarch64/")?;
 
     let tar_path = tmp_dir.path().join("ovmf_prebuilts.tar.xz");
@@ -199,11 +199,12 @@ fn download_ovmf_binaries(sh: &Shell, tmp_dir: &TempDir) -> Result<()> {
     for entry in archive.entries()? {
         let mut entry = entry?;
         let path = entry.path()?.to_string_lossy().into_owned();
+        println!("Checking path for EFI binaries: {:?}", path);
 
         if path.ends_with("x64/code.fd") {
-            entry.unpack(X64_CODE)?;
+            entry.unpack(X86_64_CODE)?;
         } else if path.ends_with("x64/vars.fd") {
-            entry.unpack(X64_VARS)?;
+            entry.unpack(X86_64_VARS)?;
         } else if path.ends_with("aarch64/code.fd") {
             entry.unpack(AARCH64_CODE)?;
         } else if path.ends_with("aarch64/vars.fd") {
@@ -211,8 +212,8 @@ fn download_ovmf_binaries(sh: &Shell, tmp_dir: &TempDir) -> Result<()> {
         }
     }
 
-    assert!(sh.path_exists(X64_CODE));
-    assert!(sh.path_exists(X64_VARS));
+    assert!(sh.path_exists(X86_64_CODE));
+    assert!(sh.path_exists(X86_64_VARS));
     assert!(sh.path_exists(AARCH64_CODE));
     assert!(sh.path_exists(AARCH64_VARS));
 

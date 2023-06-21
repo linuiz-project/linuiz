@@ -1,8 +1,8 @@
 use crate::{interrupts::exceptions::Exception, task::Registers};
+use ia32utils::structures::idt::{InterruptStackFrame, PageFaultErrorCode, SelectorErrorCode};
 use libsys::{Address, Virtual};
-use x86_64::structures::idt::{InterruptStackFrame, PageFaultErrorCode, SelectorErrorCode};
 
-/// x64 exception wrapper type.
+/// x86_64 exception wrapper type.
 #[repr(C)]
 #[derive(Debug)]
 #[allow(non_camel_case_types)]

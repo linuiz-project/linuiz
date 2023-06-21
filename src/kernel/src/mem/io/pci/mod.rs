@@ -1,7 +1,7 @@
 mod device;
 pub use device::*;
 
-use crate::mem::{alloc::pmm::PMM, paging, with_kmapper, HHDM};
+use crate::mem::{alloc::pmm, paging, HHDM};
 use alloc::{collections::BTreeMap, vec::Vec};
 use core::ptr::NonNull;
 use libkernel::{LittleEndian, LittleEndianU16};
@@ -29,44 +29,44 @@ pub fn get_device_base_address(base: usize, bus_index: u8, device_index: u8) -> 
 }
 
 pub fn init_devices() -> Result<()> {
-    with_kmapper(|kmapper| {
-        let pci_devices = PCI_DEVICES.lock();
+    let mut devices = PCI_DEVICES.lock();
 
-        let acpi_tables = crate::acpi::TABLES.get().ok_or(Error::NoninitTables)?.lock();
-        let pci_regions = acpi::PciConfigRegions::new(&acpi_tables, &*PMM).map_err(|err| Error::AcpiError { err })?;
+    let acpi_tables = crate::acpi::TABLES.get().ok_or(Error::NoninitTables)?.lock();
+    let pci_regions = acpi::PciConfigRegions::new(&acpi_tables, pmm::get()).map_err(|err| Error::AcpiError { err })?;
 
-        pci_regions
-            .iter()
-            .map(|entry| (entry.physical_address, entry.segment_group, entry.bus_range))
-            .flat_map(|(base_address, segment_index, bus_range)| {
-                bus_range.map(move |bus_index| (base_address, segment_index, bus_index))
-            })
-            .flat_map(|(base_address, segment_index, bus_index)| {
-                (0u8..32u8).map(move |device_index| (base_address, segment_index, bus_index, device_index))
-            })
-            .try_for_each(|(base_address, segment_index, bus_index, device_index)| {
-                let device_frame = get_device_base_address(base_address, bus_index, device_index);
-                let device_page = HHDM.offset(device_frame).unwrap();
+    pci_regions
+        .iter()
+        .map(|entry| (entry.physical_address, entry.segment_group, entry.bus_range))
+        .flat_map(|(base_address, segment_index, bus_range)| {
+            bus_range.map(move |bus_index| (base_address, segment_index, bus_index))
+        })
+        .flat_map(|(base_address, segment_index, bus_index)| {
+            (0u8..32u8).map(move |device_index| (base_address, segment_index, bus_index, device_index))
+        })
+        .try_for_each(|(base_address, segment_index, bus_index, device_index)| {
+            let device_frame = get_device_base_address(base_address, bus_index, device_index);
+            let device_page = HHDM.offset(device_frame).unwrap();
 
-                // Safety: We should be reading known-good memory here, according to the PCI spec. The following `if` test will verify that.
-                let vendor_id = unsafe { device_page.as_ptr().cast::<LittleEndianU16>().read_volatile() };
-                if vendor_id.get() > u16::MIN && vendor_id.get() < u16::MAX {
-                    debug!(
-                        "Configuring PCIe device: [{:0>2}:{:0>2}:{:0>2}.00@{:X?}]",
-                        segment_index, bus_index, device_index, device_page
-                    );
+            // Safety: We should be reading known-good memory here, according to the PCI spec. The following `if` test will verify that.
+            let vendor_id = unsafe { device_page.as_ptr().cast::<LittleEndianU16>().read_volatile() };
+            if vendor_id.get() > u16::MIN && vendor_id.get() < u16::MAX {
+                debug!(
+                    "Configuring PCIe device: [{:0>2}:{:0>2}:{:0>2}.00@{:X?}]",
+                    segment_index, bus_index, device_index, device_page
+                );
 
-                    // Safety: Base pointer, at this point, has been verified as known-good.
-                    if let Ok(Devices::Standard(device)) = unsafe { new(NonNull::new(device_page.as_ptr()).unwrap()) } {
+                // Safety: Base pointer, at this point, has been verified as known-good.
+                match unsafe { new(NonNull::new(device_page.as_ptr()).unwrap()) } {
+                    Ok(Devices::Standard(device)) => {
                         trace!("{:#?}", device);
-                        // pci_devices.push(SingleOwner::new(pci_device));
+                        devices.push(device);
                     }
+
                     // TODO handle PCI-to-PCI busses
+                    _ => {}
                 }
+            }
 
-                Ok(())
-            })
-    })?;
-
-    Ok(())
+            Ok(())
+        })
 }

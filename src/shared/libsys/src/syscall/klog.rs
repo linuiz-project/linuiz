@@ -1,6 +1,5 @@
 use super::{Result, Vector};
 
-#[repr(u64)]
 enum KlogVectorOffset {
     Info = 0,
     Error = 1,
@@ -25,23 +24,23 @@ pub fn trace(str: &str) -> Result {
 }
 
 fn klog(offset: KlogVectorOffset, str: &str) -> Result {
-    let vector = (Vector::KlogInfo as u64) + (offset as u64);
+    let vector = (Vector::KlogInfo as usize) + (offset as usize);
     let str_ptr = str.as_ptr();
     let str_len = str.len();
 
     // Safety: It isn't.
     unsafe {
-        let low: u64;
-        let high: u64;
+        let discriminant: usize;
+        let value: usize;
 
         core::arch::asm!(
             "int 0x80",
             in("rax") vector,
-            inout("rdi") str_ptr => low,
-            inout("rsi") str_len => high,
+            inout("rdi") str_ptr => discriminant,
+            inout("rsi") str_len => value,
             options(nostack, nomem, preserves_flags)
         );
 
-        core::mem::transmute([low, high])
+        <Result as super::ResultConverter>::from_registers((discriminant, value))
     }
 }

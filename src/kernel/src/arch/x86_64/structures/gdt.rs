@@ -1,6 +1,5 @@
-pub use x86_64::{
+pub use ia32utils::{
     instructions::tables::{lgdt, sgdt},
-    registers::segmentation::SegmentSelector,
     structures::gdt::*,
 };
 
@@ -55,7 +54,7 @@ pub fn load() {
     unsafe {
         GDT_DATA.gdt.load();
 
-        use x86_64::instructions::segmentation::{Segment, CS, DS, ES, FS, GS, SS};
+        use ia32utils::instructions::segmentation::{Segment, CS, DS, ES, FS, GS, SS};
 
         CS::set_reg(kernel_code_selector());
         SS::set_reg(kernel_data_selector());
@@ -68,7 +67,7 @@ pub fn load() {
         // This has the fun behavioural side-effect of *also* clearing the IA32_FS/GS_BASE MSRs,
         // thus making any code involved in the CPL change context unable to access thread-local or
         // process-local state.
-        let null_selector = SegmentSelector::new(0x0, x86_64::PrivilegeLevel::Ring0);
+        let null_selector = SegmentSelector::new(0x0, ia32utils::PrivilegeLevel::Ring0);
         ES::set_reg(null_selector);
         DS::set_reg(null_selector);
         // It should be noted that Intel (not AMD) clears the FS/GS base when loading a null selector.

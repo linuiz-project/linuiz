@@ -168,6 +168,8 @@ impl acpi::AcpiHandler for AcpiHandler {
 pub static TABLES: spin::Once<Mutex<acpi::AcpiTables<AcpiHandler>>> = spin::Once::new();
 
 pub fn init_interface() -> Result<()> {
+    debug!("Initializing ACPI interface...");
+
     TABLES.try_call_once(|| {
         let rsdp_address = crate::init::boot::get_rsdp_address().map_err(|err| Error::Boot { err })?;
         // Safety: Bootloader guarantees any address provided for RDSP will be valid.
@@ -176,6 +178,8 @@ pub fn init_interface() -> Result<()> {
 
         Ok(Mutex::new(acpi_tables))
     })?;
+
+    debug!("Initialized ACPI interface.");
 
     Ok(())
 }

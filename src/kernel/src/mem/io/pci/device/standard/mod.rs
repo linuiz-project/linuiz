@@ -1,8 +1,7 @@
 // mod capabilities;
 // pub use capabilities::*;
 
-use crate::mem::io::pci::{Bar, Device, Kind, Standard};
-use bit_field::BitField;
+use crate::mem::io::pci::{Device, Standard};
 use libkernel::{LittleEndianU16, LittleEndianU32, LittleEndianU8};
 
 impl Device<Standard> {
@@ -60,14 +59,14 @@ impl Device<Standard> {
     pub fn interrupt_line(&self) -> Option<u8> {
         match unsafe { self.read_offset::<LittleEndianU8>(Self::ROW_SIZE * 0xF) } {
             0xFF => None,
-            value => Some(value as u8),
+            value => Some(value),
         }
     }
 
     pub fn interrupt_pin(&self) -> Option<u8> {
         match unsafe { self.read_offset::<LittleEndianU8>((Self::ROW_SIZE * 0xF) + 1) } {
             0x0 => None,
-            value => Some(value as u8),
+            value => Some(value),
         }
     }
 

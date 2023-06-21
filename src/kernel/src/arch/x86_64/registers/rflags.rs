@@ -1,9 +1,7 @@
-use libsys::ureg;
-
 bitflags::bitflags! {
     #[repr(transparent)]
     #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-    pub struct RFlags : ureg {
+    pub struct RFlags : usize {
         /// Set by hardware if the last arithmetic operation generated a carry out of the most-significant
         /// bit of the result.
         const CARRY_FLAG = 1 << 0                   | Self::REQ_RESERVED;
@@ -59,7 +57,7 @@ bitflags::bitflags! {
 }
 
 impl RFlags {
-    const REQ_RESERVED: ureg = 1 << 1;
+    const REQ_RESERVED: usize = 1 << 1;
 
     #[inline]
     pub fn read() -> Self {
@@ -67,8 +65,8 @@ impl RFlags {
     }
 
     #[inline]
-    fn read_raw() -> ureg {
-        let result: ureg;
+    fn read_raw() -> usize {
+        let result: usize;
 
         // Safety: Instruction block has no side effects.
         unsafe {

@@ -33,7 +33,7 @@ pub unsafe fn disable() {
 pub fn are_enabled() -> bool {
     #[cfg(target_arch = "x86_64")]
     {
-        crate::arch::x64::registers::RFlags::read().contains(crate::arch::x64::registers::RFlags::INTERRUPT_FLAG)
+        crate::arch::x86_64::registers::RFlags::read().contains(crate::arch::x86_64::registers::RFlags::INTERRUPT_FLAG)
     }
 
     #[cfg(target_arch = "riscv64")]

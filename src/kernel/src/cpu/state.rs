@@ -21,9 +21,9 @@ struct State {
     scheduler: InterruptCell<Scheduler>,
 
     #[cfg(target_arch = "x86_64")]
-    idt: Box<crate::arch::x64::structures::idt::InterruptDescriptorTable>,
+    idt: Box<crate::arch::x86_64::structures::idt::InterruptDescriptorTable>,
     #[cfg(target_arch = "x86_64")]
-    tss: Box<crate::arch::x64::structures::tss::TaskStateSegment>,
+    tss: Box<crate::arch::x86_64::structures::tss::TaskStateSegment>,
 
     #[cfg(target_arch = "x86_64")]
     apic: apic::Apic,
@@ -51,7 +51,7 @@ pub enum ExceptionCatcher {
 pub unsafe fn init(timer_frequency: u16) {
     #[cfg(target_arch = "x86_64")]
     let idt = {
-        use crate::arch::x64::structures::idt;
+        use crate::arch::x86_64::structures::idt;
 
         let mut idt = Box::new(idt::InterruptDescriptorTable::new());
 
@@ -64,11 +64,9 @@ pub unsafe fn init(timer_frequency: u16) {
 
     #[cfg(target_arch = "x86_64")]
     let tss = {
-        use crate::arch::{
-            reexport::x86_64::VirtAddr,
-            x64::structures::{idt::StackTableIndex, tss},
-        };
+        use crate::arch::x86_64::structures::{idt::StackTableIndex, tss};
         use core::num::NonZeroUsize;
+        use ia32utils::VirtAddr;
 
         fn allocate_tss_stack() -> VirtAddr {
             use crate::mem::Stack;
@@ -111,7 +109,7 @@ pub unsafe fn init(timer_frequency: u16) {
 
     /* init APIC */
     {
-        use crate::{arch::x64, interrupts::Vector};
+        use crate::{arch::x86_64, interrupts::Vector};
 
         let apic = &mut state.apic;
 
@@ -123,10 +121,11 @@ pub unsafe fn init(timer_frequency: u16) {
         apic.get_thermal_sensor().set_vector(Vector::Thermal as u8).set_masked(true);
 
         // Configure APIC timer in most advanced mode.
-        let timer_interval = if x64::cpuid::FEATURE_INFO.has_tsc() && x64::cpuid::FEATURE_INFO.has_tsc_deadline() {
+        let timer_interval = if x86_64::cpuid::FEATURE_INFO.has_tsc() && x86_64::cpuid::FEATURE_INFO.has_tsc_deadline()
+        {
             apic.get_timer().set_mode(apic::TimerMode::TscDeadline);
 
-            let frequency = x64::cpuid::CPUID.get_processor_frequency_info().map_or_else(
+            let frequency = x86_64::cpuid::CPUID.get_processor_frequency_info().map_or_else(
                 || {
                     libsys::do_once!({
                         trace!("Processors do not support TSC frequency reporting via CPUID.");
@@ -173,11 +172,11 @@ pub unsafe fn init(timer_frequency: u16) {
     let state_address = Box::into_raw(state).addr();
 
     #[cfg(target_arch = "x86_64")]
-    crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::write(state_address as u64);
+    crate::arch::x86_64::registers::msr::IA32_KERNEL_GS_BASE::write(state_address as u64);
 }
 
 fn get_state_ptr() -> Result<NonNull<State>> {
-    let kernel_gs_usize = usize::try_from(crate::arch::x64::registers::msr::IA32_KERNEL_GS_BASE::read()).unwrap();
+    let kernel_gs_usize = usize::try_from(crate::arch::x86_64::registers::msr::IA32_KERNEL_GS_BASE::read()).unwrap();
     NonNull::new(kernel_gs_usize as *mut State).ok_or(Error::NotInitialized)
 }
 
@@ -201,7 +200,7 @@ pub unsafe fn begin_scheduling() -> Result<()> {
     with_scheduler(|scheduler| {
         assert!(!scheduler.is_enabled());
         scheduler.enable();
-    })?;
+    });
 
     // Enable APIC timer ...
     let apic = &mut get_state_mut()?.apic;
@@ -219,8 +218,9 @@ pub unsafe fn begin_scheduling() -> Result<()> {
     Ok(())
 }
 
-pub fn with_scheduler<O>(func: impl FnOnce(&mut crate::task::Scheduler) -> O) -> Result<O> {
-    get_state_mut().map(|state| state.scheduler.with_mut(func))
+pub fn with_scheduler<O>(func: impl FnOnce(&mut crate::task::Scheduler) -> O) -> O {
+    let state = get_state_mut().unwrap();
+    state.scheduler.with_mut(func)
 }
 
 /// Ends the current interrupt context for the interrupt controller.
@@ -253,7 +253,7 @@ pub unsafe fn set_preemption_wait(interval_wait: core::num::NonZeroU16) -> Resul
 
             // Safety: Control flow expects the TSC deadline to be set.
             apic::TimerMode::TscDeadline => unsafe {
-                crate::arch::x64::registers::msr::IA32_TSC_DEADLINE::set(
+                crate::arch::x86_64::registers::msr::IA32_TSC_DEADLINE::set(
                     core::arch::x86_64::_rdtsc() + (timer_interval.get() * u64::from(interval_wait.get())),
                 );
             },

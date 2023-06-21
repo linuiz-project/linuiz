@@ -2,6 +2,7 @@
 #![feature(
     strict_provenance,          // #95228 <https://github.com/rust-lang/rust/issues/95228>
     try_trait_v2,               // #84277 <https://github.com/rust-lang/rust/issues/84277>
+    exclusive_range_pattern,    // #37854 <https://github.com/rust-lang/rust/issues/37854>
     const_option,
 )]
 
@@ -16,6 +17,8 @@ pub use constants::*;
 // pub mod sync;
 pub mod syscall;
 
+#[macro_use]
+extern crate static_assertions;
 extern crate alloc;
 
 use core::num::NonZeroU32;

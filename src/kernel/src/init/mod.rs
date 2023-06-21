@@ -6,9 +6,6 @@ pub use params::*;
 
 pub mod boot;
 
-use crate::mem::alloc::AlignedAllocator;
-use core::mem::MaybeUninit;
-use libkernel::LinkerSymbol;
 use libsys::Address;
 
 crate::error_impl! {
@@ -24,19 +21,27 @@ pub static KERNEL_HANDLE: spin::Lazy<uuid::Uuid> = spin::Lazy::new(uuid::Uuid::n
 pub unsafe extern "C" fn init() -> ! {
     use core::sync::atomic::{AtomicBool, Ordering};
 
+    #[limine::limine_tag]
+    static LIMINE_KERNEL_FILE: limine::KernelFileRequest = limine::KernelFileRequest::new(boot::LIMINE_REV);
+
     static INIT: AtomicBool = AtomicBool::new(false);
     assert!(!INIT.load(Ordering::Acquire), "`init()` has already been called!");
     INIT.store(true, Ordering::Release);
 
     setup_logging();
-
+    arch::cpu_setup();
     print_boot_info();
 
-    arch::cpu_setup();
+    let kernel_file = LIMINE_KERNEL_FILE
+        .get_response()
+        .map(limine::KernelFileResponse::file)
+        .expect("bootloader did not respond to kernel file request");
 
-    memory::setup().unwrap();
+    params::parse(kernel_file.cmdline());
+    crate::mem::alloc::pmm::init(boot::get_memory_map().unwrap()).unwrap();
+    crate::panic::symbols::parse(kernel_file).unwrap();
+    memory::setup(kernel_file).unwrap();
 
-    debug!("Initializing ACPI interface...");
     crate::acpi::init_interface().unwrap();
 
     crate::mem::io::pci::init_devices().unwrap();
@@ -45,16 +50,7 @@ pub unsafe extern "C" fn init() -> ! {
 
     setup_smp();
 
-    debug!("Reclaiming bootloader memory...");
-    crate::init::boot::reclaim_boot_memory({
-        extern "C" {
-            static __symbols_start: LinkerSymbol;
-            static __symbols_end: LinkerSymbol;
-        }
-
-        &[__symbols_start.as_usize()..__symbols_end.as_usize()]
-    });
-    debug!("Bootloader memory reclaimed.");
+    crate::init::boot::reclaim_memory().unwrap();
 
     kernel_core_setup()
 }
@@ -95,7 +91,7 @@ fn print_boot_info() {
 
     // Vendor strings from the CPU need to be enumerated per-platform.
     #[cfg(target_arch = "x86_64")]
-    if let Some(vendor_info) = crate::arch::x64::cpuid::VENDOR_INFO.as_ref() {
+    if let Some(vendor_info) = crate::arch::x86_64::cpuid::VENDOR_INFO.as_ref() {
         info!("Vendor              {}", vendor_info.as_str());
     } else {
         info!("Vendor              Unknown");
@@ -148,12 +144,10 @@ fn load_drivers() {
             };
 
             // Safety: In-place transmutation of initialized bytes for the purpose of copying safely.
-            let archive_data = unsafe { entry.data().align_to::<MaybeUninit<u8>>().1 };
-            trace!("Allocating memory for ELF data...");
-            let mut elf_copy = crate::task::ElfMemory::new_zeroed_slice_in(archive_data.len(), AlignedAllocator::new());
-            trace!("Copying ELF data into memory...");
-            elf_copy.copy_from_slice(archive_data);
-            trace!("ELF data copied into memory.");
+            // let (_, archive_data, _) = unsafe { entry.data().align_to::<MaybeUninit<u8>>() };
+            trace!("Allocating ELF data into memory...");
+            let elf_data = alloc::boxed::Box::from(entry.data());
+            trace!("ELF data allocated into memory.");
 
             let Ok((Some(shdrs), Some(_))) = elf.section_headers_with_strtab()
             else {
@@ -191,8 +185,7 @@ fn load_drivers() {
                 elf.ehdr,
                 segments_copy,
                 relas,
-                // Safety: The ELF data buffer is now initialized with the contents of the ELF.
-                crate::task::ElfData::Memory(unsafe { elf_copy.assume_init() }),
+                crate::task::ElfData::Memory(elf_data),
             );
 
             crate::task::PROCESSES.lock().push_back(task);
@@ -218,7 +211,7 @@ fn setup_smp() {
             for cpu_info in cpus {
                 trace!("Starting processor: ID P{}/L{}", cpu_info.processor_id(), cpu_info.lapic_id());
 
-                if PARAMETERS.smp {
+                if params::get().smp {
                     extern "C" fn _smp_entry(_: &limine::CpuInfo) -> ! {
                         arch::cpu_setup();
 

@@ -8,10 +8,6 @@ pub fn breakpoint() {
     }
 }
 
-pub mod tables {
-    pub use x86_64::instructions::tables::*;
-}
-
 pub mod sync {
     #[inline]
     pub fn mfence() {

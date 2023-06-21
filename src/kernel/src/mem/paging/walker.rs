@@ -37,12 +37,10 @@ impl<'a> Walker<'a> {
             Ordering::Greater => {
                 for entry in table {
                     if entry.is_present() {
-                        let table = unsafe {
-                            core::slice::from_raw_parts(
-                                crate::mem::HHDM.offset(entry.get_frame()).unwrap().as_ptr().cast(),
-                                libsys::table_index_size(),
-                            )
-                        };
+                        let table_ptr = crate::mem::HHDM.offset(entry.get_frame()).unwrap().as_ptr().cast();
+                        let table_size = libsys::table_index_size();
+                        let table = unsafe { core::slice::from_raw_parts(table_ptr, table_size) };
+
                         Self::walk_impl(table, cur_depth.next(), target_depth, func)?;
                     } else {
                         let steps = core::iter::Step::steps_between(&cur_depth, &target_depth).unwrap();

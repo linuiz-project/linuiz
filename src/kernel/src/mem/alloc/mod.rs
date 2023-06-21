@@ -10,7 +10,7 @@ use spin::Lazy;
 pub type KernelAllocator = pmm::PhysicalAllocator;
 
 // TODO decide if we even need this? Perhaps just rely on the PMM for *all* allocations.
-pub static KMALLOC: Lazy<KernelAllocator> = Lazy::new(|| &*pmm::PMM);
+pub static KMALLOC: Lazy<KernelAllocator> = Lazy::new(pmm::get);
 
 mod global_allocator_impl {
     use super::KMALLOC;

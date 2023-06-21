@@ -11,7 +11,8 @@ use libsys::{Address, Physical};
 crate::error_impl! {
     #[derive(Debug)]
     pub enum Error {
-        InvalidHeaderType { value: u8 } => None,
+        InvalidKind { raw: u8 } => None,
+        UnsupportedKind { raw: u8 } => None,
         InvalidBarSpace { value: u8 } => None,
         BarIndexOverflow { index: usize } => None
     }
@@ -57,13 +58,12 @@ pub struct Command(u16);
 //     }
 // }
 
-// #[repr(u16)]
-// #[derive(Debug, TryFromPrimitive)]
-// pub enum DEVSELTiming {
-//     Fast = 0b00,
-//     Medium = 0b01,
-//     Slow = 0b10,
-// }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DevselTiming {
+    Fast,
+    Medium,
+    Slow,
+}
 
 bitflags::bitflags! {
     #[repr(transparent)]
@@ -86,11 +86,17 @@ bitflags::bitflags! {
     }
 }
 
-// impl StatusRegister {
-//     pub fn devsel_timing(&self) -> DEVSELTiming {
-//         DEVSELTiming::try_from((self.bits() >> 9) & 0b11).unwrap()
-//     }
-// }
+impl Status {
+    pub fn devsel_timing(self) -> DevselTiming {
+        match self.bits().get_bits(9..11) {
+            0b00 => DevselTiming::Fast,
+            0b01 => DevselTiming::Medium,
+            0b10 => DevselTiming::Slow,
+
+            _ => unreachable!(),
+        }
+    }
+}
 
 pub trait Kind {
     const REGISTER_COUNT: usize;
@@ -115,7 +121,6 @@ impl Kind for PCI2CardBus {
 pub enum Devices {
     Standard(Device<Standard>),
     PCI2PCI(Device<PCI2PCI>),
-    PCI2CardBus(Device<PCI2CardBus>),
 }
 
 pub struct Device<T: Kind>(NonNull<u8>, PhantomData<T>);
@@ -132,8 +137,8 @@ pub unsafe fn new(ptr: NonNull<u8>) -> Result<Devices> {
     match header_ty.get().get_bits(0..7) {
         0x0 => Ok(Devices::Standard(Device::<Standard>(ptr, PhantomData))),
         0x1 => Ok(Devices::PCI2PCI(Device(ptr, PhantomData))),
-        0x2 => Ok(Devices::PCI2CardBus(Device::<PCI2CardBus>(ptr, PhantomData))),
-        value => Err(Error::InvalidHeaderType { value }),
+        0x2 => Err(Error::UnsupportedKind { raw: 0x2 }),
+        raw => Err(Error::InvalidKind { raw }),
     }
 }
 
@@ -165,7 +170,7 @@ impl<T: Kind> Device<T> {
     }
 
     pub fn get_status(&self) -> Status {
-        Status::from_bits_truncate(unsafe { self.read_offset::<LittleEndianU16>(Self::ROW_SIZE + 2) })
+        Status::from_bits_retain(unsafe { self.read_offset::<LittleEndianU16>(Self::ROW_SIZE + 2) })
     }
 
     pub fn get_revision_id(&self) -> u8 {
@@ -310,12 +315,6 @@ impl Bar {
 }
 
 impl core::fmt::Debug for Device<PCI2PCI> {
-    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter.debug_tuple("Not Implemented").finish()
-    }
-}
-
-impl core::fmt::Debug for Device<PCI2CardBus> {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter.debug_tuple("Not Implemented").finish()
     }
