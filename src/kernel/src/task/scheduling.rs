@@ -3,6 +3,7 @@ use crate::{
     task::{Registers, State, Task},
 };
 use alloc::collections::VecDeque;
+use libsys::Address;
 
 pub static PROCESSES: spin::Mutex<VecDeque<Task>> = spin::Mutex::new(VecDeque::new());
 
@@ -108,8 +109,10 @@ impl Scheduler {
             let old_value = self.task.replace(next_process);
             debug_assert!(old_value.is_none());
         } else {
-            *state =
-                State::kernel(crate::interrupts::wait_loop as usize as u64, self.idle_stack.top().addr().get() as u64);
+            *state = State::kernel(
+                Address::new(crate::interrupts::wait_loop as usize).unwrap(),
+                Address::new(self.idle_stack.top().addr().get()).unwrap(),
+            );
             *regs = Registers::default();
 
             trace!("Switched idle task.");

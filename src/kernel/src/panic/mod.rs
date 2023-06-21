@@ -62,7 +62,7 @@ fn stack_trace() {
     let frame_ptr = {
         #[cfg(target_arch = "x86_64")]
         {
-            crate::arch::x64::registers::stack::RBP::read() as *const StackFrame
+            crate::arch::x86_64::registers::stack::RBP::read() as *const StackFrame
         }
     };
 

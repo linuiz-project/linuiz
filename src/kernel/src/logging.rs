@@ -45,8 +45,8 @@ impl log::Log for Serial {
 crate::error_impl! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum Error {
-        SetLoggerError => None,
-        NoLoggerError => None
+        SetLogger => None,
+        NoLogger => None
     }
 }
 
@@ -75,8 +75,8 @@ pub fn init() -> Result<()> {
         })
     });
 
-    let uart = SERIAL_UART.as_ref().ok_or(Error::NoLoggerError)?;
-    log::set_logger(uart).map_err(|_| Error::SetLoggerError)?;
+    let uart = SERIAL_UART.as_ref().ok_or(Error::NoLogger)?;
+    log::set_logger(uart).map_err(|_| Error::SetLogger)?;
 
     Ok(())
 }

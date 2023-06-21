@@ -1,9 +1,10 @@
 pub mod klog;
 pub mod task;
 
+use core::ffi::c_void;
 use num_enum::TryFromPrimitive;
 
-#[repr(u64)]
+#[repr(usize)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive, Hash)]
 pub enum Vector {
     KlogInfo = 0x100,
@@ -15,53 +16,77 @@ pub enum Vector {
     TaskYield = 0x201,
 }
 
-#[repr(u64)]
-#[derive(Debug)]
-pub enum Result {
-    Ok,
-    InvalidPtr(*const u8),
-    Utf8Error,
-    IntError,
+const_assert!({
+    use core::mem::size_of;
+    size_of::<Result>() <= size_of::<(u64, u64)>()
+});
 
-    InvalidVector,
+pub type Result = core::result::Result<Success, Error>;
+
+pub trait ResultConverter {
+    type Registers;
+
+    fn from_registers(regs: Self::Registers) -> Self;
+    fn into_registers(self) -> Self::Registers;
 }
 
-impl core::ops::FromResidual<Self> for Result {
-    fn from_residual(residual: Self) -> Self {
-        residual
-    }
-}
+impl ResultConverter for Result {
+    type Registers = (usize, usize);
 
-impl core::ops::FromResidual<core::result::Result<core::convert::Infallible, Self>> for Result {
-    fn from_residual(residual: core::result::Result<core::convert::Infallible, Self>) -> Self {
-        unsafe { residual.unwrap_err_unchecked() }
-    }
-}
+    fn from_registers((discriminant, value): Self::Registers) -> Self {
+        let discriminant = u32::try_from(discriminant).unwrap();
+        match Error::try_from_primitive(discriminant).map_err(|err| err.number) {
+            Ok(err) => Err(err),
 
-impl core::ops::Try for Result {
-    type Output = Self;
-    type Residual = Self;
+            Err(0x0) => Ok(Success::Ok),
+            Err(0x1) => Ok(Success::Ptr(value as *mut c_void)),
+            Err(0x2) => Ok(Success::NonNullPtr(core::ptr::NonNull::new(value as *mut c_void).unwrap())),
 
-    fn from_output(output: Self::Output) -> Self {
-        output
+            Err(_) => unimplemented!(),
+        }
     }
 
-    fn branch(self) -> core::ops::ControlFlow<Self::Residual, Self::Output> {
+    fn into_registers(self) -> Self::Registers {
         match self {
-            Self::Ok => core::ops::ControlFlow::Continue(self),
-            err => core::ops::ControlFlow::Break(err),
+            Ok(success @ Success::Ok) => (success.discriminant() as usize, usize::default()),
+            Ok(success @ Success::Ptr(ptr)) => (success.discriminant() as usize, ptr.addr()),
+            Ok(success @ Success::NonNullPtr(ptr)) => (success.discriminant() as usize, ptr.addr().get()),
+
+            Err(err) => (err as usize, Default::default()),
         }
     }
 }
 
-impl From<core::num::TryFromIntError> for Result {
-    fn from(_: core::num::TryFromIntError) -> Self {
-        Self::IntError
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Success {
+    Ok = 0x0,
+    Ptr(*mut c_void) = 0x1,
+    NonNullPtr(core::ptr::NonNull<c_void>) = 0x2,
+}
+
+impl Success {
+    #[inline]
+    const fn discriminant(&self) -> u32 {
+        // Safety: discrimnent is guaranteed to be the first bytes
+        unsafe { *(self as *const Self as *const u32) }
     }
 }
 
-impl From<core::str::Utf8Error> for Result {
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
+pub enum Error {
+    InvalidVector = 0x10000,
+    InvalidPtr = 0x20000,
+    InvalidUtf8 = 0x30000,
+
+    UnmappedMemory = 0x40000,
+
+    NoActiveTask = 0x50000,
+}
+
+impl From<core::str::Utf8Error> for Error {
     fn from(_: core::str::Utf8Error) -> Self {
-        Self::Utf8Error
+        Self::InvalidUtf8
     }
 }

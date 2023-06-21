@@ -139,9 +139,9 @@ pub fn run(sh: &xshell::Shell, options: Options) -> Result<()> {
         Cpu::Rv64 => unimplemented!(),
         _ => optional_args.extend_from_slice(&[
             "-drive",
-            "if=pflash,index=0,readonly=on,format=raw,file=build/ovmf/x64/code.fd",
+            "if=pflash,index=0,readonly=on,format=raw,file=build/ovmf/x86_64/code.fd",
             "-drive",
-            "if=pflash,index=1,format=raw,file=build/ovmf/x64/vars.fd",
+            "if=pflash,index=1,format=raw,file=build/ovmf/x86_64/vars.fd",
             "-drive",
             "format=raw,file=fat:rw:build/root/",
         ]),

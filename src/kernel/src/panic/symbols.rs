@@ -11,7 +11,11 @@ crate::error_impl! {
     }
 }
 
-static SYMBOLS: spin::Once<(String, Box<[(Symbol, Option<Range<usize>>)]>)> = spin::Once::new();
+pub type SymbolMapping = (Symbol, Option<Range<usize>>);
+pub type PackedStrings = String;
+pub type PackedSymbolTable = (PackedStrings, Box<[SymbolMapping]>);
+
+static SYMBOLS: spin::Once<PackedSymbolTable> = spin::Once::new();
 
 pub fn parse(kernel_file: &'static limine::File) -> Result<()> {
     SYMBOLS.try_call_once(|| {

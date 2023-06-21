@@ -66,7 +66,7 @@ pub fn copy_kernel_page_table() -> alloc::pmm::Result<Address<Frame>> {
 }
 
 #[cfg(target_arch = "x86_64")]
-pub struct PagingRegister(pub Address<Frame>, pub crate::arch::x64::registers::control::CR3Flags);
+pub struct PagingRegister(pub Address<Frame>, pub crate::arch::x86_64::registers::control::CR3Flags);
 #[cfg(target_arch = "riscv64")]
 pub struct PagingRegister(pub Address<Frame>, pub u16, pub crate::arch::rv64::registers::satp::Mode);
 
@@ -74,7 +74,7 @@ impl PagingRegister {
     pub fn read() -> Self {
         #[cfg(target_arch = "x86_64")]
         {
-            let args = crate::arch::x64::registers::control::CR3::read();
+            let args = crate::arch::x86_64::registers::control::CR3::read();
             Self(args.0, args.1)
         }
 
@@ -90,7 +90,7 @@ impl PagingRegister {
     /// Writing to this register has the chance to externally invalidate memory references.
     pub unsafe fn write(args: &Self) {
         #[cfg(target_arch = "x86_64")]
-        crate::arch::x64::registers::control::CR3::write(args.0, args.1);
+        crate::arch::x86_64::registers::control::CR3::write(args.0, args.1);
 
         #[cfg(target_arch = "riscv64")]
         crate::arch::rv64::registers::satp::write(args.0.as_usize(), args.1, args.2);

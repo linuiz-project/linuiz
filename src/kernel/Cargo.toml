@@ -42,9 +42,9 @@ rustc-demangle = "0.1"
 tar-no-std = "0.2"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
+ia32utils = { version = "0.14", package = "x86_64" }
 pic_8259 = { path = "../shared/pic_8259/" }
 raw-cpuid = "11.0"
-x86_64 = "0.14"
 
 
 [profile.dev]

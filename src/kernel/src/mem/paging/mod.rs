@@ -19,7 +19,7 @@ impl TableDepth {
         Self({
             #[cfg(target_arch = "x86_64")]
             {
-                use crate::arch::x64::registers::control;
+                use crate::arch::x86_64::registers::control;
 
                 if control::CR4::read().contains(control::CR4Flags::LA57) {
                     5
@@ -248,7 +248,7 @@ impl PageTableEntry {
         }
 
         #[cfg(target_arch = "x86_64")]
-        if !crate::arch::x64::registers::msr::IA32_EFER::get_nxe() {
+        if !crate::arch::x86_64::registers::msr::IA32_EFER::get_nxe() {
             // This bit is reserved if NXE is not supported. For now, this means silently removing it for compatability.
             attributes.remove(TableEntryFlags::NO_EXECUTE);
         }

@@ -97,9 +97,11 @@ impl Task {
             priority,
             address_space,
             context: (
-                State::user(u64::try_from(load_offset).unwrap() + elf_header.e_entry, unsafe {
-                    stack.as_non_null_ptr().as_ptr().add(stack.len()).addr() as u64
-                }),
+                State::user(
+                    Address::new(load_offset + usize::try_from(elf_header.e_entry).unwrap()).unwrap(),
+                    // Safety: Addition keeps the pointer within the bounds of the allocation, and the unit size is 1.
+                    unsafe { Address::from_ptr(stack.as_non_null_ptr().as_ptr().add(stack.len())) },
+                ),
                 Registers::default(),
             ),
             load_offset,

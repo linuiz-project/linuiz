@@ -13,8 +13,7 @@ use crate::{
 #[inline(never)]
 pub unsafe fn handle_trap(irq_vector: u64, state: &mut State, regs: &mut Registers) {
     match Vector::try_from(irq_vector) {
-        Ok(Vector::Timer) => crate::cpu::state::with_scheduler(|scheduler| scheduler.interrupt_task(state, regs))
-            .expect("local state is not initialized"),
+        Ok(Vector::Timer) => crate::cpu::state::with_scheduler(|scheduler| scheduler.interrupt_task(state, regs)),
 
         Ok(Vector::Syscall) => handle_syscall(state, regs),
 
@@ -25,6 +24,7 @@ pub unsafe fn handle_trap(irq_vector: u64, state: &mut State, regs: &mut Registe
     crate::cpu::state::end_of_interrupt().unwrap();
 }
 
+#[allow(clippy::similar_names)]
 fn handle_syscall(state: &mut State, regs: &mut Registers) {
     let vector = regs.rax;
     let arg0 = regs.rdi;
@@ -34,11 +34,8 @@ fn handle_syscall(state: &mut State, regs: &mut Registers) {
     let arg4 = regs.r8;
     let arg5 = regs.r9;
 
-    if let Some(result) = syscall::process(vector, arg0, arg1, arg2, arg3, arg4, arg5, state, regs) {
-        // Safety: Result is guaranteed to be laid out as 16 contiguous bytes in memory.
-        let result_parts = unsafe { core::mem::transmute::<libsys::syscall::Result, [u64; 2]>(result) };
-
-        regs.rdi = result_parts[0];
-        regs.rsi = result_parts[1];
-    }
+    let result = syscall::process(vector, arg0, arg1, arg2, arg3, arg4, arg5, state, regs);
+    let (rdi, rsi) = <libsys::syscall::Result as libsys::syscall::ResultConverter>::into_registers(result);
+    regs.rdi = rdi;
+    regs.rsi = rsi;
 }

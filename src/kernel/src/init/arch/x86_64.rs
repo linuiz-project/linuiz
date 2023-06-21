@@ -1,5 +1,5 @@
 pub fn cpu_setup() {
-    use crate::arch::x64::{
+    use crate::arch::x86_64::{
         cpuid,
         registers::control::{CR0Flags, CR4Flags, CR0, CR4},
         registers::msr,
@@ -60,7 +60,7 @@ pub fn cpu_setup() {
     }
 
     // Load the static processor tables for this core.
-    crate::arch::x64::structures::load_static_tables();
+    crate::arch::x86_64::structures::load_static_tables();
 
     // Setup system call interface.
     // // Safety: Parameters are set according to the IA-32 SDM, and so should have no undetermined side-effects.

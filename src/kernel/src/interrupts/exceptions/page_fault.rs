@@ -124,6 +124,4 @@ pub unsafe fn handler(address: Address<Virtual>) -> Result<()> {
 
         Ok(())
     })
-    .map_err(|_| Error::CoreState)
-    .flatten()
 }

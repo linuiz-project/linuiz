@@ -1,11 +1,19 @@
 use crate::{
-    arch::x64::registers::RFlags,
     interrupts::exceptions::{ex_handler, ArchException},
     task::{Registers, State},
 };
-use x86_64::structures::idt;
+use libsys::Address;
 
-pub use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, InterruptStackFrameValue};
+pub use ia32utils::{
+    instructions::tables::{lidt, sidt},
+    structures::idt::*,
+};
+
+/// Loads the IDT from the interrupt descriptor table register.
+pub unsafe fn get_current() -> Option<&'static mut InterruptDescriptorTable> {
+    let idt_pointer = sidt();
+    idt_pointer.base.as_mut_ptr::<InterruptDescriptorTable>().as_mut()
+}
 
 macro_rules! push_gprs {
     () => {
@@ -85,7 +93,7 @@ macro_rules! exception_handler {
     ($exception_name:ident, $return_type:ty) => {
         paste::paste! {
             #[naked]
-            extern "x86-interrupt" fn [<$exception_name _handler>](stack_frame: InterruptStackFrame) -> $return_type {
+            pub extern "x86-interrupt" fn [<$exception_name _handler>](stack_frame: InterruptStackFrame) -> $return_type {
                 // Safety: When has perfect assembly ever caused undefined behaviour?
                 unsafe {
                     core::arch::asm!(
@@ -118,7 +126,7 @@ macro_rules! exception_handler_with_error {
     ($exception_name:ident, $error_ty:ty, $return_type:ty) => {
         paste::paste! {
             #[naked]
-            extern "x86-interrupt" fn [<$exception_name _handler>](
+            pub extern "x86-interrupt" fn [<$exception_name _handler>](
                 stack_frame: InterruptStackFrame,
                 error_code: $error_ty
             ) -> $return_type {
@@ -160,7 +168,7 @@ macro_rules! irq_stub {
     ($irq_vector:literal) => {
         paste::paste! {
             #[naked]
-            extern "x86-interrupt" fn [<irq_ $irq_vector>](_: crate::arch::x64::structures::idt::InterruptStackFrame) {
+            pub extern "x86-interrupt" fn [<irq_ $irq_vector>](_: crate::arch::x86_64::structures::idt::InterruptStackFrame) {
                 // Safety: This is literally perfect assembly. It's safe because it's perfect.
                 unsafe {
                     core::arch::asm!(
@@ -196,29 +204,27 @@ macro_rules! irq_stub {
 /// ### Safety
 ///
 /// This function should not be called from software.
-unsafe extern "sysv64" fn irq_handoff(
-    irq_number: u64,
-    isf: &mut crate::arch::x64::structures::idt::InterruptStackFrame,
-    regs: &mut Registers,
-) {
-    use crate::arch::reexport::x86_64::VirtAddr;
+#[allow(clippy::cast_possible_truncation)]
+unsafe extern "sysv64" fn irq_handoff(irq_number: u64, isf: &mut InterruptStackFrame, regs: &mut Registers) {
+    use crate::arch::x86_64::registers::RFlags;
+    use ia32utils::VirtAddr;
 
-    let mut proc_state = State {
-        ip: isf.instruction_pointer.as_u64(),
-        sp: isf.stack_pointer.as_u64(),
-        rfl: RFlags::from_bits_retain(isf.cpu_flags),
-        cs: isf.code_segment,
-        ss: isf.stack_segment,
+    let mut state = State {
+        ip: Address::from_ptr(isf.instruction_pointer.as_mut_ptr::<()>()),
+        cs: usize::try_from(isf.code_segment).unwrap(),
+        rfl: RFlags::from_bits_retain(isf.cpu_flags as usize),
+        sp: Address::from_ptr(isf.stack_pointer.as_mut_ptr::<()>()),
+        ss: usize::try_from(isf.stack_segment).unwrap(),
     };
 
-    crate::interrupts::traps::handle_trap(irq_number, &mut proc_state, regs);
+    crate::interrupts::traps::handle_trap(irq_number, &mut state, regs);
 
-    isf.as_mut().write(crate::arch::x64::structures::idt::InterruptStackFrameValue {
-        instruction_pointer: VirtAddr::new(proc_state.ip),
-        code_segment: proc_state.cs,
-        cpu_flags: proc_state.rfl.bits(),
-        stack_pointer: VirtAddr::new(proc_state.sp),
-        stack_segment: proc_state.ss,
+    isf.as_mut().write(InterruptStackFrameValue {
+        instruction_pointer: VirtAddr::from_ptr(state.ip.as_ptr()),
+        code_segment: u64::try_from(state.cs).unwrap(),
+        cpu_flags: u64::try_from(state.rfl.bits()).unwrap(),
+        stack_pointer: VirtAddr::from_ptr(state.sp.as_ptr()),
+        stack_segment: u64::try_from(state.ss).unwrap(),
     });
 }
 
@@ -265,37 +271,33 @@ extern "sysv64" fn nm_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Re
 exception_handler_with_error!(df, u64, !);
 extern "sysv64" fn df_handler_inner(stack_frame: &InterruptStackFrame, _: u64, gprs: &Registers) -> ! {
     ex_handler(&ArchException::DoubleFault(stack_frame, gprs));
-    // Wait indefinite in case the above exception handler returns control flow.
-    crate::interrupts::wait_loop()
+
+    unreachable!()
 }
 
 exception_handler_with_error!(ts, u64, ());
 extern "sysv64" fn ts_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &Registers) {
-    ex_handler(&ArchException::InvalidTSS(stack_frame, idt::SelectorErrorCode::new_truncate(error_code), gprs));
+    ex_handler(&ArchException::InvalidTSS(stack_frame, SelectorErrorCode::new_truncate(error_code), gprs));
 }
 
 exception_handler_with_error!(np, u64, ());
 extern "sysv64" fn np_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &Registers) {
-    ex_handler(&ArchException::SegmentNotPresent(stack_frame, idt::SelectorErrorCode::new_truncate(error_code), gprs));
+    ex_handler(&ArchException::SegmentNotPresent(stack_frame, SelectorErrorCode::new_truncate(error_code), gprs));
 }
 
 exception_handler_with_error!(ss, u64, ());
 extern "sysv64" fn ss_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &Registers) {
-    ex_handler(&ArchException::StackSegmentFault(stack_frame, idt::SelectorErrorCode::new_truncate(error_code), gprs));
+    ex_handler(&ArchException::StackSegmentFault(stack_frame, SelectorErrorCode::new_truncate(error_code), gprs));
 }
 
 exception_handler_with_error!(gp, u64, ());
 extern "sysv64" fn gp_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &Registers) {
-    ex_handler(&ArchException::GeneralProtectionFault(
-        stack_frame,
-        idt::SelectorErrorCode::new_truncate(error_code),
-        gprs,
-    ));
+    ex_handler(&ArchException::GeneralProtectionFault(stack_frame, SelectorErrorCode::new_truncate(error_code), gprs));
 }
 
-exception_handler_with_error!(pf, idt::PageFaultErrorCode, ());
-extern "sysv64" fn pf_handler_inner(stack_frame: &InterruptStackFrame, err: idt::PageFaultErrorCode, gprs: &Registers) {
-    ex_handler(&ArchException::PageFault(stack_frame, gprs, err, crate::arch::x64::registers::control::CR2::read()));
+exception_handler_with_error!(pf, PageFaultErrorCode, ());
+extern "sysv64" fn pf_handler_inner(stack_frame: &InterruptStackFrame, err: PageFaultErrorCode, gprs: &Registers) {
+    ex_handler(&ArchException::PageFault(stack_frame, gprs, err, crate::arch::x86_64::registers::control::CR2::read()));
 }
 
 // --- reserved 15
@@ -330,12 +332,6 @@ extern "sysv64" fn ve_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Re
 // --- reserved 22-30
 
 // --- triple fault (can't handle)
-
-/// Loads the IDT from the interrupt descriptor table register.
-pub unsafe fn get_current() -> Option<&'static mut InterruptDescriptorTable> {
-    let idt_pointer = x86_64::instructions::tables::sidt();
-    idt_pointer.base.as_mut_ptr::<InterruptDescriptorTable>().as_mut()
-}
 
 /// Defines set indexes which specified interrupts will use for stacks.
 #[repr(usize)]
@@ -379,7 +375,7 @@ pub fn set_exception_handlers(idt: &mut InterruptDescriptorTable) {
 #[allow(clippy::too_many_lines)]
 pub fn set_stub_handlers(idt: &mut InterruptDescriptorTable) {
     // userspace syscall vector
-    idt[128].set_handler_fn(irq_128).set_privilege_level(x86_64::PrivilegeLevel::Ring3);
+    idt[128].set_handler_fn(irq_128).set_privilege_level(ia32utils::PrivilegeLevel::Ring3);
 
     idt[32].set_handler_fn(irq_32);
     idt[33].set_handler_fn(irq_33);

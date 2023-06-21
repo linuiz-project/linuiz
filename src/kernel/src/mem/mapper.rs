@@ -17,7 +17,7 @@ pub struct Mapper {
 unsafe impl Send for Mapper {}
 
 impl Mapper {
-    /// Attempts to construct a new page manager. Returns `None` if the pmm::get() could not provide a root frame.
+    /// Attempts to construct a new page manager. Returns `None` if the `pmm::get()` could not provide a root frame.
     pub fn new(depth: TableDepth) -> Option<Self> {
         let root_frame = pmm::get().next_frame().ok()?;
         trace!("New mapper root frame: {:X}", root_frame);
@@ -87,7 +87,7 @@ impl Mapper {
                 *entry = paging::PageTableEntry::new(frame, attributes);
 
                 #[cfg(target_arch = "x86_64")]
-                crate::arch::x64::instructions::tlb::invlpg(page);
+                crate::arch::x86_64::instructions::tlb::invlpg(page);
             });
 
         result
@@ -113,7 +113,7 @@ impl Mapper {
 
             // Invalidate the page in the TLB.
             #[cfg(target_arch = "x86_64")]
-            crate::arch::x64::instructions::tlb::invlpg(page);
+            crate::arch::x86_64::instructions::tlb::invlpg(page);
         })
     }
 
@@ -158,7 +158,7 @@ impl Mapper {
             entry.set_attributes(attributes, modify_mode);
 
             #[cfg(target_arch = "x86_64")]
-            crate::arch::x64::instructions::tlb::invlpg(page);
+            crate::arch::x86_64::instructions::tlb::invlpg(page);
         })
     }
 
@@ -169,9 +169,9 @@ impl Mapper {
         trace!("Swapping address space to: {:X}", self.root_frame);
 
         #[cfg(target_arch = "x86_64")]
-        crate::arch::x64::registers::control::CR3::write(
+        crate::arch::x86_64::registers::control::CR3::write(
             self.root_frame,
-            crate::arch::x64::registers::control::CR3Flags::empty(),
+            crate::arch::x86_64::registers::control::CR3Flags::empty(),
         );
     }
 

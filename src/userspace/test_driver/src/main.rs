@@ -1,6 +1,5 @@
 #![no_std]
 #![no_main]
-#![feature(sync_unsafe_cell, naked_functions, asm_const)]
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
@@ -24,8 +23,8 @@ unsafe impl core::alloc::GlobalAlloc for FakeAllocator {
 #[no_mangle]
 extern "C" fn _start() -> ! {
     loop {
-        libsys::syscall::klog::info("klog syscall test 1");
-        libsys::syscall::klog::info("klog syscall test 2");
-        libsys::syscall::task::yield_task();
+        libsys::syscall::klog::info("klog syscall test 1").unwrap();
+        libsys::syscall::klog::info("klog syscall test 2").unwrap();
+        libsys::syscall::task::yield_task().unwrap();
     }
 }
