@@ -24,7 +24,7 @@ pub(super) fn process(
         arg5
     );
 
-    match Vector::try_from(vector) {
+    let result = match Vector::try_from(vector) {
         Err(err) => {
             warn!("Unhandled system call vector: {:X?}", err);
             Err(Error::InvalidVector)
@@ -45,7 +45,11 @@ pub(super) fn process(
 
             Ok(Success::Ok)
         }
-    }
+    };
+
+    trace!("Syscall: {:X?}", result);
+
+    result
 }
 
 fn process_klog(level: log::Level, str_ptr_arg: usize, str_len: usize) -> Result {

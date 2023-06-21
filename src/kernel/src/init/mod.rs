@@ -6,8 +6,6 @@ pub use params::*;
 
 pub mod boot;
 
-use crate::mem::alloc::AlignedAllocator;
-use core::mem::MaybeUninit;
 use libsys::Address;
 
 crate::error_impl! {
@@ -146,12 +144,10 @@ fn load_drivers() {
             };
 
             // Safety: In-place transmutation of initialized bytes for the purpose of copying safely.
-            let archive_data = unsafe { entry.data().align_to::<MaybeUninit<u8>>().1 };
-            trace!("Allocating memory for ELF data...");
-            let mut elf_copy = crate::task::ElfMemory::new_zeroed_slice_in(archive_data.len(), AlignedAllocator::new());
-            trace!("Copying ELF data into memory...");
-            elf_copy.copy_from_slice(archive_data);
-            trace!("ELF data copied into memory.");
+            // let (_, archive_data, _) = unsafe { entry.data().align_to::<MaybeUninit<u8>>() };
+            trace!("Allocating ELF data into memory...");
+            let elf_data = alloc::boxed::Box::from(entry.data());
+            trace!("ELF data allocated into memory.");
 
             let Ok((Some(shdrs), Some(_))) = elf.section_headers_with_strtab()
             else {
@@ -189,8 +185,7 @@ fn load_drivers() {
                 elf.ehdr,
                 segments_copy,
                 relas,
-                // Safety: The ELF data buffer is now initialized with the contents of the ELF.
-                crate::task::ElfData::Memory(unsafe { elf_copy.assume_init() }),
+                crate::task::ElfData::Memory(elf_data),
             );
 
             crate::task::PROCESSES.lock().push_back(task);

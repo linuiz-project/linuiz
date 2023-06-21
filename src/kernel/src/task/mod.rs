@@ -1,6 +1,4 @@
 mod context;
-
-use bit_field::BitField;
 pub use context::*;
 
 mod scheduling;
@@ -9,8 +7,8 @@ pub use scheduling::*;
 mod address_space;
 pub use address_space::*;
 
-use crate::mem::alloc::AlignedAllocator;
 use alloc::{boxed::Box, string::String, vec::Vec};
+use bit_field::BitField;
 use core::num::NonZeroUsize;
 use elf::{endian::AnyEndian, file::FileHeader, segment::ProgramHeader};
 use libsys::{page_size, Address, Virtual};
@@ -51,12 +49,10 @@ pub struct ElfRela {
 }
 
 pub type Context = (State, Registers);
-pub type ElfAllocator = AlignedAllocator<{ libsys::page_size() }>;
-pub type ElfMemory = Box<[u8], ElfAllocator>;
 
 #[derive(Debug)]
 pub enum ElfData {
-    Memory(ElfMemory),
+    Memory(Box<[u8]>),
     File(String),
 }
 

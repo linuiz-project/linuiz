@@ -188,6 +188,10 @@ impl AddressSpace {
         Ok(())
     }
 
+    pub fn get_flags(&self, address: Address<Page>) -> Result<TableEntryFlags> {
+        self.0.get_page_attributes(address).ok_or(Error::NotMapped { addr: address.get() })
+    }
+
     pub fn is_mmapped(&self, address: Address<Page>) -> bool {
         self.0.is_mapped(address, None)
     }

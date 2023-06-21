@@ -17,55 +17,65 @@ crate::error_impl! {
 /// Calling this function more than once and/or outside the context of a page fault is undefined behaviour.
 #[doc(hidden)]
 #[inline(never)]
-pub unsafe fn handler(address: Address<Virtual>) -> Result<()> {
+pub unsafe fn handler(fault_address: Address<Virtual>) -> Result<()> {
     crate::cpu::state::with_scheduler(|scheduler| {
+        // TODO this code doesn't belong here
+
         use crate::{mem::paging::TableEntryFlags, task::ElfData};
         use core::mem::MaybeUninit;
         use libsys::page_size;
 
         let task = scheduler.task_mut().ok_or(Error::NoTask)?;
-        let fault_elf_vaddr =
-            address.get().checked_sub(task.load_offset()).ok_or(Error::UnhandledAddress { addr: address })?;
-        let phdr = *task
+
+        let fault_unoffset = fault_address
+            .get()
+            .checked_sub(task.load_offset())
+            .ok_or(Error::UnhandledAddress { addr: fault_address })?;
+
+        let segment = *task
             .elf_segments()
             .iter()
             .filter(|phdr| phdr.p_type == elf::abi::PT_LOAD)
             .find(|phdr| {
-                (phdr.p_vaddr..(phdr.p_vaddr + phdr.p_memsz)).contains(&u64::try_from(fault_elf_vaddr).unwrap())
+                (phdr.p_vaddr..(phdr.p_vaddr + phdr.p_memsz)).contains(&u64::try_from(fault_unoffset).unwrap())
             })
             .ok_or(Error::ElfData)?;
 
         // Small check to help ensure the phdr alignments are page-fit.
-        debug_assert_eq!(phdr.p_align & (libsys::page_mask() as u64), 0);
+        debug_assert_eq!(segment.p_align & (libsys::page_mask() as u64), 0);
 
-        let fault_page = Address::<Page>::new_truncate(address.get());
-        debug!("Demand mapping {:X?} from segment: {:X?}", fault_page.as_ptr(), phdr);
+        let fault_page = Address::new_truncate(fault_address.get());
 
-        trace!("Calculating addresses and offsets for mapping.");
-        let fault_vaddr = fault_page.get().get() - task.load_offset();
-        let segment_vaddr = usize::try_from(phdr.p_vaddr).unwrap();
-        let segment_file_size = usize::try_from(phdr.p_filesz).unwrap();
+        let fault_unoffset_page: Address<Page> = Address::new_truncate(fault_unoffset);
+        let fault_unoffset_page_addr = fault_unoffset_page.get().get();
 
-        let fault_segment_offset = fault_vaddr.saturating_sub(segment_vaddr);
-        let segment_front_pad = segment_vaddr.saturating_sub(fault_vaddr);
+        let fault_unoffset_end_page: Address<Page> = Address::new_truncate(fault_unoffset_page_addr + page_size());
+        let fault_unoffset_end_page_addr = fault_unoffset_end_page.get().get();
 
-        let fault_segment_range = fault_segment_offset..(fault_segment_offset + page_size());
-        let padded_segment_offset = fault_segment_offset + segment_front_pad;
+        debug!("Demand mapping {:X?} from segment: {:X?}", Address::<Page>::new_truncate(fault_address.get()), segment);
 
-        let segment_file_end = padded_segment_offset + segment_file_size;
-        let segment_range_end = usize::min(fault_segment_range.end, segment_file_end);
-        let segment_range = padded_segment_offset..segment_range_end;
+        let segment_addr = usize::try_from(segment.p_vaddr).unwrap();
+        let segment_size = usize::try_from(segment.p_filesz).unwrap();
+        let segment_end_addr = segment_addr + segment_size;
 
-        // Map the page as RW so we can copy the ELF data in.
+        let fault_offset = fault_unoffset_page_addr.saturating_sub(segment_addr);
+        let fault_end_pad = fault_unoffset_end_page_addr.saturating_sub(segment_end_addr);
+        let fault_front_pad = segment_addr.saturating_sub(fault_unoffset_page_addr);
+        let fault_size = ((fault_unoffset_end_page_addr - fault_unoffset_page_addr) - fault_front_pad) - fault_end_pad;
+
         trace!("Mapping the demand page RW so data can be copied.");
         let mapped_memory = task
             .address_space_mut()
             .mmap(Some(fault_page), core::num::NonZeroUsize::MIN, crate::task::MmapPermissions::ReadWrite)
-            .unwrap();
-        let mapped_memory = mapped_memory.as_uninit_slice_mut();
+            .unwrap()
+            .as_uninit_slice_mut();
 
-        let (front_pad, remaining) = mapped_memory.split_at_mut(segment_front_pad);
-        let (file_memory, end_pad) = remaining.split_at_mut(segment_range.len());
+        let (front_pad, remaining) = mapped_memory.split_at_mut(fault_front_pad);
+        let (file_memory, end_pad) = remaining.split_at_mut(fault_size);
+
+        debug_assert_eq!(fault_front_pad, front_pad.len(), "front padding");
+        debug_assert_eq!(fault_end_pad, end_pad.len(), "end padding");
+        debug_assert_eq!(fault_size, file_memory.len(), "file memory");
 
         trace!(
             "Copying memory into demand mapping: {:#X}..{:#X}..{:#X}.",
@@ -79,10 +89,13 @@ pub unsafe fn handler(address: Address<Virtual>) -> Result<()> {
         if !file_memory.is_empty() {
             match task.elf_data() {
                 ElfData::Memory(data) => {
+                    let segment_data_offset = usize::try_from(segment.p_offset).unwrap();
+
+                    let offset_segment_range =
+                        (segment_data_offset + fault_offset)..(segment_data_offset + fault_offset + fault_size);
+
                     // Safety: Same-sized reinterpret for copying.
-                    let (pre, copy_data, post) = unsafe { data.get(segment_range).unwrap().align_to() };
-                    assert!(pre.is_empty());
-                    assert!(post.is_empty());
+                    let (_, copy_data, _) = unsafe { data[offset_segment_range].align_to() };
 
                     file_memory.copy_from_slice(copy_data);
                 }
@@ -90,16 +103,15 @@ pub unsafe fn handler(address: Address<Virtual>) -> Result<()> {
             }
         }
 
-        // Safety: Array has been initialized with values.
+        // Safety: Slice has been initialized with values.
         let _mapped_memory = unsafe { MaybeUninit::slice_assume_init_mut(mapped_memory) };
 
-        // Process any relocations.
         trace!("Processing demand mapping relocations.");
         let load_offset = task.load_offset();
-        let fault_page_mem_range = fault_vaddr..(fault_vaddr + page_size());
+        let fault_page_as_range = fault_unoffset_page_addr..fault_unoffset_end_page_addr;
 
         task.elf_relas().retain(|rela| {
-            if fault_page_mem_range.contains(&rela.address.get()) {
+            if fault_page_as_range.contains(&rela.address.get()) {
                 trace!("Processing relocation: {:X?}", rela);
                 rela.address.as_ptr().add(load_offset).cast::<usize>().write(rela.value);
 
@@ -116,7 +128,7 @@ pub unsafe fn handler(address: Address<Virtual>) -> Result<()> {
                 core::num::NonZeroUsize::new(1).unwrap(),
                 TableEntryFlags::PRESENT
                     | TableEntryFlags::USER
-                    | TableEntryFlags::from(crate::task::segment_to_mmap_permissions(phdr.p_type)),
+                    | TableEntryFlags::from(crate::task::segment_to_mmap_permissions(segment.p_type)),
             )
             .unwrap();
 
