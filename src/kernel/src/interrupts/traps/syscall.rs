@@ -55,16 +55,23 @@ pub(super) fn process(
 fn process_klog(level: log::Level, str_ptr_arg: usize, str_len: usize) -> Result {
     let str_ptr = str_ptr_arg as *mut u8;
 
+    // TODO abstract this into a function
     crate::cpu::state::with_scheduler(|scheduler| {
-        let task = scheduler.task_mut().ok_or(Error::NoActiveTask)?;
-        let address_space = task.address_space_mut();
+        use crate::task::Error as TaskError;
+        use libsys::{page_size, Address};
 
         let str_start = str_ptr.addr();
         let str_end = str_start + str_len;
 
-        for address in (str_start..str_end).map(libsys::Address::new_truncate) {
-            if !address_space.is_mmapped(address) {
-                return Err(Error::UnmappedMemory);
+        let task = scheduler.task_mut().ok_or(Error::NoActiveTask)?;
+        for address in (str_start..str_end).step_by(page_size() / 2).map(Address::new_truncate) {
+            match task.demand_map(address) {
+                Ok(()) | Err(TaskError::AlreadyMapped) => {}
+
+                err => {
+                    warn!("Failed to demand map: {:X?}", err);
+                    return Err(Error::UnmappedMemory);
+                }
             }
         }
 
