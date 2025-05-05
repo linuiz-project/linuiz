@@ -47,7 +47,7 @@ impl Scheduler {
     }
 
     pub fn interrupt_task(&mut self, state: &mut State, regs: &mut Registers) {
-        debug_assert!(!crate::interrupts::are_enabled());
+        debug_assert!(!crate::interrupts::is_interrupts_enabled());
 
         let mut processes = PROCESSES.lock();
 
@@ -66,7 +66,7 @@ impl Scheduler {
 
     /// Attempts to schedule the next task in the local task queue.
     pub fn yield_task(&mut self, state: &mut State, regs: &mut Registers) {
-        debug_assert!(!crate::interrupts::are_enabled());
+        debug_assert!(!crate::interrupts::is_interrupts_enabled());
 
         let mut processes = PROCESSES.lock();
 
@@ -82,7 +82,7 @@ impl Scheduler {
     }
 
     pub fn kill_task(&mut self, state: &mut State, regs: &mut Registers) {
-        debug_assert!(!crate::interrupts::are_enabled());
+        debug_assert!(!crate::interrupts::is_interrupts_enabled());
 
         // TODO add process to reap queue to reclaim address space memory
         let process = self.task.take().expect("cannot exit without process");

@@ -1,4 +1,4 @@
-use crate::{interrupts::InterruptCell, mem::HHDM};
+use crate::{interrupts::InterruptCell, mem::hhdm};
 use bitvec::slice::BitSlice;
 use core::{
     alloc::{AllocError, Allocator, Layout},
@@ -18,26 +18,24 @@ pub type PhysicalAllocator = &'static PhysicalMemoryManager<'static>;
 
 static PMM: spin::Once<PhysicalMemoryManager> = spin::Once::new();
 
-pub fn init(memory_map: &[&limine::MemmapEntry]) -> core::result::Result<(), InitError> {
-    PMM.try_call_once(|| {
+pub fn init(memory_map: &[&limine::memory_map::Entry]) {
+    PMM.call_once(|| {
         let free_regions = memory_map.iter().filter_map(|entry| {
-            (entry.ty() == limine::MemoryMapEntryType::Usable).then(|| {
-                let region = entry.range();
-                let region_start = usize::try_from(region.start).unwrap();
-                let region_end = usize::try_from(region.end).unwrap();
+            (entry.entry_type == limine::memory_map::EntryType::USABLE).then(|| {
+                let region_start = usize::try_from(entry.base).unwrap();
+                let region_end = usize::try_from(entry.base + entry.length).unwrap();
 
                 region_start..region_end
             })
         });
 
-        let max_key = memory_map.iter().max_by_key(|e| e.range().end).ok_or(InitError)?;
-        let total_memory = usize::try_from(max_key.range().end).unwrap();
+        let total_memory = memory_map.iter().map(|e| e.base + e.length).max().unwrap().try_into().unwrap();
         trace!("Total phyiscal memory: {:#X}", total_memory);
 
-        Ok(PhysicalMemoryManager { allocator: FrameAllocator::new(free_regions, total_memory).ok_or(InitError)? })
-    })?;
-
-    Ok(())
+        PhysicalMemoryManager {
+            allocator: FrameAllocator::new(free_regions, total_memory).expect("failed to create frame allocator"),
+        }
+    });
 }
 
 pub fn get() -> PhysicalAllocator {
@@ -128,7 +126,7 @@ unsafe impl Allocator for &PhysicalMemoryManager<'_> {
             core::cmp::Ordering::Less => unreachable!(),
         }
         .map_err(|_| AllocError)?;
-        let address = HHDM.offset(frame).ok_or(AllocError)?;
+        let address = hhdm::get().offset(frame).ok_or(AllocError)?;
 
         Ok(NonNull::slice_from_raw_parts(NonNull::new(address.as_ptr()).unwrap(), frame_count * page_size()))
     }
@@ -136,7 +134,7 @@ unsafe impl Allocator for &PhysicalMemoryManager<'_> {
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
         assert!(layout.align() <= page_size());
 
-        let offset = ptr.as_ptr().sub_ptr(HHDM.address().as_ptr());
+        let offset = ptr.addr().get() - hhdm::get().virt().get();
         let address = Address::new(offset).unwrap();
 
         if layout.size() <= page_size() {
@@ -175,10 +173,10 @@ impl FrameAllocator<'_> {
         assert_eq!(select_region.start & page_mask(), 0);
         assert_eq!(select_region.end & page_mask(), 0);
 
-        trace!("Selecting PMM ledger region: {:X?}", select_region);
+        trace!("Selecting region for ledger: {:X?}", select_region);
 
         // Safety: Memory map describes HHDM, so this pointer into it will be valid if the bootloader memory map is.s
-        let ledger_start_ptr = unsafe { HHDM.ptr().add(select_region.start) };
+        let ledger_start_ptr = unsafe { hhdm::get().ptr().add(select_region.start) };
         // Safety: Unless the memory map lied to us, this memory is valid for a `&[AtomicUsize; total_frames]`.
         let ledger = BitSlice::from_slice_mut(unsafe {
             core::slice::from_raw_parts_mut(ledger_start_ptr.cast::<AtomicUsize>(), table_slice_len)

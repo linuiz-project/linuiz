@@ -7,6 +7,7 @@
     iter_next_chunk,                        // #98326 <https://github.com/rust-lang/rust/issues/98326>
     array_windows,                          // #75027 <https://github.com/rust-lang/rust/issues/75027>
     maybe_uninit_slice,                     // #63569 <https://github.com/rust-lang/rust/issues/63569>
+    maybe_uninit_write_slice,               // #79995 <https://github.com/rust-lang/rust/issues/79995>
     iterator_try_reduce,                    // #87053 <https://github.com/rust-lang/rust/issues/87053>
     map_try_insert,                         // #82766 <https://github.com/rust-lang/rust/issues/82766>
     try_trait_v2,                           // #84277 <https://github.com/rust-lang/rust/issues/84277>
@@ -60,9 +61,15 @@ mod interrupts;
 mod logging;
 mod mem;
 mod panic;
+mod params;
 mod rand;
 mod task;
 mod time;
+
+#[cfg(debug_assertions)]
+static STACK_SIZE: u64 = 0x1000000;
+#[cfg(not(debug_assertions))]
+static STACK_SIZE: u64 = 0x4000;
 
 /// ### Safety
 ///

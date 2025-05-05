@@ -1,12 +1,12 @@
-#![allow(clippy::no_mangle_with_rust_abi)]
-
 use core::mem::MaybeUninit;
 
 #[no_mangle]
 unsafe extern "Rust" fn __getrandom_v03_custom(dest: *mut u8, len: usize) -> Result<(), getrandom::Error> {
-    // `dest` may be unitialized for `len`, so the pointer should reflect that.
-    let dest_maybeuninit_ptr = <*mut MaybeUninit<u8>>::from(data);
-    let buf = core::slice::from_raw_parts_mut(dest_maybeuninit_ptr, len);
+    let buf = core::slice::from_raw_parts_mut(
+        // `dest` may be uninitialized for `len`
+        dest.cast::<MaybeUninit<u8>>(),
+        len,
+    );
 
     trace!("[RAND] BUFFER LEN: {}", buf.len());
 
@@ -15,7 +15,7 @@ unsafe extern "Rust" fn __getrandom_v03_custom(dest: *mut u8, len: usize) -> Res
 
         trace!("[RAND] CHUNK#{}: {:?}", index, rng_bytes);
 
-        chunk.copy_from_slice(&rng_bytes[..chunk.len()]);
+        chunk.write_copy_of_slice(&rng_bytes[..chunk.len()]);
     }
 
     Ok(())

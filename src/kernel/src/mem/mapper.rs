@@ -1,8 +1,7 @@
 use crate::mem::{
     alloc::pmm,
-    paging,
+    hhdm, paging,
     paging::{Error, Result, TableDepth},
-    HHDM,
 };
 use libkernel::mem::{Mut, Ref};
 use libsys::{Address, Frame, Page};
@@ -24,7 +23,7 @@ impl Mapper {
 
         // Safety: pmm::get() promises rented frames to be within the HHDM.
         unsafe {
-            let hhdm_offset_address = HHDM.offset(root_frame).unwrap();
+            let hhdm_offset_address = hhdm::get().offset(root_frame).unwrap();
             core::ptr::write_bytes(hhdm_offset_address.as_ptr(), 0x0, libsys::page_size());
         }
 
@@ -181,7 +180,7 @@ impl Mapper {
 
     pub fn view_page_table(&self) -> &[paging::PageTableEntry; libsys::table_index_size()] {
         // Safety: Root frame is guaranteed to be valid within the HHDM.
-        let table_ptr = HHDM.offset(self.root_frame).unwrap().as_ptr().cast();
+        let table_ptr = hhdm::get().offset(self.root_frame).unwrap().as_ptr().cast();
         // Safety: Root frame is guaranteed to be valid for PTEs for the length of the table index size.
         let table = unsafe { core::slice::from_raw_parts(table_ptr, libsys::table_index_size()) };
         // Safety: Table was created to match the size required by return type.

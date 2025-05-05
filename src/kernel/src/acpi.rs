@@ -1,35 +1,40 @@
+use core::ptr::NonNull;
+
 use crate::mem::{
     alloc::{KernelAllocator, KMALLOC},
-    HHDM,
+    hhdm,
 };
-use acpi::PhysicalMapping;
-use port::{PortAddress, ReadWritePort};
-use spin::{Lazy, Mutex};
+use acpi::{
+    address::{AddressSpace as AcpiAddressSpace, GenericAddress as AcpiAddress},
+    PhysicalMapping,
+};
+use libkernel::{mem::VolatileCell, ReadWrite};
+use port::{PortAddress, PortReadWrite, ReadWritePort};
+use spin::{Lazy, Mutex, Once};
 
 crate::error_impl! {
     #[derive(Debug)]
     pub enum Error {
-        Acpi { err: acpi::AcpiError } => None,
-        Boot { err: crate::init::boot::Error } => Some(err)
+        Acpi { err: acpi::AcpiError } => None
     }
 }
 
-pub enum Register<'a, T: port::PortReadWrite> {
+pub enum Register<'a, T: PortReadWrite> {
     Io(ReadWritePort<T>),
-    Mmio(&'a libkernel::mem::VolatileCell<T, libkernel::ReadWrite>),
+    Mmio(&'a VolatileCell<T, ReadWrite>),
 }
 
-impl<T: port::PortReadWrite> Register<'_, T> {
-    pub const fn new(generic_address: &acpi::address::GenericAddress) -> Option<Self> {
+impl<T: PortReadWrite> Register<'_, T> {
+    pub const fn new(generic_address: &AcpiAddress) -> Option<Self> {
         match generic_address.address_space {
-            acpi::address::AddressSpace::SystemMemory => {
+            AcpiAddressSpace::SystemMemory => {
                 Some(Self::Mmio(
                     // Safety: There's no meaningful way to validate the address provided by the `GenericAddress` structure.
                     unsafe { &*(generic_address.address as *const _) },
                 ))
             }
 
-            acpi::address::AddressSpace::SystemIo => {
+            AcpiAddressSpace::SystemIo => {
                 Some(Self::Io(
                     // Safety: There's no meaningful way to validate the port provided by the `GenericAddress` structure.
                     unsafe {
@@ -70,7 +75,7 @@ impl acpi::AcpiHandler for AcpiHandler {
 
         acpi::PhysicalMapping::new(
             address,
-            core::ptr::NonNull::new(HHDM.ptr().add(address).cast()).unwrap(),
+            NonNull::new(hhdm::get().ptr().add(address).cast()).unwrap(),
             size,
             size,
             Self,
@@ -165,24 +170,7 @@ impl acpi::AcpiHandler for AcpiHandler {
 //     }
 // }
 
-pub static TABLES: spin::Once<Mutex<acpi::AcpiTables<AcpiHandler>>> = spin::Once::new();
-
-pub fn init_interface() -> Result<()> {
-    debug!("Initializing ACPI interface...");
-
-    TABLES.try_call_once(|| {
-        let rsdp_address = crate::init::boot::get_rsdp_address().map_err(|err| Error::Boot { err })?;
-        // Safety: Bootloader guarantees any address provided for RDSP will be valid.
-        let acpi_tables = unsafe { acpi::AcpiTables::from_rsdp(AcpiHandler, rsdp_address.get()) }
-            .map_err(|err| Error::Acpi { err })?;
-
-        Ok(Mutex::new(acpi_tables))
-    })?;
-
-    debug!("Initialized ACPI interface.");
-
-    Ok(())
-}
+pub static TABLES: Once<Mutex<acpi::AcpiTables<AcpiHandler>>> = Once::new();
 
 pub static FADT: Lazy<Option<Mutex<PhysicalMapping<AcpiHandler, acpi::fadt::Fadt>>>> = Lazy::new(|| {
     TABLES.get().map(Mutex::lock).and_then(|tables| tables.find_table::<acpi::fadt::Fadt>().ok()).map(Mutex::new)

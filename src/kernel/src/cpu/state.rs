@@ -2,9 +2,9 @@ use crate::{interrupts::exceptions::Exception, interrupts::InterruptCell, task::
 use alloc::boxed::Box;
 use core::{cell::UnsafeCell, num::NonZeroU64, ptr::NonNull, sync::atomic::AtomicBool};
 
-pub(self) const US_PER_SEC: u32 = 1000000;
-pub(self) const US_WAIT: u32 = 10000;
-pub(self) const US_FREQ_FACTOR: u32 = US_PER_SEC / US_WAIT;
+pub const US_PER_SEC: u32 = 1000000;
+pub const US_WAIT: u32 = 10000;
+pub const US_FREQ_FACTOR: u32 = US_PER_SEC / US_WAIT;
 
 crate::error_impl! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,7 +99,7 @@ pub unsafe fn init(timer_frequency: u16) {
         tss,
 
         #[cfg(target_arch = "x86_64")]
-        apic: apic::Apic::new(Some(|address: usize| crate::mem::HHDM.ptr().add(address))).unwrap(),
+        apic: apic::Apic::new(Some(|address: usize| crate::mem::hhdm::get().ptr().add(address))).unwrap(),
 
         timer_interval: None,
 

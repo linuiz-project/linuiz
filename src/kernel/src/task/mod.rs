@@ -247,8 +247,8 @@ impl Task {
             }
         }
 
-        // Safety: Slice has been initialized with values.
-        let _mapped_memory = unsafe { MaybeUninit::slice_assume_init_mut(mapped_memory) };
+        // Slice has been initialized with values.
+        drop(mapped_memory);
 
         trace!("Processing demand mapping relocations.");
         let load_offset = self.load_offset();

@@ -1,3 +1,5 @@
+pub use clock::*;
+
 #[cfg(target_arch = "x86_64")]
 mod clock {
     pub static SYSTEM_CLOCK: spin::Lazy<Clock> = spin::Lazy::new(|| {
@@ -81,9 +83,3 @@ mod clock {
         }
     }
 }
-
-pub(self) const US_PER_SEC: u32 = 1000000;
-pub(self) const US_WAIT: u32 = 10000;
-pub(self) const US_FREQ_FACTOR: u32 = US_PER_SEC / US_WAIT;
-
-pub use clock::*;

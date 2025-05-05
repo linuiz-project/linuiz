@@ -1,3 +1,5 @@
+#![allow(unused_unsafe)]
+
 use crate::{
     interrupts::exceptions::{ex_handler, ArchException},
     task::{Registers, State},
@@ -92,11 +94,11 @@ macro_rules! push_ret_frame {
 macro_rules! exception_handler {
     ($exception_name:ident, $return_type:ty) => {
         paste::paste! {
-            #[naked]
+            #[unsafe(naked)]
             pub extern "x86-interrupt" fn [<$exception_name _handler>](stack_frame: InterruptStackFrame) -> $return_type {
                 // Safety: When has perfect assembly ever caused undefined behaviour?
                 unsafe {
-                    core::arch::asm!(
+                    core::arch::naked_asm!(
                         "cld",
                         push_gprs!(),
                         push_ret_frame!(15),
@@ -113,8 +115,7 @@ macro_rules! exception_handler {
 
                         iretq
                         ",
-                        sym [<$exception_name _handler_inner>],
-                        options(noreturn)
+                        sym [<$exception_name _handler_inner>]
                     )
                 }
             }
@@ -125,14 +126,14 @@ macro_rules! exception_handler {
 macro_rules! exception_handler_with_error {
     ($exception_name:ident, $error_ty:ty, $return_type:ty) => {
         paste::paste! {
-            #[naked]
+            #[unsafe(naked)]
             pub extern "x86-interrupt" fn [<$exception_name _handler>](
                 stack_frame: InterruptStackFrame,
                 error_code: $error_ty
             ) -> $return_type {
                 // Safety: When has perfect assembly ever caused undefined behaviour?
                 unsafe {
-                    core::arch::asm!(
+                    core::arch::naked_asm!(
                         "cld",
                         push_gprs!(),
                         push_ret_frame!(16),
@@ -155,8 +156,7 @@ macro_rules! exception_handler_with_error {
 
                         iretq
                         ",
-                        sym [<$exception_name _handler_inner>],
-                        options(noreturn)
+                        sym [<$exception_name _handler_inner>]
                     )
                 }
             }
@@ -167,11 +167,11 @@ macro_rules! exception_handler_with_error {
 macro_rules! irq_stub {
     ($irq_vector:literal) => {
         paste::paste! {
-            #[naked]
+            #[unsafe(naked)]
             pub extern "x86-interrupt" fn [<irq_ $irq_vector>](_: crate::arch::x86_64::structures::idt::InterruptStackFrame) {
                 // Safety: This is literally perfect assembly. It's safe because it's perfect.
                 unsafe {
-                    core::arch::asm!(
+                    core::arch::naked_asm!(
                         "cld",
                         push_gprs!(),
                         push_ret_frame!(15),
@@ -192,8 +192,7 @@ macro_rules! irq_stub {
                         iretq
                         ",
                         const $irq_vector,
-                        sym irq_handoff,
-                        options(noreturn)
+                        sym irq_handoff
                     );
                 }
             }

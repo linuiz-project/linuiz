@@ -84,7 +84,7 @@ impl TableDepth {
 }
 
 impl Step for TableDepth {
-    fn steps_between(start: &Self, end: &Self) -> Option<usize> {
+    fn steps_between(start: &Self, end: &Self) -> (usize, Option<usize>) {
         Step::steps_between(&end.0, &start.0)
     }
 
@@ -304,7 +304,7 @@ impl<RefKind: InteriorRef> PageTable<'_, RefKind> {
     }
 
     fn table_ptr(&self) -> *mut PageTableEntry {
-        crate::mem::HHDM.offset(self.get_frame()).unwrap().as_ptr().cast()
+        crate::mem::hhdm::get().offset(self.get_frame()).unwrap().as_ptr().cast()
     }
 
     pub fn entries(&self) -> &[PageTableEntry] {

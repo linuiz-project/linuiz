@@ -1,7 +1,5 @@
-mod hhdm;
-pub use hhdm::*;
-
 pub mod alloc;
+pub mod hhdm;
 pub mod io;
 pub mod mapper;
 pub mod paging;
@@ -55,7 +53,7 @@ pub fn copy_kernel_page_table() -> alloc::pmm::Result<Address<Frame>> {
     // Safety: Frame is provided by allocator, and so guaranteed to be within the HHDM, and is frame-sized.
     let new_table = unsafe {
         core::slice::from_raw_parts_mut(
-            HHDM.offset(table_frame).unwrap().as_ptr().cast::<paging::PageTableEntry>(),
+            hhdm::get().offset(table_frame).unwrap().as_ptr().cast::<paging::PageTableEntry>(),
             table_index_size(),
         )
     };

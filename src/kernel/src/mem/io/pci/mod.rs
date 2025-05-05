@@ -1,7 +1,7 @@
 mod device;
 pub use device::*;
 
-use crate::mem::{alloc::pmm, paging, HHDM};
+use crate::mem::{alloc::pmm, hhdm, paging};
 use alloc::{collections::BTreeMap, vec::Vec};
 use core::ptr::NonNull;
 use libkernel::{LittleEndian, LittleEndianU16};
@@ -45,7 +45,7 @@ pub fn init_devices() -> Result<()> {
         })
         .try_for_each(|(base_address, segment_index, bus_index, device_index)| {
             let device_frame = get_device_base_address(base_address, bus_index, device_index);
-            let device_page = HHDM.offset(device_frame).unwrap();
+            let device_page = hhdm::get().offset(device_frame).unwrap();
 
             // Safety: We should be reading known-good memory here, according to the PCI spec. The following `if` test will verify that.
             let vendor_id = unsafe { device_page.as_ptr().cast::<LittleEndianU16>().read_volatile() };

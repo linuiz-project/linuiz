@@ -1,6 +1,6 @@
 use alloc::{boxed::Box, string::String};
 use core::ops::Range;
-use elf::{endian::AnyEndian, symbol::Symbol};
+use elf::{endian::AnyEndian, symbol::Symbol, ElfBytes};
 use libsys::{Address, Virtual};
 
 crate::error_impl! {
@@ -17,13 +17,10 @@ pub type PackedSymbolTable = (PackedStrings, Box<[SymbolMapping]>);
 
 static SYMBOLS: spin::Once<PackedSymbolTable> = spin::Once::new();
 
-pub fn parse(kernel_file: &'static limine::File) -> Result<()> {
+pub fn parse(kernel_elf: &ElfBytes<AnyEndian>) -> Result<()> {
     SYMBOLS.try_call_once(|| {
-        let (symtab, strtab) = elf::ElfBytes::<AnyEndian>::minimal_parse(kernel_file.data())
-            .map_err(|err| Error::ParserError { err })?
-            .symbol_table()
-            .map_err(|err| Error::ParserError { err })?
-            .ok_or(Error::NoTables)?;
+        let (symtab, strtab) =
+            kernel_elf.symbol_table().map_err(|err| Error::ParserError { err })?.ok_or(Error::NoTables)?;
 
         let mut strs = alloc::string::String::new();
         let mut symbols = alloc::vec::Vec::with_capacity(symtab.len());

@@ -2,11 +2,11 @@ use core::arch::asm;
 
 /// Enables interrupts for the current core.
 ///
-/// Safety
+/// ### Safety
 ///
 /// Enabling interrupts early can result in unexpected behaviour.
 #[inline]
-pub unsafe fn enable() {
+pub unsafe fn enable_interrupts() {
     #[cfg(target_arch = "x86_64")]
     asm!("sti", options(nostack, nomem));
 
@@ -16,11 +16,11 @@ pub unsafe fn enable() {
 
 /// Disables interrupts for the current core.
 ///
-/// Safety
+/// ### Safety
 ///
 /// Disabling interrupts can cause the system to become unresponsive if they are not re-enabled.
 #[inline]
-pub unsafe fn disable() {
+pub unsafe fn disable_interrupts() {
     #[cfg(target_arch = "x86_64")]
     asm!("cli", options(nostack, nomem));
 
@@ -30,7 +30,7 @@ pub unsafe fn disable() {
 
 /// Returns whether or not interrupts are enabled for the current core.
 #[inline]
-pub fn are_enabled() -> bool {
+pub fn is_interrupts_enabled() -> bool {
     #[cfg(target_arch = "x86_64")]
     {
         crate::arch::x86_64::registers::RFlags::read().contains(crate::arch::x86_64::registers::RFlags::INTERRUPT_FLAG)
@@ -45,12 +45,12 @@ pub fn are_enabled() -> bool {
 /// Disables interrupts, executes the given [`FnOnce`], and re-enables interrupts if they were prior.
 #[inline]
 pub fn without<R>(func: impl FnOnce() -> R) -> R {
-    let interrupts_enabled = are_enabled();
+    let interrupts_enabled = is_interrupts_enabled();
 
     if interrupts_enabled {
         // Safety: Interrupts are expected to be disabled, and are later re-enabled.
         unsafe {
-            disable();
+            disable_interrupts();
         }
     }
 
@@ -59,7 +59,7 @@ pub fn without<R>(func: impl FnOnce() -> R) -> R {
     if interrupts_enabled {
         // Safety: Interrupts were previously enabled.
         unsafe {
-            enable();
+            enable_interrupts();
         }
     }
 
@@ -68,11 +68,15 @@ pub fn without<R>(func: impl FnOnce() -> R) -> R {
 
 /// Waits for the next interrupt on the current core.
 #[inline]
-pub fn wait() {
-    assert!(are_enabled());
-
-    // Safety: Interrupts are checked-enabled.
-    unsafe { wait_unchecked() }
+pub fn wait_for_interrupt() {
+    if is_interrupts_enabled() {
+        // Safety: Interrupts are checked to be enabled.
+        unsafe {
+            wait_unchecked();
+        }
+    } else {
+        panic!("attempted to wait for interrupts while disabled")
+    }
 }
 
 /// Waits for the next interrupt on the current core.
@@ -82,14 +86,11 @@ pub fn wait() {
 /// If interrupts are not enabled, this function will cause a deadlock.
 #[inline]
 pub unsafe fn wait_unchecked() {
-    // Safety: Control flow expects to wait for the next interrupt.
-    unsafe {
-        #[cfg(target_arch = "x86_64")]
-        asm!("hlt", options(nostack, nomem, preserves_flags));
+    #[cfg(target_arch = "x86_64")]
+    asm!("hlt", options(nostack, nomem, preserves_flags));
 
-        #[cfg(target_arch = "riscv64")]
-        asm!("wfi", options(nostack, nomem, preserves_flags));
-    }
+    #[cfg(target_arch = "riscv64")]
+    asm!("wfi", options(nostack, nomem, preserves_flags));
 }
 
 /// Indefinitely waits for the next interrupt on the current core.
@@ -110,6 +111,6 @@ pub fn wait_loop() -> ! {
 /// Murdering a CPU core is undefined behaviour.
 #[inline]
 pub unsafe fn halt_and_catch_fire() -> ! {
-    disable();
+    disable_interrupts();
     wait_loop()
 }
