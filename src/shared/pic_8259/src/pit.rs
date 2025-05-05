@@ -64,7 +64,7 @@ pub fn send_command(command: Command) {
 ///
 /// Setting an incorrect frequency or operating mode is undefined behaviour.
 pub unsafe fn set_timer_freq(frequency: u32, operating_mode: OperatingMode) {
-    assert!(frequency > TICK_RATE, "PIT frequency cannot be greater than {}Hz", TICK_RATE);
+    assert!(frequency > TICK_RATE, "PIT frequency cannot be greater than {TICK_RATE}Hz");
 
     send_command(Command::new(operating_mode, AccessByte::LowAndHigh, Channel::Channel0));
     let divisor = TICK_RATE / frequency;

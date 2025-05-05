@@ -28,7 +28,7 @@ MODULE_PATH=boot:///linuiz/drivers
 KASLR=yes
 "#;
 
-static UEFI_FIRMWARE_IMAGE_URL: &str = "https://github.com/rust-osdev/ovmf-prebuilt/releases/download/edk2-stable202211-r1/edk2-stable202211-r1-bin.tar.xz";
+static UEFI_FIRMWARE_IMAGE_URL: &str = "https://github.com/rust-osdev/ovmf-prebuilt/releases/download/edk2-stable202502-r2/edk2-stable202502-r2-bin.tar.xz";
 static X86_64_CODE: &str = "build/ovmf/x86_64/code.fd";
 static X86_64_VARS: &str = "build/ovmf/x86_64/vars.fd";
 static AARCH64_CODE: &str = "build/ovmf/aarch64/code.fd";
@@ -151,6 +151,7 @@ fn main() -> Result<()> {
 
 fn in_workspace_with(shell: &Shell, with_fn: impl Fn(&Shell) -> Result<()>) -> Result<()> {
     for dir in WORKSPACE_DIRS {
+        println!("Workspace: {dir}");
         let _dir = shell.push_dir(dir);
         with_fn(shell)?
     }
@@ -199,16 +200,24 @@ fn download_ovmf_binaries(sh: &Shell, tmp_dir: &TempDir) -> Result<()> {
     for entry in archive.entries()? {
         let mut entry = entry?;
         let path = entry.path()?.to_string_lossy().into_owned();
-        println!("Checking path for EFI binaries: {:?}", path);
 
-        if path.ends_with("x64/code.fd") {
-            entry.unpack(X86_64_CODE)?;
-        } else if path.ends_with("x64/vars.fd") {
-            entry.unpack(X86_64_VARS)?;
-        } else if path.ends_with("aarch64/code.fd") {
-            entry.unpack(AARCH64_CODE)?;
-        } else if path.ends_with("aarch64/vars.fd") {
-            entry.unpack(AARCH64_VARS)?;
+        if !path.ends_with("/") {
+            print!("Checking path for EFI binaries: {path:?}");
+
+            if path.ends_with("x64/code.fd") {
+                entry.unpack(X86_64_CODE)?;
+            } else if path.ends_with("x64/vars.fd") {
+                entry.unpack(X86_64_VARS)?;
+            } else if path.ends_with("aarch64/code.fd") {
+                entry.unpack(AARCH64_CODE)?;
+            } else if path.ends_with("aarch64/vars.fd") {
+                entry.unpack(AARCH64_VARS)?;
+            } else {
+                println!(" ... invalid");
+                continue;
+            }
+
+            println!(" ... found");
         }
     }
 

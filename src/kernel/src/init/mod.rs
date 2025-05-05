@@ -107,17 +107,15 @@ fn load_drivers() {
 
     debug!("Unpacking kernel drivers...");
 
-    let Some(modules) = LIMINE_MODULES.get_response()
-    else {
+    let Some(modules) = LIMINE_MODULES.get_response() else {
         warn!("Bootloader provided no modules; skipping driver loading.");
-        return
+        return;
     };
 
     let modules = modules.modules();
     trace!("Found modules: {:X?}", modules);
 
-    let Some(drivers_module) = modules.iter().find(|module| module.path().ends_with("drivers"))
-    else {
+    let Some(drivers_module) = modules.iter().find(|module| module.path().ends_with("drivers")) else {
         panic!("no drivers module found")
     };
 
@@ -137,10 +135,9 @@ fn load_drivers() {
         })
         .for_each(|(entry, elf)| {
             // Get and copy the ELF segments into a small box.
-            let Some(segments_copy) = elf.segments().map(|segments| segments.into_iter().collect())
-            else {
+            let Some(segments_copy) = elf.segments().map(|segments| segments.into_iter().collect()) else {
                 error!("ELF has no segments.");
-                return
+                return;
             };
 
             // Safety: In-place transmutation of initialized bytes for the purpose of copying safely.
@@ -149,8 +146,7 @@ fn load_drivers() {
             let elf_data = alloc::boxed::Box::from(entry.data());
             trace!("ELF data allocated into memory.");
 
-            let Ok((Some(shdrs), Some(_))) = elf.section_headers_with_strtab()
-            else {
+            let Ok((Some(shdrs), Some(_))) = elf.section_headers_with_strtab() else {
                 panic!("Error retrieving ELF relocation metadata.")
             };
 

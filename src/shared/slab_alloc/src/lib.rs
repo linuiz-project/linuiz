@@ -1,10 +1,7 @@
 #![cfg_attr(not(test), no_std)]
 #![feature(
     allocator_api,          // #32838 <https://github.com/rust-lang/rust/issues/32838>
-    new_uninit,             // #63291 <https://github.com/rust-lang/rust/issues/63291>
-    pointer_is_aligned,     // #96284 <https://github.com/rust-lang/rust/issues/96284>
-    ptr_sub_ptr,            // #95892 <https://github.com/rust-lang/rust/issues/95892>
-    drain_filter,           // #43244 <https://github.com/rust-lang/rust/issues/43244>
+    // drain_filter,           // #43244 <https://github.com/rust-lang/rust/issues/43244>
 )]
 
 extern crate alloc;

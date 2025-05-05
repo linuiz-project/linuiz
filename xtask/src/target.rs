@@ -20,8 +20,20 @@ impl core::fmt::Display for Target {
 
 #[derive(Serialize, Deserialize)]
 struct ConfigOptions {
-    unstable: UnstableOptions,
-    build: BuildOptions,
+    unstable_options: UnstableOptions,
+    build_options: BuildOptions,
+}
+
+impl ConfigOptions {
+    pub fn new(target: Target, rustflags: Option<Vec<String>>) -> Self {
+        Self {
+            unstable_options: UnstableOptions {
+                build_std: vec!["core".into(), "compiler_builtins".into(), "alloc".into()],
+                build_std_features: vec!["compiler-builtins-mem".into()],
+            },
+            build_options: BuildOptions { target: target.to_string(), rustflags },
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -33,63 +45,43 @@ struct UnstableOptions {
     build_std_features: Vec<String>,
 }
 
-impl Default for UnstableOptions {
-    fn default() -> Self {
-        Self {
-            build_std: vec!["core".into(), "compiler_builtins".into(), "alloc".into()],
-            build_std_features: vec!["compiler-builtins-mem".into()],
-        }
-    }
-}
-
 #[derive(Serialize, Deserialize)]
 struct BuildOptions {
     target: String,
     rustflags: Option<Vec<String>>,
 }
 
-impl ConfigOptions {
-    fn kernel_default(target: Target) -> Self {
-        Self {
-            unstable: Default::default(),
-            build: BuildOptions {
-                target: target.to_string(),
-                rustflags: Some(vec!["-C".into(), "code-model=kernel".into(), "-C".into(), "embed-bitcode=yes".into()]),
-            },
-        }
-    }
-
-    fn userspace_default(target: Target) -> Self {
-        Self { unstable: Default::default(), build: BuildOptions { target: target.to_string(), rustflags: None } }
-    }
-}
-
 pub fn update_target(sh: &Shell, target: Target) -> Result<()> {
-    update_target_path(sh, target, "src/kernel/.cargo/config.toml", || ConfigOptions::kernel_default(target))?;
-    update_target_path(sh, target, "src/userspace/.cargo/config.toml", || ConfigOptions::userspace_default(target))?;
+    // kernel target update
+    update_target_impl(
+        sh,
+        "src/kernel/.cargo/config.toml",
+        target,
+        Some(vec![
+            "-C".into(),
+            "code-model=kernel".into(),
+            "-C".into(),
+            "embed-bitcode=yes".into(),
+            "--cfg".into(),
+            "getrandom_backend=\"custom\"".into(),
+        ]),
+    )?;
+
+    // userspace target update
+    update_target_impl(sh, "src/userspace/.cargo/config.toml", target, None)?;
 
     Ok(())
 }
 
-fn update_target_path<P: AsRef<std::path::Path>>(
+fn update_target_impl(
     sh: &Shell,
+    path: impl AsRef<std::path::Path>,
     target: Target,
-    path: P,
-    default: impl FnOnce() -> ConfigOptions,
+    rustflags: Option<Vec<String>>,
 ) -> Result<()> {
-    let config = sh
-        .read_file(path.as_ref())
-        .with_context(|| format!("configuration toml doesn't exist: {:?}", path.as_ref()))
-        .and_then(|config_str| {
-            toml::from_str::<ConfigOptions>(&config_str)
-                .with_context(|| format!("configuration toml is malformed: {:?}", path.as_ref()))
-        })
-        .map(|mut config| {
-            config.build.target = target.to_string();
-            config
-        })
-        .unwrap_or_else(|_| default());
+    let config = ConfigOptions::new(target, rustflags);
+    let config_toml = toml::to_string_pretty(&config).with_context(|| "failed prettifying config TOML")?;
+    sh.write_file(path.as_ref(), config_toml).with_context(|| "failed writing prettified TOML")?;
 
-    let config_pretty_str = toml::to_string_pretty(&config).with_context(|| "failed prettifying config TOML")?;
-    sh.write_file(path.as_ref(), config_pretty_str).with_context(|| "failed writing prettified TOML")
+    Ok(())
 }

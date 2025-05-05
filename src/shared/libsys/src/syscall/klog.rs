@@ -38,7 +38,7 @@ fn klog(offset: KlogVectorOffset, str: &str) -> Result {
             in("rax") vector,
             inout("rdi") str_ptr => discriminant,
             inout("rsi") str_len => value,
-            options(nostack, nomem, preserves_flags)
+            options(nostack, preserves_flags)
         );
 
         <Result as super::ResultConverter>::from_registers((discriminant, value))

@@ -1,9 +1,6 @@
 #![no_std]
 #![feature(
-    strict_provenance,          // #95228 <https://github.com/rust-lang/rust/issues/95228>
     try_trait_v2,               // #84277 <https://github.com/rust-lang/rust/issues/84277>
-    exclusive_range_pattern,    // #37854 <https://github.com/rust-lang/rust/issues/37854>
-    const_option,
 )]
 
 mod macros;
@@ -61,8 +58,8 @@ pub use cpu_types::*;
 mod cpu_types {
     #![allow(non_camel_case_types)]
 
-    #[cfg(target_pointer_width = "128")]
-    pub type uptr = u128;
+    // #[cfg(target_pointer_width = "128")]
+    // pub type uptr = u128;
     #[cfg(target_pointer_width = "64")]
     pub type uptr = u64;
     #[cfg(target_pointer_width = "32")]

@@ -30,17 +30,16 @@ mod clock {
             let platform_info = platform_info.lock();
 
             if let Some(pm_timer) = platform_info.pm_timer.as_ref()
-                 && let Some(register) = crate::acpi::Register::new(&pm_timer.base)
-             {
-                 Some(Self {
-                     ty: Type::Acpi(register),
-                     frequency: 3579545,
-                     max_timestamp: u64::from(if pm_timer.supports_32bit { u32::MAX } else { 0xFFFFFF })
-                 })
-
-             } else {
-                 None
-             }
+                && let Some(register) = crate::acpi::Register::new(&pm_timer.base)
+            {
+                Some(Self {
+                    ty: Type::Acpi(register),
+                    frequency: 3579545,
+                    max_timestamp: u64::from(if pm_timer.supports_32bit { u32::MAX } else { 0xFFFFFF }),
+                })
+            } else {
+                None
+            }
         }
 
         pub fn unload(&mut self) {

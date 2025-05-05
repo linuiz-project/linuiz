@@ -41,7 +41,7 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
 
     let cargo_args = {
         let mut args = vec![
-            "--out-dir",
+            "--artifact-dir",
             &tmp_path_dir_str,
             if options.release {
                 "--release"

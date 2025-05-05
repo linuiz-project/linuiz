@@ -1,7 +1,6 @@
 #![no_std]
 #![no_main]
 #![feature(
-    error_in_core,                          // #103765 <https://github.com/rust-lang/rust/issues/103765>
     result_flattening,                      // #70142 <https://github.com/rust-lang/rust/issues/70142>
     iter_advance_by,                        // #77404 <https://github.com/rust-lang/rust/issues/77404>
     iter_array_chunks,                      // #100450 <https://github.com/rust-lang/rust/issues/100450>
@@ -10,33 +9,18 @@
     maybe_uninit_slice,                     // #63569 <https://github.com/rust-lang/rust/issues/63569>
     iterator_try_reduce,                    // #87053 <https://github.com/rust-lang/rust/issues/87053>
     map_try_insert,                         // #82766 <https://github.com/rust-lang/rust/issues/82766>
-    new_uninit,                             // #63291 <https://github.com/rust-lang/rust/issues/63291>
     try_trait_v2,                           // #84277 <https://github.com/rust-lang/rust/issues/84277>
     step_trait,                             // #42168 <https://github.com/rust-lang/rust/issues/42168>
-    ptr_sub_ptr,                            // #95892 <https://github.com/rust-lang/rust/issues/95892>
-    asm_const,
-    naked_functions,
     sync_unsafe_cell,
-    panic_info_message,
     allocator_api,
-    pointer_is_aligned,
     slice_ptr_get,
-    strict_provenance,
-    core_intrinsics,
-    exclusive_range_pattern,
-    raw_ref_op,
     let_chains,
-    unchecked_math,
     if_let_guard,
     exact_size_is_empty,
     fn_align,
     ptr_as_uninit,
     ptr_metadata,
-    control_flow_enum,
     btreemap_alloc,
-    inline_const,
-    const_option,
-    const_option_ext,
     const_trait_impl,
 )]
 #![forbid(clippy::inline_asm_x86_att_syntax)]

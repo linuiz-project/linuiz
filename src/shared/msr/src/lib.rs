@@ -103,7 +103,7 @@ impl IA32_APIC_BASE {
 
 pub struct IA32_EFER;
 impl IA32_EFER {
-    /// Leave the IA32_EFER.SCE bit unsupported, as we don't use `syscall`.
+    // Leave the IA32_EFER.SCE bit unsupported, as we don't use `syscall`.
 
     /// Gets the IA32_EFER.LMA (long-mode active) bit.
     #[inline]

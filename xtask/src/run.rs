@@ -112,7 +112,7 @@ pub fn run(sh: &xshell::Shell, options: Options) -> Result<()> {
 
     let options_machine = match (options.cpu, options.accel) {
         (Cpu::Rv64, Accelerator::None) => "virt",
-        (Cpu::Rv64, accel) => panic!("invalid accelerator for RISC-V: {:?}", accel),
+        (Cpu::Rv64, accel) => panic!("invalid accelerator for RISC-V: {accel:?}"),
 
         (_, Accelerator::Kvm) => "q35,accel=kvm",
         (_, Accelerator::None) => "q35",
@@ -175,7 +175,7 @@ pub fn run(sh: &xshell::Shell, options: Options) -> Result<()> {
     );
 
     if options.norun {
-        println!("cmd: {}", cmd.to_string());
+        println!("cmd: {cmd}");
         Ok(())
     } else {
         cmd.run().with_context(|| "failed running OS")

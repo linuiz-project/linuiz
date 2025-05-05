@@ -1,13 +1,20 @@
 #![allow(clippy::no_mangle_with_rust_abi)]
 
-getrandom::register_custom_getrandom!(prng_custom_getrandom);
+use core::mem::MaybeUninit;
 
-#[allow(clippy::unnecessary_wraps)]
-fn prng_custom_getrandom(buf: &mut [u8]) -> Result<(), getrandom::Error> {
-    trace!("[RAND] RANDOMIZING BYTES FOR BUFFER: []:{}", buf.len());
+#[no_mangle]
+unsafe extern "Rust" fn __getrandom_v03_custom(dest: *mut u8, len: usize) -> Result<(), getrandom::Error> {
+    // `dest` may be unitialized for `len`, so the pointer should reflect that.
+    let dest_maybeuninit_ptr = <*mut MaybeUninit<u8>>::from(data);
+    let buf = core::slice::from_raw_parts_mut(dest_maybeuninit_ptr, len);
+
+    trace!("[RAND] BUFFER LEN: {}", buf.len());
+
     for (index, chunk) in buf.chunks_mut(core::mem::size_of::<u64>()).enumerate() {
         let rng_bytes = prng::next_u64().to_ne_bytes();
-        trace!("[RAND] Chunk {}: {:?}", index, rng_bytes);
+
+        trace!("[RAND] CHUNK#{}: {:?}", index, rng_bytes);
+
         chunk.copy_from_slice(&rng_bytes[..chunk.len()]);
     }
 
@@ -23,15 +30,17 @@ pub mod prng {
         Mutex::new(Pcg64Mcg::new({
             #[cfg(target_arch = "x86_64")]
             {
-                // Safety: ???
+                // Safety: `_rdtsc` isn't unsafe, so far as I can tell.
                 unsafe {
                     let state_low = u128::from(core::arch::x86_64::_rdtsc());
 
+                    // spin for a random-ish length to allow timestamp counter to progress
                     for _ in 0..(state_low & 0xFF) {
                         core::hint::spin_loop();
                     }
 
                     let state_high = u128::from(core::arch::x86_64::_rdtsc());
+
                     state_low | (state_high << 64)
                 }
             }

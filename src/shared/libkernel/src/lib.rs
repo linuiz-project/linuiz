@@ -1,7 +1,6 @@
 #![no_std]
 #![feature(
     extern_types,                   // #43467 <https://github.com/rust-lang/rust/issues/43467>
-    exclusive_range_pattern,        // #37854 <https://github.com/rust-lang/rust/issues/37854>
 )]
 
 pub mod mem;
