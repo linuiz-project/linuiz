@@ -15,11 +15,16 @@ pub struct DescriptorTablePointer {
     pub base: u64,
 }
 
-pub fn load_static_tables() {
+/// ### Safety
+///
+/// This function has the potential to disrupt software execution by clearing the FS/GS bases
+/// on Intel chips. Caller must ensure the bases are not in use by software at time of calling.
+pub unsafe fn load_static_tables() {
     use crate::arch::x86_64::structures::idt::InterruptDescriptorTable;
 
     // Always initialize GDT prior to configuring IDT.
-    crate::arch::x86_64::structures::gdt::load();
+    // Safety: This function is only called once, prior to FS/GS base being in use.
+    unsafe { crate::arch::x86_64::structures::gdt::load() };
 
     // Due to the fashion in which the `x86_64` crate initializes the IDT entries,
     // it must be ensured that the handlers are set only *after* the GDT has been

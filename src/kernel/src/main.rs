@@ -25,14 +25,17 @@
     const_trait_impl,
 )]
 #![forbid(clippy::inline_asm_x86_att_syntax)]
-#![deny(clippy::semicolon_if_nothing_returned, clippy::debug_assert_with_mut_call, clippy::float_arithmetic)]
-#![warn(
-    clippy::cargo,
-    clippy::pedantic,
+#![deny(
+    clippy::semicolon_if_nothing_returned,
+    clippy::debug_assert_with_mut_call,
+    clippy::float_arithmetic,
+    clippy::semicolon_inside_block,
     clippy::undocumented_unsafe_blocks,
     clippy::missing_const_for_fn,
-    clippy::cast_lossless
+    clippy::cast_lossless,
+    unsafe_op_in_unsafe_fn
 )]
+#![warn(clippy::cargo, clippy::pedantic)]
 #![allow(
     clippy::enum_glob_use,
     clippy::inline_always,
@@ -78,13 +81,16 @@ static STACK_SIZE: u64 = 0x4000;
 #[doc(hidden)]
 #[allow(clippy::too_many_lines)]
 unsafe extern "C" fn _entry() -> ! {
-    core::arch::asm!(
-        "
+    // Safety: We've just entered the kernel, so no state can be disrupted.
+    unsafe {
+        core::arch::asm!(
+            "
         xor rbp, rbp
 
         call {}
         ",
-        sym init::init,
-        options(noreturn)
-    )
+            sym init::init,
+            options(noreturn)
+        )
+    }
 }

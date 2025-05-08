@@ -3,6 +3,8 @@
 mod segmentation;
 pub use segmentation::*;
 
+use core::arch::asm;
+
 /// Set by the processor if this segment has been accessed. Only cleared by software.
 /// _Setting_ this bit in software prevents GDT writes on first use.
 const ACCESSED: u64 = 1 << 40;
@@ -46,9 +48,9 @@ const KERNEL_CODE64_FLAGS: u64 = COMMON_FLAGS | EXECUTABLE | LONG_MODE;
 const USER_DATA_FLAGS: u64 = COMMON_FLAGS | DEFAULT_SIZE | DPL_RING_3;
 const USER_CODE64_FLAGS: u64 = COMMON_FLAGS | EXECUTABLE | LONG_MODE | DPL_RING_3;
 
-/// The GDT layout is very specific, due to the behaviour of the `IA32_STAR` MSR and its
+/// The GDT layout is very specific, due to the behaviour of the **IA32_STAR** MSR and its
 /// affect on syscalls. Do not change this, or if it is changed, ensure it follows the requisite
-/// standard set by the aforementioned `IA32_STAR` MSR. Details can be found in the description of
+/// standard set by the aforementioned **IA32_STAR** MSR. Details can be found in the description of
 /// the `syscall` and `sysret` instructions in the IA32 Software Developer's Manual.
 ///
 /// Additionally, x86 requires that the first GDT entry be null (i.e. no segment information).
@@ -74,8 +76,29 @@ pub unsafe fn load() {
     //         set to the GDT's memory location, with the requisite limit set
     //         correctly (size in bytes, less 1).
     unsafe {
-        core::arch::asm!(
+        asm!(
             "lgdt [{}]", in(reg) &gdt_ptr, options(readonly, nostack, preserves_flags)
+        );
+    }
+
+    // Safety: This is special since we cannot directly move to CS; x86 requires the instruction
+    //         pointer and CS to be set at the same time. To do this, we push the new segment selector
+    //         and return value onto the stack and use a "far return" (`retfq`) to reload CS and
+    //         continue at the end of our function.
+    //
+    //         Note we cannot use a "far call" (`lcall`) or "far jmp" (`ljmp`) to do this because then we
+    //         would only be able to jump to 32-bit instruction pointers. Only Intel implements support
+    //         for 64-bit far calls/jumps in long-mode, AMD does not.
+    unsafe {
+        asm!(
+            "push {sel}",
+            "lea {tmp}, [55f + rip]",
+            "push {tmp}",
+            "retfq",
+            "55:",
+            sel = in(reg) u64::from(KCODE_SELECTOR.as_u16()),
+            tmp = lateout(reg) _,
+            options(preserves_flags),
         );
     }
 
@@ -85,13 +108,21 @@ pub unsafe fn load() {
     //         base has been loaded with the CPU thread-local state structure pointer.
     unsafe {
         // Because this is x86, everything is complicated. It's important we load the extra
-        // data segment registers (fs/gs) with the null descriptors, because if they don't
+        // data segment registers (FS/GS) with the null descriptors, because if they don't
         // point to a null descriptor, then when CPL changes, the processor will clear the
         // base and limit of the relevant descriptor.
         //
-        // This has the fun behavioural side-effect of ALSO clearing the IA32_FS/GS_BASE MSRs,
+        // This has the fun behavioural side-effect of ALSO clearing the **IA32_FS/GS_BASE** MSRs,
         // thus making any code involved in the CPL change context unable to access thread-local or
         // process-local state (when those MSRs are in use for the purpose).
-        core::arch::asm!("mov es, 0", "mov ds, 0", "mov fs, 0", "mov gs, 0", options(nostack, preserves_flags));
+        asm!(
+            "mov ss, {sel:x}",
+            "mov es, 0",
+            "mov ds, 0",
+            "mov fs, 0",
+            "mov gs, 0",
+            sel = in(reg) KDATA_SELECTOR.as_u16(),
+            options(nostack, preserves_flags)
+        );
     }
 }

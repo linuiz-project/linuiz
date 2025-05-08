@@ -322,7 +322,12 @@ pub unsafe fn kernel_core_setup() -> ! {
     crate::interrupts::wait_loop()
 }
 
-fn cpu_config() {
+/// ### Safety
+///
+/// This function has the potential to modify CPU state in such a way as to disrupt
+/// software execution. It should be run only once per hardware thread at the very
+/// beginning of code execution.
+unsafe fn cpu_config() {
     #[cfg(target_arch = "x86_64")]
     {
         use crate::arch::x86_64::{
@@ -382,11 +387,11 @@ fn cpu_config() {
         {
             // Safety: Setting `IA32_EFER.NXE` in this context is safe because the bootloader
             //         does not use the `NX` bit, and so should not be in use at this point.
-            unsafe { msr::IA32_EFER::set_nxe(true) };
+            unsafe { msr::IA32_EFER::set_nxe(true); }
         }
 
-        // Load the static processor tables for this core.
-        crate::arch::x86_64::structures::load_static_tables();
+        // Safety: This function is only be run once per hardware thread, and at the very beginning of execution.
+        unsafe { crate::arch::x86_64::structures::load_static_tables(); }
 
         // Setup system call interface.
         // // Safety: Parameters are set according to the IA-32 SDM, and so should have no undetermined side-effects.
