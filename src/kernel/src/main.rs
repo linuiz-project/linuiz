@@ -25,17 +25,16 @@
     const_trait_impl,
 )]
 #![forbid(clippy::inline_asm_x86_att_syntax)]
-#![deny(
-    clippy::semicolon_if_nothing_returned,
-    clippy::debug_assert_with_mut_call,
-    clippy::float_arithmetic,
-    clippy::semicolon_inside_block,
-    clippy::undocumented_unsafe_blocks,
-    clippy::missing_const_for_fn,
+#![deny(clippy::debug_assert_with_mut_call, clippy::float_arithmetic)]
+#![warn(
+    clippy::cargo,
+    clippy::pedantic,
     clippy::cast_lossless,
-    unsafe_op_in_unsafe_fn
+    clippy::missing_const_for_fn,
+    clippy::undocumented_unsafe_blocks,
+    clippy::semicolon_inside_block,
+    clippy::semicolon_if_nothing_returned
 )]
-#![warn(clippy::cargo, clippy::pedantic)]
 #![allow(
     clippy::enum_glob_use,
     clippy::inline_always,

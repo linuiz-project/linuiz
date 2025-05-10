@@ -1,14 +1,14 @@
 use core::ptr::NonNull;
 
 use crate::mem::{
-    alloc::{KernelAllocator, KMALLOC},
+    alloc::{KMALLOC, KernelAllocator},
     hhdm,
 };
 use acpi::{
-    address::{AddressSpace as AcpiAddressSpace, GenericAddress as AcpiAddress},
     PhysicalMapping,
+    address::{AddressSpace as AcpiAddressSpace, GenericAddress as AcpiAddress},
 };
-use libkernel::{mem::VolatileCell, ReadWrite};
+use libkernel::{ReadWrite, mem::VolatileCell};
 use port::{PortAddress, PortReadWrite, ReadWritePort};
 use spin::{Lazy, Mutex, Once};
 
@@ -171,6 +171,11 @@ impl acpi::AcpiHandler for AcpiHandler {
 // }
 
 pub static TABLES: Once<Mutex<acpi::AcpiTables<AcpiHandler>>> = Once::new();
+
+pub fn init_tables() {
+    static RSDP_ADDRESS_REQUEST: BootOnly<limine::request::RsdpRequest> =
+        BootOnly::new(limine::request::RsdpRequest::new());
+}
 
 pub static FADT: Lazy<Option<Mutex<PhysicalMapping<AcpiHandler, acpi::fadt::Fadt>>>> = Lazy::new(|| {
     TABLES.get().map(Mutex::lock).and_then(|tables| tables.find_table::<acpi::fadt::Fadt>().ok()).map(Mutex::new)

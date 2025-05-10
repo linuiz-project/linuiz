@@ -11,6 +11,10 @@ unsafe impl Send for Serial {}
 //         So basically, TODO.
 unsafe impl Sync for Serial {}
 
+impl Serial {
+pub fn new(address: ) -> Self {
+}}
+
 impl log::Log for Serial {
     fn enabled(&self, _: &log::Metadata) -> bool {
         true
@@ -42,23 +46,11 @@ impl log::Log for Serial {
     fn flush(&self) {}
 }
 
-crate::error_impl! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum Error {
-        SetLogger => None,
-        NoLogger => None
-    }
-}
-
-pub fn init() -> Result<()> {
+pub fn init() {
     #[cfg(debug_assertions)]
-    {
         log::set_max_level(log::LevelFilter::Trace);
-    }
     #[cfg(not(debug_assertions))]
-    {
         log::set_max_level(log::LevelFilter::Trace);
-    }
 
     static SERIAL_UART: spin::Lazy<Option<Serial>> = spin::Lazy::new(|| {
         crate::interrupts::without(|| {

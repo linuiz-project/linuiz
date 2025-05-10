@@ -1,13 +1,35 @@
+use core::sync::atomic::{AtomicBool, Ordering};
+
 use libsys::{Address, Frame, Page, Physical, Virtual};
 use limine::{
     memory_map,
     mp::RequestFlags,
     request::{
-        BootloaderInfoRequest, ExecutableAddressRequest, ExecutableFileRequest, HhdmRequest, MemoryMapRequest,
-        MpRequest, RsdpRequest, StackSizeRequest,
+        BootloaderInfoRequest, ExecutableAddressRequest, ExecutableCmdlineRequest, ExecutableFileRequest, HhdmRequest,
+        MemoryMapRequest, MpRequest, RsdpRequest, StackSizeRequest,
     },
     BaseRevision,
 };
+
+static BOOT_RECLAIM: AtomicBool = AtomicBool::new(false);
+
+pub struct BootOnly<T> {
+    obj: T,
+}
+
+impl<T> BootOnly<T> {
+    pub const fn new(obj: T) -> Self {
+        Self { obj }
+    }
+
+    pub fn get(&self) -> &T {
+        if !BOOT_RECLAIM.load(Ordering::Acquire) {
+            &self.obj
+        } else {
+            panic!("cannot access variable; bootloader memory has already been reclaimed")
+        }
+    }
+}
 
 #[allow(clippy::too_many_lines)]
 pub extern "C" fn init() -> ! {
@@ -15,45 +37,41 @@ pub extern "C" fn init() -> ! {
     // within this function should be absolutely, definitely run ONLY ONCE. Writing
     // the code sequentially within one function easily ensures that will be the case.
 
+    // Specify the Limine revision to use
     static BASE_REVISION: BaseRevision = BaseRevision::with_revision(0);
+    // All limine feature requests (ensures they are not used after bootloader memory is reclaimed)
     static STACK_SIZE_REQUEST: StackSizeRequest = StackSizeRequest::new().with_size(crate::STACK_SIZE);
     static BOOT_INFO_REQUEST: BootloaderInfoRequest = BootloaderInfoRequest::new();
     static KERNEL_ADDR_REQUEST: ExecutableAddressRequest = ExecutableAddressRequest::new();
     static KERNEL_FILE_REQUEST: ExecutableFileRequest = ExecutableFileRequest::new();
+    static KERNEL_CMDLINE_REQUEST: ExecutableCmdlineRequest = ExecutableCmdlineRequest::new();
     static MEMORY_MAP_REQUEST: MemoryMapRequest = MemoryMapRequest::new();
     static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
-    static RSDP_ADDRESS_REQUEST: RsdpRequest = RsdpRequest::new();
     static MP_REQUEST: MpRequest = MpRequest::new().with_flags(RequestFlags::X2APIC);
 
-    #[cfg(debug_assertions)]
-    // Initialize logging, or spin indefinitely if we fail (debug mode is useless without logging).
+    // Initialize logging, or spin indefinitely if we fail.
     crate::logging::init().unwrap_or_else(|_| crate::interrupts::wait_loop());
 
-    #[cfg(not(debug_assertions))]
-    // Logging failed to initialize, but just continue to boot (not necessary in non-debug).
-    crate::logging::init().ok();
-
-    cpu_config();
-
-    /* BOOTLOADER & VENDOR INFO */
-    {
-        if let Some(boot_info_response) = BOOT_INFO_REQUEST.get_response() {
-            info!(
-                "Bootloader Info     {} v{} (rev {})",
-                boot_info_response.name(),
-                boot_info_response.version(),
-                boot_info_response.revision()
-            );
-        } else {
-            info!("Bootloader Info     UNKNOWN")
-        }
-
-        #[cfg(target_arch = "x86_64")]
-        let vendor_info =
-            crate::arch::x86_64::cpuid::VENDOR_INFO.as_ref().map(raw_cpuid::VendorInfo::as_str).unwrap_or("UNKNOWN");
-
-        info!("Vendor              {vendor_info}");
+    unsafe {
+        cpu_config();
     }
+
+    if let Some(boot_info_response) = BOOT_INFO_REQUEST.get_response() {
+        info!(
+            "Bootloader Info     {} v{} (rev {})",
+            boot_info_response.name(),
+            boot_info_response.version(),
+            boot_info_response.revision()
+        );
+    } else {
+        info!("Bootloader Info     UNKNOWN")
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    let vendor_info =
+        crate::arch::x86_64::cpuid::VENDOR_INFO.as_ref().map(raw_cpuid::VendorInfo::as_str).unwrap_or("UNKNOWN");
+
+    info!("Vendor              {vendor_info}");
 
     // Set up various variables and structures for init to use.
     let memory_map = MEMORY_MAP_REQUEST.get_response().expect("no response to memory map request").entries();
@@ -61,10 +79,9 @@ pub extern "C" fn init() -> ! {
         .get_response()
         .map(limine::response::ExecutableFileResponse::file)
         .expect("no response to kernel file request");
-    let kernel_file_addr = kernel_file.addr();
-    let kernel_file_len = kernel_file.size();
     // SAFETY: memory region is initialized by Limine.
-    let kernel_file_mem = unsafe { core::slice::from_raw_parts(kernel_file_addr, kernel_file_len.try_into().unwrap()) };
+    let kernel_file_mem =
+        unsafe { core::slice::from_raw_parts(kernel_file.addr(), kernel_file.size().try_into().unwrap()) };
     let kernel_elf = elf::ElfBytes::<elf::endian::AnyEndian>::minimal_parse(kernel_file_mem)
         .expect("failed to parse kernel file into ELF binary");
     let (kernel_addr_phys, kernel_addr_virt) = {
@@ -76,7 +93,7 @@ pub extern "C" fn init() -> ! {
     };
 
     // Parse the kernel parameters.
-    crate::params::parse(kernel_file.string().to_str().expect("kernel command string is not valid UTF-8"));
+    crate::params::parse_cmdline();
     // Initialize the physical memory manager.
     crate::mem::alloc::pmm::init(memory_map);
     // Parse the kernel ELF symbols.
@@ -254,12 +271,18 @@ pub extern "C" fn init() -> ! {
         for cpu in response.cpus().iter().filter(|cpu| cpu.lapic_id != response.bsp_lapic_id()) {
             trace!("Starting processor: ID P{}/L{}", cpu.id, cpu.lapic_id);
 
-            if crate::params::use_smp() {
+            if crate::params::use_multiprocessing() {
                 extern "C" fn _smp_entry(_: &limine::mp::Cpu) -> ! {
-                    cpu_config();
+                    unsafe {
+                        cpu_config();
+                    }
 
-                    // Safety: All currently referenced memory should also be mapped in the kernel page tables.
-                    crate::mem::with_kmapper(|kmapper| unsafe { kmapper.swap_into() });
+                    crate::mem::with_kmapper(|kmapper| {
+                        // Safety: All currently referenced memory should also be mapped in the kernel page tables.
+                        unsafe {
+                            kmapper.swap_into();
+                        }
+                    });
 
                     // Safety: Function has not been called on the this core.
                     unsafe { kernel_core_setup() }
@@ -387,11 +410,15 @@ unsafe fn cpu_config() {
         {
             // Safety: Setting `IA32_EFER.NXE` in this context is safe because the bootloader
             //         does not use the `NX` bit, and so should not be in use at this point.
-            unsafe { msr::IA32_EFER::set_nxe(true); }
+            unsafe {
+                msr::IA32_EFER::set_nxe(true);
+            }
         }
 
         // Safety: This function is only be run once per hardware thread, and at the very beginning of execution.
-        unsafe { crate::arch::x86_64::structures::load_static_tables(); }
+        unsafe {
+            crate::arch::x86_64::structures::load_static_tables();
+        }
 
         // Setup system call interface.
         // // Safety: Parameters are set according to the IA-32 SDM, and so should have no undetermined side-effects.

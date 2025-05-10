@@ -1,52 +1,54 @@
-static PARAMS: spin::Once<KernelParameters> = spin::Once::new();
+use crate::init::BootOnly;
+use limine::request::ExecutableCmdlineRequest;
+
+static PARAMS: spin::RwLock<KernelParameters> =
+    spin::RwLock::new(KernelParameters { use_multiprocessing: true, keep_symbol_info: false, low_memory_mode: false });
 
 #[derive(Debug, Clone, Copy)]
 pub struct KernelParameters {
-    /// Whether the kernel should utilize symmetric multi-processing.
-    pub use_smp: bool,
+    /// Whether the kernel should utilize multi-processing.
+    pub use_multiprocessing: bool,
 
-    /// TODO
+    /// Whether to keep the kernel symbol info before reclaiming extra memory.
     pub keep_symbol_info: bool,
 
     /// Whether the kernel should use low-memory mode.
     pub low_memory_mode: bool,
 }
 
-impl Default for KernelParameters {
-    fn default() -> Self {
-        Self { use_smp: true, keep_symbol_info: false, low_memory_mode: false }
-    }
-}
+/// ### Safety
+///
+/// Caller must
+pub fn parse_cmdline() {
+    static KERNEL_CMDLINE_REQUEST: BootOnly<ExecutableCmdlineRequest> = BootOnly::new(ExecutableCmdlineRequest::new());
 
-pub fn parse(command_str: &str) {
-    PARAMS.call_once(|| {
-        let mut kernel_params = crate::params::KernelParameters::default();
+    let mut params = PARAMS.write();
 
-        for arg in command_str.split(' ') {
+    if let Some(response) = KERNEL_CMDLINE_REQUEST.get().get_response() {
+        for arg in response.cmdline().to_str().expect("kernel command string is not valid UTF-8").split(' ') {
             match arg {
-                "--nosmp" => kernel_params.use_smp = false,
-                "--symbolinfo" => kernel_params.keep_symbol_info = true,
-                "--lomem" => kernel_params.low_memory_mode = true,
-
-                // ignore
-                "" => {}
+                "--nomp" => params.use_multiprocessing = false,
+                "--symbolinfo" => params.keep_symbol_info = true,
+                "--lomem" => params.low_memory_mode = true,
 
                 other => warn!("Unknown command line argument: {:?}", other),
             }
         }
+    } else {
+        info!("No kernel cmdline provided.")
+    };
 
-        kernel_params
-    });
+    info!("Parameters:\n{:?}", *params);
 }
 
-pub fn use_smp() -> bool {
-    PARAMS.get().unwrap().use_smp
+pub fn use_multiprocessing() -> bool {
+    PARAMS.read().use_multiprocessing
 }
 
 pub fn keep_symbol_info() -> bool {
-    PARAMS.get().unwrap().keep_symbol_info
+    PARAMS.read().keep_symbol_info
 }
 
 pub fn use_low_memory() -> bool {
-    PARAMS.get().unwrap().low_memory_mode
+    PARAMS.read().low_memory_mode
 }

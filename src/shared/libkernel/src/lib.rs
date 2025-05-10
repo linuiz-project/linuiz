@@ -12,7 +12,7 @@ pub struct ReadOnly;
 pub struct WriteOnly;
 pub struct ReadWrite;
 
-extern "C" {
+unsafe extern "C" {
     pub type LinkerSymbol;
 }
 
