@@ -12,8 +12,22 @@ unsafe impl Send for Serial {}
 unsafe impl Sync for Serial {}
 
 impl Serial {
-pub fn new(address: ) -> Self {
-}}
+pub fn new(address: UartAddress) -> Self {
+ crate::interrupts::without(|| {
+#[cfg(target_arch = "x86_64")]
+                // Safety: Constructor is called only once, with a hopefully-valid address.
+    let uart = unsafe {
+                    Uart::<Data>::new(uart::COM1)
+                }
+
+            UartWriter::new(uart
+            )
+            .map(Mutex::new)
+            .map(InterruptCell::new)
+            .map(Serial)
+        })
+    }
+}
 
 impl log::Log for Serial {
     fn enabled(&self, _: &log::Metadata) -> bool {

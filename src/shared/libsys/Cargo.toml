@@ -3,10 +3,8 @@ name = "libsys"
 version = "0.1.0"
 edition = "2024"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-num_enum = { version = "0.6", default-features = false }
+num_enum = { version = "0.7", default-features = false }
 log = { version = "0.4", default-features = false, optional = true }
 uuid = { version = "1.3", default-features = false }
 static_assertions = "1.1"
