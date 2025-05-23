@@ -9,7 +9,7 @@
 
 pub mod pit;
 
-use port::{ReadWritePort, WriteOnlyPort};
+use ioports::{ReadWritePort, WriteOnlyPort};
 
 const CMD_INIT: u8 = 0x11;
 const CMD_END_OF_INTERRUPT: u8 = 0x20;

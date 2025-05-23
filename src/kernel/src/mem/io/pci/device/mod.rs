@@ -5,7 +5,7 @@ pub mod standard;
 
 use bit_field::BitField;
 use core::{fmt, marker::PhantomData, ptr::NonNull};
-use libkernel::{LittleEndian, LittleEndianU16, LittleEndianU32, LittleEndianU8};
+use libkernel::{LittleEndian, LittleEndianU8, LittleEndianU16, LittleEndianU32};
 use libsys::{Address, Physical};
 
 crate::error_impl! {

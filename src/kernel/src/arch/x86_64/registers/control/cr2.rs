@@ -1,4 +1,4 @@
-use libsys::{ureg, Address, Truncate, Virtual};
+use libsys::{Address, Truncate, Virtual, ureg};
 
 pub struct CR2;
 

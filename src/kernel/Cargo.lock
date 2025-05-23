@@ -35,9 +35,9 @@ checksum = "dc827186963e592360843fb5ba4b973e145841266c1357f7180c43526f2e5b61"
 
 [[package]]
 name = "bitflags"
-version = "2.9.0"
+version = "2.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c8214115b7bf84099f1309324e63141d4c5d7cc26862f97a0a857dbefe165bd"
+checksum = "1b8e56985ec62d17e9c1001dc89c88ecd7dc08e47eba5ec7c29c7b5eeecde967"
 
 [[package]]
 name = "bitvec"
@@ -88,6 +88,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "ioports"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5ce1bcd1ebdb9b0b372e78a2898f53869a8ee5024af4b077424b3ea3f4e90dd"
+
+[[package]]
 name = "kernel"
 version = "0.0.0"
 dependencies = [
@@ -98,6 +104,7 @@ dependencies = [
  "bitvec",
  "elf",
  "getrandom",
+ "ioports",
  "libkernel",
  "libsys",
  "limine",
@@ -106,7 +113,6 @@ dependencies = [
  "num_enum",
  "paste",
  "pic_8259",
- "port-rs",
  "rand_core",
  "rand_pcg",
  "raw-cpuid",
@@ -223,12 +229,8 @@ version = "0.1.0"
 dependencies = [
  "bit_field",
  "bitflags",
- "port-rs",
+ "ioports",
 ]
-
-[[package]]
-name = "port-rs"
-version = "0.1.0"
 
 [[package]]
 name = "proc-macro2"
@@ -300,9 +302,9 @@ checksum = "719b953e2095829ee67db738b3bfa9fa368c94900df327b3f07fe6e794d2fe1f"
 
 [[package]]
 name = "rustversion"
-version = "1.0.20"
+version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eded382c5f5f786b989652c49544c4877d9f015cc22e145a5ea8ea66c2921cd2"
+checksum = "8a0d197bd2c9dc6e53b84da9556a69ba4cdfab8619eb41a8bd1cc2027a0f6b1d"
 
 [[package]]
 name = "scopeguard"
@@ -344,9 +346,9 @@ checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 
 [[package]]
 name = "tar-no-std"
-version = "0.3.3"
+version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b86f35512dae48782f49a15538f9af3e7ef3ea8226ee073c88f081958583924"
+checksum = "15574aa79d3c04a12f3cb53ff976d5571e53b9d8e0bdbe4021df0a06473dd1c9"
 dependencies = [
  "bitflags",
  "log",
@@ -356,11 +358,10 @@ dependencies = [
 
 [[package]]
 name = "uart"
-version = "0.1.2"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf797cf07dd88b21255bcc3b1bb84606e9bae30e4f5b61e22e2565bdafa3e309"
+checksum = "91307089bc9b44d5b6ed87e71ca0121cffde8ae07e8281df8918c30732842676"
 dependencies = [
- "bit_field",
  "bitflags",
 ]
 
@@ -372,9 +373,9 @@ checksum = "5a5f39404a5da50712a4c1eecf25e90dd62b613502b7e925fd4e4d19b5c96512"
 
 [[package]]
 name = "uuid"
-version = "1.16.0"
+version = "1.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "458f7a779bf54acc9f347480ac654f68407d3aab21269a6e3c9f922acd9e2da9"
+checksum = "3cf4199d1e5d15ddd86a694e4d0dffa9c323ce759fea589f00fef9d81cc1931d"
 dependencies = [
  "getrandom",
 ]

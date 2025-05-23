@@ -7,8 +7,8 @@ use core::{
     ptr::NonNull,
     sync::atomic::AtomicUsize,
 };
-use libsys::{page_mask, page_shift, page_size};
 use libsys::{Address, Frame};
+use libsys::{page_mask, page_shift, page_size};
 use spin::RwLock;
 
 #[derive(Debug, Clone, Copy)]

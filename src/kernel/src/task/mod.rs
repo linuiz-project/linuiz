@@ -11,7 +11,7 @@ use alloc::{boxed::Box, string::String, vec::Vec};
 use bit_field::BitField;
 use core::num::NonZeroUsize;
 use elf::{endian::AnyEndian, file::FileHeader, segment::ProgramHeader};
-use libsys::{page_size, Address, Virtual};
+use libsys::{Address, Virtual, page_size};
 
 #[allow(clippy::cast_possible_truncation)]
 pub const STACK_SIZE: NonZeroUsize = NonZeroUsize::new((libsys::MIBIBYTE as usize) - page_size()).unwrap();

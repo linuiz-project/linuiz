@@ -55,7 +55,7 @@ impl Command {
 }
 
 pub fn send_command(command: Command) {
-    unsafe { port::WriteOnlyPort::<u8>::new(0x43) }.write(command.as_u8());
+    unsafe { ioports::WriteOnlyPort::<u8>::new(0x43) }.write(command.as_u8());
 }
 
 /// Sets the frequency of the programmable interrupt timer.
@@ -69,7 +69,7 @@ pub unsafe fn set_timer_freq(frequency: u32, operating_mode: OperatingMode) {
     send_command(Command::new(operating_mode, AccessByte::LowAndHigh, Channel::Channel0));
     let divisor = TICK_RATE / frequency;
 
-    let mut data = unsafe { port::WriteOnlyPort::<u8>::new(0x40) };
+    let mut data = unsafe { ioports::WriteOnlyPort::<u8>::new(0x40) };
     data.write(divisor as u8);
     data.write((divisor >> 8) as u8);
 }

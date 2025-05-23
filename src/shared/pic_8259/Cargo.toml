@@ -9,8 +9,7 @@ readme = ""
 keywords = []
 categories = []
 
-[dependencies.port-rs]
-path = "../port-rs/"
 [dependencies]
 bitflags = "*"
 bit_field = "*"
+ioports = "*"

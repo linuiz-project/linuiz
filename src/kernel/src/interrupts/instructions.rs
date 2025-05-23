@@ -86,16 +86,19 @@ pub fn wait_for_interrupt() {
 /// If interrupts are not enabled, this function will cause a deadlock.
 #[inline]
 pub unsafe fn wait_unchecked() {
-    #[cfg(target_arch = "x86_64")]
-    asm!("hlt", options(nostack, nomem, preserves_flags));
+    // Safety: Caller must guarantee this does not cause a deadlock.
+    unsafe {
+        #[cfg(target_arch = "x86_64")]
+        asm!("hlt", options(nostack, nomem, preserves_flags));
 
-    #[cfg(target_arch = "riscv64")]
-    asm!("wfi", options(nostack, nomem, preserves_flags));
+        #[cfg(target_arch = "riscv64")]
+        asm!("wfi", options(nostack, nomem, preserves_flags));
+    }
 }
 
 /// Indefinitely waits for the next interrupt on the current core.
 #[inline]
-pub fn wait_loop() -> ! {
+pub fn wait_indefinite() -> ! {
     loop {
         // Safety: We never recover from this, so it doesn't matter if a deadlock occurs.
         unsafe {
@@ -111,6 +114,8 @@ pub fn wait_loop() -> ! {
 /// Murdering a CPU core is undefined behaviour.
 #[inline]
 pub unsafe fn halt_and_catch_fire() -> ! {
-    disable_interrupts();
-    wait_loop()
+    // Safety: We never recover from this, so it doesn't matter.
+    unsafe { disable_interrupts() };
+
+    wait_indefinite()
 }

@@ -2,7 +2,7 @@ pub mod walker;
 use bit_field::BitField;
 use core::{fmt, iter::Step};
 use libkernel::mem::{InteriorRef, Mut, Ref};
-use libsys::{page_shift, table_index_mask, table_index_shift, table_index_size, Address, Frame, Page, Virtual};
+use libsys::{Address, Frame, Page, Virtual, page_shift, table_index_mask, table_index_shift, table_index_size};
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -21,11 +21,7 @@ impl TableDepth {
             {
                 use crate::arch::x86_64::registers::control;
 
-                if control::CR4::read().contains(control::CR4Flags::LA57) {
-                    5
-                } else {
-                    4
-                }
+                if control::CR4::read().contains(control::CR4Flags::LA57) { 5 } else { 4 }
             }
         })
     }

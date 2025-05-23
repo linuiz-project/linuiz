@@ -1,4 +1,4 @@
-use crate::{interrupts::exceptions::Exception, interrupts::InterruptCell, task::Scheduler};
+use crate::{interrupts::InterruptCell, interrupts::exceptions::Exception, task::Scheduler};
 use alloc::boxed::Box;
 use core::{cell::UnsafeCell, num::NonZeroU64, ptr::NonNull, sync::atomic::AtomicBool};
 

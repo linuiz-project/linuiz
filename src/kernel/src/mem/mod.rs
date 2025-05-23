@@ -8,7 +8,7 @@ use self::mapper::Mapper;
 use crate::interrupts::InterruptCell;
 
 use core::ptr::NonNull;
-use libsys::{table_index_size, Address, Frame};
+use libsys::{Address, Frame, table_index_size};
 use spin::{Lazy, Mutex};
 
 #[repr(align(0x10))]

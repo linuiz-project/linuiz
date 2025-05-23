@@ -15,13 +15,7 @@ pub(super) fn process(
 ) -> Result {
     trace!(
         "Syscall Args: Vector:{:X?}   0:{:X?}  1:{:X?}  2:{:X?}  3:{:X?}  4:{:X?}  5:{:X?}",
-        vector,
-        arg0,
-        arg1,
-        arg2,
-        arg3,
-        arg4,
-        arg5
+        vector, arg0, arg1, arg2, arg3, arg4, arg5
     );
 
     let result = match Vector::try_from(vector) {
@@ -58,7 +52,7 @@ fn process_klog(level: log::Level, str_ptr_arg: usize, str_len: usize) -> Result
     // TODO abstract this into a function
     crate::cpu::state::with_scheduler(|scheduler| {
         use crate::task::Error as TaskError;
-        use libsys::{page_size, Address};
+        use libsys::{Address, page_size};
 
         let str_start = str_ptr.addr();
         let str_end = str_start + str_len;

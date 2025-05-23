@@ -4,7 +4,7 @@ use crate::mem::{
     paging::{TableDepth, TableEntryFlags},
 };
 use core::{num::NonZeroUsize, ptr::NonNull};
-use libsys::{page_size, Address, Page, Virtual};
+use libsys::{Address, Page, Virtual, page_size};
 
 crate::error_impl! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]

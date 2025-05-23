@@ -1,12 +1,15 @@
 use core::mem::MaybeUninit;
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 unsafe extern "Rust" fn __getrandom_v03_custom(dest: *mut u8, len: usize) -> Result<(), getrandom::Error> {
-    let buf = core::slice::from_raw_parts_mut(
-        // `dest` may be uninitialized for `len`
-        dest.cast::<MaybeUninit<u8>>(),
-        len,
-    );
+    // Safety: The caller must ensure the provided parameters are valid.
+    let buf = unsafe {
+        core::slice::from_raw_parts_mut(
+            // `dest` may be uninitialized for `len`
+            dest.cast::<MaybeUninit<u8>>(),
+            len,
+        )
+    };
 
     trace!("[RAND] BUFFER LEN: {}", buf.len());
 

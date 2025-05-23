@@ -1,6 +1,6 @@
 use alloc::{boxed::Box, string::String};
 use core::ops::Range;
-use elf::{endian::AnyEndian, symbol::Symbol, ElfBytes};
+use elf::{ElfBytes, endian::AnyEndian, symbol::Symbol};
 use libsys::{Address, Virtual};
 
 crate::error_impl! {

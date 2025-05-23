@@ -68,18 +68,17 @@ mod rand;
 mod task;
 mod time;
 
-#[cfg(debug_assertions)]
-static STACK_SIZE: u64 = 0x1000000;
-#[cfg(not(debug_assertions))]
-static STACK_SIZE: u64 = 0x4000;
 
 /// ### Safety
 ///
 /// This function should only ever be called by the bootloader.
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[doc(hidden)]
 #[allow(clippy::too_many_lines)]
 unsafe extern "C" fn _entry() -> ! {
+
+
+
     // Safety: We've just entered the kernel, so no state can be disrupted.
     unsafe {
         core::arch::asm!(

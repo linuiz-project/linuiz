@@ -30,11 +30,7 @@ impl RedirectionEntry {
     }
 
     pub fn get_destination_mode(&self) -> interrupts::DestinationMode {
-        if self.0.get_bit(11) {
-            interrupts::DestinationMode::Physical
-        } else {
-            interrupts::DestinationMode::Logical
-        }
+        if self.0.get_bit(11) { interrupts::DestinationMode::Physical } else { interrupts::DestinationMode::Logical }
     }
 
     pub fn set_destination_mode(&mut self, dest_mode: interrupts::DestinationMode) {
@@ -46,11 +42,7 @@ impl RedirectionEntry {
     }
 
     pub fn get_pin_polarity(&self) -> Polarity {
-        if self.0.get_bit(13) {
-            Polarity::ActiveLow
-        } else {
-            Polarity::ActiveHigh
-        }
+        if self.0.get_bit(13) { Polarity::ActiveLow } else { Polarity::ActiveHigh }
     }
 
     pub fn set_pin_polarity(&mut self, polarity: Polarity) {
@@ -64,11 +56,7 @@ impl RedirectionEntry {
     }
 
     pub fn get_trigger_mode(&self) -> TriggerMode {
-        if self.0.get_bit(15) {
-            TriggerMode::Edge
-        } else {
-            TriggerMode::Level
-        }
+        if self.0.get_bit(15) { TriggerMode::Edge } else { TriggerMode::Level }
     }
 
     pub fn set_trigger_mode(&mut self, trigger_mode: TriggerMode) {

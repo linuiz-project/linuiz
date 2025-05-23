@@ -36,23 +36,27 @@ mod context_impl {
 
     impl State {
         pub fn kernel(ip: Address<Virtual>, sp: Address<Virtual>) -> Self {
-            Self {
-                ip,
-                cs: gdt::kernel_code_selector().0.into(),
-                rfl: RFlags::INTERRUPT_FLAG,
-                sp,
-                ss: gdt::kernel_data_selector().0.into(),
-            }
+            // Self {
+            //     ip,
+            //     cs: gdt::kernel_code_selector().0.into(),
+            //     rfl: RFlags::INTERRUPT_FLAG,
+            //     sp,
+            //     ss: gdt::kernel_data_selector().0.into(),
+            // }
+
+            todo!()
         }
 
         pub fn user(ip: Address<Virtual>, sp: Address<Virtual>) -> Self {
-            Self {
-                ip,
-                cs: gdt::user_code_selector().0.into(),
-                rfl: RFlags::INTERRUPT_FLAG,
-                sp,
-                ss: gdt::user_data_selector().0.into(),
-            }
+            // Self {
+            //     ip,
+            //     cs: gdt::user_code_selector().0.into(),
+            //     rfl: RFlags::INTERRUPT_FLAG,
+            //     sp,
+            //     ss: gdt::user_data_selector().0.into(),
+            // }
+
+            todo!()
         }
     }
 }

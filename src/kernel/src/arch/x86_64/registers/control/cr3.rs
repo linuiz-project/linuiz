@@ -1,5 +1,5 @@
 use core::arch::asm;
-use libsys::{ureg, Address, Frame, Truncate};
+use libsys::{Address, Frame, Truncate, ureg};
 
 bitflags::bitflags! {
     #[repr(transparent)]

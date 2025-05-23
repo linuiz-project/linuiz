@@ -2,7 +2,7 @@
 // pub use capabilities::*;
 
 use crate::mem::io::pci::{Device, Standard};
-use libkernel::{LittleEndianU16, LittleEndianU32, LittleEndianU8};
+use libkernel::{LittleEndianU8, LittleEndianU16, LittleEndianU32};
 
 impl Device<Standard> {
     pub fn cardbus_cis_ptr(&self) -> Option<usize> {

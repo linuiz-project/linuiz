@@ -110,7 +110,7 @@ impl Scheduler {
             debug_assert!(old_value.is_none());
         } else {
             *state = State::kernel(
-                Address::new(crate::interrupts::wait_loop as usize).unwrap(),
+                Address::new(crate::interrupts::wait_indefinite as usize).unwrap(),
                 Address::new(self.idle_stack.top().addr().get()).unwrap(),
             );
             *regs = Registers::default();

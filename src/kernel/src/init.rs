@@ -1,14 +1,14 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
+use bitflags::bitflags;
 use libsys::{Address, Frame, Page, Physical, Virtual};
 use limine::{
-    memory_map,
+    BaseRevision, memory_map,
     mp::RequestFlags,
     request::{
         BootloaderInfoRequest, ExecutableAddressRequest, ExecutableCmdlineRequest, ExecutableFileRequest, HhdmRequest,
         MemoryMapRequest, MpRequest, RsdpRequest, StackSizeRequest,
     },
-    BaseRevision,
 };
 
 static BOOT_RECLAIM: AtomicBool = AtomicBool::new(false);
@@ -31,6 +31,32 @@ impl<T> BootOnly<T> {
     }
 }
 
+bitflags! {
+    struct STAGE: u64 {
+        const LOGGING = 1 << 0;
+        const CMDLINE = 1 << 2;
+        const BOOT_MEMORY = 1 << 3;
+        const MEMORY_MAP = 1 << 4;
+        const MULTIPROCESSSING = 1 << 5;
+        const PMM = 1 << 6;
+        const HHDM = 1 << 7;
+        const ACPI = 1 << 8;
+        const PCI = 1 << 9;
+
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct Stage(u32);
+
+impl Stage {
+    const INITIAL: Self = Self(u32::MIN);
+    const CMDLINE_PARSED: Self = Self(10);
+    const LOGGING_SETUP: Self = Self(20);
+    const LOGGING_TESTED: Self = Self(30);
+    const FINISHED: Self = Self(u32::MAX);
+}
+
 #[allow(clippy::too_many_lines)]
 pub extern "C" fn init() -> ! {
     // This function is absolutely massive, and that's intentional. All of the code
@@ -39,8 +65,13 @@ pub extern "C" fn init() -> ! {
 
     // Specify the Limine revision to use
     static BASE_REVISION: BaseRevision = BaseRevision::with_revision(0);
+
+    #[cfg(debug_assertions)]
+    static STACK_SIZE_REQUEST: StackSizeRequest = StackSizeRequest::new().with_size(0x1000000);
+    #[cfg(not(debug_assertions))]
+    static STACK_SIZE_REQUEST: StackSizeRequest = StackSizeRequest::new().with_size(0x4000);
+
     // All limine feature requests (ensures they are not used after bootloader memory is reclaimed)
-    static STACK_SIZE_REQUEST: StackSizeRequest = StackSizeRequest::new().with_size(crate::STACK_SIZE);
     static BOOT_INFO_REQUEST: BootloaderInfoRequest = BootloaderInfoRequest::new();
     static KERNEL_ADDR_REQUEST: ExecutableAddressRequest = ExecutableAddressRequest::new();
     static KERNEL_FILE_REQUEST: ExecutableFileRequest = ExecutableFileRequest::new();
@@ -50,7 +81,7 @@ pub extern "C" fn init() -> ! {
     static MP_REQUEST: MpRequest = MpRequest::new().with_flags(RequestFlags::X2APIC);
 
     // Initialize logging, or spin indefinitely if we fail.
-    crate::logging::init().unwrap_or_else(|_| crate::interrupts::wait_loop());
+    crate::logging::init();
 
     unsafe {
         cpu_config();
@@ -72,6 +103,8 @@ pub extern "C" fn init() -> ! {
         crate::arch::x86_64::cpuid::VENDOR_INFO.as_ref().map(raw_cpuid::VendorInfo::as_str).unwrap_or("UNKNOWN");
 
     info!("Vendor              {vendor_info}");
+
+    crate::interrupts::wait_indefinite();
 
     // Set up various variables and structures for init to use.
     let memory_map = MEMORY_MAP_REQUEST.get_response().expect("no response to memory map request").entries();
@@ -211,7 +244,7 @@ pub extern "C" fn init() -> ! {
                 .into_iter()
                 .filter(|ph| ph.p_type == elf::abi::PT_LOAD)
                 .for_each(|phdr| {
-                    extern "C" {
+                    unsafe extern "C" {
                         static KERNEL_BASE: libkernel::LinkerSymbol;
                     }
 
@@ -248,13 +281,15 @@ pub extern "C" fn init() -> ! {
     /* PARSE ACPI TABLES */
     {
         crate::acpi::TABLES.call_once(|| {
-            let rsdp_address =
-                RSDP_ADDRESS_REQUEST.get_response().expect("no response to RSDP address request").address();
-            // Safety: Bootloader guarantees the provided RDSP address is valid.
-            let acpi_tables = unsafe { acpi::AcpiTables::from_rsdp(crate::acpi::AcpiHandler, rsdp_address) }
-                .expect("failed to parse ACPI tables");
+            // let rsdp_address =
+            //     RSDP_ADDRESS_REQUEST.get_response().expect("no response to RSDP address request").address();
+            // // Safety: Bootloader guarantees the provided RDSP address is valid.
+            // let acpi_tables = unsafe { acpi::AcpiTables::from_rsdp(crate::acpi::AcpiHandler, rsdp_address) }
+            //     .expect("failed to parse ACPI tables");
 
-            spin::Mutex::new(acpi_tables)
+            // spin::Mutex::new(acpi_tables)
+
+            todo!()
         });
     }
 
@@ -342,7 +377,7 @@ pub unsafe fn kernel_core_setup() -> ! {
     crate::cpu::state::begin_scheduling().unwrap();
 
     // This interrupt wait loop is necessary to ensure the core can jump into the scheduler.
-    crate::interrupts::wait_loop()
+    crate::interrupts::wait_indefinite()
 }
 
 /// ### Safety
@@ -356,7 +391,7 @@ unsafe fn cpu_config() {
         use crate::arch::x86_64::{
             cpuid,
             registers::{
-                control::{CR0Flags, CR4Flags, CR0, CR4},
+                control::{CR0, CR0Flags, CR4, CR4Flags},
                 msr,
             },
         };

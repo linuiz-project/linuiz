@@ -1,7 +1,7 @@
 #![allow(unused_unsafe)]
 
 use crate::{
-    interrupts::exceptions::{ex_handler, ArchException},
+    interrupts::exceptions::{ArchException, ex_handler},
     task::{Registers, State},
 };
 use libsys::Address;
@@ -315,7 +315,7 @@ exception_handler!(mc, !);
 extern "sysv64" fn mc_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) -> ! {
     ex_handler(&ArchException::MachineCheck(stack_frame, gprs));
     // Wait indefinite in case the above exception handler returns control flow.
-    crate::interrupts::wait_loop()
+    crate::interrupts::wait_indefinite()
 }
 
 exception_handler!(xm, ());
