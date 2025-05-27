@@ -12,7 +12,8 @@
     map_try_insert,                         // #82766 <https://github.com/rust-lang/rust/issues/82766>
     try_trait_v2,                           // #84277 <https://github.com/rust-lang/rust/issues/84277>
     step_trait,                             // #42168 <https://github.com/rust-lang/rust/issues/42168>
-    generic_arg_infer,                      // #85077 <https://github.com/rust-lang/rust/issues/85077>    
+    generic_arg_infer,                      // #85077 <https://github.com/rust-lang/rust/issues/85077>
+    exclusive_wrapper,                      // #98407 <https://github.com/rust-lang/rust/issues/98407>
     sync_unsafe_cell,
     allocator_api,
     slice_ptr_get,
@@ -56,6 +57,9 @@ extern crate alloc;
 
 #[macro_use]
 extern crate log;
+
+#[macro_use]
+extern crate thiserror;
 
 mod acpi;
 mod arch;

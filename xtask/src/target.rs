@@ -20,7 +20,10 @@ impl core::fmt::Display for Target {
 
 #[derive(Serialize, Deserialize)]
 struct ConfigOptions {
+    #[serde(rename(serialize = "unstable"))]
     unstable_options: UnstableOptions,
+
+    #[serde(rename(serialize = "build"))]
     build_options: BuildOptions,
 }
 

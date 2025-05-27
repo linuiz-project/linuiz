@@ -29,7 +29,7 @@ bitvec = { version = "1.0", default-features = false, features = [
     "atomic",
     "alloc",
 ] }
-uart = "1.0"
+uart = { version = "1.0", default-features = false }
 ioports = "1.0"
 spin = "0.10"
 bit_field = "0.10"
@@ -37,6 +37,8 @@ bitflags = "2.9"
 paste = "1.0"
 rustc-demangle = "0.1"
 tar-no-std = "0.3"
+circular-buffer = { version = "1.0", default-features = false }
+thiserror = { version = "2.0", default-features = false }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 ia32utils = { version = "0.15", package = "x86_64" }

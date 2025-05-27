@@ -40,16 +40,17 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
     let tmp_path_dir_str = tmp_dir_path.to_string_lossy();
 
     let cargo_args = {
-        let mut args = vec![
-            "--artifact-dir",
-            &tmp_path_dir_str,
-            if options.release {
-                "--release"
-            } else {
-                // Only provide future-compatibiltiy notifications for development builds.
-                "--future-incompat-report"
-            },
-        ];
+        let mut args = Vec::new();
+
+        args.push("--artifact-dir");
+        args.push(tmp_path_dir_str.as_ref());
+
+        if options.release {
+            args.push("--release");
+        } else {
+            // Only provide future-compatibiltiy notifications for development builds.
+            args.push("--future-incompat-report");
+        }
 
         if options.verbose {
             args.push("-vv");

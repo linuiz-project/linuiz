@@ -72,7 +72,7 @@ pub struct Options {
     #[arg(long, default_value = "512")]
     ram: usize,
 
-    /// Enables debug logging to the specified location.
+    /// Enables debug logging.
     #[arg(long)]
     log: bool,
 
