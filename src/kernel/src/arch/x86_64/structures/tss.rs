@@ -2,7 +2,6 @@
 
 use super::gdt;
 
-pub use ia32utils::{instructions::tables::load_tss, structures::tss::*};
 
 pub fn ptr_as_descriptor(tss_ptr: core::ptr::NonNull<TaskStateSegment>) -> gdt::Descriptor {
     use bit_field::BitField;
@@ -25,11 +24,11 @@ pub fn ptr_as_descriptor(tss_ptr: core::ptr::NonNull<TaskStateSegment>) -> gdt::
     gdt::Descriptor::SystemSegment(low, high)
 }
 
-/// Safety
+/// ## Safety
 ///
 /// * Descriptor must be valid as the core's task state segment.
 /// * Caller must ensure loading a new TSS will not result in undefined behaviour.
-pub unsafe fn load_local(descriptor: gdt::Descriptor) {
+pub unsafe fn load(descriptor: gdt::Descriptor) {
     crate::interrupts::without(|| {
         // Store current GDT pointer to restore later.
         let cur_gdt = gdt::sgdt();

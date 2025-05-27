@@ -11,26 +11,6 @@ use limine::{
     },
 };
 
-static BOOT_RECLAIM: AtomicBool = AtomicBool::new(false);
-
-pub struct BootOnly<T> {
-    obj: T,
-}
-
-impl<T> BootOnly<T> {
-    pub const fn new(obj: T) -> Self {
-        Self { obj }
-    }
-
-    pub fn get(&self) -> &T {
-        if !BOOT_RECLAIM.load(Ordering::Acquire) {
-            &self.obj
-        } else {
-            panic!("cannot access variable; bootloader memory has already been reclaimed")
-        }
-    }
-}
-
 bitflags! {
     struct STAGE: u64 {
         const LOGGING = 1 << 0;
@@ -87,22 +67,7 @@ pub extern "C" fn init() -> ! {
         cpu_config();
     }
 
-    if let Some(boot_info_response) = BOOT_INFO_REQUEST.get_response() {
-        info!(
-            "Bootloader Info     {} v{} (rev {})",
-            boot_info_response.name(),
-            boot_info_response.version(),
-            boot_info_response.revision()
-        );
-    } else {
-        info!("Bootloader Info     UNKNOWN")
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    let vendor_info =
-        crate::arch::x86_64::cpuid::VENDOR_INFO.as_ref().map(raw_cpuid::VendorInfo::as_str).unwrap_or("UNKNOWN");
-
-    info!("Vendor              {vendor_info}");
+    log_environment_info(BOOT_INFO_REQUEST.get_response());
 
     crate::interrupts::wait_indefinite();
 
@@ -125,14 +90,15 @@ pub extern "C" fn init() -> ! {
         )
     };
 
-    // Parse the kernel parameters.
-    crate::params::parse_cmdline();
+    // TODO parse the kernel cmdline from limine response
+    // // Parse the kernel parameters.
+    // crate::params::parse_cmdline();
     // Initialize the physical memory manager.
     crate::mem::alloc::pmm::init(memory_map);
     // Parse the kernel ELF symbols.
-    crate::panic::symbols::parse(&kernel_elf).inspect_err(|err| {
-        error!("Could not load kernel symbols: {err:?}");
-    });
+    if let Err(error) = crate::panic::symbols::parse(&kernel_elf) {
+        error!("Could not load kernel symbols: {error:?}");
+    }
 
     /* SETUP KERNEL MEMORY */
     {
@@ -147,7 +113,7 @@ pub extern "C" fn init() -> ! {
             let hhdm_address =
                 HHDM_REQUEST.get_response().expect("no response to HHDM address request").offset().try_into().unwrap();
 
-            debug!("HHDM @ {:X?}", hhdm_address);
+            debug!("HHDM @ {hhdm_address:X?}");
 
             hhdm::Hhdm::new(Address::<Page>::new(hhdm_address).unwrap())
         });
@@ -160,7 +126,7 @@ pub extern "C" fn init() -> ! {
         ) {
             let huge_page_depth = TableDepth::new(1).unwrap();
 
-            trace!("HHDM Map  {:#X?}  {:?}   lock {}", range, flags, lock_frames);
+            trace!("HHDM Map  {range:#X?}  {flags:?}   lock {lock_frames}");
 
             while !range.is_empty() {
                 if range.len() > huge_page_depth.align()
@@ -233,7 +199,7 @@ pub extern "C" fn init() -> ! {
                 if let Some((flags, lock_frames)) = mmap_args {
                     map_hhdm_range(kmapper, entry_range, flags, lock_frames);
                 } else {
-                    trace!("HHDM Map (!! BAD MEMORY !!) @{:#X?}", entry_range);
+                    trace!("HHDM Map (!! BAD MEMORY !!) @{entry_range:#X?}");
                 }
             }
 
@@ -248,7 +214,7 @@ pub extern "C" fn init() -> ! {
                         static KERNEL_BASE: libkernel::LinkerSymbol;
                     }
 
-                    debug!("{:X?}", phdr);
+                    debug!("{phdr:X?}");
 
                     // Safety: `KERNEL_BASE` is a linker symbol to an in-executable memory location, so it is guaranteed to be valid (and is never written to).
                     let base_offset = usize::try_from(phdr.p_vaddr).unwrap() - unsafe { KERNEL_BASE.as_usize() };
@@ -264,7 +230,7 @@ pub extern "C" fn init() -> ! {
                             let phys_addr = Address::new(kernel_addr_phys.get() + offset).unwrap();
                             let virt_addr = Address::new(kernel_addr_virt.get() + offset).unwrap();
 
-                            trace!("Map  {:X?} -> {:X?}   {:?}", virt_addr, phys_addr, flags);
+                            trace!("Map  {virt_addr:X?} -> {phys_addr:X?}   {flags:?}");
                             kmapper
                                 .map(virt_addr, TableDepth::min(), phys_addr, true, flags)
                                 .expect("failed to map kernel memory region");
@@ -275,7 +241,7 @@ pub extern "C" fn init() -> ! {
             // Safety: Kernel mappings should be identical to the bootloader mappings.
             unsafe { kmapper.swap_into() };
             debug!("Kernel has finalized control of page tables.");
-        })
+        });
     }
 
     /* PARSE ACPI TABLES */
@@ -360,13 +326,11 @@ fn finalize_init(memory_map: &[&memory_map::Entry]) -> ! {
 
     debug!("Bootloader memory reclaimed.");
 
-    drop(memory_map);
-
     // Safety: Function has not been called on the this core.
     unsafe { kernel_core_setup() }
 }
 
-/// ### Safety
+/// ## Safety
 ///
 /// This function should only ever be called once per core.
 pub unsafe fn kernel_core_setup() -> ! {
@@ -380,7 +344,7 @@ pub unsafe fn kernel_core_setup() -> ! {
     crate::interrupts::wait_indefinite()
 }
 
-/// ### Safety
+/// ## Safety
 ///
 /// This function has the potential to modify CPU state in such a way as to disrupt
 /// software execution. It should be run only once per hardware thread at the very
@@ -396,64 +360,67 @@ unsafe fn cpu_config() {
             },
         };
 
-        // Set CR0 flags.
-        // Safety: We set `CR0` once, and setting it again during kernel execution is not supported.
-        unsafe { CR0::write(CR0Flags::PE | CR0Flags::MP | CR0Flags::ET | CR0Flags::NE | CR0Flags::WP | CR0Flags::PG) };
+        // Safety: This is the first and only time `CR0` will be set.
+        unsafe {
+            CR0::write(CR0Flags::PE | CR0Flags::MP | CR0Flags::ET | CR0Flags::NE | CR0Flags::WP | CR0Flags::PG);
+        }
 
-        // Set CR4 flags.
-        let mut flags = CR4Flags::PAE | CR4Flags::PGE | CR4Flags::OSXMMEXCPT;
+        let mut cr4_flags = CR4Flags::PAE | CR4Flags::PGE | CR4Flags::OSXMMEXCPT;
 
         if cpuid::FEATURE_INFO.has_de() {
-            flags.insert(CR4Flags::DE);
+            cr4_flags.insert(CR4Flags::DE);
         }
 
         if cpuid::FEATURE_INFO.has_fxsave_fxstor() {
-            flags.insert(CR4Flags::OSFXSR);
+            cr4_flags.insert(CR4Flags::OSFXSR);
         }
 
         if cpuid::FEATURE_INFO.has_mce() {
-            flags.insert(CR4Flags::MCE);
+            cr4_flags.insert(CR4Flags::MCE);
         }
 
         if cpuid::FEATURE_INFO.has_pcid() {
-            flags.insert(CR4Flags::PCIDE);
+            cr4_flags.insert(CR4Flags::PCIDE);
         }
 
-        if cpuid::EXT_FEATURE_INFO.as_ref().map_or(false, cpuid::ExtendedFeatures::has_umip) {
-            flags.insert(CR4Flags::UMIP);
+        if cpuid::EXT_FEATURE_INFO.as_ref().is_some_and(cpuid::ExtendedFeatures::has_umip) {
+            cr4_flags.insert(CR4Flags::UMIP);
         }
 
-        if cpuid::EXT_FEATURE_INFO.as_ref().map_or(false, cpuid::ExtendedFeatures::has_fsgsbase) {
-            flags.insert(CR4Flags::FSGSBASE);
+        if cpuid::EXT_FEATURE_INFO.as_ref().is_some_and(cpuid::ExtendedFeatures::has_fsgsbase) {
+            cr4_flags.insert(CR4Flags::FSGSBASE);
         }
 
-        if cpuid::EXT_FEATURE_INFO.as_ref().map_or(false, cpuid::ExtendedFeatures::has_smep) {
-            flags.insert(CR4Flags::SMEP);
+        if cpuid::EXT_FEATURE_INFO.as_ref().is_some_and(cpuid::ExtendedFeatures::has_smep) {
+            cr4_flags.insert(CR4Flags::SMEP);
         }
 
-        if cpuid::EXT_FEATURE_INFO.as_ref().map_or(false, cpuid::ExtendedFeatures::has_smap) {
-            flags.insert(CR4Flags::SMAP);
+        if cpuid::EXT_FEATURE_INFO.as_ref().is_some_and(cpuid::ExtendedFeatures::has_smap) {
+            cr4_flags.insert(CR4Flags::SMAP);
         }
 
-        // Safety: Initialize the CR4 register with all CPU & kernel supported features.
-        unsafe { CR4::write(flags) };
+        // Safety:  Initialize the CR4 register with all CPU & kernel supported features.
+        unsafe {
+            CR4::write(cr4_flags);
+        }
 
         // Enable use of the `NO_EXECUTE` page attribute, if supported.
         if cpuid::EXT_FUNCTION_INFO
             .as_ref()
-            .map_or(false, cpuid::ExtendedProcessorFeatureIdentifiers::has_execute_disable)
+            .is_some_and(cpuid::ExtendedProcessorFeatureIdentifiers::has_execute_disable)
         {
-            // Safety: Setting `IA32_EFER.NXE` in this context is safe because the bootloader
-            //         does not use the `NX` bit, and so should not be in use at this point.
+            // Safety: The `NX` bit is not currently in use by any paging structures.
             unsafe {
                 msr::IA32_EFER::set_nxe(true);
             }
         }
 
-        // Safety: This function is only be run once per hardware thread, and at the very beginning of execution.
+        // Safety: This function is only called once, prior to FS/GS base being in use.
         unsafe {
-            crate::arch::x86_64::structures::load_static_tables();
+            crate::arch::x86_64::structures::gdt::load();
         }
+
+        crate::arch::x86_64::structures::idt::load();
 
         // Setup system call interface.
         // // Safety: Parameters are set according to the IA-32 SDM, and so should have no undetermined side-effects.
@@ -469,6 +436,18 @@ unsafe fn cpu_config() {
     }
 }
 
+fn log_environment_info(boot_info: Option<&limine::response::BootloaderInfoResponse>) {
+    if let Some(boot_info) = boot_info {
+        info!("Bootloader Info     {} v{} (rev {})", boot_info.name(), boot_info.version(), boot_info.revision());
+    } else {
+        info!("Bootloader Info     UNKNOWN");
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    let vendor_info = crate::arch::x86_64::cpuid::VENDOR_INFO.as_ref().map_or("UNKNOWN", raw_cpuid::VendorInfo::as_str);
+
+    info!("Vendor              {vendor_info}",);
+}
 // fn load_drivers() {
 //     use crate::task::{AddressSpace, Priority, Task};
 //     use elf::endian::AnyEndian;

@@ -1,9 +1,7 @@
-use libsys::ureg;
-
-bitflags::bitflags! {
+bitflags! {
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct CR4Flags : ureg {
+    pub struct CR4Flags: u64 {
         const VME           = 1 << 0;
         const PVI           = 1 << 1;
         const TSD           = 1 << 2;
@@ -35,7 +33,7 @@ pub struct CR4;
 impl CR4 {
     #[inline]
     pub fn read() -> CR4Flags {
-        let value: ureg;
+        let value: u64;
 
         // Safety: Reading into a register has no side effects.
         unsafe {
@@ -49,19 +47,23 @@ impl CR4 {
         CR4Flags::from_bits_truncate(value)
     }
 
-    /// ### Safety
+    /// ## Safety
     ///
-    /// Incorrect flags may violate any number of safety guarantees.
+    /// - `flags` must contain only features supported by the current CPU.
+    /// - `flags` must not be updated at such a point as the features in question are in use.
     #[inline]
-    pub unsafe fn write(value: CR4Flags) {
-        core::arch::asm!(
-            "mov cr4, {}",
-            in(reg) value.bits(),
-            options(nostack, nomem)
-        );
+    pub unsafe fn write(flags: CR4Flags) {
+        // Safety: Caller is required to ensure updating `CR4` with the provided flags will not cause undefined behaviour.
+        unsafe {
+            core::arch::asm!(
+                "mov cr4, {}",
+                in(reg) flags.bits(),
+                options(nostack, nomem)
+            );
+        }
     }
 
-    /// ### Safety
+    /// ## Safety
     ///
     /// Incorrect flags may violate any number of safety guarantees.
     #[inline]
@@ -72,7 +74,7 @@ impl CR4 {
         CR4::write(new_flags);
     }
 
-    /// ### Safety
+    /// ## Safety
     ///
     /// Incorrect flags may violate any number of safety guarantees.
     #[inline]

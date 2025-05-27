@@ -1,7 +1,7 @@
-bitflags::bitflags! {
+bitflags! {
     #[repr(transparent)]
     #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-    pub struct RFlags : usize {
+    pub struct RFlags: u64 {
         /// Set by hardware if the last arithmetic operation generated a carry out of the most-significant
         /// bit of the result.
         const CARRY_FLAG = 1 << 0                   | Self::REQ_RESERVED;
@@ -57,7 +57,7 @@ bitflags::bitflags! {
 }
 
 impl RFlags {
-    const REQ_RESERVED: usize = 1 << 1;
+    const REQ_RESERVED: u64 = 1 << 1;
 
     #[inline]
     pub fn read() -> Self {
@@ -65,23 +65,23 @@ impl RFlags {
     }
 
     #[inline]
-    fn read_raw() -> usize {
-        let result: usize;
+    fn read_raw() -> u64 {
+        let raw: u64;
 
         // Safety: Instruction block has no side effects.
         unsafe {
             core::arch::asm!(
                 "pushf",
                 "pop {}",
-                out(reg) result,
+                out(reg) raw,
                 options(pure, nomem, preserves_flags)
             );
         }
 
-        result
+        raw
     }
 
-    /// ### Safety
+    /// ## Safety
     ///
     /// Providing an invalid (in general, or for the current context) set of flags in undefined behaviour.
     #[inline]
@@ -89,11 +89,14 @@ impl RFlags {
         let mut old_flags = Self::read();
         old_flags.set(flags, set);
 
-        core::arch::asm!(
-            "push {}",
-            "popf",
-            in(reg) old_flags.bits(),
-            options(nostack, nomem, preserves_flags)
-        );
+        // Safety: Caller must guarantee setting the flags will not cause undefined behaviour.
+        unsafe {
+            core::arch::asm!(
+                "push {}",
+                "popf",
+                in(reg) old_flags.bits(),
+                options(nostack, nomem)
+            );
+        }
     }
 }

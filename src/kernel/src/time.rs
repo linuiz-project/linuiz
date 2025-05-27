@@ -26,7 +26,7 @@ mod clock {
     // Safety: Addresses for type values are required to be globally accessible.
     unsafe impl Sync for Clock<'_> {}
 
-    impl<'a> Clock<'a> {
+    impl Clock<'_> {
         fn load() -> Option<Self> {
             let platform_info = crate::acpi::PLATFORM_INFO.as_ref()?;
             let platform_info = platform_info.lock();
@@ -44,11 +44,12 @@ mod clock {
             }
         }
 
-        pub fn unload(&mut self) {
-            match self.ty {
-                Type::Acpi(_) => {}
-            }
-        }
+        // TODO figure out what to do with this function
+        // pub fn unload(&mut self) {
+        //     match self.ty {
+        //         Type::Acpi(_) => {}
+        //     }
+        // }
 
         #[inline]
         pub const fn frequency(&self) -> u64 {

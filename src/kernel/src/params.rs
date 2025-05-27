@@ -1,4 +1,3 @@
-use crate::init::BootOnly;
 use limine::request::ExecutableCmdlineRequest;
 
 static PARAMS: spin::RwLock<KernelParameters> =
@@ -16,30 +15,28 @@ pub struct KernelParameters {
     pub low_memory_mode: bool,
 }
 
-/// ### Safety
-///
-/// Caller must
-pub fn parse_cmdline() {
-    static KERNEL_CMDLINE_REQUEST: BootOnly<ExecutableCmdlineRequest> = BootOnly::new(ExecutableCmdlineRequest::new());
+// TODO figure out if we're segregating the Limine request for this function
+// pub fn parse_cmdline() {
+//     static KERNEL_CMDLINE_REQUEST: BootOnly<ExecutableCmdlineRequest> = BootOnly::new(ExecutableCmdlineRequest::new());
 
-    let mut params = PARAMS.write();
+//     let mut params = PARAMS.write();
 
-    if let Some(response) = KERNEL_CMDLINE_REQUEST.get().get_response() {
-        for arg in response.cmdline().to_str().expect("kernel command string is not valid UTF-8").split(' ') {
-            match arg {
-                "--nomp" => params.use_multiprocessing = false,
-                "--symbolinfo" => params.keep_symbol_info = true,
-                "--lomem" => params.low_memory_mode = true,
+//     if let Some(response) = KERNEL_CMDLINE_REQUEST.get().get_response() {
+//         for arg in response.cmdline().to_str().expect("kernel command string is not valid UTF-8").split(' ') {
+//             match arg {
+//                 "--nomp" => params.use_multiprocessing = false,
+//                 "--symbolinfo" => params.keep_symbol_info = true,
+//                 "--lomem" => params.low_memory_mode = true,
 
-                other => warn!("Unknown command line argument: {:?}", other),
-            }
-        }
-    } else {
-        info!("No kernel cmdline provided.")
-    };
+//                 other => warn!("Unknown command line argument: {other:?}"),
+//             }
+//         }
+//     } else {
+//         info!("No kernel cmdline provided.");
+//     }
 
-    info!("Parameters:\n{:?}", *params);
-}
+//     info!("Parameters:\n{:?}", *params);
+// }
 
 pub fn use_multiprocessing() -> bool {
     PARAMS.read().use_multiprocessing

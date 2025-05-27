@@ -13,6 +13,8 @@ use core::num::NonZeroUsize;
 use elf::{endian::AnyEndian, file::FileHeader, segment::ProgramHeader};
 use libsys::{Address, Virtual, page_size};
 
+use crate::arch::x86_64::structures::idt::InterruptStackFrame;
+
 #[allow(clippy::cast_possible_truncation)]
 pub const STACK_SIZE: NonZeroUsize = NonZeroUsize::new((libsys::MIBIBYTE as usize) - page_size()).unwrap();
 pub const STACK_PAGES: NonZeroUsize = NonZeroUsize::new(STACK_SIZE.get() / page_size()).unwrap();
@@ -57,7 +59,7 @@ pub struct ElfRela {
     pub value: usize,
 }
 
-pub type Context = (State, Registers);
+pub type Context = (InterruptStackFrame, Registers);
 
 #[derive(Debug)]
 pub enum ElfData {
@@ -102,7 +104,7 @@ impl Task {
             priority,
             address_space,
             context: (
-                State::user(
+                InterruptStackFrame::new_user(
                     Address::new(load_offset + usize::try_from(elf_header.e_entry).unwrap()).unwrap(),
                     // Safety: Addition keeps the pointer within the bounds of the allocation, and the unit size is 1.
                     unsafe { Address::from_ptr(stack.as_non_null_ptr().as_ptr().add(stack.len())) },
@@ -246,9 +248,6 @@ impl Task {
                 ElfData::File(_) => unimplemented!(),
             }
         }
-
-        // Slice has been initialized with values.
-        drop(mapped_memory);
 
         trace!("Processing demand mapping relocations.");
         let load_offset = self.load_offset();

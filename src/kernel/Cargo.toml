@@ -49,7 +49,9 @@ opt-level = 0
 codegen-units = 16
 overflow-checks = true
 lto = "off"
+panic = "abort"
 
 [profile.release]
 codegen-units = 1
 lto = "fat"
+panic = "abort"

@@ -15,7 +15,7 @@ struct StackTracer {
 }
 
 impl StackTracer {
-    /// ### Safety
+    /// ## Safety
     ///
     /// The provided frame pointer must point to a valid call stack frame.
     const unsafe fn new(frame_ptr: NonNull<StackFrame>) -> Self {
@@ -35,7 +35,7 @@ impl Iterator for StackTracer {
     }
 }
 
-/// #### Remark
+/// ## Remark
 ///
 /// This function should *never* panic or abort.
 #[panic_handler]

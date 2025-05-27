@@ -1,11 +1,13 @@
-mod arch;
-pub use arch::*;
+use core::ptr::NonNull;
 
 mod page_fault;
 
+mod arch;
+pub use arch::*;
+
 #[doc(hidden)]
 #[inline(never)]
-pub fn ex_handler(exception: &ArchException) {
+pub fn handle(exception: &ArchException) {
     trace!("Exception: {:#X?}", exception);
 
     match exception {
@@ -19,8 +21,6 @@ pub fn ex_handler(exception: &ArchException) {
         _ => panic!("could not handle exception!"),
     };
 }
-
-use core::ptr::NonNull;
 
 #[derive(Debug, Clone, Copy)]
 pub enum PageFaultReason {

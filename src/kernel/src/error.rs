@@ -13,6 +13,7 @@ macro_rules! error_impl {
         }
     ) => {
         $(#[$outer])*
+        #[allow(clippy::enum_variant_names)]
         $vis enum $Error {
             $(
                 $(#[$inner])*

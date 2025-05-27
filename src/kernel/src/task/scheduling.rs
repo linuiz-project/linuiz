@@ -1,6 +1,7 @@
 use crate::{
+    arch::x86_64::structures::idt::InterruptStackFrame,
     mem::Stack,
-    task::{Registers, State, Task},
+    task::{Registers, Task},
 };
 use alloc::collections::VecDeque;
 use libsys::Address;
@@ -46,7 +47,7 @@ impl Scheduler {
         self.task.as_mut()
     }
 
-    pub fn interrupt_task(&mut self, state: &mut State, regs: &mut Registers) {
+    pub fn interrupt_task(&mut self, state: &mut InterruptStackFrame, regs: &mut Registers) {
         debug_assert!(!crate::interrupts::is_interrupts_enabled());
 
         let mut processes = PROCESSES.lock();
@@ -65,7 +66,7 @@ impl Scheduler {
     }
 
     /// Attempts to schedule the next task in the local task queue.
-    pub fn yield_task(&mut self, state: &mut State, regs: &mut Registers) {
+    pub fn yield_task(&mut self, isf: &mut InterruptStackFrame, regs: &mut Registers) {
         debug_assert!(!crate::interrupts::is_interrupts_enabled());
 
         let mut processes = PROCESSES.lock();
@@ -73,15 +74,15 @@ impl Scheduler {
         let mut process = self.task.take().expect("cannot yield without process");
         trace!("Yielding task: {:?}", process.id());
 
-        process.context.0 = *state;
+        process.context.0 = *isf;
         process.context.1 = *regs;
 
         processes.push_back(process);
 
-        self.next_task(&mut processes, state, regs);
+        self.next_task(&mut processes, isf, regs);
     }
 
-    pub fn kill_task(&mut self, state: &mut State, regs: &mut Registers) {
+    pub fn kill_task(&mut self, isf: &mut InterruptStackFrame, regs: &mut Registers) {
         debug_assert!(!crate::interrupts::is_interrupts_enabled());
 
         // TODO add process to reap queue to reclaim address space memory
@@ -89,13 +90,13 @@ impl Scheduler {
         trace!("Exiting process: {:?}", process.id());
 
         let mut processes = PROCESSES.lock();
-        self.next_task(&mut processes, state, regs);
+        self.next_task(&mut processes, isf, regs);
     }
 
-    fn next_task(&mut self, processes: &mut VecDeque<Task>, state: &mut State, regs: &mut Registers) {
+    fn next_task(&mut self, processes: &mut VecDeque<Task>, isf: &mut InterruptStackFrame, regs: &mut Registers) {
         // Pop a new task from the task queue, or simply switch in the idle task.
         if let Some(next_process) = processes.pop_front() {
-            *state = next_process.context.0;
+            *isf = next_process.context.0;
             *regs = next_process.context.1;
 
             if !next_process.address_space.is_current() {
@@ -109,10 +110,16 @@ impl Scheduler {
             let old_value = self.task.replace(next_process);
             debug_assert!(old_value.is_none());
         } else {
-            *state = State::kernel(
-                Address::new(crate::interrupts::wait_indefinite as usize).unwrap(),
-                Address::new(self.idle_stack.top().addr().get()).unwrap(),
-            );
+            // Safety: Instruction pointer is to a valid function.
+            unsafe {
+                isf.set_instruction_pointer(Address::new(crate::interrupts::wait_indefinite as usize).unwrap());
+            }
+
+            // Safety: Stack pointer is valid for idle function stack.
+            unsafe {
+                isf.set_stack_pointer(Address::new(self.idle_stack.top().addr().get()).unwrap());
+            }
+
             *regs = Registers::default();
 
             trace!("Switched idle task.");

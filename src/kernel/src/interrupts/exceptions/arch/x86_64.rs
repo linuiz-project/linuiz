@@ -1,8 +1,11 @@
-use crate::{interrupts::exceptions::Exception, task::Registers};
-use ia32utils::structures::idt::{InterruptStackFrame, PageFaultErrorCode, SelectorErrorCode};
+use crate::{
+    arch::x86_64::structures::idt::{InterruptStackFrame, PageFaultErrorCode, SelectorErrorCode},
+    interrupts::exceptions::Exception,
+    task::Registers,
+};
 use libsys::{Address, Virtual};
 
-/// x86_64 exception wrapper type.
+/// Exception wrapper type.
 #[repr(C)]
 #[derive(Debug)]
 #[allow(non_camel_case_types)]
@@ -20,7 +23,7 @@ pub enum ArchException<'a> {
     /// Occurs when `int3` is called in software.
     Breakpoint(&'a InterruptStackFrame, &'a Registers),
 
-    /// Occurs when the `into` instruction is executed with the `OVERFLOW` bit set in RFlags.
+    /// Occurs when the `into` instruction is executed with the `OVERFLOW` bit set in `RFlags`.
     Overflow(&'a InterruptStackFrame, &'a Registers),
 
     /// Occurs when the `bound` instruction is executed and fails its check.
@@ -116,8 +119,8 @@ impl From<ArchException<'_>> for Exception {
                         PageFaultReason::NotMapped
                     },
                 },
-                NonNull::new(isf.instruction_pointer.as_mut_ptr::<u8>()).unwrap(),
-                NonNull::new(isf.stack_pointer.as_mut_ptr::<u8>()).unwrap(),
+                NonNull::new(isf.get_instruction_pointer().as_ptr()).unwrap(),
+                NonNull::new(isf.get_stack_pointer().as_ptr()).unwrap(),
             ),
 
             _ => todo!(),

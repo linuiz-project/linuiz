@@ -1,7 +1,7 @@
-bitflags::bitflags! {
+bitflags! {
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct CR0Flags : libsys::ureg {
+    pub struct CR0Flags: u64 {
         const PE = 1 << 0;
         const MP = 1 << 1;
         const EM = 1 << 2;
@@ -21,7 +21,7 @@ pub struct CR0;
 impl CR0 {
     #[inline]
     pub fn read() -> CR0Flags {
-        let value: libsys::ureg;
+        let value: u64;
 
         // Safety: Reading CR0 has no side effects.
         unsafe {

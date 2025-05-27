@@ -12,7 +12,7 @@ unsafe impl Send for Serial {}
 unsafe impl Sync for Serial {}
 
 impl Serial {
-    /// ### Safety
+    /// ## Safety
     ///
     /// - `address` must be a valid serial address pointing to a UART 16550 device.
     /// - `address` must not be read from or written to by another context.
@@ -41,15 +41,16 @@ impl log::Log for Serial {
 
             self.0.with(|mutex| {
                 let mut uart_writer = mutex.lock();
-                write!(
+                writeln!(
                     &mut uart_writer,
-                    "[{whole_time:wwidth$}.{frac_time:0fwidth$}][{level}] {args}\n",
+                    "[{whole_time:wwidth$}.{frac_time:0fwidth$}][{level}] {args}",
                     level = record.level(),
                     args = record.args(),
                     wwidth = 4,
                     fwidth = 3
-                );
-            })
+                )
+                .unwrap();
+            });
         }
     }
 

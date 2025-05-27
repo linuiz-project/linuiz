@@ -3,6 +3,8 @@
     try_trait_v2,               // #84277 <https://github.com/rust-lang/rust/issues/84277>
 )]
 
+// TODO account for pointer width not matching register width
+
 mod macros;
 
 mod address;
@@ -54,41 +56,41 @@ pub const fn align_down_div(value: usize, alignment_bits: NonZeroU32) -> usize {
     align_down(value, alignment_bits) / (1usize << alignment_bits.get())
 }
 
-pub use cpu_types::*;
-mod cpu_types {
-    #![allow(non_camel_case_types)]
+// pub use cpu_types::*;
+// mod cpu_types {
+//     #![allow(non_camel_case_types, unexpected_cfgs)]
 
-    // #[cfg(target_pointer_width = "128")]
-    // pub type uptr = u128;
-    #[cfg(target_pointer_width = "64")]
-    pub type uptr = u64;
-    #[cfg(target_pointer_width = "32")]
-    pub type uptr = u32;
+//     #[cfg(target_pointer_width = "128")]
+//     pub type uptr = u128;
+//     #[cfg(target_pointer_width = "64")]
+//     pub type uptr = u64;
+//     #[cfg(target_pointer_width = "32")]
+//     pub type uptr = u32;
 
-    #[cfg(any(target_arch = "x86_64", target_arch = "riscv64", target_arch = "aarch64"))]
-    pub type ureg = u64;
-    #[cfg(any(target_arch = "x86", target_arch = "riscv32"))]
-    pub type ureg = u32;
-}
+//     #[cfg(any(target_arch = "x86_64", target_arch = "riscv64", target_arch = "aarch64"))]
+//     pub type ureg = u64;
+//     #[cfg(any(target_arch = "x86", target_arch = "riscv32"))]
+//     pub type ureg = u32;
+// }
 
-pub trait Truncate {
-    type Into;
+// pub trait Truncate {
+//     type Into;
 
-    fn truncate_into(self) -> Self::Into;
-}
+//     fn truncate_into(self) -> Self::Into;
+// }
 
-impl Truncate for ureg {
-    type Into = usize;
+// impl Truncate for ureg {
+//     type Into = usize;
 
-    fn truncate_into(self) -> Self::Into {
-        self as usize
-    }
-}
+//     fn truncate_into(self) -> Self::Into {
+//         self as usize
+//     }
+// }
 
-impl Truncate for usize {
-    type Into = ureg;
+// impl Truncate for usize {
+//     type Into = ureg;
 
-    fn truncate_into(self) -> Self::Into {
-        self as ureg
-    }
-}
+//     fn truncate_into(self) -> Self::Into {
+//         self as ureg
+//     }
+// }

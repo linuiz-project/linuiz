@@ -5,14 +5,14 @@ use alloc::{boxed::Box, collections::BTreeMap};
 use bit_field::BitField;
 use core::{convert::TryFrom, fmt, marker::PhantomData, mem::MaybeUninit, sync::atomic::AtomicU16};
 use libsys::{
-    io::pci::{standard::StandardRegister, PCIeDevice, Standard},
+    Address, Physical, ReadOnly, ReadWrite,
+    io::pci::{PCIeDevice, Standard, standard::StandardRegister},
     memory::{
-        page_aligned_allocator,
+        PageAlignedBox, page_aligned_allocator,
         volatile::{Volatile, VolatileCell},
-        PageAlignedBox,
     },
     sync::{SuccessSource, SuccessToken, ValuedSuccessToken},
-    volatile_bitfield_getter, volatile_bitfield_getter_ro, Address, Physical, ReadOnly, ReadWrite,
+    volatile_bitfield_getter, volatile_bitfield_getter_ro,
 };
 use num_enum::TryFromPrimitive;
 use spin::{Mutex, MutexGuard};
@@ -26,7 +26,7 @@ pub enum ControllerPowerScope {
     NVMSubsystemScope = 0b11,
 }
 
-bitflags::bitflags! {
+bitflags! {
     #[repr(transparent)]
     pub struct CommandSetsSupported: u8 {
         const NVM = 1 << 0;
@@ -461,8 +461,8 @@ impl<'dev> Controller<'dev> {
         let command_id = Self::next_command_id(&pending_cmds);
 
         use command::{
-            admin::{AdminCommand, Identify},
             Command, DataPointer, FuseOperation, PSDT,
+            admin::{AdminCommand, Identify},
         };
 
         let opcode = command.get_opcode();

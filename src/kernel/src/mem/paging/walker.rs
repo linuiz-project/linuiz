@@ -10,7 +10,7 @@ pub struct Walker<'a> {
 }
 
 impl<'a> Walker<'a> {
-    /// ### Safety
+    /// ## Safety
     ///
     /// The provided page table must me a valid root-level table.
     pub unsafe fn new(table: &'a [PageTableEntry], depth: TableDepth, target_depth: TableDepth) -> Option<Self> {

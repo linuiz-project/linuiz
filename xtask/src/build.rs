@@ -1,11 +1,11 @@
 use anyhow::Result;
 use std::{fs::File, io::Error, path::Path};
-use xshell::{cmd, Shell};
+use xshell::{Shell, cmd};
 
 #[derive(clap::Parser)]
 #[allow(non_snake_case)]
 pub struct Options {
-    /// Whether the current build is a release build.
+    /// Whether to build in release mode (with all optimizations).
     #[arg(long)]
     release: bool,
 
@@ -18,7 +18,7 @@ pub struct Options {
     #[arg(long)]
     fingerprint: bool,
 
-    #[arg(long, default_value = "test_driver")]
+    #[arg(long)]
     drivers: Vec<String>,
 }
 

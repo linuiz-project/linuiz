@@ -65,7 +65,7 @@ pub enum DevselTiming {
     Slow,
 }
 
-bitflags::bitflags! {
+bitflags! {
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct Status : u16 {

@@ -10,7 +10,7 @@ crate::error_impl! {
     }
 }
 
-/// ### Safety
+/// ## Safety
 ///
 /// This function should only be called in the case of passing context to handle a page fault.
 /// Calling this function more than once and/or outside the context of a page fault is undefined behaviour.

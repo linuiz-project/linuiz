@@ -8,8 +8,8 @@ use acpi::{
     PhysicalMapping,
     address::{AddressSpace as AcpiAddressSpace, GenericAddress as AcpiAddress},
 };
-use libkernel::{ReadWrite, mem::VolatileCell};
 use ioports::{PortAddress, PortReadWrite, ReadWritePort};
+use libkernel::{ReadWrite, mem::VolatileCell};
 use spin::{Lazy, Mutex, Once};
 
 crate::error_impl! {
@@ -71,7 +71,7 @@ pub struct AcpiHandler;
 
 impl acpi::AcpiHandler for AcpiHandler {
     unsafe fn map_physical_region<T>(&self, address: usize, size: usize) -> acpi::PhysicalMapping<Self, T> {
-        trace!("ACPI MAP: @{:#X}:{}", address, size);
+        trace!("ACPI MAP: @{address:#X}:{size}");
 
         acpi::PhysicalMapping::new(
             address,

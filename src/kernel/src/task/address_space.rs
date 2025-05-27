@@ -150,7 +150,7 @@ impl AddressSpace {
         }
     }
 
-    /// ### Safety
+    /// ## Safety
     ///
     /// Caller must ensure that mapping the provided page range, with the provided page flags, will not cause undefined behaviour.
     unsafe fn invoke_mapper(
@@ -196,7 +196,7 @@ impl AddressSpace {
         self.0.is_mapped(address, None)
     }
 
-    /// ### Safety
+    /// ## Safety
     ///
     /// Caller must ensure that switching the currently active address space will not cause undefined behaviour.
     pub unsafe fn swap_into(&self) {

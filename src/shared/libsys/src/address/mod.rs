@@ -1,12 +1,12 @@
 mod frame;
 mod page;
 mod physical;
-mod virt;
+mod r#virtual;
 
 pub use frame::*;
 pub use page::*;
 pub use physical::*;
-pub use virt::*;
+pub use r#virtual::*;
 
 use core::fmt;
 

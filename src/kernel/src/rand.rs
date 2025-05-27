@@ -1,6 +1,7 @@
 use core::mem::MaybeUninit;
 
 #[unsafe(no_mangle)]
+#[allow(clippy::unnecessary_wraps)]
 unsafe extern "Rust" fn __getrandom_v03_custom(dest: *mut u8, len: usize) -> Result<(), getrandom::Error> {
     // Safety: The caller must ensure the provided parameters are valid.
     let buf = unsafe {
@@ -16,7 +17,7 @@ unsafe extern "Rust" fn __getrandom_v03_custom(dest: *mut u8, len: usize) -> Res
     for (index, chunk) in buf.chunks_mut(core::mem::size_of::<u64>()).enumerate() {
         let rng_bytes = prng::next_u64().to_ne_bytes();
 
-        trace!("[RAND] CHUNK#{}: {:?}", index, rng_bytes);
+        trace!("[RAND] CHUNK#{index}: {rng_bytes:?}");
 
         chunk.write_copy_of_slice(&rng_bytes[..chunk.len()]);
     }

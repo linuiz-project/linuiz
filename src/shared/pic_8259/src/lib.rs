@@ -131,7 +131,7 @@ pub struct ChainedPic([Pic; 2]);
 impl ChainedPic {
     /// Create a new interface for the standard PIC1 and PIC2 controllers, specifying the desired interrupt offsets.
     ///
-    /// ### Safety
+    /// ## Safety
     ///
     /// `base_irq` must be a valid, nominal value for the current environment.
     pub const unsafe fn new(base_irq: u8) -> Self {
@@ -144,7 +144,7 @@ impl ChainedPic {
     /// Initializes the chained PICs. They're initialized together (at the same time) because
     /// I/O operations might not be intantaneous on older processors.
     ///
-    /// ### Safety
+    /// ## Safety
     ///
     /// Setting new enabled interrupt lines has the possibility of adversely affecting control flow
     /// unrelated to this function, or even this core's context. It is thus the responsibility of the

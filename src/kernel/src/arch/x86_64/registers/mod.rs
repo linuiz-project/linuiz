@@ -1,8 +1,8 @@
 #![allow(dead_code, clippy::upper_case_acronyms)]
 
 mod rflags;
-
 pub use rflags::*;
+
 pub mod control;
 pub mod msr {
     pub use msr::*;
@@ -13,22 +13,32 @@ macro_rules! basic_raw_register {
         pub struct $register_ident;
 
         impl $register_ident {
-            /// ### Safety
+            /// ## Safety
             ///
             /// Writing directly to a register circumvents the compiler. It is the job of the developer
             /// to ensure that this does not cause undefined behaviour.
             #[inline]
-            pub unsafe fn write(value: libsys::ureg) {
-                core::arch::asm!(concat!("mov ", stringify!($register_ident), ", {}"), in(reg) value, options(nomem, nostack));
+            pub unsafe fn write(value: u64) {
+                // Safety: Caller is required to ensure no undefined behaviour occurs.
+                unsafe {
+                    core::arch::asm!(
+                        concat!("mov ", stringify!($register_ident), ", {}"),
+                        in(reg) value,
+                        options(nomem, nostack, preserves_flags)
+                    );
+                }
             }
 
             #[inline]
-            pub fn read() -> libsys::ureg {
-                let value: libsys::ureg;
+            pub fn read() -> u64 {
+                let value: u64;
 
                 // Safety: Reading a value out of a register does not cause undefined behaviour.
                 unsafe {
-                    core::arch::asm!(concat!("mov {}, ", stringify!($register_ident)), out(reg) value, options(nomem, nostack));
+                    core::arch::asm!(
+                        concat!("mov {}, ", stringify!($register_ident)),
+                        out(reg) value,
+                        options(nomem, nostack, preserves_flags));
                 }
 
                 value
@@ -42,23 +52,33 @@ macro_rules! basic_ptr_register {
         pub struct $register_ident;
 
         impl $register_ident {
-            /// ### Safety
+            /// ## Safety
             ///
             /// Writing directly to a register circumvents the compiler. It is the job of the developer
             /// to ensure that this does not cause undefined behaviour.
             #[inline]
-            pub unsafe fn write(value: libsys::ureg) {
-                core::arch::asm!(concat!("mov ", stringify!($register_ident), ", {}"), in(reg) value, options(nomem, nostack, preserves_flags));
+            pub unsafe fn write(value: u64) {
+                // Safety: Caller is required to ensure no undefined behaviour occurs.
+                unsafe {
+                    core::arch::asm!(
+                        concat!("mov ", stringify!($register_ident), ", {}"),
+                        in(reg) value,
+                        options(nomem, nostack, preserves_flags)
+                    );
+                }
             }
 
             #[inline]
-            pub fn read() -> libsys::ureg {
-                let value: libsys::ureg;
+            pub fn read() -> u64 {
+                let value: u64;
 
-
-                // Safety: We are only reading values here.
+                // Safety:  Reading a value out of a register does not cause undefined behaviour.
                 unsafe {
-                    core::arch::asm!(concat!("mov {}, ", stringify!($register_ident)), out(reg) value, options(nomem, nostack, preserves_flags));
+                    core::arch::asm!(
+                        concat!("mov {}, ", stringify!($register_ident)),
+                        out(reg) value,
+                        options(nomem, nostack, preserves_flags)
+                    );
                 }
 
                 value

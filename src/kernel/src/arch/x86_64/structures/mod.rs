@@ -1,7 +1,7 @@
 pub mod gdt;
 pub mod idt;
 pub mod ioapic;
-pub mod tss;
+// pub mod tss;
 
 /// A struct describing a pointer to a descriptor table (GDT / IDT).
 /// This is in a format suitable for giving to 'lgdt' or 'lidt'.
@@ -13,31 +13,4 @@ pub struct DescriptorTablePointer {
 
     /// Memory offset (pointer) to the table.
     pub base: u64,
-}
-
-/// ### Safety
-///
-/// This function has the potential to disrupt software execution by clearing the FS/GS bases
-/// on Intel chips. Caller must ensure the bases are not in use by software at time of calling.
-pub unsafe fn load_static_tables() {
-    use crate::arch::x86_64::structures::idt::InterruptDescriptorTable;
-
-    // Always initialize GDT prior to configuring IDT.
-    // Safety: This function is only called once, prior to FS/GS base being in use.
-    unsafe { crate::arch::x86_64::structures::gdt::load() };
-
-    // Due to the fashion in which the `x86_64` crate initializes the IDT entries,
-    // it must be ensured that the handlers are set only *after* the GDT has been
-    // properly initialized and loaded—otherwise, the `CS` value for the IDT entries
-    // is incorrect, and this causes very confusing GPFs.
-    crate::interrupts::without(|| {
-        static STATIC_IDT: spin::Lazy<InterruptDescriptorTable> = spin::Lazy::new(|| {
-            let mut idt = InterruptDescriptorTable::new();
-            crate::arch::x86_64::structures::idt::set_exception_handlers(&mut idt);
-            crate::arch::x86_64::structures::idt::set_stub_handlers(&mut idt);
-            idt
-        });
-
-        STATIC_IDT.load();
-    });
 }

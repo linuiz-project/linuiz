@@ -1,8 +1,8 @@
-use crate::task::{Registers, State};
+use crate::{arch::x86_64::structures::idt::InterruptStackFrame, task::Registers};
 use libsys::syscall::{Error, Result, Success, Vector};
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn process(
+pub fn process(
     vector: usize,
     arg0: usize,
     arg1: usize,
@@ -10,7 +10,7 @@ pub(super) fn process(
     arg3: usize,
     arg4: usize,
     arg5: usize,
-    state: &mut State,
+    state: &mut InterruptStackFrame,
     regs: &mut Registers,
 ) -> Result {
     trace!(

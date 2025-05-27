@@ -1,5 +1,5 @@
 pub mod exceptions;
-pub mod traps;
+pub mod syscall;
 
 mod instructions;
 pub use instructions::*;

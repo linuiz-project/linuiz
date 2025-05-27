@@ -1,14 +1,14 @@
 #![no_std]
 #![allow(non_camel_case_types)]
 
-//! ### Safety
+//! ## Safety
 //!
 //! It is *possible* that the current CPU doesn't support the MSR feature.
 //! In this case, well... all of this fails. And we're going to ignore that.
 
 use bit_field::BitField;
 
-/// ### Safety
+/// ## Safety
 ///
 /// * Caller must ensure the address is valid.
 #[inline]
@@ -30,7 +30,7 @@ pub unsafe fn rdmsr(address: u32) -> u64 {
     value
 }
 
-/// ### Safety
+/// ## Safety
 ///
 /// * Caller must ensure the address is valid.
 /// * Caller must ensure writing the value to the MSR address will not result in undefined behaviour.
@@ -55,7 +55,7 @@ macro_rules! generic_msr {
                 unsafe { $crate::rdmsr($addr) }
             }
 
-            /// ### Safety
+            /// ## Safety
             ///
             /// Writing arbitrary data to an MSR is undefined behaviour. Caller must ensure
             /// what is written is valid for the given MSR address.
@@ -114,7 +114,7 @@ impl IA32_EFER {
 
     /// Sets the IA32_EFER.LME (long-mode enable) bit.
     ///
-    /// ### Safety
+    /// ## Safety
     ///
     /// This function does not check if long mode is supported, or if the core is prepared to enter it.
     #[inline]
@@ -124,7 +124,7 @@ impl IA32_EFER {
 
     /// Sets the IA32_EFER.SCE (syscall/syret enable) bit.
     ///
-    /// ### Safety
+    /// ## Safety
     ///
     /// Caller must ensure software expects system calls to be enabled or disabled.
     #[inline]
@@ -141,7 +141,7 @@ impl IA32_EFER {
 
     /// Sets the IA32_EFER.NXE (no-execute enable) bit.
     ///
-    /// ### Safety
+    /// ## Safety
     ///
     /// This function does not check if the NX bit is actually supported.
     #[inline]
@@ -154,7 +154,7 @@ pub struct IA32_STAR;
 impl IA32_STAR {
     /// Sets the selectors used for `sysret`.
     ///
-    /// ### Usage (from the IA32 specification):
+    /// ## Usage (from the IA32 specification):
     ///
     /// > When SYSRET transfers control to 64-bit mode user code using REX.W, the processor gets the privilege level 3
     /// > target code segment, instruction pointer, stack segment, and flags as follows:
@@ -163,7 +163,7 @@ impl IA32_STAR {
     /// > Target stack segment:      Reads a non-NULL selector from IA32_STAR\[63:48\] + 8
     /// > ...
     ///
-    /// ### Safety
+    /// ## Safety
     ///
     /// Invalid low and high selectors will likely result in a #GP upon syscall.
     #[inline]
@@ -176,7 +176,7 @@ pub struct IA32_LSTAR;
 impl IA32_LSTAR {
     /// Sets the `rip` value that's jumped to when the `syscall` instruction is executed.
     ///
-    /// ### Safety
+    /// ## Safety
     ///
     /// Caller must ensure the given function pointer is valid for a syscall instruction pointer.
     #[inline]
@@ -191,7 +191,7 @@ pub struct IA32_FMASK;
 impl IA32_FMASK {
     /// Sets `rflags` upon a `syscall` based on masking the bits in the given value.
     ///
-    /// ### Safety
+    /// ## Safety
     ///
     /// An invalid rflags value will result in undefined behaviour when entering a syscall handler.
     #[inline]
@@ -204,7 +204,7 @@ pub struct IA32_TSC_DEADLINE;
 impl IA32_TSC_DEADLINE {
     /// Sets the timestamp counter deadline.
     ///
-    /// ### Safety
+    /// ## Safety
     ///
     /// Writing an invalid or unexpected deadline to this function could result in a deadlock.
     #[inline]

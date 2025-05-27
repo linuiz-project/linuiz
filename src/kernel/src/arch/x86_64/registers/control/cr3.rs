@@ -1,10 +1,10 @@
 use core::arch::asm;
-use libsys::{Address, Frame, Truncate, ureg};
+use libsys::{Address, Frame};
 
-bitflags::bitflags! {
+bitflags! {
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct CR3Flags : ureg {
+    pub struct CR3Flags: u64 {
         const PAGE_LEVEL_WRITE_THROUGH = 1 << 3;
         const PAGE_LEVEL_CACHE_DISABLE = 1 << 4;
     }
@@ -22,19 +22,19 @@ impl CR3 {
     }
 
     pub fn read() -> (Address<Frame>, CR3Flags) {
-        let value: ureg;
+        let value: u64;
 
         // Safety: Reading CR3 has no side effects.
         unsafe {
             asm!("mov {}, cr3", out(reg) value, options(nostack, nomem));
         }
 
-        (Address::new_truncate((value & !0xFFF).truncate_into()), CR3Flags::from_bits_truncate(value))
+        (Address::new_truncate(usize::try_from(value & !0xFFF).unwrap()), CR3Flags::from_bits_truncate(value))
     }
 
     #[inline]
     pub fn refresh() {
-        let value: ureg;
+        let value: u64;
 
         // Safety: Refreshing the CR3 register has no side effects (it merely purges the TLB).
         unsafe {

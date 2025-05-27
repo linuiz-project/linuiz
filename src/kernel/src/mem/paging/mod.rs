@@ -19,9 +19,9 @@ impl TableDepth {
         Self({
             #[cfg(target_arch = "x86_64")]
             {
-                use crate::arch::x86_64::registers::control;
+                use crate::arch::x86_64::registers::control::{CR4, CR4Flags};
 
-                if control::CR4::read().contains(control::CR4Flags::LA57) { 5 } else { 4 }
+                if CR4::read().contains(CR4Flags::LA57) { 5 } else { 4 }
             }
         })
     }
@@ -118,7 +118,7 @@ crate::error_impl! {
 }
 
 #[cfg(target_arch = "x86_64")]
-bitflags::bitflags! {
+bitflags! {
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct TableEntryFlags : u64 {
@@ -144,7 +144,7 @@ bitflags::bitflags! {
 }
 
 #[cfg(target_arch = "riscv64")]
-bitflags::bitflags! {
+bitflags! {
     #[repr(transparent)]
     pub struct TableEntryFlags: u64 {
         const VALID = 1 << 0;
@@ -210,7 +210,7 @@ impl PageTableEntry {
 
     /// Sets the entry's frame index.
     ///
-    /// ### Safety
+    /// ## Safety
     ///
     /// Caller must ensure changing the attributes of this entry does not cause memory corruption.
     #[inline]
@@ -226,7 +226,7 @@ impl PageTableEntry {
 
     /// Sets the attributes of this page table entry.
     ///
-    /// ### Safety
+    /// ## Safety
     ///
     /// Caller must ensure changing the attributes of this entry does not cause any memory corruption side effects.
     pub unsafe fn set_attributes(&mut self, new_attributes: TableEntryFlags, modify_mode: FlagsModify) {
@@ -310,7 +310,7 @@ impl<RefKind: InteriorRef> PageTable<'_, RefKind> {
 }
 
 impl<'a> PageTable<'a, Ref> {
-    /// ### Safety
+    /// ## Safety
     ///
     /// - Page table entry must point to a valid page table.
     /// - Page table depth must be correct for the provided table.
@@ -346,7 +346,7 @@ impl<'a> PageTable<'a, Ref> {
 }
 
 impl<'a> PageTable<'a, Mut> {
-    /// ### Safety
+    /// ## Safety
     ///
     /// - Page table entry must point to a valid page table.
     /// - Page table depth must be correct for the provided table.

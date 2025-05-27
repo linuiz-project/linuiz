@@ -1,6 +1,6 @@
 use core::arch::asm;
 
-bitflags::bitflags! {
+bitflags! {
     // Wrapper type for `sstatus` register.
     #[repr(transparent)]
     pub struct SSTATUS : u64 {

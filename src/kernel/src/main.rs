@@ -12,6 +12,7 @@
     map_try_insert,                         // #82766 <https://github.com/rust-lang/rust/issues/82766>
     try_trait_v2,                           // #84277 <https://github.com/rust-lang/rust/issues/84277>
     step_trait,                             // #42168 <https://github.com/rust-lang/rust/issues/42168>
+    generic_arg_infer,                      // #85077 <https://github.com/rust-lang/rust/issues/85077>    
     sync_unsafe_cell,
     allocator_api,
     slice_ptr_get,
@@ -33,7 +34,8 @@
     clippy::missing_const_for_fn,
     clippy::undocumented_unsafe_blocks,
     clippy::semicolon_inside_block,
-    clippy::semicolon_if_nothing_returned
+    clippy::semicolon_if_nothing_returned,
+    unsafe_op_in_unsafe_fn
 )]
 #![allow(
     clippy::enum_glob_use,
@@ -42,9 +44,10 @@
     clippy::must_use_candidate,
     clippy::unreadable_literal,
     clippy::wildcard_imports,
-    // While ideally this is warned against, the number of situations in which pointer alignment up-casting
-    // is acceptable seem to far outweigh the circumstances within the kernel where it is inappropriate.
-    clippy::cast_ptr_alignment,
+    clippy::upper_case_acronyms,
+    // // While ideally this is warned against, the number of situations in which pointer alignment up-casting
+    // // is acceptable seem to far outweigh the circumstances within the kernel where it is inappropriate.
+    // clippy::cast_ptr_alignment,
     dead_code
 )]
 #![cfg_attr(target_arch = "x86_64", feature(abi_x86_interrupt))]
@@ -68,17 +71,16 @@ mod rand;
 mod task;
 mod time;
 
+#[macro_use]
+extern crate bitflags;
 
-/// ### Safety
+/// ## Safety
 ///
 /// This function should only ever be called by the bootloader.
 #[unsafe(no_mangle)]
 #[doc(hidden)]
 #[allow(clippy::too_many_lines)]
 unsafe extern "C" fn _entry() -> ! {
-
-
-
     // Safety: We've just entered the kernel, so no state can be disrupted.
     unsafe {
         core::arch::asm!(

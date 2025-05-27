@@ -224,7 +224,7 @@ impl Apic {
         }
     }
 
-    /// ### Safety
+    /// ## Safety
     ///
     /// Writing an invalid value to a register is undefined behaviour.
     unsafe fn write_register(&self, register: Register, value: u32) {
@@ -234,7 +234,7 @@ impl Apic {
         }
     }
 
-    /// ### Safety
+    /// ## Safety
     ///
     /// Given the amount of external contexts that could potentially rely on the APIC, enabling it
     /// has the oppurtunity to affect those contexts in undefined ways.
@@ -243,7 +243,7 @@ impl Apic {
         self.write_register(Register::SPR, *self.read_register(Register::SPR).set_bit(8, true));
     }
 
-    /// ### Safety
+    /// ## Safety
     ///
     /// Given the amount of external contexts that could potentially rely on the APIC, disabling it
     /// has the oppurtunity to affect those contexts in undefined ways.
@@ -272,7 +272,7 @@ impl Apic {
         ErrorStatusFlags::from_bits_truncate(self.read_register(Register::ERR))
     }
 
-    /// ### Safety
+    /// ## Safety
     ///
     /// An invalid or unexpcted interrupt command could potentially put the core in an unusable state.
     #[inline]
@@ -281,7 +281,7 @@ impl Apic {
         self.write_register(Register::ICRH, interrupt_command.get_cmd());
     }
 
-    /// ### Safety
+    /// ## Safety
     ///
     /// The timer divisor directly affects the tick rate and interrupt rate of the
     /// internal local timer clock. Thus, changing the divisor has the potential to
@@ -291,7 +291,7 @@ impl Apic {
         self.write_register(Register::TIMER_DIVISOR, divisor.as_divide_value().into());
     }
 
-    /// ### Safety
+    /// ## Safety
     ///
     /// Setting the initial count of the timer resets its internal clock. This can lead
     /// to a situation where another context is awaiting a specific clock duration, but
@@ -343,7 +343,7 @@ impl Apic {
     ///     - LINT0 & LINT1 are unmasked and assigned to the `LINT0_VECTOR` (253) and `LINT1_VECTOR` (254), respectively.
     ///     - The spurious register is configured with the `SPURIOUS_VECTOR` (255).
     ///
-    /// ### Safety
+    /// ## Safety
     ///
     /// The caller must guarantee that software is in a state that is ready to accept the APIC performing a software reset.
     pub unsafe fn software_reset(&self, spr_vector: u8, lint0_vector: u8, lint1_vector: u8) {
@@ -419,7 +419,7 @@ impl<T: LocalVectorVariant> LocalVector<'_, T> {
         self.0.read_register(T::REGISTER).get_bit(Self::MASKED_OFFSET)
     }
 
-    /// ### Safety
+    /// ## Safety
     ///
     /// Masking an interrupt may result in contexts expecting that interrupt to fire to deadlock.
     #[inline]
@@ -437,7 +437,7 @@ impl<T: LocalVectorVariant> LocalVector<'_, T> {
         }
     }
 
-    /// ### Safety
+    /// ## Safety
     ///
     /// Given the vector is an arbitrary >32 `u8`, all contexts must agree on what vectors
     /// correspond to what local interrupts.
@@ -458,7 +458,7 @@ impl<T: LocalVectorVariant> core::fmt::Debug for LocalVector<'_, T> {
 }
 
 impl<T: GenericVectorVariant> LocalVector<'_, T> {
-    /// ### Safety
+    /// ## Safety
     ///
     /// Setting the incorrect delivery mode may result in interrupts not being received
     /// correctly, or being sent to all cores at once.
@@ -475,7 +475,7 @@ impl LocalVector<'_, Timer> {
         TimerMode::try_from(self.0.read_register(<Timer as LocalVectorVariant>::REGISTER).get_bits(17..19)).unwrap()
     }
 
-    /// ### Safety
+    /// ## Safety
     ///
     /// Setting the mode of the timer may result in undefined behaviour if switching modes while
     /// the APIC is currently active and ticking (or otherwise expecting the timer to behave in

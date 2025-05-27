@@ -2,30 +2,36 @@ use core::arch::asm;
 
 /// Enables interrupts for the current core.
 ///
-/// ### Safety
+/// ## Safety
 ///
 /// Enabling interrupts early can result in unexpected behaviour.
 #[inline]
 pub unsafe fn enable_interrupts() {
-    #[cfg(target_arch = "x86_64")]
-    asm!("sti", options(nostack, nomem));
+    // Safety: Caller is required to ensure enabling interrupts will not cause undefined behaviour.
+    unsafe {
+        #[cfg(target_arch = "x86_64")]
+        asm!("sti", options(nostack, nomem));
 
-    #[cfg(target_arch = "riscv64")]
-    crate::rv64::registers::sstatus::set_sie(true);
+        #[cfg(target_arch = "riscv64")]
+        crate::rv64::registers::sstatus::set_sie(true);
+    }
 }
 
 /// Disables interrupts for the current core.
 ///
-/// ### Safety
+/// ## Safety
 ///
 /// Disabling interrupts can cause the system to become unresponsive if they are not re-enabled.
 #[inline]
 pub unsafe fn disable_interrupts() {
-    #[cfg(target_arch = "x86_64")]
-    asm!("cli", options(nostack, nomem));
+    // Safety: Caller is required to ensure disabling interrupts will not cause undefined behaviour.
+    unsafe {
+        #[cfg(target_arch = "x86_64")]
+        asm!("cli", options(nostack, nomem));
 
-    #[cfg(target_arch = "riscv64")]
-    crate::rv64::registers::sstatus::set_sie(false);
+        #[cfg(target_arch = "riscv64")]
+        crate::rv64::registers::sstatus::set_sie(false);
+    }
 }
 
 /// Returns whether or not interrupts are enabled for the current core.
@@ -81,7 +87,7 @@ pub fn wait_for_interrupt() {
 
 /// Waits for the next interrupt on the current core.
 ///
-/// ### Safety
+/// ## Safety
 ///
 /// If interrupts are not enabled, this function will cause a deadlock.
 #[inline]
@@ -109,7 +115,7 @@ pub fn wait_indefinite() -> ! {
 
 /// Murder, in cold electrons, the current core.
 ///
-/// ### Safety
+/// ## Safety
 ///
 /// Murdering a CPU core is undefined behaviour.
 #[inline]

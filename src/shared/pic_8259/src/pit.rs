@@ -60,7 +60,7 @@ pub fn send_command(command: Command) {
 
 /// Sets the frequency of the programmable interrupt timer.
 ///
-/// ### Safety
+/// ## Safety
 ///
 /// Setting an incorrect frequency or operating mode is undefined behaviour.
 pub unsafe fn set_timer_freq(frequency: u32, operating_mode: OperatingMode) {
