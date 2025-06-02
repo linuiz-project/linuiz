@@ -192,9 +192,11 @@ macro_rules! irq_stub {
     };
 }
 
-/// ## Safety
+/// Handles and interrupt request.
 ///
-/// This function should not be called directly.
+/// # Safety
+///
+/// TODO
 #[allow(clippy::similar_names)]
 unsafe extern "sysv64" fn irq_handler(irq_number: u64, isf: &mut InterruptStackFrame, regs: &mut Registers) {
     match Vector::try_from(irq_number) {
@@ -219,8 +221,10 @@ unsafe extern "sysv64" fn irq_handler(irq_number: u64, isf: &mut InterruptStackF
         vector_result => unimplemented!("Unhandled interrupt: {:?}", vector_result),
     }
 
-    // Safety:
-    unsafe { crate::cpu::state::end_of_interrupt() }.unwrap();
+    // Safety: This is the end of an interrupt context.
+    unsafe {
+        crate::cpu::state::end_of_interrupt();
+    }
 }
 
 exception_handler!(de, ());
