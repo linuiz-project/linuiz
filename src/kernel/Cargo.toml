@@ -2,6 +2,9 @@
 name = "kernel"
 version = "0.0.0"
 edition = "2024"
+license = "BSD 3-Clause"
+repository = "https://github.com/linuiz-project/linuiz"
+description = "Novelty hybrid micro+mono kernel, designed to achieve extremely low overhead and memory footprint. "
 
 [dependencies.msr]
 path = "../shared/msr/"
@@ -29,7 +32,9 @@ bitvec = { version = "1.0", default-features = false, features = [
     "atomic",
     "alloc",
 ] }
-uart = { version = "1.0", default-features = false }
+uart = { version = "2.0", default-features = false, features = [
+    "address_impl",
+] }
 ioports = "1.0"
 spin = "0.10"
 bit_field = "0.10"

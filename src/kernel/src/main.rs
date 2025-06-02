@@ -39,6 +39,7 @@
     unsafe_op_in_unsafe_fn
 )]
 #![allow(
+    clippy::cargo_common_metadata,
     clippy::enum_glob_use,
     clippy::inline_always,
     clippy::items_after_statements,
@@ -46,6 +47,7 @@
     clippy::unreadable_literal,
     clippy::wildcard_imports,
     clippy::upper_case_acronyms,
+    clippy::missing_const_for_fn,
     // // While ideally this is warned against, the number of situations in which pointer alignment up-casting
     // // is acceptable seem to far outweigh the circumstances within the kernel where it is inappropriate.
     // clippy::cast_ptr_alignment,
@@ -78,6 +80,23 @@ mod time;
 #[macro_use]
 extern crate bitflags;
 
+/// Specify the Limine revision to use.
+#[doc(hidden)]
+static BASE_REVISION: limine::BaseRevision = limine::BaseRevision::with_revision(0);
+
+/// Specify the exact stack size the kernel would like to use.
+#[doc(hidden)]
+static STACK_SIZE_REQUEST: limine::request::StackSizeRequest = limine::request::StackSizeRequest::new().with_size({
+    #[cfg(debug_assertions)]
+    {
+        0x1000000
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        0x4000
+    }
+});
+
 /// ## Safety
 ///
 /// This function should only ever be called by the bootloader.
@@ -89,10 +108,10 @@ unsafe extern "C" fn _entry() -> ! {
     unsafe {
         core::arch::asm!(
             "
-        xor rbp, rbp
+            xor rbp, rbp
 
-        call {}
-        ",
+            call {}
+            ",
             sym init::init,
             options(noreturn)
         )

@@ -14,13 +14,12 @@ pub fn process(
     regs: &mut Registers,
 ) -> Result {
     trace!(
-        "Syscall Args: Vector:{:X?}   0:{:X?}  1:{:X?}  2:{:X?}  3:{:X?}  4:{:X?}  5:{:X?}",
-        vector, arg0, arg1, arg2, arg3, arg4, arg5
+        "Syscall Args: Vector:{vector:X?}   0:{arg0:X?}  1:{arg1:X?}  2:{arg2:X?}  3:{arg3:X?}  4:{arg4:X?}  5:{arg5:X?}"
     );
 
     let result = match Vector::try_from(vector) {
         Err(err) => {
-            warn!("Unhandled system call vector: {:X?}", err);
+            warn!("Unhandled system call vector: {err:X?}");
             Err(Error::InvalidVector)
         }
 
@@ -41,7 +40,7 @@ pub fn process(
         }
     };
 
-    trace!("Syscall: {:X?}", result);
+    trace!("Syscall Result: {result:X?}");
 
     result
 }
@@ -63,7 +62,7 @@ fn process_klog(level: log::Level, str_ptr_arg: usize, str_len: usize) -> Result
                 Ok(()) | Err(TaskError::AlreadyMapped) => {}
 
                 err => {
-                    warn!("Failed to demand map: {:X?}", err);
+                    warn!("Failed to demand map: {err:X?}");
                     return Err(Error::UnmappedMemory);
                 }
             }
@@ -76,7 +75,7 @@ fn process_klog(level: log::Level, str_ptr_arg: usize, str_len: usize) -> Result
     let str_slice = unsafe { core::slice::from_raw_parts(str_ptr, str_len) };
     let str = core::str::from_utf8(str_slice).map_err(Error::from)?;
 
-    log!(level, "[KLOG]: {}", str);
+    log!(level, "[KLOG]: {str}");
 
     Ok(Success::Ok)
 }

@@ -1,13 +1,13 @@
 use libsys::{Address, Virtual};
 
-crate::error_impl! {
-    /// Indicates what type of error the common page fault handler encountered.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum Error {
-        CoreState => None,
-        NoTask => None,
-        Task { err: crate::task::Error } => Some(err),
-    }
+/// Indicates what type of error the common page fault handler encountered.
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+pub enum Error {
+    #[error("there's no active task")]
+    NoTask,
+
+    #[error("failed to deman map memory")]
+    Task(#[from] crate::task::Error),
 }
 
 /// ## Safety
@@ -16,9 +16,11 @@ crate::error_impl! {
 /// Calling this function more than once and/or outside the context of a page fault is undefined behaviour.
 #[doc(hidden)]
 #[inline(never)]
-pub unsafe fn handler(fault_address: Address<Virtual>) -> Result<()> {
+pub unsafe fn handler(fault_address: Address<Virtual>) -> Result<(), Error> {
     crate::cpu::state::with_scheduler(|scheduler| {
-        scheduler.task_mut().ok_or(Error::NoTask)?.demand_map(fault_address).map_err(|err| Error::Task { err })
+        scheduler.task_mut().ok_or(Error::NoTask)?.demand_map(fault_address)?;
+
+        Ok::<(), Error>(())
     })?;
 
     Ok(())

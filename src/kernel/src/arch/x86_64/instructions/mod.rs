@@ -1,3 +1,4 @@
+pub mod interrupts;
 pub mod sync;
 pub mod tlb;
 

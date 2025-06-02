@@ -19,7 +19,7 @@ impl Mapper {
     /// Attempts to construct a new page manager. Returns `None` if the `pmm::get()` could not provide a root frame.
     pub fn new(depth: TableDepth) -> Option<Self> {
         let root_frame = pmm::get().next_frame().ok()?;
-        trace!("New mapper root frame: {:X}", root_frame);
+        trace!("New mapper root frame: {:X?}", root_frame);
 
         // Safety: pmm::get() promises rented frames to be within the HHDM.
         unsafe {
@@ -165,7 +165,7 @@ impl Mapper {
     ///
     /// Caller must ensure that switching the currently active address space will not cause undefined behaviour.
     pub unsafe fn swap_into(&self) {
-        trace!("Swapping address space to: {:X}", self.root_frame);
+        trace!("Swapping address space to: {:X?}", self.root_frame);
 
         #[cfg(target_arch = "x86_64")]
         crate::arch::x86_64::registers::control::CR3::write(

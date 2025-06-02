@@ -35,7 +35,7 @@ impl Iterator for StackTracer {
     }
 }
 
-/// ## Remark
+/// # Remark
 ///
 /// This function should *never* panic or abort.
 #[panic_handler]
@@ -50,7 +50,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 
 fn stack_trace() {
     fn print_stack_trace_entry<D: core::fmt::Display>(entry_num: usize, fn_address: Address<Virtual>, symbol_name: D) {
-        error!("{entry_num:.<4}0x{:X} {symbol_name:#}", fn_address.get());
+        error!("#{entry_num: <4}0x{:X} {symbol_name:#}", fn_address.get());
     }
 
     error!("----------STACK-TRACE---------");
@@ -67,7 +67,7 @@ fn stack_trace() {
     for (depth, trace_address) in stack_tracer.enumerate() {
         const SYMBOL_TYPE_FUNCTION: u8 = 2;
 
-        if let Some((_, Some(symbol_name))) = symbols::get(trace_address) {
+        if let Some(symbol_name) = symbols::get_name(trace_address) {
             if let Ok(demangled) = rustc_demangle::try_demangle(symbol_name) {
                 print_stack_trace_entry(depth, trace_address, demangled);
             } else {

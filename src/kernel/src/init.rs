@@ -1,39 +1,12 @@
-use bitflags::bitflags;
-use libsys::{Address, Frame, Page, Physical, Virtual};
+use libsys::{Address, Frame, Physical, Virtual};
 use limine::{
-    BaseRevision, memory_map,
+    memory_map,
     mp::RequestFlags,
     request::{
         BootloaderInfoRequest, ExecutableAddressRequest, ExecutableCmdlineRequest, ExecutableFileRequest, HhdmRequest,
-        MemoryMapRequest, MpRequest, RsdpRequest, StackSizeRequest,
+        MemoryMapRequest, MpRequest, RsdpRequest,
     },
 };
-
-bitflags! {
-    struct STAGE: u64 {
-        const LOGGING = 1 << 0;
-        const CMDLINE = 1 << 2;
-        const BOOT_MEMORY = 1 << 3;
-        const MEMORY_MAP = 1 << 4;
-        const MULTIPROCESSSING = 1 << 5;
-        const PMM = 1 << 6;
-        const HHDM = 1 << 7;
-        const ACPI = 1 << 8;
-        const PCI = 1 << 9;
-
-    }
-}
-
-#[derive(Debug, Eq, PartialEq)]
-struct Stage(u32);
-
-impl Stage {
-    const INITIAL: Self = Self(u32::MIN);
-    const CMDLINE_PARSED: Self = Self(10);
-    const LOGGING_SETUP: Self = Self(20);
-    const LOGGING_TESTED: Self = Self(30);
-    const FINISHED: Self = Self(u32::MAX);
-}
 
 #[allow(clippy::too_many_lines)]
 pub extern "C" fn init() -> ! {
@@ -41,22 +14,22 @@ pub extern "C" fn init() -> ! {
     // within this function should be absolutely, definitely run ONLY ONCE. Writing
     // the code sequentially within one function easily ensures that will be the case.
 
-    // Specify the Limine revision to use
-    static BASE_REVISION: BaseRevision = BaseRevision::with_revision(0);
-
-    #[cfg(debug_assertions)]
-    static STACK_SIZE_REQUEST: StackSizeRequest = StackSizeRequest::new().with_size(0x1000000);
-    #[cfg(not(debug_assertions))]
-    static STACK_SIZE_REQUEST: StackSizeRequest = StackSizeRequest::new().with_size(0x4000);
-
     // All limine feature requests (ensures they are not used after bootloader memory is reclaimed)
     static BOOT_INFO_REQUEST: BootloaderInfoRequest = BootloaderInfoRequest::new();
-    static KERNEL_ADDR_REQUEST: ExecutableAddressRequest = ExecutableAddressRequest::new();
     static KERNEL_FILE_REQUEST: ExecutableFileRequest = ExecutableFileRequest::new();
     static KERNEL_CMDLINE_REQUEST: ExecutableCmdlineRequest = ExecutableCmdlineRequest::new();
-    static MEMORY_MAP_REQUEST: MemoryMapRequest = MemoryMapRequest::new();
+    static KERNEL_ADDR_REQUEST: ExecutableAddressRequest = ExecutableAddressRequest::new();
     static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
+    static MEMORY_MAP_REQUEST: MemoryMapRequest = MemoryMapRequest::new();
     static MP_REQUEST: MpRequest = MpRequest::new().with_flags(RequestFlags::X2APIC);
+
+    // Enable logging first, so we can get feedback on the entire init process.
+    if crate::logging::UartLogger::init().is_err() {
+        // Safety: Logging subsystem must be enabled to run / debug OS.
+        unsafe {
+            crate::interrupts::halt_and_catch_fire();
+        }
+    }
 
     // Safety: Function is run only once for this hardware thread.
     unsafe {
@@ -64,16 +37,17 @@ pub extern "C" fn init() -> ! {
         crate::arch::x86_64::configure_hwthread();
     }
 
-    // Initialize logging, or spin indefinitely if we fail.
-    crate::logging::init();
-
     if let Some(boot_info) = BOOT_INFO_REQUEST.get_response() {
         info!("Bootloader Info     {} v{} (rev {})", boot_info.name(), boot_info.version(), boot_info.revision());
     } else {
         info!("Bootloader Info     UNKNOWN");
     }
 
-    crate::interrupts::wait_indefinite();
+    crate::params::parse(&KERNEL_CMDLINE_REQUEST);
+    crate::panic::symbols::parse(&KERNEL_FILE_REQUEST);
+    crate::mem::hhdm::set(&HHDM_REQUEST);
+
+    crate::arch::x86_64::instructions::breakpoint();
 
     // Set up various variables and structures for init to use.
     let memory_map = MEMORY_MAP_REQUEST.get_response().expect("no response to memory map request").entries();
@@ -99,10 +73,6 @@ pub extern "C" fn init() -> ! {
     // crate::params::parse_cmdline();
     // Initialize the physical memory manager.
     crate::mem::alloc::pmm::init(memory_map);
-    // Parse the kernel ELF symbols.
-    if let Err(error) = crate::panic::symbols::parse(&kernel_elf) {
-        error!("Could not load kernel symbols: {error:?}");
-    }
 
     /* SETUP KERNEL MEMORY */
     {
@@ -112,15 +82,6 @@ pub extern "C" fn init() -> ! {
         };
         use libsys::page_size;
         use limine::memory_map::EntryType;
-
-        crate::mem::hhdm::HHDM.call_once(|| {
-            let hhdm_address =
-                HHDM_REQUEST.get_response().expect("no response to HHDM address request").offset().try_into().unwrap();
-
-            debug!("HHDM @ {hhdm_address:X?}");
-
-            hhdm::Hhdm::new(Address::<Page>::new(hhdm_address).unwrap())
-        });
 
         fn map_hhdm_range(
             mapper: &mut crate::mem::mapper::Mapper,
@@ -267,49 +228,11 @@ pub extern "C" fn init() -> ! {
 
     // load_drivers();
 
-    /* SETUP SMP */
-    {
-        let response = MP_REQUEST.get_response().expect("no response to multiprocessing request");
-
-        debug!("Detecting and starting additional cores.");
-
-        for cpu in response.cpus().iter().filter(|cpu| cpu.lapic_id != response.bsp_lapic_id()) {
-            trace!("Starting processor: ID P{}/L{}", cpu.id, cpu.lapic_id);
-
-            if crate::params::use_multiprocessing() {
-                extern "C" fn _smp_entry(_: &limine::mp::Cpu) -> ! {
-                    // Safety: Function is run only once for this hardware thread.
-                    unsafe {
-                        #[cfg(target_arch = "x86_64")]
-                        crate::arch::x86_64::configure_hwthread();
-                    }
-
-                    crate::mem::with_kmapper(|kmapper| {
-                        // Safety: All currently referenced memory should also be mapped in the kernel page tables.
-                        unsafe {
-                            kmapper.swap_into();
-                        }
-                    });
-
-                    // Safety: Function has not been called on the this core.
-                    unsafe { kernel_core_setup() }
-                }
-
-                cpu.goto_address.write(_smp_entry);
-            } else {
-                extern "C" fn _idle_forever(_: &limine::mp::Cpu) -> ! {
-                    // Safety: Murder isn't legal. Is this?
-                    unsafe { crate::interrupts::halt_and_catch_fire() }
-                }
-
-                cpu.goto_address.write(_idle_forever);
-            }
-        }
-    }
+    crate::cpu::start_mp(&MP_REQUEST);
 
     // Drop into a finalizing function to lose all references
-    // to Limine bootloader requests/responses (as they will
-    // be deallocated upon bootloader memory reclamation).
+    // to Limine bootloader requests/responses (they will be
+    // deallocated during reclamation of bootloader memory).
     finalize_init(memory_map)
 }
 
@@ -332,22 +255,8 @@ fn finalize_init(memory_map: &[&memory_map::Entry]) -> ! {
 
     debug!("Bootloader memory reclaimed.");
 
-    // Safety: Function has not been called on the this core.
-    unsafe { kernel_core_setup() }
-}
-
-/// ## Safety
-///
-/// This function should only ever be called once per core.
-pub unsafe fn kernel_core_setup() -> ! {
-    crate::cpu::state::init(1000);
-
-    // Ensure we enable interrupts prior to enabling the scheduler.
-    crate::interrupts::enable_interrupts();
-    crate::cpu::state::begin_scheduling().unwrap();
-
-    // This interrupt wait loop is necessary to ensure the core can jump into the scheduler.
-    crate::interrupts::wait_indefinite()
+    // Safety: We've reached the end of the kernel init phase.
+    unsafe { crate::cpu::run() }
 }
 
 // fn load_drivers() {

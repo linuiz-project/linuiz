@@ -1,4 +1,4 @@
-use crate::{checked_phys_canonical, page_mask, page_shift, phys_canonical_mask, Address, Physical};
+use crate::{Address, Physical, checked_phys_canonical, page_mask, page_shift, phys_canonical_mask};
 
 pub struct Frame;
 
@@ -6,6 +6,8 @@ impl super::Addressable for Frame {
     type Init = usize;
     type Repr = usize;
     type Get = Address<Physical>;
+
+    const DEBUG_NAME: &'static str = "Address<Frame>";
 
     fn new(init: Self::Init) -> Option<Self::Repr> {
         (((init & page_mask()) == 0) && checked_phys_canonical(init)).then_some(init)

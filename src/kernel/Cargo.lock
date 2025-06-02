@@ -169,9 +169,9 @@ dependencies = [
 
 [[package]]
 name = "lock_api"
-version = "0.4.12"
+version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07af8b9cdd281b7915f413fa73f29ebd5d55d0d3f0155584dade1ff18cea1b17"
+checksum = "96936507f153605bddfcda068dd804796c84324ed2510809e5b2a624c81da765"
 dependencies = [
  "autocfg",
  "scopeguard",
@@ -386,9 +386,9 @@ dependencies = [
 
 [[package]]
 name = "uart"
-version = "1.2.0"
+version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e89d4f5f702785be80824c4189fb329930f010912ba5a37d467ce0464823b70"
+checksum = "e43cb66305134d1113ca51b4bb5ae6d1f316714bb93146f2339d3a1557df2c83"
 dependencies = [
  "bitflags",
 ]

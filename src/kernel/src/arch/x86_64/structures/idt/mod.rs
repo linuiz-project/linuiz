@@ -12,10 +12,14 @@ pub use isf::*;
 mod error_codes;
 pub use error_codes::*;
 
-pub const DB_STACK_TABLE_INDEX: u16 = 0;
-pub const NM_STACK_TABLE_INDEX: u16 = 1;
-pub const DF_STACK_TABLE_INDEX: u16 = 2;
-pub const MC_STACK_TABLE_INDEX: u16 = 3;
+#[repr(u16)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StackTableIndex {
+    Debug = 0,
+    NonMaskableInterrupt = 1,
+    DoubleFault = 2,
+    MachineCheck = 3,
+}
 
 /// An Interrupt Descriptor Table with 256 entries.
 ///
@@ -32,8 +36,8 @@ pub const MC_STACK_TABLE_INDEX: u16 = 3;
 /// The field descriptions are taken from the
 /// [AMD64 manual volume 2](https://support.amd.com/TechDocs/24593.pdf)
 /// (with slight modifications).
-#[derive(Debug, Clone)]
 #[repr(C)]
+#[derive(Debug, Clone)]
 #[repr(align(16))]
 pub struct InterruptDescriptorTable {
     /// A divide error (`#DE`) occurs when the denominator of a DIV instruction or
@@ -422,8 +426,8 @@ pub struct InterruptDescriptorTable {
     /// - External interrupts are recognized on instruction boundaries. The saved instruction
     ///   pointer points to the instruction immediately following the boundary where the
     ///   external interrupt was recognized.
-    /// - If the interrupt occurs as a result of executing the INTn instruction, the saved
-    ///   instruction pointer points to the instruction after the INTn.
+    /// - If the interrupt occurs as a result of executing the `INTn` instruction, the saved
+    ///   instruction pointer points to the instruction after the `INTn`.
     interrupts: [Entry<HandlerFunc>; 224],
 }
 
@@ -455,312 +459,283 @@ impl core::ops::IndexMut<u8> for InterruptDescriptorTable {
     }
 }
 
-static IDT: spin::Mutex<InterruptDescriptorTable> = spin::Mutex::new(InterruptDescriptorTable {
-    divide_error: Entry::missing(),
-    debug: Entry::missing(),
-    non_maskable_interrupt: Entry::missing(),
-    breakpoint: Entry::missing(),
-    overflow: Entry::missing(),
-    bound_range_exceeded: Entry::missing(),
-    invalid_opcode: Entry::missing(),
-    device_not_available: Entry::missing(),
-    double_fault: Entry::missing(),
-    coprocessor_segment_overrun: Entry::missing(),
-    invalid_tss: Entry::missing(),
-    segment_not_present: Entry::missing(),
-    stack_segment_fault: Entry::missing(),
-    general_protection_fault: Entry::missing(),
-    page_fault: Entry::missing(),
-    _reserved1: [Entry::missing(); _],
-    x87_floating_point: Entry::missing(),
-    alignment_check: Entry::missing(),
-    machine_check: Entry::missing(),
-    simd_floating_point: Entry::missing(),
-    virtualization: Entry::missing(),
-    cp_protection_exception: Entry::missing(),
-    _reserved2: [Entry::missing(); _],
-    hv_injection_exception: Entry::missing(),
-    vmm_communication_exception: Entry::missing(),
-    security_exception: Entry::missing(),
-    _reserved3: [Entry::missing(); _],
-    interrupts: [Entry::missing(); _],
-});
+static IDT: spin::Once<InterruptDescriptorTable> = spin::Once::new();
 
 #[allow(clippy::too_many_lines)]
 pub fn load() {
-    let mut idt = IDT.lock();
+    IDT.call_once(|| InterruptDescriptorTable {
+        divide_error: Entry::new(de_stub),
+        // Safety: Stack table index is set to `Debug` stack.
+        debug: unsafe { Entry::new_with_stack(db_stub, StackTableIndex::Debug) },
+        // Safety: Stack table index is set to `NonMaskableInterrupt` stack.
+        non_maskable_interrupt: unsafe { Entry::new_with_stack(nmi_stub, StackTableIndex::NonMaskableInterrupt) },
+        breakpoint: Entry::new(bp_stub),
+        overflow: Entry::new(of_stub),
+        bound_range_exceeded: Entry::new(br_stub),
+        invalid_opcode: Entry::new(ud_stub),
+        device_not_available: Entry::new(na_stub),
+        // Safety: Stack table index is set to `DoubleFault` stack.
+        double_fault: unsafe { Entry::new_with_stack(df_stub, StackTableIndex::DoubleFault) },
+        coprocessor_segment_overrun: Entry::missing(),
+        invalid_tss: Entry::new(ts_stub),
+        segment_not_present: Entry::new(np_stub),
+        stack_segment_fault: Entry::new(ss_stub),
+        general_protection_fault: Entry::new(gp_stub),
+        page_fault: Entry::new(pf_stub),
+        _reserved1: [Entry::missing(); _],
+        x87_floating_point: Entry::new(mf_stub),
+        alignment_check: Entry::new(ac_stub),
+        // Safety: Stack table index is set to `MachineCheck` stack.
+        machine_check: unsafe { Entry::new_with_stack(mc_stub, StackTableIndex::MachineCheck) },
+        simd_floating_point: Entry::new(xm_stub),
+        virtualization: Entry::new(ve_stub),
+        cp_protection_exception: Entry::missing(),
+        _reserved2: [Entry::missing(); _],
+        hv_injection_exception: Entry::missing(),
+        vmm_communication_exception: Entry::missing(),
+        security_exception: Entry::missing(),
+        _reserved3: [Entry::missing(); _],
+        interrupts: [
+            // Safety: Privilege level is set for coming FROM userspace (ring 3) for syscalls.
+            unsafe { Entry::new_with_privilege(irq_128, super::gdt::PrivilegeLevel::Ring3) },
+            Entry::new(irq_32),
+            Entry::new(irq_33),
+            Entry::new(irq_34),
+            Entry::new(irq_35),
+            Entry::new(irq_36),
+            Entry::new(irq_37),
+            Entry::new(irq_39),
+            Entry::new(irq_38),
+            Entry::new(irq_40),
+            Entry::new(irq_41),
+            Entry::new(irq_42),
+            Entry::new(irq_43),
+            Entry::new(irq_44),
+            Entry::new(irq_45),
+            Entry::new(irq_46),
+            Entry::new(irq_47),
+            Entry::new(irq_48),
+            Entry::new(irq_49),
+            Entry::new(irq_50),
+            Entry::new(irq_51),
+            Entry::new(irq_52),
+            Entry::new(irq_53),
+            Entry::new(irq_54),
+            Entry::new(irq_55),
+            Entry::new(irq_56),
+            Entry::new(irq_57),
+            Entry::new(irq_58),
+            Entry::new(irq_59),
+            Entry::new(irq_60),
+            Entry::new(irq_61),
+            Entry::new(irq_62),
+            Entry::new(irq_63),
+            Entry::new(irq_64),
+            Entry::new(irq_65),
+            Entry::new(irq_66),
+            Entry::new(irq_67),
+            Entry::new(irq_68),
+            Entry::new(irq_69),
+            Entry::new(irq_70),
+            Entry::new(irq_71),
+            Entry::new(irq_72),
+            Entry::new(irq_73),
+            Entry::new(irq_74),
+            Entry::new(irq_75),
+            Entry::new(irq_76),
+            Entry::new(irq_77),
+            Entry::new(irq_78),
+            Entry::new(irq_79),
+            Entry::new(irq_80),
+            Entry::new(irq_81),
+            Entry::new(irq_82),
+            Entry::new(irq_83),
+            Entry::new(irq_84),
+            Entry::new(irq_85),
+            Entry::new(irq_86),
+            Entry::new(irq_87),
+            Entry::new(irq_88),
+            Entry::new(irq_89),
+            Entry::new(irq_90),
+            Entry::new(irq_91),
+            Entry::new(irq_92),
+            Entry::new(irq_93),
+            Entry::new(irq_94),
+            Entry::new(irq_95),
+            Entry::new(irq_96),
+            Entry::new(irq_97),
+            Entry::new(irq_98),
+            Entry::new(irq_99),
+            Entry::new(irq_100),
+            Entry::new(irq_101),
+            Entry::new(irq_102),
+            Entry::new(irq_103),
+            Entry::new(irq_104),
+            Entry::new(irq_105),
+            Entry::new(irq_106),
+            Entry::new(irq_107),
+            Entry::new(irq_108),
+            Entry::new(irq_109),
+            Entry::new(irq_110),
+            Entry::new(irq_111),
+            Entry::new(irq_112),
+            Entry::new(irq_113),
+            Entry::new(irq_114),
+            Entry::new(irq_115),
+            Entry::new(irq_116),
+            Entry::new(irq_117),
+            Entry::new(irq_118),
+            Entry::new(irq_119),
+            Entry::new(irq_120),
+            Entry::new(irq_121),
+            Entry::new(irq_122),
+            Entry::new(irq_123),
+            Entry::new(irq_124),
+            Entry::new(irq_125),
+            Entry::new(irq_126),
+            Entry::new(irq_127),
+            Entry::new(irq_129),
+            Entry::new(irq_130),
+            Entry::new(irq_131),
+            Entry::new(irq_132),
+            Entry::new(irq_133),
+            Entry::new(irq_134),
+            Entry::new(irq_135),
+            Entry::new(irq_136),
+            Entry::new(irq_137),
+            Entry::new(irq_138),
+            Entry::new(irq_139),
+            Entry::new(irq_140),
+            Entry::new(irq_141),
+            Entry::new(irq_142),
+            Entry::new(irq_143),
+            Entry::new(irq_144),
+            Entry::new(irq_145),
+            Entry::new(irq_146),
+            Entry::new(irq_147),
+            Entry::new(irq_148),
+            Entry::new(irq_149),
+            Entry::new(irq_150),
+            Entry::new(irq_151),
+            Entry::new(irq_152),
+            Entry::new(irq_153),
+            Entry::new(irq_154),
+            Entry::new(irq_155),
+            Entry::new(irq_156),
+            Entry::new(irq_157),
+            Entry::new(irq_158),
+            Entry::new(irq_159),
+            Entry::new(irq_160),
+            Entry::new(irq_161),
+            Entry::new(irq_162),
+            Entry::new(irq_163),
+            Entry::new(irq_164),
+            Entry::new(irq_165),
+            Entry::new(irq_166),
+            Entry::new(irq_167),
+            Entry::new(irq_168),
+            Entry::new(irq_169),
+            Entry::new(irq_170),
+            Entry::new(irq_171),
+            Entry::new(irq_172),
+            Entry::new(irq_173),
+            Entry::new(irq_174),
+            Entry::new(irq_175),
+            Entry::new(irq_176),
+            Entry::new(irq_177),
+            Entry::new(irq_178),
+            Entry::new(irq_179),
+            Entry::new(irq_180),
+            Entry::new(irq_181),
+            Entry::new(irq_182),
+            Entry::new(irq_183),
+            Entry::new(irq_184),
+            Entry::new(irq_185),
+            Entry::new(irq_186),
+            Entry::new(irq_187),
+            Entry::new(irq_188),
+            Entry::new(irq_189),
+            Entry::new(irq_190),
+            Entry::new(irq_191),
+            Entry::new(irq_192),
+            Entry::new(irq_193),
+            Entry::new(irq_194),
+            Entry::new(irq_195),
+            Entry::new(irq_196),
+            Entry::new(irq_197),
+            Entry::new(irq_198),
+            Entry::new(irq_199),
+            Entry::new(irq_200),
+            Entry::new(irq_201),
+            Entry::new(irq_202),
+            Entry::new(irq_203),
+            Entry::new(irq_204),
+            Entry::new(irq_205),
+            Entry::new(irq_206),
+            Entry::new(irq_207),
+            Entry::new(irq_208),
+            Entry::new(irq_209),
+            Entry::new(irq_210),
+            Entry::new(irq_211),
+            Entry::new(irq_212),
+            Entry::new(irq_213),
+            Entry::new(irq_214),
+            Entry::new(irq_215),
+            Entry::new(irq_216),
+            Entry::new(irq_217),
+            Entry::new(irq_218),
+            Entry::new(irq_219),
+            Entry::new(irq_220),
+            Entry::new(irq_221),
+            Entry::new(irq_222),
+            Entry::new(irq_223),
+            Entry::new(irq_224),
+            Entry::new(irq_225),
+            Entry::new(irq_226),
+            Entry::new(irq_227),
+            Entry::new(irq_228),
+            Entry::new(irq_229),
+            Entry::new(irq_230),
+            Entry::new(irq_231),
+            Entry::new(irq_232),
+            Entry::new(irq_233),
+            Entry::new(irq_234),
+            Entry::new(irq_235),
+            Entry::new(irq_236),
+            Entry::new(irq_237),
+            Entry::new(irq_238),
+            Entry::new(irq_239),
+            Entry::new(irq_240),
+            Entry::new(irq_241),
+            Entry::new(irq_242),
+            Entry::new(irq_243),
+            Entry::new(irq_244),
+            Entry::new(irq_245),
+            Entry::new(irq_246),
+            Entry::new(irq_247),
+            Entry::new(irq_248),
+            Entry::new(irq_249),
+            Entry::new(irq_250),
+            Entry::new(irq_251),
+            Entry::new(irq_252),
+            Entry::new(irq_253),
+            Entry::new(irq_254),
+            Entry::new(irq_255),
+        ],
+    });
 
-    // Safety: These are nominal and agreed-upon states for the given exception vectors.
-    unsafe {
-        idt.debug.set_handler_fn(db_handler).set_stack_index(DB_STACK_TABLE_INDEX);
-        idt.non_maskable_interrupt.set_handler_fn(nmi_handler).set_stack_index(NM_STACK_TABLE_INDEX);
-        idt.double_fault.set_handler_fn(df_handler).set_stack_index(DF_STACK_TABLE_INDEX);
-        idt.machine_check.set_handler_fn(mc_handler).set_stack_index(MC_STACK_TABLE_INDEX);
-    }
-
-    idt.divide_error.set_handler_fn(de_handler);
-    idt.breakpoint.set_handler_fn(bp_handler);
-    idt.overflow.set_handler_fn(of_handler);
-    idt.bound_range_exceeded.set_handler_fn(br_handler);
-    idt.invalid_opcode.set_handler_fn(ud_handler);
-    idt.device_not_available.set_handler_fn(na_handler);
-    idt.invalid_tss.set_handler_fn(ts_handler);
-    idt.segment_not_present.set_handler_fn(np_handler);
-    idt.stack_segment_fault.set_handler_fn(ss_handler);
-    idt.general_protection_fault.set_handler_fn(gp_handler);
-    idt.page_fault.set_handler_fn(pf_handler);
-    // --- 15    reserved
-    idt.x87_floating_point.set_handler_fn(mf_handler);
-    idt.alignment_check.set_handler_fn(ac_handler);
-    idt.simd_floating_point.set_handler_fn(xm_handler);
-    idt.virtualization.set_handler_fn(ve_handler);
-    // --- 20-31 reserved
-    // --- 32    triple fault (can't handle)
-
-    // userspace syscall vector
-    idt[128].set_handler_fn(irq_128).set_privilege_level(super::gdt::PrivilegeLevel::Ring3);
-
-    idt[32].set_handler_fn(irq_32);
-    idt[33].set_handler_fn(irq_33);
-    idt[34].set_handler_fn(irq_34);
-    idt[35].set_handler_fn(irq_35);
-    idt[36].set_handler_fn(irq_36);
-    idt[37].set_handler_fn(irq_37);
-    idt[38].set_handler_fn(irq_38);
-    idt[39].set_handler_fn(irq_39);
-    idt[40].set_handler_fn(irq_40);
-    idt[41].set_handler_fn(irq_41);
-    idt[42].set_handler_fn(irq_42);
-    idt[43].set_handler_fn(irq_43);
-    idt[44].set_handler_fn(irq_44);
-    idt[45].set_handler_fn(irq_45);
-    idt[46].set_handler_fn(irq_46);
-    idt[47].set_handler_fn(irq_47);
-    idt[48].set_handler_fn(irq_48);
-    idt[49].set_handler_fn(irq_49);
-    idt[50].set_handler_fn(irq_50);
-    idt[51].set_handler_fn(irq_51);
-    idt[52].set_handler_fn(irq_52);
-    idt[53].set_handler_fn(irq_53);
-    idt[54].set_handler_fn(irq_54);
-    idt[55].set_handler_fn(irq_55);
-    idt[56].set_handler_fn(irq_56);
-    idt[57].set_handler_fn(irq_57);
-    idt[58].set_handler_fn(irq_58);
-    idt[59].set_handler_fn(irq_59);
-    idt[60].set_handler_fn(irq_60);
-    idt[61].set_handler_fn(irq_61);
-    idt[62].set_handler_fn(irq_62);
-    idt[63].set_handler_fn(irq_63);
-    idt[64].set_handler_fn(irq_64);
-    idt[65].set_handler_fn(irq_65);
-    idt[66].set_handler_fn(irq_66);
-    idt[67].set_handler_fn(irq_67);
-    idt[68].set_handler_fn(irq_68);
-    idt[69].set_handler_fn(irq_69);
-    idt[70].set_handler_fn(irq_70);
-    idt[71].set_handler_fn(irq_71);
-    idt[72].set_handler_fn(irq_72);
-    idt[73].set_handler_fn(irq_73);
-    idt[74].set_handler_fn(irq_74);
-    idt[75].set_handler_fn(irq_75);
-    idt[76].set_handler_fn(irq_76);
-    idt[77].set_handler_fn(irq_77);
-    idt[78].set_handler_fn(irq_78);
-    idt[79].set_handler_fn(irq_79);
-    idt[80].set_handler_fn(irq_80);
-    idt[81].set_handler_fn(irq_81);
-    idt[82].set_handler_fn(irq_82);
-    idt[83].set_handler_fn(irq_83);
-    idt[84].set_handler_fn(irq_84);
-    idt[85].set_handler_fn(irq_85);
-    idt[86].set_handler_fn(irq_86);
-    idt[87].set_handler_fn(irq_87);
-    idt[88].set_handler_fn(irq_88);
-    idt[89].set_handler_fn(irq_89);
-    idt[90].set_handler_fn(irq_90);
-    idt[91].set_handler_fn(irq_91);
-    idt[92].set_handler_fn(irq_92);
-    idt[93].set_handler_fn(irq_93);
-    idt[94].set_handler_fn(irq_94);
-    idt[95].set_handler_fn(irq_95);
-    idt[96].set_handler_fn(irq_96);
-    idt[97].set_handler_fn(irq_97);
-    idt[98].set_handler_fn(irq_98);
-    idt[99].set_handler_fn(irq_99);
-    idt[100].set_handler_fn(irq_100);
-    idt[101].set_handler_fn(irq_101);
-    idt[102].set_handler_fn(irq_102);
-    idt[103].set_handler_fn(irq_103);
-    idt[104].set_handler_fn(irq_104);
-    idt[105].set_handler_fn(irq_105);
-    idt[106].set_handler_fn(irq_106);
-    idt[107].set_handler_fn(irq_107);
-    idt[108].set_handler_fn(irq_108);
-    idt[109].set_handler_fn(irq_109);
-    idt[110].set_handler_fn(irq_110);
-    idt[111].set_handler_fn(irq_111);
-    idt[112].set_handler_fn(irq_112);
-    idt[113].set_handler_fn(irq_113);
-    idt[114].set_handler_fn(irq_114);
-    idt[115].set_handler_fn(irq_115);
-    idt[116].set_handler_fn(irq_116);
-    idt[117].set_handler_fn(irq_117);
-    idt[118].set_handler_fn(irq_118);
-    idt[119].set_handler_fn(irq_119);
-    idt[120].set_handler_fn(irq_120);
-    idt[121].set_handler_fn(irq_121);
-    idt[122].set_handler_fn(irq_122);
-    idt[123].set_handler_fn(irq_123);
-    idt[124].set_handler_fn(irq_124);
-    idt[125].set_handler_fn(irq_125);
-    idt[126].set_handler_fn(irq_126);
-    idt[127].set_handler_fn(irq_127);
-    idt[129].set_handler_fn(irq_129);
-    idt[130].set_handler_fn(irq_130);
-    idt[131].set_handler_fn(irq_131);
-    idt[132].set_handler_fn(irq_132);
-    idt[133].set_handler_fn(irq_133);
-    idt[134].set_handler_fn(irq_134);
-    idt[135].set_handler_fn(irq_135);
-    idt[136].set_handler_fn(irq_136);
-    idt[137].set_handler_fn(irq_137);
-    idt[138].set_handler_fn(irq_138);
-    idt[139].set_handler_fn(irq_139);
-    idt[140].set_handler_fn(irq_140);
-    idt[141].set_handler_fn(irq_141);
-    idt[142].set_handler_fn(irq_142);
-    idt[143].set_handler_fn(irq_143);
-    idt[144].set_handler_fn(irq_144);
-    idt[145].set_handler_fn(irq_145);
-    idt[146].set_handler_fn(irq_146);
-    idt[147].set_handler_fn(irq_147);
-    idt[148].set_handler_fn(irq_148);
-    idt[149].set_handler_fn(irq_149);
-    idt[150].set_handler_fn(irq_150);
-    idt[151].set_handler_fn(irq_151);
-    idt[152].set_handler_fn(irq_152);
-    idt[153].set_handler_fn(irq_153);
-    idt[154].set_handler_fn(irq_154);
-    idt[155].set_handler_fn(irq_155);
-    idt[156].set_handler_fn(irq_156);
-    idt[157].set_handler_fn(irq_157);
-    idt[158].set_handler_fn(irq_158);
-    idt[159].set_handler_fn(irq_159);
-    idt[160].set_handler_fn(irq_160);
-    idt[161].set_handler_fn(irq_161);
-    idt[162].set_handler_fn(irq_162);
-    idt[163].set_handler_fn(irq_163);
-    idt[164].set_handler_fn(irq_164);
-    idt[165].set_handler_fn(irq_165);
-    idt[166].set_handler_fn(irq_166);
-    idt[167].set_handler_fn(irq_167);
-    idt[168].set_handler_fn(irq_168);
-    idt[169].set_handler_fn(irq_169);
-    idt[170].set_handler_fn(irq_170);
-    idt[171].set_handler_fn(irq_171);
-    idt[172].set_handler_fn(irq_172);
-    idt[173].set_handler_fn(irq_173);
-    idt[174].set_handler_fn(irq_174);
-    idt[175].set_handler_fn(irq_175);
-    idt[176].set_handler_fn(irq_176);
-    idt[177].set_handler_fn(irq_177);
-    idt[178].set_handler_fn(irq_178);
-    idt[179].set_handler_fn(irq_179);
-    idt[180].set_handler_fn(irq_180);
-    idt[181].set_handler_fn(irq_181);
-    idt[182].set_handler_fn(irq_182);
-    idt[183].set_handler_fn(irq_183);
-    idt[184].set_handler_fn(irq_184);
-    idt[185].set_handler_fn(irq_185);
-    idt[186].set_handler_fn(irq_186);
-    idt[187].set_handler_fn(irq_187);
-    idt[188].set_handler_fn(irq_188);
-    idt[189].set_handler_fn(irq_189);
-    idt[190].set_handler_fn(irq_190);
-    idt[191].set_handler_fn(irq_191);
-    idt[192].set_handler_fn(irq_192);
-    idt[193].set_handler_fn(irq_193);
-    idt[194].set_handler_fn(irq_194);
-    idt[195].set_handler_fn(irq_195);
-    idt[196].set_handler_fn(irq_196);
-    idt[197].set_handler_fn(irq_197);
-    idt[198].set_handler_fn(irq_198);
-    idt[199].set_handler_fn(irq_199);
-    idt[200].set_handler_fn(irq_200);
-    idt[201].set_handler_fn(irq_201);
-    idt[202].set_handler_fn(irq_202);
-    idt[203].set_handler_fn(irq_203);
-    idt[204].set_handler_fn(irq_204);
-    idt[205].set_handler_fn(irq_205);
-    idt[206].set_handler_fn(irq_206);
-    idt[207].set_handler_fn(irq_207);
-    idt[208].set_handler_fn(irq_208);
-    idt[209].set_handler_fn(irq_209);
-    idt[210].set_handler_fn(irq_210);
-    idt[211].set_handler_fn(irq_211);
-    idt[212].set_handler_fn(irq_212);
-    idt[213].set_handler_fn(irq_213);
-    idt[214].set_handler_fn(irq_214);
-    idt[215].set_handler_fn(irq_215);
-    idt[216].set_handler_fn(irq_216);
-    idt[217].set_handler_fn(irq_217);
-    idt[218].set_handler_fn(irq_218);
-    idt[219].set_handler_fn(irq_219);
-    idt[220].set_handler_fn(irq_220);
-    idt[221].set_handler_fn(irq_221);
-    idt[222].set_handler_fn(irq_222);
-    idt[223].set_handler_fn(irq_223);
-    idt[224].set_handler_fn(irq_224);
-    idt[225].set_handler_fn(irq_225);
-    idt[226].set_handler_fn(irq_226);
-    idt[227].set_handler_fn(irq_227);
-    idt[228].set_handler_fn(irq_228);
-    idt[229].set_handler_fn(irq_229);
-    idt[230].set_handler_fn(irq_230);
-    idt[231].set_handler_fn(irq_231);
-    idt[232].set_handler_fn(irq_232);
-    idt[233].set_handler_fn(irq_233);
-    idt[234].set_handler_fn(irq_234);
-    idt[235].set_handler_fn(irq_235);
-    idt[236].set_handler_fn(irq_236);
-    idt[237].set_handler_fn(irq_237);
-    idt[238].set_handler_fn(irq_238);
-    idt[239].set_handler_fn(irq_239);
-    idt[240].set_handler_fn(irq_240);
-    idt[241].set_handler_fn(irq_241);
-    idt[242].set_handler_fn(irq_242);
-    idt[243].set_handler_fn(irq_243);
-    idt[244].set_handler_fn(irq_244);
-    idt[245].set_handler_fn(irq_245);
-    idt[246].set_handler_fn(irq_246);
-    idt[247].set_handler_fn(irq_247);
-    idt[248].set_handler_fn(irq_248);
-    idt[249].set_handler_fn(irq_249);
-    idt[250].set_handler_fn(irq_250);
-    idt[251].set_handler_fn(irq_251);
-    idt[252].set_handler_fn(irq_252);
-    idt[253].set_handler_fn(irq_253);
-    idt[254].set_handler_fn(irq_254);
-    idt[255].set_handler_fn(irq_255);
-
+    let idt = IDT.get().unwrap();
     let idt_dtptr = crate::arch::x86_64::structures::DescriptorTablePointer {
-        limit: u16::try_from(core::mem::size_of_val(&*idt) - 1).unwrap(),
-        base: u64::try_from((&raw const *idt).addr()).unwrap(),
+        limit: u16::try_from(core::mem::size_of_val(idt) - 1).unwrap(),
+        base: u64::try_from(core::ptr::from_ref(idt).addr()).unwrap(),
     };
 
     // Safety: The descriptor table pointer was properly constructed.
     unsafe {
         core::arch::asm!(
             "lidt [{}]",
-            in(reg) &idt_dtptr,
+            in(reg) &raw const idt_dtptr,
             options(readonly, nostack, preserves_flags)
         );
     }
 }
-
-// #[allow(clippy::too_many_lines)]
-// pub fn set_stub_handlers(idt: &mut InterruptDescriptorTable) {
-//     // userspace syscall vector
-//     idt[128].set_handler_fn(irq_128).set_privilege_level(ia32utils::PrivilegeLevel::Ring3);
-// }

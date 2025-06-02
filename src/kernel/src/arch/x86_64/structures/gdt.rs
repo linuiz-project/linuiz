@@ -1,6 +1,6 @@
 bitflags! {
-    #[derive(Debug, Clone, Copy)]
     #[repr(transparent)]
+    #[derive(Debug, Clone, Copy)]
     struct SegmentDescriptor: u64 {
         /// Set by the processor if this segment has been accessed. Only cleared by software.
         /// *Setting* this bit in software prevents GDT writes on first use.
@@ -171,8 +171,8 @@ pub unsafe fn load() {
 /// with some additional flags).
 ///
 /// See Intel 3a, Section 3.4.2 "Segment Selectors"
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SegmentSelector(u16);
 
 impl SegmentSelector {
@@ -215,8 +215,8 @@ impl core::fmt::Debug for SegmentSelector {
 }
 
 /// Represents a protection ring level.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[repr(u8)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum PrivilegeLevel {
     /// Privilege-level 0 (most privilege): This level is used by critical system-software
     /// components that require direct access to, and control over, all processor and system

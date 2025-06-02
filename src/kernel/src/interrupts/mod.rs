@@ -1,10 +1,10 @@
+use num_enum::TryFromPrimitive;
+
 pub mod exceptions;
 pub mod syscall;
 
-mod instructions;
-pub use instructions::*;
-
-use num_enum::TryFromPrimitive;
+#[cfg(target_arch = "x86_64")]
+pub use crate::arch::x86_64::instructions::interrupts::{disable, enable, is_enabled, wait_next};
 
 /// Delivery mode for IPIs.
 #[repr(u32)]
@@ -76,4 +76,54 @@ impl<T> InterruptCell<T> {
     pub fn with_mut<U>(&mut self, func: impl FnOnce(&mut T) -> U) -> U {
         without(|| func(&mut self.0))
     }
+}
+
+/// Disables interrupts, executes the given [`FnOnce`], and re-enables interrupts if they were prior.
+#[inline]
+pub fn without<R>(func: impl FnOnce() -> R) -> R {
+    let interrupts_enabled = is_enabled();
+
+    if interrupts_enabled {
+        // Safety: Interrupts are expected to be disabled, and are later re-enabled.
+        unsafe {
+            disable();
+        }
+    }
+
+    let return_value = func();
+
+    if interrupts_enabled {
+        // Safety: Interrupts were previously enabled.
+        unsafe {
+            enable();
+        }
+    }
+
+    return_value
+}
+
+/// Indefinitely waits for the next interrupt on the current hardware thread.
+#[inline(always)]
+pub fn wait_indefinite() -> ! {
+    loop {
+        // Safety: We never recover from this, so it doesn't matter if a deadlock occurs.
+        unsafe {
+            wait_next();
+        }
+    }
+}
+
+/// Murder, in cold electrons, the current hardware thread.
+///
+/// ## Safety
+///
+/// Murdering a hardware thread is undefined behaviour.
+#[inline(always)]
+pub unsafe fn halt_and_catch_fire() -> ! {
+    // Safety: We never recover from this, so it doesn't matter.
+    unsafe {
+        disable();
+    }
+
+    wait_indefinite()
 }

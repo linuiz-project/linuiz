@@ -2,6 +2,16 @@ use libsys::{Address, Frame, Page, Virtual};
 
 pub static HHDM: spin::Once<Hhdm> = spin::Once::new();
 
+pub fn set(hhdm_request: &limine::request::HhdmRequest) {
+    HHDM.call_once(|| {
+        let hhdm_address = hhdm_request.get_response().expect("bootloader did not provide HHDM response").offset();
+
+        debug!("HHDM @ {hhdm_address:#X}");
+
+        Hhdm(Address::<Page>::new(hhdm_address.try_into().unwrap()).unwrap())
+    });
+}
+
 pub fn get() -> &'static Hhdm {
     HHDM.get().unwrap()
 }
@@ -11,10 +21,6 @@ pub fn get() -> &'static Hhdm {
 pub struct Hhdm(Address<Page>);
 
 impl Hhdm {
-    pub const fn new(address: Address<Page>) -> Self {
-        Self(address)
-    }
-
     pub const fn page(self) -> Address<Page> {
         self.0
     }

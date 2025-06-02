@@ -86,7 +86,7 @@ macro_rules! exception_handler {
     ($exception_name:ident, $return_type:ty) => {
         paste::paste! {
             #[unsafe(naked)]
-            pub extern "x86-interrupt" fn [<$exception_name _handler>](stack_frame: InterruptStackFrame) -> $return_type {
+            pub extern "x86-interrupt" fn [<$exception_name _stub>](stack_frame: InterruptStackFrame) -> $return_type {
                 // Safety: When has perfect assembly ever caused undefined behaviour?
                 unsafe {
                     core::arch::naked_asm!(
@@ -107,7 +107,7 @@ macro_rules! exception_handler {
                         pop_gprs!(),
 
                         "iretq",
-                        sym [<$exception_name _handler_inner>]
+                        sym [<$exception_name _handler>]
                     )
                 }
             }
@@ -119,7 +119,7 @@ macro_rules! exception_handler_with_error {
     ($exception_name:ident, $error_ty:ty, $return_type:ty) => {
         paste::paste! {
             #[unsafe(naked)]
-            pub extern "x86-interrupt" fn [<$exception_name _handler>](
+            pub extern "x86-interrupt" fn [<$exception_name _stub>](
                 stack_frame: InterruptStackFrame,
                 error_code: $error_ty
             ) -> $return_type {
@@ -148,7 +148,7 @@ macro_rules! exception_handler_with_error {
                         "add rsp, 0x8",  // "pop" the error code
 
                         "iretq",
-                        sym [<$exception_name _handler_inner>]
+                        sym [<$exception_name _handler>]
                     )
                 }
             }
@@ -184,7 +184,7 @@ macro_rules! irq_stub {
 
                         "iretq",
                         const $irq_vector,
-                        sym handle_irq
+                        sym irq_handler
                     );
                 }
             }
@@ -196,7 +196,7 @@ macro_rules! irq_stub {
 ///
 /// This function should not be called directly.
 #[allow(clippy::similar_names)]
-unsafe extern "sysv64" fn handle_irq(irq_number: u64, isf: &mut InterruptStackFrame, regs: &mut Registers) {
+unsafe extern "sysv64" fn irq_handler(irq_number: u64, isf: &mut InterruptStackFrame, regs: &mut Registers) {
     match Vector::try_from(irq_number) {
         Ok(Vector::Timer) => crate::cpu::state::with_scheduler(|scheduler| scheduler.interrupt_task(isf, regs)),
 
@@ -224,103 +224,103 @@ unsafe extern "sysv64" fn handle_irq(irq_number: u64, isf: &mut InterruptStackFr
 }
 
 exception_handler!(de, ());
-extern "sysv64" fn de_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
+extern "sysv64" fn de_handler(stack_frame: &InterruptStackFrame, gprs: &Registers) {
     handle(&ArchException::DivideError(stack_frame, gprs));
 }
 
 exception_handler!(db, ());
-extern "sysv64" fn db_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
+extern "sysv64" fn db_handler(stack_frame: &InterruptStackFrame, gprs: &Registers) {
     handle(&ArchException::Debug(stack_frame, gprs));
 }
 
 exception_handler!(nmi, ());
-extern "sysv64" fn nmi_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
+extern "sysv64" fn nmi_handler(stack_frame: &InterruptStackFrame, gprs: &Registers) {
     handle(&ArchException::NonMaskable(stack_frame, gprs));
 }
 
 exception_handler!(bp, ());
-extern "sysv64" fn bp_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
+extern "sysv64" fn bp_handler(stack_frame: &InterruptStackFrame, gprs: &Registers) {
     handle(&ArchException::Breakpoint(stack_frame, gprs));
 }
 
 exception_handler!(of, ());
-extern "sysv64" fn of_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
+extern "sysv64" fn of_handler(stack_frame: &InterruptStackFrame, gprs: &Registers) {
     handle(&ArchException::Overflow(stack_frame, gprs));
 }
 
 exception_handler!(br, ());
-extern "sysv64" fn br_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
+extern "sysv64" fn br_handler(stack_frame: &InterruptStackFrame, gprs: &Registers) {
     handle(&ArchException::BoundRangeExceeded(stack_frame, gprs));
 }
 
 exception_handler!(ud, ());
-extern "sysv64" fn ud_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
+extern "sysv64" fn ud_handler(stack_frame: &InterruptStackFrame, gprs: &Registers) {
     handle(&ArchException::InvalidOpcode(stack_frame, gprs));
 }
 
 exception_handler!(na, ());
-extern "sysv64" fn na_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
+extern "sysv64" fn na_handler(stack_frame: &InterruptStackFrame, gprs: &Registers) {
     handle(&ArchException::DeviceNotAvailable(stack_frame, gprs));
 }
 
 exception_handler_with_error!(df, u64, !);
-extern "sysv64" fn df_handler_inner(stack_frame: &InterruptStackFrame, _: u64, gprs: &Registers) -> ! {
+extern "sysv64" fn df_handler(stack_frame: &InterruptStackFrame, _: u64, gprs: &Registers) -> ! {
     handle(&ArchException::DoubleFault(stack_frame, gprs));
 
     unreachable!()
 }
 
 exception_handler_with_error!(ts, u64, ());
-extern "sysv64" fn ts_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &Registers) {
+extern "sysv64" fn ts_handler(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &Registers) {
     handle(&ArchException::InvalidTSS(stack_frame, SelectorErrorCode::new(error_code).unwrap(), gprs));
 }
 
 exception_handler_with_error!(np, u64, ());
-extern "sysv64" fn np_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &Registers) {
+extern "sysv64" fn np_handler(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &Registers) {
     handle(&ArchException::SegmentNotPresent(stack_frame, SelectorErrorCode::new(error_code).unwrap(), gprs));
 }
 
 exception_handler_with_error!(ss, u64, ());
-extern "sysv64" fn ss_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &Registers) {
+extern "sysv64" fn ss_handler(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &Registers) {
     handle(&ArchException::StackSegmentFault(stack_frame, SelectorErrorCode::new(error_code).unwrap(), gprs));
 }
 
 exception_handler_with_error!(gp, u64, ());
-extern "sysv64" fn gp_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &Registers) {
+extern "sysv64" fn gp_handler(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &Registers) {
     handle(&ArchException::GeneralProtectionFault(stack_frame, SelectorErrorCode::new(error_code).unwrap(), gprs));
 }
 
 exception_handler_with_error!(pf, PageFaultErrorCode, ());
-extern "sysv64" fn pf_handler_inner(stack_frame: &InterruptStackFrame, err: PageFaultErrorCode, gprs: &Registers) {
+extern "sysv64" fn pf_handler(stack_frame: &InterruptStackFrame, err: PageFaultErrorCode, gprs: &Registers) {
     handle(&ArchException::PageFault(stack_frame, gprs, err, crate::arch::x86_64::registers::control::CR2::read()));
 }
 
 // --- reserved 15
 
 exception_handler!(mf, ());
-extern "sysv64" fn mf_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
+extern "sysv64" fn mf_handler(stack_frame: &InterruptStackFrame, gprs: &Registers) {
     handle(&ArchException::x87FloatingPoint(stack_frame, gprs));
 }
 
 exception_handler_with_error!(ac, u64, ());
-extern "sysv64" fn ac_handler_inner(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &Registers) {
+extern "sysv64" fn ac_handler(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &Registers) {
     handle(&ArchException::AlignmentCheck(stack_frame, error_code, gprs));
 }
 
 exception_handler!(mc, !);
-extern "sysv64" fn mc_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) -> ! {
+extern "sysv64" fn mc_handler(stack_frame: &InterruptStackFrame, gprs: &Registers) -> ! {
     handle(&ArchException::MachineCheck(stack_frame, gprs));
     // Wait indefinite in case the above exception handler returns control flow.
     crate::interrupts::wait_indefinite()
 }
 
 exception_handler!(xm, ());
-extern "sysv64" fn xm_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
+extern "sysv64" fn xm_handler(stack_frame: &InterruptStackFrame, gprs: &Registers) {
     handle(&ArchException::SimdFlaotingPoint(stack_frame, gprs));
 }
 
 exception_handler!(ve, ());
-extern "sysv64" fn ve_handler_inner(stack_frame: &InterruptStackFrame, gprs: &Registers) {
+extern "sysv64" fn ve_handler(stack_frame: &InterruptStackFrame, gprs: &Registers) {
     handle(&ArchException::Virtualization(stack_frame, gprs));
 }
 

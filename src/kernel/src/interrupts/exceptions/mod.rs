@@ -8,7 +8,7 @@ pub use arch::*;
 #[doc(hidden)]
 #[inline(never)]
 pub fn handle(exception: &ArchException) {
-    trace!("Exception: {:#X?}", exception);
+    trace!("Exception:\n{exception:#X?}");
 
     match exception {
         // Safety: Function is called once per this page fault exception.
@@ -19,7 +19,7 @@ pub fn handle(exception: &ArchException) {
         },
 
         _ => panic!("could not handle exception!"),
-    };
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

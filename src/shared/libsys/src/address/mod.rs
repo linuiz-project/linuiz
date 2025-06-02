@@ -11,9 +11,11 @@ pub use r#virtual::*;
 use core::fmt;
 
 pub trait Addressable: Sized {
+    type Repr;
     type Init;
-    type Repr: Copy;
     type Get;
+
+    const DEBUG_NAME: &'static str;
 
     fn new(init: Self::Init) -> Option<Self::Repr>;
     fn new_truncate(init: Self::Init) -> Self::Repr;
@@ -71,42 +73,30 @@ impl<Kind: IndexAddressable> Address<Kind> {
     }
 }
 
-impl<Repr: Default, I, K: Addressable<Init = I, Repr = Repr>> Default for Address<K> {
+impl<Repr: Default, I, Kind: Addressable<Init = I, Repr = Repr>> Default for Address<Kind> {
     fn default() -> Self {
         Self(Repr::default())
     }
 }
 
-impl<Repr: Clone, I, K: Addressable<Init = I, Repr = Repr>> Clone for Address<K> {
+impl<Repr: Clone, I, Kind: Addressable<Init = I, Repr = Repr>> Clone for Address<Kind> {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
 }
 
-impl<Repr: Copy, I, K: Addressable<Init = I, Repr = Repr>> Copy for Address<K> {}
+impl<Repr: Copy, I, Kind: Addressable<Init = I, Repr = Repr>> Copy for Address<Kind> {}
 
-impl<Repr: PartialEq, I, K: Addressable<Init = I, Repr = Repr>> PartialEq for Address<K> {
+impl<Repr: PartialEq, I, Kind: Addressable<Init = I, Repr = Repr>> PartialEq for Address<Kind> {
     fn eq(&self, other: &Self) -> bool {
         self.0.eq(&other.0)
     }
 }
 
-impl<Repr: Eq, I, K: Addressable<Init = I, Repr = Repr>> Eq for Address<K> {}
+impl<Repr: Eq, I, Kind: Addressable<Init = I, Repr = Repr>> Eq for Address<Kind> {}
 
-impl<I, Repr: fmt::Debug, K: Addressable<Init = I, Repr = Repr>> fmt::Debug for Address<K> {
+impl<I, Repr: fmt::Debug, Kind: Addressable<Init = I, Repr = Repr>> fmt::Debug for Address<Kind> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("Address").field(&self.0).finish()
-    }
-}
-
-impl<I, Repr: fmt::LowerHex, K: Addressable<Init = I, Repr = Repr>> fmt::LowerHex for Address<K> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("Address({:#x})", self.0))
-    }
-}
-
-impl<I, Repr: fmt::UpperHex, K: Addressable<Init = I, Repr = Repr>> fmt::UpperHex for Address<K> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("Address({:#X})", self.0))
+        f.debug_tuple(Kind::DEBUG_NAME).field(&self.0).finish()
     }
 }

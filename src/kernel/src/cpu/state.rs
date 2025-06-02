@@ -7,13 +7,6 @@ pub const US_PER_SEC: u32 = 1000000;
 pub const US_WAIT: u32 = 10000;
 pub const US_FREQ_FACTOR: u32 = US_PER_SEC / US_WAIT;
 
-crate::error_impl! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum Error {
-        NotInitialized => None
-    }
-}
-
 pub const STACK_SIZE: usize = 0x10000;
 
 #[repr(C)]
@@ -78,7 +71,7 @@ pub unsafe fn init(timer_frequency: u16) {
     // };
 
     let mut state = Box::new(State {
-        core_id: crate::cpu::read_id(),
+        core_id: crate::cpu::get_id(),
         scheduler: InterruptCell::new(Scheduler::new(false)),
 
         // #[cfg(target_arch = "x86_64")]
@@ -150,27 +143,22 @@ pub unsafe fn init(timer_frequency: u16) {
 
             frequency / u64::from(timer_frequency)
         } else {
+            // Safety: APIC is not currently in use, so can be reset.
             unsafe {
                 apic.sw_enable();
                 apic.set_timer_divisor(apic::TimerDivisor::Div1);
                 apic.get_timer().set_masked(true).set_mode(apic::TimerMode::OneShot);
+                apic.set_timer_initial_count(u32::MAX);
             }
 
-            let frequency = {
-                // Safety: No other context is awaiting on the timer count.
-                unsafe {
-                    apic.set_timer_initial_count(u32::MAX);
-                }
+            crate::time::SYSTEM_CLOCK.spin_wait_us(US_WAIT);
+            let timer_count = apic.get_timer_current_count();
 
-                crate::time::SYSTEM_CLOCK.spin_wait_us(US_WAIT);
-                let timer_count = apic.get_timer_current_count();
+            let frequency = (u32::MAX - timer_count) * US_FREQ_FACTOR;
 
-                (u32::MAX - timer_count) * US_FREQ_FACTOR
-            };
-
+            // Ensure we reset the APIC timer to avoid any errant interrupts.
             // Safety: No other context is awaiting on the timer count.
             unsafe {
-                // Ensure we reset the APIC timer to avoid any errant interrupts.
                 apic.set_timer_initial_count(0);
             }
 
@@ -189,27 +177,22 @@ pub unsafe fn init(timer_frequency: u16) {
     }
 }
 
-fn get_state_ptr() -> Result<NonNull<State>> {
+fn get_ptr() -> NonNull<State> {
     let kernel_gs_usize = usize::try_from(crate::arch::x86_64::registers::msr::IA32_KERNEL_GS_BASE::read()).unwrap();
-    NonNull::new(kernel_gs_usize as *mut State).ok_or(Error::NotInitialized)
+    NonNull::new(kernel_gs_usize as *mut State).expect("state register is empty")
 }
 
-fn get_state() -> Result<&'static State> {
+fn get() -> &'static State {
     // Safety: If the pointer is non-null, the kernel guarantees it will be initialized.
-    unsafe { get_state_ptr().map(|ptr| ptr.as_ref()) }
+    unsafe { get_ptr().as_ref() }
 }
 
-fn get_state_mut() -> Result<&'static mut State> {
+fn get_mut() -> &'static mut State {
     // Safety: If the pointer is non-null, the kernel guarantees it will be initialized.
-    unsafe { get_state_ptr().map(|mut ptr| ptr.as_mut()) }
+    unsafe { get_ptr().as_mut() }
 }
 
-/// Returns the generated ID for the local core.
-pub fn get_core_id() -> Result<u32> {
-    get_state().map(|state| state.core_id)
-}
-
-pub unsafe fn begin_scheduling() -> Result<()> {
+pub unsafe fn begin_scheduling() {
     // Enable scheduler ...
     with_scheduler(|scheduler| {
         assert!(!scheduler.is_enabled());
@@ -217,7 +200,7 @@ pub unsafe fn begin_scheduling() -> Result<()> {
     });
 
     // Enable APIC timer ...
-    let apic = &mut get_state_mut()?.apic;
+    let apic = &mut get_mut().apic;
     assert!(apic.get_timer().get_masked());
     // Safety: Calling `begin_scheduling` implies this state change is expected.
     unsafe {
@@ -226,32 +209,30 @@ pub unsafe fn begin_scheduling() -> Result<()> {
 
     // Safety: Calling `begin_scheduling` implies this function is expected to be called.
     unsafe {
-        set_preemption_wait(core::num::NonZeroU16::MIN)?;
+        set_preemption_wait(core::num::NonZeroU16::MIN);
     }
-
-    Ok(())
 }
 
 pub fn with_scheduler<O>(func: impl FnOnce(&mut crate::task::Scheduler) -> O) -> O {
-    let state = get_state_mut().unwrap();
-    state.scheduler.with_mut(func)
+    get_mut().scheduler.with_mut(func)
 }
 
 /// Ends the current interrupt context for the interrupt controller. On platforms that
 /// don't require an end of interrupt instruction, this is a no-op.
-pub unsafe fn end_of_interrupt() -> Result<()> {
-    // TODO this shouldn't return a result
+///
+/// # Safety
+///
+/// - Function must be called only once at the very end of an interrupt context.
+pub unsafe fn end_of_interrupt() {
     #[cfg(target_arch = "x86_64")]
-    get_state().map(|state| state.apic.end_of_interrupt())?;
-
-    Ok(())
+    get().apic.end_of_interrupt();
 }
 
 /// ## Safety
 ///
-/// Caller must ensure that setting a new preemption wait will not cause undefined behaviour.
-pub unsafe fn set_preemption_wait(interval_wait: core::num::NonZeroU16) -> Result<()> {
-    let state = get_state_mut()?;
+/// - Function should only be called once the last preemption wait has resolved.
+pub unsafe fn set_preemption_wait(interval_wait: core::num::NonZeroU16) {
+    let state = get_mut();
     let timer_interval = state.timer_interval.unwrap();
 
     #[cfg(target_arch = "x86_64")]
@@ -275,8 +256,6 @@ pub unsafe fn set_preemption_wait(interval_wait: core::num::NonZeroU16) -> Resul
             apic::TimerMode::Periodic => unimplemented!(),
         }
     }
-
-    Ok(())
 }
 
 // pub fn provide_exception<T: Into<Exception>>(exception: T) -> core::result::Result<(), T> {

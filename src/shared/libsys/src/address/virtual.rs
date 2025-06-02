@@ -1,11 +1,14 @@
 use crate::{checked_virt_canonical, virt_noncanonical_shift};
 
+#[derive(Debug)]
 pub struct Virtual;
 
 impl super::Addressable for Virtual {
     type Init = usize;
     type Repr = usize;
     type Get = usize;
+
+    const DEBUG_NAME: &'static str = "Address<Virtual>";
 
     fn new(init: Self::Init) -> Option<Self::Repr> {
         checked_virt_canonical(init).then_some(init)

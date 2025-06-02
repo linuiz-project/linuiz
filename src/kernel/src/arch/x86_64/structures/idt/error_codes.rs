@@ -49,8 +49,8 @@ bitflags! {
 }
 
 /// An error code referencing a segment selector.
-#[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct SelectorErrorCode(u64);
 
 impl SelectorErrorCode {

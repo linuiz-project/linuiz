@@ -48,7 +48,7 @@ impl Scheduler {
     }
 
     pub fn interrupt_task(&mut self, state: &mut InterruptStackFrame, regs: &mut Registers) {
-        debug_assert!(!crate::interrupts::is_interrupts_enabled());
+        debug_assert!(!crate::interrupts::is_enabled());
 
         let mut processes = PROCESSES.lock();
 
@@ -67,7 +67,7 @@ impl Scheduler {
 
     /// Attempts to schedule the next task in the local task queue.
     pub fn yield_task(&mut self, isf: &mut InterruptStackFrame, regs: &mut Registers) {
-        debug_assert!(!crate::interrupts::is_interrupts_enabled());
+        debug_assert!(!crate::interrupts::is_enabled());
 
         let mut processes = PROCESSES.lock();
 
@@ -83,7 +83,7 @@ impl Scheduler {
     }
 
     pub fn kill_task(&mut self, isf: &mut InterruptStackFrame, regs: &mut Registers) {
-        debug_assert!(!crate::interrupts::is_interrupts_enabled());
+        debug_assert!(!crate::interrupts::is_enabled());
 
         // TODO add process to reap queue to reclaim address space memory
         let process = self.task.take().expect("cannot exit without process");
@@ -123,14 +123,14 @@ impl Scheduler {
             *regs = Registers::default();
 
             trace!("Switched idle task.");
-        };
+        }
 
         // TODO have some kind of queue of preemption waits, to ensure we select the shortest one.
         // Safety: Just having switched tasks, no preemption wait should supercede this one.
         unsafe {
             const TIME_SLICE: core::num::NonZeroU16 = core::num::NonZeroU16::new(5).unwrap();
 
-            crate::cpu::state::set_preemption_wait(TIME_SLICE).unwrap();
+            crate::cpu::state::set_preemption_wait(TIME_SLICE);
         }
     }
 }

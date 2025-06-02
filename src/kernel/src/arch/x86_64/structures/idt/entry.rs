@@ -1,6 +1,6 @@
 use crate::arch::x86_64::structures::{
     gdt::{KCODE_SELECTOR, PrivilegeLevel, SegmentSelector},
-    idt::InterruptStackFrame,
+    idt::{InterruptStackFrame, StackTableIndex},
 };
 use bit_field::BitField;
 use core::marker::PhantomData;
@@ -71,8 +71,8 @@ impl_handler_func_type!(GeneralHandlerFunc);
 /// An Interrupt Descriptor Table entry.
 ///
 /// The generic parameter is some [`HandlerFuncType`], depending on the interrupt vector.
-#[derive(Clone, Copy)]
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct Entry<F> {
     pointer_low: u16,
     options: Options,
@@ -85,7 +85,7 @@ pub struct Entry<F> {
 impl<F> core::fmt::Debug for Entry<F> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Entry")
-            .field("handler_addr", &format_args!("{:#x}", self.handler_addr()))
+            .field("handler_addr", &self.handler_addr())
             .field("options", &self.options)
             .finish_non_exhaustive()
     }
@@ -143,12 +143,6 @@ impl<F> Entry<F> {
     }
 }
 
-impl<F> Default for Entry<F> {
-    fn default() -> Self {
-        Self::missing()
-    }
-}
-
 impl<F: HandlerFuncType> Entry<F> {
     /// Sets the handler function for the IDT entry and sets the following defaults:
     ///   - The code selector is the code segment currently active in the CPU
@@ -162,11 +156,84 @@ impl<F: HandlerFuncType> Entry<F> {
     ///
     /// This method is only usable with the `abi_x86_interrupt` feature enabled. Without it, the
     /// unsafe [`Entry::set_handler_addr`] method has to be used instead.
-    #[inline]
-    pub fn set_handler_fn(&mut self, handler: F) -> &mut Options {
+    fn set_handler_fn(&mut self, handler: F) -> &mut Options {
         // Safety: Caller is required to ensure the provided function correctly handles
         //         the interrupt assocaited with this `Entry`.
         unsafe { self.set_handler_addr(handler.get_address()) }
+    }
+
+    /// Sets the handler function for the IDT entry and sets the following defaults:
+    ///   - The code selector is the kernel code segment.
+    ///   - The present bit is set.
+    ///   - Interrupts are disabled on handler invocation.
+    ///   - The privilege level (DPL) is [`PrivilegeLevel::Ring0`].
+    ///   - No interrupt stack table is configured (existing stack will be used).
+    ///
+    /// The function returns a mutable reference to the entry's options that allows
+    /// further customization.
+    ///
+    /// This method is only usable with the `abi_x86_interrupt` feature enabled. Without it, the
+    /// unsafe [`Entry::set_handler_addr`] method has to be used instead.
+    pub fn new(handler: F) -> Self {
+        let mut entry = Self::missing();
+        entry.set_handler_fn(handler);
+        entry
+    }
+
+    /// Sets the handler function for the IDT entry and sets the following defaults:
+    ///   - The code selector is the kernel code segment.
+    ///   - The present bit is set.
+    ///   - Interrupts are disabled on handler invocation.
+    ///   - The privilege level (DPL) is [`PrivilegeLevel::Ring0`].
+    ///   - The interrupt stack table index is set to `stack_table_index`.
+    ///
+    /// The function returns a mutable reference to the entry's options that allows
+    /// further customization.
+    ///
+    /// This method is only usable with the `abi_x86_interrupt` feature enabled. Without it, the
+    /// unsafe [`Entry::set_handler_addr`] method has to be used instead.
+    ///
+    /// ## Safety
+    ///
+    /// TODO
+    pub unsafe fn new_with_stack(handler: F, stack_table_index: StackTableIndex) -> Self {
+        let mut entry = Self::missing();
+        let options = entry.set_handler_fn(handler);
+
+        // Safety: Caller is required to guarantee the stack table index is correct.
+        unsafe {
+            options.set_stack_index(stack_table_index);
+        }
+
+        entry
+    }
+
+    /// Sets the handler function for the IDT entry and sets the following defaults:
+    ///   - The code selector is the code segment currently active in the CPU
+    ///   - The present bit is set.
+    ///   - Interrupts are disabled on handler invocation.
+    ///   - The privilege level (DPL) set to `privilege_level`.
+    ///   - No interrupt stack table is configured (existing stack will be used).
+    ///
+    /// The function returns a mutable reference to the entry's options that allows
+    /// further customization.
+    ///
+    /// This method is only usable with the `abi_x86_interrupt` feature enabled. Without it, the
+    /// unsafe [`Entry::set_handler_addr`] method has to be used instead.
+    ///
+    /// ## Safety
+    ///
+    /// TODO
+    pub unsafe fn new_with_privilege(handler: F, privilege_level: PrivilegeLevel) -> Self {
+        let mut entry = Self::missing();
+        let options = entry.set_handler_fn(handler);
+
+        // Safety: Caller is required to guarantee the stack table index is correct.
+        unsafe {
+            options.set_privilege_level(privilege_level);
+        }
+
+        entry
     }
 }
 
@@ -212,7 +279,10 @@ impl Options {
     }
 
     /// Set or reset the preset bit.
-    #[inline]
+    ///
+    /// ## Safety
+    ///
+    /// TODO
     pub fn set_present(&mut self, present: bool) -> &mut Self {
         self.bits.set_bit(15, present);
         self
@@ -220,14 +290,22 @@ impl Options {
 
     /// Let the CPU disable hardware interrupts when the handler is invoked. By default,
     /// interrupts are disabled on handler invocation.
-    pub fn set_disable_interrupts(&mut self, disable: bool) -> &mut Self {
+    ///
+    /// ## Safety
+    ///
+    /// TODO
+    pub unsafe fn set_disable_interrupts(&mut self, disable: bool) -> &mut Self {
         self.bits.set_bit(8, !disable);
         self
     }
 
     /// Set the required privilege level (DPL) for invoking the handler. The DPL can be 0, 1, 2,
     /// or 3, the default is 0. If CPL < DPL, a general protection fault occurs.
-    pub fn set_privilege_level(&mut self, dpl: PrivilegeLevel) -> &mut Self {
+    ///
+    /// ## Safety
+    ///
+    /// TODO
+    pub unsafe fn set_privilege_level(&mut self, dpl: PrivilegeLevel) -> &mut Self {
         self.bits.set_bits(13..15, dpl as u16);
         self
     }
@@ -245,10 +323,10 @@ impl Options {
     ///
     /// This function is unsafe because the caller must ensure that the passed stack index is
     /// valid and not used by other interrupts. Otherwise, memory safety violations are possible.
-    pub unsafe fn set_stack_index(&mut self, index: u16) -> &mut Self {
+    pub unsafe fn set_stack_index(&mut self, index: StackTableIndex) -> &mut Self {
         // The hardware IST index starts at 1, but our software IST index
         // starts at 0. Therefore we need to add 1 here.
-        self.bits.set_bits(0..3, index + 1);
+        self.bits.set_bits(0..3, (index as u16) + 1);
         self
     }
 }

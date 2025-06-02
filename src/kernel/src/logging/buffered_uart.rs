@@ -1,7 +1,8 @@
 use circular_buffer::CircularBuffer;
-use uart::{Data, Uart, UartAddress};
+use uart::{Data, FifoControl, LineStatus, Uart, UartAddress};
 
 const UART_FIFO_SIZE: usize = 16;
+type BufferChunk = [u8; UART_FIFO_SIZE];
 
 #[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
@@ -11,7 +12,7 @@ pub enum Error {
 
 pub struct BufferedUart {
     uart: Uart<Data>,
-    tx_buffer: CircularBuffer<1024, [u8; UART_FIFO_SIZE]>,
+    tx_buffer: CircularBuffer<64, BufferChunk>,
 }
 
 // Safety: Interior address is not thread-specific.
@@ -43,10 +44,7 @@ impl BufferedUart {
 
             // Test the UART to ensure it's functioning correctly.
             uart.write_modem_control(
-                ModemControl::REQUEST_TO_SEND
-                    | ModemControl::AUXILIARY_OUTPUT_1
-                    | ModemControl::AUXILIARY_OUTPUT_2
-                    | ModemControl::LOOPBACK_MODE,
+                ModemControl::REQUEST_TO_SEND | ModemControl::OUT_1 | ModemControl::OUT_2 | ModemControl::LOOPBACK_MODE,
             );
 
             uart.write_byte(0x1F);
@@ -54,22 +52,29 @@ impl BufferedUart {
                 return None;
             }
 
+            uart.write_fifo_control(FifoControl::ENABLE | FifoControl::CLEAR_RX | FifoControl::CLEAR_TX);
             uart.write_interrupt_enable(InterruptEnable::TRANSMIT_EMPTY);
 
             // Configure modem control for actual UART usage.
-            uart.write_modem_control(
-                ModemControl::TERMINAL_READY
-                    | ModemControl::REQUEST_TO_SEND
-                    | ModemControl::AUXILIARY_OUTPUT_1
-                    | ModemControl::AUXILIARY_OUTPUT_2,
-            );
+            uart.write_modem_control(ModemControl::TERMINAL_READY | ModemControl::OUT_1 | ModemControl::OUT_2);
 
             Some(Self { uart, tx_buffer: CircularBuffer::new() })
         })
     }
 
-    pub fn remaining_buffer_size(&self) -> usize {
-        self.tx_buffer.capacity() - self.tx_buffer.len()
+    #[cfg(debug_assertions)]
+    pub fn write_immediate(&mut self, data: &[u8]) {
+        for byte in data.iter().copied() {
+            while !self.uart.read_line_status().contains(LineStatus::THR_EMPTY) {
+                core::hint::spin_loop();
+            }
+
+            self.uart.write_byte(byte);
+        }
+    }
+
+    pub const fn remaining_buffer_size(&self) -> usize {
+        (self.tx_buffer.capacity() - self.tx_buffer.len()) * size_of::<BufferChunk>()
     }
 
     pub fn buffer_data(&mut self, data: &[u8]) -> Result<(), Error> {
@@ -79,10 +84,9 @@ impl BufferedUart {
 
         let was_empty = self.tx_buffer.is_empty();
 
-        let mut copy_chunk = [0u8; UART_FIFO_SIZE];
-        for chunk in data.chunks(UART_FIFO_SIZE) {
+        let mut copy_chunk = BufferChunk::default();
+        for chunk in data.chunks(size_of::<BufferChunk>()) {
             copy_chunk[..chunk.len()].copy_from_slice(chunk);
-            copy_chunk[chunk.len()..].fill(0);
             self.tx_buffer.push_back(copy_chunk);
         }
 
@@ -93,13 +97,15 @@ impl BufferedUart {
         Ok(())
     }
 
-    pub fn unbuffer_chunk(&mut self) -> Option<[u8; UART_FIFO_SIZE]> {
+    fn unbuffer_chunk(&mut self) -> Option<[u8; UART_FIFO_SIZE]> {
         self.tx_buffer.pop_front()
     }
 
-    pub fn write_next(&mut self) {
-        let Some(chunk) = self.tx_buffer.pop_front() else {
-            return;
-        };
+    fn write_next(&mut self) {
+        if let Some(chunk) = self.unbuffer_chunk() {
+            for byte in chunk.iter().copied().filter(|byte| *byte == 0) {
+                self.uart.write_byte(byte);
+            }
+        }
     }
 }

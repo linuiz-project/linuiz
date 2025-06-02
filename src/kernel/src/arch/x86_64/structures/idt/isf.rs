@@ -7,8 +7,8 @@ use crate::arch::x86_64::{
 use libsys::{Address, Virtual};
 
 /// Represents the interrupt stack frame pushed by the CPU on interrupt or exception entry.
-#[derive(Debug, Clone, Copy)]
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct InterruptStackFrame {
     instruction_pointer: u64,
 
@@ -133,5 +133,17 @@ impl InterruptStackFrame {
     /// TODO
     pub unsafe fn set_stack_segment(&mut self, segment_selector: SegmentSelector) {
         self.stack_segment = segment_selector.as_u16();
+    }
+}
+
+impl core::fmt::Debug for InterruptStackFrame {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("InterruptStackFrame")
+            .field("instruction_pointer", &self.get_instruction_pointer())
+            .field("code_segment", &self.get_code_segment())
+            .field("cpu_flags", &self.get_cpu_flags())
+            .field("stack_pointer", &self.get_stack_pointer())
+            .field("stack_segment", &self.get_stack_segment())
+            .finish()
     }
 }

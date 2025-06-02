@@ -1,5 +1,6 @@
 #[macro_export]
 #[allow(clippy::module_name_repetitions)]
+#[deprecated]
 macro_rules! error_impl {
     (
         $(#[$outer:meta])*
