@@ -71,9 +71,9 @@ bitflags! {
     }
 }
 
-/// The GDT layout is very specific, due to the behaviour of the **IA32_STAR** MSR and its
+/// The GDT layout is very specific, due to the behaviour of the `IA32_STAR` MSR and its
 /// affect on syscalls. Do not change this, or if it is changed, ensure it follows the requisite
-/// standard set by the aforementioned **IA32_STAR** MSR. Details can be found in the description of
+/// standard set by the aforementioned `IA32_STAR` MSR. Details can be found in the description of
 /// the `syscall` and `sysret` instructions in the IA32 Software Developer's Manual.
 ///
 /// Additionally, x86 requires that the first GDT entry be null (i.e. no segment information).
@@ -108,7 +108,7 @@ pub unsafe fn load() {
     unsafe {
         asm!(
             "lgdt [{}]",
-            in(reg) &gdt_dtptr,
+            in(reg) &raw const gdt_dtptr,
             options(readonly, nostack, preserves_flags)
         );
     }
@@ -210,7 +210,10 @@ impl SegmentSelector {
 
 impl core::fmt::Debug for SegmentSelector {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("SegmentSelector").field("rpl", &self.rpl()).field("gdt_index", &self.gdt_index()).finish()
+        f.debug_struct("SegmentSelector")
+            .field("rpl", &self.rpl())
+            .field("gdt_index", &self.gdt_index())
+            .finish()
     }
 }
 

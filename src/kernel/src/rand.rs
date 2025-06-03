@@ -2,7 +2,10 @@ use core::mem::MaybeUninit;
 
 #[unsafe(no_mangle)]
 #[allow(clippy::unnecessary_wraps)]
-unsafe extern "Rust" fn __getrandom_v03_custom(dest: *mut u8, len: usize) -> Result<(), getrandom::Error> {
+unsafe extern "Rust" fn __getrandom_v03_custom(
+    dest: *mut u8,
+    len: usize,
+) -> Result<(), getrandom::Error> {
     // Safety: The caller must ensure the provided parameters are valid.
     let buf = unsafe {
         core::slice::from_raw_parts_mut(

@@ -5,7 +5,10 @@ macro_rules! do_once {
 
         static HAS_DONE: AtomicBool = AtomicBool::new(false);
 
-        if HAS_DONE.compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
+        if HAS_DONE
+            .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
+        {
             $do
         }
     }};

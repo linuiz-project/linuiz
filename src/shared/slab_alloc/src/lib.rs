@@ -72,7 +72,8 @@ impl<A: Allocator + Clone> SlabManager<A> {
 
     #[inline]
     pub fn check_fits_layout(&self, layout: Layout) -> bool {
-        self.block_size() >= layout.align() && self.block_size() == layout.size().next_power_of_two()
+        self.block_size() >= layout.align()
+            && self.block_size() == layout.size().next_power_of_two()
     }
 
     pub fn take_object(&mut self) -> Option<NonNull<[u8]>> {
@@ -85,8 +86,9 @@ impl<A: Allocator + Clone> SlabManager<A> {
         let slab_block_index = index % bits_per_slab;
         let slab_block_offset = slab_block_index * self.block_size();
 
-        let slab =
-            self.slabs[slab_block_index].get_mut(slab_block_offset..(slab_block_offset + self.block_size())).unwrap();
+        let slab = self.slabs[slab_block_index]
+            .get_mut(slab_block_offset..(slab_block_offset + self.block_size()))
+            .unwrap();
 
         Some(NonNull::new(slab as *mut [u8]).unwrap())
     }
@@ -122,7 +124,11 @@ impl<A: Allocator + Clone> SlabAllocator<A> {
     pub fn new_in(slab_size: NonZeroUsize, allocator: A) -> Self {
         check_valid_slab_size(slab_size);
 
-        Self { slab_size, slabs: Mutex::new(Vec::new_in(allocator.clone())), allocator }
+        Self {
+            slab_size,
+            slabs: Mutex::new(Vec::new_in(allocator.clone())),
+            allocator,
+        }
     }
 
     fn max_slabbed_allocation_size(&self) -> usize {

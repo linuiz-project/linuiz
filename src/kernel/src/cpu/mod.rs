@@ -32,7 +32,10 @@ pub fn start_mp(mp_request: &limine::request::MpRequest) {
         // Make sure we skip the boot thread (we're using it right now!).
         cpu.lapic_id != response.bsp_lapic_id()
     }) {
-        trace!("Starting hardware thread: ID ID#{} LAPIC#{}", cpu.id, cpu.lapic_id);
+        trace!(
+            "Starting hardware thread: ID ID#{} LAPIC#{}",
+            cpu.id, cpu.lapic_id
+        );
 
         extern "C" fn _mp_entry(_: &limine::mp::Cpu) -> ! {
             // Safety: Function is run only once for this hardware thread.

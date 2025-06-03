@@ -16,7 +16,8 @@ use libsys::{Address, Virtual, page_size};
 use crate::arch::x86_64::structures::idt::InterruptStackFrame;
 
 #[allow(clippy::cast_possible_truncation)]
-pub const STACK_SIZE: NonZeroUsize = NonZeroUsize::new((libsys::MIBIBYTE as usize) - page_size()).unwrap();
+pub const STACK_SIZE: NonZeroUsize =
+    NonZeroUsize::new((libsys::MIBIBYTE as usize) - page_size()).unwrap();
 pub const STACK_PAGES: NonZeroUsize = NonZeroUsize::new(STACK_SIZE.get() / page_size()).unwrap();
 pub const STACK_START: NonZeroUsize = NonZeroUsize::new(page_size()).unwrap();
 pub const MIN_LOAD_OFFSET: usize = STACK_START.get() + STACK_SIZE.get();
@@ -25,7 +26,10 @@ pub const PT_FLAG_EXEC_BIT: usize = 0;
 pub const PT_FLAG_WRITE_BIT: usize = 1;
 
 pub fn segment_to_mmap_permissions(segment_ty: u32) -> MmapPermissions {
-    match (segment_ty.get_bit(PT_FLAG_WRITE_BIT), segment_ty.get_bit(PT_FLAG_EXEC_BIT)) {
+    match (
+        segment_ty.get_bit(PT_FLAG_WRITE_BIT),
+        segment_ty.get_bit(PT_FLAG_EXEC_BIT),
+    ) {
         (true, false) => MmapPermissions::ReadWrite,
         (false, true) => MmapPermissions::ReadExecute,
         (false, false) => MmapPermissions::ReadOnly,
@@ -96,7 +100,11 @@ impl Task {
 
         trace!("Allocating userspace stack for task: {:?}.", id);
         let stack = address_space
-            .mmap(Some(Address::new_truncate(STACK_START.get())), STACK_PAGES, MmapPermissions::ReadWrite)
+            .mmap(
+                Some(Address::new_truncate(STACK_START.get())),
+                STACK_PAGES,
+                MmapPermissions::ReadWrite,
+            )
             .unwrap();
 
         Self {
@@ -105,7 +113,8 @@ impl Task {
             address_space,
             context: (
                 InterruptStackFrame::new_user(
-                    Address::new(load_offset + usize::try_from(elf_header.e_entry).unwrap()).unwrap(),
+                    Address::new(load_offset + usize::try_from(elf_header.e_entry).unwrap())
+                        .unwrap(),
                     // Safety: Addition keeps the pointer within the bounds of the allocation, and the unit size is 1.
                     unsafe { Address::from_ptr(stack.as_non_null_ptr().as_ptr().add(stack.len())) },
                 ),
@@ -175,15 +184,18 @@ impl Task {
             return Err(Error::AlreadyMapped);
         }
 
-        let fault_unoffset =
-            address.get().checked_sub(self.load_offset()).ok_or(Error::AddressUnderrun { addr: address })?;
+        let fault_unoffset = address
+            .get()
+            .checked_sub(self.load_offset())
+            .ok_or(Error::AddressUnderrun { addr: address })?;
 
         let segment = self
             .elf_segments()
             .iter()
             .filter(|phdr| phdr.p_type == elf::abi::PT_LOAD)
             .find(|phdr| {
-                (phdr.p_vaddr..(phdr.p_vaddr + phdr.p_memsz)).contains(&u64::try_from(fault_unoffset).unwrap())
+                (phdr.p_vaddr..(phdr.p_vaddr + phdr.p_memsz))
+                    .contains(&u64::try_from(fault_unoffset).unwrap())
             })
             .copied()
             .ok_or(Error::UnhandledAddress { addr: address })?;
@@ -191,12 +203,17 @@ impl Task {
         // Small check to help ensure the segment alignments are page-fit.
         debug_assert_eq!(segment.p_align & (libsys::page_mask() as u64), 0);
 
-        debug!("Demand mapping {:X?} from segment: {:X?}", Address::<Page>::new_truncate(address.get()), segment);
+        debug!(
+            "Demand mapping {:X?} from segment: {:X?}",
+            Address::<Page>::new_truncate(address.get()),
+            segment
+        );
 
         let fault_unoffset_page: Address<Page> = Address::new_truncate(fault_unoffset);
         let fault_unoffset_page_addr = fault_unoffset_page.get().get();
 
-        let fault_unoffset_end_page: Address<Page> = Address::new_truncate(fault_unoffset_page_addr + page_size());
+        let fault_unoffset_end_page: Address<Page> =
+            Address::new_truncate(fault_unoffset_page_addr + page_size());
         let fault_unoffset_end_page_addr = fault_unoffset_end_page.get().get();
 
         let segment_addr = usize::try_from(segment.p_vaddr).unwrap();
@@ -206,12 +223,18 @@ impl Task {
         let fault_offset = fault_unoffset_page_addr.saturating_sub(segment_addr);
         let fault_end_pad = fault_unoffset_end_page_addr.saturating_sub(segment_end_addr);
         let fault_front_pad = segment_addr.saturating_sub(fault_unoffset_page_addr);
-        let fault_size = ((fault_unoffset_end_page_addr - fault_unoffset_page_addr) - fault_front_pad) - fault_end_pad;
+        let fault_size = ((fault_unoffset_end_page_addr - fault_unoffset_page_addr)
+            - fault_front_pad)
+            - fault_end_pad;
 
         trace!("Mapping the demand page RW so data can be copied.");
         let mapped_memory = self
             .address_space_mut()
-            .mmap(Some(fault_page), core::num::NonZeroUsize::MIN, crate::task::MmapPermissions::ReadWrite)
+            .mmap(
+                Some(fault_page),
+                core::num::NonZeroUsize::MIN,
+                crate::task::MmapPermissions::ReadWrite,
+            )
             .unwrap();
         // Safety: Address space allocator fulfills all required invariants.
         let mapped_memory = unsafe { mapped_memory.as_uninit_slice_mut() };
@@ -237,8 +260,8 @@ impl Task {
                 ElfData::Memory(data) => {
                     let segment_data_offset = usize::try_from(segment.p_offset).unwrap();
 
-                    let offset_segment_range =
-                        (segment_data_offset + fault_offset)..(segment_data_offset + fault_offset + fault_size);
+                    let offset_segment_range = (segment_data_offset + fault_offset)
+                        ..(segment_data_offset + fault_offset + fault_size);
 
                     // Safety: Same-sized reinterpret for copying.
                     let (_, copy_data, _) = unsafe { data[offset_segment_range].align_to() };
@@ -259,7 +282,11 @@ impl Task {
                 // Safety: Fault page is checked to contain the relocation's address, and the pointer is guaranteed after
                 // offset to lie within the memory mapped region above.
                 unsafe {
-                    rela.address.as_ptr().add(load_offset).cast::<usize>().write(rela.value);
+                    rela.address
+                        .as_ptr()
+                        .add(load_offset)
+                        .cast::<usize>()
+                        .write(rela.value);
                 }
 
                 false
@@ -277,7 +304,9 @@ impl Task {
                     core::num::NonZeroUsize::new(1).unwrap(),
                     TableEntryFlags::PRESENT
                         | TableEntryFlags::USER
-                        | TableEntryFlags::from(crate::task::segment_to_mmap_permissions(segment.p_type)),
+                        | TableEntryFlags::from(crate::task::segment_to_mmap_permissions(
+                            segment.p_type,
+                        )),
                 )
                 .unwrap();
         }

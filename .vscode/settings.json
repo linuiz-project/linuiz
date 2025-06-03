@@ -4,10 +4,4 @@
     },
     "rust-analyzer.check.allTargets": false,
     "rust-analyzer.showUnlinkedFileNotification": false,
-    "rust-analyzer.linkedProjects": [
-        "src/kernel/Cargo.toml",
-        "src/shared/Cargo.toml",
-        "src/userspace/Cargo.toml",
-        "xtask/Cargo.toml"
-    ],
 }

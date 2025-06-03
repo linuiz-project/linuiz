@@ -1,53 +1,45 @@
-pub mod pmm;
-
+use crate::mem::pmm;
 use alloc::alloc::Global;
 use core::{
-    alloc::{AllocError, Allocator, Layout},
+    alloc::{AllocError, Allocator, GlobalAlloc, Layout},
     ptr::NonNull,
 };
-use spin::Lazy;
 
-pub type KernelAllocator = pmm::PhysicalAllocator;
+#[global_allocator]
+static GLOBAL_ALLOCATOR: KernelAllocator = KernelAllocator;
 
-// TODO decide if we even need this? Perhaps just rely on the PMM for *all* allocations.
-pub static KMALLOC: Lazy<KernelAllocator> = Lazy::new(pmm::get);
+pub struct KernelAllocator;
 
-mod global_allocator_impl {
-    use super::KMALLOC;
-    use core::{
-        alloc::{Allocator, GlobalAlloc, Layout},
-        ptr::NonNull,
-    };
-
-    struct GlobalAllocator;
-
-    unsafe impl GlobalAlloc for GlobalAllocator {
-        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-            KMALLOC.allocate(layout).map_or(core::ptr::null_mut(), |ptr| {
-                trace!("Allocation {:?} -> @{:X?}   0x{:X?}", layout, ptr, ptr.as_ref().len());
+unsafe impl GlobalAlloc for KernelAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        pmm::get()
+            .allocate(layout)
+            .map_or(core::ptr::null_mut(), |ptr| {
+                trace!(
+                    "Allocation {:?} -> @{:X?}   0x{:X?}",
+                    layout,
+                    ptr,
+                    ptr.as_ref().len()
+                );
 
                 ptr.as_non_null_ptr().as_ptr()
             })
-        }
-
-        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-            trace!("Deallocation @{:?}   {:?}", ptr, layout);
-            KMALLOC.deallocate(NonNull::new(ptr).unwrap(), layout);
-        }
     }
 
-    unsafe impl Allocator for GlobalAllocator {
-        fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, core::alloc::AllocError> {
-            KMALLOC.allocate(layout)
-        }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        trace!("Deallocation @{:?}   {:?}", ptr, layout);
+        pmm::get().deallocate(NonNull::new(ptr).unwrap(), layout);
+    }
+}
 
-        unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
-            KMALLOC.deallocate(ptr, layout);
-        }
+unsafe impl Allocator for KernelAllocator {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, core::alloc::AllocError> {
+        pmm::get().allocate(layout)
     }
 
-    #[global_allocator]
-    static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator;
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        pmm::get().deallocate(ptr, layout);
+    }
 }
 
 pub struct AlignedAllocator<const ALIGN: usize, A: Allocator = Global>(A);

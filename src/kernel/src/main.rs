@@ -86,16 +86,17 @@ static BASE_REVISION: limine::BaseRevision = limine::BaseRevision::with_revision
 
 /// Specify the exact stack size the kernel would like to use.
 #[doc(hidden)]
-static STACK_SIZE_REQUEST: limine::request::StackSizeRequest = limine::request::StackSizeRequest::new().with_size({
-    #[cfg(debug_assertions)]
-    {
-        0x1000000
-    }
-    #[cfg(not(debug_assertions))]
-    {
-        0x4000
-    }
-});
+static STACK_SIZE_REQUEST: limine::request::StackSizeRequest =
+    limine::request::StackSizeRequest::new().with_size({
+        #[cfg(debug_assertions)]
+        {
+            0x1000000
+        }
+        #[cfg(not(debug_assertions))]
+        {
+            0x4000
+        }
+    });
 
 /// ## Safety
 ///

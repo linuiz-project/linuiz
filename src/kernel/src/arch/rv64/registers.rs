@@ -110,7 +110,11 @@ pub mod satp {
 
     #[inline]
     pub fn read() -> (Address<Physical>, u16, Mode) {
-        (Address::<Physical>::new_truncate(get_ppn() * 0x1000), get_asid(), get_mode())
+        (
+            Address::<Physical>::new_truncate(get_ppn() * 0x1000),
+            get_asid(),
+            get_mode(),
+        )
     }
 
     #[inline]

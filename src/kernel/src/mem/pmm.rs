@@ -14,32 +14,36 @@ use spin::RwLock;
 #[derive(Debug, Clone, Copy)]
 pub struct InitError;
 
-pub type PhysicalAllocator = &'static PhysicalMemoryManager<'static>;
-
 static PMM: spin::Once<PhysicalMemoryManager> = spin::Once::new();
 
 pub fn init(memory_map: &[&limine::memory_map::Entry]) {
     PMM.call_once(|| {
-        let free_regions = memory_map.iter().filter_map(|entry| {
-            (entry.entry_type == limine::memory_map::EntryType::USABLE).then(|| {
+        let free_regions = memory_map
+            .iter()
+            .filter(|&entry| entry.entry_type == limine::memory_map::EntryType::USABLE)
+            .map(|entry| {
                 let region_start = usize::try_from(entry.base).unwrap();
                 let region_end = usize::try_from(entry.base + entry.length).unwrap();
 
                 region_start..region_end
-            })
-        });
+            });
 
-        let total_memory = memory_map.iter().map(|e| e.base + e.length).max().unwrap().try_into().unwrap();
-        trace!("Total phyiscal memory: {:#X}", total_memory);
+        let total_memory = memory_map
+            .iter()
+            .map(|e| e.base + e.length)
+            .max()
+            .unwrap()
+            .try_into()
+            .unwrap();
+        trace!("Total phyiscal memory: {total_memory:#X}");
 
-        PhysicalMemoryManager {
-            allocator: FrameAllocator::new(free_regions, total_memory).expect("failed to create frame allocator"),
-        }
+        PhysicalMemoryManager::new(free_regions, total_memory).expect("failed creating pmm")
     });
 }
 
-pub fn get() -> PhysicalAllocator {
-    PMM.get().expect("physical memory manager has not been initialized")
+pub fn get() -> &'static PhysicalMemoryManager {
+    PMM.get()
+        .expect("physical memory manager has not been initialized")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,70 +103,29 @@ struct RegionDescriptor {
     region: Range<usize>,
 }
 
-pub struct PhysicalMemoryManager<'a> {
-    // TODO map: Vec<RegionDescriptor, &'a FrameAllocator<'a>>,
-    allocator: FrameAllocator<'a>,
-}
-
-impl<'a> core::ops::Deref for PhysicalMemoryManager<'a> {
-    type Target = FrameAllocator<'a>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.allocator
-    }
-}
-
-// Safety: PMM utilizes interior mutability & Correct:tm: logic.
-unsafe impl Allocator for &PhysicalMemoryManager<'_> {
-    fn allocate(&self, layout: Layout) -> core::result::Result<NonNull<[u8]>, AllocError> {
-        assert!(layout.align() <= page_size());
-
-        let frame_count = libsys::align_up_div(layout.size(), page_shift());
-        let frame = match frame_count.cmp(&1usize) {
-            core::cmp::Ordering::Greater => {
-                self.next_frames(NonZeroUsize::new(frame_count).unwrap(), Some(page_shift()))
-            }
-            core::cmp::Ordering::Equal => self.next_frame(),
-            core::cmp::Ordering::Less => unreachable!(),
-        }
-        .map_err(|_| AllocError)?;
-        let address = hhdm::get().offset(frame).ok_or(AllocError)?;
-
-        Ok(NonNull::slice_from_raw_parts(NonNull::new(address.as_ptr()).unwrap(), frame_count * page_size()))
-    }
-
-    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
-        assert!(layout.align() <= page_size());
-
-        let offset = ptr.addr().get() - hhdm::get().virt().get();
-        let address = Address::new(offset).unwrap();
-
-        if layout.size() <= page_size() {
-            self.free_frame(address).ok();
-        } else {
-            let frame_count = libsys::align_up_div(layout.size(), page_shift());
-            for index_offset in 0..frame_count {
-                self.free_frame(Address::from_index(address.index() + index_offset).unwrap()).ok();
-            }
-        }
-    }
-}
-
-pub struct FrameAllocator<'a> {
-    table: InterruptCell<RwLock<&'a mut BitSlice<AtomicUsize>>>,
+pub struct PhysicalMemoryManager {
+    table: InterruptCell<RwLock<&'static mut BitSlice<AtomicUsize>>>,
 }
 
 // Safety: Type uses entirely atomic operations.
-unsafe impl Send for FrameAllocator<'_> {}
+unsafe impl Send for PhysicalMemoryManager {}
 // Safety: Type uses entirely atomic operations.
-unsafe impl Sync for FrameAllocator<'_> {}
+unsafe impl Sync for PhysicalMemoryManager {}
 
-impl FrameAllocator<'_> {
-    pub fn new(free_regions: impl Iterator<Item = Range<usize>>, total_memory: usize) -> Option<Self> {
+impl PhysicalMemoryManager {
+    pub fn new(
+        free_regions: impl Iterator<Item = Range<usize>>,
+        total_memory: usize,
+    ) -> Option<Self> {
         let total_frames = total_memory / page_size();
-        let table_slice_len =
-            libsys::align_up_div(total_frames, NonZeroU32::new(usize::BITS.trailing_zeros()).unwrap());
-        let table_size_in_frames = libsys::align_up_div(table_slice_len * core::mem::size_of::<usize>(), page_shift());
+        let table_slice_len = libsys::align_up_div(
+            total_frames,
+            NonZeroU32::new(usize::BITS.trailing_zeros()).unwrap(),
+        );
+        let table_size_in_frames = libsys::align_up_div(
+            table_slice_len * core::mem::size_of::<usize>(),
+            page_shift(),
+        );
         let table_size_in_bytes = table_size_in_frames * page_size();
 
         let select_region = free_regions
@@ -191,7 +154,9 @@ impl FrameAllocator<'_> {
         let ledger_end_index = select_region.end / page_size();
         ledger[ledger_start_index..ledger_end_index].fill(true);
 
-        Some(Self { table: InterruptCell::new(spin::RwLock::new(ledger)) })
+        Some(Self {
+            table: InterruptCell::new(spin::RwLock::new(ledger)),
+        })
     }
 
     #[inline]
@@ -212,7 +177,11 @@ impl FrameAllocator<'_> {
         })
     }
 
-    pub fn next_frames(&self, count: NonZeroUsize, align_bits: Option<NonZeroU32>) -> Result<Address<Frame>> {
+    pub fn next_frames(
+        &self,
+        count: NonZeroUsize,
+        align_bits: Option<NonZeroU32>,
+    ) -> Result<Address<Frame>> {
         let align_bits = align_bits.unwrap_or(NonZeroU32::MIN).get();
         let align_index_skip = u32::max(1, align_bits >> page_shift().get());
         self.table.with(|table| {
@@ -221,6 +190,7 @@ impl FrameAllocator<'_> {
                 .windows(count.get())
                 .enumerate()
                 .step_by(align_index_skip.try_into().unwrap())
+                // TODO simplify this to return the window directly.
                 .find_map(|(index, window)| window.not_any().then_some(index))
                 .ok_or(Error::NoneFree)?;
             let window = table.get_mut(index..(index + count.get())).unwrap();
@@ -258,5 +228,45 @@ impl FrameAllocator<'_> {
                 Ok(())
             }
         })
+    }
+}
+
+// Safety: PMM utilizes interior mutability & Correct:tm: logic.
+unsafe impl Allocator for PhysicalMemoryManager {
+    fn allocate(&self, layout: Layout) -> core::result::Result<NonNull<[u8]>, AllocError> {
+        assert!(layout.align() <= page_size());
+
+        let frame_count = libsys::align_up_div(layout.size(), page_shift());
+        let frame = match frame_count.cmp(&1usize) {
+            core::cmp::Ordering::Greater => {
+                self.next_frames(NonZeroUsize::new(frame_count).unwrap(), Some(page_shift()))
+            }
+            core::cmp::Ordering::Equal => self.next_frame(),
+            core::cmp::Ordering::Less => unreachable!(),
+        }
+        .map_err(|_| AllocError)?;
+        let address = hhdm::get().offset(frame).ok_or(AllocError)?;
+
+        Ok(NonNull::slice_from_raw_parts(
+            NonNull::new(address.as_ptr()).unwrap(),
+            frame_count * page_size(),
+        ))
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        assert!(layout.align() <= page_size());
+
+        let offset = ptr.addr().get() - hhdm::get().virt().get();
+        let address = Address::new(offset).unwrap();
+
+        if layout.size() <= page_size() {
+            self.free_frame(address).ok();
+        } else {
+            let frame_count = libsys::align_up_div(layout.size(), page_shift());
+            for index_offset in 0..frame_count {
+                self.free_frame(Address::from_index(address.index() + index_offset).unwrap())
+                    .ok();
+            }
+        }
     }
 }

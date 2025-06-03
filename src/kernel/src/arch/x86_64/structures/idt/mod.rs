@@ -468,7 +468,9 @@ pub fn load() {
         // Safety: Stack table index is set to `Debug` stack.
         debug: unsafe { Entry::new_with_stack(db_stub, StackTableIndex::Debug) },
         // Safety: Stack table index is set to `NonMaskableInterrupt` stack.
-        non_maskable_interrupt: unsafe { Entry::new_with_stack(nmi_stub, StackTableIndex::NonMaskableInterrupt) },
+        non_maskable_interrupt: unsafe {
+            Entry::new_with_stack(nmi_stub, StackTableIndex::NonMaskableInterrupt)
+        },
         breakpoint: Entry::new(bp_stub),
         overflow: Entry::new(of_stub),
         bound_range_exceeded: Entry::new(br_stub),

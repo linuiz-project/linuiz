@@ -1,7 +1,7 @@
 use core::ptr::NonNull;
 
 use crate::mem::{
-    alloc::{KMALLOC, KernelAllocator},
+    alloc::{self, KernelAllocator},
     hhdm,
 };
 use acpi::{
@@ -70,7 +70,11 @@ impl<T: PortReadWrite> Register<'_, T> {
 pub struct AcpiHandler;
 
 impl acpi::AcpiHandler for AcpiHandler {
-    unsafe fn map_physical_region<T>(&self, address: usize, size: usize) -> acpi::PhysicalMapping<Self, T> {
+    unsafe fn map_physical_region<T>(
+        &self,
+        address: usize,
+        size: usize,
+    ) -> acpi::PhysicalMapping<Self, T> {
         trace!("ACPI MAP: @{address:#X}:{size}");
 
         acpi::PhysicalMapping::new(
@@ -178,21 +182,32 @@ pub fn init_tables() {
     todo!()
 }
 
-pub static FADT: Lazy<Option<Mutex<PhysicalMapping<AcpiHandler, acpi::fadt::Fadt>>>> = Lazy::new(|| {
-    TABLES.get().map(Mutex::lock).and_then(|tables| tables.find_table::<acpi::fadt::Fadt>().ok()).map(Mutex::new)
-});
+pub static FADT: Lazy<Option<Mutex<PhysicalMapping<AcpiHandler, acpi::fadt::Fadt>>>> =
+    Lazy::new(|| {
+        TABLES
+            .get()
+            .map(Mutex::lock)
+            .and_then(|tables| tables.find_table::<acpi::fadt::Fadt>().ok())
+            .map(Mutex::new)
+    });
 
-pub static MCFG: Lazy<Option<Mutex<PhysicalMapping<AcpiHandler, acpi::mcfg::Mcfg>>>> = Lazy::new(|| {
-    TABLES.get().map(Mutex::lock).and_then(|tables| tables.find_table::<acpi::mcfg::Mcfg>().ok()).map(Mutex::new)
-});
+pub static MCFG: Lazy<Option<Mutex<PhysicalMapping<AcpiHandler, acpi::mcfg::Mcfg>>>> =
+    Lazy::new(|| {
+        TABLES
+            .get()
+            .map(Mutex::lock)
+            .and_then(|tables| tables.find_table::<acpi::mcfg::Mcfg>().ok())
+            .map(Mutex::new)
+    });
 
-pub static PLATFORM_INFO: Lazy<Option<Mutex<acpi::PlatformInfo<&'static KernelAllocator>>>> = Lazy::new(|| {
-    TABLES
-        .get()
-        .map(Mutex::lock)
-        .and_then(|tables| acpi::PlatformInfo::new_in(&*tables, &*KMALLOC).ok())
-        .map(Mutex::new)
-});
+pub static PLATFORM_INFO: Lazy<Option<Mutex<acpi::PlatformInfo<&'static KernelAllocator>>>> =
+    Lazy::new(|| {
+        TABLES
+            .get()
+            .map(Mutex::lock)
+            .and_then(|tables| acpi::PlatformInfo::new_in(&*tables, &KernelAllocator).ok())
+            .map(Mutex::new)
+    });
 
 // struct AmlContextWrapper(aml::AmlContext);
 // // Safety: TODO

@@ -11,7 +11,10 @@ pub trait InteriorRef {
 
 pub struct Ref;
 impl InteriorRef for Ref {
-    type RefType<'a, T> = &'a T where T: 'a;
+    type RefType<'a, T>
+        = &'a T
+    where
+        T: 'a;
 
     fn shared_ref<'a, T>(r: &'a Self::RefType<'_, T>) -> &'a T {
         r
@@ -20,7 +23,10 @@ impl InteriorRef for Ref {
 
 pub struct Mut;
 impl InteriorRef for Mut {
-    type RefType<'a, T> = &'a mut T where T: 'a;
+    type RefType<'a, T>
+        = &'a mut T
+    where
+        T: 'a;
 
     fn shared_ref<'a, T>(r: &'a Self::RefType<'_, T>) -> &'a T {
         r

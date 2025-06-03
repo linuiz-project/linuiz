@@ -6,12 +6,10 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use std::{
     fs::File,
-    io::{copy, BufReader, Cursor},
+    io::{BufReader, Cursor, copy},
     path::Path,
 };
-use xshell::{cmd, Shell, TempDir};
-
-static WORKSPACE_DIRS: [&str; 3] = ["src/kernel", "src/shared", "src/userspace"];
+use xshell::{Shell, TempDir, cmd};
 
 static LIMINE_UEFI_IMAGE_URL: &str =
     "https://raw.githubusercontent.com/limine-bootloader/limine/v4.x-branch-binary/BOOTX64.EFI";
@@ -42,12 +40,6 @@ struct Fmt {
 #[derive(Parser)]
 #[command(rename_all = "snake_case")]
 enum Arguments {
-    Clean,
-    Update,
-    Check,
-    Clippy,
-    Fmt(Fmt),
-
     #[command(subcommand)]
     Target(target::Target),
 
@@ -68,7 +60,9 @@ fn main() -> Result<()> {
     }
 
     // Ensure the binaries have their `.cargo/config.toml`s.
-    if !sh.path_exists("src/kernel/.cargo/config.toml") || !sh.path_exists("src/userspace/.cargo/config.toml") {
+    if !sh.path_exists("src/kernel/.cargo/config.toml")
+        || !sh.path_exists("src/userspace/.cargo/config.toml")
+    {
         target::update_target(&sh, target::Target::x86_64)?;
     }
 
@@ -103,36 +97,23 @@ fn main() -> Result<()> {
         ovmf_download = true;
     }
 
+    #[cfg(target_arch = "aarch64")]
+    if !sh.path_exists(AARCH64_CODE) || !sh.path_exists(AARCH64_VARS) {
+        todo!()
+    }
+
     match Arguments::parse() {
-        Arguments::Clean => {
-            in_workspace_with(&sh, |sh| cmd!(sh, "cargo clean").run().with_context(|| "`cargo clean` failed"))?;
-        }
+        // Arguments::Update => {
+        //     cmd!(sh, "cargo update").run()?;
 
-        Arguments::Check => {
-            in_workspace_with(&sh, |sh| cmd!(sh, "cargo check --bins").run().with_context(|| "`cargo check` failed"))?;
-        }
+        //     if !limine_download {
+        //         download_limine_binary(&sh)?;
+        //     }
 
-        Arguments::Update => {
-            in_workspace_with(&sh, |sh| cmd!(sh, "cargo update").run().with_context(|| "`cargo update` failed"))?;
-
-            if !limine_download {
-                download_limine_binary(&sh)?;
-            }
-
-            if !ovmf_download {
-                download_ovmf_binaries(&sh, &tmp_dir)?;
-            }
-        }
-
-        Arguments::Clippy => {
-            in_workspace_with(&sh, |sh| cmd!(sh, "cargo clippy").run().with_context(|| "`cargo clippy` failed"))?;
-        }
-
-        Arguments::Fmt(fmt) => {
-            let args = &fmt.args;
-            in_workspace_with(&sh, |sh| cmd!(sh, "cargo fmt {args...}").run().with_context(|| "`cargo fmt` failed"))?;
-        }
-
+        //     if !ovmf_download {
+        //         download_ovmf_binaries(&sh, &tmp_dir)?;
+        //     }
+        // }
         Arguments::Target(target) => {
             target::update_target(&sh, target).with_context(|| "failed to update targets")?;
         }
@@ -144,16 +125,6 @@ fn main() -> Result<()> {
         Arguments::Run(run_options) => {
             run::run(&sh, run_options)?;
         }
-    }
-
-    Ok(())
-}
-
-fn in_workspace_with(shell: &Shell, with_fn: impl Fn(&Shell) -> Result<()>) -> Result<()> {
-    for dir in WORKSPACE_DIRS {
-        println!("Workspace: {dir}");
-        let _dir = shell.push_dir(dir);
-        with_fn(shell)?
     }
 
     Ok(())
@@ -172,7 +143,10 @@ fn download_limine_binary(sh: &Shell) -> Result<()> {
 
     let out_path = "build/root/EFI/BOOT/BOOTX64.EFI";
     let response = reqwest::blocking::get(LIMINE_UEFI_IMAGE_URL)?;
-    copy(&mut Cursor::new(response.bytes()?), &mut File::create(out_path)?)?;
+    copy(
+        &mut Cursor::new(response.bytes()?),
+        &mut File::create(out_path)?,
+    )?;
 
     assert!(sh.path_exists(out_path));
 
@@ -188,7 +162,10 @@ fn download_ovmf_binaries(sh: &Shell, tmp_dir: &TempDir) -> Result<()> {
     let tar_path = tmp_dir.path().join("ovmf_prebuilts.tar.xz");
 
     let response = reqwest::blocking::get(UEFI_FIRMWARE_IMAGE_URL)?;
-    copy(&mut Cursor::new(response.bytes()?), &mut File::create(tar_path.clone())?)?;
+    copy(
+        &mut Cursor::new(response.bytes()?),
+        &mut File::create(tar_path.clone())?,
+    )?;
 
     let mut archive_compressed = BufReader::new(File::open(tar_path)?);
     let mut archive_decompressed = Vec::new();
@@ -202,8 +179,6 @@ fn download_ovmf_binaries(sh: &Shell, tmp_dir: &TempDir) -> Result<()> {
         let path = entry.path()?.to_string_lossy().into_owned();
 
         if !path.ends_with("/") {
-            print!("Checking path for EFI binaries: {path:?}");
-
             if path.ends_with("x64/code.fd") {
                 entry.unpack(X86_64_CODE)?;
             } else if path.ends_with("x64/vars.fd") {
@@ -212,12 +187,7 @@ fn download_ovmf_binaries(sh: &Shell, tmp_dir: &TempDir) -> Result<()> {
                 entry.unpack(AARCH64_CODE)?;
             } else if path.ends_with("aarch64/vars.fd") {
                 entry.unpack(AARCH64_VARS)?;
-            } else {
-                println!(" ... invalid");
-                continue;
             }
-
-            println!(" ... found");
         }
     }
 

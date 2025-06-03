@@ -43,11 +43,7 @@ mod x86_64 {
         let cr4: usize;
         unsafe { core::arch::asm!("mov {}, cr4", out(reg) cr4, options(nomem, pure)) };
 
-        if (cr4 & CR4_LA57_BIT) == 0 {
-            4
-        } else {
-            5
-        }
+        if (cr4 & CR4_LA57_BIT) == 0 { 4 } else { 5 }
     }
 
     pub fn virt_noncanonical_shift() -> NonZeroU32 {

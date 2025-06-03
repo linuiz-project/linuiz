@@ -3,8 +3,8 @@ use limine::{
     memory_map,
     mp::RequestFlags,
     request::{
-        BootloaderInfoRequest, ExecutableAddressRequest, ExecutableCmdlineRequest, ExecutableFileRequest, HhdmRequest,
-        MemoryMapRequest, MpRequest, RsdpRequest,
+        BootloaderInfoRequest, ExecutableAddressRequest, ExecutableCmdlineRequest,
+        ExecutableFileRequest, HhdmRequest, MemoryMapRequest, MpRequest, RsdpRequest,
     },
 };
 
@@ -21,8 +21,8 @@ pub extern "C" fn init() -> ! {
     static KERNEL_ADDR_REQUEST: ExecutableAddressRequest = ExecutableAddressRequest::new();
     static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
     static MEMORY_MAP_REQUEST: MemoryMapRequest = MemoryMapRequest::new();
+    static RSDP_ADDRESS_REQUEST: RsdpRequest = RsdpRequest::new();
     static MP_REQUEST: MpRequest = MpRequest::new().with_flags(RequestFlags::X2APIC);
-
     // Enable logging first, so we can get feedback on the entire init process.
     if crate::logging::UartLogger::init().is_err() {
         // Safety: Logging subsystem must be enabled to run / debug OS.
@@ -38,7 +38,12 @@ pub extern "C" fn init() -> ! {
     }
 
     if let Some(boot_info) = BOOT_INFO_REQUEST.get_response() {
-        info!("Bootloader Info     {} v{} (rev {})", boot_info.name(), boot_info.version(), boot_info.revision());
+        info!(
+            "Bootloader Info     {} v{} (rev {})",
+            boot_info.name(),
+            boot_info.version(),
+            boot_info.revision()
+        );
     } else {
         info!("Bootloader Info     UNKNOWN");
     }
@@ -47,24 +52,35 @@ pub extern "C" fn init() -> ! {
     crate::panic::symbols::parse(&KERNEL_FILE_REQUEST);
     crate::mem::hhdm::set(&HHDM_REQUEST);
 
+    let memory_map = MEMORY_MAP_REQUEST
+        .get_response()
+        .expect("no response to memory map request")
+        .entries();
+
+    crate::mem::pmm::init(memory_map);
+
     crate::arch::x86_64::instructions::breakpoint();
 
     // Set up various variables and structures for init to use.
-    let memory_map = MEMORY_MAP_REQUEST.get_response().expect("no response to memory map request").entries();
     let kernel_file = KERNEL_FILE_REQUEST
         .get_response()
         .map(limine::response::ExecutableFileResponse::file)
         .expect("no response to kernel file request");
     // SAFETY: memory region is initialized by Limine.
-    let kernel_file_mem =
-        unsafe { core::slice::from_raw_parts(kernel_file.addr(), kernel_file.size().try_into().unwrap()) };
+    let kernel_file_mem = unsafe {
+        core::slice::from_raw_parts(kernel_file.addr(), kernel_file.size().try_into().unwrap())
+    };
     let kernel_elf = elf::ElfBytes::<elf::endian::AnyEndian>::minimal_parse(kernel_file_mem)
         .expect("failed to parse kernel file into ELF binary");
     let (kernel_addr_phys, kernel_addr_virt) = {
-        let kernel_addr_response = KERNEL_ADDR_REQUEST.get_response().expect("no kernel address response");
+        let kernel_addr_response = KERNEL_ADDR_REQUEST
+            .get_response()
+            .expect("no kernel address response");
         (
-            Address::<Physical>::new(kernel_addr_response.physical_base().try_into().unwrap()).unwrap(),
-            Address::<Virtual>::new(kernel_addr_response.virtual_base().try_into().unwrap()).unwrap(),
+            Address::<Physical>::new(kernel_addr_response.physical_base().try_into().unwrap())
+                .unwrap(),
+            Address::<Virtual>::new(kernel_addr_response.virtual_base().try_into().unwrap())
+                .unwrap(),
         )
     };
 
@@ -72,7 +88,6 @@ pub extern "C" fn init() -> ! {
     // // Parse the kernel parameters.
     // crate::params::parse_cmdline();
     // Initialize the physical memory manager.
-    crate::mem::alloc::pmm::init(memory_map);
 
     /* SETUP KERNEL MEMORY */
     {
@@ -104,7 +119,13 @@ pub extern "C" fn init() -> ! {
                     range.advance_by(huge_page_depth.align()).unwrap();
 
                     mapper
-                        .map(page, huge_page_depth, frame, lock_frames, flags | TableEntryFlags::HUGE)
+                        .map(
+                            page,
+                            huge_page_depth,
+                            frame,
+                            lock_frames,
+                            flags | TableEntryFlags::HUGE,
+                        )
                         .expect("failed to map range")
                 } else {
                     // Map a standard page
@@ -113,7 +134,9 @@ pub extern "C" fn init() -> ! {
                     let page = hhdm::get().offset(frame).unwrap();
                     range.advance_by(page_size()).unwrap();
 
-                    mapper.map(page, TableDepth::min(), frame, lock_frames, flags).expect("failed to map range");
+                    mapper
+                        .map(page, TableDepth::min(), frame, lock_frames, flags)
+                        .expect("failed to map range");
                 }
             }
         }
@@ -134,14 +157,20 @@ pub extern "C" fn init() -> ! {
             let mut last_end = 0;
             while let Some((mut entry_range, entry_ty)) = mmap_entries.next() {
                 // collapse sequential matching entries
-                if let Some((end_range, _)) =
-                    mmap_entries.take_while(|(range, ty)| entry_range.end == range.start && entry_ty.eq(ty)).last()
+                if let Some((end_range, _)) = mmap_entries
+                    .take_while(|(range, ty)| entry_range.end == range.start && entry_ty.eq(ty))
+                    .last()
                 {
                     entry_range.end = end_range.end;
                 }
 
                 if entry_range.start > last_end {
-                    map_hhdm_range(kmapper, last_end..entry_range.start, TableEntryFlags::RW, true);
+                    map_hhdm_range(
+                        kmapper,
+                        last_end..entry_range.start,
+                        TableEntryFlags::RW,
+                        true,
+                    );
                 }
 
                 last_end = entry_range.end;
@@ -154,7 +183,9 @@ pub extern "C" fn init() -> ! {
                     | EntryType::BOOTLOADER_RECLAIMABLE
                     | EntryType::FRAMEBUFFER => Some((TableEntryFlags::RW, true)),
 
-                    EntryType::RESERVED | EntryType::EXECUTABLE_AND_MODULES => Some((TableEntryFlags::RO, true)),
+                    EntryType::RESERVED | EntryType::EXECUTABLE_AND_MODULES => {
+                        Some((TableEntryFlags::RO, true))
+                    }
 
                     EntryType::BAD_MEMORY => None,
 
@@ -182,11 +213,12 @@ pub extern "C" fn init() -> ! {
                     debug!("{phdr:X?}");
 
                     // Safety: `KERNEL_BASE` is a linker symbol to an in-executable memory location, so it is guaranteed to be valid (and is never written to).
-                    let base_offset = usize::try_from(phdr.p_vaddr).unwrap() - unsafe { KERNEL_BASE.as_usize() };
+                    let base_offset =
+                        usize::try_from(phdr.p_vaddr).unwrap() - unsafe { KERNEL_BASE.as_usize() };
                     let base_offset_end = base_offset + usize::try_from(phdr.p_memsz).unwrap();
-                    let flags = crate::mem::paging::TableEntryFlags::from(crate::task::segment_to_mmap_permissions(
-                        phdr.p_flags,
-                    ));
+                    let flags = crate::mem::paging::TableEntryFlags::from(
+                        crate::task::segment_to_mmap_permissions(phdr.p_flags),
+                    );
 
                     (base_offset..base_offset_end)
                         .step_by(page_size())
@@ -204,7 +236,9 @@ pub extern "C" fn init() -> ! {
 
             debug!("Switching to kernel page tables...");
             // Safety: Kernel mappings should be identical to the bootloader mappings.
-            unsafe { kmapper.swap_into() };
+            unsafe {
+                kmapper.swap_into();
+            }
             debug!("Kernel has finalized control of page tables.");
         });
     }
@@ -224,7 +258,7 @@ pub extern "C" fn init() -> ! {
         });
     }
 
-    crate::mem::io::pci::init_devices().unwrap();
+    // crate::mem::io::pci::init_devices().unwrap();
 
     // load_drivers();
 
@@ -251,7 +285,7 @@ fn finalize_init(memory_map: &[&memory_map::Entry]) -> ! {
             (entry_start..entry_end).step_by(libsys::page_size())
         })
         .map(|address| Address::<Frame>::new(address).unwrap())
-        .for_each(|frame| crate::mem::alloc::pmm::get().free_frame(frame).unwrap());
+        .for_each(|frame| crate::mem::pmm::get().free_frame(frame).unwrap());
 
     debug!("Bootloader memory reclaimed.");
 

@@ -1,7 +1,7 @@
 use crate::mem::{
-    alloc::pmm,
     hhdm, paging,
     paging::{Error, Result, TableDepth},
+    pmm,
 };
 use libkernel::mem::{Mut, Ref};
 use libsys::{Address, Frame, Page};
@@ -39,7 +39,11 @@ impl Mapper {
     /// - The root frame must point to a valid top-level page table.
     /// - There must only exist one copy of provided page table tree at any time.
     pub unsafe fn new_unsafe(depth: TableDepth, root_frame: Address<Frame>) -> Self {
-        Self { depth, root_frame, entry: paging::PageTableEntry::new(root_frame, paging::TableEntryFlags::PRESENT) }
+        Self {
+            depth,
+            root_frame,
+            entry: paging::PageTableEntry::new(root_frame, paging::TableEntryFlags::PRESENT),
+        }
     }
 
     const fn root_table(&self) -> paging::PageTable<Ref> {
@@ -66,7 +70,7 @@ impl Mapper {
         if lock_frame {
             // If the acquisition of the frame fails, return an error.
             pmm::get().lock_frame(frame).map_err(|err| match err {
-                super::alloc::pmm::Error::OutOfBounds => Error::FrameBounds,
+                pmm::Error::OutOfBounds => Error::FrameBounds,
                 _ => Error::AllocError,
             })?;
         }
@@ -97,23 +101,34 @@ impl Mapper {
     /// Safety
     ///
     /// Caller must ensure calling this function does not cause memory corruption.
-    pub unsafe fn unmap(&mut self, page: Address<Page>, to_depth: Option<TableDepth>, free_frame: bool) -> Result<()> {
-        self.root_table_mut().with_entry_mut(page, to_depth, |entry| {
-            // Safety: We've got an explicit directive from the caller to unmap this page, so the caller must ensure that's a valid operation.
-            unsafe { entry.set_attributes(paging::TableEntryFlags::PRESENT, paging::FlagsModify::Remove) };
+    pub unsafe fn unmap(
+        &mut self,
+        page: Address<Page>,
+        to_depth: Option<TableDepth>,
+        free_frame: bool,
+    ) -> Result<()> {
+        self.root_table_mut()
+            .with_entry_mut(page, to_depth, |entry| {
+                // Safety: We've got an explicit directive from the caller to unmap this page, so the caller must ensure that's a valid operation.
+                unsafe {
+                    entry.set_attributes(
+                        paging::TableEntryFlags::PRESENT,
+                        paging::FlagsModify::Remove,
+                    )
+                };
 
-            let frame = entry.get_frame();
-            // Safety: See above.
-            unsafe { entry.set_frame(Address::new_truncate(0)) };
+                let frame = entry.get_frame();
+                // Safety: See above.
+                unsafe { entry.set_frame(Address::new_truncate(0)) };
 
-            if free_frame {
-                pmm::get().free_frame(frame).unwrap();
-            }
+                if free_frame {
+                    pmm::get().free_frame(frame).unwrap();
+                }
 
-            // Invalidate the page in the TLB.
-            #[cfg(target_arch = "x86_64")]
-            crate::arch::x86_64::instructions::tlb::invlpg(page);
-        })
+                // Invalidate the page in the TLB.
+                #[cfg(target_arch = "x86_64")]
+                crate::arch::x86_64::instructions::tlb::invlpg(page);
+            })
     }
 
     pub fn auto_map(&mut self, page: Address<Page>, flags: paging::TableEntryFlags) -> Result<()> {
@@ -133,17 +148,23 @@ impl Mapper {
     }
 
     pub fn is_mapped_to(&self, page: Address<Page>, frame: Address<Frame>) -> bool {
-        self.root_table().with_entry(page, None, |entry| entry.get_frame() == frame).unwrap_or(false)
+        self.root_table()
+            .with_entry(page, None, |entry| entry.get_frame() == frame)
+            .unwrap_or(false)
     }
 
     pub fn get_mapped_to(&self, page: Address<Page>) -> Option<Address<Frame>> {
-        self.root_table().with_entry(page, None, |entry| entry.get_frame()).ok()
+        self.root_table()
+            .with_entry(page, None, |entry| entry.get_frame())
+            .ok()
     }
 
     /* STATE CHANGING */
 
     pub fn get_page_attributes(&self, page: Address<Page>) -> Option<paging::TableEntryFlags> {
-        self.root_table().with_entry(page, None, |entry| entry.get_attributes()).ok()
+        self.root_table()
+            .with_entry(page, None, |entry| entry.get_attributes())
+            .ok()
     }
 
     pub unsafe fn set_page_attributes(

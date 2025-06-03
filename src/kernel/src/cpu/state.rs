@@ -101,45 +101,55 @@ pub unsafe fn init(timer_frequency: u16) {
         unsafe {
             apic.software_reset(255, 254, 253);
             apic.get_timer().set_vector(Vector::Timer as u8);
-            apic.get_error().set_vector(Vector::Error as u8).set_masked(false);
-            apic.get_performance().set_vector(Vector::Performance as u8).set_masked(true);
-            apic.get_thermal_sensor().set_vector(Vector::Thermal as u8).set_masked(true);
+            apic.get_error()
+                .set_vector(Vector::Error as u8)
+                .set_masked(false);
+            apic.get_performance()
+                .set_vector(Vector::Performance as u8)
+                .set_masked(true);
+            apic.get_thermal_sensor()
+                .set_vector(Vector::Thermal as u8)
+                .set_masked(true);
         }
 
         // Configure APIC timer in most advanced mode.
-        let timer_interval = if x86_64::cpuid::FEATURE_INFO.has_tsc() && x86_64::cpuid::FEATURE_INFO.has_tsc_deadline()
+        let timer_interval = if x86_64::cpuid::FEATURE_INFO.has_tsc()
+            && x86_64::cpuid::FEATURE_INFO.has_tsc_deadline()
         {
             // Safety: APIC is put into TSC Deadline mode for configuration.
             unsafe {
                 apic.get_timer().set_mode(apic::TimerMode::TscDeadline);
             }
 
-            let frequency = x86_64::cpuid::CPUID.get_processor_frequency_info().map_or_else(
-                || {
-                    libsys::do_once!({
-                        trace!("Processors do not support TSC frequency reporting via CPUID.");
-                    });
+            let frequency = x86_64::cpuid::CPUID
+                .get_processor_frequency_info()
+                .map_or_else(
+                    || {
+                        libsys::do_once!({
+                            trace!("Processors do not support TSC frequency reporting via CPUID.");
+                        });
 
-                    // Safety: Enable the APIC to start the timer, and mask the timer interrupt
-                    //         to avoid it firing while we measure.
-                    unsafe {
-                        apic.sw_enable();
-                        apic.get_timer().set_masked(true);
-                    }
+                        // Safety: Enable the APIC to start the timer, and mask the timer interrupt
+                        //         to avoid it firing while we measure.
+                        unsafe {
+                            apic.sw_enable();
+                            apic.get_timer().set_masked(true);
+                        }
 
-                    // Safety: I don't know why `_rdtsc()` is unsafe (it has no side effects).
-                    let start_tsc = unsafe { core::arch::x86_64::_rdtsc() };
-                    crate::time::SYSTEM_CLOCK.spin_wait_us(US_WAIT);
-                    // Safety: I don't know why `_rdtsc()` is unsafe (it has no side effects).
-                    let end_tsc = unsafe { core::arch::x86_64::_rdtsc() };
+                        // Safety: I don't know why `_rdtsc()` is unsafe (it has no side effects).
+                        let start_tsc = unsafe { core::arch::x86_64::_rdtsc() };
+                        crate::time::SYSTEM_CLOCK.spin_wait_us(US_WAIT);
+                        // Safety: I don't know why `_rdtsc()` is unsafe (it has no side effects).
+                        let end_tsc = unsafe { core::arch::x86_64::_rdtsc() };
 
-                    (end_tsc - start_tsc) * u64::from(US_FREQ_FACTOR)
-                },
-                |info| {
-                    u64::from(info.bus_frequency())
-                        / (u64::from(info.processor_base_frequency()) * u64::from(info.processor_max_frequency()))
-                },
-            );
+                        (end_tsc - start_tsc) * u64::from(US_FREQ_FACTOR)
+                    },
+                    |info| {
+                        u64::from(info.bus_frequency())
+                            / (u64::from(info.processor_base_frequency())
+                                * u64::from(info.processor_max_frequency()))
+                    },
+                );
 
             frequency / u64::from(timer_frequency)
         } else {
@@ -147,7 +157,9 @@ pub unsafe fn init(timer_frequency: u16) {
             unsafe {
                 apic.sw_enable();
                 apic.set_timer_divisor(apic::TimerDivisor::Div1);
-                apic.get_timer().set_masked(true).set_mode(apic::TimerMode::OneShot);
+                apic.get_timer()
+                    .set_masked(true)
+                    .set_mode(apic::TimerMode::OneShot);
                 apic.set_timer_initial_count(u32::MAX);
             }
 
@@ -178,7 +190,8 @@ pub unsafe fn init(timer_frequency: u16) {
 }
 
 fn get_ptr() -> NonNull<State> {
-    let kernel_gs_usize = usize::try_from(crate::arch::x86_64::registers::msr::IA32_KERNEL_GS_BASE::read()).unwrap();
+    let kernel_gs_usize =
+        usize::try_from(crate::arch::x86_64::registers::msr::IA32_KERNEL_GS_BASE::read()).unwrap();
     NonNull::new(kernel_gs_usize as *mut State).expect("state register is empty")
 }
 
@@ -249,7 +262,8 @@ pub unsafe fn set_preemption_wait(interval_wait: core::num::NonZeroU16) {
             // Safety: Control flow expects the TSC deadline to be set.
             apic::TimerMode::TscDeadline => unsafe {
                 crate::arch::x86_64::registers::msr::IA32_TSC_DEADLINE::set(
-                    core::arch::x86_64::_rdtsc() + (timer_interval.get() * u64::from(interval_wait.get())),
+                    core::arch::x86_64::_rdtsc()
+                        + (timer_interval.get() * u64::from(interval_wait.get())),
                 );
             },
 

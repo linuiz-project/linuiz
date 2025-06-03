@@ -29,7 +29,10 @@ impl CR3 {
             asm!("mov {}, cr3", out(reg) value, options(nostack, nomem));
         }
 
-        (Address::new_truncate(usize::try_from(value & !0xFFF).unwrap()), CR3Flags::from_bits_truncate(value))
+        (
+            Address::new_truncate(usize::try_from(value & !0xFFF).unwrap()),
+            CR3Flags::from_bits_truncate(value),
+        )
     }
 
     #[inline]

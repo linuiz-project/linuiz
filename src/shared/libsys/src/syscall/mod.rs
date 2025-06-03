@@ -40,7 +40,9 @@ impl ResultConverter for Result {
 
             Err(0x0) => Ok(Success::Ok),
             Err(0x1) => Ok(Success::Ptr(value as *mut c_void)),
-            Err(0x2) => Ok(Success::NonNullPtr(core::ptr::NonNull::new(value as *mut c_void).unwrap())),
+            Err(0x2) => Ok(Success::NonNullPtr(
+                core::ptr::NonNull::new(value as *mut c_void).unwrap(),
+            )),
 
             Err(_) => unimplemented!(),
         }
@@ -50,7 +52,9 @@ impl ResultConverter for Result {
         match self {
             Ok(success @ Success::Ok) => (success.discriminant() as usize, usize::default()),
             Ok(success @ Success::Ptr(ptr)) => (success.discriminant() as usize, ptr.addr()),
-            Ok(success @ Success::NonNullPtr(ptr)) => (success.discriminant() as usize, ptr.addr().get()),
+            Ok(success @ Success::NonNullPtr(ptr)) => {
+                (success.discriminant() as usize, ptr.addr().get())
+            }
 
             Err(err) => (err as usize, Default::default()),
         }

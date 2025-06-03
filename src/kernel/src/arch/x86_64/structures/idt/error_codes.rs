@@ -56,7 +56,11 @@ pub struct SelectorErrorCode(u64);
 impl SelectorErrorCode {
     /// Create a [`SelectorErrorCode`]`. Returns [`None`]` if any reserved bits (16-64) are set.
     pub const fn new(flags: u64) -> Option<Self> {
-        if (flags & 0xFFFFFFFFFFFF0000) == 0 { Some(Self(flags)) } else { None }
+        if (flags & 0xFFFFFFFFFFFF0000) == 0 {
+            Some(Self(flags))
+        } else {
+            None
+        }
     }
 
     /// Indicates whether the exception occured during delivery of an

@@ -57,7 +57,10 @@ fn process_klog(level: log::Level, str_ptr_arg: usize, str_len: usize) -> Result
         let str_end = str_start + str_len;
 
         let task = scheduler.task_mut().ok_or(Error::NoActiveTask)?;
-        for address in (str_start..str_end).step_by(page_size() / 2).map(Address::new_truncate) {
+        for address in (str_start..str_end)
+            .step_by(page_size() / 2)
+            .map(Address::new_truncate)
+        {
             match task.demand_map(address) {
                 Ok(()) | Err(TaskError::AlreadyMapped) => {}
 

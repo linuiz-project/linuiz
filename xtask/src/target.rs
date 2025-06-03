@@ -34,7 +34,10 @@ impl ConfigOptions {
                 build_std: vec!["core".into(), "compiler_builtins".into(), "alloc".into()],
                 build_std_features: vec!["compiler-builtins-mem".into()],
             },
-            build_options: BuildOptions { target: target.to_string(), rustflags },
+            build_options: BuildOptions {
+                target: target.to_string(),
+                rustflags,
+            },
         }
     }
 }
@@ -83,8 +86,10 @@ fn update_target_impl(
     rustflags: Option<Vec<String>>,
 ) -> Result<()> {
     let config = ConfigOptions::new(target, rustflags);
-    let config_toml = toml::to_string_pretty(&config).with_context(|| "failed prettifying config TOML")?;
-    sh.write_file(path.as_ref(), config_toml).with_context(|| "failed writing prettified TOML")?;
+    let config_toml =
+        toml::to_string_pretty(&config).with_context(|| "failed prettifying config TOML")?;
+    sh.write_file(path.as_ref(), config_toml)
+        .with_context(|| "failed writing prettified TOML")?;
 
     Ok(())
 }

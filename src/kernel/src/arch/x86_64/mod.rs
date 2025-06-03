@@ -7,8 +7,10 @@ pub mod cpuid {
     use spin::Lazy;
 
     pub static CPUID: Lazy<CpuId<raw_cpuid::CpuIdReaderNative>> = Lazy::new(CpuId::new);
-    pub static FEATURE_INFO: Lazy<FeatureInfo> = Lazy::new(|| CPUID.get_feature_info().expect("no CPUID.01H support"));
-    pub static EXT_FEATURE_INFO: Lazy<Option<ExtendedFeatures>> = Lazy::new(|| CPUID.get_extended_feature_info());
+    pub static FEATURE_INFO: Lazy<FeatureInfo> =
+        Lazy::new(|| CPUID.get_feature_info().expect("no CPUID.01H support"));
+    pub static EXT_FEATURE_INFO: Lazy<Option<ExtendedFeatures>> =
+        Lazy::new(|| CPUID.get_extended_feature_info());
     pub static EXT_FUNCTION_INFO: Lazy<Option<ExtendedProcessorFeatureIdentifiers>> =
         Lazy::new(|| CPUID.get_extended_processor_and_feature_identifiers());
     pub static VENDOR_INFO: Lazy<Option<VendorInfo>> = Lazy::new(|| CPUID.get_vendor_info());
@@ -27,7 +29,9 @@ pub unsafe fn configure_hwthread() {
 
     // Safety: This is the first and only time `CR0` will be set.
     unsafe {
-        CR0::write(CR0Flags::PE | CR0Flags::MP | CR0Flags::ET | CR0Flags::NE | CR0Flags::WP | CR0Flags::PG);
+        CR0::write(
+            CR0Flags::PE | CR0Flags::MP | CR0Flags::ET | CR0Flags::NE | CR0Flags::WP | CR0Flags::PG,
+        );
     }
 
     let mut cr4_flags = CR4Flags::PAE | CR4Flags::PGE | CR4Flags::OSXMMEXCPT;
@@ -48,19 +52,31 @@ pub unsafe fn configure_hwthread() {
         cr4_flags.insert(CR4Flags::PCIDE);
     }
 
-    if cpuid::EXT_FEATURE_INFO.as_ref().is_some_and(cpuid::ExtendedFeatures::has_umip) {
+    if cpuid::EXT_FEATURE_INFO
+        .as_ref()
+        .is_some_and(cpuid::ExtendedFeatures::has_umip)
+    {
         cr4_flags.insert(CR4Flags::UMIP);
     }
 
-    if cpuid::EXT_FEATURE_INFO.as_ref().is_some_and(cpuid::ExtendedFeatures::has_fsgsbase) {
+    if cpuid::EXT_FEATURE_INFO
+        .as_ref()
+        .is_some_and(cpuid::ExtendedFeatures::has_fsgsbase)
+    {
         cr4_flags.insert(CR4Flags::FSGSBASE);
     }
 
-    if cpuid::EXT_FEATURE_INFO.as_ref().is_some_and(cpuid::ExtendedFeatures::has_smep) {
+    if cpuid::EXT_FEATURE_INFO
+        .as_ref()
+        .is_some_and(cpuid::ExtendedFeatures::has_smep)
+    {
         cr4_flags.insert(CR4Flags::SMEP);
     }
 
-    if cpuid::EXT_FEATURE_INFO.as_ref().is_some_and(cpuid::ExtendedFeatures::has_smap) {
+    if cpuid::EXT_FEATURE_INFO
+        .as_ref()
+        .is_some_and(cpuid::ExtendedFeatures::has_smap)
+    {
         cr4_flags.insert(CR4Flags::SMAP);
     }
 
@@ -70,7 +86,10 @@ pub unsafe fn configure_hwthread() {
     }
 
     // Enable use of the `NO_EXECUTE` page attribute, if supported.
-    if cpuid::EXT_FUNCTION_INFO.as_ref().is_some_and(cpuid::ExtendedProcessorFeatureIdentifiers::has_execute_disable) {
+    if cpuid::EXT_FUNCTION_INFO
+        .as_ref()
+        .is_some_and(cpuid::ExtendedProcessorFeatureIdentifiers::has_execute_disable)
+    {
         // Safety: The `NX` bit is not currently in use by any paging structures.
         unsafe {
             msr::IA32_EFER::set_nxe(true);
@@ -96,7 +115,12 @@ pub unsafe fn configure_hwthread() {
     //     msr::IA32_EFER::set_sce(true);
     // }
 
-    info!("Vendor              {}", cpuid::VENDOR_INFO.as_ref().map_or("UNKNOWN", raw_cpuid::VendorInfo::as_str));
+    info!(
+        "Vendor              {}",
+        cpuid::VENDOR_INFO
+            .as_ref()
+            .map_or("UNKNOWN", raw_cpuid::VendorInfo::as_str)
+    );
 }
 
 /// Gets the ID of the current core.

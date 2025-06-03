@@ -30,7 +30,10 @@ pub enum PageFaultReason {
 
 #[derive(Debug, Clone, Copy)]
 pub enum ExceptionKind {
-    PageFault { ptr: NonNull<u8>, reason: PageFaultReason },
+    PageFault {
+        ptr: NonNull<u8>,
+        reason: PageFaultReason,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]

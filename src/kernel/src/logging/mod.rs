@@ -2,7 +2,8 @@ use crate::interrupts::InterruptCell;
 use core::fmt::Write;
 use spin::{Mutex, Once};
 use uart::{
-    Baud, Data, FifoControl, InterruptEnable, LineControl, LineStatus, ModemControl, Uart, address::PortAddress,
+    Baud, Data, FifoControl, InterruptEnable, LineControl, LineStatus, ModemControl, Uart,
+    address::PortAddress,
 };
 
 #[derive(Debug, Error)]
@@ -65,10 +66,16 @@ impl UartLogger {
                 }
 
                 // Fully enable UART, with FIFO.
-                uart.write_fifo_control(FifoControl::ENABLE | FifoControl::CLEAR_RX | FifoControl::CLEAR_TX);
-                uart.write_modem_control(ModemControl::TERMINAL_READY | ModemControl::OUT_1 | ModemControl::OUT_2);
+                uart.write_fifo_control(
+                    FifoControl::ENABLE | FifoControl::CLEAR_RX | FifoControl::CLEAR_TX,
+                );
+                uart.write_modem_control(
+                    ModemControl::TERMINAL_READY | ModemControl::OUT_1 | ModemControl::OUT_2,
+                );
 
-                Ok(UartLogger { writer: InterruptCell::new(Mutex::new(UartWriter(uart))) })
+                Ok(UartLogger {
+                    writer: InterruptCell::new(Mutex::new(UartWriter(uart))),
+                })
             })?;
 
             #[cfg(debug_assertions)]

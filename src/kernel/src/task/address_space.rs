@@ -71,7 +71,12 @@ impl AddressSpace {
     }
 
     pub fn new_userspace() -> Self {
-        Self::new(unsafe { Mapper::new_unsafe(TableDepth::max(), crate::mem::copy_kernel_page_table().unwrap()) })
+        Self::new(unsafe {
+            Mapper::new_unsafe(
+                TableDepth::max(),
+                crate::mem::copy_kernel_page_table().unwrap(),
+            )
+        })
     }
 
     pub fn is_current(&self) -> bool {
@@ -97,9 +102,18 @@ impl AddressSpace {
     }
 
     #[cfg_attr(debug_assertions, inline(never))]
-    fn map_any(&mut self, page_count: NonZeroUsize, permissions: MmapPermissions) -> Result<NonNull<[u8]>> {
+    fn map_any(
+        &mut self,
+        page_count: NonZeroUsize,
+        permissions: MmapPermissions,
+    ) -> Result<NonNull<[u8]>> {
         let walker = unsafe {
-            paging::walker::Walker::new(self.0.view_page_table(), TableDepth::max(), TableDepth::min()).unwrap()
+            paging::walker::Walker::new(
+                self.0.view_page_table(),
+                TableDepth::max(),
+                TableDepth::min(),
+            )
+            .unwrap()
         };
 
         let mut index = 0;
@@ -125,7 +139,9 @@ impl AddressSpace {
         match run.cmp(&page_count.get()) {
             core::cmp::Ordering::Equal => {
                 let address = Address::<Page>::new(index << libsys::page_shift().get()).unwrap();
-                let flags = TableEntryFlags::PRESENT | TableEntryFlags::USER | TableEntryFlags::from(permissions);
+                let flags = TableEntryFlags::PRESENT
+                    | TableEntryFlags::USER
+                    | TableEntryFlags::from(permissions);
 
                 unsafe { self.invoke_mapper(address, page_count, flags) }
             }
@@ -145,7 +161,9 @@ impl AddressSpace {
             self.invoke_mapper(
                 address,
                 page_count,
-                TableEntryFlags::PRESENT | TableEntryFlags::USER | TableEntryFlags::from(permissions),
+                TableEntryFlags::PRESENT
+                    | TableEntryFlags::USER
+                    | TableEntryFlags::from(permissions),
             )
         }
     }
@@ -166,7 +184,10 @@ impl AddressSpace {
             .try_for_each(|offset_page| self.0.auto_map(offset_page, flags))
             .map_err(Error::from)?;
 
-        Ok(NonNull::slice_from_raw_parts(NonNull::new(address.as_ptr()).unwrap(), mapping_size))
+        Ok(NonNull::slice_from_raw_parts(
+            NonNull::new(address.as_ptr()).unwrap(),
+            mapping_size,
+        ))
     }
 
     pub unsafe fn set_flags(
@@ -178,7 +199,9 @@ impl AddressSpace {
         for index_offset in 0..page_count.get() {
             let offset_index = address.index() + index_offset;
             let offset_address =
-                Address::from_index(offset_index).ok_or(Error::AddressIndexOverrun { index: offset_index })?;
+                Address::from_index(offset_index).ok_or(Error::AddressIndexOverrun {
+                    index: offset_index,
+                })?;
 
             self.0
                 .set_page_attributes(offset_address, None, flags, paging::FlagsModify::Set)
@@ -189,7 +212,9 @@ impl AddressSpace {
     }
 
     pub fn get_flags(&self, address: Address<Page>) -> Result<TableEntryFlags> {
-        self.0.get_page_attributes(address).ok_or(Error::NotMapped { addr: address.get() })
+        self.0.get_page_attributes(address).ok_or(Error::NotMapped {
+            addr: address.get(),
+        })
     }
 
     pub fn is_mmapped(&self, address: Address<Page>) -> bool {
@@ -206,6 +231,8 @@ impl AddressSpace {
 
 impl core::fmt::Debug for AddressSpace {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_tuple("AddressSpace").field(&self.0.view_page_table().as_ptr()).finish()
+        f.debug_tuple("AddressSpace")
+            .field(&self.0.view_page_table().as_ptr())
+            .finish()
     }
 }

@@ -136,8 +136,16 @@ impl ChainedPic {
     /// `base_irq` must be a valid, nominal value for the current environment.
     pub const unsafe fn new(base_irq: u8) -> Self {
         Self([
-            Pic { offset: base_irq, command: WriteOnlyPort::new(0x20), data: ReadWritePort::new(0x21) },
-            Pic { offset: base_irq + 8, command: WriteOnlyPort::new(0xA0), data: ReadWritePort::new(0xA1) },
+            Pic {
+                offset: base_irq,
+                command: WriteOnlyPort::new(0x20),
+                data: ReadWritePort::new(0x21),
+            },
+            Pic {
+                offset: base_irq + 8,
+                command: WriteOnlyPort::new(0xA0),
+                data: ReadWritePort::new(0xA1),
+            },
         ])
     }
 
@@ -185,7 +193,9 @@ impl ChainedPic {
         io_wait();
 
         // Write masks to data port, specifying which interrupts are ignored.
-        self.0[0].data.write(!enabled.low_bits() & !(1 << 2) /* never mask cascade */);
+        self.0[0].data.write(
+            !enabled.low_bits() & !(1 << 2), /* never mask cascade */
+        );
         io_wait();
         self.0[1].data.write(!enabled.high_bits());
     }

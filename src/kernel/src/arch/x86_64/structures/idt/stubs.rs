@@ -198,9 +198,15 @@ macro_rules! irq_stub {
 ///
 /// TODO
 #[allow(clippy::similar_names)]
-unsafe extern "sysv64" fn irq_handler(irq_number: u64, isf: &mut InterruptStackFrame, regs: &mut Registers) {
+unsafe extern "sysv64" fn irq_handler(
+    irq_number: u64,
+    isf: &mut InterruptStackFrame,
+    regs: &mut Registers,
+) {
     match Vector::try_from(irq_number) {
-        Ok(Vector::Timer) => crate::cpu::state::with_scheduler(|scheduler| scheduler.interrupt_task(isf, regs)),
+        Ok(Vector::Timer) => {
+            crate::cpu::state::with_scheduler(|scheduler| scheduler.interrupt_task(isf, regs))
+        }
 
         Ok(Vector::Syscall) => {
             let vector = regs.rax;
@@ -211,8 +217,13 @@ unsafe extern "sysv64" fn irq_handler(irq_number: u64, isf: &mut InterruptStackF
             let arg4 = regs.r8;
             let arg5 = regs.r9;
 
-            let result = crate::interrupts::syscall::process(vector, arg0, arg1, arg2, arg3, arg4, arg5, isf, regs);
-            let (rdi, rsi) = <libsys::syscall::Result as libsys::syscall::ResultConverter>::into_registers(result);
+            let result = crate::interrupts::syscall::process(
+                vector, arg0, arg1, arg2, arg3, arg4, arg5, isf, regs,
+            );
+            let (rdi, rsi) =
+                <libsys::syscall::Result as libsys::syscall::ResultConverter>::into_registers(
+                    result,
+                );
             regs.rdi = rdi;
             regs.rsi = rsi;
         }
@@ -275,28 +286,69 @@ extern "sysv64" fn df_handler(stack_frame: &InterruptStackFrame, _: u64, gprs: &
 }
 
 exception_handler_with_error!(ts, u64, ());
-extern "sysv64" fn ts_handler(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &Registers) {
-    handle(&ArchException::InvalidTSS(stack_frame, SelectorErrorCode::new(error_code).unwrap(), gprs));
+extern "sysv64" fn ts_handler(
+    stack_frame: &InterruptStackFrame,
+    error_code: u64,
+    gprs: &Registers,
+) {
+    handle(&ArchException::InvalidTSS(
+        stack_frame,
+        SelectorErrorCode::new(error_code).unwrap(),
+        gprs,
+    ));
 }
 
 exception_handler_with_error!(np, u64, ());
-extern "sysv64" fn np_handler(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &Registers) {
-    handle(&ArchException::SegmentNotPresent(stack_frame, SelectorErrorCode::new(error_code).unwrap(), gprs));
+extern "sysv64" fn np_handler(
+    stack_frame: &InterruptStackFrame,
+    error_code: u64,
+    gprs: &Registers,
+) {
+    handle(&ArchException::SegmentNotPresent(
+        stack_frame,
+        SelectorErrorCode::new(error_code).unwrap(),
+        gprs,
+    ));
 }
 
 exception_handler_with_error!(ss, u64, ());
-extern "sysv64" fn ss_handler(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &Registers) {
-    handle(&ArchException::StackSegmentFault(stack_frame, SelectorErrorCode::new(error_code).unwrap(), gprs));
+extern "sysv64" fn ss_handler(
+    stack_frame: &InterruptStackFrame,
+    error_code: u64,
+    gprs: &Registers,
+) {
+    handle(&ArchException::StackSegmentFault(
+        stack_frame,
+        SelectorErrorCode::new(error_code).unwrap(),
+        gprs,
+    ));
 }
 
 exception_handler_with_error!(gp, u64, ());
-extern "sysv64" fn gp_handler(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &Registers) {
-    handle(&ArchException::GeneralProtectionFault(stack_frame, SelectorErrorCode::new(error_code).unwrap(), gprs));
+extern "sysv64" fn gp_handler(
+    stack_frame: &InterruptStackFrame,
+    error_code: u64,
+    gprs: &Registers,
+) {
+    handle(&ArchException::GeneralProtectionFault(
+        stack_frame,
+        SelectorErrorCode::new(error_code).unwrap(),
+        gprs,
+    ));
 }
 
 exception_handler_with_error!(pf, PageFaultErrorCode, ());
-extern "sysv64" fn pf_handler(stack_frame: &InterruptStackFrame, err: PageFaultErrorCode, gprs: &Registers) {
-    handle(&ArchException::PageFault(stack_frame, gprs, err, crate::arch::x86_64::registers::control::CR2::read()));
+extern "sysv64" fn pf_handler(
+    stack_frame: &InterruptStackFrame,
+    err: PageFaultErrorCode,
+    gprs: &Registers,
+) {
+    handle(&ArchException::PageFault(
+        stack_frame,
+        gprs,
+        err,
+        crate::arch::x86_64::registers::control::CR2::read(),
+    ));
 }
 
 // --- reserved 15
@@ -307,8 +359,16 @@ extern "sysv64" fn mf_handler(stack_frame: &InterruptStackFrame, gprs: &Register
 }
 
 exception_handler_with_error!(ac, u64, ());
-extern "sysv64" fn ac_handler(stack_frame: &InterruptStackFrame, error_code: u64, gprs: &Registers) {
-    handle(&ArchException::AlignmentCheck(stack_frame, error_code, gprs));
+extern "sysv64" fn ac_handler(
+    stack_frame: &InterruptStackFrame,
+    error_code: u64,
+    gprs: &Registers,
+) {
+    handle(&ArchException::AlignmentCheck(
+        stack_frame,
+        error_code,
+        gprs,
+    ));
 }
 
 exception_handler!(mc, !);

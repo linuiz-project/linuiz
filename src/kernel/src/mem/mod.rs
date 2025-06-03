@@ -1,8 +1,9 @@
 pub mod alloc;
 pub mod hhdm;
-pub mod io;
+// pub mod io;
 pub mod mapper;
 pub mod paging;
+pub mod pmm;
 
 use self::mapper::Mapper;
 use crate::interrupts::InterruptCell;
@@ -47,13 +48,17 @@ pub fn with_kmapper<T>(func: impl FnOnce(&mut Mapper) -> T) -> T {
     })
 }
 
-pub fn copy_kernel_page_table() -> alloc::pmm::Result<Address<Frame>> {
-    let table_frame = alloc::pmm::get().next_frame()?;
+pub fn copy_kernel_page_table() -> pmm::Result<Address<Frame>> {
+    let table_frame = pmm::get().next_frame()?;
 
     // Safety: Frame is provided by allocator, and so guaranteed to be within the HHDM, and is frame-sized.
     let new_table = unsafe {
         core::slice::from_raw_parts_mut(
-            hhdm::get().offset(table_frame).unwrap().as_ptr().cast::<paging::PageTableEntry>(),
+            hhdm::get()
+                .offset(table_frame)
+                .unwrap()
+                .as_ptr()
+                .cast::<paging::PageTableEntry>(),
             table_index_size(),
         )
     };
@@ -64,9 +69,16 @@ pub fn copy_kernel_page_table() -> alloc::pmm::Result<Address<Frame>> {
 }
 
 #[cfg(target_arch = "x86_64")]
-pub struct PagingRegister(pub Address<Frame>, pub crate::arch::x86_64::registers::control::CR3Flags);
+pub struct PagingRegister(
+    pub Address<Frame>,
+    pub crate::arch::x86_64::registers::control::CR3Flags,
+);
 #[cfg(target_arch = "riscv64")]
-pub struct PagingRegister(pub Address<Frame>, pub u16, pub crate::arch::rv64::registers::satp::Mode);
+pub struct PagingRegister(
+    pub Address<Frame>,
+    pub u16,
+    pub crate::arch::rv64::registers::satp::Mode,
+);
 
 impl PagingRegister {
     pub fn read() -> Self {

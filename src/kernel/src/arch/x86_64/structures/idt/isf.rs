@@ -1,7 +1,8 @@
 use crate::arch::x86_64::{
     registers::RFlags,
     structures::gdt::{
-        KCODE_SELECTOR, KDATA_SELECTOR, PrivilegeLevel, SegmentSelector, UCODE_SELECTOR, UDATA_SELECTOR,
+        KCODE_SELECTOR, KDATA_SELECTOR, PrivilegeLevel, SegmentSelector, UCODE_SELECTOR,
+        UDATA_SELECTOR,
     },
 };
 use libsys::{Address, Virtual};
@@ -49,12 +50,30 @@ impl InterruptStackFrame {
         }
     }
 
-    pub fn new_kernel(instruction_pointer: Address<Virtual>, stack_pointer: Address<Virtual>) -> Self {
-        Self::new(instruction_pointer, KCODE_SELECTOR, RFlags::INTERRUPT_FLAG, stack_pointer, KDATA_SELECTOR)
+    pub fn new_kernel(
+        instruction_pointer: Address<Virtual>,
+        stack_pointer: Address<Virtual>,
+    ) -> Self {
+        Self::new(
+            instruction_pointer,
+            KCODE_SELECTOR,
+            RFlags::INTERRUPT_FLAG,
+            stack_pointer,
+            KDATA_SELECTOR,
+        )
     }
 
-    pub fn new_user(instruction_pointer: Address<Virtual>, stack_pointer: Address<Virtual>) -> Self {
-        Self::new(instruction_pointer, UCODE_SELECTOR, RFlags::INTERRUPT_FLAG, stack_pointer, UDATA_SELECTOR)
+    pub fn new_user(
+        instruction_pointer: Address<Virtual>,
+        stack_pointer: Address<Virtual>,
+    ) -> Self {
+        Self::new(
+            instruction_pointer,
+            UCODE_SELECTOR,
+            RFlags::INTERRUPT_FLAG,
+            stack_pointer,
+            UDATA_SELECTOR,
+        )
     }
 
     /// Gets the return instruction pointer.
@@ -81,7 +100,11 @@ impl InterruptStackFrame {
 
     /// Get the return code segment selector.
     pub fn get_code_segment(&self) -> SegmentSelector {
-        SegmentSelector::new(self.code_segment >> 3, PrivilegeLevel::from_u16(self.code_segment & 0b11)).unwrap()
+        SegmentSelector::new(
+            self.code_segment >> 3,
+            PrivilegeLevel::from_u16(self.code_segment & 0b11),
+        )
+        .unwrap()
     }
 
     /// Set the return code segment selector.
@@ -123,7 +146,11 @@ impl InterruptStackFrame {
 
     /// Get the return stack segment selector.
     pub fn get_stack_segment(&self) -> SegmentSelector {
-        SegmentSelector::new(self.stack_segment >> 3, PrivilegeLevel::from_u16(self.stack_segment & 0b11)).unwrap()
+        SegmentSelector::new(
+            self.stack_segment >> 3,
+            PrivilegeLevel::from_u16(self.stack_segment & 0b11),
+        )
+        .unwrap()
     }
 
     /// Set the return stack segment selector.

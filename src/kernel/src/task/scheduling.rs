@@ -16,7 +16,11 @@ pub struct Scheduler {
 
 impl Scheduler {
     pub const fn new(enabled: bool) -> Self {
-        Self { enabled, idle_stack: Stack::new(), task: None }
+        Self {
+            enabled,
+            idle_stack: Stack::new(),
+            task: None,
+        }
     }
 
     /// Enables the scheduler to pop tasks.
@@ -93,7 +97,12 @@ impl Scheduler {
         self.next_task(&mut processes, isf, regs);
     }
 
-    fn next_task(&mut self, processes: &mut VecDeque<Task>, isf: &mut InterruptStackFrame, regs: &mut Registers) {
+    fn next_task(
+        &mut self,
+        processes: &mut VecDeque<Task>,
+        isf: &mut InterruptStackFrame,
+        regs: &mut Registers,
+    ) {
         // Pop a new task from the task queue, or simply switch in the idle task.
         if let Some(next_process) = processes.pop_front() {
             *isf = next_process.context.0;
@@ -112,7 +121,9 @@ impl Scheduler {
         } else {
             // Safety: Instruction pointer is to a valid function.
             unsafe {
-                isf.set_instruction_pointer(Address::new(crate::interrupts::wait_indefinite as usize).unwrap());
+                isf.set_instruction_pointer(
+                    Address::new(crate::interrupts::wait_indefinite as usize).unwrap(),
+                );
             }
 
             // Safety: Stack pointer is valid for idle function stack.

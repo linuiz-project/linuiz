@@ -68,7 +68,10 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
         cmd!(sh, "cargo build -Z unstable-options {local_args...}").run()?;
 
         // Copy the output kernel binary to the virtual HDD.
-        sh.copy_file(tmp_dir_path.join("kernel"), root_dir.join("build/root/linuiz/"))?;
+        sh.copy_file(
+            tmp_dir_path.join("kernel"),
+            root_dir.join("build/root/linuiz/"),
+        )?;
     }
 
     /* compile userspace */
@@ -100,8 +103,9 @@ fn build_drivers_archive<P: AsRef<Path>>(
     let drivers_path = drivers_path.as_ref();
 
     // compress userspace drivers and write to archive file
-    let mut archive_builder =
-        tar::Builder::new(File::create(archive_path).expect("failed to create or open the driver package file"));
+    let mut archive_builder = tar::Builder::new(
+        File::create(archive_path).expect("failed to create or open the driver package file"),
+    );
 
     files
         .filter(|p| {

@@ -90,7 +90,13 @@ pub struct InterruptCommand {
 }
 
 impl InterruptCommand {
-    pub fn new(vector: u8, apic_id: u32, delivery_mode: DeliveryMode, is_logical: bool, is_assert: bool) -> Self {
+    pub fn new(
+        vector: u8,
+        apic_id: u32,
+        delivery_mode: DeliveryMode,
+        is_logical: bool,
+        is_assert: bool,
+    ) -> Self {
         Self {
             apic_id,
             cmd: *0u32
@@ -207,7 +213,9 @@ impl Apic {
             Some(Self(Type::x2APIC))
         } else if is_xapic {
             let map_xapic_fn = map_xapic_fn.expect("no mapping function provided for xAPIC");
-            Some(Self(Type::xAPIC(map_xapic_fn(IA32_APIC_BASE::get_base_address().try_into().unwrap()))))
+            Some(Self(Type::xAPIC(map_xapic_fn(
+                IA32_APIC_BASE::get_base_address().try_into().unwrap(),
+            ))))
         } else {
             None
         }
@@ -217,7 +225,12 @@ impl Apic {
     fn read_register(&self, register: Register) -> u32 {
         match self.0 {
             // Safety: Address provided for xAPIC mapping is required to be valid.
-            Type::xAPIC(xapic_ptr) => unsafe { xapic_ptr.add(register.xapic_offset()).cast::<u32>().read_volatile() },
+            Type::xAPIC(xapic_ptr) => unsafe {
+                xapic_ptr
+                    .add(register.xapic_offset())
+                    .cast::<u32>()
+                    .read_volatile()
+            },
 
             // Safety: MSR addresses are known-valid from IA32 SDM.
             Type::x2APIC => unsafe { msr::rdmsr(register.x2apic_msr()).try_into().unwrap() },
@@ -229,7 +242,10 @@ impl Apic {
     /// Writing an invalid value to a register is undefined behaviour.
     unsafe fn write_register(&self, register: Register, value: u32) {
         match self.0 {
-            Type::xAPIC(xapic_ptr) => xapic_ptr.add(register.xapic_offset()).cast::<u32>().write_volatile(value),
+            Type::xAPIC(xapic_ptr) => xapic_ptr
+                .add(register.xapic_offset())
+                .cast::<u32>()
+                .write_volatile(value),
             Type::x2APIC => msr::wrmsr(register.x2apic_msr(), value.into()),
         }
     }
@@ -240,7 +256,10 @@ impl Apic {
     /// has the oppurtunity to affect those contexts in undefined ways.
     #[inline]
     pub unsafe fn sw_enable(&self) {
-        self.write_register(Register::SPR, *self.read_register(Register::SPR).set_bit(8, true));
+        self.write_register(
+            Register::SPR,
+            *self.read_register(Register::SPR).set_bit(8, true),
+        );
     }
 
     /// ## Safety
@@ -249,7 +268,10 @@ impl Apic {
     /// has the oppurtunity to affect those contexts in undefined ways.
     #[inline]
     pub unsafe fn sw_disable(&self) {
-        self.write_register(Register::SPR, *self.read_register(Register::SPR).set_bit(8, false));
+        self.write_register(
+            Register::SPR,
+            *self.read_register(Register::SPR).set_bit(8, false),
+        );
     }
 
     pub fn get_id(&self) -> u32 {
@@ -350,7 +372,9 @@ impl Apic {
         self.sw_disable();
 
         self.write_register(Register::TPR, 0x0);
-        let modified_spr = *self.read_register(Register::SPR).set_bits(0..8, spr_vector.into());
+        let modified_spr = *self
+            .read_register(Register::SPR)
+            .set_bits(0..8, spr_vector.into());
         self.write_register(Register::SPR, modified_spr);
 
         self.sw_enable();
@@ -411,12 +435,16 @@ impl<T: LocalVectorVariant> LocalVector<'_, T> {
 
     #[inline]
     pub fn get_interrupted(&self) -> bool {
-        self.0.read_register(T::REGISTER).get_bit(Self::INTERRUPTED_OFFSET)
+        self.0
+            .read_register(T::REGISTER)
+            .get_bit(Self::INTERRUPTED_OFFSET)
     }
 
     #[inline]
     pub fn get_masked(&self) -> bool {
-        self.0.read_register(T::REGISTER).get_bit(Self::MASKED_OFFSET)
+        self.0
+            .read_register(T::REGISTER)
+            .get_bit(Self::MASKED_OFFSET)
     }
 
     /// ## Safety
@@ -424,7 +452,13 @@ impl<T: LocalVectorVariant> LocalVector<'_, T> {
     /// Masking an interrupt may result in contexts expecting that interrupt to fire to deadlock.
     #[inline]
     pub unsafe fn set_masked(&self, masked: bool) -> &Self {
-        self.0.write_register(T::REGISTER, *self.0.read_register(T::REGISTER).set_bit(Self::MASKED_OFFSET, masked));
+        self.0.write_register(
+            T::REGISTER,
+            *self
+                .0
+                .read_register(T::REGISTER)
+                .set_bit(Self::MASKED_OFFSET, masked),
+        );
 
         self
     }
@@ -445,7 +479,13 @@ impl<T: LocalVectorVariant> LocalVector<'_, T> {
     pub unsafe fn set_vector(&self, vector: u8) -> &Self {
         assert!(vector >= 32, "interrupt vectors 0..32 are reserved");
 
-        self.0.write_register(T::REGISTER, *self.0.read_register(T::REGISTER).set_bits(0..8, vector.into()));
+        self.0.write_register(
+            T::REGISTER,
+            *self
+                .0
+                .read_register(T::REGISTER)
+                .set_bits(0..8, vector.into()),
+        );
 
         self
     }
@@ -453,7 +493,10 @@ impl<T: LocalVectorVariant> LocalVector<'_, T> {
 
 impl<T: LocalVectorVariant> core::fmt::Debug for LocalVector<'_, T> {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter.debug_tuple("Local Vector").field(&self.0.read_register(T::REGISTER)).finish()
+        formatter
+            .debug_tuple("Local Vector")
+            .field(&self.0.read_register(T::REGISTER))
+            .finish()
     }
 }
 
@@ -463,7 +506,13 @@ impl<T: GenericVectorVariant> LocalVector<'_, T> {
     /// Setting the incorrect delivery mode may result in interrupts not being received
     /// correctly, or being sent to all cores at once.
     pub unsafe fn set_delivery_mode(&self, mode: DeliveryMode) -> &Self {
-        self.0.write_register(T::REGISTER, *self.0.read_register(T::REGISTER).set_bits(8..11, mode as u32));
+        self.0.write_register(
+            T::REGISTER,
+            *self
+                .0
+                .read_register(T::REGISTER)
+                .set_bits(8..11, mode as u32),
+        );
 
         self
     }
@@ -472,7 +521,12 @@ impl<T: GenericVectorVariant> LocalVector<'_, T> {
 impl LocalVector<'_, Timer> {
     #[inline]
     pub fn get_mode(&self) -> TimerMode {
-        TimerMode::try_from(self.0.read_register(<Timer as LocalVectorVariant>::REGISTER).get_bits(17..19)).unwrap()
+        TimerMode::try_from(
+            self.0
+                .read_register(<Timer as LocalVectorVariant>::REGISTER)
+                .get_bits(17..19),
+        )
+        .unwrap()
     }
 
     /// ## Safety
@@ -483,11 +537,17 @@ impl LocalVector<'_, Timer> {
     pub unsafe fn set_mode(&self, mode: TimerMode) -> &Self {
         let tsc_dl_support = core::arch::x86_64::__cpuid(0x1).ecx.get_bit(24);
 
-        assert!(mode != TimerMode::TscDeadline || tsc_dl_support, "TSC deadline is not supported on this CPU.");
+        assert!(
+            mode != TimerMode::TscDeadline || tsc_dl_support,
+            "TSC deadline is not supported on this CPU."
+        );
 
         self.0.write_register(
             <Timer as LocalVectorVariant>::REGISTER,
-            *self.0.read_register(<Timer as LocalVectorVariant>::REGISTER).set_bits(17..19, mode as u32),
+            *self
+                .0
+                .read_register(<Timer as LocalVectorVariant>::REGISTER)
+                .set_bits(17..19, mode as u32),
         );
 
         if tsc_dl_support {

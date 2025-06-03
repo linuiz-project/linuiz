@@ -52,13 +52,21 @@ impl IndexRing {
 
 impl core::fmt::Debug for IndexRing {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter.debug_tuple("Index Ring").field(&format_args!("{}/{}", self.current, self.max - 1)).finish()
+        formatter
+            .debug_tuple("Index Ring")
+            .field(&format_args!("{}/{}", self.current, self.max - 1))
+            .finish()
     }
 }
 
 #[macro_export]
 macro_rules! asm_marker {
     ($marker:literal) => {
-        core::arch::asm!("push r8", concat!("mov r8, ", $marker), "pop r8", options(nostack, nomem));
+        core::arch::asm!(
+            "push r8",
+            concat!("mov r8, ", $marker),
+            "pop r8",
+            options(nostack, nomem)
+        );
     };
 }

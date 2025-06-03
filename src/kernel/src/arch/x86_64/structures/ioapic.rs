@@ -15,7 +15,10 @@ impl RedirectionEntry {
 
     pub fn set_vector(&mut self, vector: u8) {
         // TODO InterruptVector type for 32..256 vector checking?
-        assert!((32..=255).contains(&vector), "provided vector must be within 32..256");
+        assert!(
+            (32..=255).contains(&vector),
+            "provided vector must be within 32..256"
+        );
 
         self.0.set_bits(0..8, vector.into());
     }
@@ -30,7 +33,11 @@ impl RedirectionEntry {
     }
 
     pub fn get_destination_mode(&self) -> interrupts::DestinationMode {
-        if self.0.get_bit(11) { interrupts::DestinationMode::Physical } else { interrupts::DestinationMode::Logical }
+        if self.0.get_bit(11) {
+            interrupts::DestinationMode::Physical
+        } else {
+            interrupts::DestinationMode::Logical
+        }
     }
 
     pub fn set_destination_mode(&mut self, dest_mode: interrupts::DestinationMode) {
@@ -42,7 +49,11 @@ impl RedirectionEntry {
     }
 
     pub fn get_pin_polarity(&self) -> Polarity {
-        if self.0.get_bit(13) { Polarity::ActiveLow } else { Polarity::ActiveHigh }
+        if self.0.get_bit(13) {
+            Polarity::ActiveLow
+        } else {
+            Polarity::ActiveHigh
+        }
     }
 
     pub fn set_pin_polarity(&mut self, polarity: Polarity) {
@@ -56,7 +67,11 @@ impl RedirectionEntry {
     }
 
     pub fn get_trigger_mode(&self) -> TriggerMode {
-        if self.0.get_bit(15) { TriggerMode::Edge } else { TriggerMode::Level }
+        if self.0.get_bit(15) {
+            TriggerMode::Edge
+        } else {
+            TriggerMode::Level
+        }
     }
 
     pub fn set_trigger_mode(&mut self, trigger_mode: TriggerMode) {
@@ -86,8 +101,10 @@ impl RedirectionEntry {
     }
 }
 
-type IoApicRegisters<'a> =
-    Mutex<(&'a VolatileCell<u32, libkernel::WriteOnly>, &'a VolatileCell<u32, libkernel::ReadWrite>)>;
+type IoApicRegisters<'a> = Mutex<(
+    &'a VolatileCell<u32, libkernel::WriteOnly>,
+    &'a VolatileCell<u32, libkernel::ReadWrite>,
+)>;
 
 pub struct IoApic<'a> {
     id: u8,
@@ -117,7 +134,10 @@ impl IoApic<'_> {
     }
 
     pub fn get_redirection(&self, global_irq_num: u32) -> RedirectionEntry {
-        assert!(self.handled_irqs().contains(&global_irq_num), "I/O APIC does not handle the provided redirection");
+        assert!(
+            self.handled_irqs().contains(&global_irq_num),
+            "I/O APIC does not handle the provided redirection"
+        );
 
         let reg_base_index = 0x10 + (global_irq_num * 2);
 
@@ -132,7 +152,10 @@ impl IoApic<'_> {
     }
 
     pub fn set_redirection(&self, global_irq_num: u32, redirection: &RedirectionEntry) {
-        assert!(self.handled_irqs().contains(&global_irq_num), "I/O APIC does not handle the provided redirection");
+        assert!(
+            self.handled_irqs().contains(&global_irq_num),
+            "I/O APIC does not handle the provided redirection"
+        );
 
         #[allow(clippy::cast_possible_truncation)]
         {
@@ -150,7 +173,10 @@ impl IoApic<'_> {
     }
 
     pub fn modify_redirection(&self, global_irq_num: u32) {
-        assert!(self.handled_irqs().contains(&global_irq_num), "I/O APIC does not handle the provided redirection");
+        assert!(
+            self.handled_irqs().contains(&global_irq_num),
+            "I/O APIC does not handle the provided redirection"
+        );
     }
 }
 

@@ -49,16 +49,3 @@ thiserror = { version = "2.0", default-features = false }
 ia32utils = { version = "0.15", package = "x86_64" }
 pic_8259 = { path = "../shared/pic_8259/" }
 raw-cpuid = "11.0"
-
-
-[profile.dev]
-opt-level = 0
-codegen-units = 16
-overflow-checks = true
-lto = "off"
-panic = "abort"
-
-[profile.release]
-codegen-units = 1
-lto = "fat"
-panic = "abort"

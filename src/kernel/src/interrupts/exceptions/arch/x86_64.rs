@@ -66,7 +66,12 @@ pub enum ArchException<'a> {
     ///     - Attempting to load the instruction TLB with a translation for a non-executable page.
     ///     - A protection cehck (privilege, r/w) failed.
     ///     - A reserved bit in the page directory table or entries is set to 1.
-    PageFault(&'a InterruptStackFrame, &'a Registers, PageFaultErrorCode, Address<Virtual>),
+    PageFault(
+        &'a InterruptStackFrame,
+        &'a Registers,
+        PageFaultErrorCode,
+        Address<Virtual>,
+    ),
 
     /// Occurs when the `fwait` or `wait` instruction (or any floating point instruction) is executed, and the
     /// following conditions are true:

@@ -34,7 +34,11 @@ pub struct Command {
 
 impl Command {
     pub fn new(operating_mode: OperatingMode, access_mode: AccessByte, channel: Channel) -> Self {
-        Self { value: ((channel as u8) << 6) | ((access_mode as u8) << 4) | ((operating_mode as u8) << 1) }
+        Self {
+            value: ((channel as u8) << 6)
+                | ((access_mode as u8) << 4)
+                | ((operating_mode as u8) << 1),
+        }
     }
 
     pub fn set_operating_mode(&mut self, operating_mode: OperatingMode) {
@@ -64,9 +68,16 @@ pub fn send_command(command: Command) {
 ///
 /// Setting an incorrect frequency or operating mode is undefined behaviour.
 pub unsafe fn set_timer_freq(frequency: u32, operating_mode: OperatingMode) {
-    assert!(frequency > TICK_RATE, "PIT frequency cannot be greater than {TICK_RATE}Hz");
+    assert!(
+        frequency > TICK_RATE,
+        "PIT frequency cannot be greater than {TICK_RATE}Hz"
+    );
 
-    send_command(Command::new(operating_mode, AccessByte::LowAndHigh, Channel::Channel0));
+    send_command(Command::new(
+        operating_mode,
+        AccessByte::LowAndHigh,
+        Channel::Channel0,
+    ));
     let divisor = TICK_RATE / frequency;
 
     let mut data = unsafe { ioports::WriteOnlyPort::<u8>::new(0x40) };

@@ -49,7 +49,8 @@ impl_handler_func_type!(HandlerFuncWithErrCode);
 /// A page fault handler function that pushes a page fault error code.
 ///
 /// This type alias is only usable with the `abi_x86_interrupt` feature enabled.
-pub type PageFaultHandlerFunc = extern "x86-interrupt" fn(InterruptStackFrame, error_code: super::PageFaultErrorCode);
+pub type PageFaultHandlerFunc =
+    extern "x86-interrupt" fn(InterruptStackFrame, error_code: super::PageFaultErrorCode);
 impl_handler_func_type!(PageFaultHandlerFunc);
 
 /// A handler function that must not return, e.g. for a machine check exception.
@@ -61,7 +62,8 @@ impl_handler_func_type!(DivergingHandlerFunc);
 /// A handler function with an error code that must not return, e.g. for a double fault exception.
 ///
 /// This type alias is only usable with the `abi_x86_interrupt` feature enabled.
-pub type DivergingHandlerFuncWithErrCode = extern "x86-interrupt" fn(InterruptStackFrame, error_code: u64) -> !;
+pub type DivergingHandlerFuncWithErrCode =
+    extern "x86-interrupt" fn(InterruptStackFrame, error_code: u64) -> !;
 impl_handler_func_type!(DivergingHandlerFuncWithErrCode);
 
 /// A general handler function for an interrupt or an exception with the interrupt/exceptions's index and an optional error code.
@@ -138,7 +140,9 @@ impl<F> Entry<F> {
 
     pub fn handler_addr(&self) -> Address<Virtual> {
         Address::new_truncate(
-            ((self.pointer_high as usize) << 32) | ((self.pointer_middle as usize) << 16) | (self.pointer_low as usize),
+            ((self.pointer_high as usize) << 32)
+                | ((self.pointer_middle as usize) << 16)
+                | (self.pointer_low as usize),
         )
     }
 }
@@ -251,7 +255,10 @@ impl core::fmt::Debug for Options {
             .field("code_selector", &self.cs)
             .field("stack_index", &(self.bits.get_bits(0..3) - 1))
             .field("type", &format_args!("{:#04b}", self.bits.get_bits(8..12)))
-            .field("privilege_level", &PrivilegeLevel::from_u16(self.bits.get_bits(13..15)))
+            .field(
+                "privilege_level",
+                &PrivilegeLevel::from_u16(self.bits.get_bits(13..15)),
+            )
             .field("present", &self.bits.get_bit(15))
             .finish()
     }

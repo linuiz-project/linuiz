@@ -37,7 +37,11 @@ mod clock {
                 Some(Self {
                     ty: Type::Acpi(register),
                     frequency: 3579545,
-                    max_timestamp: u64::from(if pm_timer.supports_32bit { u32::MAX } else { 0xFFFFFF }),
+                    max_timestamp: u64::from(if pm_timer.supports_32bit {
+                        u32::MAX
+                    } else {
+                        0xFFFFFF
+                    }),
                 })
             } else {
                 None
@@ -76,7 +80,8 @@ mod clock {
 
             while total_ticks > 0 {
                 let new_tick = self.get_timestamp();
-                total_ticks -= (new_tick.wrapping_sub(current_tick) & self.max_timestamp()).min(total_ticks);
+                total_ticks -=
+                    (new_tick.wrapping_sub(current_tick) & self.max_timestamp()).min(total_ticks);
                 current_tick = new_tick;
 
                 core::hint::spin_loop();

@@ -13,14 +13,30 @@ impl<'a> Walker<'a> {
     /// ## Safety
     ///
     /// The provided page table must me a valid root-level table.
-    pub unsafe fn new(table: &'a [PageTableEntry], depth: TableDepth, target_depth: TableDepth) -> Option<Self> {
-        (depth >= target_depth).then_some(Self { root_table: table, root_depth: depth, target_depth })
+    pub unsafe fn new(
+        table: &'a [PageTableEntry],
+        depth: TableDepth,
+        target_depth: TableDepth,
+    ) -> Option<Self> {
+        (depth >= target_depth).then_some(Self {
+            root_table: table,
+            root_depth: depth,
+            target_depth,
+        })
     }
 
-    pub fn walk<E>(&self, mut func: impl FnMut(Option<&PageTableEntry>) -> ControlFlow<E>) -> ControlFlow<E> {
+    pub fn walk<E>(
+        &self,
+        mut func: impl FnMut(Option<&PageTableEntry>) -> ControlFlow<E>,
+    ) -> ControlFlow<E> {
         debug_assert!(self.root_depth > self.target_depth);
 
-        Self::walk_impl(self.root_table, self.root_depth, self.target_depth, &mut func)
+        Self::walk_impl(
+            self.root_table,
+            self.root_depth,
+            self.target_depth,
+            &mut func,
+        )
     }
 
     fn walk_impl<E>(
@@ -37,7 +53,11 @@ impl<'a> Walker<'a> {
             Ordering::Greater => {
                 for entry in table {
                     if entry.is_present() {
-                        let table_ptr = crate::mem::hhdm::get().offset(entry.get_frame()).unwrap().as_ptr().cast();
+                        let table_ptr = crate::mem::hhdm::get()
+                            .offset(entry.get_frame())
+                            .unwrap()
+                            .as_ptr()
+                            .cast();
                         let table_size = libsys::table_index_size();
                         let table = unsafe { core::slice::from_raw_parts(table_ptr, table_size) };
 

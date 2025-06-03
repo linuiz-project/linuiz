@@ -4,7 +4,10 @@ pub static HHDM: spin::Once<Hhdm> = spin::Once::new();
 
 pub fn set(hhdm_request: &limine::request::HhdmRequest) {
     HHDM.call_once(|| {
-        let hhdm_address = hhdm_request.get_response().expect("bootloader did not provide HHDM response").offset();
+        let hhdm_address = hhdm_request
+            .get_response()
+            .expect("bootloader did not provide HHDM response")
+            .offset();
 
         debug!("HHDM @ {hhdm_address:#X}");
 
@@ -34,6 +37,9 @@ impl Hhdm {
     }
 
     pub fn offset(self, frame: Address<Frame>) -> Option<Address<Page>> {
-        self.virt().get().checked_add(frame.get().get()).and_then(Address::new)
+        self.virt()
+            .get()
+            .checked_add(frame.get().get())
+            .and_then(Address::new)
     }
 }

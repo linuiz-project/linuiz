@@ -1,4 +1,6 @@
-use crate::{Address, Physical, checked_phys_canonical, page_mask, page_shift, phys_canonical_mask};
+use crate::{
+    Address, Physical, checked_phys_canonical, page_mask, page_shift, phys_canonical_mask,
+};
 
 pub struct Frame;
 

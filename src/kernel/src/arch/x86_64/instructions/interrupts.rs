@@ -29,7 +29,8 @@ pub unsafe fn disable() {
 /// Whether or not interrupts are enabled for the current hardware thread.
 #[inline]
 pub fn is_enabled() -> bool {
-    crate::arch::x86_64::registers::RFlags::read().contains(crate::arch::x86_64::registers::RFlags::INTERRUPT_FLAG)
+    crate::arch::x86_64::registers::RFlags::read()
+        .contains(crate::arch::x86_64::registers::RFlags::INTERRUPT_FLAG)
 }
 
 /// Waits for the next interrupt on the current hardware thread.

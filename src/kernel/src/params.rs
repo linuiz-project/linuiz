@@ -14,7 +14,11 @@ pub struct Parameters {
 
 impl Default for Parameters {
     fn default() -> Self {
-        Parameters { use_multiprocessing: true, drop_symbol_info: false, low_memory_mode: false }
+        Parameters {
+            use_multiprocessing: true,
+            drop_symbol_info: false,
+            low_memory_mode: false,
+        }
     }
 }
 
@@ -44,7 +48,7 @@ pub fn parse(kernel_cmdline_request: &limine::request::ExecutableCmdlineRequest)
             }
 
             None => {
-                error!("Bootloader didn't provide resposne to kernel command line request.");
+                error!("Bootloader didn't provide response to kernel command line request.");
             }
         }
 
