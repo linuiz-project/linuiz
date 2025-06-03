@@ -2,8 +2,25 @@ use anyhow::Result;
 use std::{fs::File, io::Error, path::Path};
 use xshell::{Shell, cmd};
 
-#[derive(clap::Parser)]
-#[allow(non_snake_case)]
+#[derive(Debug, ValueEnum, Clone, Copy, PartialEq, Eq)]
+#[allow(non_camel_case_types)]
+pub enum Target {
+    x86_64,
+    riscv64gc,
+    aarch64,
+}
+
+impl Target {
+    pub const fn as_triple(&self) -> &'static str {
+        match self {
+            Target::x86_64 => "x86_64-unknown-none",
+            Target::riscv64gc => unimplemented!(),
+            Target::aarch64 => unimplemented!(),
+        }
+    }
+}
+
+#[derive(Parser)]
 pub struct Options {
     /// Whether to build in release mode (with all optimizations).
     #[arg(long)]
@@ -17,6 +34,10 @@ pub struct Options {
     /// This can be useful for debugging constant rebuilds.
     #[arg(long)]
     fingerprint: bool,
+
+    /// Target platform to compile for.
+    #[arg(short, long)]
+    target: Target,
 
     #[arg(long)]
     drivers: Vec<String>,
@@ -37,55 +58,40 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
 
     let tmp_dir = sh.create_temp_dir()?;
     let tmp_dir_path = tmp_dir.path();
-    let tmp_path_dir_str = tmp_dir_path.to_string_lossy();
 
-    let cargo_args = {
-        let mut args = Vec::new();
+    cmd!(sh, "cargo fmt --check").run()?;
 
-        args.push("--artifact-dir");
-        args.push(tmp_path_dir_str.as_ref());
+    let mut build_cmd = cmd!(sh, "cargo build")
+        .args(["--target", options.target.as_triple()])
+        .args(["--artifact-dir", tmp_dir_path.to_str().unwrap()])
+        .args(["-Z", "unstable-options"]);
 
-        if options.release {
-            args.push("--release");
-        } else {
-            // Only provide future-compatibiltiy notifications for development builds.
-            args.push("--future-incompat-report");
-        }
-
-        if options.verbose {
-            args.push("-vv");
-        }
-
-        args
-    };
-
-    /* compile kernel */
-    {
-        let _dir = sh.push_dir("src/kernel/");
-
-        cmd!(sh, "cargo fmt").run()?;
-        let local_args = &cargo_args;
-        cmd!(sh, "cargo build -Z unstable-options {local_args...}").run()?;
-
-        // Copy the output kernel binary to the virtual HDD.
-        sh.copy_file(
-            tmp_dir_path.join("kernel"),
-            root_dir.join("build/root/linuiz/"),
-        )?;
+    if options.release {
+        build_cmd = build_cmd.arg("--release");
+    } else {
+        // Only provide future-compatibiltiy notifications for development builds.
+        build_cmd = build_cmd.arg("--future-incompat-report")
     }
 
-    /* compile userspace */
-    {
-        let _dir = sh.push_dir("src/userspace/");
-
-        cmd!(sh, "cargo fmt").run()?;
-        let local_args = &cargo_args;
-        cmd!(sh, "cargo build -Z unstable-options {local_args...}").run()?;
+    if options.verbose {
+        build_cmd = build_cmd.arg("-vv")
     }
+
+    build_cmd.run()?;
+
+    if !sh.path_exists("run/system/linuiz") {
+        sh.create_dir("run/system/linuiz")?;
+    }
+
+    // Copy the kernel binary to the virtual HDD.
+    sh.copy_file(
+        tmp_dir_path.join("kernel"),
+        root_dir.join("run/system/linuiz/kernel"),
+    )?;
 
     build_drivers_archive(
         tmp_dir_path,
-        &root_dir.join("build/root/linuiz/drivers"),
+        root_dir.join("run/system/linuiz/drivers"),
         sh.read_dir(tmp_dir_path)?.into_iter(),
         &options.drivers,
     )
@@ -94,9 +100,9 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
     Ok(())
 }
 
-fn build_drivers_archive<P: AsRef<Path>>(
-    drivers_path: P,
-    archive_path: P,
+fn build_drivers_archive<P1: AsRef<Path>, P2: AsRef<Path>>(
+    drivers_path: P1,
+    archive_path: P2,
     files: impl Iterator<Item = std::path::PathBuf>,
     include_drivers: &[String],
 ) -> Result<(), Error> {
