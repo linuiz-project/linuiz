@@ -19,14 +19,6 @@ Cargo.lock
 .vscode/dryrun.log
 .vscode/targets.log
 
-# Keep executable lockfiles
-!xtask/Cargo.lock
-!**/kernel/Cargo.lock
-!**/userspace/Cargo.lock
-
-# Ignore build/run artifacts
-/.debug
-/build
-
-# Ignore `.cargo/` configs
-**/.cargo
+# Ignore debug/run artifacts
+.debug/
+run/system/linuiz
