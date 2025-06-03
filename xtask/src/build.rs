@@ -1,6 +1,4 @@
-use anyhow::Result;
 use std::{fs::File, io::Error, path::Path};
-use xshell::{Shell, cmd};
 
 #[derive(Debug, ValueEnum, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
@@ -43,7 +41,7 @@ pub struct Options {
     drivers: Vec<String>,
 }
 
-pub fn build(sh: &Shell, options: Options) -> Result<()> {
+pub fn build(sh: &xshell::Shell, options: Options) -> anyhow::Result<()> {
     let _cargo_log = {
         let mut cargo_log = Vec::new();
 
