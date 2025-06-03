@@ -1,3 +1,5 @@
+use std::path::Path;
+
 #[derive(Debug, ValueEnum, Clone, Copy, PartialEq, Eq)]
 pub enum Accelerator {
     Kvm,
@@ -66,16 +68,37 @@ pub struct Options {
     gdb: bool,
 }
 
-pub fn run(sh: &xshell::Shell, options: Options) -> anyhow::Result<()> {
+pub fn run<P: AsRef<Path>>(
+    sh: &xshell::Shell,
+    temp_dir: P,
+    options: Options,
+) -> anyhow::Result<()> {
     if !options.nobuild {
-        crate::build::build(sh, options.build_options)?;
+        crate::build::build(sh, temp_dir.as_ref(), options.build_options)?;
     }
 
     let mut run_cmd = {
         match options.cpu {
             Cpu::Host | Cpu::Max | Cpu::Qemu64 => {
-                cmd!(sh, "qemu-system-x86_64 -drive if=pflash,index=0,readonly=on,format=raw,file=run/ovmf/x86_64/code.fd -drive if=pflash,index=1,format=raw,file=run/ovmf/x86_64/vars.fd -drive format=raw,file=fat:rw:run/system")
-            },
+                // Create a temporary copy of the OVMF vars firmware to avoid overwriting
+                // the fresh copy that's saved to the repository.
+                let ovmf_vars_fd_copy = temp_dir.as_ref().join("vars.fd");
+                sh.copy_file("run/ovmf/x86_64/vars.fd", &ovmf_vars_fd_copy)?;
+
+                cmd!(sh, "qemu-system-x86_64")
+                    .args([
+                        "-drive",
+                        "if=pflash,index=0,readonly=on,format=raw,file=run/ovmf/x86_64/code.fd",
+                    ])
+                    .args([
+                        "-drive",
+                        &format!(
+                            "if=pflash,index=1,format=raw,file={}",
+                            ovmf_vars_fd_copy.to_string_lossy()
+                        ),
+                    ])
+                    .args(["-drive", "format=raw,file=fat:rw:run/system"])
+            }
 
             Cpu::Rv64 => unimplemented!(),
         }
@@ -83,7 +106,7 @@ pub fn run(sh: &xshell::Shell, options: Options) -> anyhow::Result<()> {
     .arg("-no-shutdown")
     .arg("-no-reboot")
     .args(["-serial", "mon:stdio"])
-    .args(["-drive", "format=raw,file=build/disk0.img,id=disk1,if=none"])
+    .args(["-drive", "format=raw,file=run/disk0.img,id=disk1,if=none"])
     .args(["-net", "none"])
     .args(["-M", "smm=off"])
     .args([
@@ -109,7 +132,11 @@ pub fn run(sh: &xshell::Shell, options: Options) -> anyhow::Result<()> {
     .args(["-m", &format!("{}M", options.ram)])
     .args([
         "-device",
-        &format!("{:?},drive=disk1,serial=deadbeef", options.block),
+        match options.block {
+            BlockDriver::Ahci => "ahci,drive=disk1,serial=deadbeef",
+            BlockDriver::Nvme => "nvme,drive=disk1,serial=deadbeef",
+            BlockDriver::Virtio => "virtio-blk-pci,drive=disk1,serial=deadbeef",
+        },
     ]);
 
     if options.log {

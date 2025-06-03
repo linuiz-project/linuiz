@@ -41,7 +41,11 @@ pub struct Options {
     drivers: Vec<String>,
 }
 
-pub fn build(sh: &xshell::Shell, options: Options) -> anyhow::Result<()> {
+pub fn build<P: AsRef<Path>>(
+    sh: &xshell::Shell,
+    temp_dir: P,
+    options: Options,
+) -> anyhow::Result<()> {
     let _cargo_log = {
         let mut cargo_log = Vec::new();
 
@@ -54,14 +58,11 @@ pub fn build(sh: &xshell::Shell, options: Options) -> anyhow::Result<()> {
 
     let root_dir = sh.current_dir();
 
-    let tmp_dir = sh.create_temp_dir()?;
-    let tmp_dir_path = tmp_dir.path();
-
     cmd!(sh, "cargo fmt --check").run()?;
 
     let mut build_cmd = cmd!(sh, "cargo build")
         .args(["--target", options.target.as_triple()])
-        .args(["--artifact-dir", tmp_dir_path.to_str().unwrap()])
+        .args(["--artifact-dir", temp_dir.as_ref().to_str().unwrap()])
         .args(["-Z", "unstable-options"]);
 
     if options.release {
@@ -83,14 +84,14 @@ pub fn build(sh: &xshell::Shell, options: Options) -> anyhow::Result<()> {
 
     // Copy the kernel binary to the virtual HDD.
     sh.copy_file(
-        tmp_dir_path.join("kernel"),
+        temp_dir.as_ref().join("kernel"),
         root_dir.join("run/system/linuiz/kernel"),
     )?;
 
     build_drivers_archive(
-        tmp_dir_path,
+        temp_dir.as_ref(),
         root_dir.join("run/system/linuiz/drivers"),
-        sh.read_dir(tmp_dir_path)?.into_iter(),
+        sh.read_dir(temp_dir.as_ref())?.into_iter(),
         &options.drivers,
     )
     .expect("error attempting to package drivers");

@@ -27,13 +27,15 @@ fn main() -> anyhow::Result<()> {
         cmd!(sh, "qemu-img create -f raw run/disk0.img 256M").run()?;
     }
 
+    let temp_dir = sh.create_temp_dir()?;
+
     match <Arguments as clap::Parser>::parse() {
         Arguments::Build(build_options) => {
-            build::build(&sh, build_options)?;
+            build::build(&sh, temp_dir.path(), build_options)?;
         }
 
         Arguments::Run(run_options) => {
-            run::run(&sh, run_options)?;
+            run::run(&sh, temp_dir.path(), run_options)?;
         }
     }
 
