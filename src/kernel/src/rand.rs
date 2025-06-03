@@ -29,8 +29,7 @@ unsafe extern "Rust" fn __getrandom_v03_custom(
 }
 
 pub mod prng {
-    use rand_core::RngCore;
-    use rand_pcg::Pcg64Mcg;
+    use rand_pcg::{Pcg64Mcg, rand_core::RngCore};
     use spin::{Lazy, Mutex};
 
     static PCG: Lazy<Mutex<Pcg64Mcg>> = Lazy::new(|| {

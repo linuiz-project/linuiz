@@ -52,7 +52,7 @@ pub fn parse(kernel_cmdline_request: &limine::request::ExecutableCmdlineRequest)
             }
         }
 
-        debug!("Kernel Parameters:\n{params:#}");
+        debug!("Kernel Parameters:\n{params:#?}");
 
         params
     });
