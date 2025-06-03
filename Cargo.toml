@@ -1,28 +1,24 @@
 [workspace]
 resolver = "3"
+exclude = ["xtask"]
 members = [
-    "xtask",
     "src/kernel",
     "src/shared/apic",
     "src/shared/libkernel",
     "src/shared/libsys",
     "src/shared/msr",
     "src/shared/pic_8259",
-    "src/shared/slab_alloc",
-    "src/userspace/nvme",
-    "src/userspace/test_driver",
+    # "src/shared/slab_alloc",
+    # "src/userspace/nvme",
+    # "src/userspace/test_driver",
 ]
 
 [profile.dev]
-lto = "off"
-[profile.dev.package.kernel]
-opt-level = 0
-codegen-units = 16
-overflow-checks = true
-[profile.dev.package.xtask]
-debug = false
+panic = "abort"
 
 [profile.release]
-lto = "fat"
+panic = "abort"
+lto = true
+opt-level = 2
 [profile.release.package.kernel]
 codegen-units = 1
