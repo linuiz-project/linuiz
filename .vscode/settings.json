@@ -4,4 +4,8 @@
     },
     "rust-analyzer.check.allTargets": false,
     "rust-analyzer.showUnlinkedFileNotification": false,
+    "rust-analyzer.linkedProjects": [
+        "Cargo.toml",
+        "xtask/Cargo.toml"
+    ]
 }
