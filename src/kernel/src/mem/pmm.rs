@@ -9,9 +9,6 @@ use core::{
 use libsys::{Address, Frame, page_mask, page_shift, page_size};
 use spin::RwLock;
 
-#[derive(Debug, Clone, Copy)]
-pub struct InitError;
-
 static PMM: spin::Once<PhysicalMemoryManager> = spin::Once::new();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,7 +29,6 @@ pub enum Error {
     NotLocked,
 }
 
-pub type Result<T> = core::result::Result<T, Error>;
 type FrameTable = RwLock<&'static mut BitSlice<AtomicUsize>>;
 
 pub struct PhysicalMemoryManager {
@@ -128,7 +124,7 @@ impl PhysicalMemoryManager {
     }
 
     /// Passes the static physical memory manager's frame table to `with_fn`, returning the result.
-    fn with_table<T>(with_fn: impl FnOnce(&FrameTable) -> Result<T>) -> Result<T> {
+    fn with_table<T>(with_fn: impl FnOnce(&FrameTable) -> Result<T, Error>) -> Result<T, Error> {
         Self::get_static().table.with(with_fn)
     }
 
@@ -140,7 +136,7 @@ impl PhysicalMemoryManager {
         Self::total_frames() * libsys::page_size()
     }
 
-    pub fn next_frame() -> Result<Address<Frame>> {
+    pub fn next_frame() -> Result<Address<Frame>, Error> {
         Self::with_table(|table| {
             let mut table = table.write();
             let index = table.first_zero().ok_or(Error::NoneFree)?;
@@ -153,7 +149,7 @@ impl PhysicalMemoryManager {
     pub fn next_frames(
         count: NonZeroUsize,
         align_bits: Option<NonZeroU32>,
-    ) -> Result<Address<Frame>> {
+    ) -> Result<Address<Frame>, Error> {
         Self::with_table(|table| {
             let mut table = table.write();
 
@@ -178,7 +174,7 @@ impl PhysicalMemoryManager {
         })
     }
 
-    pub fn lock_frame(address: Address<Frame>) -> Result<()> {
+    pub fn lock_frame(address: Address<Frame>) -> Result<(), Error> {
         Self::with_table(|table| {
             let table = table.read();
             let index = address.index();
@@ -200,7 +196,7 @@ impl PhysicalMemoryManager {
         })
     }
 
-    pub fn free_frame(address: Address<Frame>) -> Result<()> {
+    pub fn free_frame(address: Address<Frame>) -> Result<(), Error> {
         Self::with_table(|table| {
             let table = table.read();
             let index = address.index();
