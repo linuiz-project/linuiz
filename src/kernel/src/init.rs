@@ -8,6 +8,8 @@ use limine::{
     },
 };
 
+use crate::mem::pmm::PhysicalMemoryManager;
+
 #[allow(clippy::too_many_lines)]
 pub extern "C" fn init() -> ! {
     // This function is absolutely massive, and that's intentional. All of the code
@@ -51,13 +53,7 @@ pub extern "C" fn init() -> ! {
     crate::params::parse(&KERNEL_CMDLINE_REQUEST);
     crate::panic::symbols::parse(&KERNEL_FILE_REQUEST);
     crate::mem::hhdm::set(&HHDM_REQUEST);
-
-    let memory_map = MEMORY_MAP_REQUEST
-        .get_response()
-        .expect("no response to memory map request")
-        .entries();
-
-    crate::mem::pmm::init(memory_map);
+    crate::mem::pmm::PhysicalMemoryManager::init(&MEMORY_MAP_REQUEST);
 
     crate::arch::x86_64::instructions::breakpoint();
 
@@ -84,164 +80,158 @@ pub extern "C" fn init() -> ! {
         )
     };
 
-    // TODO parse the kernel cmdline from limine response
-    // // Parse the kernel parameters.
-    // crate::params::parse_cmdline();
-    // Initialize the physical memory manager.
-
     /* SETUP KERNEL MEMORY */
-    {
-        use crate::mem::{
-            hhdm,
-            paging::{TableDepth, TableEntryFlags},
-        };
-        use libsys::page_size;
-        use limine::memory_map::EntryType;
+    // {
+    //     use crate::mem::{
+    //         hhdm,
+    //         paging::{TableDepth, TableEntryFlags},
+    //     };
+    //     use libsys::page_size;
+    //     use limine::memory_map::EntryType;
 
-        fn map_hhdm_range(
-            mapper: &mut crate::mem::mapper::Mapper,
-            mut range: core::ops::Range<usize>,
-            flags: TableEntryFlags,
-            lock_frames: bool,
-        ) {
-            let huge_page_depth = TableDepth::new(1).unwrap();
+    //     fn map_hhdm_range(
+    //         mapper: &mut crate::mem::mapper::Mapper,
+    //         mut range: core::ops::Range<usize>,
+    //         flags: TableEntryFlags,
+    //         lock_frames: bool,
+    //     ) {
+    //         let huge_page_depth = TableDepth::new(1).unwrap();
 
-            trace!("HHDM Map  {range:#X?}  {flags:?}   lock {lock_frames}");
+    //         trace!("HHDM Map  {range:#X?}  {flags:?}   lock {lock_frames}");
 
-            while !range.is_empty() {
-                if range.len() > huge_page_depth.align()
-                    && range.start.trailing_zeros() >= huge_page_depth.align().trailing_zeros()
-                {
-                    // Map a huge page
+    //         while !range.is_empty() {
+    //             if range.len() > huge_page_depth.align()
+    //                 && range.start.trailing_zeros() >= huge_page_depth.align().trailing_zeros()
+    //             {
+    //                 // Map a huge page
 
-                    let frame = Address::new(range.start).unwrap();
-                    let page = hhdm::get().offset(frame).unwrap();
-                    range.advance_by(huge_page_depth.align()).unwrap();
+    //                 let frame = Address::new(range.start).unwrap();
+    //                 let page = hhdm::get().offset(frame).unwrap();
+    //                 range.advance_by(huge_page_depth.align()).unwrap();
 
-                    mapper
-                        .map(
-                            page,
-                            huge_page_depth,
-                            frame,
-                            lock_frames,
-                            flags | TableEntryFlags::HUGE,
-                        )
-                        .expect("failed to map range")
-                } else {
-                    // Map a standard page
+    //                 mapper
+    //                     .map(
+    //                         page,
+    //                         huge_page_depth,
+    //                         frame,
+    //                         lock_frames,
+    //                         flags | TableEntryFlags::HUGE,
+    //                     )
+    //                     .expect("failed to map range")
+    //             } else {
+    //                 // Map a standard page
 
-                    let frame = Address::new(range.start).unwrap();
-                    let page = hhdm::get().offset(frame).unwrap();
-                    range.advance_by(page_size()).unwrap();
+    //                 let frame = Address::new(range.start).unwrap();
+    //                 let page = hhdm::get().offset(frame).unwrap();
+    //                 range.advance_by(page_size()).unwrap();
 
-                    mapper
-                        .map(page, TableDepth::min(), frame, lock_frames, flags)
-                        .expect("failed to map range");
-                }
-            }
-        }
+    //                 mapper
+    //                     .map(page, TableDepth::min(), frame, lock_frames, flags)
+    //                     .expect("failed to map range");
+    //             }
+    //         }
+    //     }
 
-        debug!("Preparing kernel memory system.");
+    //     debug!("Preparing kernel memory system.");
 
-        /* load and map segments */
+    //     /* load and map segments */
+    //     debug!("Mapping the higher-half direct map.");
+    //     crate::mem::with_kmapper(|kmapper| {
+    //         let mmap_entries = &mut memory_map.iter().map(|entry| {
+    //             let entry_start = usize::try_from(entry.base).unwrap();
+    //             let entry_end = usize::try_from(entry.base + entry.length).unwrap();
 
-        debug!("Mapping the higher-half direct map.");
-        crate::mem::with_kmapper(|kmapper| {
-            let mmap_entries = &mut memory_map.iter().map(|entry| {
-                let entry_start = usize::try_from(entry.base).unwrap();
-                let entry_end = usize::try_from(entry.base + entry.length).unwrap();
+    //             (entry_start..entry_end, entry.entry_type)
+    //         });
 
-                (entry_start..entry_end, entry.entry_type)
-            });
+    //         let mut last_end = 0;
+    //         while let Some((mut entry_range, entry_ty)) = mmap_entries.next() {
+    //             // collapse sequential matching entries
+    //             if let Some((end_range, _)) = mmap_entries
+    //                 .take_while(|(range, ty)| entry_range.end == range.start && entry_ty.eq(ty))
+    //                 .last()
+    //             {
+    //                 entry_range.end = end_range.end;
+    //             }
 
-            let mut last_end = 0;
-            while let Some((mut entry_range, entry_ty)) = mmap_entries.next() {
-                // collapse sequential matching entries
-                if let Some((end_range, _)) = mmap_entries
-                    .take_while(|(range, ty)| entry_range.end == range.start && entry_ty.eq(ty))
-                    .last()
-                {
-                    entry_range.end = end_range.end;
-                }
+    //             if entry_range.start > last_end {
+    //                 map_hhdm_range(
+    //                     kmapper,
+    //                     last_end..entry_range.start,
+    //                     TableEntryFlags::RW,
+    //                     true,
+    //                 );
+    //             }
 
-                if entry_range.start > last_end {
-                    map_hhdm_range(
-                        kmapper,
-                        last_end..entry_range.start,
-                        TableEntryFlags::RW,
-                        true,
-                    );
-                }
+    //             last_end = entry_range.end;
 
-                last_end = entry_range.end;
+    //             let mmap_args = match entry_ty {
+    //                 EntryType::USABLE => Some((TableEntryFlags::RW, false)),
 
-                let mmap_args = match entry_ty {
-                    EntryType::USABLE => Some((TableEntryFlags::RW, false)),
+    //                 EntryType::ACPI_NVS
+    //                 | EntryType::ACPI_RECLAIMABLE
+    //                 | EntryType::BOOTLOADER_RECLAIMABLE
+    //                 | EntryType::FRAMEBUFFER => Some((TableEntryFlags::RW, true)),
 
-                    EntryType::ACPI_NVS
-                    | EntryType::ACPI_RECLAIMABLE
-                    | EntryType::BOOTLOADER_RECLAIMABLE
-                    | EntryType::FRAMEBUFFER => Some((TableEntryFlags::RW, true)),
+    //                 EntryType::RESERVED | EntryType::EXECUTABLE_AND_MODULES => {
+    //                     Some((TableEntryFlags::RO, true))
+    //                 }
 
-                    EntryType::RESERVED | EntryType::EXECUTABLE_AND_MODULES => {
-                        Some((TableEntryFlags::RO, true))
-                    }
+    //                 EntryType::BAD_MEMORY => None,
 
-                    EntryType::BAD_MEMORY => None,
+    //                 _ => unreachable!(),
+    //             };
 
-                    _ => unreachable!(),
-                };
+    //             if let Some((flags, lock_frames)) = mmap_args {
+    //                 map_hhdm_range(kmapper, entry_range, flags, lock_frames);
+    //             } else {
+    //                 trace!("HHDM Map (!! BAD MEMORY !!) @{entry_range:#X?}");
+    //             }
+    //         }
 
-                if let Some((flags, lock_frames)) = mmap_args {
-                    map_hhdm_range(kmapper, entry_range, flags, lock_frames);
-                } else {
-                    trace!("HHDM Map (!! BAD MEMORY !!) @{entry_range:#X?}");
-                }
-            }
+    //         /* load kernel segments */
+    //         kernel_elf
+    //             .segments()
+    //             .expect("kernel file has no segments")
+    //             .into_iter()
+    //             .filter(|ph| ph.p_type == elf::abi::PT_LOAD)
+    //             .for_each(|phdr| {
+    //                 unsafe extern "C" {
+    //                     static KERNEL_BASE: libkernel::LinkerSymbol;
+    //                 }
 
-            /* load kernel segments */
-            kernel_elf
-                .segments()
-                .expect("kernel file has no segments")
-                .into_iter()
-                .filter(|ph| ph.p_type == elf::abi::PT_LOAD)
-                .for_each(|phdr| {
-                    unsafe extern "C" {
-                        static KERNEL_BASE: libkernel::LinkerSymbol;
-                    }
+    //                 debug!("{phdr:X?}");
 
-                    debug!("{phdr:X?}");
+    //                 // Safety: `KERNEL_BASE` is a linker symbol to an in-executable memory location, so it is guaranteed to be valid (and is never written to).
+    //                 let base_offset =
+    //                     usize::try_from(phdr.p_vaddr).unwrap() - unsafe { KERNEL_BASE.as_usize() };
+    //                 let base_offset_end = base_offset + usize::try_from(phdr.p_memsz).unwrap();
+    //                 let flags = crate::mem::paging::TableEntryFlags::from(
+    //                     crate::task::segment_to_mmap_permissions(phdr.p_flags),
+    //                 );
 
-                    // Safety: `KERNEL_BASE` is a linker symbol to an in-executable memory location, so it is guaranteed to be valid (and is never written to).
-                    let base_offset =
-                        usize::try_from(phdr.p_vaddr).unwrap() - unsafe { KERNEL_BASE.as_usize() };
-                    let base_offset_end = base_offset + usize::try_from(phdr.p_memsz).unwrap();
-                    let flags = crate::mem::paging::TableEntryFlags::from(
-                        crate::task::segment_to_mmap_permissions(phdr.p_flags),
-                    );
+    //                 (base_offset..base_offset_end)
+    //                     .step_by(page_size())
+    //                     // Attempt to map the page to the frame.
+    //                     .for_each(|offset| {
+    //                         let phys_addr = Address::new(kernel_addr_phys.get() + offset).unwrap();
+    //                         let virt_addr = Address::new(kernel_addr_virt.get() + offset).unwrap();
 
-                    (base_offset..base_offset_end)
-                        .step_by(page_size())
-                        // Attempt to map the page to the frame.
-                        .for_each(|offset| {
-                            let phys_addr = Address::new(kernel_addr_phys.get() + offset).unwrap();
-                            let virt_addr = Address::new(kernel_addr_virt.get() + offset).unwrap();
+    //                         trace!("Map  {virt_addr:X?} -> {phys_addr:X?}   {flags:?}");
+    //                         kmapper
+    //                             .map(virt_addr, TableDepth::min(), phys_addr, true, flags)
+    //                             .expect("failed to map kernel memory region");
+    //                     });
+    //             });
 
-                            trace!("Map  {virt_addr:X?} -> {phys_addr:X?}   {flags:?}");
-                            kmapper
-                                .map(virt_addr, TableDepth::min(), phys_addr, true, flags)
-                                .expect("failed to map kernel memory region");
-                        });
-                });
-
-            debug!("Switching to kernel page tables...");
-            // Safety: Kernel mappings should be identical to the bootloader mappings.
-            unsafe {
-                kmapper.swap_into();
-            }
-            debug!("Kernel has finalized control of page tables.");
-        });
-    }
+    //         debug!("Switching to kernel page tables...");
+    //         // Safety: Kernel mappings should be identical to the bootloader mappings.
+    //         unsafe {
+    //             kmapper.swap_into();
+    //         }
+    //         debug!("Kernel has finalized control of page tables.");
+    //     });
+    // }
 
     /* PARSE ACPI TABLES */
     {
@@ -267,7 +257,8 @@ pub extern "C" fn init() -> ! {
     // Drop into a finalizing function to lose all references
     // to Limine bootloader requests/responses (they will be
     // deallocated during reclamation of bootloader memory).
-    finalize_init(memory_map)
+    // finalize_init(memory_map)
+    todo!()
 }
 
 /// Finalizes the kernel init process. After entering this function, all bootloader
@@ -285,7 +276,7 @@ fn finalize_init(memory_map: &[&memory_map::Entry]) -> ! {
             (entry_start..entry_end).step_by(libsys::page_size())
         })
         .map(|address| Address::<Frame>::new(address).unwrap())
-        .for_each(|frame| crate::mem::pmm::get().free_frame(frame).unwrap());
+        .for_each(|frame| PhysicalMemoryManager::free_frame(frame).unwrap());
 
     debug!("Bootloader memory reclaimed.");
 

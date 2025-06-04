@@ -7,6 +7,8 @@ use libsys::{
     table_index_size,
 };
 
+use crate::mem::pmm::PhysicalMemoryManager;
+
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TableDepth(u32);
@@ -439,9 +441,7 @@ impl<'a> PageTable<'a, Mut> {
 
                 // Set the entry frame and set attributes to make a valid PTE.
                 *self.entry = PageTableEntry::new(
-                    crate::mem::pmm::get()
-                        .next_frame()
-                        .map_err(|_| Error::AllocError)?,
+                    PhysicalMemoryManager::next_frame().map_err(|_| Error::AllocError)?,
                     flags,
                 );
 

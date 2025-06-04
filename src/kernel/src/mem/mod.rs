@@ -6,7 +6,7 @@ pub mod paging;
 pub mod pmm;
 
 use self::mapper::Mapper;
-use crate::interrupts::InterruptCell;
+use crate::{interrupts::InterruptCell, mem::pmm::PhysicalMemoryManager};
 
 use core::ptr::NonNull;
 use libsys::{Address, Frame, table_index_size};
@@ -48,8 +48,8 @@ pub fn with_kmapper<T>(func: impl FnOnce(&mut Mapper) -> T) -> T {
     })
 }
 
-pub fn copy_kernel_page_table() -> pmm::Result<Address<Frame>> {
-    let table_frame = pmm::get().next_frame()?;
+pub fn copy_kernel_page_table() -> Result<Address<Frame>, pmm::Error> {
+    let table_frame = PhysicalMemoryManager::next_frame()?;
 
     // Safety: Frame is provided by allocator, and so guaranteed to be within the HHDM, and is frame-sized.
     let new_table = unsafe {
@@ -95,7 +95,7 @@ impl PagingRegister {
         }
     }
 
-    /// Safety
+    /// # Safety
     ///
     /// Writing to this register has the chance to externally invalidate memory references.
     pub unsafe fn write(args: &Self) {
