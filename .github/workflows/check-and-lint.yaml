@@ -20,8 +20,7 @@ jobs:
           override: true
       - uses: actions-rs/cargo@v1
         with:
-          command: xtask
-          args: check
+          command: check
 
   rustfmt:
     name: Rustfmt
@@ -36,5 +35,5 @@ jobs:
           override: true
       - uses: actions-rs/cargo@v1
         with:
-          command: xtask
-          args: fmt -- --all --check
+          command: fmt
+          args: --all --check
