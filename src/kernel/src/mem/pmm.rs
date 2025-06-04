@@ -11,21 +11,21 @@ use spin::RwLock;
 
 static PMM: spin::Once<PhysicalMemoryManager> = spin::Once::new();
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
-    /// There are not enough free frames to satisfy the request.
+    #[error("the physical memory manager is out of free frames")]
     NoneFree,
 
-    /// Given alignment is invalid (e.g. not a power-of-two).
+    #[error("given alignment is invalid (e.g. not a power-of-two)")]
     InvalidAlignment,
 
-    /// The provided frame index was out of bounds of the frame table.
+    #[error("attempted to index out of bounds of the frame table")]
     OutOfBounds,
 
-    /// Attempted to lock a frame that wasn't free.
+    #[error("attempted to lock a frame that wasn't free")]
     NotFree,
 
-    /// Attempted to free a frame that wasn't locked.
+    #[error("attempted to free a frame that wasn't locked")]
     NotLocked,
 }
 
