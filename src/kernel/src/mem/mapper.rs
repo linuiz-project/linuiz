@@ -1,7 +1,7 @@
 use crate::mem::{
-    hhdm, paging,
-    paging::{Error, Result, TableDepth},
-    pmm,
+    hhdm,
+    paging::{self, Error, Result, TableDepth},
+    pmm::{self, PhysicalMemoryManager},
 };
 use libkernel::mem::{Mut, Ref};
 use libsys::{Address, Frame, Page};
@@ -18,7 +18,7 @@ unsafe impl Send for Mapper {}
 impl Mapper {
     /// Attempts to construct a new page manager. Returns `None` if the `pmm::get()` could not provide a root frame.
     pub fn new(depth: TableDepth) -> Option<Self> {
-        let root_frame = pmm::get().next_frame().ok()?;
+        let root_frame = PhysicalMemoryManager::next_frame().ok()?;
         trace!("New mapper root frame: {:X?}", root_frame);
 
         // Safety: pmm::get() promises rented frames to be within the HHDM.
@@ -69,8 +69,10 @@ impl Mapper {
     ) -> Result<()> {
         if lock_frame {
             // If the acquisition of the frame fails, return an error.
-            pmm::get().lock_frame(frame).map_err(|err| match err {
+            PhysicalMemoryManager::lock_frame(frame).map_err(|err| match err {
                 pmm::Error::OutOfBounds => Error::FrameBounds,
+
+                // TODO we should be more specific about the error received
                 _ => Error::AllocError,
             })?;
         }
@@ -122,7 +124,7 @@ impl Mapper {
                 unsafe { entry.set_frame(Address::new_truncate(0)) };
 
                 if free_frame {
-                    pmm::get().free_frame(frame).unwrap();
+                    PhysicalMemoryManager::free_frame(frame).unwrap();
                 }
 
                 // Invalidate the page in the TLB.
@@ -132,7 +134,7 @@ impl Mapper {
     }
 
     pub fn auto_map(&mut self, page: Address<Page>, flags: paging::TableEntryFlags) -> Result<()> {
-        match pmm::get().next_frame() {
+        match PhysicalMemoryManager::next_frame() {
             Ok(frame) => self.map(page, TableDepth::min(), frame, false, flags),
             Err(err) => {
                 trace!("Auto alloc pmm::get() error: {:?}", err);
