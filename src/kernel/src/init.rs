@@ -84,11 +84,6 @@ pub extern "C" fn init() -> ! {
         )
     };
 
-    // TODO parse the kernel cmdline from limine response
-    // // Parse the kernel parameters.
-    // crate::params::parse_cmdline();
-    // Initialize the physical memory manager.
-
     /* SETUP KERNEL MEMORY */
     {
         use crate::mem::{
