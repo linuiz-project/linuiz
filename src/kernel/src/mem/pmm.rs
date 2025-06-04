@@ -89,7 +89,7 @@ impl PhysicalMemoryManager {
             assert_eq!(select_region.start & page_mask(), 0);
             assert_eq!(select_region.end & page_mask(), 0);
 
-            trace!("Frame table region: {:X?}", select_region);
+            trace!("Frame table region: {select_region:X?}");
 
             // Safety: Memory map describes HHDM, so this pointer into it will be valid if the bootloader memory map is.s
             let table_start_ptr = unsafe { hhdm::get().ptr().add(select_region.start) };
@@ -205,12 +205,12 @@ impl PhysicalMemoryManager {
             // padding effect of using a `usize` as the underlying data type.
             if index < Self::total_frames() {
                 // if the frame is locked...
-                if !table[index] {
+                if table[index] {
+                    Err(Error::NotLocked)
+                } else {
                     table.set_aliased(index, false);
 
                     Ok(())
-                } else {
-                    Err(Error::NotLocked)
                 }
             } else {
                 Err(Error::OutOfBounds)
