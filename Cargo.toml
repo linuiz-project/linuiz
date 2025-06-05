@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 exclude = ["xtask"]
-members = [
+members = [ "src/acpica",
     "src/kernel",
     "src/shared/apic",
     "src/shared/libkernel",
