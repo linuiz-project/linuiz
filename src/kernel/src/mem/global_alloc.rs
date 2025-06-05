@@ -1,10 +1,5 @@
 use crate::mem::{hhdm::Hhdm, pmm::PhysicalMemoryManager};
-use alloc::alloc::Global;
-use core::{
-    alloc::{AllocError, Allocator, Layout},
-    num::NonZeroUsize,
-    ptr::NonNull,
-};
+use core::{alloc::Layout, num::NonZeroUsize};
 use libsys::{Address, page_shift, page_size};
 
 #[global_allocator]

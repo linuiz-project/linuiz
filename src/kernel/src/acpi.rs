@@ -1,7 +1,6 @@
 use core::ptr::NonNull;
 
 use crate::mem::Hhdm;
-use ::alloc::alloc::Global;
 use acpi::{
     PhysicalMapping,
     address::{AddressSpace as AcpiAddressSpace, GenericAddress as AcpiAddress},
@@ -194,13 +193,13 @@ pub static MCFG: Lazy<Option<Mutex<PhysicalMapping<AcpiHandler, acpi::mcfg::Mcfg
             .map(Mutex::new)
     });
 
-pub static PLATFORM_INFO: Lazy<Option<Mutex<acpi::PlatformInfo<Global>>>> = Lazy::new(|| {
-    todo!()
-    // TABLES
-    //     .get()
-    //     .map(Mutex::lock)
-    //     .and_then(|tables| acpi::PlatformInfo::new_in(&*tables, &KernelAllocator).ok())
-    //     .map(Mutex::new)
+pub static PLATFORM_INFO: Lazy<Option<Mutex<acpi::PlatformInfo>>> = Lazy::new(|| {
+    
+     TABLES
+         .get()
+         .map(Mutex::lock)
+         .and_then(|tables| acpi::PlatformInfo::new_in(&*tables, &KernelAllocator).ok())
+         .map(Mutex::new)
 });
 
 // struct AmlContextWrapper(aml::AmlContext);

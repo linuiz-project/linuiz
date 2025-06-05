@@ -17,9 +17,6 @@ path = "../shared/libkernel/"
 
 
 [dependencies]
-acpi = { git = "https://github.com/linuiz-project/acpi", default-features = false, features = [
-    "allocator_api",
-] }
 limine = { version = "0.4", features = ["uuid"] }
 log = { version = "0.4", default-features = false }
 getrandom = "0.3"

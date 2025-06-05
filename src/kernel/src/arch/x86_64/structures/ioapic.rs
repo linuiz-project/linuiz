@@ -1,5 +1,5 @@
 use crate::interrupts;
-use acpi::platform::interrupt::{Polarity, TriggerMode};
+// use acpi::platform::interrupt::{Polarity, TriggerMode};
 // use alloc::vec::Vec;
 use bit_field::BitField;
 use libkernel::mem::VolatileCell;

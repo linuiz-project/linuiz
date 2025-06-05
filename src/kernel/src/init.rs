@@ -234,19 +234,19 @@ pub extern "C" fn init() -> ! {
     // }
 
     /* PARSE ACPI TABLES */
-    {
-        crate::acpi::TABLES.call_once(|| {
-            // let rsdp_address =
-            //     RSDP_ADDRESS_REQUEST.get_response().expect("no response to RSDP address request").address();
-            // // Safety: Bootloader guarantees the provided RDSP address is valid.
-            // let acpi_tables = unsafe { acpi::AcpiTables::from_rsdp(crate::acpi::AcpiHandler, rsdp_address) }
-            //     .expect("failed to parse ACPI tables");
+    // {
+    //     crate::acpi::TABLES.call_once(|| {
+    //         // let rsdp_address =
+    //         //     RSDP_ADDRESS_REQUEST.get_response().expect("no response to RSDP address request").address();
+    //         // // Safety: Bootloader guarantees the provided RDSP address is valid.
+    //         // let acpi_tables = unsafe { acpi::AcpiTables::from_rsdp(crate::acpi::AcpiHandler, rsdp_address) }
+    //         //     .expect("failed to parse ACPI tables");
 
-            // spin::Mutex::new(acpi_tables)
+    //         // spin::Mutex::new(acpi_tables)
 
-            todo!()
-        });
-    }
+    //         todo!()
+    //     });
+    // }
 
     // crate::mem::io::pci::init_devices().unwrap();
 
