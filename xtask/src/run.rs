@@ -77,6 +77,16 @@ pub fn run<P: AsRef<Path>>(
         crate::build::build(sh, temp_dir.as_ref(), options.build_options)?;
     }
 
+    // Ensure there's a debug directory for logs or the like.
+    if !sh.path_exists(".debug/") {
+        sh.create_dir(".debug/")?;
+    }
+
+    // Ensure development disk image exists.
+    if !sh.path_exists("run/disk0.img") {
+        cmd!(sh, "qemu-img create -f raw run/disk0.img 256M").run()?;
+    }
+
     let mut run_cmd = {
         match options.cpu {
             Cpu::Host | Cpu::Max | Cpu::Qemu64 => {
