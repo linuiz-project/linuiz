@@ -7,7 +7,7 @@ use libsys::{
     table_index_size,
 };
 
-use crate::mem::pmm::PhysicalMemoryManager;
+use crate::mem::{Hhdm, pmm::PhysicalMemoryManager};
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -321,11 +321,7 @@ impl<RefKind: InteriorRef> PageTable<'_, RefKind> {
     }
 
     fn table_ptr(&self) -> *mut PageTableEntry {
-        crate::mem::hhdm::get()
-            .offset(self.get_frame())
-            .unwrap()
-            .as_ptr()
-            .cast()
+        core::ptr::with_exposed_provenance_mut(Hhdm::offset().get() + self.get_frame().get().get())
     }
 
     pub fn entries(&self) -> &[PageTableEntry] {

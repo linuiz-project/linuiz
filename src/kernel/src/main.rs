@@ -1,7 +1,6 @@
 #![no_std]
 #![no_main]
 #![feature(
-    result_flattening,                      // #70142 <https://github.com/rust-lang/rust/issues/70142>
     iter_advance_by,                        // #77404 <https://github.com/rust-lang/rust/issues/77404>
     iter_array_chunks,                      // #100450 <https://github.com/rust-lang/rust/issues/100450>
     iter_next_chunk,                        // #98326 <https://github.com/rust-lang/rust/issues/98326>
@@ -14,6 +13,7 @@
     step_trait,                             // #42168 <https://github.com/rust-lang/rust/issues/42168>
     generic_arg_infer,                      // #85077 <https://github.com/rust-lang/rust/issues/85077>
     exclusive_wrapper,                      // #98407 <https://github.com/rust-lang/rust/issues/98407>
+    nonnull_provenance,                     // #135243 <https://github.com/rust-lang/rust/issues/135243>
     sync_unsafe_cell,
     allocator_api,
     slice_ptr_get,

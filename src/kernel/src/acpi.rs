@@ -1,8 +1,8 @@
 use core::ptr::NonNull;
 
 use crate::mem::{
+    Hhdm,
     alloc::{self, KernelAllocator},
-    hhdm,
 };
 use acpi::{
     PhysicalMapping,
@@ -77,13 +77,9 @@ impl acpi::AcpiHandler for AcpiHandler {
     ) -> acpi::PhysicalMapping<Self, T> {
         trace!("ACPI MAP: @{address:#X}:{size}");
 
-        acpi::PhysicalMapping::new(
-            address,
-            NonNull::new(hhdm::get().ptr().add(address).cast()).unwrap(),
-            size,
-            size,
-            Self,
-        )
+        let virt_ptr = core::ptr::with_exposed_provenance_mut(Hhdm::offset().get() + address);
+
+        acpi::PhysicalMapping::new(address, NonNull::new(virt_ptr).unwrap(), size, size, Self)
     }
 
     fn unmap_physical_region<T>(_: &acpi::PhysicalMapping<Self, T>) {

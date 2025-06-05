@@ -1,45 +1,29 @@
-use libsys::{Address, Frame, Page, Virtual};
+use core::num::NonZero;
 
-pub static HHDM: spin::Once<Hhdm> = spin::Once::new();
-
-pub fn set(hhdm_request: &limine::request::HhdmRequest) {
-    HHDM.call_once(|| {
-        let hhdm_address = hhdm_request
-            .get_response()
-            .expect("bootloader did not provide HHDM response")
-            .offset();
-
-        debug!("HHDM @ {hhdm_address:#X}");
-
-        Hhdm(Address::<Page>::new(hhdm_address.try_into().unwrap()).unwrap())
-    });
-}
-
-pub fn get() -> &'static Hhdm {
-    HHDM.get().unwrap()
-}
+static HHDM: spin::Once<Hhdm> = spin::Once::new();
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Hhdm(Address<Page>);
+pub struct Hhdm(NonZero<usize>);
 
 impl Hhdm {
-    pub const fn page(self) -> Address<Page> {
-        self.0
+    pub fn init(hhdm_request: &limine::request::HhdmRequest) {
+        HHDM.call_once(|| {
+            // Zero-based memory offset of the start of the HHDM.
+            let hhdm_offset = hhdm_request
+                .get_response()
+                .expect("bootloader did not provide response to higher-half direct map request")
+                .offset();
+
+            debug!("HHDM @ {hhdm_offset:#X}");
+
+            Hhdm(NonZero::new(usize::try_from(hhdm_offset).unwrap()).unwrap())
+        });
     }
 
-    pub fn virt(self) -> Address<Virtual> {
-        self.0.get()
-    }
-
-    pub fn ptr(self) -> *mut u8 {
-        self.virt().as_ptr()
-    }
-
-    pub fn offset(self, frame: Address<Frame>) -> Option<Address<Page>> {
-        self.virt()
-            .get()
-            .checked_add(frame.get().get())
-            .and_then(Address::new)
+    pub fn offset() -> NonZero<usize> {
+        HHDM.get()
+            .expect("higher-half direct map has not been initialized")
+            .0
     }
 }
