@@ -1,6 +1,6 @@
 pub mod gdt;
 pub mod idt;
-pub mod ioapic;
+// pub mod ioapic;
 // pub mod tss;
 
 /// A struct describing a pointer to a descriptor table (GDT / IDT).

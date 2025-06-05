@@ -1,11 +1,12 @@
-pub mod alloc;
+mod global_alloc;
+
+mod hhdm;
+pub use hhdm::*;
+
 // pub mod io;
 pub mod mapper;
 pub mod paging;
 pub mod pmm;
-
-mod hhdm;
-pub use hhdm::*;
 
 use self::mapper::Mapper;
 use crate::{interrupts::InterruptCell, mem::pmm::PhysicalMemoryManager};

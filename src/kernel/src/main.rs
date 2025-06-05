@@ -15,7 +15,6 @@
     exclusive_wrapper,                      // #98407 <https://github.com/rust-lang/rust/issues/98407>
     nonnull_provenance,                     // #135243 <https://github.com/rust-lang/rust/issues/135243>
     sync_unsafe_cell,
-    allocator_api,
     slice_ptr_get,
     let_chains,
     if_let_guard,
@@ -63,7 +62,7 @@ extern crate log;
 #[macro_use]
 extern crate thiserror;
 
-mod acpi;
+// mod acpi;
 mod arch;
 mod cpu;
 mod error;

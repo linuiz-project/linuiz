@@ -10,42 +10,43 @@ mod clock {
         })
     });
 
-    pub enum Type<'a> {
-        Acpi(crate::acpi::Register<'a, u32>),
+    pub enum Kind {
+        Acpi,
         // Tsc(u64)
     }
 
-    pub struct Clock<'a> {
-        ty: Type<'a>,
+    pub struct Clock {
+        ty: Kind,
         frequency: u64,
         max_timestamp: u64,
     }
 
     // Safety: Addresses for type values are required to be globally accessible.
-    unsafe impl Send for Clock<'_> {}
+    unsafe impl Send for Clock {}
     // Safety: Addresses for type values are required to be globally accessible.
-    unsafe impl Sync for Clock<'_> {}
+    unsafe impl Sync for Clock {}
 
-    impl Clock<'_> {
+    impl Clock {
         fn load() -> Option<Self> {
-            let platform_info = crate::acpi::PLATFORM_INFO.as_ref()?;
-            let platform_info = platform_info.lock();
+            todo!()
+            // let platform_info = crate::acpi::PLATFORM_INFO.as_ref()?;
+            // let platform_info = platform_info.lock();
 
-            if let Some(pm_timer) = platform_info.pm_timer.as_ref()
-                && let Some(register) = crate::acpi::Register::new(&pm_timer.base)
-            {
-                Some(Self {
-                    ty: Type::Acpi(register),
-                    frequency: 3579545,
-                    max_timestamp: u64::from(if pm_timer.supports_32bit {
-                        u32::MAX
-                    } else {
-                        0xFFFFFF
-                    }),
-                })
-            } else {
-                None
-            }
+            // if let Some(pm_timer) = platform_info.pm_timer.as_ref()
+            //     && let Some(register) = crate::acpi::Register::new(&pm_timer.base)
+            // {
+            //     Some(Self {
+            //         ty: Type::Acpi(register),
+            //         frequency: 3579545,
+            //         max_timestamp: u64::from(if pm_timer.supports_32bit {
+            //             u32::MAX
+            //         } else {
+            //             0xFFFFFF
+            //         }),
+            //     })
+            // } else {
+            //     None
+            // }
         }
 
         // TODO figure out what to do with this function
@@ -68,7 +69,10 @@ mod clock {
         #[inline]
         pub fn get_timestamp(&self) -> u64 {
             match &self.ty {
-                Type::Acpi(register) => u64::from(register.read()),
+                Kind::Acpi => {
+                    todo!()
+                    // u64::from(register.read())
+                }
             }
         }
 

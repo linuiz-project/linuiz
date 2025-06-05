@@ -28,14 +28,6 @@ pub enum Error {
     NotLocked,
 }
 
-impl From<Error> for core::alloc::AllocError {
-    fn from(value: Error) -> Self {
-        error!("Allocation: {value:?}");
-
-        core::alloc::AllocError
-    }
-}
-
 type FrameTable = RwLock<&'static mut BitSlice<AtomicUsize>>;
 
 pub struct PhysicalMemoryManager {
