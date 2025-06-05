@@ -52,7 +52,6 @@ pub fn with_kmapper<T>(func: impl FnOnce(&mut Mapper) -> T) -> T {
 
 pub fn copy_kernel_page_table() -> Result<Address<Frame>, pmm::Error> {
     let table_frame = PhysicalMemoryManager::next_frame()?;
-
     let table_ptr =
         core::ptr::with_exposed_provenance_mut(Hhdm::offset().get() + table_frame.get().get());
 

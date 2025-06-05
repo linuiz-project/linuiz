@@ -34,7 +34,6 @@ impl From<Error> for core::alloc::AllocError {
 
         core::alloc::AllocError
     }
-}
 
 type FrameTable = RwLock<&'static mut BitSlice<AtomicUsize>>;
 
