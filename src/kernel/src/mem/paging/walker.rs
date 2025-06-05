@@ -58,7 +58,9 @@ impl<'a> Walker<'a> {
                         let table_ptr = core::ptr::with_exposed_provenance_mut(
                             Hhdm::offset().get() + entry.get_frame().get().get(),
                         );
-                        let table = unsafe { core::slice::from_raw_parts(table_ptr, libsys::table_index_size()) };
+                        let table = unsafe {
+                            core::slice::from_raw_parts(table_ptr, libsys::table_index_size())
+                        };
 
                         Self::walk_impl(table, cur_depth.next(), target_depth, func)?;
                     } else {
