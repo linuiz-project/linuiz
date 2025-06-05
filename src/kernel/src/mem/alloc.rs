@@ -1,7 +1,4 @@
-use crate::mem::{
-    hhdm,
-    pmm::{self, PhysicalMemoryManager},
-};
+use crate::mem::{hhdm::Hhdm, pmm::PhysicalMemoryManager};
 use alloc::alloc::Global;
 use core::{
     alloc::{AllocError, Allocator, GlobalAlloc, Layout},
@@ -15,44 +12,53 @@ static GLOBAL_ALLOCATOR: KernelAllocator = KernelAllocator;
 
 pub struct KernelAllocator;
 
-// Safety: PMM utilizes interior mutability & Correct:tm: logic.
-unsafe impl Allocator for KernelAllocator {
-    fn allocate(&self, layout: Layout) -> core::result::Result<NonNull<[u8]>, AllocError> {
+unsafe impl core::alloc::Allocator for KernelAllocator {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         assert!(layout.align() <= page_size());
 
         let frame_count = libsys::align_up_div(layout.size(), page_shift());
-        let frame = match frame_count.cmp(&1usize) {
-            core::cmp::Ordering::Greater => PhysicalMemoryManager::next_frames(
-                NonZeroUsize::new(frame_count).unwrap(),
-                Some(page_shift()),
-            ),
 
-            core::cmp::Ordering::Equal => PhysicalMemoryManager::next_frame(),
+        let frame_address = {
+            match frame_count {
+                0 => unreachable!(
+                    "Did not expect `0` from: `libsys::align_up_div({}, {})`",
+                    layout.size(),
+                    page_shift()
+                ),
 
-            core::cmp::Ordering::Less => unreachable!(),
-        }
-        // TODO log the error somehow
-        .map_err(|_| AllocError)?;
+                1 => PhysicalMemoryManager::next_frame()?,
 
-        let address = hhdm::get().offset(frame).ok_or(AllocError)?;
+                frame_count => PhysicalMemoryManager::next_frames(
+                    // Safety: `frame_count` is already checked to be `0`.
+                    NonZeroUsize::new(frame_count).unwrap(),
+                    Some(page_shift()),
+                )?,
+            }
+        };
+
+        trace!("Allocation: {frame_address:?}:{frame_count}");
 
         Ok(NonNull::slice_from_raw_parts(
-            NonNull::new(address.as_ptr()).unwrap(),
-            frame_count * page_size(),
+            NonNull::without_provenance(
+                NonZeroUsize::new(Hhdm::offset().get() + frame_address.get().get()).unwrap(),
+            ),
+            layout.size(),
         ))
     }
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
         assert!(layout.align() <= page_size());
 
-        let offset = ptr.addr().get() - hhdm::get().virt().get();
-        let address = Address::new(offset).unwrap();
+        // Calculate the physical (rather than virtual) memory offset of the pointer.
+        let phys_offset = ptr.addr().get() - Hhdm::offset().get();
+        let phys_offset_aligned = libsys::align_down(phys_offset, page_shift());
+        let frame_address = Address::new(phys_offset_aligned).unwrap();
 
         if layout.size() <= page_size() {
-            PhysicalMemoryManager::free_frame(address).ok();
+            PhysicalMemoryManager::free_frame(frame_address).ok();
         } else {
             let frame_count = libsys::align_up_div(layout.size(), page_shift());
-            let frames_start = address.index();
+            let frames_start = frame_address.index();
             let frames_end = frames_start + frame_count;
 
             (frames_start..frames_end)
@@ -65,17 +71,12 @@ unsafe impl Allocator for KernelAllocator {
 }
 
 unsafe impl GlobalAlloc for KernelAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        self.allocate(layout)
-            .map_or(core::ptr::null_mut(), |ptr| ptr.as_non_null_ptr().as_ptr())
+    unsafe fn alloc(&self, _: Layout) -> *mut u8 {
+        unimplemented!()
     }
 
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        // Safety: Caller is required to guarantee the provided `ptr` and `layout`
-        //         will be valid for a deallocation.
-        unsafe {
-            self.deallocate(NonNull::new(ptr).unwrap(), layout);
-        }
+    unsafe fn dealloc(&self, _: *mut u8, _: Layout) {
+        unimplemented!()
     }
 }
 
