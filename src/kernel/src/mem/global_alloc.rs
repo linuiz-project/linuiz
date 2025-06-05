@@ -73,4 +73,3 @@ unsafe impl core::alloc::GlobalAlloc for KernelAllocator {
         }
     }
 }
-
