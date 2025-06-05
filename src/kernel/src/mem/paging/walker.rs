@@ -1,5 +1,7 @@
 use core::ops::ControlFlow;
 
+use crate::mem::Hhdm;
+
 use super::{PageTableEntry, TableDepth};
 use libsys::table_index_size;
 
@@ -53,13 +55,10 @@ impl<'a> Walker<'a> {
             Ordering::Greater => {
                 for entry in table {
                     if entry.is_present() {
-                        let table_ptr = crate::mem::hhdm::get()
-                            .offset(entry.get_frame())
-                            .unwrap()
-                            .as_ptr()
-                            .cast();
-                        let table_size = libsys::table_index_size();
-                        let table = unsafe { core::slice::from_raw_parts(table_ptr, table_size) };
+                        let table_ptr = core::ptr::with_exposed_provenance_mut(
+                            Hhdm::offset().get() + entry.get_frame().get().get(),
+                        );
+                        let table = unsafe { core::slice::from_raw_parts(table_ptr, libsys::table_index_size()) };
 
                         Self::walk_impl(table, cur_depth.next(), target_depth, func)?;
                     } else {

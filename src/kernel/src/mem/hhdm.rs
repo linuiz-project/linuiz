@@ -1,8 +1,10 @@
+use core::num::NonZero;
+
 static HHDM: spin::Once<Hhdm> = spin::Once::new();
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Hhdm(usize);
+pub struct Hhdm(NonZero<usize>);
 
 impl Hhdm {
     pub fn init(hhdm_request: &limine::request::HhdmRequest) {
@@ -15,14 +17,13 @@ impl Hhdm {
 
             debug!("HHDM @ {hhdm_offset:#X}");
 
-            Hhdm(usize::try_from(hhdm_offset).unwrap())
+            Hhdm(NonZero::new(usize::try_from(hhdm_offset).unwrap()).unwrap())
         });
     }
 
-    pub fn ptr_offset(byte_offset: usize) -> usize {
+    pub fn offset() -> NonZero<usize> {
         HHDM.get()
             .expect("higher-half direct map has not been initialized")
             .0
-            + byte_offset
     }
 }

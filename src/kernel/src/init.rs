@@ -52,7 +52,7 @@ pub extern "C" fn init() -> ! {
 
     crate::params::parse(&KERNEL_CMDLINE_REQUEST);
     crate::panic::symbols::parse(&KERNEL_FILE_REQUEST);
-    crate::mem::hhdm::set(&HHDM_REQUEST);
+    crate::mem::Hhdm::init(&HHDM_REQUEST);
     crate::mem::pmm::PhysicalMemoryManager::init(&MEMORY_MAP_REQUEST);
 
     crate::arch::x86_64::instructions::breakpoint();

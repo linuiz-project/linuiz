@@ -1,9 +1,11 @@
 pub mod alloc;
-pub mod hhdm;
 // pub mod io;
 pub mod mapper;
 pub mod paging;
 pub mod pmm;
+
+mod hhdm;
+pub use hhdm::*;
 
 use self::mapper::Mapper;
 use crate::{interrupts::InterruptCell, mem::pmm::PhysicalMemoryManager};
@@ -51,17 +53,11 @@ pub fn with_kmapper<T>(func: impl FnOnce(&mut Mapper) -> T) -> T {
 pub fn copy_kernel_page_table() -> Result<Address<Frame>, pmm::Error> {
     let table_frame = PhysicalMemoryManager::next_frame()?;
 
+    let table_ptr =
+        core::ptr::with_exposed_provenance_mut(Hhdm::offset().get() + table_frame.get().get());
+
     // Safety: Frame is provided by allocator, and so guaranteed to be within the HHDM, and is frame-sized.
-    let new_table = unsafe {
-        core::slice::from_raw_parts_mut(
-            hhdm::get()
-                .offset(table_frame)
-                .unwrap()
-                .as_ptr()
-                .cast::<paging::PageTableEntry>(),
-            table_index_size(),
-        )
-    };
+    let new_table = unsafe { core::slice::from_raw_parts_mut(table_ptr, table_index_size()) };
     new_table.fill(paging::PageTableEntry::empty());
     with_kmapper(|kmapper| new_table.copy_from_slice(kmapper.view_page_table()));
 
