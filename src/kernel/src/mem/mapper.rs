@@ -17,9 +17,9 @@ unsafe impl Send for Mapper {}
 
 impl Mapper {
     /// Attempts to construct a new page manager. Returns `None` if the `pmm::get()` could not provide a root frame.
-    pub fn new(depth: TableDepth) -> Option<Self> {
-        let root_frame = PhysicalMemoryManager::next_frame().ok()?;
-        trace!("New mapper root frame: {:X?}", root_frame);
+    pub fn new(depth: TableDepth) -> Self {
+        let root_frame = PhysicalMemoryManager::next_frame()
+            .expect("could not retrieve a frame for mapper creation");
 
         // Safety: `root_frame` is a physical address to a page-sized allocation, which is then offset to the HHDM.
         unsafe {
@@ -32,11 +32,11 @@ impl Mapper {
             );
         }
 
-        Some(Self {
+        Self {
             depth,
             root_frame,
             entry: paging::PageTableEntry::new(root_frame, paging::TableEntryFlags::PRESENT),
-        })
+        }
     }
 
     /// Safety

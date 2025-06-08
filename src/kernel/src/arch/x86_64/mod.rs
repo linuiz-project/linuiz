@@ -3,10 +3,11 @@ pub mod registers;
 pub mod structures;
 
 pub mod cpuid {
-    pub use raw_cpuid::*;
     use spin::Lazy;
 
-    pub static CPUID: Lazy<CpuId<raw_cpuid::CpuIdReaderNative>> = Lazy::new(CpuId::new);
+    pub use raw_cpuid::*;
+
+    pub static CPUID: Lazy<CpuId<CpuIdReaderNative>> = Lazy::new(CpuId::new);
     pub static FEATURE_INFO: Lazy<FeatureInfo> =
         Lazy::new(|| CPUID.get_feature_info().expect("no CPUID.01H support"));
     pub static EXT_FEATURE_INFO: Lazy<Option<ExtendedFeatures>> =
