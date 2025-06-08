@@ -1,4 +1,4 @@
-use core::num::NonZero;
+use core::{num::NonZero, ptr::NonNull};
 
 use libsys::{Address, Frame, Page, Physical, Virtual};
 
@@ -23,12 +23,21 @@ impl Hhdm {
         });
     }
 
+    fn s() -> Self {
+        HHDM.get()
+            .expect("higher-half direct map has not been initialized")
+}
+
     /// The raw virtual offset of the beginning of the higher-half direct map.
     fn offset() -> NonZero<usize> {
         HHDM.get()
             .expect("higher-half direct map has not been initialized")
             .0
     }
+
+pub fn base_ptr() -> NonNull<u8> {
+HH
+}
 
     /// Convert a physical address to its higher-half direct mapped virtual counterpart.
     pub fn physical_to_virtual(physical_address: Address<Physical>) -> Address<Virtual> {
