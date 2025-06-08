@@ -18,16 +18,12 @@ Additionally, Linuiz aims to seamlessly integrate a windowing into the command-l
 The build process is mostly automated via the `cargo xtask` pattern, although the following **prerequisites** must be met:
   - `cargo` and `rustup` installed and in your `PATH`.
   - The following packages installed:
-
-    &ensp;`git`, `ovmf`, `gcc`, `qemu`, `qemu-utils`
+    - `build-essential`,  `libclang-dev`, `qemu`, `qemu-utils`
 
   - Depending on the architecture you wish to target, you may need one of the following:
+    - `qemu-system-x86`, `qemu-system-arm`, or `qemu-system-misc` *(for risc-v)*
+      - *note: Others can be listed with `apt list | grep qemu-system`*
 
-    &ensp;`qemu-system-x86`, `qemu-system-arm`, or `qemu-system-misc` *(for risc-v)*
-
-    &ensp;Others can be listed with `apt list | grep qemu-system`
-
-<br />
 
 ## Running
 

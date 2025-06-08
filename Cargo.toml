@@ -1,16 +1,19 @@
 [workspace]
 resolver = "3"
-exclude = ["xtask"]
+exclude = [
+    "xtask",
+    "src/slab_alloc",
+    "src/userspace/nvme",
+    "src/userspace/test_driver",
+]
 members = [
     "src/kernel",
-    "src/shared/apic",
-    "src/shared/libkernel",
-    "src/shared/libsys",
-    "src/shared/msr",
-    "src/shared/pic_8259",
-    # "src/shared/slab_alloc",
-    # "src/userspace/nvme",
-    # "src/userspace/test_driver",
+    "src/libkernel",
+    "src/acpica",
+    "src/acpica-sys",
+    "src/apic",
+    "src/msr",
+    "src/pic_8259",
 ]
 
 [profile.dev]

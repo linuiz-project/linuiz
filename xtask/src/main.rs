@@ -17,16 +17,6 @@ enum Arguments {
 fn main() -> anyhow::Result<()> {
     let sh = xshell::Shell::new()?;
 
-    // Ensure there's a debug directory for logs or the like.
-    if !sh.path_exists(".debug/") {
-        sh.create_dir(".debug/")?;
-    }
-
-    // Ensure development disk image exists.
-    if !sh.path_exists("run/disk0.img") {
-        cmd!(sh, "qemu-img create -f raw run/disk0.img 256M").run()?;
-    }
-
     let temp_dir = sh.create_temp_dir()?;
 
     match <Arguments as clap::Parser>::parse() {
