@@ -58,14 +58,14 @@ pub fn build<P: AsRef<Path>>(
 
     let root_dir = sh.current_dir();
 
-    cmd!(sh, "cargo fmt --check").run()?;
-
     let mut build_cmd = cmd!(sh, "cargo build")
         .args(["--target", options.target.as_triple()])
         .args(["--artifact-dir", temp_dir.as_ref().to_str().unwrap()])
         .args(["-Z", "unstable-options"]);
 
     if options.release {
+        cmd!(sh, "cargo fmt --check").run()?;
+
         build_cmd = build_cmd.arg("--release");
     } else {
         // Only provide future-compatibiltiy notifications for development builds.
