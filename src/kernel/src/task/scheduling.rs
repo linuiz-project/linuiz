@@ -1,6 +1,6 @@
 use crate::{
     arch::x86_64::structures::idt::InterruptStackFrame,
-    mem::Stack,
+    mem::stack::Stack,
     task::{Registers, Task},
 };
 use alloc::collections::VecDeque;

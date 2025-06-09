@@ -44,7 +44,7 @@ pub fn start_mp(mp_request: &limine::request::MpRequest) {
             }
 
             // Safety: All currently referenced memory should also be mapped in the kernel page tables.
-            crate::mem::with_kmapper(|kmapper| unsafe {
+            crate::mem::with_kernel_mapper(|kmapper| unsafe {
                 kmapper.swap_into();
             });
 

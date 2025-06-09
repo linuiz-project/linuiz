@@ -36,7 +36,7 @@ unsafe impl core::alloc::GlobalAlloc for KernelAllocator {
             Ok(frame_address) => {
                 trace!("Allocation: {frame_address:?}:{frame_count}");
 
-                core::ptr::without_provenance_mut(Hhdm::offset().get() + frame_address.get().get())
+                core::ptr::without_provenance_mut(Hhdm::frame_to_page(frame_address).get().get())
             }
 
             Err(crate::mem::pmm::Error::NoneFree) => core::ptr::null_mut(),
@@ -49,9 +49,9 @@ unsafe impl core::alloc::GlobalAlloc for KernelAllocator {
         assert!(layout.align() <= page_size());
 
         // Calculate the physical (rather than virtual) memory offset of the pointer.
-        let phys_offset = ptr.addr() - Hhdm::offset().get();
-        let phys_offset_aligned = libsys::align_down(phys_offset, page_shift());
-        let frame_address = Address::new(phys_offset_aligned).unwrap();
+        let physical_offset = Hhdm::offset_rar(ptr.addr());
+        let physical_offset_aligned = libsys::align_down(physical_offset, page_shift());
+        let frame_address = Address::new(physical_offset_aligned).unwrap();
 
         if layout.size() <= page_size() {
             PhysicalMemoryManager::free_frame(frame_address).ok();

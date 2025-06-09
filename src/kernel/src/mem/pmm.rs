@@ -54,6 +54,31 @@ impl PhysicalMemoryManager {
                 .expect("no response to memory map request")
                 .entries();
 
+            memory_map.iter().for_each(|entry| {
+                let entry_start = entry.base;
+                let entry_end = entry_start + entry.length;
+                debug!(
+                    "MEM @ {:#X?}  {}",
+                    entry_start..entry_end,
+                    match entry.entry_type {
+                        limine::memory_map::EntryType::USABLE => "USABLE",
+                        limine::memory_map::EntryType::RESERVED => "RESERVED",
+                        limine::memory_map::EntryType::EXECUTABLE_AND_MODULES =>
+                            "EXECUTABLE_AND_MODULES",
+                        limine::memory_map::EntryType::BOOTLOADER_RECLAIMABLE =>
+                            "BOOTLOADER_RECLAIMABLE",
+                        limine::memory_map::EntryType::ACPI_RECLAIMABLE => "ACPI_RECLAIMABLE",
+                        limine::memory_map::EntryType::ACPI_NVS => "ACPI_NVS",
+                        limine::memory_map::EntryType::FRAMEBUFFER => "FRAMEBUFFER",
+                        limine::memory_map::EntryType::BAD_MEMORY => "BAD_MEMORY",
+
+                        _ => unreachable!("unknown memory map entry type"),
+                    }
+                );
+            });
+
+            report_total_usable_memory(memory_map);
+
             let free_ranges = memory_map
                 .iter()
                 .filter(|&entry| entry.entry_type == limine::memory_map::EntryType::USABLE)
@@ -64,11 +89,14 @@ impl PhysicalMemoryManager {
                     region_start..region_end
                 });
 
-            let total_memory = memory_map.iter().map(|e| e.base + e.length).max().unwrap();
-            let total_memory = usize::try_from(total_memory).unwrap();
-            trace!("Total phyiscal memory: {}M", total_memory / 1_000_000);
+            let last_entry = memory_map.last().unwrap();
+            // While this is the ""total"" physical memory, it should be noted it isn't the total *installed* memory.
+            // Because of hardware addressing, reserved regions, and other quirks—this number will likely be much larger
+            // than the actual amount of installed physical memory the machine has.
+            let total_physical_memory =
+                usize::try_from(last_entry.base + last_entry.length).unwrap();
 
-            let total_frames = total_memory / page_size();
+            let total_frames = total_physical_memory / page_size();
             let table_slice_len = libsys::align_up_div(
                 total_frames,
                 NonZeroU32::new(usize::BITS.trailing_zeros()).unwrap(),
@@ -88,13 +116,13 @@ impl PhysicalMemoryManager {
             assert_eq!(select_region.start & page_mask(), 0);
             assert_eq!(select_region.end & page_mask(), 0);
 
-            trace!("Frame table region: {select_region:X?}");
+            trace!("Frame table region: {select_region:#X?}");
 
             // Safety: Region is guaranteed by the memory map to be unused.
             let table = unsafe {
                 core::slice::from_raw_parts_mut(
                     core::ptr::with_exposed_provenance_mut::<MaybeUninit<AtomicUsize>>(
-                        Hhdm::offset().get() + select_region.start,
+                        Hhdm::offset_rar(select_region.start),
                     ),
                     table_slice_len,
                 )
@@ -217,4 +245,30 @@ impl PhysicalMemoryManager {
             }
         })
     }
+}
+
+fn report_total_usable_memory(memory_map: &[&limine::memory_map::Entry]) {
+    let total_usable_memory =
+        memory_map
+            .iter()
+            .fold(0u64, |usable_memory_count, entry| match entry.entry_type {
+                limine::memory_map::EntryType::USABLE
+                | limine::memory_map::EntryType::EXECUTABLE_AND_MODULES
+                | limine::memory_map::EntryType::BOOTLOADER_RECLAIMABLE
+                | limine::memory_map::EntryType::ACPI_RECLAIMABLE => {
+                    usable_memory_count + entry.length
+                }
+
+                limine::memory_map::EntryType::RESERVED
+                | limine::memory_map::EntryType::ACPI_NVS
+                | limine::memory_map::EntryType::FRAMEBUFFER
+                | limine::memory_map::EntryType::BAD_MEMORY => usable_memory_count,
+
+                _ => unreachable!("unknown memory map entry type"),
+            });
+
+    debug!(
+        "Detected system memory: {}MB",
+        total_usable_memory / 1_000_000
+    );
 }

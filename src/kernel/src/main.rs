@@ -47,6 +47,7 @@
     clippy::wildcard_imports,
     clippy::upper_case_acronyms,
     clippy::missing_const_for_fn,
+    clippy::needless_for_each,
     // // While ideally this is warned against, the number of situations in which pointer alignment up-casting
     // // is acceptable seem to far outweigh the circumstances within the kernel where it is inappropriate.
     // clippy::cast_ptr_alignment,

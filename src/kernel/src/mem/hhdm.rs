@@ -1,4 +1,5 @@
 use core::num::NonZero;
+use libsys::{Address, Frame, Page, Physical, Virtual};
 
 static HHDM: spin::Once<Hhdm> = spin::Once::new();
 
@@ -21,9 +22,43 @@ impl Hhdm {
         });
     }
 
-    pub fn offset() -> NonZero<usize> {
+    /// The raw virtual address of the beginning of the higher-half direct map.
+    fn get_static() -> NonZero<usize> {
         HHDM.get()
             .expect("higher-half direct map has not been initialized")
             .0
+    }
+
+    /// Offset `address` by the base address of the higher-half direct map.
+    pub fn offset_rar(address: usize) -> usize {
+        Self::get_static().get() + address
+    }
+
+    /// Convert a physical address to its higher-half direct mapped virtual counterpart.
+    pub fn physical_to_virtual(physical_address: Address<Physical>) -> Address<Virtual> {
+        Address::new_truncate(Self::get_static().get() + physical_address.get())
+    }
+
+    /// Convert a virtual address to its physical counterpart.
+    ///
+    /// # Panics
+    ///
+    /// If `virtual_address` is not a higher-half direct mapped address.
+    pub fn virtual_to_physical(virtual_address: Address<Virtual>) -> Address<Physical> {
+        Address::new(virtual_address.get() - Self::get_static().get()).unwrap()
+    }
+
+    /// Convert a frame address to its higher-half direct mapped page counterpart.
+    pub fn frame_to_page(frame_address: Address<Frame>) -> Address<Page> {
+        Address::new_truncate(Self::get_static().get() + frame_address.get().get())
+    }
+
+    /// Convert a page address to its physical counterpart.
+    ///
+    /// # Panics
+    ///
+    /// If `page_address` is not a higher-half direct mapped address.
+    pub fn page_to_frame(page_address: Address<Page>) -> Address<Frame> {
+        Address::new(page_address.get().get() - Self::get_static().get()).unwrap()
     }
 }

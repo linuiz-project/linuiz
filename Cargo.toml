@@ -9,8 +9,6 @@ exclude = [
 members = [
     "src/kernel",
     "src/libkernel",
-    "src/acpica",
-    "src/acpica-sys",
     "src/apic",
     "src/msr",
     "src/pic_8259",

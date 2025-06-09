@@ -78,7 +78,7 @@ pub unsafe fn init(timer_frequency: u16) {
         // tss,
         #[cfg(target_arch = "x86_64")]
         apic: apic::Apic::new(Some(|address: usize| {
-            core::ptr::with_exposed_provenance_mut(crate::mem::Hhdm::offset().get() + address)
+            core::ptr::with_exposed_provenance_mut(crate::mem::Hhdm::offset_rar(address))
         }))
         .unwrap(),
 
@@ -124,9 +124,7 @@ pub unsafe fn init(timer_frequency: u16) {
                 .get_processor_frequency_info()
                 .map_or_else(
                     || {
-                        libsys::do_once!({
-                            trace!("Processors do not support TSC frequency reporting via CPUID.");
-                        });
+                        trace!("Processor does not support TSC frequency reporting via CPUID.");
 
                         // Safety: Enable the APIC to start the timer, and mask the timer interrupt
                         //         to avoid it firing while we measure.
