@@ -321,7 +321,7 @@ impl<RefKind: InteriorRef> PageTable<'_, RefKind> {
     }
 
     fn table_ptr(&self) -> *mut PageTableEntry {
-        core::ptr::with_exposed_provenance_mut(Hhdm::offset().get() + self.get_frame().get().get())
+        core::ptr::with_exposed_provenance_mut(Hhdm::frame_to_page(self.get_frame()).get().get())
     }
 
     pub fn entries(&self) -> &[PageTableEntry] {

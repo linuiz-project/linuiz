@@ -25,7 +25,7 @@ impl Mapper {
         unsafe {
             core::ptr::write_bytes(
                 core::ptr::with_exposed_provenance_mut::<u8>(
-                    Hhdm::offset().get() + root_frame.get().get(),
+                    Hhdm::frame_to_page(root_frame).get().get(),
                 ),
                 0u8,
                 libsys::page_size(),
@@ -209,7 +209,7 @@ impl Mapper {
     pub fn view_page_table(&self) -> &[paging::PageTableEntry; libsys::table_index_size()] {
         // Safety: Root frame is guaranteed to be valid within the HHDM.
         let table_ptr =
-            core::ptr::with_exposed_provenance(Hhdm::offset().get() + self.root_frame.get().get());
+            core::ptr::with_exposed_provenance(Hhdm::frame_to_page(self.root_frame).get().get());
         // Safety: Root frame is guaranteed to be valid for PTEs for the length of the table index size.
         let table = unsafe { core::slice::from_raw_parts(table_ptr, libsys::table_index_size()) };
         // Safety: Table was created to match the size required by return type.

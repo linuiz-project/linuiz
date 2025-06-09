@@ -3,9 +3,7 @@ mod global_alloc;
 mod hhdm;
 pub use hhdm::*;
 
-mod stack;
-pub use stack::*;
-
+pub mod stack;
 // pub mod io;
 pub mod mapper;
 pub mod paging;
@@ -246,7 +244,7 @@ pub fn with_kernel_mapper<T>(func: impl FnOnce(&mut Mapper) -> T) -> T {
 pub fn copy_kernel_page_table() -> Result<Address<Frame>, pmm::Error> {
     let table_frame = PhysicalMemoryManager::next_frame()?;
     let table_ptr =
-        core::ptr::with_exposed_provenance_mut(Hhdm::offset().get() + table_frame.get().get());
+        core::ptr::with_exposed_provenance_mut(Hhdm::frame_to_page(table_frame).get().get());
 
     // Safety: Frame is provided by allocator, and so guaranteed to be within the HHDM, and is frame-sized.
     let new_table = unsafe { core::slice::from_raw_parts_mut(table_ptr, table_index_size()) };

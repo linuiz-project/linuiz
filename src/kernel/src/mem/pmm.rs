@@ -122,7 +122,7 @@ impl PhysicalMemoryManager {
             let table = unsafe {
                 core::slice::from_raw_parts_mut(
                     core::ptr::with_exposed_provenance_mut::<MaybeUninit<AtomicUsize>>(
-                        Hhdm::offset().get() + select_region.start,
+                        Hhdm::offset_rar(select_region.start),
                     ),
                     table_slice_len,
                 )
