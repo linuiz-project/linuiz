@@ -10,9 +10,7 @@ SEGMENT_ALIGN = CONSTANT(MAXPAGESIZE);
 
 SECTIONS
 {
-    . = KERNEL_BASE + SIZEOF_HEADERS; 
-
-    PROVIDE(__executable_start = .);
+    . = KERNEL_BASE + SIZEOF_HEADERS;
 
     .hash                   : { *(.hash) }
     .gnu.hash               : { *(.gnu.hash) }
@@ -57,10 +55,8 @@ SECTIONS
     . = DATA_SEGMENT_END(.);
 
     . = ALIGN(SEGMENT_ALIGN);
-    PROVIDE(__symbols_start = .);
     .symtab             : { *(.symtab) }
     .strtab             : { *(.strtab) }
-    PROVIDE(__symbols_end = .);
 
     .comment              0 : { *(.comment) }
     .debug                0 : { *(.debug) }
