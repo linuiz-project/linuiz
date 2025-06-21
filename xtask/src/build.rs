@@ -1,7 +1,8 @@
 use std::{fs::File, io::Error, path::Path};
 
-#[derive(Debug, ValueEnum, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
+#[derive(Debug, ValueEnum, Clone, Copy, PartialEq, Eq)]
+#[value(rename_all = "snake_case")]
 pub enum Target {
     x86_64,
     riscv64gc,
