@@ -22,7 +22,7 @@ use spin::{Mutex, Once};
 
 static KERNEL_MAPPER: Once<InterruptCell<Mutex<Mapper>>> = Once::new();
 
-/// Initialize the kernel memory system. This will:
+/// Initialize the kernel memory. This will:
 /// - set up the kernel page table mapper
 /// - map & flag each entry from the bootloader memory map
 /// - map & flag the kernel executable regions
@@ -33,7 +33,7 @@ pub fn init(
     kernel_address_request: &limine::request::ExecutableAddressRequest,
 ) {
     KERNEL_MAPPER.call_once(|| {
-        debug!("Preparing kernel memory system...");
+        debug!("Preparing kernel memory...");
 
         let mut kernel_mapper = Mapper::new(TableDepth::max());
 
@@ -134,15 +134,11 @@ pub fn init(
             .iter()
             .filter(|program_header| program_header.p_type == elf::abi::PT_LOAD)
             .for_each(|program_header| {
-                unsafe extern "C" {
-                    static KERNEL_BASE: crate::LinkerSymbol;
-                }
-
                 debug!("{program_header:X?}");
 
                 // Safety: `KERNEL_BASE` is a linker symbol to an in-executable memory location, set by the linker.
-                let kernel_base = unsafe { KERNEL_BASE.as_usize() };
-                let base_offset = usize::try_from(program_header.p_vaddr).unwrap() - kernel_base;
+                let base_offset =
+                    usize::try_from(program_header.p_vaddr).unwrap() - kernel_virtual_address;
                 let base_offset_end =
                     base_offset + usize::try_from(program_header.p_memsz).unwrap();
                 let flags = TableEntryFlags::from(crate::task::segment_to_mmap_permissions(
@@ -200,7 +196,7 @@ fn map_hhdm_range(
         trace!("HHDM Part  {:#X}", range.start);
 
         if range.len() > huge_page_depth.align()
-            && range.start.trailing_zeros() >= huge_page_depth.align().trailing_zeros()
+            && range.start.trailing_zeros() >= huge_page_depth.align().trailing_zeros() // TODO this `>=` might be an error?
         {
             // Map a huge page
 
