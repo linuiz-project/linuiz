@@ -1,3 +1,4 @@
+pub mod interrupts;
 pub mod state;
 
 pub fn get_id() -> u32 {
