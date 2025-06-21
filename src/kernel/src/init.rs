@@ -25,6 +25,7 @@ pub extern "C" fn init() -> ! {
     static MEMORY_MAP_REQUEST: MemoryMapRequest = MemoryMapRequest::new();
     static RSDP_ADDRESS_REQUEST: RsdpRequest = RsdpRequest::new();
     static MP_REQUEST: MpRequest = MpRequest::new().with_flags(RequestFlags::X2APIC);
+
     // Enable logging first, so we can get feedback on the entire init process.
     if crate::logging::UartLogger::init().is_err() {
         // Safety: Logging subsystem must be enabled to run / debug OS.
@@ -50,7 +51,6 @@ pub extern "C" fn init() -> ! {
         &KERNEL_FILE_REQUEST,
         &KERNEL_ADDRESS_REQUEST,
     );
-
     core::arch::breakpoint();
 
     // /* PARSE ACPI TABLES */

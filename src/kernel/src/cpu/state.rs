@@ -78,7 +78,7 @@ pub unsafe fn init(timer_frequency: u16) {
         // tss,
         #[cfg(target_arch = "x86_64")]
         apic: apic::Apic::new(Some(|address: usize| {
-            core::ptr::with_exposed_provenance_mut(crate::mem::Hhdm::offset_rar(address))
+            core::ptr::with_exposed_provenance_mut(crate::mem::Hhdm::offset(address))
         }))
         .unwrap(),
 

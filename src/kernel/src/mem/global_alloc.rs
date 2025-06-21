@@ -49,7 +49,7 @@ unsafe impl core::alloc::GlobalAlloc for KernelAllocator {
         assert!(layout.align() <= page_size());
 
         // Calculate the physical (rather than virtual) memory offset of the pointer.
-        let physical_offset = Hhdm::offset_rar(ptr.addr());
+        let physical_offset = Hhdm::offset(ptr.addr());
         let physical_offset_aligned = libsys::align_down(physical_offset, page_shift());
         let frame_address = Address::new(physical_offset_aligned).unwrap();
 

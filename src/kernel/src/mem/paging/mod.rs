@@ -434,6 +434,8 @@ impl<'a> PageTable<'a, Mut> {
                     self.entry
                 );
 
+                trace!(".");
+
                 let mut flags = TableEntryFlags::PTE;
                 // Insert the USER bit in all non-leaf entries.
                 // This is for compatibility with the x86 paging scheme.
@@ -441,19 +443,31 @@ impl<'a> PageTable<'a, Mut> {
                     flags.insert(TableEntryFlags::USER);
                 }
 
+                trace!("..");
+
                 // Set the entry frame and set attributes to make a valid PTE.
                 *self.entry = PageTableEntry::new(
                     PhysicalMemoryManager::next_frame().map_err(|_| Error::AllocError)?,
                     flags,
                 );
 
+                trace!("...");
+
                 // Clear the table to avoid corrupted PTEs.
                 self.entries_mut().fill(PageTableEntry::empty());
+
+                trace!("...");
             }
 
             let next_depth = self.depth().next_checked().unwrap();
+
+            trace!("NEXT DEPTH: {next_depth:?}");
+
             let entry_index = self.depth().index_of(page.get()).unwrap();
             let sub_entry = self.entries_mut().get_mut(entry_index).unwrap();
+
+            trace!("....");
+
             // Safety: If the page table entry is present, then it's a valid entry, all bits accounted.
             (unsafe { PageTable::<Mut>::new(next_depth, sub_entry) })
                 .with_entry_create(page, to_depth, with_fn)

@@ -30,7 +30,7 @@ impl Hhdm {
     }
 
     /// Offset `address` by the base address of the higher-half direct map.
-    pub fn offset_rar(address: usize) -> usize {
+    pub fn offset(address: usize) -> usize {
         Self::get_static().get() + address
     }
 

@@ -95,14 +95,9 @@ struct UartWriter(Uart<PortAddress, Data>);
 
 impl UartWriter {
     fn wait_for_empty(&mut self) {
-        loop {
-            let line_status = self.0.read_line_status();
-
-            dbgw(line_status);
-
-            if line_status.contains(LineStatus::THR_EMPTY) {
-                return;
-            }
+        while !self.0.read_line_status().contains(LineStatus::THR_EMPTY) {
+            #[cfg(debug_assertions)]
+            debug::DebugWriter.write_char('$');
 
             core::hint::spin_loop();
         }
@@ -111,6 +106,9 @@ impl UartWriter {
 
 impl core::fmt::Write for UartWriter {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        #[cfg(debug_assertions)]
+        debug::DebugWriter.write_str(s);
+
         for (index, c) in s.chars().enumerate() {
             // Wait for the FIFO to empty initially and every 16 bytes written.
             if (index % UART_FIFO_SIZE) == 0 {
@@ -148,6 +146,6 @@ impl log::Log for UartLogger {
     }
 
     fn flush(&self) {
-        todo!()
+        unimplemented!()
     }
 }

@@ -115,7 +115,8 @@ pub fn run<P: AsRef<Path>>(
     }
     .arg("-no-shutdown")
     .arg("-no-reboot")
-    .args(["-serial", "mon:stdio"])
+    .args(["-debugcon", "file:.debug/debugcon.log"])
+    .args(["-serial", "stdio"])
     .args(["-drive", "format=raw,file=run/disk0.img,id=disk1,if=none"])
     .args(["-net", "none"])
     .args(["-M", "smm=off"])
@@ -156,7 +157,7 @@ pub fn run<P: AsRef<Path>>(
     }
 
     if options.nographic {
-        run_cmd = run_cmd.arg("-nographic");
+        run_cmd = run_cmd.args(["-display", "none"]);
     }
 
     if options.gdb {
