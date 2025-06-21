@@ -51,7 +51,7 @@ pub extern "C" fn init() -> ! {
         &KERNEL_ADDRESS_REQUEST,
     );
 
-    crate::arch::x86_64::instructions::breakpoint();
+    core::arch::breakpoint();
 
     // /* PARSE ACPI TABLES */
     // {

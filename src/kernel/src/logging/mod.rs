@@ -28,7 +28,7 @@ impl UartLogger {
             static UART_LOGGER: Once<UartLogger> = Once::new();
 
             UART_LOGGER.try_call_once(|| {
-                let mut uart = Uart::new_reset({
+                let uart = Uart::new_reset({
                     use core::num::NonZero;
 
                     // Safety: Value is >0.

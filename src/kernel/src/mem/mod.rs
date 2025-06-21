@@ -135,7 +135,7 @@ pub fn init(
             .filter(|program_header| program_header.p_type == elf::abi::PT_LOAD)
             .for_each(|program_header| {
                 unsafe extern "C" {
-                    static KERNEL_BASE: libkernel::LinkerSymbol;
+                    static KERNEL_BASE: crate::LinkerSymbol;
                 }
 
                 debug!("{program_header:X?}");

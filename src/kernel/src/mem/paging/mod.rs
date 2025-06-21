@@ -1,7 +1,7 @@
 pub mod walker;
+use crate::util::{InteriorRef, Mut, Ref};
 use bit_field::BitField;
 use core::{fmt, iter::Step};
-use libkernel::mem::{InteriorRef, Mut, Ref};
 use libsys::{
     Address, Frame, Page, Virtual, page_shift, table_index_mask, table_index_shift,
     table_index_size,

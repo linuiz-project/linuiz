@@ -1,13 +1,15 @@
 #![no_std]
 #![no_main]
 #![feature(
-    iter_advance_by,                        // #77404 <https://github.com/rust-lang/rust/issues/77404>
-    iter_array_chunks,                      // #100450 <https://github.com/rust-lang/rust/issues/100450>
-    iter_next_chunk,                        // #98326 <https://github.com/rust-lang/rust/issues/98326>
-    array_windows,                          // #75027 <https://github.com/rust-lang/rust/issues/75027>
-    maybe_uninit_slice,                     // #63569 <https://github.com/rust-lang/rust/issues/63569>
-    maybe_uninit_write_slice,               // #79995 <https://github.com/rust-lang/rust/issues/79995>
-    step_trait,                             // #42168 <https://github.com/rust-lang/rust/issues/42168>
+    iter_advance_by,
+    iter_array_chunks,
+    iter_next_chunk,
+    array_windows,
+    maybe_uninit_slice,
+    maybe_uninit_write_slice,
+    step_trait,
+    breakpoint,
+    extern_types,
     slice_ptr_get,
     let_chains,
     if_let_guard,
@@ -64,6 +66,7 @@ mod params;
 mod rand;
 mod task;
 mod time;
+mod util;
 
 #[macro_use]
 extern crate bitflags;
@@ -86,7 +89,23 @@ static STACK_SIZE_REQUEST: limine::request::StackSizeRequest =
         }
     });
 
-/// ## Safety
+unsafe extern "C" {
+    pub type LinkerSymbol;
+}
+
+impl LinkerSymbol {
+    #[inline(always)]
+    pub fn as_ptr<T>(&'static self) -> *const T {
+        self as *const _ as *const T
+    }
+
+    #[inline(always)]
+    pub fn as_usize(&'static self) -> usize {
+        self as *const Self as usize
+    }
+}
+
+/// # Safety
 ///
 /// This function should only ever be called by the bootloader.
 #[unsafe(no_mangle)]

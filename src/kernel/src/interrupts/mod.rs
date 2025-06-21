@@ -3,8 +3,7 @@ use num_enum::TryFromPrimitive;
 pub mod exceptions;
 pub mod syscall;
 
-#[cfg(target_arch = "x86_64")]
-pub use crate::arch::x86_64::instructions::interrupts::{disable, enable, is_enabled, wait_next};
+pub use crate::cpu::interrupts::{disable, enable, is_enabled, wait_next};
 
 /// Delivery mode for IPIs.
 #[repr(u32)]

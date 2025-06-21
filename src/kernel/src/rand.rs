@@ -29,6 +29,11 @@ pub mod prng {
     use rand_pcg::{Pcg64Mcg, rand_core::RngCore};
     use spin::{Lazy, Mutex};
 
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    fn produce_seed() -> u64 {
+        todo!()
+    }
+
     static PCG: Lazy<Mutex<Pcg64Mcg>> = Lazy::new(|| {
         Mutex::new(Pcg64Mcg::new({
             #[cfg(target_arch = "x86_64")]

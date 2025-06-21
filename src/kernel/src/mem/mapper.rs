@@ -1,9 +1,11 @@
-use crate::mem::{
-    Hhdm,
-    paging::{self, Error, Result, TableDepth},
-    pmm::{self, PhysicalMemoryManager},
+use crate::{
+    mem::{
+        Hhdm,
+        paging::{self, Error, Result, TableDepth},
+        pmm::{self, PhysicalMemoryManager},
+    },
+    util::{Mut, Ref},
 };
-use libkernel::mem::{Mut, Ref};
 use libsys::{Address, Frame, Page};
 
 pub struct Mapper {
@@ -101,7 +103,7 @@ impl Mapper {
                 *entry = paging::PageTableEntry::new(frame, attributes);
 
                 #[cfg(target_arch = "x86_64")]
-                crate::arch::x86_64::instructions::tlb::invlpg(page);
+                crate::arch::x86_64::instructions::__invlpg(page);
             });
 
         result
@@ -138,7 +140,7 @@ impl Mapper {
 
                 // Invalidate the page in the TLB.
                 #[cfg(target_arch = "x86_64")]
-                crate::arch::x86_64::instructions::tlb::invlpg(page);
+                crate::arch::x86_64::instructions::__invlpg(page);
             })
     }
 
@@ -189,7 +191,7 @@ impl Mapper {
             entry.set_attributes(attributes, modify_mode);
 
             #[cfg(target_arch = "x86_64")]
-            crate::arch::x86_64::instructions::tlb::invlpg(page);
+            crate::arch::x86_64::instructions::__invlpg(page);
         })
     }
 

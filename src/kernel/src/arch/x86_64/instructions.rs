@@ -1,14 +1,19 @@
+use core::arch::asm;
+use libsys::{Address, Page};
+
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("instruction is not supported on the current platform")]
     InstructionSupport,
 }
 
-pub type Result<T, Error>;
+pub fn __rdrand() -> Result<u64, Error> {
+    todo!()
+}
 
-pub fn __rdrand() -> Result<u64> {}
-
-pub fn __rdseed() -> Result<u64> {}
+pub fn __rdseed() -> Result<u64, Error> {
+    todo!()
+}
 
 /// Enables interrupts for the current hardware thread.
 #[inline(always)]
