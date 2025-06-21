@@ -7,23 +7,11 @@
     array_windows,                          // #75027 <https://github.com/rust-lang/rust/issues/75027>
     maybe_uninit_slice,                     // #63569 <https://github.com/rust-lang/rust/issues/63569>
     maybe_uninit_write_slice,               // #79995 <https://github.com/rust-lang/rust/issues/79995>
-    iterator_try_reduce,                    // #87053 <https://github.com/rust-lang/rust/issues/87053>
-    map_try_insert,                         // #82766 <https://github.com/rust-lang/rust/issues/82766>
-    try_trait_v2,                           // #84277 <https://github.com/rust-lang/rust/issues/84277>
     step_trait,                             // #42168 <https://github.com/rust-lang/rust/issues/42168>
-    generic_arg_infer,                      // #85077 <https://github.com/rust-lang/rust/issues/85077>
-    exclusive_wrapper,                      // #98407 <https://github.com/rust-lang/rust/issues/98407>
-    nonnull_provenance,                     // #135243 <https://github.com/rust-lang/rust/issues/135243>
-    sync_unsafe_cell,
     slice_ptr_get,
     let_chains,
     if_let_guard,
-    exact_size_is_empty,
-    fn_align,
-    ptr_as_uninit,
-    ptr_metadata,
-    btreemap_alloc,
-    const_trait_impl,
+    ptr_as_uninit
 )]
 #![forbid(clippy::inline_asm_x86_att_syntax)]
 #![deny(clippy::debug_assert_with_mut_call, clippy::float_arithmetic)]
