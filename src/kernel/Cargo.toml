@@ -24,7 +24,7 @@ bitvec = { version = "1.0", default-features = false, features = [
     "atomic",
     "alloc",
 ] }
-uart = { version = "2.0", default-features = false, features = [
+uart = { version = "3.0", default-features = false, features = [
     "address_impl",
 ] }
 ioports = "1.0"
