@@ -16,8 +16,7 @@ use libsys::{Address, Virtual, page_size};
 use crate::arch::x86_64::structures::idt::InterruptStackFrame;
 
 #[allow(clippy::cast_possible_truncation)]
-pub const STACK_SIZE: NonZeroUsize =
-    NonZeroUsize::new((libsys::MIBIBYTE as usize) - page_size()).unwrap();
+pub const STACK_SIZE: NonZeroUsize = NonZeroUsize::new(1_000_000).unwrap();
 pub const STACK_PAGES: NonZeroUsize = NonZeroUsize::new(STACK_SIZE.get() / page_size()).unwrap();
 pub const STACK_START: NonZeroUsize = NonZeroUsize::new(page_size()).unwrap();
 pub const MIN_LOAD_OFFSET: usize = STACK_START.get() + STACK_SIZE.get();
@@ -106,7 +105,6 @@ impl Task {
                 MmapPermissions::ReadWrite,
             )
             .unwrap();
-
         Self {
             id,
             priority,
@@ -115,8 +113,10 @@ impl Task {
                 InterruptStackFrame::new_user(
                     Address::new(load_offset + usize::try_from(elf_header.e_entry).unwrap())
                         .unwrap(),
-                    // Safety: Addition keeps the pointer within the bounds of the allocation, and the unit size is 1.
-                    unsafe { Address::from_ptr(stack.as_non_null_ptr().as_ptr().add(stack.len())) },
+                    Address::from_ptr({
+                        // Safety: Index is the end of the slice.
+                        unsafe { stack.get_unchecked_mut(stack.len()).as_ptr() }
+                    }),
                 ),
                 Registers::default(),
             ),

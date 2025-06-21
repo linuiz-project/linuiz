@@ -2,8 +2,7 @@ use crate::interrupts::InterruptCell;
 use core::fmt::Write;
 use spin::{Mutex, Once};
 use uart::{
-    Baud, Data, FifoControl, InterruptEnable, LineControl, LineStatus, ModemControl, Uart,
-    address::PortAddress,
+    Baud, Data, FifoControl, LineControl, LineStatus, ModemControl, Uart, address::PortAddress,
 };
 
 #[derive(Debug, Error)]
@@ -29,19 +28,18 @@ impl UartLogger {
             static UART_LOGGER: Once<UartLogger> = Once::new();
 
             UART_LOGGER.try_call_once(|| {
-                // Safety: Function invariants provide safety guarantees.
-                let mut uart = unsafe {
-                    Uart::<PortAddress, Data>::new({
-                        #[cfg(target_arch = "x86_64")]
-                        {
-                            PortAddress::new(0x3F8)
-                        }
-                    })
-                };
+                let mut uart = Uart::new_reset({
+                    use core::num::NonZero;
 
-                // Bring UART to a known (mostly disabled) state.
-                uart.write_line_control(LineControl::empty());
-                uart.write_interrupt_enable(InterruptEnable::empty());
+                    // Safety: Value is >0.
+                    let port_address = unsafe { NonZero::new_unchecked(0x3F8) };
+
+                    // Safety: Function invariants provide safety guarantees.
+                    #[cfg(target_arch = "x86_64")]
+                    unsafe {
+                        PortAddress::new(port_address)
+                    }
+                });
 
                 // Configure the baud rate (tx/rx speed) to maximum.
                 let mut uart = uart.into_dlab_mode();
@@ -93,7 +91,7 @@ impl UartLogger {
 struct UartWriter(Uart<PortAddress, Data>);
 
 impl UartWriter {
-    fn wait_for_empty(&self) {
+    fn wait_for_empty(&mut self) {
         while !self.0.read_line_status().contains(LineStatus::THR_EMPTY) {
             core::hint::spin_loop();
         }
@@ -125,13 +123,11 @@ impl log::Log for UartLogger {
             self.writer.with(|writer| {
                 let mut writer = writer.lock();
 
-                // TODO tell the time?
-                let ticks = 1234;
-
                 writeln!(
                     writer,
-                    "[#{hwthread_id}][T{ticks}][{level}] {args}",
+                    "[#{hwthread_id}][{target}][{level}] {args}",
                     hwthread_id = crate::cpu::get_id(),
+                    target = record.target(),
                     level = record.level(),
                     args = record.args(),
                 )

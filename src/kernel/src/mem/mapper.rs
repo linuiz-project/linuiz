@@ -82,10 +82,14 @@ impl Mapper {
             })?;
         }
 
+        trace!(
+            "MAP @ {page:X?} -> {frame:X?}  (to_depth:{}, lock:{lock_frame}, {attributes:?})",
+            depth.get()
+        );
+
         // If acquisition of the frame is successful, attempt to map the page to the frame index.
         let result = self
             .root_table_mut()
-            // Safety: Frame does not contain any data.
             .with_entry_create(page, depth, |entry| {
                 if depth > TableDepth::min() {
                     debug_assert!(

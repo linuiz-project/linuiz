@@ -417,6 +417,12 @@ impl<'a> PageTable<'a, Mut> {
         to_depth: TableDepth,
         with_fn: impl FnOnce(&mut PageTableEntry) -> T,
     ) -> Result<T> {
+        trace!(
+            "CREATE: {page:X?} (to_depth:{}, current:{})",
+            to_depth.get(),
+            self.depth().get()
+        );
+
         if self.depth() == to_depth {
             Ok(with_fn(self.entry))
         } else if !self.is_huge() {

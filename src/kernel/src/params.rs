@@ -48,7 +48,7 @@ pub fn parse(kernel_cmdline_request: &limine::request::ExecutableCmdlineRequest)
             }
 
             None => {
-                error!("Bootloader didn't provide response to kernel command line request.");
+                warn!("Bootloader didn't provide response to kernel command line request.");
             }
         }
 

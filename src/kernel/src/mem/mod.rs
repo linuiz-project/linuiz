@@ -33,7 +33,7 @@ pub fn init(
     kernel_address_request: &limine::request::ExecutableAddressRequest,
 ) {
     KERNEL_MAPPER.call_once(|| {
-        debug!("Preparing kernel memory system.");
+        debug!("Preparing kernel memory system...");
 
         let mut kernel_mapper = Mapper::new(TableDepth::max());
 
@@ -191,12 +191,14 @@ fn map_hhdm_range(
 ) {
     let huge_page_depth = TableDepth::new(1).unwrap();
 
-    trace!("HHDM Map  {range:#X?}  {flags:?}   lock: {lock_frames}");
+    trace!("HHDM Map   {range:#X?}  {flags:?}   lock: {lock_frames}");
 
     let frame_address = Address::new(range.start).unwrap();
     let page_address = Hhdm::frame_to_page(frame_address);
 
     while !range.is_empty() {
+        trace!("HHDM Part  {:#X}", range.start);
+
         if range.len() > huge_page_depth.align()
             && range.start.trailing_zeros() >= huge_page_depth.align().trailing_zeros()
         {
