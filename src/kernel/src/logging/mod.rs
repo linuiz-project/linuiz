@@ -5,6 +5,9 @@ use uart::{
     Baud, Data, FifoControl, LineControl, LineStatus, ModemControl, Uart, address::PortAddress,
 };
 
+#[cfg(debug_assertions)]
+mod debug;
+
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("UART loopback integrity check failed")]
@@ -13,9 +16,7 @@ pub enum Error {
 
 const UART_FIFO_SIZE: usize = 16;
 
-pub struct UartLogger {
-    writer: InterruptCell<Mutex<UartWriter>>,
-}
+pub struct UartLogger(InterruptCell<Mutex<UartWriter>>);
 
 // Safety: System UART is not thread-specific in kernel.
 unsafe impl Send for UartLogger {}
@@ -28,12 +29,12 @@ impl UartLogger {
             static UART_LOGGER: Once<UartLogger> = Once::new();
 
             UART_LOGGER.try_call_once(|| {
+                use core::num::NonZero;
+
+                // Safety: Value is >0.
+                let port_address = unsafe { NonZero::new_unchecked(0x3F8) };
+
                 let uart = Uart::new_reset({
-                    use core::num::NonZero;
-
-                    // Safety: Value is >0.
-                    let port_address = unsafe { NonZero::new_unchecked(0x3F8) };
-
                     // Safety: Function invariants provide safety guarantees.
                     #[cfg(target_arch = "x86_64")]
                     unsafe {
@@ -71,9 +72,11 @@ impl UartLogger {
                     ModemControl::TERMINAL_READY | ModemControl::OUT_1 | ModemControl::OUT_2,
                 );
 
-                Ok(UartLogger {
-                    writer: InterruptCell::new(Mutex::new(UartWriter(uart))),
-                })
+                b"HELLO WORLD....\n".iter().copied().for_each(|byte| {
+                    uart.write_byte(byte);
+                });
+
+                Ok(UartLogger(InterruptCell::new(Mutex::new(UartWriter(uart)))))
             })?;
 
             #[cfg(debug_assertions)]
@@ -92,7 +95,15 @@ struct UartWriter(Uart<PortAddress, Data>);
 
 impl UartWriter {
     fn wait_for_empty(&mut self) {
-        while !self.0.read_line_status().contains(LineStatus::THR_EMPTY) {
+        loop {
+            let line_status = self.0.read_line_status();
+
+            dbgw(line_status);
+
+            if line_status.contains(LineStatus::THR_EMPTY) {
+                return;
+            }
+
             core::hint::spin_loop();
         }
     }
@@ -120,7 +131,7 @@ impl log::Log for UartLogger {
 
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
-            self.writer.with(|writer| {
+            self.0.with(|writer| {
                 let mut writer = writer.lock();
 
                 writeln!(
