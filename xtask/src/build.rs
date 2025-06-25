@@ -21,10 +21,6 @@ impl Target {
 
 #[derive(Parser)]
 pub struct Options {
-    /// Whether to build in release mode (with all optimizations).
-    #[arg(long)]
-    release: bool,
-
     /// Verbose build output. Equivalent to `cargo build -vv`.
     #[arg(short, long)]
     verbose: bool,
@@ -37,6 +33,12 @@ pub struct Options {
     /// Target platform to compile for.
     #[arg(short, long)]
     target: Target,
+
+    /// Whether to build in release mode (with all optimizations).
+    #[arg(long)]
+    release: bool,
+
+    #[arg(long)]
 
     #[arg(long)]
     drivers: Vec<String>,

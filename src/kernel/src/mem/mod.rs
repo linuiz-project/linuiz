@@ -102,15 +102,17 @@ pub fn init(
                     {
                         // Map a giga page
 
-                        kernel_mapper
-                            .map(
-                                page_address,
-                                TableDepth::giga(),
-                                frame_address,
-                                false,
-                                paging_flags | TableEntryFlags::HUGE,
-                            )
-                            .expect("failed to map range");
+                        unsafe {
+                            kernel_mapper
+                                .map(
+                                    page_address,
+                                    TableDepth::giga(),
+                                    frame_address,
+                                    false,
+                                    paging_flags | TableEntryFlags::HUGE,
+                                )
+                                .expect("failed to map range");
+                        }
 
                         entry_range.advance_by(giga_page_size()).unwrap();
                     } else if paging::use_mega_pages()
@@ -121,29 +123,33 @@ pub fn init(
                     {
                         // Map a mega page
 
-                        kernel_mapper
-                            .map(
-                                page_address,
-                                TableDepth::mega(),
-                                frame_address,
-                                false,
-                                paging_flags | TableEntryFlags::HUGE,
-                            )
-                            .expect("failed to map range");
+                        unsafe {
+                            kernel_mapper
+                                .map(
+                                    page_address,
+                                    TableDepth::mega(),
+                                    frame_address,
+                                    false,
+                                    paging_flags | TableEntryFlags::HUGE,
+                                )
+                                .expect("failed to map range");
+                        }
 
                         entry_range.advance_by(mega_page_size()).unwrap();
                     } else {
                         // Map a standard page
 
-                        kernel_mapper
-                            .map(
-                                page_address,
-                                TableDepth::min(),
-                                frame_address,
-                                false,
-                                paging_flags,
-                            )
-                            .expect("failed to map range");
+                        unsafe {
+                            kernel_mapper
+                                .map(
+                                    page_address,
+                                    TableDepth::min(),
+                                    frame_address,
+                                    false,
+                                    paging_flags,
+                                )
+                                .expect("failed to map range");
+                        }
 
                         entry_range.advance_by(page_size()).unwrap();
                     }
@@ -183,10 +189,19 @@ pub fn init(
             .expect("could not get kernel file segments")
             .iter()
             .filter(|program_header| program_header.p_type == elf::abi::PT_LOAD)
+            // .map(|program_header| {
+            //     let segment_start =
+            //         usize::try_from(program_header.p_vaddr).unwrap() - kernel_virtual_address;
+            //     let segment_end = segment_start + usize::try_from(program_header.p_memsz).unwrap();
+            //     let flags = TableEntryFlags::from(crate::task::segment_to_mmap_permissions(
+            //         program_header.p_flags,
+            //     ));
+
+            //     ((segment_start..segment_end), flags)
+            // })
             .for_each(|program_header| {
                 trace!("{program_header:X?}");
 
-                // Safety: `KERNEL_BASE` is a linker symbol to an in-executable memory location, set by the linker.
                 let base_offset =
                     usize::try_from(program_header.p_vaddr).unwrap() - kernel_virtual_address;
                 let base_offset_end =
@@ -203,15 +218,17 @@ pub fn init(
                         let virtual_address =
                             Address::new(kernel_virtual_address + offset).unwrap();
 
-                        kernel_mapper
-                            .map(
-                                virtual_address,
-                                TableDepth::min(),
-                                physical_address,
-                                false,
-                                flags,
-                            )
-                            .expect("failed to map kernel memory region");
+                        unsafe {
+                            kernel_mapper
+                                .map(
+                                    virtual_address,
+                                    TableDepth::min(),
+                                    physical_address,
+                                    false,
+                                    flags,
+                                )
+                                .expect("failed to map kernel memory region");
+                        }
                     });
             });
 
@@ -249,29 +266,33 @@ fn map_hhdm_range(
 
             range.advance_by(huge_page_depth.align()).unwrap();
 
-            mapper
-                .map(
-                    page_address,
-                    huge_page_depth,
-                    frame_address,
-                    lock_frames,
-                    flags | TableEntryFlags::HUGE,
-                )
-                .expect("failed to map range");
+            unsafe {
+                mapper
+                    .map(
+                        page_address,
+                        huge_page_depth,
+                        frame_address,
+                        lock_frames,
+                        flags | TableEntryFlags::HUGE,
+                    )
+                    .expect("failed to map range");
+            }
         } else {
             // Map a standard page
 
             range.advance_by(libsys::page_size()).unwrap();
 
-            mapper
-                .map(
-                    page_address,
-                    TableDepth::min(),
-                    frame_address,
-                    lock_frames,
-                    flags,
-                )
-                .expect("failed to map range");
+            unsafe {
+                mapper
+                    .map(
+                        page_address,
+                        TableDepth::min(),
+                        frame_address,
+                        lock_frames,
+                        flags,
+                    )
+                    .expect("failed to map range");
+            }
         }
     }
 }

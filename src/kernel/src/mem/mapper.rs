@@ -66,7 +66,11 @@ impl Mapper {
     /* MAP / UNMAP */
 
     /// Maps the specified page to the specified frame index.
-    pub fn map(
+    ///
+    /// # Safety
+    ///
+    /// TODO
+    pub unsafe fn map(
         &mut self,
         page: Address<Page>,
         depth: TableDepth,
@@ -102,7 +106,7 @@ impl Mapper {
 
     /// Unmaps the given page, optionally freeing the frame the page points to within the given [`FrameManager`].
     ///
-    /// Safety
+    /// # Safety
     ///
     /// Caller must ensure calling this function does not cause memory corruption.
     pub unsafe fn unmap(
@@ -140,7 +144,9 @@ impl Mapper {
 
     pub fn auto_map(&mut self, page: Address<Page>, flags: TableEntryFlags) -> Result<(), Error> {
         let frame = PhysicalMemoryManager::next_frame()?;
-        self.map(page, TableDepth::min(), frame, false, flags)?;
+        unsafe {
+            self.map(page, TableDepth::min(), frame, false, flags)?;
+        }
 
         Ok(())
     }
