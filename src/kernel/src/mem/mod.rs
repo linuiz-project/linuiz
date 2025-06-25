@@ -90,6 +90,7 @@ pub fn init(
 
                 trace!("HHDM: {entry_range:#X?} {paging_flags:?}");
 
+                #[allow(unstable_name_collisions)]
                 while !entry_range.is_empty() {
                     let frame_address = Address::new(entry_range.start).unwrap();
                     let page_address = Hhdm::frame_to_page(frame_address);
@@ -196,7 +197,6 @@ pub fn init(
             //     let flags = TableEntryFlags::from(crate::task::segment_to_mmap_permissions(
             //         program_header.p_flags,
             //     ));
-
             //     ((segment_start..segment_end), flags)
             // })
             .for_each(|program_header| {

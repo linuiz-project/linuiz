@@ -33,7 +33,7 @@ impl log::Log for Logger {
                 self.0.with(|writer| {
                     let mut writer = writer.lock();
 
-                    writer.write_fmt(args);
+                    writer.write_fmt(args).ok();
                 });
             });
         }
