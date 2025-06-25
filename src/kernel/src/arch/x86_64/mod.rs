@@ -1,3 +1,4 @@
+pub mod devices;
 pub mod instructions;
 pub mod registers;
 pub mod structures;
@@ -25,7 +26,7 @@ pub mod cpuid {
 pub unsafe fn configure_hwthread() {
     use registers::{
         control::{CR0, CR0Flags, CR4, CR4Flags},
-        msr,
+        model_specific::IA32_EFER,
     };
 
     // Safety: This is the first and only time `CR0` will be set.
@@ -93,7 +94,7 @@ pub unsafe fn configure_hwthread() {
     {
         // Safety: The `NX` bit is not currently in use by any paging structures.
         unsafe {
-            msr::IA32_EFER::set_nxe(true);
+            IA32_EFER::set_nxe(true);
         }
     }
 

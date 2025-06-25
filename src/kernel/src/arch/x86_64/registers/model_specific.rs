@@ -1,17 +1,16 @@
-#![no_std]
 #![allow(non_camel_case_types)]
 
-//! ## Safety
+//! # Safety
 //!
 //! It is *possible* that the current CPU doesn't support the MSR feature.
 //! In this case, well... all of this fails. And we're going to ignore that.
 
 use bit_field::BitField;
 
-/// ## Safety
+/// # Safety
 ///
 /// * Caller must ensure the address is valid.
-#[inline]
+#[inline(always)]
 pub unsafe fn rdmsr(address: u32) -> u64 {
     let value: u64;
 
@@ -34,7 +33,7 @@ pub unsafe fn rdmsr(address: u32) -> u64 {
 ///
 /// * Caller must ensure the address is valid.
 /// * Caller must ensure writing the value to the MSR address will not result in undefined behaviour.
-#[inline]
+#[inline(always)]
 pub unsafe fn wrmsr(address: u32, value: u64) {
     core::arch::asm!(
         "wrmsr",
@@ -52,7 +51,7 @@ macro_rules! generic_msr {
         impl $name {
             #[inline]
             pub fn read() -> u64 {
-                unsafe { $crate::rdmsr($addr) }
+                unsafe { $crate::arch::x86_64::registers::model_specific::rdmsr($addr) }
             }
 
             /// ## Safety
@@ -61,7 +60,7 @@ macro_rules! generic_msr {
             /// what is written is valid for the given MSR address.
             #[inline]
             pub unsafe fn write(value: u64) {
-                $crate::wrmsr($addr, value);
+                $crate::arch::x86_64::registers::model_specific::wrmsr($addr, value);
             }
         }
     };

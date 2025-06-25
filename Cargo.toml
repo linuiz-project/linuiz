@@ -6,7 +6,7 @@ exclude = [
     "src/userspace/nvme",
     "src/userspace/test_driver",
 ]
-members = ["src/kernel", "src/apic", "src/msr"]
+members = ["src/kernel"]
 
 [profile.dev]
 panic = "abort"

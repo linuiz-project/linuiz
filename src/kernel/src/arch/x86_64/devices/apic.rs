@@ -1,9 +1,8 @@
-#![no_std]
 #![allow(non_camel_case_types, non_upper_case_globals)]
 
+use crate::arch::x86_64::registers::model_specific::IA32_APIC_BASE;
 use bit_field::BitField;
 use core::marker::PhantomData;
-use msr::IA32_APIC_BASE;
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
