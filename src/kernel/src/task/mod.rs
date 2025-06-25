@@ -36,13 +36,16 @@ pub fn segment_to_mmap_permissions(segment_flags: u32) -> MmapPermissions {
     }
 }
 
-crate::error_impl! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum Error {
-        AlreadyMapped => None,
-        AddressUnderrun { addr: Address<Virtual> } => None,
-        UnhandledAddress { addr: Address<Virtual> } => None
-    }
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+pub enum Error {
+    #[error("address is already mapped")]
+    AlreadyMapped,
+
+    #[error("tried to demand map a page and underflowed")]
+    AddressUnderrun(Address<Virtual>),
+
+    #[error("address belongs to a non-load segment")]
+    NonLoadAddress(Address<Virtual>),
 }
 
 pub static TASK_LOAD_BASE: usize = 0x20000;
@@ -174,7 +177,7 @@ impl Task {
     }
 
     #[allow(clippy::too_many_lines)]
-    pub fn demand_map(&mut self, address: Address<Virtual>) -> Result<()> {
+    pub fn demand_map(&mut self, address: Address<Virtual>) -> Result<(), Error> {
         use crate::mem::paging::TableEntryFlags;
         use core::mem::MaybeUninit;
         use libsys::Page;
@@ -188,7 +191,7 @@ impl Task {
         let fault_unoffset = address
             .get()
             .checked_sub(self.load_offset())
-            .ok_or(Error::AddressUnderrun { addr: address })?;
+            .ok_or(Error::AddressUnderrun(address))?;
 
         let segment = self
             .elf_segments()
@@ -199,7 +202,7 @@ impl Task {
                     .contains(&u64::try_from(fault_unoffset).unwrap())
             })
             .copied()
-            .ok_or(Error::UnhandledAddress { addr: address })?;
+            .ok_or(Error::NonLoadAddress(address))?;
 
         // Small check to help ensure the segment alignments are page-fit.
         debug_assert_eq!(segment.p_align & (libsys::page_mask() as u64), 0);
@@ -282,6 +285,7 @@ impl Task {
                 trace!("Processing relocation: {rela:X?}");
                 // Safety: Fault page is checked to contain the relocation's address, and the pointer is guaranteed after
                 // offset to lie within the memory mapped region above.
+                #[allow(clippy::cast_ptr_alignment)]
                 unsafe {
                     rela.address
                         .as_ptr()
