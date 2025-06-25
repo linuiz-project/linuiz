@@ -47,6 +47,11 @@ pub fn init(
         kernel_address_request: &limine::request::ExecutableAddressRequest,
     ) -> Mapper {
         debug!("Preparing kernel memory...");
+        debug!(
+            "Paging Setup Info: MEGA:{}, GIGA:{}",
+            paging::use_mega_pages(),
+            paging::use_giga_pages()
+        );
 
         let mut kernel_mapper = Mapper::new(TableDepth::max());
 
@@ -103,7 +108,7 @@ pub fn init(
                                 TableDepth::giga(),
                                 frame_address,
                                 false,
-                                paging_flags,
+                                paging_flags | TableEntryFlags::HUGE,
                             )
                             .expect("failed to map range");
 
@@ -122,7 +127,7 @@ pub fn init(
                                 TableDepth::mega(),
                                 frame_address,
                                 false,
-                                paging_flags,
+                                paging_flags | TableEntryFlags::HUGE,
                             )
                             .expect("failed to map range");
 
@@ -179,7 +184,7 @@ pub fn init(
             .iter()
             .filter(|program_header| program_header.p_type == elf::abi::PT_LOAD)
             .for_each(|program_header| {
-                debug!("{program_header:X?}");
+                trace!("{program_header:X?}");
 
                 // Safety: `KERNEL_BASE` is a linker symbol to an in-executable memory location, set by the linker.
                 let base_offset =
@@ -198,13 +203,12 @@ pub fn init(
                         let virtual_address =
                             Address::new(kernel_virtual_address + offset).unwrap();
 
-                        trace!("Map  {virtual_address:X?} -> {physical_address:X?}   {flags:?}");
                         kernel_mapper
                             .map(
                                 virtual_address,
                                 TableDepth::min(),
                                 physical_address,
-                                true,
+                                false,
                                 flags,
                             )
                             .expect("failed to map kernel memory region");

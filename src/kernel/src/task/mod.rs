@@ -24,10 +24,10 @@ pub const MIN_LOAD_OFFSET: usize = STACK_START.get() + STACK_SIZE.get();
 pub const PT_FLAG_EXEC_BIT: usize = 0;
 pub const PT_FLAG_WRITE_BIT: usize = 1;
 
-pub fn segment_to_mmap_permissions(segment_ty: u32) -> MmapPermissions {
+pub fn segment_to_mmap_permissions(segment_flags: u32) -> MmapPermissions {
     match (
-        segment_ty.get_bit(PT_FLAG_WRITE_BIT),
-        segment_ty.get_bit(PT_FLAG_EXEC_BIT),
+        segment_flags.get_bit(PT_FLAG_WRITE_BIT),
+        segment_flags.get_bit(PT_FLAG_EXEC_BIT),
     ) {
         (true, false) => MmapPermissions::ReadWrite,
         (false, true) => MmapPermissions::ReadExecute,
@@ -97,7 +97,7 @@ impl Task {
         trace!("Generating a random ID for new task.");
         let id = uuid::Uuid::new_v4();
 
-        trace!("Allocating userspace stack for task: {:?}.", id);
+        trace!("Allocating userspace stack for task: {id:?}.");
         let stack = address_space
             .mmap(
                 Some(Address::new_truncate(STACK_START.get())),

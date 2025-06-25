@@ -75,7 +75,7 @@ impl Mapper {
         attributes: TableEntryFlags,
     ) -> Result<(), Error> {
         trace!(
-            "MAP @ {page:X?} -> {frame:X?}  (to_depth:{}, lock:{lock_frame}, {attributes:?})",
+            "Mapping: {page:X?} -> {frame:X?}  (to_depth:{}, lock:{lock_frame}, {attributes:?})",
             depth.get()
         );
 
@@ -113,31 +113,36 @@ impl Mapper {
     ) -> Result<(), Error> {
         self.root_table_mut()
             .with_entry_mut(page, to_depth, |entry| {
-                // Safety: We've got an explicit directive from the caller to unmap this page, so the caller must ensure that's a valid operation.
-                unsafe { entry.set_attributes(TableEntryFlags::PRESENT, FlagsModify::Remove) };
+                // Safety: Caller must ensure invariants are maintained.
+                unsafe {
+                    entry.set_attributes(TableEntryFlags::PRESENT, FlagsModify::Remove);
+                }
 
                 let frame = entry.get_frame();
-                // Safety: See above.
-                unsafe { entry.set_frame(Address::new_truncate(0)) };
+
+                // Safety: Caller must ensure invariants are maintained.
+                unsafe {
+                    entry.set_frame(Address::new_truncate(0));
+                }
 
                 if free_frame {
-                    PhysicalMemoryManager::free_frame(frame).unwrap();
+                    PhysicalMemoryManager::free_frame(frame)?;
                 }
 
                 // Invalidate the page in the TLB.
                 #[cfg(target_arch = "x86_64")]
                 crate::arch::x86_64::instructions::__invlpg(page);
+
+                Ok(())
             })
+            .flatten()
     }
 
     pub fn auto_map(&mut self, page: Address<Page>, flags: TableEntryFlags) -> Result<(), Error> {
-        match PhysicalMemoryManager::next_frame() {
-            Ok(frame) => self.map(page, TableDepth::min(), frame, false, flags),
-            Err(err) => {
-                trace!("Auto alloc pmm::get() error: {err:?}");
-                Err(Error::AllocError)
-            }
-        }
+        let frame = PhysicalMemoryManager::next_frame()?;
+        self.map(page, TableDepth::min(), frame, false, flags)?;
+
+        Ok(())
     }
 
     /* STATE QUERYING */

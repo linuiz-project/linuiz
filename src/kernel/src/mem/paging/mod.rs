@@ -25,8 +25,7 @@ pub fn use_giga_pages() -> bool {
     {
         crate::arch::x86_64::cpuid::EXT_FUNCTION_INFO
             .as_ref()
-            .map(raw_cpuid::ExtendedProcessorFeatureIdentifiers::has_1gib_pages)
-            .unwrap_or(false)
+            .is_some_and(raw_cpuid::ExtendedProcessorFeatureIdentifiers::has_1gib_pages)
     }
 }
 
@@ -435,12 +434,6 @@ impl<'a> PageTable<'a, Mut> {
         to_depth: TableDepth,
         with_fn: impl FnOnce(&mut PageTableEntry) -> T,
     ) -> Result<T, Error> {
-        trace!(
-            "Creating table: {page:X?} (to_depth:{}, current:{})",
-            to_depth.get(),
-            self.depth().get()
-        );
-
         if self.depth() == to_depth {
             Ok(with_fn(self.entry))
         } else if !self.is_huge() {
@@ -450,6 +443,12 @@ impl<'a> PageTable<'a, Mut> {
                     "page table entry is non-present, but has a present frame address: {:?} {:?}",
                     self.depth(),
                     self.entry
+                );
+
+                trace!(
+                    "Creating table: {page:X?} (to_depth:{}, current:{})",
+                    to_depth.get(),
+                    self.depth().get()
                 );
 
                 let mut flags = TableEntryFlags::PTE;
