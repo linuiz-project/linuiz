@@ -22,3 +22,4 @@ Cargo.lock
 # Ignore debug/run artifacts
 .debug/
 run/system/linuiz
+.build_hash
