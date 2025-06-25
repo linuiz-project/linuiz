@@ -38,6 +38,7 @@
     clippy::upper_case_acronyms,
     clippy::missing_const_for_fn,
     clippy::needless_for_each,
+    clippy::if_not_else,
     // // While ideally this is warned against, the number of situations in which pointer alignment up-casting
     // // is acceptable seem to far outweigh the circumstances within the kernel where it is inappropriate.
     // clippy::cast_ptr_alignment,
@@ -88,22 +89,6 @@ static STACK_SIZE_REQUEST: limine::request::StackSizeRequest =
             0x4000
         }
     });
-
-unsafe extern "C" {
-    pub type LinkerSymbol;
-}
-
-impl LinkerSymbol {
-    #[inline(always)]
-    pub fn as_ptr<T>(&'static self) -> *const T {
-        self as *const _ as *const T
-    }
-
-    #[inline(always)]
-    pub fn as_usize(&'static self) -> usize {
-        self as *const Self as usize
-    }
-}
 
 /// # Safety
 ///

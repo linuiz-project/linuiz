@@ -83,19 +83,13 @@ pub fn without<R>(func: impl FnOnce() -> R) -> R {
     let interrupts_enabled = is_enabled();
 
     if interrupts_enabled {
-        // Safety: Interrupts are expected to be disabled, and are later re-enabled.
-        unsafe {
-            disable();
-        }
+        disable();
     }
 
     let return_value = func();
 
     if interrupts_enabled {
-        // Safety: Interrupts were previously enabled.
-        unsafe {
-            enable();
-        }
+        enable();
     }
 
     return_value
@@ -105,10 +99,7 @@ pub fn without<R>(func: impl FnOnce() -> R) -> R {
 #[inline(always)]
 pub fn wait_indefinite() -> ! {
     loop {
-        // Safety: We never recover from this, so it doesn't matter if a deadlock occurs.
-        unsafe {
-            wait_next();
-        }
+        wait_next();
     }
 }
 
@@ -119,10 +110,7 @@ pub fn wait_indefinite() -> ! {
 /// Murdering a hardware thread is undefined behaviour.
 #[inline(always)]
 pub unsafe fn halt_and_catch_fire() -> ! {
-    // Safety: We never recover from this, so it doesn't matter.
-    unsafe {
-        disable();
-    }
+    disable();
 
     wait_indefinite()
 }

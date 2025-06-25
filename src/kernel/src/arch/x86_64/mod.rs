@@ -17,7 +17,7 @@ pub mod cpuid {
     pub static VENDOR_INFO: Lazy<Option<VendorInfo>> = Lazy::new(|| CPUID.get_vendor_info());
 }
 
-/// ## Safety
+/// # Safety
 ///
 /// This function has the potential to modify CPU state in such a way as to disrupt
 /// software execution. It should be run only once per hardware thread at the very

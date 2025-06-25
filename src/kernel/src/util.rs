@@ -1,5 +1,3 @@
-
-
 // TODO figure out a way to get rid of this
 pub trait InteriorRef {
     type RefType<'a, T>

@@ -1,4 +1,4 @@
-pub mod walker;
+use crate::mem::{Hhdm, pmm::PhysicalMemoryManager};
 use crate::util::{InteriorRef, Mut, Ref};
 use bit_field::BitField;
 use core::{fmt, iter::Step};
@@ -7,19 +7,46 @@ use libsys::{
     table_index_size,
 };
 
-use crate::mem::{Hhdm, pmm::PhysicalMemoryManager};
+pub mod walker;
+
+/// Whether the current environment supports 2MiB pages.
+pub fn use_mega_pages() -> bool {
+    #[cfg(target_arch = "x86_64")]
+    {
+        crate::arch::x86_64::cpuid::FEATURE_INFO.has_pae()
+            && crate::arch::x86_64::registers::control::CR4::read()
+                .contains(crate::arch::x86_64::registers::control::CR4Flags::PAE)
+    }
+}
+
+/// Whether the current environment supports 1GiB pages.
+pub fn use_giga_pages() -> bool {
+    #[cfg(target_arch = "x86_64")]
+    {
+        crate::arch::x86_64::cpuid::EXT_FUNCTION_INFO
+            .as_ref()
+            .map(raw_cpuid::ExtendedProcessorFeatureIdentifiers::has_1gib_pages)
+            .unwrap_or(false)
+    }
+}
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TableDepth(u32);
 
 impl TableDepth {
-    #[inline]
-    pub const fn min() -> Self {
+    pub fn min() -> Self {
         Self(0)
     }
 
-    #[inline]
+    pub fn mega() -> Self {
+        Self(1)
+    }
+
+    pub fn giga() -> Self {
+        Self(2)
+    }
+
     pub fn max() -> Self {
         Self({
             #[cfg(target_arch = "x86_64")]
@@ -35,51 +62,42 @@ impl TableDepth {
         })
     }
 
-    #[inline]
-    pub const fn min_align() -> usize {
+    pub fn min_align() -> usize {
         Self::min().align()
     }
 
-    #[inline]
     pub fn max_align() -> usize {
         Self::max().align()
     }
 
-    #[inline]
     pub fn new(depth: u32) -> Option<Self> {
         (Self::min().0..=Self::max().0)
             .contains(&depth)
             .then_some(Self(depth))
     }
 
-    #[inline]
     pub const fn get(self) -> u32 {
         self.0
     }
 
-    #[inline]
-    pub const fn align(self) -> usize {
+    pub fn align(self) -> usize {
         libsys::page_size()
             .checked_shl(libsys::table_index_shift().get() * self.get())
             .unwrap()
     }
 
-    #[inline]
     pub fn next(self) -> Self {
         Step::forward(self, 1)
     }
 
-    #[inline]
     pub fn next_checked(self) -> Option<Self> {
         Step::forward_checked(self, 1)
     }
 
-    #[inline]
     pub fn is_min(self) -> bool {
         self == Self::min()
     }
 
-    #[inline]
     pub fn is_max(self) -> bool {
         self == Self::max()
     }
@@ -114,22 +132,22 @@ impl Step for TableDepth {
     }
 }
 
-crate::error_impl! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    #[allow(clippy::enum_variant_names)]
-    pub enum Error {
-        /// The underlying allocator is out of memory.
-        AllocError => None,
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+#[allow(clippy::enum_variant_names)]
+pub enum Error {
+    #[error("physical memory manager is out of memory")]
+    AllocError,
 
-        /// An attempted mapping sits outside the physical memory bounds.
-        FrameBounds => None,
+    /// Unexpected huge page was encountered.
+    #[error("mapper encountered a huge page when one was not expected")]
+    HugePageEncountered,
 
-        /// Unexpected huge page was encountered.
-        HugePage => None,
+    /// The specified page is not mapped.
+    #[error("page is not mapped: {0:X?}")]
+    NotMapped(Address<Virtual>),
 
-        /// The specified page is not mapped.
-        NotMapped { addr: Address<Virtual> } => None
-    }
+    #[error(transparent)]
+    PhysicalMemoryManager(#[from] crate::mem::pmm::Error),
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -344,7 +362,7 @@ impl<'a> PageTable<'a, Ref> {
         page: Address<Page>,
         to_depth: Option<TableDepth>,
         with_fn: impl FnOnce(&PageTableEntry) -> T,
-    ) -> Result<T> {
+    ) -> Result<T, Error> {
         if self.depth() == to_depth.unwrap_or(TableDepth::min()) {
             Ok(with_fn(self.entry))
         } else if !self.is_huge() {
@@ -359,10 +377,10 @@ impl<'a> PageTable<'a, Ref> {
                 (unsafe { PageTable::<Ref>::new(next_depth, sub_entry) })
                     .with_entry(page, to_depth, with_fn)
             } else {
-                Err(Error::NotMapped { addr: page.get() })
+                Err(Error::NotMapped(page.get()))
             }
         } else {
-            Err(Error::HugePage)
+            Err(Error::HugePageEncountered)
         }
     }
 }
@@ -386,7 +404,7 @@ impl<'a> PageTable<'a, Mut> {
         page: Address<Page>,
         to_depth: Option<TableDepth>,
         with_fn: impl FnOnce(&mut PageTableEntry) -> T,
-    ) -> Result<T> {
+    ) -> Result<T, Error> {
         if self.depth() == to_depth.unwrap_or(TableDepth::min()) {
             Ok(with_fn(self.entry))
         } else if !self.is_huge() {
@@ -401,10 +419,10 @@ impl<'a> PageTable<'a, Mut> {
                 (unsafe { PageTable::<Mut>::new(next_depth, sub_entry) })
                     .with_entry_mut(page, to_depth, with_fn)
             } else {
-                Err(Error::NotMapped { addr: page.get() })
+                Err(Error::NotMapped(page.get()))
             }
         } else {
-            Err(Error::HugePage)
+            Err(Error::HugePageEncountered)
         }
     }
 
@@ -416,9 +434,9 @@ impl<'a> PageTable<'a, Mut> {
         page: Address<Page>,
         to_depth: TableDepth,
         with_fn: impl FnOnce(&mut PageTableEntry) -> T,
-    ) -> Result<T> {
+    ) -> Result<T, Error> {
         trace!(
-            "CREATE: {page:X?} (to_depth:{}, current:{})",
+            "Creating table: {page:X?} (to_depth:{}, current:{})",
             to_depth.get(),
             self.depth().get()
         );
@@ -434,8 +452,6 @@ impl<'a> PageTable<'a, Mut> {
                     self.entry
                 );
 
-                trace!(".");
-
                 let mut flags = TableEntryFlags::PTE;
                 // Insert the USER bit in all non-leaf entries.
                 // This is for compatibility with the x86 paging scheme.
@@ -443,36 +459,25 @@ impl<'a> PageTable<'a, Mut> {
                     flags.insert(TableEntryFlags::USER);
                 }
 
-                trace!("..");
-
                 // Set the entry frame and set attributes to make a valid PTE.
                 *self.entry = PageTableEntry::new(
                     PhysicalMemoryManager::next_frame().map_err(|_| Error::AllocError)?,
                     flags,
                 );
 
-                trace!("...");
-
                 // Clear the table to avoid corrupted PTEs.
                 self.entries_mut().fill(PageTableEntry::empty());
-
-                trace!("...");
             }
 
             let next_depth = self.depth().next_checked().unwrap();
-
-            trace!("NEXT DEPTH: {next_depth:?}");
-
             let entry_index = self.depth().index_of(page.get()).unwrap();
             let sub_entry = self.entries_mut().get_mut(entry_index).unwrap();
-
-            trace!("....");
 
             // Safety: If the page table entry is present, then it's a valid entry, all bits accounted.
             (unsafe { PageTable::<Mut>::new(next_depth, sub_entry) })
                 .with_entry_create(page, to_depth, with_fn)
         } else {
-            Err(Error::HugePage)
+            Err(Error::HugePageEncountered)
         }
     }
 }

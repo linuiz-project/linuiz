@@ -35,9 +35,7 @@ pub enum ExceptionCatcher {
 
 /// Initializes the core-local state structure.
 ///
-/// ## Safety
-///
-/// This function invariantly assumes it will only be called once.
+/// TODO make this run once and only once
 #[allow(clippy::too_many_lines)]
 pub unsafe fn init(timer_frequency: u16) {
     // #[cfg(target_arch = "x86_64")]
@@ -202,6 +200,7 @@ fn get_mut() -> &'static mut State {
     unsafe { get_ptr().as_mut() }
 }
 
+/// TODO inline this function
 pub unsafe fn begin_scheduling() {
     // Enable scheduler ...
     with_scheduler(|scheduler| {

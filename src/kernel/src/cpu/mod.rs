@@ -61,11 +61,17 @@ pub fn start_mp(mp_request: &limine::request::MpRequest) {
 ///
 /// - Function can only be run once at the end of the kernel init phase.
 pub unsafe fn run() -> ! {
-    crate::cpu::state::init(1000);
+    // Safety: Function is only run once, right here.
+    unsafe {
+        crate::cpu::state::init(1000);
+    }
 
     // Ensure we enable interrupts prior to enabling the scheduler.
     crate::interrupts::enable();
-    crate::cpu::state::begin_scheduling();
+    // Safety: The hardware thread is ready to be scheduled with tasks.
+    unsafe {
+        crate::cpu::state::begin_scheduling();
+    }
 
     // This interrupt wait loop is necessary to ensure the core can jump into the scheduler.
     crate::interrupts::wait_indefinite()

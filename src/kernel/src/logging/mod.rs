@@ -1,151 +1,59 @@
-use crate::interrupts::InterruptCell;
-use core::fmt::Write;
-use spin::{Mutex, Once};
-use uart::{
-    Baud, Data, FifoControl, LineControl, LineStatus, ModemControl, Uart, address::PortAddress,
-};
+mod serial;
 
 #[cfg(debug_assertions)]
 mod debug;
 
-#[derive(Debug, Error)]
-pub enum Error {
-    #[error("UART loopback integrity check failed")]
-    IntegrityCheck,
+/// The kernel logger.
+pub struct Logger {
+    serial: Option<&'static serial::Logger>,
+
+    #[cfg(debug_assertions)]
+    debug: &'static debug::Logger,
 }
 
-const UART_FIFO_SIZE: usize = 16;
-
-pub struct UartLogger(InterruptCell<Mutex<UartWriter>>);
-
-// Safety: System UART is not thread-specific in kernel.
-unsafe impl Send for UartLogger {}
-// Safety: Allows only one instance to be created.
-unsafe impl Sync for UartLogger {}
-
-impl UartLogger {
-    pub fn init() -> Result<(), Error> {
+impl Logger {
+    pub fn init() {
         crate::interrupts::without(|| {
-            static UART_LOGGER: Once<UartLogger> = Once::new();
+            static LOGGER: spin::Once<Logger> = spin::Once::new();
 
-            UART_LOGGER.try_call_once(|| {
-                use core::num::NonZero;
+            let static_logger = LOGGER.call_once(|| Self {
+                serial: serial::Logger::init().ok(),
 
-                // Safety: Value is >0.
-                let port_address = unsafe { NonZero::new_unchecked(0x3F8) };
+                #[cfg(debug_assertions)]
+                debug: debug::Logger::init(),
+            });
 
-                let uart = Uart::new_reset({
-                    // Safety: Function invariants provide safety guarantees.
-                    #[cfg(target_arch = "x86_64")]
-                    unsafe {
-                        PortAddress::new(port_address)
-                    }
-                });
-
-                // Configure the baud rate (tx/rx speed) to maximum.
-                let mut uart = uart.into_dlab_mode();
-                uart.set_baud(Baud::B115200);
-                let mut uart = uart.into_data_mode();
-
-                // Set character size to 8 bits with no parity.
-                uart.write_line_control(LineControl::BITS_8);
-
-                // Configure UART into loopback mode to test it.
-                uart.write_modem_control(
-                    ModemControl::REQUEST_TO_SEND
-                        | ModemControl::OUT_1
-                        | ModemControl::OUT_2
-                        | ModemControl::LOOPBACK_MODE,
-                );
-
-                // Test the UART to ensure it's functioning correctly.
-                uart.write_byte(0x1F);
-                if uart.read_byte() != 0x1F {
-                    return Err(Error::IntegrityCheck);
-                }
-
-                // Fully enable UART, with FIFO.
-                uart.write_fifo_control(
-                    FifoControl::ENABLE | FifoControl::CLEAR_RX | FifoControl::CLEAR_TX,
-                );
-                uart.write_modem_control(
-                    ModemControl::TERMINAL_READY | ModemControl::OUT_1 | ModemControl::OUT_2,
-                );
-
-                b"HELLO WORLD....\n".iter().copied().for_each(|byte| {
-                    uart.write_byte(byte);
-                });
-
-                Ok(UartLogger(InterruptCell::new(Mutex::new(UartWriter(uart)))))
-            })?;
-
-            #[cfg(debug_assertions)]
             log::set_max_level(log::LevelFilter::Trace);
-            #[cfg(not(debug_assertions))]
-            log::set_max_level(log::LevelFilter::Trace);
-
-            log::set_logger(UART_LOGGER.get().unwrap()).unwrap();
-
-            Ok(())
-        })
+            log::set_logger(static_logger).unwrap();
+        });
     }
 }
 
-struct UartWriter(Uart<PortAddress, Data>);
-
-impl UartWriter {
-    fn wait_for_empty(&mut self) {
-        while !self.0.read_line_status().contains(LineStatus::THR_EMPTY) {
-            #[cfg(debug_assertions)]
-            debug::DebugWriter.write_char('$');
-
-            core::hint::spin_loop();
-        }
-    }
-}
-
-impl core::fmt::Write for UartWriter {
-    fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        #[cfg(debug_assertions)]
-        debug::DebugWriter.write_str(s);
-
-        for (index, c) in s.chars().enumerate() {
-            // Wait for the FIFO to empty initially and every 16 bytes written.
-            if (index % UART_FIFO_SIZE) == 0 {
-                self.wait_for_empty();
-            }
-
-            self.0.write_byte(u8::try_from(c).unwrap_or(b'?'));
-        }
-
-        Ok(())
-    }
-}
-
-impl log::Log for UartLogger {
+impl log::Log for Logger {
     fn enabled(&self, _: &log::Metadata) -> bool {
-        true
+        unimplemented!()
     }
 
     fn log(&self, record: &log::Record) {
-        if self.enabled(record.metadata()) {
-            self.0.with(|writer| {
-                let mut writer = writer.lock();
+        #[cfg(debug_assertions)]
+        self.debug.log(record);
 
-                writeln!(
-                    writer,
-                    "[#{hwthread_id}][{target}][{level}] {args}",
-                    hwthread_id = crate::cpu::get_id(),
-                    target = record.target(),
-                    level = record.level(),
-                    args = record.args(),
-                )
-                .unwrap();
-            });
+        if let Some(serial_logger) = self.serial {
+            serial_logger.log(record);
         }
     }
 
     fn flush(&self) {
         unimplemented!()
     }
+}
+
+fn with_formatted_log_record(record: &log::Record, func: impl FnOnce(core::fmt::Arguments)) {
+    func(format_args!(
+        "[#{hwthread_id}][{level}][{target}] {args}\n",
+        hwthread_id = crate::cpu::get_id(),
+        level = record.level(),
+        target = record.target(),
+        args = record.args(),
+    ));
 }

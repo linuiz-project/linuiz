@@ -17,7 +17,7 @@ use crate::{
         pmm::PhysicalMemoryManager,
     },
 };
-use libsys::{Address, Frame, table_index_size};
+use libsys::{Address, Frame, giga_page_size, mega_page_size, page_size, table_index_size};
 use spin::{Mutex, Once};
 
 static KERNEL_MAPPER: Once<InterruptCell<Mutex<Mapper>>> = Once::new();
@@ -33,12 +33,24 @@ pub fn init(
     kernel_address_request: &limine::request::ExecutableAddressRequest,
 ) {
     KERNEL_MAPPER.call_once(|| {
+        InterruptCell::new(Mutex::new(init(
+            memory_map_request,
+            kernel_file_request,
+            kernel_address_request,
+        )))
+    });
+
+    /// This is a separarte local function because `cargo fmt` fails to automatically format when it is inlined.
+    fn init(
+        memory_map_request: &limine::request::MemoryMapRequest,
+        kernel_file_request: &limine::request::ExecutableFileRequest,
+        kernel_address_request: &limine::request::ExecutableAddressRequest,
+    ) -> Mapper {
         debug!("Preparing kernel memory...");
 
         let mut kernel_mapper = Mapper::new(TableDepth::max());
 
-        // Prepare the memory map iterator by deconstructing the memory map entry into its requisite parts.
-        let mut memory_map_iter = memory_map_request
+        memory_map_request
             .get_response()
             .expect("bootloader did not provide a response to the memory map request")
             .entries()
@@ -48,57 +60,90 @@ pub fn init(
                 let entry_end = usize::try_from(entry.base + entry.length).unwrap();
 
                 (entry_start..entry_end, entry.entry_type)
+            })
+            .for_each(|(mut entry_range, entry_ty)| {
+                let entry_range = &mut entry_range;
+
+                let paging_flags = {
+                    match entry_ty {
+                        limine::memory_map::EntryType::USABLE
+                        | limine::memory_map::EntryType::ACPI_NVS
+                        | limine::memory_map::EntryType::ACPI_RECLAIMABLE
+                        | limine::memory_map::EntryType::BOOTLOADER_RECLAIMABLE
+                        | limine::memory_map::EntryType::FRAMEBUFFER => TableEntryFlags::RW,
+
+                        limine::memory_map::EntryType::RESERVED
+                        | limine::memory_map::EntryType::EXECUTABLE_AND_MODULES => {
+                            TableEntryFlags::RO
+                        }
+
+                        _ => {
+                            unreachable!("Unrecognized memory map entry type @ {entry_range:#X?}")
+                        }
+                    }
+                };
+
+                trace!("HHDM: {entry_range:#X?} {paging_flags:?}");
+
+                while !entry_range.is_empty() {
+                    let frame_address = Address::new(entry_range.start).unwrap();
+                    let page_address = Hhdm::frame_to_page(frame_address);
+
+                    if paging::use_giga_pages()
+                    // check entry is larger than giga page
+                    && entry_range.len() >= giga_page_size()
+                    // check entry is aligned to giga page
+                    && entry_range.start.trailing_zeros() >= giga_page_size().trailing_zeros()
+                    {
+                        // Map a giga page
+
+                        kernel_mapper
+                            .map(
+                                page_address,
+                                TableDepth::giga(),
+                                frame_address,
+                                false,
+                                paging_flags,
+                            )
+                            .expect("failed to map range");
+
+                        entry_range.advance_by(giga_page_size()).unwrap();
+                    } else if paging::use_mega_pages()
+                    // check entry is larger than mega page
+                    && entry_range.len() >= mega_page_size()
+                    // check entry is aligned to mega page
+                    && entry_range.len().trailing_zeros() >= mega_page_size().trailing_zeros()
+                    {
+                        // Map a mega page
+
+                        kernel_mapper
+                            .map(
+                                page_address,
+                                TableDepth::mega(),
+                                frame_address,
+                                false,
+                                paging_flags,
+                            )
+                            .expect("failed to map range");
+
+                        entry_range.advance_by(mega_page_size()).unwrap();
+                    } else {
+                        // Map a standard page
+
+                        kernel_mapper
+                            .map(
+                                page_address,
+                                TableDepth::min(),
+                                frame_address,
+                                false,
+                                paging_flags,
+                            )
+                            .expect("failed to map range");
+
+                        entry_range.advance_by(page_size()).unwrap();
+                    }
+                }
             });
-
-        // Extract the first entry to use as an initialization value for the proceeding `.fold()`.
-        let first_entry = memory_map_iter.next().expect("memory map has no entries");
-        // Iterate each entry, keeping track of the previous to allow us to map the regions inbetween entries.
-        memory_map_iter.fold(first_entry, |(prev_range, prev_ty), (range, ty)| {
-            if prev_range.end == range.start && prev_ty == ty {
-                return (prev_range.start..range.end, ty);
-            } else if range.start > prev_range.end {
-                // If there's space inbetween entries, we want to map that as well. Although, the memory
-                // will be locked in the physical memory manager, to ensure it isn't accidentally written to.
-
-                map_hhdm_range(
-                    &mut kernel_mapper,
-                    prev_range.end..range.start,
-                    TableEntryFlags::RW,
-                    true,
-                );
-            }
-
-            match ty {
-                limine::memory_map::EntryType::USABLE => {
-                    map_hhdm_range(
-                        &mut kernel_mapper,
-                        range.clone(),
-                        TableEntryFlags::RW,
-                        false,
-                    );
-                }
-
-                limine::memory_map::EntryType::ACPI_NVS
-                | limine::memory_map::EntryType::ACPI_RECLAIMABLE
-                | limine::memory_map::EntryType::BOOTLOADER_RECLAIMABLE
-                | limine::memory_map::EntryType::FRAMEBUFFER => {
-                    map_hhdm_range(&mut kernel_mapper, range.clone(), TableEntryFlags::RW, true);
-                }
-
-                limine::memory_map::EntryType::RESERVED
-                | limine::memory_map::EntryType::EXECUTABLE_AND_MODULES => {
-                    map_hhdm_range(&mut kernel_mapper, range.clone(), TableEntryFlags::RO, true);
-                }
-
-                limine::memory_map::EntryType::BAD_MEMORY => {
-                    trace!("HHDM Map (!! BAD MEMORY !!) @{range:#X?}");
-                }
-
-                _ => unreachable!("unrecognized memory map entry type"),
-            }
-
-            (range, ty)
-        });
 
         // Extract the kernel file's physical and virtual addresses.
         let (kernel_physical_address, kernel_virtual_address) = kernel_address_request
@@ -175,8 +220,8 @@ pub fn init(
 
         debug!("Kernel has finalized control of page tables.");
 
-        InterruptCell::new(Mutex::new(kernel_mapper))
-    });
+        kernel_mapper
+    }
 }
 
 fn map_hhdm_range(
@@ -187,16 +232,14 @@ fn map_hhdm_range(
 ) {
     let huge_page_depth = TableDepth::new(1).unwrap();
 
-    trace!("HHDM Map   {range:#X?}  {flags:?}   lock: {lock_frames}");
-
-    let frame_address = Address::new(range.start).unwrap();
-    let page_address = Hhdm::frame_to_page(frame_address);
+    trace!("HHDM mapping: {range:#X?} lock:{lock_frames} {flags:?}");
 
     while !range.is_empty() {
-        trace!("HHDM Part  {:#X}", range.start);
+        let frame_address = Address::new(range.start).unwrap();
+        let page_address = Hhdm::frame_to_page(frame_address);
 
         if range.len() > huge_page_depth.align()
-            && range.start.trailing_zeros() >= huge_page_depth.align().trailing_zeros() // TODO this `>=` might be an error?
+            && range.start.trailing_zeros() >= huge_page_depth.align().trailing_zeros()
         {
             // Map a huge page
 
@@ -283,11 +326,14 @@ impl PagingRegister {
     ///
     /// Writing to this register has the chance to externally invalidate memory references.
     pub unsafe fn write(args: &Self) {
-        #[cfg(target_arch = "x86_64")]
-        crate::arch::x86_64::registers::control::CR3::write(args.0, args.1);
+        // Safety: Caller is required to maintain safety invariants.
+        unsafe {
+            #[cfg(target_arch = "x86_64")]
+            crate::arch::x86_64::registers::control::CR3::write(args.0, args.1);
 
-        #[cfg(target_arch = "riscv64")]
-        crate::arch::rv64::registers::satp::write(args.0.as_usize(), args.1, args.2);
+            #[cfg(target_arch = "riscv64")]
+            crate::arch::rv64::registers::satp::write(args.0.as_usize(), args.1, args.2);
+        }
     }
 
     #[inline]

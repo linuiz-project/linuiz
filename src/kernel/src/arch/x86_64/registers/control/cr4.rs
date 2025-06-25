@@ -71,10 +71,13 @@ impl CR4 {
         let mut new_flags = CR4::read();
         new_flags.set(flags, true);
 
-        CR4::write(new_flags);
+        // Safety: Caller is required to maintain safety invariants.
+        unsafe {
+            CR4::write(new_flags);
+        }
     }
 
-    /// ## Safety
+    /// # Safety
     ///
     /// Incorrect flags may violate any number of safety guarantees.
     #[inline]
@@ -82,6 +85,9 @@ impl CR4 {
         let mut new_flags = CR4::read();
         new_flags.set(flags, false);
 
-        CR4::write(new_flags);
+        // Safety: Caller is required to maintain safety invariants.
+        unsafe {
+            CR4::write(new_flags);
+        }
     }
 }

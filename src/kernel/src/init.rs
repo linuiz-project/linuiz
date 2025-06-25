@@ -27,12 +27,7 @@ pub extern "C" fn init() -> ! {
     static MP_REQUEST: MpRequest = MpRequest::new().with_flags(RequestFlags::X2APIC);
 
     // Enable logging first, so we can get feedback on the entire init process.
-    if crate::logging::UartLogger::init().is_err() {
-        // Safety: Logging subsystem must be enabled to run / debug OS.
-        unsafe {
-            crate::interrupts::halt_and_catch_fire();
-        }
-    }
+    crate::logging::Logger::init();
 
     // Safety: Function is run only once for this hardware thread.
     unsafe {

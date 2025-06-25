@@ -173,6 +173,7 @@ impl Task {
         &mut self.elf_relas
     }
 
+    #[allow(clippy::too_many_lines)]
     pub fn demand_map(&mut self, address: Address<Virtual>) -> Result<()> {
         use crate::mem::paging::TableEntryFlags;
         use core::mem::MaybeUninit;
@@ -278,7 +279,7 @@ impl Task {
 
         self.elf_relas().retain(|rela| {
             if fault_page_as_range.contains(&rela.address.get()) {
-                trace!("Processing relocation: {:X?}", rela);
+                trace!("Processing relocation: {rela:X?}");
                 // Safety: Fault page is checked to contain the relocation's address, and the pointer is guaranteed after
                 // offset to lie within the memory mapped region above.
                 unsafe {
