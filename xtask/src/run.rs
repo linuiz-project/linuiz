@@ -1,12 +1,6 @@
 use std::path::Path;
 
 #[derive(Debug, ValueEnum, Clone, Copy, PartialEq, Eq)]
-pub enum Accelerator {
-    Kvm,
-    None,
-}
-
-#[derive(Debug, ValueEnum, Clone, Copy, PartialEq, Eq)]
 pub enum Cpu {
     Host,
     Max,
@@ -29,8 +23,8 @@ pub struct Options {
     cpu: Cpu,
 
     /// Emulation accelerator to use.
-    #[arg(long, default_value = "none")]
-    accel: Accelerator,
+    #[arg(long, default_value = "false")]
+    disable_kvm: bool,
 
     /// Number of CPUs to emulate.
     #[arg(long, default_value = "4")]
@@ -121,16 +115,6 @@ pub fn run<P: AsRef<Path>>(
     .args(["-net", "none"])
     .args(["-M", "smm=off"])
     .args([
-        "-machine",
-        match (options.cpu, options.accel) {
-            (Cpu::Rv64, Accelerator::None) => "virt",
-            (Cpu::Rv64, accel) => panic!("invalid accelerator for RISC-V: {accel:?}"),
-
-            (_, Accelerator::Kvm) => "q35,accel=kvm",
-            (_, Accelerator::None) => "q35",
-        },
-    ])
-    .args([
         "-cpu",
         match options.cpu {
             Cpu::Host => "host",
@@ -149,6 +133,10 @@ pub fn run<P: AsRef<Path>>(
             BlockDriver::Virtio => "virtio-blk-pci,drive=disk1,serial=deadbeef",
         },
     ]);
+
+    if !options.disable_kvm {
+        run_cmd = run_cmd.arg("-enable-kvm");
+    }
 
     if options.log {
         run_cmd = run_cmd
