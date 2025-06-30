@@ -15,8 +15,7 @@
     if_let_guard,
     ptr_as_uninit,
     strict_provenance_lints,
-    box_vec_non_null,
-    generic_const_exprs
+    box_vec_non_null
 )]
 #![forbid(clippy::inline_asm_x86_att_syntax, fuzzy_provenance_casts)]
 #![deny(
@@ -96,7 +95,7 @@ use limine::{
 
 /// Specify the Limine revision to use.
 #[doc(hidden)]
-static BASE_REVISION: limine::BaseRevision = limine::BaseRevision::with_revision(0);
+static BASE_REVISION: limine::BaseRevision = limine::BaseRevision::with_revision(3);
 
 /// Specify the exact stack size the kernel would like to use.
 #[doc(hidden)]

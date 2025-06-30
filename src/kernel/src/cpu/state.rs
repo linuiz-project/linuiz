@@ -1,6 +1,6 @@
 use crate::{interrupts::InterruptCell, interrupts::exceptions::Exception, task::Scheduler};
 use alloc::boxed::Box;
-use core::{cell::UnsafeCell, num::NonZeroU64, ptr::NonNull, sync::atomic::AtomicBool};
+use core::{cell::UnsafeCell, num::NonZeroU64, sync::atomic::AtomicBool};
 
 pub const US_PER_SEC: u32 = 1000000;
 pub const US_WAIT: u32 = 10000;

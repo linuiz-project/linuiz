@@ -1,8 +1,6 @@
 mod global_alloc;
 
 mod hhdm;
-use core::ops::Range;
-
 pub use hhdm::*;
 
 pub mod stack;
