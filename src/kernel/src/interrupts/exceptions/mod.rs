@@ -1,15 +1,13 @@
-use core::ptr::NonNull;
-
 mod page_fault;
 
 mod arch;
 pub use arch::*;
 
+use core::ptr::NonNull;
+
 #[doc(hidden)]
 #[inline(never)]
 pub fn handle(exception: &ArchException) {
-    trace!("Exception:\n{exception:#X?}");
-
     match exception {
         // Safety: Function is called once per this page fault exception.
         ArchException::PageFault(_, _, _, address) => unsafe {
@@ -18,7 +16,7 @@ pub fn handle(exception: &ArchException) {
             }
         },
 
-        _ => panic!("could not handle exception!"),
+        exception => panic!("{exception:#X?}"),
     }
 }
 

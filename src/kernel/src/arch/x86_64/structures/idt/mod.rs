@@ -459,6 +459,11 @@ impl InterruptDescriptorTable {
     pub unsafe fn load(&self) {
         let dtptr = DescriptorTablePointer::from(self);
 
+        trace!(
+            "Loading IDT @ {:X?}:\n{dtptr:#X?}",
+            core::ptr::from_ref(self)
+        );
+
         // Safety: The descriptor table pointer was properly constructed.
         unsafe {
             core::arch::asm!(

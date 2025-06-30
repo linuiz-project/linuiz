@@ -32,7 +32,7 @@ pub fn segment_to_mmap_permissions(segment_flags: u32) -> MmapPermissions {
         (true, false) => MmapPermissions::ReadWrite,
         (false, true) => MmapPermissions::ReadExecute,
         (false, false) => MmapPermissions::ReadOnly,
-        (true, true) => panic!("ELF section is WX"),
+        (true, true) => unreachable!("ELF section is WX"),
     }
 }
 

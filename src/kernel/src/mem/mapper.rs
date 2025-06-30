@@ -198,11 +198,11 @@ impl Mapper {
         })
     }
 
-    /// Safety
+    /// # Safety
     ///
     /// Caller must ensure that switching the currently active address space will not cause undefined behaviour.
     pub unsafe fn swap_into(&self) {
-        trace!("Swapping address space to: {:X?}", self.root_frame);
+        trace!("Swapping CR3: {:X?}", self.root_frame);
 
         // Safety: Caller is required to maintain safety invariants.
         unsafe {
@@ -214,7 +214,7 @@ impl Mapper {
         }
     }
 
-    pub const fn root_frame(&self) -> Address<Frame> {
+    pub fn root_frame(&self) -> Address<Frame> {
         self.root_frame
     }
 

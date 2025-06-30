@@ -1,6 +1,8 @@
 mod global_alloc;
 
 mod hhdm;
+use core::ops::Range;
+
 pub use hhdm::*;
 
 pub mod stack;
@@ -17,7 +19,7 @@ use crate::{
         pmm::PhysicalMemoryManager,
     },
 };
-use libsys::{Address, Frame, giga_page_size, mega_page_size, page_size, table_index_size};
+use libsys::{Address, Frame, Page, giga_page_size, mega_page_size, page_size, table_index_size};
 use spin::{Mutex, Once};
 
 static KERNEL_MAPPER: Once<InterruptCell<Mutex<Mapper>>> = Once::new();
@@ -32,20 +34,78 @@ pub fn init(
     kernel_file_request: &limine::request::ExecutableFileRequest,
     kernel_address_request: &limine::request::ExecutableAddressRequest,
 ) {
-    KERNEL_MAPPER.call_once(|| {
-        InterruptCell::new(Mutex::new(init(
-            memory_map_request,
-            kernel_file_request,
-            kernel_address_request,
-        )))
-    });
+    fn map_range(
+        mapper: &mut Mapper,
+        from: Address<Page>,
+        to: Address<Frame>,
+        length: usize,
+        paging_flags: TableEntryFlags,
+    ) {
+        trace!("Map Range: ({from:X?} -> {to:X?}):{length:#X} {paging_flags:?}");
 
-    /// This is a separarte local function because `cargo fmt` fails to automatically format when it is inlined.
-    fn init(
-        memory_map_request: &limine::request::MemoryMapRequest,
-        kernel_file_request: &limine::request::ExecutableFileRequest,
-        kernel_address_request: &limine::request::ExecutableAddressRequest,
-    ) -> Mapper {
+        let mut remaining_length = length;
+        while remaining_length > 0 {
+            let offset = length - remaining_length;
+            let from = Address::<Page>::new(from.get().get() + offset).unwrap();
+            let to = Address::<Frame>::new(to.get().get() + offset).unwrap();
+
+            if paging::use_giga_pages()
+                    // check is larger than giga page
+                    && remaining_length >= giga_page_size()
+                    // check is aligned to giga page
+                    && from.get().get().trailing_zeros() >= giga_page_size().trailing_zeros()
+            {
+                // Map a giga page
+
+                unsafe {
+                    mapper
+                        .map(
+                            from,
+                            TableDepth::giga(),
+                            to,
+                            false,
+                            paging_flags | TableEntryFlags::HUGE,
+                        )
+                        .expect("failed to map range");
+                }
+
+                remaining_length -= giga_page_size();
+            } else if paging::use_mega_pages()
+                    // check is larger than mega page
+                    && remaining_length >= mega_page_size()
+                    // check is aligned to mega page
+                    && from.get().get().trailing_zeros() >= mega_page_size().trailing_zeros()
+            {
+                // Map a mega page
+
+                unsafe {
+                    mapper
+                        .map(
+                            from,
+                            TableDepth::mega(),
+                            to,
+                            false,
+                            paging_flags | TableEntryFlags::HUGE,
+                        )
+                        .expect("failed to map range");
+                }
+
+                remaining_length -= mega_page_size();
+            } else {
+                // Map a standard page
+
+                unsafe {
+                    mapper
+                        .map(from, TableDepth::min(), to, false, paging_flags)
+                        .expect("failed to map range");
+                }
+
+                remaining_length -= core::cmp::min(page_size(), remaining_length);
+            }
+        }
+    }
+
+    KERNEL_MAPPER.call_once(|| {
         debug!("Preparing kernel memory...");
         debug!(
             "Paging Setup Info: MEGA:{}, GIGA:{}",
@@ -60,17 +120,13 @@ pub fn init(
             .expect("bootloader did not provide a response to the memory map request")
             .entries()
             .iter()
-            .map(|entry| {
+            .for_each(|entry| {
                 let entry_start = usize::try_from(entry.base).unwrap();
-                let entry_end = usize::try_from(entry.base + entry.length).unwrap();
-
-                (entry_start..entry_end, entry.entry_type)
-            })
-            .for_each(|(mut entry_range, entry_ty)| {
-                let entry_range = &mut entry_range;
-
-                let paging_flags = {
-                    match entry_ty {
+                let entry_length = usize::try_from(entry.length).unwrap();
+                let entry_frame = Address::<Frame>::new(entry_start).unwrap();
+                let entry_page = Hhdm::frame_to_page(entry_frame);
+                let entry_paging_flags = {
+                    match entry.entry_type {
                         limine::memory_map::EntryType::USABLE
                         | limine::memory_map::EntryType::ACPI_NVS
                         | limine::memory_map::EntryType::ACPI_RECLAIMABLE
@@ -83,78 +139,18 @@ pub fn init(
                         }
 
                         _ => {
-                            unreachable!("Unrecognized memory map entry type @ {entry_range:#X?}")
+                            unreachable!("Unrecognized memory map entry type: {:#X}", entry.base)
                         }
                     }
                 };
 
-                trace!("HHDM: {entry_range:#X?} {paging_flags:?}");
-
-                #[allow(unstable_name_collisions)]
-                while !entry_range.is_empty() {
-                    let frame_address = Address::new(entry_range.start).unwrap();
-                    let page_address = Hhdm::frame_to_page(frame_address);
-
-                    if paging::use_giga_pages()
-                    // check entry is larger than giga page
-                    && entry_range.len() >= giga_page_size()
-                    // check entry is aligned to giga page
-                    && entry_range.start.trailing_zeros() >= giga_page_size().trailing_zeros()
-                    {
-                        // Map a giga page
-
-                        unsafe {
-                            kernel_mapper
-                                .map(
-                                    page_address,
-                                    TableDepth::giga(),
-                                    frame_address,
-                                    false,
-                                    paging_flags | TableEntryFlags::HUGE,
-                                )
-                                .expect("failed to map range");
-                        }
-
-                        entry_range.advance_by(giga_page_size()).unwrap();
-                    } else if paging::use_mega_pages()
-                    // check entry is larger than mega page
-                    && entry_range.len() >= mega_page_size()
-                    // check entry is aligned to mega page
-                    && entry_range.len().trailing_zeros() >= mega_page_size().trailing_zeros()
-                    {
-                        // Map a mega page
-
-                        unsafe {
-                            kernel_mapper
-                                .map(
-                                    page_address,
-                                    TableDepth::mega(),
-                                    frame_address,
-                                    false,
-                                    paging_flags | TableEntryFlags::HUGE,
-                                )
-                                .expect("failed to map range");
-                        }
-
-                        entry_range.advance_by(mega_page_size()).unwrap();
-                    } else {
-                        // Map a standard page
-
-                        unsafe {
-                            kernel_mapper
-                                .map(
-                                    page_address,
-                                    TableDepth::min(),
-                                    frame_address,
-                                    false,
-                                    paging_flags,
-                                )
-                                .expect("failed to map range");
-                        }
-
-                        entry_range.advance_by(page_size()).unwrap();
-                    }
-                }
+                map_range(
+                    &mut kernel_mapper,
+                    entry_page,
+                    entry_frame,
+                    entry_length,
+                    entry_paging_flags,
+                );
             });
 
         // Extract the kernel file's physical and virtual addresses.
@@ -191,101 +187,39 @@ pub fn init(
             .iter()
             .filter(|program_header| program_header.p_type == elf::abi::PT_LOAD)
             .for_each(|program_header| {
-                trace!("{program_header:X?}");
+                trace!("Kernel Segment: {program_header:X?}");
 
-                let base_offset =
+                let offset =
                     usize::try_from(program_header.p_vaddr).unwrap() - kernel_virtual_address;
-                let base_offset_end =
-                    base_offset + usize::try_from(program_header.p_memsz).unwrap();
-                let flags = TableEntryFlags::from(crate::task::segment_to_mmap_permissions(
-                    program_header.p_flags,
-                ));
+                let segment_page = Address::new(kernel_virtual_address + offset).unwrap();
+                let segment_frame = Address::new(kernel_physical_address + offset).unwrap();
+                let segment_length = usize::try_from(core::cmp::max(
+                    program_header.p_memsz, // If the segment size is smaller than it's alignment, we can map it
+                    program_header.p_align, // as if it's alignment is the total size (support for mega pages).
+                ))
+                .unwrap();
+                let segment_paging_flags = TableEntryFlags::from(
+                    crate::task::segment_to_mmap_permissions(program_header.p_flags),
+                );
 
-                (base_offset..base_offset_end)
-                    .step_by(libsys::page_size())
-                    .for_each(|offset| {
-                        let physical_address =
-                            Address::new(kernel_physical_address + offset).unwrap();
-                        let virtual_address =
-                            Address::new(kernel_virtual_address + offset).unwrap();
-
-                        unsafe {
-                            kernel_mapper
-                                .map(
-                                    virtual_address,
-                                    TableDepth::min(),
-                                    physical_address,
-                                    false,
-                                    flags,
-                                )
-                                .expect("failed to map kernel memory region");
-                        }
-                    });
+                map_range(
+                    &mut kernel_mapper,
+                    segment_page,
+                    segment_frame,
+                    segment_length,
+                    segment_paging_flags,
+                );
             });
 
-        debug!("Switching to kernel page tables...");
-
-        // Safety: Kernel mappings should be identical to the bootloader mappings.
+        // Safety: Kernel page tables should be set up correctly.
         unsafe {
             kernel_mapper.swap_into();
         }
 
-        debug!("Kernel has finalized control of page tables.");
+        trace!("Kernel has finalized control of memory system.");
 
-        kernel_mapper
-    }
-}
-
-fn map_hhdm_range(
-    mapper: &mut crate::mem::mapper::Mapper,
-    mut range: core::ops::Range<usize>,
-    flags: TableEntryFlags,
-    lock_frames: bool,
-) {
-    let huge_page_depth = TableDepth::new(1).unwrap();
-
-    trace!("HHDM mapping: {range:#X?} lock:{lock_frames} {flags:?}");
-
-    while !range.is_empty() {
-        let frame_address = Address::new(range.start).unwrap();
-        let page_address = Hhdm::frame_to_page(frame_address);
-
-        if range.len() > huge_page_depth.align()
-            && range.start.trailing_zeros() >= huge_page_depth.align().trailing_zeros()
-        {
-            // Map a huge page
-
-            range.advance_by(huge_page_depth.align()).unwrap();
-
-            unsafe {
-                mapper
-                    .map(
-                        page_address,
-                        huge_page_depth,
-                        frame_address,
-                        lock_frames,
-                        flags | TableEntryFlags::HUGE,
-                    )
-                    .expect("failed to map range");
-            }
-        } else {
-            // Map a standard page
-
-            range.advance_by(libsys::page_size()).unwrap();
-
-            unsafe {
-                mapper
-                    .map(
-                        page_address,
-                        TableDepth::min(),
-                        frame_address,
-                        lock_frames,
-                        flags,
-                    )
-                    .expect("failed to map range");
-            }
-        }
-    }
+        InterruptCell::new(Mutex::new(kernel_mapper))
+    });
 }
 
 pub fn with_kernel_mapper<T>(func: impl FnOnce(&mut Mapper) -> T) -> T {

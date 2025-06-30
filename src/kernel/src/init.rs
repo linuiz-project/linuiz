@@ -12,41 +12,7 @@ use crate::mem::pmm::PhysicalMemoryManager;
 
 #[allow(clippy::too_many_lines)]
 pub extern "C" fn init() -> ! {
-    // This function is absolutely massive, and that's intentional. All of the code
-    // within this function should be absolutely, definitely run ONLY ONCE. Writing
-    // the code sequentially within one function easily ensures that will be the case.
-
-    // All limine feature requests (ensures they are not used after bootloader memory is reclaimed)
-    static BOOTLOADER_INFO_REQUEST: BootloaderInfoRequest = BootloaderInfoRequest::new();
-    static KERNEL_FILE_REQUEST: ExecutableFileRequest = ExecutableFileRequest::new();
-    static KERNEL_CMDLINE_REQUEST: ExecutableCmdlineRequest = ExecutableCmdlineRequest::new();
-    static KERNEL_ADDRESS_REQUEST: ExecutableAddressRequest = ExecutableAddressRequest::new();
-    static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
-    static MEMORY_MAP_REQUEST: MemoryMapRequest = MemoryMapRequest::new();
-    static RSDP_ADDRESS_REQUEST: RsdpRequest = RsdpRequest::new();
-    static MP_REQUEST: MpRequest = MpRequest::new().with_flags(RequestFlags::X2APIC);
-
-    // Enable logging first, so we can get feedback on the entire init process.
-    crate::logging::Logger::init();
-
-    // Safety: Function is run only once for this hardware thread.
-    unsafe {
-        #[cfg(target_arch = "x86_64")]
-        crate::arch::x86_64::configure_hwthread();
-    }
-
-    output_environment_info(&BOOTLOADER_INFO_REQUEST, &KERNEL_ADDRESS_REQUEST);
-
-    crate::params::parse(&KERNEL_CMDLINE_REQUEST);
-    crate::panic::symbols::parse(&KERNEL_FILE_REQUEST);
-    crate::mem::Hhdm::init(&HHDM_REQUEST);
-    crate::mem::pmm::PhysicalMemoryManager::init(&MEMORY_MAP_REQUEST);
-    crate::mem::init(
-        &MEMORY_MAP_REQUEST,
-        &KERNEL_FILE_REQUEST,
-        &KERNEL_ADDRESS_REQUEST,
-    );
-    core::arch::breakpoint();
+    
 
     // /* PARSE ACPI TABLES */
     // {
@@ -76,33 +42,6 @@ pub extern "C" fn init() -> ! {
     todo!()
 }
 
-fn output_environment_info(
-    bootloader_info_request: &BootloaderInfoRequest,
-    kernel_address_request: &ExecutableAddressRequest,
-) {
-    if let Some(bootloader_info) = bootloader_info_request.get_response() {
-        info!(
-            "Bootloader Info     {} v{} (rev {})",
-            bootloader_info.name(),
-            bootloader_info.version(),
-            bootloader_info.revision()
-        );
-    } else {
-        info!("Bootloader Info     UNKNOWN");
-    }
-
-    let (kernel_physical_address, kernel_virtual_address) = kernel_address_request
-        .get_response()
-        .map(|response| {
-            (
-                usize::try_from(response.physical_base()).unwrap(),
-                usize::try_from(response.virtual_base()).unwrap(),
-            )
-        })
-        .expect("bootloader did not provide a response to kernel address request");
-    debug!("Kernel physical address: {kernel_physical_address:#X?}");
-    debug!("Kernel virtual address: {kernel_virtual_address:#X?}");
-}
 
 /// Finalizes the kernel init process. After entering this function, all bootloader
 /// reclaimable memory will be freed, and bootloader info/data will be inaccessible.

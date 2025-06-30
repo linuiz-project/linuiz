@@ -15,7 +15,7 @@ struct StackTracer {
 }
 
 impl StackTracer {
-    /// ## Safety
+    /// # Safety
     ///
     /// The provided frame pointer must point to a valid call stack frame.
     const unsafe fn new(frame_ptr: NonNull<StackFrame>) -> Self {
@@ -50,8 +50,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 
     stack_trace();
 
-    // Safety: It's dead, Jim.
-    unsafe { crate::interrupts::halt_and_catch_fire() }
+    crate::interrupts::halt_and_catch_fire()
 }
 
 fn stack_trace() {
@@ -69,6 +68,8 @@ fn stack_trace() {
         #[cfg(target_arch = "x86_64")]
         {
             let base_ptr: usize;
+
+            // Safety: We're just reading a register.
             unsafe {
                 core::arch::asm!(
                     "mov {}, rbp",
@@ -81,8 +82,14 @@ fn stack_trace() {
         }
     };
 
+    let Some(frame_ptr) = NonNull::new(frame_ptr.cast_mut()) else {
+        error!("No stack frame pointer was found; stack trace will not be emitted.");
+        return;
+    };
+
     // Safety: Frame pointer is pulled directly from the frame pointer register.
-    let stack_tracer = unsafe { StackTracer::new(NonNull::new(frame_ptr.cast_mut()).unwrap()) };
+    let stack_tracer = unsafe { StackTracer::new(frame_ptr) };
+
     for (depth, trace_address) in stack_tracer.enumerate() {
         const SYMBOL_TYPE_FUNCTION: u8 = 2;
 

@@ -56,7 +56,7 @@ pub struct Options {
     release: bool,
 
     /// Page alignment of the kernel executable segments.
-    #[arg(long)]
+    #[arg(long, default_value = "fast")]
     kalign: SegmentAlign,
 
     #[arg(long)]

@@ -91,7 +91,7 @@ impl InterruptStackFrame {
 
     /// Stores the new return instruction pointer.
     ///
-    /// ## Safety
+    /// # Safety
     ///
     /// TODO
     pub unsafe fn set_instruction_pointer(&mut self, instruction_pointer: Address<Virtual>) {
@@ -108,7 +108,7 @@ impl InterruptStackFrame {
 
     /// Set the return code segment selector.
     ///
-    /// ## Safety
+    /// # Safety
     ///
     /// TODO
     pub unsafe fn set_code_segment(&mut self, segment_selector: SegmentSelector) {
@@ -117,12 +117,12 @@ impl InterruptStackFrame {
 
     /// Get the return cpu flags.
     pub fn get_cpu_flags(&self) -> RFlags {
-        RFlags::from_bits(self.cpu_flags).unwrap()
+        RFlags::from_bits_truncate(self.cpu_flags)
     }
 
     /// Set the return cpu flags.
     ///
-    /// ## Safety
+    /// # Safety
     ///
     /// TODO
     pub unsafe fn set_cpu_flags(&mut self, cpu_flags: RFlags) {
@@ -136,7 +136,7 @@ impl InterruptStackFrame {
 
     /// Set the return stack pointer.
     ///
-    /// ## Safety
+    /// # Safety
     ///
     /// TODO
     pub unsafe fn set_stack_pointer(&mut self, stack_pointer: Address<Virtual>) {
@@ -153,7 +153,7 @@ impl InterruptStackFrame {
 
     /// Set the return stack segment selector.
     ///
-    /// ## Safety
+    /// # Safety
     ///
     /// TODO
     pub unsafe fn set_stack_segment(&mut self, segment_selector: SegmentSelector) {

@@ -225,7 +225,7 @@ impl PhysicalMemoryManager {
                 table.set_unchecked(index, true);
             }
 
-            trace!("Locked: {:#X?}", index << page_shift().get());
+            trace!("Frame Locked: {:#X?}", index << page_shift().get());
 
             Ok(Address::new(index << page_shift().get()).unwrap())
         })
@@ -255,7 +255,7 @@ impl PhysicalMemoryManager {
                 .unwrap();
             free_frames.fill(true);
 
-            trace!("Locked: {:#X?}", free_frames.as_ptr_range());
+            trace!("Frame Locked: {:#X?}", free_frames.as_ptr_range());
 
             Ok(Address::new(free_frames_index << page_shift().get()).unwrap())
         })
@@ -276,7 +276,7 @@ impl PhysicalMemoryManager {
                         table.set_aliased_unchecked(index, true);
                     }
 
-                    trace!("Locked: {:#X?}", index << page_shift().get());
+                    trace!("Frame Locked: {:#X?}", index << page_shift().get());
 
                     Ok(())
                 } else {

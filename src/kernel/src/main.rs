@@ -70,7 +70,6 @@ extern crate strum;
 mod arch;
 mod cpu;
 mod error;
-mod init;
 mod interrupts;
 mod logging;
 mod mem;
@@ -83,6 +82,17 @@ mod util;
 
 #[macro_use]
 extern crate bitflags;
+
+use crate::mem::pmm::PhysicalMemoryManager;
+use libsys::{Address, Frame};
+use limine::{
+    memory_map,
+    mp::RequestFlags,
+    request::{
+        BootloaderInfoRequest, ExecutableAddressRequest, ExecutableCmdlineRequest,
+        ExecutableFileRequest, HhdmRequest, MemoryMapRequest, MpRequest, RsdpRequest,
+    },
+};
 
 /// Specify the Limine revision to use.
 #[doc(hidden)]
@@ -105,20 +115,92 @@ static STACK_SIZE_REQUEST: limine::request::StackSizeRequest =
 /// # Safety
 ///
 /// This function should only ever be called by the bootloader.
-#[unsafe(no_mangle)]
 #[doc(hidden)]
+#[unsafe(no_mangle)]
 #[allow(clippy::too_many_lines)]
 unsafe extern "C" fn _entry() -> ! {
-    // Safety: We've just entered the kernel, so no state can be disrupted.
-    unsafe {
-        core::arch::asm!(
-            "
-            xor rbp, rbp
+    // This function is absolutely massive, and that's intentional. All of the code
+    // within this function should be absolutely, definitely run ONLY ONCE. Writing
+    // the code sequentially within one function easily ensures that will be the case.
 
-            call {}
-            ",
-            sym init::init,
-            options(noreturn)
-        )
+    // All limine feature requests (ensures they are not used after bootloader memory is reclaimed)
+    static BOOTLOADER_INFO_REQUEST: BootloaderInfoRequest = BootloaderInfoRequest::new();
+    static KERNEL_FILE_REQUEST: ExecutableFileRequest = ExecutableFileRequest::new();
+    static KERNEL_CMDLINE_REQUEST: ExecutableCmdlineRequest = ExecutableCmdlineRequest::new();
+    static KERNEL_ADDRESS_REQUEST: ExecutableAddressRequest = ExecutableAddressRequest::new();
+    static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
+    static MEMORY_MAP_REQUEST: MemoryMapRequest = MemoryMapRequest::new();
+    static RSDP_ADDRESS_REQUEST: RsdpRequest = RsdpRequest::new();
+    static MP_REQUEST: MpRequest = MpRequest::new().with_flags(RequestFlags::X2APIC);
+
+    // Enable logging first, so we can get feedback on the entire init process.
+    crate::logging::Logger::init();
+
+    // Safety: Function is run only once for this hardware thread.
+    unsafe {
+        #[cfg(target_arch = "x86_64")]
+        crate::arch::x86_64::configure_hwthread();
     }
+
+    if let Some(bootloader_info) = BOOTLOADER_INFO_REQUEST.get_response() {
+        info!(
+            "Bootloader Info     {} v{} (rev {})",
+            bootloader_info.name(),
+            bootloader_info.version(),
+            bootloader_info.revision()
+        );
+    } else {
+        info!("Bootloader Info     UNKNOWN");
+    }
+
+    let (kernel_physical_address, kernel_virtual_address) = KERNEL_ADDRESS_REQUEST
+        .get_response()
+        .map(|response| {
+            (
+                usize::try_from(response.physical_base()).unwrap(),
+                usize::try_from(response.virtual_base()).unwrap(),
+            )
+        })
+        .expect("bootloader did not provide a response to kernel address request");
+    debug!("Kernel physical address: {kernel_physical_address:#X?}");
+    debug!("Kernel virtual address: {kernel_virtual_address:#X?}");
+
+    crate::params::parse(&KERNEL_CMDLINE_REQUEST);
+    crate::panic::symbols::parse(&KERNEL_FILE_REQUEST);
+    crate::mem::Hhdm::init(&HHDM_REQUEST);
+    crate::mem::pmm::PhysicalMemoryManager::init(&MEMORY_MAP_REQUEST);
+    crate::mem::init(
+        &MEMORY_MAP_REQUEST,
+        &KERNEL_FILE_REQUEST,
+        &KERNEL_ADDRESS_REQUEST,
+    );
+
+    core::arch::breakpoint();
+
+    crate::cpu::start_mp(&MP_REQUEST);
+
+    todo!()
+}
+
+/// Finalizes the kernel init process. After entering this function, all bootloader
+/// reclaimable memory will be freed, and bootloader info/data will be inaccessible.
+fn finalize_init(memory_map: &[&memory_map::Entry]) -> ! {
+    debug!("Reclaiming bootloader memory...");
+
+    memory_map
+        .iter()
+        .filter(|entry| entry.entry_type == limine::memory_map::EntryType::BOOTLOADER_RECLAIMABLE)
+        .flat_map(|entry| {
+            let entry_start = usize::try_from(entry.base).unwrap();
+            let entry_end = usize::try_from(entry.base + entry.length).unwrap();
+
+            (entry_start..entry_end).step_by(libsys::page_size())
+        })
+        .map(|address| Address::<Frame>::new(address).unwrap())
+        .for_each(|frame| PhysicalMemoryManager::free_frame(frame).unwrap());
+
+    debug!("Bootloader memory reclaimed.");
+
+    // Safety: We've reached the end of the kernel init phase.
+    unsafe { crate::cpu::run() }
 }

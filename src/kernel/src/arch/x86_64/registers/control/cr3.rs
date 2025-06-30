@@ -4,7 +4,7 @@ use libsys::{Address, Frame};
 bitflags! {
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct CR3Flags: u64 {
+    pub struct CR3Flags: usize {
         const PAGE_LEVEL_WRITE_THROUGH = 1 << 3;
         const PAGE_LEVEL_CACHE_DISABLE = 1 << 4;
     }
@@ -16,30 +16,33 @@ impl CR3 {
     /// # Safety
     ///
     /// Incorrect flags may violate any number of safety guarantees.
-    #[inline]
+    #[inline(never)]
     pub unsafe fn write(address: Address<Frame>, flags: CR3Flags) {
-        let value = u64::try_from(address.get().get()).unwrap() | flags.bits();
-
         // Safety: Caller is required to maintain safety invariants.
         unsafe {
             asm!(
                 "mov cr3, {}",
-                in(reg) value,
-                options(nostack)
+                in(reg) address.get().get() | flags.bits(),
+                options(nostack, preserves_flags)
             );
         }
     }
 
+    #[inline(always)]
     pub fn read() -> (Address<Frame>, CR3Flags) {
-        let value: u64;
+        let value: usize;
 
         // Safety: Reading CR3 has no side effects.
         unsafe {
-            asm!("mov {}, cr3", out(reg) value, options(nostack, nomem));
+            asm!(
+                "mov {}, cr3",
+                out(reg) value,
+                options(nostack, nomem)
+            );
         }
 
         (
-            Address::new_truncate(usize::try_from(value & !0xFFF).unwrap()),
+            Address::new_truncate(value & libsys::page_mask()),
             CR3Flags::from_bits_truncate(value),
         )
     }
@@ -50,11 +53,10 @@ impl CR3 {
         unsafe {
             asm!(
                 "
-                push rax
-                mov rax, cr3
-                mov cr3, rax
-                pop rax
+                mov {0}, cr3
+                mov cr3, {0}
                 ",
+                out(reg) _,
                 options(preserves_flags)
             );
         }

@@ -96,20 +96,15 @@ pub fn without<R>(func: impl FnOnce() -> R) -> R {
 }
 
 /// Indefinitely waits for the next interrupt on the current hardware thread.
-#[inline(always)]
 pub fn wait_indefinite() -> ! {
     loop {
         wait_next();
     }
 }
 
-/// Murder, in cold electrons, the current hardware thread.
-///
-/// ## Safety
-///
-/// Murdering a hardware thread is undefined behaviour.
-#[inline(always)]
-pub unsafe fn halt_and_catch_fire() -> ! {
+/// Murder—in cold electrons—the current hardware thread.
+#[inline(never)]
+pub fn halt_and_catch_fire() -> ! {
     disable();
 
     wait_indefinite()
