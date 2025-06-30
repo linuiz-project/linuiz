@@ -18,11 +18,13 @@ impl CR3 {
     /// Incorrect flags may violate any number of safety guarantees.
     #[inline]
     pub unsafe fn write(address: Address<Frame>, flags: CR3Flags) {
+        let value = u64::try_from(address.get().get()).unwrap() | flags.bits();
+
         // Safety: Caller is required to maintain safety invariants.
         unsafe {
             asm!(
                 "mov cr3, {}",
-                in(reg) (address.get().get() as u64) | flags.bits(),
+                in(reg) value,
                 options(nostack)
             );
         }

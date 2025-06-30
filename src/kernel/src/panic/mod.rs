@@ -68,7 +68,16 @@ fn stack_trace() {
     let frame_ptr = {
         #[cfg(target_arch = "x86_64")]
         {
-            crate::arch::x86_64::registers::stack::RBP::read() as *const StackFrame
+            let base_ptr: usize;
+            unsafe {
+                core::arch::asm!(
+                    "mov {}, rbp",
+                    out(reg) base_ptr,
+                    options(nostack, nomem, preserves_flags)
+                );
+            }
+
+            core::ptr::without_provenance::<StackFrame>(base_ptr)
         }
     };
 

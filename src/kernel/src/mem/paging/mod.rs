@@ -282,7 +282,7 @@ impl PageTableEntry {
         }
 
         #[cfg(target_arch = "x86_64")]
-        if !crate::arch::x86_64::registers::msr::IA32_EFER::get_nxe() {
+        if !crate::arch::x86_64::registers::model_specific::IA32_EFER::get_no_execute_enable() {
             // This bit is reserved if NXE is not supported. For now, this means silently removing it for compatability.
             attributes.remove(TableEntryFlags::NO_EXECUTE);
         }

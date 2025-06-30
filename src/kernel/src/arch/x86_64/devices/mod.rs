@@ -1,1 +1,1 @@
-pub mod apic;
+pub mod x2apic;

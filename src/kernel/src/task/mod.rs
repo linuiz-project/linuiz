@@ -121,7 +121,7 @@ impl Task {
                         unsafe { stack.get_unchecked_mut(stack.len()).as_ptr() }
                     }),
                 ),
-                Registers::default(),
+                Registers::empty(),
             ),
             load_offset,
             elf_header,
@@ -205,7 +205,10 @@ impl Task {
             .ok_or(Error::NonLoadAddress(address))?;
 
         // Small check to help ensure the segment alignments are page-fit.
-        debug_assert_eq!(segment.p_align & (libsys::page_mask() as u64), 0);
+        debug_assert_eq!(
+            segment.p_align & u64::try_from(libsys::page_mask()).unwrap(),
+            0
+        );
 
         debug!(
             "Demand mapping {:X?} from segment: {:X?}",

@@ -53,12 +53,12 @@ impl Mapper {
         }
     }
 
-    fn root_table<'a>(&'a self) -> PageTable<'a, Ref> {
+    fn root_table(&self) -> PageTable<'_, Ref> {
         // Safety: `Self` requires that the entry be valid.
         unsafe { PageTable::<Ref>::new(self.depth, &self.entry) }
     }
 
-    fn root_table_mut<'a>(&'a mut self) -> PageTable<'a, Mut> {
+    fn root_table_mut(&mut self) -> PageTable<'_, Mut> {
         // Safety: `Self` requires that the entry be valid.
         unsafe { PageTable::<Mut>::new(self.depth, &mut self.entry) }
     }

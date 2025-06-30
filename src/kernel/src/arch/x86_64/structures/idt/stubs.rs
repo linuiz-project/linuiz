@@ -192,20 +192,16 @@ macro_rules! irq_stub {
     };
 }
 
-/// Handles and interrupt request.
-///
-/// # Safety
-///
-/// TODO
+/// Handles an interrupt request.
 #[allow(clippy::similar_names)]
-unsafe extern "sysv64" fn irq_handler(
+extern "sysv64" fn irq_handler(
     irq_number: u64,
     isf: &mut InterruptStackFrame,
     regs: &mut Registers,
 ) {
     match Vector::try_from(irq_number) {
         Ok(Vector::Timer) => {
-            crate::cpu::state::with_scheduler(|scheduler| scheduler.interrupt_task(isf, regs))
+            crate::cpu::state::with_scheduler(|scheduler| scheduler.interrupt_task(isf, regs));
         }
 
         Ok(Vector::Syscall) => {

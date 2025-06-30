@@ -1,168 +1,190 @@
-bitflags! {
-    #[repr(transparent)]
-    #[derive(Debug, Clone, Copy)]
-    struct SegmentDescriptor: u64 {
-        /// Set by the processor if this segment has been accessed. Only cleared by software.
-        /// *Setting* this bit in software prevents GDT writes on first use.
-        const ACCESSED = 1 << 40;
-        /// For 32-bit data segments, sets the segment as writable. For 32-bit code segments,
-        /// sets the segment as _readable_. In 64-bit mode, ignored for all segments.
-        const WRITABLE = 1 << 41;
-        /// For code segments, sets the segment as “conforming”, influencing the
-        /// privilege checks that occur on control transfers. For 32-bit data segments,
-        /// sets the segment as "expand down". In 64-bit mode, ignored for data segments.
-        const CONFORMING = 1 << 42;
-        /// This flag must be set for code segments and unset for data segments.
-        const EXECUTABLE = 1 << 43;
-        /// This flag must be set for user segments (in contrast to system segments).
-        const USER_SEGMENT = 1 << 44;
-        /// These two bits encode the Descriptor Privilege Level (DPL) for this descriptor.
-        /// If both bits are set, the DPL is Ring 3, if both are unset, the DPL is Ring 0.
-        const DPL_RING_3 = 3 << 45;
-        /// Must be set for any segment, causes a segment not present exception if not set.
-        const PRESENT = 1 << 47;
-        /// Available for use by the Operating System
-        const AVAILABLE = 1 << 52;
-        /// Must be set for 64-bit code segments, unset otherwise.
-        const LONG_MODE = 1 << 53;
-        /// Use 32-bit (as opposed to 16-bit) operands. If [`LONG_MODE`][Self::LONG_MODE] is set,
-        /// this must be unset. In 64-bit mode, ignored for data segments.
-        const DEFAULT_SIZE = 1 << 54;
-        /// Limit field is scaled by 4096 bytes. In 64-bit mode, ignored for all segments.
-        const GRANULARITY = 1 << 55;
-        /// Bits `0..=15` of the limit field (ignored in 64-bit mode)
-        const LIMIT_0_15 = 0xFFFF;
-        /// Bits `16..=19` of the limit field (ignored in 64-bit mode)
-        const LIMIT_16_19 = 0xF << 48;
-        /// Bits `0..=23` of the base field (ignored in 64-bit mode, except for fs and gs)
-        const BASE_0_23 = 0xFF_FFFF << 16;
-        /// Bits `24..=31` of the base field (ignored in 64-bit mode, except for fs and gs)
-        const BASE_24_31 = 0xFF << 56;
+use crate::arch::x86_64::structures::{DescriptorTablePointer, tss::TaskStateSegment};
+use bit_field::BitField;
+use core::{ops::Range, ptr::NonNull};
+use spin::Once;
 
-        /// Common bits shared in most kinds of segment descriptors.
-        const COMMON =
-            Self::USER_SEGMENT.bits()
-            | Self::PRESENT.bits()
-            | Self::WRITABLE.bits()
-            | Self::ACCESSED.bits()
-            | Self::LIMIT_0_15.bits()
-            | Self::LIMIT_16_19.bits()
-            | Self::GRANULARITY.bits();
+pub static KCODE_SELECTOR: Once<SegmentSelector> = Once::new();
+pub static KDATA_SELECTOR: Once<SegmentSelector> = Once::new();
+pub static UDATA_SELECTOR: Once<SegmentSelector> = Once::new();
+pub static UCODE_SELECTOR: Once<SegmentSelector> = Once::new();
 
-        const KCODE_SEGMENT =
-            Self::COMMON.bits()
-            | Self::EXECUTABLE.bits()
-            | Self::LONG_MODE.bits();
+static GDT: Once<GlobalDescriptorTable> = Once::new();
 
-        const KDATA_SEGMENT =
-            Self::COMMON.bits()
-            | Self::DEFAULT_SIZE.bits();
-
-        const UDATA_SEGMENT =
-            Self::COMMON.bits()
-            | Self::DEFAULT_SIZE.bits()
-            | Self::DPL_RING_3.bits();
-
-        const UCODE_SEGMENT =
-            Self::COMMON.bits()
-            | Self::EXECUTABLE.bits()
-            | Self::LONG_MODE.bits()
-            | Self::DPL_RING_3.bits();
-    }
+#[repr(C, align(8))]
+#[derive(Debug, Clone)]
+pub struct GlobalDescriptorTable {
+    table: [u64; 7],
+    len: usize,
 }
 
-/// The GDT layout is very specific, due to the behaviour of the `IA32_STAR` MSR and its
-/// affect on syscalls. Do not change this, or if it is changed, ensure it follows the requisite
-/// standard set by the aforementioned `IA32_STAR` MSR. Details can be found in the description of
-/// the `syscall` and `sysret` instructions in the IA32 Software Developer's Manual.
-///
-/// Additionally, x86 requires that the first GDT entry be null (i.e. no segment information).
-static GDT: [SegmentDescriptor; 5] = [
-    SegmentDescriptor::empty(),
-    SegmentDescriptor::KCODE_SEGMENT,
-    SegmentDescriptor::KDATA_SEGMENT,
-    SegmentDescriptor::UDATA_SEGMENT,
-    SegmentDescriptor::UCODE_SEGMENT,
-];
+impl GlobalDescriptorTable {
+    /// An empty [`GlobalDescriptorTable`].
+    fn empty() -> Self {
+        Self {
+            table: [0; _],
 
-pub const KCODE_SELECTOR: SegmentSelector = SegmentSelector::new(1, PrivilegeLevel::Ring0).unwrap();
-pub const KDATA_SELECTOR: SegmentSelector = SegmentSelector::new(2, PrivilegeLevel::Ring0).unwrap();
-pub const UDATA_SELECTOR: SegmentSelector = SegmentSelector::new(3, PrivilegeLevel::Ring3).unwrap();
-pub const UCODE_SELECTOR: SegmentSelector = SegmentSelector::new(4, PrivilegeLevel::Ring3).unwrap();
-
-/// ## Safety
-///
-/// This function should be executed only once, and prior to any point when the FS/GS _BASE MSRs will
-/// be in use, as they are cleared when this function is run.
-pub unsafe fn load() {
-    use core::arch::asm;
-
-    let gdt_dtptr = crate::arch::x86_64::structures::DescriptorTablePointer {
-        limit: u16::try_from(core::mem::size_of_val(&GDT) - 1).unwrap(),
-        base: GDT.as_ptr().addr().try_into().unwrap(),
-    };
-
-    // Safety: The GDT is properly formed, and the descriptor table pointer is
-    //         set to the GDT's memory location, with the requisite limit set
-    //         correctly (size in bytes, less 1).
-    unsafe {
-        asm!(
-            "lgdt [{}]",
-            in(reg) &raw const gdt_dtptr,
-            options(readonly, nostack, preserves_flags)
-        );
+            // x86 requires that the first GDT entry remain null.
+            len: 1,
+        }
     }
 
-    // Safety: This is special since we cannot directly move to CS; x86 requires the instruction
-    //         pointer and CS to be set at the same time. To do this, we push the new segment selector
-    //         and return value onto the stack and use a "far return" (`retfq`) to reload CS and
-    //         continue at the end of our function.
-    //
-    //         Note we cannot use a "far call" (`lcall`) or "far jmp" (`ljmp`) to do this because then we
-    //         would only be able to jump to 32-bit instruction pointers. Only Intel implements support
-    //         for 64-bit far calls/jumps in long-mode, AMD does not.
-    unsafe {
-        asm!(
-            "push {sel}",
-            "lea {tmp}, [55f + rip]",
-            "push {tmp}",
-            "retfq",
-            "55:",
-            sel = in(reg) u64::from(KCODE_SELECTOR.as_u16()),
-            tmp = lateout(reg) _,
-            options(preserves_flags),
+    /// # Safety
+    ///
+    /// - An invalid [`GlobalDescriptorTable`] could potentially make memory unreadable or unwriteable.
+    /// - This should be executed prior to any point when the FS/GS _BASE MSRs will
+    ///   be in use, as they are cleared when this function is run.
+    pub unsafe fn load(&self) {
+        use core::arch::asm;
+
+        let dtptr = DescriptorTablePointer::from(self);
+
+        trace!(
+            "Loading GDT @ {:X?}:\n{self:#X?}\n{dtptr:#X?}",
+            core::ptr::from_ref(self)
         );
+
+        // Safety: The GDT is properly formed, and the descriptor table pointer is
+        //         set to the GDT's memory location, with the requisite limit set
+        //         correctly (size in bytes, less 1).
+        unsafe {
+            asm!(
+                "lgdt [{}]",
+                in(reg) &raw const dtptr,
+                options(readonly, nostack, preserves_flags)
+            );
+        }
     }
 
-    // Safety: While setting the ES & DS segment registers to null is perfectly safe, setting
-    //         the FS & GS segment registers (on Intel only, not AMD) clears the respective
-    //         FS/GS base. Thus, it is imperative that this function not be run after the GS
-    //         base has been loaded with the CPU thread-local state structure pointer.
-    unsafe {
-        // Because this is x86, everything is complicated. It's important we load the extra
-        // data segment registers (FS/GS) with the null descriptors, because if they don't
-        // point to a null descriptor, then when CPL changes, the processor will clear the
-        // base and limit of the relevant descriptor.
+    /// Appends a [`SegmentDescriptor`] to the [`GlobalDescriptorTable`] entries table.
+    pub fn append_segment(
+        &mut self,
+        segment_descriptor: impl SegmentDescriptor,
+    ) -> SegmentSelector {
+        let current_index = self.len;
+        let privilege_level = segment_descriptor.privilege_level();
+        let appended_entry_count = segment_descriptor.append_entries(&mut self.table[self.len..]);
+        self.len += appended_entry_count;
+
+        SegmentSelector::new(u16::try_from(current_index).unwrap(), privilege_level)
+    }
+
+    pub fn with_temporary<T>(func: impl FnOnce(&mut Self) -> T) -> T {
+        let static_gdt = GDT.get().expect("GDT has not been initialized");
+
+        let mut temp_gdt = static_gdt.clone();
+
+        crate::interrupts::without(|| {
+            let value = func(&mut temp_gdt);
+
+            // Safety: Loading the static GDT is always safe.
+            unsafe {
+                static_gdt.load();
+            }
+
+            value
+        })
+    }
+
+    pub fn load_static() {
+        assert!(!crate::interrupts::is_enabled());
+
+        trace!("Configuring the static global descriptor table ...");
+
+        let gdt = GDT.call_once(|| {
+            let mut gdt = GlobalDescriptorTable::empty();
+
+            // The GDT layout is very specific, due to the behaviour of the `IA32_STAR` MSR and its
+            // affect on syscalls. Do not change this, or if it is changed, ensure it follows the requisite
+            // standard set by the aforementioned `IA32_STAR` MSR. Details can be found in the description of
+            // the `syscall` and `sysret` instructions in the IA32 Software Developer's Manual.
+            let kcode_selector = gdt.append_segment(GenericSegmentDescriptor::kernel_code());
+            let kdata_selector = gdt.append_segment(GenericSegmentDescriptor::kernel_data());
+            let udata_selector = gdt.append_segment(GenericSegmentDescriptor::user_data());
+            let ucode_selector = gdt.append_segment(GenericSegmentDescriptor::user_code());
+
+            KCODE_SELECTOR.call_once(|| kcode_selector);
+            KDATA_SELECTOR.call_once(|| kdata_selector);
+            UDATA_SELECTOR.call_once(|| udata_selector);
+            UCODE_SELECTOR.call_once(|| ucode_selector);
+
+            trace!("Segment descriptors loaded:");
+            trace!("Kernel code: {kcode_selector:?}");
+            trace!("Kernel data: {kdata_selector:?}");
+            trace!("User data: {udata_selector:?}");
+            trace!("User code: {ucode_selector:?}");
+
+            gdt
+        });
+
+        // Safety: The GDT is properly formed, and the descriptor table pointer is
+        //         set to the GDT's memory location, with the requisite limit set
+        //         correctly (size in bytes, less 1).
+        unsafe {
+            gdt.load();
+        }
+
+        let kcode_selector = *KCODE_SELECTOR.wait();
+        let kdata_selector = *KDATA_SELECTOR.wait();
+
+        trace!("Jumping to the new code segment: {kcode_selector:?}");
+        // Safety: This is special since we cannot directly move to CS; x86 requires the instruction
+        //         pointer and CS to be set at the same time. To do this, we push the new segment selector
+        //         and return value onto the stack and use a "far return" (`retfq`) to reload CS and
+        //         continue at the end of our function.
         //
-        // This has the fun behavioural side-effect of ALSO clearing the FS/GS _BASE MSRs,
-        // thus making any code involved in the CPL change context unable to access thread-local or
-        // process-local state (when those MSRs are in use for the purpose).
-        asm!(
-            "
-            mov ss, {sel:x}
+        //         Note we cannot use a "far call" (`lcall`) or "far jmp" (`ljmp`) to do this because then we
+        //         would only be able to jump to 32-bit instruction pointers. Only Intel implements support
+        //         for 64-bit far calls/jumps in long-mode, AMD does not.
+        unsafe {
+            core::arch::asm!(
+                "
+                push {selector}
+                lea {ip}, [55f + rip]
+                push {ip}
+                retfq
+                55:
+                ",
+                selector = in(reg) u64::from(kcode_selector.as_u16()),
+                ip = out(reg) _,
+                options(preserves_flags),
+            );
+        }
 
-            push rax        # store `rax`
-            xor rax, rax    # zero-out `rax`
-            # zero-out segment registers
-            mov es, ax
-            mov ds, ax
-            mov fs, ax
-            mov gs, ax
-            pop rax         # restore `rax`
-            ",
-            sel = in(reg) KDATA_SELECTOR.as_u16(),
-            options(preserves_flags)
-        );
+        trace!("Clearing the extant segment registers ...");
+        // Safety: While setting the ES & DS segment registers to null is perfectly safe, setting
+        //         the FS & GS segment registers (on Intel only, not AMD) clears the respective
+        //         FS/GS base. Thus, it is imperative that this function not be run after the GS
+        //         base has been loaded with the CPU thread-local state structure pointer.
+        unsafe {
+            // Because this is x86, everything is complicated. It's important we load the extra
+            // data segment registers (FS/GS) with the null descriptors, because if they don't
+            // point to a null descriptor, then when CPL changes, the processor will clear the
+            // base and limit of the relevant descriptor.
+            //
+            // This has the fun behavioural side-effect of ALSO clearing the FS/GS _BASE MSRs,
+            // thus making any code involved in the CPL change context unable to access thread-local or
+            // process-local state (when those MSRs are in use for the purpose).
+            core::arch::asm!(
+                "
+                mov ss, {selector:x}
+
+                push rax        # store `rax`
+                xor rax, rax    # zero-out `rax`
+
+                # zero-out segment registers
+                mov es, ax
+                mov ds, ax
+                mov fs, ax
+                mov gs, ax
+
+                pop rax         # restore `rax`
+                ",
+                selector = in(reg) kdata_selector.as_u16(),
+                options(preserves_flags)
+            );
+        }
+
+        trace!("Finished loading global descriptor table.");
     }
 }
 
@@ -181,14 +203,8 @@ impl SegmentSelector {
     pub const NULL: Self = Self(0);
 
     /// Creates a new [`SegmentSelector`]
-    pub const fn new(index: u16, rpl: PrivilegeLevel) -> Option<SegmentSelector> {
-        match (index, rpl) {
-            (1 | 2, PrivilegeLevel::Ring0) | (3 | 4, PrivilegeLevel::Ring3) => {
-                Some(SegmentSelector(index << 3 | (rpl as u16)))
-            }
-
-            (_, _) => None,
-        }
+    pub fn new(index: u16, rpl: PrivilegeLevel) -> SegmentSelector {
+        SegmentSelector(index << 3 | u16::from(rpl))
     }
 
     /// Returns the selector as a raw u16.
@@ -202,63 +218,210 @@ impl SegmentSelector {
     }
 
     /// Returns the requested privilege level.
-    #[inline]
-    pub fn rpl(self) -> PrivilegeLevel {
-        PrivilegeLevel::from_u16(self.0 & 0b11)
+    pub fn privilege_level(self) -> PrivilegeLevel {
+        PrivilegeLevel::try_from(self.0 & 0b11).unwrap()
     }
 }
 
 impl core::fmt::Debug for SegmentSelector {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("SegmentSelector")
-            .field("rpl", &self.rpl())
-            .field("gdt_index", &self.gdt_index())
+        f.debug_tuple("SegmentSelector")
+            .field(&self.gdt_index())
+            .field(&self.privilege_level())
             .finish()
     }
 }
 
 /// Represents a protection ring level.
-#[repr(u8)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[repr(u16)]
+#[derive(Debug, TryFromPrimitive, IntoPrimitive, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum PrivilegeLevel {
     /// Privilege-level 0 (most privilege): This level is used by critical system-software
     /// components that require direct access to, and control over, all processor and system
     /// resources. This can include BIOS, memory-management functions, and interrupt handlers.
-    Ring0 = 0,
+    Ring0 = 0b00,
 
     /// Privilege-level 1 (moderate privilege): This level is used by less-critical system-
     /// software services that can access and control a limited scope of processor and system
     /// resources. Software running at these privilege levels might include some device drivers
     /// and library routines. The actual privileges of this level are defined by the
     /// operating system.
-    Ring1 = 1,
+    Ring1 = 0b01,
 
     /// Privilege-level 2 (moderate privilege): Like level 1, this level is used by
     /// less-critical system-software services that can access and control a limited scope of
     /// processor and system resources. The actual privileges of this level are defined by the
     /// operating system.
-    Ring2 = 2,
+    Ring2 = 0b10,
 
     /// Privilege-level 3 (least privilege): This level is used by application software.
     /// Software running at privilege-level 3 is normally prevented from directly accessing
     /// most processor and system resources. Instead, applications request access to the
     /// protected processor and system resources by calling more-privileged service routines
     /// to perform the accesses.
-    Ring3 = 3,
+    Ring3 = 0b11,
 }
 
-impl PrivilegeLevel {
-    /// Creates a `PrivilegeLevel` from a numeric value. The value must be in the range 0..4.
+/// Common bits between all kinds of segment descriptors.
+///
+/// Composed of:
+/// - **Limit**, bits 0..16 and 48..52
+/// - **Present**, bit 47
+/// - **Granularity**, bit 55
+const COMMON_BITS: u64 = {
+    (1 << 47)               // Present
+    | (1 << 55)             // Granularity
+    | 0xFFFF | (0xF << 48) // Limit
+};
+
+/// Desired privilege level for the segment.
+const PRIVILEGE_LEVEL_BIT_RANGE: Range<usize> = 45..47;
+
+pub trait SegmentDescriptor {
+    /// The desired privilege level of the segment.
+    fn privilege_level(&self) -> PrivilegeLevel;
+
+    /// Appends this [`SegmentDescriptor`]'s entries to the provided `append_to`
+    /// slice, returning how many entries were appended.
+    fn append_entries(self, append_to: &mut [u64]) -> usize;
+}
+
+/// A generic (non-system) segment descriptor.
+pub struct GenericSegmentDescriptor(u64);
+
+impl GenericSegmentDescriptor {
+    /// Set by the processor if this segment has been accessed. Only cleared by software.
+    /// Setting this bit in software prevents GDT writes on first use.
     ///
-    /// This function panics if the passed value is >3.
-    #[inline]
-    pub const fn from_u16(value: u16) -> PrivilegeLevel {
-        match value {
-            0 => PrivilegeLevel::Ring0,
-            1 => PrivilegeLevel::Ring1,
-            2 => PrivilegeLevel::Ring2,
-            3 => PrivilegeLevel::Ring3,
-            _ => panic!("invalid privilege level"),
+    /// Usually, this bit is set in 64-bit descriptors. Only unset if otherwise required.
+    const ACCESSED_BIT_INDEX: usize = 40;
+
+    /// For data segments, sets the segment as **writable**.
+    ///
+    /// For code segments, sets the segment as **readable**.
+    const READ_WRITE_BIT_INDEX: usize = 41;
+
+    /// This flag must be set for all non-system segments.
+    const NON_SYSTEM_SEGMENT_BIT_INDEX: usize = 44;
+
+    /// This flag must be set for code segments and unset for data segments.
+    const EXECUTABLE_BIT_INDEX: usize = 43;
+
+    /// Must be set for 64-bit code segments, unset otherwise.
+    const LONG_MODE_CODE_BIT_INDEX: usize = 53;
+
+    /// Use 32-bit (as opposed to 16-bit) operands. If [`LONG_MODE_CODE_BIT`][Self::LONG_MODE_CODE_BIT] is set,
+    /// this must be unset. In 64-bit mode, ignored for data segments.
+    const EXTENDED_SIZE_BIT_INDEX: usize = 54;
+
+    fn new(is_code: bool, privilege_level: PrivilegeLevel) -> Self {
+        let mut value = COMMON_BITS;
+
+        value.set_bit(Self::ACCESSED_BIT_INDEX, true);
+        value.set_bit(Self::READ_WRITE_BIT_INDEX, true);
+        value.set_bit(Self::NON_SYSTEM_SEGMENT_BIT_INDEX, true);
+
+        if is_code {
+            value.set_bit(Self::EXECUTABLE_BIT_INDEX, true);
+            value.set_bit(Self::LONG_MODE_CODE_BIT_INDEX, true);
+        } else {
+            value.set_bit(Self::EXTENDED_SIZE_BIT_INDEX, true);
         }
+
+        value.set_bits(
+            PRIVILEGE_LEVEL_BIT_RANGE,
+            u64::from(u16::from(privilege_level)),
+        );
+
+        Self(value)
+    }
+
+    pub fn kernel_code() -> Self {
+        Self::new(true, PrivilegeLevel::Ring0)
+    }
+
+    pub fn kernel_data() -> Self {
+        Self::new(false, PrivilegeLevel::Ring0)
+    }
+
+    pub fn user_code() -> Self {
+        Self::new(true, PrivilegeLevel::Ring3)
+    }
+
+    pub fn user_data() -> Self {
+        Self::new(false, PrivilegeLevel::Ring3)
+    }
+}
+
+impl SegmentDescriptor for GenericSegmentDescriptor {
+    fn privilege_level(&self) -> PrivilegeLevel {
+        let raw_bits = self.0.get_bits(PRIVILEGE_LEVEL_BIT_RANGE);
+        let raw_bits_u16 = u16::try_from(raw_bits).unwrap();
+
+        PrivilegeLevel::try_from(raw_bits_u16).unwrap()
+    }
+
+    fn append_entries(self, append_to: &mut [u64]) -> usize {
+        append_to[0] = self.0;
+
+        1
+    }
+}
+
+/// A system segment descriptor.
+pub struct SystemSegmentDescriptor(u128);
+
+impl SystemSegmentDescriptor {
+    const BASE_LOW_BIT_RANGE: Range<usize> = 16..32;
+    const BASE_MID_BIT_RANGE: Range<usize> = 56..64;
+    const BASE_HIGH_BIT_RANGE: Range<usize> = 64..96;
+
+    /// Defines different types of system segments rather than code and data segments.
+    const SEGMENT_TYPE_BIT_RANGE: Range<usize> = 40..44;
+
+    /// # Safety
+    ///
+    /// - `tss` must be dereferenceable to [`TaskStateSegment`].
+    pub unsafe fn from_tss(tss: NonNull<TaskStateSegment>) -> Self {
+        let mut value = u128::from(COMMON_BITS);
+
+        // Sets the segment type to TSS (64-bit + Available)
+        value.set_bits(Self::SEGMENT_TYPE_BIT_RANGE, 0b1001);
+
+        value.set_bits(
+            PRIVILEGE_LEVEL_BIT_RANGE,
+            u128::from(u16::from(PrivilegeLevel::Ring0)),
+        );
+
+        let base = u128::try_from(tss.addr().get()).unwrap();
+        value.set_bits(Self::BASE_LOW_BIT_RANGE, base & 0xFFFF);
+        value.set_bits(
+            Self::BASE_MID_BIT_RANGE,
+            (base >> Self::BASE_LOW_BIT_RANGE.len()) & 0xFF,
+        );
+        value.set_bits(
+            Self::BASE_HIGH_BIT_RANGE,
+            (base >> (Self::BASE_LOW_BIT_RANGE.len() + Self::BASE_MID_BIT_RANGE.len()))
+                & 0xFFFF_FFFF,
+        );
+
+        Self(value)
+    }
+}
+
+impl SegmentDescriptor for SystemSegmentDescriptor {
+    fn privilege_level(&self) -> PrivilegeLevel {
+        let raw_bits = self.0.get_bits(PRIVILEGE_LEVEL_BIT_RANGE);
+        let raw_bits_u16 = u16::try_from(raw_bits).unwrap();
+
+        PrivilegeLevel::try_from(raw_bits_u16).unwrap()
+    }
+
+    #[allow(clippy::as_conversions, clippy::cast_possible_truncation)]
+    fn append_entries(self, append_to: &mut [u64]) -> usize {
+        append_to[0] = self.0 as u64;
+        append_to[1] = (self.0 >> u64::BITS) as u64;
+
+        2
     }
 }

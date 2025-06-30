@@ -61,9 +61,12 @@ pub fn start_mp(mp_request: &limine::request::MpRequest) {
 ///
 /// - Function can only be run once at the end of the kernel init phase.
 pub unsafe fn run() -> ! {
+    #[cfg(target_arch = "x86_64")]
+    crate::arch::x86_64::structures::tss::TaskStateSegment::new_with_stacks().load();
+
     // Safety: Function is only run once, right here.
     unsafe {
-        crate::cpu::state::init(1000);
+        crate::cpu::state::LocalState::init(1000);
     }
 
     // Ensure we enable interrupts prior to enabling the scheduler.

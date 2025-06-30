@@ -1,3 +1,5 @@
+use crate::arch::x86_64::structures::{gdt::GlobalDescriptorTable, idt::InterruptDescriptorTable};
+
 pub mod devices;
 pub mod instructions;
 pub mod registers;
@@ -29,12 +31,26 @@ pub unsafe fn configure_hwthread() {
         model_specific::IA32_EFER,
     };
 
+    info!(
+        "CPU Vendor          {}",
+        cpuid::VENDOR_INFO
+            .as_ref()
+            .map_or("UNKNOWN", raw_cpuid::VendorInfo::as_str)
+    );
+    trace!("{:#?}", *cpuid::FEATURE_INFO);
+    trace!("{:#?}", *cpuid::EXT_FEATURE_INFO);
+    trace!("{:#?}", *cpuid::EXT_FUNCTION_INFO);
+
+    trace!("Configuring `CR0` ...");
+
     // Safety: This is the first and only time `CR0` will be set.
     unsafe {
         CR0::write(
             CR0Flags::PE | CR0Flags::MP | CR0Flags::ET | CR0Flags::NE | CR0Flags::WP | CR0Flags::PG,
         );
     }
+
+    trace!("Configuring `CR4` ...");
 
     let mut cr4_flags = CR4Flags::PAE | CR4Flags::PGE | CR4Flags::OSXMMEXCPT;
 
@@ -87,23 +103,19 @@ pub unsafe fn configure_hwthread() {
         CR4::write(cr4_flags);
     }
 
+    trace!("Configuring `IA32_EFER.NXE` ...");
+
     // Enable use of the `NO_EXECUTE` page attribute, if supported.
     if cpuid::EXT_FUNCTION_INFO
         .as_ref()
         .is_some_and(cpuid::ExtendedProcessorFeatureIdentifiers::has_execute_disable)
     {
-        // Safety: The `NX` bit is not currently in use by any paging structures.
-        unsafe {
-            IA32_EFER::set_nxe(true);
-        }
+        trace!("Set `IA32_EFER.NXE`.");
+        IA32_EFER::set_no_execute_enable(true);
     }
 
-    // Safety: This function is only called once, prior to FS/GS base being in use.
-    unsafe {
-        crate::arch::x86_64::structures::gdt::load();
-    }
-
-    crate::arch::x86_64::structures::idt::load();
+    GlobalDescriptorTable::load_static();
+    InterruptDescriptorTable::load_static();
 
     // Setup system call interface.
     // // Safety: Parameters are set according to the IA-32 SDM, and so should have no undetermined side-effects.
@@ -116,13 +128,6 @@ pub unsafe fn configure_hwthread() {
     //     // Enable `syscall`/`sysret`.
     //     msr::IA32_EFER::set_sce(true);
     // }
-
-    info!(
-        "Vendor              {}",
-        cpuid::VENDOR_INFO
-            .as_ref()
-            .map_or("UNKNOWN", raw_cpuid::VendorInfo::as_str)
-    );
 }
 
 /// Gets the ID of the current core.

@@ -190,15 +190,6 @@ pub fn init(
             .expect("could not get kernel file segments")
             .iter()
             .filter(|program_header| program_header.p_type == elf::abi::PT_LOAD)
-            // .map(|program_header| {
-            //     let segment_start =
-            //         usize::try_from(program_header.p_vaddr).unwrap() - kernel_virtual_address;
-            //     let segment_end = segment_start + usize::try_from(program_header.p_memsz).unwrap();
-            //     let flags = TableEntryFlags::from(crate::task::segment_to_mmap_permissions(
-            //         program_header.p_flags,
-            //     ));
-            //     ((segment_start..segment_end), flags)
-            // })
             .for_each(|program_header| {
                 trace!("{program_header:X?}");
 

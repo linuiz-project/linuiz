@@ -109,8 +109,8 @@ pub fn run<P: AsRef<Path>>(
     }
     .arg("-no-shutdown")
     .arg("-no-reboot")
-    .args(["-debugcon", "file:.debug/debug.log"])
     .args(["-serial", "stdio"])
+    .args(["-debugcon", "file:.debug/debug.log"])
     .args(["-drive", "format=raw,file=run/disk0.img,id=disk1,if=none"])
     .args(["-net", "none"])
     .args(["-M", "smm=off"])
