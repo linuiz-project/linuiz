@@ -1,9 +1,10 @@
-mod global_alloc;
-
 mod hhdm;
 pub use hhdm::*;
 
-pub mod stack;
+mod stack;
+pub use stack::*;
+
+pub mod alloc;
 // pub mod io;
 pub mod mapper;
 pub mod paging;

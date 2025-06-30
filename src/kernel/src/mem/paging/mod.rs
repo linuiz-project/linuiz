@@ -23,7 +23,7 @@ pub fn use_mega_pages() -> bool {
 pub fn use_giga_pages() -> bool {
     #[cfg(target_arch = "x86_64")]
     {
-        crate::arch::x86_64::cpuid::EXT_FUNCTION_INFO
+        crate::arch::x86_64::cpuid::EXT_FEATURE_IDENTIFIERS
             .as_ref()
             .is_some_and(raw_cpuid::ExtendedProcessorFeatureIdentifiers::has_1gib_pages)
     }

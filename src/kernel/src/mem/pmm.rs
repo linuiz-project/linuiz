@@ -255,7 +255,11 @@ impl PhysicalMemoryManager {
                 .unwrap();
             free_frames.fill(true);
 
-            trace!("Frame Locked: {:#X?}", free_frames.as_ptr_range());
+            trace!(
+                "Frames Locked: {:#X?}..{:#X?}",
+                free_frames_index,
+                free_frames_index + free_frames.len()
+            );
 
             Ok(Address::new(free_frames_index << page_shift().get()).unwrap())
         })

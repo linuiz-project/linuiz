@@ -88,7 +88,7 @@ impl GlobalDescriptorTable {
     pub fn load_static() {
         assert!(!crate::interrupts::is_enabled());
 
-        trace!("Configuring the static global descriptor table ...");
+        trace!("Configuring the static global descriptor table...");
 
         let gdt = GDT.call_once(|| {
             let mut gdt = GlobalDescriptorTable::empty();
@@ -150,7 +150,7 @@ impl GlobalDescriptorTable {
             );
         }
 
-        trace!("Clearing the extant segment registers ...");
+        trace!("Clearing extant segment registers...");
         // Safety: While setting the ES & DS segment registers to null is perfectly safe, setting
         //         the FS & GS segment registers (on Intel only, not AMD) clears the respective
         //         FS/GS base. Thus, it is imperative that this function not be run after the GS

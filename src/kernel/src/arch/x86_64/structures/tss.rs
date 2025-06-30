@@ -5,7 +5,7 @@ use alloc::boxed::Box;
 use core::ptr::NonNull;
 use zerocopy::FromZeros;
 
-type StackTableStack = crate::mem::stack::Stack<0x16000>;
+type StackTableStack = crate::mem::Stack<0x16000>;
 
 // Pre-defined indexes into the interrupt stack table (IST).
 #[repr(u16)]

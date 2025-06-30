@@ -82,34 +82,36 @@ mod util;
 #[macro_use]
 extern crate bitflags;
 
-use crate::mem::pmm::PhysicalMemoryManager;
-use libsys::{Address, Frame};
 use limine::{
-    memory_map,
+    BaseRevision,
     mp::RequestFlags,
     request::{
         BootloaderInfoRequest, ExecutableAddressRequest, ExecutableCmdlineRequest,
         ExecutableFileRequest, HhdmRequest, MemoryMapRequest, MpRequest, RsdpRequest,
+        StackSizeRequest,
     },
 };
 
 /// Specify the Limine revision to use.
 #[doc(hidden)]
-static BASE_REVISION: limine::BaseRevision = limine::BaseRevision::with_revision(3);
+static BASE_REVISION: BaseRevision = BaseRevision::with_revision(3);
+
+const KERNEL_STACK_SIZE: usize = {
+    #[cfg(debug_assertions)]
+    {
+        0x1000000
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        0x4000
+    }
+};
 
 /// Specify the exact stack size the kernel would like to use.
 #[doc(hidden)]
-static STACK_SIZE_REQUEST: limine::request::StackSizeRequest =
-    limine::request::StackSizeRequest::new().with_size({
-        #[cfg(debug_assertions)]
-        {
-            0x1000000
-        }
-        #[cfg(not(debug_assertions))]
-        {
-            0x4000
-        }
-    });
+#[allow(clippy::as_conversions)]
+static STACK_SIZE_REQUEST: StackSizeRequest =
+    StackSizeRequest::new().with_size(KERNEL_STACK_SIZE as u64);
 
 /// # Safety
 ///
@@ -174,32 +176,6 @@ unsafe extern "C" fn _entry() -> ! {
         &KERNEL_ADDRESS_REQUEST,
     );
 
-    core::arch::breakpoint();
-
-    crate::cpu::start_mp(&MP_REQUEST);
-
-    todo!()
-}
-
-/// Finalizes the kernel init process. After entering this function, all bootloader
-/// reclaimable memory will be freed, and bootloader info/data will be inaccessible.
-fn finalize_init(memory_map: &[&memory_map::Entry]) -> ! {
-    debug!("Reclaiming bootloader memory...");
-
-    memory_map
-        .iter()
-        .filter(|entry| entry.entry_type == limine::memory_map::EntryType::BOOTLOADER_RECLAIMABLE)
-        .flat_map(|entry| {
-            let entry_start = usize::try_from(entry.base).unwrap();
-            let entry_end = usize::try_from(entry.base + entry.length).unwrap();
-
-            (entry_start..entry_end).step_by(libsys::page_size())
-        })
-        .map(|address| Address::<Frame>::new(address).unwrap())
-        .for_each(|frame| PhysicalMemoryManager::free_frame(frame).unwrap());
-
-    debug!("Bootloader memory reclaimed.");
-
     // Safety: We've reached the end of the kernel init phase.
-    unsafe { crate::cpu::run() }
+    unsafe { crate::cpu::synchronize(Some((&MP_REQUEST, &MEMORY_MAP_REQUEST))) }
 }

@@ -37,7 +37,7 @@ impl Iterator for StackTracer {
     }
 }
 
-/// # Remark
+/// # Remarks
 ///
 /// This function should *never* panic or abort.
 #[panic_handler]

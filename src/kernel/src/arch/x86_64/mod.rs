@@ -1,24 +1,10 @@
 use crate::arch::x86_64::structures::{gdt::GlobalDescriptorTable, idt::InterruptDescriptorTable};
 
+pub mod cpuid;
 pub mod devices;
 pub mod instructions;
 pub mod registers;
 pub mod structures;
-
-pub mod cpuid {
-    use spin::Lazy;
-
-    pub use raw_cpuid::*;
-
-    pub static CPUID: Lazy<CpuId<CpuIdReaderNative>> = Lazy::new(CpuId::new);
-    pub static FEATURE_INFO: Lazy<FeatureInfo> =
-        Lazy::new(|| CPUID.get_feature_info().expect("no CPUID.01H support"));
-    pub static EXT_FEATURE_INFO: Lazy<Option<ExtendedFeatures>> =
-        Lazy::new(|| CPUID.get_extended_feature_info());
-    pub static EXT_FUNCTION_INFO: Lazy<Option<ExtendedProcessorFeatureIdentifiers>> =
-        Lazy::new(|| CPUID.get_extended_processor_and_feature_identifiers());
-    pub static VENDOR_INFO: Lazy<Option<VendorInfo>> = Lazy::new(|| CPUID.get_vendor_info());
-}
 
 /// # Safety
 ///
@@ -39,9 +25,9 @@ pub unsafe fn configure_hwthread() {
     );
     trace!("{:#?}", *cpuid::FEATURE_INFO);
     trace!("{:#?}", *cpuid::EXT_FEATURE_INFO);
-    trace!("{:#?}", *cpuid::EXT_FUNCTION_INFO);
+    trace!("{:#?}", *cpuid::EXT_FEATURE_IDENTIFIERS);
 
-    trace!("Configuring `CR0` ...");
+    trace!("Configuring `CR0`...");
 
     // Safety: This is the first and only time `CR0` will be set.
     unsafe {
@@ -50,7 +36,7 @@ pub unsafe fn configure_hwthread() {
         );
     }
 
-    trace!("Configuring `CR4` ...");
+    trace!("Configuring `CR4`...");
 
     let mut cr4_flags = CR4Flags::PAE | CR4Flags::PGE | CR4Flags::OSXMMEXCPT;
 
@@ -72,28 +58,28 @@ pub unsafe fn configure_hwthread() {
 
     if cpuid::EXT_FEATURE_INFO
         .as_ref()
-        .is_some_and(cpuid::ExtendedFeatures::has_umip)
+        .is_some_and(raw_cpuid::ExtendedFeatures::has_umip)
     {
         cr4_flags.insert(CR4Flags::UMIP);
     }
 
     if cpuid::EXT_FEATURE_INFO
         .as_ref()
-        .is_some_and(cpuid::ExtendedFeatures::has_fsgsbase)
+        .is_some_and(raw_cpuid::ExtendedFeatures::has_fsgsbase)
     {
         cr4_flags.insert(CR4Flags::FSGSBASE);
     }
 
     if cpuid::EXT_FEATURE_INFO
         .as_ref()
-        .is_some_and(cpuid::ExtendedFeatures::has_smep)
+        .is_some_and(raw_cpuid::ExtendedFeatures::has_smep)
     {
         cr4_flags.insert(CR4Flags::SMEP);
     }
 
     if cpuid::EXT_FEATURE_INFO
         .as_ref()
-        .is_some_and(cpuid::ExtendedFeatures::has_smap)
+        .is_some_and(raw_cpuid::ExtendedFeatures::has_smap)
     {
         cr4_flags.insert(CR4Flags::SMAP);
     }
@@ -103,12 +89,12 @@ pub unsafe fn configure_hwthread() {
         CR4::write(cr4_flags);
     }
 
-    trace!("Configuring `IA32_EFER.NXE` ...");
+    trace!("Configuring `IA32_EFER.NXE`...");
 
     // Enable use of the `NO_EXECUTE` page attribute, if supported.
-    if cpuid::EXT_FUNCTION_INFO
+    if cpuid::EXT_FEATURE_IDENTIFIERS
         .as_ref()
-        .is_some_and(cpuid::ExtendedProcessorFeatureIdentifiers::has_execute_disable)
+        .is_some_and(raw_cpuid::ExtendedProcessorFeatureIdentifiers::has_execute_disable)
     {
         trace!("Set `IA32_EFER.NXE`.");
         IA32_EFER::set_no_execute_enable(true);
