@@ -2,7 +2,7 @@ use core::{
     ops::Range,
     sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
-use libsys::{Address, Frame};
+use libsys::{Address, Frame, Physical};
 use spin::{Mutex, Once};
 
 pub mod interrupts;
@@ -33,7 +33,7 @@ pub unsafe fn configure() {
 ///
 /// # Returns
 ///
-/// - If request was satisfied, `Some` of the count of hardware threads in the system.
+/// - If request was satisfied, `Some` of the count of non-bootstrap hardware threads in the system.
 /// - If request was not satisfied, `None`.
 pub fn begin_multiprocessing(mp_request: &limine::request::MpRequest) -> Option<usize> {
     let Some(response) = mp_request.get_response() else {
@@ -78,7 +78,9 @@ pub fn begin_multiprocessing(mp_request: &limine::request::MpRequest) -> Option<
         }
     }
 
-    Some(response.cpus().len())
+    Some(
+        response.cpus().len() - 1, // subtract bootstrap processor
+    )
 }
 
 /// Frees bootloader reclaimable memory, then begins local post-memory-system-initialization
@@ -89,6 +91,7 @@ pub fn begin_multiprocessing(mp_request: &limine::request::MpRequest) -> Option<
 /// - Function can only be run once at the end of the kernel init phase.
 /// - `pre_call_sp` must be the current hardware thread's stack pointer immediately prior to
 ///   this method being called.
+#[allow(clippy::too_many_lines)]
 pub unsafe fn synchronize(
     bsp_requests: Option<(
         &limine::request::MpRequest,
@@ -97,8 +100,15 @@ pub unsafe fn synchronize(
 ) -> ! {
     /// Checks if `range` contains the `stack_address`, and print out a message to
     /// indicate the check was true.
-    fn check_range_contains_stack(range: &Range<usize>, stack_address: usize) -> bool {
-        let range_contains_stack = range.contains(&stack_address);
+    fn check_range_contains_stack(range: &Range<usize>, stack_address: Address<Physical>) -> bool {
+        let range_contains_stack = range.contains(&stack_address.get());
+
+        trace!(
+            "Checking: {:#X}..{:#X} contains {:#X} ({range_contains_stack})",
+            range.start,
+            range.end,
+            stack_address.get()
+        );
 
         if range_contains_stack {
             trace!("Found boot stack: {range:#X?}");
@@ -112,28 +122,24 @@ pub unsafe fn synchronize(
 
     /// If `Some`, the current entry to be checked; if `None`, there are no more entries
     /// to check.
-    static CHECK_ENTRY_IS_STACK: Once<Mutex<Option<Range<usize>>>> = Once::new();
+    static CHECK_ENTRY: Once<Mutex<Option<Range<usize>>>> = Once::new();
 
-    /// Total number of non-bootstrap processors that have checked whether the current
-    /// entry contains its stack.
-    static ENTRY_CHECK_DONE_COUNT: AtomicUsize = AtomicUsize::new(0);
+    /// Total number of non-bootstrap processors that are not currently performing the entry check
+    /// (they either haven't done one yet, or have completed the previous check).
+    static CHECK_ENTRY_IDLE: AtomicUsize = AtomicUsize::new(0);
 
     /// Indicates one of the non-bootstrap processors found that an entry contains its
     /// stack.
-    static ENTRY_CHECK_CONSENSUS: AtomicBool = AtomicBool::new(false);
+    static CHECK_ENTRY_CONSENSUS: AtomicBool = AtomicBool::new(false);
 
-    /// Indicates the bootstrap processor has completed all sycnrhonization, and initialization
-    /// can continue.
-    static ALL_CORES_READY: AtomicBool = AtomicBool::new(false);
-
-    let stack_address = get_stack_ptr().addr();
+    let stack_address =
+        crate::mem::Hhdm::virtual_to_physical(Address::from_ptr(get_stack_ptr().cast_mut()));
 
     // If this this the bootstrap processor context, the following requests will have been passed...
     if let Some((mp_request, memory_map_request)) = bsp_requests {
         // Begin multiprocessing and store the processor count to use in synchronization later.
         if let Some(hwthread_count) = crate::cpu::begin_multiprocessing(mp_request) {
             HWTHREAD_COUNT.call_once(|| hwthread_count);
-            ENTRY_CHECK_DONE_COUNT.store(hwthread_count, Ordering::Release);
         }
 
         debug!("Reclaiming bootloader memory...");
@@ -151,40 +157,56 @@ pub unsafe fn synchronize(
                 let entry_start = usize::try_from(entry.base).unwrap();
                 let entry_end = usize::try_from(entry.base + entry.length).unwrap();
 
+                trace!("Attempting to free memory: {entry_start:#X}:{entry_end:#X}");
+
                 entry_start..entry_end
             })
             .filter(|entry_range| {
                 // Check if the entry contains the BSP stack, and if so, filter it
                 // (check returned false, so invert and return true to avoid filtering).
-                !check_range_contains_stack(&entry_range, stack_address)
+                !check_range_contains_stack(entry_range, stack_address)
             })
             .filter(|entry_range| {
-                if CHECK_ENTRY_IS_STACK.is_completed() {
+                if CHECK_ENTRY.is_completed() {
                     // If the check entry has already been set, then update it...
 
-                    let check_entry = CHECK_ENTRY_IS_STACK.wait();
+                    let check_entry = CHECK_ENTRY.wait();
 
                     let mut check_entry = check_entry.lock();
                     *check_entry = Some(entry_range.clone());
                 } else {
                     // If the check entry has not already been set, then set it...
 
-                    CHECK_ENTRY_IS_STACK.call_once(|| Mutex::new(Some(entry_range.clone())));
+                    CHECK_ENTRY.call_once(|| Mutex::new(Some(entry_range.clone())));
                 }
 
-                // Reset the entry check count to signal a new iteration...
-                ENTRY_CHECK_DONE_COUNT.store(0, Ordering::Release);
+                trace!("Resetting the bootloader reclaim entry check loop...");
 
-                // Wait for all other hardware threads to finish checking entry...
-                while ENTRY_CHECK_DONE_COUNT.load(Ordering::Acquire) < *HWTHREAD_COUNT.wait() {
+                // Reset the consensus so the other hardware threads can use it.
+                CHECK_ENTRY_CONSENSUS.store(false, Ordering::Release);
+
+                // Wait for all other hardware threads to be ready to check entry...
+                while CHECK_ENTRY_IDLE.load(Ordering::Acquire) < *HWTHREAD_COUNT.wait() {
+                    core::hint::spin_loop();
+                }
+
+                // Other hardware threads are ready, reset the entry check count to begin...
+                CHECK_ENTRY_IDLE.store(0, Ordering::Release);
+
+                // Wait for all other hardware threads to be done checking entry...
+                while CHECK_ENTRY_IDLE.load(Ordering::Acquire) < *HWTHREAD_COUNT.wait() {
                     core::hint::spin_loop();
                 }
 
                 // If the consensus was a positive check, filter it.
-                !ENTRY_CHECK_CONSENSUS.load(Ordering::Acquire)
+                let consensus = CHECK_ENTRY_CONSENSUS.load(Ordering::Acquire);
+
+                trace!("Consensus (Do Filter): {consensus}");
+
+                !consensus
             })
-            // We'll flat_map each entry to physical memory range...
-            .flat_map(|entry_range| entry_range)
+            // We'll flatten each entry to a physical memory range...
+            .flatten()
             // Iterate page-size chunks...
             .step_by(libsys::page_size())
             // Map entry to physical page address...
@@ -192,19 +214,39 @@ pub unsafe fn synchronize(
             // Free the requisite physical frames...
             .for_each(|frame| crate::mem::pmm::PhysicalMemoryManager::free_frame(frame).unwrap());
 
-        debug!("Bootloader memory reclaimed.");
+        // Clear the check entry to `None`, so other hardware threads know there's no more work.
+        let check_entry = CHECK_ENTRY.wait();
+        let mut check_entry = check_entry.lock();
+        *check_entry = None;
+        drop(check_entry);
+
+        // Wait for all other hardware threads to be ready to check entry, so they can
+        // continue initialization...
+        while CHECK_ENTRY_IDLE.load(Ordering::Acquire) < *HWTHREAD_COUNT.wait() {
+            core::hint::spin_loop();
+        }
 
         // Update core readiness to indicate non-bootstrap processors can continue their initialization.
-        ALL_CORES_READY.store(true, Ordering::Release);
+        CHECK_ENTRY_IDLE.store(0, Ordering::Release);
+
+        debug!("Bootloader memory reclaimed.");
     } else {
-        let entry = CHECK_ENTRY_IS_STACK.wait();
+        // Wait for bootstrap processor to populate the check entry...
+        let entry = CHECK_ENTRY.wait();
+
+        trace!("Entering bootloader reclaim stack check loop...");
 
         loop {
-            // Wait for the check done count to be zero, signalling to start again.
-            while ENTRY_CHECK_DONE_COUNT.load(Ordering::Acquire) > 0 {
+            trace!("Waiting for entry check loop to reset...");
+
+            // Add current hardware thread to completed count.
+            CHECK_ENTRY_IDLE.fetch_add(1, Ordering::AcqRel);
+            // Wait for the check done count to be at maximum, signalling to start again.
+            while CHECK_ENTRY_IDLE.load(Ordering::Acquire) > 0 {
                 core::hint::spin_loop();
             }
 
+            trace!("Acquiring entry range lock...");
             let entry_range = entry.lock();
 
             // If the entry is `None`, then we're done checking entries.
@@ -212,20 +254,12 @@ pub unsafe fn synchronize(
                 break;
             };
 
-            if check_range_contains_stack(&entry_range, stack_address) {
-                // Only update the consensus value if it was previously false.
-                ENTRY_CHECK_CONSENSUS.store(true, Ordering::Release);
+            if check_range_contains_stack(entry_range, stack_address) {
+                CHECK_ENTRY_CONSENSUS.store(true, Ordering::Release);
             }
-
-            // Add current hardware thread to completed checks count.
-            ENTRY_CHECK_DONE_COUNT.fetch_add(1, Ordering::AcqRel);
         }
 
-        trace!("Waiting for bootstrap processor to signal ready...");
-
-        while !ALL_CORES_READY.load(Ordering::Acquire) {
-            core::hint::spin_loop();
-        }
+        trace!("Entry checks complete.");
     }
 
     core::arch::breakpoint();
