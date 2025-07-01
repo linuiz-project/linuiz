@@ -89,7 +89,7 @@ impl RSP {
         // Safety: Reading a value out of a register does not cause undefined behaviour.
         unsafe {
             core::arch::asm!(
-                "mov {}, rbp",
+                "mov {}, rsp",
                 out(reg) value,
                 options(nomem, nostack, preserves_flags)
             );

@@ -1,7 +1,11 @@
-pub mod symbols;
-
-use core::ptr::NonNull;
+use core::{
+    fmt::{Result, Write},
+    panic::PanicInfo,
+    ptr::NonNull,
+};
 use libsys::{Address, Virtual};
+
+pub mod symbols;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -41,68 +45,92 @@ impl Iterator for StackTracer {
 ///
 /// This function should *never* panic or abort.
 #[panic_handler]
-fn panic(info: &core::panic::PanicInfo) -> ! {
-    error!(
-        "KERNEL PANIC (at {}): {}",
-        info.location().unwrap_or(core::panic::Location::caller()),
-        info.message()
-    );
+fn panic(info: &PanicInfo) -> ! {
+    let mut panic_buffer = [0u8; 0x1000];
 
-    stack_trace();
+    // Safety: Buffer is zeroed and length is set to 0.
+    let mut panic_string = unsafe {
+        alloc::string::String::from_raw_parts(panic_buffer.as_mut_ptr(), 0, panic_buffer.len())
+    };
+
+    if construct_panic_message(&mut panic_string, info).is_ok() {
+        error!("{panic_string}");
+    } else {
+        error!("Could not construct panic message.");
+    }
 
     crate::interrupts::halt_and_catch_fire()
 }
 
-fn stack_trace() {
+fn construct_panic_message(mut buffer: impl Write, info: &PanicInfo) -> Result {
     fn print_stack_trace_entry<D: core::fmt::Display>(
+        mut buffer: impl Write,
         entry_num: usize,
         fn_address: Address<Virtual>,
         symbol_name: D,
-    ) {
-        error!("#{entry_num: <4}0x{:X} {symbol_name:#}", fn_address.get());
+    ) -> Result {
+        writeln!(
+            buffer,
+            "#{entry_num: <4}0x{:X} {symbol_name:#}",
+            fn_address.get()
+        )
     }
 
-    error!("----------STACK-TRACE---------");
+    writeln!(
+        &mut buffer,
+        "KERNEL PANIC (at {}): {}",
+        info.location().unwrap_or(core::panic::Location::caller()),
+        info.message()
+    )?;
 
-    let frame_ptr = {
+    let stack_frame_ptr = {
         #[cfg(target_arch = "x86_64")]
         {
             let base_ptr: usize;
 
             // Safety: We're just reading a register.
             unsafe {
-                core::arch::asm!(
-                    "mov {}, rbp",
-                    out(reg) base_ptr,
-                    options(nostack, nomem, preserves_flags)
-                );
+                core::arch::asm!( "mov {}, rbp", out(reg) base_ptr, options(nostack, nomem, preserves_flags));
             }
 
-            core::ptr::without_provenance::<StackFrame>(base_ptr)
+            core::ptr::without_provenance_mut::<StackFrame>(base_ptr)
         }
     };
 
-    let Some(frame_ptr) = NonNull::new(frame_ptr.cast_mut()) else {
-        error!("No stack frame pointer was found; stack trace will not be emitted.");
-        return;
+    let Some(frame_ptr) = NonNull::new(stack_frame_ptr) else {
+        writeln!(
+            &mut buffer,
+            "No stack frame pointer was found; stack trace will not be emitted."
+        )?;
+
+        return Ok(());
     };
+
+    writeln!(&mut buffer, "----------STACK-TRACE---------")?;
 
     // Safety: Frame pointer is pulled directly from the frame pointer register.
-    let stack_tracer = unsafe { StackTracer::new(frame_ptr) };
+    (unsafe { StackTracer::new(frame_ptr) })
+        .enumerate()
+        .try_for_each(|(depth, trace_address)| {
+            const SYMBOL_TYPE_FUNCTION: u8 = 2;
 
-    for (depth, trace_address) in stack_tracer.enumerate() {
-        const SYMBOL_TYPE_FUNCTION: u8 = 2;
-
-        if let Some(symbol_name) = symbols::get_name(trace_address) {
-            if let Ok(demangled) = rustc_demangle::try_demangle(symbol_name) {
-                print_stack_trace_entry(depth, trace_address, demangled);
+            if let Some(symbol_name) = symbols::get_name(trace_address) {
+                if let Ok(demangled) = rustc_demangle::try_demangle(symbol_name) {
+                    print_stack_trace_entry(&mut buffer, depth, trace_address, demangled)
+                } else {
+                    print_stack_trace_entry(&mut buffer, depth, trace_address, symbol_name)
+                }
             } else {
-                print_stack_trace_entry(depth, trace_address, symbol_name);
+                print_stack_trace_entry(
+                    &mut buffer,
+                    depth,
+                    trace_address,
+                    "!!! no function found !!!",
+                )
             }
-        } else {
-            print_stack_trace_entry(depth, trace_address, "!!! no function found !!!");
-        }
-    }
+        })?;
 
-    error!("----------STACK-TRACE----------");
+    writeln!(&mut buffer, "----------STACK-TRACE----------")?;
+
+    Ok(())
 }
