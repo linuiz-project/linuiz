@@ -1,4 +1,8 @@
-static PARAMS: spin::Once<Parameters> = spin::Once::new();
+use core::ffi::CStr;
+use limine::{request::ExecutableCmdlineRequest, response::ExecutableCmdlineResponse};
+use spin::Once;
+
+static PARAMS: Once<Parameters> = Once::new();
 
 #[derive(Debug, Clone, Copy)]
 pub struct Parameters {
@@ -22,14 +26,14 @@ impl Default for Parameters {
     }
 }
 
-pub fn parse(kernel_cmdline_request: &limine::request::ExecutableCmdlineRequest) {
+pub fn parse(kernel_cmdline_request: &ExecutableCmdlineRequest) {
     PARAMS.call_once(|| {
         let mut params = Parameters::default();
 
         match kernel_cmdline_request
             .get_response()
-            .map(limine::response::ExecutableCmdlineResponse::cmdline)
-            .map(core::ffi::CStr::to_str)
+            .map(ExecutableCmdlineResponse::cmdline)
+            .map(CStr::to_str)
         {
             Some(Ok("")) => {
                 // Ignore accidental extra spaces
@@ -59,9 +63,9 @@ pub fn parse(kernel_cmdline_request: &limine::request::ExecutableCmdlineRequest)
 }
 
 pub fn use_multiprocessing() -> bool {
-    PARAMS.get().unwrap().use_multiprocessing
+    PARAMS.wait().use_multiprocessing
 }
 
 pub fn use_low_memory() -> bool {
-    PARAMS.get().unwrap().low_memory_mode
+    PARAMS.wait().low_memory_mode
 }

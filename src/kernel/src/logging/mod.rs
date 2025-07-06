@@ -13,7 +13,7 @@ pub struct Logger {
 
 impl Logger {
     pub fn init() {
-        crate::interrupts::without(|| {
+        crate::interrupts::uninterruptable(|| {
             static LOGGER: spin::Once<Logger> = spin::Once::new();
 
             let static_logger = LOGGER.call_once(|| Self {

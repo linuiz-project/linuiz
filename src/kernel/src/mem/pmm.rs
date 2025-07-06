@@ -198,8 +198,7 @@ impl PhysicalMemoryManager {
     }
 
     fn get_static() -> &'static Self {
-        PMM.get()
-            .expect("physical memory manager has not been initialized")
+        PMM.wait()
     }
 
     /// Passes the static physical memory manager's frame table to `with_fn`, returning the result.

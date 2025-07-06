@@ -1,4 +1,4 @@
-use crate::arch::x86_64::devices::x2apic::{InterruptDeliveryMode, Register};
+use crate::{arch::x86_64::devices::x2apic::{InterruptDeliveryMode, Register}, interrupts::Vector};
 use bit_field::BitField;
 use core::marker::PhantomData;
 
@@ -89,17 +89,19 @@ impl<K: Kind> LocalVector<K> {
     }
 
     /// Gets the interrupt vector number.
-    pub fn get_vector() -> u8 {
+    pub fn get_vector() -> Vector {
         let vector = Self::read_raw().get_bits(0..8);
 
         debug_assert!(vector > 15, "interrupts vectors 0..=15 are reserved");
 
-        u8::try_from(vector).unwrap()
+        Vector::from(u8::try_from(vector).unwrap())
     }
 
     /// Sets the interrupt vector number.
-    pub fn set_vector(vector: u8) {
-        assert!(vector > 15, "interrupts vectors 0..=15 are reserved");
+    pub fn set_vector(vector: Vector) {
+        let vector = u8::from(vector);
+
+        debug_assert!(vector > 15, "interrupts vectors 0..=15 are reserved");
 
         Self::read_raw().set_bits(0..8, u32::from(vector));
     }
@@ -113,12 +115,6 @@ impl<K: Deliverable> LocalVector<K> {
     }
 }
 
-/// Specifies the polarity of an interrupt pin.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PinPolarity {
-    ActiveHigh,
-    ActiveLow,
-}
 
 /// Various valid modes for APIC timer to operate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

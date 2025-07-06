@@ -24,9 +24,7 @@ impl Hhdm {
 
     /// The raw virtual address of the beginning of the higher-half direct map.
     fn get_static() -> NonZero<usize> {
-        HHDM.get()
-            .expect("higher-half direct map has not been initialized")
-            .0
+        HHDM.wait().0
     }
 
     /// Offset `address` by the base address of the higher-half direct map.

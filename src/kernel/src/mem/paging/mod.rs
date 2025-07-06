@@ -13,7 +13,7 @@ pub mod walker;
 pub fn use_mega_pages() -> bool {
     #[cfg(target_arch = "x86_64")]
     {
-        crate::arch::x86_64::cpuid::FEATURE_INFO.has_pae()
+        crate::arch::x86_64::cpuid::feature_info().is_some_and(raw_cpuid::FeatureInfo::has_pae)
             && crate::arch::x86_64::registers::control::CR4::read()
                 .contains(crate::arch::x86_64::registers::control::CR4Flags::PAE)
     }
@@ -23,8 +23,7 @@ pub fn use_mega_pages() -> bool {
 pub fn use_giga_pages() -> bool {
     #[cfg(target_arch = "x86_64")]
     {
-        crate::arch::x86_64::cpuid::EXT_FEATURE_IDENTIFIERS
-            .as_ref()
+        crate::arch::x86_64::cpuid::extended_feature_identifiers()
             .is_some_and(raw_cpuid::ExtendedProcessorFeatureIdentifiers::has_1gib_pages)
     }
 }

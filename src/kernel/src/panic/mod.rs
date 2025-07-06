@@ -4,6 +4,7 @@ use core::{
     ptr::NonNull,
 };
 use libsys::{Address, Virtual};
+use spin::Mutex;
 
 pub mod symbols;
 
@@ -46,9 +47,11 @@ impl Iterator for StackTracer {
 /// This function should *never* panic or abort.
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    let mut panic_buffer = [0u8; 0x1000];
+    static PANIC_BUFFER: Mutex<[u8; 0x4000]> = Mutex::new([0u8; _]);
 
-    // Safety: Buffer is zeroed and length is set to 0.
+    let mut panic_buffer = PANIC_BUFFER.lock();
+
+    // Safety: String length is set to zero and capacity is set to buffer length.
     let mut panic_string = unsafe {
         alloc::string::String::from_raw_parts(panic_buffer.as_mut_ptr(), 0, panic_buffer.len())
     };
@@ -59,7 +62,29 @@ fn panic(info: &PanicInfo) -> ! {
         error!("Could not construct panic message.");
     }
 
-    crate::interrupts::halt_and_catch_fire()
+    drop(panic_string);
+    drop(panic_buffer);
+
+    crate::cpu::halt_and_catch_fire()
+}
+
+#[inline(always)]
+fn get_stack_frame_ptr() -> *mut StackFrame {
+    #[cfg(target_arch = "x86_64")]
+    {
+        let base_ptr: usize;
+
+        // Safety: We're just reading a register.
+        unsafe {
+            core::arch::asm!(
+                "mov {}, rbp",
+                out(reg) base_ptr,
+                options(nostack, nomem, preserves_flags)
+            );
+        }
+
+        core::ptr::without_provenance_mut::<StackFrame>(base_ptr)
+    }
 }
 
 fn construct_panic_message(mut buffer: impl Write, info: &PanicInfo) -> Result {
@@ -83,21 +108,7 @@ fn construct_panic_message(mut buffer: impl Write, info: &PanicInfo) -> Result {
         info.message()
     )?;
 
-    let stack_frame_ptr = {
-        #[cfg(target_arch = "x86_64")]
-        {
-            let base_ptr: usize;
-
-            // Safety: We're just reading a register.
-            unsafe {
-                core::arch::asm!( "mov {}, rbp", out(reg) base_ptr, options(nostack, nomem, preserves_flags));
-            }
-
-            core::ptr::without_provenance_mut::<StackFrame>(base_ptr)
-        }
-    };
-
-    let Some(frame_ptr) = NonNull::new(stack_frame_ptr) else {
+    let Some(frame_ptr) = NonNull::new(get_stack_frame_ptr()) else {
         writeln!(
             &mut buffer,
             "No stack frame pointer was found; stack trace will not be emitted."

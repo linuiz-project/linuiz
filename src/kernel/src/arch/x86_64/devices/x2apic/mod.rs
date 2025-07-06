@@ -1,11 +1,13 @@
 pub mod interrupt_command;
 pub mod local_vector;
 
+use crate::interrupts::Vector;
 use bit_field::BitField;
-use core::{fmt, marker::PhantomData};
-use local_vector::{
-    CMCI, Error, LINT0, LINT1, LocalVector, PerformanceMonitors, ThermalSensor, Timer,
-};
+use core::fmt;
+
+pub const US_PER_SEC: u64 = 1000000;
+pub const US_WAIT: u64 = 10000;
+pub const US_FREQ_FACTOR: u64 = US_PER_SEC / US_WAIT;
 
 #[repr(u32)]
 #[derive(Debug, IntoPrimitive, Clone, Copy)]
@@ -164,26 +166,109 @@ impl From<InterruptDeliveryMode> for u32 {
     }
 }
 
-bitflags! {
-    #[repr(transparent)]
-    #[derive(Debug, Clone, Copy)]
-    pub struct TimerDivideConfiguration: u64 {
-        const DIVIDE_1      = 0b1011;
-        const DIVIDE_2      = 0b0000;
-        const DIVIDE_4      = 0b0001;
-        const DIVIDE_8      = 0b0010;
-        const DIVIDE_16     = 0b0011;
-        const DIVIDE_32     = 0b1000;
-        const DIVIDE_64     = 0b1001;
-        const DIVIDE_128    = 0b1010;
-    }
+#[repr(u64)]
+#[derive(Debug, TryFromPrimitive, IntoPrimitive, Clone, Copy)]
+pub enum TimerDivideConfiguration {
+    DivideBy1 = 0b1011,
+    DivideBy2 = 0b0000,
+    DivideBy4 = 0b0001,
+    DivideBy8 = 0b0010,
+    DivideBy16 = 0b0011,
+    DivideBy32 = 0b1000,
+    DivideBy64 = 0b1001,
+    DivideBy128 = 0b1010,
 }
 
 #[allow(non_camel_case_types)]
 pub struct x2Apic;
 
 impl x2Apic {
-    pub fn configure() {}
+    pub fn init() {
+        use local_vector::{
+            CMCI, Error, LINT0, LINT1, LocalVector, PerformanceMonitors, ThermalSensor, Timer,
+        };
+
+        Self::set_enabled(false);
+
+        Self::set_spurious_vector(Vector::Spurious);
+
+        LocalVector::<Timer>::set_vector(Vector::Timer);
+        LocalVector::<Timer>::set_masked(true);
+
+        LocalVector::<Error>::set_vector(Vector::Error);
+        LocalVector::<Error>::set_masked(false);
+
+        LocalVector::<CMCI>::set_vector(Vector::CMCI);
+        LocalVector::<CMCI>::set_masked(false);
+
+        LocalVector::<PerformanceMonitors>::set_vector(Vector::PerformanceMonitors);
+        LocalVector::<PerformanceMonitors>::set_masked(false);
+
+        LocalVector::<ThermalSensor>::set_vector(Vector::ThermalSensor);
+        LocalVector::<ThermalSensor>::set_masked(false);
+
+        LocalVector::<LINT0>::set_vector(Vector::External);
+        LocalVector::<LINT0>::set_masked(false);
+        LocalVector::<LINT1>::set_vector(Vector::External);
+        LocalVector::<LINT1>::set_masked(false);
+
+        // Local APIC timer is left masked (will be configured by the system clock).
+
+        // if FEATURE_INFO.has_tsc()
+        //     && FEATURE_INFO.has_tsc_deadline()
+        //     && ADVANCED_PWM_INFO
+        //         .as_ref()
+        //         .is_some_and(raw_cpuid::ApmInfo::has_invariant_tsc)
+        // {
+        //     trace!("Using TSC timer mode.");
+
+        //     LocalVector::<Timer>::set_mode(TimerMode::TscDeadline);
+
+        //     let frequency = PROCESSOR_FREQUENCY_INFO.as_ref().map_or_else(
+        //         || {
+        //             trace!("Processor does not support TSC frequency reporting via `CPUID`.");
+
+        //             // Enable the APIC to start the timer (timer is still masked to avoid firing)
+        //             Self::set_enabled(true);
+
+        //             // Safety: Processor has TSC capability.
+        //             let start_tsc = unsafe { _rdtsc() };
+        //             crate::clock::SYSTEM_CLOCK.spin_wait_us(50000);
+        //             // Safety: Processor has TSC capability.
+        //             let end_tsc = unsafe { _rdtsc() };
+
+        //             (end_tsc - start_tsc) * US_FREQ_FACTOR
+        //         },
+        //         |info| {
+        //             u64::from(info.bus_frequency())
+        //                 / (u64::from(info.processor_base_frequency())
+        //                     * u64::from(info.processor_max_frequency()))
+        //         },
+        //     );
+
+        //     NonZero::new(frequency / u64::from(timer_frequency))
+        //         .expect("timer interval is zero; error occurred during measurements")
+        // } else {
+        //     // Configure the local APIC timer for measurement...
+        //     Self::set_timer_divide_configuration(TimerDivideConfiguration::DivideBy1);
+        //     LocalVector::<Timer>::set_mode(TimerMode::OneShot);
+
+        //     // Start the local APIC timer...
+        //     Self::set_timer_initial_count(u32::MAX);
+        //     Self::set_enabled(true);
+
+        //     crate::clock::SYSTEM_CLOCK.spin_wait_us(US_WAIT.try_into().unwrap());
+        //     let timer_count = Self::get_timer_current_count();
+
+        //     let frequency = u64::from(u32::MAX - timer_count) * US_FREQ_FACTOR;
+
+        //     // Ensure we reset the APIC timer to avoid any errant interrupts.
+        //     Self::set_timer_initial_count(0);
+
+        //     NonZero::new(frequency / u64::from(timer_frequency))
+        //         .expect("timer interval is zero; error occurred during measurements")
+        // }
+    }
 
     /// The initial ID of the local APIC device.
     pub fn get_id() -> u32 {
@@ -258,7 +343,9 @@ impl x2Apic {
     /// deliver a spurious-interrupt vector. Dispensing the spurious-interrupt vector does not
     /// affect the interrupt service register, so the handler for this vector should return
     /// without an end-of-interrupt call.
-    pub fn set_spurious_vector(vector: u8) {
+    pub fn set_spurious_vector(vector: Vector) {
+        let vector = u8::from(vector);
+
         assert!(vector > 15, "interrupts vectors 0..=15 are reserved");
 
         write_register(
@@ -322,13 +409,12 @@ impl x2Apic {
     }
 
     fn get_timer_divide_configuration() -> TimerDivideConfiguration {
-        TimerDivideConfiguration::from_bits_truncate(read_register(
-            Register::TIMER_DIVIDE_CONFIGURATION,
-        ))
+        TimerDivideConfiguration::try_from(read_register(Register::TIMER_DIVIDE_CONFIGURATION))
+            .unwrap()
     }
 
     fn set_timer_divide_configuration(value: TimerDivideConfiguration) {
-        write_register(Register::TIMER_DIVIDE_CONFIGURATION, value.bits());
+        write_register(Register::TIMER_DIVIDE_CONFIGURATION, u64::from(value));
     }
 
     fn send_interrupt_command(interrupt_command: interrupt_command::InterruptCommand) {
@@ -341,34 +427,6 @@ impl x2Apic {
         );
 
         write_register(Register::INTERRUPT_COMMAND, (high << 32) | low);
-    }
-
-    pub fn lvt_timer() -> LocalVector<Timer> {
-        LocalVector(PhantomData)
-    }
-
-    pub fn lvt_cmci() -> LocalVector<CMCI> {
-        LocalVector(PhantomData)
-    }
-
-    pub fn lvt_lint0() -> LocalVector<LINT0> {
-        LocalVector(PhantomData)
-    }
-
-    pub fn lvt_lint1() -> LocalVector<LINT1> {
-        LocalVector(PhantomData)
-    }
-
-    pub fn lvt_error() -> LocalVector<Error> {
-        LocalVector(PhantomData)
-    }
-
-    pub fn lvt_performance_monitors() -> LocalVector<PerformanceMonitors> {
-        LocalVector(PhantomData)
-    }
-
-    pub fn lvt_thermal_sensor() -> LocalVector<ThermalSensor> {
-        LocalVector(PhantomData)
     }
 
     pub fn end_of_interrupt() {

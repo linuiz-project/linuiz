@@ -63,10 +63,11 @@ extern crate zerocopy;
 extern crate num_enum;
 
 #[macro_use]
-extern crate strum;
+extern crate paste;
 
 // mod acpi;
 mod arch;
+mod clock;
 mod cpu;
 mod error;
 mod interrupts;
@@ -76,7 +77,6 @@ mod panic;
 mod params;
 mod rand;
 mod task;
-mod time;
 mod util;
 
 #[macro_use]
@@ -143,16 +143,7 @@ unsafe extern "C" fn _entry() -> ! {
         crate::arch::x86_64::configure_hwthread();
     }
 
-    if let Some(bootloader_info) = BOOTLOADER_INFO_REQUEST.get_response() {
-        info!(
-            "Bootloader Info     {} v{} (rev {})",
-            bootloader_info.name(),
-            bootloader_info.version(),
-            bootloader_info.revision()
-        );
-    } else {
-        info!("Bootloader Info     UNKNOWN");
-    }
+    print_boot_info(&BOOTLOADER_INFO_REQUEST);
 
     let (kernel_physical_address, kernel_virtual_address) = KERNEL_ADDRESS_REQUEST
         .get_response()
@@ -178,4 +169,26 @@ unsafe extern "C" fn _entry() -> ! {
 
     // Safety: We've reached the end of the kernel init phase.
     unsafe { crate::cpu::synchronize(Some((&MP_REQUEST, &MEMORY_MAP_REQUEST))) }
+}
+
+fn print_boot_info(bootloader_info_request: &BootloaderInfoRequest) {
+    if let Some(bootloader_info) = bootloader_info_request.get_response() {
+        info!(
+            "Bootloader: {} v{} (rev {})",
+            bootloader_info.name(),
+            bootloader_info.version(),
+            bootloader_info.revision()
+        );
+    } else {
+        info!("Bootloader: UNKNOWN");
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        if let Some(hypervisor_info) = crate::arch::x86_64::cpuid::hypervisor_info() {
+            info!("Hypervisor: {:?}", hypervisor_info.identify());
+        }
+
+        crate::arch::x86_64::cpuid::print_info();
+    }
 }

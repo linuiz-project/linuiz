@@ -39,7 +39,7 @@ impl GlobalDescriptorTable {
         let dtptr = DescriptorTablePointer::from(self);
 
         trace!(
-            "Loading GDT @ {:X?}:\n{self:#X?}\n{dtptr:#X?}",
+            "Loading: {:X?}:\n{self:#X?}\n{dtptr:#X?}",
             core::ptr::from_ref(self)
         );
 
@@ -69,11 +69,10 @@ impl GlobalDescriptorTable {
     }
 
     pub fn with_temporary<T>(func: impl FnOnce(&mut Self) -> T) -> T {
-        let static_gdt = GDT.get().expect("GDT has not been initialized");
-
+        let static_gdt = GDT.wait();
         let mut temp_gdt = static_gdt.clone();
 
-        crate::interrupts::without(|| {
+        crate::interrupts::uninterruptable(|| {
             let value = func(&mut temp_gdt);
 
             // Safety: Loading the static GDT is always safe.

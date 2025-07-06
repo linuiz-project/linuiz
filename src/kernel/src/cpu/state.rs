@@ -2,10 +2,6 @@ use crate::{interrupts::InterruptCell, interrupts::exceptions::Exception, task::
 use alloc::boxed::Box;
 use core::{cell::UnsafeCell, num::NonZeroU64, sync::atomic::AtomicBool};
 
-pub const US_PER_SEC: u32 = 1000000;
-pub const US_WAIT: u32 = 10000;
-pub const US_FREQ_FACTOR: u32 = US_PER_SEC / US_WAIT;
-
 pub const STACK_SIZE: usize = 0x10000;
 pub const SYSCALL_STACK_SIZE: usize = 0x40000;
 
@@ -18,14 +14,7 @@ pub enum ExceptionCatcher {
 /// Local (to the current hardware thread) state structure.
 pub struct LocalState {
     scheduler: InterruptCell<Scheduler>,
-
-    // #[cfg(target_arch = "x86_64")]
-    // tss: Box<crate::arch::x86_64::structures::tss::TaskStateSegment>,
-    // TODO APIC
-    // #[cfg(target_arch = "x86_64")]
-    // apic: apic::Apic,
     timer_interval: Option<NonZeroU64>,
-
     catch_exception: AtomicBool,
     exception: UnsafeCell<Option<Exception>>,
 }
@@ -36,49 +25,9 @@ impl LocalState {
     /// TODO make this run once and only once
     #[allow(clippy::too_many_lines)]
     pub unsafe fn init(timer_frequency: u16) {
-        // #[cfg(target_arch = "x86_64")]
-        // let tss = {
-        //     use crate::arch::x86_64::structures::{
-        //         idt::{DB_STACK_TABLE_INDEX, DF_STACK_TABLE_INDEX, MC_STACK_TABLE_INDEX, NM_STACK_TABLE_INDEX},
-        //         tss,
-        //     };
-        //     use core::num::NonZeroUsize;
-        //     use ia32utils::VirtAddr;
-
-        //     fn allocate_tss_stack() -> VirtAddr {
-        //         use crate::mem::Stack;
-
-        //         const TSS_STACK_SIZE: NonZeroUsize = NonZeroUsize::new(0x16000).unwrap();
-
-        //         VirtAddr::from_ptr(Box::leak(Box::new(Stack::<{ TSS_STACK_SIZE.get() }>::new())).as_ptr_range().end)
-        //     }
-
-        //     let mut tss = Box::new(tss::TaskStateSegment::new());
-        //     // TODO guard pages for these stacks
-        //     tss.privilege_stack_table[0] = allocate_tss_stack();
-        //     tss.interrupt_stack_table[DB_STACK_TABLE_INDEX.into()] = allocate_tss_stack();
-        //     tss.interrupt_stack_table[NM_STACK_TABLE_INDEX.into()] = allocate_tss_stack();
-        //     tss.interrupt_stack_table[DF_STACK_TABLE_INDEX.into()] = allocate_tss_stack();
-        //     tss.interrupt_stack_table[MC_STACK_TABLE_INDEX.into()] = allocate_tss_stack();
-
-        //     tss::load(tss::ptr_as_descriptor(NonNull::new(&mut *tss).unwrap()));
-
-        //     tss
-        // };
-
         let mut state = Box::new(LocalState {
             scheduler: InterruptCell::new(Scheduler::new(false)),
-
-            // #[cfg(target_arch = "x86_64")]
-            // tss,
-            // TODO APIC
-            // #[cfg(target_arch = "x86_64")]
-            // apic: apic::Apic::new(Some(|address: usize| {
-            //     core::ptr::with_exposed_provenance_mut(crate::mem::Hhdm::offset(address))
-            // }))
-            // .unwrap(),
             timer_interval: None,
-
             catch_exception: AtomicBool::new(false),
             exception: UnsafeCell::new(None),
         });

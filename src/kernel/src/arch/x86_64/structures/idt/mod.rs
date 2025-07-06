@@ -460,7 +460,7 @@ impl InterruptDescriptorTable {
         let dtptr = DescriptorTablePointer::from(self);
 
         trace!(
-            "Loading IDT @ {:X?}:\n{dtptr:#X?}",
+            "Loading: {:X?}:\n{dtptr:#X?}",
             core::ptr::from_ref(self)
         );
 

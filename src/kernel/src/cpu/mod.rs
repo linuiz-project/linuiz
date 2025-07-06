@@ -5,8 +5,8 @@ use core::{
 use libsys::{Address, Frame, Physical};
 use spin::{Mutex, Once};
 
-pub mod interrupts;
 pub mod state;
+pub mod timer;
 
 pub fn get_id() -> u32 {
     #[cfg(target_arch = "x86_64")]
@@ -68,7 +68,7 @@ pub fn begin_multiprocessing(mp_request: &limine::request::MpRequest) -> Option<
         }
 
         extern "C" fn _idle_forever(_: &limine::mp::Cpu) -> ! {
-            crate::interrupts::halt_and_catch_fire()
+            crate::cpu::halt_and_catch_fire()
         }
 
         if crate::params::use_multiprocessing() {
@@ -262,10 +262,10 @@ pub unsafe fn synchronize(
         trace!("Entry checks complete.");
     }
 
-    core::arch::breakpoint();
-
     #[cfg(target_arch = "x86_64")]
-    crate::arch::x86_64::structures::tss::TaskStateSegment::new_with_stacks().load();
+    crate::arch::x86_64::structures::tss::TaskStateSegment::new_with_stacks().load_local();
+
+    core::arch::breakpoint();
 
     // Safety: Function is only run once, right here.
     unsafe {
@@ -291,4 +291,12 @@ pub fn get_stack_ptr() -> *const u8 {
     {
         crate::arch::x86_64::registers::RSP::read()
     }
+}
+
+/// Murder—in cold electrons—the current hardware thread.
+#[inline(never)]
+pub fn halt_and_catch_fire() -> ! {
+    crate::interrupts::disable();
+
+    crate::interrupts::wait_indefinite()
 }

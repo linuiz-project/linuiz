@@ -222,13 +222,10 @@ pub fn init(
 }
 
 pub fn with_kernel_mapper<T>(func: impl FnOnce(&mut Mapper) -> T) -> T {
-    KERNEL_MAPPER
-        .get()
-        .expect("kernel memory has not been initialized")
-        .with(|mapper| {
-            let mut mapper = mapper.lock();
-            func(&mut mapper)
-        })
+    KERNEL_MAPPER.wait().with(|mapper| {
+        let mut mapper = mapper.lock();
+        func(&mut mapper)
+    })
 }
 
 pub fn copy_kernel_page_table() -> Result<Address<Frame>, pmm::Error> {
