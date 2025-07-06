@@ -12,7 +12,7 @@ rand_pcg = { version = "0.9", default-features = false }
 num_enum = { version = "0.7", default-features = false }
 uuid = { version = "1.16", default-features = false, features = ["v4"] }
 strum = { version = "0.27", default-features = false, features = ["derive"] }
-elf = { version = "0.7", default-features = false, features = ["nightly"] }
+elf = { version = "0.8.0", default-features = false }
 bitvec = { version = "1.0", default-features = false, features = [
     "atomic",
     "alloc",
