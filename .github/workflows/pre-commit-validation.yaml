@@ -2,13 +2,14 @@ on:
   pull_request:
     branches:
       - main
+      - 
   workflow_dispatch:
 
 name: Pre-commit Validation
 
 jobs:
   check:
-    name: Check
+    name: Check Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,7 +24,7 @@ jobs:
           command: check
 
   rustfmt:
-    name: Rustfmt
+    name: Check Formatting
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,7 +40,7 @@ jobs:
           args: --all --check
 
   dependency_sort:
-    name: Dependency Sort
+    name: Check Dependency Ordering
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
