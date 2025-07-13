@@ -37,3 +37,23 @@ jobs:
         with:
           command: fmt
           args: --all --check
+
+  dependency_sort:
+    name: Dependency Sort
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          components: rustfmt
+          profile: minimal
+          override: true
+      - uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: cargo-sort
+        with:
+          command: sort
+          args: --grouped --check
+
