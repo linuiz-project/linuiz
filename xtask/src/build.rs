@@ -46,6 +46,9 @@ pub struct Options {
 }
 
 pub fn build(sh: &Shell, temp_dir: impl AsRef<Path>, options: Options) -> Result<()> {
+    cmd!(sh, "cargo fmt --check").run()?;
+    cmd!(sh, "cargo sort --workspace --grouped --check").run()?;
+
     // Safety: Single-threaded.
     unsafe {
         set_var("LINUIZ_OUT_DIR", temp_dir.as_ref().as_os_str());

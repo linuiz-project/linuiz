@@ -92,51 +92,52 @@ impl AddressSpace {
     #[cfg_attr(debug_assertions, inline(never))]
     fn map_any(
         &mut self,
-        page_count: NonZeroUsize,
-        permissions: MmapPermissions,
+        _page_count: NonZeroUsize,
+        _permissions: MmapPermissions,
     ) -> Result<NonNull<[u8]>, Error> {
-        let walker = unsafe {
-            paging::walker::Walker::new(
-                self.0.view_page_table(),
-                TableDepth::max(),
-                TableDepth::min(),
-            )
-            .unwrap()
-        };
+        // let walker = unsafe {
+        //     paging::walker::Walker::new(
+        //         self.0.view_page_table(),
+        //         TableDepth::max(),
+        //         TableDepth::min(),
+        //     )
+        //     .unwrap()
+        // };
 
-        let mut index = 0;
-        let mut run = 0;
-        walker
-            .walk(|entry| {
-                use core::ops::ControlFlow;
+        // let mut index = 0;
+        // let mut run = 0;
+        // walker.walk(|entry| {
+        //     use core::ops::ControlFlow;
 
-                if entry.is_none() {
-                    run += 1;
+        //     if entry.is_none() {
+        //         run += 1;
 
-                    if run == page_count.get() {
-                        return ControlFlow::Break(());
-                    }
-                } else {
-                    run = 0;
-                }
+        //         if run == page_count.get() {
+        //             return ControlFlow::Break(());
+        //         }
+        //     } else {
+        //         run = 0;
+        //     }
 
-                index += 1;
+        //     index += 1;
 
-                ControlFlow::Continue(())
-            });
+        //     ControlFlow::Continue(())
+        // });
 
-        match run.cmp(&page_count.get()) {
-            core::cmp::Ordering::Equal => {
-                let address = Address::<Page>::new(index << libsys::page_shift().get()).unwrap();
-                let flags = TableEntryFlags::PRESENT
-                    | TableEntryFlags::USER
-                    | TableEntryFlags::from(permissions);
+        // match run.cmp(&page_count.get()) {
+        //     core::cmp::Ordering::Equal => {
+        //         let address = Address::<Page>::new(index << libsys::page_shift().get()).unwrap();
+        //         let flags = TableEntryFlags::PRESENT
+        //             | TableEntryFlags::USER
+        //             | TableEntryFlags::from(permissions);
 
-                unsafe { self.invoke_mapper(address, page_count, flags) }
-            }
-            core::cmp::Ordering::Less => Err(Error::OutOfMemory),
-            core::cmp::Ordering::Greater => unreachable!(),
-        }
+        //         unsafe { self.invoke_mapper(address, page_count, flags) }
+        //     }
+        //     core::cmp::Ordering::Less => Err(Error::OutOfMemory),
+        //     core::cmp::Ordering::Greater => unreachable!(),
+        // }
+
+        todo!()
     }
 
     #[cfg_attr(debug_assertions, inline(never))]
