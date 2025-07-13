@@ -1,7 +1,15 @@
-use std::{fs::File, io::Error, path::Path};
+use std::{
+    env::set_var,
+    fs::File,
+    hash::{DefaultHasher, Hash, Hasher},
+    io::Error,
+    path::Path,
+};
 
-#[derive(Debug, ValueEnum, Clone, Copy, PartialEq, Eq)]
+/// Possible target platforms to compile for.
 #[allow(non_camel_case_types)]
+#[derive(Debug, ValueEnum, Clone, Copy, PartialEq, Eq)]
+#[value(rename_all = "snake_case")]
 pub enum Target {
     x86_64,
     riscv64gc,
@@ -18,12 +26,18 @@ impl Target {
     }
 }
 
+/// Possible segment alignments for the kernel.
+#[derive(Debug, ValueEnum, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SegmentAlign {
+    /// Single-page alignment.
+    Small,
+
+    /// Mega-page alignment.
+    Fast,
+}
+
 #[derive(Parser)]
 pub struct Options {
-    /// Whether to build in release mode (with all optimizations).
-    #[arg(long)]
-    release: bool,
-
     /// Verbose build output. Equivalent to `cargo build -vv`.
     #[arg(short, long)]
     verbose: bool,
@@ -37,6 +51,14 @@ pub struct Options {
     #[arg(short, long)]
     target: Target,
 
+    /// Whether to build in release mode (with all optimizations).
+    #[arg(long)]
+    release: bool,
+
+    /// Page alignment of the kernel executable segments.
+    #[arg(long, default_value = "fast")]
+    kalign: SegmentAlign,
+
     #[arg(long)]
     drivers: Vec<String>,
 }
@@ -46,19 +68,34 @@ pub fn build<P: AsRef<Path>>(
     temp_dir: P,
     options: Options,
 ) -> anyhow::Result<()> {
-    let _cargo_log = {
-        let mut cargo_log = Vec::new();
-
-        if options.fingerprint {
-            cargo_log.push("cargo::core::compiler::fingerprint=info");
+    if options.fingerprint {
+        // Safety: Usage is single-threaded.
+        unsafe {
+            set_var("CARGO_LOG", "cargo::core::compiler::fingerprint=info");
         }
+    }
 
-        sh.push_env("CARGO_LOG", cargo_log.join(" "))
-    };
+    // Save a fingerprint for options Cargo doesn't track (is used by `cargo:rerun-if-changed`).
+    let mut hasher = DefaultHasher::new();
+    options.kalign.hash(&mut hasher);
+    if let Err(error) = sh.write_file("target/.xtraprint", hasher.finish().to_le_bytes()) {
+        println!("Couldn't write kernel extra fingerprint: {error:?}");
+    }
+
+    // Safety: Usage is single-threaded.
+    unsafe {
+        set_var(
+            "KERNEL_SEGMENT_ALIGN",
+            match options.kalign {
+                SegmentAlign::Small if options.target == Target::x86_64 => "0x1000",
+                SegmentAlign::Fast if options.target == Target::x86_64 => "0x200000",
+
+                _ => unimplemented!(),
+            },
+        );
+    }
 
     let root_dir = sh.current_dir();
-
-    cmd!(sh, "cargo fmt --check").run()?;
 
     let mut build_cmd = cmd!(sh, "cargo build")
         .args(["--target", options.target.as_triple()])
@@ -66,6 +103,8 @@ pub fn build<P: AsRef<Path>>(
         .args(["-Z", "unstable-options"]);
 
     if options.release {
+        cmd!(sh, "cargo fmt --check").run()?;
+
         build_cmd = build_cmd.arg("--release");
     } else {
         // Only provide future-compatibiltiy notifications for development builds.

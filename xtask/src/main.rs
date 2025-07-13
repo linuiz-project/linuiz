@@ -8,7 +8,6 @@ extern crate clap;
 extern crate xshell;
 
 #[derive(Parser)]
-#[command(rename_all = "snake_case")]
 enum Arguments {
     Build(build::Options),
     Run(run::Options),

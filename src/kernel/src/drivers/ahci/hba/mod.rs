@@ -5,7 +5,7 @@ mod port;
 pub use command::*;
 pub use port::*;
 
-use libsys::{memory::VolatileCell, ReadOnly};
+use libsys::{ReadOnly, memory::VolatileCell};
 
 #[repr(C)]
 pub struct Memory {
@@ -20,7 +20,7 @@ pub struct Memory {
     enclosure_management_control: VolatileCell<u32, ReadOnly>,
     host_capabilities_extended: VolatileCell<u32, ReadOnly>,
     bios_handoff_control_status: VolatileCell<u32, ReadOnly>,
-    _reserved0: [u8; 0x74],
+    _0: [u8; 0x74],
     _vendor0: [u8; 0x60],
     ports: [Port; 32],
 }

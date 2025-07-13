@@ -1,36 +1,38 @@
-use core::mem::MaybeUninit;
-
 #[unsafe(no_mangle)]
 #[allow(clippy::unnecessary_wraps)]
 unsafe extern "Rust" fn __getrandom_v03_custom(
-    dest: *mut u8,
+    dst: *mut u8,
     len: usize,
 ) -> Result<(), getrandom::Error> {
-    // Safety: The caller must ensure the provided parameters are valid.
-    let buf = unsafe {
-        core::slice::from_raw_parts_mut(
-            // `dest` may be uninitialized for `len`
-            dest.cast::<MaybeUninit<u8>>(),
-            len,
-        )
-    };
+    (0..len)
+        .step_by(size_of::<u64>())
+        .try_for_each(|chunk_offset| {
+            let rng_bytes = prng::next_u64().to_ne_bytes();
+            let chunk_size = usize::min(len - chunk_offset, size_of::<u64>());
 
-    trace!("[RAND] BUFFER LEN: {}", buf.len());
+            // Safety:
+            //  - `rng_bytes` is on the local stack, `dest` should not be (so cannot overlap).
+            //  - `dest` is valid as `u8` for `len`, so can be written to as raw bytes.
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    rng_bytes.as_ptr(),
+                    dst.byte_add(chunk_offset),
+                    chunk_size,
+                );
+            }
 
-    for (index, chunk) in buf.chunks_mut(core::mem::size_of::<u64>()).enumerate() {
-        let rng_bytes = prng::next_u64().to_ne_bytes();
-
-        trace!("[RAND] CHUNK#{index}: {rng_bytes:?}");
-
-        chunk.write_copy_of_slice(&rng_bytes[..chunk.len()]);
-    }
-
-    Ok(())
+            Ok(())
+        })
 }
 
 pub mod prng {
     use rand_pcg::{Pcg64Mcg, rand_core::RngCore};
     use spin::{Lazy, Mutex};
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    fn produce_seed() -> u64 {
+        todo!()
+    }
 
     static PCG: Lazy<Mutex<Pcg64Mcg>> = Lazy::new(|| {
         Mutex::new(Pcg64Mcg::new({

@@ -1,12 +1,16 @@
-static PARAMS: spin::Once<Parameters> = spin::Once::new();
+use core::ffi::CStr;
+use limine::{request::ExecutableCmdlineRequest, response::ExecutableCmdlineResponse};
+use spin::Once;
+
+static PARAMS: Once<Parameters> = Once::new();
 
 #[derive(Debug, Clone, Copy)]
 pub struct Parameters {
     /// Whether the kernel should utilize multi-processing.
     pub use_multiprocessing: bool,
 
-    /// Whether to keep the kernel symbol info before reclaiming extra memory.
-    pub drop_symbol_info: bool,
+    /// Whether to keep the kernel symbol info (for stack traces).
+    pub keep_symbol_info: bool,
 
     /// Whether the kernel should use low-memory mode.
     pub low_memory_mode: bool,
@@ -16,26 +20,28 @@ impl Default for Parameters {
     fn default() -> Self {
         Parameters {
             use_multiprocessing: true,
-            drop_symbol_info: false,
+            keep_symbol_info: true,
             low_memory_mode: false,
         }
     }
 }
 
-pub fn parse(kernel_cmdline_request: &limine::request::ExecutableCmdlineRequest) {
+pub fn parse(kernel_cmdline_request: &ExecutableCmdlineRequest) {
     PARAMS.call_once(|| {
         let mut params = Parameters::default();
 
         match kernel_cmdline_request
             .get_response()
-            .map(limine::response::ExecutableCmdlineResponse::cmdline)
-            .map(core::ffi::CStr::to_str)
+            .map(ExecutableCmdlineResponse::cmdline)
+            .map(CStr::to_str)
         {
             Some(Ok("")) => {
                 // Ignore accidental extra spaces
             }
 
             Some(Ok("--nomp")) => params.use_multiprocessing = false,
+
+            Some(Ok("--keep-symbols")) => params.keep_symbol_info = true,
 
             Some(Ok("--lomem")) => params.low_memory_mode = true,
 
@@ -48,7 +54,7 @@ pub fn parse(kernel_cmdline_request: &limine::request::ExecutableCmdlineRequest)
             }
 
             None => {
-                error!("Bootloader didn't provide response to kernel command line request.");
+                warn!("Bootloader didn't provide response to kernel command line request.");
             }
         }
 
@@ -59,9 +65,13 @@ pub fn parse(kernel_cmdline_request: &limine::request::ExecutableCmdlineRequest)
 }
 
 pub fn use_multiprocessing() -> bool {
-    PARAMS.get().unwrap().use_multiprocessing
+    PARAMS.wait().use_multiprocessing
+}
+
+pub fn keep_symbol_info() -> bool {
+    PARAMS.wait().keep_symbol_info
 }
 
 pub fn use_low_memory() -> bool {
-    PARAMS.get().unwrap().low_memory_mode
+    PARAMS.wait().low_memory_mode
 }

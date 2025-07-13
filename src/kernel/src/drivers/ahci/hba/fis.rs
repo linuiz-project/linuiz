@@ -60,7 +60,7 @@ impl Hw2Dev {
     }
 
     pub fn set_sector_base(&mut self, sector: usize) {
-        assert_eq!(sector & 0xFFFFFFFFFFFF, 0, "`sector` is a 48");
+        assert_eq!(sector & 0xFFFF_FFFF_FFFF, 0, "`sector` is a 48");
 
         self.lba0 = (sector >> 0) as u8;
         self.lba1 = (sector >> 8) as u8;

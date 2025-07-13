@@ -15,7 +15,7 @@ pub struct InterruptStackFrame {
 
     code_segment: u16,
 
-    _reserved1: [u8; 6],
+    _1: [u8; 6],
 
     /// The flags register before the interrupt handler was invoked.
     cpu_flags: u64,
@@ -26,7 +26,7 @@ pub struct InterruptStackFrame {
     /// The stack segment descriptor at the time of the interrupt (often zero in 64-bit mode).
     stack_segment: u16,
 
-    _reserved2: [u8; 6],
+    _2: [u8; 6],
 }
 
 impl InterruptStackFrame {
@@ -42,11 +42,11 @@ impl InterruptStackFrame {
         Self {
             instruction_pointer: u64::try_from(instruction_pointer.get()).unwrap(),
             code_segment: code_segment.as_u16(),
-            _reserved1: [0u8; _],
+            _1: [0u8; _],
             cpu_flags: cpu_flags.bits(),
             stack_pointer: u64::try_from(stack_pointer.get()).unwrap(),
             stack_segment: stack_segment.as_u16(),
-            _reserved2: [0u8; _],
+            _2: [0u8; _],
         }
     }
 
@@ -56,10 +56,10 @@ impl InterruptStackFrame {
     ) -> Self {
         Self::new(
             instruction_pointer,
-            KCODE_SELECTOR,
+            *KCODE_SELECTOR.wait(),
             RFlags::INTERRUPT_FLAG,
             stack_pointer,
-            KDATA_SELECTOR,
+            *KDATA_SELECTOR.wait(),
         )
     }
 
@@ -69,10 +69,10 @@ impl InterruptStackFrame {
     ) -> Self {
         Self::new(
             instruction_pointer,
-            UCODE_SELECTOR,
+            *UCODE_SELECTOR.wait(),
             RFlags::INTERRUPT_FLAG,
             stack_pointer,
-            UDATA_SELECTOR,
+            *UDATA_SELECTOR.wait(),
         )
     }
 
@@ -91,7 +91,7 @@ impl InterruptStackFrame {
 
     /// Stores the new return instruction pointer.
     ///
-    /// ## Safety
+    /// # Safety
     ///
     /// TODO
     pub unsafe fn set_instruction_pointer(&mut self, instruction_pointer: Address<Virtual>) {
@@ -102,14 +102,13 @@ impl InterruptStackFrame {
     pub fn get_code_segment(&self) -> SegmentSelector {
         SegmentSelector::new(
             self.code_segment >> 3,
-            PrivilegeLevel::from_u16(self.code_segment & 0b11),
+            PrivilegeLevel::try_from(self.code_segment & 0b11).unwrap(),
         )
-        .unwrap()
     }
 
     /// Set the return code segment selector.
     ///
-    /// ## Safety
+    /// # Safety
     ///
     /// TODO
     pub unsafe fn set_code_segment(&mut self, segment_selector: SegmentSelector) {
@@ -118,12 +117,12 @@ impl InterruptStackFrame {
 
     /// Get the return cpu flags.
     pub fn get_cpu_flags(&self) -> RFlags {
-        RFlags::from_bits(self.cpu_flags).unwrap()
+        RFlags::from_bits_truncate(self.cpu_flags)
     }
 
     /// Set the return cpu flags.
     ///
-    /// ## Safety
+    /// # Safety
     ///
     /// TODO
     pub unsafe fn set_cpu_flags(&mut self, cpu_flags: RFlags) {
@@ -137,7 +136,7 @@ impl InterruptStackFrame {
 
     /// Set the return stack pointer.
     ///
-    /// ## Safety
+    /// # Safety
     ///
     /// TODO
     pub unsafe fn set_stack_pointer(&mut self, stack_pointer: Address<Virtual>) {
@@ -148,14 +147,13 @@ impl InterruptStackFrame {
     pub fn get_stack_segment(&self) -> SegmentSelector {
         SegmentSelector::new(
             self.stack_segment >> 3,
-            PrivilegeLevel::from_u16(self.stack_segment & 0b11),
+            PrivilegeLevel::try_from(self.stack_segment & 0b11).unwrap(),
         )
-        .unwrap()
     }
 
     /// Set the return stack segment selector.
     ///
-    /// ## Safety
+    /// # Safety
     ///
     /// TODO
     pub unsafe fn set_stack_segment(&mut self, segment_selector: SegmentSelector) {

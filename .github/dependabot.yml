@@ -2,7 +2,7 @@ version: 2
 updates:
   # Enable crate version updates for the main crate
   - package-ecosystem: "cargo"
-    directory: "/src/"
+    directory: "/"
     schedule:
       interval: "weekly"
   # Enable version updates for Github Actions

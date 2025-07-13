@@ -3,39 +3,41 @@ name = "kernel"
 version = "0.0.0"
 edition = "2024"
 
+[features]
+default = ["panic_traces"]
+panic_traces = ["dep:rustc-demangle"]
+
 [dependencies]
+acpi = "5.2"
 bit_field = "0.10"
 bitflags = "2.9"
 bitvec = { version = "1.0", default-features = false, features = [
     "atomic",
     "alloc",
 ] }
-elf = { version = "0.7", default-features = false, features = ["nightly"] }
+elf = { version = "0.8.0", default-features = false }
 getrandom = "0.3"
 ioports = "1.0"
-libsys = { git = "https://github.com/linuiz-project/libsys" }
-limine = { version = "0.4", features = ["uuid"] }
+limine = { version = "0.5", features = ["uuid"] }
 log = { version = "0.4", default-features = false }
-num_enum = { version = "0.7", default-features = false }
 paste = "1.0"
 rand_pcg = { version = "0.9", default-features = false }
-rustc-demangle = "0.1"
 spin = "0.10"
-# circular-buffer = { version = "1.0", default-features = false }
+num_enum = { version = "0.7", default-features = false }
 thiserror = { version = "2.0", default-features = false }
-uart = { version = "2.0", default-features = false, features = [
+uart = { version = "3.0", default-features = false, features = [
     "address_impl",
 ] }
 uuid = { version = "1.16", default-features = false, features = ["v4"] }
-[dependencies.apic]
-path = "../apic"
-[dependencies.libkernel]
-path = "../libkernel"
+zerocopy = { version = "0.8", features = ["derive", "alloc"] }
 
-[dependencies.msr]
-path = "../msr"
+# source: git
+acpica = { git = "https://github.com/linuiz-project/acpica" }
+libsys = { git = "https://github.com/linuiz-project/libsys", tag = "v0.1.3" }
+printf-compat = { git = "https://github.com/zdivelbiss/printf-compat", default-features = false }
+
+# feature-specific
+rustc-demangle = { version = "0.1", optional = true } # feature: panic_traces
 
 [target.x86_64-unknown-none.dependencies]
-ia32utils = { version = "0.15", package = "x86_64" }
-pic_8259 = { path = "../pic_8259/" }
 raw-cpuid = "11.0"

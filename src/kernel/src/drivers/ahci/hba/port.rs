@@ -1,8 +1,9 @@
 use bit_field::BitField;
 use core::convert::TryFrom;
 use libsys::{
+    Address, ReadOnly, ReadWrite,
     memory::{Volatile, VolatileCell, VolatileSplitPtr},
-    volatile_bitfield_getter, volatile_bitfield_getter_ro, Address, ReadOnly, ReadWrite,
+    volatile_bitfield_getter, volatile_bitfield_getter_ro,
 };
 use num_enum::TryFromPrimitive;
 
@@ -212,7 +213,7 @@ pub struct Port {
     interrupt_status: InterruptStatus,
     interrupt_enable: VolatileCell<u32, ReadOnly>,
     command_status: CommandStatus,
-    _reserved0: [u8; 4],
+    _0: [u8; 4],
     task_file_data: VolatileCell<u32, ReadOnly>,
     signature: VolatileCell<Class, ReadOnly>,
     sata_status: SATAStatus,
@@ -222,7 +223,7 @@ pub struct Port {
     command_issue: VolatileCell<u32, ReadWrite>,
     sata_notification: VolatileCell<u32, ReadOnly>,
     fis_switch_control: VolatileCell<u32, ReadOnly>,
-    _reserved1: [u8; 11],
+    _1: [u8; 11],
     _vendor0: [u8; 4],
 }
 
@@ -342,7 +343,7 @@ impl Port {
     }
 
     pub fn read(&self, sector_base: usize, sector_count: u16) -> alloc::vec::Vec<u8> {
-        use crate::drivers::ahci::{hba::fis, ATA_DEV_BUSY, ATA_DEV_DRQ};
+        use crate::drivers::ahci::{ATA_DEV_BUSY, ATA_DEV_DRQ, hba::fis};
 
         debug!("AHCI PORT: READ: RECEIVED");
 

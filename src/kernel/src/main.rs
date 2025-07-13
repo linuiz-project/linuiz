@@ -1,37 +1,32 @@
 #![no_std]
 #![no_main]
 #![feature(
-    iter_advance_by,                        // #77404 <https://github.com/rust-lang/rust/issues/77404>
-    iter_array_chunks,                      // #100450 <https://github.com/rust-lang/rust/issues/100450>
-    iter_next_chunk,                        // #98326 <https://github.com/rust-lang/rust/issues/98326>
-    array_windows,                          // #75027 <https://github.com/rust-lang/rust/issues/75027>
-    maybe_uninit_slice,                     // #63569 <https://github.com/rust-lang/rust/issues/63569>
-    maybe_uninit_write_slice,               // #79995 <https://github.com/rust-lang/rust/issues/79995>
-    iterator_try_reduce,                    // #87053 <https://github.com/rust-lang/rust/issues/87053>
-    map_try_insert,                         // #82766 <https://github.com/rust-lang/rust/issues/82766>
-    try_trait_v2,                           // #84277 <https://github.com/rust-lang/rust/issues/84277>
-    step_trait,                             // #42168 <https://github.com/rust-lang/rust/issues/42168>
-    generic_arg_infer,                      // #85077 <https://github.com/rust-lang/rust/issues/85077>
-    exclusive_wrapper,                      // #98407 <https://github.com/rust-lang/rust/issues/98407>
-    nonnull_provenance,                     // #135243 <https://github.com/rust-lang/rust/issues/135243>
-    sync_unsafe_cell,
+    iter_advance_by,
+    iter_array_chunks,
+    iter_next_chunk,
+    array_windows,
+    maybe_uninit_slice,
+    maybe_uninit_write_slice,
+    step_trait,
+    breakpoint,
+    extern_types,
     slice_ptr_get,
     let_chains,
     if_let_guard,
-    exact_size_is_empty,
-    fn_align,
     ptr_as_uninit,
-    ptr_metadata,
-    btreemap_alloc,
-    const_trait_impl,
+    strict_provenance_lints,
+    box_vec_non_null
 )]
-#![forbid(clippy::inline_asm_x86_att_syntax)]
-#![deny(clippy::debug_assert_with_mut_call, clippy::float_arithmetic)]
+#![forbid(clippy::inline_asm_x86_att_syntax, fuzzy_provenance_casts)]
+#![deny(
+    clippy::debug_assert_with_mut_call,
+    clippy::float_arithmetic,
+    clippy::as_conversions,
+    stable_features
+)]
 #![warn(
     clippy::cargo,
     clippy::pedantic,
-    clippy::cast_lossless,
-    clippy::missing_const_for_fn,
     clippy::undocumented_unsafe_blocks,
     clippy::semicolon_inside_block,
     clippy::semicolon_if_nothing_returned,
@@ -47,9 +42,8 @@
     clippy::wildcard_imports,
     clippy::upper_case_acronyms,
     clippy::missing_const_for_fn,
-    // // While ideally this is warned against, the number of situations in which pointer alignment up-casting
-    // // is acceptable seem to far outweigh the circumstances within the kernel where it is inappropriate.
-    // clippy::cast_ptr_alignment,
+    clippy::needless_for_each,
+    clippy::if_not_else,
     dead_code
 )]
 #![cfg_attr(target_arch = "x86_64", feature(abi_x86_interrupt))]
@@ -62,11 +56,20 @@ extern crate log;
 #[macro_use]
 extern crate thiserror;
 
+#[macro_use]
+extern crate zerocopy;
+
+#[macro_use]
+extern crate num_enum;
+
+#[macro_use]
+extern crate paste;
+
 // mod acpi;
 mod arch;
+mod clock;
 mod cpu;
 mod error;
-mod init;
 mod interrupts;
 mod logging;
 mod mem;
@@ -74,46 +77,123 @@ mod panic;
 mod params;
 mod rand;
 mod task;
-mod time;
+mod util;
 
 #[macro_use]
 extern crate bitflags;
 
+use limine::{
+    BaseRevision,
+    mp::RequestFlags,
+    request::{
+        BootloaderInfoRequest, ExecutableAddressRequest, ExecutableCmdlineRequest,
+        ExecutableFileRequest, HhdmRequest, MemoryMapRequest, MpRequest, RsdpRequest,
+        StackSizeRequest,
+    },
+};
+
 /// Specify the Limine revision to use.
 #[doc(hidden)]
-static BASE_REVISION: limine::BaseRevision = limine::BaseRevision::with_revision(0);
+static BASE_REVISION: BaseRevision = BaseRevision::with_revision(3);
+
+const KERNEL_STACK_SIZE: usize = {
+    #[cfg(debug_assertions)]
+    {
+        0x1000000
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        0x4000
+    }
+};
 
 /// Specify the exact stack size the kernel would like to use.
 #[doc(hidden)]
-static STACK_SIZE_REQUEST: limine::request::StackSizeRequest =
-    limine::request::StackSizeRequest::new().with_size({
-        #[cfg(debug_assertions)]
-        {
-            0x1000000
-        }
-        #[cfg(not(debug_assertions))]
-        {
-            0x4000
-        }
-    });
+#[allow(clippy::as_conversions)]
+static STACK_SIZE_REQUEST: StackSizeRequest =
+    StackSizeRequest::new().with_size(KERNEL_STACK_SIZE as u64);
 
-/// ## Safety
+/// # Safety
 ///
 /// This function should only ever be called by the bootloader.
-#[unsafe(no_mangle)]
 #[doc(hidden)]
+#[unsafe(no_mangle)]
 #[allow(clippy::too_many_lines)]
 unsafe extern "C" fn _entry() -> ! {
-    // Safety: We've just entered the kernel, so no state can be disrupted.
-    unsafe {
-        core::arch::asm!(
-            "
-            xor rbp, rbp
+    // This function is absolutely massive, and that's intentional. All of the code
+    // within this function should be absolutely, definitely run ONLY ONCE. Writing
+    // the code sequentially within one function easily ensures that will be the case.
 
-            call {}
-            ",
-            sym init::init,
-            options(noreturn)
-        )
+    // All limine feature requests (ensures they are not used after bootloader memory is reclaimed)
+    static BOOTLOADER_INFO_REQUEST: BootloaderInfoRequest = BootloaderInfoRequest::new();
+    static KERNEL_FILE_REQUEST: ExecutableFileRequest = ExecutableFileRequest::new();
+    static KERNEL_CMDLINE_REQUEST: ExecutableCmdlineRequest = ExecutableCmdlineRequest::new();
+    static KERNEL_ADDRESS_REQUEST: ExecutableAddressRequest = ExecutableAddressRequest::new();
+    static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
+    static MEMORY_MAP_REQUEST: MemoryMapRequest = MemoryMapRequest::new();
+    static RSDP_ADDRESS_REQUEST: RsdpRequest = RsdpRequest::new();
+    static MP_REQUEST: MpRequest = MpRequest::new().with_flags(RequestFlags::X2APIC);
+
+    // Enable logging first, so we can get feedback on the entire init process.
+    crate::logging::Logger::init();
+
+    // Safety: Function is run only once for this hardware thread.
+    unsafe {
+        #[cfg(target_arch = "x86_64")]
+        crate::arch::x86_64::configure_hwthread();
+    }
+
+    print_boot_info(&BOOTLOADER_INFO_REQUEST);
+
+    let (kernel_physical_address, kernel_virtual_address) = KERNEL_ADDRESS_REQUEST
+        .get_response()
+        .map(|response| {
+            (
+                usize::try_from(response.physical_base()).unwrap(),
+                usize::try_from(response.virtual_base()).unwrap(),
+            )
+        })
+        .expect("bootloader did not provide a response to kernel address request");
+    debug!("Kernel physical address: {kernel_physical_address:#X?}");
+    debug!("Kernel virtual address: {kernel_virtual_address:#X?}");
+
+    crate::params::parse(&KERNEL_CMDLINE_REQUEST);
+
+    #[cfg(feature = "panic_traces")]
+    if crate::params::keep_symbol_info() {
+        crate::panic::tracing::symbols::parse(&KERNEL_FILE_REQUEST);
+    }
+
+    crate::mem::Hhdm::init(&HHDM_REQUEST);
+    crate::mem::pmm::PhysicalMemoryManager::init(&MEMORY_MAP_REQUEST);
+    crate::mem::init(
+        &MEMORY_MAP_REQUEST,
+        &KERNEL_FILE_REQUEST,
+        &KERNEL_ADDRESS_REQUEST,
+    );
+
+    // Safety: We've reached the end of the kernel init phase.
+    unsafe { crate::cpu::synchronize(Some((&MP_REQUEST, &MEMORY_MAP_REQUEST))) }
+}
+
+fn print_boot_info(bootloader_info_request: &BootloaderInfoRequest) {
+    if let Some(bootloader_info) = bootloader_info_request.get_response() {
+        info!(
+            "Bootloader: {} v{} (rev {})",
+            bootloader_info.name(),
+            bootloader_info.version(),
+            bootloader_info.revision()
+        );
+    } else {
+        info!("Bootloader: UNKNOWN");
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        if let Some(hypervisor_info) = crate::arch::x86_64::cpuid::hypervisor_info() {
+            info!("Hypervisor: {:?}", hypervisor_info.identify());
+        }
+
+        crate::arch::x86_64::cpuid::print_info();
     }
 }

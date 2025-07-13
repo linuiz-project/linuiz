@@ -1,6 +1,7 @@
 use crate::arch::x86_64::structures::{
     gdt::{KCODE_SELECTOR, PrivilegeLevel, SegmentSelector},
-    idt::{InterruptStackFrame, StackTableIndex},
+    idt::InterruptStackFrame,
+    tss::InterruptStackTableIndex,
 };
 use bit_field::BitField;
 use core::marker::PhantomData;
@@ -26,7 +27,7 @@ macro_rules! impl_handler_func_type {
                 // width doesn't exeed 64 bits.
                 #[cfg_attr(
                     any(target_pointer_width = "32", target_pointer_width = "64"),
-                    allow(clippy::fn_to_numeric_cast)
+                    allow(clippy::fn_to_numeric_cast, clippy::as_conversions)
                 )]
                 Address::new(self as usize).unwrap()
             }
@@ -119,7 +120,8 @@ impl<F> Entry<F> {
 
     /// Configure the interrupt descriptor table entry.
     ///
-    /// ## Safety
+    /// # Safety
+    ///
     /// - `address` must point to a valid address for the
     unsafe fn set_handler_addr(&mut self, fn_address: Address<Virtual>) -> &mut Options {
         let fn_address = fn_address.get();
@@ -131,7 +133,7 @@ impl<F> Entry<F> {
         self.options = Options::minimal();
         // Safety: `KCODE_SELECTOR` is a valid segment selector for the kernel code segment.
         unsafe {
-            self.options.set_code_selector(KCODE_SELECTOR);
+            self.options.set_code_selector(*KCODE_SELECTOR.wait());
         }
         self.options.set_present(true);
 
@@ -139,11 +141,14 @@ impl<F> Entry<F> {
     }
 
     pub fn handler_addr(&self) -> Address<Virtual> {
-        Address::new_truncate(
-            ((self.pointer_high as usize) << 32)
-                | ((self.pointer_middle as usize) << 16)
-                | (self.pointer_low as usize),
-        )
+        let address = (u64::from(self.pointer_high) << 32)
+            | (u64::from(self.pointer_middle) << 16)
+            | u64::from(self.pointer_low);
+
+        usize::try_from(address)
+            .ok()
+            .and_then(Address::new)
+            .unwrap()
     }
 }
 
@@ -200,13 +205,16 @@ impl<F: HandlerFuncType> Entry<F> {
     /// ## Safety
     ///
     /// TODO
-    pub unsafe fn new_with_stack(handler: F, stack_table_index: StackTableIndex) -> Self {
+    pub unsafe fn new_with_stack(
+        handler: F,
+        interrupt_stack_table_index: InterruptStackTableIndex,
+    ) -> Self {
         let mut entry = Self::missing();
         let options = entry.set_handler_fn(handler);
 
         // Safety: Caller is required to guarantee the stack table index is correct.
         unsafe {
-            options.set_stack_index(stack_table_index);
+            options.set_stack_index(interrupt_stack_table_index);
         }
 
         entry
@@ -257,7 +265,7 @@ impl core::fmt::Debug for Options {
             .field("type", &format_args!("{:#04b}", self.bits.get_bits(8..12)))
             .field(
                 "privilege_level",
-                &PrivilegeLevel::from_u16(self.bits.get_bits(13..15)),
+                &PrivilegeLevel::try_from(self.bits.get_bits(13..15)).unwrap(),
             )
             .field("present", &self.bits.get_bit(15))
             .finish()
@@ -308,32 +316,28 @@ impl Options {
 
     /// Set the required privilege level (DPL) for invoking the handler. The DPL can be 0, 1, 2,
     /// or 3, the default is 0. If CPL < DPL, a general protection fault occurs.
-    ///
-    /// ## Safety
-    ///
-    /// TODO
-    pub unsafe fn set_privilege_level(&mut self, dpl: PrivilegeLevel) -> &mut Self {
-        self.bits.set_bits(13..15, dpl as u16);
+    pub unsafe fn set_privilege_level(&mut self, value: PrivilegeLevel) -> &mut Self {
+        self.bits.set_bits(13..15, u16::from(value));
         self
     }
 
-    /// Assigns a Interrupt Stack Table (IST) stack to this handler. The CPU will then always
+    /// Assigns an interrupt stack table (IST) stack to this handler. The CPU will then always
     /// switch to the specified stack before the handler is invoked. This allows kernels to
-    /// recover from corrupt stack pointers (e.g., on kernel stack overflow).
+    /// recover from corrupt stack pointers (e.g. on kernel stack overflow).
     ///
-    /// An IST stack is specified by an IST index between 0 and 6 (inclusive). Using the same
+    /// An interrupt stack table stack is specified by an index between 0..=6. Using the same
     /// stack for multiple interrupts can be dangerous when nested interrupts are possible.
     ///
-    /// This function panics if the index is not in the range 0..7.
+    /// This function panics if the index is not in the range 0..=6.
     ///
-    /// ## Safety
+    /// # Safety
     ///
     /// This function is unsafe because the caller must ensure that the passed stack index is
     /// valid and not used by other interrupts. Otherwise, memory safety violations are possible.
-    pub unsafe fn set_stack_index(&mut self, index: StackTableIndex) -> &mut Self {
+    pub unsafe fn set_stack_index(&mut self, index: InterruptStackTableIndex) -> &mut Self {
         // The hardware IST index starts at 1, but our software IST index
         // starts at 0. Therefore we need to add 1 here.
-        self.bits.set_bits(0..3, (index as u16) + 1);
+        self.bits.set_bits(0..3, u16::from(index) + 1);
         self
     }
 }

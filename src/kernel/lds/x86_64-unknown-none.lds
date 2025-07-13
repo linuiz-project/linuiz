@@ -2,17 +2,13 @@ OUTPUT_FORMAT(elf64-x86-64)
 OUTPUT_ARCH(i386:x86-64)
 ENTRY(_entry)
 
-/* Place kernel in the last 2GB of virtual memory. */
-KERNEL_BASE = 0xffffffff80000000;
 SEGMENT_ALIGN = CONSTANT(MAXPAGESIZE);
-/* SEGMENT_ALIGN = 0x200000; */
-
 
 SECTIONS
 {
-    . = KERNEL_BASE + SIZEOF_HEADERS; 
-
-    PROVIDE(__executable_start = .);
+    /* Place kernel in the last 2GB of virtual memory. */
+    . = 0xffffffff80000000;
+    . = . + SIZEOF_HEADERS;
 
     .hash                   : { *(.hash) }
     .gnu.hash               : { *(.gnu.hash) }
@@ -57,10 +53,8 @@ SECTIONS
     . = DATA_SEGMENT_END(.);
 
     . = ALIGN(SEGMENT_ALIGN);
-    PROVIDE(__symbols_start = .);
     .symtab             : { *(.symtab) }
     .strtab             : { *(.strtab) }
-    PROVIDE(__symbols_end = .);
 
     .comment              0 : { *(.comment) }
     .debug                0 : { *(.debug) }

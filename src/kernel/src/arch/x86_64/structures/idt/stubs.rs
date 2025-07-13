@@ -84,7 +84,7 @@ macro_rules! push_ret_frame {
 
 macro_rules! exception_handler {
     ($exception_name:ident, $return_type:ty) => {
-        paste::paste! {
+        paste! {
             #[unsafe(naked)]
             pub extern "x86-interrupt" fn [<$exception_name _stub>](stack_frame: InterruptStackFrame) -> $return_type {
                 // Safety: When has perfect assembly ever caused undefined behaviour?
@@ -117,7 +117,7 @@ macro_rules! exception_handler {
 
 macro_rules! exception_handler_with_error {
     ($exception_name:ident, $error_ty:ty, $return_type:ty) => {
-        paste::paste! {
+        paste! {
             #[unsafe(naked)]
             pub extern "x86-interrupt" fn [<$exception_name _stub>](
                 stack_frame: InterruptStackFrame,
@@ -158,7 +158,7 @@ macro_rules! exception_handler_with_error {
 
 macro_rules! irq_stub {
     ($irq_vector:literal) => {
-        paste::paste! {
+        paste! {
             #[unsafe(naked)]
             pub extern "x86-interrupt" fn [<irq_ $irq_vector>](_: crate::arch::x86_64::structures::idt::InterruptStackFrame) {
                 // Safety: This is literally perfect assembly. It's safe because it's perfect.
@@ -192,23 +192,19 @@ macro_rules! irq_stub {
     };
 }
 
-/// Handles and interrupt request.
-///
-/// # Safety
-///
-/// TODO
+/// Handles an interrupt request.
 #[allow(clippy::similar_names)]
-unsafe extern "sysv64" fn irq_handler(
-    irq_number: u64,
+extern "sysv64" fn irq_handler(
+    irq_number: u8,
     isf: &mut InterruptStackFrame,
     regs: &mut Registers,
 ) {
-    match Vector::try_from(irq_number) {
-        Ok(Vector::Timer) => {
-            crate::cpu::state::with_scheduler(|scheduler| scheduler.interrupt_task(isf, regs))
+    match Vector::from(irq_number) {
+        Vector::Timer => {
+            crate::cpu::state::with_scheduler(|scheduler| scheduler.interrupt_task(isf, regs));
         }
 
-        Ok(Vector::Syscall) => {
+        Vector::Syscall => {
             let vector = regs.rax;
             let arg0 = regs.rdi;
             let arg1 = regs.rsi;
@@ -228,8 +224,7 @@ unsafe extern "sysv64" fn irq_handler(
             regs.rsi = rsi;
         }
 
-        Err(err) => panic!("Invalid interrupt vector: {:X?}", err),
-        vector_result => unimplemented!("Unhandled interrupt: {:?}", vector_result),
+        vector => unimplemented!("unsupported interrupt vector: {vector:?}"),
     }
 
     // Safety: This is the end of an interrupt context.

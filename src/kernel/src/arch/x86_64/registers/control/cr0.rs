@@ -19,7 +19,6 @@ bitflags! {
 pub struct CR0;
 
 impl CR0 {
-    #[inline]
     pub fn read() -> CR0Flags {
         let value: u64;
 
@@ -35,28 +34,37 @@ impl CR0 {
         CR0Flags::from_bits_truncate(value)
     }
 
-    #[inline]
+    /// # Safety
+    ///
+    /// TODO
     pub unsafe fn write(value: CR0Flags) {
-        core::arch::asm!(
-            "mov cr0, {}",
-            in(reg) value.bits(),
-            options(nostack, nomem, preserves_flags)
-        );
+        // Safety: Caller is required to maintain safety invariants.
+        unsafe {
+            core::arch::asm!(
+                "mov cr0, {}",
+                in(reg) value.bits(),
+                options(nostack, nomem, preserves_flags)
+            );
+        }
     }
 
-    #[inline]
     pub unsafe fn enable(flags: CR0Flags) {
         let mut new_flags = CR0::read();
         new_flags.set(flags, true);
 
-        CR0::write(new_flags);
+        // Safety: Caller is required to maintain safety invariants.
+        unsafe {
+            CR0::write(new_flags);
+        }
     }
 
-    #[inline]
     pub unsafe fn disable(flags: CR0Flags) {
         let mut new_flags = CR0::read();
         new_flags.set(flags, false);
 
-        CR0::write(new_flags);
+        // Safety: Caller is required to maintain safety invariants.
+        unsafe {
+            CR0::write(new_flags);
+        }
     }
 }

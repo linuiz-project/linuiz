@@ -46,7 +46,7 @@ pub fn process(
 }
 
 fn process_klog(level: log::Level, str_ptr_arg: usize, str_len: usize) -> Result {
-    let str_ptr = str_ptr_arg as *mut u8;
+    let str_ptr = core::ptr::with_exposed_provenance::<u8>(str_ptr_arg);
 
     // TODO abstract this into a function
     crate::cpu::state::with_scheduler(|scheduler| {
@@ -58,7 +58,7 @@ fn process_klog(level: log::Level, str_ptr_arg: usize, str_len: usize) -> Result
 
         let task = scheduler.task_mut().ok_or(Error::NoActiveTask)?;
         for address in (str_start..str_end)
-            .step_by(page_size() / 2)
+            .step_by(page_size())
             .map(Address::new_truncate)
         {
             match task.demand_map(address) {

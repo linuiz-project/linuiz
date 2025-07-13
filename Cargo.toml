@@ -1,20 +1,12 @@
 [workspace]
 resolver = "3"
 exclude = [
-    "xtask",
     "src/slab_alloc",
     "src/userspace/nvme",
     "src/userspace/test_driver",
+    "xtask",
 ]
-members = [
-    "src/kernel",
-    "src/libkernel",
-    "src/acpica",
-    "src/acpica-sys",
-    "src/apic",
-    "src/msr",
-    "src/pic_8259",
-]
+members = ["src/kernel"]
 
 [profile.dev]
 panic = "abort"

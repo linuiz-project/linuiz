@@ -16,8 +16,7 @@ use libsys::{Address, Virtual, page_size};
 use crate::arch::x86_64::structures::idt::InterruptStackFrame;
 
 #[allow(clippy::cast_possible_truncation)]
-pub const STACK_SIZE: NonZeroUsize =
-    NonZeroUsize::new((libsys::MIBIBYTE as usize) - page_size()).unwrap();
+pub const STACK_SIZE: NonZeroUsize = NonZeroUsize::new(1_000_000).unwrap();
 pub const STACK_PAGES: NonZeroUsize = NonZeroUsize::new(STACK_SIZE.get() / page_size()).unwrap();
 pub const STACK_START: NonZeroUsize = NonZeroUsize::new(page_size()).unwrap();
 pub const MIN_LOAD_OFFSET: usize = STACK_START.get() + STACK_SIZE.get();
@@ -25,25 +24,28 @@ pub const MIN_LOAD_OFFSET: usize = STACK_START.get() + STACK_SIZE.get();
 pub const PT_FLAG_EXEC_BIT: usize = 0;
 pub const PT_FLAG_WRITE_BIT: usize = 1;
 
-pub fn segment_to_mmap_permissions(segment_ty: u32) -> MmapPermissions {
+pub fn segment_to_mmap_permissions(segment_flags: u32) -> MmapPermissions {
     match (
-        segment_ty.get_bit(PT_FLAG_WRITE_BIT),
-        segment_ty.get_bit(PT_FLAG_EXEC_BIT),
+        segment_flags.get_bit(PT_FLAG_WRITE_BIT),
+        segment_flags.get_bit(PT_FLAG_EXEC_BIT),
     ) {
         (true, false) => MmapPermissions::ReadWrite,
         (false, true) => MmapPermissions::ReadExecute,
         (false, false) => MmapPermissions::ReadOnly,
-        (true, true) => panic!("ELF section is WX"),
+        (true, true) => unreachable!("ELF section is WX"),
     }
 }
 
-crate::error_impl! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum Error {
-        AlreadyMapped => None,
-        AddressUnderrun { addr: Address<Virtual> } => None,
-        UnhandledAddress { addr: Address<Virtual> } => None
-    }
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+pub enum Error {
+    #[error("address is already mapped")]
+    AlreadyMapped,
+
+    #[error("tried to demand map a page and underflowed")]
+    AddressUnderrun(Address<Virtual>),
+
+    #[error("address belongs to a non-load segment")]
+    NonLoadAddress(Address<Virtual>),
 }
 
 pub static TASK_LOAD_BASE: usize = 0x20000;
@@ -98,7 +100,7 @@ impl Task {
         trace!("Generating a random ID for new task.");
         let id = uuid::Uuid::new_v4();
 
-        trace!("Allocating userspace stack for task: {:?}.", id);
+        trace!("Allocating userspace stack for task: {id:?}.");
         let stack = address_space
             .mmap(
                 Some(Address::new_truncate(STACK_START.get())),
@@ -106,7 +108,6 @@ impl Task {
                 MmapPermissions::ReadWrite,
             )
             .unwrap();
-
         Self {
             id,
             priority,
@@ -115,10 +116,12 @@ impl Task {
                 InterruptStackFrame::new_user(
                     Address::new(load_offset + usize::try_from(elf_header.e_entry).unwrap())
                         .unwrap(),
-                    // Safety: Addition keeps the pointer within the bounds of the allocation, and the unit size is 1.
-                    unsafe { Address::from_ptr(stack.as_non_null_ptr().as_ptr().add(stack.len())) },
+                    Address::from_ptr({
+                        // Safety: Index is the end of the slice.
+                        unsafe { stack.get_unchecked_mut(stack.len()).as_ptr() }
+                    }),
                 ),
-                Registers::default(),
+                Registers::empty(),
             ),
             load_offset,
             elf_header,
@@ -173,7 +176,8 @@ impl Task {
         &mut self.elf_relas
     }
 
-    pub fn demand_map(&mut self, address: Address<Virtual>) -> Result<()> {
+    #[allow(clippy::too_many_lines)]
+    pub fn demand_map(&mut self, address: Address<Virtual>) -> Result<(), Error> {
         use crate::mem::paging::TableEntryFlags;
         use core::mem::MaybeUninit;
         use libsys::Page;
@@ -187,7 +191,7 @@ impl Task {
         let fault_unoffset = address
             .get()
             .checked_sub(self.load_offset())
-            .ok_or(Error::AddressUnderrun { addr: address })?;
+            .ok_or(Error::AddressUnderrun(address))?;
 
         let segment = self
             .elf_segments()
@@ -198,10 +202,13 @@ impl Task {
                     .contains(&u64::try_from(fault_unoffset).unwrap())
             })
             .copied()
-            .ok_or(Error::UnhandledAddress { addr: address })?;
+            .ok_or(Error::NonLoadAddress(address))?;
 
         // Small check to help ensure the segment alignments are page-fit.
-        debug_assert_eq!(segment.p_align & (libsys::page_mask() as u64), 0);
+        debug_assert_eq!(
+            segment.p_align & u64::try_from(libsys::page_mask()).unwrap(),
+            0
+        );
 
         debug!(
             "Demand mapping {:X?} from segment: {:X?}",
@@ -278,9 +285,10 @@ impl Task {
 
         self.elf_relas().retain(|rela| {
             if fault_page_as_range.contains(&rela.address.get()) {
-                trace!("Processing relocation: {:X?}", rela);
+                trace!("Processing relocation: {rela:X?}");
                 // Safety: Fault page is checked to contain the relocation's address, and the pointer is guaranteed after
                 // offset to lie within the memory mapped region above.
+                #[allow(clippy::cast_ptr_alignment)]
                 unsafe {
                     rela.address
                         .as_ptr()

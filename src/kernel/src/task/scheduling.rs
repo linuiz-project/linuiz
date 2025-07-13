@@ -5,6 +5,7 @@ use crate::{
 };
 use alloc::collections::VecDeque;
 use libsys::Address;
+use zerocopy::FromZeros;
 
 pub static PROCESSES: spin::Mutex<VecDeque<Task>> = spin::Mutex::new(VecDeque::new());
 
@@ -15,10 +16,10 @@ pub struct Scheduler {
 }
 
 impl Scheduler {
-    pub const fn new(enabled: bool) -> Self {
+    pub fn new(enabled: bool) -> Self {
         Self {
             enabled,
-            idle_stack: Stack::new(),
+            idle_stack: Stack::new_zeroed(),
             task: None,
         }
     }
@@ -120,6 +121,7 @@ impl Scheduler {
             debug_assert!(old_value.is_none());
         } else {
             // Safety: Instruction pointer is to a valid function.
+            #[allow(clippy::as_conversions)]
             unsafe {
                 isf.set_instruction_pointer(
                     Address::new(crate::interrupts::wait_indefinite as usize).unwrap(),
@@ -131,7 +133,7 @@ impl Scheduler {
                 isf.set_stack_pointer(Address::new(self.idle_stack.top().addr().get()).unwrap());
             }
 
-            *regs = Registers::default();
+            *regs = Registers::empty();
 
             trace!("Switched idle task.");
         }

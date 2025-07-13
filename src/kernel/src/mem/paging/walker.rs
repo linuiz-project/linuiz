@@ -56,7 +56,7 @@ impl<'a> Walker<'a> {
                 for entry in table {
                     if entry.is_present() {
                         let table_ptr = core::ptr::with_exposed_provenance_mut(
-                            Hhdm::offset().get() + entry.get_frame().get().get(),
+                            Hhdm::frame_to_page(entry.get_frame()).get().get(),
                         );
                         let table = unsafe {
                             core::slice::from_raw_parts(table_ptr, libsys::table_index_size())
