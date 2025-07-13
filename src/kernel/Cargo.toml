@@ -20,10 +20,10 @@ getrandom = "0.3"
 ioports = "1.0"
 limine = { version = "0.5", features = ["uuid"] }
 log = { version = "0.4", default-features = false }
+num_enum = { version = "0.7", default-features = false }
 paste = "1.0"
 rand_pcg = { version = "0.9", default-features = false }
 spin = "0.10"
-num_enum = { version = "0.7", default-features = false }
 thiserror = { version = "2.0", default-features = false }
 uart = { version = "3.0", default-features = false, features = [
     "address_impl",
