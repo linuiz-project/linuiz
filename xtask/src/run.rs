@@ -1,3 +1,4 @@
+use anyhow::Result;
 use std::path::Path;
 
 #[derive(Debug, ValueEnum, Clone, Copy, PartialEq, Eq)]
@@ -62,11 +63,7 @@ pub struct Options {
     gdb: bool,
 }
 
-pub fn run<P: AsRef<Path>>(
-    sh: &xshell::Shell,
-    temp_dir: P,
-    options: Options,
-) -> anyhow::Result<()> {
+pub fn run(sh: &xshell::Shell, temp_dir: impl AsRef<Path>, options: Options) -> Result<()> {
     if !options.nobuild {
         crate::build::build(sh, temp_dir.as_ref(), options.build_options)?;
     }
