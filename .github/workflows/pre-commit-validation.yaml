@@ -4,7 +4,7 @@ on:
       - main
   workflow_dispatch:
 
-name: Check and Lint
+name: Pre-commit Validation
 
 jobs:
   check:
