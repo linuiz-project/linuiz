@@ -1,7 +1,7 @@
 on:
   - pull_request
 
-name: Pre-commit Validation
+name: Validation
 
 jobs:
   check:
