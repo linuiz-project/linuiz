@@ -9,7 +9,7 @@ defaults:
 
 jobs:
   validation:
-    name: Check Dependency Ordering
+    name: Pre-commit Validation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
