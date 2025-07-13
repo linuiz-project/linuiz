@@ -1,4 +1,7 @@
-use crate::{arch::x86_64::devices::x2apic::{InterruptDeliveryMode, Register}, interrupts::Vector};
+use crate::{
+    arch::x86_64::devices::x2apic::{InterruptDeliveryMode, Register},
+    interrupts::Vector,
+};
 use bit_field::BitField;
 use core::marker::PhantomData;
 
@@ -114,7 +117,6 @@ impl<K: Deliverable> LocalVector<K> {
         Self::write_raw(*Self::read_raw().set_bits(8..11, u32::from(mode)));
     }
 }
-
 
 /// Various valid modes for APIC timer to operate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

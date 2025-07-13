@@ -25,7 +25,6 @@ pub(super) fn emit_stack_trace() {
 
     drop(panic_string);
     drop(panic_buffer);
-
 }
 
 #[repr(C)]
