@@ -2,7 +2,7 @@ on:
   pull_request:
     branches:
       - main
-      - 
+      - dependency-sort
   workflow_dispatch:
 
 name: Pre-commit Validation
