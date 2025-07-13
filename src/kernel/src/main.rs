@@ -160,7 +160,9 @@ unsafe extern "C" fn _entry() -> ! {
     crate::params::parse(&KERNEL_CMDLINE_REQUEST);
 
     #[cfg(feature = "panic_traces")]
-    crate::panic::tracing::symbols::parse(&KERNEL_FILE_REQUEST);
+    if crate::params::keep_symbol_info() {
+        crate::panic::tracing::symbols::parse(&KERNEL_FILE_REQUEST);
+    }
 
     crate::mem::Hhdm::init(&HHDM_REQUEST);
     crate::mem::pmm::PhysicalMemoryManager::init(&MEMORY_MAP_REQUEST);

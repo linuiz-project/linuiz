@@ -9,8 +9,8 @@ pub struct Parameters {
     /// Whether the kernel should utilize multi-processing.
     pub use_multiprocessing: bool,
 
-    /// Whether to keep the kernel symbol info before reclaiming extra memory.
-    pub drop_symbol_info: bool,
+    /// Whether to keep the kernel symbol info (for stack traces).
+    pub keep_symbol_info: bool,
 
     /// Whether the kernel should use low-memory mode.
     pub low_memory_mode: bool,
@@ -20,7 +20,7 @@ impl Default for Parameters {
     fn default() -> Self {
         Parameters {
             use_multiprocessing: true,
-            drop_symbol_info: false,
+            keep_symbol_info: true,
             low_memory_mode: false,
         }
     }
@@ -40,6 +40,8 @@ pub fn parse(kernel_cmdline_request: &ExecutableCmdlineRequest) {
             }
 
             Some(Ok("--nomp")) => params.use_multiprocessing = false,
+
+            Some(Ok("--keep-symbols")) => params.keep_symbol_info = true,
 
             Some(Ok("--lomem")) => params.low_memory_mode = true,
 
@@ -64,6 +66,10 @@ pub fn parse(kernel_cmdline_request: &ExecutableCmdlineRequest) {
 
 pub fn use_multiprocessing() -> bool {
     PARAMS.wait().use_multiprocessing
+}
+
+pub fn keep_symbol_info() -> bool {
+    PARAMS.wait().keep_symbol_info
 }
 
 pub fn use_low_memory() -> bool {
