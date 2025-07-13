@@ -3,38 +3,37 @@ name = "kernel"
 version = "0.0.0"
 edition = "2024"
 
-[dependencies.msr]
-path = "../msr"
+[dependencies]
+bit_field = "0.10"
+bitflags = "2.9"
+bitvec = { version = "1.0", default-features = false, features = [
+    "atomic",
+    "alloc",
+] }
+elf = { version = "0.7", default-features = false, features = ["nightly"] }
+getrandom = "0.3"
+ioports = "1.0"
+libsys = { git = "https://github.com/linuiz-project/libsys" }
+limine = { version = "0.4", features = ["uuid"] }
+log = { version = "0.4", default-features = false }
+num_enum = { version = "0.7", default-features = false }
+paste = "1.0"
+rand_pcg = { version = "0.9", default-features = false }
+rustc-demangle = "0.1"
+spin = "0.10"
+# circular-buffer = { version = "1.0", default-features = false }
+thiserror = { version = "2.0", default-features = false }
+uart = { version = "2.0", default-features = false, features = [
+    "address_impl",
+] }
+uuid = { version = "1.16", default-features = false, features = ["v4"] }
 [dependencies.apic]
 path = "../apic"
 [dependencies.libkernel]
 path = "../libkernel"
 
-
-[dependencies]
-libsys = { git = "https://github.com/linuiz-project/libsys" }
-limine = { version = "0.4", features = ["uuid"] }
-log = { version = "0.4", default-features = false }
-getrandom = "0.3"
-rand_pcg = { version = "0.9", default-features = false }
-num_enum = { version = "0.7", default-features = false }
-uuid = { version = "1.16", default-features = false, features = ["v4"] }
-elf = { version = "0.7", default-features = false, features = ["nightly"] }
-bitvec = { version = "1.0", default-features = false, features = [
-    "atomic",
-    "alloc",
-] }
-uart = { version = "2.0", default-features = false, features = [
-    "address_impl",
-] }
-ioports = "1.0"
-spin = "0.10"
-bit_field = "0.10"
-bitflags = "2.9"
-paste = "1.0"
-rustc-demangle = "0.1"
-# circular-buffer = { version = "1.0", default-features = false }
-thiserror = { version = "2.0", default-features = false }
+[dependencies.msr]
+path = "../msr"
 
 [target.x86_64-unknown-none.dependencies]
 ia32utils = { version = "0.15", package = "x86_64" }
