@@ -1,7 +1,6 @@
-use alloc::sync;
 use core::{
     ops::Range,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+    sync::atomic::{AtomicBool, Ordering},
 };
 use libsys::{Address, Frame, Physical};
 use spin::{Barrier, Mutex, Once};

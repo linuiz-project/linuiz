@@ -28,8 +28,10 @@ impl Hhdm {
     }
 
     /// Offset `address` by the base address of the higher-half direct map.
-    pub fn offset(address: usize) -> usize {
-        Self::get_static().get() + address
+    pub fn offset(address: usize) -> NonZero<usize> {
+        Self::get_static()
+            .checked_add(address)
+            .expect("provided higher-half direct map offset caused overflow")
     }
 
     /// Convert a physical address to its higher-half direct mapped virtual counterpart.

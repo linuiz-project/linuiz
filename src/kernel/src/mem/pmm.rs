@@ -110,7 +110,7 @@ impl PhysicalMemoryManager {
             trace!("Frame table region: {select_region:#X?}");
 
             let table_ptr =
-                core::ptr::with_exposed_provenance_mut::<u8>(Hhdm::offset(select_region.start));
+                core::ptr::with_exposed_provenance_mut::<u8>(Hhdm::offset(select_region.start).get());
 
             // Pre-initialize the table memory to a known, zeroed out state.
             // Safety: The memory region should not be in use by any other context.

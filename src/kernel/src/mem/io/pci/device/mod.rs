@@ -123,7 +123,7 @@ pub enum Devices {
     PCI2PCI(Device<PCI2PCI>),
 }
 
-pub struct Device<T: Kind>(NonNull<u8>, PhantomData<T>);
+pub struct Device<T>(NonNull<u8>, PhantomData<T>);
 
 // Safety: PCI MMIO (and so, the pointers used for it) utilize the global HHDM, and so can be sent between threads.
 unsafe impl<T: Kind> Send for Device<T> {}

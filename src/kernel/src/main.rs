@@ -15,7 +15,8 @@
     if_let_guard,
     ptr_as_uninit,
     strict_provenance_lints,
-    box_vec_non_null
+    box_vec_non_null,
+    allocator_api
 )]
 #![forbid(clippy::inline_asm_x86_att_syntax, fuzzy_provenance_casts)]
 #![deny(
@@ -65,7 +66,7 @@ extern crate num_enum;
 #[macro_use]
 extern crate paste;
 
-// mod acpi;
+mod acpi;
 mod arch;
 mod clock;
 mod cpu;
