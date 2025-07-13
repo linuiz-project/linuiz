@@ -1,9 +1,10 @@
+use alloc::sync;
 use core::{
     ops::Range,
     sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 use libsys::{Address, Frame, Physical};
-use spin::{Mutex, Once};
+use spin::{Barrier, Mutex, Once};
 
 pub mod state;
 pub mod timer;
@@ -110,36 +111,25 @@ pub unsafe fn synchronize(
             stack_address.get()
         );
 
-        if range_contains_stack {
-            trace!("Found boot stack: {range:#X?}");
-        }
-
         range_contains_stack
     }
 
-    /// Total count of hardware threads in the system.
-    static HWTHREAD_COUNT: Once<usize> = Once::new();
-
-    /// If `Some`, the current entry to be checked; if `None`, there are no more entries
-    /// to check.
-    static CHECK_ENTRY: Once<Mutex<Option<Range<usize>>>> = Once::new();
-
-    /// Total number of non-bootstrap processors that are not currently performing the entry check
-    /// (they either haven't done one yet, or have completed the previous check).
-    static CHECK_ENTRY_IDLE: AtomicUsize = AtomicUsize::new(0);
-
-    /// Indicates one of the non-bootstrap processors found that an entry contains its
-    /// stack.
-    static CHECK_ENTRY_CONSENSUS: AtomicBool = AtomicBool::new(false);
+    static ENTRY_TO_CHECK: Mutex<Option<Range<usize>>> = Mutex::new(None);
+    static IS_ENTRY_USED: AtomicBool = AtomicBool::new(false);
+    static ENTRY_READY_SYNC: Once<Barrier> = Once::new();
+    static ENTRY_PROCESSED_SYNC: Once<Barrier> = Once::new();
+    static INIT_FINALIZED_SYNC: Once<Barrier> = Once::new();
 
     let stack_address =
         crate::mem::Hhdm::virtual_to_physical(Address::from_ptr(get_stack_ptr().cast_mut()));
 
-    // If this this the bootstrap processor context, the following requests will have been passed...
+    // If this this the bootstrap processor context, the requests will have been passed.
     if let Some((mp_request, memory_map_request)) = bsp_requests {
         // Begin multiprocessing and store the processor count to use in synchronization later.
         if let Some(hwthread_count) = crate::cpu::begin_multiprocessing(mp_request) {
-            HWTHREAD_COUNT.call_once(|| hwthread_count);
+            ENTRY_READY_SYNC.call_once(|| Barrier::new(hwthread_count));
+            ENTRY_PROCESSED_SYNC.call_once(|| Barrier::new(hwthread_count));
+            INIT_FINALIZED_SYNC.call_once(|| Barrier::new(hwthread_count));
         }
 
         debug!("Reclaiming bootloader memory...");
@@ -167,43 +157,29 @@ pub unsafe fn synchronize(
                 !check_range_contains_stack(entry_range, stack_address)
             })
             .filter(|entry_range| {
-                if CHECK_ENTRY.is_completed() {
-                    // If the check entry has already been set, then update it...
+                // If the synchronizer hasn't been initialized, then multiprocessing was
+                // disabled, and no extra entry checks need to occur.
+                let (Some(entry_ready), Some(entry_processed)) =
+                    (ENTRY_READY_SYNC.get(), ENTRY_PROCESSED_SYNC.get())
+                else {
+                    return true;
+                };
 
-                    let check_entry = CHECK_ENTRY.wait();
+                // Set the new entry to be checked.
+                let mut entry_to_check = ENTRY_TO_CHECK.lock();
+                *entry_to_check = Some(entry_range.clone());
+                drop(entry_to_check);
 
-                    let mut check_entry = check_entry.lock();
-                    *check_entry = Some(entry_range.clone());
-                } else {
-                    // If the check entry has not already been set, then set it...
+                // Reset the consensus so the other hardware threads can set it again.
+                IS_ENTRY_USED.store(false, Ordering::Release);
 
-                    CHECK_ENTRY.call_once(|| Mutex::new(Some(entry_range.clone())));
-                }
+                trace!("Waiting for all hardware threads to be ready to next entry...");
+                entry_ready.wait();
 
-                trace!("Resetting the bootloader reclaim entry check loop...");
+                trace!("Waiting for all hardware threads to check entry...");
+                entry_processed.wait();
 
-                // Reset the consensus so the other hardware threads can use it.
-                CHECK_ENTRY_CONSENSUS.store(false, Ordering::Release);
-
-                // Wait for all other hardware threads to be ready to check entry...
-                while CHECK_ENTRY_IDLE.load(Ordering::Acquire) < *HWTHREAD_COUNT.wait() {
-                    core::hint::spin_loop();
-                }
-
-                // Other hardware threads are ready, reset the entry check count to begin...
-                CHECK_ENTRY_IDLE.store(0, Ordering::Release);
-
-                // Wait for all other hardware threads to be done checking entry...
-                while CHECK_ENTRY_IDLE.load(Ordering::Acquire) < *HWTHREAD_COUNT.wait() {
-                    core::hint::spin_loop();
-                }
-
-                // If the consensus was a positive check, filter it.
-                let consensus = CHECK_ENTRY_CONSENSUS.load(Ordering::Acquire);
-
-                trace!("Consensus (Do Filter): {consensus}");
-
-                !consensus
+                IS_ENTRY_USED.load(Ordering::Acquire)
             })
             // We'll flatten each entry to a physical memory range...
             .flatten()
@@ -214,50 +190,47 @@ pub unsafe fn synchronize(
             // Free the requisite physical frames...
             .for_each(|frame| crate::mem::pmm::PhysicalMemoryManager::free_frame(frame).unwrap());
 
-        // Clear the check entry to `None`, so other hardware threads know there's no more work.
-        let check_entry = CHECK_ENTRY.wait();
-        let mut check_entry = check_entry.lock();
-        *check_entry = None;
-        drop(check_entry);
+        if let Some(init_finalized) = INIT_FINALIZED_SYNC.get() {
+            // Clear the check entry to `None`, so other hardware threads know there's no more work.
+            let mut entry_to_check = ENTRY_TO_CHECK.lock();
+            *entry_to_check = None;
+            drop(entry_to_check);
 
-        // Wait for all other hardware threads to be ready to check entry, so they can
-        // continue initialization...
-        while CHECK_ENTRY_IDLE.load(Ordering::Acquire) < *HWTHREAD_COUNT.wait() {
-            core::hint::spin_loop();
+            // Wait for other hardware threads to be ready, so they can continue initialization...
+            init_finalized.wait();
         }
-
-        // Update core readiness to indicate non-bootstrap processors can continue their initialization.
-        CHECK_ENTRY_IDLE.store(0, Ordering::Release);
 
         debug!("Bootloader memory reclaimed.");
     } else {
-        // Wait for bootstrap processor to populate the check entry...
-        let entry = CHECK_ENTRY.wait();
+        // Wait for bootstrap processor to populate the synchronizer...
+        let entry_ready = ENTRY_READY_SYNC.wait();
+        let entry_processed = ENTRY_PROCESSED_SYNC.wait();
+        let init_finalized = INIT_FINALIZED_SYNC.wait();
 
-        trace!("Entering bootloader reclaim stack check loop...");
+        trace!("Entering memory map entry stack check loop.");
 
         loop {
-            trace!("Waiting for entry check loop to reset...");
+            trace!("Waiting for next entry to be ready...");
+            entry_ready.wait();
 
-            // Add current hardware thread to completed count.
-            CHECK_ENTRY_IDLE.fetch_add(1, Ordering::AcqRel);
-            // Wait for the check done count to be at maximum, signalling to start again.
-            while CHECK_ENTRY_IDLE.load(Ordering::Acquire) > 0 {
-                core::hint::spin_loop();
-            }
-
-            trace!("Acquiring entry range lock...");
-            let entry_range = entry.lock();
+            trace!("Waiting to acquire entry...");
+            let entry_to_check = ENTRY_TO_CHECK.lock();
 
             // If the entry is `None`, then we're done checking entries.
-            let Some(entry_range) = &*entry_range else {
+            let Some(entry_range) = &*entry_to_check else {
                 break;
             };
 
             if check_range_contains_stack(entry_range, stack_address) {
-                CHECK_ENTRY_CONSENSUS.store(true, Ordering::Release);
+                IS_ENTRY_USED.store(true, Ordering::Release);
             }
+
+            trace!("Waiting for entry to finish being checked...");
+            entry_processed.wait();
         }
+
+        // Wait for bootstrap processor to finish up.
+        init_finalized.wait();
 
         trace!("Entry checks complete.");
     }
