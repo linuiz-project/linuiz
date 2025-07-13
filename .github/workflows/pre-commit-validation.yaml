@@ -50,6 +50,7 @@ jobs:
         with:
           command: install
           args: cargo-sort
+      - uses: actions-rs/cargo@v1
         with:
           command: sort
           args: --grouped --check
