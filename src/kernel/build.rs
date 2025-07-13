@@ -1,6 +1,4 @@
 fn main() {
-    println!("cargo:rerun-if-changed=target/.xtraprint");
-
     if let Ok(kernel_segment_align) = std::env::var("KERNEL_SEGMENT_ALIGN") {
         println!("cargo:rustc-link-arg=-zmax-page-size={kernel_segment_align}");
     }
