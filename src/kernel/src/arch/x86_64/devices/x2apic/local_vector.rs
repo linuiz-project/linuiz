@@ -49,17 +49,17 @@ impl Kind for ThermalSensor {
 impl Deliverable for ThermalSensor {}
 
 #[derive(Debug, Clone)]
-pub struct LocalVector<K: Kind>(pub(super) PhantomData<K>);
+pub struct LocalVector<T>(pub(super) PhantomData<T>);
 
-impl<K: Kind> LocalVector<K> {
+impl<T: Kind> LocalVector<T> {
     /// Reads the raw LVT entry as a `u32`.
     fn read_raw() -> u32 {
-        u32::try_from(super::read_register(K::REGISTER)).unwrap()
+        u32::try_from(super::read_register(T::REGISTER)).unwrap()
     }
 
     /// Writes `value` as the raw LVT entry value.
     fn write_raw(value: u32) {
-        super::write_register(K::REGISTER, u64::from(value));
+        super::write_register(T::REGISTER, u64::from(value));
     }
 
     /// Gets the delivery status of the interrupt.
@@ -110,7 +110,7 @@ impl<K: Kind> LocalVector<K> {
     }
 }
 
-impl<K: Deliverable> LocalVector<K> {
+impl<T: Deliverable> LocalVector<T> {
     /// Specifies the type of interrupt to be sent to the processor. Some delivery modes will only
     /// operate as intended when used in conjunction with a specific trigger mode.
     pub fn set_delivery_mode(mode: InterruptDeliveryMode) {
