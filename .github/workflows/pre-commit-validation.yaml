@@ -24,12 +24,12 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-        components: rustfmt
 
       - name: Install Dependencies
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          rustup toolchain install --profile minimal --component rust-src,rustfmt,clippy nightly-2025-07-12-x86_64-unknown-none
+          rustup toolchain install --profile minimal --component rust-src,rustfmt,clippy nightly-2025-07-12
+          rustup target add x86_64-unknown-none
           cargo install cargo-sort
 
       - name: Configure Environment
