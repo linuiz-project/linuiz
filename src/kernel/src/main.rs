@@ -158,7 +158,10 @@ unsafe extern "C" fn _entry() -> ! {
     debug!("Kernel virtual address: {kernel_virtual_address:#X?}");
 
     crate::params::parse(&KERNEL_CMDLINE_REQUEST);
-    crate::panic::symbols::parse(&KERNEL_FILE_REQUEST);
+
+    #[cfg(feature = "panic_traces")]
+    crate::panic::tracing::symbols::parse(&KERNEL_FILE_REQUEST);
+
     crate::mem::Hhdm::init(&HHDM_REQUEST);
     crate::mem::pmm::PhysicalMemoryManager::init(&MEMORY_MAP_REQUEST);
     crate::mem::init(

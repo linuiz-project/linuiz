@@ -9,5 +9,7 @@ pub struct ArchClock {
 }
 
 impl ArchClock {
-    pub fn configure() -> Self {}
+    pub fn configure() -> Self {
+        todo!()
+    }
 }
