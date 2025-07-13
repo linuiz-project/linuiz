@@ -172,7 +172,7 @@ pub unsafe fn synchronize(
                 // Reset the consensus so the other hardware threads can set it again.
                 IS_ENTRY_USED.store(false, Ordering::Release);
 
-                trace!("Waiting for all hardware threads to be ready to next entry...");
+                trace!("Waiting for all hardware threads to be ready for next entry...");
                 entry_ready.wait();
 
                 trace!("Waiting for all hardware threads to check entry...");
@@ -223,6 +223,9 @@ pub unsafe fn synchronize(
             if check_range_contains_stack(entry_range, stack_address) {
                 IS_ENTRY_USED.store(true, Ordering::Release);
             }
+
+            // Return the entry for other hardware threads to check.
+            drop(entry_to_check);
 
             trace!("Waiting for entry to finish being checked...");
             entry_processed.wait();

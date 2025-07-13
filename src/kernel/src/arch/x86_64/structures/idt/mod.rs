@@ -40,7 +40,7 @@ pub struct InterruptDescriptorTable {
     /// The saved instruction pointer points to the instruction that caused the `#DE`.
     ///
     /// The vector number of the `#DE` exception is 0.
-    divide_error: Entry<HandlerFunc>,
+    divide_error: Entry,
 
     /// When the debug-exception mechanism is enabled, a `#DB` exception can occur under any
     /// of the following circumstances:
@@ -72,7 +72,7 @@ pub struct InterruptDescriptorTable {
     /// instruction pointer points to the instruction after the one that caused the `#DB`.
     ///
     /// The vector number of the `#DB` exception is 1.
-    debug: Entry<HandlerFunc>,
+    debug: Entry,
 
     /// An non maskable interrupt exception (NMI) occurs as a result of system logic
     /// signaling a non-maskable interrupt to the processor.
@@ -82,7 +82,7 @@ pub struct InterruptDescriptorTable {
     /// boundary where the NMI was recognized.
     ///
     /// The vector number of the NMI exception is 2.
-    non_maskable_interrupt: Entry<HandlerFunc>,
+    non_maskable_interrupt: Entry,
 
     /// A breakpoint (`#BP`) exception occurs when an `INT3` instruction is executed. The
     /// `INT3` is normally used by debug software to set instruction breakpoints by replacing
@@ -90,7 +90,7 @@ pub struct InterruptDescriptorTable {
     /// The saved instruction pointer points to the byte after the `INT3` instruction.
     ///
     /// The vector number of the `#BP` exception is 3.
-    breakpoint: Entry<HandlerFunc>,
+    breakpoint: Entry,
 
     /// An overflow exception (`#OF`) occurs as a result of executing an `INTO` instruction
     /// while the overflow bit in `RFLAGS` is set to 1.
@@ -99,7 +99,7 @@ pub struct InterruptDescriptorTable {
     /// instruction that caused the `#OF`.
     ///
     /// The vector number of the `#OF` exception is 4.
-    overflow: Entry<HandlerFunc>,
+    overflow: Entry,
 
     /// A bound-range exception (`#BR`) exception can occur as a result of executing
     /// the `BOUND` instruction. The `BOUND` instruction compares an array index (first
@@ -109,7 +109,7 @@ pub struct InterruptDescriptorTable {
     /// The saved instruction pointer points to the `BOUND` instruction that caused the `#BR`.
     ///
     /// The vector number of the `#BR` exception is 5.
-    bound_range_exceeded: Entry<HandlerFunc>,
+    bound_range_exceeded: Entry,
 
     /// An invalid opcode exception (`#UD`) occurs when an attempt is made to execute an
     /// invalid or undefined opcode. The validity of an opcode often depends on the
@@ -143,7 +143,7 @@ pub struct InterruptDescriptorTable {
     /// The saved instruction pointer points to the instruction that caused the `#UD`.
     ///
     /// The vector number of the `#UD` exception is 6.
-    invalid_opcode: Entry<HandlerFunc>,
+    invalid_opcode: Entry,
 
     /// A device not available exception (`#NM`) occurs under any of the following conditions:
     ///
@@ -160,7 +160,7 @@ pub struct InterruptDescriptorTable {
     /// The saved instruction pointer points to the instruction that caused the `#NM`.
     ///
     /// The vector number of the `#NM` exception is 7.
-    device_not_available: Entry<HandlerFunc>,
+    device_not_available: Entry,
 
     /// A double fault (`#DF`) exception can occur when a second exception occurs during
     /// the handling of a prior (first) exception or interrupt handler.
@@ -194,14 +194,14 @@ pub struct InterruptDescriptorTable {
     /// and the program cannot be restarted.
     ///
     /// The vector number of the `#DF` exception is 8.
-    double_fault: Entry<DivergingHandlerFuncWithErrCode>,
+    double_fault: Entry,
 
     /// This interrupt vector is reserved. It is for a discontinued exception originally used
     /// by processors that supported external x87-instruction coprocessors. On those processors,
     /// the exception condition is caused by an invalid-segment or invalid-page access on an
     /// x87-instruction coprocessor-instruction operand. On current processors, this condition
     /// causes a general-protection exception to occur.
-    coprocessor_segment_overrun: Entry<HandlerFunc>,
+    coprocessor_segment_overrun: Entry,
 
     /// An invalid TSS exception (`#TS`) occurs only as a result of a control transfer through
     /// a gate descriptor that results in an invalid stack-segment reference using an `SS`
@@ -211,7 +211,7 @@ pub struct InterruptDescriptorTable {
     /// points to the control-transfer instruction that caused the `#TS`.
     ///
     /// The vector number of the `#TS` exception is 10.
-    invalid_tss: Entry<HandlerFuncWithErrCode>,
+    invalid_tss: Entry,
 
     /// An segment-not-present exception (`#NP`) occurs when an attempt is made to load a
     /// segment or gate with a clear present bit.
@@ -221,7 +221,7 @@ pub struct InterruptDescriptorTable {
     /// that loaded the segment selector resulting in the `#NP`.
     ///
     /// The vector number of the `#NP` exception is 11.
-    segment_not_present: Entry<HandlerFuncWithErrCode>,
+    segment_not_present: Entry,
 
     /// An stack segment exception (`#SS`) can occur in the following situations:
     ///
@@ -238,7 +238,7 @@ pub struct InterruptDescriptorTable {
     /// caused the `#SS`.
     ///
     /// The vector number of the `#NP` exception is 12.
-    stack_segment_fault: Entry<HandlerFuncWithErrCode>,
+    stack_segment_fault: Entry,
 
     /// A general protection fault (`#GP`) can occur in various situations. Common causes include:
     ///
@@ -254,7 +254,7 @@ pub struct InterruptDescriptorTable {
     /// the instruction that caused the `#GP`.
     ///
     /// The vector number of the `#GP` exception is 13.
-    general_protection_fault: Entry<HandlerFuncWithErrCode>,
+    general_protection_fault: Entry,
 
     /// A page fault (`#PF`) can occur during a memory access in any of the following situations:
     ///
@@ -275,10 +275,10 @@ pub struct InterruptDescriptorTable {
     /// [`PageFaultErrorCode`](struct.PageFaultErrorCode.html) struct.
     ///
     /// The vector number of the `#PF` exception is 14.
-    page_fault: Entry<PageFaultHandlerFunc>,
+    page_fault: Entry,
 
     /// vector nr. 15
-    _1: [Entry<HandlerFunc>; 1],
+    _1: [Entry; 1],
 
     /// The x87 Floating-Point Exception-Pending exception (`#MF`) is used to handle unmasked x87
     /// floating-point exceptions. In 64-bit mode, the x87 floating point unit is not used
@@ -286,7 +286,7 @@ pub struct InterruptDescriptorTable {
     /// compatibility mode.
     ///
     /// The vector number of the `#MF` exception is 16.
-    x87_floating_point: Entry<HandlerFunc>,
+    x87_floating_point: Entry,
 
     /// An alignment check exception (`#AC`) occurs when an unaligned-memory data reference
     /// is performed while alignment checking is enabled. An `#AC` can occur only when CPL=3.
@@ -295,7 +295,7 @@ pub struct InterruptDescriptorTable {
     /// instruction that caused the `#AC`.
     ///
     /// The vector number of the `#AC` exception is 17.
-    alignment_check: Entry<HandlerFuncWithErrCode>,
+    alignment_check: Entry,
 
     /// The machine check exception (`#MC`) is model specific. Processor implementations
     /// are not required to support the `#MC` exception, and those implementations that do
@@ -304,7 +304,7 @@ pub struct InterruptDescriptorTable {
     /// There is no reliable way to restart the program.
     ///
     /// The vector number of the `#MC` exception is 18.
-    machine_check: Entry<DivergingHandlerFunc>,
+    machine_check: Entry,
 
     /// The SIMD Floating-Point Exception (`#XF`) is used to handle unmasked SSE
     /// floating-point exceptions. The SSE floating-point exceptions reported by
@@ -320,10 +320,10 @@ pub struct InterruptDescriptorTable {
     /// The saved instruction pointer points to the instruction that caused the `#XF`.
     ///
     /// The vector number of the `#XF` exception is 19.
-    simd_floating_point: Entry<HandlerFunc>,
+    simd_floating_point: Entry,
 
     /// vector nr. 20
-    virtualization: Entry<HandlerFunc>,
+    virtualization: Entry,
 
     /// A #CP exception is generated when shadow stacks are enabled and mismatch
     /// scenarios are detected (possible error code cases below).
@@ -336,10 +336,10 @@ pub struct InterruptDescriptorTable {
     /// - A missing ENDBRANCH instruction if indirect branch tracking is enabled.
     ///
     /// vector nr. 21
-    cp_protection_exception: Entry<HandlerFuncWithErrCode>,
+    cp_protection_exception: Entry,
 
     /// vector nr. 22-27
-    _2: [Entry<HandlerFunc>; 6],
+    _2: [Entry; 6],
 
     /// The Hypervisor Injection Exception (`#HV`) is injected by a hypervisor
     /// as a doorbell to inform an `SEV-SNP` enabled guest running with the
@@ -356,7 +356,7 @@ pub struct InterruptDescriptorTable {
     /// software-managed para-virtualization interface.
     ///
     /// The vector number of the ``#HV`` exception is 28.
-    hv_injection_exception: Entry<HandlerFunc>,
+    hv_injection_exception: Entry,
 
     /// The VMM Communication Exception (`#VC`) is always generated by hardware when an `SEV-ES`
     /// enabled guest is running and an `NAE` event occurs.
@@ -385,7 +385,7 @@ pub struct InterruptDescriptorTable {
     /// setting intercept bits for events that would occur in the `#VC` handler (such as `IRET`).
     ///
     /// The vector number of the ``#VC`` exception is 29.
-    vmm_communication_exception: Entry<HandlerFuncWithErrCode>,
+    vmm_communication_exception: Entry,
 
     /// The Security Exception (`#SX`) signals security-sensitive events that occur while
     /// executing the VMM, in the form of an exception so that the VMM may take appropriate
@@ -396,10 +396,10 @@ pub struct InterruptDescriptorTable {
     /// The only error code currently defined is 1, and indicates redirection of INIT has occurred.
     ///
     /// The vector number of the ``#SX`` exception is 30.
-    security_exception: Entry<HandlerFuncWithErrCode>,
+    security_exception: Entry,
 
     /// vector nr. 31
-    _3: [Entry<HandlerFunc>; 1],
+    _3: [Entry; 1],
 
     /// User-defined interrupts can be initiated either by system logic or software. They occur
     /// when:
@@ -421,11 +421,11 @@ pub struct InterruptDescriptorTable {
     ///   external interrupt was recognized.
     /// - If the interrupt occurs as a result of executing the `INTn` instruction, the saved
     ///   instruction pointer points to the instruction after the `INTn`.
-    interrupts: [Entry<HandlerFunc>; 224],
+    interrupts: [Entry; 224],
 }
 
 impl core::ops::Index<u8> for InterruptDescriptorTable {
-    type Output = Entry<HandlerFunc>;
+    type Output = Entry;
 
     /// Returns the IDT entry with the specified index.
     ///
@@ -475,271 +475,292 @@ impl InterruptDescriptorTable {
     pub fn load_static() {
         static IDT: spin::Once<InterruptDescriptorTable> = spin::Once::new();
 
-        let idt = IDT.call_once(|| InterruptDescriptorTable {
-            divide_error: Entry::new(de_stub),
-            // Safety: Stack table index is set to `Debug` stack.
-            debug: unsafe { Entry::new_with_stack(db_stub, InterruptStackTableIndex::Debug) },
-            // Safety: Stack table index is set to `NonMaskableInterrupt` stack.
-            non_maskable_interrupt: unsafe {
-                Entry::new_with_stack(nmi_stub, InterruptStackTableIndex::NonMaskableInterrupt)
-            },
-            breakpoint: Entry::new(bp_stub),
-            overflow: Entry::new(of_stub),
-            bound_range_exceeded: Entry::new(br_stub),
-            invalid_opcode: Entry::new(ud_stub),
-            device_not_available: Entry::new(na_stub),
-            // Safety: Stack table index is set to `DoubleFault` stack.
-            double_fault: unsafe {
-                Entry::new_with_stack(df_stub, InterruptStackTableIndex::DoubleFault)
-            },
-            coprocessor_segment_overrun: Entry::missing(),
-            invalid_tss: Entry::new(ts_stub),
-            segment_not_present: Entry::new(np_stub),
-            stack_segment_fault: Entry::new(ss_stub),
-            general_protection_fault: Entry::new(gp_stub),
-            page_fault: Entry::new(pf_stub),
-            _1: [Entry::missing(); _],
-            x87_floating_point: Entry::new(mf_stub),
-            alignment_check: Entry::new(ac_stub),
-            // Safety: Stack table index is set to `MachineCheck` stack.
-            machine_check: unsafe {
-                Entry::new_with_stack(mc_stub, InterruptStackTableIndex::MachineCheck)
-            },
-            simd_floating_point: Entry::new(xm_stub),
-            virtualization: Entry::new(ve_stub),
-            cp_protection_exception: Entry::missing(),
-            _2: [Entry::missing(); _],
-            hv_injection_exception: Entry::missing(),
-            vmm_communication_exception: Entry::missing(),
-            security_exception: Entry::missing(),
-            _3: [Entry::missing(); _],
-            interrupts: [
-                // Safety: Privilege level is set for coming FROM userspace (ring 3) for syscalls.
-                unsafe { Entry::new_with_privilege(irq_128, super::gdt::PrivilegeLevel::Ring3) },
-                Entry::new(irq_32),
-                Entry::new(irq_33),
-                Entry::new(irq_34),
-                Entry::new(irq_35),
-                Entry::new(irq_36),
-                Entry::new(irq_37),
-                Entry::new(irq_39),
-                Entry::new(irq_38),
-                Entry::new(irq_40),
-                Entry::new(irq_41),
-                Entry::new(irq_42),
-                Entry::new(irq_43),
-                Entry::new(irq_44),
-                Entry::new(irq_45),
-                Entry::new(irq_46),
-                Entry::new(irq_47),
-                Entry::new(irq_48),
-                Entry::new(irq_49),
-                Entry::new(irq_50),
-                Entry::new(irq_51),
-                Entry::new(irq_52),
-                Entry::new(irq_53),
-                Entry::new(irq_54),
-                Entry::new(irq_55),
-                Entry::new(irq_56),
-                Entry::new(irq_57),
-                Entry::new(irq_58),
-                Entry::new(irq_59),
-                Entry::new(irq_60),
-                Entry::new(irq_61),
-                Entry::new(irq_62),
-                Entry::new(irq_63),
-                Entry::new(irq_64),
-                Entry::new(irq_65),
-                Entry::new(irq_66),
-                Entry::new(irq_67),
-                Entry::new(irq_68),
-                Entry::new(irq_69),
-                Entry::new(irq_70),
-                Entry::new(irq_71),
-                Entry::new(irq_72),
-                Entry::new(irq_73),
-                Entry::new(irq_74),
-                Entry::new(irq_75),
-                Entry::new(irq_76),
-                Entry::new(irq_77),
-                Entry::new(irq_78),
-                Entry::new(irq_79),
-                Entry::new(irq_80),
-                Entry::new(irq_81),
-                Entry::new(irq_82),
-                Entry::new(irq_83),
-                Entry::new(irq_84),
-                Entry::new(irq_85),
-                Entry::new(irq_86),
-                Entry::new(irq_87),
-                Entry::new(irq_88),
-                Entry::new(irq_89),
-                Entry::new(irq_90),
-                Entry::new(irq_91),
-                Entry::new(irq_92),
-                Entry::new(irq_93),
-                Entry::new(irq_94),
-                Entry::new(irq_95),
-                Entry::new(irq_96),
-                Entry::new(irq_97),
-                Entry::new(irq_98),
-                Entry::new(irq_99),
-                Entry::new(irq_100),
-                Entry::new(irq_101),
-                Entry::new(irq_102),
-                Entry::new(irq_103),
-                Entry::new(irq_104),
-                Entry::new(irq_105),
-                Entry::new(irq_106),
-                Entry::new(irq_107),
-                Entry::new(irq_108),
-                Entry::new(irq_109),
-                Entry::new(irq_110),
-                Entry::new(irq_111),
-                Entry::new(irq_112),
-                Entry::new(irq_113),
-                Entry::new(irq_114),
-                Entry::new(irq_115),
-                Entry::new(irq_116),
-                Entry::new(irq_117),
-                Entry::new(irq_118),
-                Entry::new(irq_119),
-                Entry::new(irq_120),
-                Entry::new(irq_121),
-                Entry::new(irq_122),
-                Entry::new(irq_123),
-                Entry::new(irq_124),
-                Entry::new(irq_125),
-                Entry::new(irq_126),
-                Entry::new(irq_127),
-                Entry::new(irq_129),
-                Entry::new(irq_130),
-                Entry::new(irq_131),
-                Entry::new(irq_132),
-                Entry::new(irq_133),
-                Entry::new(irq_134),
-                Entry::new(irq_135),
-                Entry::new(irq_136),
-                Entry::new(irq_137),
-                Entry::new(irq_138),
-                Entry::new(irq_139),
-                Entry::new(irq_140),
-                Entry::new(irq_141),
-                Entry::new(irq_142),
-                Entry::new(irq_143),
-                Entry::new(irq_144),
-                Entry::new(irq_145),
-                Entry::new(irq_146),
-                Entry::new(irq_147),
-                Entry::new(irq_148),
-                Entry::new(irq_149),
-                Entry::new(irq_150),
-                Entry::new(irq_151),
-                Entry::new(irq_152),
-                Entry::new(irq_153),
-                Entry::new(irq_154),
-                Entry::new(irq_155),
-                Entry::new(irq_156),
-                Entry::new(irq_157),
-                Entry::new(irq_158),
-                Entry::new(irq_159),
-                Entry::new(irq_160),
-                Entry::new(irq_161),
-                Entry::new(irq_162),
-                Entry::new(irq_163),
-                Entry::new(irq_164),
-                Entry::new(irq_165),
-                Entry::new(irq_166),
-                Entry::new(irq_167),
-                Entry::new(irq_168),
-                Entry::new(irq_169),
-                Entry::new(irq_170),
-                Entry::new(irq_171),
-                Entry::new(irq_172),
-                Entry::new(irq_173),
-                Entry::new(irq_174),
-                Entry::new(irq_175),
-                Entry::new(irq_176),
-                Entry::new(irq_177),
-                Entry::new(irq_178),
-                Entry::new(irq_179),
-                Entry::new(irq_180),
-                Entry::new(irq_181),
-                Entry::new(irq_182),
-                Entry::new(irq_183),
-                Entry::new(irq_184),
-                Entry::new(irq_185),
-                Entry::new(irq_186),
-                Entry::new(irq_187),
-                Entry::new(irq_188),
-                Entry::new(irq_189),
-                Entry::new(irq_190),
-                Entry::new(irq_191),
-                Entry::new(irq_192),
-                Entry::new(irq_193),
-                Entry::new(irq_194),
-                Entry::new(irq_195),
-                Entry::new(irq_196),
-                Entry::new(irq_197),
-                Entry::new(irq_198),
-                Entry::new(irq_199),
-                Entry::new(irq_200),
-                Entry::new(irq_201),
-                Entry::new(irq_202),
-                Entry::new(irq_203),
-                Entry::new(irq_204),
-                Entry::new(irq_205),
-                Entry::new(irq_206),
-                Entry::new(irq_207),
-                Entry::new(irq_208),
-                Entry::new(irq_209),
-                Entry::new(irq_210),
-                Entry::new(irq_211),
-                Entry::new(irq_212),
-                Entry::new(irq_213),
-                Entry::new(irq_214),
-                Entry::new(irq_215),
-                Entry::new(irq_216),
-                Entry::new(irq_217),
-                Entry::new(irq_218),
-                Entry::new(irq_219),
-                Entry::new(irq_220),
-                Entry::new(irq_221),
-                Entry::new(irq_222),
-                Entry::new(irq_223),
-                Entry::new(irq_224),
-                Entry::new(irq_225),
-                Entry::new(irq_226),
-                Entry::new(irq_227),
-                Entry::new(irq_228),
-                Entry::new(irq_229),
-                Entry::new(irq_230),
-                Entry::new(irq_231),
-                Entry::new(irq_232),
-                Entry::new(irq_233),
-                Entry::new(irq_234),
-                Entry::new(irq_235),
-                Entry::new(irq_236),
-                Entry::new(irq_237),
-                Entry::new(irq_238),
-                Entry::new(irq_239),
-                Entry::new(irq_240),
-                Entry::new(irq_241),
-                Entry::new(irq_242),
-                Entry::new(irq_243),
-                Entry::new(irq_244),
-                Entry::new(irq_245),
-                Entry::new(irq_246),
-                Entry::new(irq_247),
-                Entry::new(irq_248),
-                Entry::new(irq_249),
-                Entry::new(irq_250),
-                Entry::new(irq_251),
-                Entry::new(irq_252),
-                Entry::new(irq_253),
-                Entry::new(irq_254),
-                Entry::new(irq_255),
-            ],
+        let idt = IDT.call_once(|| {
+            // Safety:
+            //  - All function addresses are correctly set to linked interrupt stubs.
+            //  - Entries with specified stack table indexes are set correctly.
+            //  - Entries with specified privilege levels are set correctly.
+            unsafe {
+                InterruptDescriptorTable {
+                    divide_error: Entry::new(__de_stub.as_usize()),
+                    // Safety: Stack table index is set to `Debug` stack.
+                    debug: Entry::new_with_stack(
+                        __db_stub.as_usize(),
+                        InterruptStackTableIndex::Debug,
+                    ),
+                    // Safety: Stack table index is set to `NonMaskableInterrupt` stack.
+                    non_maskable_interrupt: Entry::new_with_stack(
+                        __nm_stub.as_usize(),
+                        InterruptStackTableIndex::NonMaskableInterrupt,
+                    ),
+                    breakpoint: Entry::new(__bp_stub.as_usize()),
+                    overflow: Entry::new(__of_stub.as_usize()),
+                    bound_range_exceeded: Entry::new(__br_stub.as_usize()),
+                    invalid_opcode: Entry::new(__ud_stub.as_usize()),
+                    device_not_available: Entry::new(__na_stub.as_usize()),
+                    // Safety: Stack table index is set to `DoubleFault` stack.
+                    double_fault: Entry::new_with_stack(
+                        __df_stub.as_usize(),
+                        InterruptStackTableIndex::DoubleFault,
+                    ),
+                    coprocessor_segment_overrun: Entry::missing(),
+                    invalid_tss: Entry::new(__ts_stub.as_usize()),
+                    segment_not_present: Entry::new(__np_stub.as_usize()),
+                    stack_segment_fault: Entry::new(__ss_stub.as_usize()),
+                    general_protection_fault: Entry::new(__gp_stub.as_usize()),
+                    page_fault: Entry::new(__pf_stub.as_usize()),
+                    _1: [Entry::missing(); _],
+                    x87_floating_point: Entry::new(__mf_stub.as_usize()),
+                    alignment_check: Entry::new(__ac_stub.as_usize()),
+                    // Safety: Stack table index is set to `MachineCheck` stack.
+                    machine_check: unsafe {
+                        Entry::new_with_stack(
+                            __mc_stub.as_usize(),
+                            InterruptStackTableIndex::MachineCheck,
+                        )
+                    },
+                    simd_floating_point: Entry::new(__xm_stub.as_usize()),
+                    virtualization: Entry::new(__ve_stub.as_usize()),
+                    cp_protection_exception: Entry::missing(),
+                    _2: [Entry::missing(); _],
+                    hv_injection_exception: Entry::missing(),
+                    vmm_communication_exception: Entry::missing(),
+                    security_exception: Entry::missing(),
+                    _3: [Entry::missing(); _],
+                    interrupts: [
+                        // Safety: Privilege level is set for coming FROM userspace (ring 3) for syscalls.
+                        unsafe {
+                            Entry::new_with_privilege(
+                                __irq_128_stub.as_usize(),
+                                super::gdt::PrivilegeLevel::Ring3,
+                            )
+                        },
+                        Entry::new(__irq_32_stub.as_usize()),
+                        Entry::new(__irq_33_stub.as_usize()),
+                        Entry::new(__irq_34_stub.as_usize()),
+                        Entry::new(__irq_35_stub.as_usize()),
+                        Entry::new(__irq_36_stub.as_usize()),
+                        Entry::new(__irq_37_stub.as_usize()),
+                        Entry::new(__irq_39_stub.as_usize()),
+                        Entry::new(__irq_38_stub.as_usize()),
+                        Entry::new(__irq_40_stub.as_usize()),
+                        Entry::new(__irq_41_stub.as_usize()),
+                        Entry::new(__irq_42_stub.as_usize()),
+                        Entry::new(__irq_43_stub.as_usize()),
+                        Entry::new(__irq_44_stub.as_usize()),
+                        Entry::new(__irq_45_stub.as_usize()),
+                        Entry::new(__irq_46_stub.as_usize()),
+                        Entry::new(__irq_47_stub.as_usize()),
+                        Entry::new(__irq_48_stub.as_usize()),
+                        Entry::new(__irq_49_stub.as_usize()),
+                        Entry::new(__irq_50_stub.as_usize()),
+                        Entry::new(__irq_51_stub.as_usize()),
+                        Entry::new(__irq_52_stub.as_usize()),
+                        Entry::new(__irq_53_stub.as_usize()),
+                        Entry::new(__irq_54_stub.as_usize()),
+                        Entry::new(__irq_55_stub.as_usize()),
+                        Entry::new(__irq_56_stub.as_usize()),
+                        Entry::new(__irq_57_stub.as_usize()),
+                        Entry::new(__irq_58_stub.as_usize()),
+                        Entry::new(__irq_59_stub.as_usize()),
+                        Entry::new(__irq_60_stub.as_usize()),
+                        Entry::new(__irq_61_stub.as_usize()),
+                        Entry::new(__irq_62_stub.as_usize()),
+                        Entry::new(__irq_63_stub.as_usize()),
+                        Entry::new(__irq_64_stub.as_usize()),
+                        Entry::new(__irq_65_stub.as_usize()),
+                        Entry::new(__irq_66_stub.as_usize()),
+                        Entry::new(__irq_67_stub.as_usize()),
+                        Entry::new(__irq_68_stub.as_usize()),
+                        Entry::new(__irq_69_stub.as_usize()),
+                        Entry::new(__irq_70_stub.as_usize()),
+                        Entry::new(__irq_71_stub.as_usize()),
+                        Entry::new(__irq_72_stub.as_usize()),
+                        Entry::new(__irq_73_stub.as_usize()),
+                        Entry::new(__irq_74_stub.as_usize()),
+                        Entry::new(__irq_75_stub.as_usize()),
+                        Entry::new(__irq_76_stub.as_usize()),
+                        Entry::new(__irq_77_stub.as_usize()),
+                        Entry::new(__irq_78_stub.as_usize()),
+                        Entry::new(__irq_79_stub.as_usize()),
+                        Entry::new(__irq_80_stub.as_usize()),
+                        Entry::new(__irq_81_stub.as_usize()),
+                        Entry::new(__irq_82_stub.as_usize()),
+                        Entry::new(__irq_83_stub.as_usize()),
+                        Entry::new(__irq_84_stub.as_usize()),
+                        Entry::new(__irq_85_stub.as_usize()),
+                        Entry::new(__irq_86_stub.as_usize()),
+                        Entry::new(__irq_87_stub.as_usize()),
+                        Entry::new(__irq_88_stub.as_usize()),
+                        Entry::new(__irq_89_stub.as_usize()),
+                        Entry::new(__irq_90_stub.as_usize()),
+                        Entry::new(__irq_91_stub.as_usize()),
+                        Entry::new(__irq_92_stub.as_usize()),
+                        Entry::new(__irq_93_stub.as_usize()),
+                        Entry::new(__irq_94_stub.as_usize()),
+                        Entry::new(__irq_95_stub.as_usize()),
+                        Entry::new(__irq_96_stub.as_usize()),
+                        Entry::new(__irq_97_stub.as_usize()),
+                        Entry::new(__irq_98_stub.as_usize()),
+                        Entry::new(__irq_99_stub.as_usize()),
+                        Entry::new(__irq_100_stub.as_usize()),
+                        Entry::new(__irq_101_stub.as_usize()),
+                        Entry::new(__irq_102_stub.as_usize()),
+                        Entry::new(__irq_103_stub.as_usize()),
+                        Entry::new(__irq_104_stub.as_usize()),
+                        Entry::new(__irq_105_stub.as_usize()),
+                        Entry::new(__irq_106_stub.as_usize()),
+                        Entry::new(__irq_107_stub.as_usize()),
+                        Entry::new(__irq_108_stub.as_usize()),
+                        Entry::new(__irq_109_stub.as_usize()),
+                        Entry::new(__irq_110_stub.as_usize()),
+                        Entry::new(__irq_111_stub.as_usize()),
+                        Entry::new(__irq_112_stub.as_usize()),
+                        Entry::new(__irq_113_stub.as_usize()),
+                        Entry::new(__irq_114_stub.as_usize()),
+                        Entry::new(__irq_115_stub.as_usize()),
+                        Entry::new(__irq_116_stub.as_usize()),
+                        Entry::new(__irq_117_stub.as_usize()),
+                        Entry::new(__irq_118_stub.as_usize()),
+                        Entry::new(__irq_119_stub.as_usize()),
+                        Entry::new(__irq_120_stub.as_usize()),
+                        Entry::new(__irq_121_stub.as_usize()),
+                        Entry::new(__irq_122_stub.as_usize()),
+                        Entry::new(__irq_123_stub.as_usize()),
+                        Entry::new(__irq_124_stub.as_usize()),
+                        Entry::new(__irq_125_stub.as_usize()),
+                        Entry::new(__irq_126_stub.as_usize()),
+                        Entry::new(__irq_127_stub.as_usize()),
+                        Entry::new(__irq_129_stub.as_usize()),
+                        Entry::new(__irq_130_stub.as_usize()),
+                        Entry::new(__irq_131_stub.as_usize()),
+                        Entry::new(__irq_132_stub.as_usize()),
+                        Entry::new(__irq_133_stub.as_usize()),
+                        Entry::new(__irq_134_stub.as_usize()),
+                        Entry::new(__irq_135_stub.as_usize()),
+                        Entry::new(__irq_136_stub.as_usize()),
+                        Entry::new(__irq_137_stub.as_usize()),
+                        Entry::new(__irq_138_stub.as_usize()),
+                        Entry::new(__irq_139_stub.as_usize()),
+                        Entry::new(__irq_140_stub.as_usize()),
+                        Entry::new(__irq_141_stub.as_usize()),
+                        Entry::new(__irq_142_stub.as_usize()),
+                        Entry::new(__irq_143_stub.as_usize()),
+                        Entry::new(__irq_144_stub.as_usize()),
+                        Entry::new(__irq_145_stub.as_usize()),
+                        Entry::new(__irq_146_stub.as_usize()),
+                        Entry::new(__irq_147_stub.as_usize()),
+                        Entry::new(__irq_148_stub.as_usize()),
+                        Entry::new(__irq_149_stub.as_usize()),
+                        Entry::new(__irq_150_stub.as_usize()),
+                        Entry::new(__irq_151_stub.as_usize()),
+                        Entry::new(__irq_152_stub.as_usize()),
+                        Entry::new(__irq_153_stub.as_usize()),
+                        Entry::new(__irq_154_stub.as_usize()),
+                        Entry::new(__irq_155_stub.as_usize()),
+                        Entry::new(__irq_156_stub.as_usize()),
+                        Entry::new(__irq_157_stub.as_usize()),
+                        Entry::new(__irq_158_stub.as_usize()),
+                        Entry::new(__irq_159_stub.as_usize()),
+                        Entry::new(__irq_160_stub.as_usize()),
+                        Entry::new(__irq_161_stub.as_usize()),
+                        Entry::new(__irq_162_stub.as_usize()),
+                        Entry::new(__irq_163_stub.as_usize()),
+                        Entry::new(__irq_164_stub.as_usize()),
+                        Entry::new(__irq_165_stub.as_usize()),
+                        Entry::new(__irq_166_stub.as_usize()),
+                        Entry::new(__irq_167_stub.as_usize()),
+                        Entry::new(__irq_168_stub.as_usize()),
+                        Entry::new(__irq_169_stub.as_usize()),
+                        Entry::new(__irq_170_stub.as_usize()),
+                        Entry::new(__irq_171_stub.as_usize()),
+                        Entry::new(__irq_172_stub.as_usize()),
+                        Entry::new(__irq_173_stub.as_usize()),
+                        Entry::new(__irq_174_stub.as_usize()),
+                        Entry::new(__irq_175_stub.as_usize()),
+                        Entry::new(__irq_176_stub.as_usize()),
+                        Entry::new(__irq_177_stub.as_usize()),
+                        Entry::new(__irq_178_stub.as_usize()),
+                        Entry::new(__irq_179_stub.as_usize()),
+                        Entry::new(__irq_180_stub.as_usize()),
+                        Entry::new(__irq_181_stub.as_usize()),
+                        Entry::new(__irq_182_stub.as_usize()),
+                        Entry::new(__irq_183_stub.as_usize()),
+                        Entry::new(__irq_184_stub.as_usize()),
+                        Entry::new(__irq_185_stub.as_usize()),
+                        Entry::new(__irq_186_stub.as_usize()),
+                        Entry::new(__irq_187_stub.as_usize()),
+                        Entry::new(__irq_188_stub.as_usize()),
+                        Entry::new(__irq_189_stub.as_usize()),
+                        Entry::new(__irq_190_stub.as_usize()),
+                        Entry::new(__irq_191_stub.as_usize()),
+                        Entry::new(__irq_192_stub.as_usize()),
+                        Entry::new(__irq_193_stub.as_usize()),
+                        Entry::new(__irq_194_stub.as_usize()),
+                        Entry::new(__irq_195_stub.as_usize()),
+                        Entry::new(__irq_196_stub.as_usize()),
+                        Entry::new(__irq_197_stub.as_usize()),
+                        Entry::new(__irq_198_stub.as_usize()),
+                        Entry::new(__irq_199_stub.as_usize()),
+                        Entry::new(__irq_200_stub.as_usize()),
+                        Entry::new(__irq_201_stub.as_usize()),
+                        Entry::new(__irq_202_stub.as_usize()),
+                        Entry::new(__irq_203_stub.as_usize()),
+                        Entry::new(__irq_204_stub.as_usize()),
+                        Entry::new(__irq_205_stub.as_usize()),
+                        Entry::new(__irq_206_stub.as_usize()),
+                        Entry::new(__irq_207_stub.as_usize()),
+                        Entry::new(__irq_208_stub.as_usize()),
+                        Entry::new(__irq_209_stub.as_usize()),
+                        Entry::new(__irq_210_stub.as_usize()),
+                        Entry::new(__irq_211_stub.as_usize()),
+                        Entry::new(__irq_212_stub.as_usize()),
+                        Entry::new(__irq_213_stub.as_usize()),
+                        Entry::new(__irq_214_stub.as_usize()),
+                        Entry::new(__irq_215_stub.as_usize()),
+                        Entry::new(__irq_216_stub.as_usize()),
+                        Entry::new(__irq_217_stub.as_usize()),
+                        Entry::new(__irq_218_stub.as_usize()),
+                        Entry::new(__irq_219_stub.as_usize()),
+                        Entry::new(__irq_220_stub.as_usize()),
+                        Entry::new(__irq_221_stub.as_usize()),
+                        Entry::new(__irq_222_stub.as_usize()),
+                        Entry::new(__irq_223_stub.as_usize()),
+                        Entry::new(__irq_224_stub.as_usize()),
+                        Entry::new(__irq_225_stub.as_usize()),
+                        Entry::new(__irq_226_stub.as_usize()),
+                        Entry::new(__irq_227_stub.as_usize()),
+                        Entry::new(__irq_228_stub.as_usize()),
+                        Entry::new(__irq_229_stub.as_usize()),
+                        Entry::new(__irq_230_stub.as_usize()),
+                        Entry::new(__irq_231_stub.as_usize()),
+                        Entry::new(__irq_232_stub.as_usize()),
+                        Entry::new(__irq_233_stub.as_usize()),
+                        Entry::new(__irq_234_stub.as_usize()),
+                        Entry::new(__irq_235_stub.as_usize()),
+                        Entry::new(__irq_236_stub.as_usize()),
+                        Entry::new(__irq_237_stub.as_usize()),
+                        Entry::new(__irq_238_stub.as_usize()),
+                        Entry::new(__irq_239_stub.as_usize()),
+                        Entry::new(__irq_240_stub.as_usize()),
+                        Entry::new(__irq_241_stub.as_usize()),
+                        Entry::new(__irq_242_stub.as_usize()),
+                        Entry::new(__irq_243_stub.as_usize()),
+                        Entry::new(__irq_244_stub.as_usize()),
+                        Entry::new(__irq_245_stub.as_usize()),
+                        Entry::new(__irq_246_stub.as_usize()),
+                        Entry::new(__irq_247_stub.as_usize()),
+                        Entry::new(__irq_248_stub.as_usize()),
+                        Entry::new(__irq_249_stub.as_usize()),
+                        Entry::new(__irq_250_stub.as_usize()),
+                        Entry::new(__irq_251_stub.as_usize()),
+                        Entry::new(__irq_252_stub.as_usize()),
+                        Entry::new(__irq_253_stub.as_usize()),
+                        Entry::new(__irq_254_stub.as_usize()),
+                        Entry::new(__irq_255_stub.as_usize()),
+                    ],
+                }
+            }
         });
 
         // Safety: The descriptor table pointer was properly constructed.

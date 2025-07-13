@@ -106,23 +106,24 @@ impl AddressSpace {
 
         let mut index = 0;
         let mut run = 0;
-        walker.walk(|entry| {
-            use core::ops::ControlFlow;
+        walker
+            .walk(|entry| {
+                use core::ops::ControlFlow;
 
-            if entry.is_none() {
-                run += 1;
+                if entry.is_none() {
+                    run += 1;
 
-                if run == page_count.get() {
-                    return ControlFlow::Break(());
+                    if run == page_count.get() {
+                        return ControlFlow::Break(());
+                    }
+                } else {
+                    run = 0;
                 }
-            } else {
-                run = 0;
-            }
 
-            index += 1;
+                index += 1;
 
-            ControlFlow::Continue(())
-        });
+                ControlFlow::Continue(())
+            });
 
         match run.cmp(&page_count.get()) {
             core::cmp::Ordering::Equal => {
