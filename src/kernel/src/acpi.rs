@@ -1,5 +1,5 @@
 use crate::mem::Hhdm;
-use acpi::AcpiTables;
+use acpi::{AcpiError, AcpiTables};
 use core::ptr::NonNull;
 
 #[derive(Clone, Copy)]
@@ -31,12 +31,28 @@ impl acpi::AcpiHandler for Handler {
     }
 }
 
-pub fn get_tables(rsdp_request: &limine::request::RsdpRequest) -> AcpiTables<Handler> {
-    let rsdp_response = rsdp_request
-        .get_response()
-        .expect("bootloader did not provide a response to RSDP address request");
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error("bootloader did not provide an RSDP address")]
+    NoRsdpAddress,
+
+    #[error("failed to validate ACPI root table")]
+    ValidationFailed(AcpiError),
+}
+
+impl From<AcpiError> for Error {
+    fn from(error: AcpiError) -> Self {
+        Self::ValidationFailed(error)
+    }
+}
+
+pub fn get_root_table(
+    rsdp_request: &limine::request::RsdpRequest,
+) -> Result<AcpiTables<Handler>, Error> {
+    let rsdp_response = rsdp_request.get_response().ok_or(Error::NoRsdpAddress)?;
 
     // Safety: Bootloader guarantees provided RSDP address to be valid.
-    (unsafe { AcpiTables::from_rsdp(Handler, rsdp_response.address()) })
-        .expect("ACPI table validation failed")
+    let root_table = unsafe { AcpiTables::from_rsdp(Handler, rsdp_response.address()) }?;
+
+    Ok(root_table)
 }
