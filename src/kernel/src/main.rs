@@ -15,7 +15,8 @@
     ptr_as_uninit,
     strict_provenance_lints,
     box_vec_non_null,
-    allocator_api
+    allocator_api,
+    duration_constants
 )]
 #![forbid(clippy::inline_asm_x86_att_syntax, fuzzy_provenance_casts)]
 #![deny(
@@ -101,7 +102,7 @@ impl LinkerSymbol {
 
 /// Specify the Limine revision to use.
 #[doc(hidden)]
-static BASE_REVISION: BaseRevision = BaseRevision::with_revision(3);
+static BASE_REVISION: BaseRevision = BaseRevision::with_revision(4);
 
 const KERNEL_STACK_SIZE: usize = {
     #[cfg(debug_assertions)]
@@ -180,6 +181,7 @@ unsafe extern "C" fn _entry() -> ! {
     );
 
     crate::time::Stopwatch::init(&RSDP_REQUEST);
+    trace!("System stopwatch initialized.");
 
     // Safety: We've reached the end of the kernel init phase.
     unsafe { crate::cpu::synchronize(Some((&MP_REQUEST, &MEMORY_MAP_REQUEST))) }
@@ -206,3 +208,93 @@ fn print_boot_info(bootloader_info_request: &BootloaderInfoRequest) {
         crate::arch::x86_64::cpuid::print_info();
     }
 }
+
+// fn load_drivers() {
+//     use crate::task::{AddressSpace, Priority, Task};
+//     use elf::endian::AnyEndian;
+
+//     #[limine::limine_tag]
+//     static LIMINE_MODULES: limine::ModuleRequest = limine::ModuleRequest::new(crate::init::boot::LIMINE_REV);
+
+//     debug!("Unpacking kernel drivers...");
+
+//     let Some(modules) = LIMINE_MODULES.get_response() else {
+//         warn!("Bootloader provided no modules; skipping driver loading.");
+//         return;
+//     };
+
+//     let modules = modules.modules();
+//     trace!("Found modules: {:X?}", modules);
+
+//     let Some(drivers_module) = modules.iter().find(|module| module.path().ends_with("drivers")) else {
+//         panic!("no drivers module found")
+//     };
+
+//     let archive = tar_no_std::TarArchiveRef::new(drivers_module.data());
+//     archive
+//         .entries()
+//         .filter_map(|entry| {
+//             debug!("Attempting to parse driver blob: {}", entry.filename());
+
+//             match elf::ElfBytes::<AnyEndian>::minimal_parse(entry.data()) {
+//                 Ok(elf) => Some((entry, elf)),
+//                 Err(err) => {
+//                     error!("Failed to parse driver blob into ELF: {:?}", err);
+//                     None
+//                 }
+//             }
+//         })
+//         .for_each(|(entry, elf)| {
+//             // Get and copy the ELF segments into a small box.
+//             let Some(segments_copy) = elf.segments().map(|segments| segments.into_iter().collect()) else {
+//                 error!("ELF has no segments.");
+//                 return;
+//             };
+
+//             // Safety: In-place transmutation of initialized bytes for the purpose of copying safely.
+//             // let (_, archive_data, _) = unsafe { entry.data().align_to::<MaybeUninit<u8>>() };
+//             trace!("Allocating ELF data into memory...");
+//             let elf_data = alloc::boxed::Box::from(entry.data());
+//             trace!("ELF data allocated into memory.");
+
+//             let Ok((Some(shdrs), Some(_))) = elf.section_headers_with_strtab() else {
+//                 panic!("Error retrieving ELF relocation metadata.")
+//             };
+
+//             let load_offset = crate::task::MIN_LOAD_OFFSET;
+
+//             trace!("Processing relocations localized to fault page.");
+//             let mut relas = alloc::vec::Vec::with_capacity(shdrs.len());
+
+//             shdrs
+//                 .iter()
+//                 .filter(|shdr| shdr.sh_type == elf::abi::SHT_RELA)
+//                 .flat_map(|shdr| elf.section_data_as_relas(&shdr).unwrap())
+//                 .for_each(|rela| {
+//                     use crate::task::ElfRela;
+
+//                     match rela.r_type {
+//                         elf::abi::R_X86_64_RELATIVE => relas.push(ElfRela {
+//                             address: Address::new(usize::try_from(rela.r_offset).unwrap()).unwrap(),
+//                             value: load_offset + usize::try_from(rela.r_addend).unwrap(),
+//                         }),
+
+//                         _ => unimplemented!(),
+//                     }
+//                 });
+
+//             trace!("Finished processing relocations, pushing task.");
+
+//             let task = Task::new(
+//                 Priority::Normal,
+//                 AddressSpace::new_userspace(),
+//                 load_offset,
+//                 elf.ehdr,
+//                 segments_copy,
+//                 relas,
+//                 crate::task::ElfData::Memory(elf_data),
+//             );
+
+//             crate::task::PROCESSES.lock().push_back(task);
+//         });
+// }

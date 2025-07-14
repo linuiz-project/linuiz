@@ -5,8 +5,6 @@ use ioports::ReadOnlyPort;
 use safe_mmio::{UniqueMmioPointer, fields::ReadPure};
 use spin::Once;
 
-use crate::acpi::get_root_table;
-
 static GLOBAL_STOPWATCH: Once<Stopwatch> = Once::new();
 
 enum Source {
@@ -39,8 +37,8 @@ impl Source {
             Source::AcpiIo {
                 address: _,
                 max_value,
-            } => *max_value,
-            Source::AcpiMmio {
+            }
+            | Source::AcpiMmio {
                 address: _,
                 max_value,
             } => *max_value,
@@ -65,18 +63,22 @@ impl Stopwatch {
         GLOBAL_STOPWATCH.call_once(|| {
             trace!("Searching system to configure best possible stopwatch.");
 
-            if let Ok(acpi_root_table) = get_root_table(rsdp_request)
+            if let Ok(acpi_root_table) = crate::acpi::get_root_table(rsdp_request)
                 && let Ok(acpi_platform_info) = acpi_root_table.platform_info()
                 && let Some(pm_timer) = acpi_platform_info.pm_timer
             {
                 trace!("Found ACPI power management timer.");
 
-                let acpi_pm_timer_address = pm_timer.base;
-                match acpi_pm_timer_address.address_space {
+                match pm_timer.base.address_space {
                     acpi::address::AddressSpace::SystemIo => {
+                        trace!(
+                            "Using ACPI power management timer via port IO: {:#X}",
+                            pm_timer.base.address
+                        );
+
                         // TODO potentially use `NonZero<u16>` instead of just `u16`?
-                        let port_address = u16::try_from(acpi_pm_timer_address.address)
-                            .expect("invalid port address");
+                        let port_address =
+                            u16::try_from(pm_timer.base.address).expect("invalid port address");
 
                         let ticks_per_sec = 3579545;
                         let ticks_per_ms = ticks_per_sec / 1000;
@@ -99,7 +101,12 @@ impl Stopwatch {
                     }
 
                     acpi::address::AddressSpace::SystemMemory => {
-                        let mmio_address = usize::try_from(acpi_pm_timer_address.address)
+                        trace!(
+                            "Using ACPI power management timer via MMIO: {:#X}",
+                            pm_timer.base.address
+                        );
+
+                        let mmio_address = usize::try_from(pm_timer.base.address)
                             .expect("failed to convert ACPI power management timer address");
                         let mmio_address = NonNull::with_exposed_provenance(
                             NonZero::try_from(mmio_address)

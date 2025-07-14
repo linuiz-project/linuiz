@@ -146,7 +146,9 @@ extern "sysv64" fn __irq_handler(
 ) {
     match Vector::from(irq_number) {
         Vector::Timer => {
-            crate::cpu::state::with_scheduler(|scheduler| scheduler.interrupt_task(isf, regs));
+            crate::cpu::local_state::with_scheduler(|scheduler| {
+                scheduler.interrupt_task(isf, regs);
+            });
         }
         Vector::Syscall => {
             let vector = regs.rax;
@@ -170,7 +172,7 @@ extern "sysv64" fn __irq_handler(
     }
     // Safety: This is the end of an interrupt context.
     unsafe {
-        crate::cpu::state::end_of_interrupt();
+        crate::cpu::local_state::end_of_interrupt();
     }
 }
 unsafe extern "C" {

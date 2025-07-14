@@ -16,9 +16,9 @@ pub struct Scheduler {
 }
 
 impl Scheduler {
-    pub fn new(enabled: bool) -> Self {
+    pub fn new() -> Self {
         Self {
-            enabled,
+            enabled: false,
             idle_stack: Stack::new_zeroed(),
             task: None,
         }
@@ -143,7 +143,7 @@ impl Scheduler {
         unsafe {
             const TIME_SLICE: core::num::NonZeroU16 = core::num::NonZeroU16::new(5).unwrap();
 
-            crate::cpu::state::set_preemption_wait(TIME_SLICE);
+            crate::cpu::local_state::set_preemption_wait(TIME_SLICE);
         }
     }
 }

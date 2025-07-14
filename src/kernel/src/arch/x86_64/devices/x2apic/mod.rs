@@ -211,63 +211,6 @@ impl x2Apic {
         LocalVector::<LINT0>::set_masked(false);
         LocalVector::<LINT1>::set_vector(Vector::External);
         LocalVector::<LINT1>::set_masked(false);
-
-        // Local APIC timer is left masked (will be configured by the system clock).
-
-        // if FEATURE_INFO.has_tsc()
-        //     && FEATURE_INFO.has_tsc_deadline()
-        //     && ADVANCED_PWM_INFO
-        //         .as_ref()
-        //         .is_some_and(raw_cpuid::ApmInfo::has_invariant_tsc)
-        // {
-        //     trace!("Using TSC timer mode.");
-
-        //     LocalVector::<Timer>::set_mode(TimerMode::TscDeadline);
-
-        //     let frequency = PROCESSOR_FREQUENCY_INFO.as_ref().map_or_else(
-        //         || {
-        //             trace!("Processor does not support TSC frequency reporting via `CPUID`.");
-
-        //             // Enable the APIC to start the timer (timer is still masked to avoid firing)
-        //             Self::set_enabled(true);
-
-        //             // Safety: Processor has TSC capability.
-        //             let start_tsc = unsafe { _rdtsc() };
-        //             crate::clock::SYSTEM_CLOCK.spin_wait_us(50000);
-        //             // Safety: Processor has TSC capability.
-        //             let end_tsc = unsafe { _rdtsc() };
-
-        //             (end_tsc - start_tsc) * US_FREQ_FACTOR
-        //         },
-        //         |info| {
-        //             u64::from(info.bus_frequency())
-        //                 / (u64::from(info.processor_base_frequency())
-        //                     * u64::from(info.processor_max_frequency()))
-        //         },
-        //     );
-
-        //     NonZero::new(frequency / u64::from(timer_frequency))
-        //         .expect("timer interval is zero; error occurred during measurements")
-        // } else {
-        //     // Configure the local APIC timer for measurement...
-        //     Self::set_timer_divide_configuration(TimerDivideConfiguration::DivideBy1);
-        //     LocalVector::<Timer>::set_mode(TimerMode::OneShot);
-
-        //     // Start the local APIC timer...
-        //     Self::set_timer_initial_count(u32::MAX);
-        //     Self::set_enabled(true);
-
-        //     crate::clock::SYSTEM_CLOCK.spin_wait_us(US_WAIT.try_into().unwrap());
-        //     let timer_count = Self::get_timer_current_count();
-
-        //     let frequency = u64::from(u32::MAX - timer_count) * US_FREQ_FACTOR;
-
-        //     // Ensure we reset the APIC timer to avoid any errant interrupts.
-        //     Self::set_timer_initial_count(0);
-
-        //     NonZero::new(frequency / u64::from(timer_frequency))
-        //         .expect("timer interval is zero; error occurred during measurements")
-        // }
     }
 
     /// The initial ID of the local APIC device.
@@ -396,28 +339,28 @@ impl x2Apic {
         write_register(Register::ERROR_STATUS, 0x0);
     }
 
-    fn get_timer_initial_count() -> u32 {
+    pub fn get_timer_initial_count() -> u32 {
         u32::try_from(read_register(Register::TIMER_INITIAL_COUNT)).unwrap()
     }
 
-    fn set_timer_initial_count(value: u32) {
+    pub fn set_timer_initial_count(value: u32) {
         write_register(Register::TIMER_INITIAL_COUNT, u64::from(value));
     }
 
-    fn get_timer_current_count() -> u32 {
+    pub fn get_timer_current_count() -> u32 {
         u32::try_from(read_register(Register::TIMER_CURRENT_COUNT)).unwrap()
     }
 
-    fn get_timer_divide_configuration() -> TimerDivideConfiguration {
+    pub fn get_timer_divide_configuration() -> TimerDivideConfiguration {
         TimerDivideConfiguration::try_from(read_register(Register::TIMER_DIVIDE_CONFIGURATION))
             .unwrap()
     }
 
-    fn set_timer_divide_configuration(value: TimerDivideConfiguration) {
+    pub fn set_timer_divide_configuration(value: TimerDivideConfiguration) {
         write_register(Register::TIMER_DIVIDE_CONFIGURATION, u64::from(value));
     }
 
-    fn send_interrupt_command(interrupt_command: interrupt_command::InterruptCommand) {
+    pub fn send_interrupt_command(interrupt_command: interrupt_command::InterruptCommand) {
         let high = u64::from(interrupt_command.high());
         let low = u64::from(interrupt_command.low());
 

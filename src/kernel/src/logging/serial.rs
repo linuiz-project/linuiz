@@ -107,7 +107,7 @@ impl core::fmt::Write for Writer {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         for (index, c) in s.chars().enumerate() {
             // Wait for the FIFO to empty initially and every 16 bytes written.
-            if (index % UART_FIFO_SIZE) == 0 {
+            if index.is_multiple_of(UART_FIFO_SIZE) {
                 self.wait_for_empty();
             }
 

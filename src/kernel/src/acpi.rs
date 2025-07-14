@@ -14,7 +14,7 @@ impl acpi::AcpiHandler for Handler {
         physical_address: usize,
         size: usize,
     ) -> acpi::PhysicalMapping<Self, T> {
-        trace!("ACPI: Requested physical mapping at:{physical_address:#X} (size:{size})");
+        trace!("Physical mapping @ {physical_address:#X} (size:{size})");
 
         let virtual_address = NonNull::with_exposed_provenance(Hhdm::offset(physical_address));
 
@@ -51,8 +51,21 @@ pub fn get_root_table(
 ) -> Result<AcpiTables<Handler>, Error> {
     let rsdp_response = rsdp_request.get_response().ok_or(Error::NoRsdpAddress)?;
 
+    let rsdp_address = rsdp_response.address();
+    debug!("Found RSDP: {rsdp_address:#X?}");
+
+    let physical_address = {
+        // Limine protocol specification states that base revisions < 3 provides
+        // the RSDP address as a virtual address rather than physical.
+        if rsdp_response.revision() < 3 {
+            Hhdm::negative_offset(rsdp_address).get()
+        } else {
+            rsdp_address
+        }
+    };
+
     // Safety: Bootloader guarantees provided RSDP address to be valid.
-    let root_table = unsafe { AcpiTables::from_rsdp(Handler, rsdp_response.address()) }?;
+    let root_table = unsafe { AcpiTables::from_rsdp(Handler, physical_address) }?;
 
     Ok(root_table)
 }

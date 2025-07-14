@@ -27,11 +27,21 @@ impl Hhdm {
         HHDM.wait().0
     }
 
-    /// Offset `address` by the base address of the higher-half direct map.
+    /// Positively offset `address` by the base address of the higher-half direct map.
     pub fn offset(address: usize) -> NonZero<usize> {
         Self::get_static()
+            .get()
             .checked_add(address)
+            .and_then(NonZero::new)
             .expect("provided higher-half direct map offset caused overflow")
+    }
+
+    /// Negatively offset `address` by the base address of the higher-half direct map.
+    pub fn negative_offset(address: usize) -> NonZero<usize> {
+        address
+            .checked_sub(Self::get_static().get())
+            .and_then(NonZero::new)
+            .expect("provided higher-half direct map offset caused underflow")
     }
 
     /// Convert a physical address to its higher-half direct mapped virtual counterpart.

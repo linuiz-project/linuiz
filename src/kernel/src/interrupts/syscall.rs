@@ -29,12 +29,12 @@ pub fn process(
         Ok(Vector::KlogTrace) => process_klog(log::Level::Trace, arg0, arg1),
 
         Ok(Vector::TaskExit) => {
-            crate::cpu::state::with_scheduler(|scheduler| scheduler.kill_task(state, regs));
+            crate::cpu::local_state::with_scheduler(|scheduler| scheduler.kill_task(state, regs));
 
             Ok(Success::Ok)
         }
         Ok(Vector::TaskYield) => {
-            crate::cpu::state::with_scheduler(|scheduler| scheduler.yield_task(state, regs));
+            crate::cpu::local_state::with_scheduler(|scheduler| scheduler.yield_task(state, regs));
 
             Ok(Success::Ok)
         }
@@ -49,7 +49,7 @@ fn process_klog(level: log::Level, str_ptr_arg: usize, str_len: usize) -> Result
     let str_ptr = core::ptr::with_exposed_provenance::<u8>(str_ptr_arg);
 
     // TODO abstract this into a function
-    crate::cpu::state::with_scheduler(|scheduler| {
+    crate::cpu::local_state::with_scheduler(|scheduler| {
         use crate::task::Error as TaskError;
         use libsys::{Address, page_size};
 

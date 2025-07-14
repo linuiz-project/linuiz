@@ -8,5 +8,6 @@
     "rust-analyzer.linkedProjects": [
         "Cargo.toml",
         "xtask/Cargo.toml"
-    ]
+    ],
+    "rust-analyzer.cargo.allTargets": false
 }

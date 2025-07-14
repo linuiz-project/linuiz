@@ -17,7 +17,7 @@ pub enum Error {
 #[doc(hidden)]
 #[inline(never)]
 pub unsafe fn handler(fault_address: Address<Virtual>) -> Result<(), Error> {
-    crate::cpu::state::with_scheduler(|scheduler| {
+    crate::cpu::local_state::with_scheduler(|scheduler| {
         scheduler
             .task_mut()
             .ok_or(Error::NoTask)?

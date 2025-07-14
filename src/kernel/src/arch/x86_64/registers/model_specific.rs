@@ -9,7 +9,7 @@ use core::{num::NonZero, ptr::NonNull};
 
 use crate::{
     arch::x86_64::{registers::RFlags, structures::gdt::SegmentSelector},
-    cpu::state::LocalState,
+    cpu::local_state::LocalState,
 };
 use bit_field::BitField;
 use libsys::{Address, Virtual};

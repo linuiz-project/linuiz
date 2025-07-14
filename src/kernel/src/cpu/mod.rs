@@ -5,8 +5,9 @@ use core::{
 use libsys::{Address, Frame, Physical};
 use spin::{Barrier, Mutex, Once};
 
-pub mod state;
-pub mod timer;
+use crate::{arch::x86_64::devices::x2apic::x2Apic, cpu::local_state::LocalState};
+
+pub mod local_state;
 
 pub fn get_id() -> u32 {
     #[cfg(target_arch = "x86_64")]
@@ -78,9 +79,7 @@ pub fn begin_multiprocessing(mp_request: &limine::request::MpRequest) -> Option<
         }
     }
 
-    Some(
-        response.cpus().len() - 1, // subtract bootstrap processor
-    )
+    Some(response.cpus().len())
 }
 
 /// Frees bootloader reclaimable memory, then begins local post-memory-system-initialization
@@ -122,10 +121,14 @@ pub unsafe fn synchronize(
     let stack_address =
         crate::mem::Hhdm::virtual_to_physical(Address::from_ptr(get_stack_ptr().cast_mut()));
 
+    trace!("Beginning multiprocessing synchronization / bootloader memory reclaim procedure.");
+
     // If this this the bootstrap processor context, the requests will have been passed.
     if let Some((mp_request, memory_map_request)) = bsp_requests {
         // Begin multiprocessing and store the processor count to use in synchronization later.
         if let Some(hwthread_count) = crate::cpu::begin_multiprocessing(mp_request) {
+            trace!("We will synchronize {hwthread_count} hardware threads.");
+
             ENTRY_READY_SYNC.call_once(|| Barrier::new(hwthread_count));
             ENTRY_PROCESSED_SYNC.call_once(|| Barrier::new(hwthread_count));
             INIT_FINALIZED_SYNC.call_once(|| Barrier::new(hwthread_count));
@@ -189,11 +192,16 @@ pub unsafe fn synchronize(
             // Free the requisite physical frames...
             .for_each(|frame| crate::mem::pmm::PhysicalMemoryManager::free_frame(frame).unwrap());
 
-        if let Some(init_finalized) = INIT_FINALIZED_SYNC.get() {
+        if let Some(entry_ready) = ENTRY_READY_SYNC.get()
+            && let Some(init_finalized) = INIT_FINALIZED_SYNC.get()
+        {
             // Clear the check entry to `None`, so other hardware threads know there's no more work.
             let mut entry_to_check = ENTRY_TO_CHECK.lock();
             *entry_to_check = None;
             drop(entry_to_check);
+
+            // Signal to other hardware threads to read the next extry.
+            entry_ready.wait();
 
             // Wait for other hardware threads to be ready, so they can continue initialization...
             init_finalized.wait();
@@ -240,19 +248,24 @@ pub unsafe fn synchronize(
     #[cfg(target_arch = "x86_64")]
     crate::arch::x86_64::structures::tss::TaskStateSegment::new_with_stacks().load_local();
 
-    core::arch::breakpoint();
-
-    // Safety: Function is only run once, right here.
-    unsafe {
-        crate::cpu::state::LocalState::init(1000);
+    debug!("Initializing and enabled the local interrupt controller.");
+    #[cfg(target_arch = "x86_64")]
+    {
+        x2Apic::init();
+        x2Apic::set_enabled(true);
     }
+    debug!("Local interrupt controller has been initialized and enabled.");
+
+    LocalState::init();
+
+    core::arch::breakpoint();
 
     // Ensure we enable interrupts prior to enabling the scheduler.
     crate::interrupts::enable();
 
     // Safety: The hardware thread is ready to be scheduled with tasks.
     unsafe {
-        crate::cpu::state::begin_scheduling();
+        crate::cpu::local_state::begin_scheduling();
     }
 
     // This interrupt wait loop is necessary to ensure the core can jump into the scheduler.

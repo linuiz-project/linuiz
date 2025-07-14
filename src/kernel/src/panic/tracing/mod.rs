@@ -17,10 +17,8 @@ pub(super) fn emit_stack_trace() {
         alloc::string::String::from_raw_parts(panic_buffer.as_mut_ptr(), 0, panic_buffer.len())
     };
 
-    if construct_panic_message(&mut panic_string).is_ok() {
-        error!("{panic_string}");
-    } else {
-        error!("Could not construct panic message.");
+    if let Err(err) = construct_panic_message(&mut panic_string) {
+        error!("Failed constructing panic message: {err:?}");
     }
 
     drop(panic_string);
