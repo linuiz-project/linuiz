@@ -1,4 +1,4 @@
-name: Validation
+name: Post-commit Validation
 
 on:
   - pull_request
@@ -9,7 +9,6 @@ defaults:
 
 jobs:
   validation:
-    name: Post-commit Validation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
