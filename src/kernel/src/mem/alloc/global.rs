@@ -12,6 +12,12 @@ unsafe impl core::alloc::GlobalAlloc for KernelAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         assert!(layout.align() <= page_size());
 
+        trace!(
+            "Allocate: {{ size: {:#X}, align: {:#X} }}",
+            layout.size(),
+            layout.align()
+        );
+
         let frame_count = libsys::align_up_div(layout.size(), page_shift());
 
         let alloc_result = {
@@ -48,8 +54,14 @@ unsafe impl core::alloc::GlobalAlloc for KernelAllocator {
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         assert!(layout.align() <= page_size());
 
+        trace!(
+            "Deallocate: {ptr:#X?} {{ size: {:#X}, align: {:#X} }}",
+            layout.size(),
+            layout.align()
+        );
+
         // Calculate the physical (rather than virtual) memory offset of the pointer.
-        let physical_offset = Hhdm::offset(ptr.addr()).get();
+        let physical_offset = Hhdm::negative_offset(ptr.addr()).get();
         let physical_offset_aligned = libsys::align_down(physical_offset, page_shift());
         let frame_address = Address::new(physical_offset_aligned).unwrap();
 
