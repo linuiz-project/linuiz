@@ -1,6 +1,11 @@
-use crate::arch::x86_64::cpuid::{
-    advanced_power_management_info, feature_info, hypervisor_info, processor_frequency_info,
-};
+use core::arch::x86_64::_rdtsc;
+
+use crate::{arch::x86_64::{
+    cpuid::{
+        advanced_power_management_info, feature_info, hypervisor_info, processor_frequency_info,
+    },
+    devices::x2apic::local_vector::{LocalVector, Timer, TimerMode},
+}, time::Stopwatch};
 use raw_cpuid::{ApmInfo, FeatureInfo, HypervisorInfo};
 
 enum ClockSource {
@@ -8,12 +13,12 @@ enum ClockSource {
     LocalApic,
 }
 
-pub struct ArchClock {
+pub struct ArchTimer {
     frequency: u64,
     source: ClockSource,
 }
 
-impl ArchClock {
+impl ArchTimer {
     pub fn configure() -> Self {
         if feature_info().is_some_and(FeatureInfo::has_tsc)
             && feature_info().is_some_and(FeatureInfo::has_tsc_deadline)
@@ -40,10 +45,21 @@ impl ArchClock {
                         .map(u64::from)
                 })
                 .unwrap_or_else(|| {
-                    // We can't query the processor frequency information, so we'll have to measure it against another known-frequency source.
+                    trace!("Processor does not support TSC frequency reporting via `CPUID`.");
 
-                    todo!()
+                    // Enable the APIC to start the timer (timer is still masked to avoid firing)
+                    LocalVector::<Timer>::set_masked(false);
+
+                    // Safety: Processor has TSC capability.
+                    let start_tsc = unsafe { _rdtsc() };
+                    crate::clock::SYSTEM_CLOCK.spin_wait_us(50000);
+                    // Safety: Processor has TSC capability.
+                    let end_tsc = unsafe { _rdtsc() };
+
+                    (end_tsc - start_tsc) * US_FREQ_FACTOR
                 });
+
+            LocalVector::<Timer>::set_mode(TimerMode::TscDeadline);
 
             Self {
                 frequency,
@@ -58,9 +74,18 @@ impl ArchClock {
                 .and_then(raw_cpuid::HypervisorInfo::apic_frequency)
                 .map_or_else(
                     || {
-                        // We can't query the processor frequency information, so we'll have to measure it against another known-frequency source.
+                    trace!("Processor does not support local APIC timer frequency reporting via `CPUID`.");
 
-                        todo!()
+                    // Enable the APIC to start the timer (timer is still masked to avoid firing)
+                    LocalVector::<Timer>::set_masked(false);
+
+                    // Safety: Processor has TSC capability.
+                    let start_tsc = unsafe { _rdtsc() };
+                    Stopwatch::spin_wait_ms(50);
+                    // Safety: Processor has TSC capability.
+                    let end_tsc = unsafe { _rdtsc() };
+
+                    (end_tsc - start_tsc) * US_FREQ_FACTOR
                     },
                     u64::from,
                 );
@@ -70,30 +95,9 @@ impl ArchClock {
                 source: ClockSource::LocalApic,
             }
         }
-
-        //     LocalVector::<Timer>::set_mode(TimerMode::TscDeadline);
-
-        //     let frequency = PROCESSOR_FREQUENCY_INFO.as_ref().map_or_else(
-        //         || {
-        //             trace!("Processor does not support TSC frequency reporting via `CPUID`.");
-
-        //             // Enable the APIC to start the timer (timer is still masked to avoid firing)
-        //             Self::set_enabled(true);
-
-        //             // Safety: Processor has TSC capability.
-        //             let start_tsc = unsafe { _rdtsc() };
-        //             crate::clock::SYSTEM_CLOCK.spin_wait_us(50000);
-        //             // Safety: Processor has TSC capability.
-        //             let end_tsc = unsafe { _rdtsc() };
-
-        //             (end_tsc - start_tsc) * US_FREQ_FACTOR
-        //         },
-        //         |info| {
-        //             u64::from(info.bus_frequency())
-        //                 / (u64::from(info.processor_base_frequency())
-        //                     * u64::from(info.processor_max_frequency()))
-        //         },
-        //     );
-        // }
     }
+}
+
+fn wait_stopwatch(microseconds: u32) {
+    let timer = crate::acpi::get_root_table(rsdp_request);
 }

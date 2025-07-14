@@ -60,7 +60,6 @@ use limine::{
 
 mod acpi;
 mod arch;
-mod clock;
 mod cpu;
 mod error;
 mod interrupts;
@@ -70,6 +69,7 @@ mod panic;
 mod params;
 mod rand;
 mod task;
+mod time;
 mod util;
 
 extern crate alloc;
@@ -138,7 +138,7 @@ unsafe extern "C" fn _entry() -> ! {
     static KERNEL_ADDRESS_REQUEST: ExecutableAddressRequest = ExecutableAddressRequest::new();
     static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
     static MEMORY_MAP_REQUEST: MemoryMapRequest = MemoryMapRequest::new();
-    static RSDP_ADDRESS_REQUEST: RsdpRequest = RsdpRequest::new();
+    static RSDP_REQUEST: RsdpRequest = RsdpRequest::new();
     static MP_REQUEST: MpRequest = MpRequest::new().with_flags(RequestFlags::X2APIC);
 
     // Enable logging first, so we can get feedback on the entire init process.
@@ -178,6 +178,8 @@ unsafe extern "C" fn _entry() -> ! {
         &KERNEL_FILE_REQUEST,
         &KERNEL_ADDRESS_REQUEST,
     );
+
+    crate::time::Stopwatch::init(&RSDP_REQUEST);
 
     // Safety: We've reached the end of the kernel init phase.
     unsafe { crate::cpu::synchronize(Some((&MP_REQUEST, &MEMORY_MAP_REQUEST))) }
