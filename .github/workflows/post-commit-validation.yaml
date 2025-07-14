@@ -9,6 +9,7 @@ defaults:
 
 jobs:
   validation:
+    name: Build & Formatting
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
