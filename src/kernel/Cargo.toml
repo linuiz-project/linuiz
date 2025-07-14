@@ -22,6 +22,7 @@ limine = { version = "0.5", features = ["uuid"] }
 log = { version = "0.4", default-features = false }
 num_enum = { version = "0.7", default-features = false }
 rand_pcg = { version = "0.9", default-features = false }
+safe-mmio = "0.2"
 spin = "0.10"
 thiserror = { version = "2.0", default-features = false }
 uart = { version = "3.0", default-features = false, features = [
