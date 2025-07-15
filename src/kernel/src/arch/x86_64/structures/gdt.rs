@@ -371,12 +371,13 @@ impl SegmentDescriptor for GenericSegmentDescriptor {
 pub struct SystemSegmentDescriptor(u128);
 
 impl SystemSegmentDescriptor {
-    const BASE_LOW_BIT_RANGE: Range<usize> = 16..32;
-    const BASE_MID_BIT_RANGE: Range<usize> = 56..64;
-    const BASE_HIGH_BIT_RANGE: Range<usize> = 64..96;
+    const BASE_BIT_RANGE_1: Range<usize> = 16..32;
+    const BASE_BIT_RANGE_2: Range<usize> = 56..64;
+    const BASE_BIT_RANGE_3: Range<usize> = 56..64;
+    const BASE_BIT_RANGE_4: Range<usize> = 64..96;
 
-    /// Defines different types of system segments rather than code and data segments.
-    const SEGMENT_TYPE_BIT_RANGE: Range<usize> = 40..44;
+    const SYSTEM_SEGMENT_TYPE_BIT_RANGE: Range<usize> = 40..44;
+    const SYSTEM_SEGMENT_TYPE_TSS_AVAILABLE: u128 = 0x9;
 
     /// # Safety
     ///
@@ -384,25 +385,25 @@ impl SystemSegmentDescriptor {
     pub unsafe fn from_tss(tss: NonNull<TaskStateSegment>) -> Self {
         let mut value = u128::from(COMMON_BITS);
 
-        // Sets the segment type to TSS (64-bit + Available)
-        value.set_bits(Self::SEGMENT_TYPE_BIT_RANGE, 0b1001);
+        // Set the systems segment type (in this case, 64-bit TSS + Available)
+        value.set_bits(
+            Self::SYSTEM_SEGMENT_TYPE_BIT_RANGE,
+            Self::SYSTEM_SEGMENT_TYPE_TSS_AVAILABLE,
+        );
 
+        // Set the privilege level to Ring 0.
         value.set_bits(
             PRIVILEGE_LEVEL_BIT_RANGE,
             u128::from(u16::from(PrivilegeLevel::Ring0)),
         );
 
+        // Set all of the bits for the "base" of the table. And because of legacy
+        // compatibility, this requires setting 4 different bit ranges.
         let base = u128::try_from(tss.addr().get()).unwrap();
-        value.set_bits(Self::BASE_LOW_BIT_RANGE, base & 0xFFFF);
-        value.set_bits(
-            Self::BASE_MID_BIT_RANGE,
-            (base >> Self::BASE_LOW_BIT_RANGE.len()) & 0xFF,
-        );
-        value.set_bits(
-            Self::BASE_HIGH_BIT_RANGE,
-            (base >> (Self::BASE_LOW_BIT_RANGE.len() + Self::BASE_MID_BIT_RANGE.len()))
-                & 0xFFFF_FFFF,
-        );
+        value.set_bits(Self::BASE_BIT_RANGE_1, base.get_bits(0..16));
+        value.set_bits(Self::BASE_BIT_RANGE_2, base.get_bits(16..24));
+        value.set_bits(Self::BASE_BIT_RANGE_3, base.get_bits(24..32));
+        value.set_bits(Self::BASE_BIT_RANGE_4, base.get_bits(32..64));
 
         Self(value)
     }
