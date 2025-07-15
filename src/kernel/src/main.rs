@@ -47,7 +47,6 @@
     clippy::if_not_else,
     dead_code
 )]
-#![cfg_attr(target_arch = "x86_64", feature(abi_x86_interrupt))]
 
 use limine::{
     BaseRevision,
