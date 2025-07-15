@@ -76,11 +76,18 @@ impl TaskStateSegment {
         GlobalDescriptorTable::with_temporary(|temp_gdt| {
             let tss_ptr = Box::into_non_null(Box::new(self));
 
-            trace!("Loading: {tss_ptr:#X?}");
-
             // Safety: `self` is dereferenceable as `Self`.
             let tss_segment_descriptor = unsafe { SystemSegmentDescriptor::from_tss(tss_ptr) };
             let tss_segment_selector = temp_gdt.append_segment(tss_segment_descriptor);
+
+            // Load the temporary GDT for loading TSS.
+            // Safety: Temporary GDT is identical to static GDT + 1 entry, so cannot
+            //         cause undefined behaviour by loading.
+            unsafe {
+                temp_gdt.load();
+            }
+
+            trace!("Loading: {tss_ptr:#X?}");
 
             // Safety: No memory safety concerns.
             unsafe {
