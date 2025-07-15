@@ -107,7 +107,7 @@ pub fn run(sh: &xshell::Shell, temp_dir: impl AsRef<Path>, options: Options) -> 
     .arg("-no-shutdown")
     .arg("-no-reboot")
     .args(["-debugcon", "file:.debug/debug.log"])
-    .args(["-serial", "mon:stdio"])
+    .args(["-serial", "stdio"])
     .args(["-drive", "format=raw,file=run/disk0.img,id=disk1,if=none"])
     .args(["-net", "none"])
     .args(["-M", "smm=off"])
