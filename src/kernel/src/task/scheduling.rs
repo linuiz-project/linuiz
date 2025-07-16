@@ -1,11 +1,9 @@
 use crate::{
     arch::x86_64::structures::idt::InterruptStackFrame,
-    mem::Stack,
+    mem::stack::Stack,
     task::{Registers, Task},
 };
-use alloc::collections::VecDeque;
 use libsys::Address;
-use zerocopy::FromZeros;
 
 pub static PROCESSES: spin::Mutex<VecDeque<Task>> = spin::Mutex::new(VecDeque::new());
 
@@ -19,7 +17,7 @@ impl Scheduler {
     pub fn new() -> Self {
         Self {
             enabled: false,
-            idle_stack: Stack::new_zeroed(),
+            idle_stack: Stack::allocate_new(),
             task: None,
         }
     }

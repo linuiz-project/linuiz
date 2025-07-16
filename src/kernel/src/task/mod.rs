@@ -7,7 +7,6 @@ pub use scheduling::*;
 mod address_space;
 pub use address_space::*;
 
-use alloc::{boxed::Box, string::String, vec::Vec};
 use bit_field::BitField;
 use core::num::NonZeroUsize;
 use elf::{endian::AnyEndian, file::FileHeader, segment::ProgramHeader};

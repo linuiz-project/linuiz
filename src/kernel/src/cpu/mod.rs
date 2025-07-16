@@ -116,10 +116,10 @@ pub unsafe fn synchronize(
     static IS_ENTRY_USED: AtomicBool = AtomicBool::new(false);
     static ENTRY_READY_SYNC: Once<Barrier> = Once::new();
     static ENTRY_PROCESSED_SYNC: Once<Barrier> = Once::new();
-    static INIT_FINALIZED_SYNC: Once<Barrier> = Once::new();
 
-    let stack_address =
-        crate::mem::Hhdm::virtual_to_physical(Address::from_ptr(get_stack_ptr().cast_mut()));
+    let stack_address = crate::mem::HigherHalfDirectMap::virtual_to_physical(Address::from_ptr(
+        get_stack_ptr().cast_mut(),
+    ));
 
     trace!("Beginning multiprocessing synchronization / bootloader memory reclaim procedure.");
 
@@ -131,7 +131,6 @@ pub unsafe fn synchronize(
 
             ENTRY_READY_SYNC.call_once(|| Barrier::new(hwthread_count));
             ENTRY_PROCESSED_SYNC.call_once(|| Barrier::new(hwthread_count));
-            INIT_FINALIZED_SYNC.call_once(|| Barrier::new(hwthread_count));
         }
 
         debug!("Reclaiming bootloader memory...");
@@ -192,9 +191,7 @@ pub unsafe fn synchronize(
             // Free the requisite physical frames...
             .for_each(|frame| crate::mem::pmm::PhysicalMemoryManager::free_frame(frame).unwrap());
 
-        if let Some(entry_ready) = ENTRY_READY_SYNC.get()
-            && let Some(init_finalized) = INIT_FINALIZED_SYNC.get()
-        {
+        if let Some(entry_ready) = ENTRY_READY_SYNC.get() {
             // Clear the check entry to `None`, so other hardware threads know there's no more work.
             let mut entry_to_check = ENTRY_TO_CHECK.lock();
             *entry_to_check = None;
@@ -202,9 +199,6 @@ pub unsafe fn synchronize(
 
             // Signal to other hardware threads to read the next extry.
             entry_ready.wait();
-
-            // Wait for other hardware threads to be ready, so they can continue initialization...
-            init_finalized.wait();
         }
 
         debug!("Bootloader memory reclaimed.");
@@ -212,7 +206,6 @@ pub unsafe fn synchronize(
         // Wait for bootstrap processor to populate the synchronizer...
         let entry_ready = ENTRY_READY_SYNC.wait();
         let entry_processed = ENTRY_PROCESSED_SYNC.wait();
-        let init_finalized = INIT_FINALIZED_SYNC.wait();
 
         trace!("Entering memory map entry stack check loop.");
 
@@ -239,21 +232,22 @@ pub unsafe fn synchronize(
             entry_processed.wait();
         }
 
-        // Wait for bootstrap processor to finish up.
-        init_finalized.wait();
-
         trace!("Entry checks complete.");
     }
+
+    debug!("Preparing hardware thread for task scheduling...");
 
     #[cfg(target_arch = "x86_64")]
     crate::arch::x86_64::structures::tss::TaskStateSegment::new_with_stacks().load_local();
 
-    debug!("Initializing and enabled the local interrupt controller.");
+    trace!("Initializing the local interrupt controller.");
     #[cfg(target_arch = "x86_64")]
-    {
-        x2Apic::init();
-        x2Apic::set_enabled(true);
-    }
+    x2Apic::reset();
+
+    trace!("Enabling the local interrupt controller.");
+    #[cfg(target_arch = "x86_64")]
+    x2Apic::set_enabled(true);
+
     debug!("Local interrupt controller has been initialized and enabled.");
 
     LocalState::init();

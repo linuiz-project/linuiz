@@ -1,4 +1,4 @@
-use crate::mem::{Hhdm, pmm::PhysicalMemoryManager};
+use crate::mem::{HigherHalfDirectMap, pmm::PhysicalMemoryManager};
 use crate::util::{InteriorRef, Mut, Ref};
 use bit_field::BitField;
 use core::{fmt, iter::Step};
@@ -208,6 +208,8 @@ pub enum FlagsModify {
 }
 
 // TODO impl table levels for attribute masking on x86
+// TODO ensure all updates to PTEs are all-or-nothing, as the
+//      MMU may read the PTE in a partially modified state.
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct PageTableEntry(u64);
@@ -337,7 +339,11 @@ impl<RefKind: InteriorRef> PageTable<'_, RefKind> {
     }
 
     fn table_ptr(&self) -> *mut PageTableEntry {
-        core::ptr::with_exposed_provenance_mut(Hhdm::frame_to_page(self.get_frame()).get().get())
+        core::ptr::with_exposed_provenance_mut(
+            HigherHalfDirectMap::frame_to_page(self.get_frame())
+                .get()
+                .get(),
+        )
     }
 
     pub fn entries(&self) -> &[PageTableEntry] {

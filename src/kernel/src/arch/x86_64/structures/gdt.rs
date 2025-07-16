@@ -8,13 +8,39 @@ pub static KDATA_SELECTOR: Once<SegmentSelector> = Once::new();
 pub static UDATA_SELECTOR: Once<SegmentSelector> = Once::new();
 pub static UCODE_SELECTOR: Once<SegmentSelector> = Once::new();
 
-static GDT: Once<GlobalDescriptorTable> = Once::new();
+crate::singleton! {
+    #[derive(Debug, Clone)]
+    #[repr(C, align(8))]
+    pub GlobalDescriptorTable {
+        table: [u64; 7],
+        len: usize,
+    }
 
-#[repr(C, align(8))]
-#[derive(Debug, Clone)]
-pub struct GlobalDescriptorTable {
-    table: [u64; 7],
-    len: usize,
+    fn init() {
+        let mut gdt = Self::empty();
+
+        // The GDT layout is very specific, due to the behaviour of the `IA32_STAR` MSR and its
+        // affect on syscalls. Do not change this, or if it is changed, ensure it follows the requisite
+        // standard set by the aforementioned `IA32_STAR` MSR. Details can be found in the description of
+        // the `syscall` and `sysret` instructions in the IA32 Software Developer's Manual.
+        let kcode_selector = gdt.append_segment(GenericSegmentDescriptor::kernel_code());
+        let kdata_selector = gdt.append_segment(GenericSegmentDescriptor::kernel_data());
+        let udata_selector = gdt.append_segment(GenericSegmentDescriptor::user_data());
+        let ucode_selector = gdt.append_segment(GenericSegmentDescriptor::user_code());
+
+        KCODE_SELECTOR.call_once(|| kcode_selector);
+        KDATA_SELECTOR.call_once(|| kdata_selector);
+        UDATA_SELECTOR.call_once(|| udata_selector);
+        UCODE_SELECTOR.call_once(|| ucode_selector);
+
+        trace!("Segment descriptors loaded:");
+        trace!("Kernel code: {kcode_selector:?}");
+        trace!("Kernel data: {kdata_selector:?}");
+        trace!("User data: {udata_selector:?}");
+        trace!("User code: {ucode_selector:?}");
+
+        gdt
+    }
 }
 
 impl GlobalDescriptorTable {
@@ -28,98 +54,14 @@ impl GlobalDescriptorTable {
         }
     }
 
-    /// # Safety
-    ///
-    /// - An invalid [`GlobalDescriptorTable`] could potentially make memory unreadable or unwriteable.
-    /// - This should be executed prior to any point when the FS/GS _BASE MSRs will
-    ///   be in use, as they are cleared when this function is run.
-    pub unsafe fn load(&self) {
-        use core::arch::asm;
-
-        let dtptr = DescriptorTablePointer::from(self);
-
-        trace!(
-            "Loading: {:X?}:\n{self:#X?}\n{dtptr:#X?}",
-            core::ptr::from_ref(self)
-        );
-
-        // Safety: The GDT is properly formed, and the descriptor table pointer is
-        //         set to the GDT's memory location, with the requisite limit set
-        //         correctly (size in bytes, less 1).
-        unsafe {
-            asm!(
-                "lgdt [{}]",
-                in(reg) &raw const dtptr,
-                options(readonly, nostack, preserves_flags)
-            );
-        }
-    }
-
-    /// Appends a [`SegmentDescriptor`] to the [`GlobalDescriptorTable`] entries table.
-    pub fn append_segment(
-        &mut self,
-        segment_descriptor: impl SegmentDescriptor,
-    ) -> SegmentSelector {
-        let current_index = self.len;
-        let privilege_level = segment_descriptor.privilege_level();
-        let appended_entry_count = segment_descriptor.append_entries(&mut self.table[self.len..]);
-        self.len += appended_entry_count;
-
-        SegmentSelector::new(u16::try_from(current_index).unwrap(), privilege_level)
-    }
-
-    pub fn with_temporary<T>(func: impl FnOnce(&mut Self) -> T) -> T {
-        let static_gdt = GDT.wait();
-        let mut temp_gdt = static_gdt.clone();
-
-        crate::interrupts::uninterruptable(|| {
-            let value = func(&mut temp_gdt);
-
-            // Safety: Loading the static GDT is always safe.
-            unsafe {
-                static_gdt.load();
-            }
-
-            value
-        })
-    }
-
     pub fn load_static() {
-        assert!(!crate::interrupts::is_enabled());
-
-        trace!("Configuring the static global descriptor table...");
-
-        let gdt = GDT.call_once(|| {
-            let mut gdt = GlobalDescriptorTable::empty();
-
-            // The GDT layout is very specific, due to the behaviour of the `IA32_STAR` MSR and its
-            // affect on syscalls. Do not change this, or if it is changed, ensure it follows the requisite
-            // standard set by the aforementioned `IA32_STAR` MSR. Details can be found in the description of
-            // the `syscall` and `sysret` instructions in the IA32 Software Developer's Manual.
-            let kcode_selector = gdt.append_segment(GenericSegmentDescriptor::kernel_code());
-            let kdata_selector = gdt.append_segment(GenericSegmentDescriptor::kernel_data());
-            let udata_selector = gdt.append_segment(GenericSegmentDescriptor::user_data());
-            let ucode_selector = gdt.append_segment(GenericSegmentDescriptor::user_code());
-
-            KCODE_SELECTOR.call_once(|| kcode_selector);
-            KDATA_SELECTOR.call_once(|| kdata_selector);
-            UDATA_SELECTOR.call_once(|| udata_selector);
-            UCODE_SELECTOR.call_once(|| ucode_selector);
-
-            trace!("Segment descriptors loaded:");
-            trace!("Kernel code: {kcode_selector:?}");
-            trace!("Kernel data: {kdata_selector:?}");
-            trace!("User data: {udata_selector:?}");
-            trace!("User code: {ucode_selector:?}");
-
-            gdt
-        });
+        let static_gdt = Self::get_static();
 
         // Safety: The GDT is properly formed, and the descriptor table pointer is
         //         set to the GDT's memory location, with the requisite limit set
         //         correctly (size in bytes, less 1).
         unsafe {
-            gdt.load();
+            static_gdt.load();
         }
 
         let kcode_selector = *KCODE_SELECTOR.wait();
@@ -183,7 +125,71 @@ impl GlobalDescriptorTable {
             );
         }
 
-        trace!("Finished loading global descriptor table.");
+        trace!("Finished loading static global descriptor table.");
+    }
+
+    /// # Safety
+    ///
+    /// - An invalid [`GlobalDescriptorTable`] could potentially make memory unreadable or unwriteable.
+    /// - This should be executed prior to any point when the FS/GS _BASE MSRs will
+    ///   be in use, as they are cleared when this function is run.
+    unsafe fn load(&self) {
+        use core::arch::asm;
+
+        let dtptr = DescriptorTablePointer::from(self);
+
+        trace!(
+            "Loading: {:X?}:\n{self:#X?}\n{dtptr:#X?}",
+            core::ptr::from_ref(self)
+        );
+
+        // Safety: The GDT is properly formed, and the descriptor table pointer is
+        //         set to the GDT's memory location, with the requisite limit set
+        //         correctly (size in bytes, less 1).
+        unsafe {
+            asm!(
+                "lgdt [{}]",
+                in(reg) &raw const dtptr,
+                options(readonly, nostack, preserves_flags)
+            );
+        }
+    }
+
+    /// Appends a [`SegmentDescriptor`] to the [`GlobalDescriptorTable`] entries table.
+    pub fn append_segment(
+        &mut self,
+        segment_descriptor: impl SegmentDescriptor,
+    ) -> SegmentSelector {
+        let current_index = self.len;
+        let privilege_level = segment_descriptor.privilege_level();
+        let appended_entry_count = segment_descriptor.append_entries(&mut self.table[self.len..]);
+        self.len += appended_entry_count;
+
+        SegmentSelector::new(u16::try_from(current_index).unwrap(), privilege_level)
+    }
+
+    pub fn with_temporary<T>(func: impl FnOnce(&mut Self) -> T) -> T {
+        let static_gdt = Self::get_static();
+
+        let mut temp_gdt = static_gdt.clone();
+
+        crate::interrupts::uninterruptable(|| {
+            // Load the temporary GDT for loading TSS.
+            // Safety: Temporary GDT is identical to static GDT + 1 entry, so cannot
+            //         cause undefined behaviour by loading.
+            unsafe {
+                temp_gdt.load();
+            }
+
+            let value = func(&mut temp_gdt);
+
+            // Safety: Loading the static GDT is always safe.
+            unsafe {
+                static_gdt.load();
+            }
+
+            value
+        })
     }
 }
 

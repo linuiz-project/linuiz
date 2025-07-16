@@ -5,19 +5,20 @@ pub mod syscall;
 #[derive(Debug, FromPrimitive, IntoPrimitive, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
 pub enum Vector {
-    Spurious = 0x20,
-    Watchdog = 0x21,
-    Timer = 0x30,
-    ThermalSensor = 0x32,
-    PerformanceMonitors = 0x33,
-    CMCI = 0x3B,
-    Error = 0x3C,
-    External = 0x3D,
+    Watchdog = 0x20,
+    Timer = 0x21,
+    Error = 0x22,
+    PerformanceCounter = 0x23,
+    ThermalSensor = 0x24,
+    CMCI = 0x25,
+    External = 0x26,
 
     Syscall = 0x80,
 
+    Spurious = 0xFF,
+
     #[default]
-    Unknown,
+    Unknown = 0,
 }
 
 /// Enables interrupts for the current hardware thread.

@@ -1,9 +1,9 @@
 use crate::{
     interrupts::{InterruptCell, exceptions::Exception},
+    mem::alloc::KERNEL_ALLOCATOR,
     task::Scheduler,
     time::LocalTimer,
 };
-use alloc::boxed::Box;
 use core::{cell::UnsafeCell, ptr::NonNull, sync::atomic::AtomicBool};
 
 pub const STACK_SIZE: usize = 0x10000;
@@ -44,15 +44,19 @@ impl LocalState {
         trace!("Configuring local timer...");
         let scheduler = Scheduler::new();
 
-        let state = Box::new(LocalState {
-            timer,
-            scheduler: InterruptCell::new(scheduler),
-            catch_exception: AtomicBool::new(false),
-            exception: UnsafeCell::new(None),
-        });
+        let local_state_ptr = KERNEL_ALLOCATOR
+            .allocate_t::<LocalState>()
+            .expect("failed to allocate local state");
 
-        // Unbox local state structure (so it is never deallocated).
-        let local_state_ptr = Box::into_non_null(state);
+        // Safety: Memory was allocated for the size and align of `LocalState`.
+        unsafe {
+            local_state_ptr.write(LocalState {
+                timer,
+                scheduler: InterruptCell::new(scheduler),
+                catch_exception: AtomicBool::new(false),
+                exception: UnsafeCell::new(None),
+            });
+        }
 
         // Set the local state pointer for this hardware thread.
         #[cfg(target_arch = "x86_64")]

@@ -1,5 +1,8 @@
 use crate::{
-    arch::x86_64::devices::x2apic::{InterruptDeliveryMode, Register},
+    arch::x86_64::{
+        cpuid::feature_info,
+        devices::x2apic::{InterruptDeliveryMode, Register, x2Apic},
+    },
     interrupts::Vector,
 };
 use bit_field::BitField;
@@ -36,29 +39,37 @@ impl Kind for Error {
     const REGISTER: Register = Register::LVT_ERROR;
 }
 
-pub struct PerformanceMonitors;
-impl Kind for PerformanceMonitors {
-    const REGISTER: Register = Register::LVT_PERFORMANCE_MONITORS;
+pub struct PerformanceCounter;
+impl Kind for PerformanceCounter {
+    const REGISTER: Register = Register::LVT_PERFORMANCE_COUNTER;
 }
-impl Deliverable for PerformanceMonitors {}
+impl Deliverable for PerformanceCounter {}
 
 pub struct ThermalSensor;
 impl Kind for ThermalSensor {
-    const REGISTER: Register = Register::LVT_THERMAL_SENSOR;
+    const REGISTER: Register = Register::LVT_THERMAL_MONITOR;
 }
 impl Deliverable for ThermalSensor {}
 
 #[derive(Debug, Clone)]
-pub struct LocalVector<T>(pub(super) PhantomData<T>);
+pub struct LocalVector<T>(PhantomData<T>);
 
 impl<T: Kind> LocalVector<T> {
     /// Reads the raw LVT entry as a `u32`.
-    fn read_raw() -> u32 {
+    #[allow(clippy::unused_self)]
+    fn read_raw(&self) -> u32 {
+        // This function needlessly takes `&self` only to avoid being used as
+        // and associated function. This allows the usage of feature-dependent
+
         u32::try_from(super::read_register(T::REGISTER)).unwrap()
     }
 
     /// Writes `value` as the raw LVT entry value.
-    fn write_raw(value: u32) {
+    #[allow(clippy::unused_self)]
+    fn write_raw(&self, value: u32) {
+        // This function needlessly takes `&self` only to avoid being used as
+        // and associated function.
+
         super::write_register(T::REGISTER, u64::from(value));
     }
 
@@ -69,8 +80,8 @@ impl<T: Kind> LocalVector<T> {
     /// - `false` indicates there is currently no activity for this interrupt source, or
     ///   the previous interrupt from this source was delivered to the processor core and
     ///   accepted.
-    pub fn get_delivery_status() -> bool {
-        Self::read_raw().get_bit(12)
+    pub fn get_delivery_status(&self) -> bool {
+        self.read_raw().get_bit(12)
     }
 
     /// Whether the interrupt is masked (ignored upon reception to the APIC).
@@ -78,8 +89,8 @@ impl<T: Kind> LocalVector<T> {
     /// Note: When the local APIC handles a performance-monitoring counters interrupt, it
     ///       automatically sets the mask flag in the LVT performance counter register. This
     ///       flag is set to 1 on reset. It can only be cleared by software.
-    pub fn get_masked() -> bool {
-        Self::read_raw().get_bit(16)
+    pub fn get_masked(&self) -> bool {
+        self.read_raw().get_bit(16)
     }
 
     /// Masks or unmasks the interrupt based on `masked`.
@@ -87,13 +98,15 @@ impl<T: Kind> LocalVector<T> {
     /// Note: When the local APIC handles a performance-monitoring counters interrupt, it
     ///       automatically sets the mask flag in the LVT performance counter register. This
     ///       flag is set to 1 on reset. It can only be cleared by software.
-    pub fn set_masked(masked: bool) {
-        Self::write_raw(*Self::read_raw().set_bit(16, masked));
+    pub fn set_masked(&self, masked: bool) -> &Self {
+        self.write_raw(*self.read_raw().set_bit(16, masked));
+
+        self
     }
 
     /// Gets the interrupt vector number.
-    pub fn get_vector() -> Vector {
-        let vector = Self::read_raw().get_bits(0..8);
+    pub fn get_vector(&self) -> Vector {
+        let vector = self.read_raw().get_bits(0..8);
 
         debug_assert!(vector > 15, "interrupts vectors 0..=15 are reserved");
 
@@ -101,76 +114,94 @@ impl<T: Kind> LocalVector<T> {
     }
 
     /// Sets the interrupt vector number.
-    pub fn set_vector(vector: Vector) {
+    pub fn set_vector(&self, vector: Vector) -> &Self {
         let vector = u8::from(vector);
 
         debug_assert!(vector > 15, "interrupts vectors 0..=15 are reserved");
 
-        Self::read_raw().set_bits(0..8, u32::from(vector));
+        self.write_raw(*self.read_raw().set_bits(0..8, u32::from(vector)));
+
+        self
     }
 }
 
 impl<T: Deliverable> LocalVector<T> {
     /// Specifies the type of interrupt to be sent to the processor. Some delivery modes will only
     /// operate as intended when used in conjunction with a specific trigger mode.
-    pub fn set_delivery_mode(mode: InterruptDeliveryMode) {
-        Self::write_raw(*Self::read_raw().set_bits(8..11, u32::from(mode)));
+    pub fn set_delivery_mode(&self, mode: InterruptDeliveryMode) -> &Self {
+        self.write_raw(*self.read_raw().set_bits(8..11, u32::from(mode)));
+
+        self
     }
 }
 
 /// Various valid modes for APIC timer to operate.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+#[derive(Debug, IntoPrimitive, TryFromPrimitive, Clone, Copy, PartialEq, Eq)]
 pub enum TimerMode {
     /// Timer will operate in a one-shot mode using a count-down value.
-    OneShot,
+    OneShot = 0b00,
 
     /// Timer will operate in a periodic mode by reloading a count-down value.
-    Periodic,
+    Periodic = 0b01,
 
     /// Uses the `IA32_TSC_DEADLINE` model-specific register as a deadline value, which will
     /// trigger when the hardware thread's timestamp counter reaches or passes the deadline.
-    TscDeadline,
-}
-
-impl From<TimerMode> for u32 {
-    fn from(value: TimerMode) -> Self {
-        match value {
-            TimerMode::OneShot => 0b00,
-            TimerMode::Periodic => 0b01,
-            TimerMode::TscDeadline => 0b10,
-        }
-    }
-}
-
-impl TryFrom<u32> for TimerMode {
-    type Error = u32;
-
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
-        match value {
-            0b00 => Ok(Self::OneShot),
-            0b01 => Ok(Self::Periodic),
-            0b10 => Ok(Self::TscDeadline),
-            value => Err(value),
-        }
-    }
+    TscDeadline = 0b10,
 }
 
 impl LocalVector<Timer> {
     /// Gets the mode that the timer is currently operating in.
-    pub fn get_mode() -> TimerMode {
-        TimerMode::try_from(Self::read_raw().get_bits(17..19)).unwrap()
+    pub fn get_mode(&self) -> TimerMode {
+        TimerMode::try_from(self.read_raw().get_bits(17..19)).unwrap()
     }
 
     /// Sets the mode for the timer to operate in.
-    pub fn set_mode(mode: TimerMode) {
-        // Safety: `cpuid` instruction is almost definitely supported.
-        let is_tsc_deadline_supported = unsafe { core::arch::x86_64::__cpuid(0x1).ecx.get_bit(24) };
+    pub fn set_mode(&self, mode: TimerMode) -> &Self {
+        if mode == TimerMode::TscDeadline
+            && !feature_info().is_some_and(raw_cpuid::FeatureInfo::has_tsc_deadline)
+        {
+            panic!("timestamp counter deadline timer mode not supported");
+        }
 
-        assert!(
-            mode != TimerMode::TscDeadline || is_tsc_deadline_supported,
-            "TSC deadline mode is not supported by this APIC"
-        );
+        self.write_raw(*self.read_raw().set_bits(17..19, u32::from(mode)));
 
-        Self::write_raw(*Self::read_raw().set_bits(17..19, u32::from(mode)));
+        self
+    }
+}
+
+impl x2Apic {
+    pub fn lvt_lint0() -> LocalVector<LINT0> {
+        LocalVector(PhantomData)
+    }
+
+    pub fn lvt_lint1() -> LocalVector<LINT1> {
+        LocalVector(PhantomData)
+    }
+
+    pub fn lvt_error() -> LocalVector<Error> {
+        LocalVector(PhantomData)
+    }
+
+    pub fn lvt_timer() -> LocalVector<Timer> {
+        LocalVector(PhantomData)
+    }
+
+    pub fn lvt_performance_counter() -> Option<LocalVector<PerformanceCounter>> {
+        // If max LVT is 4, then 5 registers are supported, which includes
+        // the performance counter register.
+        (x2Apic::max_lvt_entry() >= 4).then_some(LocalVector(PhantomData))
+    }
+
+    pub fn lvt_thermal_monitor() -> Option<LocalVector<ThermalSensor>> {
+        // If max LVT is 5, then 6 registers are supported, which includes
+        // thermal monitor register.
+        (x2Apic::max_lvt_entry() >= 5).then_some(LocalVector(PhantomData))
+    }
+
+    pub fn lvt_cmci() -> Option<LocalVector<CMCI>> {
+        // If max LVT is 6, then 7 registers are supported, which includes
+        // the CMCI register.
+        (x2Apic::max_lvt_entry() >= 6).then_some(LocalVector(PhantomData))
     }
 }

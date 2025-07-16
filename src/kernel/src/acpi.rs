@@ -1,4 +1,4 @@
-use crate::mem::Hhdm;
+use crate::mem::HigherHalfDirectMap;
 use acpi::{AcpiError, AcpiTables};
 use core::ptr::NonNull;
 
@@ -16,7 +16,8 @@ impl acpi::AcpiHandler for Handler {
     ) -> acpi::PhysicalMapping<Self, T> {
         trace!("Physical mapping @ {physical_address:#X} (size:{size})");
 
-        let virtual_address = NonNull::with_exposed_provenance(Hhdm::offset(physical_address));
+        let virtual_address =
+            NonNull::with_exposed_provenance(HigherHalfDirectMap::offset(physical_address));
 
         // Safety:
         //  - `physical_address` is the physical address of the mapping.
@@ -58,7 +59,7 @@ pub fn get_root_table(
         // Limine protocol specification states that base revisions < 3 provides
         // the RSDP address as a virtual address rather than physical.
         if rsdp_response.revision() < 3 {
-            Hhdm::negative_offset(rsdp_address).get()
+            HigherHalfDirectMap::negative_offset(rsdp_address).get()
         } else {
             rsdp_address
         }

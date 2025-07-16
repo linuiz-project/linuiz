@@ -1,13 +1,8 @@
-use crate::{interrupts::InterruptCell, mem::Hhdm};
+use crate::{interrupts::InterruptCell, mem::HigherHalfDirectMap};
 use bitvec::slice::BitSlice;
-use core::{
-    num::{NonZeroU32, NonZeroUsize},
-    sync::atomic::AtomicUsize,
-};
+use core::{num::NonZero, sync::atomic::AtomicUsize};
 use libsys::{Address, Frame, align_up_div, page_mask, page_shift, page_size};
 use spin::RwLock;
-
-static PMM: spin::Once<PhysicalMemoryManager> = spin::Once::new();
 
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
@@ -29,9 +24,156 @@ pub enum Error {
 
 type FrameTable = RwLock<&'static mut BitSlice<AtomicUsize>>;
 
-pub struct PhysicalMemoryManager {
-    table: InterruptCell<FrameTable>,
-    total_frames: usize,
+crate::singleton! {
+    pub PhysicalMemoryManager {
+        table: InterruptCell<FrameTable>,
+        total_frames: usize,
+    }
+
+    /// Initializes the static physical memory manager with the provided bootloader memory map request.
+    fn init(memory_map_request: &limine::request::MemoryMapRequest) {
+        let memory_map = memory_map_request
+            .get_response()
+            .expect("no response to memory map request")
+            .entries();
+
+        report_memory_map_entries(memory_map);
+        report_total_usable_memory(memory_map);
+
+        let last_entry = memory_map.last().unwrap();
+
+        // While this is the ""total"" physical memory, it should be noted it isn't the total *installed* memory.
+        // Because of hardware addressing, reserved regions—and other quirks—this number will likely be much larger
+        // than the actual amount of installed physical memory the machine has.
+        let total_physical_memory =
+            usize::try_from(last_entry.base + last_entry.length).unwrap();
+
+        let total_frames = align_up_div(total_physical_memory, page_shift());
+        trace!("Total frames: {total_frames} ({total_physical_memory:#X} B)");
+
+        // Aligned frame count to the next multiple of `usize`s bit count.
+        let table_slice_len = align_up_div(
+            total_frames,
+            NonZero::new(usize::BITS.trailing_zeros()).unwrap(),
+        );
+        // Total memory the table will consume as a multiple of frame size.
+        let table_area_in_frames = align_up_div(
+            table_slice_len * core::mem::size_of::<usize>(),
+            page_shift(),
+        );
+        // Total memory the table will consume as a multiple of bytes.
+        let table_area_in_bytes = table_area_in_frames * page_size();
+        trace!(
+            "Table Size: {table_slice_len:#X}, Table Area (Frames): {table_area_in_frames:#X}, Table Area (Bytes): {table_area_in_bytes:#X}"
+        );
+
+        // Select a region that will fit the table, aligned to frame size.
+        // TODO allow selecting a region that would fit the table, but whose beginning does not align to a frame boundary.
+        let select_region = memory_map
+            .iter()
+            .filter(|entry| entry.entry_type == limine::memory_map::EntryType::USABLE)
+            .map(|entry| {
+                let entry_start = usize::try_from(entry.base).unwrap();
+                let entry_end = usize::try_from(entry.base + entry.length).unwrap();
+
+                entry_start..entry_end
+            })
+            .find(|region| region.len() >= table_area_in_bytes)
+            .map(|region| region.start..(region.start + table_area_in_bytes))
+            .expect("no memory regions large enough for frame table");
+
+        debug_assert_eq!(select_region.start & page_mask(), 0);
+        debug_assert_eq!(select_region.end & page_mask(), 0);
+
+        trace!("Frame table region: {select_region:#X?}");
+
+        let table_ptr = core::ptr::with_exposed_provenance_mut::<u8>(
+            HigherHalfDirectMap::offset(select_region.start).get(),
+        );
+
+        // Pre-initialize the table memory to a known, zeroed out state.
+        // Safety: The memory region should not be in use by any other context.
+        unsafe {
+            core::ptr::write_bytes(table_ptr, 0, table_area_in_bytes);
+        }
+
+        let table = BitSlice::from_slice_mut({
+            // Safety: Region is guaranteed by the memory map to be unused, and has been zero-initialized to be valid as `AtomicUsize`.
+            #[allow(clippy::cast_ptr_alignment)]
+            unsafe {
+                core::slice::from_raw_parts_mut(
+                    table_ptr.cast::<AtomicUsize>(),
+                    table_slice_len,
+                )
+            }
+        });
+
+        // Fill the padding bits, as the table may have more bits than there are frames.
+        table
+            .get_mut(total_frames..)
+            .expect("attempted to index frame table out of bounds")
+            .fill(true);
+
+        // Ensure the table's frames are reserved.
+        trace!(
+            "Locking (Table): {:#X}..{:#X}",
+            select_region.start, select_region.end
+        );
+        table
+            .get_mut((select_region.start / page_size())..(select_region.end / page_size()))
+            .expect("attempted to index frame table out of bounds")
+            .fill(true);
+
+        let mut prev_entry_range_end = None;
+        memory_map
+            .iter()
+            .map(|entry| {
+                // Map the entry to a usable range and type
+
+                let entry_start = usize::try_from(entry.base).unwrap();
+                let entry_end = usize::try_from(entry.base + entry.length).unwrap();
+
+                (entry_start..entry_end, entry.entry_type)
+            })
+            .for_each(|(entry_range, entry_ty)| {
+                // If there's space inbetween entries, we'll lock it to ensure it isn't accidentally used.
+                if let Some(prev_entry_range_end) = prev_entry_range_end
+                    && prev_entry_range_end < entry_range.start
+                {
+                    debug!(
+                        "Locking (Inbetween): {:#X}..{:#X}",
+                        prev_entry_range_end, entry_range.start
+                    );
+
+                    table
+                        .get_mut(
+                            (prev_entry_range_end / page_size())
+                                ..(entry_range.start / page_size()),
+                        )
+                        .expect("attempted to index frame table out of bounds")
+                        .fill(true);
+                }
+
+                // Only lock the non-usable entries...
+                if entry_ty != limine::memory_map::EntryType::USABLE {
+                    trace!("Locking: {:#X}..{:#X}", entry_range.start, entry_range.end);
+
+                    table
+                        .get_mut(
+                            (entry_range.start / page_size())..(entry_range.end / page_size()),
+                        )
+                        .expect("attempted to index frame table out of bounds")
+                        .fill(true);
+                }
+
+                prev_entry_range_end = Some(entry_range.end);
+            });
+
+        Self {
+            table: InterruptCell::new(spin::RwLock::new(table)),
+            total_frames,
+        }
+    }
 }
 
 // Safety: Type uses entirely atomic operations.
@@ -40,168 +182,6 @@ unsafe impl Send for PhysicalMemoryManager {}
 unsafe impl Sync for PhysicalMemoryManager {}
 
 impl PhysicalMemoryManager {
-    /// Initializes the static physical memory manager with the provided bootloader memory map request.
-    #[allow(clippy::too_many_lines)]
-    pub fn init(memory_map_request: &limine::request::MemoryMapRequest) {
-        use limine::memory_map::EntryType;
-
-        debug_assert!(
-            !PMM.is_completed(),
-            "physical memory manager is already initialized"
-        );
-
-        PMM.call_once(|| init(memory_map_request));
-
-        /// This is a separarte local function because `cargo fmt` fails to automatically format when it is inlined.
-        fn init(memory_map_request: &limine::request::MemoryMapRequest) -> PhysicalMemoryManager {
-            let memory_map = memory_map_request
-                .get_response()
-                .expect("no response to memory map request")
-                .entries();
-
-            report_memory_map_entries(memory_map);
-            report_total_usable_memory(memory_map);
-
-            let last_entry = memory_map.last().unwrap();
-
-            // While this is the ""total"" physical memory, it should be noted it isn't the total *installed* memory.
-            // Because of hardware addressing, reserved regions—and other quirks—this number will likely be much larger
-            // than the actual amount of installed physical memory the machine has.
-            let total_physical_memory =
-                usize::try_from(last_entry.base + last_entry.length).unwrap();
-
-            let total_frames = align_up_div(total_physical_memory, page_shift());
-            trace!("Total frames: {total_frames} ({total_physical_memory:#X} B)");
-
-            // Aligned frame count to the next multiple of `usize`s bit count.
-            let table_slice_len = align_up_div(
-                total_frames,
-                NonZeroU32::new(usize::BITS.trailing_zeros()).unwrap(),
-            );
-            // Total memory the table will consume as a multiple of frame size.
-            let table_area_in_frames = align_up_div(
-                table_slice_len * core::mem::size_of::<usize>(),
-                page_shift(),
-            );
-            // Total memory the table will consume as a multiple of bytes.
-            let table_area_in_bytes = table_area_in_frames * page_size();
-            trace!(
-                "Table Size: {table_slice_len:#X}, Table Area (Frames): {table_area_in_frames:#X}, Table Area (Bytes): {table_area_in_bytes:#X}"
-            );
-
-            // Select a region that will fit the table, aligned to frame size.
-            // TODO allow selecting a region that would fit the table, but whose beginning does not align to a frame boundary.
-            let select_region = memory_map
-                .iter()
-                .filter(|entry| entry.entry_type == limine::memory_map::EntryType::USABLE)
-                .map(|entry| {
-                    let entry_start = usize::try_from(entry.base).unwrap();
-                    let entry_end = usize::try_from(entry.base + entry.length).unwrap();
-
-                    entry_start..entry_end
-                })
-                .find(|region| region.len() >= table_area_in_bytes)
-                .map(|region| region.start..(region.start + table_area_in_bytes))
-                .expect("no memory regions large enough for frame table");
-
-            debug_assert_eq!(select_region.start & page_mask(), 0);
-            debug_assert_eq!(select_region.end & page_mask(), 0);
-
-            trace!("Frame table region: {select_region:#X?}");
-
-            let table_ptr = core::ptr::with_exposed_provenance_mut::<u8>(
-                Hhdm::offset(select_region.start).get(),
-            );
-
-            // Pre-initialize the table memory to a known, zeroed out state.
-            // Safety: The memory region should not be in use by any other context.
-            unsafe {
-                core::ptr::write_bytes(table_ptr, 0, table_area_in_bytes);
-            }
-
-            let table = BitSlice::from_slice_mut({
-                // Safety: Region is guaranteed by the memory map to be unused, and has been zero-initialized to be valid as `AtomicUsize`.
-                #[allow(clippy::cast_ptr_alignment)]
-                unsafe {
-                    core::slice::from_raw_parts_mut(
-                        table_ptr.cast::<AtomicUsize>(),
-                        table_slice_len,
-                    )
-                }
-            });
-
-            // Fill the padding bits, as the table may have more bits than there are frames.
-            table
-                .get_mut(total_frames..)
-                .expect("attempted to index frame table out of bounds")
-                .fill(true);
-
-            // Ensure the table's frames are reserved.
-            trace!(
-                "Locking (Table): {:#X}..{:#X}",
-                select_region.start, select_region.end
-            );
-            table
-                .get_mut((select_region.start / page_size())..(select_region.end / page_size()))
-                .expect("attempted to index frame table out of bounds")
-                .fill(true);
-
-            let mut prev_entry_range_end = None;
-            memory_map
-                .iter()
-                .map(|entry| {
-                    // Map the entry to a usable range and type
-
-                    let entry_start = usize::try_from(entry.base).unwrap();
-                    let entry_end = usize::try_from(entry.base + entry.length).unwrap();
-
-                    (entry_start..entry_end, entry.entry_type)
-                })
-                .for_each(|(entry_range, entry_ty)| {
-                    // If there's space inbetween entries, we'll lock it to ensure it isn't accidentally used.
-                    if let Some(prev_entry_range_end) = prev_entry_range_end
-                        && prev_entry_range_end < entry_range.start
-                    {
-                        debug!(
-                            "Locking (Inbetween): {:#X}..{:#X}",
-                            prev_entry_range_end, entry_range.start
-                        );
-
-                        table
-                            .get_mut(
-                                (prev_entry_range_end / page_size())
-                                    ..(entry_range.start / page_size()),
-                            )
-                            .expect("attempted to index frame table out of bounds")
-                            .fill(true);
-                    }
-
-                    // Only lock the non-usable entries...
-                    if entry_ty != EntryType::USABLE {
-                        trace!("Locking: {:#X}..{:#X}", entry_range.start, entry_range.end);
-
-                        table
-                            .get_mut(
-                                (entry_range.start / page_size())..(entry_range.end / page_size()),
-                            )
-                            .expect("attempted to index frame table out of bounds")
-                            .fill(true);
-                    }
-
-                    prev_entry_range_end = Some(entry_range.end);
-                });
-
-            PhysicalMemoryManager {
-                table: InterruptCell::new(spin::RwLock::new(table)),
-                total_frames,
-            }
-        }
-    }
-
-    fn get_static() -> &'static Self {
-        PMM.wait()
-    }
-
     /// Passes the static physical memory manager's frame table to `with_fn`, returning the result.
     fn with_table<T>(with_fn: impl FnOnce(&FrameTable) -> Result<T, Error>) -> Result<T, Error> {
         Self::get_static().table.with(with_fn)
@@ -232,13 +212,13 @@ impl PhysicalMemoryManager {
     }
 
     pub fn next_frames(
-        count: NonZeroUsize,
-        align_bits: Option<NonZeroU32>,
+        count: NonZero<usize>,
+        align_bits: Option<NonZero<u32>>,
     ) -> Result<Address<Frame>, Error> {
         Self::with_table(|table| {
             let mut table = table.write();
 
-            let align_bits = align_bits.unwrap_or(NonZeroU32::MIN).get();
+            let align_bits = align_bits.unwrap_or(NonZero::<u32>::MIN).get();
             let align_index_skip = u32::max(1, align_bits >> page_shift().get());
 
             let free_frames_index = table

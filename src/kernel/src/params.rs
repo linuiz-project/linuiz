@@ -27,7 +27,7 @@ impl Default for Parameters {
 }
 
 pub fn parse(kernel_cmdline_request: &ExecutableCmdlineRequest) {
-    PARAMS.call_once(|| {
+    fn parse_impl(kernel_cmdline_request: &ExecutableCmdlineRequest) -> Parameters {
         let mut params = Parameters::default();
 
         match kernel_cmdline_request
@@ -61,7 +61,9 @@ pub fn parse(kernel_cmdline_request: &ExecutableCmdlineRequest) {
         debug!("Kernel Parameters:\n{params:#?}");
 
         params
-    });
+    }
+
+    PARAMS.call_once(|| parse_impl(kernel_cmdline_request));
 }
 
 pub fn use_multiprocessing() -> bool {

@@ -2,27 +2,20 @@ use core::{
     fmt::{Result, Write},
     ptr::NonNull,
 };
+use heapless::String;
 use libsys::{Address, Virtual};
 use spin::Mutex;
 
 pub mod symbols;
 
 pub(super) fn emit_stack_trace() {
-    static PANIC_BUFFER: Mutex<[u8; 0x4000]> = Mutex::new([0u8; _]);
+    static PANIC_BUFFER: Mutex<String<0x4000>> = Mutex::new(String::new());
 
     let mut panic_buffer = PANIC_BUFFER.lock();
 
-    // Safety: String length is set to zero and capacity is set to buffer length.
-    let mut panic_string = unsafe {
-        alloc::string::String::from_raw_parts(panic_buffer.as_mut_ptr(), 0, panic_buffer.len())
-    };
-
-    if let Err(err) = construct_panic_message(&mut panic_string) {
+    if let Err(err) = construct_panic_message(&mut *panic_buffer) {
         error!("Failed constructing panic message: {err:?}");
     }
-
-    drop(panic_string);
-    drop(panic_buffer);
 }
 
 #[repr(C)]
@@ -109,7 +102,7 @@ fn construct_panic_message(mut buffer: impl Write) -> Result {
         .try_for_each(|(depth, trace_address)| {
             const SYMBOL_TYPE_FUNCTION: u8 = 2;
 
-            if let Some(symbol_name) = symbols::get_name(trace_address) {
+            if let Some(symbol_name) = symbols::Symbols::get_name(trace_address) {
                 if let Ok(demangled) = rustc_demangle::try_demangle(symbol_name) {
                     print_stack_trace_entry(&mut buffer, depth, trace_address, demangled)
                 } else {

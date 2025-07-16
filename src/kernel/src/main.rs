@@ -16,7 +16,8 @@
     strict_provenance_lints,
     box_vec_non_null,
     allocator_api,
-    duration_constants
+    duration_constants,
+    array_ptr_get
 )]
 #![forbid(clippy::inline_asm_x86_att_syntax, fuzzy_provenance_casts)]
 #![deny(
@@ -61,7 +62,6 @@ use limine::{
 mod acpi;
 mod arch;
 mod cpu;
-mod error;
 mod interrupts;
 mod logging;
 mod mem;
@@ -72,8 +72,6 @@ mod task;
 mod time;
 mod util;
 
-extern crate alloc;
-
 #[macro_use]
 extern crate log;
 
@@ -81,13 +79,16 @@ extern crate log;
 extern crate thiserror;
 
 #[macro_use]
-extern crate zerocopy;
+extern crate bytemuck;
 
 #[macro_use]
 extern crate num_enum;
 
 #[macro_use]
 extern crate bitflags;
+
+#[macro_use]
+extern crate paste;
 
 unsafe extern "C" {
     pub type LinkerSymbol;
@@ -168,10 +169,10 @@ unsafe extern "C" fn _entry() -> ! {
 
     #[cfg(feature = "panic_traces")]
     if crate::params::keep_symbol_info() {
-        crate::panic::tracing::symbols::parse(&KERNEL_FILE_REQUEST);
+        crate::panic::tracing::symbols::Symbols::init(&KERNEL_FILE_REQUEST);
     }
 
-    crate::mem::Hhdm::init(&HHDM_REQUEST);
+    crate::mem::HigherHalfDirectMap::init(&HHDM_REQUEST);
     crate::mem::pmm::PhysicalMemoryManager::init(&MEMORY_MAP_REQUEST);
     crate::mem::init(
         &MEMORY_MAP_REQUEST,
@@ -297,3 +298,57 @@ fn print_boot_info(bootloader_info_request: &BootloaderInfoRequest) {
 //             crate::task::PROCESSES.lock().push_back(task);
 //         });
 // }
+
+#[macro_export]
+macro_rules! singleton {
+    (
+        $(#[$struct_attrs:meta])*
+        $struct_scope:vis $struct_name:ident {
+            $(
+                $(#[$field_attrs:meta])*
+                $scope:vis $field_name:ident: $field_ty:ty,
+            )*
+        }
+
+        $(#[$init_attrs:meta])*
+        fn init($($arg_name:ident: $arg_ty:ty),*)
+            $init:block
+    ) => {
+        paste! {
+            #[allow(non_upper_case_globals)]
+            static [< STATIC_ $struct_name >]: spin::Once<$struct_name> = spin::Once::new();
+
+            $(#[$struct_attrs])*
+            $struct_scope struct $struct_name {
+                $(
+                    $(#[$field_attrs])*
+                    $scope $field_name: $field_ty
+                ),*
+            }
+
+            impl $struct_name {
+                $(#[$init_attrs])*
+                pub fn init($($arg_name: $arg_ty)*) {
+                    [< STATIC_ $struct_name >].call_once(||{
+                        trace!(concat!("Initializing `", stringify!($struct_name), "`..."));
+
+                        let init = $init;
+
+                        debug!(concat!("Static `", stringify!($struct_name), "` initialized."));
+
+                        init
+                    });
+                }
+
+                /// Gets the static [`Self`] if [`Self::init`] has been called, orcauses a panic if not.
+                fn get_static() -> &'static Self {
+                    [< STATIC_ $struct_name >]
+                        .get()
+                        .expect(
+                            concat!("static `", stringify!($name), "` has not yet been initialized")
+                        )
+                }
+            }
+        }
+    };
+}

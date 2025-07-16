@@ -3,9 +3,6 @@
 use core::{num::NonZero, ptr::NonNull, time::Duration};
 use ioports::ReadOnlyPort;
 use safe_mmio::{UniqueMmioPointer, fields::ReadPure};
-use spin::Once;
-
-static GLOBAL_STOPWATCH: Once<Stopwatch> = Once::new();
 
 enum Source {
     AcpiIo {
@@ -46,11 +43,83 @@ impl Source {
     }
 }
 
-pub struct Stopwatch {
-    source: Source,
-    ticks_per_sec: u64,
-    ticks_per_ms: u64,
-    ticks_per_us: u64,
+crate::singleton! {
+    pub Stopwatch {
+        source: Source,
+        ticks_per_sec: u64,
+        ticks_per_ms: u64,
+        ticks_per_us: u64,
+    }
+
+    fn init(rsdp_request: &limine::request::RsdpRequest) {
+        if let Ok(acpi_root_table) = crate::acpi::get_root_table(rsdp_request)
+            && let Ok(acpi_platform_info) = acpi_root_table.platform_info()
+            && let Some(pm_timer) = acpi_platform_info.pm_timer
+        {
+            trace!("Found ACPI power management timer.");
+
+            match pm_timer.base.address_space {
+                acpi::address::AddressSpace::SystemIo => {
+                    trace!(
+                        "Using ACPI power management timer via port IO: {{ address: {:#X}, is 32 bit: {} }}",
+                        pm_timer.base.address, pm_timer.supports_32bit
+                    );
+
+                    // TODO potentially use `NonZero<u16>` instead of just `u16`?
+                    let port_address =
+                        u16::try_from(pm_timer.base.address).expect("invalid port address");
+
+                    Self {
+                        source: Source::AcpiIo {
+                            // Safety: ACPI spec (and the crate) guarantees the address will be a valid IO port.
+                            address: unsafe { ReadOnlyPort::new(port_address) },
+                            max_value: if pm_timer.supports_32bit {
+                                0xFFFF_FFFF
+                            } else {
+                                0x00FF_FFFF
+                            },
+                        },
+                        ticks_per_sec: 3579545,
+                        ticks_per_ms: 3579545 / 1000,
+                        ticks_per_us: 3579545 / 1000 / 1000,
+                    }
+                }
+
+                acpi::address::AddressSpace::SystemMemory => {
+                    trace!(
+                        "Using ACPI power management timer via MMIO: {{ address: {:#X}, is 32 bit: {} }}",
+                        pm_timer.base.address, pm_timer.supports_32bit
+                    );
+
+                    let mmio_address = usize::try_from(pm_timer.base.address)
+                        .expect("failed to convert ACPI power management timer address");
+                    let mmio_address = NonNull::with_exposed_provenance(
+                        NonZero::try_from(mmio_address)
+                            .expect("ACPI power management timer address is invalid"),
+                    );
+
+                    Self {
+                        source: Source::AcpiMmio {
+                            // Safety: ACPI spec (and the crate) guarantees the address will be a valid IO port.
+                            address: unsafe { UniqueMmioPointer::new(mmio_address) },
+                            max_value: if pm_timer.supports_32bit {
+                                0xFFFF_FFFF
+                            } else {
+                                0x00FF_FFFF
+                            },
+                        },
+                        ticks_per_sec: 3579545,
+                        ticks_per_ms: 3579545 / 1000,
+                        ticks_per_us: 3579545 / 1000 / 1000,
+                    }
+                }
+
+                _ => unreachable!(),
+            }
+        } else {
+            unimplemented!("only the ACPI power management timer is available as a stopwatch")
+        }
+    }
 }
 
 // Safety: For `Source::Acpi`, references memory mapped in all address spaces.
@@ -59,92 +128,6 @@ unsafe impl Send for Stopwatch {}
 unsafe impl Sync for Stopwatch {}
 
 impl Stopwatch {
-    pub fn init(rsdp_request: &limine::request::RsdpRequest) {
-        GLOBAL_STOPWATCH.call_once(|| {
-            trace!("Searching system to configure best possible stopwatch.");
-
-            if let Ok(acpi_root_table) = crate::acpi::get_root_table(rsdp_request)
-                && let Ok(acpi_platform_info) = acpi_root_table.platform_info()
-                && let Some(pm_timer) = acpi_platform_info.pm_timer
-            {
-                trace!("Found ACPI power management timer.");
-
-                match pm_timer.base.address_space {
-                    acpi::address::AddressSpace::SystemIo => {
-                        trace!(
-                            "Using ACPI power management timer via port IO: {:#X}",
-                            pm_timer.base.address
-                        );
-
-                        // TODO potentially use `NonZero<u16>` instead of just `u16`?
-                        let port_address =
-                            u16::try_from(pm_timer.base.address).expect("invalid port address");
-
-                        let ticks_per_sec = 3579545;
-                        let ticks_per_ms = ticks_per_sec / 1000;
-                        let ticks_per_us = ticks_per_ms / 1000;
-
-                        Self {
-                            source: Source::AcpiIo {
-                                // Safety: ACPI spec (and the crate) guarantees the address will be a valid IO port.
-                                address: unsafe { ReadOnlyPort::new(port_address) },
-                                max_value: if pm_timer.supports_32bit {
-                                    0xFFFF_FFFF
-                                } else {
-                                    0xFFFF_FF00
-                                },
-                            },
-                            ticks_per_sec,
-                            ticks_per_ms,
-                            ticks_per_us,
-                        }
-                    }
-
-                    acpi::address::AddressSpace::SystemMemory => {
-                        trace!(
-                            "Using ACPI power management timer via MMIO: {:#X}",
-                            pm_timer.base.address
-                        );
-
-                        let mmio_address = usize::try_from(pm_timer.base.address)
-                            .expect("failed to convert ACPI power management timer address");
-                        let mmio_address = NonNull::with_exposed_provenance(
-                            NonZero::try_from(mmio_address)
-                                .expect("ACPI power management timer address is invalid"),
-                        );
-
-                        let ticks_per_sec = 3579545;
-                        let ticks_per_ms = ticks_per_sec / 1000;
-                        let ticks_per_us = ticks_per_ms / 1000;
-
-                        Self {
-                            source: Source::AcpiMmio {
-                                // Safety: ACPI spec (and the crate) guarantees the address will be a valid IO port.
-                                address: unsafe { UniqueMmioPointer::new(mmio_address) },
-                                max_value: if pm_timer.supports_32bit {
-                                    0xFFFF_FFFF
-                                } else {
-                                    0xFFFF_FF00
-                                },
-                            },
-                            ticks_per_sec,
-                            ticks_per_ms,
-                            ticks_per_us,
-                        }
-                    }
-
-                    _ => unreachable!(),
-                }
-            } else {
-                unimplemented!("only the ACPI power management timer is available as a stopwatch")
-            }
-        });
-    }
-
-    fn get_static() -> &'static Self {
-        GLOBAL_STOPWATCH.wait()
-    }
-
     /// Spin waits for the provided [`Duration`].
     ///
     /// # Remarks
@@ -156,17 +139,25 @@ impl Stopwatch {
         let duration_us = u64::try_from(duration.as_micros()).unwrap_or(u64::MAX);
         let mut wait_ticks = duration_us * stopwatch.ticks_per_us;
         let mut last_tick_count = stopwatch.source.read();
-        while wait_ticks > 0 {
-            let next_tick_count = stopwatch.source.read();
-            let (mut elapsed_ticks, is_overflow) = next_tick_count.overflowing_sub(last_tick_count);
 
-            // Collect the portion that we lost in the overflow.
-            if is_overflow {
-                elapsed_ticks += stopwatch.source.max_value() - last_tick_count;
-            }
+        while wait_ticks > 0 {
+            let current_tick_count = stopwatch.source.read();
+            let elapsed_ticks = {
+                if last_tick_count < current_tick_count {
+                    // ... the counter did not overflow ...
+
+                    current_tick_count - last_tick_count
+                } else {
+                    // ... the counter overflowed...
+
+                    // Calculates the ticks we lost during the overflow.
+                    let overflow_ticks = stopwatch.source.max_value() - last_tick_count;
+                    current_tick_count + overflow_ticks
+                }
+            };
 
             wait_ticks = wait_ticks.saturating_sub(elapsed_ticks);
-            last_tick_count = next_tick_count;
+            last_tick_count = current_tick_count;
 
             core::hint::spin_loop();
         }

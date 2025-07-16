@@ -1,14 +1,12 @@
 mod hhdm;
 pub use hhdm::*;
 
-mod stack;
-pub use stack::*;
-
-pub mod alloc;
 // pub mod io;
+pub mod alloc;
 pub mod mapper;
 pub mod paging;
 pub mod pmm;
+pub mod stack;
 
 use crate::{
     interrupts::InterruptCell,
@@ -18,6 +16,7 @@ use crate::{
         pmm::PhysicalMemoryManager,
     },
 };
+use core::{alloc::Layout, mem::MaybeUninit, ptr::NonNull};
 use libsys::{Address, Frame, Page, giga_page_size, mega_page_size, page_size, table_index_size};
 use spin::{Mutex, Once};
 
@@ -123,7 +122,7 @@ pub fn init(
                 let entry_start = usize::try_from(entry.base).unwrap();
                 let entry_length = usize::try_from(entry.length).unwrap();
                 let entry_frame = Address::<Frame>::new(entry_start).unwrap();
-                let entry_page = Hhdm::frame_to_page(entry_frame);
+                let entry_page = HigherHalfDirectMap::frame_to_page(entry_frame);
                 let entry_paging_flags = {
                     match entry.entry_type {
                         limine::memory_map::EntryType::USABLE
@@ -230,8 +229,9 @@ pub fn with_kernel_mapper<T>(func: impl FnOnce(&mut Mapper) -> T) -> T {
 
 pub fn copy_kernel_page_table() -> Result<Address<Frame>, pmm::Error> {
     let table_frame = PhysicalMemoryManager::next_frame()?;
-    let table_ptr =
-        core::ptr::with_exposed_provenance_mut(Hhdm::frame_to_page(table_frame).get().get());
+    let table_ptr = core::ptr::with_exposed_provenance_mut(
+        HigherHalfDirectMap::frame_to_page(table_frame).get().get(),
+    );
 
     // Safety: Frame is provided by allocator, and so guaranteed to be within the HHDM, and is frame-sized.
     let new_table = unsafe { core::slice::from_raw_parts_mut(table_ptr, table_index_size()) };
@@ -282,7 +282,6 @@ impl PagingRegister {
         }
     }
 
-    #[inline]
     pub const fn frame(&self) -> Address<Frame> {
         self.0
     }

@@ -3,10 +3,7 @@ use crate::{
         cpuid::{
             advanced_power_management_info, feature_info, hypervisor_info, processor_frequency_info,
         },
-        devices::x2apic::{
-            local_vector::{LocalVector, Timer, TimerMode},
-            x2Apic,
-        },
+        devices::x2apic::{local_vector::TimerMode, x2Apic},
     },
     time::Stopwatch,
 };
@@ -31,6 +28,8 @@ impl LocalTimer {
         {
             trace!("Local Timer: Timestamp Counter");
 
+            x2Apic::lvt_timer().set_mode(TimerMode::TscDeadline);
+
             // Notably, on AMD systems the first check simply won't work, becuase AMD is cursed and Lisa Su is
             // continuing AMD's time-honored tradition of making their CPUs 10x more difficult to program for than Intel.
             let frequency = processor_frequency_info()
@@ -51,8 +50,6 @@ impl LocalTimer {
                 })
                 .unwrap_or_else(measure_tsc);
 
-            LocalVector::<Timer>::set_mode(TimerMode::TscDeadline);
-
             Self {
                 frequency,
                 source: Source::TimestampCounter,
@@ -62,11 +59,11 @@ impl LocalTimer {
 
             trace!("Local Timer: APIC (one-shot)");
 
+            x2Apic::lvt_timer().set_mode(TimerMode::OneShot);
+
             let frequency = hypervisor_info()
                 .and_then(raw_cpuid::HypervisorInfo::apic_frequency)
                 .map_or_else(measure_lapic, u64::from);
-
-            LocalVector::<Timer>::set_mode(TimerMode::OneShot);
 
             Self {
                 frequency,
@@ -77,7 +74,7 @@ impl LocalTimer {
 }
 
 /// Duration to measure other timer sources against [`Stopwatch`].
-const MEASUREMENT_DURATION: Duration = Duration::from_millis(50_000);
+const MEASUREMENT_DURATION: Duration = Duration::from_millis(50);
 
 /// Amount you need to multiply measured ticks by when using [`MEASUREMENT_DURATION`].
 #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
@@ -104,13 +101,9 @@ fn measure_tsc() -> u64 {
 fn measure_lapic() -> u64 {
     trace!("Measuring the local APIC timer frequency...");
 
-    // We assume the APIC is already enabled.
-
     x2Apic::set_timer_divide_configuration(
         crate::arch::x86_64::devices::x2apic::TimerDivideConfiguration::DivideBy1,
     );
-    LocalVector::<Timer>::set_masked(true);
-    LocalVector::<Timer>::set_mode(TimerMode::OneShot);
 
     const MEASURE_TIMER_COUNTDOWN_VALUE: u32 = u32::MAX;
 

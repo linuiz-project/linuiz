@@ -25,8 +25,8 @@ pub enum Register {
     LVT_CMCI                    = 0x82F,
     INTERRUPT_COMMAND           = 0x830,
     LVT_TIMER                   = 0x832,
-    LVT_THERMAL_SENSOR          = 0x833,
-    LVT_PERFORMANCE_MONITORS    = 0x834,
+    LVT_THERMAL_MONITOR         = 0x833,
+    LVT_PERFORMANCE_COUNTER    = 0x834,
     LVT_LINT0                   = 0x835,
     LVT_LINT1                   = 0x836,
     LVT_ERROR                   = 0x837,
@@ -183,34 +183,57 @@ pub enum TimerDivideConfiguration {
 pub struct x2Apic;
 
 impl x2Apic {
-    pub fn init() {
-        use local_vector::{
-            CMCI, Error, LINT0, LINT1, LocalVector, PerformanceMonitors, ThermalSensor, Timer,
-        };
+    pub fn reset() {
+        debug!("Local APIC:\n{x2Apic:#X?}");
 
+        trace!("Disabling local APIC for reset sequence...");
         Self::set_enabled(false);
 
+        trace!("Configuring the spurious interrupt...");
         Self::set_spurious_vector(Vector::Spurious);
 
-        LocalVector::<Timer>::set_vector(Vector::Timer);
-        LocalVector::<Timer>::set_masked(true);
+        // TODO Set up the IO APIC so we can correctly configure these.
+        // trace!("Configuring the external 0 interrupt...");
+        // LocalVector::<LINT0>::set_vector(Vector::External);
+        // LocalVector::<LINT0>::set_masked(false);
+        // trace!("Configuring the external 1 interrupt...");
+        // LocalVector::<LINT1>::set_vector(Vector::External);
+        // LocalVector::<LINT1>::set_masked(false);
 
-        LocalVector::<Error>::set_vector(Vector::Error);
-        LocalVector::<Error>::set_masked(false);
+        trace!("Configuring the error interrupt...");
+        Self::lvt_error()
+            .set_vector(Vector::Error)
+            .set_masked(false);
 
-        LocalVector::<CMCI>::set_vector(Vector::CMCI);
-        LocalVector::<CMCI>::set_masked(false);
+        trace!("Configuring the timer interrupt (will be masked)...");
+        Self::lvt_timer().set_vector(Vector::Timer).set_masked(true);
 
-        LocalVector::<PerformanceMonitors>::set_vector(Vector::PerformanceMonitors);
-        LocalVector::<PerformanceMonitors>::set_masked(false);
+        if let Some(lvt_performance_counter) = Self::lvt_performance_counter() {
+            trace!("Configuring the performance counter interrupt...");
+            lvt_performance_counter
+                .set_vector(Vector::PerformanceCounter)
+                .set_masked(false);
+        } else {
+            trace!("Performance counter local vector not supported.");
+        }
 
-        LocalVector::<ThermalSensor>::set_vector(Vector::ThermalSensor);
-        LocalVector::<ThermalSensor>::set_masked(false);
+        if let Some(lvt_thermal_monitor) = Self::lvt_thermal_monitor() {
+            trace!("Configuring the thermal monitor interrupt...");
+            lvt_thermal_monitor
+                .set_vector(Vector::ThermalSensor)
+                .set_masked(false);
+        } else {
+            trace!("Thermal monitor local vector not supported.");
+        }
 
-        LocalVector::<LINT0>::set_vector(Vector::External);
-        LocalVector::<LINT0>::set_masked(false);
-        LocalVector::<LINT1>::set_vector(Vector::External);
-        LocalVector::<LINT1>::set_masked(false);
+        if let Some(lvt_cmci) = Self::lvt_cmci() {
+            trace!("Configuring the CMCI interrupt...");
+            lvt_cmci.set_vector(Vector::CMCI).set_masked(false);
+        } else {
+            trace!("CMCI local vector not supported.");
+        }
+
+        debug!("Local APIC reset.");
     }
 
     /// The initial ID of the local APIC device.
