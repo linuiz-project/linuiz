@@ -58,11 +58,14 @@ impl AddressSpace {
     }
 
     pub fn new_userspace() -> Self {
-        Self::new(unsafe {
-            Mapper::new_unsafe(
-                TableDepth::max(),
-                crate::mem::copy_kernel_page_table().unwrap(),
-            )
+        Self::new({
+            // Safety: Kernel mapper is valid and has only one copy.
+            unsafe {
+                Mapper::new_unsafe(
+                    TableDepth::max(),
+                    crate::mem::copy_kernel_page_table().unwrap(),
+                )
+            }
         })
     }
 
@@ -140,13 +143,13 @@ impl AddressSpace {
         todo!()
     }
 
-    #[cfg_attr(debug_assertions, inline(never))]
     fn map_exact(
         &mut self,
         address: Address<Page>,
         page_count: NonZeroUsize,
         permissions: MmapPermissions,
     ) -> Result<NonNull<[u8]>, Error> {
+        // Safety: Caller is required to maintain invariants.
         unsafe {
             self.invoke_mapper(
                 address,
@@ -171,8 +174,7 @@ impl AddressSpace {
         (0..mapping_size)
             .step_by(page_size())
             .map(|offset| Address::new_truncate(address.get().get() + offset))
-            .try_for_each(|offset_page| self.0.auto_map(offset_page, flags))
-            .map_err(Error::from)?;
+            .try_for_each(|offset_page| self.0.auto_map(offset_page, flags))?;
 
         Ok(NonNull::slice_from_raw_parts(
             NonNull::new(address.as_ptr()).unwrap(),

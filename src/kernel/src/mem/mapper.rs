@@ -41,7 +41,7 @@ impl Mapper {
         }
     }
 
-    /// Safety
+    /// # Safety
     ///
     /// - The root frame must point to a valid top-level page table.
     /// - There must only exist one copy of provided page table tree at any time.
@@ -65,12 +65,8 @@ impl Mapper {
 
     /* MAP / UNMAP */
 
-    /// Maps the specified page to the specified frame index.
-    ///
-    /// # Safety
-    ///
-    /// TODO
-    pub unsafe fn map(
+    /// Maps the specified page to the frame.
+    pub fn map(
         &mut self,
         page: Address<Page>,
         depth: TableDepth,
@@ -145,9 +141,7 @@ impl Mapper {
     pub fn auto_map(&mut self, page: Address<Page>, flags: TableEntryFlags) -> Result<(), Error> {
         let frame = PhysicalMemoryManager::next_frame()?;
 
-        unsafe {
-            self.map(page, TableDepth::min(), frame, false, flags)?;
-        }
+        self.map(page, TableDepth::min(), frame, false, flags)?;
 
         Ok(())
     }

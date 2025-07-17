@@ -54,17 +54,15 @@ pub fn init(
             {
                 // Map a giga page
 
-                unsafe {
-                    mapper
-                        .map(
-                            from,
-                            TableDepth::giga(),
-                            to,
-                            false,
-                            paging_flags | TableEntryFlags::HUGE,
-                        )
-                        .expect("failed to map range");
-                }
+                mapper
+                    .map(
+                        from,
+                        TableDepth::giga(),
+                        to,
+                        false,
+                        paging_flags | TableEntryFlags::HUGE,
+                    )
+                    .expect("failed to map range");
 
                 remaining_length -= giga_page_size();
             } else if paging::use_mega_pages()
@@ -75,27 +73,23 @@ pub fn init(
             {
                 // Map a mega page
 
-                unsafe {
-                    mapper
-                        .map(
-                            from,
-                            TableDepth::mega(),
-                            to,
-                            false,
-                            paging_flags | TableEntryFlags::HUGE,
-                        )
-                        .expect("failed to map range");
-                }
+                mapper
+                    .map(
+                        from,
+                        TableDepth::mega(),
+                        to,
+                        false,
+                        paging_flags | TableEntryFlags::HUGE,
+                    )
+                    .expect("failed to map range");
 
                 remaining_length -= mega_page_size();
             } else {
                 // Map a standard page
 
-                unsafe {
-                    mapper
-                        .map(from, TableDepth::min(), to, false, paging_flags)
-                        .expect("failed to map range");
-                }
+                mapper
+                    .map(from, TableDepth::min(), to, false, paging_flags)
+                    .expect("failed to map range");
 
                 remaining_length -= core::cmp::min(page_size(), remaining_length);
             }
