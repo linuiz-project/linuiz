@@ -60,6 +60,9 @@ impl<'a> Walker<'a> {
                                 .get()
                                 .get(),
                         );
+
+                        // Safety: If the table entry is present, then the table is guaranteed to
+                        //         exist, and be valid for `[PageTableEntry; table_index_size()]`.
                         let table = unsafe {
                             core::slice::from_raw_parts(table_ptr, libsys::table_index_size())
                         };

@@ -224,7 +224,7 @@ impl ModelSpecificRegister for IA32_TSC_DEADLINE {
 
 impl IA32_TSC_DEADLINE {
     /// Sets the timestamp counter deadline for the local APIC timer (if it's in TSC deadline mode).
-    pub unsafe fn set(value: u64) {
+    pub fn set(value: u64) {
         wrmsr::<Self>(value);
     }
 }

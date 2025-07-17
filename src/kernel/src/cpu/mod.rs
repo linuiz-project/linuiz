@@ -258,10 +258,10 @@ pub unsafe fn synchronize(
     // Ensure we enable interrupts prior to enabling the scheduler.
     crate::interrupts::enable();
 
-    // Safety: The hardware thread is ready to be scheduled with tasks.
-    unsafe {
-        crate::cpu::local_state::begin_scheduling();
-    }
+    // // Safety: The hardware thread is ready to be scheduled with tasks.
+    // unsafe {
+    //     crate::cpu::local_state::begin_scheduling();
+    // }
 
     // This interrupt wait loop is necessary to ensure the core can jump into the scheduler.
     crate::interrupts::wait_indefinite()

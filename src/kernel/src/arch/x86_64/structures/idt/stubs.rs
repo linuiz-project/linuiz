@@ -1,6 +1,10 @@
 use crate::{
     LinkerSymbol,
-    arch::x86_64::structures::idt::{InterruptStackFrame, PageFaultErrorCode, SelectorErrorCode},
+    arch::x86_64::{
+        devices::x2apic::x2Apic,
+        structures::idt::{InterruptStackFrame, PageFaultErrorCode, SelectorErrorCode},
+    },
+    cpu::local_state::LocalState,
     interrupts::{
         Vector,
         exceptions::{ArchException, handle},
@@ -168,7 +172,7 @@ extern "sysv64" fn __irq_handler(
 ) {
     match Vector::from(irq_number) {
         Vector::Timer => {
-            crate::cpu::local_state::with_scheduler(|scheduler| {
+            LocalState::with_scheduler(|scheduler| {
                 scheduler.interrupt_task(isf, regs);
             });
         }
@@ -196,7 +200,8 @@ extern "sysv64" fn __irq_handler(
 
     // Safety: This is the end of an interrupt context.
     unsafe {
-        crate::cpu::local_state::end_of_interrupt();
+        #[cfg(target_arch = "x86_64")]
+        x2Apic::end_of_interrupt();
     }
 }
 

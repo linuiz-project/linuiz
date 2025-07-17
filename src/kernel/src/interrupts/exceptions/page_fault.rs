@@ -1,5 +1,7 @@
 use libsys::{Address, Virtual};
 
+use crate::cpu::local_state::LocalState;
+
 /// Indicates what type of error the common page fault handler encountered.
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
@@ -17,7 +19,7 @@ pub enum Error {
 #[doc(hidden)]
 #[inline(never)]
 pub unsafe fn handler(fault_address: Address<Virtual>) -> Result<(), Error> {
-    crate::cpu::local_state::with_scheduler(|scheduler| {
+    LocalState::with_scheduler(|scheduler| {
         scheduler
             .task_mut()
             .ok_or(Error::NoTask)?

@@ -4,7 +4,8 @@ use crate::{
     task::Scheduler,
     time::LocalTimer,
 };
-use core::{cell::UnsafeCell, ptr::NonNull, sync::atomic::AtomicBool};
+use core::{cell::UnsafeCell, ptr::NonNull, sync::atomic::AtomicBool, time::Duration};
+use spin::Mutex;
 
 pub const STACK_SIZE: usize = 0x10000;
 pub const SYSCALL_STACK_SIZE: usize = 0x40000;
@@ -25,7 +26,7 @@ fn try_get_local_static_ptr() -> Option<NonNull<LocalState>> {
 /// Local (to the current hardware thread) state structure.
 pub struct LocalState {
     timer: LocalTimer,
-    scheduler: InterruptCell<Scheduler>,
+    scheduler: InterruptCell<Mutex<Scheduler>>,
     catch_exception: AtomicBool,
     exception: UnsafeCell<Option<Exception>>,
 }
@@ -52,7 +53,7 @@ impl LocalState {
         unsafe {
             local_state_ptr.write(LocalState {
                 timer,
-                scheduler: InterruptCell::new(scheduler),
+                scheduler: InterruptCell::new(Mutex::new(scheduler)),
                 catch_exception: AtomicBool::new(false),
                 exception: UnsafeCell::new(None),
             });
@@ -65,7 +66,8 @@ impl LocalState {
         debug!("Local state has been initialized.");
     }
 
-    pub fn get_local_static() -> &'static Self {
+    /// Gets the local hardware thread state structure.
+    fn get_static() -> &'static Self {
         try_get_local_static_ptr()
             .map(|local_state_ptr| {
                 // Safety: If the state pointer is non-null, the kernel guarantees it will be valid for reading as `LocalState`.
@@ -73,79 +75,48 @@ impl LocalState {
             })
             .expect("local state has not been initialized")
     }
-}
 
-/// TODO inline this function
-pub unsafe fn begin_scheduling() {
-    // Enable scheduler ...
-    with_scheduler(|scheduler| {
-        assert!(!scheduler.is_enabled());
-        scheduler.enable();
-    });
+    pub fn with_scheduler<T>(func: impl FnOnce(&mut Scheduler) -> T) -> T {
+        Self::get_static().scheduler.with(|scheduler| {
+            let mut scheduler = scheduler.lock();
 
-    // Enable APIC timer ...
-    // TODO APIC
-    // let apic = &mut get_mut().apic;
-    // assert!(apic.get_timer().get_masked());
-    // // Safety: Calling `begin_scheduling` implies this state change is expected.
-    // unsafe {
-    //     apic.get_timer().set_masked(false);
-    // }
+            func(&mut scheduler)
+        })
+    }
 
-    // Safety: Calling `begin_scheduling` implies this function is expected to be called.
-    unsafe {
-        set_preemption_wait(core::num::NonZeroU16::MIN);
+    /// ## Safety
+    ///
+    /// - Function should only be called once the last preemption wait has resolved.
+    pub unsafe fn set_preemption_wait(duration: Duration) {
+        LocalState::get_static()
+            .timer
+            .set_wait(duration)
+            .expect("preemption wait duration was too long");
     }
 }
 
-pub fn with_scheduler<O>(func: impl FnOnce(&mut crate::task::Scheduler) -> O) -> O {
-    // LocalState::get_local_static().scheduler.with_mut(func)
-    todo!()
-}
+// /// TODO inline this function
+// pub unsafe fn begin_scheduling() {
+//     // Enable scheduler ...
+//     with_scheduler(|scheduler| {
+//         assert!(!scheduler.is_enabled());
+//         scheduler.enable();
+//     });
 
-/// Ends the current interrupt context for the interrupt controller. On platforms that
-/// don't require an end of interrupt instruction, this is a no-op.
-///
-/// # Safety
-///
-/// - Function must be called only once at the very end of an interrupt context.
-pub unsafe fn end_of_interrupt() {
-    // TODO APIC
-    // #[cfg(target_arch = "x86_64")]
-    // get().apic.end_of_interrupt();
-}
+//     // Enable APIC timer ...
+//     // TODO APIC
+//     // let apic = &mut get_mut().apic;
+//     // assert!(apic.get_timer().get_masked());
+//     // // Safety: Calling `begin_scheduling` implies this state change is expected.
+//     // unsafe {
+//     //     apic.get_timer().set_masked(false);
+//     // }
 
-/// ## Safety
-///
-/// - Function should only be called once the last preemption wait has resolved.
-pub unsafe fn set_preemption_wait(interval_wait: core::num::NonZeroU16) {
-    let state = LocalState::get_local_static();
-    // let timer_interval = state.timer_interval.unwrap();
-
-    // TODO APIC
-    // #[cfg(target_arch = "x86_64")]
-    // {
-    //     let apic = &mut state.apic;
-
-    //     match apic.get_timer().get_mode() {
-    //         // Safety: Control flow expects timer initial count to be set.
-    //         apic::TimerMode::OneShot => unsafe {
-    //             let final_count = timer_interval.get() * u64::from(interval_wait.get());
-    //             apic.set_timer_initial_count(final_count.try_into().unwrap_or(u32::MAX));
-    //         },
-
-    //         // Safety: Control flow expects the TSC deadline to be set.
-    //         apic::TimerMode::TscDeadline => unsafe {
-    //             crate::arch::x86_64::registers::msr::IA32_TSC_DEADLINE::set(
-    //                 core::arch::x86_64::_rdtsc()
-    //                     + (timer_interval.get() * u64::from(interval_wait.get())),
-    //             );
-    //         },
-
-    //         apic::TimerMode::Periodic => unimplemented!(),
-    //     }
-    // }
-}
+//     // Safety: Calling `begin_scheduling` implies this function is expected to be called.
+//     unsafe {
+//         set_preemption_wait(core::num::NonZeroU16::MIN);
+//     }
+// }
 
 // pub fn provide_exception<T: Into<Exception>>(exception: T) -> core::result::Result<(), T> {
 //     let state = get_state_mut();
