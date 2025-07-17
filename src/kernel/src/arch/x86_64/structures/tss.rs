@@ -4,6 +4,7 @@ use crate::{
     arch::x86_64::structures::gdt::{GlobalDescriptorTable, SystemSegmentDescriptor},
     mem::alloc::KERNEL_ALLOCATOR,
 };
+use core::ptr::NonNull;
 
 type StackTableStack = crate::mem::stack::Stack<0x16000>;
 
@@ -18,18 +19,19 @@ pub enum InterruptStackTableIndex {
 }
 
 #[repr(C, packed(4))]
+#[derive(FromZeros)]
 pub struct TaskStateSegment {
     _1: [u8; 4],
 
-    /// The full 64-bit canonical forms of the stack pointers (RSP) for privilege levels 0-2.
-    /// The stack pointers used when a privilege level change occurs from a lower privilege level to a higher one.
-    privilege_stack_table: [Option<StackTableStack>; 3],
+    /// The stack pointers used when a privilege level change occurs from a lower privilege level
+    /// to a higher one (e.g. ring 3 to ring 0).
+    privilege_stack_table: [Option<NonNull<StackTableStack>>; 3],
 
     _2: [u8; 8],
 
-    /// The full 64-bit canonical forms of the interrupt stack table (IST) pointers.
-    /// The stack pointers used when an entry in the Interrupt Descriptor Table has an IST value other than 0.
-    interrupt_stack_table: [Option<StackTableStack>; 7],
+    /// The stack pointers used when an entry in the Interrupt Descriptor Table has an IST value
+    /// other than 0.
+    interrupt_stack_table: [Option<NonNull<StackTableStack>>; 7],
 
     _3: [u8; 10],
 
@@ -38,21 +40,27 @@ pub struct TaskStateSegment {
 }
 
 impl TaskStateSegment {
-    pub fn new_with_stacks() -> Self {
-        fn allocate_stack_table_stack() -> StackTableStack {
-            StackTableStack::allocate_new()
+    /// Loads this [`TaskStateSegment`] into the task state segment register.
+    ///
+    /// # Remarks
+    ///
+    /// Only one [`TaskStateSegment`] should be loaded on each hardware thread. It's likely a
+    /// runtime error if more than one are loaded per hardware threads.
+    pub fn load_local() {
+        fn allocate_stack_table_stack() -> NonNull<StackTableStack> {
+            KERNEL_ALLOCATOR
+                .allocate_t::<StackTableStack>()
                 .expect("failed to allocate a new stack for task state segment")
         }
 
-        let mut tss = TaskStateSegment {
-            privilege_stack_table: [Some(allocate_stack_table_stack()), None, None],
-            interrupt_stack_table: [const { None }; _],
-            iomap_base: u16::try_from(size_of::<TaskStateSegment>()).unwrap(),
-            _1: [0u8; _],
-            _2: [0u8; _],
-            _3: [0u8; _],
-        };
+        let tss = crate::mem::alloc::KERNEL_ALLOCATOR
+            .allocate_t_static::<Self>()
+            .expect("failed to allocate task state segment");
 
+        // Set the stack for transitions to ring 0.
+        tss.privilege_stack_table[0] = Some(allocate_stack_table_stack());
+
+        // Set the stacks for faults that cannot be disabled or are caused by runtime errors.
         tss.interrupt_stack_table[usize::from(u16::from(InterruptStackTableIndex::Debug))] =
             Some(allocate_stack_table_stack());
         tss.interrupt_stack_table
@@ -63,26 +71,11 @@ impl TaskStateSegment {
         tss.interrupt_stack_table[usize::from(u16::from(InterruptStackTableIndex::MachineCheck))] =
             Some(allocate_stack_table_stack());
 
-        tss
-    }
-
-    /// Loads this [`TaskStateSegment`] into the task state segment register.
-    ///
-    /// # Remarks
-    ///
-    /// Only one [`TaskStateSegment`] should need to be loaded on each hardware thread.
-    /// It's likely a runtime error if more than one are loaded per hardware threads.
-    pub fn load_local(self) {
         GlobalDescriptorTable::with_temporary(|temp_gdt| {
-            let tss_ptr = KERNEL_ALLOCATOR
-                .allocate_t::<Self>()
-                .expect("could not allocate task state segment");
-
-            // Safety: `self` is dereferenceable as `Self`.
-            let tss_segment_descriptor = unsafe { SystemSegmentDescriptor::from_tss(tss_ptr) };
+            let tss_segment_descriptor = SystemSegmentDescriptor::from_tss(tss);
             let tss_segment_selector = temp_gdt.append_segment(tss_segment_descriptor);
 
-            trace!("Loading: {tss_ptr:#X?}");
+            trace!("Loading: {:#X?}", core::ptr::from_ref(tss));
 
             // Safety: No memory safety concerns.
             unsafe {

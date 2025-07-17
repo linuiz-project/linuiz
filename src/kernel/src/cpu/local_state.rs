@@ -41,8 +41,8 @@ impl LocalState {
         trace!("Configuring local timer...");
         let timer = LocalTimer::configure();
 
-        trace!("Configuring local timer...");
-        let scheduler = Scheduler::new();
+        trace!("Configuring local scheduler...");
+        let scheduler = Scheduler::new().expect("failed to allocate idle stack");
 
         let local_state_ptr = KERNEL_ALLOCATOR
             .allocate_t::<LocalState>()

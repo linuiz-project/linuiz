@@ -72,23 +72,25 @@ mod task;
 mod time;
 mod util;
 
-#[macro_use]
-extern crate log;
-
-#[macro_use]
-extern crate thiserror;
-
-#[macro_use]
-extern crate bytemuck;
-
-#[macro_use]
-extern crate num_enum;
+extern crate alloc;
 
 #[macro_use]
 extern crate bitflags;
 
 #[macro_use]
+extern crate log;
+
+#[macro_use]
+extern crate num_enum;
+
+#[macro_use]
 extern crate paste;
+
+#[macro_use]
+extern crate thiserror;
+
+#[macro_use]
+extern crate zerocopy;
 
 unsafe extern "C" {
     pub type LinkerSymbol;
@@ -340,13 +342,18 @@ macro_rules! singleton {
                     });
                 }
 
-                /// Gets the static [`Self`] if [`Self::init`] has been called, orcauses a panic if not.
+                /// Gets the single instance of [`Self`], or causes a panic if it's uninitialized.
                 fn get_static() -> &'static Self {
                     [< STATIC_ $struct_name >]
                         .get()
                         .expect(
-                            concat!("static `", stringify!($name), "` has not yet been initialized")
+                            concat!("static `", stringify!($struct_name), "` has not yet been initialized")
                         )
+                }
+
+                /// Whether the singleton has been initialized.
+                pub fn is_initialized() -> bool {
+                    [< STATIC_ $struct_name >].get().is_some()
                 }
             }
         }

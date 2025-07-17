@@ -11,18 +11,10 @@ panic_traces = ["dep:rustc-demangle"]
 acpi = "5.2"
 bit_field = "0.10"
 bitflags = "2.9"
-bitvec = { version = "1.0", default-features = false, features = [
-    "atomic",
-    "alloc",
-] }
-bytemuck = { git = "https://github.com/zdivelbiss/bytemuck", default-features = false, features = [
-    "derive",
-    "zeroable_maybe_uninit",
-    "min_const_generics",
-] }
-heapless = "0.8"
+bitvec = { version = "1.0", default-features = false, features = ["atomic"] }
 elf = { version = "0.8.0", default-features = false }
 getrandom = "0.3"
+heapless = "0.8"
 ioports = "1.0"
 limine = { version = "0.5", features = ["uuid"] }
 log = { version = "0.4", default-features = false }
@@ -37,6 +29,10 @@ uart = { version = "3.0", default-features = false, features = [
     "address_impl",
 ] }
 uuid = { version = "1.16", default-features = false, features = ["v4"] }
+zerocopy = { version = "0.8", default-features = false, features = [
+    "derive",
+    "alloc",
+] }
 
 # source: git
 acpica = { git = "https://github.com/linuiz-project/acpica" }

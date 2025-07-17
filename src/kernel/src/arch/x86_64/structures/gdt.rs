@@ -1,6 +1,6 @@
 use crate::arch::x86_64::structures::{DescriptorTablePointer, tss::TaskStateSegment};
 use bit_field::BitField;
-use core::{ops::Range, ptr::NonNull};
+use core::ops::Range;
 use spin::Once;
 
 pub static KCODE_SELECTOR: Once<SegmentSelector> = Once::new();
@@ -385,10 +385,10 @@ impl SystemSegmentDescriptor {
     const SYSTEM_SEGMENT_TYPE_BIT_RANGE: Range<usize> = 40..44;
     const SYSTEM_SEGMENT_TYPE_TSS_AVAILABLE: u128 = 0x9;
 
-    /// # Safety
-    ///
-    /// - `tss` must be dereferenceable to [`TaskStateSegment`].
-    pub unsafe fn from_tss(tss: NonNull<TaskStateSegment>) -> Self {
+    /// Constructs a [`SystemSegmentDescriptor`] from a valid [`TaskStateSegment`].
+    pub fn from_tss(tss: &TaskStateSegment) -> Self {
+        let tss_ptr = core::ptr::from_ref(tss);
+
         let mut value = u128::from(COMMON_BITS);
 
         // Set the systems segment type (in this case, 64-bit TSS + Available)
@@ -405,7 +405,7 @@ impl SystemSegmentDescriptor {
 
         // Set all of the bits for the "base" of the table. And because of legacy
         // compatibility, this requires setting 4 different bit ranges.
-        let base = u128::try_from(tss.addr().get()).unwrap();
+        let base = u128::try_from(tss_ptr.addr()).unwrap();
         value.set_bits(Self::BASE_BIT_RANGE_1, base.get_bits(0..16));
         value.set_bits(Self::BASE_BIT_RANGE_2, base.get_bits(16..24));
         value.set_bits(Self::BASE_BIT_RANGE_3, base.get_bits(24..32));

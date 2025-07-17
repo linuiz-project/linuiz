@@ -1,11 +1,10 @@
+use crate::{arch::x86_64::devices::x2apic::x2Apic, cpu::local_state::LocalState};
 use core::{
     ops::Range,
     sync::atomic::{AtomicBool, Ordering},
 };
 use libsys::{Address, Frame, Physical};
-use spin::{Barrier, Mutex, Once};
-
-use crate::{arch::x86_64::devices::x2apic::x2Apic, cpu::local_state::LocalState};
+use spin::{Barrier, Once, RwLock};
 
 pub mod local_state;
 
@@ -59,7 +58,8 @@ pub fn begin_multiprocessing(mp_request: &limine::request::MpRequest) -> Option<
                 configure();
             }
 
-            // Safety: All currently referenced memory should also be mapped in the kernel page tables.
+            // Safety: All currently referenced memory should also be mapped in the kernel page
+            //         tables.
             crate::mem::with_kernel_mapper(|kmapper| unsafe {
                 kmapper.swap_into();
             });
@@ -112,7 +112,8 @@ pub unsafe fn synchronize(
         range_contains_stack
     }
 
-    static ENTRY_TO_CHECK: Mutex<Option<Range<usize>>> = Mutex::new(None);
+    // TODO use a `spin::RwLock` for this.
+    static ENTRY_TO_CHECK: RwLock<Option<Range<usize>>> = RwLock::new(None);
     static IS_ENTRY_USED: AtomicBool = AtomicBool::new(false);
     static ENTRY_READY_SYNC: Once<Barrier> = Once::new();
     static ENTRY_PROCESSED_SYNC: Once<Barrier> = Once::new();
@@ -167,7 +168,7 @@ pub unsafe fn synchronize(
                 };
 
                 // Set the new entry to be checked.
-                let mut entry_to_check = ENTRY_TO_CHECK.lock();
+                let mut entry_to_check = ENTRY_TO_CHECK.write();
                 *entry_to_check = Some(entry_range.clone());
                 drop(entry_to_check);
 
@@ -193,7 +194,7 @@ pub unsafe fn synchronize(
 
         if let Some(entry_ready) = ENTRY_READY_SYNC.get() {
             // Clear the check entry to `None`, so other hardware threads know there's no more work.
-            let mut entry_to_check = ENTRY_TO_CHECK.lock();
+            let mut entry_to_check = ENTRY_TO_CHECK.write();
             *entry_to_check = None;
             drop(entry_to_check);
 
@@ -214,10 +215,10 @@ pub unsafe fn synchronize(
             entry_ready.wait();
 
             trace!("Waiting to acquire entry...");
-            let entry_to_check = ENTRY_TO_CHECK.lock();
+            let entry_to_check = ENTRY_TO_CHECK.read();
 
-            // If the entry is `None`, then we're done checking entries.
-            let Some(entry_range) = &*entry_to_check else {
+            let Some(entry_range) = entry_to_check.as_ref() else {
+                // If the entry is `None`, then we're done checking entries.
                 break;
             };
 
@@ -238,7 +239,7 @@ pub unsafe fn synchronize(
     debug!("Preparing hardware thread for task scheduling...");
 
     #[cfg(target_arch = "x86_64")]
-    crate::arch::x86_64::structures::tss::TaskStateSegment::new_with_stacks().load_local();
+    crate::arch::x86_64::structures::tss::TaskStateSegment::load_local();
 
     trace!("Initializing the local interrupt controller.");
     #[cfg(target_arch = "x86_64")]

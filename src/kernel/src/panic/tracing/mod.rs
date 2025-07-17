@@ -102,7 +102,9 @@ fn construct_panic_message(mut buffer: impl Write) -> Result {
         .try_for_each(|(depth, trace_address)| {
             const SYMBOL_TYPE_FUNCTION: u8 = 2;
 
-            if let Some(symbol_name) = symbols::Symbols::get_name(trace_address) {
+            if symbols::Symbols::is_initialized()
+                && let Some(symbol_name) = symbols::Symbols::get_name(trace_address)
+            {
                 if let Ok(demangled) = rustc_demangle::try_demangle(symbol_name) {
                     print_stack_trace_entry(&mut buffer, depth, trace_address, demangled)
                 } else {

@@ -83,7 +83,10 @@ pub unsafe fn configure_hwthread() {
         IA32_EFER::set_no_execute_enable(true);
     }
 
+    GlobalDescriptorTable::init();
     GlobalDescriptorTable::load_static();
+
+    InterruptDescriptorTable::init();
     InterruptDescriptorTable::load_static();
 
     // Setup system call interface.

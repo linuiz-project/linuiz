@@ -144,6 +144,7 @@ impl Mapper {
 
     pub fn auto_map(&mut self, page: Address<Page>, flags: TableEntryFlags) -> Result<(), Error> {
         let frame = PhysicalMemoryManager::next_frame()?;
+
         unsafe {
             self.map(page, TableDepth::min(), frame, false, flags)?;
         }

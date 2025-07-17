@@ -3,49 +3,47 @@ use crate::{
     mem::stack::Stack,
     task::{Registers, Task},
 };
+use alloc::{boxed::Box, collections::vec_deque::VecDeque};
+use core::alloc::AllocError;
 use libsys::Address;
+use zerocopy::FromZeros;
 
 pub static PROCESSES: spin::Mutex<VecDeque<Task>> = spin::Mutex::new(VecDeque::new());
 
 pub struct Scheduler {
     enabled: bool,
-    idle_stack: Stack<0x1000>,
+    idle_stack: Box<Stack<0x1000>>,
     task: Option<Task>,
 }
 
 impl Scheduler {
-    pub fn new() -> Self {
-        Self {
+    pub fn new() -> Result<Self, AllocError> {
+        Ok(Self {
             enabled: false,
-            idle_stack: Stack::allocate_new(),
+            idle_stack: Stack::new_box_zeroed().map_err(|_| AllocError)?,
             task: None,
-        }
+        })
     }
 
     /// Enables the scheduler to pop tasks.
-    #[inline]
     pub fn enable(&mut self) {
         self.enabled = true;
     }
 
     /// Disables scheduler from popping tasks. Any task pops which are already in-flight will not be cancelled.
-    #[inline]
     pub fn disable(&mut self) {
         self.enabled = false;
     }
 
     /// Indicates whether the scheduler is enabled.
-    #[inline]
     pub const fn is_enabled(&self) -> bool {
         self.enabled
     }
 
-    #[inline]
     pub const fn process(&self) -> Option<&Task> {
         self.task.as_ref()
     }
 
-    #[inline]
     pub fn task_mut(&mut self) -> Option<&mut Task> {
         self.task.as_mut()
     }
@@ -57,7 +55,7 @@ impl Scheduler {
 
         // Move the current task, if any, back into the scheduler queue.
         if let Some(mut process) = self.task.take() {
-            trace!("Interrupting task: {:?}", process.id());
+            trace!("Interrupting: {:?}", process.id());
 
             process.context.0 = *state;
             process.context.1 = *regs;
@@ -74,8 +72,8 @@ impl Scheduler {
 
         let mut processes = PROCESSES.lock();
 
-        let mut process = self.task.take().expect("cannot yield without process");
-        trace!("Yielding task: {:?}", process.id());
+        let mut process = self.task.take().expect("no active task in scheduler");
+        trace!("Yielding: {:?}", process.id());
 
         process.context.0 = *isf;
         process.context.1 = *regs;
@@ -89,8 +87,8 @@ impl Scheduler {
         debug_assert!(!crate::interrupts::is_enabled());
 
         // TODO add process to reap queue to reclaim address space memory
-        let process = self.task.take().expect("cannot exit without process");
-        trace!("Exiting process: {:?}", process.id());
+        let process = self.task.take().expect("no active task in scheduler");
+        trace!("Exiting: {:?}", process.id());
 
         let mut processes = PROCESSES.lock();
         self.next_task(&mut processes, isf, regs);

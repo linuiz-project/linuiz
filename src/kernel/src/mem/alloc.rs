@@ -1,11 +1,14 @@
 use crate::mem::{HigherHalfDirectMap, pmm::PhysicalMemoryManager};
+use alloc::boxed::Box;
 use core::{
     alloc::{AllocError, Allocator, Layout},
     num::NonZero,
     ptr::NonNull,
 };
 use libsys::{Address, page_shift, page_size};
+use zerocopy::FromZeros;
 
+#[global_allocator]
 pub static KERNEL_ALLOCATOR: KernelAllocator = KernelAllocator;
 
 pub struct KernelAllocator;
@@ -83,11 +86,62 @@ unsafe impl Allocator for KernelAllocator {
     }
 }
 
+// Safety: Perfect code. Perfect. Code.
+unsafe impl core::alloc::GlobalAlloc for KernelAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        KERNEL_ALLOCATOR
+            .allocate(layout)
+            .map(NonNull::as_non_null_ptr)
+            .map(NonNull::as_ptr)
+            .unwrap_or(core::ptr::null_mut())
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        let Some(ptr) = NonNull::new(ptr) else {
+            error!("Called `GlobalAlloc::dealloc` with a null pointer.");
+            return;
+        };
+
+        // Safety: Caller is required to maintain safety invariants.
+        unsafe {
+            KERNEL_ALLOCATOR.deallocate(ptr, layout);
+        }
+    }
+}
+
 impl KernelAllocator {
+    /// Allocates a memory region that will fit the size and alignment of `T`.
     pub fn allocate_t<T>(&self) -> Result<NonNull<T>, AllocError> {
         let layout = Layout::new::<T>();
         let allocation = self.allocate(layout)?;
 
         Ok(allocation.as_non_null_ptr().cast())
+    }
+
+    pub fn allocate_t_zeroed<T>(&self) -> Result<NonNull<T>, AllocError> {
+        let layout = Layout::new::<T>();
+        let allocation = self.allocate_zeroed(layout)?;
+
+        Ok(allocation.as_non_null_ptr().cast())
+    }
+
+    pub fn allocate_t_static<T: FromZeros>(&self) -> Result<&'static mut T, AllocError> {
+        let mut allocation = self.allocate_t_zeroed::<T>()?;
+
+        // Safety: Memory returned from allocator is convertible to a reference.
+        Ok(unsafe { allocation.as_mut() })
+    }
+
+    /// Allocates (without necessarily zeroing) memory for a `T` and boxes it.
+    pub fn allocate_t_boxed<T: FromZeros>(&self) -> Result<Box<T>, AllocError> {
+        let allocation = self.allocate_t_zeroed::<T>()?;
+
+        // Safety:
+        //  - Pointer was just allocated, so no double-free is possible.
+        //  - Memory was allocated by global allocator.
+        //  - Allocation layout is identical or greater than the `T` layout.
+        let t_box = unsafe { Box::from_non_null(allocation) };
+
+        Ok(t_box)
     }
 }

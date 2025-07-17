@@ -16,7 +16,6 @@ use crate::{
         pmm::PhysicalMemoryManager,
     },
 };
-use core::{alloc::Layout, mem::MaybeUninit, ptr::NonNull};
 use libsys::{Address, Frame, Page, giga_page_size, mega_page_size, page_size, table_index_size};
 use spin::{Mutex, Once};
 

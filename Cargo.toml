@@ -1,11 +1,6 @@
 [workspace]
 resolver = "3"
-exclude = [
-    "src/slab_alloc",
-    "src/userspace/nvme",
-    "src/userspace/test_driver",
-    "xtask",
-]
+exclude = ["src/userspace/nvme", "src/userspace/test_driver", "xtask"]
 members = ["src/kernel"]
 
 [profile.dev]
