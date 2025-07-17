@@ -1,5 +1,8 @@
 use crate::{
-    arch::x86_64::structures::idt::InterruptStackFrame, cpu::local_state::LocalState, mem::stack::Stack, task::{Registers, Task}
+    arch::x86_64::structures::idt::InterruptStackFrame,
+    cpu::local_state::LocalState,
+    mem::stack::Stack,
+    task::{Registers, Task},
 };
 use alloc::{boxed::Box, collections::vec_deque::VecDeque};
 use core::{alloc::AllocError, time::Duration};
@@ -135,7 +138,7 @@ impl Scheduler {
         // TODO have some kind of queue of preemption waits, to ensure we select the shortest one.
         // Safety: Just having switched tasks, no preemption wait should supercede this one.
         unsafe {
-             LocalState::set_preemption_wait(Duration::from_millis(15));
+            LocalState::set_preemption_wait(Duration::from_millis(15));
         }
     }
 }
