@@ -49,11 +49,7 @@ unsafe impl Allocator for KernelAllocator {
                 layout.size(),
             )
         })
-        .map_err(|error| {
-            error!("Allocate: {error:?}");
-
-            AllocError
-        })
+        .ok_or(AllocError)
     }
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
@@ -71,7 +67,7 @@ unsafe impl Allocator for KernelAllocator {
         let frame_address = Address::new(physical_offset_aligned).unwrap();
 
         if layout.size() <= page_size() {
-            PhysicalMemoryManager::free_frame(frame_address).ok();
+            PhysicalMemoryManager::free_frame(frame_address);
         } else {
             let frame_count = libsys::align_up_div(layout.size(), page_shift());
             let frames_start = frame_address.index();
@@ -80,8 +76,7 @@ unsafe impl Allocator for KernelAllocator {
             (frames_start..frames_end)
                 .map(Address::from_index)
                 .map(Option::unwrap)
-                .try_for_each(PhysicalMemoryManager::free_frame)
-                .expect("failed while freeing frames");
+                .for_each(PhysicalMemoryManager::free_frame);
         }
     }
 }

@@ -5,7 +5,7 @@ use uart::{
     Baud, Data, FifoControl, LineControl, LineStatus, ModemControl, Uart, address::PortAddress,
 };
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq, Eq)]
 pub enum Error {
     #[error("UART loopback integrity check failed")]
     IntegrityCheck,

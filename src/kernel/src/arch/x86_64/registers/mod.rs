@@ -1,7 +1,7 @@
 #![allow(dead_code, clippy::upper_case_acronyms)]
 
-mod rflags;
-pub use rflags::*;
+mod flags;
+pub use flags::*;
 
 pub mod control;
 pub mod model_specific;

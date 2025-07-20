@@ -1,4 +1,7 @@
-use crate::{arch::x86_64::devices::x2apic::x2Apic, cpu::local_state::LocalState};
+use crate::{
+    arch::x86_64::devices::x2apic::x2Apic, cpu::local_state::LocalState,
+    mem::pmm::PhysicalMemoryManager,
+};
 use core::{
     ops::Range,
     sync::atomic::{AtomicBool, Ordering},
@@ -190,7 +193,7 @@ pub unsafe fn synchronize(
             // Map entry to physical page address...
             .map(|address| Address::<Frame>::new(address).unwrap())
             // Free the requisite physical frames...
-            .for_each(|frame| crate::mem::pmm::PhysicalMemoryManager::free_frame(frame).unwrap());
+            .for_each(PhysicalMemoryManager::free_frame);
 
         if let Some(entry_ready) = ENTRY_READY_SYNC.get() {
             // Clear the check entry to `None`, so other hardware threads know there's no more work.

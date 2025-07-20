@@ -1,23 +1,27 @@
 #![no_std]
 #![no_main]
 #![feature(
+    allocator_api,
+    array_ptr_get,
+    array_windows,
+    box_vec_non_null,
+    breakpoint,
+    cfg_select,
+    duration_constants,
+    extern_types,
+    generic_const_exprs,
+    if_let_guard,
     iter_advance_by,
     iter_array_chunks,
     iter_next_chunk,
-    array_windows,
     maybe_uninit_slice,
     maybe_uninit_write_slice,
-    step_trait,
-    breakpoint,
-    extern_types,
-    slice_ptr_get,
-    if_let_guard,
+    pointer_is_aligned_to,
+    ptr_as_ref_unchecked,
     ptr_as_uninit,
-    strict_provenance_lints,
-    box_vec_non_null,
-    allocator_api,
-    duration_constants,
-    array_ptr_get
+    slice_ptr_get,
+    step_trait,
+    strict_provenance_lints
 )]
 #![forbid(clippy::inline_asm_x86_att_syntax, fuzzy_provenance_casts)]
 #![deny(
@@ -27,6 +31,7 @@
     stable_features
 )]
 #![warn(
+    clippy::todo,
     clippy::cargo,
     clippy::pedantic,
     clippy::undocumented_unsafe_blocks,
@@ -46,7 +51,9 @@
     clippy::missing_const_for_fn,
     clippy::needless_for_each,
     clippy::if_not_else,
-    dead_code
+    dead_code,
+    incomplete_features,
+    mismatched_lifetime_syntaxes
 )]
 
 use limine::{

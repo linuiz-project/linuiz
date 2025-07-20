@@ -3,6 +3,7 @@ use raw_cpuid::{ExtendedFeatures, ExtendedProcessorFeatureIdentifiers, FeatureIn
 use crate::arch::x86_64::{
     cpuid::{extended_feature_identifiers, extended_feature_info, feature_info},
     devices::x2apic::x2Apic,
+    registers::Flags,
     structures::{gdt::GlobalDescriptorTable, idt::InterruptDescriptorTable},
 };
 
@@ -11,6 +12,7 @@ pub mod devices;
 pub mod instructions;
 pub mod registers;
 pub mod structures;
+pub mod rand;
 
 /// # Safety
 ///
@@ -28,20 +30,34 @@ pub unsafe fn configure_hwthread() {
     // Safety: This is the first and only time `CR0` will be set.
     unsafe {
         CR0::write(
-            CR0Flags::PE | CR0Flags::MP | CR0Flags::ET | CR0Flags::NE | CR0Flags::WP | CR0Flags::PG,
+            CR0Flags::PE
+                | CR0Flags::MP
+                | CR0Flags::ET
+                | CR0Flags::NE
+                | CR0Flags::WP
+                | CR0Flags::AM
+                | CR0Flags::PG,
         );
     }
 
     trace!("Configuring `CR4`...");
 
-    let mut cr4_flags = CR4Flags::PAE | CR4Flags::PGE | CR4Flags::OSXMMEXCPT;
+    let mut cr4_flags = CR4Flags::empty();
+
+    if feature_info().is_some_and(FeatureInfo::has_pge) {
+        cr4_flags.insert(CR4Flags::PGE);
+    }
+
+    if feature_info().is_some_and(FeatureInfo::has_pae) {
+        cr4_flags.insert(CR4Flags::PAE);
+    }
 
     if feature_info().is_some_and(FeatureInfo::has_de) {
         cr4_flags.insert(CR4Flags::DE);
     }
 
     if feature_info().is_some_and(FeatureInfo::has_fxsave_fxstor) {
-        cr4_flags.insert(CR4Flags::OSFXSR);
+        cr4_flags.insert(CR4Flags::OSFXSR | CR4Flags::OSXMMEXCPT);
     }
 
     if feature_info().is_some_and(FeatureInfo::has_mce) {
@@ -83,6 +99,11 @@ pub unsafe fn configure_hwthread() {
         IA32_EFER::set_no_execute_enable(true);
     }
 
+    // Safety: Only the alignment check bit is set.
+    unsafe {
+        Flags::write(Flags::read() | Flags::ALIGNMENT_CHECK);
+    }
+
     GlobalDescriptorTable::init();
     GlobalDescriptorTable::load_static();
 
@@ -115,3 +136,5 @@ pub unsafe fn configure_hwthread() {
 pub fn get_hwthread_id() -> u32 {
     x2Apic::get_id()
 }
+
+

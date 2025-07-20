@@ -43,8 +43,8 @@ pub fn disable() {
 pub fn is_enabled() -> bool {
     #[cfg(target_arch = "x86_64")]
     {
-        crate::arch::x86_64::registers::RFlags::read()
-            .contains(crate::arch::x86_64::registers::RFlags::INTERRUPT_FLAG)
+        crate::arch::x86_64::registers::Flags::read()
+            .contains(crate::arch::x86_64::registers::Flags::INTERRUPT_FLAG)
     }
 
     #[cfg(not(any(target_arch = "x86_64")))]

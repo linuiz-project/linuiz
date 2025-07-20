@@ -1,3 +1,10 @@
+use crate::{
+    interrupts::InterruptCell,
+    mem::{mapper::Mapper, paging::page_table::Depth},
+};
+use libsys::{Address, Frame, Page, giga_page_size, mega_page_size, page_size};
+use spin::{Mutex, Once};
+
 mod hhdm;
 pub use hhdm::*;
 
@@ -7,17 +14,6 @@ pub mod mapper;
 pub mod paging;
 pub mod pmm;
 pub mod stack;
-
-use crate::{
-    interrupts::InterruptCell,
-    mem::{
-        mapper::Mapper,
-        paging::{PageTableEntry, TableDepth, TableEntryFlags},
-        pmm::PhysicalMemoryManager,
-    },
-};
-use libsys::{Address, Frame, Page, giga_page_size, mega_page_size, page_size, table_index_size};
-use spin::{Mutex, Once};
 
 static KERNEL_MAPPER: Once<InterruptCell<Mutex<Mapper>>> = Once::new();
 
@@ -36,9 +32,9 @@ pub fn init(
         from: Address<Page>,
         to: Address<Frame>,
         length: usize,
-        paging_flags: TableEntryFlags,
+        permissions: Permissions,
     ) {
-        trace!("Map Range: ({from:X?} -> {to:X?}):{length:#X} {paging_flags:?}");
+        trace!("Map Range: ({from:X?} -> {to:X?}):{length:#X} {permissions:?}");
 
         let mut remaining_length = length;
         while remaining_length > 0 {
@@ -55,13 +51,7 @@ pub fn init(
                 // Map a giga page
 
                 mapper
-                    .map(
-                        from,
-                        TableDepth::giga(),
-                        to,
-                        false,
-                        paging_flags | TableEntryFlags::HUGE,
-                    )
+                    .map(from, Depth::giga(), to, false, permissions)
                     .expect("failed to map range");
 
                 remaining_length -= giga_page_size();
@@ -74,13 +64,7 @@ pub fn init(
                 // Map a mega page
 
                 mapper
-                    .map(
-                        from,
-                        TableDepth::mega(),
-                        to,
-                        false,
-                        paging_flags | TableEntryFlags::HUGE,
-                    )
+                    .map(from, Depth::mega(), to, false, permissions)
                     .expect("failed to map range");
 
                 remaining_length -= mega_page_size();
@@ -88,7 +72,7 @@ pub fn init(
                 // Map a standard page
 
                 mapper
-                    .map(from, TableDepth::min(), to, false, paging_flags)
+                    .map(from, Depth::max(), to, false, permissions)
                     .expect("failed to map range");
 
                 remaining_length -= core::cmp::min(page_size(), remaining_length);
@@ -104,7 +88,7 @@ pub fn init(
             paging::use_giga_pages()
         );
 
-        let mut kernel_mapper = Mapper::new(TableDepth::max());
+        let mut kernel_mapper = Mapper::new();
 
         memory_map_request
             .get_response()
@@ -116,17 +100,17 @@ pub fn init(
                 let entry_length = usize::try_from(entry.length).unwrap();
                 let entry_frame = Address::<Frame>::new(entry_start).unwrap();
                 let entry_page = HigherHalfDirectMap::frame_to_page(entry_frame);
-                let entry_paging_flags = {
+                let entry_permissions = {
                     match entry.entry_type {
                         limine::memory_map::EntryType::USABLE
                         | limine::memory_map::EntryType::ACPI_NVS
                         | limine::memory_map::EntryType::ACPI_RECLAIMABLE
                         | limine::memory_map::EntryType::BOOTLOADER_RECLAIMABLE
-                        | limine::memory_map::EntryType::FRAMEBUFFER => TableEntryFlags::RW,
+                        | limine::memory_map::EntryType::FRAMEBUFFER => Permissions::ReadWrite,
 
                         limine::memory_map::EntryType::RESERVED
                         | limine::memory_map::EntryType::EXECUTABLE_AND_MODULES => {
-                            TableEntryFlags::RO
+                            Permissions::ReadOnly
                         }
 
                         _ => {
@@ -140,7 +124,7 @@ pub fn init(
                     entry_page,
                     entry_frame,
                     entry_length,
-                    entry_paging_flags,
+                    entry_permissions,
                 );
             });
 
@@ -189,18 +173,23 @@ pub fn init(
                     program_header.p_align, // as if it's alignment is the total size (support for mega pages).
                 ))
                 .unwrap();
-                let segment_paging_flags = TableEntryFlags::from(
-                    crate::task::segment_to_mmap_permissions(program_header.p_flags),
-                );
+                let segment_permissions =
+                    crate::task::segment_to_mapping_permissions(program_header.p_flags);
 
                 map_range(
                     &mut kernel_mapper,
                     segment_page,
                     segment_frame,
                     segment_length,
-                    segment_paging_flags,
+                    segment_permissions,
                 );
             });
+
+        InterruptCell::new(Mutex::new(kernel_mapper))
+    });
+
+    KERNEL_MAPPER.wait().with(|kernel_mapper| {
+        let kernel_mapper = kernel_mapper.lock();
 
         // Safety: Kernel page tables should be set up correctly.
         unsafe {
@@ -208,9 +197,15 @@ pub fn init(
         }
 
         trace!("Kernel has finalized control of memory system.");
-
-        InterruptCell::new(Mutex::new(kernel_mapper))
     });
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Permissions {
+    None,
+    ReadOnly,
+    ReadWrite,
+    ReadExecute,
 }
 
 pub fn with_kernel_mapper<T>(func: impl FnOnce(&mut Mapper) -> T) -> T {
@@ -218,66 +213,6 @@ pub fn with_kernel_mapper<T>(func: impl FnOnce(&mut Mapper) -> T) -> T {
         let mut mapper = mapper.lock();
         func(&mut mapper)
     })
-}
-
-pub fn copy_kernel_page_table() -> Result<Address<Frame>, pmm::Error> {
-    let table_frame = PhysicalMemoryManager::next_frame()?;
-    let table_ptr = core::ptr::with_exposed_provenance_mut(
-        HigherHalfDirectMap::frame_to_page(table_frame).get().get(),
-    );
-
-    // Safety: Frame is provided by allocator, and so guaranteed to be within the HHDM, and is frame-sized.
-    let new_table = unsafe { core::slice::from_raw_parts_mut(table_ptr, table_index_size()) };
-    new_table.fill(PageTableEntry::empty());
-    with_kernel_mapper(|kmapper| new_table.copy_from_slice(kmapper.view_page_table()));
-
-    Ok(table_frame)
-}
-
-#[cfg(target_arch = "x86_64")]
-pub struct PagingRegister(
-    pub Address<Frame>,
-    pub crate::arch::x86_64::registers::control::CR3Flags,
-);
-#[cfg(target_arch = "riscv64")]
-pub struct PagingRegister(
-    pub Address<Frame>,
-    pub u16,
-    pub crate::arch::rv64::registers::satp::Mode,
-);
-
-impl PagingRegister {
-    pub fn read() -> Self {
-        #[cfg(target_arch = "x86_64")]
-        {
-            let args = crate::arch::x86_64::registers::control::CR3::read();
-            Self(args.0, args.1)
-        }
-
-        #[cfg(target_arch = "riscv64")]
-        {
-            let args = crate::arch::rv64::registers::satp::read();
-            Self(args.0, args.1, args.2)
-        }
-    }
-
-    /// # Safety
-    ///
-    /// Writing to this register has the chance to externally invalidate memory references.
-    pub unsafe fn write(args: &Self) {
-        // Safety: Caller is required to maintain safety invariants.
-        unsafe {
-            #[cfg(target_arch = "x86_64")]
-            crate::arch::x86_64::registers::control::CR3::write(args.0, args.1);
-
-            #[cfg(target_arch = "riscv64")]
-            crate::arch::rv64::registers::satp::write(args.0.as_usize(), args.1, args.2);
-        }
-    }
-
-    pub const fn frame(&self) -> Address<Frame> {
-        self.0
-    }
 }
 
 // pub unsafe fn catch_read(ptr: NonNull<[u8]>) -> Result<Box<[u8]>, Exception> {
@@ -323,3 +258,18 @@ impl PagingRegister {
 
 //     Ok(String::from_utf8_lossy(core::slice::from_raw_parts(read_ptr.as_ptr(), strlen)).into_owned())
 // }
+
+/// Zeros the higher-half direct mapped memory of `frame`.
+///
+/// # Safety
+///
+/// - The higher-half direct mapped memory of `frame` must not be otherwise aliased.
+pub unsafe fn zero_frame(frame: Address<Frame>) {
+    let page = HigherHalfDirectMap::frame_to_page(frame);
+    let ptr = page.as_ptr();
+
+    // Safety: Caller is required to maintain safety invariants.
+    unsafe {
+        core::ptr::write_bytes(ptr, 0, page_size());
+    }
+}

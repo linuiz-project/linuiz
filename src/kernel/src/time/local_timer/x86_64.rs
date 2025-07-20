@@ -11,7 +11,7 @@ use crate::{
 use core::{arch::x86_64::_rdtsc, time::Duration};
 use raw_cpuid::{ApmInfo, FeatureInfo, HypervisorInfo};
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq, Eq)]
 pub enum Error {
     #[error("wait duration was too long")]
     InvalidWait,

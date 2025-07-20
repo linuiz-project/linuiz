@@ -8,7 +8,7 @@
 use core::{num::NonZero, ptr::NonNull};
 
 use crate::{
-    arch::x86_64::{registers::RFlags, structures::gdt::SegmentSelector},
+    arch::x86_64::{registers::Flags, structures::gdt::SegmentSelector},
     cpu::local_state::LocalState,
 };
 use bit_field::BitField;
@@ -211,8 +211,10 @@ impl ModelSpecificRegister for IA32_FMASK {
 
 impl IA32_FMASK {
     /// Sets `rflags` upon a `syscall` based on masking the bits in the given value.
-    pub unsafe fn set(rflags: RFlags) {
-        wrmsr::<Self>(rflags.bits());
+    pub unsafe fn set(flags: Flags) {
+        let flags = u64::try_from(flags.bits()).unwrap();
+
+        wrmsr::<Self>(flags);
     }
 }
 

@@ -1,7 +1,7 @@
 bitflags! {
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct RFlags: u64 {
+    pub struct Flags: usize {
         /// Set by hardware if the last arithmetic operation generated a carry out of the most-significant
         /// bit of the result.
         const CARRY_FLAG = 1 << 0;
@@ -73,20 +73,32 @@ bitflags! {
     }
 }
 
-impl RFlags {
+impl Flags {
     pub fn read() -> Self {
-        let rflags: u64;
+        let flags: usize;
 
         // Safety: Instruction block has no side effects.
         unsafe {
             core::arch::asm!(
                 "pushf",
                 "pop {}",
-                out(reg) rflags,
+                out(reg) flags,
                 options(pure, nomem, preserves_flags)
             );
         }
 
-        Self::from_bits_truncate(rflags)
+        Self::from_bits_truncate(flags)
+    }
+
+    pub unsafe fn write(value: Self) {
+        // Safety: Instruction block has no side effects.
+        unsafe {
+            core::arch::asm!(
+                "push {}",
+                "popf",
+                in(reg) value.bits(),
+                options(nomem, preserves_flags)
+            );
+        }
     }
 }

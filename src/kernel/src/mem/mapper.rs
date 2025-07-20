@@ -1,66 +1,31 @@
-use crate::{
-    mem::{
-        HigherHalfDirectMap,
-        paging::{Error, FlagsModify, PageTable, PageTableEntry, TableDepth, TableEntryFlags},
-        pmm::PhysicalMemoryManager,
+use crate::mem::{
+    HigherHalfDirectMap, Permissions,
+    paging::{
+        RootTable,
+        page_table::{Depth, Entry},
     },
-    util::{Mut, Ref},
+    pmm::PhysicalMemoryManager,
 };
 use libsys::{Address, Frame, Page};
 
-pub struct Mapper {
-    depth: TableDepth,
-    root_frame: Address<Frame>,
-    entry: PageTableEntry,
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum Error {
+    #[error("could not allocate memory for mapping")]
+    OutOfMemory,
+
+    #[error(transparent)]
+    Paging(#[from] crate::mem::paging::Error),
 }
+
+#[derive(Debug, FromZeros, Clone)]
+pub struct Mapper(RootTable);
 
 // Safety: Type has no thread-local references.
 unsafe impl Send for Mapper {}
 
 impl Mapper {
-    /// Attempts to construct a new page manager. Returns `None` if the `pmm::get()` could not provide a root frame.
-    pub fn new(depth: TableDepth) -> Self {
-        let root_frame = PhysicalMemoryManager::next_frame()
-            .expect("could not retrieve a frame for mapper creation");
-
-        // Safety: `root_frame` is a physical address to a page-sized allocation, which is then offset to the HHDM.
-        unsafe {
-            core::ptr::write_bytes(
-                core::ptr::with_exposed_provenance_mut::<u8>(
-                    HigherHalfDirectMap::frame_to_page(root_frame).get().get(),
-                ),
-                0u8,
-                libsys::page_size(),
-            );
-        }
-
-        Self {
-            depth,
-            root_frame,
-            entry: PageTableEntry::new(root_frame, TableEntryFlags::PRESENT),
-        }
-    }
-
-    /// # Safety
-    ///
-    /// - The root frame must point to a valid top-level page table.
-    /// - There must only exist one copy of provided page table tree at any time.
-    pub unsafe fn new_unsafe(depth: TableDepth, root_frame: Address<Frame>) -> Self {
-        Self {
-            depth,
-            root_frame,
-            entry: PageTableEntry::new(root_frame, TableEntryFlags::PRESENT),
-        }
-    }
-
-    fn root_table(&self) -> PageTable<'_, Ref> {
-        // Safety: `Self` requires that the entry be valid.
-        unsafe { PageTable::<Ref>::new(self.depth, &self.entry) }
-    }
-
-    fn root_table_mut(&mut self) -> PageTable<'_, Mut> {
-        // Safety: `Self` requires that the entry be valid.
-        unsafe { PageTable::<Mut>::new(self.depth, &mut self.entry) }
+    pub fn new() -> Self {
+        zerocopy::FromZeros::new_zeroed()
     }
 
     /* MAP / UNMAP */
@@ -69,35 +34,45 @@ impl Mapper {
     pub fn map(
         &mut self,
         page: Address<Page>,
-        depth: TableDepth,
+        depth: Depth,
         frame: Address<Frame>,
         lock_frame: bool,
-        attributes: TableEntryFlags,
+        permissions: Permissions,
     ) -> Result<(), Error> {
         trace!(
-            "Mapping: {page:X?} -> {frame:X?}  (to_depth:{}, lock:{lock_frame}, {attributes:?})",
+            "Mapping: {page:X?} -> {frame:X?}  (to_depth:{}, lock:{lock_frame} {permissions:?})",
             depth.get()
         );
 
         if lock_frame {
-            PhysicalMemoryManager::lock_frame(frame)?;
+            PhysicalMemoryManager::lock_frame(frame);
         }
 
         // If acquisition of the frame is successful, attempt to map the page to the frame index.
-        self.root_table_mut()
-            .with_entry_create(page, depth, |entry| {
-                if depth > TableDepth::min() {
-                    debug_assert!(
-                        attributes.contains(TableEntryFlags::HUGE),
-                        "attributes missing huge bit for huge mapping"
-                    );
+        self.0.with_entry_create(page, depth, |entry| {
+            #[cfg(target_arch = "x86_64")]
+            if depth > Depth::max() {
+                unsafe {
+                    entry.set_huge(true);
                 }
+            }
 
-                *entry = PageTableEntry::new(frame, attributes);
+            #[cfg(target_arch = "riscv64")]
+            if HigherHalfDirectMap::is_address_higher_half(page) {
+                unsafe {
+                    entry.set_global(true);
+                }
+            }
 
-                #[cfg(target_arch = "x86_64")]
-                crate::arch::x86_64::instructions::__invlpg(page);
-            })
+            unsafe {
+                entry.set_frame(frame);
+            }
+
+            #[cfg(target_arch = "x86_64")]
+            crate::arch::x86_64::instructions::__invlpg(page);
+        })?;
+
+        Ok(())
     }
 
     /// Unmaps the given page, optionally freeing the frame the page points to within the given [`FrameManager`].
@@ -108,121 +83,103 @@ impl Mapper {
     pub unsafe fn unmap(
         &mut self,
         page: Address<Page>,
-        to_depth: Option<TableDepth>,
+        to_depth: Option<Depth>,
         free_frame: bool,
     ) -> Result<(), Error> {
-        self.root_table_mut()
-            .with_entry_mut(page, to_depth, |entry| {
-                // Safety: Caller must ensure invariants are maintained.
-                unsafe {
-                    entry.set_attributes(TableEntryFlags::PRESENT, FlagsModify::Remove);
-                }
+        self.0.with_entry_mut(page, to_depth, |entry| {
+            let frame = entry.get_frame();
 
-                let frame = entry.get_frame();
+            unsafe {
+                entry.clear();
+            }
 
-                // Safety: Caller must ensure invariants are maintained.
-                unsafe {
-                    entry.set_frame(Address::new_truncate(0));
-                }
+            if free_frame {
+                PhysicalMemoryManager::free_frame(frame);
+            }
 
-                if free_frame {
-                    PhysicalMemoryManager::free_frame(frame)?;
-                }
+            // Invalidate the page in the TLB.
+            #[cfg(target_arch = "x86_64")]
+            crate::arch::x86_64::instructions::__invlpg(page);
+        })?;
 
-                // Invalidate the page in the TLB.
-                #[cfg(target_arch = "x86_64")]
-                crate::arch::x86_64::instructions::__invlpg(page);
-
-                Ok(())
-            })
-            .flatten()
+        Ok(())
     }
 
-    pub fn auto_map(&mut self, page: Address<Page>, flags: TableEntryFlags) -> Result<(), Error> {
-        let frame = PhysicalMemoryManager::next_frame()?;
+    pub fn auto_map(&mut self, page: Address<Page>, permissions: Permissions) -> Result<(), Error> {
+        let frame = PhysicalMemoryManager::next_frame().ok_or(Error::OutOfMemory)?;
 
-        self.map(page, TableDepth::min(), frame, false, flags)?;
+        self.map(page, Depth::max(), frame, false, permissions)?;
 
         Ok(())
     }
 
     /* STATE QUERYING */
 
-    pub fn is_mapped(&self, page: Address<Page>, depth: Option<TableDepth>) -> bool {
-        self.root_table().with_entry(page, depth, |_| ()).is_ok()
+    pub fn is_mapped(&self, page: Address<Page>, depth: Option<Depth>) -> bool {
+        self.0.with_entry(page, depth, |_| ()).is_ok()
     }
 
     pub fn is_mapped_to(&self, page: Address<Page>, frame: Address<Frame>) -> bool {
-        self.root_table()
+        self.0
             .with_entry(page, None, |entry| entry.get_frame() == frame)
             .unwrap_or(false)
     }
 
     pub fn get_mapped_to(&self, page: Address<Page>) -> Option<Address<Frame>> {
-        self.root_table()
+        self.0
             .with_entry(page, None, |entry| entry.get_frame())
             .ok()
     }
 
     /* STATE CHANGING */
 
-    pub fn get_page_attributes(&self, page: Address<Page>) -> Option<TableEntryFlags> {
-        self.root_table()
-            .with_entry(page, None, |entry| entry.get_attributes())
-            .ok()
+    pub fn get_permissions(&self, page: Address<Page>) -> Result<Permissions, Error> {
+        let permissions = self.0.with_entry(page, None, Entry::get_permissions)?;
+
+        Ok(permissions)
     }
 
-    /// # Safety
-    ///
-    /// TODO
-    pub unsafe fn set_page_attributes(
+    pub unsafe fn set_page_permissions(
         &mut self,
         page: Address<Page>,
-        depth: Option<TableDepth>,
-        attributes: TableEntryFlags,
-        modify_mode: FlagsModify,
+        depth: Option<Depth>,
+        permissions: Permissions,
     ) -> Result<(), Error> {
-        self.root_table_mut().with_entry_mut(page, depth, |entry| {
+        self.0.with_entry_mut(page, depth, |entry| {
             // Safety: Caller is required to maintain safety invariants.
             unsafe {
-                entry.set_attributes(attributes, modify_mode);
+                entry.set_permissions(permissions);
             }
 
             #[cfg(target_arch = "x86_64")]
             crate::arch::x86_64::instructions::__invlpg(page);
-        })
+        })?;
+
+        Ok(())
     }
 
-    /// # Safety
-    ///
-    /// Caller must ensure that switching the currently active address space will not cause undefined behaviour.
+    pub fn get_root_table_address(&self) -> Address<Frame> {
+        let self_ptr = core::ptr::from_ref(self).cast_mut();
+        let self_page = Address::<Page>::from_ptr(self_ptr);
+
+        HigherHalfDirectMap::page_to_frame(self_page)
+    }
+
     pub unsafe fn swap_into(&self) {
-        trace!("Swapping CR3: {:X?}", self.root_frame);
+        let root_table_address = self.get_root_table_address();
 
-        // Safety: Caller is required to maintain safety invariants.
-        unsafe {
-            #[cfg(target_arch = "x86_64")]
-            crate::arch::x86_64::registers::control::CR3::write(
-                self.root_frame,
-                crate::arch::x86_64::registers::control::CR3Flags::empty(),
-            );
+        trace!("Swapping: {root_table_address:X?}");
+
+        cfg_select! {
+            target_arch = "x86_64" => {
+                // Safety: Caller is required to maintain safety invariants.
+                unsafe {
+                    crate::arch::x86_64::registers::control::CR3::write(
+                        root_table_address,
+                        crate::arch::x86_64::registers::control::CR3Flags::empty(),
+                    );
+                }
+            }
         }
-    }
-
-    pub fn root_frame(&self) -> Address<Frame> {
-        self.root_frame
-    }
-
-    pub fn view_page_table(&self) -> &[PageTableEntry; libsys::table_index_size()] {
-        // Safety: Root frame is guaranteed to be valid within the HHDM.
-        let table_ptr = core::ptr::with_exposed_provenance(
-            HigherHalfDirectMap::frame_to_page(self.root_frame)
-                .get()
-                .get(),
-        );
-        // Safety: Root frame is guaranteed to be valid for PTEs for the length of the table index size.
-        let table = unsafe { core::slice::from_raw_parts(table_ptr, libsys::table_index_size()) };
-        // Safety: Table was created to match the size required by return type.
-        unsafe { table.try_into().unwrap_unchecked() }
     }
 }

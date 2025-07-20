@@ -3,7 +3,7 @@ use libsys::{Address, Virtual};
 use crate::cpu::local_state::LocalState;
 
 /// Indicates what type of error the common page fault handler encountered.
-#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Error, PartialEq, Eq)]
 pub enum Error {
     #[error("there's no active task")]
     NoTask,

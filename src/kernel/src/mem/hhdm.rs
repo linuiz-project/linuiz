@@ -60,8 +60,8 @@ impl HigherHalfDirectMap {
     }
 
     /// Convert a frame address to its higher-half direct mapped page counterpart.
-    pub fn frame_to_page(frame_address: Address<Frame>) -> Address<Page> {
-        Address::new_truncate(Self::get_static().base_address.get() + frame_address.get().get())
+    pub fn frame_to_page(frame: Address<Frame>) -> Address<Page> {
+        Address::new_truncate(Self::get_static().base_address.get() + frame.get().get())
     }
 
     /// Convert a page address to its physical counterpart.
@@ -69,7 +69,12 @@ impl HigherHalfDirectMap {
     /// # Panics
     ///
     /// If `page_address` is not a higher-half direct mapped address.
-    pub fn page_to_frame(page_address: Address<Page>) -> Address<Frame> {
-        Address::new(page_address.get().get() - Self::get_static().base_address.get()).unwrap()
+    pub fn page_to_frame(page: Address<Page>) -> Address<Frame> {
+        Address::new(page.get().get() - Self::get_static().base_address.get()).unwrap()
+    }
+
+    /// Returns whether the provided address is a higher-half or lower-half address.
+    pub fn is_address_higher_half(address: Address<Virtual>) -> bool {
+        address.get() >= Self::get_static().base_address.get()
     }
 }

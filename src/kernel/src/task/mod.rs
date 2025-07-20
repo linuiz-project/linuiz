@@ -1,7 +1,7 @@
-use crate::arch::x86_64::structures::idt::InterruptStackFrame;
+use crate::{arch::x86_64::structures::idt::InterruptStackFrame, mem::Permissions};
 use alloc::{boxed::Box, string::String, vec::Vec};
 use bit_field::BitField;
-use core::num::NonZeroUsize;
+use core::num::NonZero;
 use elf::{endian::AnyEndian, file::FileHeader, segment::ProgramHeader};
 use libsys::{Address, Virtual, page_size};
 
@@ -15,27 +15,28 @@ mod address_space;
 pub use address_space::*;
 
 #[allow(clippy::cast_possible_truncation)]
-pub const STACK_SIZE: NonZeroUsize = NonZeroUsize::new(1_000_000).unwrap();
-pub const STACK_PAGES: NonZeroUsize = NonZeroUsize::new(STACK_SIZE.get() / page_size()).unwrap();
-pub const STACK_START: NonZeroUsize = NonZeroUsize::new(page_size()).unwrap();
+pub const STACK_SIZE: NonZero<usize> = NonZero::<usize>::new(1_000_000).unwrap();
+pub const STACK_PAGES: NonZero<usize> =
+    NonZero::<usize>::new(STACK_SIZE.get() / page_size()).unwrap();
+pub const STACK_START: NonZero<usize> = NonZero::<usize>::new(page_size()).unwrap();
 pub const MIN_LOAD_OFFSET: usize = STACK_START.get() + STACK_SIZE.get();
 
 pub const PT_FLAG_EXEC_BIT: usize = 0;
 pub const PT_FLAG_WRITE_BIT: usize = 1;
 
-pub fn segment_to_mmap_permissions(segment_flags: u32) -> MmapPermissions {
+pub fn segment_to_mapping_permissions(segment_flags: u32) -> Permissions {
     match (
         segment_flags.get_bit(PT_FLAG_WRITE_BIT),
         segment_flags.get_bit(PT_FLAG_EXEC_BIT),
     ) {
-        (true, false) => MmapPermissions::ReadWrite,
-        (false, true) => MmapPermissions::ReadExecute,
-        (false, false) => MmapPermissions::ReadOnly,
-        (true, true) => unreachable!("ELF section is WX"),
+        (false, false) => Permissions::ReadOnly,
+        (true, false) => Permissions::ReadWrite,
+        (false, true) => Permissions::ReadExecute,
+        (true, true) => unreachable!("ELF segment is WX"),
     }
 }
 
-#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Error, PartialEq, Eq)]
 pub enum Error {
     #[error("address is already mapped")]
     AlreadyMapped,
@@ -104,7 +105,7 @@ impl Task {
             .mmap(
                 Some(Address::new_truncate(STACK_START.get())),
                 STACK_PAGES,
-                MmapPermissions::ReadWrite,
+                Permissions::ReadWrite,
             )
             .unwrap();
         Self {
@@ -177,7 +178,6 @@ impl Task {
 
     #[allow(clippy::too_many_lines)]
     pub fn demand_map(&mut self, address: Address<Virtual>) -> Result<(), Error> {
-        use crate::mem::paging::TableEntryFlags;
         use core::mem::MaybeUninit;
         use libsys::Page;
 
@@ -238,8 +238,8 @@ impl Task {
             .address_space_mut()
             .mmap(
                 Some(fault_page),
-                core::num::NonZeroUsize::MIN,
-                crate::task::MmapPermissions::ReadWrite,
+                NonZero::<usize>::MIN,
+                Permissions::ReadWrite,
             )
             .unwrap();
         // Safety: Address space allocator fulfills all required invariants.
@@ -306,14 +306,10 @@ impl Task {
         // Safety: Page is already mapped, permissions are being modified according to the segment access type.
         unsafe {
             self.address_space_mut()
-                .set_flags(
+                .set_permissions(
                     fault_page,
-                    core::num::NonZeroUsize::new(1).unwrap(),
-                    TableEntryFlags::PRESENT
-                        | TableEntryFlags::USER
-                        | TableEntryFlags::from(crate::task::segment_to_mmap_permissions(
-                            segment.p_type,
-                        )),
+                    core::num::NonZero::<usize>::MIN, // 1
+                    crate::task::segment_to_mapping_permissions(segment.p_type),
                 )
                 .unwrap();
         }
