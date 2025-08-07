@@ -7,6 +7,11 @@
         ],
         "editor.defaultFormatter": "rust-lang.rust-analyzer"
     },
+    "[nasm]": {
+        "editor.rulers": [
+            60
+        ]
+    },
     "rust-analyzer.showUnlinkedFileNotification": false,
     "rust-analyzer.linkedProjects": [
         "Cargo.toml",
