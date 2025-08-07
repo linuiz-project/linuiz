@@ -3,7 +3,7 @@ use crate::{
         cpuid::{
             advanced_power_management_info, feature_info, hypervisor_info, processor_frequency_info,
         },
-        devices::x2apic::{local_vector::TimerMode, x2Apic},
+        devices::local_apic::{LAPIC, TimerDivideConfiguration, local_vector::TimerMode},
         registers::model_specific::IA32_TSC_DEADLINE,
     },
     time::Stopwatch,
@@ -20,7 +20,8 @@ pub enum Error {
 /// Duration to measure other timer sources against [`Stopwatch`].
 const MEASUREMENT_DURATION: Duration = Duration::from_millis(50);
 
-/// Amount you need to multiply measured ticks by when using [`MEASUREMENT_DURATION`].
+/// Amount you need to multiply measured ticks by when using
+/// [`MEASUREMENT_DURATION`].
 #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
 const MEASUREMENT_FREQUENCY_FACTOR: u32 =
     (Duration::SECOND.as_micros() / MEASUREMENT_DURATION.as_micros()) as u32;
@@ -45,16 +46,14 @@ fn measure_tsc() -> u64 {
 fn measure_lapic() -> u32 {
     trace!("Measuring the local APIC timer frequency...");
 
-    x2Apic::set_timer_divide_configuration(
-        crate::arch::x86_64::devices::x2apic::TimerDivideConfiguration::DivideBy1,
-    );
+    LAPIC.set_timer_divide_configuration(TimerDivideConfiguration::DivideBy1);
 
     const MEASURE_TIMER_COUNTDOWN_VALUE: u32 = u32::MAX;
 
     // Loading the initial count starts the timer.
-    x2Apic::set_timer_initial_count(MEASURE_TIMER_COUNTDOWN_VALUE);
+    LAPIC.set_timer_initial_count(MEASURE_TIMER_COUNTDOWN_VALUE);
     Stopwatch::spin_wait(MEASUREMENT_DURATION);
-    let end_timer_count = x2Apic::get_timer_current_count();
+    let end_timer_count = LAPIC.get_timer_current_count();
 
     let elapsed_ticks = MEASURE_TIMER_COUNTDOWN_VALUE - end_timer_count;
     let frequency = elapsed_ticks * MEASUREMENT_FREQUENCY_FACTOR;
@@ -77,19 +76,22 @@ impl LocalTimer {
         {
             trace!("Local Timer: Timestamp Counter");
 
-            x2Apic::lvt_timer().set_mode(TimerMode::TscDeadline);
+            LAPIC.lvt_timer().set_mode(TimerMode::TscDeadline);
 
-            // Notably, on AMD systems the first check simply won't work, becuase AMD is cursed and Lisa Su is
-            // continuing AMD's time-honored tradition of making their CPUs 10x more difficult to program for than Intel.
+            // Notably, on AMD systems the first check simply won't work, becuase AMD is
+            // cursed and Lisa Su is continuing AMD's time-honored tradition of
+            // making their CPUs 10x more difficult to program for than Intel.
             let frequency = processor_frequency_info()
                 .map(|processor_frequency_info| {
-                    // We read the processor frequency information directly from the CPU, to do the math to make it useful.
+                    // We read the processor frequency information directly from the CPU, to do the
+                    // math to make it useful.
                     u64::from(processor_frequency_info.bus_frequency())
                         / (u64::from(processor_frequency_info.processor_base_frequency())
                             * u64::from(processor_frequency_info.processor_max_frequency()))
                 })
                 .or_else(|| {
-                    // We're in a hypervisor environment and it provides the 0x40000000 and 0x40000010 hypervisor info leaves.
+                    // We're in a hypervisor environment and it provides the 0x40000000 and
+                    // 0x40000010 hypervisor info leaves.
                     feature_info()
                         .is_some_and(FeatureInfo::has_hypervisor)
                         .then(|| hypervisor_info())
@@ -101,11 +103,12 @@ impl LocalTimer {
 
             LocalTimer::TimestampCounter { frequency }
         } else {
-            // We'll have to use the LAPIC, since TSC isn't supported in such a way as to allow it to be useful.
+            // We'll have to use the LAPIC, since TSC isn't supported in such a way as to
+            // allow it to be useful.
 
             trace!("Local Timer: APIC (one-shot)");
 
-            x2Apic::lvt_timer().set_mode(TimerMode::OneShot);
+            LAPIC.lvt_timer().set_mode(TimerMode::OneShot);
 
             let frequency = hypervisor_info()
                 .and_then(raw_cpuid::HypervisorInfo::apic_frequency)
@@ -134,7 +137,7 @@ impl LocalTimer {
                     .checked_mul(wait_us)
                     .ok_or(Error::InvalidWait)?;
 
-                x2Apic::set_timer_initial_count(wait_ticks);
+                LAPIC.set_timer_initial_count(wait_ticks);
             }
         }
 

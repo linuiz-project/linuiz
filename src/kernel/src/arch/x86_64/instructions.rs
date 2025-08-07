@@ -1,5 +1,5 @@
 use core::arch::asm;
-use libsys::{Address, Page};
+use libsys::address::{Address, Page};
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum Error {

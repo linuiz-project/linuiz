@@ -4,6 +4,7 @@ use crate::{
     task::Scheduler,
     time::LocalTimer,
 };
+use alloc::alloc::Allocator;
 use core::{cell::UnsafeCell, ptr::NonNull, sync::atomic::AtomicBool, time::Duration};
 use spin::Mutex;
 
@@ -46,22 +47,31 @@ impl LocalState {
         let scheduler = Scheduler::new().expect("failed to allocate idle stack");
 
         let local_state_ptr = KERNEL_ALLOCATOR
-            .allocate_t::<LocalState>()
-            .expect("failed to allocate local state");
+            .allocate(core::alloc::Layout::new::<Self>())
+            .expect("failed to allocate local state")
+            .as_non_null_ptr()
+            .cast::<Self>();
 
-        // Safety: Memory was allocated for the size and align of `LocalState`.
+        let local_state = LocalState {
+            timer,
+            scheduler: InterruptCell::new(Mutex::new(scheduler)),
+            catch_exception: AtomicBool::new(false),
+            exception: UnsafeCell::new(None),
+        };
+
+        // Safety: Memory was allocated for the size and align of `Self`.
         unsafe {
-            local_state_ptr.write(LocalState {
-                timer,
-                scheduler: InterruptCell::new(Mutex::new(scheduler)),
-                catch_exception: AtomicBool::new(false),
-                exception: UnsafeCell::new(None),
-            });
+            local_state_ptr.write(local_state);
         }
 
         // Set the local state pointer for this hardware thread.
-        #[cfg(target_arch = "x86_64")]
-        crate::arch::x86_64::registers::model_specific::IA32_KERNEL_GS_BASE::write(local_state_ptr);
+        cfg_select! {
+            target_arch = "x86_64" => {
+                crate::arch::x86_64::registers::model_specific::IA32_KERNEL_GS_BASE::write(local_state_ptr);
+            }
+
+            _ => { todo!() }
+        }
 
         debug!("Local state has been initialized.");
     }

@@ -19,19 +19,24 @@ fn try_generate_rdseed() -> Result<u64, Error> {
     let mut value = 0u64;
     let mut iterations = 0usize;
 
-    // Safety: Feature is checked to exist.
-    while iterations < MAXIMUM_RETRIES
-        && unsafe { core::arch::x86_64::_rdseed64_step(&mut value) } == 0
-    {
-        iterations += 1;
+    loop {
+        if iterations > MAXIMUM_RETRIES {
+            return Err(Error::MaximumRetries);
+        }
 
-        core::hint::spin_loop();
-    }
+        // Safety: Feature is checked to exist.
+        match unsafe { core::arch::x86_64::_rdseed64_step(&mut value) } {
+            0 => {
+                iterations += 1;
+                core::hint::spin_loop();
+            }
 
-    if iterations < MAXIMUM_RETRIES {
-        Ok(value)
-    } else {
-        Err(Error::MaximumRetries)
+            1 => {
+                return Ok(value);
+            }
+
+            _ => unreachable!(),
+        }
     }
 }
 
@@ -43,19 +48,24 @@ fn try_generate_rdrand() -> Result<u64, Error> {
     let mut value = 0u64;
     let mut iterations = 0usize;
 
-    // Safety: Feature is checked to exist.
-    while iterations < MAXIMUM_RETRIES
-        && unsafe { core::arch::x86_64::_rdseed64_step(&mut value) } == 0
-    {
-        iterations += 1;
+    loop {
+        if iterations > MAXIMUM_RETRIES {
+            return Err(Error::MaximumRetries);
+        }
 
-        core::hint::spin_loop();
-    }
+        // Safety: Feature is checked to exist.
+        match unsafe { core::arch::x86_64::_rdrand64_step(&mut value) } {
+            0 => {
+                iterations += 1;
+                core::hint::spin_loop();
+            }
 
-    if iterations < MAXIMUM_RETRIES {
-        Ok(value)
-    } else {
-        Err(Error::MaximumRetries)
+            1 => {
+                return Ok(value);
+            }
+
+            _ => unreachable!(),
+        }
     }
 }
 

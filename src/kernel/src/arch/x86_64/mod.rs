@@ -1,107 +1,91 @@
-use raw_cpuid::{ExtendedFeatures, ExtendedProcessorFeatureIdentifiers, FeatureInfo};
-
 use crate::arch::x86_64::{
-    cpuid::{extended_feature_identifiers, extended_feature_info, feature_info},
-    devices::x2apic::x2Apic,
-    registers::Flags,
+    cpuid::{extended_feature_info, feature_info},
+    devices::local_apic::LAPIC,
+    registers::ProcessorFlags,
     structures::{gdt::GlobalDescriptorTable, idt::InterruptDescriptorTable},
 };
+use raw_cpuid::{ExtendedFeatures, FeatureInfo};
 
 pub mod cpuid;
 pub mod devices;
 pub mod instructions;
+pub mod rand;
 pub mod registers;
 pub mod structures;
-pub mod rand;
 
 /// # Safety
 ///
-/// This function has the potential to modify CPU state in such a way as to disrupt
-/// software execution. It should be run only once per hardware thread at the very
-/// beginning of code execution.
+/// This function has the potential to modify CPU state in such a way as to
+/// disrupt software execution. It should be run only once per hardware thread
+/// at the very beginning of code execution.
 pub unsafe fn configure_hwthread() {
     use registers::{
-        control::{CR0, CR0Flags, CR4, CR4Flags},
+        control::{cr0, cr4},
         model_specific::IA32_EFER,
     };
 
-    trace!("Configuring `CR0`...");
+    // Double-check flags set by bootloader.
+    debug_assert!(cr0::CR0::read().contains(cr0::Flags::PG));
+    debug_assert!(cr0::CR0::read().contains(cr0::Flags::PE));
+    debug_assert!(cr0::CR0::read().contains(cr0::Flags::WP));
+    debug_assert!(cr4::CR4::read().contains(cr4::Flags::PAE));
+    debug_assert!(IA32_EFER::get_long_mode_active());
+    debug_assert!(IA32_EFER::get_no_execute_enable());
 
-    // Safety: This is the first and only time `CR0` will be set.
+    // Safety: No invalid features are enabled.
     unsafe {
-        CR0::write(
-            CR0Flags::PE
-                | CR0Flags::MP
-                | CR0Flags::ET
-                | CR0Flags::NE
-                | CR0Flags::WP
-                | CR0Flags::AM
-                | CR0Flags::PG,
-        );
+        cr0::CR0::enable(cr0::Flags::NE | cr0::Flags::AM);
     }
 
-    trace!("Configuring `CR4`...");
-
-    let mut cr4_flags = CR4Flags::empty();
+    let mut flags = cr4::Flags::empty();
 
     if feature_info().is_some_and(FeatureInfo::has_pge) {
-        cr4_flags.insert(CR4Flags::PGE);
-    }
-
-    if feature_info().is_some_and(FeatureInfo::has_pae) {
-        cr4_flags.insert(CR4Flags::PAE);
+        flags.insert(cr4::Flags::PGE);
     }
 
     if feature_info().is_some_and(FeatureInfo::has_de) {
-        cr4_flags.insert(CR4Flags::DE);
+        flags.insert(cr4::Flags::DE);
     }
 
     if feature_info().is_some_and(FeatureInfo::has_fxsave_fxstor) {
-        cr4_flags.insert(CR4Flags::OSFXSR | CR4Flags::OSXMMEXCPT);
+        flags.insert(cr4::Flags::OSFXSR);
+        flags.insert(cr4::Flags::OSXMMEXCPT);
     }
 
     if feature_info().is_some_and(FeatureInfo::has_mce) {
-        cr4_flags.insert(CR4Flags::MCE);
+        flags.insert(cr4::Flags::MCE);
     }
 
     if feature_info().is_some_and(FeatureInfo::has_pcid) {
-        cr4_flags.insert(CR4Flags::PCIDE);
+        flags.insert(cr4::Flags::PCIDE);
     }
 
     if extended_feature_info().is_some_and(ExtendedFeatures::has_umip) {
-        cr4_flags.insert(CR4Flags::UMIP);
+        flags.insert(cr4::Flags::UMIP);
     }
 
     if extended_feature_info().is_some_and(ExtendedFeatures::has_fsgsbase) {
-        cr4_flags.insert(CR4Flags::FSGSBASE);
+        flags.insert(cr4::Flags::FSGSBASE);
     }
 
     if extended_feature_info().is_some_and(ExtendedFeatures::has_smep) {
-        cr4_flags.insert(CR4Flags::SMEP);
+        flags.insert(cr4::Flags::SMEP);
     }
 
     if extended_feature_info().is_some_and(ExtendedFeatures::has_smap) {
-        cr4_flags.insert(CR4Flags::SMAP);
+        flags.insert(cr4::Flags::SMAP);
     }
 
-    // Safety:  Initialize the CR4 register with all CPU & kernel supported features.
+    // Safety:
+    // - Caller is required to ensure no CPU features are in use.
+    // - All enabled features have been checked for support.
     unsafe {
-        CR4::write(cr4_flags);
-    }
-
-    trace!("Configuring `IA32_EFER.NXE`...");
-
-    // Enable use of the `NO_EXECUTE` page attribute, if supported.
-    if extended_feature_identifiers()
-        .is_some_and(ExtendedProcessorFeatureIdentifiers::has_execute_disable)
-    {
-        trace!("Set `IA32_EFER.NXE`.");
-        IA32_EFER::set_no_execute_enable(true);
+        cr4::CR4::enable(flags);
     }
 
     // Safety: Only the alignment check bit is set.
     unsafe {
-        Flags::write(Flags::read() | Flags::ALIGNMENT_CHECK);
+        ProcessorFlags::write(ProcessorFlags::read() | ProcessorFlags::ALIGNMENT_CHECK);
     }
 
     GlobalDescriptorTable::init();
@@ -111,12 +95,14 @@ pub unsafe fn configure_hwthread() {
     InterruptDescriptorTable::load_static();
 
     // Setup system call interface.
-    // // Safety: Parameters are set according to the IA-32 SDM, and so should have no undetermined side-effects.
-    // unsafe {
+    // // Safety: Parameters are set according to the IA-32 SDM, and so should
+    // have no undetermined side-effects. unsafe {
     //     // Configure system call environment registers.
-    //     msr::IA32_STAR::set_selectors(gdt::kernel_code_selector().0, gdt::kernel_data_selector().0);
+    //     msr::IA32_STAR::set_selectors(gdt::kernel_code_selector().0,
+    // gdt::kernel_data_selector().0);
     //     msr::IA32_LSTAR::set_syscall(syscall::_syscall_entry);
-    //     // We don't want to keep any flags set within the syscall (especially the interrupt flag).
+    //     // We don't want to keep any flags set within the syscall (especially
+    // the interrupt flag).
     //     msr::IA32_FMASK::set_rflags_mask(RFlags::all().bits());
     //     // Enable `syscall`/`sysret`.
     //     msr::IA32_EFER::set_sce(true);
@@ -128,13 +114,12 @@ pub unsafe fn configure_hwthread() {
 /// # Remarks
 ///
 /// Currently, this effectively just reads the 32-bit ID provided by the x2APIC
-/// controller. In the future, obviously there is interest in supporting identification
-/// of more diverse hardware layouts than just assuming a flat CPU model that disregards
-/// even hyper-threading (which is all but ubiquitous in 2025, at time of writing). So,
-/// it can be expected that in the future, this function will change significantly.
+/// controller. In the future, obviously there is interest in supporting
+/// identification of more diverse hardware layouts than just assuming a flat
+/// CPU model that disregards even hyper-threading (which is all but ubiquitous
+/// in 2025, at time of writing). So, it can be expected that in the future,
+/// this function will return a more dynamic identification structure.
 #[allow(clippy::map_unwrap_or)]
 pub fn get_hwthread_id() -> u32 {
-    x2Apic::get_id()
+    LAPIC.get_id()
 }
-
-

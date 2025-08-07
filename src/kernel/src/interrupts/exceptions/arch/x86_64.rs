@@ -1,9 +1,9 @@
 use crate::{
     arch::x86_64::structures::idt::{InterruptStackFrame, PageFaultErrorCode, SelectorErrorCode},
-    interrupts::exceptions::Exception,
+    interrupts::exceptions::{Exception, ExceptionKind, PageFaultReason},
     task::Registers,
 };
-use libsys::{Address, Virtual};
+use libsys::address::{Address, Virtual};
 
 /// Exception wrapper type.
 #[repr(C)]
@@ -109,26 +109,29 @@ pub enum ArchException<'a> {
     TripleFault,
 }
 
+// TODO Rather than implementing this, we should probably handle specific exceptions at the
+//      exception's unified handler, and then pass a constructed `Exception` to a more general (not
+//      arch-specific) handler.
 impl From<ArchException<'_>> for Exception {
     fn from(value: ArchException) -> Self {
-        use crate::interrupts::exceptions::{ExceptionKind, PageFaultReason};
-        use core::ptr::NonNull;
-
         match value {
-            ArchException::PageFault(isf, _, err, address) => Exception::new(
-                ExceptionKind::PageFault {
-                    ptr: NonNull::new(address.as_ptr()).unwrap(),
-                    reason: if err.contains(PageFaultErrorCode::PROTECTION_VIOLATION) {
+            ArchException::PageFault(isf, _, err, address) => {
+                let cause = {
+                    if err.contains(PageFaultErrorCode::PROTECTION_VIOLATION) {
                         PageFaultReason::BadPermissions
                     } else {
                         PageFaultReason::NotMapped
-                    },
-                },
-                NonNull::new(isf.get_instruction_pointer().as_ptr()).unwrap(),
-                NonNull::new(isf.get_stack_pointer().as_ptr()).unwrap(),
-            ),
+                    }
+                };
 
-            _ => todo!(),
+                Exception::new(
+                    ExceptionKind::PageFault { address, cause },
+                    isf.get_instruction_address(),
+                    isf.get_stack_address(),
+                )
+            }
+
+            _ => unimplemented!(),
         }
     }
 }

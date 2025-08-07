@@ -8,7 +8,7 @@ use xshell::Shell;
 #[value(rename_all = "snake_case")]
 pub enum Target {
     x86_64,
-    riscv64gc,
+    riscv64,
     aarch64,
 }
 
@@ -16,7 +16,7 @@ impl Target {
     pub const fn as_triple(&self) -> &'static str {
         match self {
             Target::x86_64 => "x86_64-unknown-none",
-            Target::riscv64gc => unimplemented!(),
+            Target::riscv64 => "riscv64gc-unknown-none",
             Target::aarch64 => unimplemented!(),
         }
     }
@@ -43,17 +43,13 @@ pub struct Options {
 
     #[arg(long)]
     drivers: Vec<String>,
+
+    /// Whether to produce a disassembly of the kernel.
+    #[arg(short, long)]
+    disassemble: bool,
 }
 
 pub fn build(sh: &Shell, temp_dir: impl AsRef<Path>, options: Options) -> Result<()> {
-    cmd!(sh, "cargo fmt --check").run()?;
-    cmd!(sh, "cargo sort --workspace --grouped --check").run()?;
-
-    // Safety: Single-threaded.
-    unsafe {
-        set_var("LINUIZ_OUT_DIR", temp_dir.as_ref().as_os_str());
-    }
-
     if options.fingerprint {
         // Safety: Single-threaded.
         unsafe {
@@ -88,11 +84,21 @@ pub fn build(sh: &Shell, temp_dir: impl AsRef<Path>, options: Options) -> Result
         sh.create_dir("run/system/linuiz")?;
     }
 
+    let kernel_path = root_dir.join("run/system/linuiz/kernel");
     // Copy the kernel binary to the virtual HDD.
-    sh.copy_file(
-        temp_dir.as_ref().join("kernel"),
-        root_dir.join("run/system/linuiz/kernel"),
-    )?;
+    sh.copy_file(temp_dir.as_ref().join("kernel"), kernel_path.as_path())?;
+
+    if options.disassemble {
+        let disassembly_output = cmd!(
+            sh,
+            "objdump --disassemble-all --demangle=rust -M intel {kernel_path}"
+        )
+        .output()?;
+        sh.write_file(
+            root_dir.join(".debug/kernel.dump"),
+            disassembly_output.stdout.as_slice(),
+        )?;
+    }
 
     // compress userspace drivers and write to archive file
     let mut archive_builder = tar::Builder::new(

@@ -1,6 +1,5 @@
-use libsys::{Address, Virtual};
-
 use crate::cpu::local_state::LocalState;
+use libsys::address::{Address, Virtual};
 
 /// Indicates what type of error the common page fault handler encountered.
 #[derive(Debug, Error, PartialEq, Eq)]

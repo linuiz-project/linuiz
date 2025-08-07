@@ -8,11 +8,11 @@
 use core::{num::NonZero, ptr::NonNull};
 
 use crate::{
-    arch::x86_64::{registers::Flags, structures::gdt::SegmentSelector},
+    arch::x86_64::{registers::ProcessorFlags, structures::gdt::SegmentSelector},
     cpu::local_state::LocalState,
 };
 use bit_field::BitField;
-use libsys::{Address, Virtual};
+use libsys::address::{Address, Virtual};
 
 /// # Safety
 ///
@@ -114,7 +114,7 @@ impl IA32_APIC_BASE {
         let base_address = usize::try_from(rdmsr::<Self>())
             .expect("could not convert `IA32_APIC_BASE` to `usize`");
 
-        Address::new(base_address).expect("`IA32_APIC_BASE` returned an invalid address")
+        Address::<Virtual>::new(base_address).expect("`IA32_APIC_BASE` returned an invalid address")
     }
 }
 
@@ -211,7 +211,7 @@ impl ModelSpecificRegister for IA32_FMASK {
 
 impl IA32_FMASK {
     /// Sets `rflags` upon a `syscall` based on masking the bits in the given value.
-    pub unsafe fn set(flags: Flags) {
+    pub unsafe fn set(flags: ProcessorFlags) {
         let flags = u64::try_from(flags.bits()).unwrap();
 
         wrmsr::<Self>(flags);

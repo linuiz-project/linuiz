@@ -1,9 +1,12 @@
 use crate::{arch::x86_64::structures::idt::InterruptStackFrame, mem::Permissions};
 use alloc::{boxed::Box, string::String, vec::Vec};
 use bit_field::BitField;
-use core::num::NonZero;
+use core::{mem::MaybeUninit, num::NonZero, ptr::NonNull};
 use elf::{endian::AnyEndian, file::FileHeader, segment::ProgramHeader};
-use libsys::{Address, Virtual, page_size};
+use libsys::{
+    address::{Address, Page, Virtual},
+    constants::{page_mask, page_size},
+};
 
 mod context;
 pub use context::*;
@@ -13,6 +16,8 @@ pub use scheduling::*;
 
 mod address_space;
 pub use address_space::*;
+
+pub mod asid;
 
 #[allow(clippy::cast_possible_truncation)]
 pub const STACK_SIZE: NonZero<usize> = NonZero::<usize>::new(1_000_000).unwrap();
@@ -103,8 +108,7 @@ impl Task {
         trace!("Allocating userspace stack for task: {id:?}.");
         let stack = address_space
             .mmap(
-                Some(Address::new_truncate(STACK_START.get())),
-                STACK_PAGES,
+                MemoryMapping::Any { count: STACK_PAGES },
                 Permissions::ReadWrite,
             )
             .unwrap();
@@ -114,9 +118,11 @@ impl Task {
             address_space,
             context: (
                 InterruptStackFrame::new_user(
-                    Address::new(load_offset + usize::try_from(elf_header.e_entry).unwrap())
-                        .unwrap(),
-                    Address::from_ptr({
+                    Address::<Virtual>::new(
+                        load_offset + usize::try_from(elf_header.e_entry).unwrap(),
+                    )
+                    .unwrap(),
+                    Address::from({
                         // Safety: Index is the end of the slice.
                         unsafe { stack.get_unchecked_mut(stack.len()).as_ptr() }
                     }),
@@ -178,10 +184,7 @@ impl Task {
 
     #[allow(clippy::too_many_lines)]
     pub fn demand_map(&mut self, address: Address<Virtual>) -> Result<(), Error> {
-        use core::mem::MaybeUninit;
-        use libsys::Page;
-
-        let fault_page = Address::new_truncate(address.get());
+        let fault_page = Address::<Page>::new_truncate(address.get());
 
         if self.address_space().is_mmapped(fault_page) {
             return Err(Error::AlreadyMapped);
@@ -204,10 +207,7 @@ impl Task {
             .ok_or(Error::NonLoadAddress(address))?;
 
         // Small check to help ensure the segment alignments are page-fit.
-        debug_assert_eq!(
-            segment.p_align & u64::try_from(libsys::page_mask()).unwrap(),
-            0
-        );
+        debug_assert!(segment.p_align & u64::try_from(page_mask()).unwrap() == 0);
 
         debug!(
             "Demand mapping {:X?} from segment: {:X?}",
@@ -215,11 +215,11 @@ impl Task {
             segment
         );
 
-        let fault_unoffset_page: Address<Page> = Address::new_truncate(fault_unoffset);
+        let fault_unoffset_page = Address::<Page>::new_truncate(fault_unoffset);
         let fault_unoffset_page_addr = fault_unoffset_page.get().get();
 
-        let fault_unoffset_end_page: Address<Page> =
-            Address::new_truncate(fault_unoffset_page_addr + page_size());
+        let fault_unoffset_end_page =
+            Address::<Page>::new_truncate(fault_unoffset_page_addr + page_size());
         let fault_unoffset_end_page_addr = fault_unoffset_end_page.get().get();
 
         let segment_addr = usize::try_from(segment.p_vaddr).unwrap();
@@ -237,8 +237,9 @@ impl Task {
         let mapped_memory = self
             .address_space_mut()
             .mmap(
-                Some(fault_page),
-                NonZero::<usize>::MIN,
+                MemoryMapping::Exact {
+                    range: fault_page..fault_page,
+                },
                 Permissions::ReadWrite,
             )
             .unwrap();
@@ -248,9 +249,9 @@ impl Task {
         let (front_pad, remaining) = mapped_memory.split_at_mut(fault_front_pad);
         let (file_memory, end_pad) = remaining.split_at_mut(fault_size);
 
-        debug_assert_eq!(fault_front_pad, front_pad.len(), "front padding");
-        debug_assert_eq!(fault_end_pad, end_pad.len(), "end padding");
-        debug_assert_eq!(fault_size, file_memory.len(), "file memory");
+        debug_assert_eq!(fault_front_pad, front_pad.len(), "mismatch front padding");
+        debug_assert_eq!(fault_end_pad, end_pad.len(), "mismatch end padding");
+        debug_assert_eq!(fault_size, file_memory.len(), "mismatch file memory");
 
         trace!(
             "Copying memory into demand mapping: {:#X}..{:#X}..{:#X}.",
@@ -285,15 +286,12 @@ impl Task {
         self.elf_relas().retain(|rela| {
             if fault_page_as_range.contains(&rela.address.get()) {
                 trace!("Processing relocation: {rela:X?}");
-                // Safety: Fault page is checked to contain the relocation's address, and the pointer is guaranteed after
-                // offset to lie within the memory mapped region above.
-                #[allow(clippy::cast_ptr_alignment)]
+
+                let rela_address = NonZero::<usize>::new(rela.address.get() + load_offset).unwrap();
+                let rela_ptr = NonNull::<usize>::with_exposed_provenance(rela_address);
+
                 unsafe {
-                    rela.address
-                        .as_ptr()
-                        .add(load_offset)
-                        .cast::<usize>()
-                        .write(rela.value);
+                    rela_ptr.write(rela.value);
                 }
 
                 false
@@ -308,7 +306,6 @@ impl Task {
             self.address_space_mut()
                 .set_permissions(
                     fault_page,
-                    core::num::NonZero::<usize>::MIN, // 1
                     crate::task::segment_to_mapping_permissions(segment.p_type),
                 )
                 .unwrap();

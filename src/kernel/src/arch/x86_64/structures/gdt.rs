@@ -1,6 +1,7 @@
 use crate::arch::x86_64::structures::{DescriptorTablePointer, tss::TaskStateSegment};
 use bit_field::BitField;
 use core::ops::Range;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use spin::Once;
 
 pub static KCODE_SELECTOR: Once<SegmentSelector> = Once::new();
@@ -9,14 +10,14 @@ pub static UDATA_SELECTOR: Once<SegmentSelector> = Once::new();
 pub static UCODE_SELECTOR: Once<SegmentSelector> = Once::new();
 
 crate::singleton! {
-    #[derive(Debug, Clone)]
     #[repr(C, align(8))]
+    #[derive(Debug, Clone)]
     pub GlobalDescriptorTable {
         table: [u64; 7],
-        len: usize,
+        len: usize
     }
 
-    fn init() {
+    fn init() -> Self {
         let mut gdt = Self::empty();
 
         // The GDT layout is very specific, due to the behaviour of the `IA32_STAR` MSR and its
@@ -68,14 +69,16 @@ impl GlobalDescriptorTable {
         let kdata_selector = *KDATA_SELECTOR.wait();
 
         trace!("Jumping to the new code segment: {kcode_selector:?}");
-        // Safety: This is special since we cannot directly move to CS; x86 requires the instruction
-        //         pointer and CS to be set at the same time. To do this, we push the new segment selector
-        //         and return value onto the stack and use a "far return" (`retfq`) to reload CS and
+        // Safety: This is special since we cannot directly move to CS; x86 requires the
+        // instruction         pointer and CS to be set at the same time. To do
+        // this, we push the new segment selector         and return value onto
+        // the stack and use a "far return" (`retfq`) to reload CS and
         //         continue at the end of our function.
         //
-        //         Note we cannot use a "far call" (`lcall`) or "far jmp" (`ljmp`) to do this because then we
-        //         would only be able to jump to 32-bit instruction pointers. Only Intel implements support
-        //         for 64-bit far calls/jumps in long-mode, AMD does not.
+        //         Note we cannot use a "far call" (`lcall`) or "far jmp" (`ljmp`) to do
+        // this because then we         would only be able to jump to 32-bit
+        // instruction pointers. Only Intel implements support         for
+        // 64-bit far calls/jumps in long-mode, AMD does not.
         unsafe {
             core::arch::asm!(
                 "
@@ -92,19 +95,22 @@ impl GlobalDescriptorTable {
         }
 
         trace!("Clearing extant segment registers...");
-        // Safety: While setting the ES & DS segment registers to null is perfectly safe, setting
-        //         the FS & GS segment registers (on Intel only, not AMD) clears the respective
-        //         FS/GS base. Thus, it is imperative that this function not be run after the GS
-        //         base has been loaded with the CPU thread-local state structure pointer.
+        // Safety: While setting the ES & DS segment registers to null is perfectly
+        // safe, setting         the FS & GS segment registers (on Intel only,
+        // not AMD) clears the respective         FS/GS base. Thus, it is
+        // imperative that this function not be run after the GS         base
+        // has been loaded with the CPU thread-local state structure pointer.
         unsafe {
-            // Because this is x86, everything is complicated. It's important we load the extra
-            // data segment registers (FS/GS) with the null descriptors, because if they don't
-            // point to a null descriptor, then when CPL changes, the processor will clear the
-            // base and limit of the relevant descriptor.
+            // Because this is x86, everything is complicated. It's important we load the
+            // extra data segment registers (FS/GS) with the null descriptors,
+            // because if they don't point to a null descriptor, then when CPL
+            // changes, the processor will clear the base and limit of the
+            // relevant descriptor.
             //
-            // This has the fun behavioural side-effect of ALSO clearing the FS/GS _BASE MSRs,
-            // thus making any code involved in the CPL change context unable to access thread-local or
-            // process-local state (when those MSRs are in use for the purpose).
+            // This has the fun behavioural side-effect of ALSO clearing the FS/GS _BASE
+            // MSRs, thus making any code involved in the CPL change context
+            // unable to access thread-local or process-local state (when those
+            // MSRs are in use for the purpose).
             core::arch::asm!(
                 "
                 mov ss, {selector:x}
@@ -130,18 +136,16 @@ impl GlobalDescriptorTable {
 
     /// # Safety
     ///
-    /// - An invalid [`GlobalDescriptorTable`] could potentially make memory unreadable or unwriteable.
-    /// - This should be executed prior to any point when the FS/GS _BASE MSRs will
-    ///   be in use, as they are cleared when this function is run.
+    /// - An invalid [`GlobalDescriptorTable`] could potentially make memory
+    ///   unreadable or unwriteable.
+    /// - This should be executed prior to any point when the FS/GS _BASE MSRs
+    ///   will be in use, as they are cleared when this function is run.
     unsafe fn load(&self) {
         use core::arch::asm;
 
         let dtptr = DescriptorTablePointer::from(self);
 
-        trace!(
-            "Loading: {:X?}:\n{self:#X?}\n{dtptr:#X?}",
-            core::ptr::from_ref(self)
-        );
+        trace!("Loading: {dtptr:X?}");
 
         // Safety: The GDT is properly formed, and the descriptor table pointer is
         //         set to the GDT's memory location, with the requisite limit set
@@ -155,7 +159,8 @@ impl GlobalDescriptorTable {
         }
     }
 
-    /// Appends a [`SegmentDescriptor`] to the [`GlobalDescriptorTable`] entries table.
+    /// Appends a [`SegmentDescriptor`] to the [`GlobalDescriptorTable`] entries
+    /// table.
     pub fn append_segment(
         &mut self,
         segment_descriptor: impl SegmentDescriptor,
@@ -203,8 +208,8 @@ impl GlobalDescriptorTable {
 pub struct SegmentSelector(u16);
 
 impl SegmentSelector {
-    /// Can be used as a selector into a non-existent segment and assigned to segment registers,
-    /// e.g. data segment register in ring 0
+    /// Can be used as a selector into a non-existent segment and assigned to
+    /// segment registers, e.g. data segment register in ring 0
     pub const NULL: Self = Self(0);
 
     /// Creates a new [`SegmentSelector`]
@@ -228,6 +233,12 @@ impl SegmentSelector {
     }
 }
 
+impl From<u16> for SegmentSelector {
+    fn from(value: u16) -> Self {
+        Self(value)
+    }
+}
+
 impl core::fmt::Debug for SegmentSelector {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_tuple("SegmentSelector")
@@ -241,29 +252,32 @@ impl core::fmt::Debug for SegmentSelector {
 #[repr(u16)]
 #[derive(Debug, TryFromPrimitive, IntoPrimitive, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum PrivilegeLevel {
-    /// Privilege-level 0 (most privilege): This level is used by critical system-software
-    /// components that require direct access to, and control over, all processor and system
-    /// resources. This can include BIOS, memory-management functions, and interrupt handlers.
+    /// Privilege-level 0 (most privilege): This level is used by critical
+    /// system-software components that require direct access to, and
+    /// control over, all processor and system resources. This can include
+    /// BIOS, memory-management functions, and interrupt handlers.
     Ring0 = 0b00,
 
-    /// Privilege-level 1 (moderate privilege): This level is used by less-critical system-
-    /// software services that can access and control a limited scope of processor and system
-    /// resources. Software running at these privilege levels might include some device drivers
-    /// and library routines. The actual privileges of this level are defined by the
-    /// operating system.
+    /// Privilege-level 1 (moderate privilege): This level is used by
+    /// less-critical system- software services that can access and control
+    /// a limited scope of processor and system resources. Software running
+    /// at these privilege levels might include some device drivers
+    /// and library routines. The actual privileges of this level are defined by
+    /// the operating system.
     Ring1 = 0b01,
 
-    /// Privilege-level 2 (moderate privilege): Like level 1, this level is used by
-    /// less-critical system-software services that can access and control a limited scope of
-    /// processor and system resources. The actual privileges of this level are defined by the
-    /// operating system.
+    /// Privilege-level 2 (moderate privilege): Like level 1, this level is used
+    /// by less-critical system-software services that can access and
+    /// control a limited scope of processor and system resources. The
+    /// actual privileges of this level are defined by the operating system.
     Ring2 = 0b10,
 
-    /// Privilege-level 3 (least privilege): This level is used by application software.
-    /// Software running at privilege-level 3 is normally prevented from directly accessing
-    /// most processor and system resources. Instead, applications request access to the
-    /// protected processor and system resources by calling more-privileged service routines
-    /// to perform the accesses.
+    /// Privilege-level 3 (least privilege): This level is used by application
+    /// software. Software running at privilege-level 3 is normally
+    /// prevented from directly accessing most processor and system
+    /// resources. Instead, applications request access to the
+    /// protected processor and system resources by calling more-privileged
+    /// service routines to perform the accesses.
     Ring3 = 0b11,
 }
 
@@ -295,10 +309,12 @@ pub trait SegmentDescriptor {
 pub struct GenericSegmentDescriptor(u64);
 
 impl GenericSegmentDescriptor {
-    /// Set by the processor if this segment has been accessed. Only cleared by software.
-    /// Setting this bit in software prevents GDT writes on first use.
+    /// Set by the processor if this segment has been accessed. Only cleared by
+    /// software. Setting this bit in software prevents GDT writes on first
+    /// use.
     ///
-    /// Usually, this bit is set in 64-bit descriptors. Only unset if otherwise required.
+    /// Usually, this bit is set in 64-bit descriptors. Only unset if otherwise
+    /// required.
     const ACCESSED_BIT_INDEX: usize = 40;
 
     /// For data segments, sets the segment as **writable**.
@@ -315,7 +331,8 @@ impl GenericSegmentDescriptor {
     /// Must be set for 64-bit code segments, unset otherwise.
     const LONG_MODE_CODE_BIT_INDEX: usize = 53;
 
-    /// Use 32-bit (as opposed to 16-bit) operands. If [`LONG_MODE_CODE_BIT`][Self::LONG_MODE_CODE_BIT] is set,
+    /// Use 32-bit (as opposed to 16-bit) operands. If
+    /// [`LONG_MODE_CODE_BIT`][Self::LONG_MODE_CODE_BIT] is set,
     /// this must be unset. In 64-bit mode, ignored for data segments.
     const EXTENDED_SIZE_BIT_INDEX: usize = 54;
 
@@ -385,7 +402,8 @@ impl SystemSegmentDescriptor {
     const SYSTEM_SEGMENT_TYPE_BIT_RANGE: Range<usize> = 40..44;
     const SYSTEM_SEGMENT_TYPE_TSS_AVAILABLE: u128 = 0x9;
 
-    /// Constructs a [`SystemSegmentDescriptor`] from a valid [`TaskStateSegment`].
+    /// Constructs a [`SystemSegmentDescriptor`] from a valid
+    /// [`TaskStateSegment`].
     pub fn from_tss(tss: &TaskStateSegment) -> Self {
         let tss_ptr = core::ptr::from_ref(tss);
 

@@ -5,24 +5,18 @@ use uart::{
     Baud, Data, FifoControl, LineControl, LineStatus, ModemControl, Uart, address::PortAddress,
 };
 
-#[derive(Debug, Error, PartialEq, Eq)]
-pub enum Error {
-    #[error("UART loopback integrity check failed")]
-    IntegrityCheck,
-}
-
 const UART_FIFO_SIZE: usize = 16;
 
 pub struct Logger(InterruptCell<Mutex<Writer>>);
 
 impl Logger {
     /// Initializes the UART-based serial logging device.
-    pub fn init() -> Result<&'static Self, Error> {
+    pub fn init() -> &'static Self {
         static UART_LOGGER: Once<Logger> = Once::new();
 
-        UART_LOGGER.try_call_once(|| {
+        UART_LOGGER.call_once(|| {
             // Safety: Value is >0.
-            let port_address = unsafe { NonZero::new_unchecked(0x3F8) };
+            let port_address = unsafe { NonZero::<u16>::new_unchecked(0x3F8) };
 
             let uart = Uart::new_reset({
                 // Safety: Function invariants provide safety guarantees.
@@ -40,20 +34,6 @@ impl Logger {
             // Set character size to 8 bits with no parity.
             uart.write_line_control(LineControl::BITS_8);
 
-            // Configure UART into loopback mode to test it.
-            uart.write_modem_control(
-                ModemControl::REQUEST_TO_SEND
-                    | ModemControl::OUT_1
-                    | ModemControl::OUT_2
-                    | ModemControl::LOOPBACK_MODE,
-            );
-
-            // Test the UART to ensure it's functioning correctly.
-            uart.write_byte(0x1F);
-            if uart.read_byte() != 0x1F {
-                return Err(Error::IntegrityCheck);
-            }
-
             // Fully enable UART, with FIFO.
             uart.write_fifo_control(
                 FifoControl::ENABLE | FifoControl::CLEAR_RX | FifoControl::CLEAR_TX,
@@ -62,18 +42,21 @@ impl Logger {
                 ModemControl::TERMINAL_READY | ModemControl::OUT_1 | ModemControl::OUT_2,
             );
 
-            b"-SERIAL LOGGER-\n".iter().copied().for_each(|byte| {
+            b"\n-SERIAL LOGGER-\n".iter().copied().for_each(|byte| {
                 uart.write_byte(byte);
             });
 
-            Ok(Self(InterruptCell::new(Mutex::new(Writer(uart)))))
+            Self(InterruptCell::new(Mutex::new(Writer(uart))))
         })
     }
 }
 
 impl log::Log for Logger {
     fn enabled(&self, metadata: &log::Metadata) -> bool {
-        metadata.level() <= log::Level::Debug
+        cfg_select! {
+                debug_assertions  => { metadata.level() <= log::Level::Trace }
+            not(debug_assertions) => { metadata.level() <= log::Level::Debug }
+        }
     }
 
     fn log(&self, record: &log::Record) {

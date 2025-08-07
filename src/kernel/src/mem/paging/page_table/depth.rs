@@ -1,7 +1,11 @@
 use core::iter::Step;
-use libsys::{Address, Virtual, page_shift, table_index_mask, table_index_shift};
+use libsys::{
+    address::{Address, Virtual},
+    constants::{page_bits, table_index_bits, table_index_mask},
+};
 
-/// Describes the depth of a page table translation, from min (usually 4) to max (usually 0).
+/// Describes the depth of a page table translation, from min (usually 4) to max
+/// (usually 0).
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Depth(u32);
@@ -22,17 +26,19 @@ impl Depth {
         Self(3)
     }
 
-    /// Minimum table tree depth. On x64, this is 5 levels with LA57 enabled, or 4 level without.
+    /// Minimum table tree depth. On x64, this is 5 levels with LA57 enabled, or
+    /// 4 level without.
     pub fn min() -> Self {
         let depth = {
-            #[cfg(target_arch = "x86_64")]
-            {
-                use crate::arch::x86_64::registers::control::{CR4, CR4Flags};
+            cfg_select! {
+                target_arch = "x86_64" => {
+                    use crate::arch::x86_64::registers::control::cr4;
 
-                if CR4::read().contains(CR4Flags::LA57) {
-                    5
-                } else {
-                    4
+                    if cr4::CR4::read().contains(cr4::Flags::LA57) {
+                        5
+                    } else {
+                        4
+                    }
                 }
             }
         };
@@ -59,9 +65,7 @@ impl Depth {
     }
 
     pub fn align(self) -> usize {
-        libsys::page_size()
-            .checked_shl(libsys::table_index_shift().get() * self.get())
-            .unwrap()
+        1usize << page_bits().get() << (table_index_bits().get() * self.get())
     }
 
     pub fn next(self) -> Self {
@@ -81,10 +85,11 @@ impl Depth {
     }
 
     pub fn index_of(self, address: Address<Virtual>) -> usize {
-        // Because `Depth` is 1-based (i.e. 4-level paging allows us to have a maximum depth of 1),
-        // it means we need to adjust the actual depth number to be zero-based for our calcualtion.
+        // Because `Depth` is 1-based (i.e. 4-level paging allows us to have a maximum
+        // depth of 1), it means we need to adjust the actual depth number to be
+        // zero-based for our calcualtion.
         let base_zero_depth = self.get() - 1;
-        let index_bit_shift = (base_zero_depth * table_index_shift().get()) + page_shift().get();
+        let index_bit_shift = (base_zero_depth * table_index_bits().get()) + page_bits().get();
         (address.get() >> index_bit_shift) & table_index_mask()
     }
 }

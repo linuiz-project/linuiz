@@ -1,12 +1,14 @@
 use crate::interrupts::InterruptCell;
 use core::fmt::Write;
-use ioports::WriteOnlyPort;
+use ioports::{ReadOnlyPort, WriteOnlyPort};
 use spin::{Mutex, Once};
 
 /// A debug output utilizing QEMU's port 0xE9 hack.
-pub struct Logger(InterruptCell<Mutex<Writer>>);
+pub struct Logger(Option<InterruptCell<Mutex<Writer>>>);
 
 impl Logger {
+    const PORT_ADDRESS: u16 = 0xE9;
+
     /// Initialized the QEMU 0xE9-hack debug logger.
     ///
     /// Subsequent calls after the first will do nothing but return a reference to the static logger.
@@ -14,10 +16,25 @@ impl Logger {
         static DEBUG_LOGGER: Once<Logger> = Once::new();
 
         DEBUG_LOGGER.call_once(|| {
-            Self(InterruptCell::new(Mutex::new(Writer({
-                // Safety: It's assumed that this port exists if the kernel was compiled and run in debug mode.
-                unsafe { WriteOnlyPort::new(0xE9) }
-            }))))
+            #[cfg(target_arch = "x86_64")]
+            if crate::arch::x86_64::cpuid::hypervisor_info().is_none() {
+                return Self(None);
+            }
+
+            // Safety: We're testing if the port exists.
+            let test_port = unsafe { ReadOnlyPort::<u8>::new(0xE9) };
+            if test_port.read() == 0xE9 {
+                // Safety: If a read on port 0xE9 returns `0xE9`, then QEMU guarantees it exists.
+                let mut debug_port = unsafe { WriteOnlyPort::<u8>::new(0xE9) };
+
+                b"-DEBUG LOGGER-\n"
+                    .iter()
+                    .for_each(|character| debug_port.write(*character));
+
+                Self(Some(InterruptCell::new(Mutex::new(Writer(debug_port)))))
+            } else {
+                Self(None)
+            }
         })
     }
 }
@@ -30,10 +47,12 @@ impl log::Log for Logger {
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
             super::with_formatted_log_record(record, |args| {
-                self.0.with(|writer| {
-                    let mut writer = writer.lock();
+                self.0.as_ref().inspect(|writer| {
+                    writer.with(|writer| {
+                        let mut writer = writer.lock();
 
-                    writer.write_fmt(args).ok();
+                        writer.write_fmt(args).ok();
+                    });
                 });
             });
         }

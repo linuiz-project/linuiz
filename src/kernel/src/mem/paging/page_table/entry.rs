@@ -1,11 +1,10 @@
-use crate::mem::{
-    HigherHalfDirectMap, Permissions, paging::page_table::PageTable, pmm::PhysicalMemoryManager,
-};
+use crate::mem::{HigherHalfDirectMap, Permissions, paging::page_table::PageTable};
 use bit_field::BitField;
-use core::{alloc::AllocError, ptr::NonNull};
-use libsys::{Address, Frame};
+use core::ptr::NonNull;
+use libsys::address::{Address, Frame};
 
-#[derive(FromZeros, Clone, Copy)]
+#[repr(transparent)]
+#[derive(Clone)]
 pub struct Entry(usize);
 
 impl Entry {
@@ -16,7 +15,9 @@ impl Entry {
     #[cfg(target_arch = "x86_64")]
     const USER_BIT_INDEX: usize = 2;
     #[cfg(target_arch = "x86_64")]
-    const HUGE_PAGE_BIT_INDEX: usize = 7;
+    const HUGE_BIT_INDEX: usize = 7;
+    #[cfg(target_arch = "x86_64")]
+    const GLOBAL_BIT_INDEX: usize = 8;
     #[cfg(target_arch = "x86_64")]
     const NO_EXECUTE_BIT_INDEX: usize = 63;
 
@@ -34,20 +35,31 @@ impl Entry {
     const GLOBAL_BIT_INDEX: usize = 5;
 
     fn get_frame_address_range() -> core::ops::Range<usize> {
-        cfg_select! {
-            target_arch = "x86_64" => {
-                debug_assert!(
-                    crate::arch::x86_64::cpuid::feature_info()
-                        .is_some_and(raw_cpuid::FeatureInfo::has_pae)
-                        && crate::arch::x86_64::registers::control::CR4::read()
-                            .contains(crate::arch::x86_64::registers::control::CR4Flags::PAE)
-                );
+        static FRAME_ADDRESS_RANGE: spin::Lazy<core::ops::Range<usize>> = spin::Lazy::new(|| {
+            cfg_select! {
+                any(target_arch = "x86", target_arch = "x86_64") => {
+                    use crate::arch::x86_64::{cpuid::feature_info, registers::control::cr4};
+                    use raw_cpuid::FeatureInfo;
 
-                12..51
+                    if feature_info().is_some_and(FeatureInfo::has_pae)
+                        && cr4::CR4::read().contains(cr4::Flags::PAE)
+                    {
+
+                        12..51
+                    } else {
+                        12..32
+                    }
+                }
+
+                _ => { todo!() }
             }
+        });
 
-            _ => { todo!() }
-        }
+        FRAME_ADDRESS_RANGE.clone()
+    }
+
+    pub const fn empty() -> Self {
+        Self(0)
     }
 
     pub unsafe fn clear(&mut self) {
@@ -55,17 +67,24 @@ impl Entry {
     }
 
     /// Gets the frame index of the page table entry.
-    pub fn get_frame(self) -> Address<Frame> {
+    pub fn get_frame(&self) -> Option<Address<Frame>> {
+        if !self.is_enabled() {
+            return None;
+        }
+
         let frame_index = self.0.get_bits(Self::get_frame_address_range());
-        let frame_address = Address::from_index(frame_index);
+        let frame_address =
+            Address::<Frame>::from_index(frame_index).expect("entry's frame address is invalid");
 
-        debug_assert!(frame_address.is_some());
-
-        // Safety: Page table pointers are guaranteed to have valid physical addresses.
-        unsafe { frame_address.unwrap_unchecked() }
+        Some(frame_address)
     }
 
     /// Sets the entry's frame index.
+    ///
+    /// # Safety
+    ///
+    /// - `frame` must be unused or otherwise expected to be pointed to by this
+    ///   entry's address.
     pub unsafe fn set_frame(&mut self, frame: Address<Frame>) {
         self.0
             .set_bits(Self::get_frame_address_range(), frame.index());
@@ -85,7 +104,7 @@ impl Entry {
         }
     }
 
-    pub unsafe fn set_enabled(&mut self, enabled: bool) {
+    pub fn set_enabled(&mut self, enabled: bool) {
         cfg_select! {
             target_arch = "x86_64" => {
                 self.0.set_bit(Self::PRESENT_BIT_INDEX, enabled);
@@ -99,21 +118,61 @@ impl Entry {
         }
     }
 
-    #[cfg(target_arch = "riscv64")]
     pub fn is_global(&self) -> bool {
         cfg_select! {
-            target_arch = "riscv64" => { self.0.get_bit(Self::GLOBAL_BIT_INDEX) }
+            target_arch = "x86_64" => {
+                use crate::arch::x86_64::registers::control::cr4;
+
+                if cr4::CR4::read().contains(cr4::Flags::PGE) {
+                    self.0.get_bit(Self::GLOBAL_BIT_INDEX)
+                } else {
+                    false
+                }
+            }
+
+            target_arch = "riscv64" => {
+                self.0.get_bit(Self::GLOBAL_BIT_INDEX)
+            }
 
             _ => { todo!() }
         }
     }
 
-    #[cfg(target_arch = "riscv64")]
-    #[allow(unused_variables)]
-    pub unsafe fn set_global(&mut self, global: bool) {
+    pub fn set_global(&mut self, global: bool) {
         cfg_select! {
+            target_arch = "x86_64" => {
+                use crate::arch::x86_64::registers::control::cr4;
+
+                if cr4::CR4::read().contains(cr4::Flags::PGE) {
+                    self.0.set_bit(Self::GLOBAL_BIT_INDEX, global);
+                }
+            }
+
             target_arch = "riscv64" => {
                 self.0.set_bit(Self::GLOBAL_BIT_INDEX, global);
+            }
+
+            _ => { todo!() }
+        }
+    }
+
+    pub fn is_user(&self) -> bool {
+        cfg_select! {
+            target_arch = "x86_64" => { self.0.get_bit(Self::USER_BIT_INDEX) }
+            target_arch = "riscv64" => { self.0.get_bit(Self::USER_BIT_INDEX) }
+
+            _ => { todo!() }
+        }
+    }
+
+    pub fn set_user(&mut self, user_accessible: bool) {
+        cfg_select! {
+            target_arch = "x86_64" => {
+                self.0.set_bit(Self::USER_BIT_INDEX, user_accessible);
+            }
+
+            target_arch = "riscv64" => {
+                self.0.set_bit(Self::USER_BIT_INDEX, user_accessible);
             }
 
             _ => { todo!() }
@@ -124,7 +183,7 @@ impl Entry {
     pub fn is_huge(&self) -> bool {
         cfg_select! {
             target_arch = "x86_64" => {
-                self.0.get_bit(Self::HUGE_PAGE_BIT_INDEX)
+                self.0.get_bit(Self::HUGE_BIT_INDEX)
             }
 
             _ => { todo!() }
@@ -132,19 +191,11 @@ impl Entry {
     }
 
     #[cfg(target_arch = "x86_64")]
-    pub unsafe fn set_huge(&mut self, huge_page: bool) {
+    pub fn set_huge(&mut self, huge_page: bool) {
         cfg_select! {
             target_arch = "x86_64" => {
-                self.0.set_bit(Self::HUGE_PAGE_BIT_INDEX, huge_page);
+                self.0.set_bit(Self::HUGE_BIT_INDEX, huge_page);
             }
-
-            _ => { todo!() }
-        }
-    }
-
-    pub fn is_intermediate(&self) -> bool {
-        cfg_select! {
-            target_arch = "x86_64" => { !self.is_huge() }
 
             _ => { todo!() }
         }
@@ -169,12 +220,12 @@ impl Entry {
         }
     }
 
-    pub unsafe fn set_permissions(&mut self, permissions: Permissions) {
+    pub fn set_permissions(&mut self, permissions: Permissions) {
         cfg_select! {
             target_arch = "x86_64" => {
                 match permissions {
-                    // All pages in x86_64 are at least read only, so `Permissions::None` is effectively
-                    // analogous to that.
+                    // All pages in x86 are at least read only, so `Permissions::None` is
+                    // effectively analogous to that.
                     Permissions::None | Permissions::ReadOnly => {
                         self.0.set_bit(Self::WRITEABLE_BIT_INDEX, false);
                         self.0.set_bit(Self::NO_EXECUTE_BIT_INDEX, true);
@@ -196,86 +247,19 @@ impl Entry {
         }
     }
 
-    pub fn is_user_accessible(&self) -> bool {
-        cfg_select! {
-            target_arch = "x86_64" => { self.0.get_bit(Self::USER_BIT_INDEX) }
-            target_arch = "riscv64" => { self.0.get_bit(Self::USER_BIT_INDEX) }
-
-            _ => { todo!() }
-        }
-    }
-
-    pub unsafe fn set_user_accessible(&mut self, user_accessible: bool) {
-        cfg_select! {
-            target_arch = "x86_64" => {
-                self.0.set_bit(Self::USER_BIT_INDEX, user_accessible);
-            }
-
-            target_arch = "riscv64" => {
-                self.0.set_bit(Self::USER_BIT_INDEX, user_accessible);
-            }
-
-            _ => { todo!() }
-        }
-    }
-
-    /// Automatically populate the pointer with a new frame.
-    pub fn populate(&mut self) -> Result<(), AllocError> {
-        debug_assert!(!self.is_enabled());
-
-        let frame = PhysicalMemoryManager::next_frame().ok_or(AllocError)?;
-
-        // Safety: Memory was just allocated.
-        unsafe {
-            crate::mem::zero_frame(frame);
-        }
-
-        unsafe {
-            self.set_frame(frame);
-            self.set_enabled(true);
-        }
-
-        Ok(())
-    }
-
-    /// Automatically depopulate the pointer and free the frame.
-    pub fn depopulate(&mut self) -> Result<(), AllocError> {
-        debug_assert!(!self.is_enabled());
-
-        let frame = self.get_frame();
-
-        PhysicalMemoryManager::free_frame(frame);
-
-        unsafe {
-            self.set_frame(Address::default());
-            self.set_enabled(false);
-        }
-
-        Ok(())
-    }
-
-    /// Gets the higher-half direct mapped pointer to the page table this pointer refers to, or
-    /// `None`.
+    /// Gets the higher-half direct mapped pointer to this entry's page table,
+    /// or `None`.
     fn get_page_table_ptr(&self) -> Option<NonNull<PageTable>> {
-        if !self.is_enabled() {
-            return None;
-        }
-
-        let frame = self.get_frame();
+        let frame = self.get_frame()?;
         let page = HigherHalfDirectMap::frame_to_page(frame);
-
-        // This pointer—coming from the higher-half direct map—should never be null.
-        let ptr = page.as_ptr().cast::<PageTable>();
-
-        debug_assert!(!ptr.is_null());
-        debug_assert!(ptr.is_aligned_to(align_of::<PageTable>()));
-
-        let ptr = unsafe { NonNull::new_unchecked(ptr) };
+        let page_address = core::num::NonZero::<usize>::new(page.get().get()).unwrap();
+        let ptr = core::ptr::NonNull::<PageTable>::with_exposed_provenance(page_address);
 
         Some(ptr)
     }
 
-    /// Gets a shared reference the page table this pointer refers to, or `None`.
+    /// Gets a shared reference the page table this pointer refers to, or
+    /// `None`.
     pub(in crate::mem::paging) fn page_table(&self) -> Option<&PageTable> {
         let ptr = self.get_page_table_ptr()?;
 
@@ -289,7 +273,8 @@ impl Entry {
         Some(page_table)
     }
 
-    /// Gets an exclusive reference the page table this pointer refers to, or `None`.
+    /// Gets an exclusive reference the page table this pointer refers to, or
+    /// `None`.
     pub(in crate::mem::paging) fn page_table_mut(&mut self) -> Option<&mut PageTable> {
         let mut ptr = self.get_page_table_ptr()?;
 
@@ -324,7 +309,7 @@ impl core::fmt::Debug for Entry {
 
         debug_struct
             .field("Permissions", &self.get_permissions())
-            .field("User Accessible", &self.is_user_accessible())
+            .field("User Accessible", &self.is_user())
             .finish()
     }
 }

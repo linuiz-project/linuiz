@@ -48,10 +48,10 @@ crate::singleton! {
         source: Source,
         ticks_per_sec: u64,
         ticks_per_ms: u64,
-        ticks_per_us: u64,
+        ticks_per_us: u64
     }
 
-    fn init(rsdp_request: &limine::request::RsdpRequest) {
+    fn init(rsdp_request: &limine::request::RsdpRequest) -> Self {
         if let Ok(acpi_root_table) = crate::acpi::get_root_table(rsdp_request)
             && let Ok(acpi_platform_info) = acpi_root_table.platform_info()
             && let Some(pm_timer) = acpi_platform_info.pm_timer

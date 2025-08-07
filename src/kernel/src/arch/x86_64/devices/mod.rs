@@ -1,1 +1,1 @@
-pub mod x2apic;
+pub mod local_apic;

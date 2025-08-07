@@ -1,25 +1,26 @@
 #![allow(clippy::module_name_repetitions)]
 
-use crate::{
-    arch::x86_64::structures::gdt::{GlobalDescriptorTable, SystemSegmentDescriptor},
-    mem::alloc::KERNEL_ALLOCATOR,
-};
+use crate::arch::x86_64::structures::gdt::{GlobalDescriptorTable, SystemSegmentDescriptor};
+use alloc::boxed::Box;
 use core::ptr::NonNull;
+use num_enum::{FromPrimitive, IntoPrimitive};
 
 type StackTableStack = crate::mem::stack::Stack<0x16000>;
 
 // Pre-defined indexes into the interrupt stack table (IST).
 #[repr(u16)]
-#[derive(Debug, IntoPrimitive, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, IntoPrimitive, FromPrimitive, Clone, Copy, PartialEq, Eq)]
 pub enum InterruptStackTableIndex {
     Debug = 0,
     NonMaskableInterrupt = 1,
     DoubleFault = 2,
     MachineCheck = 3,
+
+    #[default]
+    Unknown,
 }
 
 #[repr(C, packed(4))]
-#[derive(FromZeros)]
 pub struct TaskStateSegment {
     _1: [u8; 4],
 
@@ -39,6 +40,19 @@ pub struct TaskStateSegment {
     iomap_base: u16,
 }
 
+impl Default for TaskStateSegment {
+    fn default() -> Self {
+        Self {
+            privilege_stack_table: [None; _],
+            interrupt_stack_table: [None; _],
+            iomap_base: 0,
+            _1: [0u8; _],
+            _2: [0u8; _],
+            _3: [0u8; _],
+        }
+    }
+}
+
 impl TaskStateSegment {
     /// Loads this [`TaskStateSegment`] into the task state segment register.
     ///
@@ -48,14 +62,13 @@ impl TaskStateSegment {
     /// runtime error if more than one are loaded per hardware threads.
     pub fn load_local() {
         fn allocate_stack_table_stack() -> NonNull<StackTableStack> {
-            KERNEL_ALLOCATOR
-                .allocate_t::<StackTableStack>()
-                .expect("failed to allocate a new stack for task state segment")
+            let stack =
+                StackTableStack::new().expect("failed to allocate a task state segment stack");
+
+            NonNull::from_mut(Box::leak(stack))
         }
 
-        let tss = crate::mem::alloc::KERNEL_ALLOCATOR
-            .allocate_t_static::<Self>()
-            .expect("failed to allocate task state segment");
+        let tss = Box::leak(Box::new(TaskStateSegment::default()));
 
         // Set the stack for transitions to ring 0.
         tss.privilege_stack_table[0] = Some(allocate_stack_table_stack());

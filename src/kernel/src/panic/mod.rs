@@ -7,7 +7,7 @@ pub mod tracing;
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     error!(
-        "KERNEL PANIC (at {}): {}",
+        "KERNEL PANIC (@ {}):\n{}",
         info.location().unwrap_or(core::panic::Location::caller()),
         info.message()
     );

@@ -1,34 +1,47 @@
-use crate::arch::x86_64::devices::x2apic::InterruptDeliveryMode;
+use crate::arch::x86_64::devices::local_apic::InterruptDeliveryMode;
 use bit_field::BitField;
-use core::num::NonZeroU8;
+use core::num::NonZero;
 
 /// Specifies the destination mode of an interrupt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InterruptDestinationMode {
-    /// In physical destination mode, the destination processor is specified by its local APIC ID. For Pentium 4
-    /// and Intel Xeon processors, either a single destination (local APIC IDs 0x00 through 0xFE) or a broadcast
-    /// to all APICs (the APIC ID is 0xFF) may be specified in physical destination mode. A broadcast inter-process
-    /// interrupt (bits 28-31 of the message destination address are 1) or I/O subsystem initiated interrupt with
-    /// lowest priority delivery mode is not supported in physical destination mode and must not be configured by
-    /// software. Also, for any non-broadcast inter-process interrupt or I/O subsystem initiated interrupt with
-    /// lowest priority delivery mode, software must ensure that APICs defined in the interrupt address are present
-    /// and enabled to receive interrupts. For the P6 family and Pentium processors, a single destination is
-    /// specified in physical destination mode with a local APIC ID of 0x00 through 0x0E, allowing up to 15 local
-    /// APICs to be addressed on the APIC bus. A broadcast to all local APICs is specified with 0x0F.
+    /// In physical destination mode, the destination processor is specified by
+    /// its local APIC ID. For Pentium 4 and Intel Xeon processors, either a
+    /// single destination (local APIC IDs 0x00 through 0xFE) or a broadcast
+    /// to all APICs (the APIC ID is 0xFF) may be specified in physical
+    /// destination mode. A broadcast inter-process interrupt (bits 28-31 of
+    /// the message destination address are 1) or I/O subsystem initiated
+    /// interrupt with lowest priority delivery mode is not supported in
+    /// physical destination mode and must not be configured by
+    /// software. Also, for any non-broadcast inter-process interrupt or I/O
+    /// subsystem initiated interrupt with lowest priority delivery mode,
+    /// software must ensure that APICs defined in the interrupt address are
+    /// present and enabled to receive interrupts. For the P6 family and
+    /// Pentium processors, a single destination is specified in physical
+    /// destination mode with a local APIC ID of 0x00 through 0x0E, allowing up
+    /// to 15 local APICs to be addressed on the APIC bus. A broadcast to
+    /// all local APICs is specified with 0x0F.
     ///
-    /// Note: The number of local APICs that can be addressed on the system bus may be restricted by hardware.
+    /// Note: The number of local APICs that can be addressed on the system bus
+    /// may be restricted by hardware.
     Physical,
 
-    /// In logical destination mode, inter-process interrupt destination is specified using an 8-bit message destination
-    /// address, which is entered in the destination field of the interrupt command register. Upon receiving an inter-process
-    /// interrupt message that was sent using logical destination mode, a local APIC compares the message destination address
-    /// in the message with the values in its logical destination register and destination format register to determine if it
-    /// should accept and handle the inter-process interrupt. For both configurations of logical destination mode, when combined
-    /// with lowest priority delivery mode, software is responsible for ensuring that all of the local APICs included in or
-    /// addressed by the inter-process interrupt or I/O subsystem interrupt are present and enabled to receive the interrupt.
+    /// In logical destination mode, inter-process interrupt destination is
+    /// specified using an 8-bit message destination address, which is
+    /// entered in the destination field of the interrupt command register. Upon
+    /// receiving an inter-process interrupt message that was sent using
+    /// logical destination mode, a local APIC compares the message destination
+    /// address in the message with the values in its logical destination
+    /// register and destination format register to determine if it
+    /// should accept and handle the inter-process interrupt. For both
+    /// configurations of logical destination mode, when combined
+    /// with lowest priority delivery mode, software is responsible for ensuring
+    /// that all of the local APICs included in or addressed by the
+    /// inter-process interrupt or I/O subsystem interrupt are present and
+    /// enabled to receive the interrupt.
     ///
-    /// Note: The logical APIC ID should not be confused with the local APIC ID that is contained in the local APIC
-    ///       ID register.
+    /// Note: The logical APIC ID should not be confused with the local APIC ID
+    /// that is contained in the local APIC       ID register.
     Logical,
 }
 
@@ -59,9 +72,9 @@ impl From<InterruptTriggerMode> for bool {
 
 /// Specifies an interrupt level assertion.
 ///
-/// For the INIT level de-assert delivery mode this flag must be set to 0; for all other delivery
-/// modes it must be set to 1. (This flag has no meaning in Pentium 4 and Intel Xeon processors,
-/// and will always be issued as a 1.)
+/// For the INIT level de-assert delivery mode this flag must be set to 0; for
+/// all other delivery modes it must be set to 1. (This flag has no meaning in
+/// Pentium 4 and Intel Xeon processors, and will always be issued as a 1.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InterruptAssertMode {
     Deassert,
@@ -77,31 +90,39 @@ impl From<InterruptAssertMode> for bool {
     }
 }
 
-/// Indicates whether a shorthand notation is used to specify the destination of the interrupt and,
-/// if so, which shorthand is used. Destination shorthands are used in place of the destination
-/// field, and can be sent by software using a single write to the low bits interrupt command register.
+/// Indicates whether a shorthand notation is used to specify the destination of
+/// the interrupt and, if so, which shorthand is used. Destination shorthands
+/// are used in place of the destination field, and can be sent by software
+/// using a single write to the low bits interrupt command register.
 pub enum InterruptDestination {
     Processor {
         id: u32,
     },
 
-    /// The issuing APIC is the one and only destination of the inter-process interrupt. This destination
-    /// shorthand allows software to interrupt the processor on which it is executing. An APIC
-    /// implementation is free to deliver the self-interrupt message internally or to issue the message to
-    /// the bus and “snoop” it as with any other inter-process interrupt message.
+    /// The issuing APIC is the one and only destination of the inter-process
+    /// interrupt. This destination shorthand allows software to interrupt
+    /// the processor on which it is executing. An APIC implementation is
+    /// free to deliver the self-interrupt message internally or to issue the
+    /// message to the bus and “snoop” it as with any other inter-process
+    /// interrupt message.
     OnlySelf,
 
-    /// The inter-process interrupt is sent to all processors in the system including the processor sending
-    /// it. The APIC will broadcast an inter-process interrupt message with the destination field set to 0xF
-    /// for Pentium and P6 family processors, and to 0xFF for Pentium 4 and Intel Xeon processors.
+    /// The inter-process interrupt is sent to all processors in the system
+    /// including the processor sending it. The APIC will broadcast an
+    /// inter-process interrupt message with the destination field set to 0xF
+    /// for Pentium and P6 family processors, and to 0xFF for Pentium 4 and
+    /// Intel Xeon processors.
     AllIncludingSelf,
 
-    /// The inter-process interrupt is sent to all processors in a system with the exception of the processor
-    /// sending it. The APIC broadcasts a message with the physical destination mode and destination field set
-    /// to 0xF for Pentium and P6 family processors, and to 0xFF for Pentium 4 and Intel Xeon processors.
-    /// Support for this destination shorthand in conjunction with the lowest-priority delivery mode is model
-    /// specific. For Pentium 4 and Intel Xeon processors, when this shorthand is used together with lowest
-    /// priority delivery mode, the inter-process interrupt may be redirected back to the issuing processor.
+    /// The inter-process interrupt is sent to all processors in a system with
+    /// the exception of the processor sending it. The APIC broadcasts a
+    /// message with the physical destination mode and destination field set
+    /// to 0xF for Pentium and P6 family processors, and to 0xFF for Pentium 4
+    /// and Intel Xeon processors. Support for this destination shorthand in
+    /// conjunction with the lowest-priority delivery mode is model
+    /// specific. For Pentium 4 and Intel Xeon processors, when this shorthand
+    /// is used together with lowest priority delivery mode, the
+    /// inter-process interrupt may be redirected back to the issuing processor.
     AllExclusingSelf,
 }
 
@@ -116,7 +137,7 @@ pub struct InterruptCommand {
 impl InterruptCommand {
     #[allow(clippy::needless_pass_by_value)]
     pub fn new(
-        vector: Option<NonZeroU8>,
+        vector: Option<NonZero<u8>>,
         destination: InterruptDestination,
         delivery_mode: InterruptDeliveryMode,
         destination_mode: InterruptDestinationMode,
@@ -203,7 +224,7 @@ impl InterruptCommand {
 
     pub fn new_sipi(vector: u8, apic_id: u32) -> Self {
         Self::new(
-            NonZeroU8::new(vector),
+            Some(NonZero::<u8>::new(vector).unwrap()),
             InterruptDestination::Processor { id: apic_id },
             InterruptDeliveryMode::StartUp,
             InterruptDestinationMode::Physical,
@@ -212,11 +233,11 @@ impl InterruptCommand {
         )
     }
 
-    pub(crate) fn high(self) -> u32 {
+    pub(crate) fn high_bits(self) -> u32 {
         self.high
     }
 
-    pub(crate) fn low(self) -> u32 {
+    pub(crate) fn low_bits(self) -> u32 {
         self.low
     }
 }

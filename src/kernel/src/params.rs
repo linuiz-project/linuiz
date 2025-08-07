@@ -1,79 +1,78 @@
-use core::ffi::CStr;
-use limine::{request::ExecutableCmdlineRequest, response::ExecutableCmdlineResponse};
-use spin::Once;
+use limine::request::ExecutableCmdlineRequest;
 
-static PARAMS: Once<Parameters> = Once::new();
+crate::singleton! {
+    #[derive(Debug)]
+    pub KernelParameters {
+        /// Whether the kernel should utilize multi-processing.
+        use_multiprocessing: bool,
 
-#[derive(Debug, Clone, Copy)]
-pub struct Parameters {
-    /// Whether the kernel should utilize multi-processing.
-    pub use_multiprocessing: bool,
+        /// Whether to keep the kernel symbol info (for stack traces).
+        drop_symbol_info: bool,
 
-    /// Whether to keep the kernel symbol info (for stack traces).
-    pub keep_symbol_info: bool,
+        /// Whether the kernel should use low-memory mode.
+        low_memory_mode: bool
+    }
 
-    /// Whether the kernel should use low-memory mode.
-    pub low_memory_mode: bool,
+    fn init(kernel_cmdline_request: &ExecutableCmdlineRequest) -> Self {
+        let mut params = Self::default();
+
+        let Some(kernel_cmdline_response) = kernel_cmdline_request.get_response()
+        else {
+            warn!("Bootloader did not provide response to kernel command line request.");
+            return params;
+        };
+
+        let Ok(params_str) = kernel_cmdline_response.cmdline().to_str() else {
+            warn!("Kernel command line contained invalid UTF-8.");
+            return params;
+        };
+
+
+        params_str
+            .split(' ')
+            .for_each(|param| {
+                match param {
+                    "" => {
+                        // Ignore accidental extra spaces
+                    }
+
+                    "--no-multiprocessing" => params.use_multiprocessing = false,
+                    "--drop-symbols" => params.drop_symbol_info = true,
+                    "--low-memory" => params.low_memory_mode = true,
+
+                    _ => {
+                        warn!("Unknown kernel parameter: \"{param}\"");
+                    }
+                }
+            });
+
+        debug!("{params:#?}");
+
+        params
+    }
 }
 
-impl Default for Parameters {
+impl Default for KernelParameters {
     fn default() -> Self {
-        Parameters {
+        KernelParameters {
             use_multiprocessing: true,
-            keep_symbol_info: true,
+            drop_symbol_info: false,
             low_memory_mode: false,
         }
     }
 }
 
-pub fn parse(kernel_cmdline_request: &ExecutableCmdlineRequest) {
-    fn parse_impl(kernel_cmdline_request: &ExecutableCmdlineRequest) -> Parameters {
-        let mut params = Parameters::default();
-
-        match kernel_cmdline_request
-            .get_response()
-            .map(ExecutableCmdlineResponse::cmdline)
-            .map(CStr::to_str)
-        {
-            Some(Ok("")) => {
-                // Ignore accidental extra spaces
-            }
-
-            Some(Ok("--nomp")) => params.use_multiprocessing = false,
-
-            Some(Ok("--keep-symbols")) => params.keep_symbol_info = true,
-
-            Some(Ok("--lomem")) => params.low_memory_mode = true,
-
-            Some(Ok(arg)) => {
-                warn!("Unknown command line argument: {arg:?}");
-            }
-
-            Some(Err(error)) => {
-                error!("Failed to parse kernel command line: {error:?}");
-            }
-
-            None => {
-                warn!("Bootloader didn't provide response to kernel command line request.");
-            }
-        }
-
-        debug!("Kernel Parameters:\n{params:#?}");
-
-        params
+impl KernelParameters {
+    pub fn use_multiprocessing() -> bool {
+        Self::get_static().use_multiprocessing
     }
 
-    PARAMS.call_once(|| parse_impl(kernel_cmdline_request));
-}
+    #[cfg(feature = "panic_traces")]
+    pub fn drop_symbol_info() -> bool {
+        Self::get_static().drop_symbol_info
+    }
 
-pub fn use_multiprocessing() -> bool {
-    PARAMS.wait().use_multiprocessing
-}
-
-pub fn keep_symbol_info() -> bool {
-    PARAMS.wait().keep_symbol_info
-}
-
-pub fn use_low_memory() -> bool {
-    PARAMS.wait().low_memory_mode
+    pub fn use_low_memory() -> bool {
+        Self::get_static().low_memory_mode
+    }
 }

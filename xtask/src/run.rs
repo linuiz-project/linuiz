@@ -23,10 +23,6 @@ pub struct Options {
     #[arg(long, default_value = "qemu64")]
     cpu: Cpu,
 
-    /// Emulation accelerator to use.
-    #[arg(long, default_value = "false")]
-    disable_kvm: bool,
-
     /// Number of CPUs to emulate.
     #[arg(long, default_value = "4")]
     smp: usize,
@@ -36,8 +32,8 @@ pub struct Options {
     ram: usize,
 
     /// Enables debug logging.
-    #[arg(long)]
-    log: bool,
+    #[arg(short = 'l', long)]
+    debug_log: bool,
 
     /// Which type of block driver to use for root drive.
     #[arg(long, default_value = "virtio")]
@@ -47,18 +43,20 @@ pub struct Options {
     #[arg(long)]
     nobuild: bool,
 
-    /// Runs the kernel in serial-only mode (no graphics driving).
-    #[arg(long)]
-    nographic: bool,
+    /// If disabled, runs the kernel in serial-only mode (no graphics).
+    #[arg(short, long)]
+    graphic: bool,
 
     #[clap(flatten)]
     build_options: crate::build::Options,
 
-    /// Skips execution and only prints the QEMU command that would have been executed.
+    /// Skips execution and only prints the QEMU command that would have been
+    /// executed.
     #[arg(short, long)]
     norun: bool,
 
-    /// Puts QEMU in GDB debug mode, awaiting signal from the debugger to begin execution.
+    /// Puts QEMU in GDB debug mode, awaiting signal from the debugger to begin
+    /// execution.
     #[arg(short, long)]
     gdb: bool,
 }
@@ -106,8 +104,15 @@ pub fn run(sh: &xshell::Shell, temp_dir: impl AsRef<Path>, options: Options) -> 
     }
     .arg("-no-shutdown")
     .arg("-no-reboot")
-    .args(["-debugcon", "file:.debug/debug.log"])
-    .args(["-serial", "stdio"])
+    .args([
+        "-chardev",
+        if options.debug_log {
+            "stdio,id=char0,logfile=.debug/debug.log,signal=off"
+        } else {
+            "stdio,id=char0,signal=off"
+        },
+    ])
+    .args(["-serial", "chardev:char0"])
     .args(["-drive", "format=raw,file=run/disk0.img,id=disk1,if=none"])
     .args(["-net", "none"])
     .args(["-M", "smm=off"])
@@ -131,17 +136,15 @@ pub fn run(sh: &xshell::Shell, temp_dir: impl AsRef<Path>, options: Options) -> 
         },
     ]);
 
-    if !options.disable_kvm {
+    if options.debug_log {
+        run_cmd = run_cmd
+            .args(["-D", ".debug/qemu.log"])
+            .args(["-d", "int,guest_errors"]);
+    } else {
         run_cmd = run_cmd.arg("-enable-kvm");
     }
 
-    if options.log {
-        run_cmd = run_cmd
-            .args(["-d", "int,guest_errors"])
-            .args(["-D", ".debug/qemu.log"]);
-    }
-
-    if options.nographic {
+    if !options.graphic {
         run_cmd = run_cmd.args(["-display", "none"]);
     }
 

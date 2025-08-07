@@ -6,8 +6,7 @@ use crate::{
 };
 use alloc::{boxed::Box, collections::vec_deque::VecDeque};
 use core::{alloc::AllocError, time::Duration};
-use libsys::Address;
-use zerocopy::FromZeros;
+use libsys::address::{Address, Virtual};
 
 pub static PROCESSES: spin::Mutex<VecDeque<Task>> = spin::Mutex::new(VecDeque::new());
 
@@ -19,11 +18,13 @@ pub struct Scheduler {
 
 impl Scheduler {
     pub fn new() -> Result<Self, AllocError> {
-        Ok(Self {
+        let scheduler = Self {
             enabled: false,
-            idle_stack: Stack::new_box_zeroed().map_err(|_| AllocError)?,
+            idle_stack: Stack::new()?,
             task: None,
-        })
+        };
+
+        Ok(scheduler)
     }
 
     /// Enables the scheduler to pop tasks.
@@ -121,13 +122,15 @@ impl Scheduler {
             #[allow(clippy::as_conversions)]
             unsafe {
                 isf.set_instruction_pointer(
-                    Address::new(crate::interrupts::wait_indefinite as usize).unwrap(),
+                    Address::<Virtual>::new(crate::interrupts::wait_indefinite as usize).unwrap(),
                 );
             }
 
             // Safety: Stack pointer is valid for idle function stack.
             unsafe {
-                isf.set_stack_pointer(Address::new(self.idle_stack.top().addr().get()).unwrap());
+                isf.set_stack_pointer(
+                    Address::<Virtual>::new(self.idle_stack.top().addr().get()).unwrap(),
+                );
             }
 
             *regs = Registers::empty();

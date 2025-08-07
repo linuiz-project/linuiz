@@ -1,9 +1,11 @@
 use crate::{
-    interrupts::InterruptCell,
     mem::{mapper::Mapper, paging::page_table::Depth},
+    task::asid::AddressSpaceId,
 };
-use libsys::{Address, Frame, Page, giga_page_size, mega_page_size, page_size};
-use spin::{Mutex, Once};
+use libsys::{
+    address::{Address, Frame, Page},
+    constants::{huge_page_size, large_page_size, page_size},
+};
 
 mod hhdm;
 pub use hhdm::*;
@@ -15,78 +17,76 @@ pub mod paging;
 pub mod pmm;
 pub mod stack;
 
-static KERNEL_MAPPER: Once<InterruptCell<Mutex<Mapper>>> = Once::new();
-
-/// Initialize the kernel memory. This will:
-/// - set up the kernel page table mapper
-/// - map & flag each entry from the bootloader memory map
-/// - map & flag the kernel executable regions
-#[allow(clippy::too_many_lines)]
-pub fn init(
-    memory_map_request: &limine::request::MemoryMapRequest,
-    kernel_file_request: &limine::request::ExecutableFileRequest,
-    kernel_address_request: &limine::request::ExecutableAddressRequest,
-) {
-    fn map_range(
-        mapper: &mut Mapper,
-        from: Address<Page>,
-        to: Address<Frame>,
-        length: usize,
-        permissions: Permissions,
-    ) {
-        trace!("Map Range: ({from:X?} -> {to:X?}):{length:#X} {permissions:?}");
-
-        let mut remaining_length = length;
-        while remaining_length > 0 {
-            let offset = length - remaining_length;
-            let from = Address::<Page>::new(from.get().get() + offset).unwrap();
-            let to = Address::<Frame>::new(to.get().get() + offset).unwrap();
-
-            if paging::use_giga_pages()
-                    // check is larger than giga page
-                    && remaining_length >= giga_page_size()
-                    // check is aligned to giga page
-                    && from.get().get().trailing_zeros() >= giga_page_size().trailing_zeros()
-            {
-                // Map a giga page
-
-                mapper
-                    .map(from, Depth::giga(), to, false, permissions)
-                    .expect("failed to map range");
-
-                remaining_length -= giga_page_size();
-            } else if paging::use_mega_pages()
-                    // check is larger than mega page
-                    && remaining_length >= mega_page_size()
-                    // check is aligned to mega page
-                    && from.get().get().trailing_zeros() >= mega_page_size().trailing_zeros()
-            {
-                // Map a mega page
-
-                mapper
-                    .map(from, Depth::mega(), to, false, permissions)
-                    .expect("failed to map range");
-
-                remaining_length -= mega_page_size();
-            } else {
-                // Map a standard page
-
-                mapper
-                    .map(from, Depth::max(), to, false, permissions)
-                    .expect("failed to map range");
-
-                remaining_length -= core::cmp::min(page_size(), remaining_length);
-            }
-        }
+crate::singleton! {
+    pub KernelMapper {
+        mapper: Mapper
     }
 
-    KERNEL_MAPPER.call_once(|| {
+    fn init(
+        memory_map_request: &limine::request::MemoryMapRequest,
+        kernel_file_request: &limine::request::ExecutableFileRequest,
+        kernel_address_request: &limine::request::ExecutableAddressRequest
+    ) -> Self {
+        fn map_range(
+            mapper: &mut Mapper,
+            from: Address<Page>,
+            to: Address<Frame>,
+            count: usize,
+            memory_access: Permissions,
+        ) {
+            trace!("Map Range: ({from:X?} -> {to:X?}):{count:#X} {memory_access:?}");
+
+            let mut remaining_count = count;
+            while remaining_count > 0 {
+                let offset = count - remaining_count;
+                let from = Address::<Page>::new(from.get().get() + offset).unwrap();
+                let to = Address::<Frame>::new(to.get().get() + offset).unwrap();
+
+                if paging::use_huge_pages()
+                    // check is larger than giga page
+                    && remaining_count >= huge_page_size()
+                    // check is aligned to giga page
+                    && from.get().get().trailing_zeros() >= huge_page_size().trailing_zeros()
+                {
+                    // Map a giga page
+
+                    mapper
+                        .map(from, Depth::giga(), to, false, memory_access)
+                        .expect("failed to map range");
+
+                    remaining_count -= huge_page_size();
+                } else if paging::use_large_pages()
+                    // check is larger than mega page
+                    && remaining_count >= large_page_size()
+                    // check is aligned to mega page
+                    && from.get().get().trailing_zeros() >= large_page_size().trailing_zeros()
+                {
+                    // Map a mega page
+
+                    mapper
+                        .map(from, Depth::mega(), to, false, memory_access)
+                        .expect("failed to map range");
+
+                    remaining_count -= large_page_size();
+                } else {
+                    // Map a standard page
+
+                    mapper
+                        .map(from, Depth::max(), to, false, memory_access)
+                        .expect("failed to map range");
+
+                    remaining_count -= core::cmp::min(page_size(), remaining_count);
+                }
+            }
+        }
+
         debug!("Preparing kernel memory...");
         debug!(
-            "Paging Setup Info: MEGA:{}, GIGA:{}",
-            paging::use_mega_pages(),
-            paging::use_giga_pages()
+            "Paging Setup Info: {{ large pages: {}, huge pages: {} }}",
+            paging::use_large_pages(),
+            paging::use_huge_pages(),
         );
+
 
         let mut kernel_mapper = Mapper::new();
 
@@ -166,8 +166,9 @@ pub fn init(
 
                 let offset =
                     usize::try_from(program_header.p_vaddr).unwrap() - kernel_virtual_address;
-                let segment_page = Address::new(kernel_virtual_address + offset).unwrap();
-                let segment_frame = Address::new(kernel_physical_address + offset).unwrap();
+                let segment_page = Address::<Page>::new(kernel_virtual_address + offset).unwrap();
+                let segment_frame =
+                    Address::<Frame>::new(kernel_physical_address + offset).unwrap();
                 let segment_length = usize::try_from(core::cmp::max(
                     program_header.p_memsz, // If the segment size is smaller than it's alignment, we can map it
                     program_header.p_align, // as if it's alignment is the total size (support for mega pages).
@@ -185,19 +186,34 @@ pub fn init(
                 );
             });
 
-        InterruptCell::new(Mutex::new(kernel_mapper))
-    });
+        Self {
+            mapper: kernel_mapper
+        }
+    }
+}
 
-    KERNEL_MAPPER.wait().with(|kernel_mapper| {
-        let kernel_mapper = kernel_mapper.lock();
+impl KernelMapper {
+    pub fn swap_into() {
+        let kernel_mapper = &Self::get_static().mapper;
 
         // Safety: Kernel page tables should be set up correctly.
         unsafe {
-            kernel_mapper.swap_into();
+            cfg_select! {
+                target_arch = "x86_64" => {
+                    crate::arch::x86_64::registers::control::cr3::CR3::write(
+                        kernel_mapper.root_table().frame(),
+                        &AddressSpaceId::KERNEL
+                    );
+                }
+            }
         }
 
-        trace!("Kernel has finalized control of memory system.");
-    });
+        trace!("Swapped into kernel page tables.");
+    }
+
+    pub fn with<T>(func: impl FnOnce(&Mapper) -> T) -> T {
+        func(&Self::get_static().mapper)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -208,37 +224,31 @@ pub enum Permissions {
     ReadExecute,
 }
 
-pub fn with_kernel_mapper<T>(func: impl FnOnce(&mut Mapper) -> T) -> T {
-    KERNEL_MAPPER.wait().with(|mapper| {
-        let mut mapper = mapper.lock();
-        func(&mut mapper)
-    })
-}
-
-// pub unsafe fn catch_read(ptr: NonNull<[u8]>) -> Result<Box<[u8]>, Exception> {
-//     let mem_range = ptr.as_uninit_slice().as_ptr_range();
-//     let aligned_start = libsys::align_down(mem_range.start.addr(), libsys::page_shift());
-//     let mem_end = mem_range.end.addr();
+// pub unsafe fn catch_read(ptr: NonNull<[u8]>) -> Result<Box<[u8]>, Exception>
+// {     let mem_range = ptr.as_uninit_slice().as_ptr_range();
+//     let aligned_start = libsys::align_down(mem_range.start.addr(),
+// libsys::page_shift());     let mem_end = mem_range.end.addr();
 
 //     let mut copied_mem = Box::new_uninit_slice(ptr.len());
-//     for (offset, page_addr) in (aligned_start..mem_end).enumerate().step_by(page_size()) {
-//         let ptr_addr = core::cmp::max(mem_range.start.addr(), page_addr);
-//         let ptr_len = core::cmp::min(mem_end.saturating_sub(ptr_addr), page_size());
+//     for (offset, page_addr) in
+// (aligned_start..mem_end).enumerate().step_by(page_size()) {         let
+// ptr_addr = core::cmp::max(mem_range.start.addr(), page_addr);         let
+// ptr_len = core::cmp::min(mem_end.saturating_sub(ptr_addr), page_size());
 
 //         // Safety: Box slice and this iterator are bound by the ptr len.
 //         let to_ptr = unsafe { copied_mem.as_mut_ptr().add(offset) };
-//         // Safety: Copy is only invalid if the caller provided an invalid pointer.
-//         crate::local::do_catch(|| unsafe {
-//             core::ptr::copy_nonoverlapping(ptr_addr as *mut u8, to_ptr, ptr_len);
-//         })?;
+//         // Safety: Copy is only invalid if the caller provided an invalid
+// pointer.         crate::local::do_catch(|| unsafe {
+//             core::ptr::copy_nonoverlapping(ptr_addr as *mut u8, to_ptr,
+// ptr_len);         })?;
 //     }
 
 //     Ok(copied_mem)
 // }
 
 // TODO TryString
-// pub unsafe fn catch_read_str(mut read_ptr: NonNull<u8>) -> Result<String, Exception> {
-//     let mut strlen = 0;
+// pub unsafe fn catch_read_str(mut read_ptr: NonNull<u8>) -> Result<String,
+// Exception> {     let mut strlen = 0;
 //     'y: loop {
 //         let read_len = read_ptr.as_ptr().align_offset(page_size());
 //         read_ptr = NonNull::new(
@@ -247,8 +257,8 @@ pub fn with_kernel_mapper<T>(func: impl FnOnce(&mut Mapper) -> T) -> T {
 //         )
 //         .unwrap();
 
-//         for byte in catch_read(NonNull::slice_from_raw_parts(read_ptr, read_len))?.iter() {
-//             if byte.ne(&b'\0') {
+//         for byte in catch_read(NonNull::slice_from_raw_parts(read_ptr,
+// read_len))?.iter() {             if byte.ne(&b'\0') {
 //                 strlen += 1;
 //             } else {
 //                 break 'y;
@@ -256,17 +266,18 @@ pub fn with_kernel_mapper<T>(func: impl FnOnce(&mut Mapper) -> T) -> T {
 //         }
 //     }
 
-//     Ok(String::from_utf8_lossy(core::slice::from_raw_parts(read_ptr.as_ptr(), strlen)).into_owned())
-// }
+//     Ok(String::from_utf8_lossy(core::slice::from_raw_parts(read_ptr.as_ptr(),
+// strlen)).into_owned()) }
 
 /// Zeros the higher-half direct mapped memory of `frame`.
 ///
 /// # Safety
 ///
-/// - The higher-half direct mapped memory of `frame` must not be otherwise aliased.
+/// - The higher-half direct mapped memory of `frame` must not be otherwise
+///   aliased.
 pub unsafe fn zero_frame(frame: Address<Frame>) {
     let page = HigherHalfDirectMap::frame_to_page(frame);
-    let ptr = page.as_ptr();
+    let ptr = core::ptr::with_exposed_provenance_mut::<u8>(page.get().get());
 
     // Safety: Caller is required to maintain safety invariants.
     unsafe {

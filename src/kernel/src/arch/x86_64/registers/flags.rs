@@ -1,7 +1,7 @@
 bitflags! {
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct Flags: usize {
+    pub struct ProcessorFlags: usize {
         /// Set by hardware if the last arithmetic operation generated a carry out of the most-significant
         /// bit of the result.
         const CARRY_FLAG = 1 << 0;
@@ -73,7 +73,7 @@ bitflags! {
     }
 }
 
-impl Flags {
+impl ProcessorFlags {
     pub fn read() -> Self {
         let flags: usize;
 

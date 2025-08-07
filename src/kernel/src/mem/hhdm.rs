@@ -1,14 +1,14 @@
 use core::num::NonZero;
-use libsys::{Address, Frame, Page, Physical, Virtual};
+use libsys::address::{Address, Frame, Page, Physical, Virtual};
 
 crate::singleton! {
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub HigherHalfDirectMap {
-        base_address: NonZero<usize>,
+        base_address: NonZero<usize>
     }
 
-    fn init(hhdm_request: &limine::request::HhdmRequest) {
+    fn init(hhdm_request: &limine::request::HhdmRequest) -> Self {
         // Zero-based memory offset of the start of the HHDM.
         let base_address = hhdm_request
             .get_response()
@@ -47,7 +47,9 @@ impl HigherHalfDirectMap {
 
     /// Convert a physical address to its higher-half direct mapped virtual counterpart.
     pub fn physical_to_virtual(physical_address: Address<Physical>) -> Address<Virtual> {
-        Address::new_truncate(Self::get_static().base_address.get() + physical_address.get())
+        Address::<Virtual>::new_truncate(
+            Self::get_static().base_address.get() + physical_address.get(),
+        )
     }
 
     /// Convert a virtual address to its physical counterpart.
@@ -56,12 +58,13 @@ impl HigherHalfDirectMap {
     ///
     /// If `virtual_address` is not a higher-half direct mapped address.
     pub fn virtual_to_physical(virtual_address: Address<Virtual>) -> Address<Physical> {
-        Address::new(virtual_address.get() - Self::get_static().base_address.get()).unwrap()
+        Address::<Physical>::new(virtual_address.get() - Self::get_static().base_address.get())
+            .unwrap()
     }
 
     /// Convert a frame address to its higher-half direct mapped page counterpart.
     pub fn frame_to_page(frame: Address<Frame>) -> Address<Page> {
-        Address::new_truncate(Self::get_static().base_address.get() + frame.get().get())
+        Address::<Page>::new_truncate(Self::get_static().base_address.get() + frame.get().get())
     }
 
     /// Convert a page address to its physical counterpart.
@@ -70,7 +73,7 @@ impl HigherHalfDirectMap {
     ///
     /// If `page_address` is not a higher-half direct mapped address.
     pub fn page_to_frame(page: Address<Page>) -> Address<Frame> {
-        Address::new(page.get().get() - Self::get_static().base_address.get()).unwrap()
+        Address::<Frame>::new(page.get().get() - Self::get_static().base_address.get()).unwrap()
     }
 
     /// Returns whether the provided address is a higher-half or lower-half address.

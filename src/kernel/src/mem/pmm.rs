@@ -1,24 +1,49 @@
 use crate::{interrupts::InterruptCell, mem::HigherHalfDirectMap};
 use bitvec::slice::BitSlice;
 use core::{num::NonZero, sync::atomic::AtomicUsize};
-use libsys::{Address, Frame, align_up_div, page_mask, page_shift, page_size};
+use libsys::{
+    address::{Address, Frame},
+    constants::{page_bits, page_mask, page_size},
+    math::align_up_div,
+};
 use spin::RwLock;
+
+#[derive(Debug, Error)]
+pub enum NextFrameError {
+    #[error("the physical memory manager is out of free frames")]
+    NoneFree,
+}
+
+#[derive(Debug, Error)]
+pub enum LockFrameError {
+    #[error("attempted to index out of bounds")]
+    OutOfBounds,
+
+    #[error("cannot lock frame; not free")]
+    NotLocked,
+}
+
+#[derive(Debug, Error)]
+pub enum FreeFrameError {
+    #[error("attempted to index out of bounds")]
+    OutOfBounds,
+
+    #[error("cannot free frame; not locked")]
+    NotLocked,
+}
 
 crate::singleton! {
     pub PhysicalMemoryManager {
         table: InterruptCell<RwLock<&'static mut BitSlice<AtomicUsize>>>,
-        total_frames: usize,
+        total_frames: usize
     }
 
     /// Initializes the static physical memory manager with the provided bootloader memory map request.
-    fn init(memory_map_request: &limine::request::MemoryMapRequest) {
+    fn init(memory_map_request: &limine::request::MemoryMapRequest) -> Self {
         let memory_map = memory_map_request
             .get_response()
-            .expect("no response to memory map request")
+            .expect("bootloader did not provide a response to the memory map request")
             .entries();
-
-        report_memory_map_entries(memory_map);
-        report_total_usable_memory(memory_map);
 
         let last_entry = memory_map.last().unwrap();
 
@@ -28,8 +53,8 @@ crate::singleton! {
         let total_physical_memory =
             usize::try_from(last_entry.base + last_entry.length).unwrap();
 
-        let total_frames = align_up_div(total_physical_memory, page_shift());
-        trace!("Total frames: {total_frames} ({total_physical_memory:#X} B)");
+        let total_frames = align_up_div(total_physical_memory, page_bits());
+        trace!("Total frames: {total_frames} ({total_physical_memory:#X} Bytes)");
 
         // Aligned frame count to the next multiple of `usize`s bit count.
         let table_slice_len = align_up_div(
@@ -39,7 +64,7 @@ crate::singleton! {
         // Total memory the table will consume as a multiple of frame size.
         let table_area_in_frames = align_up_div(
             table_slice_len * core::mem::size_of::<usize>(),
-            page_shift(),
+            page_bits(),
         );
         // Total memory the table will consume as a multiple of bytes.
         let table_area_in_bytes = table_area_in_frames * page_size();
@@ -48,7 +73,6 @@ crate::singleton! {
         );
 
         // Select a region that will fit the table, aligned to frame size.
-        // TODO allow selecting a region that would fit the table, but whose beginning does not align to a frame boundary.
         let select_region = memory_map
             .iter()
             .filter(|entry| entry.entry_type == limine::memory_map::EntryType::USABLE)
@@ -95,10 +119,7 @@ crate::singleton! {
             .fill(true);
 
         // Ensure the table's frames are reserved.
-        trace!(
-            "Locking (Table): {:#X}..{:#X}",
-            select_region.start, select_region.end
-        );
+        trace!("Locking (Table): {select_region:#X?}");
         table
             .get_mut((select_region.start / page_size())..(select_region.end / page_size()))
             .expect("attempted to index frame table out of bounds")
@@ -120,9 +141,9 @@ crate::singleton! {
                 if let Some(prev_entry_range_end) = prev_entry_range_end
                     && prev_entry_range_end < entry_range.start
                 {
-                    debug!(
-                        "Locking (Inbetween): {:#X}..{:#X}",
-                        prev_entry_range_end, entry_range.start
+                    trace!(
+                        "Locking (Inbetween): {:#X?}",
+                        prev_entry_range_end..entry_range.start
                     );
 
                     table
@@ -136,7 +157,7 @@ crate::singleton! {
 
                 // Only lock the non-usable entries...
                 if entry_ty != limine::memory_map::EntryType::USABLE {
-                    trace!("Locking: {:#X}..{:#X}", entry_range.start, entry_range.end);
+                    trace!("Locking (Used): {entry_range:#X?}");
 
                     table
                         .get_mut(
@@ -162,7 +183,8 @@ unsafe impl Send for PhysicalMemoryManager {}
 unsafe impl Sync for PhysicalMemoryManager {}
 
 impl PhysicalMemoryManager {
-    /// Passes the static physical memory manager's frame table to `with_fn`, returning the result.
+    /// Passes the static physical memory manager's frame table to `with_fn`,
+    /// returning the result.
     fn with_table<T>(with_fn: impl FnOnce(&RwLock<&'static mut BitSlice<AtomicUsize>>) -> T) -> T {
         Self::get_static().table.with(with_fn)
     }
@@ -172,13 +194,13 @@ impl PhysicalMemoryManager {
     }
 
     pub fn total_memory() -> usize {
-        Self::total_frames() * libsys::page_size()
+        Self::total_frames() * page_size()
     }
 
-    pub fn next_frame() -> Option<Address<Frame>> {
+    pub fn next_frame(clear_memory: bool) -> Result<Address<Frame>, NextFrameError> {
         Self::with_table(|table| {
             let mut table = table.write();
-            let free_frame_index = table.first_zero()?;
+            let free_frame_index = table.first_zero().ok_or(NextFrameError::NoneFree)?;
 
             // Safety: `index` is returned from a search function on `Self`.
             unsafe {
@@ -187,34 +209,44 @@ impl PhysicalMemoryManager {
 
             trace!(
                 "Frame Locked: {:#X?}",
-                free_frame_index << page_shift().get()
+                free_frame_index << page_bits().get()
             );
 
-            let frame = Address::new(free_frame_index << page_shift().get())
+            let frame = Address::<Frame>::new(free_frame_index << page_bits().get())
                 .expect("physical memory manager constructed invalid physical address");
 
-            Some(frame)
+            if clear_memory {
+                // Safety: Memory was just allocated, and is not currently aliased.
+                unsafe {
+                    crate::mem::zero_frame(frame);
+                }
+            }
+
+            Ok(frame)
         })
     }
 
     pub fn next_frames(
         count: NonZero<usize>,
         align_bits: Option<NonZero<u32>>,
-    ) -> Option<Address<Frame>> {
+        clear_memory: bool,
+    ) -> Result<Address<Frame>, NextFrameError> {
         Self::with_table(|table| {
             let mut table = table.write();
 
             let align_bits = align_bits.unwrap_or(NonZero::<u32>::MIN).get();
-            let align_index_skip = u32::max(1, align_bits >> page_shift().get());
+            let align_index_skip = u32::max(1, align_bits >> page_bits().get());
 
             let free_frames_index = table
                 .windows(count.get())
                 .enumerate()
                 .step_by(align_index_skip.try_into().unwrap())
-                .find_map(|(index, window)| window.not_any().then_some(index))?;
+                .find_map(|(index, window)| window.not_any().then_some(index))
+                .ok_or(NextFrameError::NoneFree)?;
 
-            // It's a bit uglier to find the index of the window, then effectively reacreate it. However, `.windows()`
-            // does not return a mutable bitslice, so this is how it must be done.
+            // It's a bit uglier to find the index of the window, then effectively reacreate
+            // it. However, `.windows()` does not return a mutable bitslice, so
+            // this is how it must be done.
             let free_frames = table
                 .get_mut(free_frames_index..(free_frames_index + count.get()))
                 .unwrap();
@@ -226,48 +258,71 @@ impl PhysicalMemoryManager {
                 free_frames_index + free_frames.len()
             );
 
-            let frame = Address::new(free_frames_index << page_shift().get())
+            let frame = Address::<Frame>::new(free_frames_index << page_bits().get())
                 .expect("physical memory manager constructed invalid physical address");
 
-            Some(frame)
+            if clear_memory {
+                // Safety: Memory was just allocated, and is not currently aliased.
+                unsafe {
+                    crate::mem::zero_frame(frame);
+                }
+            }
+
+            Ok(frame)
         })
     }
 
-    pub fn lock_frame(address: Address<Frame>) {
+    pub fn lock_frame(address: Address<Frame>) -> Result<(), LockFrameError> {
         Self::with_table(|table| {
             let table = table.read();
             let index = address.index();
 
             // The table may have more bits than there are frames due to the
             // padding effect of using a `usize` as the underlying data type.
-            assert!(index < Self::total_frames(), "frame index out of bounds");
-            assert!(!table[index], "frame cannot be locked; was not free");
+            if index >= Self::total_frames() {
+                return Err(LockFrameError::OutOfBounds);
+            }
 
-            // Safety: Index is checked to be within frame bounds.
+            // Safety: Index is checked within bounds.
+            if unsafe { *table.get_unchecked(index) } {
+                return Err(LockFrameError::NotLocked);
+            }
+
+            // Safety: Index is checked within bounds.
             unsafe {
                 table.set_aliased_unchecked(index, true);
             }
 
-            trace!("Frame Locked: {:#X?}", index << page_shift().get());
+            trace!("Frame Locked: {:#X?}", index << page_bits().get());
+
+            Ok(())
         })
     }
 
-    pub fn free_frame(address: Address<Frame>) {
+    pub fn free_frame(address: Address<Frame>) -> Result<(), FreeFrameError> {
         Self::with_table(|table| {
             let table = table.read();
             let index = address.index();
 
             // The table may have more bits than there are frames due to the
             // padding effect of using a `usize` as the underlying data type.
-            assert!(index < Self::total_frames(), "frame index out of bounds");
-            assert!(table[index], "frame cannot be freed; was not locked");
+            if index >= Self::total_frames() {
+                return Err(FreeFrameError::OutOfBounds);
+            }
 
-            // Safety: Index is checked to be within frame bounds.
+            // Safety: Index is checked within bounds.
+            if !(unsafe { *table.get_unchecked(index) }) {
+                return Err(FreeFrameError::NotLocked);
+            }
+
+            // Safety: Index is checked within bounds.
             unsafe {
                 table.set_aliased_unchecked(index, false);
             }
 
-            trace!("Freed: {:#X?}", index << page_shift().get());
+            trace!("Freed: {:#X?}", index << page_bits().get());
+
+            Ok(())
         })
     }
 
@@ -282,53 +337,4 @@ impl PhysicalMemoryManager {
             unsafe { *table.get_unchecked(index) }
         })
     }
-}
-
-fn report_memory_map_entries(memory_map: &[&limine::memory_map::Entry]) {
-    memory_map.iter().for_each(|entry| {
-        let entry_start = entry.base;
-        let entry_end = entry_start + entry.length;
-        debug!(
-            "Memory map entry: {:#X?}  {}",
-            entry_start..entry_end,
-            match entry.entry_type {
-                limine::memory_map::EntryType::USABLE => "USABLE",
-                limine::memory_map::EntryType::RESERVED => "RESERVED",
-                limine::memory_map::EntryType::EXECUTABLE_AND_MODULES => "EXECUTABLE_AND_MODULES",
-                limine::memory_map::EntryType::BOOTLOADER_RECLAIMABLE => "BOOTLOADER_RECLAIMABLE",
-                limine::memory_map::EntryType::ACPI_RECLAIMABLE => "ACPI_RECLAIMABLE",
-                limine::memory_map::EntryType::ACPI_NVS => "ACPI_NVS",
-                limine::memory_map::EntryType::FRAMEBUFFER => "FRAMEBUFFER",
-                limine::memory_map::EntryType::BAD_MEMORY => "BAD_MEMORY",
-
-                _ => unreachable!("!! UNKOWN !!"),
-            }
-        );
-    });
-}
-
-fn report_total_usable_memory(memory_map: &[&limine::memory_map::Entry]) {
-    let total_usable_memory =
-        memory_map
-            .iter()
-            .fold(0u64, |usable_memory_count, entry| match entry.entry_type {
-                limine::memory_map::EntryType::USABLE
-                | limine::memory_map::EntryType::EXECUTABLE_AND_MODULES
-                | limine::memory_map::EntryType::BOOTLOADER_RECLAIMABLE
-                | limine::memory_map::EntryType::ACPI_RECLAIMABLE => {
-                    usable_memory_count + entry.length
-                }
-
-                limine::memory_map::EntryType::RESERVED
-                | limine::memory_map::EntryType::ACPI_NVS
-                | limine::memory_map::EntryType::FRAMEBUFFER
-                | limine::memory_map::EntryType::BAD_MEMORY => usable_memory_count,
-
-                _ => unreachable!("unknown memory map entry type"),
-            });
-
-    debug!(
-        "Detected system memory: {}MB",
-        total_usable_memory / 1_000_000
-    );
 }

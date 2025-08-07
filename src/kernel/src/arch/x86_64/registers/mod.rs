@@ -9,29 +9,10 @@ pub mod model_specific;
 pub struct RSP;
 
 impl RSP {
-    /// Writes the raw `value` to the stack pointer register.
-    ///
-    /// # Safety
-    ///
-    /// Writing directly to a register circumvents the compiler. It is the job of the developer
-    /// to ensure that this does not cause undefined behaviour.
-    #[inline(always)]
-    pub unsafe fn write(value: *const u8) {
-        // Safety: Caller is required to ensure no undefined behaviour occurs.
-        #[allow(clippy::pointers_in_nomem_asm_block)]
-        unsafe {
-            core::arch::asm!(
-                "mov rsp, {}",
-                in(reg) value,
-                options(nomem, nostack, preserves_flags)
-            );
-        }
-    }
-
     // Reads the raw value from the register.
     #[inline(always)]
     pub fn read() -> *const u8 {
-        let value: usize;
+        let value: *const u8;
 
         // Safety: Reading a value out of a register does not cause undefined behaviour.
         unsafe {
@@ -42,7 +23,7 @@ impl RSP {
             );
         }
 
-        core::ptr::with_exposed_provenance(value)
+        value
     }
 }
 

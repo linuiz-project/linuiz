@@ -1,3 +1,5 @@
+use num_enum::{FromPrimitive, IntoPrimitive};
+
 pub mod exceptions;
 pub mod syscall;
 
@@ -43,8 +45,8 @@ pub fn disable() {
 pub fn is_enabled() -> bool {
     #[cfg(target_arch = "x86_64")]
     {
-        crate::arch::x86_64::registers::Flags::read()
-            .contains(crate::arch::x86_64::registers::Flags::INTERRUPT_FLAG)
+        crate::arch::x86_64::registers::ProcessorFlags::read()
+            .contains(crate::arch::x86_64::registers::ProcessorFlags::INTERRUPT_FLAG)
     }
 
     #[cfg(not(any(target_arch = "x86_64")))]
@@ -66,17 +68,14 @@ pub fn wait_next() {
 pub struct InterruptCell<T>(T);
 
 impl<T> InterruptCell<T> {
-    #[inline]
     pub const fn new(value: T) -> Self {
         Self(value)
     }
 
-    #[inline]
     pub fn with<U>(&self, func: impl FnOnce(&T) -> U) -> U {
         uninterruptable(|| func(&self.0))
     }
 
-    #[inline]
     pub fn with_mut<U>(&mut self, func: impl FnOnce(&mut T) -> U) -> U {
         uninterruptable(|| func(&mut self.0))
     }

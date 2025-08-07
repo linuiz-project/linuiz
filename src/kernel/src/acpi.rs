@@ -14,7 +14,7 @@ impl acpi::AcpiHandler for Handler {
         physical_address: usize,
         size: usize,
     ) -> acpi::PhysicalMapping<Self, T> {
-        trace!("Physical mapping @ {physical_address:#X} (size:{size})");
+        trace!("Physical Mapping {{ address: {physical_address:#X}, size: {size} bytes }}");
 
         let virtual_address =
             NonNull::with_exposed_provenance(HigherHalfDirectMap::offset(physical_address));
@@ -23,12 +23,14 @@ impl acpi::AcpiHandler for Handler {
         //  - `physical_address` is the physical address of the mapping.
         //  - `virtual_address` is the virtual address of the mapping.
         //  - `size` is both the requested and fulfilled size of the mapping.
-        //  - Physical memory can always be mapped, as the higher-half direct map represents all physical memory.
+        //  - Physical memory can always be mapped, as the higher-half direct map
+        //    represents all physical memory.
         unsafe { acpi::PhysicalMapping::new(physical_address, virtual_address, size, size, Self) }
     }
 
     fn unmap_physical_region<T>(_: &acpi::PhysicalMapping<Self, T>) {
-        //  We don't actually need to unmap anything, since this utilizes the HHDM.
+        //  We don't actually need to unmap anything, since this utilizes the
+        // HHDM.
     }
 }
 

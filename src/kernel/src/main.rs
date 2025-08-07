@@ -2,23 +2,26 @@
 #![no_main]
 #![feature(
     allocator_api,
-    array_ptr_get,
+    array_repeat,
     array_windows,
     box_vec_non_null,
     breakpoint,
     cfg_select,
     duration_constants,
     extern_types,
-    generic_const_exprs,
+    generic_atomic,
     if_let_guard,
     iter_advance_by,
     iter_array_chunks,
     iter_next_chunk,
+    maybe_uninit_array_assume_init,
     maybe_uninit_slice,
     maybe_uninit_write_slice,
     pointer_is_aligned_to,
+    pointer_try_cast_aligned,
     ptr_as_ref_unchecked,
     ptr_as_uninit,
+    range_into_bounds,
     slice_ptr_get,
     step_trait,
     strict_provenance_lints
@@ -52,7 +55,6 @@
     clippy::needless_for_each,
     clippy::if_not_else,
     dead_code,
-    incomplete_features,
     mismatched_lifetime_syntaxes
 )]
 
@@ -79,6 +81,9 @@ mod task;
 mod time;
 mod util;
 
+#[cfg(debug_assertions)]
+mod dev;
+
 extern crate alloc;
 
 #[macro_use]
@@ -88,16 +93,13 @@ extern crate bitflags;
 extern crate log;
 
 #[macro_use]
-extern crate num_enum;
-
-#[macro_use]
 extern crate paste;
 
 #[macro_use]
-extern crate thiserror;
+extern crate static_assertions;
 
 #[macro_use]
-extern crate zerocopy;
+extern crate thiserror;
 
 unsafe extern "C" {
     pub type LinkerSymbol;
@@ -105,7 +107,7 @@ unsafe extern "C" {
 
 impl LinkerSymbol {
     pub fn as_usize(&'static self) -> usize {
-        (&raw const self).addr()
+        core::ptr::from_ref(self).addr()
     }
 }
 
@@ -116,11 +118,11 @@ static BASE_REVISION: BaseRevision = BaseRevision::with_revision(4);
 const KERNEL_STACK_SIZE: usize = {
     #[cfg(debug_assertions)]
     {
-        0x1000000
+        0x800000
     }
     #[cfg(not(debug_assertions))]
     {
-        0x4000
+        0x100000
     }
 };
 
@@ -130,73 +132,102 @@ const KERNEL_STACK_SIZE: usize = {
 static STACK_SIZE_REQUEST: StackSizeRequest =
     StackSizeRequest::new().with_size(KERNEL_STACK_SIZE as u64);
 
-/// # Safety
-///
-/// This function should only ever be called by the bootloader.
 #[doc(hidden)]
+#[unsafe(naked)]
 #[unsafe(no_mangle)]
 #[allow(clippy::too_many_lines)]
 unsafe extern "C" fn _entry() -> ! {
-    // This function is absolutely massive, and that's intentional. All of the code
-    // within this function should be absolutely, definitely run ONLY ONCE. Writing
-    // the code sequentially within one function easily ensures that will be the case.
+    extern "sysv64" fn main(stack_ptr: *const u8) -> ! {
+        // All of the code within this function should be run ONLY ONCE. Writing the
+        // code sequentially within one function easily ensures that will be the
+        // case.
 
-    // All limine feature requests (ensures they are not used after bootloader memory is reclaimed)
-    static BOOTLOADER_INFO_REQUEST: BootloaderInfoRequest = BootloaderInfoRequest::new();
-    static KERNEL_FILE_REQUEST: ExecutableFileRequest = ExecutableFileRequest::new();
-    static KERNEL_CMDLINE_REQUEST: ExecutableCmdlineRequest = ExecutableCmdlineRequest::new();
-    static KERNEL_ADDRESS_REQUEST: ExecutableAddressRequest = ExecutableAddressRequest::new();
-    static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
-    static MEMORY_MAP_REQUEST: MemoryMapRequest = MemoryMapRequest::new();
-    static RSDP_REQUEST: RsdpRequest = RsdpRequest::new();
-    static MP_REQUEST: MpRequest = MpRequest::new().with_flags(RequestFlags::X2APIC);
+        // All limine feature requests (ensures they are not used after bootloader
+        // memory is reclaimed)
+        static BOOTLOADER_INFO_REQUEST: BootloaderInfoRequest = BootloaderInfoRequest::new();
+        static KERNEL_FILE_REQUEST: ExecutableFileRequest = ExecutableFileRequest::new();
+        static KERNEL_CMDLINE_REQUEST: ExecutableCmdlineRequest = ExecutableCmdlineRequest::new();
+        static KERNEL_ADDRESS_REQUEST: ExecutableAddressRequest = ExecutableAddressRequest::new();
+        static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
+        static MEMORY_MAP_REQUEST: MemoryMapRequest = MemoryMapRequest::new();
+        static RSDP_REQUEST: RsdpRequest = RsdpRequest::new();
+        static MP_REQUEST: MpRequest = MpRequest::new().with_flags(RequestFlags::X2APIC);
 
-    // Enable logging first, so we can get feedback on the entire init process.
-    crate::logging::Logger::init();
+        // Safety: Value is non-zero.
+        let paging_depth = unsafe { core::num::NonZero::<u32>::new_unchecked(4) };
+        // Safety: Current paging depth is 4.
+        unsafe {
+            libsys::constants::set_paging_depth(paging_depth);
+        }
 
-    // Safety: Function is run only once for this hardware thread.
-    unsafe {
+        // Enable logging first, so we can get feedback on the entire init process.
+        crate::logging::KernelLogger::init();
+
         #[cfg(target_arch = "x86_64")]
-        crate::arch::x86_64::configure_hwthread();
+        // Safety: Function is run only once for this hardware thread.
+        unsafe {
+            crate::arch::x86_64::configure_hwthread();
+        }
+
+        if STACK_SIZE_REQUEST.get_response().is_none() {
+            warn!("Stack size request was not fulfilled.");
+        }
+
+        // 0x1E029000
+        // 0x1E09E000
+        // 0x1E93F000
+        trace!("Bootstrap Processor Stack: {stack_ptr:#X?}");
+        print_env_info(&BOOTLOADER_INFO_REQUEST, &MEMORY_MAP_REQUEST);
+
+        let (kernel_physical_address, kernel_virtual_address) = KERNEL_ADDRESS_REQUEST
+            .get_response()
+            .map(|response| {
+                (
+                    usize::try_from(response.physical_base()).unwrap(),
+                    usize::try_from(response.virtual_base()).unwrap(),
+                )
+            })
+            .expect("bootloader did not provide a response to kernel address request");
+        debug!("Kernel physical address: {kernel_physical_address:#X?}");
+        debug!("Kernel virtual address: {kernel_virtual_address:#X?}");
+
+        crate::params::KernelParameters::init(&KERNEL_CMDLINE_REQUEST);
+
+        #[cfg(feature = "panic_traces")]
+        if !crate::params::KernelParameters::drop_symbol_info() {
+            crate::panic::tracing::symbols::KernelSymbols::init(&KERNEL_FILE_REQUEST);
+        }
+
+        crate::mem::HigherHalfDirectMap::init(&HHDM_REQUEST);
+        crate::mem::pmm::PhysicalMemoryManager::init(&MEMORY_MAP_REQUEST);
+        crate::mem::KernelMapper::init(
+            &MEMORY_MAP_REQUEST,
+            &KERNEL_FILE_REQUEST,
+            &KERNEL_ADDRESS_REQUEST,
+        );
+
+        crate::time::Stopwatch::init(&RSDP_REQUEST);
+
+        // Safety: We've reached the end of the kernel init phase.
+        unsafe { crate::cpu::synchronize(stack_ptr, Some((&MP_REQUEST, &MEMORY_MAP_REQUEST))) }
     }
 
-    print_boot_info(&BOOTLOADER_INFO_REQUEST);
-
-    let (kernel_physical_address, kernel_virtual_address) = KERNEL_ADDRESS_REQUEST
-        .get_response()
-        .map(|response| {
-            (
-                usize::try_from(response.physical_base()).unwrap(),
-                usize::try_from(response.virtual_base()).unwrap(),
-            )
-        })
-        .expect("bootloader did not provide a response to kernel address request");
-    debug!("Kernel physical address: {kernel_physical_address:#X?}");
-    debug!("Kernel virtual address: {kernel_virtual_address:#X?}");
-
-    crate::params::parse(&KERNEL_CMDLINE_REQUEST);
-
-    #[cfg(feature = "panic_traces")]
-    if crate::params::keep_symbol_info() {
-        crate::panic::tracing::symbols::Symbols::init(&KERNEL_FILE_REQUEST);
-    }
-
-    crate::mem::HigherHalfDirectMap::init(&HHDM_REQUEST);
-    crate::mem::pmm::PhysicalMemoryManager::init(&MEMORY_MAP_REQUEST);
-    crate::mem::init(
-        &MEMORY_MAP_REQUEST,
-        &KERNEL_FILE_REQUEST,
-        &KERNEL_ADDRESS_REQUEST,
-    );
-
-    crate::time::Stopwatch::init(&RSDP_REQUEST);
-    trace!("System stopwatch initialized.");
-
-    // Safety: We've reached the end of the kernel init phase.
-    unsafe { crate::cpu::synchronize(Some((&MP_REQUEST, &MEMORY_MAP_REQUEST))) }
+    // Move the exact starting stack pointer into the first parameter.
+    // This will be used in `crate::cpu::synchronize` to determine which memory
+    // segments are stack spaces used by the kernel setup process.
+    core::arch::naked_asm!(
+        "
+        mov rdi, rsp
+        call {}
+        ",
+        sym main
+    )
 }
 
-fn print_boot_info(bootloader_info_request: &BootloaderInfoRequest) {
+fn print_env_info(
+    bootloader_info_request: &BootloaderInfoRequest,
+    memory_map_request: &MemoryMapRequest,
+) {
     if let Some(bootloader_info) = bootloader_info_request.get_response() {
         info!(
             "Bootloader: {} v{} (rev {})",
@@ -216,6 +247,60 @@ fn print_boot_info(bootloader_info_request: &BootloaderInfoRequest) {
 
         crate::arch::x86_64::cpuid::print_info();
     }
+
+    let memory_map = memory_map_request
+        .get_response()
+        .expect("bootloader did not provide a response to the memory map request")
+        .entries();
+
+    report_memory_map_entries(memory_map);
+    report_total_usable_memory(memory_map);
+}
+
+fn report_memory_map_entries(memory_map: &[&limine::memory_map::Entry]) {
+    memory_map.iter().for_each(|entry| {
+        let entry_start = entry.base;
+        let entry_end = entry_start + entry.length;
+        debug!(
+            "Memory Map: {:#X?}  {}",
+            entry_start..entry_end,
+            match entry.entry_type {
+                limine::memory_map::EntryType::USABLE => "USABLE",
+                limine::memory_map::EntryType::RESERVED => "RESERVED",
+                limine::memory_map::EntryType::EXECUTABLE_AND_MODULES => "EXECUTABLE_AND_MODULES",
+                limine::memory_map::EntryType::BOOTLOADER_RECLAIMABLE => "BOOTLOADER_RECLAIMABLE",
+                limine::memory_map::EntryType::ACPI_RECLAIMABLE => "ACPI_RECLAIMABLE",
+                limine::memory_map::EntryType::ACPI_NVS => "ACPI_NVS",
+                limine::memory_map::EntryType::FRAMEBUFFER => "FRAMEBUFFER",
+                limine::memory_map::EntryType::BAD_MEMORY => "BAD_MEMORY",
+
+                _ => unreachable!("!! UNKOWN !!"),
+            }
+        );
+    });
+}
+
+fn report_total_usable_memory(memory_map: &[&limine::memory_map::Entry]) {
+    let total_usable_memory = memory_map
+        .iter()
+        .fold(0u64, |mut total_usable_memory, entry| {
+            if matches!(
+                entry.entry_type,
+                limine::memory_map::EntryType::USABLE
+                    | limine::memory_map::EntryType::EXECUTABLE_AND_MODULES
+                    | limine::memory_map::EntryType::BOOTLOADER_RECLAIMABLE
+                    | limine::memory_map::EntryType::ACPI_RECLAIMABLE
+            ) {
+                total_usable_memory += entry.length;
+            }
+
+            total_usable_memory
+        });
+
+    debug!(
+        "Detected system memory: {}MB",
+        total_usable_memory / 1_000_000
+    );
 }
 
 // fn load_drivers() {
@@ -223,7 +308,8 @@ fn print_boot_info(bootloader_info_request: &BootloaderInfoRequest) {
 //     use elf::endian::AnyEndian;
 
 //     #[limine::limine_tag]
-//     static LIMINE_MODULES: limine::ModuleRequest = limine::ModuleRequest::new(crate::init::boot::LIMINE_REV);
+//     static LIMINE_MODULES: limine::ModuleRequest =
+// limine::ModuleRequest::new(crate::init::boot::LIMINE_REV);
 
 //     debug!("Unpacking kernel drivers...");
 
@@ -235,9 +321,9 @@ fn print_boot_info(bootloader_info_request: &BootloaderInfoRequest) {
 //     let modules = modules.modules();
 //     trace!("Found modules: {:X?}", modules);
 
-//     let Some(drivers_module) = modules.iter().find(|module| module.path().ends_with("drivers")) else {
-//         panic!("no drivers module found")
-//     };
+//     let Some(drivers_module) = modules.iter().find(|module|
+// module.path().ends_with("drivers")) else {         panic!("no drivers module
+// found")     };
 
 //     let archive = tar_no_std::TarArchiveRef::new(drivers_module.data());
 //     archive
@@ -248,27 +334,28 @@ fn print_boot_info(bootloader_info_request: &BootloaderInfoRequest) {
 //             match elf::ElfBytes::<AnyEndian>::minimal_parse(entry.data()) {
 //                 Ok(elf) => Some((entry, elf)),
 //                 Err(err) => {
-//                     error!("Failed to parse driver blob into ELF: {:?}", err);
-//                     None
+//                     error!("Failed to parse driver blob into ELF: {:?}",
+// err);                     None
 //                 }
 //             }
 //         })
 //         .for_each(|(entry, elf)| {
 //             // Get and copy the ELF segments into a small box.
-//             let Some(segments_copy) = elf.segments().map(|segments| segments.into_iter().collect()) else {
-//                 error!("ELF has no segments.");
-//                 return;
+//             let Some(segments_copy) = elf.segments().map(|segments|
+// segments.into_iter().collect()) else {                 error!("ELF has no
+// segments.");                 return;
 //             };
 
-//             // Safety: In-place transmutation of initialized bytes for the purpose of copying safely.
-//             // let (_, archive_data, _) = unsafe { entry.data().align_to::<MaybeUninit<u8>>() };
-//             trace!("Allocating ELF data into memory...");
-//             let elf_data = alloc::boxed::Box::from(entry.data());
-//             trace!("ELF data allocated into memory.");
+//             // Safety: In-place transmutation of initialized bytes for the
+// purpose of copying safely.             // let (_, archive_data, _) = unsafe {
+// entry.data().align_to::<MaybeUninit<u8>>() };             trace!("Allocating
+// ELF data into memory...");             let elf_data =
+// alloc::boxed::Box::from(entry.data());             trace!("ELF data allocated
+// into memory.");
 
-//             let Ok((Some(shdrs), Some(_))) = elf.section_headers_with_strtab() else {
-//                 panic!("Error retrieving ELF relocation metadata.")
-//             };
+//             let Ok((Some(shdrs), Some(_))) =
+// elf.section_headers_with_strtab() else {                 panic!("Error
+// retrieving ELF relocation metadata.")             };
 
 //             let load_offset = crate::task::MIN_LOAD_OFFSET;
 
@@ -284,9 +371,10 @@ fn print_boot_info(bootloader_info_request: &BootloaderInfoRequest) {
 
 //                     match rela.r_type {
 //                         elf::abi::R_X86_64_RELATIVE => relas.push(ElfRela {
-//                             address: Address::new(usize::try_from(rela.r_offset).unwrap()).unwrap(),
-//                             value: load_offset + usize::try_from(rela.r_addend).unwrap(),
-//                         }),
+//                             address:
+// Address::new(usize::try_from(rela.r_offset).unwrap()).unwrap(),
+// value: load_offset + usize::try_from(rela.r_addend).unwrap(),
+// }),
 
 //                         _ => unimplemented!(),
 //                     }
@@ -315,12 +403,12 @@ macro_rules! singleton {
         $struct_scope:vis $struct_name:ident {
             $(
                 $(#[$field_attrs:meta])*
-                $scope:vis $field_name:ident: $field_ty:ty,
-            )*
+                $field_scope:vis $field_name:ident: $field_ty:ty
+            ),*
         }
 
         $(#[$init_attrs:meta])*
-        fn init($($arg_name:ident: $arg_ty:ty),*)
+        fn init($($arg_name:ident: $arg_ty:ty),*) -> Self
             $init:block
     ) => {
         paste! {
@@ -331,13 +419,13 @@ macro_rules! singleton {
             $struct_scope struct $struct_name {
                 $(
                     $(#[$field_attrs])*
-                    $scope $field_name: $field_ty
+                    $field_scope $field_name: $field_ty
                 ),*
             }
 
             impl $struct_name {
                 $(#[$init_attrs])*
-                pub fn init($($arg_name: $arg_ty)*) {
+                pub fn init($($arg_name: $arg_ty),*) {
                     [< STATIC_ $struct_name >].call_once(||{
                         trace!(concat!("Initializing `", stringify!($struct_name), "`..."));
 

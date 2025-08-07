@@ -1,4 +1,4 @@
-use libsys::{Address, Virtual};
+use libsys::address::{Address, Virtual};
 
 pub struct CR2;
 
@@ -12,6 +12,6 @@ impl CR2 {
             core::arch::asm!("mov {}, cr2", out(reg) value, options(nomem, nostack, preserves_flags));
         }
 
-        Address::new(usize::try_from(value).unwrap()).unwrap()
+        Address::<Virtual>::new(usize::try_from(value).unwrap()).unwrap()
     }
 }

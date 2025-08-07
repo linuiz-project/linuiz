@@ -1,5 +1,5 @@
 use elf::{ElfBytes, endian::AnyEndian, string_table::StringTable, symbol::SymbolTable};
-use libsys::{Address, Virtual};
+use libsys::address::{Address, Virtual};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -14,18 +14,19 @@ pub enum Error {
 }
 
 crate::singleton! {
-    pub Symbols {
-        tables: Option<(SymbolTable<'static, AnyEndian>, StringTable<'static>)>,
+    pub KernelSymbols {
+        tables: Option<(SymbolTable<'static, AnyEndian>, StringTable<'static>)>
     }
 
-    fn init(kernel_file_request: &limine::request::ExecutableFileRequest) {
+    fn init(kernel_file_request: &limine::request::ExecutableFileRequest) -> Self {
         let Some(response) = kernel_file_request.get_response() else {
             error!("Bootloader didn't provide response to kernel file request.");
             return Self { tables: None };
         };
 
         // Safety: Bootloader guarantees the address and size of the executable file will be correct.
-        //         Additionally, given the context, it also guarantees the file will be mapped into memory.
+        //         Additionally, given the context, it also guarantees the file will be mapped into
+        //         memory.
         let kernel_file = unsafe {
             core::slice::from_raw_parts::<'static>(
                 response.file().addr(),
@@ -58,9 +59,9 @@ crate::singleton! {
     }
 }
 
-impl Symbols {
+impl KernelSymbols {
     pub fn get_name(address: Address<Virtual>) -> Option<&'static str> {
-        let (symbols, strings) = Symbols::get_static().tables.as_ref()?;
+        let (symbols, strings) = KernelSymbols::get_static().tables.as_ref()?;
 
         let symbol = symbols.iter().find(|symbol| {
             (symbol.st_value..(symbol.st_value + symbol.st_size))

@@ -1,5 +1,11 @@
-use crate::mem::{HigherHalfDirectMap, paging::Error};
-use libsys::{Address, Page, table_index_size};
+use crate::mem::{
+    HigherHalfDirectMap,
+    pmm::{NextFrameError, PhysicalMemoryManager},
+};
+use libsys::{
+    address::{Address, Page},
+    constants::table_index_size,
+};
 
 mod depth;
 pub use depth::*;
@@ -7,12 +13,46 @@ pub use depth::*;
 mod entry;
 pub use entry::*;
 
+#[derive(Debug, Error, PartialEq, Eq)]
+#[allow(clippy::enum_variant_names)]
+pub enum WithEntryError {
+    #[error("expected an intermediate page, but found a terminating page")]
+    TerminatingPage,
+
+    #[error("page was not mapped")]
+    NotMapped,
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+#[allow(clippy::enum_variant_names)]
+pub enum CreateEntryError {
+    #[error("expected an intermediate page, but found a terminating page")]
+    TerminatingPage,
+
+    #[error("ran out of memory for allocation")]
+    OutOfMemory,
+}
+
+impl From<NextFrameError> for CreateEntryError {
+    fn from(error: NextFrameError) -> Self {
+        match error {
+            NextFrameError::NoneFree => Self::OutOfMemory,
+        }
+    }
+}
+
 #[repr(C)]
 #[cfg_attr(target_arch = "x86_64", repr(align(0x1000)))]
-#[derive(Debug, FromZeros, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(super) struct PageTable([Entry; table_index_size()]);
 
+assert_eq_size!([u8; 0x1000], PageTable);
+
 impl PageTable {
+    pub const fn empty() -> Self {
+        Self([const { Entry::empty() }; table_index_size()])
+    }
+
     pub fn get(&self, index: usize) -> Option<&Entry> {
         self.0.get(index)
     }
@@ -30,7 +70,7 @@ impl PageTable {
         current_depth: Depth,
         to_depth: Option<Depth>,
         with_fn: impl FnOnce(&Entry) -> T,
-    ) -> Result<T, Error> {
+    ) -> Result<T, WithEntryError> {
         let entry_index = current_depth.index_of(page.get());
 
         debug_assert!(entry_index < table_index_size());
@@ -41,13 +81,15 @@ impl PageTable {
         if current_depth == to_depth.unwrap_or(Depth::max()) {
             Ok(with_fn(entry))
         } else {
-            if !entry.is_intermediate() {
-                return Err(Error::TerminatingPage);
+            // This is a simple runtime check to ensure we don't accidentally mistakenly create
+            // large/huge pages along a table walk path.
+            if !is_intermediate_entry(entry) {
+                return Err(WithEntryError::TerminatingPage);
             }
 
             entry
                 .page_table()
-                .ok_or(Error::NotMapped(page))
+                .ok_or(WithEntryError::NotMapped)
                 .and_then(|page_table| {
                     // Safety: Caller is required to maintain safety invariants.
                     unsafe { page_table.with_entry(page, current_depth.next(), to_depth, with_fn) }
@@ -61,7 +103,7 @@ impl PageTable {
         current_depth: Depth,
         to_depth: Option<Depth>,
         with_fn: impl FnOnce(&mut Entry) -> T,
-    ) -> Result<T, Error> {
+    ) -> Result<T, WithEntryError> {
         let entry_index = current_depth.index_of(page.get());
 
         debug_assert!(entry_index < table_index_size());
@@ -72,13 +114,15 @@ impl PageTable {
         if current_depth == to_depth.unwrap_or(Depth::max()) {
             Ok(with_fn(entry))
         } else {
-            if !entry.is_intermediate() {
-                return Err(Error::TerminatingPage);
+            // This is a simple runtime check to ensure we don't accidentally mistakenly create
+            // large/huge pages along a table walk path.
+            if !is_intermediate_entry(entry) {
+                return Err(WithEntryError::TerminatingPage);
             }
 
             entry
                 .page_table_mut()
-                .ok_or(Error::NotMapped(page))
+                .ok_or(WithEntryError::NotMapped)
                 .and_then(|page_table| {
                     // Safety: Caller is required to maintain safety invariants.
                     unsafe {
@@ -96,7 +140,7 @@ impl PageTable {
         current_depth: Depth,
         to_depth: Depth,
         with_fn: impl FnOnce(&mut Entry) -> T,
-    ) -> Result<T, Error> {
+    ) -> Result<T, CreateEntryError> {
         let entry_index = current_depth.index_of(page.get());
 
         debug_assert!(entry_index < table_index_size());
@@ -107,58 +151,35 @@ impl PageTable {
         if current_depth == to_depth {
             Ok(with_fn(entry))
         } else {
-            if !entry.is_intermediate() {
-                return Err(Error::TerminatingPage);
+            // This is a simple runtime check to ensure we don't accidentally mistakenly create
+            // large/huge pages along a table walk path.
+            if !is_intermediate_entry(entry) {
+                return Err(CreateEntryError::TerminatingPage);
             }
 
             if !entry.is_enabled() {
-                debug_assert!(
-                    entry.get_frame() == Address::default(),
-                    "entry is disabled, but has an address: {current_depth:?} {entry:?}"
-                );
-
                 trace!(
-                    "Creating table: {page:X?} (to_depth:{}, current:{})",
+                    "Creating table: {{ page: {page:X?}, to_depth: {}, current_depth: {} }}",
                     to_depth.get(),
                     current_depth.get()
                 );
 
-                entry
-                    .populate()
-                    .expect("could not allocate memory for new page table");
-
-                // Architecture-specific bit enables.
-                cfg_select! {
-                    target_arch = "x86_64" => {
-                        // Insert the `USER` bit in all non-leaf, non-higher-half pages. This is for
-                        // compatibility with the x86 paging scheme, where non-`USER` pages in a page table
-                        // walk will immediately return an access error.
-                        if !HigherHalfDirectMap::is_address_higher_half(page.get()) {
-                            unsafe {
-                                entry.set_user_accessible(true);
-                            }
-                        }
-                    }
-
-                    target_arch = "riscv64" => {
-                        // RISC-V supports a "global" bit to indicate a translation step is
-                        // identical between all address spaces. In our case, this is for kernel
-                        // pages, which will be mapped into the higher-half in all address spaces.
-                        if HigherHalfDirectMap::is_address_higher_half(page.get()) {
-                            unsafe {
-                                entry.set_global(true);
-                            }
-                        }
-                    }
+                // Insert the `USER` bit in all non-leaf, non-higher-half pages. This is for
+                // compatibility with the x86 paging scheme, where non-`USER` pages in a
+                // page table walk will immediately return an access error.
+                #[cfg(target_arch = "x86_64")]
+                if !HigherHalfDirectMap::is_address_higher_half(page.get()) {
+                    entry.set_user(true);
                 }
 
+                let frame = PhysicalMemoryManager::next_frame(true)?;
+
+                // Safety: Frame is unused.
                 unsafe {
-                    entry.set_permissions(crate::mem::Permissions::ReadOnly);
+                    entry.set_frame(frame);
                 }
 
-                unsafe {
-                    entry.set_enabled(true);
-                }
+                entry.set_enabled(true);
             }
 
             let page_table = entry.page_table_mut();
@@ -177,5 +198,13 @@ impl PageTable {
 
     pub fn iter_mut(&mut self) -> core::slice::IterMut<Entry> {
         self.0.iter_mut()
+    }
+}
+
+fn is_intermediate_entry(entry: &Entry) -> bool {
+    cfg_select! {
+        target_arch = "x86_64" => { !entry.is_huge() }
+
+        _ => { todo!() }
     }
 }

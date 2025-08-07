@@ -1,11 +1,11 @@
 use crate::arch::x86_64::{
-    registers::Flags,
+    registers::ProcessorFlags,
     structures::gdt::{
         KCODE_SELECTOR, KDATA_SELECTOR, PrivilegeLevel, SegmentSelector, UCODE_SELECTOR,
         UDATA_SELECTOR,
     },
 };
-use libsys::{Address, Virtual};
+use libsys::address::{Address, Virtual};
 
 /// Represents the interrupt stack frame pushed by the CPU on interrupt or exception entry.
 #[repr(C)]
@@ -33,7 +33,7 @@ impl InterruptStackFrame {
     pub fn new(
         instruction_pointer: Address<Virtual>,
         code_segment: SegmentSelector,
-        cpu_flags: Flags,
+        cpu_flags: ProcessorFlags,
         stack_pointer: Address<Virtual>,
         stack_segment: SegmentSelector,
     ) -> Self {
@@ -53,7 +53,7 @@ impl InterruptStackFrame {
         Self::new(
             instruction_pointer,
             *KCODE_SELECTOR.wait(),
-            Flags::INTERRUPT_FLAG,
+            ProcessorFlags::INTERRUPT_FLAG,
             stack_pointer,
             *KDATA_SELECTOR.wait(),
         )
@@ -66,7 +66,7 @@ impl InterruptStackFrame {
         Self::new(
             instruction_pointer,
             *UCODE_SELECTOR.wait(),
-            Flags::INTERRUPT_FLAG,
+            ProcessorFlags::INTERRUPT_FLAG,
             stack_pointer,
             *UDATA_SELECTOR.wait(),
         )
@@ -81,8 +81,8 @@ impl InterruptStackFrame {
     /// following the last executed instruction. However, for some exceptions (e.g., page faults),
     /// this value points to the faulting instruction, so that the instruction is restarted on
     /// return. See the documentation of the [`InterruptDescriptorTable`] fields for more details.
-    pub fn get_instruction_pointer(&self) -> Address<Virtual> {
-        Address::new(self.instruction_pointer).unwrap()
+    pub fn get_instruction_address(&self) -> Address<Virtual> {
+        Address::<Virtual>::new(self.instruction_pointer).unwrap()
     }
 
     /// Stores the new return instruction pointer.
@@ -110,8 +110,8 @@ impl InterruptStackFrame {
     }
 
     /// Get the return cpu flags.
-    pub fn get_cpu_flags(&self) -> Flags {
-        Flags::from_bits_truncate(self.cpu_flags)
+    pub fn get_cpu_flags(&self) -> ProcessorFlags {
+        ProcessorFlags::from_bits_truncate(self.cpu_flags)
     }
 
     /// Set the return cpu flags.
@@ -119,13 +119,13 @@ impl InterruptStackFrame {
     /// # Safety
     ///
     /// TODO
-    pub unsafe fn set_cpu_flags(&mut self, cpu_flags: Flags) {
+    pub unsafe fn set_cpu_flags(&mut self, cpu_flags: ProcessorFlags) {
         self.cpu_flags = cpu_flags.bits();
     }
 
     /// Get the return stack pointer.
-    pub fn get_stack_pointer(&self) -> Address<Virtual> {
-        Address::new(self.stack_pointer).unwrap()
+    pub fn get_stack_address(&self) -> Address<Virtual> {
+        Address::<Virtual>::new(self.stack_pointer).unwrap()
     }
 
     /// Set the return stack pointer.
@@ -160,10 +160,10 @@ impl InterruptStackFrame {
 impl core::fmt::Debug for InterruptStackFrame {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("InterruptStackFrame")
-            .field("instruction_pointer", &self.get_instruction_pointer())
+            .field("instruction_pointer", &self.get_instruction_address())
             .field("code_segment", &self.get_code_segment())
             .field("cpu_flags", &self.get_cpu_flags())
-            .field("stack_pointer", &self.get_stack_pointer())
+            .field("stack_pointer", &self.get_stack_address())
             .field("stack_segment", &self.get_stack_segment())
             .finish()
     }

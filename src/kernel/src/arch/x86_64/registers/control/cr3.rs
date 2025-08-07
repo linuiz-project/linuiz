@@ -1,35 +1,27 @@
+use crate::task::asid::AddressSpaceId;
+use bit_field::BitField;
 use core::arch::asm;
-use libsys::{Address, Frame};
-
-bitflags! {
-    #[repr(transparent)]
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct CR3Flags: usize {
-        const PAGE_LEVEL_WRITE_THROUGH = 1 << 3;
-        const PAGE_LEVEL_CACHE_DISABLE = 1 << 4;
-    }
-}
+use libsys::{
+    address::{Address, Frame},
+    constants::{page_bits, physical_address_bits},
+};
 
 pub struct CR3;
 
 impl CR3 {
-    /// # Safety
-    ///
-    /// Incorrect flags may violate any number of safety guarantees.
-    #[inline(never)]
-    pub unsafe fn write(address: Address<Frame>, flags: CR3Flags) {
+    pub unsafe fn write(address: Address<Frame>, address_space_id: &AddressSpaceId) {
         // Safety: Caller is required to maintain safety invariants.
         unsafe {
             asm!(
                 "mov cr3, {}",
-                in(reg) address.get().get() | flags.bits(),
-                options(nostack, preserves_flags)
+                in(reg) address.get().get() | address_space_id.get(),
+                options(preserves_flags)
             );
         }
     }
 
-    #[inline(always)]
-    pub fn read() -> (Address<Frame>, CR3Flags) {
+    #[must_use]
+    pub fn read() -> (Address<Frame>, AddressSpaceId) {
         let value: usize;
 
         // Safety: Reading CR3 has no side effects.
@@ -37,28 +29,20 @@ impl CR3 {
             asm!(
                 "mov {}, cr3",
                 out(reg) value,
-                options(nostack, nomem)
+                options(nostack, nomem, preserves_flags)
             );
         }
 
-        (
-            Address::new_truncate(value & libsys::page_mask()),
-            CR3Flags::from_bits_truncate(value),
-        )
-    }
+        let page_bits = usize::try_from(page_bits().get()).unwrap();
+        let physical_address_bits = usize::try_from(physical_address_bits().get()).unwrap();
+        let address_space_id_bits = value.get_bits(0..page_bits);
+        let frame_index_bits = value.get_bits(page_bits..physical_address_bits);
 
-    #[inline]
-    pub fn refresh() {
-        // Safety: Refreshing the CR3 register has no side effects (it merely purges the TLB).
-        unsafe {
-            asm!(
-                "
-                mov {0}, cr3
-                mov cr3, {0}
-                ",
-                out(reg) _,
-                options(preserves_flags)
-            );
-        }
+        let frame = Address::<Frame>::from_index(frame_index_bits)
+            .expect("CR3 had non-canonical frame address");
+        let address_space_id = AddressSpaceId::new(address_space_id_bits)
+            .expect("CR3 had an invalid address space ID");
+
+        (frame, address_space_id)
     }
 }
