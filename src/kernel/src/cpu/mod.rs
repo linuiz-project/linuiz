@@ -1,5 +1,4 @@
 use crate::{
-    arch::x86_64::devices::local_apic::LAPIC,
     cpu::local_state::LocalState,
     mem::{KernelMapper, pmm::PhysicalMemoryManager},
     params::KernelParameters,
@@ -20,7 +19,7 @@ pub mod local_state;
 pub fn get_id() -> u32 {
     #[cfg(target_arch = "x86_64")]
     {
-        crate::arch::x86_64::get_hwthread_id()
+        crate::arch::x86_64::get_processor_id()
     }
 }
 
@@ -58,7 +57,7 @@ pub fn begin_multiprocessing(mp_request: &limine::request::MpRequest) -> Option<
                 // Safety: All currently referenced memory should also be mapped in the kernel
                 // page tables.
                 unsafe {
-                    kernel_mapper.swap_into(&AddressSpaceId::KERNEL);
+                    kernel_mapper.swap_into(AddressSpaceId::KERNEL);
                 }
             });
 
@@ -160,7 +159,7 @@ pub unsafe fn synchronize(
             ENTRY_PROCESSED_SYNC.call_once(|| Barrier::new(hwthread_count));
         }
 
-        debug!("Reclaiming bootloader memory...");
+        debug!("Begin reclaiming bootloader memory...");
 
         memory_map_request
             .get_response()
@@ -268,16 +267,6 @@ pub unsafe fn synchronize(
 
     #[cfg(target_arch = "x86_64")]
     crate::arch::x86_64::structures::tss::TaskStateSegment::load_local();
-
-    trace!("Initializing the local interrupt controller.");
-    #[cfg(target_arch = "x86_64")]
-    LAPIC.reset();
-
-    trace!("Enabling the local interrupt controller.");
-    #[cfg(target_arch = "x86_64")]
-    LAPIC.set_enabled(true);
-
-    debug!("Local interrupt controller has been initialized and enabled.");
 
     LocalState::init();
 

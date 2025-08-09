@@ -202,7 +202,7 @@ impl KernelMapper {
                 target_arch = "x86_64" => {
                     crate::arch::x86_64::registers::control::cr3::CR3::write(
                         kernel_mapper.root_table().frame(),
-                        &AddressSpaceId::KERNEL
+                        AddressSpaceId::KERNEL
                     );
                 }
             }

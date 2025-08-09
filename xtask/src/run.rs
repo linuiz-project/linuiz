@@ -106,11 +106,7 @@ pub fn run(sh: &xshell::Shell, temp_dir: impl AsRef<Path>, options: Options) -> 
     .arg("-no-reboot")
     .args([
         "-chardev",
-        if options.debug_log {
-            "stdio,id=char0,logfile=.debug/debug.log,signal=off"
-        } else {
-            "stdio,id=char0,signal=off"
-        },
+        "stdio,id=char0,logfile=.debug/kernel.log,signal=off",
     ])
     .args(["-serial", "chardev:char0"])
     .args(["-drive", "format=raw,file=run/disk0.img,id=disk1,if=none"])

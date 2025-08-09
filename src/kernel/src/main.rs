@@ -173,9 +173,6 @@ unsafe extern "C" fn _entry() -> ! {
             warn!("Stack size request was not fulfilled.");
         }
 
-        // 0x1E029000
-        // 0x1E09E000
-        // 0x1E93F000
         trace!("Bootstrap Processor Stack: {stack_ptr:#X?}");
         print_env_info(&BOOTLOADER_INFO_REQUEST, &MEMORY_MAP_REQUEST);
 

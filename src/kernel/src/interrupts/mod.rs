@@ -64,7 +64,8 @@ pub fn wait_next() {
     unimplemented!();
 }
 
-/// Provides access to the contained instance of `T`, ensuring interrupts are disabled for the duration of the borrow.
+/// Provides access to the contained instance of `T`, ensuring interrupts are
+/// disabled for the duration of the borrow.
 pub struct InterruptCell<T>(T);
 
 impl<T> InterruptCell<T> {
@@ -81,7 +82,8 @@ impl<T> InterruptCell<T> {
     }
 }
 
-/// Disables interrupts if they were enabled, executes `func`, then re-enables interrupts if they were disabled.
+/// Disables interrupts if they were enabled, executes `func`, then re-enables
+/// interrupts if they were disabled.
 #[inline]
 pub fn uninterruptable<T>(func: impl FnOnce() -> T) -> T {
     let interrupts_enabled = is_enabled();

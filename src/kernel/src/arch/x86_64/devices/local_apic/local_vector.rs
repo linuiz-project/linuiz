@@ -52,16 +52,13 @@ impl Kind for ThermalSensor {
 }
 impl Deliverable for ThermalSensor {}
 
-#[derive(Debug, Clone)]
-pub struct LocalVector<'a, T> {
-    local_apic: &'a LocalApic,
-    marker: PhantomData<T>,
-}
+pub struct LocalVector<T>(PhantomData<T>);
 
-impl<T: Kind> LocalVector<'_, T> {
+impl<T: Kind> LocalVector<T> {
     /// Reads the raw LVT entry as a `u32`.
+    #[allow(clippy::unused_self)]
     fn read(&self) -> u32 {
-        self.local_apic.read_register(T::REGISTER)
+        LocalApic::read_register(T::REGISTER)
     }
 
     /// Writes `value` as the raw LVT entry value.
@@ -70,9 +67,10 @@ impl<T: Kind> LocalVector<'_, T> {
     ///
     /// - `value` must not contain any invalid values.
     /// - `value` must not contain any reserved bits.
+    #[allow(clippy::unused_self)]
     unsafe fn write(&self, value: u32) {
         // Safety: Caller is required to maintain safety invariants.
-        unsafe { self.local_apic.write_register(T::REGISTER, value) }
+        unsafe { LocalApic::write_register(T::REGISTER, value) }
     }
 
     /// Gets the delivery status of the interrupt.
@@ -88,20 +86,30 @@ impl<T: Kind> LocalVector<'_, T> {
 
     /// Whether the interrupt is masked (ignored upon reception to the APIC).
     ///
-    /// Note: When the local APIC handles a performance-monitoring counters
-    /// interrupt, it       automatically sets the mask flag in the LVT
-    /// performance counter register. This       flag is set to 1 on reset.
-    /// It can only be cleared by software.
+    /// # Remarks
+    ///
+    /// When the local APIC handles a performance-monitoring counters interrupt,
+    /// it automatically sets the mask flag in the LVT performance counter
+    /// register.
+    ///
+    /// This flag is set to 1 on reset.
+    ///
+    /// This flag can only be cleared by software.
     pub fn get_masked(&self) -> bool {
         self.read().get_bit(16)
     }
 
     /// Masks or unmasks the interrupt based on `masked`.
     ///
-    /// Note: When the local APIC handles a performance-monitoring counters
-    /// interrupt, it       automatically sets the mask flag in the LVT
-    /// performance counter register. This       flag is set to 1 on reset.
-    /// It can only be cleared by software.
+    /// # Remarks
+    ///
+    /// When the local APIC handles a performance-monitoring counters interrupt,
+    /// it automatically sets the mask flag in the LVT performance counter
+    /// register.
+    ///
+    /// This flag is set to 1 on reset.
+    ///
+    /// This flag can only be cleared by software.
     pub fn set_masked(&self, masked: bool) -> &Self {
         // Safety: The masked bit is valid and non-reserved.
         unsafe {
@@ -135,10 +143,10 @@ impl<T: Kind> LocalVector<'_, T> {
     }
 }
 
-impl<T: Deliverable> LocalVector<'_, T> {
+impl<T: Deliverable> LocalVector<T> {
     /// Specifies the type of interrupt to be sent to the processor. Some
-    /// delivery modes will only operate as intended when used in
-    /// conjunction with a specific trigger mode.
+    /// delivery modes will only operate as intended when used in conjunction
+    /// with a specific trigger mode.
     pub fn set_delivery_mode(&self, mode: InterruptDeliveryMode) -> &Self {
         // Safety: The delivery mode bits are valid and non-reserved.
         unsafe {
@@ -165,7 +173,7 @@ pub enum TimerMode {
     TscDeadline = 0b10,
 }
 
-impl LocalVector<'_, Timer> {
+impl LocalVector<Timer> {
     /// Gets the mode that the timer is currently operating in.
     pub fn get_mode(&self) -> TimerMode {
         TimerMode::try_from(self.read().get_bits(17..19)).unwrap()
@@ -189,58 +197,37 @@ impl LocalVector<'_, Timer> {
 }
 
 impl LocalApic {
-    pub fn lvt_lint0(&self) -> LocalVector<LINT0> {
-        LocalVector {
-            local_apic: self,
-            marker: PhantomData,
-        }
+    pub fn lvt_lint0() -> LocalVector<LINT0> {
+        LocalVector(PhantomData)
     }
 
-    pub fn lvt_lint1(&self) -> LocalVector<LINT1> {
-        LocalVector {
-            local_apic: self,
-            marker: PhantomData,
-        }
+    pub fn lvt_lint1() -> LocalVector<LINT1> {
+        LocalVector(PhantomData)
     }
 
-    pub fn lvt_error(&self) -> LocalVector<Error> {
-        LocalVector {
-            local_apic: self,
-            marker: PhantomData,
-        }
+    pub fn lvt_error() -> LocalVector<Error> {
+        LocalVector(PhantomData)
     }
 
-    pub fn lvt_timer(&self) -> LocalVector<Timer> {
-        LocalVector {
-            local_apic: self,
-            marker: PhantomData,
-        }
+    pub fn lvt_timer() -> LocalVector<Timer> {
+        LocalVector(PhantomData)
     }
 
-    pub fn lvt_performance_counter(&self) -> Option<LocalVector<PerformanceCounter>> {
+    pub fn lvt_performance_counter() -> Option<LocalVector<PerformanceCounter>> {
         // If max LVT is 4, then 5 registers are supported, which includes
         // the performance counter register.
-        (self.max_lvt_entry() >= 4).then_some(LocalVector {
-            local_apic: self,
-            marker: PhantomData,
-        })
+        (Self::max_lvt_entry() >= 4).then_some(LocalVector(PhantomData))
     }
 
-    pub fn lvt_thermal_monitor(&self) -> Option<LocalVector<ThermalSensor>> {
+    pub fn lvt_thermal_monitor() -> Option<LocalVector<ThermalSensor>> {
         // If max LVT is 5, then 6 registers are supported, which includes
         // thermal monitor register.
-        (self.max_lvt_entry() >= 5).then_some(LocalVector {
-            local_apic: self,
-            marker: PhantomData,
-        })
+        (Self::max_lvt_entry() >= 5).then_some(LocalVector(PhantomData))
     }
 
-    pub fn lvt_cmci(&self) -> Option<LocalVector<CMCI>> {
+    pub fn lvt_cmci() -> Option<LocalVector<CMCI>> {
         // If max LVT is 6, then 7 registers are supported, which includes
         // the CMCI register.
-        (self.max_lvt_entry() >= 6).then_some(LocalVector {
-            local_apic: self,
-            marker: PhantomData,
-        })
+        (Self::max_lvt_entry() >= 6).then_some(LocalVector(PhantomData))
     }
 }

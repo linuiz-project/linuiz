@@ -9,13 +9,16 @@ use libsys::{
 pub struct CR3;
 
 impl CR3 {
-    pub unsafe fn write(address: Address<Frame>, address_space_id: &AddressSpaceId) {
+    pub unsafe fn write(address: Address<Frame>, address_space_id: AddressSpaceId) {
+        let address = address.get().get();
+        let address_space_id = usize::from(address_space_id);
+        let bits = address | address_space_id;
+
         // Safety: Caller is required to maintain safety invariants.
         unsafe {
             asm!(
                 "mov cr3, {}",
-                in(reg) address.get().get() | address_space_id.get(),
-                options(preserves_flags)
+                in(reg) bits
             );
         }
     }

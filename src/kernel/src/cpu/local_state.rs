@@ -20,7 +20,7 @@ pub enum ExceptionCatcher {
 fn try_get_local_static_ptr() -> Option<NonNull<LocalState>> {
     #[cfg(target_arch = "x86_64")]
     {
-        crate::arch::x86_64::registers::model_specific::IA32_KERNEL_GS_BASE::read()
+        crate::arch::x86_64::registers::model_specific::IA32_KERNEL_GS_BASE::get_local_state_ptr()
     }
 }
 
@@ -67,7 +67,13 @@ impl LocalState {
         // Set the local state pointer for this hardware thread.
         cfg_select! {
             target_arch = "x86_64" => {
-                crate::arch::x86_64::registers::model_specific::IA32_KERNEL_GS_BASE::write(local_state_ptr);
+                use crate::arch::x86_64::registers::model_specific::IA32_KERNEL_GS_BASE;
+
+                assert!(IA32_KERNEL_GS_BASE::get_local_state_ptr().is_none());
+
+                unsafe {
+                    IA32_KERNEL_GS_BASE::set_local_state_ptr(local_state_ptr);
+                }
             }
 
             _ => { todo!() }
@@ -77,17 +83,18 @@ impl LocalState {
     }
 
     /// Gets the local hardware thread state structure.
-    fn get_static() -> &'static Self {
+    fn get_local_static() -> &'static Self {
         try_get_local_static_ptr()
             .map(|local_state_ptr| {
-                // Safety: If the state pointer is non-null, the kernel guarantees it will be valid for reading as `LocalState`.
+                // Safety: If the state pointer is non-null, the kernel guarantees it will be
+                // valid for reading as `LocalState`.
                 unsafe { local_state_ptr.as_ref() }
             })
             .expect("local state has not been initialized")
     }
 
     pub fn with_scheduler<T>(func: impl FnOnce(&mut Scheduler) -> T) -> T {
-        Self::get_static().scheduler.with(|scheduler| {
+        Self::get_local_static().scheduler.with(|scheduler| {
             let mut scheduler = scheduler.lock();
 
             func(&mut scheduler)
@@ -96,9 +103,10 @@ impl LocalState {
 
     /// ## Safety
     ///
-    /// - Function should only be called once the last preemption wait has resolved.
+    /// - Function should only be called once the last preemption wait has
+    ///   resolved.
     pub unsafe fn set_preemption_wait(duration: Duration) {
-        LocalState::get_static()
+        LocalState::get_local_static()
             .timer
             .set_wait(duration)
             .expect("preemption wait duration was too long");
@@ -117,19 +125,19 @@ impl LocalState {
 //     // TODO APIC
 //     // let apic = &mut get_mut().apic;
 //     // assert!(apic.get_timer().get_masked());
-//     // // Safety: Calling `begin_scheduling` implies this state change is expected.
-//     // unsafe {
+//     // // Safety: Calling `begin_scheduling` implies this state change is
+// expected.     // unsafe {
 //     //     apic.get_timer().set_masked(false);
 //     // }
 
-//     // Safety: Calling `begin_scheduling` implies this function is expected to be called.
-//     unsafe {
+//     // Safety: Calling `begin_scheduling` implies this function is expected
+// to be called.     unsafe {
 //         set_preemption_wait(core::num::NonZeroU16::MIN);
 //     }
 // }
 
-// pub fn provide_exception<T: Into<Exception>>(exception: T) -> core::result::Result<(), T> {
-//     let state = get_state_mut();
+// pub fn provide_exception<T: Into<Exception>>(exception: T) ->
+// core::result::Result<(), T> {     let state = get_state_mut();
 //     if state.catch_exception.load(Ordering::Relaxed) {
 //         let exception_cell = state.exception.get_mut();
 
@@ -143,9 +151,10 @@ impl LocalState {
 
 // /// ## Safety
 // ///
-// /// Caller must ensure `do_func` is effectively stackless, since no stack cleanup will occur on an exception.
-// pub unsafe fn do_catch<T>(do_func: impl FnOnce() -> T) -> core::result::Result<T, Exception> {
-//     let state = get_state_mut();
+// /// Caller must ensure `do_func` is effectively stackless, since no stack
+// cleanup will occur on an exception. pub unsafe fn do_catch<T>(do_func: impl
+// FnOnce() -> T) -> core::result::Result<T, Exception> {     let state =
+// get_state_mut();
 
 //     debug_assert!(state.exception.get_mut().is_none());
 
@@ -155,7 +164,8 @@ impl LocalState {
 //         .expect("nested exception catching is not supported");
 
 //     let do_func_result = do_func();
-//     let result = state.exception.get_mut().take().map_or(Ok(do_func_result), Err);
+//     let result = state.exception.get_mut().take().map_or(Ok(do_func_result),
+// Err);
 
 //     state
 //         .catch_exception

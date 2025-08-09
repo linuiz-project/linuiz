@@ -259,7 +259,7 @@ impl Mapper {
         Ok(())
     }
 
-    pub unsafe fn swap_into(&self, address_space_id: &AddressSpaceId) {
+    pub unsafe fn swap_into(&self, address_space_id: AddressSpaceId) {
         let root_table_frame = self.root_table().frame();
 
         trace!("Swapping: {{ id: {address_space_id:?}, frame: {root_table_frame:X?} }}");
@@ -273,6 +273,8 @@ impl Mapper {
                        address_space_id
                    );
                }
+
+                _ => { todo!() }
             }
         }
     }

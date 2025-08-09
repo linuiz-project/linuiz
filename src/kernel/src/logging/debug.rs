@@ -1,6 +1,7 @@
 use crate::interrupts::InterruptCell;
 use core::fmt::Write;
 use ioports::{ReadOnlyPort, WriteOnlyPort};
+use log::{Level, Log, Metadata, Record};
 use spin::{Mutex, Once};
 
 /// A debug output utilizing QEMU's port 0xE9 hack.
@@ -9,9 +10,10 @@ pub struct Logger(Option<InterruptCell<Mutex<Writer>>>);
 impl Logger {
     const PORT_ADDRESS: u16 = 0xE9;
 
-    /// Initialized the QEMU 0xE9-hack debug logger.
+    /// Initialize the QEMU 0xE9-hack debug logger.
     ///
-    /// Subsequent calls after the first will do nothing but return a reference to the static logger.
+    /// Subsequent calls after the first will do nothing but return a reference
+    /// to the static logger.
     pub fn init() -> &'static Self {
         static DEBUG_LOGGER: Once<Logger> = Once::new();
 
@@ -24,7 +26,8 @@ impl Logger {
             // Safety: We're testing if the port exists.
             let test_port = unsafe { ReadOnlyPort::<u8>::new(0xE9) };
             if test_port.read() == 0xE9 {
-                // Safety: If a read on port 0xE9 returns `0xE9`, then QEMU guarantees it exists.
+                // Safety: If a read on port 0xE9 returns `0xE9`, then QEMU
+                //         guarantees it exists.
                 let mut debug_port = unsafe { WriteOnlyPort::<u8>::new(0xE9) };
 
                 b"-DEBUG LOGGER-\n"
@@ -39,12 +42,12 @@ impl Logger {
     }
 }
 
-impl log::Log for Logger {
-    fn enabled(&self, _: &log::Metadata) -> bool {
-        true
+impl Log for Logger {
+    fn enabled(&self, metadata: &Metadata) -> bool {
+        metadata.level() <= Level::Trace
     }
 
-    fn log(&self, record: &log::Record) {
+    fn log(&self, record: &Record) {
         if self.enabled(record.metadata()) {
             super::with_formatted_log_record(record, |args| {
                 self.0.as_ref().inspect(|writer| {

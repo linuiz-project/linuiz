@@ -13,5 +13,5 @@ reqwest = { version = "0.12", default-features = false, features = [
 tar = { version = "0.4", default-features = false }
 anyhow = "1.0"
 xshell = "0.2"
-toml = "0.8"
+toml = "0.9"
 lzma-rs = "0.3"

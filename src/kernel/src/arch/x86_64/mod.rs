@@ -1,7 +1,7 @@
 use crate::arch::x86_64::{
     cpuid::{extended_feature_info, feature_info},
-    devices::local_apic::LAPIC,
-    registers::ProcessorFlags,
+    devices::local_apic::LocalApic,
+    registers::{ProcessorFlags, model_specific::IA32_TSC_AUX},
     structures::{gdt::GlobalDescriptorTable, idt::InterruptDescriptorTable},
 };
 use raw_cpuid::{ExtendedFeatures, FeatureInfo};
@@ -72,9 +72,9 @@ pub unsafe fn configure_hwthread() {
         flags.insert(cr4::Flags::SMEP);
     }
 
-    if extended_feature_info().is_some_and(ExtendedFeatures::has_smap) {
-        flags.insert(cr4::Flags::SMAP);
-    }
+    // if extended_feature_info().is_some_and(ExtendedFeatures::has_smap) {
+    //     flags.insert(cr4::Flags::SMAP);
+    // }
 
     // Safety:
     // - Caller is required to ensure no CPU features are in use.
@@ -94,22 +94,24 @@ pub unsafe fn configure_hwthread() {
     InterruptDescriptorTable::init();
     InterruptDescriptorTable::load_static();
 
-    // Setup system call interface.
-    // // Safety: Parameters are set according to the IA-32 SDM, and so should
-    // have no undetermined side-effects. unsafe {
-    //     // Configure system call environment registers.
-    //     msr::IA32_STAR::set_selectors(gdt::kernel_code_selector().0,
-    // gdt::kernel_data_selector().0);
-    //     msr::IA32_LSTAR::set_syscall(syscall::_syscall_entry);
-    //     // We don't want to keep any flags set within the syscall (especially
-    // the interrupt flag).
-    //     msr::IA32_FMASK::set_rflags_mask(RFlags::all().bits());
-    //     // Enable `syscall`/`sysret`.
-    //     msr::IA32_EFER::set_sce(true);
-    // }
+    LocalApic::reset();
+
+    if cpuid::extended_feature_info().is_some_and(raw_cpuid::ExtendedFeatures::has_rdpid)
+        || cpuid::extended_feature_identifiers()
+            .is_some_and(raw_cpuid::ExtendedProcessorFeatureIdentifiers::has_rdtscp)
+    {
+        let processor_id = LocalApic::get_id();
+        // Safety:
+        // - Model-specific register is checked to be supported.
+        // - Local APIC IDs are unqiue, and NUMA/multi-socket is not currently
+        //   supported.
+        unsafe {
+            IA32_TSC_AUX::set(processor_id);
+        }
+    }
 }
 
-/// Gets the ID of the current core.
+/// Gets the ID of the current processor.
 ///
 /// # Remarks
 ///
@@ -120,6 +122,6 @@ pub unsafe fn configure_hwthread() {
 /// in 2025, at time of writing). So, it can be expected that in the future,
 /// this function will return a more dynamic identification structure.
 #[allow(clippy::map_unwrap_or)]
-pub fn get_hwthread_id() -> u32 {
-    LAPIC.get_id()
+pub fn get_processor_id() -> u32 {
+    LocalApic::get_id()
 }

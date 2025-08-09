@@ -142,7 +142,7 @@ impl AddressSpace {
     pub unsafe fn swap_into(&self) {
         // Safety: Caller is required to maintain safety invariants.
         unsafe {
-            self.mapper.swap_into(&self.id);
+            self.mapper.swap_into(self.id);
         }
     }
 }

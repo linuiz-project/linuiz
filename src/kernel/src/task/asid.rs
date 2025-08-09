@@ -1,5 +1,5 @@
 #[repr(transparent)]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AddressSpaceId(usize);
 
 impl AddressSpaceId {
@@ -15,9 +15,10 @@ impl AddressSpaceId {
     pub fn new(id: usize) -> Option<Self> {
         (id <= Self::MAX).then_some(Self(id))
     }
+}
 
-    /// Gets the process context ID.
-    pub fn get(&self) -> usize {
-        self.0
+impl From<AddressSpaceId> for usize {
+    fn from(value: AddressSpaceId) -> Self {
+        value.0
     }
 }

@@ -1,4 +1,4 @@
-use crate::interrupts::Vector;
+use crate::{arch::x86_64::registers::model_specific::IA32_APIC_BASE, interrupts::Vector};
 use bit_field::BitField;
 use core::{fmt, num::NonZero, ptr::NonNull};
 use libsys::address::{Address, Virtual};
@@ -7,7 +7,6 @@ use safe_mmio::{
     UniqueMmioPointer,
     fields::{ReadPure, WriteOnly},
 };
-use spin::Lazy;
 
 pub mod interrupt_command;
 pub mod local_vector;
@@ -16,29 +15,29 @@ pub const US_PER_SEC: u64 = 1000000;
 pub const US_WAIT: u64 = 10000;
 pub const US_FREQ_FACTOR: u64 = US_PER_SEC / US_WAIT;
 
-#[repr(u32)]
+#[repr(u8)]
 #[derive(Debug, IntoPrimitive, Clone, Copy)]
 #[allow(non_camel_case_types)]
 #[rustfmt::skip]
 pub enum Register {
-    ID                          = 0x802,
-    VERSION                     = 0x803,
-    TASK_PRIORITY               = 0x808,
-    PROCESSOR_PRIORITY          = 0x80A,
-    END_OF_INTERRUPT            = 0x80B,
-    LOCAL_DESTINATION           = 0x80D,
-    SPURIOUS_VECTOR             = 0x80F,
-    ERROR_STATUS                = 0x828,
-    LVT_CMCI                    = 0x82F,
-    LVT_TIMER                   = 0x832,
-    LVT_THERMAL_MONITOR         = 0x833,
-    LVT_PERFORMANCE_COUNTER     = 0x834,
-    LVT_LINT0                   = 0x835,
-    LVT_LINT1                   = 0x836,
-    LVT_ERROR                   = 0x837,
-    TIMER_INITIAL_COUNT         = 0x838,
-    TIMER_CURRENT_COUNT         = 0x839,
-    TIMER_DIVIDE_CONFIGURATION  = 0x83E,
+    ID                          = 0x02,
+    VERSION                     = 0x03,
+    TASK_PRIORITY               = 0x08,
+    PROCESSOR_PRIORITY          = 0x0A,
+    END_OF_INTERRUPT            = 0x0B,
+    LOCAL_DESTINATION           = 0x0D,
+    SPURIOUS_VECTOR             = 0x0F,
+    ERROR_STATUS                = 0x28,
+    LVT_CMCI                    = 0x2F,
+    LVT_TIMER                   = 0x32,
+    LVT_THERMAL_MONITOR         = 0x33,
+    LVT_PERFORMANCE_COUNTER     = 0x34,
+    LVT_LINT0                   = 0x35,
+    LVT_LINT1                   = 0x36,
+    LVT_ERROR                   = 0x37,
+    TIMER_INITIAL_COUNT         = 0x38,
+    TIMER_CURRENT_COUNT         = 0x39,
+    TIMER_DIVIDE_CONFIGURATION  = 0x3E,
 }
 
 impl Register {
@@ -53,17 +52,16 @@ impl Register {
             | Register::ERROR_STATUS
             | Register::TIMER_INITIAL_COUNT
             | Register::TIMER_CURRENT_COUNT
-            | Register::TIMER_DIVIDE_CONFIGURATION => true,
+            | Register::TIMER_DIVIDE_CONFIGURATION
+            | Register::LVT_CMCI
+            | Register::LVT_TIMER
+            | Register::LVT_THERMAL_MONITOR
+            | Register::LVT_PERFORMANCE_COUNTER
+            | Register::LVT_LINT0
+            | Register::LVT_LINT1
+            | Register::LVT_ERROR => true,
 
             Register::END_OF_INTERRUPT => false,
-
-            Register::LVT_CMCI => todo!(),
-            Register::LVT_TIMER => todo!(),
-            Register::LVT_THERMAL_MONITOR => todo!(),
-            Register::LVT_PERFORMANCE_COUNTER => todo!(),
-            Register::LVT_LINT0 => todo!(),
-            Register::LVT_LINT1 => todo!(),
-            Register::LVT_ERROR => todo!(),
         }
     }
 
@@ -75,21 +73,31 @@ impl Register {
             | Register::SPURIOUS_VECTOR
             | Register::ERROR_STATUS
             | Register::TIMER_INITIAL_COUNT
-            | Register::TIMER_DIVIDE_CONFIGURATION => true,
+            | Register::TIMER_DIVIDE_CONFIGURATION
+            | Register::LVT_CMCI
+            | Register::LVT_TIMER
+            | Register::LVT_THERMAL_MONITOR
+            | Register::LVT_PERFORMANCE_COUNTER
+            | Register::LVT_LINT0
+            | Register::LVT_LINT1
+            | Register::LVT_ERROR => true,
 
             Register::ID
             | Register::VERSION
             | Register::PROCESSOR_PRIORITY
             | Register::TIMER_CURRENT_COUNT => false,
-
-            Register::LVT_CMCI => todo!(),
-            Register::LVT_TIMER => todo!(),
-            Register::LVT_THERMAL_MONITOR => todo!(),
-            Register::LVT_PERFORMANCE_COUNTER => todo!(),
-            Register::LVT_LINT0 => todo!(),
-            Register::LVT_LINT1 => todo!(),
-            Register::LVT_ERROR => todo!(),
         }
+    }
+
+    pub fn as_xapic_address(self, base_address: Address<Virtual>) -> NonZero<usize> {
+        let offset = usize::from(u8::from(self)) << 4;
+        let address = base_address.get() + offset;
+
+        NonZero::<usize>::new(address).unwrap()
+    }
+
+    pub fn as_x2apic_address(self) -> u32 {
+        u32::from(u8::from(self)) | 0x800
     }
 }
 
@@ -207,29 +215,52 @@ pub enum TimerDivideConfiguration {
     DivideBy128 = 0b1010,
 }
 
+#[derive(Debug, Clone, Copy)]
 #[allow(non_camel_case_types)]
-enum Kind {
+enum Mode {
     xApic(Address<Virtual>),
     x2Apic,
 }
 
-pub struct LocalApic(Kind);
+pub struct LocalApic;
 
 impl LocalApic {
-    fn offset_register(base_address: usize, register: Register) -> NonZero<usize> {
-        let register_index = usize::try_from(u32::from(register)).unwrap();
-        let register_offset = register_index * 0x10;
+    fn get_mode() -> Mode {
+        const X2APIC_BIT: usize = 10;
+        const HW_ENABLED_BIT: usize = 11;
+        const BASE_ADDRESS_MASK: u64 = 0xFFFFFF000;
 
-        NonZero::<usize>::new(base_address + register_offset).unwrap()
+        let ia32_apic_base = IA32_APIC_BASE::read();
+
+        assert!(
+            ia32_apic_base.get_bit(HW_ENABLED_BIT),
+            "local APIC is hardware disabled"
+        );
+
+        if ia32_apic_base.get_bit(X2APIC_BIT) {
+            Mode::x2Apic
+        } else {
+            // We would like to avoid panicking in this function.
+            #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
+            let base_address = (ia32_apic_base & BASE_ADDRESS_MASK) as usize;
+
+            // Safety: `BASE_ADDRESS_MASK` guarantees the APIC base address is a
+            //         canonical 64-bit virtual address.
+            let base_address = unsafe { Address::<Virtual>::new_unchecked(base_address) };
+
+            Mode::xApic(base_address)
+        }
     }
 
-    /// Reads from `register`.
-    fn read_register(&self, register: Register) -> u32 {
+    /// # Safety
+    ///
+    /// - `mode` must be the currently active APIC mode.
+    unsafe fn read_register_with_mode(mode: Mode, register: Register) -> u32 {
         assert!(register.is_readable());
 
-        match self.0 {
-            Kind::xApic(base_address) => {
-                let register_address = Self::offset_register(base_address.get(), register);
+        match mode {
+            Mode::xApic(base_address) => {
+                let register_address = register.as_xapic_address(base_address);
                 let register_ptr =
                     NonNull::<ReadPure<u32>>::with_exposed_provenance(register_address);
 
@@ -240,7 +271,7 @@ impl LocalApic {
                 unsafe { UniqueMmioPointer::new(register_ptr) }.read()
             }
 
-            Kind::x2Apic => {
+            Mode::x2Apic => {
                 let value: u32;
 
                 // Safety: Reading from a model-specific register cannot create undefined
@@ -248,7 +279,7 @@ impl LocalApic {
                 unsafe {
                     core::arch::asm!(
                         "rdmsr",
-                        in("ecx") u32::from(register),
+                        in("ecx") register.as_x2apic_address(),
                         out("eax") value,
                         out("edx") _,
                         options(nostack, nomem, preserves_flags)
@@ -260,18 +291,24 @@ impl LocalApic {
         }
     }
 
+    /// Reads from `register`.
+    fn read_register(register: Register) -> u32 {
+        // Safety: Provided mode is currently active APIC mode.
+        unsafe { Self::read_register_with_mode(Self::get_mode(), register) }
+    }
+
     /// Writes `value` to `register`.
     ///
     /// # Safety
     ///
     /// - `value` must not contain any invalid values.
     /// - `value` must not contain any reserved bits.
-    unsafe fn write_register(&self, register: Register, value: u32) {
+    unsafe fn write_register(register: Register, value: u32) {
         assert!(register.is_writable());
 
-        match self.0 {
-            Kind::xApic(base_address) => {
-                let register_address = Self::offset_register(base_address.get(), register);
+        match Self::get_mode() {
+            Mode::xApic(base_address) => {
+                let register_address = register.as_xapic_address(base_address);
                 let register_ptr =
                     NonNull::<WriteOnly<u32>>::with_exposed_provenance(register_address);
 
@@ -282,13 +319,13 @@ impl LocalApic {
                 unsafe { UniqueMmioPointer::new(register_ptr) }.write(value);
             }
 
-            Kind::x2Apic => {
+            Mode::x2Apic => {
                 // Safety: Writing to x2 APIC model-specific registers cannot create undefined
                 // behaviour.
                 unsafe {
                     core::arch::asm!(
                         "wrmsr",
-                        in("ecx") u32::from(register),
+                        in("ecx") register.as_x2apic_address(),
                         in("eax") value,
                         in("edx") 0,
                         options(nostack, nomem, preserves_flags)
@@ -298,60 +335,15 @@ impl LocalApic {
         }
     }
 
-    pub fn reset(&self) {
-        debug!("{self:#X?}");
-
-        trace!("Disabling local APIC for reset sequence...");
-        self.set_enabled(false);
-
-        trace!("Configuring the spurious interrupt...");
-        self.set_spurious_vector(Vector::Spurious);
-
-        // TODO Set up the IO APIC so we can correctly configure these.
-        // trace!("Configuring the external 0 interrupt...");
-        // LocalVector::<LINT0>::set_vector(Vector::External);
-        // LocalVector::<LINT0>::set_masked(false);
-        // trace!("Configuring the external 1 interrupt...");
-        // LocalVector::<LINT1>::set_vector(Vector::External);
-        // LocalVector::<LINT1>::set_masked(false);
-
-        trace!("Configuring the error interrupt...");
-        self.lvt_error().set_vector(Vector::Error).set_masked(false);
-
-        trace!("Configuring the timer interrupt (will be masked)...");
-        self.lvt_timer().set_vector(Vector::Timer).set_masked(true);
-
-        if let Some(lvt_performance_counter) = self.lvt_performance_counter() {
-            trace!("Configuring the performance counter interrupt...");
-            lvt_performance_counter
-                .set_vector(Vector::PerformanceCounter)
-                .set_masked(false);
-        } else {
-            trace!("Performance counter local vector not supported.");
-        }
-
-        if let Some(lvt_thermal_monitor) = self.lvt_thermal_monitor() {
-            trace!("Configuring the thermal monitor interrupt...");
-            lvt_thermal_monitor
-                .set_vector(Vector::ThermalSensor)
-                .set_masked(false);
-        } else {
-            trace!("Thermal monitor local vector not supported.");
-        }
-
-        if let Some(lvt_cmci) = self.lvt_cmci() {
-            trace!("Configuring the CMCI interrupt...");
-            lvt_cmci.set_vector(Vector::CMCI).set_masked(false);
-        } else {
-            trace!("CMCI local vector not supported.");
-        }
-
-        debug!("Local APIC reset.");
-    }
-
     /// The initial ID of the local APIC device.
-    pub fn get_id(&self) -> u32 {
-        self.read_register(Register::ID)
+    pub fn get_id() -> u32 {
+        let mode = Self::get_mode();
+        let value = Self::read_register(Register::ID);
+
+        match mode {
+            Mode::xApic(_) => value.get_bits(24..32),
+            Mode::x2Apic => value,
+        }
     }
 
     /// Version of the APIC device.
@@ -359,16 +351,16 @@ impl LocalApic {
     /// Possible values:
     /// - 0x0_: 82489DX discrete APIC
     /// - 0x10 to 0x15: Integrated APIC
-    pub fn version(&self) -> u8 {
-        let bits = self.read_register(Register::VERSION).get_bits(..8);
+    pub fn version() -> u8 {
+        let bits = Self::read_register(Register::VERSION).get_bits(..8);
         u8::try_from(bits).unwrap()
     }
 
     /// Indicates whether software can inhibit the broadcast of an end of
     /// interrupt message by setting bit 12 of the spurious interrupt vector
     /// register.
-    pub fn can_suppress_eoi_broadcast(&self) -> bool {
-        self.read_register(Register::VERSION).get_bit(24)
+    pub fn can_suppress_eoi_broadcast() -> bool {
+        Self::read_register(Register::VERSION).get_bit(24)
     }
 
     /// The number of local vector table entries, less 1.
@@ -380,8 +372,8 @@ impl LocalApic {
     ///   entries): 5
     /// - For the P6 family processors (which have 5 LVT entries): 4
     /// - For the Pentium processor (which has 4 LVT entries): 3
-    pub fn max_lvt_entry(&self) -> u8 {
-        let bits = self.read_register(Register::VERSION).get_bits(16..24);
+    pub fn max_lvt_entry() -> u8 {
+        let bits = Self::read_register(Register::VERSION).get_bits(16..24);
         u8::try_from(bits).unwrap()
     }
 
@@ -405,8 +397,8 @@ impl LocalApic {
     /// spurious-interrupt vector does not affect the interrupt service
     /// register, so the handler for this vector should return without an
     /// end-of-interrupt call.
-    pub fn get_spurious_vector(&self) -> u8 {
-        let bits = self.read_register(Register::SPURIOUS_VECTOR).get_bits(..8);
+    pub fn get_spurious_vector() -> u8 {
+        let bits = Self::read_register(Register::SPURIOUS_VECTOR).get_bits(..8);
         u8::try_from(bits).unwrap()
     }
 
@@ -430,35 +422,31 @@ impl LocalApic {
     /// spurious-interrupt vector does not affect the interrupt service
     /// register, so the handler for this vector should return without an
     /// end-of-interrupt call.
-    pub fn set_spurious_vector(&self, vector: Vector) {
+    pub fn set_spurious_vector(vector: Vector) {
         let vector = u8::from(vector);
 
         // Safety: Value is valid and no reserved bits are set.
         unsafe {
-            self.write_register(
+            Self::write_register(
                 Register::SPURIOUS_VECTOR,
-                *self
-                    .read_register(Register::SPURIOUS_VECTOR)
-                    .set_bits(..8, u32::from(vector)),
+                *Self::read_register(Register::SPURIOUS_VECTOR).set_bits(..8, u32::from(vector)),
             );
         }
     }
 
     /// Whether the local APIC is enabled (`1`/`true`) or disabled
     /// (`0`/`false`).
-    pub fn get_enabled(&self) -> bool {
-        self.read_register(Register::SPURIOUS_VECTOR).get_bit(8)
+    pub fn get_enabled() -> bool {
+        Self::read_register(Register::SPURIOUS_VECTOR).get_bit(8)
     }
 
     /// Enables (`1`/`true`) or disables (`0`/`false`) the local APIC.
-    pub fn set_enabled(&self, value: bool) {
+    pub fn set_enabled(value: bool) {
         // Safety: Value is valid and no reserved bits are set.
         unsafe {
-            self.write_register(
+            Self::write_register(
                 Register::SPURIOUS_VECTOR,
-                *self
-                    .read_register(Register::SPURIOUS_VECTOR)
-                    .set_bit(8, value),
+                *Self::read_register(Register::SPURIOUS_VECTOR).set_bit(8, value),
             );
         }
     }
@@ -469,8 +457,8 @@ impl LocalApic {
     /// `0`/`false`, indicating that end-of-interrupt broadcasts are
     /// performed. This bit is reserved to `0`/`false` if the processor does
     /// not support end-of-interrupt broadcast suppression.
-    pub fn get_eoi_broadcast_suppression(&self) -> bool {
-        self.read_register(Register::SPURIOUS_VECTOR).get_bit(12)
+    pub fn get_eoi_broadcast_suppression() -> bool {
+        Self::read_register(Register::SPURIOUS_VECTOR).get_bit(12)
     }
 
     /// Sets whether an end-of-interrupt for a level-triggered interrupt causes
@@ -479,65 +467,61 @@ impl LocalApic {
     /// indicating that end-of-interrupt broadcasts are performed. This bit
     /// is reserved to `0`/`false` if the processor does not support
     /// end-of-interrupt broadcast suppression.
-    pub fn set_eoi_broadcast_suppression(&self, value: bool) {
+    pub fn set_eoi_broadcast_suppression(value: bool) {
         // Safety: Value is valid and no reserved bits are set.
         unsafe {
-            self.write_register(
+            Self::write_register(
                 Register::SPURIOUS_VECTOR,
-                *self
-                    .read_register(Register::SPURIOUS_VECTOR)
-                    .set_bit(12, value),
+                *Self::read_register(Register::SPURIOUS_VECTOR).set_bit(12, value),
             );
         }
     }
 
-    pub fn get_error_status(&self) -> ErrorStatus {
-        let bits = self.read_register(Register::ERROR_STATUS);
+    pub fn get_error_status() -> ErrorStatus {
+        let bits = Self::read_register(Register::ERROR_STATUS);
         ErrorStatus::from_bits_truncate(bits)
     }
 
-    fn clear_error_status(&self) {
+    pub fn clear_error_status() {
         // Safety: Value is valid and no reserved bits are set.
         unsafe {
-            self.write_register(Register::ERROR_STATUS, 0x0);
+            Self::write_register(Register::ERROR_STATUS, 0x0);
         }
     }
 
-    pub fn get_timer_initial_count(&self) -> u32 {
-        let bits = self.read_register(Register::TIMER_INITIAL_COUNT);
-        u32::try_from(bits).unwrap()
+    pub fn get_timer_initial_count() -> u32 {
+        Self::read_register(Register::TIMER_INITIAL_COUNT)
     }
 
-    pub fn set_timer_initial_count(&self, value: u32) {
+    pub fn set_timer_initial_count(value: u32) {
         // Safety: Value is valid and no reserved bits are set.
         unsafe {
-            self.write_register(Register::TIMER_INITIAL_COUNT, value);
+            Self::write_register(Register::TIMER_INITIAL_COUNT, value);
         }
     }
 
-    pub fn get_timer_current_count(&self) -> u32 {
-        let bits = self.read_register(Register::TIMER_CURRENT_COUNT);
-        u32::try_from(bits).unwrap()
+    pub fn get_timer_current_count() -> u32 {
+        Self::read_register(Register::TIMER_CURRENT_COUNT)
     }
 
-    pub fn get_timer_divide_configuration(&self) -> TimerDivideConfiguration {
-        let bits = self.read_register(Register::TIMER_DIVIDE_CONFIGURATION);
+    pub fn get_timer_divide_configuration() -> TimerDivideConfiguration {
+        let bits = Self::read_register(Register::TIMER_DIVIDE_CONFIGURATION);
         TimerDivideConfiguration::try_from(bits).unwrap()
     }
 
-    pub fn set_timer_divide_configuration(&self, value: TimerDivideConfiguration) {
+    pub fn set_timer_divide_configuration(value: TimerDivideConfiguration) {
         // Safety: Value is valid and no reserved bits are set.
         unsafe {
-            self.write_register(Register::TIMER_DIVIDE_CONFIGURATION, u32::from(value));
+            Self::write_register(Register::TIMER_DIVIDE_CONFIGURATION, u32::from(value));
         }
     }
 
-    pub fn send_interrupt_command(&self, interrupt_command: interrupt_command::InterruptCommand) {
+    pub fn send_interrupt_command(interrupt_command: interrupt_command::InterruptCommand) {
         let high_bits = interrupt_command.high_bits();
         let low_bits = interrupt_command.low_bits();
 
-        match self.0 {
-            Kind::xApic(base_address) => {
+        match Self::get_mode() {
+            Mode::xApic(base_address) => {
                 const ICR_LOW: usize = 0x300;
                 const ICR_HIGH: usize = 0x310;
 
@@ -561,7 +545,7 @@ impl LocalApic {
                 }
             }
 
-            Kind::x2Apic => {
+            Mode::x2Apic => {
                 const ICR_MSR: u32 = 0x830;
 
                 assert!(
@@ -590,38 +574,77 @@ impl LocalApic {
     ///
     /// - Calling context must be the end of an interrupt service routine or
     ///   recoverable processor exception.
-    pub unsafe fn end_of_interrupt(&self) {
+    pub unsafe fn end_of_interrupt() {
         // Safety: Value is valid and no reserved bits are set.
         unsafe {
-            self.write_register(Register::END_OF_INTERRUPT, 0x0);
+            Self::write_register(Register::END_OF_INTERRUPT, 0x0);
         }
+    }
+
+    pub fn reset() {
+        trace!("Disabling local APIC for reset sequence...");
+        Self::set_enabled(false);
+
+        trace!("Configuring the spurious interrupt...");
+        Self::set_spurious_vector(Vector::Spurious);
+
+        // TODO Set up the IO APIC so we can correctly configure these.
+        // trace!("Configuring the external 0 interrupt...");
+        // LocalVector::<LINT0>::set_vector(Vector::External);
+        // LocalVector::<LINT0>::set_masked(false);
+        // trace!("Configuring the external 1 interrupt...");
+        // LocalVector::<LINT1>::set_vector(Vector::External);
+        // LocalVector::<LINT1>::set_masked(false);
+
+        trace!("Configuring the error interrupt...");
+        Self::lvt_error()
+            .set_vector(Vector::Error)
+            .set_masked(false);
+
+        trace!("Configuring the timer interrupt (will be masked)...");
+        Self::lvt_timer().set_vector(Vector::Timer).set_masked(true);
+
+        if let Some(lvt_performance_counter) = Self::lvt_performance_counter() {
+            trace!("Configuring the performance counter interrupt...");
+            lvt_performance_counter
+                .set_vector(Vector::PerformanceCounter)
+                .set_masked(false);
+        } else {
+            trace!("Performance counter local vector not supported.");
+        }
+
+        if let Some(lvt_thermal_monitor) = Self::lvt_thermal_monitor() {
+            trace!("Configuring the thermal monitor interrupt...");
+            lvt_thermal_monitor
+                .set_vector(Vector::ThermalSensor)
+                .set_masked(false);
+        } else {
+            trace!("Thermal monitor local vector not supported.");
+        }
+
+        if let Some(lvt_cmci) = Self::lvt_cmci() {
+            trace!("Configuring the CMCI interrupt...");
+            lvt_cmci.set_vector(Vector::CMCI).set_masked(false);
+        } else {
+            trace!("CMCI local vector not supported.");
+        }
+
+        Self::set_enabled(true);
+
+        debug!("Reset complete.");
     }
 }
 
 impl fmt::Debug for LocalApic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Version")
-            .field("ID", &self.get_id())
-            .field("Version", &self.version())
+            .field("ID", &Self::get_id())
+            .field("Version", &Self::version())
             .field(
                 "Can Suppress EOI Broadcast",
-                &self.can_suppress_eoi_broadcast(),
+                &Self::can_suppress_eoi_broadcast(),
             )
-            .field("Maximum LVT Entry", &self.max_lvt_entry())
+            .field("Maximum LVT Entry", &Self::max_lvt_entry())
             .finish()
     }
 }
-
-pub static LAPIC: Lazy<LocalApic> = Lazy::new(|| {
-    use crate::arch::x86_64::registers::model_specific::IA32_APIC_BASE;
-
-    if !IA32_APIC_BASE::get_hw_enabled() {
-        panic!("local APIC is hardware disabled")
-    }
-
-    if IA32_APIC_BASE::get_is_x2apic_mode() {
-        LocalApic(Kind::x2Apic)
-    } else {
-        LocalApic(Kind::xApic(IA32_APIC_BASE::get_base_address()))
-    }
-});

@@ -3,7 +3,7 @@ use crate::{
         cpuid::{
             advanced_power_management_info, feature_info, hypervisor_info, processor_frequency_info,
         },
-        devices::local_apic::{LAPIC, TimerDivideConfiguration, local_vector::TimerMode},
+        devices::local_apic::{LocalApic, TimerDivideConfiguration, local_vector::TimerMode},
         registers::model_specific::IA32_TSC_DEADLINE,
     },
     time::Stopwatch,
@@ -46,14 +46,14 @@ fn measure_tsc() -> u64 {
 fn measure_lapic() -> u32 {
     trace!("Measuring the local APIC timer frequency...");
 
-    LAPIC.set_timer_divide_configuration(TimerDivideConfiguration::DivideBy1);
+    LocalApic::set_timer_divide_configuration(TimerDivideConfiguration::DivideBy1);
 
     const MEASURE_TIMER_COUNTDOWN_VALUE: u32 = u32::MAX;
 
     // Loading the initial count starts the timer.
-    LAPIC.set_timer_initial_count(MEASURE_TIMER_COUNTDOWN_VALUE);
+    LocalApic::set_timer_initial_count(MEASURE_TIMER_COUNTDOWN_VALUE);
     Stopwatch::spin_wait(MEASUREMENT_DURATION);
-    let end_timer_count = LAPIC.get_timer_current_count();
+    let end_timer_count = LocalApic::get_timer_current_count();
 
     let elapsed_ticks = MEASURE_TIMER_COUNTDOWN_VALUE - end_timer_count;
     let frequency = elapsed_ticks * MEASUREMENT_FREQUENCY_FACTOR;
@@ -63,10 +63,12 @@ fn measure_lapic() -> u32 {
     frequency
 }
 
-pub enum LocalTimer {
-    TimestampCounter { frequency: u64 },
-    LocalApic { frequency: u32 },
+enum Mode {
+    TscDeadline { frequency: u64 },
+    OneShot { frequency: u32 },
 }
+
+pub struct LocalTimer(Mode);
 
 impl LocalTimer {
     pub fn configure() -> Self {
@@ -76,7 +78,7 @@ impl LocalTimer {
         {
             trace!("Local Timer: Timestamp Counter");
 
-            LAPIC.lvt_timer().set_mode(TimerMode::TscDeadline);
+            LocalApic::lvt_timer().set_mode(TimerMode::TscDeadline);
 
             // Notably, on AMD systems the first check simply won't work, becuase AMD is
             // cursed and Lisa Su is continuing AMD's time-honored tradition of
@@ -101,43 +103,47 @@ impl LocalTimer {
                 })
                 .unwrap_or_else(measure_tsc);
 
-            LocalTimer::TimestampCounter { frequency }
+            Self(Mode::TscDeadline { frequency })
         } else {
             // We'll have to use the LAPIC, since TSC isn't supported in such a way as to
             // allow it to be useful.
 
             trace!("Local Timer: APIC (one-shot)");
 
-            LAPIC.lvt_timer().set_mode(TimerMode::OneShot);
+            LocalApic::lvt_timer().set_mode(TimerMode::OneShot);
 
             let frequency = hypervisor_info()
                 .and_then(raw_cpuid::HypervisorInfo::apic_frequency)
                 .unwrap_or_else(measure_lapic);
 
-            LocalTimer::LocalApic { frequency }
+            Self(Mode::OneShot { frequency })
         }
     }
 
     pub fn set_wait(&self, duration: Duration) -> Result<(), Error> {
-        match self {
-            Self::TimestampCounter { frequency } => {
+        match self.0 {
+            Mode::TscDeadline { frequency } => {
                 let wait_us =
                     u64::try_from(duration.as_micros()).map_err(|_| Error::InvalidWait)?;
                 let wait_ticks = (frequency / 1_000_000)
                     .checked_mul(wait_us)
                     .ok_or(Error::InvalidWait)?;
 
-                IA32_TSC_DEADLINE::set(wait_ticks);
+                // Safety: If mode is `TscDeadline`, then the timestamp counter
+                //         is supported.
+                unsafe {
+                    IA32_TSC_DEADLINE::set(wait_ticks);
+                }
             }
 
-            Self::LocalApic { frequency } => {
+            Mode::OneShot { frequency } => {
                 let wait_us =
                     u32::try_from(duration.as_micros()).map_err(|_| Error::InvalidWait)?;
                 let wait_ticks = (frequency / 1_000_000)
                     .checked_mul(wait_us)
                     .ok_or(Error::InvalidWait)?;
 
-                LAPIC.set_timer_initial_count(wait_ticks);
+                LocalApic::set_timer_initial_count(wait_ticks);
             }
         }
 

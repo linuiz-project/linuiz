@@ -1,7 +1,7 @@
 use crate::{
     LinkerSymbol,
     arch::x86_64::{
-        devices::local_apic::LAPIC,
+        devices::local_apic::LocalApic,
         structures::idt::{InterruptStackFrame, PageFaultErrorCode, SelectorErrorCode},
     },
     cpu::local_state::LocalState,
@@ -192,7 +192,7 @@ extern "sysv64" fn __irq_handler(
 
     // Safety: This is the end of an interrupt service routine.
     unsafe {
-        LAPIC.end_of_interrupt();
+        LocalApic::end_of_interrupt();
     }
 }
 
