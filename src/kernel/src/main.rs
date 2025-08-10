@@ -118,7 +118,7 @@ static BASE_REVISION: BaseRevision = BaseRevision::with_revision(4);
 const KERNEL_STACK_SIZE: usize = {
     #[cfg(debug_assertions)]
     {
-        0x800000
+        0x100000
     }
     #[cfg(not(debug_assertions))]
     {
@@ -153,24 +153,23 @@ unsafe extern "C" fn _entry() -> ! {
         static RSDP_REQUEST: RsdpRequest = RsdpRequest::new();
         static MP_REQUEST: MpRequest = MpRequest::new().with_flags(RequestFlags::X2APIC);
 
+        // Enable logging first, so we can get feedback on the entire init process.
+        crate::logging::KernelLogger::init();
+
+        if STACK_SIZE_REQUEST.get_response().is_none() {
+            warn!("Stack size request was not fulfilled.");
+        }
+
+        // Safety: Function is run only once for this hardware thread.
+        unsafe {
+            crate::cpu::configure();
+        }
+
         // Safety: Value is non-zero.
         let paging_depth = unsafe { core::num::NonZero::<u32>::new_unchecked(4) };
         // Safety: Current paging depth is 4.
         unsafe {
             libsys::constants::set_paging_depth(paging_depth);
-        }
-
-        // Enable logging first, so we can get feedback on the entire init process.
-        crate::logging::KernelLogger::init();
-
-        #[cfg(target_arch = "x86_64")]
-        // Safety: Function is run only once for this hardware thread.
-        unsafe {
-            crate::arch::x86_64::configure_hwthread();
-        }
-
-        if STACK_SIZE_REQUEST.get_response().is_none() {
-            warn!("Stack size request was not fulfilled.");
         }
 
         trace!("Bootstrap Processor Stack: {stack_ptr:#X?}");
