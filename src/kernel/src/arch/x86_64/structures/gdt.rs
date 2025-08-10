@@ -1,4 +1,6 @@
-use crate::arch::x86_64::structures::{DescriptorTablePointer, tss::TaskStateSegment};
+use crate::arch::x86_64::structures::{
+    DescriptorTable, DescriptorTablePointer, tss::TaskStateSegment,
+};
 use bit_field::BitField;
 use core::ops::Range;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
@@ -10,11 +12,11 @@ pub static UDATA_SELECTOR: Once<SegmentSelector> = Once::new();
 pub static UCODE_SELECTOR: Once<SegmentSelector> = Once::new();
 
 crate::singleton! {
-    #[repr(C, align(8))]
+    #[repr(C, align(0x8))]
     #[derive(Debug, Clone)]
     pub GlobalDescriptorTable {
         table: [u64; 7],
-        len: usize
+        len: u16
     }
 
     fn init() -> Self {
@@ -41,6 +43,12 @@ crate::singleton! {
         trace!("User code: {ucode_selector:?}");
 
         gdt
+    }
+}
+
+impl DescriptorTable for GlobalDescriptorTable {
+    fn limit(&self) -> u16 {
+        (self.len * 8) - 1
     }
 }
 
@@ -140,7 +148,7 @@ impl GlobalDescriptorTable {
     ///   unreadable or unwriteable.
     /// - This should be executed prior to any point when the FS/GS _BASE MSRs
     ///   will be in use, as they are cleared when this function is run.
-    unsafe fn load(&self) {
+    pub unsafe fn load(&self) {
         use core::arch::asm;
 
         let dtptr = DescriptorTablePointer::from(self);
@@ -165,9 +173,10 @@ impl GlobalDescriptorTable {
         &mut self,
         segment_descriptor: impl SegmentDescriptor,
     ) -> SegmentSelector {
-        let current_index = self.len;
+        let current_index = usize::from(self.len);
         let privilege_level = segment_descriptor.privilege_level();
-        let appended_entry_count = segment_descriptor.append_entries(&mut self.table[self.len..]);
+        let appended_entry_count =
+            segment_descriptor.append_entries(&mut self.table[current_index..]);
         self.len += appended_entry_count;
 
         SegmentSelector::new(u16::try_from(current_index).unwrap(), privilege_level)
@@ -179,13 +188,6 @@ impl GlobalDescriptorTable {
         let mut temp_gdt = static_gdt.clone();
 
         crate::interrupts::uninterruptable(|| {
-            // Load the temporary GDT for loading TSS.
-            // Safety: Temporary GDT is identical to static GDT + 1 entry, so cannot
-            //         cause undefined behaviour by loading.
-            unsafe {
-                temp_gdt.load();
-            }
-
             let value = func(&mut temp_gdt);
 
             // Safety: Loading the static GDT is always safe.
@@ -302,7 +304,7 @@ pub trait SegmentDescriptor {
 
     /// Appends this [`SegmentDescriptor`]'s entries to the provided `append_to`
     /// slice, returning how many entries were appended.
-    fn append_entries(self, append_to: &mut [u64]) -> usize;
+    fn append_entries(self, append_to: &mut [u64]) -> u16;
 }
 
 /// A generic (non-system) segment descriptor.
@@ -383,7 +385,7 @@ impl SegmentDescriptor for GenericSegmentDescriptor {
         PrivilegeLevel::try_from(raw_bits_u16).unwrap()
     }
 
-    fn append_entries(self, append_to: &mut [u64]) -> usize {
+    fn append_entries(self, append_to: &mut [u64]) -> u16 {
         append_to[0] = self.0;
 
         1
@@ -442,7 +444,7 @@ impl SegmentDescriptor for SystemSegmentDescriptor {
     }
 
     #[allow(clippy::as_conversions, clippy::cast_possible_truncation)]
-    fn append_entries(self, append_to: &mut [u64]) -> usize {
+    fn append_entries(self, append_to: &mut [u64]) -> u16 {
         append_to[0] = self.0 as u64;
         append_to[1] = (self.0 >> u64::BITS) as u64;
 

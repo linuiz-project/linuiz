@@ -24,19 +24,20 @@ pub enum InterruptStackTableIndex {
 pub struct TaskStateSegment {
     _1: [u8; 4],
 
-    /// The stack pointers used when a privilege level change occurs from a lower privilege level
-    /// to a higher one (e.g. ring 3 to ring 0).
+    /// The stack pointers used when a privilege level change occurs from a
+    /// lower privilege level to a higher one (e.g. ring 3 to ring 0).
     privilege_stack_table: [Option<NonNull<StackTableStack>>; 3],
 
     _2: [u8; 8],
 
-    /// The stack pointers used when an entry in the Interrupt Descriptor Table has an IST value
-    /// other than 0.
+    /// The stack pointers used when an entry in the Interrupt Descriptor Table
+    /// has an IST value other than 0.
     interrupt_stack_table: [Option<NonNull<StackTableStack>>; 7],
 
     _3: [u8; 10],
 
-    /// The 16-bit offset to the I/O permission bit map from the 64-bit TSS base.
+    /// The 16-bit offset to the I/O permission bit map from the 64-bit TSS
+    /// base.
     iomap_base: u16,
 }
 
@@ -58,8 +59,9 @@ impl TaskStateSegment {
     ///
     /// # Remarks
     ///
-    /// Only one [`TaskStateSegment`] should be loaded on each hardware thread. It's likely a
-    /// runtime error if more than one are loaded per hardware threads.
+    /// Only one [`TaskStateSegment`] should be loaded on each hardware thread.
+    /// It's likely a runtime error if more than one are loaded per hardware
+    /// threads.
     pub fn load_local() {
         fn allocate_stack_table_stack() -> NonNull<StackTableStack> {
             let stack =
@@ -73,7 +75,8 @@ impl TaskStateSegment {
         // Set the stack for transitions to ring 0.
         tss.privilege_stack_table[0] = Some(allocate_stack_table_stack());
 
-        // Set the stacks for faults that cannot be disabled or are caused by runtime errors.
+        // Set the stacks for faults that cannot be disabled or are caused by runtime
+        // errors.
         tss.interrupt_stack_table[usize::from(u16::from(InterruptStackTableIndex::Debug))] =
             Some(allocate_stack_table_stack());
         tss.interrupt_stack_table
@@ -87,6 +90,13 @@ impl TaskStateSegment {
         GlobalDescriptorTable::with_temporary(|temp_gdt| {
             let tss_segment_descriptor = SystemSegmentDescriptor::from_tss(tss);
             let tss_segment_selector = temp_gdt.append_segment(tss_segment_descriptor);
+
+            // Load the temporary GDT for loading TSS.
+            // Safety: Temporary GDT is identical to static GDT + 1 entry, so cannot
+            //         cause undefined behaviour by loading.
+            unsafe {
+                temp_gdt.load();
+            }
 
             trace!("Loading: {:#X?}", core::ptr::from_ref(tss));
 

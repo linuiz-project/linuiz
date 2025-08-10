@@ -14,7 +14,7 @@ mod error_codes;
 pub use error_codes::*;
 
 use crate::arch::x86_64::structures::{
-    DescriptorTablePointer, gdt::PrivilegeLevel, tss::InterruptStackTableIndex,
+    DescriptorTable, DescriptorTablePointer, gdt::PrivilegeLevel, tss::InterruptStackTableIndex,
 };
 use core::array::repeat;
 
@@ -34,7 +34,7 @@ crate::singleton! {
     /// The field descriptions are taken from the
     /// [AMD64 manual volume 2](https://support.amd.com/TechDocs/24593.pdf)
     /// (with slight modifications).
-    #[repr(C, align(16))]
+    #[repr(C, align(0x10))]
     #[derive(Debug, Clone)]
     pub InterruptDescriptorTable {
         /// A divide error (`#DE`) occurs when the denominator of a DIV instruction or
@@ -1185,6 +1185,12 @@ crate::singleton! {
 }
 
 assert_eq_size!([u8; 0x1000], InterruptDescriptorTable);
+
+impl DescriptorTable for InterruptDescriptorTable {
+    fn limit(&self) -> u16 {
+        0xFFF
+    }
+}
 
 impl core::ops::Index<u8> for InterruptDescriptorTable {
     type Output = Entry;

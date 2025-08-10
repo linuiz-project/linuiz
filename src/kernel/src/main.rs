@@ -133,91 +133,76 @@ static STACK_SIZE_REQUEST: StackSizeRequest =
     StackSizeRequest::new().with_size(KERNEL_STACK_SIZE as u64);
 
 #[doc(hidden)]
-#[unsafe(naked)]
 #[unsafe(no_mangle)]
 #[allow(clippy::too_many_lines)]
 unsafe extern "C" fn _entry() -> ! {
-    extern "sysv64" fn main(stack_ptr: *const u8) -> ! {
-        // All of the code within this function should be run ONLY ONCE. Writing the
-        // code sequentially within one function easily ensures that will be the
-        // case.
+    // All of the code within this function should be run ONLY ONCE. Writing the
+    // code sequentially within one function easily ensures that will be the
+    // case.
 
-        // All limine feature requests (ensures they are not used after bootloader
-        // memory is reclaimed)
-        static BOOTLOADER_INFO_REQUEST: BootloaderInfoRequest = BootloaderInfoRequest::new();
-        static KERNEL_FILE_REQUEST: ExecutableFileRequest = ExecutableFileRequest::new();
-        static KERNEL_CMDLINE_REQUEST: ExecutableCmdlineRequest = ExecutableCmdlineRequest::new();
-        static KERNEL_ADDRESS_REQUEST: ExecutableAddressRequest = ExecutableAddressRequest::new();
-        static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
-        static MEMORY_MAP_REQUEST: MemoryMapRequest = MemoryMapRequest::new();
-        static RSDP_REQUEST: RsdpRequest = RsdpRequest::new();
-        static MP_REQUEST: MpRequest = MpRequest::new().with_flags(RequestFlags::X2APIC);
+    // All limine feature requests (ensures they are not used after bootloader
+    // memory is reclaimed)
+    static BOOTLOADER_INFO_REQUEST: BootloaderInfoRequest = BootloaderInfoRequest::new();
+    static KERNEL_FILE_REQUEST: ExecutableFileRequest = ExecutableFileRequest::new();
+    static KERNEL_CMDLINE_REQUEST: ExecutableCmdlineRequest = ExecutableCmdlineRequest::new();
+    static KERNEL_ADDRESS_REQUEST: ExecutableAddressRequest = ExecutableAddressRequest::new();
+    static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
+    static MEMORY_MAP_REQUEST: MemoryMapRequest = MemoryMapRequest::new();
+    static RSDP_REQUEST: RsdpRequest = RsdpRequest::new();
+    static MP_REQUEST: MpRequest = MpRequest::new().with_flags(RequestFlags::X2APIC);
 
-        // Enable logging first, so we can get feedback on the entire init process.
-        crate::logging::KernelLogger::init();
+    // Enable logging first, so we can get feedback on the entire init process.
+    crate::logging::KernelLogger::init();
 
-        if STACK_SIZE_REQUEST.get_response().is_none() {
-            warn!("Stack size request was not fulfilled.");
-        }
-
-        // Safety: Function is run only once for this hardware thread.
-        unsafe {
-            crate::cpu::configure();
-        }
-
-        // Safety: Value is non-zero.
-        let paging_depth = unsafe { core::num::NonZero::<u32>::new_unchecked(4) };
-        // Safety: Current paging depth is 4.
-        unsafe {
-            libsys::constants::set_paging_depth(paging_depth);
-        }
-
-        trace!("Bootstrap Processor Stack: {stack_ptr:#X?}");
-        print_env_info(&BOOTLOADER_INFO_REQUEST, &MEMORY_MAP_REQUEST);
-
-        let (kernel_physical_address, kernel_virtual_address) = KERNEL_ADDRESS_REQUEST
-            .get_response()
-            .map(|response| {
-                (
-                    usize::try_from(response.physical_base()).unwrap(),
-                    usize::try_from(response.virtual_base()).unwrap(),
-                )
-            })
-            .expect("bootloader did not provide a response to kernel address request");
-        debug!("Kernel physical address: {kernel_physical_address:#X?}");
-        debug!("Kernel virtual address: {kernel_virtual_address:#X?}");
-
-        crate::params::KernelParameters::init(&KERNEL_CMDLINE_REQUEST);
-
-        #[cfg(feature = "panic_traces")]
-        if !crate::params::KernelParameters::drop_symbol_info() {
-            crate::panic::tracing::symbols::KernelSymbols::init(&KERNEL_FILE_REQUEST);
-        }
-
-        crate::mem::HigherHalfDirectMap::init(&HHDM_REQUEST);
-        crate::mem::pmm::PhysicalMemoryManager::init(&MEMORY_MAP_REQUEST);
-        crate::mem::KernelMapper::init(
-            &MEMORY_MAP_REQUEST,
-            &KERNEL_FILE_REQUEST,
-            &KERNEL_ADDRESS_REQUEST,
-        );
-
-        crate::time::Stopwatch::init(&RSDP_REQUEST);
-
-        // Safety: We've reached the end of the kernel init phase.
-        unsafe { crate::cpu::synchronize(stack_ptr, Some((&MP_REQUEST, &MEMORY_MAP_REQUEST))) }
+    if STACK_SIZE_REQUEST.get_response().is_none() {
+        warn!("Stack size request was not fulfilled.");
     }
 
-    // Move the exact starting stack pointer into the first parameter.
-    // This will be used in `crate::cpu::synchronize` to determine which memory
-    // segments are stack spaces used by the kernel setup process.
-    core::arch::naked_asm!(
-        "
-        mov rdi, rsp
-        call {}
-        ",
-        sym main
-    )
+    // Safety: Function is run only once for this hardware thread.
+    unsafe {
+        crate::cpu::configure();
+    }
+
+    // Safety: Value is non-zero.
+    let paging_depth = unsafe { core::num::NonZero::<u32>::new_unchecked(4) };
+    // Safety: Current paging depth is 4.
+    unsafe {
+        libsys::constants::set_paging_depth(paging_depth);
+    }
+
+    print_env_info(&BOOTLOADER_INFO_REQUEST, &MEMORY_MAP_REQUEST);
+
+    let (kernel_physical_address, kernel_virtual_address) = KERNEL_ADDRESS_REQUEST
+        .get_response()
+        .map(|response| {
+            (
+                usize::try_from(response.physical_base()).unwrap(),
+                usize::try_from(response.virtual_base()).unwrap(),
+            )
+        })
+        .expect("bootloader did not provide a response to kernel address request");
+    debug!("Kernel physical address: {kernel_physical_address:#X?}");
+    debug!("Kernel virtual address: {kernel_virtual_address:#X?}");
+
+    crate::params::KernelParameters::init(&KERNEL_CMDLINE_REQUEST);
+
+    #[cfg(feature = "panic_traces")]
+    if !crate::params::KernelParameters::drop_symbol_info() {
+        crate::panic::tracing::symbols::KernelSymbols::init(&KERNEL_FILE_REQUEST);
+    }
+
+    crate::mem::HigherHalfDirectMap::init(&HHDM_REQUEST);
+    crate::mem::pmm::PhysicalMemoryManager::init(&MEMORY_MAP_REQUEST);
+    crate::mem::KernelMapper::init(
+        &MEMORY_MAP_REQUEST,
+        &KERNEL_FILE_REQUEST,
+        &KERNEL_ADDRESS_REQUEST,
+    );
+
+    crate::time::Stopwatch::init(&RSDP_REQUEST);
+
+    // Safety: We've reached the end of the kernel init phase.
+    unsafe { crate::cpu::start(Some(&MP_REQUEST), Some(&MEMORY_MAP_REQUEST)) }
 }
 
 fn print_env_info(
