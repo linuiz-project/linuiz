@@ -35,7 +35,7 @@ crate::singleton! {
     /// [AMD64 manual volume 2](https://support.amd.com/TechDocs/24593.pdf)
     /// (with slight modifications).
     #[repr(C, align(0x10))]
-    #[derive(Debug, Clone)]
+    #[derive(Clone)]
     pub InterruptDescriptorTable {
         /// A divide error (`#DE`) occurs when the denominator of a DIV instruction or
         /// an IDIV instruction is 0. A `#DE` also occurs if the result is too large to be
@@ -1226,6 +1226,7 @@ impl InterruptDescriptorTable {
         let dtptr = DescriptorTablePointer::from(idt);
 
         trace!("Loading: {dtptr:X?}");
+        trace!("{idt:#X?}");
 
         // Safety: The descriptor table pointer was properly constructed.
         unsafe {
@@ -1235,5 +1236,89 @@ impl InterruptDescriptorTable {
                 options(readonly, nostack, preserves_flags)
             );
         }
+    }
+}
+
+impl core::fmt::Debug for InterruptDescriptorTable {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        writeln!(f, "InterruptDescriptorTable {{")?;
+
+        writeln!(f, "    Divide Error: {:X?}", &self.divide_error)?;
+        writeln!(f, "    Debug: {:X?}", &self.debug)?;
+        writeln!(
+            f,
+            "    Non Maskable Interrupt: {:X?}",
+            &self.non_maskable_interrupt
+        )?;
+        writeln!(f, "    Breakpoint: {:X?}", &self.breakpoint)?;
+        writeln!(f, "    Overflow: {:X?}", &self.overflow)?;
+        writeln!(
+            f,
+            "    Bound Range Exceeded: {:X?}",
+            &self.bound_range_exceeded
+        )?;
+        writeln!(f, "    Invalid Opcode: {:X?}", &self.invalid_opcode)?;
+        writeln!(
+            f,
+            "    Device Not Available: {:X?}",
+            &self.device_not_available
+        )?;
+        writeln!(f, "    Double Fault: {:X?}", &self.double_fault)?;
+        writeln!(
+            f,
+            "    Coprocessor Segment Overrun: {:X?}",
+            &self.coprocessor_segment_overrun
+        )?;
+        writeln!(f, "    Invalid TSS: {:X?}", &self.invalid_tss)?;
+        writeln!(
+            f,
+            "    Segment Not Present: {:X?}",
+            &self.segment_not_present
+        )?;
+        writeln!(
+            f,
+            "    Stack Segment Fault: {:X?}",
+            &self.stack_segment_fault
+        )?;
+        writeln!(
+            f,
+            "    General Protection Fault: {:X?}",
+            &self.general_protection_fault
+        )?;
+        writeln!(f, "    Page Fault: {:X?}", &self.page_fault)?;
+        writeln!(f, "    x87 Floating Point: {:X?}", &self.x87_floating_point)?;
+        writeln!(f, "    Alignment Check: {:X?}", &self.alignment_check)?;
+        writeln!(f, "    Machine Check: {:X?}", &self.machine_check)?;
+        writeln!(
+            f,
+            "    SIMD Floating Point: {:X?}",
+            &self.simd_floating_point
+        )?;
+        writeln!(f, "    Virtualization: {:X?}", &self.virtualization)?;
+        writeln!(
+            f,
+            "    CP Protection Exception: {:X?}",
+            &self.cp_protection_exception
+        )?;
+        writeln!(
+            f,
+            "    Hypervisor Injection Exception: {:X?}",
+            &self.hv_injection_exception
+        )?;
+        writeln!(
+            f,
+            "    VMM Communication Exception: {:X?}",
+            &self.vmm_communication_exception
+        )?;
+        writeln!(f, "    Security Excption: {:X?}", &self.security_exception)?;
+
+        self.interrupts
+            .iter()
+            .enumerate()
+            .try_for_each(|(index, entry)| writeln!(f, "    Interrupt {index}: {entry:X?}"))?;
+
+        write!(f, "}}")?;
+
+        Ok(())
     }
 }

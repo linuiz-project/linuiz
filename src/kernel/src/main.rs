@@ -198,6 +198,10 @@ unsafe extern "C" fn _entry() -> ! {
         &KERNEL_FILE_REQUEST,
         &KERNEL_ADDRESS_REQUEST,
     );
+    // Safety: Kernel mappings have just been set up.
+    unsafe {
+        crate::mem::KernelMapper::swap_into();
+    }
 
     crate::time::Stopwatch::init(&RSDP_REQUEST);
 

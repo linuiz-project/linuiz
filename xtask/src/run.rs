@@ -31,9 +31,13 @@ pub struct Options {
     #[arg(long, default_value = "512")]
     ram: usize,
 
-    /// Enables debug logging.
-    #[arg(short = 'l', long)]
-    debug_log: bool,
+    /// Enables debug logging for the specified components.
+    #[arg(long, default_value = "")]
+    debug: String,
+
+    /// Enables debug logging for the specified components.
+    #[arg(long, default_value = "")]
+    trace: String,
 
     /// Which type of block driver to use for root drive.
     #[arg(long, default_value = "virtio")]
@@ -132,11 +136,17 @@ pub fn run(sh: &xshell::Shell, temp_dir: impl AsRef<Path>, options: Options) -> 
         },
     ]);
 
-    if options.debug_log {
+    if !options.debug.is_empty() {
         run_cmd = run_cmd
             .args(["-D", ".debug/qemu.log"])
-            .args(["-d", "int,guest_errors"]);
-    } else {
+            .args(["-d", options.debug.as_str()]);
+    }
+
+    if !options.trace.is_empty() {
+        run_cmd = run_cmd.args(["-trace", options.trace.as_str()]);
+    }
+
+    if options.debug.is_empty() && options.trace.is_empty() {
         run_cmd = run_cmd.arg("-enable-kvm");
     }
 

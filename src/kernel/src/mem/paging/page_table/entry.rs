@@ -201,6 +201,18 @@ impl Entry {
         }
     }
 
+    #[cfg(target_arch = "x86_64")]
+    /// Sets the `WRITE` bit, but no the `NO_EXECUTE` bit.
+    ///
+    /// # Remarks
+    ///
+    /// Setting the `WRITE` bit without the `NO_EXECUTE` bit is extremely
+    /// unsafe.T his should **only** be done for intermediate, non-leaf page
+    /// table entries.
+    pub fn set_write_execute(&mut self) {
+        self.0.get_bit(Self::WRITEABLE_BIT_INDEX);
+    }
+
     pub fn get_permissions(&self) -> Permissions {
         cfg_select! {
             target_arch = "x86_64" => {
@@ -212,7 +224,8 @@ impl Entry {
                     (true, true) => Permissions::ReadWrite,
                     (false, false) => Permissions::ReadExecute,
 
-                    _ => unreachable!(),
+                    // This should ONLY be for intermediate entries.
+                    (true, false) => Permissions::WriteExecute,
                 }
             }
 
@@ -224,8 +237,8 @@ impl Entry {
         cfg_select! {
             target_arch = "x86_64" => {
                 match permissions {
-                    // All pages in x86 are at least read only, so `Permissions::None` is
-                    // effectively analogous to that.
+                    // All pages in x86 are at least read only, so
+                    // `Permissions::None` is effectively analogous to that.
                     Permissions::None | Permissions::ReadOnly => {
                         self.0.set_bit(Self::WRITEABLE_BIT_INDEX, false);
                         self.0.set_bit(Self::NO_EXECUTE_BIT_INDEX, true);
@@ -239,6 +252,10 @@ impl Entry {
                     Permissions::ReadExecute => {
                         self.0.set_bit(Self::WRITEABLE_BIT_INDEX, false);
                         self.0.set_bit(Self::NO_EXECUTE_BIT_INDEX, false);
+                    }
+
+                    Permissions::WriteExecute => {
+                        unimplemented!("use `::set_write_execute` to make an entry W/X");
                     }
                 }
             }
@@ -289,25 +306,29 @@ impl Entry {
     }
 }
 
+impl Default for Entry {
+    fn default() -> Self {
+        cfg_select! {
+            target_arch = "x86_64" => {
+                Self(1 << Self::WRITEABLE_BIT_INDEX)
+            }
+        }
+    }
+}
+
 impl core::fmt::Debug for Entry {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let mut debug_struct = formatter.debug_struct("Page Table Pointer");
 
         debug_struct
-            .field("Physical Address", &self.get_frame())
-            .field("Enabled", &self.is_enabled());
+            .field("Enabled", &self.is_enabled())
+            .field("Physical Address", &self.get_frame());
 
-        cfg_select! {
-            target_arch = "x86_64" => {
-                debug_struct.field("Huge", &self.is_huge());
-            }
-
-            target_arch = "riscv64" => {
-                debug_struct.field("Global", &self.is_global());
-            }
-        }
+        #[cfg(target_arch = "x86_64")]
+        debug_struct.field("Huge", &self.is_huge());
 
         debug_struct
+            .field("Global", &self.is_global())
             .field("Permissions", &self.get_permissions())
             .field("User Accessible", &self.is_user())
             .finish()

@@ -154,6 +154,7 @@ impl GlobalDescriptorTable {
         let dtptr = DescriptorTablePointer::from(self);
 
         trace!("Loading: {dtptr:X?}");
+        trace!("{self:#X?}");
 
         // Safety: The GDT is properly formed, and the descriptor table pointer is
         //         set to the GDT's memory location, with the requisite limit set

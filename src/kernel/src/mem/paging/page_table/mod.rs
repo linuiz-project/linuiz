@@ -1,3 +1,5 @@
+use core::array::repeat;
+
 use crate::mem::{
     HigherHalfDirectMap,
     pmm::{NextFrameError, PhysicalMemoryManager},
@@ -43,16 +45,12 @@ impl From<NextFrameError> for CreateEntryError {
 
 #[repr(C)]
 #[cfg_attr(target_arch = "x86_64", repr(align(0x1000)))]
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(super) struct PageTable([Entry; table_index_size()]);
 
 assert_eq_size!([u8; 0x1000], PageTable);
 
 impl PageTable {
-    pub const fn empty() -> Self {
-        Self([const { Entry::empty() }; table_index_size()])
-    }
-
     pub fn get(&self, index: usize) -> Option<&Entry> {
         self.0.get(index)
     }
@@ -81,8 +79,8 @@ impl PageTable {
         if current_depth == to_depth.unwrap_or(Depth::max()) {
             Ok(with_fn(entry))
         } else {
-            // This is a simple runtime check to ensure we don't accidentally mistakenly create
-            // large/huge pages along a table walk path.
+            // This is a simple runtime check to ensure we don't accidentally mistakenly
+            // create large/huge pages along a table walk path.
             if !is_intermediate_entry(entry) {
                 return Err(WithEntryError::TerminatingPage);
             }
@@ -114,8 +112,8 @@ impl PageTable {
         if current_depth == to_depth.unwrap_or(Depth::max()) {
             Ok(with_fn(entry))
         } else {
-            // This is a simple runtime check to ensure we don't accidentally mistakenly create
-            // large/huge pages along a table walk path.
+            // This is a simple runtime check to ensure we don't accidentally mistakenly
+            // create large/huge pages along a table walk path.
             if !is_intermediate_entry(entry) {
                 return Err(WithEntryError::TerminatingPage);
             }
@@ -132,8 +130,8 @@ impl PageTable {
         }
     }
 
-    /// Attempts to get a mutable reference to the page table that lies in the given entry's frame,
-    /// or creates the page table if it doesn't exist.
+    /// Attempts to get a mutable reference to the page table that lies in the
+    /// given entry's frame, or creates the page table if it doesn't exist.
     pub fn with_entry_create<T>(
         &mut self,
         page: Address<Page>,
@@ -151,8 +149,8 @@ impl PageTable {
         if current_depth == to_depth {
             Ok(with_fn(entry))
         } else {
-            // This is a simple runtime check to ensure we don't accidentally mistakenly create
-            // large/huge pages along a table walk path.
+            // Ensure we don't mistakenly create large/huge pages along a table
+            // walk path.
             if !is_intermediate_entry(entry) {
                 return Err(CreateEntryError::TerminatingPage);
             }
@@ -164,12 +162,23 @@ impl PageTable {
                     current_depth.get()
                 );
 
-                // Insert the `USER` bit in all non-leaf, non-higher-half pages. This is for
-                // compatibility with the x86 paging scheme, where non-`USER` pages in a
-                // page table walk will immediately return an access error.
                 #[cfg(target_arch = "x86_64")]
-                if !HigherHalfDirectMap::is_address_higher_half(page.get()) {
-                    entry.set_user(true);
+                {
+                    // x86 takes the most retrictive combination of all
+                    // permissions from the intermediate and leaf entries,
+                    // which means that a read-only intermediate page table
+                    // entry will make the entire block of memory represented
+                    // by the entry read-only, regardless of the leaf entry's
+                    // permissions.
+                    entry.set_write_execute();
+
+                    // Insert the `USER` bit in all non-leaf, non-higher-half
+                    // pages. This is for compatibility with the x86 paging
+                    // scheme, where non-`USER` pages in a page table walk will
+                    // immediately return an access error.
+                    if !HigherHalfDirectMap::is_address_higher_half(page.get()) {
+                        entry.set_user(true);
+                    }
                 }
 
                 let frame = PhysicalMemoryManager::next_frame(true)?;
@@ -198,6 +207,27 @@ impl PageTable {
 
     pub fn iter_mut(&mut self) -> core::slice::IterMut<Entry> {
         self.0.iter_mut()
+    }
+}
+
+impl Default for PageTable {
+    fn default() -> Self {
+        Self(repeat(Entry::default()))
+    }
+}
+
+impl core::fmt::Debug for PageTable {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        writeln!(f, "PageTable {{")?;
+
+        self.0
+            .iter()
+            .enumerate()
+            .try_for_each(|(index, entry)| writeln!(f, "    {index: >3}: {entry:X?}"))?;
+
+        write!(f, "}}")?;
+
+        Ok(())
     }
 }
 

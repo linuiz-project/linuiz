@@ -45,7 +45,7 @@ pub struct Options {
     drivers: Vec<String>,
 
     /// Whether to produce a disassembly of the kernel.
-    #[arg(short, long)]
+    #[arg(short = 'y', long)]
     disassemble: bool,
 }
 

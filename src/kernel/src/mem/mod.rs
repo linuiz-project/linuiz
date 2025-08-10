@@ -18,6 +18,7 @@ pub mod pmm;
 pub mod stack;
 
 crate::singleton! {
+    #[derive(Debug)]
     pub KernelMapper {
         mapper: Mapper
     }
@@ -186,9 +187,13 @@ crate::singleton! {
                 );
             });
 
-        Self {
+        let kernel_mapper = Self {
             mapper: kernel_mapper
-        }
+        };
+
+        trace!("{kernel_mapper:#X?}");
+
+        kernel_mapper
     }
 }
 
@@ -215,6 +220,7 @@ pub enum Permissions {
     ReadOnly,
     ReadWrite,
     ReadExecute,
+    WriteExecute,
 }
 
 // pub unsafe fn catch_read(ptr: NonNull<[u8]>) -> Result<Box<[u8]>, Exception>

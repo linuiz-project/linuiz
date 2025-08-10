@@ -109,8 +109,8 @@ impl From<WithEntryError> for GetMappingError {
 pub struct Mapper(RootTable);
 
 impl Mapper {
-    pub const fn new() -> Self {
-        Self(RootTable::empty())
+    pub fn new() -> Self {
+        Self(RootTable::default())
     }
 
     pub fn root_table(&self) -> &RootTable {

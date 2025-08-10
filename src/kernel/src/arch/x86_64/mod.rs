@@ -72,9 +72,9 @@ pub unsafe fn configure_hwthread() {
         flags.insert(cr4::Flags::SMEP);
     }
 
-    // if extended_feature_info().is_some_and(ExtendedFeatures::has_smap) {
-    //     flags.insert(cr4::Flags::SMAP);
-    // }
+    if extended_feature_info().is_some_and(ExtendedFeatures::has_smap) {
+        flags.insert(cr4::Flags::SMAP);
+    }
 
     // Safety:
     // - Caller is required to ensure no CPU features are in use.

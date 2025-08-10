@@ -46,18 +46,17 @@ pub fn use_huge_pages() -> bool {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct RootTable(PageTable);
 
 impl RootTable {
-    pub const fn empty() -> Self {
-        Self(PageTable::empty())
-    }
-
     /// Returns the page address of this table.
     pub fn page(&self) -> Address<Page> {
         let self_ptr = core::ptr::from_ref(&self.0).cast_mut();
-        Address::<Page>::try_from(self_ptr).expect("`&self` was not page-aligned")
+        let page = Address::<Page>::try_from(self_ptr).expect("`&self` was not page-aligned");
+        trace!("ROOT TABLE PAGE: {page:X?}");
+
+        page
     }
 
     /// Returns the frame address of this table.
