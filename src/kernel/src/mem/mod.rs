@@ -193,26 +193,19 @@ crate::singleton! {
 }
 
 impl KernelMapper {
-    pub fn swap_into() {
-        let kernel_mapper = &Self::get_static().mapper;
+    pub fn clone() -> Mapper {
+        Self::get_static().mapper.clone()
+    }
 
-        // Safety: Kernel page tables should be set up correctly.
+    pub unsafe fn swap_into() {
+        let mapper = &Self::get_static().mapper;
+
+        // Safety: Caller is required to maintain safety invariants.
         unsafe {
-            cfg_select! {
-                target_arch = "x86_64" => {
-                    crate::arch::x86_64::registers::control::cr3::CR3::write(
-                        kernel_mapper.root_table().frame(),
-                        AddressSpaceId::KERNEL
-                    );
-                }
-            }
+            mapper.swap_into(AddressSpaceId::KERNEL);
         }
 
         trace!("Swapped into kernel page tables.");
-    }
-
-    pub fn with<T>(func: impl FnOnce(&Mapper) -> T) -> T {
-        func(&Self::get_static().mapper)
     }
 }
 

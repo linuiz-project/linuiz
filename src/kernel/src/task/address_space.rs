@@ -31,7 +31,7 @@ impl AddressSpace {
     pub fn new(id: AddressSpaceId) -> Self {
         Self {
             id,
-            mapper: KernelMapper::with(Mapper::clone),
+            mapper: KernelMapper::clone(),
         }
     }
 

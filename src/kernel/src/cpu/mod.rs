@@ -2,7 +2,6 @@ use crate::{
     cpu::local_state::LocalState,
     mem::{KernelMapper, pmm::PhysicalMemoryManager},
     params::KernelParameters,
-    task::asid::AddressSpaceId,
 };
 use core::{
     ops::Range,
@@ -29,9 +28,9 @@ pub fn get_id() -> u32 {
 /// software execution. It should be run only once per hardware thread at the
 /// very beginning of code execution.
 pub unsafe fn configure() {
-    // Safety: Caller is required to meet invariants.
+    #[cfg(target_arch = "x86_64")]
+    // Safety: Caller is required to maintain safety invariants.
     unsafe {
-        #[cfg(target_arch = "x86_64")]
         crate::arch::x86_64::configure_hwthread();
     }
 }
@@ -53,13 +52,11 @@ pub fn begin_multiprocessing(mp_request: &limine::request::MpRequest) -> Option<
                 configure();
             }
 
-            KernelMapper::with(|kernel_mapper| {
-                // Safety: All currently referenced memory should also be mapped in the kernel
-                // page tables.
-                unsafe {
-                    kernel_mapper.swap_into(AddressSpaceId::KERNEL);
-                }
-            });
+            // Safety: All currently referenced memory should also be mapped in
+            //         the kernel page tables.
+            unsafe {
+                KernelMapper::swap_into();
+            }
 
             // Safety: Hardware thread still in init phase.
             unsafe { synchronize(stack_ptr, None) }
