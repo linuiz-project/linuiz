@@ -57,7 +57,7 @@ pub struct Options {
 
     /// Puts QEMU in GDB debug mode, awaiting signal from the debugger to begin
     /// execution.
-    #[arg(short, long)]
+    #[arg(short = 's', long)]
     gdb: bool,
 }
 
@@ -145,7 +145,7 @@ pub fn run(sh: &xshell::Shell, temp_dir: impl AsRef<Path>, options: Options) -> 
     }
 
     if options.gdb {
-        run_cmd = run_cmd.args(["-S", "-s"]);
+        run_cmd = run_cmd.arg("-S").arg("-s");
     }
 
     if options.norun {

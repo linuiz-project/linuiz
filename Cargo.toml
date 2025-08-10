@@ -5,6 +5,7 @@ members = ["src/kernel"]
 
 [profile.dev]
 panic = "abort"
+opt-level = 0
 
 [profile.release]
 panic = "abort"
