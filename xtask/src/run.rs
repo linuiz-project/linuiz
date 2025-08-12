@@ -146,7 +146,10 @@ pub fn run(sh: &xshell::Shell, temp_dir: impl AsRef<Path>, options: Options) -> 
         run_cmd = run_cmd.args(["-trace", options.trace.as_str()]);
     }
 
-    if options.debug.is_empty() && options.trace.is_empty() {
+    if !regex::Regex::new("(?:^|,)int")
+        .unwrap()
+        .is_match(options.debug.as_str())
+    {
         run_cmd = run_cmd.arg("-enable-kvm");
     }
 
