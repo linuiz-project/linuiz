@@ -1,8 +1,9 @@
 #![allow(non_camel_case_types)]
 
-use crate::cpu::{local_flags::LocalFlags, local_state::LocalState};
+use crate::cpu::local_state::LocalState;
 use bit_field::BitField;
 use core::{num::NonZero, ptr::NonNull};
+use libsys::address::{Address, Frame};
 
 /// Implements `rdmsr` and `wrmsr` for an x86 model-specific register.
 ///
@@ -74,9 +75,47 @@ unsafe impl ModelSpecificRegister for IA32_APIC_BASE {
 }
 
 impl IA32_APIC_BASE {
-    pub fn read() -> u64 {
+    fn read() -> u32 {
         // Safety: `IA32_APIC_BASE` is always supported.
-        unsafe { Self::rdmsr() }
+        let bits = unsafe { Self::rdmsr() };
+
+        // The length of this register is reserved to 32 bits.
+        #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
+        let bits = bits as u32;
+
+        bits
+    }
+
+    /// Indicates whether the current hardware thread in the bootstrap hardware
+    /// thread ('bootstrap processor').
+    pub fn get_is_bsp() -> bool {
+        Self::read().get_bit(8)
+    }
+
+    /// Indicates whether the local APIC is operating in x2 mode.
+    pub fn get_is_x2apic_mode() -> bool {
+        Self::read().get_bit(10)
+    }
+
+    /// Gets the enable state of the APIC.
+    pub fn get_hw_enabled() -> bool {
+        Self::read().get_bit(11)
+    }
+
+    /// Gets the base address of the local APIC.
+    pub fn get_base_address() -> Address<Frame> {
+        let base_address = Self::read() & !0xFFF;
+
+        // `u32` will always be castable to `usize` (we do not support 16-bit
+        // architectures).
+        #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
+        let base_address = base_address as usize;
+
+        // Safety:
+        // - `base_address` is page aligned via the `&` operator above.
+        // - The APIC base is reserved to exactly match the processor's maximum physical
+        //   address size.
+        unsafe { Address::<Frame>::new_unchecked(base_address) }
     }
 }
 
@@ -142,67 +181,28 @@ unsafe impl ModelSpecificRegister for IA32_KERNEL_GS_BASE {
 }
 
 impl IA32_KERNEL_GS_BASE {
-    fn read() -> (LocalFlags, Option<NonNull<LocalState>>) {
+    pub fn get_local_state_ptr() -> Option<NonNull<LocalState>> {
         // Safety: `IA32_KERNEL_GS_BASE` is always supported in long mode.
         let bits = unsafe { Self::rdmsr() };
 
         // We would like to avoid potentionally panicking in this function.
         #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
-        let ptr = NonZero::new(bits as usize).map(NonNull::with_exposed_provenance);
-        let flags = LocalFlags::from_bits_truncate(bits);
+        let address_bits = bits as usize;
 
-        (flags, ptr)
-    }
-
-    unsafe fn write(flags: LocalFlags, pointer: Option<NonNull<LocalState>>) {
-        let flags_bits = flags.bits();
-        let ptr_bits = pointer
-            .map(NonNull::addr)
-            .map(NonZero::<usize>::get)
-            .unwrap_or(0);
-
-        // We would like to avoid potentionally panicking in this function.
-        #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
-        let ptr_bits = ptr_bits as u64;
-
-        debug_assert!((ptr_bits & LocalFlags::all().bits()) == 0);
-
-        unsafe {
-            Self::wrmsr(flags_bits | ptr_bits);
-        }
-    }
-
-    pub fn get_local_state_ptr() -> Option<NonNull<LocalState>> {
-        let (_, pointer) = Self::read();
-
-        pointer
+        NonZero::new(address_bits).map(NonNull::with_exposed_provenance)
     }
 
     /// Sets the processor-local pointer to the [`LocalState`] structure.
     pub unsafe fn set_local_state_ptr(ptr: NonNull<LocalState>) {
-        let (flags, _) = Self::read();
+        // We would like to avoid potentionally panicking in this function.
+        #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
+        let address_bits = ptr.addr().get() as u64;
 
         // Safety:
         // - `IA32_KERNEL_GS_BASE` is always supported in long mode.
         // - Caller is required to maintain all other safety invariants.
         unsafe {
-            Self::write(flags, Some(ptr));
-        }
-    }
-
-    pub fn get_local_flags() -> LocalFlags {
-        let (flags, _) = Self::read();
-        flags
-    }
-
-    pub unsafe fn set_local_flags(flags: LocalFlags) {
-        let (_, ptr) = Self::read();
-
-        // Safety:
-        // - `IA32_KERNEL_GS_BASE` is always supported in long mode.
-        // - Caller is required to maintain all other safety invariants.
-        unsafe {
-            Self::write(flags, ptr);
+            Self::wrmsr(address_bits);
         }
     }
 }

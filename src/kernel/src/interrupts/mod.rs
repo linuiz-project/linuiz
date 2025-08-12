@@ -23,7 +23,7 @@ pub enum Vector {
     Unknown = 0,
 }
 
-/// Enables interrupts for the current hardware thread.
+/// Enables interrupts for the current processor.
 pub fn enable() {
     #[cfg(target_arch = "x86_64")]
     crate::arch::x86_64::instructions::__sti();
@@ -32,7 +32,7 @@ pub fn enable() {
     unimplemented!();
 }
 
-/// Disables interrupts for the current hardware thread.
+/// Disables interrupts for the current processor.
 pub fn disable() {
     #[cfg(target_arch = "x86_64")]
     crate::arch::x86_64::instructions::__cli();
@@ -41,7 +41,7 @@ pub fn disable() {
     unimplemented!();
 }
 
-/// Whether or not interrupts are enabled for the current hardware thread.
+/// Whether or not interrupts are enabled for the current processor.
 pub fn is_enabled() -> bool {
     #[cfg(target_arch = "x86_64")]
     {
@@ -55,7 +55,7 @@ pub fn is_enabled() -> bool {
     }
 }
 
-/// Waits for the next interrupt on the current hardware thread.
+/// Waits for the next interrupt on the current processor.
 pub fn wait_next() {
     #[cfg(target_arch = "x86_64")]
     crate::arch::x86_64::instructions::__hlt();
@@ -101,7 +101,7 @@ pub fn uninterruptable<T>(func: impl FnOnce() -> T) -> T {
     return_value
 }
 
-/// Indefinitely waits for the next interrupt on the current hardware thread.
+/// Indefinitely waits for the next interrupt on the current processor.
 pub fn wait_indefinite() -> ! {
     loop {
         wait_next();

@@ -41,12 +41,20 @@ impl AddressSpace {
                 let (current_table_address, _) =
                     crate::arch::x86_64::registers::control::cr3::CR3::read();
 
-                current_table_address == self.mapper.root_table().frame()
+                current_table_address == self.mapper.frame()
             }
         }
     }
 
-    pub fn mmap(
+    /// Memory maps a range of memory.
+    ///
+    /// # Safety
+    ///
+    /// - If `mapping` is [`MemoryMapping::Exact`], it must reference only
+    ///   currently unused pages.
+    /// - `permissions` must be the correct permissions for how the memory will
+    ///   be used.
+    pub unsafe fn mmap(
         &mut self,
         mapping: MemoryMapping,
         // TODO support lazy mapping
@@ -54,20 +62,34 @@ impl AddressSpace {
         permissions: Permissions,
     ) -> Result<NonNull<[u8]>, AutoMappingError> {
         match mapping {
-            MemoryMapping::Exact { range } => self.map_range(range, permissions),
-            MemoryMapping::Any { count } => self.map_any(count, permissions),
+            MemoryMapping::Exact { range } => {
+                // Safety: Caller is required to maintain safety invariants.
+                unsafe { self.map_range(range, permissions) }
+            }
+
+            MemoryMapping::Any { count } => {
+                // Safety: Caller is required to maintain safety invariants.
+                unsafe { self.map_any(count, permissions) }
+            }
         }
     }
 
     /// Maps a range of addresses.
-    fn map_range(
+    ///
+    /// # Safety
+    ///
+    /// - `range` must not contain any pages that are already mapped.
+    /// - `permissions` must be the correct permissions for how the memory will
+    ///   be used.
+    unsafe fn map_range(
         &mut self,
         range: Range<Address<Page>>,
         permissions: Permissions,
     ) -> Result<NonNull<[u8]>, AutoMappingError> {
-        range
-            .clone()
-            .try_for_each(|offset_page| self.mapper.auto_map(offset_page, permissions))?;
+        range.clone().try_for_each(|offset_page| {
+            // Safety: Caller is required to maintain safety invariants.
+            unsafe { self.mapper.auto_map(offset_page, permissions) }
+        })?;
 
         let mapping_ptr = core::ptr::with_exposed_provenance_mut::<u8>(range.start.get().get());
         let mapping_len = range.count() * page_size();
@@ -78,21 +100,26 @@ impl AddressSpace {
         ))
     }
 
-    fn map_any(
+    /// Maps a range of `page_count` length in pages.
+    ///
+    /// # Safety
+    ///
+    /// - `permissions` must be the correct permissions for how the memory will
+    ///   be used.
+    unsafe fn map_any(
         &mut self,
-        count: NonZero<usize>,
+        page_count: NonZero<usize>,
         permissions: Permissions,
     ) -> Result<NonNull<[u8]>, AutoMappingError> {
         let mut start_index = 0;
         let mut run = 0;
 
         self.mapper
-            .root_table()
             .walk(|entry| {
                 if entry.is_none() {
                     run += 1;
 
-                    if run == count.get() {
+                    if run == page_count.get() {
                         return ControlFlow::Break(());
                     }
                 } else {
@@ -106,14 +133,17 @@ impl AddressSpace {
             .break_value()
             .ok_or(AutoMappingError::OutOfMemory)?;
 
-        match run.cmp(&count.get()) {
+        match run.cmp(&page_count.get()) {
             Ordering::Equal => {
-                let end_index = start_index + count.get();
+                let end_index = start_index + page_count.get();
 
                 let start_page = Address::<Page>::new(start_index << page_bits().get()).unwrap();
                 let end_page = Address::<Page>::new(end_index << page_bits().get()).unwrap();
 
-                self.map_range(start_page..end_page, permissions)
+                // Safety:
+                // - Range is checked to be unused.
+                // - Caller is required to ensure permissions are correct.
+                unsafe { self.map_range(start_page..end_page, permissions) }
             }
 
             Ordering::Less => Err(AutoMappingError::OutOfMemory),
@@ -132,7 +162,8 @@ impl AddressSpace {
         page: Address<Page>,
         permissions: Permissions,
     ) -> Result<(), GetMappingError> {
-        self.mapper.set_page_permissions(page, None, permissions)
+        // Safety: Caller is required to maintain safety invariants.
+        unsafe { self.mapper.set_page_permissions(page, None, permissions) }
     }
 
     pub fn is_mmapped(&self, address: Address<Page>) -> bool {

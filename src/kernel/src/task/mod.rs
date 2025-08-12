@@ -106,12 +106,13 @@ impl Task {
         let id = uuid::Uuid::new_v4();
 
         trace!("Allocating userspace stack for task: {id:?}.");
-        let stack = address_space
-            .mmap(
+        let stack = unsafe {
+            address_space.mmap(
                 MemoryMapping::Any { count: STACK_PAGES },
                 Permissions::ReadWrite,
             )
-            .unwrap();
+        };
+        let stack = stack.unwrap();
         Self {
             id,
             priority,
@@ -234,15 +235,18 @@ impl Task {
             - fault_end_pad;
 
         trace!("Mapping the demand page RW so data can be copied.");
-        let mapped_memory = self
-            .address_space_mut()
-            .mmap(
+        let address_space = self.address_space_mut();
+
+        let mapped_memory = unsafe {
+            address_space.mmap(
                 MemoryMapping::Exact {
                     range: fault_page..fault_page,
                 },
                 Permissions::ReadWrite,
             )
-            .unwrap();
+        };
+        let mapped_memory = mapped_memory.unwrap();
+
         // Safety: Address space allocator fulfills all required invariants.
         let mapped_memory = unsafe { mapped_memory.as_uninit_slice_mut() };
 
@@ -301,7 +305,8 @@ impl Task {
         });
 
         trace!("Finalizing page's access attributes.");
-        // Safety: Page is already mapped, permissions are being modified according to the segment access type.
+        // Safety: Page is already mapped, permissions are being modified according to
+        // the segment access type.
         unsafe {
             self.address_space_mut()
                 .set_permissions(

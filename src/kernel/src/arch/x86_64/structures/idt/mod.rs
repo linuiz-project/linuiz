@@ -36,7 +36,7 @@ crate::singleton! {
     /// (with slight modifications).
     #[repr(C, align(0x10))]
     #[derive(Clone)]
-    pub InterruptDescriptorTable {
+    pub struct InterruptDescriptorTable {
         /// A divide error (`#DE`) occurs when the denominator of a DIV instruction or
         /// an IDIV instruction is 0. A `#DE` also occurs if the result is too large to be
         /// represented in the destination.

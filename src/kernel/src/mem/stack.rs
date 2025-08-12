@@ -7,6 +7,12 @@ use core::{mem::MaybeUninit, ptr::NonNull};
 #[derive(Clone, Copy)]
 pub struct Stack<const N: usize>([MaybeUninit<u8>; N]);
 
+impl<const N: usize> Default for Stack<N> {
+    fn default() -> Self {
+        Self([MaybeUninit::uninit(); N])
+    }
+}
+
 impl<const N: usize> Stack<N> {
     pub fn new() -> Result<Box<Self>, core::alloc::AllocError> {
         let ptr = KERNEL_ALLOCATOR

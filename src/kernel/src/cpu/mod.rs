@@ -12,23 +12,23 @@ pub fn get_id() -> u32 {
 /// # Safety
 ///
 /// This function has the potential to modify state in such a way as to disrupt
-/// software execution. It should be run only once per hardware thread at the
-/// very beginning of code execution.
+/// software execution. It should be run only once per processor at the very
+/// beginning of code execution.
 pub unsafe fn configure() {
     #[cfg(target_arch = "x86_64")]
     // Safety: Caller is required to maintain safety invariants.
     unsafe {
-        crate::arch::x86_64::configure_hwthread();
+        crate::arch::x86_64::configure_processor();
     }
 }
 
 /// Iterates the entries in the multiprocessing request, configuring and
-/// subsequently synchronizing the other hardware threads in the system.
+/// subsequently synchronizing the other processors in the system.
 ///
 /// # Returns
 ///
-/// - If request was satisfied, `Some` of the count of non-bootstrap hardware
-///   threads in the system.
+/// - If request was satisfied, `Some` of the count of non-bootstrap processor
+///   in the system.
 /// - If request was not satisfied, `None`.
 pub fn begin_multiprocessing(mp_request: &limine::request::MpRequest) -> Option<usize> {
     let Some(response) = mp_request.get_response() else {
@@ -43,25 +43,22 @@ pub fn begin_multiprocessing(mp_request: &limine::request::MpRequest) -> Option<
         .iter()
         .filter(|cpu| cpu.lapic_id != response.bsp_lapic_id())
         .for_each(|cpu| {
-            trace!(
-                "Starting hardware thread: ID#{} LAPIC#{}",
-                cpu.id, cpu.lapic_id
-            );
+            trace!("Starting processor: ID#{} LAPIC#{}", cpu.id, cpu.lapic_id);
 
             if KernelParameters::use_multiprocessing() {
                 extern "C" fn _mp_entry(_: &limine::mp::Cpu) -> ! {
-                    // Safety: Function is run only once for this hardware thread.
+                    // Safety: Function is run only once for this processor.
                     unsafe {
                         configure();
                     }
 
-                    // Safety: All currently referenced memory should also be mapped in
-                    //         the kernel page tables.
+                    // Safety: All currently referenced memory should also be
+                    //         mapped in the kernel page tables.
                     unsafe {
                         KernelMapper::swap_into();
                     }
 
-                    // Safety: Hardware thread still in init phase.
+                    // Safety: processor still in init phase.
                     unsafe { start(None, None) }
                 }
 
@@ -83,9 +80,7 @@ pub fn begin_multiprocessing(mp_request: &limine::request::MpRequest) -> Option<
 ///
 /// # Safety
 ///
-/// - Function can only be run once at the end of the kernel init phase.
-/// - `pre_call_sp` must be the current hardware thread's stack pointer
-///   immediately prior to this method being called.
+/// - Function should only be run once at the end of the kernel init phase.
 #[allow(clippy::too_many_lines)]
 pub unsafe fn start(
     mp_request: Option<&limine::request::MpRequest>,
@@ -109,7 +104,7 @@ pub unsafe fn start(
     // Ensure we enable interrupts prior to enabling the scheduler.
     crate::interrupts::enable();
 
-    // // Safety: The hardware thread is ready to be scheduled with tasks.
+    // // Safety: The processor is ready to be scheduled with tasks.
     // unsafe {
     //     crate::cpu::local_state::begin_scheduling();
     // }
@@ -119,7 +114,7 @@ pub unsafe fn start(
     crate::interrupts::wait_indefinite()
 }
 
-/// Gets the current hardware thread's stack pointer.
+/// Gets the current processor's stack pointer.
 #[inline(always)]
 pub fn get_stack_ptr() -> *const u8 {
     #[cfg(target_arch = "x86_64")]
@@ -128,7 +123,7 @@ pub fn get_stack_ptr() -> *const u8 {
     }
 }
 
-/// Murder—in cold electrons—the current hardware thread.
+/// Murder—in cold electrons—the current processor.
 #[inline(never)]
 pub fn halt_and_catch_fire() -> ! {
     crate::interrupts::disable();

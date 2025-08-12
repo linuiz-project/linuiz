@@ -153,21 +153,21 @@ unsafe extern "C" fn _entry() -> ! {
 
     // Enable logging first, so we can get feedback on the entire init process.
     crate::logging::KernelLogger::init();
+    // The higher-half direct map is used by the local APIC, and so must be
+    // initialized directly after the logger (so the logger can use the APIC
+    // to determine the processor ID).
+    crate::mem::HigherHalfDirectMap::init(&HHDM_REQUEST);
 
-    if STACK_SIZE_REQUEST.get_response().is_none() {
-        warn!("Stack size request was not fulfilled.");
-    }
+    #[cfg(target_arch = "x86_64")]
+    crate::arch::x86_64::devices::local_apic::LocalApic::init();
 
-    // Safety: Function is run only once for this hardware thread.
+    // Safety: Function is run only once for this processor.
     unsafe {
         crate::cpu::configure();
     }
 
-    // Safety: Value is non-zero.
-    let paging_depth = unsafe { core::num::NonZero::<u32>::new_unchecked(4) };
-    // Safety: Current paging depth is 4.
-    unsafe {
-        libsys::constants::set_paging_depth(paging_depth);
+    if STACK_SIZE_REQUEST.get_response().is_none() {
+        warn!("Stack size request was not fulfilled.");
     }
 
     print_env_info(&BOOTLOADER_INFO_REQUEST, &MEMORY_MAP_REQUEST);
@@ -191,7 +191,6 @@ unsafe extern "C" fn _entry() -> ! {
         crate::panic::tracing::symbols::KernelSymbols::init(&KERNEL_FILE_REQUEST);
     }
 
-    crate::mem::HigherHalfDirectMap::init(&HHDM_REQUEST);
     crate::mem::pmm::PhysicalMemoryManager::init(&MEMORY_MAP_REQUEST);
     crate::mem::KernelMapper::init(
         &MEMORY_MAP_REQUEST,
@@ -242,6 +241,21 @@ fn print_env_info(
     report_total_usable_memory(memory_map);
 }
 
+fn limine_memory_map_entry_type_to_str(entry_type: limine::memory_map::EntryType) -> &'static str {
+    match entry_type {
+        limine::memory_map::EntryType::USABLE => "USABLE",
+        limine::memory_map::EntryType::RESERVED => "RESERVED",
+        limine::memory_map::EntryType::EXECUTABLE_AND_MODULES => "EXECUTABLE_AND_MODULES",
+        limine::memory_map::EntryType::BOOTLOADER_RECLAIMABLE => "BOOTLOADER_RECLAIMABLE",
+        limine::memory_map::EntryType::ACPI_RECLAIMABLE => "ACPI_RECLAIMABLE",
+        limine::memory_map::EntryType::ACPI_NVS => "ACPI_NVS",
+        limine::memory_map::EntryType::FRAMEBUFFER => "FRAMEBUFFER",
+        limine::memory_map::EntryType::BAD_MEMORY => "BAD_MEMORY",
+
+        _ => "!! UNKOWN !!",
+    }
+}
+
 fn report_memory_map_entries(memory_map: &[&limine::memory_map::Entry]) {
     memory_map.iter().for_each(|entry| {
         let entry_start = entry.base;
@@ -249,18 +263,7 @@ fn report_memory_map_entries(memory_map: &[&limine::memory_map::Entry]) {
         debug!(
             "Memory Map: {:#X?}  {}",
             entry_start..entry_end,
-            match entry.entry_type {
-                limine::memory_map::EntryType::USABLE => "USABLE",
-                limine::memory_map::EntryType::RESERVED => "RESERVED",
-                limine::memory_map::EntryType::EXECUTABLE_AND_MODULES => "EXECUTABLE_AND_MODULES",
-                limine::memory_map::EntryType::BOOTLOADER_RECLAIMABLE => "BOOTLOADER_RECLAIMABLE",
-                limine::memory_map::EntryType::ACPI_RECLAIMABLE => "ACPI_RECLAIMABLE",
-                limine::memory_map::EntryType::ACPI_NVS => "ACPI_NVS",
-                limine::memory_map::EntryType::FRAMEBUFFER => "FRAMEBUFFER",
-                limine::memory_map::EntryType::BAD_MEMORY => "BAD_MEMORY",
-
-                _ => unreachable!("!! UNKOWN !!"),
-            }
+            limine_memory_map_entry_type_to_str(entry.entry_type)
         );
     });
 }
@@ -385,7 +388,7 @@ fn report_total_usable_memory(memory_map: &[&limine::memory_map::Entry]) {
 macro_rules! singleton {
     (
         $(#[$struct_attrs:meta])*
-        $struct_scope:vis $struct_name:ident {
+        $struct_scope:vis struct $struct_name:ident {
             $(
                 $(#[$field_attrs:meta])*
                 $field_scope:vis $field_name:ident: $field_ty:ty
@@ -411,15 +414,9 @@ macro_rules! singleton {
             impl $struct_name {
                 $(#[$init_attrs])*
                 pub fn init($($arg_name: $arg_ty),*) {
-                    [< STATIC_ $struct_name >].call_once(||{
-                        trace!(concat!("Initializing `", stringify!($struct_name), "`..."));
+                    let init_fn = || $init;
 
-                        let init = $init;
-
-                        debug!(concat!("Static `", stringify!($struct_name), "` initialized."));
-
-                        init
-                    });
+                    [< STATIC_ $struct_name >].call_once(init_fn);
                 }
 
                 /// Gets the single instance of [`Self`], or causes a panic if it's uninitialized.

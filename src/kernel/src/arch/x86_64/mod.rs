@@ -16,9 +16,9 @@ pub mod structures;
 /// # Safety
 ///
 /// This function has the potential to modify CPU state in such a way as to
-/// disrupt software execution. It should be run only once per hardware thread
-/// at the very beginning of code execution.
-pub unsafe fn configure_hwthread() {
+/// disrupt software execution. It should be run only once per processor at the
+/// very beginning of code execution.
+pub unsafe fn configure_processor() {
     use registers::{
         control::{cr0, cr4},
         model_specific::IA32_EFER,

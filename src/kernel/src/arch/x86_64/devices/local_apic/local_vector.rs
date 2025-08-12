@@ -168,8 +168,8 @@ pub enum TimerMode {
     Periodic = 0b01,
 
     /// Uses the `IA32_TSC_DEADLINE` model-specific register as a deadline
-    /// value, which will trigger when the hardware thread's timestamp
-    /// counter reaches or passes the deadline.
+    /// value, which will trigger when the processor's timestamp counter reaches
+    /// or passes the deadline.
     TscDeadline = 0b10,
 }
 

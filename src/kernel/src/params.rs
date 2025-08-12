@@ -2,7 +2,7 @@ use limine::request::ExecutableCmdlineRequest;
 
 crate::singleton! {
     #[derive(Debug)]
-    pub KernelParameters {
+    pub struct KernelParameters {
         /// Whether the kernel should utilize multi-processing.
         use_multiprocessing: bool,
 

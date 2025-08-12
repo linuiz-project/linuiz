@@ -59,9 +59,8 @@ impl TaskStateSegment {
     ///
     /// # Remarks
     ///
-    /// Only one [`TaskStateSegment`] should be loaded on each hardware thread.
-    /// It's likely a runtime error if more than one are loaded per hardware
-    /// threads.
+    /// It's likely a runtime error if more than one [`TaskStateSegment`]s are
+    /// loaded per processor.
     pub fn load_local() {
         fn allocate_stack_table_stack() -> NonNull<StackTableStack> {
             let stack =

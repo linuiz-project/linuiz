@@ -44,7 +44,7 @@ impl Source {
 }
 
 crate::singleton! {
-    pub Stopwatch {
+    pub struct Stopwatch {
         source: Source,
         ticks_per_sec: u64,
         ticks_per_ms: u64,

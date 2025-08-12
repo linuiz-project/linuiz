@@ -24,7 +24,8 @@ fn try_get_local_static_ptr() -> Option<NonNull<LocalState>> {
     }
 }
 
-/// Local (to the current hardware thread) state structure.
+/// Local (to the current processor) state structure.
+#[repr(align(0x1000))]
 pub struct LocalState {
     timer: LocalTimer,
     scheduler: InterruptCell<Mutex<Scheduler>>,
@@ -44,7 +45,7 @@ impl LocalState {
         let timer = LocalTimer::configure();
 
         trace!("Configuring local scheduler...");
-        let scheduler = Scheduler::new().expect("failed to allocate idle stack");
+        let scheduler = Scheduler::new();
 
         let local_state_ptr = KERNEL_ALLOCATOR
             .allocate(core::alloc::Layout::new::<Self>())
@@ -64,7 +65,7 @@ impl LocalState {
             local_state_ptr.write(local_state);
         }
 
-        // Set the local state pointer for this hardware thread.
+        // Set the local state pointer for this processor.
         cfg_select! {
             target_arch = "x86_64" => {
                 use crate::arch::x86_64::registers::model_specific::IA32_KERNEL_GS_BASE;
@@ -82,7 +83,7 @@ impl LocalState {
         debug!("Local state has been initialized.");
     }
 
-    /// Gets the local hardware thread state structure.
+    /// Gets the local processor state structure.
     fn get_local_static() -> &'static Self {
         try_get_local_static_ptr()
             .map(|local_state_ptr| {

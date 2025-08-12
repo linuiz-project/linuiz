@@ -1,5 +1,5 @@
 use crate::{
-    mem::{mapper::Mapper, paging::page_table::Depth},
+    mem::{mapper::Mapper, mapper::paging::Depth},
     task::asid::AddressSpaceId,
 };
 use libsys::{
@@ -13,13 +13,12 @@ pub use hhdm::*;
 // pub mod io;
 pub mod alloc;
 pub mod mapper;
-pub mod paging;
 pub mod pmm;
 pub mod stack;
 
 crate::singleton! {
     #[derive(Debug)]
-    pub KernelMapper {
+    pub struct KernelMapper {
         mapper: Mapper
     }
 
@@ -35,7 +34,13 @@ crate::singleton! {
             count: usize,
             memory_access: Permissions,
         ) {
-            trace!("Map Range: ({from:X?} -> {to:X?}):{count:#X} {memory_access:?}");
+            let virtual_start = from.get().get();
+            let virtual_end = virtual_start + count;
+            trace!(
+                "Map Range: {:#X?} -> {:#X} {{ {memory_access:?} }}",
+                virtual_start..virtual_end,
+                to.get().get()
+            );
 
             let mut remaining_count = count;
             while remaining_count > 0 {
@@ -43,7 +48,7 @@ crate::singleton! {
                 let from = Address::<Page>::new(from.get().get() + offset).unwrap();
                 let to = Address::<Frame>::new(to.get().get() + offset).unwrap();
 
-                if paging::use_huge_pages()
+                if mapper::use_huge_pages()
                     // check is larger than giga page
                     && remaining_count >= huge_page_size()
                     // check is aligned to giga page
@@ -51,12 +56,21 @@ crate::singleton! {
                 {
                     // Map a giga page
 
-                    mapper
-                        .map(from, Depth::giga(), to, false, memory_access)
-                        .expect("failed to map range");
+                    // Safety:
+                    // - `from` page is not mapped in current page tables.
+                    // - `to` frame is apart of the higher-half direct map, so
+                    //   is unused.
+                    // - `memory_access` is calculated based on the type of the
+                    //   memory region, as reported by the bootloader (so should
+                    //   be correct, if the bootloader is not lying).
+                    unsafe {
+                        mapper
+                            .map(from, to, Depth::giga(), false, memory_access)
+                            .expect("failed to map range");
+                    }
 
                     remaining_count -= huge_page_size();
-                } else if paging::use_large_pages()
+                } else if mapper::use_large_pages()
                     // check is larger than mega page
                     && remaining_count >= large_page_size()
                     // check is aligned to mega page
@@ -64,17 +78,35 @@ crate::singleton! {
                 {
                     // Map a mega page
 
-                    mapper
-                        .map(from, Depth::mega(), to, false, memory_access)
-                        .expect("failed to map range");
+                    // Safety:
+                    // - `from` page is not mapped in current page tables.
+                    // - `to` frame is apart of the higher-half direct map, so
+                    //   is unused.
+                    // - `memory_access` is calculated based on the type of the
+                    //   memory region, as reported by the bootloader (so should
+                    //   be correct, if the bootloader is not lying).
+                    unsafe {
+                        mapper
+                            .map(from, to, Depth::mega(), false, memory_access)
+                            .expect("failed to map range");
+                    }
 
                     remaining_count -= large_page_size();
                 } else {
                     // Map a standard page
 
-                    mapper
-                        .map(from, Depth::max(), to, false, memory_access)
-                        .expect("failed to map range");
+                    // Safety:
+                    // - `from` page is not mapped in current page tables.
+                    // - `to` frame is apart of the higher-half direct map, so
+                    //   is unused.
+                    // - `memory_access` is calculated based on the type of the
+                    //   memory region, as reported by the bootloader (so should
+                    //   be correct, if the bootloader is not lying).
+                    unsafe {
+                        mapper
+                            .map(from, to, Depth::max(),false, memory_access)
+                            .expect("failed to map range");
+                    }
 
                     remaining_count -= core::cmp::min(page_size(), remaining_count);
                 }
@@ -84,8 +116,8 @@ crate::singleton! {
         debug!("Preparing kernel memory...");
         debug!(
             "Paging Setup Info: {{ large pages: {}, huge pages: {} }}",
-            paging::use_large_pages(),
-            paging::use_huge_pages(),
+            mapper::use_large_pages(),
+            mapper::use_huge_pages(),
         );
 
 
@@ -97,6 +129,13 @@ crate::singleton! {
             .entries()
             .iter()
             .for_each(|entry| {
+                trace!(
+                    "Map Entry: {{ start: {:#X}, length: {:#X}, type: {} }}",
+                    entry.base,
+                    entry.length,
+                    crate::limine_memory_map_entry_type_to_str(entry.entry_type)
+                );
+
                 let entry_start = usize::try_from(entry.base).unwrap();
                 let entry_length = usize::try_from(entry.length).unwrap();
                 let entry_frame = Address::<Frame>::new(entry_start).unwrap();
@@ -107,18 +146,20 @@ crate::singleton! {
                         | limine::memory_map::EntryType::ACPI_NVS
                         | limine::memory_map::EntryType::ACPI_RECLAIMABLE
                         | limine::memory_map::EntryType::BOOTLOADER_RECLAIMABLE
-                        | limine::memory_map::EntryType::FRAMEBUFFER => Permissions::ReadWrite,
+                        | limine::memory_map::EntryType::FRAMEBUFFER
+                            => Permissions::ReadWrite,
 
                         limine::memory_map::EntryType::RESERVED
-                        | limine::memory_map::EntryType::EXECUTABLE_AND_MODULES => {
-                            Permissions::ReadOnly
-                        }
+                        | limine::memory_map::EntryType::EXECUTABLE_AND_MODULES
+                            => Permissions::ReadOnly,
 
                         _ => {
                             unreachable!("Unrecognized memory map entry type: {:#X}", entry.base)
                         }
                     }
                 };
+
+
 
                 map_range(
                     &mut kernel_mapper,
@@ -187,6 +228,18 @@ crate::singleton! {
                 );
             });
 
+        #[cfg(target_arch = "x86_64")]
+        {
+            let local_apic_frame = crate::arch::x86_64::registers::model_specific::IA32_APIC_BASE::get_base_address();
+            map_range(
+                &mut kernel_mapper,
+                HigherHalfDirectMap::frame_to_page(local_apic_frame),
+                local_apic_frame,
+                1,
+                Permissions::ReadWrite
+            );
+        }
+
         let kernel_mapper = Self {
             mapper: kernel_mapper
         };
@@ -209,8 +262,6 @@ impl KernelMapper {
         unsafe {
             mapper.swap_into(AddressSpaceId::KERNEL);
         }
-
-        trace!("Swapped into kernel page tables.");
     }
 }
 

@@ -2,14 +2,23 @@ use core::num::NonZero;
 use libsys::address::{Address, Frame, Page, Physical, Virtual};
 
 crate::singleton! {
-    #[repr(transparent)]
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub HigherHalfDirectMap {
+    pub struct HigherHalfDirectMap {
         base_address: NonZero<usize>
     }
 
     fn init(hhdm_request: &limine::request::HhdmRequest) -> Self {
-        // Zero-based memory offset of the start of the HHDM.
+        // This function cannot contain any debug logging, as it's used by the
+        // local APIC module to offset the register addresses in xAPIC mode,
+        // which is then used by the logger to print out the processor ID.
+        //
+        // So, imagine the case:
+        // 1. You log in this function...
+        // 2. The logger tries to read the processor ID from the local APIC...
+        // 3. The local APIC reads the register address, and tries to read the
+        //    higher-half direct map value to offset it...
+        // 4. The log function panicks, because the higher-half direct map is
+        //    not yet set.
+
         let base_address = hhdm_request
             .get_response()
             .expect("bootloader did not provide response to higher-half direct map request")
@@ -20,14 +29,13 @@ crate::singleton! {
             .and_then(NonZero::new)
             .expect("higher-half direct map offset is invalid");
 
-        debug!("HHDM @ {base_address:#X}");
-
         Self { base_address }
     }
 }
 
 impl HigherHalfDirectMap {
-    /// Positively offset `address` by the base address of the higher-half direct map.
+    /// Positively offset `address` by the base address of the higher-half
+    /// direct map.
     pub fn offset(address: usize) -> NonZero<usize> {
         Self::get_static()
             .base_address
@@ -37,7 +45,8 @@ impl HigherHalfDirectMap {
             .expect("provided higher-half direct map offset caused overflow")
     }
 
-    /// Negatively offset `address` by the base address of the higher-half direct map.
+    /// Negatively offset `address` by the base address of the higher-half
+    /// direct map.
     pub fn negative_offset(address: usize) -> NonZero<usize> {
         address
             .checked_sub(Self::get_static().base_address.get())
@@ -45,7 +54,8 @@ impl HigherHalfDirectMap {
             .expect("provided higher-half direct map offset caused underflow")
     }
 
-    /// Convert a physical address to its higher-half direct mapped virtual counterpart.
+    /// Convert a physical address to its higher-half direct mapped virtual
+    /// counterpart.
     pub fn physical_to_virtual(physical_address: Address<Physical>) -> Address<Virtual> {
         Address::<Virtual>::new_truncate(
             Self::get_static().base_address.get() + physical_address.get(),
@@ -62,21 +72,14 @@ impl HigherHalfDirectMap {
             .unwrap()
     }
 
-    /// Convert a frame address to its higher-half direct mapped page counterpart.
+    /// Convert a frame address to its higher-half direct mapped page
+    /// counterpart.
     pub fn frame_to_page(frame: Address<Frame>) -> Address<Page> {
         Address::<Page>::new_truncate(Self::get_static().base_address.get() + frame.get().get())
     }
 
-    /// Convert a page address to its physical counterpart.
-    ///
-    /// # Panics
-    ///
-    /// If `page_address` is not a higher-half direct mapped address.
-    pub fn page_to_frame(page: Address<Page>) -> Address<Frame> {
-        Address::<Frame>::new(page.get().get() - Self::get_static().base_address.get()).unwrap()
-    }
-
-    /// Returns whether the provided address is a higher-half or lower-half address.
+    /// Returns whether the provided address is a higher-half or lower-half
+    /// address.
     pub fn is_address_higher_half(address: Address<Virtual>) -> bool {
         address.get() >= Self::get_static().base_address.get()
     }

@@ -14,7 +14,7 @@ pub static UCODE_SELECTOR: Once<SegmentSelector> = Once::new();
 crate::singleton! {
     #[repr(C, align(0x8))]
     #[derive(Debug, Clone)]
-    pub GlobalDescriptorTable {
+    pub struct GlobalDescriptorTable {
         table: [u64; 7],
         len: u16
     }

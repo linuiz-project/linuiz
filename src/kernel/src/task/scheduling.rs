@@ -4,27 +4,25 @@ use crate::{
     mem::stack::Stack,
     task::{Registers, Task},
 };
-use alloc::{boxed::Box, collections::vec_deque::VecDeque};
-use core::{alloc::AllocError, time::Duration};
+use alloc::collections::vec_deque::VecDeque;
+use core::time::Duration;
 use libsys::address::{Address, Virtual};
 
 pub static PROCESSES: spin::Mutex<VecDeque<Task>> = spin::Mutex::new(VecDeque::new());
 
 pub struct Scheduler {
     enabled: bool,
-    idle_stack: Box<Stack<0x1000>>,
+    idle_stack: Stack<0x100>,
     task: Option<Task>,
 }
 
 impl Scheduler {
-    pub fn new() -> Result<Self, AllocError> {
-        let scheduler = Self {
+    pub fn new() -> Self {
+        Self {
             enabled: false,
-            idle_stack: Stack::new()?,
+            idle_stack: Stack::default(),
             task: None,
-        };
-
-        Ok(scheduler)
+        }
     }
 
     /// Enables the scheduler to pop tasks.
@@ -32,7 +30,8 @@ impl Scheduler {
         self.enabled = true;
     }
 
-    /// Disables scheduler from popping tasks. Any task pops which are already in-flight will not be cancelled.
+    /// Disables scheduler from popping tasks. Any task pops which are already
+    /// in-flight will not be cancelled.
     pub fn disable(&mut self) {
         self.enabled = false;
     }
@@ -138,8 +137,9 @@ impl Scheduler {
             trace!("Switched idle task.");
         }
 
-        // TODO have some kind of queue of preemption waits, to ensure we select the shortest one.
-        // Safety: Just having switched tasks, no preemption wait should supercede this one.
+        // TODO have some kind of queue of preemption waits, to ensure we select the
+        // shortest one. Safety: Just having switched tasks, no preemption wait
+        // should supercede this one.
         unsafe {
             LocalState::set_preemption_wait(Duration::from_millis(15));
         }
@@ -148,8 +148,8 @@ impl Scheduler {
 
 // #[cfg(target_arch = "x86_64")]
 // #[naked]
-// unsafe extern "sysv64" fn exit_into(regs: &mut Registers, state: &mut State) -> ! {
-//     use core::mem::size_of;
+// unsafe extern "sysv64" fn exit_into(regs: &mut Registers, state: &mut State)
+// -> ! {     use core::mem::size_of;
 //     use x86_64::structures::idt::InterruptStackFrame;
 
 //     core::arch::asm!(

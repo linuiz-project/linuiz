@@ -33,7 +33,7 @@ pub enum FreeFrameError {
 }
 
 crate::singleton! {
-    pub PhysicalMemoryManager {
+    pub struct PhysicalMemoryManager {
         table: InterruptCell<RwLock<&'static mut BitSlice<AtomicUsize>>>,
         total_frames: usize
     }

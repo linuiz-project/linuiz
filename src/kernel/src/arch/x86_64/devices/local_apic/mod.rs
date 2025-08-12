@@ -1,7 +1,10 @@
-use crate::{arch::x86_64::registers::model_specific::IA32_APIC_BASE, interrupts::Vector};
+use crate::{
+    arch::x86_64::registers::model_specific::IA32_APIC_BASE, interrupts::Vector,
+    mem::HigherHalfDirectMap,
+};
 use bit_field::BitField;
 use core::{fmt, num::NonZero, ptr::NonNull};
-use libsys::address::{Address, Virtual};
+use libsys::address::{Address, Frame};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use safe_mmio::{
     UniqueMmioPointer,
@@ -89,11 +92,11 @@ impl Register {
         }
     }
 
-    pub fn as_xapic_address(self, base_address: Address<Virtual>) -> NonZero<usize> {
+    pub fn as_xapic_address(self, base_address: Address<Frame>) -> NonZero<usize> {
         let offset = usize::from(u8::from(self)) << 4;
-        let address = base_address.get() + offset;
+        let address = base_address.get().get() + offset;
 
-        NonZero::<usize>::new(address).unwrap()
+        HigherHalfDirectMap::offset(address)
     }
 
     pub fn as_x2apic_address(self) -> u32 {
@@ -218,47 +221,42 @@ pub enum TimerDivideConfiguration {
 #[derive(Debug, Clone, Copy)]
 #[allow(non_camel_case_types)]
 enum Mode {
-    xApic(Address<Virtual>),
+    xApic(Address<Frame>),
     x2Apic,
 }
 
-pub struct LocalApic;
+crate::singleton! {
+    pub struct LocalApic {
+        mode: Mode
+    }
 
-impl LocalApic {
-    fn get_mode() -> Mode {
-        const X2APIC_BIT: usize = 10;
-        const HW_ENABLED_BIT: usize = 11;
-        const BASE_ADDRESS_MASK: u64 = 0xFFFFFF000;
-
-        let ia32_apic_base = IA32_APIC_BASE::read();
-
+    fn init() -> Self {
         assert!(
-            ia32_apic_base.get_bit(HW_ENABLED_BIT),
+            IA32_APIC_BASE::get_hw_enabled(),
             "local APIC is hardware disabled"
         );
 
-        if ia32_apic_base.get_bit(X2APIC_BIT) {
-            Mode::x2Apic
-        } else {
-            // We would like to avoid panicking in this function.
-            #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
-            let base_address = (ia32_apic_base & BASE_ADDRESS_MASK) as usize;
+        let mode = {
+            if IA32_APIC_BASE::get_is_x2apic_mode() {
+                Mode::x2Apic
+            } else {
+                Mode::xApic(IA32_APIC_BASE::get_base_address())
+            }
+        };
 
-            // Safety: `BASE_ADDRESS_MASK` guarantees the APIC base address is a
-            //         canonical 64-bit virtual address.
-            let base_address = unsafe { Address::<Virtual>::new_unchecked(base_address) };
+        Self { mode }
+    }
+}
 
-            Mode::xApic(base_address)
-        }
+impl LocalApic {
+    fn get_mode() -> Mode {
+        Self::get_static().mode
     }
 
-    /// # Safety
-    ///
-    /// - `mode` must be the currently active APIC mode.
-    unsafe fn read_register_with_mode(mode: Mode, register: Register) -> u32 {
+    fn read_register(register: Register) -> u32 {
         assert!(register.is_readable());
 
-        match mode {
+        match Self::get_mode() {
             Mode::xApic(base_address) => {
                 let register_address = register.as_xapic_address(base_address);
                 let register_ptr =
@@ -272,14 +270,16 @@ impl LocalApic {
             }
 
             Mode::x2Apic => {
+                let register_address = register.as_x2apic_address();
+
                 let value: u32;
 
                 // Safety: Reading from a model-specific register cannot create undefined
-                // behaviour.
+                //         behaviour.
                 unsafe {
                     core::arch::asm!(
                         "rdmsr",
-                        in("ecx") register.as_x2apic_address(),
+                        in("ecx") register_address,
                         out("eax") value,
                         out("edx") _,
                         options(nostack, nomem, preserves_flags)
@@ -289,12 +289,6 @@ impl LocalApic {
                 value
             }
         }
-    }
-
-    /// Reads from `register`.
-    fn read_register(register: Register) -> u32 {
-        // Safety: Provided mode is currently active APIC mode.
-        unsafe { Self::read_register_with_mode(Self::get_mode(), register) }
     }
 
     /// Writes `value` to `register`.
@@ -320,12 +314,14 @@ impl LocalApic {
             }
 
             Mode::x2Apic => {
+                let register_address = register.as_x2apic_address();
+
                 // Safety: Writing to x2 APIC model-specific registers cannot create undefined
-                // behaviour.
+                //         behaviour.
                 unsafe {
                     core::arch::asm!(
                         "wrmsr",
-                        in("ecx") register.as_x2apic_address(),
+                        in("ecx") register_address,
                         in("eax") value,
                         in("edx") 0,
                         options(nostack, nomem, preserves_flags)
@@ -337,10 +333,8 @@ impl LocalApic {
 
     /// The initial ID of the local APIC device.
     pub fn get_id() -> u32 {
-        let mode = Self::get_mode();
         let value = Self::read_register(Register::ID);
-
-        match mode {
+        match Self::get_mode() {
             Mode::xApic(_) => value.get_bits(24..32),
             Mode::x2Apic => value,
         }
@@ -526,12 +520,12 @@ impl LocalApic {
                 const ICR_HIGH: usize = 0x310;
 
                 let register_low_address =
-                    NonZero::<usize>::new(base_address.get() + ICR_LOW).unwrap();
+                    NonZero::<usize>::new(base_address.get().get() + ICR_LOW).unwrap();
                 let register_low_ptr =
                     NonNull::<WriteOnly<u32>>::with_exposed_provenance(register_low_address);
 
                 let register_high_address =
-                    NonZero::<usize>::new(base_address.get() + ICR_HIGH).unwrap();
+                    NonZero::<usize>::new(base_address.get().get() + ICR_HIGH).unwrap();
                 let register_high_ptr =
                     NonNull::<WriteOnly<u32>>::with_exposed_provenance(register_high_address);
 

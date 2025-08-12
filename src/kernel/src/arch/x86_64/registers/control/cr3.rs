@@ -9,10 +9,12 @@ use libsys::{
 pub struct CR3;
 
 impl CR3 {
-    pub unsafe fn write(address: Address<Frame>, address_space_id: AddressSpaceId) {
-        let address = address.get().get();
+    pub unsafe fn write(frame: Address<Frame>, address_space_id: AddressSpaceId) {
+        let frame_address = frame.get().get();
         let address_space_id = usize::from(address_space_id);
-        let bits = address | address_space_id;
+        let bits = frame_address | address_space_id;
+
+        trace!("Swapping: {{ id: {address_space_id}, frame: {frame_address:#X} }}");
 
         // Safety: Caller is required to maintain safety invariants.
         unsafe {
@@ -21,6 +23,8 @@ impl CR3 {
                 in(reg) bits
             );
         }
+
+        trace!("Swapped.");
     }
 
     #[must_use]

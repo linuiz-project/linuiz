@@ -1,6 +1,5 @@
-use crate::mem::{HigherHalfDirectMap, Permissions, paging::page_table::PageTable};
+use crate::mem::Permissions;
 use bit_field::BitField;
-use core::ptr::NonNull;
 use libsys::address::{Address, Frame};
 
 #[repr(transparent)]
@@ -11,7 +10,7 @@ impl Entry {
     #[cfg(target_arch = "x86_64")]
     const PRESENT_BIT_INDEX: usize = 0;
     #[cfg(target_arch = "x86_64")]
-    const WRITEABLE_BIT_INDEX: usize = 1;
+    const WRITABLE_BIT_INDEX: usize = 1;
     #[cfg(target_arch = "x86_64")]
     const USER_BIT_INDEX: usize = 2;
     #[cfg(target_arch = "x86_64")]
@@ -26,7 +25,7 @@ impl Entry {
     #[cfg(target_arch = "riscv64")]
     const READABLE_BIT_INDEX: usize = 1;
     #[cfg(target_arch = "riscv64")]
-    const WRITEABLE_BIT_INDEX: usize = 2;
+    const WRITABLE_BIT_INDEX: usize = 2;
     #[cfg(target_arch = "riscv64")]
     const EXECUTABLE_BIT_INDEX: usize = 3;
     #[cfg(target_arch = "riscv64")]
@@ -104,7 +103,13 @@ impl Entry {
         }
     }
 
-    pub fn set_enabled(&mut self, enabled: bool) {
+    /// Enables or disables the memory region this entry represents.
+    ///
+    /// # Safety
+    ///
+    /// - Disabling a page table entry may cause a `#PF` if the memory is still
+    ///   in use.
+    pub unsafe fn set_enabled(&mut self, enabled: bool) {
         cfg_select! {
             target_arch = "x86_64" => {
                 self.0.set_bit(Self::PRESENT_BIT_INDEX, enabled);
@@ -210,14 +215,15 @@ impl Entry {
     /// unsafe.T his should **only** be done for intermediate, non-leaf page
     /// table entries.
     pub fn set_write_execute(&mut self) {
-        self.0.get_bit(Self::WRITEABLE_BIT_INDEX);
+        self.0.set_bit(Self::WRITABLE_BIT_INDEX, true);
+        self.0.set_bit(Self::NO_EXECUTE_BIT_INDEX, false);
     }
 
     pub fn get_permissions(&self) -> Permissions {
         cfg_select! {
             target_arch = "x86_64" => {
                 match (
-                    self.0.get_bit(Self::WRITEABLE_BIT_INDEX),
+                    self.0.get_bit(Self::WRITABLE_BIT_INDEX),
                     self.0.get_bit(Self::NO_EXECUTE_BIT_INDEX),
                 ) {
                     (false, true) => Permissions::ReadOnly,
@@ -233,24 +239,24 @@ impl Entry {
         }
     }
 
-    pub fn set_permissions(&mut self, permissions: Permissions) {
+    pub unsafe fn set_permissions(&mut self, permissions: Permissions) {
         cfg_select! {
             target_arch = "x86_64" => {
                 match permissions {
                     // All pages in x86 are at least read only, so
                     // `Permissions::None` is effectively analogous to that.
                     Permissions::None | Permissions::ReadOnly => {
-                        self.0.set_bit(Self::WRITEABLE_BIT_INDEX, false);
+                        self.0.set_bit(Self::WRITABLE_BIT_INDEX, false);
                         self.0.set_bit(Self::NO_EXECUTE_BIT_INDEX, true);
                     }
 
                     Permissions::ReadWrite => {
-                        self.0.set_bit(Self::WRITEABLE_BIT_INDEX, true);
+                        self.0.set_bit(Self::WRITABLE_BIT_INDEX, true);
                         self.0.set_bit(Self::NO_EXECUTE_BIT_INDEX, true);
                     }
 
                     Permissions::ReadExecute => {
-                        self.0.set_bit(Self::WRITEABLE_BIT_INDEX, false);
+                        self.0.set_bit(Self::WRITABLE_BIT_INDEX, false);
                         self.0.set_bit(Self::NO_EXECUTE_BIT_INDEX, false);
                     }
 
@@ -263,54 +269,13 @@ impl Entry {
             _ => { todo!() }
         }
     }
-
-    /// Gets the higher-half direct mapped pointer to this entry's page table,
-    /// or `None`.
-    fn get_page_table_ptr(&self) -> Option<NonNull<PageTable>> {
-        let frame = self.get_frame()?;
-        let page = HigherHalfDirectMap::frame_to_page(frame);
-        let page_address = core::num::NonZero::<usize>::new(page.get().get()).unwrap();
-        let ptr = core::ptr::NonNull::<PageTable>::with_exposed_provenance(page_address);
-
-        Some(ptr)
-    }
-
-    /// Gets a shared reference the page table this pointer refers to, or
-    /// `None`.
-    pub(in crate::mem::paging) fn page_table(&self) -> Option<&PageTable> {
-        let ptr = self.get_page_table_ptr()?;
-
-        // Safety:
-        //  - Pointer is required to be non-null if it's enabled.
-        //  - Pointer is naturally aligned due to the layout of `Pointer`.
-        //  - Caller is required to ensure the page table is zeroed or initialized.
-        //  - `&self` aliases as a shared reference.
-        let page_table = unsafe { ptr.as_ref() };
-
-        Some(page_table)
-    }
-
-    /// Gets an exclusive reference the page table this pointer refers to, or
-    /// `None`.
-    pub(in crate::mem::paging) fn page_table_mut(&mut self) -> Option<&mut PageTable> {
-        let mut ptr = self.get_page_table_ptr()?;
-
-        // Safety:
-        //  - Pointer is required to be non-null if it's enabled.
-        //  - Pointer is naturally aligned due to the layout of `Pointer`.
-        //  - Caller is required to ensure the page table is zeroed or initialized.
-        //  - `&self` aliases as a shared reference.
-        let page_table = unsafe { ptr.as_mut() };
-
-        Some(page_table)
-    }
 }
 
 impl Default for Entry {
     fn default() -> Self {
         cfg_select! {
             target_arch = "x86_64" => {
-                Self(1 << Self::WRITEABLE_BIT_INDEX)
+                Self(1 << Self::WRITABLE_BIT_INDEX)
             }
         }
     }
@@ -318,11 +283,12 @@ impl Default for Entry {
 
 impl core::fmt::Debug for Entry {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let mut debug_struct = formatter.debug_struct("Page Table Pointer");
+        let mut debug_struct = formatter.debug_struct("Entry");
 
-        debug_struct
-            .field("Enabled", &self.is_enabled())
-            .field("Physical Address", &self.get_frame());
+        debug_struct.field("Enabled", &self.is_enabled()).field(
+            "Physical Address",
+            &self.get_frame().map(|frame| frame.get().get()),
+        );
 
         #[cfg(target_arch = "x86_64")]
         debug_struct.field("Huge", &self.is_huge());

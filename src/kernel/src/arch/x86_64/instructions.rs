@@ -7,7 +7,7 @@ pub enum Error {
     InstructionSupport,
 }
 
-/// Enables interrupts for the current hardware thread.
+/// Enables interrupts for the current processor.
 #[inline(always)]
 pub fn __sti() {
     // Safety: Caller is required to ensure enabling interrupts will not cause undefined behaviour.
@@ -16,7 +16,7 @@ pub fn __sti() {
     }
 }
 
-/// Disables interrupts for the current hardware thread.
+/// Disables interrupts for the current processor.
 #[inline(always)]
 pub fn __cli() {
     // Safety: Caller is required to ensure disabling interrupts will not cause undefined behaviour.
@@ -25,7 +25,7 @@ pub fn __cli() {
     }
 }
 
-/// Waits for the next interrupt on the current hardware thread.
+/// Waits for the next interrupt on the current processor.
 pub fn __hlt() {
     // Safety: Caller must guarantee this does not cause a deadlock.
     unsafe {

@@ -47,7 +47,7 @@ unsafe impl Allocator for KernelAllocator {
             }
         }
         .map_err(|error| {
-            error!("Allocate: {error:?}");
+            error!("Allocate Error: {error:?}");
 
             AllocError
         })?;
@@ -58,7 +58,7 @@ unsafe impl Allocator for KernelAllocator {
         let allocation_ptr = NonNull::<u8>::without_provenance(allocation_address);
         let allocation = NonNull::slice_from_raw_parts(allocation_ptr, layout.size());
 
-        trace!("Allocate: {allocation:X?}");
+        trace!("Allocated: {allocation:X?}");
 
         Ok(allocation)
     }

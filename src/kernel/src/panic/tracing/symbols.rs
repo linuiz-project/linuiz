@@ -14,7 +14,7 @@ pub enum Error {
 }
 
 crate::singleton! {
-    pub KernelSymbols {
+    pub struct KernelSymbols {
         tables: Option<(SymbolTable<'static, AnyEndian>, StringTable<'static>)>
     }
 
