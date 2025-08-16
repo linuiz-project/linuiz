@@ -26,37 +26,6 @@
     step_trait,
     strict_provenance_lints
 )]
-#![forbid(clippy::inline_asm_x86_att_syntax, fuzzy_provenance_casts)]
-#![deny(
-    clippy::debug_assert_with_mut_call,
-    clippy::float_arithmetic,
-    clippy::as_conversions,
-    stable_features
-)]
-#![warn(
-    clippy::todo,
-    clippy::cargo,
-    clippy::pedantic,
-    clippy::undocumented_unsafe_blocks,
-    clippy::semicolon_inside_block,
-    clippy::semicolon_if_nothing_returned,
-    unsafe_op_in_unsafe_fn
-)]
-#![allow(
-    clippy::cargo_common_metadata,
-    clippy::enum_glob_use,
-    clippy::inline_always,
-    clippy::items_after_statements,
-    clippy::must_use_candidate,
-    clippy::unreadable_literal,
-    clippy::wildcard_imports,
-    clippy::upper_case_acronyms,
-    clippy::missing_const_for_fn,
-    clippy::needless_for_each,
-    clippy::if_not_else,
-    dead_code,
-    mismatched_lifetime_syntaxes
-)]
 
 use limine::{
     BaseRevision,
@@ -118,11 +87,11 @@ static BASE_REVISION: BaseRevision = BaseRevision::with_revision(4);
 const KERNEL_STACK_SIZE: usize = {
     #[cfg(debug_assertions)]
     {
-        0x100000
+        0x40_0000
     }
     #[cfg(not(debug_assertions))]
     {
-        0x100000
+        0x10_0000
     }
 };
 
