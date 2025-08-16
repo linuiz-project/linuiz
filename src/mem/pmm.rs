@@ -170,6 +170,8 @@ crate::singleton! {
                 prev_entry_range_end = Some(entry_range.end);
             });
 
+        debug!("Physical memory manager initialized.");
+
         Self {
             table: InterruptCell::new(spin::RwLock::new(table)),
             total_frames,

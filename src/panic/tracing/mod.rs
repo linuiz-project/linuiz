@@ -2,20 +2,27 @@ use core::{
     fmt::{Result, Write},
     ptr::NonNull,
 };
-use heapless::String;
 use libsys::address::{Address, Virtual};
 use spin::Mutex;
 
 pub mod symbols;
 
-pub(super) fn emit_stack_trace() {
-    static PANIC_BUFFER: Mutex<String<0x4000>> = Mutex::new(String::new());
+fn with_panic_buffer(func: impl FnOnce(&mut str)) {
+    static PANIC_BUFFER: Mutex<[u8; 0x4000]> = Mutex::new([0u8; _]);
 
     let mut panic_buffer = PANIC_BUFFER.lock();
+    let mut panic_str = core::str::from_utf8_mut(v).unwrap();
+panic_str.
+}
 
-    if let Err(err) = construct_panic_message(&mut *panic_buffer) {
+pub(super) fn emit_stack_trace() {
+
+with_panic_buffer(|panic_buffer| {
+    if let Err(err) = construct_panic_message(panic_buffer) {
         error!("Failed constructing panic message: {err:?}");
     }
+
+});
 }
 
 #[repr(C)]

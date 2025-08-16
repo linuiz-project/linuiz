@@ -23,8 +23,7 @@
     ptr_as_uninit,
     range_into_bounds,
     slice_ptr_get,
-    step_trait,
-    strict_provenance_lints
+    step_trait
 )]
 
 use limine::{
@@ -52,8 +51,6 @@ mod util;
 
 #[cfg(debug_assertions)]
 mod dev;
-
-extern crate alloc;
 
 #[macro_use]
 extern crate bitflags;

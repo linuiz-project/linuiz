@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::{env::set_var, fs::File, path::Path};
+use std::path::Path;
 use xshell::Shell;
 
 /// Possible target platforms to compile for.
@@ -50,35 +50,18 @@ pub struct Options {
 }
 
 pub fn build(sh: &Shell, temp_dir: impl AsRef<Path>, options: Options) -> Result<()> {
-    if options.fingerprint {
-        // Safety: Single-threaded.
-        unsafe {
-            set_var("CARGO_LOG", "cargo::core::compiler::fingerprint=info");
-        }
-    }
+    let _cargo_log = sh.push_env(
+        "CARGO_LOG",
+        if options.fingerprint {
+            "cargo::core::compiler::fingerprint=info"
+        } else {
+            ""
+        },
+    );
 
     let root_dir = sh.current_dir();
 
-    let mut build_cmd = cmd!(sh, "cargo build")
-        .arg("--target")
-        .arg(options.target.as_triple())
-        .arg("--artifact-dir")
-        .arg(temp_dir.as_ref().as_os_str())
-        .arg("-Z")
-        .arg("unstable-options");
-
-    if options.release {
-        build_cmd = build_cmd.arg("--release");
-    } else {
-        // Only provide future-compatibiltiy notifications for development builds.
-        build_cmd = build_cmd.arg("--future-incompat-report")
-    }
-
-    if options.verbose {
-        build_cmd = build_cmd.arg("-vv")
-    }
-
-    build_cmd.run()?;
+    build_kernel(sh, temp_dir.as_ref(), &options)?;
 
     if !sh.path_exists("run/system/linuiz") {
         sh.create_dir("run/system/linuiz")?;
@@ -100,28 +83,57 @@ pub fn build(sh: &Shell, temp_dir: impl AsRef<Path>, options: Options) -> Result
         )?;
     }
 
-    // compress userspace drivers and write to archive file
-    let mut archive_builder = tar::Builder::new(
-        File::create(root_dir.join("run/system/linuiz/drivers"))
-            .expect("failed to create or open the driver package file"),
-    );
+    // // compress userspace drivers and write to archive file
+    // let mut archive_builder = tar::Builder::new(
+    //     File::create(root_dir.join("run/system/linuiz/drivers"))
+    //         .expect("failed to create or open the driver package file"),
+    // );
 
-    sh.read_dir(temp_dir.as_ref())?
-        .into_iter()
-        .filter(|p| {
-            p.file_name()
-                .map(std::ffi::OsStr::to_string_lossy)
-                .filter(|driver_name| options.drivers.iter().any(|s| s.eq(driver_name)))
-                .is_some()
-        })
-        .try_for_each(|path| {
-            println!("Packaging driver: {:?}", path.file_name().unwrap());
+    // sh.read_dir(temp_dir.as_ref())?
+    //     .into_iter()
+    //     .filter(|p| {
+    //         p.file_name()
+    //             .map(std::ffi::OsStr::to_string_lossy)
+    //             .filter(|driver_name| options.drivers.iter().any(|s|
+    // s.eq(driver_name)))             .is_some()
+    //     })
+    //     .try_for_each(|path| {
+    //         println!("Packaging driver: {:?}", path.file_name().unwrap());
 
-            let rel_path = path.strip_prefix(temp_dir.as_ref()).unwrap();
-            archive_builder.append_file(rel_path, &mut File::open(&path)?)
-        })?;
+    //         let rel_path = path.strip_prefix(temp_dir.as_ref()).unwrap();
+    //         archive_builder.append_file(rel_path, &mut File::open(&path)?)
+    //     })?;
 
-    archive_builder.finish()?;
+    // archive_builder.finish()?;
+
+    Ok(())
+}
+
+fn build_kernel(sh: &Shell, temp_dir: impl AsRef<Path>, options: &Options) -> Result<()> {
+    // rustflags = ["--cfg", 'getrandom_backend="custom"']
+
+    let mut build_cmd = cmd!(sh, "cargo build")
+        .arg("--future-incompat-report")
+        .arg("--artifact-dir")
+        .arg(temp_dir.as_ref().as_os_str())
+        .args(["--target", options.target.as_triple()])
+        .args(["-Z", "unstable-options"])
+        .args(["-Z", "cargo-lints"])
+        .args(["-Z", "build-std=core,compiler_builtins,alloc"])
+        .args(["-Z", "build-std-features=compiler-builtins-mem"]);
+
+    if options.release {
+        build_cmd = build_cmd.arg("--release");
+    }
+
+    if options.verbose {
+        build_cmd = build_cmd.arg("-vv")
+    }
+
+    // Set RUSTFLAGS to enable custom getrandom backend.
+    let _rustflags = sh.push_env("RUSTFLAGS", "--cfg=getrandom_backend=\"custom\"");
+
+    build_cmd.run()?;
 
     Ok(())
 }

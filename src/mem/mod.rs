@@ -7,11 +7,12 @@ use libsys::{
     constants::{huge_page_size, large_page_size, page_size},
 };
 
+mod kernel_allocator;
+
 mod hhdm;
 pub use hhdm::*;
 
 // pub mod io;
-pub mod alloc;
 pub mod mapper;
 pub mod pmm;
 pub mod stack;
@@ -123,6 +124,7 @@ crate::singleton! {
 
         let mut kernel_mapper = Mapper::new();
 
+        trace!("Mapping the higher-half direct map...");
         memory_map_request
             .get_response()
             .expect("bootloader did not provide a response to the memory map request")
@@ -159,8 +161,6 @@ crate::singleton! {
                     }
                 };
 
-
-
                 map_range(
                     &mut kernel_mapper,
                     entry_page,
@@ -181,7 +181,8 @@ crate::singleton! {
             })
             .expect("bootloader did not provide a response to kernel address request");
 
-        // Iterate each segment of the kernel executable file, and memory map it with the proper flags.
+
+        trace!("Mapping the kernel executable...");
         kernel_file_request
             .get_response()
             .map(limine::response::ExecutableFileResponse::file)
@@ -231,6 +232,9 @@ crate::singleton! {
         #[cfg(target_arch = "x86_64")]
         {
             let local_apic_frame = crate::arch::x86_64::registers::model_specific::IA32_APIC_BASE::get_base_address();
+
+            trace!("Mapping the local APIC: {local_apic_frame:X?}");
+
             map_range(
                 &mut kernel_mapper,
                 HigherHalfDirectMap::frame_to_page(local_apic_frame),
@@ -240,10 +244,12 @@ crate::singleton! {
             );
         }
 
+
         let kernel_mapper = Self {
             mapper: kernel_mapper
         };
 
+        debug!("Kernel mappings complete.");
         trace!("{kernel_mapper:#X?}");
 
         kernel_mapper

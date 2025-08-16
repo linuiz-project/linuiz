@@ -12,9 +12,9 @@ use libsys::{
 };
 
 #[global_allocator]
-pub static KERNEL_ALLOCATOR: KernelAllocator = KernelAllocator(PhantomData);
+pub static KERNEL_ALLOCATOR: KernelAllocator = KernelAllocator;
 
-pub struct KernelAllocator(PhantomData<()>);
+pub struct KernelAllocator;
 
 // Safety: Implemented with Correct™ logic.
 unsafe impl Allocator for KernelAllocator {

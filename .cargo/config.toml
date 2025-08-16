@@ -3,6 +3,3 @@ xtask = "run --release --manifest-path xtask/Cargo.toml --"
 
 [registries.crates-io]
 protocol = "sparse"
-
-[build]
-rustflags = ["--cfg", 'getrandom_backend="custom"']

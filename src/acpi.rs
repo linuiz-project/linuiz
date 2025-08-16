@@ -29,8 +29,8 @@ impl acpi::AcpiHandler for Handler {
     }
 
     fn unmap_physical_region<T>(_: &acpi::PhysicalMapping<Self, T>) {
-        //  We don't actually need to unmap anything, since this utilizes the
-        // HHDM.
+        // We don't actually need to unmap anything, since this uses the
+        // higher-half direct map to ""map"" the physical regions.
     }
 }
 
