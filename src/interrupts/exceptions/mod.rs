@@ -1,3 +1,5 @@
+use core::ptr::NonNull;
+
 use libsys::address::{Address, Virtual};
 
 mod page_fault;
@@ -37,12 +39,12 @@ pub enum ExceptionKind {
 #[derive(Debug, Clone, Copy)]
 pub struct Exception {
     kind: ExceptionKind,
-    ip: Address<Virtual>,
-    sp: Address<Virtual>,
+    ip: Option<NonNull<u8>>,
+    sp: Option<NonNull<u8>>,
 }
 
 impl Exception {
-    pub const fn new(kind: ExceptionKind, ip: Address<Virtual>, sp: Address<Virtual>) -> Self {
+    pub const fn new(kind: ExceptionKind, ip: Option<NonNull<u8>>, sp: Option<NonNull<u8>>) -> Self {
         Self { kind, ip, sp }
     }
 }

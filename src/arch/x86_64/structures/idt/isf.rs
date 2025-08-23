@@ -5,14 +5,15 @@ use crate::arch::x86_64::{
         UDATA_SELECTOR,
     },
 };
-use libsys::address::{Address, Virtual};
+use core::ptr::NonNull;
 
-/// Represents the interrupt stack frame pushed by the CPU on interrupt or exception entry.
+/// Represents the interrupt stack frame pushed by the CPU on interrupt or
+/// exception entry.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct InterruptStackFrame {
     // The instruction pointer at the time of the interrupt.
-    instruction_pointer: usize,
+    instruction_pointer: Option<NonNull<u8>>,
 
     // The code segment at the time of the interrupt.
     code_segment: usize,
@@ -21,34 +22,36 @@ pub struct InterruptStackFrame {
     cpu_flags: usize,
 
     /// The stack pointer at the time of the interrupt.
-    stack_pointer: usize,
+    stack_pointer: Option<NonNull<u8>>,
 
-    /// The stack segment at the time of the interrupt (often zero in 64-bit mode).
+    /// The stack segment at the time of the interrupt (often zero in 64-bit
+    /// mode).
     stack_segment: usize,
 }
 
 impl InterruptStackFrame {
-    // TODO make unsafe? not sure if creating an invalid ISF is actually unsafe, since it may not always be used.
+    // TODO make unsafe? not sure if creating an invalid ISF is actually unsafe,
+    // since it may not always be used.
     /// Constructs a new [`InterruptStackFrame`].
     pub fn new(
-        instruction_pointer: Address<Virtual>,
+        instruction_pointer: Option<NonNull<u8>>,
         code_segment: SegmentSelector,
         cpu_flags: ProcessorFlags,
-        stack_pointer: Address<Virtual>,
+        stack_pointer: Option<NonNull<u8>>,
         stack_segment: SegmentSelector,
     ) -> Self {
         Self {
-            instruction_pointer: instruction_pointer.get(),
+            instruction_pointer,
             code_segment: usize::from(code_segment.as_u16()),
             cpu_flags: cpu_flags.bits(),
-            stack_pointer: stack_pointer.get(),
+            stack_pointer,
             stack_segment: usize::from(stack_segment.as_u16()),
         }
     }
 
     pub fn new_kernel(
-        instruction_pointer: Address<Virtual>,
-        stack_pointer: Address<Virtual>,
+        instruction_pointer: Option<NonNull<u8>>,
+        stack_pointer: Option<NonNull<u8>>,
     ) -> Self {
         Self::new(
             instruction_pointer,
@@ -60,8 +63,8 @@ impl InterruptStackFrame {
     }
 
     pub fn new_user(
-        instruction_pointer: Address<Virtual>,
-        stack_pointer: Address<Virtual>,
+        instruction_pointer: Option<NonNull<u8>>,
+        stack_pointer: Option<NonNull<u8>>,
     ) -> Self {
         Self::new(
             instruction_pointer,
@@ -76,13 +79,15 @@ impl InterruptStackFrame {
     ///
     /// ## Remarks
     ///
-    /// This value points to the instruction that should be executed when the interrupt
-    /// handler returns. For most interrupts, this value points to the instruction immediately
-    /// following the last executed instruction. However, for some exceptions (e.g., page faults),
-    /// this value points to the faulting instruction, so that the instruction is restarted on
-    /// return. See the documentation of the [`InterruptDescriptorTable`] fields for more details.
-    pub fn get_instruction_address(&self) -> Address<Virtual> {
-        Address::<Virtual>::new(self.instruction_pointer).unwrap()
+    /// This value points to the instruction that should be executed when the
+    /// interrupt handler returns. For most interrupts, this value points to
+    /// the instruction immediately following the last executed instruction.
+    /// However, for some exceptions (e.g., page faults), this value points
+    /// to the faulting instruction, so that the instruction is restarted on
+    /// return. See the documentation of the [`InterruptDescriptorTable`] fields
+    /// for more details.
+    pub fn get_instruction_address(&self) -> Option<NonNull<u8>> {
+        self.instruction_pointer
     }
 
     /// Stores the new return instruction pointer.
@@ -90,8 +95,8 @@ impl InterruptStackFrame {
     /// # Safety
     ///
     /// TODO
-    pub unsafe fn set_instruction_pointer(&mut self, instruction_pointer: Address<Virtual>) {
-        self.instruction_pointer = instruction_pointer.get();
+    pub unsafe fn set_instruction_pointer(&mut self, instruction_pointer: Option<NonNull<u8>>) {
+        self.instruction_pointer = instruction_pointer;
     }
 
     /// Get the return code segment selector.
@@ -124,8 +129,8 @@ impl InterruptStackFrame {
     }
 
     /// Get the return stack pointer.
-    pub fn get_stack_address(&self) -> Address<Virtual> {
-        Address::<Virtual>::new(self.stack_pointer).unwrap()
+    pub fn get_stack_address(&self) -> Option<NonNull<u8>> {
+        self.stack_pointer
     }
 
     /// Set the return stack pointer.
@@ -133,8 +138,8 @@ impl InterruptStackFrame {
     /// # Safety
     ///
     /// TODO
-    pub unsafe fn set_stack_pointer(&mut self, stack_pointer: Address<Virtual>) {
-        self.stack_pointer = stack_pointer.get();
+    pub unsafe fn set_stack_pointer(&mut self, stack_pointer: Option<NonNull<u8>>) {
+        self.stack_pointer = stack_pointer;
     }
 
     /// Get the return stack segment selector.

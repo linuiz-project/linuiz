@@ -1,11 +1,16 @@
-#![allow(clippy::module_name_repetitions)]
-
-use crate::arch::x86_64::structures::gdt::{GlobalDescriptorTable, SystemSegmentDescriptor};
-use alloc::boxed::Box;
-use core::ptr::NonNull;
+use crate::{
+    arch::x86_64::structures::gdt::{GlobalDescriptorTable, SystemSegmentDescriptor},
+    mem::alloc::allocate_kernel_stack,
+};
+use core::{num::NonZero, ptr::NonNull};
 use num_enum::{FromPrimitive, IntoPrimitive};
 
-type StackTableStack = crate::mem::stack::Stack<0x16000>;
+#[cfg(debug_assertions)]
+// Safety: Value is non-zero.
+const PAGES_PER_STACK_TABLE_STACK: NonZero<usize> = unsafe { NonZero::new_unchecked(16) };
+#[cfg(not(debug_assertions))]
+// Safety: Value is non-zero.
+const PAGES_PER_STACK_TABLE_STACK: NonZero<usize> = unsafe { NonZero::new_unchecked(4) };
 
 // Pre-defined indexes into the interrupt stack table (IST).
 #[repr(u16)]
@@ -26,13 +31,13 @@ pub struct TaskStateSegment {
 
     /// The stack pointers used when a privilege level change occurs from a
     /// lower privilege level to a higher one (e.g. ring 3 to ring 0).
-    privilege_stack_table: [Option<NonNull<StackTableStack>>; 3],
+    privilege_stack_table: [Option<NonNull<u8>>; 3],
 
     _2: [u8; 8],
 
     /// The stack pointers used when an entry in the Interrupt Descriptor Table
     /// has an IST value other than 0.
-    interrupt_stack_table: [Option<NonNull<StackTableStack>>; 7],
+    interrupt_stack_table: [Option<NonNull<u8>>; 7],
 
     _3: [u8; 10],
 
@@ -41,35 +46,23 @@ pub struct TaskStateSegment {
     iomap_base: u16,
 }
 
-impl Default for TaskStateSegment {
-    fn default() -> Self {
-        Self {
+const_assert!(size_of::<TaskStateSegment>() == 104);
+
+impl TaskStateSegment {
+    pub fn new() -> Self {
+        fn allocate_stack_table_stack() -> NonNull<u8> {
+            allocate_kernel_stack(PAGES_PER_STACK_TABLE_STACK)
+                .expect("failed to allocate a task state segment stack")
+        }
+
+        let mut tss = Self {
             privilege_stack_table: [None; _],
             interrupt_stack_table: [None; _],
-            iomap_base: 0,
+            iomap_base: size_of::<Self>() as u16,
             _1: [0u8; _],
             _2: [0u8; _],
             _3: [0u8; _],
-        }
-    }
-}
-
-impl TaskStateSegment {
-    /// Loads this [`TaskStateSegment`] into the task state segment register.
-    ///
-    /// # Remarks
-    ///
-    /// It's likely a runtime error if more than one [`TaskStateSegment`]s are
-    /// loaded per processor.
-    pub fn load_local() {
-        fn allocate_stack_table_stack() -> NonNull<StackTableStack> {
-            let stack =
-                StackTableStack::new().expect("failed to allocate a task state segment stack");
-
-            NonNull::from_mut(Box::leak(stack))
-        }
-
-        let tss = Box::leak(Box::new(TaskStateSegment::default()));
+        };
 
         // Set the stack for transitions to ring 0.
         tss.privilege_stack_table[0] = Some(allocate_stack_table_stack());
@@ -86,8 +79,18 @@ impl TaskStateSegment {
         tss.interrupt_stack_table[usize::from(u16::from(InterruptStackTableIndex::MachineCheck))] =
             Some(allocate_stack_table_stack());
 
+        tss
+    }
+
+    /// Loads this [`TaskStateSegment`] into the task state segment register.
+    ///
+    /// # Remarks
+    ///
+    /// It's likely a runtime error if more than one [`TaskStateSegment`]s are
+    /// loaded per processor.
+    pub fn load(&self) {
         GlobalDescriptorTable::with_temporary(|temp_gdt| {
-            let tss_segment_descriptor = SystemSegmentDescriptor::from_tss(tss);
+            let tss_segment_descriptor = SystemSegmentDescriptor::from_tss(self);
             let tss_segment_selector = temp_gdt.append_segment(tss_segment_descriptor);
 
             // Load the temporary GDT for loading TSS.
@@ -97,7 +100,7 @@ impl TaskStateSegment {
                 temp_gdt.load();
             }
 
-            trace!("Loading: {:#X?}", core::ptr::from_ref(tss));
+            trace!("Loading: {:#X?}", core::ptr::from_ref(self));
 
             // Safety: No memory safety concerns.
             unsafe {

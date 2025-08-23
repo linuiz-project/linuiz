@@ -113,19 +113,22 @@ impl Task {
             )
         };
         let stack = stack.unwrap();
+
+        let entry_point = usize::try_from(elf_header.e_entry).unwrap();
+        let entry_point = NonZero::<usize>::new(entry_point).unwrap();
+        let offset_entry_point = entry_point.checked_add(load_offset).unwrap();
+        let instruction_ptr = NonNull::<u8>::with_exposed_provenance(offset_entry_point);
+
         Self {
             id,
             priority,
             address_space,
             context: (
                 InterruptStackFrame::new_user(
-                    Address::<Virtual>::new(
-                        load_offset + usize::try_from(elf_header.e_entry).unwrap(),
-                    )
-                    .unwrap(),
-                    Address::from({
+                    Some(instruction_ptr),
+                    Some({
                         // Safety: Index is the end of the slice.
-                        unsafe { stack.get_unchecked_mut(stack.len()).as_ptr() }
+                        unsafe { stack.get_unchecked_mut(stack.len()) }
                     }),
                 ),
                 Registers::empty(),

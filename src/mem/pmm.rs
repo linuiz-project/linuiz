@@ -1,6 +1,6 @@
 use crate::{interrupts::InterruptCell, mem::HigherHalfDirectMap};
-use bitvec::slice::BitSlice;
-use core::{num::NonZero, sync::atomic::AtomicUsize};
+use bitmap::{BitMap, BitMapError};
+use core::num::NonZero;
 use libsys::{
     address::{Address, Frame},
     constants::{page_bits, page_mask, page_size},
@@ -15,26 +15,22 @@ pub enum NextFrameError {
 }
 
 #[derive(Debug, Error)]
-pub enum LockFrameError {
+pub enum FrameError {
     #[error("attempted to index out of bounds")]
     OutOfBounds,
-
-    #[error("cannot lock frame; not free")]
-    NotLocked,
 }
 
-#[derive(Debug, Error)]
-pub enum FreeFrameError {
-    #[error("attempted to index out of bounds")]
-    OutOfBounds,
-
-    #[error("cannot free frame; not locked")]
-    NotLocked,
+impl From<BitMapError> for FrameError {
+    fn from(error: BitMapError) -> Self {
+        match error {
+            BitMapError::OutOfBounds => Self::OutOfBounds,
+        }
+    }
 }
 
 crate::singleton! {
     pub struct PhysicalMemoryManager {
-        table: InterruptCell<RwLock<&'static mut BitSlice<AtomicUsize>>>,
+        bitmap: InterruptCell<RwLock<BitMap<'static>>>,
         total_frames: usize
     }
 
@@ -57,23 +53,23 @@ crate::singleton! {
         trace!("Total frames: {total_frames} ({total_physical_memory:#X} Bytes)");
 
         // Aligned frame count to the next multiple of `usize`s bit count.
-        let table_slice_len = align_up_div(
+        let bitmap_size = align_up_div(
             total_frames,
             NonZero::new(usize::BITS.trailing_zeros()).unwrap(),
         );
-        // Total memory the table will consume as a multiple of frame size.
-        let table_area_in_frames = align_up_div(
-            table_slice_len * core::mem::size_of::<usize>(),
+        // Total memory the bitmap will consume as a multiple of frame size.
+        let bitmap_size_in_frames = align_up_div(
+            bitmap_size * core::mem::size_of::<usize>(),
             page_bits(),
         );
-        // Total memory the table will consume as a multiple of bytes.
-        let table_area_in_bytes = table_area_in_frames * page_size();
+        // Total memory the bitmap will consume as a multiple of bytes.
+        let bitmap_size_in_bytes = bitmap_size_in_frames * page_size();
         trace!(
-            "Table Size: {table_slice_len:#X}, Table Area (Frames): {table_area_in_frames:#X}, Table Area (Bytes): {table_area_in_bytes:#X}"
+            "BitMap Size: {bitmap_size:#X}, BitMap Area (Frames): {bitmap_size_in_frames:#X}, BitMap Area (Bytes): {bitmap_size_in_bytes:#X}"
         );
 
-        // Select a region that will fit the table, aligned to frame size.
-        let select_region = memory_map
+        // Select a region that will fit the bitmap, aligned to frame size.
+        let bitmap_region = memory_map
             .iter()
             .filter(|entry| entry.entry_type == limine::memory_map::EntryType::USABLE)
             .map(|entry| {
@@ -82,48 +78,43 @@ crate::singleton! {
 
                 entry_start..entry_end
             })
-            .find(|region| region.len() >= table_area_in_bytes)
-            .map(|region| region.start..(region.start + table_area_in_bytes))
-            .expect("no memory regions large enough for frame table");
+            .find(|region| region.len() >= bitmap_size_in_bytes)
+            .map(|region| region.start..(region.start + bitmap_size_in_bytes))
+            .expect("no memory regions large enough for frame bitmap");
 
-        debug_assert_eq!(select_region.start & page_mask(), 0);
-        debug_assert_eq!(select_region.end & page_mask(), 0);
+        debug_assert_eq!(bitmap_region.start & page_mask(), 0);
+        debug_assert_eq!(bitmap_region.end & page_mask(), 0);
 
-        trace!("Frame table region: {select_region:#X?}");
+        trace!("Frame bitmap region: {bitmap_region:#X?}");
 
-        let table_ptr = core::ptr::with_exposed_provenance_mut::<u8>(
-            HigherHalfDirectMap::offset(select_region.start).get(),
+        // Construct the ptr based on an offset into the higher-half direct map.
+        let bitmap_ptr = core::ptr::with_exposed_provenance_mut::<usize>(
+            HigherHalfDirectMap::offset(bitmap_region.start).get(),
         );
 
-        // Pre-initialize the table memory to a known, zeroed out state.
+        // Pre-initialize the bitmap memory to a known, zeroed out state.
         // Safety: The memory region should not be in use by any other context.
         unsafe {
-            core::ptr::write_bytes(table_ptr, 0, table_area_in_bytes);
+            core::ptr::write_bytes(bitmap_ptr, 0, bitmap_size_in_bytes);
         }
 
-        let table = BitSlice::from_slice_mut({
-            // Safety: Region is guaranteed by the memory map to be unused, and has been zero-initialized to be valid as `AtomicUsize`.
-            #[allow(clippy::cast_ptr_alignment)]
-            unsafe {
-                core::slice::from_raw_parts_mut(
-                    table_ptr.cast::<AtomicUsize>(),
-                    table_slice_len,
-                )
-            }
-        });
+        let mut bitmap = BitMap::<'static>::new(
+            {
+                // Safety:
+                // - Region is guaranteed by the memory map to be unused
+                // - Region has been zero-initialized.
+                unsafe {
+                    core::slice::from_raw_parts_mut::<'static>(bitmap_ptr, bitmap_size)
+                }
+            },
+            total_frames
+        );
 
-        // Fill the padding bits, as the table may have more bits than there are frames.
-        table
-            .get_mut(total_frames..)
-            .expect("attempted to index frame table out of bounds")
-            .fill(true);
-
-        // Ensure the table's frames are reserved.
-        trace!("Locking (Table): {select_region:#X?}");
-        table
-            .get_mut((select_region.start / page_size())..(select_region.end / page_size()))
-            .expect("attempted to index frame table out of bounds")
-            .fill(true);
+        // Ensure the bitmap's frames are reserved.
+        trace!("Locking: {bitmap_region:#X?}");
+        let bitmap_region_start_index = bitmap_region.start / page_size();
+        let bitmap_region_end_index = bitmap_region.end / page_size();
+        bitmap.set(bitmap_region_start_index..bitmap_region_end_index).unwrap();
 
         let mut prev_entry_range_end = None;
         memory_map
@@ -141,30 +132,18 @@ crate::singleton! {
                 if let Some(prev_entry_range_end) = prev_entry_range_end
                     && prev_entry_range_end < entry_range.start
                 {
-                    trace!(
-                        "Locking (Inbetween): {:#X?}",
-                        prev_entry_range_end..entry_range.start
-                    );
-
-                    table
-                        .get_mut(
-                            (prev_entry_range_end / page_size())
-                                ..(entry_range.start / page_size()),
-                        )
-                        .expect("attempted to index frame table out of bounds")
-                        .fill(true);
+                    trace!("Locking (Inbetween): {:#X?}", prev_entry_range_end..entry_range.start);
+                    let lock_start_index = prev_entry_range_end / page_size();
+                    let lock_end_index = entry_range.start / page_size();
+                    bitmap.set(lock_start_index..lock_end_index).unwrap();
                 }
 
                 // Only lock the non-usable entries...
                 if entry_ty != limine::memory_map::EntryType::USABLE {
                     trace!("Locking (Used): {entry_range:#X?}");
-
-                    table
-                        .get_mut(
-                            (entry_range.start / page_size())..(entry_range.end / page_size()),
-                        )
-                        .expect("attempted to index frame table out of bounds")
-                        .fill(true);
+                    let lock_start_index = entry_range.start / page_size();
+                    let lock_end_index = entry_range.end / page_size();
+                    bitmap.set(lock_start_index..lock_end_index).unwrap();
                 }
 
                 prev_entry_range_end = Some(entry_range.end);
@@ -173,7 +152,7 @@ crate::singleton! {
         debug!("Physical memory manager initialized.");
 
         Self {
-            table: InterruptCell::new(spin::RwLock::new(table)),
+            bitmap: InterruptCell::new(spin::RwLock::new(bitmap)),
             total_frames,
         }
     }
@@ -185,10 +164,10 @@ unsafe impl Send for PhysicalMemoryManager {}
 unsafe impl Sync for PhysicalMemoryManager {}
 
 impl PhysicalMemoryManager {
-    /// Passes the static physical memory manager's frame table to `with_fn`,
+    /// Passes the static physical memory manager's frame bitmap to `with_fn`,
     /// returning the result.
-    fn with_table<T>(with_fn: impl FnOnce(&RwLock<&'static mut BitSlice<AtomicUsize>>) -> T) -> T {
-        Self::get_static().table.with(with_fn)
+    fn with_bitmap<T>(with_fn: impl FnOnce(&RwLock<BitMap<'static>>) -> T) -> T {
+        Self::get_static().bitmap.with(with_fn)
     }
 
     pub fn total_frames() -> usize {
@@ -199,14 +178,15 @@ impl PhysicalMemoryManager {
         Self::total_frames() * page_size()
     }
 
-    pub fn next_frame(clear_memory: bool) -> Result<Address<Frame>, NextFrameError> {
-        Self::with_table(|table| {
-            let mut table = table.write();
-            let free_frame_index = table.first_zero().ok_or(NextFrameError::NoneFree)?;
 
-            // Safety: `index` is returned from a search function on `Self`.
+    pub fn next_frame(clear_memory: bool) -> Result<Address<Frame>, NextFrameError> {
+        Self::with_bitmap(|bitmap| {
+            let mut bitmap = bitmap.write();
+            let free_frame_index = bitmap.next_free().ok_or(NextFrameError::NoneFree)?;
+
+            // Safety: `BitMap::next_free` cannot exceed bounds.
             unsafe {
-                table.set_unchecked(free_frame_index, true);
+                bitmap.set(free_frame_index).unwrap_unchecked();
             }
 
             trace!(
@@ -228,72 +208,63 @@ impl PhysicalMemoryManager {
         })
     }
 
+    // TODO get rid of this function in favor of `next_frame` with a range.
     pub fn next_frames(
         count: NonZero<usize>,
         align_bits: Option<NonZero<u32>>,
         clear_memory: bool,
     ) -> Result<Address<Frame>, NextFrameError> {
-        Self::with_table(|table| {
-            let mut table = table.write();
+        Self::with_bitmap(|bitmap| {
+            // let mut bitmap = bitmap.write();
 
-            let align_bits = align_bits.unwrap_or(NonZero::<u32>::MIN).get();
-            let align_index_skip = u32::max(1, align_bits >> page_bits().get());
+            // let align_bits = align_bits.unwrap_or(NonZero::<u32>::MIN).get();
+            // let align_index_skip = u32::max(1, align_bits >> page_bits().get());
 
-            let free_frames_index = table
-                .windows(count.get())
-                .enumerate()
-                .step_by(align_index_skip.try_into().unwrap())
-                .find_map(|(index, window)| window.not_any().then_some(index))
-                .ok_or(NextFrameError::NoneFree)?;
+            // let free_frames_index = bitmap
+            //     .windows(count.get())
+            //     .enumerate()
+            //     .step_by(align_index_skip.try_into().unwrap())
+            //     .find_map(|(index, window)| window.not_any().then_some(index))
+            //     .ok_or(NextFrameError::NoneFree)?;
 
-            // It's a bit uglier to find the index of the window, then effectively reacreate
-            // it. However, `.windows()` does not return a mutable bitslice, so
-            // this is how it must be done.
-            let free_frames = table
-                .get_mut(free_frames_index..(free_frames_index + count.get()))
-                .unwrap();
-            free_frames.fill(true);
+            // // It's a bit uglier to find the index of the window, then effectively
+            // reacreate // it. However, `.windows()` does not return a mutable
+            // bitslice, so // this is how it must be done.
+            // let free_frames = bitmap
+            //     .get_mut(free_frames_index..(free_frames_index + count.get()))
+            //     .unwrap();
+            // free_frames.fill(true);
 
-            trace!(
-                "Frames Locked: {:#X?}..{:#X?}",
-                free_frames_index,
-                free_frames_index + free_frames.len()
-            );
+            // trace!(
+            //     "Frames Locked: {:#X?}..{:#X?}",
+            //     free_frames_index,
+            //     free_frames_index + free_frames.len()
+            // );
 
-            let frame = Address::<Frame>::new(free_frames_index << page_bits().get())
-                .expect("physical memory manager constructed invalid physical address");
+            // let frame = Address::<Frame>::new(free_frames_index << page_bits().get())
+            //     .expect("physical memory manager constructed invalid physical address");
 
-            if clear_memory {
-                // Safety: Memory was just allocated, and is not currently aliased.
-                unsafe {
-                    crate::mem::zero_frame(frame);
-                }
-            }
+            // if clear_memory {
+            //     // Safety: Memory was just allocated, and is not currently aliased.
+            //     unsafe {
+            //         crate::mem::zero_frame(frame);
+            //     }
+            // }
 
-            Ok(frame)
+            // Ok(frame)
+
+            todo!()
         })
     }
 
-    pub fn lock_frame(address: Address<Frame>) -> Result<(), LockFrameError> {
-        Self::with_table(|table| {
-            let table = table.read();
+    pub fn lock_frame(address: Address<Frame>) -> Result<(), FrameError> {
+        Self::with_bitmap(|bitmap| {
+            let mut bitmap = bitmap.write();
             let index = address.index();
 
-            // The table may have more bits than there are frames due to the
-            // padding effect of using a `usize` as the underlying data type.
-            if index >= Self::total_frames() {
-                return Err(LockFrameError::OutOfBounds);
-            }
+            debug_assert!(bitmap.get(index)?);
 
-            // Safety: Index is checked within bounds.
-            if unsafe { *table.get_unchecked(index) } {
-                return Err(LockFrameError::NotLocked);
-            }
-
-            // Safety: Index is checked within bounds.
-            unsafe {
-                table.set_aliased_unchecked(index, true);
-            }
+            bitmap.set(index)?;
 
             trace!("Frame Locked: {:#X?}", index << page_bits().get());
 
@@ -301,26 +272,14 @@ impl PhysicalMemoryManager {
         })
     }
 
-    pub fn free_frame(address: Address<Frame>) -> Result<(), FreeFrameError> {
-        Self::with_table(|table| {
-            let table = table.read();
+    pub fn free_frame(address: Address<Frame>) -> Result<(), FrameError> {
+        Self::with_bitmap(|bitmap| {
+            let mut bitmap = bitmap.write();
             let index = address.index();
 
-            // The table may have more bits than there are frames due to the
-            // padding effect of using a `usize` as the underlying data type.
-            if index >= Self::total_frames() {
-                return Err(FreeFrameError::OutOfBounds);
-            }
+            debug_assert!(!(bitmap.get(index)?));
 
-            // Safety: Index is checked within bounds.
-            if !(unsafe { *table.get_unchecked(index) }) {
-                return Err(FreeFrameError::NotLocked);
-            }
-
-            // Safety: Index is checked within bounds.
-            unsafe {
-                table.set_aliased_unchecked(index, false);
-            }
+            bitmap.unset(index)?;
 
             trace!("Freed: {:#X?}", index << page_bits().get());
 
@@ -328,15 +287,12 @@ impl PhysicalMemoryManager {
         })
     }
 
-    pub fn is_locked(address: Address<Frame>) -> bool {
-        Self::with_table(|table| {
-            let table = table.read();
+    pub fn is_locked(address: Address<Frame>) -> Result<bool, FrameError> {
+        Self::with_bitmap(|bitmap| {
+            let bitmap = bitmap.read();
             let index = address.index();
 
-            assert!(index < Self::total_frames(), "frame index out of bounds");
-
-            // Safety: Index is checked to be within frame bounds.
-            unsafe { *table.get_unchecked(index) }
+            Ok(bitmap.get(index)?)
         })
     }
 }

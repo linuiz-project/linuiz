@@ -1,12 +1,14 @@
 use crate::{
     interrupts::{InterruptCell, exceptions::Exception},
-    mem::alloc::KERNEL_ALLOCATOR,
+    mem::{HigherHalfDirectMap, pmm::PhysicalMemoryManager},
     task::Scheduler,
     time::LocalTimer,
 };
-use alloc::alloc::Allocator;
 use core::{cell::UnsafeCell, ptr::NonNull, sync::atomic::AtomicBool, time::Duration};
 use spin::Mutex;
+
+#[cfg(target_arch = "x86_64")]
+use crate::arch::x86_64::structures::tss::TaskStateSegment;
 
 pub const STACK_SIZE: usize = 0x10000;
 pub const SYSCALL_STACK_SIZE: usize = 0x40000;
@@ -25,13 +27,18 @@ fn try_get_local_static_ptr() -> Option<NonNull<LocalState>> {
 }
 
 /// Local (to the current processor) state structure.
-#[repr(align(0x1000))]
 pub struct LocalState {
     timer: LocalTimer,
     scheduler: InterruptCell<Mutex<Scheduler>>,
     catch_exception: AtomicBool,
     exception: UnsafeCell<Option<Exception>>,
+
+    #[cfg(target_arch = "x86_64")]
+    tss: TaskStateSegment,
 }
+
+const_assert!(size_of::<LocalState>() <= libsys::constants::page_size());
+const_assert!(align_of::<LocalState>() <= libsys::constants::page_size());
 
 impl LocalState {
     /// Initializes the local state structure.
@@ -47,30 +54,37 @@ impl LocalState {
         trace!("Configuring local scheduler...");
         let scheduler = Scheduler::new();
 
-        let local_state_ptr = KERNEL_ALLOCATOR
-            .allocate(core::alloc::Layout::new::<Self>())
-            .expect("failed to allocate local state")
-            .as_non_null_ptr()
-            .cast::<Self>();
-
-        let local_state = LocalState {
-            timer,
-            scheduler: InterruptCell::new(Mutex::new(scheduler)),
-            catch_exception: AtomicBool::new(false),
-            exception: UnsafeCell::new(None),
-        };
+        let local_state_address = PhysicalMemoryManager::next_frame(false)
+            .expect("failed to allocate space for local state structure");
+        let local_state_address = HigherHalfDirectMap::offset(local_state_address.get().get());
+        let mut local_state_ptr = NonNull::<Self>::with_exposed_provenance(local_state_address);
 
         // Safety: Memory was allocated for the size and align of `Self`.
         unsafe {
-            local_state_ptr.write(local_state);
+            local_state_ptr.write(Self {
+                timer,
+                scheduler: InterruptCell::new(Mutex::new(scheduler)),
+                catch_exception: AtomicBool::new(false),
+                exception: UnsafeCell::new(None),
+
+                #[cfg(target_arch = "x86_64")]
+                tss: TaskStateSegment::new(),
+            });
         }
+
+        #[cfg(target_arch = "x86_64")]
+        // Safety:
+        // - `local_state_ptr` is initialized.
+        // - `Self` size & align are const-asserted to be <= `page_size`.
+        // - `local_state_ptr` is unaliased, and this aliasing is local to the statement.
+        (unsafe { local_state_ptr.as_mut() }).tss.load();
 
         // Set the local state pointer for this processor.
         cfg_select! {
             target_arch = "x86_64" => {
                 use crate::arch::x86_64::registers::model_specific::IA32_KERNEL_GS_BASE;
 
-                assert!(IA32_KERNEL_GS_BASE::get_local_state_ptr().is_none());
+                debug_assert!(IA32_KERNEL_GS_BASE::get_local_state_ptr().is_none());
 
                 unsafe {
                     IA32_KERNEL_GS_BASE::set_local_state_ptr(local_state_ptr);
@@ -102,7 +116,7 @@ impl LocalState {
         })
     }
 
-    /// ## Safety
+    /// # Safety
     ///
     /// - Function should only be called once the last preemption wait has
     ///   resolved.

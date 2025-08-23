@@ -4,7 +4,7 @@ use crate::{
     mem::{
         HigherHalfDirectMap, Permissions,
         mapper::paging::{Depth, Entry},
-        pmm::{FreeFrameError, LockFrameError, NextFrameError, PhysicalMemoryManager},
+        pmm::{FrameError, NextFrameError, PhysicalMemoryManager},
     },
     task::asid::AddressSpaceId,
     util::{ExclusiveBorrow, SharedBorrow},
@@ -54,9 +54,6 @@ pub enum MappingError {
     #[error("attempted mapping to location outside memory")]
     OutsideMemory,
 
-    #[error("attempted to lock a used frame")]
-    CannotLock,
-
     #[error("attempted to map an already mapped region")]
     AlreadyMapped,
 
@@ -64,11 +61,10 @@ pub enum MappingError {
     OutOfMemory,
 }
 
-impl From<LockFrameError> for MappingError {
-    fn from(error: LockFrameError) -> Self {
+impl From<FrameError> for MappingError {
+    fn from(error: FrameError) -> Self {
         match error {
-            LockFrameError::OutOfBounds => Self::OutsideMemory,
-            LockFrameError::NotLocked => Self::CannotLock,
+            FrameError::OutOfBounds => Self::OutsideMemory,
         }
     }
 }
@@ -88,10 +84,10 @@ pub enum UnmappingError {
     NotMapped,
 }
 
-impl From<FreeFrameError> for UnmappingError {
-    fn from(error: FreeFrameError) -> Self {
+impl From<FrameError> for UnmappingError {
+    fn from(error: FrameError) -> Self {
         match error {
-            FreeFrameError::OutOfBounds | FreeFrameError::NotLocked => Self::NotMapped,
+            FrameError::OutOfBounds => Self::NotMapped,
         }
     }
 }
@@ -121,9 +117,7 @@ impl From<NextFrameError> for AutoMappingError {
 impl From<MappingError> for AutoMappingError {
     fn from(error: MappingError) -> Self {
         match error {
-            MappingError::OutsideMemory
-            | MappingError::CannotLock
-            | MappingError::AlreadyMapped => unreachable!(),
+            MappingError::OutsideMemory | MappingError::AlreadyMapped => unreachable!(),
             MappingError::OutOfMemory => Self::OutOfMemory,
         }
     }

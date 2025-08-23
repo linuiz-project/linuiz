@@ -25,6 +25,34 @@
     slice_ptr_get,
     step_trait
 )]
+#![forbid(clippy::duplicated_attributes, clippy::inline_asm_x86_att_syntax)]
+#![deny(
+    clippy::debug_assert_with_mut_call,
+    clippy::float_arithmetic,
+    clippy::as_conversions,
+    stable_features
+)]
+#![warn(
+    clippy::pedantic,
+    clippy::todo,
+    clippy::undocumented_unsafe_blocks,
+    clippy::semicolon_inside_block,
+    clippy::semicolon_if_nothing_returned,
+    clippy::unreadable_literal,
+    unsafe_op_in_unsafe_fn
+)]
+#![allow(
+    clippy::cargo_common_metadata,
+    clippy::enum_glob_use,
+    clippy::inline_always,
+    clippy::items_after_statements,
+    clippy::must_use_candidate,
+    clippy::missing_const_for_fn,
+    clippy::needless_for_each,
+    clippy::if_not_else,
+    dead_code,
+    mismatched_lifetime_syntaxes
+)]
 
 use limine::{
     BaseRevision,
@@ -51,6 +79,8 @@ mod util;
 
 #[cfg(debug_assertions)]
 mod dev;
+
+extern crate alloc;
 
 #[macro_use]
 extern crate bitflags;

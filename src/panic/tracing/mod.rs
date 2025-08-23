@@ -7,22 +7,19 @@ use spin::Mutex;
 
 pub mod symbols;
 
-fn with_panic_buffer(func: impl FnOnce(&mut str)) {
-    static PANIC_BUFFER: Mutex<[u8; 0x4000]> = Mutex::new([0u8; _]);
-
-    let mut panic_buffer = PANIC_BUFFER.lock();
-    let mut panic_str = core::str::from_utf8_mut(v).unwrap();
-panic_str.
-}
+type PanicStringBuffer = heapless::String<0x4000>;
 
 pub(super) fn emit_stack_trace() {
+    static PANIC_BUFFER: Mutex<PanicStringBuffer> = Mutex::new(PanicStringBuffer::new());
 
-with_panic_buffer(|panic_buffer| {
-    if let Err(err) = construct_panic_message(panic_buffer) {
+    let mut panic_string_buffer = PANIC_BUFFER.lock();
+    panic_string_buffer.clear();
+
+    if let Err(err) = construct_panic_message(&mut *panic_string_buffer) {
         error!("Failed constructing panic message: {err:?}");
     }
 
-});
+    error!("STACK TRACE:\n{panic_string_buffer}");
 }
 
 #[repr(C)]
@@ -51,7 +48,8 @@ impl Iterator for StackTracer {
     type Item = Address<Virtual>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // Safety: Stack frame pointer will be valid if the correct value is provided to `Self::new()`.
+        // Safety: Stack frame pointer will be valid if the correct value is provided to
+        // `Self::new()`.
         let stack_frame = unsafe { self.frame_ptr?.as_ref() };
         self.frame_ptr = stack_frame.prev_frame_ptr;
 

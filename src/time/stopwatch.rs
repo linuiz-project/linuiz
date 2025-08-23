@@ -79,9 +79,9 @@ crate::singleton! {
                                 0x00FF_FFFF
                             },
                         },
-                        ticks_per_sec: 3579545,
-                        ticks_per_ms: 3579545 / 1000,
-                        ticks_per_us: 3579545 / 1000 / 1000,
+                        ticks_per_sec: 357_9545,
+                        ticks_per_ms: 357_9545 / 1000,
+                        ticks_per_us: 357_9545 / 1000 / 1000,
                     }
                 }
 
@@ -108,9 +108,9 @@ crate::singleton! {
                                 0x00FF_FFFF
                             },
                         },
-                        ticks_per_sec: 3579545,
-                        ticks_per_ms: 3579545 / 1000,
-                        ticks_per_us: 3579545 / 1000 / 1000,
+                        ticks_per_sec: 357_9545,
+                        ticks_per_ms: 357_9545 / 1000,
+                        ticks_per_us: 357_9545 / 1000 / 1000,
                     }
                 }
 

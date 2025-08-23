@@ -94,9 +94,6 @@ pub unsafe fn start(
 
     debug!("Preparing for task scheduling...");
 
-    #[cfg(target_arch = "x86_64")]
-    crate::arch::x86_64::structures::tss::TaskStateSegment::load_local();
-
     LocalState::init();
 
     core::arch::breakpoint();

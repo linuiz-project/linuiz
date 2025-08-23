@@ -1,18 +1,35 @@
 use crate::{
     arch::x86_64::structures::idt::InterruptStackFrame,
     cpu::local_state::LocalState,
-    mem::stack::Stack,
     task::{Registers, Task},
 };
 use alloc::collections::vec_deque::VecDeque;
-use core::time::Duration;
-use libsys::address::{Address, Virtual};
+use core::{mem::MaybeUninit, num::NonZero, ptr::NonNull, time::Duration};
 
 pub static PROCESSES: spin::Mutex<VecDeque<Task>> = spin::Mutex::new(VecDeque::new());
 
+#[cfg(debug_assertions)]
+const IDLE_STACK_SIZE: usize = 0x100;
+#[cfg(not(debug_assertions))]
+const IDLE_STACK_SIZE: usize = 0x20;
+
+#[repr(align(0x10))]
+struct IdleStack([MaybeUninit<u8>; IDLE_STACK_SIZE]);
+
+impl IdleStack {
+    fn top(&self) -> NonNull<u8> {
+        // Safety: `self.0` max index is `self.0.len() - 1`.
+        let top_byte = unsafe { self.0.get_unchecked(self.0.len() - 1) };
+        let top_ptr = core::ptr::from_ref(top_byte).cast_mut().cast::<u8>();
+
+        // Safety: `top_ptr` is derived from `self.0`, and so cannot be null.
+        unsafe { NonNull::new_unchecked(top_ptr) }
+    }
+}
+
 pub struct Scheduler {
     enabled: bool,
-    idle_stack: Stack<0x100>,
+    idle_stack: IdleStack,
     task: Option<Task>,
 }
 
@@ -20,7 +37,7 @@ impl Scheduler {
     pub fn new() -> Self {
         Self {
             enabled: false,
-            idle_stack: Stack::default(),
+            idle_stack: IdleStack(core::array::repeat(MaybeUninit::uninit())),
             task: None,
         }
     }
@@ -117,19 +134,20 @@ impl Scheduler {
             let old_value = self.task.replace(next_process);
             debug_assert!(old_value.is_none());
         } else {
-            // Safety: Instruction pointer is to a valid function.
             #[allow(clippy::as_conversions)]
+            let idle_wait_address = crate::interrupts::wait_indefinite as usize;
+            // Safety: Function address cannot be zero.
+            let idle_wait_address = unsafe { NonZero::<usize>::new_unchecked(idle_wait_address) };
+            let idle_wait_ptr = NonNull::<u8>::with_exposed_provenance(idle_wait_address);
+
+            // Safety: Instruction pointer is to a valid function.
             unsafe {
-                isf.set_instruction_pointer(
-                    Address::<Virtual>::new(crate::interrupts::wait_indefinite as usize).unwrap(),
-                );
+                isf.set_instruction_pointer(Some(idle_wait_ptr));
             }
 
             // Safety: Stack pointer is valid for idle function stack.
             unsafe {
-                isf.set_stack_pointer(
-                    Address::<Virtual>::new(self.idle_stack.top().addr().get()).unwrap(),
-                );
+                isf.set_stack_pointer(Some(self.idle_stack.top()));
             }
 
             *regs = Registers::empty();
@@ -138,8 +156,8 @@ impl Scheduler {
         }
 
         // TODO have some kind of queue of preemption waits, to ensure we select the
-        // shortest one. Safety: Just having switched tasks, no preemption wait
-        // should supercede this one.
+        // shortest one.
+        // Safety: No preemption wait will supercede this one.
         unsafe {
             LocalState::set_preemption_wait(Duration::from_millis(15));
         }

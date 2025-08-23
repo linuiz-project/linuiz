@@ -7,15 +7,13 @@ use libsys::{
     constants::{huge_page_size, large_page_size, page_size},
 };
 
-mod kernel_allocator;
-
 mod hhdm;
 pub use hhdm::*;
 
 // pub mod io;
+pub mod alloc;
 pub mod mapper;
 pub mod pmm;
-pub mod stack;
 
 crate::singleton! {
     #[derive(Debug)]
