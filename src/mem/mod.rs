@@ -15,16 +15,16 @@ pub mod alloc;
 pub mod mapper;
 pub mod pmm;
 
-crate::singleton! {
-    #[derive(Debug)]
-    pub struct KernelMapper {
-        mapper: Mapper
-    }
+#[derive(Debug)]
+pub struct KernelMapper(Mapper);
 
-    fn init(
+static KERNEL_MAPPER: spin::Once<KernelMapper> = spin::Once::new();
+
+impl KernelMapper {
+    pub fn init(
         memory_map_request: &limine::request::MemoryMapRequest,
         kernel_file_request: &limine::request::ExecutableFileRequest,
-        kernel_address_request: &limine::request::ExecutableAddressRequest
+        kernel_address_request: &limine::request::ExecutableAddressRequest,
     ) -> Self {
         fn map_range(
             mapper: &mut Mapper,
@@ -57,11 +57,10 @@ crate::singleton! {
 
                     // Safety:
                     // - `from` page is not mapped in current page tables.
-                    // - `to` frame is apart of the higher-half direct map, so
-                    //   is unused.
-                    // - `memory_access` is calculated based on the type of the
-                    //   memory region, as reported by the bootloader (so should
-                    //   be correct, if the bootloader is not lying).
+                    // - `to` frame is apart of the higher-half direct map, so is unused.
+                    // - `memory_access` is calculated based on the type of the memory region, as
+                    //   reported by the bootloader (so should be correct, if the bootloader is not
+                    //   lying).
                     unsafe {
                         mapper
                             .map(from, to, Depth::giga(), false, memory_access)
@@ -79,11 +78,10 @@ crate::singleton! {
 
                     // Safety:
                     // - `from` page is not mapped in current page tables.
-                    // - `to` frame is apart of the higher-half direct map, so
-                    //   is unused.
-                    // - `memory_access` is calculated based on the type of the
-                    //   memory region, as reported by the bootloader (so should
-                    //   be correct, if the bootloader is not lying).
+                    // - `to` frame is apart of the higher-half direct map, so is unused.
+                    // - `memory_access` is calculated based on the type of the memory region, as
+                    //   reported by the bootloader (so should be correct, if the bootloader is not
+                    //   lying).
                     unsafe {
                         mapper
                             .map(from, to, Depth::mega(), false, memory_access)
@@ -96,14 +94,13 @@ crate::singleton! {
 
                     // Safety:
                     // - `from` page is not mapped in current page tables.
-                    // - `to` frame is apart of the higher-half direct map, so
-                    //   is unused.
-                    // - `memory_access` is calculated based on the type of the
-                    //   memory region, as reported by the bootloader (so should
-                    //   be correct, if the bootloader is not lying).
+                    // - `to` frame is apart of the higher-half direct map, so is unused.
+                    // - `memory_access` is calculated based on the type of the memory region, as
+                    //   reported by the bootloader (so should be correct, if the bootloader is not
+                    //   lying).
                     unsafe {
                         mapper
-                            .map(from, to, Depth::max(),false, memory_access)
+                            .map(from, to, Depth::max(), false, memory_access)
                             .expect("failed to map range");
                     }
 
@@ -118,7 +115,6 @@ crate::singleton! {
             mapper::use_large_pages(),
             mapper::use_huge_pages(),
         );
-
 
         let mut kernel_mapper = Mapper::new();
 
@@ -146,12 +142,12 @@ crate::singleton! {
                         | limine::memory_map::EntryType::ACPI_NVS
                         | limine::memory_map::EntryType::ACPI_RECLAIMABLE
                         | limine::memory_map::EntryType::BOOTLOADER_RECLAIMABLE
-                        | limine::memory_map::EntryType::FRAMEBUFFER
-                            => Permissions::ReadWrite,
+                        | limine::memory_map::EntryType::FRAMEBUFFER => Permissions::ReadWrite,
 
                         limine::memory_map::EntryType::RESERVED
-                        | limine::memory_map::EntryType::EXECUTABLE_AND_MODULES
-                            => Permissions::ReadOnly,
+                        | limine::memory_map::EntryType::EXECUTABLE_AND_MODULES => {
+                            Permissions::ReadOnly
+                        }
 
                         _ => {
                             unreachable!("Unrecognized memory map entry type: {:#X}", entry.base)
@@ -178,7 +174,6 @@ crate::singleton! {
                 )
             })
             .expect("bootloader did not provide a response to kernel address request");
-
 
         trace!("Mapping the kernel executable...");
         kernel_file_request
@@ -211,8 +206,10 @@ crate::singleton! {
                 let segment_frame =
                     Address::<Frame>::new(kernel_physical_address + offset).unwrap();
                 let segment_length = usize::try_from(core::cmp::max(
-                    program_header.p_memsz, // If the segment size is smaller than it's alignment, we can map it
-                    program_header.p_align, // as if it's alignment is the total size (support for mega pages).
+                    program_header.p_memsz, /* If the segment size is smaller than it's
+                                             * alignment, we can map it */
+                    program_header.p_align, /* as if it's alignment is the total size (support
+                                             * for mega pages). */
                 ))
                 .unwrap();
                 let segment_permissions =
@@ -229,7 +226,8 @@ crate::singleton! {
 
         #[cfg(target_arch = "x86_64")]
         {
-            let local_apic_frame = crate::arch::x86_64::registers::model_specific::IA32_APIC_BASE::get_base_address();
+            let local_apic_frame =
+                crate::arch::x86_64::registers::model_specific::IA32_APIC_BASE::get_base_address();
 
             trace!("Mapping the local APIC: {local_apic_frame:X?}");
 
@@ -238,29 +236,28 @@ crate::singleton! {
                 HigherHalfDirectMap::frame_to_page(local_apic_frame),
                 local_apic_frame,
                 1,
-                Permissions::ReadWrite
+                Permissions::ReadWrite,
             );
         }
 
-
-        let kernel_mapper = Self {
-            mapper: kernel_mapper
-        };
+        let kernel_mapper = Self(kernel_mapper);
 
         debug!("Kernel mappings complete.");
         trace!("{kernel_mapper:#X?}");
 
         kernel_mapper
     }
-}
 
-impl KernelMapper {
+    fn get_static() -> &'static Self {
+        KERNEL_MAPPER.get().unwrap()
+    }
+
     pub fn clone() -> Mapper {
-        Self::get_static().mapper.clone()
+        Self::get_static().0.clone()
     }
 
     pub unsafe fn swap_into() {
-        let mapper = &Self::get_static().mapper;
+        let mapper = &Self::get_static().0;
 
         // Safety: Caller is required to maintain safety invariants.
         unsafe {

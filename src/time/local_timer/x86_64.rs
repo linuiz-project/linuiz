@@ -6,7 +6,7 @@ use crate::{
         devices::local_apic::{LocalApic, TimerDivideConfiguration, local_vector::TimerMode},
         registers::model_specific::IA32_TSC_DEADLINE,
     },
-    time::Stopwatch,
+    time::KernelStopwatch,
 };
 use core::{arch::x86_64::_rdtsc, time::Duration};
 use raw_cpuid::{ApmInfo, FeatureInfo, HypervisorInfo};
@@ -31,7 +31,7 @@ fn measure_tsc() -> u64 {
 
     // Safety: Processor has TSC capability.
     let start_tsc = unsafe { _rdtsc() };
-    Stopwatch::spin_wait(MEASUREMENT_DURATION);
+    KernelStopwatch::spin_wait(MEASUREMENT_DURATION);
     // Safety: Processor has TSC capability.
     let end_tsc = unsafe { _rdtsc() };
 
@@ -52,7 +52,7 @@ fn measure_lapic() -> u32 {
 
     // Loading the initial count starts the timer.
     LocalApic::set_timer_initial_count(MEASURE_TIMER_COUNTDOWN_VALUE);
-    Stopwatch::spin_wait(MEASUREMENT_DURATION);
+    KernelStopwatch::spin_wait(MEASUREMENT_DURATION);
     let end_timer_count = LocalApic::get_timer_current_count();
 
     let elapsed_ticks = MEASURE_TIMER_COUNTDOWN_VALUE - end_timer_count;

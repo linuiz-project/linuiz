@@ -142,7 +142,7 @@ pub struct Mapper(Address<Frame>);
 
 impl Mapper {
     pub fn new() -> Self {
-        let frame = PhysicalMemoryManager::next_frame(true)
+        let frame = PhysicalMemoryManager::next_free(core::num::NonZero::<usize>::MIN, true)
             .expect("failed to allocate frame for new root page table");
 
         Self(frame)
@@ -284,7 +284,7 @@ impl Mapper {
         page: Address<Page>,
         permissions: Permissions,
     ) -> Result<(), AutoMappingError> {
-        let frame = PhysicalMemoryManager::next_frame(true)?;
+        let frame = PhysicalMemoryManager::next_free(core::num::NonZero::<usize>::MIN, true)?;
 
         // Safety:
         // - Frame was just allocated, so not current in use.

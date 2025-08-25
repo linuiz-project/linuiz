@@ -6,7 +6,6 @@ use libsys::{
     constants::{page_bits, page_mask, page_size},
     math::align_up_div,
 };
-use spin::RwLock;
 
 #[derive(Debug, Error)]
 pub enum NextFrameError {
@@ -28,14 +27,20 @@ impl From<BitMapError> for FrameError {
     }
 }
 
-crate::singleton! {
-    pub struct PhysicalMemoryManager {
-        bitmap: InterruptCell<RwLock<BitMap<'static>>>,
-        total_frames: usize
-    }
+pub struct PhysicalMemoryManager<'a> {
+    bitmap: InterruptCell<spin::RwLock<BitMap<'a>>>,
+    total_frames: usize,
+}
 
-    /// Initializes the static physical memory manager with the provided bootloader memory map request.
-    fn init(memory_map_request: &limine::request::MemoryMapRequest) -> Self {
+static PHYSICAL_MEMORY_MANAGER: spin::Once<PhysicalMemoryManager<'static>> = spin::Once::new();
+
+unsafe impl Send for PhysicalMemoryManager<'_> {}
+unsafe impl Sync for PhysicalMemoryManager<'_> {}
+
+impl<'a: 'static> PhysicalMemoryManager<'a> {
+    /// Initializes the static physical memory manager with the provided
+    /// bootloader memory map request.
+    pub fn init(memory_map_request: &limine::request::MemoryMapRequest) -> Self {
         let memory_map = memory_map_request
             .get_response()
             .expect("bootloader did not provide a response to the memory map request")
@@ -43,11 +48,11 @@ crate::singleton! {
 
         let last_entry = memory_map.last().unwrap();
 
-        // While this is the ""total"" physical memory, it should be noted it isn't the total *installed* memory.
-        // Because of hardware addressing, reserved regions—and other quirks—this number will likely be much larger
+        // While this is the ""total"" physical memory, it should be noted it isn't the
+        // total *installed* memory. Because of hardware addressing, reserved
+        // regions—and other quirks—this number will likely be much larger
         // than the actual amount of installed physical memory the machine has.
-        let total_physical_memory =
-            usize::try_from(last_entry.base + last_entry.length).unwrap();
+        let total_physical_memory = usize::try_from(last_entry.base + last_entry.length).unwrap();
 
         let total_frames = align_up_div(total_physical_memory, page_bits());
         trace!("Total frames: {total_frames} ({total_physical_memory:#X} Bytes)");
@@ -58,10 +63,8 @@ crate::singleton! {
             NonZero::new(usize::BITS.trailing_zeros()).unwrap(),
         );
         // Total memory the bitmap will consume as a multiple of frame size.
-        let bitmap_size_in_frames = align_up_div(
-            bitmap_size * core::mem::size_of::<usize>(),
-            page_bits(),
-        );
+        let bitmap_size_in_frames =
+            align_up_div(bitmap_size * core::mem::size_of::<usize>(), page_bits());
         // Total memory the bitmap will consume as a multiple of bytes.
         let bitmap_size_in_bytes = bitmap_size_in_frames * page_size();
         trace!(
@@ -103,18 +106,18 @@ crate::singleton! {
                 // Safety:
                 // - Region is guaranteed by the memory map to be unused
                 // - Region has been zero-initialized.
-                unsafe {
-                    core::slice::from_raw_parts_mut::<'static>(bitmap_ptr, bitmap_size)
-                }
+                unsafe { core::slice::from_raw_parts_mut::<'static>(bitmap_ptr, bitmap_size) }
             },
-            total_frames
+            total_frames,
         );
 
         // Ensure the bitmap's frames are reserved.
         trace!("Locking: {bitmap_region:#X?}");
         let bitmap_region_start_index = bitmap_region.start / page_size();
         let bitmap_region_end_index = bitmap_region.end / page_size();
-        bitmap.set(bitmap_region_start_index..bitmap_region_end_index).unwrap();
+        bitmap
+            .set(bitmap_region_start_index..bitmap_region_end_index)
+            .unwrap();
 
         let mut prev_entry_range_end = None;
         memory_map
@@ -128,11 +131,15 @@ crate::singleton! {
                 (entry_start..entry_end, entry.entry_type)
             })
             .for_each(|(entry_range, entry_ty)| {
-                // If there's space inbetween entries, we'll lock it to ensure it isn't accidentally used.
+                // If there's space inbetween entries, we'll lock it to ensure it isn't
+                // accidentally used.
                 if let Some(prev_entry_range_end) = prev_entry_range_end
                     && prev_entry_range_end < entry_range.start
                 {
-                    trace!("Locking (Inbetween): {:#X?}", prev_entry_range_end..entry_range.start);
+                    trace!(
+                        "Locking (Inbetween): {:#X?}",
+                        prev_entry_range_end..entry_range.start
+                    );
                     let lock_start_index = prev_entry_range_end / page_size();
                     let lock_end_index = entry_range.start / page_size();
                     bitmap.set(lock_start_index..lock_end_index).unwrap();
@@ -156,18 +163,23 @@ crate::singleton! {
             total_frames,
         }
     }
-}
 
-// Safety: Type uses entirely atomic operations.
-unsafe impl Send for PhysicalMemoryManager {}
-// Safety: Type uses entirely atomic operations.
-unsafe impl Sync for PhysicalMemoryManager {}
+    fn get_static() -> &'static Self {
+        PHYSICAL_MEMORY_MANAGER.get().unwrap()
+    }
 
-impl PhysicalMemoryManager {
-    /// Passes the static physical memory manager's frame bitmap to `with_fn`,
-    /// returning the result.
-    fn with_bitmap<T>(with_fn: impl FnOnce(&RwLock<BitMap<'static>>) -> T) -> T {
-        Self::get_static().bitmap.with(with_fn)
+    fn with_bitmap<T>(func: impl FnOnce(&BitMap<'a>) -> T) -> T {
+        Self::get_static().bitmap.with(|rwlock| {
+            let bitmap = rwlock.read();
+            func(&*bitmap)
+        })
+    }
+
+    fn with_bitmap_mut<T>(func: impl FnOnce(&mut BitMap<'a>) -> T) -> T {
+        Self::get_static().bitmap.with(|rwlock| {
+            let mut bitmap = rwlock.write();
+            func(&mut *bitmap)
+        })
     }
 
     pub fn total_frames() -> usize {
@@ -178,24 +190,20 @@ impl PhysicalMemoryManager {
         Self::total_frames() * page_size()
     }
 
-
-    pub fn next_frame(clear_memory: bool) -> Result<Address<Frame>, NextFrameError> {
-        Self::with_bitmap(|bitmap| {
-            let mut bitmap = bitmap.write();
-            let free_frame_index = bitmap.next_free().ok_or(NextFrameError::NoneFree)?;
-
-            // Safety: `BitMap::next_free` cannot exceed bounds.
-            unsafe {
-                bitmap.set(free_frame_index).unwrap_unchecked();
-            }
+    pub fn next_free(
+        count: NonZero<usize>,
+        clear_memory: bool,
+    ) -> Result<Address<Frame>, NextFrameError> {
+        Self::with_bitmap_mut(|bitmap| {
+            let free_frame_index = bitmap.next_free(count).ok_or(NextFrameError::NoneFree)?;
 
             trace!(
-                "Frame Locked: {:#X?}",
-                free_frame_index << page_bits().get()
+                "Frames Locked: {:#X?}",
+                free_frame_index..(free_frame_index + count.get())
             );
 
-            let frame = Address::<Frame>::new(free_frame_index << page_bits().get())
-                .expect("physical memory manager constructed invalid physical address");
+            let free_frame_address = free_frame_index << page_bits().get();
+            let frame = Address::<Frame>::new(free_frame_address).unwrap();
 
             if clear_memory {
                 // Safety: Memory was just allocated, and is not currently aliased.
@@ -208,58 +216,8 @@ impl PhysicalMemoryManager {
         })
     }
 
-    // TODO get rid of this function in favor of `next_frame` with a range.
-    pub fn next_frames(
-        count: NonZero<usize>,
-        align_bits: Option<NonZero<u32>>,
-        clear_memory: bool,
-    ) -> Result<Address<Frame>, NextFrameError> {
-        Self::with_bitmap(|bitmap| {
-            // let mut bitmap = bitmap.write();
-
-            // let align_bits = align_bits.unwrap_or(NonZero::<u32>::MIN).get();
-            // let align_index_skip = u32::max(1, align_bits >> page_bits().get());
-
-            // let free_frames_index = bitmap
-            //     .windows(count.get())
-            //     .enumerate()
-            //     .step_by(align_index_skip.try_into().unwrap())
-            //     .find_map(|(index, window)| window.not_any().then_some(index))
-            //     .ok_or(NextFrameError::NoneFree)?;
-
-            // // It's a bit uglier to find the index of the window, then effectively
-            // reacreate // it. However, `.windows()` does not return a mutable
-            // bitslice, so // this is how it must be done.
-            // let free_frames = bitmap
-            //     .get_mut(free_frames_index..(free_frames_index + count.get()))
-            //     .unwrap();
-            // free_frames.fill(true);
-
-            // trace!(
-            //     "Frames Locked: {:#X?}..{:#X?}",
-            //     free_frames_index,
-            //     free_frames_index + free_frames.len()
-            // );
-
-            // let frame = Address::<Frame>::new(free_frames_index << page_bits().get())
-            //     .expect("physical memory manager constructed invalid physical address");
-
-            // if clear_memory {
-            //     // Safety: Memory was just allocated, and is not currently aliased.
-            //     unsafe {
-            //         crate::mem::zero_frame(frame);
-            //     }
-            // }
-
-            // Ok(frame)
-
-            todo!()
-        })
-    }
-
     pub fn lock_frame(address: Address<Frame>) -> Result<(), FrameError> {
-        Self::with_bitmap(|bitmap| {
-            let mut bitmap = bitmap.write();
+        Self::with_bitmap_mut(|bitmap| {
             let index = address.index();
 
             debug_assert!(bitmap.get(index)?);
@@ -273,8 +231,7 @@ impl PhysicalMemoryManager {
     }
 
     pub fn free_frame(address: Address<Frame>) -> Result<(), FrameError> {
-        Self::with_bitmap(|bitmap| {
-            let mut bitmap = bitmap.write();
+        Self::with_bitmap_mut(|bitmap| {
             let index = address.index();
 
             debug_assert!(!(bitmap.get(index)?));
@@ -288,11 +245,6 @@ impl PhysicalMemoryManager {
     }
 
     pub fn is_locked(address: Address<Frame>) -> Result<bool, FrameError> {
-        Self::with_bitmap(|bitmap| {
-            let bitmap = bitmap.read();
-            let index = address.index();
-
-            Ok(bitmap.get(index)?)
-        })
+        Self::with_bitmap(|bitmap| Ok(bitmap.get(address.index())?))
     }
 }

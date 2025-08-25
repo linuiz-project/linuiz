@@ -54,7 +54,7 @@ impl LocalState {
         trace!("Configuring local scheduler...");
         let scheduler = Scheduler::new();
 
-        let local_state_address = PhysicalMemoryManager::next_frame(false)
+        let local_state_address = PhysicalMemoryManager::next_free(core::num::NonZero::<usize>::MIN,false)
             .expect("failed to allocate space for local state structure");
         let local_state_address = HigherHalfDirectMap::offset(local_state_address.get().get());
         let mut local_state_ptr = NonNull::<Self>::with_exposed_provenance(local_state_address);

@@ -13,20 +13,22 @@ pub enum Error {
     NoSymbolTable,
 }
 
-crate::singleton! {
-    pub struct KernelSymbols {
-        tables: Option<(SymbolTable<'static, AnyEndian>, StringTable<'static>)>
-    }
+pub struct KernelSymbols {
+    tables: Option<(SymbolTable<'static, AnyEndian>, StringTable<'static>)>,
+}
 
-    fn init(kernel_file_request: &limine::request::ExecutableFileRequest) -> Self {
+static KERNEL_SYMBOLS: spin::Once<KernelSymbols> = spin::Once::new();
+
+impl KernelSymbols {
+    pub fn init(kernel_file_request: &limine::request::ExecutableFileRequest) -> Self {
         let Some(response) = kernel_file_request.get_response() else {
             error!("Bootloader didn't provide response to kernel file request.");
             return Self { tables: None };
         };
 
-        // Safety: Bootloader guarantees the address and size of the executable file will be correct.
-        //         Additionally, given the context, it also guarantees the file will be mapped into
-        //         memory.
+        // Safety: Bootloader guarantees the address and size of the executable file
+        // will be correct.         Additionally, given the context, it also
+        // guarantees the file will be mapped into         memory.
         let kernel_file = unsafe {
             core::slice::from_raw_parts::<'static>(
                 response.file().addr(),
@@ -34,8 +36,8 @@ crate::singleton! {
             )
         };
 
-        let Ok(kernel_elf) =
-            ElfBytes::<'static, AnyEndian>::minimal_parse(kernel_file).inspect_err(|error| {
+        let Ok(kernel_elf) = ElfBytes::<'static, AnyEndian>::minimal_parse(kernel_file)
+            .inspect_err(|error| {
                 error!("Failed to parse kernel ELF: {error:?}");
             })
         else {
@@ -54,14 +56,16 @@ crate::singleton! {
         };
 
         Self {
-            tables: Some(symbol_table)
+            tables: Some(symbol_table),
         }
     }
-}
 
-impl KernelSymbols {
+    fn get_static() -> Option<&'static Self> {
+        KERNEL_SYMBOLS.get()
+    }
+
     pub fn get_name(address: Address<Virtual>) -> Option<&'static str> {
-        let (symbols, strings) = KernelSymbols::get_static().tables.as_ref()?;
+        let (symbols, strings) = KernelSymbols::get_static()?.tables.as_ref()?;
 
         let symbol = symbols.iter().find(|symbol| {
             (symbol.st_value..(symbol.st_value + symbol.st_size))

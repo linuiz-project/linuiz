@@ -89,9 +89,6 @@ extern crate bitflags;
 extern crate log;
 
 #[macro_use]
-extern crate paste;
-
-#[macro_use]
 extern crate static_assertions;
 
 #[macro_use]
@@ -154,9 +151,6 @@ unsafe extern "C" fn _entry() -> ! {
     // to determine the processor ID).
     crate::mem::HigherHalfDirectMap::init(&HHDM_REQUEST);
 
-    #[cfg(target_arch = "x86_64")]
-    crate::arch::x86_64::devices::local_apic::LocalApic::init();
-
     // Safety: Function is run only once for this processor.
     unsafe {
         crate::cpu::configure();
@@ -198,7 +192,7 @@ unsafe extern "C" fn _entry() -> ! {
         crate::mem::KernelMapper::swap_into();
     }
 
-    crate::time::Stopwatch::init(&RSDP_REQUEST);
+    crate::time::KernelStopwatch::init(&RSDP_REQUEST);
 
     // Safety: We've reached the end of the kernel init phase.
     unsafe { crate::cpu::start(Some(&MP_REQUEST), Some(&MEMORY_MAP_REQUEST)) }
@@ -379,56 +373,3 @@ fn report_total_usable_memory(memory_map: &[&limine::memory_map::Entry]) {
 //             crate::task::PROCESSES.lock().push_back(task);
 //         });
 // }
-
-#[macro_export]
-macro_rules! singleton {
-    (
-        $(#[$struct_attrs:meta])*
-        $struct_scope:vis struct $struct_name:ident {
-            $(
-                $(#[$field_attrs:meta])*
-                $field_scope:vis $field_name:ident: $field_ty:ty
-            ),*
-        }
-
-        $(#[$init_attrs:meta])*
-        fn init($($arg_name:ident: $arg_ty:ty),*) -> Self
-            $init:block
-    ) => {
-        paste! {
-            #[allow(non_upper_case_globals)]
-            static [< STATIC_ $struct_name >]: spin::Once<$struct_name> = spin::Once::new();
-
-            $(#[$struct_attrs])*
-            $struct_scope struct $struct_name {
-                $(
-                    $(#[$field_attrs])*
-                    $field_scope $field_name: $field_ty
-                ),*
-            }
-
-            impl $struct_name {
-                $(#[$init_attrs])*
-                pub fn init($($arg_name: $arg_ty),*) {
-                    let init_fn = || $init;
-
-                    [< STATIC_ $struct_name >].call_once(init_fn);
-                }
-
-                /// Gets the single instance of [`Self`], or causes a panic if it's uninitialized.
-                fn get_static() -> &'static Self {
-                    [< STATIC_ $struct_name >]
-                        .get()
-                        .expect(
-                            concat!("static `", stringify!($struct_name), "` has not yet been initialized")
-                        )
-                }
-
-                /// Whether the singleton has been initialized.
-                pub fn is_initialized() -> bool {
-                    [< STATIC_ $struct_name >].get().is_some()
-                }
-            }
-        }
-    };
-}

@@ -1,56 +1,18 @@
 use limine::request::ExecutableCmdlineRequest;
 
-crate::singleton! {
-    #[derive(Debug)]
-    pub struct KernelParameters {
-        /// Whether the kernel should utilize multi-processing.
-        use_multiprocessing: bool,
+#[derive(Debug)]
+pub struct KernelParameters {
+    /// Whether the kernel should utilize multi-processing.
+    use_multiprocessing: bool,
 
-        /// Whether to keep the kernel symbol info (for stack traces).
-        drop_symbol_info: bool,
+    /// Whether to keep the kernel symbol info (for stack traces).
+    drop_symbol_info: bool,
 
-        /// Whether the kernel should use low-memory mode.
-        low_memory_mode: bool
-    }
-
-    fn init(kernel_cmdline_request: &ExecutableCmdlineRequest) -> Self {
-        let mut params = Self::default();
-
-        let Some(kernel_cmdline_response) = kernel_cmdline_request.get_response()
-        else {
-            warn!("Bootloader did not provide response to kernel command line request.");
-            return params;
-        };
-
-        let Ok(params_str) = kernel_cmdline_response.cmdline().to_str() else {
-            warn!("Kernel command line contained invalid UTF-8.");
-            return params;
-        };
-
-
-        params_str
-            .split(' ')
-            .for_each(|param| {
-                match param {
-                    "" => {
-                        // Ignore accidental extra spaces
-                    }
-
-                    "--no-multiprocessing" => params.use_multiprocessing = false,
-                    "--drop-symbols" => params.drop_symbol_info = true,
-                    "--low-memory" => params.low_memory_mode = true,
-
-                    _ => {
-                        warn!("Unknown kernel parameter: \"{param}\"");
-                    }
-                }
-            });
-
-        debug!("{params:#?}");
-
-        params
-    }
+    /// Whether the kernel should use low-memory mode.
+    low_memory_mode: bool,
 }
+
+static KERNEL_PARAMETERS: spin::Once<KernelParameters> = spin::Once::new();
 
 impl Default for KernelParameters {
     fn default() -> Self {
@@ -63,6 +25,44 @@ impl Default for KernelParameters {
 }
 
 impl KernelParameters {
+    pub fn init(kernel_cmdline_request: &ExecutableCmdlineRequest) -> Self {
+        let mut params = Self::default();
+
+        let Some(kernel_cmdline_response) = kernel_cmdline_request.get_response() else {
+            warn!("Bootloader did not provide response to kernel command line request.");
+            return params;
+        };
+
+        let Ok(params_str) = kernel_cmdline_response.cmdline().to_str() else {
+            warn!("Kernel command line contained invalid UTF-8.");
+            return params;
+        };
+
+        params_str.split(' ').for_each(|param| {
+            match param {
+                "" => {
+                    // Ignore accidental extra spaces
+                }
+
+                "--no-multiprocessing" => params.use_multiprocessing = false,
+                "--drop-symbols" => params.drop_symbol_info = true,
+                "--low-memory" => params.low_memory_mode = true,
+
+                _ => {
+                    warn!("Unknown kernel parameter: \"{param}\"");
+                }
+            }
+        });
+
+        debug!("{params:#?}");
+
+        params
+    }
+
+    fn get_static() -> &'static Self {
+        KERNEL_PARAMETERS.get().unwrap()
+    }
+
     pub fn use_multiprocessing() -> bool {
         Self::get_static().use_multiprocessing
     }

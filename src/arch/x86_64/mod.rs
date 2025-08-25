@@ -88,10 +88,7 @@ pub unsafe fn configure_processor() {
         ProcessorFlags::write(ProcessorFlags::read() | ProcessorFlags::ALIGNMENT_CHECK);
     }
 
-    GlobalDescriptorTable::init();
     GlobalDescriptorTable::load_static();
-
-    InterruptDescriptorTable::init();
     InterruptDescriptorTable::load_static();
 
     LocalApic::reset();

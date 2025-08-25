@@ -10,10 +10,11 @@ use slab_allocator::SlabAllocator;
 
 mod frame_allocator;
 
-// pub static KERNEL_ALLOCATOR: SlabAllocator<FrameAllocator> = SlabAllocator::new_in(FrameAllocator);
+// pub static KERNEL_ALLOCATOR: SlabAllocator<FrameAllocator> =
+// SlabAllocator::new_in(FrameAllocator);
 
 pub fn allocate_kernel_stack(pages: NonZero<usize>) -> Result<NonNull<u8>, NextFrameError> {
-    let base_address = PhysicalMemoryManager::next_frames(pages, None, false)?;
+    let base_address = PhysicalMemoryManager::next_free(pages, false)?;
     let memory_size = pages.get() * page_size();
 
     let ptr_offset = HigherHalfDirectMap::offset(base_address.get().get());

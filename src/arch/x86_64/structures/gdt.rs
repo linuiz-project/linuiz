@@ -11,66 +11,53 @@ pub static KDATA_SELECTOR: Once<SegmentSelector> = Once::new();
 pub static UDATA_SELECTOR: Once<SegmentSelector> = Once::new();
 pub static UCODE_SELECTOR: Once<SegmentSelector> = Once::new();
 
-crate::singleton! {
-    #[repr(C, align(0x8))]
-    #[derive(Debug, Clone)]
-    pub struct GlobalDescriptorTable {
-        table: [u64; 7],
-        len: u16
-    }
-
-    fn init() -> Self {
-        let mut gdt = Self::empty();
-
-        // The GDT layout is very specific, due to the behaviour of the `IA32_STAR` MSR and its
-        // affect on syscalls. Do not change this, or if it is changed, ensure it follows the requisite
-        // standard set by the aforementioned `IA32_STAR` MSR. Details can be found in the description of
-        // the `syscall` and `sysret` instructions in the IA32 Software Developer's Manual.
-        let kcode_selector = gdt.append_segment(GenericSegmentDescriptor::kernel_code());
-        let kdata_selector = gdt.append_segment(GenericSegmentDescriptor::kernel_data());
-        let udata_selector = gdt.append_segment(GenericSegmentDescriptor::user_data());
-        let ucode_selector = gdt.append_segment(GenericSegmentDescriptor::user_code());
-
-        KCODE_SELECTOR.call_once(|| kcode_selector);
-        KDATA_SELECTOR.call_once(|| kdata_selector);
-        UDATA_SELECTOR.call_once(|| udata_selector);
-        UCODE_SELECTOR.call_once(|| ucode_selector);
-
-        trace!("Segment descriptors loaded:");
-        trace!("Kernel code: {kcode_selector:?}");
-        trace!("Kernel data: {kdata_selector:?}");
-        trace!("User data: {udata_selector:?}");
-        trace!("User code: {ucode_selector:?}");
-
-        gdt
-    }
+#[repr(C, align(0x8))]
+#[derive(Debug, Clone)]
+pub struct GlobalDescriptorTable {
+    table: [u64; 7],
+    len: u16,
 }
 
-impl DescriptorTable for GlobalDescriptorTable {
-    fn limit(&self) -> u16 {
-        (self.len * 8) - 1
-    }
-}
+static GLOBAL_DESCRIPTOR_TABLE: spin::Lazy<GlobalDescriptorTable> = spin::Lazy::new(|| {
+    let mut gdt = GlobalDescriptorTable {
+        table: [0; _],
+
+        // x86 requires that the first GDT entry remain null.
+        len: 1,
+    };
+
+    // The GDT layout is very specific, due to the behaviour of the `IA32_STAR` MSR
+    // and its affect on syscalls. Do not change this, or if it is changed,
+    // ensure it follows the requisite standard set by the aforementioned
+    // `IA32_STAR` MSR. Details can be found in the description of
+    // the `syscall` and `sysret` instructions in the IA32 Software Developer's
+    // Manual.
+    let kcode_selector = gdt.append_segment(GenericSegmentDescriptor::kernel_code());
+    let kdata_selector = gdt.append_segment(GenericSegmentDescriptor::kernel_data());
+    let udata_selector = gdt.append_segment(GenericSegmentDescriptor::user_data());
+    let ucode_selector = gdt.append_segment(GenericSegmentDescriptor::user_code());
+
+    KCODE_SELECTOR.call_once(|| kcode_selector);
+    KDATA_SELECTOR.call_once(|| kdata_selector);
+    UDATA_SELECTOR.call_once(|| udata_selector);
+    UCODE_SELECTOR.call_once(|| ucode_selector);
+
+    trace!("Segment descriptors loaded:");
+    trace!("Kernel code: {kcode_selector:?}");
+    trace!("Kernel data: {kdata_selector:?}");
+    trace!("User data: {udata_selector:?}");
+    trace!("User code: {ucode_selector:?}");
+
+    gdt
+});
 
 impl GlobalDescriptorTable {
-    /// An empty [`GlobalDescriptorTable`].
-    fn empty() -> Self {
-        Self {
-            table: [0; _],
-
-            // x86 requires that the first GDT entry remain null.
-            len: 1,
-        }
-    }
-
     pub fn load_static() {
-        let static_gdt = Self::get_static();
-
         // Safety: The GDT is properly formed, and the descriptor table pointer is
         //         set to the GDT's memory location, with the requisite limit set
         //         correctly (size in bytes, less 1).
         unsafe {
-            static_gdt.load();
+            GLOBAL_DESCRIPTOR_TABLE.load();
         }
 
         let kcode_selector = *KCODE_SELECTOR.wait();
@@ -184,20 +171,24 @@ impl GlobalDescriptorTable {
     }
 
     pub fn with_temporary<T>(func: impl FnOnce(&mut Self) -> T) -> T {
-        let static_gdt = Self::get_static();
-
-        let mut temp_gdt = static_gdt.clone();
+        let mut temp_gdt = GLOBAL_DESCRIPTOR_TABLE.clone();
 
         crate::interrupts::uninterruptable(|| {
             let value = func(&mut temp_gdt);
 
             // Safety: Loading the static GDT is always safe.
             unsafe {
-                static_gdt.load();
+                GLOBAL_DESCRIPTOR_TABLE.load();
             }
 
             value
         })
+    }
+}
+
+impl DescriptorTable for GlobalDescriptorTable {
+    fn limit(&self) -> u16 {
+        (self.len * 8) - 1
     }
 }
 

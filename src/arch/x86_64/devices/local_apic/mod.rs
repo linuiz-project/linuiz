@@ -14,7 +14,7 @@ use safe_mmio::{
 pub mod interrupt_command;
 pub mod local_vector;
 
-pub const US_PER_SEC: u64 = 1000000;
+pub const US_PER_SEC: u64 = 1_000_000;
 pub const US_WAIT: u64 = 10000;
 pub const US_FREQ_FACTOR: u64 = US_PER_SEC / US_WAIT;
 
@@ -225,32 +225,28 @@ enum Mode {
     x2Apic,
 }
 
-crate::singleton! {
-    pub struct LocalApic {
-        mode: Mode
-    }
+pub struct LocalApic(Mode);
 
-    fn init() -> Self {
-        assert!(
-            IA32_APIC_BASE::get_hw_enabled(),
-            "local APIC is hardware disabled"
-        );
+static LOCAL_APIC: spin::Lazy<LocalApic> = spin::Lazy::new(|| {
+    assert!(
+        IA32_APIC_BASE::get_hw_enabled(),
+        "local APIC is hardware disabled"
+    );
 
-        let mode = {
-            if IA32_APIC_BASE::get_is_x2apic_mode() {
-                Mode::x2Apic
-            } else {
-                Mode::xApic(IA32_APIC_BASE::get_base_address())
-            }
-        };
+    let mode = {
+        if IA32_APIC_BASE::get_is_x2apic_mode() {
+            Mode::x2Apic
+        } else {
+            Mode::xApic(IA32_APIC_BASE::get_base_address())
+        }
+    };
 
-        Self { mode }
-    }
-}
+    LocalApic(mode)
+});
 
 impl LocalApic {
     fn get_mode() -> Mode {
-        Self::get_static().mode
+        LOCAL_APIC.0
     }
 
     fn read_register(register: Register) -> u32 {

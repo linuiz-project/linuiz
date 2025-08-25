@@ -43,15 +43,22 @@ impl Source {
     }
 }
 
-crate::singleton! {
-    pub struct Stopwatch {
-        source: Source,
-        ticks_per_sec: u64,
-        ticks_per_ms: u64,
-        ticks_per_us: u64
-    }
+pub struct KernelStopwatch {
+    source: Source,
+    ticks_per_sec: u64,
+    ticks_per_ms: u64,
+    ticks_per_us: u64,
+}
 
-    fn init(rsdp_request: &limine::request::RsdpRequest) -> Self {
+static KERNEL_STOPWATCH: spin::Once<KernelStopwatch> = spin::Once::new();
+
+// Safety: For `Source::Acpi`, references memory mapped in all address spaces.
+unsafe impl Send for KernelStopwatch {}
+// Safety: Type is read-only after being constructed.
+unsafe impl Sync for KernelStopwatch {}
+
+impl KernelStopwatch {
+    pub fn init(rsdp_request: &limine::request::RsdpRequest) -> Self {
         if let Ok(acpi_root_table) = crate::acpi::get_root_table(rsdp_request)
             && let Ok(acpi_platform_info) = acpi_root_table.platform_info()
             && let Some(pm_timer) = acpi_platform_info.pm_timer
@@ -71,7 +78,8 @@ crate::singleton! {
 
                     Self {
                         source: Source::AcpiIo {
-                            // Safety: ACPI spec (and the crate) guarantees the address will be a valid IO port.
+                            // Safety: ACPI spec (and the crate) guarantees the address will be a
+                            // valid IO port.
                             address: unsafe { ReadOnlyPort::new(port_address) },
                             max_value: if pm_timer.supports_32bit {
                                 0xFFFF_FFFF
@@ -100,7 +108,8 @@ crate::singleton! {
 
                     Self {
                         source: Source::AcpiMmio {
-                            // Safety: ACPI spec (and the crate) guarantees the address will be a valid IO port.
+                            // Safety: ACPI spec (and the crate) guarantees the address will be a
+                            // valid IO port.
                             address: unsafe { UniqueMmioPointer::new(mmio_address) },
                             max_value: if pm_timer.supports_32bit {
                                 0xFFFF_FFFF
@@ -120,19 +129,17 @@ crate::singleton! {
             unimplemented!("only the ACPI power management timer is available as a stopwatch")
         }
     }
-}
 
-// Safety: For `Source::Acpi`, references memory mapped in all address spaces.
-unsafe impl Send for Stopwatch {}
-// Safety: Type is read-only after being constructed.
-unsafe impl Sync for Stopwatch {}
+    fn get_static() -> &'static Self {
+        KERNEL_STOPWATCH.get().unwrap()
+    }
 
-impl Stopwatch {
     /// Spin waits for the provided [`Duration`].
     ///
     /// # Remarks
     ///
-    /// - [`Duration`]s greater than [`u64::MAX`] microseconds will be truncated.
+    /// - [`Duration`]s greater than [`u64::MAX`] microseconds will be
+    ///   truncated.
     pub fn spin_wait(duration: Duration) {
         let stopwatch = Self::get_static();
 

@@ -35,7 +35,7 @@ unsafe impl Allocator for FrameAllocator {
                     page_bits()
                 ),
 
-                1 => PhysicalMemoryManager::next_frame(false),
+                1 => PhysicalMemoryManager::next_free(core::num::NonZero::<usize>::MIN,false),
 
                 frame_count => PhysicalMemoryManager::next_frames(
                     // Safety: `frame_count` is already checked to be >0.
