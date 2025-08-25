@@ -1,14 +1,9 @@
-use core::{num::NonZero, ptr::NonNull};
-
 use crate::mem::{
     HigherHalfDirectMap,
-    alloc::frame_allocator::FrameAllocator,
     pmm::{NextFrameError, PhysicalMemoryManager},
 };
+use core::{num::NonZero, ptr::NonNull};
 use libsys::constants::page_size;
-use slab_allocator::SlabAllocator;
-
-mod frame_allocator;
 
 // pub static KERNEL_ALLOCATOR: SlabAllocator<FrameAllocator> =
 // SlabAllocator::new_in(FrameAllocator);

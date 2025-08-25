@@ -12,8 +12,7 @@ use crate::{
 use libsys::address::{Address, Frame, Page};
 
 pub mod paging;
-use paging::PageTable;
-pub use paging::{CreateEntryError, WithEntryError};
+use paging::{CreateEntryError, PageTable, WithEntryError};
 
 /// Whether the current environment supports 2MiB pages.
 pub fn use_large_pages() -> bool {
