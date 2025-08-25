@@ -9,7 +9,6 @@ default = ["panic_traces"]
 panic_traces = ["dep:rustc-demangle"]
 
 [dependencies]
-acpi = "5.2"
 bit_field = "0.10"
 bitflags = "2.9"
 elf = { version = "0.8.0", default-features = false }
@@ -38,7 +37,6 @@ uuid = { version = "1.16", default-features = false, features = ["v4"] }
 acpica = { git = "https://github.com/linuiz-project/acpica", tag = "v0.1.1" }
 bitmap = { git = "https://github.com/linuiz-project/bitmap", tag = "v0.3.0" }
 libsys = { git = "https://github.com/linuiz-project/libsys", tag = "v0.3.4" }
-slab_allocator = { git = "https://github.com/linuiz-project/slab_allocator", tag = "v0.2.1" }
 
 # feature-specific
 rustc-demangle = { version = "0.1", optional = true } # feature: panic_traces
