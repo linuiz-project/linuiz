@@ -8,7 +8,7 @@ default = ["panic_traces"]
 panic_traces = ["dep:rustc-demangle"]
 
 [dependencies]
-acpi = "5.2"
+acpi = "6.0"
 bit_field = "0.10"
 bitflags = "2.9"
 bitvec = { version = "1.0", default-features = false, features = ["atomic"] }
