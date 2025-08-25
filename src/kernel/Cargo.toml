@@ -14,7 +14,7 @@ bitflags = "2.9"
 bitvec = { version = "1.0", default-features = false, features = ["atomic"] }
 elf = { version = "0.8.0", default-features = false }
 getrandom = "0.3"
-heapless = "0.8"
+heapless = "0.9"
 ioports = "1.0"
 limine = { version = "0.5", features = ["uuid"] }
 log = { version = "0.4", default-features = false }
