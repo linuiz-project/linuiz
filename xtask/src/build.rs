@@ -1,5 +1,4 @@
 use anyhow::Result;
-use std::path::Path;
 use xshell::Shell;
 
 /// Possible target platforms to compile for.
@@ -49,7 +48,7 @@ pub struct Options {
     disassemble: bool,
 }
 
-pub fn build(sh: &Shell, temp_dir: impl AsRef<Path>, options: Options) -> Result<()> {
+pub fn build(sh: &Shell, options: Options) -> Result<()> {
     let _cargo_log = sh.push_env(
         "CARGO_LOG",
         if options.fingerprint {
@@ -60,21 +59,29 @@ pub fn build(sh: &Shell, temp_dir: impl AsRef<Path>, options: Options) -> Result
     );
 
     let root_dir = sh.current_dir();
+    let kernel_src_path = root_dir.join(format!(
+        "target/{}/{}/kernel",
+        options.target.as_triple(),
+        if options.release { "release" } else { "debug" }
+    ));
+    let kernel_dst_path = root_dir.join("run/system/linuiz/kernel");
 
-    build_kernel(sh, temp_dir.as_ref(), &options)?;
+    let kernel_src_path = kernel_src_path.as_path();
+    let kernel_dst_path = kernel_dst_path.as_path();
 
-    if !sh.path_exists("run/system/linuiz") {
-        sh.create_dir("run/system/linuiz")?;
+    build_kernel(sh, &options)?;
+
+    if !sh.path_exists(kernel_dst_path) {
+        sh.create_dir(kernel_dst_path)?;
     }
 
-    let kernel_path = root_dir.join("run/system/linuiz/kernel");
     // Copy the kernel binary to the virtual HDD.
-    sh.copy_file(temp_dir.as_ref().join("kernel"), kernel_path.as_path())?;
+    sh.copy_file(kernel_src_path, kernel_dst_path)?;
 
     if options.disassemble {
         let disassembly_output = cmd!(
             sh,
-            "objdump --disassemble-all --demangle=rust -M intel {kernel_path}"
+            "objdump --disassemble-all --demangle=rust -M intel {kernel_dst_path}"
         )
         .output()?;
         sh.write_file(
@@ -86,11 +93,9 @@ pub fn build(sh: &Shell, temp_dir: impl AsRef<Path>, options: Options) -> Result
     Ok(())
 }
 
-fn build_kernel(sh: &Shell, temp_dir: impl AsRef<Path>, options: &Options) -> Result<()> {
+fn build_kernel(sh: &Shell, options: &Options) -> Result<()> {
     let mut build_cmd = cmd!(sh, "cargo build")
         .arg("--future-incompat-report")
-        .arg("--artifact-dir")
-        .arg(temp_dir.as_ref().as_os_str())
         .args(["--target", options.target.as_triple()])
         .args(["-Z", "unstable-options"])
         .args(["-Z", "build-std=core,compiler_builtins,alloc"])

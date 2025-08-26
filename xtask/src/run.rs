@@ -1,5 +1,4 @@
 use anyhow::Result;
-use std::path::Path;
 
 #[derive(Debug, ValueEnum, Clone, Copy, PartialEq, Eq)]
 pub enum Cpu {
@@ -32,7 +31,7 @@ pub struct Options {
     ram: usize,
 
     /// Enables debug logging for the specified components.
-    #[arg(long, default_value = "")]
+    #[arg(short, long, default_value = "")]
     debug: String,
 
     /// Enables debug logging for the specified components.
@@ -65,9 +64,11 @@ pub struct Options {
     gdb: bool,
 }
 
-pub fn run(sh: &xshell::Shell, temp_dir: impl AsRef<Path>, options: Options) -> Result<()> {
+pub fn run(sh: &xshell::Shell, options: Options) -> Result<()> {
+    let temp_dir = sh.create_temp_dir()?;
+
     if !options.nobuild {
-        crate::build::build(sh, temp_dir.as_ref(), options.build_options)?;
+        crate::build::build(sh, options.build_options)?;
     }
 
     // Ensure there's a debug directory for logs or the like.
@@ -85,7 +86,7 @@ pub fn run(sh: &xshell::Shell, temp_dir: impl AsRef<Path>, options: Options) -> 
             Cpu::Host | Cpu::Max | Cpu::Qemu64 => {
                 // Create a temporary copy of the OVMF vars firmware to avoid overwriting
                 // the fresh copy that's saved to the repository.
-                let ovmf_vars_fd_copy = temp_dir.as_ref().join("vars.fd");
+                let ovmf_vars_fd_copy = temp_dir.path().join("vars.fd");
                 sh.copy_file("run/ovmf/x86_64/vars.fd", &ovmf_vars_fd_copy)?;
 
                 cmd!(sh, "qemu-system-x86_64")
@@ -146,7 +147,7 @@ pub fn run(sh: &xshell::Shell, temp_dir: impl AsRef<Path>, options: Options) -> 
         run_cmd = run_cmd.args(["-trace", options.trace.as_str()]);
     }
 
-    if options.debug.starts_with("int") || options.debug.contains(",int") {
+    if !options.debug.starts_with("int") && !options.debug.contains(",int") {
         run_cmd = run_cmd.arg("-enable-kvm");
     }
 

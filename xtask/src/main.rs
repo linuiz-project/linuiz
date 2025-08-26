@@ -16,15 +16,13 @@ enum Arguments {
 fn main() -> anyhow::Result<()> {
     let sh = xshell::Shell::new()?;
 
-    let temp_dir = sh.create_temp_dir()?;
-
     match <Arguments as clap::Parser>::parse() {
         Arguments::Build(build_options) => {
-            build::build(&sh, temp_dir.path(), build_options)?;
+            build::build(&sh, build_options)?;
         }
 
         Arguments::Run(run_options) => {
-            run::run(&sh, temp_dir.path(), run_options)?;
+            run::run(&sh, run_options)?;
         }
     }
 
