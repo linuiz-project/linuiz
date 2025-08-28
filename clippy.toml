@@ -1,0 +1,1 @@
+disallowed-types = ["spin::Mutex", "spin::Once", "spin::Lazy"]
