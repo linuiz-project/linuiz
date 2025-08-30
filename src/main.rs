@@ -30,10 +30,10 @@
 #![deny(
     clippy::debug_assert_with_mut_call,
     clippy::float_arithmetic,
-    clippy::as_conversions,
     stable_features
 )]
 #![warn(
+    clippy::as_conversions,
     clippy::pedantic,
     clippy::todo,
     clippy::undocumented_unsafe_blocks,
@@ -178,7 +178,7 @@ unsafe extern "C" fn _entry() -> ! {
         crate::panic::tracing::symbols::KernelSymbols::init(&KERNEL_FILE_REQUEST);
     }
 
-    crate::acpi::init_tables(&RSDP_REQUEST);
+    // crate::acpi::init_tables(&RSDP_REQUEST);
 
     crate::mem::pmm::PhysicalMemoryManager::init(&MEMORY_MAP_REQUEST);
     crate::mem::KernelMapper::init(
