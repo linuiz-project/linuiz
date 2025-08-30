@@ -1,13 +1,13 @@
 #[cfg(feature = "panic_traces")]
 pub mod tracing;
 
-/// # Remarks
-///
-/// This function should *never* panic or abort.
+#[cfg(not(test))]
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
+    // This function should NEVER panic or abort.
+
     error!(
-        "KERNEL PANIC (@ {}):\n{}",
+        "KERNEL PANIC ({}): {}",
         info.location().unwrap_or(core::panic::Location::caller()),
         info.message()
     );

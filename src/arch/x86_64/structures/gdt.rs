@@ -1,5 +1,6 @@
-use crate::arch::x86_64::structures::{
-    DescriptorTable, DescriptorTablePointer, tss::TaskStateSegment,
+use crate::{
+    arch::x86_64::structures::{DescriptorTable, DescriptorTablePointer, tss::TaskStateSegment},
+    util::sync::Lazy,
 };
 use bit_field::BitField;
 use core::ops::Range;
@@ -13,7 +14,7 @@ struct SegmentationData {
     udata_selector: SegmentSelector,
 }
 
-static SEGMENTATION: spin::Lazy<SegmentationData> = spin::Lazy::new(|| {
+static SEGMENTATION: Lazy<SegmentationData> = Lazy::new(|| {
     let mut gdt = GlobalDescriptorTable {
         table: [0; _],
 
@@ -72,8 +73,8 @@ impl GlobalDescriptorTable {
     pub fn load_static() {
         // Safety:
         // The GDT is properly formed, and the descriptor table pointer is set to the
-        // GDT's memory location, with the requisite limit set correctly (size in bytes,
-        // less 1).
+        // GDT's memory location, with the requisite limit set correctly (table's size
+        // in bytes, less 1).
         unsafe {
             global_descriptor_table().load();
         }
@@ -83,15 +84,15 @@ impl GlobalDescriptorTable {
 
         trace!("Jumping to the new code segment: {kcode_selector:?}");
         // Safety:
-        // This is special since we cannot directly move to CS; x86 requires the
-        // instruction pointer and CS to be set at the same time. To do this, we push
+        // This is special since we cannot directly move to `CS`; x86 requires the
+        // instruction pointer and `CS` to be set at the same time. To do this, we push
         // the new segment selector and return value onto the stack and use a "far
-        // return" (`retf`) to reload CS and continue at the end of our function.
+        // return" (`retf`) to reload `CS` and continue at the end of our function.
         //
-        // Note we cannot use a "far call" (`lcall`) or "far jmp" (`ljmp`) to do this
-        // because then we would only be able to jump to 32-bit instruction pointers.
-        // Only Intel implements support for 64-bit far calls/jumps in long-mode, AMD
-        // does not.
+        // Notably, we cannot use a "far call" (`lcall`) or "far jump" (`ljmp`) to do
+        // this because we would only be able to jump to 32-bit instruction pointers
+        // (only Intel implements support for 64-bit far calls/jumps in long-mode, AMD
+        // does not).
         unsafe {
             core::arch::asm!(
                 "
@@ -164,7 +165,7 @@ impl GlobalDescriptorTable {
 
         // Safety: The GDT is properly formed, and the descriptor table pointer is
         //         set to the GDT's memory location, with the requisite limit set
-        //         correctly (size in bytes, less 1).
+        //         correctly (table size in bytes, less 1).
         unsafe {
             asm!(
                 "lgdt [{}]",
@@ -189,6 +190,12 @@ impl GlobalDescriptorTable {
         SegmentSelector::new(u16::try_from(current_index).unwrap(), privilege_level)
     }
 
+    /// Clones and loads a temporary copy of the current GDT, allowing `func` to
+    /// modify and use it temporarily.
+    ///
+    /// This is almost exclusively used to load the Task State Segment, as the
+    /// segment selector used to load it does not need to be retained once it is
+    /// successfully loaded.
     pub fn with_temporary<T>(func: impl FnOnce(&mut Self) -> T) -> T {
         let static_gdt = global_descriptor_table();
         let mut temp_gdt = static_gdt.clone();
@@ -302,8 +309,8 @@ pub enum PrivilegeLevel {
 /// - **Present**, bit 47
 /// - **Granularity**, bit 55
 const COMMON_BITS: u64 = {
-    (1 << 47)               // Present
-    | (1 << 55)             // Granularity
+    (1 << 47)              // Present
+    | (1 << 55)            // Granularity
     | 0xFFFF | (0xF << 48) // Limit
 };
 

@@ -1,6 +1,7 @@
 use crate::{
-    mem::{mapper::Mapper, mapper::paging::Depth},
+    mem::mapper::{Mapper, paging::Depth},
     task::asid::AddressSpaceId,
+    util::sync::Once,
 };
 use libsys::{
     address::{Address, Frame, Page},
@@ -18,14 +19,15 @@ pub mod pmm;
 #[derive(Debug)]
 pub struct KernelMapper(Mapper);
 
-static KERNEL_MAPPER: spin::Once<KernelMapper> = spin::Once::new();
+static KERNEL_MAPPER: Once<KernelMapper> = Once::new();
 
 impl KernelMapper {
+    #[allow(clippy::too_many_lines)]
     pub fn init(
         memory_map_request: &limine::request::MemoryMapRequest,
         kernel_file_request: &limine::request::ExecutableFileRequest,
         kernel_address_request: &limine::request::ExecutableAddressRequest,
-    ) -> Self {
+    ) {
         fn map_range(
             mapper: &mut Mapper,
             from: Address<Page>,
@@ -109,143 +111,150 @@ impl KernelMapper {
             }
         }
 
-        debug!("Preparing kernel memory...");
-        debug!(
-            "Paging Setup Info: {{ large pages: {}, huge pages: {} }}",
-            mapper::use_large_pages(),
-            mapper::use_huge_pages(),
-        );
+        KERNEL_MAPPER.call_once(|| {
+            debug!("Preparing kernel memory...");
+            debug!(
+                "Paging Setup Info: {{ large pages: {}, huge pages: {} }}",
+                mapper::use_large_pages(),
+                mapper::use_huge_pages(),
+            );
 
-        let mut kernel_mapper = Mapper::new();
+            let mut kernel_mapper = Mapper::new();
 
-        trace!("Mapping the higher-half direct map...");
-        memory_map_request
-            .get_response()
-            .expect("bootloader did not provide a response to the memory map request")
-            .entries()
-            .iter()
-            .for_each(|entry| {
-                trace!(
-                    "Map Entry: {{ start: {:#X}, length: {:#X}, type: {} }}",
-                    entry.base,
-                    entry.length,
-                    crate::limine_memory_map_entry_type_to_str(entry.entry_type)
-                );
+            trace!("Mapping the higher-half direct map...");
+            memory_map_request
+                .get_response()
+                .expect("bootloader did not provide a response to the memory map request")
+                .entries()
+                .iter()
+                .for_each(|entry| {
+                    trace!(
+                        "Map Entry: {{ start: {:#X}, length: {:#X}, type: {} }}",
+                        entry.base,
+                        entry.length,
+                        crate::limine_memory_map_entry_type_to_str(entry.entry_type)
+                    );
 
-                let entry_start = usize::try_from(entry.base).unwrap();
-                let entry_length = usize::try_from(entry.length).unwrap();
-                let entry_frame = Address::<Frame>::new(entry_start).unwrap();
-                let entry_page = HigherHalfDirectMap::frame_to_page(entry_frame);
-                let entry_permissions = {
-                    match entry.entry_type {
-                        limine::memory_map::EntryType::USABLE
-                        | limine::memory_map::EntryType::ACPI_NVS
-                        | limine::memory_map::EntryType::ACPI_RECLAIMABLE
-                        | limine::memory_map::EntryType::BOOTLOADER_RECLAIMABLE
-                        | limine::memory_map::EntryType::FRAMEBUFFER => Permissions::ReadWrite,
+                    let entry_start = usize::try_from(entry.base).unwrap();
+                    let entry_length = usize::try_from(entry.length).unwrap();
+                    let entry_frame = Address::<Frame>::new(entry_start).unwrap();
+                    let entry_page = HigherHalfDirectMap::frame_to_page(entry_frame);
+                    let entry_permissions = {
+                        match entry.entry_type {
+                            limine::memory_map::EntryType::USABLE
+                            | limine::memory_map::EntryType::ACPI_NVS
+                            | limine::memory_map::EntryType::ACPI_RECLAIMABLE
+                            | limine::memory_map::EntryType::BOOTLOADER_RECLAIMABLE
+                            | limine::memory_map::EntryType::FRAMEBUFFER => Permissions::ReadWrite,
 
-                        limine::memory_map::EntryType::RESERVED
-                        | limine::memory_map::EntryType::EXECUTABLE_AND_MODULES => {
-                            Permissions::ReadOnly
+                            limine::memory_map::EntryType::RESERVED
+                            | limine::memory_map::EntryType::EXECUTABLE_AND_MODULES => {
+                                Permissions::ReadOnly
+                            }
+
+                            _ => {
+                                unreachable!(
+                                    "Unrecognized memory map entry type: {:#X}",
+                                    entry.base
+                                )
+                            }
                         }
+                    };
 
-                        _ => {
-                            unreachable!("Unrecognized memory map entry type: {:#X}", entry.base)
-                        }
-                    }
-                };
+                    map_range(
+                        &mut kernel_mapper,
+                        entry_page,
+                        entry_frame,
+                        entry_length,
+                        entry_permissions,
+                    );
+                });
 
-                map_range(
-                    &mut kernel_mapper,
-                    entry_page,
-                    entry_frame,
-                    entry_length,
-                    entry_permissions,
-                );
-            });
-
-        // Extract the kernel file's physical and virtual addresses.
-        let (kernel_physical_address, kernel_virtual_address) = kernel_address_request
-            .get_response()
-            .map(|response| {
-                (
-                    usize::try_from(response.physical_base()).unwrap(),
-                    usize::try_from(response.virtual_base()).unwrap(),
-                )
-            })
-            .expect("bootloader did not provide a response to kernel address request");
-
-        trace!("Mapping the kernel executable...");
-        kernel_file_request
-            .get_response()
-            .map(limine::response::ExecutableFileResponse::file)
-            .map(|kernel_file| {
-                // Safety: Bootloader guarantees the requisite memory region is correct.
-                unsafe {
-                    core::slice::from_raw_parts_mut(
-                        kernel_file.addr(),
-                        usize::try_from(kernel_file.size()).unwrap(),
+            // Extract the kernel file's physical and virtual addresses.
+            let (kernel_physical_address, kernel_virtual_address) = kernel_address_request
+                .get_response()
+                .map(|response| {
+                    (
+                        usize::try_from(response.physical_base()).unwrap(),
+                        usize::try_from(response.virtual_base()).unwrap(),
                     )
-                }
-            })
-            .map(|kernel_memory| {
-                elf::ElfBytes::<elf::endian::AnyEndian>::minimal_parse(kernel_memory)
-                    .expect("could not parse kernel file into ELF")
-            })
-            .expect("bootloader did not provide a response to kernel file request")
-            .segments()
-            .expect("could not get kernel file segments")
-            .iter()
-            .filter(|program_header| program_header.p_type == elf::abi::PT_LOAD)
-            .for_each(|program_header| {
-                trace!("Kernel Segment: {program_header:X?}");
+                })
+                .expect("bootloader did not provide a response to kernel address request");
 
-                let offset =
-                    usize::try_from(program_header.p_vaddr).unwrap() - kernel_virtual_address;
-                let segment_page = Address::<Page>::new(kernel_virtual_address + offset).unwrap();
-                let segment_frame =
-                    Address::<Frame>::new(kernel_physical_address + offset).unwrap();
-                let segment_length = usize::try_from(core::cmp::max(
-                    program_header.p_memsz, /* If the segment size is smaller than it's
-                                             * alignment, we can map it */
-                    program_header.p_align, /* as if it's alignment is the total size (support
-                                             * for mega pages). */
-                ))
-                .unwrap();
-                let segment_permissions =
-                    crate::task::segment_to_mapping_permissions(program_header.p_flags);
+            trace!("Mapping the kernel executable...");
+            kernel_file_request
+                .get_response()
+                .map(limine::response::ExecutableFileResponse::file)
+                .map(|kernel_file| {
+                    // Safety: Bootloader guarantees the requisite memory region is correct.
+                    unsafe {
+                        core::slice::from_raw_parts_mut(
+                            kernel_file.addr(),
+                            usize::try_from(kernel_file.size()).unwrap(),
+                        )
+                    }
+                })
+                .map(|kernel_memory| {
+                    elf::ElfBytes::<elf::endian::AnyEndian>::minimal_parse(kernel_memory)
+                        .expect("could not parse kernel file into ELF")
+                })
+                .expect("bootloader did not provide a response to kernel file request")
+                .segments()
+                .expect("could not get kernel file segments")
+                .iter()
+                .filter(|program_header| program_header.p_type == elf::abi::PT_LOAD)
+                .for_each(|program_header| {
+                    trace!("Kernel Segment: {program_header:X?}");
 
-                map_range(
-                    &mut kernel_mapper,
-                    segment_page,
-                    segment_frame,
-                    segment_length,
-                    segment_permissions,
-                );
-            });
+                    let offset =
+                        usize::try_from(program_header.p_vaddr).unwrap() - kernel_virtual_address;
+                    let segment_page =
+                        Address::<Page>::new(kernel_virtual_address + offset).unwrap();
+                    let segment_frame =
+                        Address::<Frame>::new(kernel_physical_address + offset).unwrap();
+                    let segment_length = usize::try_from(core::cmp::max(
+                        program_header.p_memsz, /* If the segment size is smaller than it's
+                                                 * alignment, we can map it */
+                        program_header.p_align, /* as if it's alignment is the total size
+                                                 * (support
+                                                 * for mega pages). */
+                    ))
+                    .unwrap();
+                    let segment_permissions =
+                        crate::task::segment_to_mapping_permissions(program_header.p_flags);
 
-        #[cfg(target_arch = "x86_64")]
-        {
-            let local_apic_frame =
+                    map_range(
+                        &mut kernel_mapper,
+                        segment_page,
+                        segment_frame,
+                        segment_length,
+                        segment_permissions,
+                    );
+                });
+
+            #[cfg(target_arch = "x86_64")]
+            {
+                let local_apic_frame =
                 crate::arch::x86_64::registers::model_specific::IA32_APIC_BASE::get_base_address();
 
-            trace!("Mapping the local APIC: {local_apic_frame:X?}");
+                trace!("Mapping the local APIC: {local_apic_frame:X?}");
 
-            map_range(
-                &mut kernel_mapper,
-                HigherHalfDirectMap::frame_to_page(local_apic_frame),
-                local_apic_frame,
-                1,
-                Permissions::ReadWrite,
-            );
-        }
+                map_range(
+                    &mut kernel_mapper,
+                    HigherHalfDirectMap::frame_to_page(local_apic_frame),
+                    local_apic_frame,
+                    1,
+                    Permissions::ReadWrite,
+                );
+            }
 
-        let kernel_mapper = Self(kernel_mapper);
+            let kernel_mapper = Self(kernel_mapper);
 
-        debug!("Kernel mappings complete.");
-        trace!("{kernel_mapper:#X?}");
+            debug!("Kernel mappings complete.");
+            trace!("{kernel_mapper:#X?}");
 
-        kernel_mapper
+            kernel_mapper
+        });
     }
 
     fn get_static() -> &'static Self {

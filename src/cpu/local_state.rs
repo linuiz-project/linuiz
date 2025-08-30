@@ -1,11 +1,11 @@
 use crate::{
-    interrupts::{InterruptCell, exceptions::Exception},
+    interrupts::exceptions::Exception,
     mem::{HigherHalfDirectMap, pmm::PhysicalMemoryManager},
     task::Scheduler,
     time::LocalTimer,
+    util::sync::Mutex,
 };
 use core::{cell::UnsafeCell, ptr::NonNull, sync::atomic::AtomicBool, time::Duration};
-use spin::Mutex;
 
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86_64::structures::tss::TaskStateSegment;
@@ -29,7 +29,7 @@ fn try_get_local_static_ptr() -> Option<NonNull<LocalState>> {
 /// Local (to the current processor) state structure.
 pub struct LocalState {
     timer: LocalTimer,
-    scheduler: InterruptCell<Mutex<Scheduler>>,
+    scheduler: Mutex<Scheduler>,
     catch_exception: AtomicBool,
     exception: UnsafeCell<Option<Exception>>,
 
@@ -54,8 +54,9 @@ impl LocalState {
         trace!("Configuring local scheduler...");
         let scheduler = Scheduler::new();
 
-        let local_state_address = PhysicalMemoryManager::next_free(core::num::NonZero::<usize>::MIN,false)
-            .expect("failed to allocate space for local state structure");
+        let local_state_address =
+            PhysicalMemoryManager::next_free(core::num::NonZero::<usize>::MIN, false)
+                .expect("failed to allocate space for local state structure");
         let local_state_address = HigherHalfDirectMap::offset(local_state_address.get().get());
         let mut local_state_ptr = NonNull::<Self>::with_exposed_provenance(local_state_address);
 
@@ -63,7 +64,7 @@ impl LocalState {
         unsafe {
             local_state_ptr.write(Self {
                 timer,
-                scheduler: InterruptCell::new(Mutex::new(scheduler)),
+                scheduler: Mutex::new(scheduler),
                 catch_exception: AtomicBool::new(false),
                 exception: UnsafeCell::new(None),
 
@@ -109,11 +110,7 @@ impl LocalState {
     }
 
     pub fn with_scheduler<T>(func: impl FnOnce(&mut Scheduler) -> T) -> T {
-        Self::get_local_static().scheduler.with(|scheduler| {
-            let mut scheduler = scheduler.lock();
-
-            func(&mut scheduler)
-        })
+        Self::get_local_static().scheduler.with_lock(func)
     }
 
     /// # Safety

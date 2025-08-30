@@ -1,8 +1,10 @@
-use crate::{arch::x86_64::structures::idt::InterruptStackFrame, mem::Permissions};
-use alloc::{boxed::Box, string::String, vec::Vec};
+use crate::{
+    arch::x86_64::structures::idt::InterruptStackFrame,
+    mem::{Permissions, mapper::AutoMappingError},
+};
 use bit_field::BitField;
 use core::{mem::MaybeUninit, num::NonZero, ptr::NonNull};
-use elf::{endian::AnyEndian, file::FileHeader, segment::ProgramHeader};
+use elf::{ElfBytes, endian::AnyEndian, file::FileHeader, segment::ProgramHeader};
 use libsys::{
     address::{Address, Page, Virtual},
     constants::{page_mask, page_size},
@@ -41,6 +43,26 @@ pub fn segment_to_mapping_permissions(segment_flags: u32) -> Permissions {
     }
 }
 
+#[derive(Debug, Error, Clone, Copy)]
+pub enum CreateTaskError {
+    #[error("ELF had no segments to load")]
+    NoSegments,
+
+    #[error("ELF had too many segments (max 16)")]
+    TooManySegments,
+
+    #[error("system ran out of memory for task creation")]
+    OutOfMemory,
+}
+
+impl From<AutoMappingError> for CreateTaskError {
+    fn from(error: AutoMappingError) -> Self {
+        match error {
+            AutoMappingError::OutOfMemory => Self::OutOfMemory,
+        }
+    }
+}
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum Error {
     #[error("address is already mapped")]
@@ -66,19 +88,22 @@ pub enum Priority {
 
 #[derive(Debug, Clone, Copy)]
 pub struct ElfRela {
-    pub address: Address<Virtual>,
+    pub ptr: NonNull<usize>,
     pub value: usize,
 }
 
 pub type Context = (InterruptStackFrame, Registers);
 
-#[derive(Debug)]
-pub enum ElfData {
-    Memory(Box<[u8]>),
-    File(String),
+type ElfSegments = heapless::Vec<ProgramHeader, 16>;
+type ElfRelas = heapless::VecView<ElfRela>;
+type ElfData = heapless::VecView<MaybeUninit<u8>>;
+
+pub enum StartKind<'a> {
+    Function(fn() -> !),
+    Elf(ElfBytes<'a, AnyEndian>),
 }
 
-pub struct Task {
+pub struct Task<'a> {
     id: uuid::Uuid,
     priority: Priority,
 
@@ -86,40 +111,50 @@ pub struct Task {
     context: Context,
     load_offset: usize,
 
-    elf_header: FileHeader<AnyEndian>,
-    elf_segments: Box<[ProgramHeader]>,
-    elf_relas: Vec<ElfRela>,
-    elf_data: ElfData,
+    start: StartKind<'a>,
 }
 
-impl Task {
+// Safety: Type is required to ensure all fields are `Send`-able.
+unsafe impl Send for Task<'_> {}
+
+impl<'a> Task<'a> {
     pub fn new(
         priority: Priority,
         mut address_space: AddressSpace,
         load_offset: usize,
-        elf_header: FileHeader<AnyEndian>,
-        elf_segments: Box<[ProgramHeader]>,
-        elf_relas: Vec<ElfRela>,
-        elf_data: ElfData,
-    ) -> Self {
+        start: StartKind<'a>,
+    ) -> Result<Self, CreateTaskError> {
         trace!("Generating a random ID for new task.");
         let id = uuid::Uuid::new_v4();
 
         trace!("Allocating userspace stack for task: {id:?}.");
+        // Safety:
+        // - `mapping` is not `Mapping::Exact`.
+        // - Task stacks must be R/W.
         let stack = unsafe {
             address_space.mmap(
                 MemoryMapping::Any { count: STACK_PAGES },
                 Permissions::ReadWrite,
             )
+        }?;
+
+        let entry_address = match &start {
+            StartKind::Function(function_ptr) => {
+                // Function pointers have no alternative to `as`.
+                #[allow(clippy::as_conversions)]
+                NonZero::<usize>::new(*function_ptr as usize).unwrap()
+            }
+
+            StartKind::Elf(elf) => {
+                let entry_point = usize::try_from(elf.ehdr.e_entry).unwrap();
+                let entry_point = NonZero::<usize>::new(entry_point).unwrap();
+                entry_point.checked_add(load_offset).unwrap()
+            }
         };
-        let stack = stack.unwrap();
 
-        let entry_point = usize::try_from(elf_header.e_entry).unwrap();
-        let entry_point = NonZero::<usize>::new(entry_point).unwrap();
-        let offset_entry_point = entry_point.checked_add(load_offset).unwrap();
-        let instruction_ptr = NonNull::<u8>::with_exposed_provenance(offset_entry_point);
+        let instruction_ptr = NonNull::<u8>::with_exposed_provenance(entry_address);
 
-        Self {
+        Ok(Self {
             id,
             priority,
             address_space,
@@ -134,198 +169,196 @@ impl Task {
                 Registers::empty(),
             ),
             load_offset,
-            elf_header,
-            elf_segments,
-            elf_relas,
-            elf_data,
-        }
+            start,
+        })
     }
 
-    #[inline]
-    pub const fn id(&self) -> uuid::Uuid {
+    pub fn id(&self) -> uuid::Uuid {
         self.id
     }
 
-    #[inline]
-    pub const fn priority(&self) -> Priority {
+    pub fn priority(&self) -> Priority {
         self.priority
     }
 
-    #[inline]
-    pub const fn address_space(&self) -> &AddressSpace {
+    pub fn address_space(&self) -> &AddressSpace {
         &self.address_space
     }
 
-    #[inline]
     pub fn address_space_mut(&mut self) -> &mut AddressSpace {
         &mut self.address_space
     }
 
-    #[inline]
-    pub const fn load_offset(&self) -> usize {
+    pub fn load_offset(&self) -> usize {
         self.load_offset
     }
 
-    #[inline]
-    pub const fn elf_header(&self) -> &FileHeader<AnyEndian> {
-        &self.elf_header
-    }
+    // pub fn elf_header(&self) -> &FileHeader<AnyEndian> {
+    //     &self.elf_header
+    // }
 
-    #[inline]
-    pub const fn elf_segments(&self) -> &[ProgramHeader] {
-        &self.elf_segments
-    }
+    // pub fn elf_segments(&self) -> impl Iterator<Item = &ProgramHeader> {
+    //     self.elf_segments
+    //         .iter()
+    //         .filter_map(|segment| segment.as_ref())
+    // }
 
-    #[inline]
-    pub const fn elf_data(&self) -> &ElfData {
-        &self.elf_data
-    }
+    // pub fn elf_data(&self) -> &ElfData {
+    //     &self.elf_data
+    // }
 
-    #[inline]
-    pub fn elf_relas(&mut self) -> &mut Vec<ElfRela> {
-        &mut self.elf_relas
-    }
+    // pub fn elf_relas(&mut self) -> &mut ElfRelas {
+    //     &mut self.elf_relas
+    // }
 
     #[allow(clippy::too_many_lines)]
     pub fn demand_map(&mut self, address: Address<Virtual>) -> Result<(), Error> {
-        let fault_page = Address::<Page>::new_truncate(address.get());
+        todo!()
 
-        if self.address_space().is_mmapped(fault_page) {
-            return Err(Error::AlreadyMapped);
-        }
+        // let fault_page = Address::<Page>::new_truncate(address.get());
 
-        let fault_unoffset = address
-            .get()
-            .checked_sub(self.load_offset())
-            .ok_or(Error::AddressUnderrun(address))?;
+        // if self.address_space().is_mmapped(fault_page) {
+        //     return Err(Error::AlreadyMapped);
+        // }
 
-        let segment = self
-            .elf_segments()
-            .iter()
-            .filter(|phdr| phdr.p_type == elf::abi::PT_LOAD)
-            .find(|phdr| {
-                (phdr.p_vaddr..(phdr.p_vaddr + phdr.p_memsz))
-                    .contains(&u64::try_from(fault_unoffset).unwrap())
-            })
-            .copied()
-            .ok_or(Error::NonLoadAddress(address))?;
+        // let fault_unoffset = address
+        //     .get()
+        //     .checked_sub(self.load_offset())
+        //     .ok_or(Error::AddressUnderrun(address))?;
 
-        // Small check to help ensure the segment alignments are page-fit.
-        debug_assert!(segment.p_align & u64::try_from(page_mask()).unwrap() == 0);
+        // let segment = self
+        //     .elf_segments()
+        //     .filter(|phdr| phdr.p_type == elf::abi::PT_LOAD)
+        //     .find(|phdr| {
+        //         (phdr.p_vaddr..(phdr.p_vaddr + phdr.p_memsz))
+        //             .contains(&u64::try_from(fault_unoffset).unwrap())
+        //     })
+        //     .copied()
+        //     .ok_or(Error::NonLoadAddress(address))?;
 
-        debug!(
-            "Demand mapping {:X?} from segment: {:X?}",
-            Address::<Page>::new_truncate(address.get()),
-            segment
-        );
+        // // Small check to help ensure the segment alignments are page-fit.
+        // debug_assert!(segment.p_align & u64::try_from(page_mask()).unwrap()
+        // == 0);
 
-        let fault_unoffset_page = Address::<Page>::new_truncate(fault_unoffset);
-        let fault_unoffset_page_addr = fault_unoffset_page.get().get();
+        // debug!(
+        //     "Demand mapping {:X?} from segment: {:X?}",
+        //     Address::<Page>::new_truncate(address.get()),
+        //     segment
+        // );
 
-        let fault_unoffset_end_page =
-            Address::<Page>::new_truncate(fault_unoffset_page_addr + page_size());
-        let fault_unoffset_end_page_addr = fault_unoffset_end_page.get().get();
+        // let fault_unoffset_page =
+        // Address::<Page>::new_truncate(fault_unoffset);
+        // let fault_unoffset_page_addr = fault_unoffset_page.get().get();
 
-        let segment_addr = usize::try_from(segment.p_vaddr).unwrap();
-        let segment_size = usize::try_from(segment.p_filesz).unwrap();
-        let segment_end_addr = segment_addr + segment_size;
+        // let fault_unoffset_end_page =
+        //     Address::<Page>::new_truncate(fault_unoffset_page_addr +
+        // page_size()); let fault_unoffset_end_page_addr =
+        // fault_unoffset_end_page.get().get();
 
-        let fault_offset = fault_unoffset_page_addr.saturating_sub(segment_addr);
-        let fault_end_pad = fault_unoffset_end_page_addr.saturating_sub(segment_end_addr);
-        let fault_front_pad = segment_addr.saturating_sub(fault_unoffset_page_addr);
-        let fault_size = ((fault_unoffset_end_page_addr - fault_unoffset_page_addr)
-            - fault_front_pad)
-            - fault_end_pad;
+        // let segment_addr = usize::try_from(segment.p_vaddr).unwrap();
+        // let segment_size = usize::try_from(segment.p_filesz).unwrap();
+        // let segment_end_addr = segment_addr + segment_size;
 
-        trace!("Mapping the demand page RW so data can be copied.");
-        let address_space = self.address_space_mut();
+        // let fault_offset =
+        // fault_unoffset_page_addr.saturating_sub(segment_addr);
+        // let fault_end_pad =
+        // fault_unoffset_end_page_addr.saturating_sub(segment_end_addr);
+        // let fault_front_pad =
+        // segment_addr.saturating_sub(fault_unoffset_page_addr);
+        // let fault_size = ((fault_unoffset_end_page_addr -
+        // fault_unoffset_page_addr)
+        //     - fault_front_pad)
+        //     - fault_end_pad;
 
-        let mapped_memory = unsafe {
-            address_space.mmap(
-                MemoryMapping::Exact {
-                    range: fault_page..fault_page,
-                },
-                Permissions::ReadWrite,
-            )
-        };
-        let mapped_memory = mapped_memory.unwrap();
+        // trace!("Mapping the demand page RW so data can be copied.");
+        // let address_space = self.address_space_mut();
 
-        // Safety: Address space allocator fulfills all required invariants.
-        let mapped_memory = unsafe { mapped_memory.as_uninit_slice_mut() };
+        // let mapped_memory = unsafe {
+        //     address_space.mmap(
+        //         MemoryMapping::Exact {
+        //             range: fault_page..fault_page,
+        //         },
+        //         Permissions::ReadWrite,
+        //     )
+        // };
+        // let mapped_memory = mapped_memory.unwrap();
 
-        let (front_pad, remaining) = mapped_memory.split_at_mut(fault_front_pad);
-        let (file_memory, end_pad) = remaining.split_at_mut(fault_size);
+        // // Safety: Address space allocator fulfills all required invariants.
+        // let mapped_memory = unsafe { mapped_memory.as_uninit_slice_mut() };
 
-        debug_assert_eq!(fault_front_pad, front_pad.len(), "mismatch front padding");
-        debug_assert_eq!(fault_end_pad, end_pad.len(), "mismatch end padding");
-        debug_assert_eq!(fault_size, file_memory.len(), "mismatch file memory");
+        // let (front_pad, remaining) =
+        // mapped_memory.split_at_mut(fault_front_pad);
+        // let (file_memory, end_pad) = remaining.split_at_mut(fault_size);
 
-        trace!(
-            "Copying memory into demand mapping: {:#X}..{:#X}..{:#X}.",
-            front_pad.len(),
-            file_memory.len(),
-            end_pad.len()
-        );
-        front_pad.fill(MaybeUninit::uninit());
-        end_pad.fill(MaybeUninit::uninit());
+        // debug_assert_eq!(fault_front_pad, front_pad.len(), "mismatch front
+        // padding"); debug_assert_eq!(fault_end_pad, end_pad.len(),
+        // "mismatch end padding"); debug_assert_eq!(fault_size,
+        // file_memory.len(), "mismatch file memory");
 
-        if !file_memory.is_empty() {
-            match self.elf_data() {
-                ElfData::Memory(data) => {
-                    let segment_data_offset = usize::try_from(segment.p_offset).unwrap();
+        // trace!(
+        //     "Copying memory into demand mapping: {:#X}..{:#X}..{:#X}.",
+        //     front_pad.len(),
+        //     file_memory.len(),
+        //     end_pad.len()
+        // );
+        // front_pad.fill(MaybeUninit::uninit());
+        // end_pad.fill(MaybeUninit::uninit());
 
-                    let offset_segment_range = (segment_data_offset + fault_offset)
-                        ..(segment_data_offset + fault_offset + fault_size);
+        // if !file_memory.is_empty() {
+        //     let segment_data_offset =
+        // usize::try_from(segment.p_offset).unwrap();
 
-                    // Safety: Same-sized reinterpret for copying.
-                    let (_, copy_data, _) = unsafe { data[offset_segment_range].align_to() };
+        //     let offset_segment_range = (segment_data_offset + fault_offset)
+        //         ..(segment_data_offset + fault_offset + fault_size);
 
-                    file_memory.copy_from_slice(copy_data);
-                }
-                ElfData::File(_) => unimplemented!(),
-            }
-        }
+        //     let elf_segment_data_range = self
+        //         .elf_data()
+        //         .get(offset_segment_range)
+        //         .expect("task data could not fulfill demand mapping");
 
-        trace!("Processing demand mapping relocations.");
-        let load_offset = self.load_offset();
-        let fault_page_as_range = fault_unoffset_page_addr..fault_unoffset_end_page_addr;
+        //     file_memory.copy_from_slice(elf_segment_data_range);
+        // }
 
-        self.elf_relas().retain(|rela| {
-            if fault_page_as_range.contains(&rela.address.get()) {
-                trace!("Processing relocation: {rela:X?}");
+        // trace!("Processing demand mapping relocations.");
+        // let load_offset = self.load_offset();
+        // let fault_page_as_range =
+        // fault_unoffset_page_addr..fault_unoffset_end_page_addr;
 
-                let rela_address = NonZero::<usize>::new(rela.address.get() + load_offset).unwrap();
-                let rela_ptr = NonNull::<usize>::with_exposed_provenance(rela_address);
+        // self.elf_relas().retain(|rela| {
+        //     let retain_rela =
+        // !fault_page_as_range.contains(&rela.ptr.addr().get());
 
-                unsafe {
-                    rela_ptr.write(rela.value);
-                }
+        //     if !retain_rela {
+        //         trace!("Processing relocation: {rela:X?}");
 
-                false
-            } else {
-                true
-            }
-        });
+        //         unsafe {
+        //             rela.ptr.byte_add(load_offset).write(rela.value);
+        //         }
+        //     }
 
-        trace!("Finalizing page's access attributes.");
-        // Safety: Page is already mapped, permissions are being modified according to
-        // the segment access type.
-        unsafe {
-            self.address_space_mut()
-                .set_permissions(
-                    fault_page,
-                    crate::task::segment_to_mapping_permissions(segment.p_type),
-                )
-                .unwrap();
-        }
+        //     retain_rela
+        // });
 
-        trace!("Demand mapping complete.");
+        // trace!("Finalizing page's access attributes.");
+        // // Safety: Page is already mapped, permissions are being modified
+        // according to // the segment access type.
+        // unsafe {
+        //     self.address_space_mut()
+        //         .set_permissions(
+        //             fault_page,
+        //
+        // crate::task::segment_to_mapping_permissions(segment.p_type),
+        //         )
+        //         .unwrap();
+        // }
 
-        Ok(())
+        // trace!("Demand mapping complete.");
+
+        // Ok(())
     }
 }
 
-impl core::fmt::Debug for Task {
+impl core::fmt::Debug for Task<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Task")
             .field("ID", &self.id)
@@ -333,7 +366,6 @@ impl core::fmt::Debug for Task {
             .field("Address Space", &self.address_space)
             .field("Context", &self.context)
             .field("ELF Load Offset", &self.load_offset)
-            .field("ELF Header", &self.elf_header)
             .finish_non_exhaustive()
     }
 }

@@ -1,5 +1,6 @@
 #![allow(clippy::similar_names)]
 
+use crate::util::sync::Once;
 use core::{num::NonZero, ptr::NonNull, time::Duration};
 use ioports::ReadOnlyPort;
 use safe_mmio::{UniqueMmioPointer, fields::ReadPure};
@@ -50,7 +51,7 @@ pub struct KernelStopwatch {
     ticks_per_us: u64,
 }
 
-static KERNEL_STOPWATCH: spin::Once<KernelStopwatch> = spin::Once::new();
+static KERNEL_STOPWATCH: Once<KernelStopwatch> = Once::new();
 
 // Safety: For `Source::Acpi`, references memory mapped in all address spaces.
 unsafe impl Send for KernelStopwatch {}
@@ -58,76 +59,81 @@ unsafe impl Send for KernelStopwatch {}
 unsafe impl Sync for KernelStopwatch {}
 
 impl KernelStopwatch {
-    pub fn init(rsdp_request: &limine::request::RsdpRequest) -> Self {
-        if let Ok(acpi_root_table) = crate::acpi::get_root_table(rsdp_request)
-            && let Ok(acpi_platform_info) = acpi_root_table.platform_info()
-            && let Some(pm_timer) = acpi_platform_info.pm_timer
-        {
-            trace!("Found ACPI power management timer.");
+    pub fn init(rsdp_request: &limine::request::RsdpRequest) {
+        KERNEL_STOPWATCH.call_once(|| {
+            // if let Ok(acpi_root_table) = crate::acpi::get_root_table(rsdp_request)
+            //     && let Ok(acpi_platform_info) = acpi_root_table.platform_info()
+            //     && let Some(pm_timer) = acpi_platform_info.pm_timer
+            // {
+            //     trace!("Found ACPI power management timer.");
 
-            match pm_timer.base.address_space {
-                acpi::address::AddressSpace::SystemIo => {
-                    trace!(
-                        "Using ACPI power management timer via port IO: {{ address: {:#X}, is 32 bit: {} }}",
-                        pm_timer.base.address, pm_timer.supports_32bit
-                    );
+            //     match pm_timer.base.address_space {
+            //         acpi::address::AddressSpace::SystemIo => {
+            //             trace!(
+            //                 "Using ACPI power management timer via port IO: {{ address:
+            // {:#X}, is 32 bit: {} }}",                 pm_timer.base.address,
+            // pm_timer.supports_32bit             );
 
-                    // TODO potentially use `NonZero<u16>` instead of just `u16`?
-                    let port_address =
-                        u16::try_from(pm_timer.base.address).expect("invalid port address");
+            //             // TODO potentially use `NonZero<u16>` instead of just `u16`?
+            //             let port_address =
+            //                 u16::try_from(pm_timer.base.address).expect("invalid port
+            // address");
 
-                    Self {
-                        source: Source::AcpiIo {
-                            // Safety: ACPI spec (and the crate) guarantees the address will be a
-                            // valid IO port.
-                            address: unsafe { ReadOnlyPort::new(port_address) },
-                            max_value: if pm_timer.supports_32bit {
-                                0xFFFF_FFFF
-                            } else {
-                                0x00FF_FFFF
-                            },
-                        },
-                        ticks_per_sec: 357_9545,
-                        ticks_per_ms: 357_9545 / 1000,
-                        ticks_per_us: 357_9545 / 1000 / 1000,
-                    }
-                }
+            //             Self {
+            //                 source: Source::AcpiIo {
+            //                     // Safety: ACPI spec (and the crate) guarantees the
+            // address will be a                     // valid IO port.
+            //                     address: unsafe { ReadOnlyPort::new(port_address) },
+            //                     max_value: if pm_timer.supports_32bit {
+            //                         0xFFFF_FFFF
+            //                     } else {
+            //                         0x00FF_FFFF
+            //                     },
+            //                 },
+            //                 ticks_per_sec: 357_9545,
+            //                 ticks_per_ms: 357_9545 / 1000,
+            //                 ticks_per_us: 357_9545 / 1000 / 1000,
+            //             }
+            //         }
 
-                acpi::address::AddressSpace::SystemMemory => {
-                    trace!(
-                        "Using ACPI power management timer via MMIO: {{ address: {:#X}, is 32 bit: {} }}",
-                        pm_timer.base.address, pm_timer.supports_32bit
-                    );
+            //         acpi::address::AddressSpace::SystemMemory => {
+            //             trace!(
+            //                 "Using ACPI power management timer via MMIO: {{ address:
+            // {:#X}, is 32 bit: {} }}",                 pm_timer.base.address,
+            // pm_timer.supports_32bit             );
 
-                    let mmio_address = usize::try_from(pm_timer.base.address)
-                        .expect("failed to convert ACPI power management timer address");
-                    let mmio_address = NonNull::with_exposed_provenance(
-                        NonZero::try_from(mmio_address)
-                            .expect("ACPI power management timer address is invalid"),
-                    );
+            //             let mmio_address = usize::try_from(pm_timer.base.address)
+            //                 .expect("failed to convert ACPI power management timer
+            // address");             let mmio_address =
+            // NonNull::with_exposed_provenance(
+            // NonZero::try_from(mmio_address)                     .expect("ACPI
+            // power management timer address is invalid"),             );
 
-                    Self {
-                        source: Source::AcpiMmio {
-                            // Safety: ACPI spec (and the crate) guarantees the address will be a
-                            // valid IO port.
-                            address: unsafe { UniqueMmioPointer::new(mmio_address) },
-                            max_value: if pm_timer.supports_32bit {
-                                0xFFFF_FFFF
-                            } else {
-                                0x00FF_FFFF
-                            },
-                        },
-                        ticks_per_sec: 357_9545,
-                        ticks_per_ms: 357_9545 / 1000,
-                        ticks_per_us: 357_9545 / 1000 / 1000,
-                    }
-                }
+            //             Self {
+            //                 source: Source::AcpiMmio {
+            //                     // Safety: ACPI spec (and the crate) guarantees the
+            // address will be a                     // valid IO port.
+            //                     address: unsafe { UniqueMmioPointer::new(mmio_address) },
+            //                     max_value: if pm_timer.supports_32bit {
+            //                         0xFFFF_FFFF
+            //                     } else {
+            //                         0x00FF_FFFF
+            //                     },
+            //                 },
+            //                 ticks_per_sec: 357_9545,
+            //                 ticks_per_ms: 357_9545 / 1000,
+            //                 ticks_per_us: 357_9545 / 1000 / 1000,
+            //             }
+            //         }
 
-                _ => unreachable!(),
-            }
-        } else {
-            unimplemented!("only the ACPI power management timer is available as a stopwatch")
-        }
+            //         _ => unreachable!(),
+            //     }
+            // } else {
+            //     unimplemented!("only the ACPI power management timer is available as a
+            // stopwatch") }
+
+            todo!()
+        });
     }
 
     fn get_static() -> &'static Self {

@@ -1,6 +1,6 @@
 use crate::{
     arch::x86_64::registers::model_specific::IA32_APIC_BASE, interrupts::Vector,
-    mem::HigherHalfDirectMap,
+    mem::HigherHalfDirectMap, util::sync::Lazy,
 };
 use bit_field::BitField;
 use core::{fmt, num::NonZero, ptr::NonNull};
@@ -20,7 +20,7 @@ pub const US_FREQ_FACTOR: u64 = US_PER_SEC / US_WAIT;
 
 #[repr(u8)]
 #[derive(Debug, IntoPrimitive, Clone, Copy)]
-#[allow(non_camel_case_types)]
+#[allow(non_camel_case_types, clippy::upper_case_acronyms)]
 #[rustfmt::skip]
 pub enum Register {
     ID                          = 0x02,
@@ -227,7 +227,7 @@ enum Mode {
 
 pub struct LocalApic(Mode);
 
-static LOCAL_APIC: spin::Lazy<LocalApic> = spin::Lazy::new(|| {
+static LOCAL_APIC: Lazy<LocalApic> = Lazy::new(|| {
     assert!(
         IA32_APIC_BASE::get_hw_enabled(),
         "local APIC is hardware disabled"

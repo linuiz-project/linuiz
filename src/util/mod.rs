@@ -1,3 +1,5 @@
+pub mod sync;
+
 pub trait InteriorBorrow {
     type RefType<'a, T>
     where

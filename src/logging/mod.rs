@@ -1,17 +1,19 @@
-mod serial;
+use crate::{interrupts::uninterruptable, util::sync::Once};
+
+mod uart;
 
 /// The kernel logger.
 pub struct KernelLogger {
-    serial: &'static serial::Logger,
+    serial: &'static uart::Logger,
 }
 
 impl KernelLogger {
     pub fn init() {
-        crate::interrupts::uninterruptable(|| {
-            static LOGGER: spin::Once<KernelLogger> = spin::Once::new();
+        uninterruptable(|| {
+            static LOGGER: Once<KernelLogger> = Once::new();
 
             let kernel_logger = LOGGER.call_once(|| Self {
-                serial: serial::Logger::init(),
+                serial: uart::Logger::init(),
             });
 
             log::set_max_level(log::LevelFilter::Trace);

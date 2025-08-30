@@ -14,10 +14,12 @@ pub use isf::*;
 mod error_codes;
 pub use error_codes::*;
 
-use crate::arch::x86_64::structures::{
-    DescriptorTable, DescriptorTablePointer, gdt::PrivilegeLevel, tss::InterruptStackTableIndex,
+use crate::{
+    arch::x86_64::structures::{
+        DescriptorTable, DescriptorTablePointer, gdt::PrivilegeLevel, tss::InterruptStackTableIndex,
+    },
+    util::sync::Lazy,
 };
-use core::array::repeat;
 
 /// An Interrupt Descriptor Table with 256 entries.
 ///
@@ -479,7 +481,7 @@ pub struct InterruptDescriptorTable {
 
 assert_eq_size!([u8; 0x1000], InterruptDescriptorTable);
 
-static INTERRUPT_DESCRIPTOR_TABLE: spin::Lazy<InterruptDescriptorTable> = spin::Lazy::new(|| {
+static INTERRUPT_DESCRIPTOR_TABLE: Lazy<InterruptDescriptorTable> = Lazy::new(|| {
     // Safety:
     //  - All function addresses are correctly set to linked interrupt stubs.
     //  - Entries with specified stack table indexes are set correctly.
@@ -1227,9 +1229,9 @@ static INTERRUPT_DESCRIPTOR_TABLE: spin::Lazy<InterruptDescriptorTable> = spin::
                     .with_handler(__irq_255_stub.as_usize())
                     .build(),
             ],
-            _1: repeat(Entry::missing()),
-            _2: repeat(Entry::missing()),
-            _3: repeat(Entry::missing()),
+            _1: core::array::repeat(Entry::missing()),
+            _2: core::array::repeat(Entry::missing()),
+            _3: core::array::repeat(Entry::missing()),
         }
     }
 });
@@ -1363,7 +1365,9 @@ impl core::fmt::Debug for InterruptDescriptorTable {
         self.interrupts
             .iter()
             .enumerate()
-            .try_for_each(|(index, entry)| writeln!(f, "    Interrupt {index}: {entry:X?}"))?;
+            .try_for_each(|(index, entry)| {
+                writeln!(f, "    Interrupt {}: {entry:X?}", index + 32)
+            })?;
 
         write!(f, "}}")?;
 

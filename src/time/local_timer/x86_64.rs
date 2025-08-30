@@ -9,7 +9,6 @@ use crate::{
     time::KernelStopwatch,
 };
 use core::{arch::x86_64::_rdtsc, time::Duration};
-use raw_cpuid::{ApmInfo, FeatureInfo, HypervisorInfo};
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum Error {
@@ -72,9 +71,9 @@ pub struct LocalTimer(Mode);
 
 impl LocalTimer {
     pub fn configure() -> Self {
-        if feature_info().is_some_and(FeatureInfo::has_tsc)
-            && feature_info().is_some_and(FeatureInfo::has_tsc_deadline)
-            && advanced_power_management_info().is_some_and(ApmInfo::has_invariant_tsc)
+        if feature_info().is_some_and(|cpuid| cpuid.has_tsc())
+            && feature_info().is_some_and(|cpuid| cpuid.has_tsc_deadline())
+            && advanced_power_management_info().is_some_and(|cpuid| cpuid.has_invariant_tsc())
         {
             trace!("Local Timer: Timestamp Counter");
 
@@ -92,13 +91,11 @@ impl LocalTimer {
                             * u64::from(processor_frequency_info.processor_max_frequency()))
                 })
                 .or_else(|| {
-                    // We're in a hypervisor environment and it provides the 0x40000000 and
+                    // Check if we're in a hypervisor environment and it provides the 0x40000000 and
                     // 0x40000010 hypervisor info leaves.
                     feature_info()
-                        .is_some_and(FeatureInfo::has_hypervisor)
-                        .then(|| hypervisor_info())
-                        .flatten()
-                        .and_then(HypervisorInfo::tsc_frequency)
+                        .filter(raw_cpuid::FeatureInfo::has_hypervisor)
+                        .and_then(|_| hypervisor_info().and_then(|cpuid| cpuid.tsc_frequency()))
                         .map(u64::from)
                 })
                 .unwrap_or_else(measure_tsc);
@@ -113,7 +110,7 @@ impl LocalTimer {
             LocalApic::lvt_timer().set_mode(TimerMode::OneShot);
 
             let frequency = hypervisor_info()
-                .and_then(raw_cpuid::HypervisorInfo::apic_frequency)
+                .and_then(|cpuid| cpuid.apic_frequency())
                 .unwrap_or_else(measure_lapic);
 
             Self(Mode::OneShot { frequency })

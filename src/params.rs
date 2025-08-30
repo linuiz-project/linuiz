@@ -1,5 +1,7 @@
 use limine::request::ExecutableCmdlineRequest;
 
+use crate::util::sync::Once;
+
 #[derive(Debug)]
 pub struct KernelParameters {
     /// Whether the kernel should utilize multi-processing.
@@ -12,7 +14,7 @@ pub struct KernelParameters {
     low_memory_mode: bool,
 }
 
-static KERNEL_PARAMETERS: spin::Once<KernelParameters> = spin::Once::new();
+static KERNEL_PARAMETERS: Once<KernelParameters> = Once::new();
 
 impl Default for KernelParameters {
     fn default() -> Self {
@@ -25,38 +27,40 @@ impl Default for KernelParameters {
 }
 
 impl KernelParameters {
-    pub fn init(kernel_cmdline_request: &ExecutableCmdlineRequest) -> Self {
-        let mut params = Self::default();
+    pub fn init(kernel_cmdline_request: &ExecutableCmdlineRequest) {
+        KERNEL_PARAMETERS.call_once(|| {
+            let mut params = Self::default();
 
-        let Some(kernel_cmdline_response) = kernel_cmdline_request.get_response() else {
-            warn!("Bootloader did not provide response to kernel command line request.");
-            return params;
-        };
+            let Some(kernel_cmdline_response) = kernel_cmdline_request.get_response() else {
+                warn!("Bootloader did not provide response to kernel command line request.");
+                return params;
+            };
 
-        let Ok(params_str) = kernel_cmdline_response.cmdline().to_str() else {
-            warn!("Kernel command line contained invalid UTF-8.");
-            return params;
-        };
+            let Ok(params_str) = kernel_cmdline_response.cmdline().to_str() else {
+                warn!("Kernel command line contained invalid UTF-8.");
+                return params;
+            };
 
-        params_str.split(' ').for_each(|param| {
-            match param {
-                "" => {
-                    // Ignore accidental extra spaces
+            params_str.split(' ').for_each(|param| {
+                match param {
+                    "" => {
+                        // Ignore accidental extra spaces
+                    }
+
+                    "--no-multiprocessing" => params.use_multiprocessing = false,
+                    "--drop-symbols" => params.drop_symbol_info = true,
+                    "--low-memory" => params.low_memory_mode = true,
+
+                    _ => {
+                        warn!("Unknown kernel parameter: \"{param}\"");
+                    }
                 }
+            });
 
-                "--no-multiprocessing" => params.use_multiprocessing = false,
-                "--drop-symbols" => params.drop_symbol_info = true,
-                "--low-memory" => params.low_memory_mode = true,
+            debug!("{params:#?}");
 
-                _ => {
-                    warn!("Unknown kernel parameter: \"{param}\"");
-                }
-            }
+            params
         });
-
-        debug!("{params:#?}");
-
-        params
     }
 
     fn get_static() -> &'static Self {

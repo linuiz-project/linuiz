@@ -4,7 +4,6 @@ use crate::arch::x86_64::{
     registers::{ProcessorFlags, model_specific::IA32_TSC_AUX},
     structures::{gdt::GlobalDescriptorTable, idt::InterruptDescriptorTable},
 };
-use raw_cpuid::{ExtendedFeatures, FeatureInfo};
 
 pub mod cpuid;
 pub mod devices;
@@ -32,55 +31,53 @@ pub unsafe fn configure_processor() {
     debug_assert!(IA32_EFER::get_long_mode_active());
     debug_assert!(IA32_EFER::get_no_execute_enable());
 
-    // Safety: No invalid features are enabled.
-    unsafe {
-        cr0::CR0::enable(cr0::Flags::NE | cr0::Flags::AM);
-    }
-
-    let mut flags = cr4::Flags::empty();
-
-    if feature_info().is_some_and(FeatureInfo::has_pge) {
-        flags.insert(cr4::Flags::PGE);
-    }
-
-    if feature_info().is_some_and(FeatureInfo::has_de) {
-        flags.insert(cr4::Flags::DE);
-    }
-
-    if feature_info().is_some_and(FeatureInfo::has_fxsave_fxstor) {
-        flags.insert(cr4::Flags::OSFXSR);
-        flags.insert(cr4::Flags::OSXMMEXCPT);
-    }
-
-    if feature_info().is_some_and(FeatureInfo::has_mce) {
-        flags.insert(cr4::Flags::MCE);
-    }
-
-    if feature_info().is_some_and(FeatureInfo::has_pcid) {
-        flags.insert(cr4::Flags::PCIDE);
-    }
-
-    if extended_feature_info().is_some_and(ExtendedFeatures::has_umip) {
-        flags.insert(cr4::Flags::UMIP);
-    }
-
-    if extended_feature_info().is_some_and(ExtendedFeatures::has_fsgsbase) {
-        flags.insert(cr4::Flags::FSGSBASE);
-    }
-
-    if extended_feature_info().is_some_and(ExtendedFeatures::has_smep) {
-        flags.insert(cr4::Flags::SMEP);
-    }
-
-    if extended_feature_info().is_some_and(ExtendedFeatures::has_smap) {
-        flags.insert(cr4::Flags::SMAP);
-    }
-
     // Safety:
     // - Caller is required to ensure no CPU features are in use.
     // - All enabled features have been checked for support.
     unsafe {
-        cr4::CR4::enable(flags);
+        cr0::CR0::enable(cr0::Flags::NE);
+        cr0::CR0::enable(cr0::Flags::AM);
+
+        if let Some(feature_info) = feature_info() {
+            if feature_info.has_pge() {
+                cr4::CR4::enable(cr4::Flags::PGE);
+            }
+
+            if feature_info.has_de() {
+                cr4::CR4::enable(cr4::Flags::DE);
+            }
+
+            if feature_info.has_fxsave_fxstor() {
+                cr4::CR4::enable(cr4::Flags::OSFXSR);
+                cr4::CR4::enable(cr4::Flags::OSXMMEXCPT);
+            }
+
+            if feature_info.has_mce() {
+                cr4::CR4::enable(cr4::Flags::MCE);
+            }
+
+            if feature_info.has_pcid() {
+                cr4::CR4::enable(cr4::Flags::PCIDE);
+            }
+        }
+
+        if let Some(extended_feature_info) = extended_feature_info() {
+            if extended_feature_info.has_umip() {
+                cr4::CR4::enable(cr4::Flags::UMIP);
+            }
+
+            if extended_feature_info.has_fsgsbase() {
+                cr4::CR4::enable(cr4::Flags::FSGSBASE);
+            }
+
+            if extended_feature_info.has_smep() {
+                cr4::CR4::enable(cr4::Flags::SMEP);
+            }
+
+            if extended_feature_info.has_smap() {
+                cr4::CR4::enable(cr4::Flags::SMAP);
+            }
+        }
     }
 
     // Safety: Only the alignment check bit is set.
@@ -93,9 +90,8 @@ pub unsafe fn configure_processor() {
 
     LocalApic::reset();
 
-    if cpuid::extended_feature_info().is_some_and(raw_cpuid::ExtendedFeatures::has_rdpid)
-        || cpuid::extended_feature_identifiers()
-            .is_some_and(raw_cpuid::ExtendedProcessorFeatureIdentifiers::has_rdtscp)
+    if cpuid::extended_feature_info().is_some_and(|cpuid| cpuid.has_rdpid())
+        || cpuid::extended_feature_identifiers().is_some_and(|cpuid| cpuid.has_rdtscp())
     {
         let processor_id = LocalApic::get_id();
         // Safety:

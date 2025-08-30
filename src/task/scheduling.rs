@@ -2,11 +2,13 @@ use crate::{
     arch::x86_64::structures::idt::InterruptStackFrame,
     cpu::local_state::LocalState,
     task::{Registers, Task},
+    util::sync::Mutex,
 };
-use alloc::collections::vec_deque::VecDeque;
 use core::{mem::MaybeUninit, num::NonZero, ptr::NonNull, time::Duration};
 
-pub static PROCESSES: spin::Mutex<VecDeque<Task>> = spin::Mutex::new(VecDeque::new());
+type TaskQueue<'a> = heapless::Deque<Task<'a>, 100>;
+
+pub static PROCESSES: Mutex<TaskQueue> = Mutex::new(TaskQueue::new());
 
 #[cfg(debug_assertions)]
 const IDLE_STACK_SIZE: usize = 0x100;
@@ -30,7 +32,7 @@ impl IdleStack {
 pub struct Scheduler {
     enabled: bool,
     idle_stack: IdleStack,
-    task: Option<Task>,
+    task: Option<Task<'static>>,
 }
 
 impl Scheduler {
@@ -62,43 +64,39 @@ impl Scheduler {
         self.task.as_ref()
     }
 
-    pub fn task_mut(&mut self) -> Option<&mut Task> {
+    pub fn task_mut(&mut self) -> Option<&'static mut Task> {
         self.task.as_mut()
     }
 
     pub fn interrupt_task(&mut self, state: &mut InterruptStackFrame, regs: &mut Registers) {
-        debug_assert!(!crate::interrupts::is_enabled());
+        PROCESSES.with_lock(|mut processes| {
+            // Move the current task, if any, back into the scheduler queue.
+            if let Some(mut process) = self.task.take() {
+                trace!("Interrupting: {:?}", process.id());
 
-        let mut processes = PROCESSES.lock();
+                process.context.0 = *state;
+                process.context.1 = *regs;
 
-        // Move the current task, if any, back into the scheduler queue.
-        if let Some(mut process) = self.task.take() {
-            trace!("Interrupting: {:?}", process.id());
+                processes.push_back(process).unwrap();
+            }
 
-            process.context.0 = *state;
-            process.context.1 = *regs;
-
-            processes.push_back(process);
-        }
-
-        self.next_task(&mut processes, state, regs);
+            self.next_task(&mut processes, state, regs);
+        });
     }
 
     /// Attempts to schedule the next task in the local task queue.
     pub fn yield_task(&mut self, isf: &mut InterruptStackFrame, regs: &mut Registers) {
-        debug_assert!(!crate::interrupts::is_enabled());
+        PROCESSES.with_lock(|mut processes| {
+            let mut process = self.task.take().expect("no active task in scheduler");
+            trace!("Yielding: {:?}", process.id());
 
-        let mut processes = PROCESSES.lock();
+            process.context.0 = *isf;
+            process.context.1 = *regs;
 
-        let mut process = self.task.take().expect("no active task in scheduler");
-        trace!("Yielding: {:?}", process.id());
+            processes.push_back(process).unwrap();
 
-        process.context.0 = *isf;
-        process.context.1 = *regs;
-
-        processes.push_back(process);
-
-        self.next_task(&mut processes, isf, regs);
+            self.next_task(&mut processes, isf, regs);
+        });
     }
 
     pub fn kill_task(&mut self, isf: &mut InterruptStackFrame, regs: &mut Registers) {
@@ -108,13 +106,14 @@ impl Scheduler {
         let process = self.task.take().expect("no active task in scheduler");
         trace!("Exiting: {:?}", process.id());
 
-        let mut processes = PROCESSES.lock();
-        self.next_task(&mut processes, isf, regs);
+        PROCESSES.with_lock(|mut processes| {
+            self.next_task(&mut processes, isf, regs);
+        });
     }
 
     fn next_task(
         &mut self,
-        processes: &mut VecDeque<Task>,
+        processes: &mut TaskQueue,
         isf: &mut InterruptStackFrame,
         regs: &mut Registers,
     ) {
@@ -131,8 +130,10 @@ impl Scheduler {
             }
 
             trace!("Switched task: {:?}", next_process.id());
-            let old_value = self.task.replace(next_process);
-            debug_assert!(old_value.is_none());
+
+            todo!()
+            // let old_value = self.task.replace(next_process);
+            // debug_assert!(old_value.is_none());
         } else {
             #[allow(clippy::as_conversions)]
             let idle_wait_address = crate::interrupts::wait_indefinite as usize;

@@ -12,7 +12,7 @@ enum Error {
 const MAXIMUM_RETRIES: usize = 10000;
 
 fn try_generate_rdseed() -> Result<u64, Error> {
-    if !extended_feature_info().is_some_and(raw_cpuid::ExtendedFeatures::has_rdseed) {
+    if !extended_feature_info().is_some_and(|cpuid| cpuid.has_rdseed()) {
         return Err(Error::NotSupported);
     }
 
@@ -41,7 +41,7 @@ fn try_generate_rdseed() -> Result<u64, Error> {
 }
 
 fn try_generate_rdrand() -> Result<u64, Error> {
-    if !feature_info().is_some_and(raw_cpuid::FeatureInfo::has_rdrand) {
+    if !feature_info().is_some_and(|cpuid| cpuid.has_rdrand()) {
         return Err(Error::NotSupported);
     }
 
@@ -70,7 +70,7 @@ fn try_generate_rdrand() -> Result<u64, Error> {
 }
 
 fn try_generate_rdtsc() -> Result<u64, Error> {
-    if !feature_info().is_some_and(raw_cpuid::FeatureInfo::has_tsc) {
+    if !feature_info().is_some_and(|cpuid| cpuid.has_tsc()) {
         return Err(Error::NotSupported);
     }
 

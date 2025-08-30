@@ -1,4 +1,6 @@
-use crate::mem::Permissions;
+use core::ops::Range;
+
+use crate::{mem::Permissions, util::sync::Lazy};
 use bit_field::BitField;
 use libsys::address::{Address, Frame};
 
@@ -33,14 +35,13 @@ impl Entry {
     #[cfg(target_arch = "riscv64")]
     const GLOBAL_BIT_INDEX: usize = 5;
 
-    fn get_frame_address_range() -> core::ops::Range<usize> {
-        static FRAME_ADDRESS_RANGE: spin::Lazy<core::ops::Range<usize>> = spin::Lazy::new(|| {
+    fn get_frame_address_range() -> Range<usize> {
+        static FRAME_ADDRESS_RANGE: Lazy<Range<usize>> = Lazy::new(|| {
             cfg_select! {
                 any(target_arch = "x86", target_arch = "x86_64") => {
                     use crate::arch::x86_64::{cpuid::feature_info, registers::control::cr4};
-                    use raw_cpuid::FeatureInfo;
 
-                    if feature_info().is_some_and(FeatureInfo::has_pae)
+                    if feature_info().is_some_and(|cpuid| cpuid.has_pae())
                         && cr4::CR4::read().contains(cr4::Flags::PAE)
                     {
 

@@ -1,12 +1,12 @@
-#![no_std]
-#![no_main]
+#![cfg_attr(not(test), no_std)]
+#![cfg_attr(not(test), no_main)]
 #![feature(
     allocator_api,
     array_repeat,
     array_windows,
-    box_vec_non_null,
     breakpoint,
     cfg_select,
+    core_intrinsics,
     duration_constants,
     extern_types,
     generic_atomic,
@@ -23,7 +23,8 @@
     ptr_as_uninit,
     range_into_bounds,
     slice_ptr_get,
-    step_trait
+    step_trait,
+    unsafe_cell_access
 )]
 #![forbid(clippy::duplicated_attributes, clippy::inline_asm_x86_att_syntax)]
 #![deny(
@@ -51,7 +52,8 @@
     clippy::needless_for_each,
     clippy::if_not_else,
     dead_code,
-    mismatched_lifetime_syntaxes
+    mismatched_lifetime_syntaxes,
+    internal_features
 )]
 
 use limine::{
@@ -76,11 +78,6 @@ mod rand;
 mod task;
 mod time;
 mod util;
-
-#[cfg(debug_assertions)]
-mod dev;
-
-extern crate alloc;
 
 #[macro_use]
 extern crate bitflags;
@@ -180,6 +177,8 @@ unsafe extern "C" fn _entry() -> ! {
     if !crate::params::KernelParameters::drop_symbol_info() {
         crate::panic::tracing::symbols::KernelSymbols::init(&KERNEL_FILE_REQUEST);
     }
+
+    crate::acpi::init_tables(&RSDP_REQUEST);
 
     crate::mem::pmm::PhysicalMemoryManager::init(&MEMORY_MAP_REQUEST);
     crate::mem::KernelMapper::init(

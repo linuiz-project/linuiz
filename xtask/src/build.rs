@@ -64,24 +64,24 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
         options.target.as_triple(),
         if options.release { "release" } else { "debug" }
     ));
-    let kernel_dst_path = root_dir.join("run/system/linuiz/kernel");
+    let kernel_dst_dir = root_dir.join("run/system/linuiz/");
 
     let kernel_src_path = kernel_src_path.as_path();
-    let kernel_dst_path = kernel_dst_path.as_path();
+    let kernel_dst_dir = kernel_dst_dir.as_path();
 
     build_kernel(sh, &options)?;
 
-    if !sh.path_exists(kernel_dst_path) {
-        sh.create_dir(kernel_dst_path)?;
+    if !sh.path_exists(kernel_dst_dir) {
+        sh.create_dir(kernel_dst_dir)?;
     }
 
     // Copy the kernel binary to the virtual HDD.
-    sh.copy_file(kernel_src_path, kernel_dst_path)?;
+    sh.copy_file(kernel_src_path, kernel_dst_dir)?;
 
     if options.disassemble {
         let disassembly_output = cmd!(
             sh,
-            "objdump --disassemble-all --demangle=rust -M intel {kernel_dst_path}"
+            "objdump --disassemble-all --demangle=rust -M intel {kernel_dst_dir}/kernel"
         )
         .output()?;
         sh.write_file(
@@ -94,11 +94,13 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
 }
 
 fn build_kernel(sh: &Shell, options: &Options) -> Result<()> {
+    let target_triple = options.target.as_triple();
+
     let mut build_cmd = cmd!(sh, "cargo build")
         .arg("--future-incompat-report")
-        .args(["--target", options.target.as_triple()])
+        .args(["--target", target_triple])
         .args(["-Z", "unstable-options"])
-        .args(["-Z", "build-std=core,compiler_builtins,alloc"])
+        .args(["-Z", "build-std=core,compiler_builtins"])
         .args(["-Z", "build-std-features=compiler-builtins-mem"]);
 
     if options.release {
@@ -109,8 +111,15 @@ fn build_kernel(sh: &Shell, options: &Options) -> Result<()> {
         build_cmd = build_cmd.arg("-vv")
     }
 
-    // Set RUSTFLAGS to enable custom getrandom backend.
-    let _rustflags = sh.push_env("RUSTFLAGS", "--cfg=getrandom_backend=\"custom\"");
+    let _rustflags = sh.push_env(
+        "RUSTFLAGS",
+        format!(
+            "--cfg=getrandom_backend=\"custom\" \
+            -C link-arg=-Tbuild/{target_triple}.lds \
+            -C link-arg=build/{target_triple}.a \
+            -C link-arg=-zmax-page-size=0x200000",
+        ),
+    );
 
     build_cmd.run()?;
 

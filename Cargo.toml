@@ -7,25 +7,23 @@ exclude = ["xtask"]
 [features]
 default = ["panic_traces"]
 panic_traces = ["dep:rustc-demangle"]
+buffered_uart = []
 
 [dependencies]
 bit_field = "0.10"
 bitflags = "2.9"
 elf = { version = "0.8.0", default-features = false }
 getrandom = "0.3"
-heapless = { version = "0.9", default-features = false }
+heapless = { version = "0.9", default-features = false, features = [
+    "nightly",
+    "mpmc_large",
+] }
 ioports = "1.0"
 limine = { version = "0.5", features = ["uuid"] }
 log = { version = "0.4", default-features = false }
 num_enum = { version = "0.7", default-features = false }
 rand_pcg = { version = "0.9", default-features = false }
 safe-mmio = "0.2"
-spin = { version = "0.10", default-features = false, features = [
-    "spin_mutex",
-    "once",
-    "lazy",
-    "rwlock",
-] }
 static_assertions = "1.1.0"
 thiserror = { version = "2.0", default-features = false }
 uart = { version = "3.0", default-features = false, features = [

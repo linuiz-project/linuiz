@@ -1,35 +1,35 @@
+use crate::util::sync::Once;
 use core::num::NonZero;
 use libsys::address::{Address, Frame, Page, Physical, Virtual};
 
 pub struct HigherHalfDirectMap(NonZero<usize>);
 
-static HIGHER_HALF_DIRECT_MAP: spin::Once<HigherHalfDirectMap> = spin::Once::new();
+static HIGHER_HALF_DIRECT_MAP: Once<HigherHalfDirectMap> = Once::new();
 
 impl HigherHalfDirectMap {
-    pub fn init(hhdm_request: &limine::request::HhdmRequest) -> Self {
-        // This function cannot contain any debug logging, as it's used by the
-        // local APIC module to offset the register addresses in xAPIC mode,
-        // which is then used by the logger to print out the processor ID.
-        //
-        // So, imagine the case:
-        // 1. You log in this function...
-        // 2. The logger tries to read the processor ID from the local APIC...
-        // 3. The local APIC reads the register address, and tries to read the
-        //    higher-half direct map value to offset it...
-        // 4. The log function panicks, because the higher-half direct map is not yet
-        //    set.
+    pub fn init(hhdm_request: &limine::request::HhdmRequest) {
+        HIGHER_HALF_DIRECT_MAP.call_once(|| {
+            // This function cannot contain any debug logging, as it's used by the
+            // local APIC module to offset the register addresses in xAPIC mode,
+            // which is then used by the logger to print out the processor ID.
+            //
+            // So, imagine the case:
+            // 1. You log in this function...
+            // 2. The logger tries to read the processor ID from the local APIC...
+            // 3. The local APIC reads the register address, and tries to read the
+            //    higher-half direct map value to offset it...
+            // 4. The log function panicks, because the higher-half direct map is not yet
+            //    set.
 
-        let base_address = hhdm_request
-            .get_response()
-            .expect("bootloader did not provide response to higher-half direct map request")
-            .offset();
+            let base_address = hhdm_request
+                .get_response()
+                .expect("bootloader did not provide response to higher-half direct map request")
+                .offset();
+            let base_address = usize::try_from(base_address).unwrap();
+            let base_address = NonZero::new(base_address).unwrap();
 
-        let base_address = usize::try_from(base_address)
-            .ok()
-            .and_then(NonZero::new)
-            .expect("higher-half direct map offset is invalid");
-
-        Self(base_address)
+            Self(base_address)
+        });
     }
 
     fn get_static() -> &'static Self {

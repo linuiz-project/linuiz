@@ -19,10 +19,9 @@ pub fn use_large_pages() -> bool {
     cfg_select! {
         target_arch = "x86_64" => {
             use crate::arch::x86_64::{cpuid::feature_info, registers::control::cr4};
-            use raw_cpuid::FeatureInfo;
 
             debug_assert!(
-                feature_info().is_some_and(FeatureInfo::has_pae)
+                feature_info().is_some_and(|cpuid| cpuid.has_pae())
                     && cr4::CR4::read().contains(cr4::Flags::PAE)
             );
 
@@ -37,11 +36,8 @@ pub fn use_large_pages() -> bool {
 pub fn use_huge_pages() -> bool {
     cfg_select! {
         target_arch = "x86_64" => {
-            use crate::arch::x86_64::cpuid::extended_feature_identifiers;
-            use raw_cpuid::ExtendedProcessorFeatureIdentifiers;
-
-            extended_feature_identifiers()
-                .is_some_and(ExtendedProcessorFeatureIdentifiers::has_1gib_pages)
+            crate::arch::x86_64::cpuid::extended_feature_identifiers()
+                .is_some_and(|cpuid| cpuid.has_1gib_pages())
         }
 
         _ => { todo!() }

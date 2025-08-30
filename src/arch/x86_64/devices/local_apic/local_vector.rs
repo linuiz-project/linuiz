@@ -19,6 +19,7 @@ impl Kind for Timer {
     const REGISTER: Register = Register::LVT_TIMER;
 }
 
+#[allow(clippy::upper_case_acronyms)]
 pub struct CMCI;
 impl Kind for CMCI {
     const REGISTER: Register = Register::LVT_CMCI;
@@ -125,7 +126,8 @@ impl<T: Kind> LocalVector<T> {
 
         debug_assert!(vector > 15, "interrupts vectors 0..=15 are reserved");
 
-        Vector::from(u8::try_from(vector).unwrap())
+        let vector = u8::try_from(vector).unwrap();
+        Vector::try_from(vector).unwrap()
     }
 
     /// Sets the interrupt vector number.
@@ -182,7 +184,7 @@ impl LocalVector<Timer> {
     /// Sets the mode for the timer to operate in.
     pub fn set_mode(&self, mode: TimerMode) -> &Self {
         if mode == TimerMode::TscDeadline
-            && !feature_info().is_some_and(raw_cpuid::FeatureInfo::has_tsc_deadline)
+            && !feature_info().is_some_and(|cpuid| cpuid.has_tsc_deadline())
         {
             panic!("timestamp counter deadline timer mode not supported");
         }

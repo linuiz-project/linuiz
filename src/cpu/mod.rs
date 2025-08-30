@@ -2,10 +2,15 @@ use crate::{cpu::local_state::LocalState, mem::KernelMapper, params::KernelParam
 
 pub mod local_state;
 
-pub fn get_id() -> u32 {
-    #[cfg(target_arch = "x86_64")]
-    {
-        crate::arch::x86_64::get_processor_id()
+pub type CoreId = u32;
+
+pub fn get_id() -> CoreId {
+    cfg_select! {
+        target_arch = "x86_64" => {
+            crate::arch::x86_64::get_processor_id()
+        }
+
+        _ => { todo!() }
     }
 }
 
@@ -15,10 +20,15 @@ pub fn get_id() -> u32 {
 /// software execution. It should be run only once per processor at the very
 /// beginning of code execution.
 pub unsafe fn configure() {
-    #[cfg(target_arch = "x86_64")]
-    // Safety: Caller is required to maintain safety invariants.
-    unsafe {
-        crate::arch::x86_64::configure_processor();
+    cfg_select! {
+        target_arch = "x86_64" => {
+            // Safety: Caller is required to maintain safety invariants.
+            unsafe {
+                crate::arch::x86_64::configure_processor();
+            }
+        }
+
+        _ => { todo!() }
     }
 }
 

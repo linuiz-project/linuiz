@@ -1,25 +1,27 @@
+use crate::util::sync::Mutex;
 use core::{
     fmt::{Result, Write},
     ptr::NonNull,
 };
 use libsys::address::{Address, Virtual};
-use spin::Mutex;
 
 pub mod symbols;
 
+// TODO remove dependency on `heapless`
 type PanicStringBuffer = heapless::String<0x4000>;
 
 pub(super) fn emit_stack_trace() {
-    static PANIC_BUFFER: Mutex<PanicStringBuffer> = Mutex::new(PanicStringBuffer::new());
+    static PANIC_STRING_BUFFER: Mutex<PanicStringBuffer> = Mutex::new(PanicStringBuffer::new());
 
-    let mut panic_string_buffer = PANIC_BUFFER.lock();
-    panic_string_buffer.clear();
+    PANIC_STRING_BUFFER.with_lock(|panic_string_buffer| {
+        panic_string_buffer.clear();
 
-    if let Err(err) = construct_panic_message(&mut *panic_string_buffer) {
-        error!("Failed constructing panic message: {err:?}");
-    }
+        if let Err(err) = construct_panic_message(&mut *panic_string_buffer) {
+            error!("Failed constructing panic message: {err:?}");
+        }
 
-    error!("STACK TRACE:\n{panic_string_buffer}");
+        error!("STACK TRACE:\n{panic_string_buffer}");
+    });
 }
 
 #[repr(C)]

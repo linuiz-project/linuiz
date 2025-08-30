@@ -1,11 +1,11 @@
-use num_enum::{FromPrimitive, IntoPrimitive};
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 pub mod exceptions;
 pub mod syscall;
 
 #[repr(u8)]
-#[derive(Debug, FromPrimitive, IntoPrimitive, Clone, Copy, PartialEq, Eq)]
-#[allow(non_camel_case_types)]
+#[derive(Debug, TryFromPrimitive, IntoPrimitive, Clone, Copy, PartialEq, Eq)]
+#[allow(non_camel_case_types, clippy::upper_case_acronyms)]
 pub enum Vector {
     Watchdog = 0x20,
     Timer = 0x21,
@@ -18,9 +18,6 @@ pub enum Vector {
     Syscall = 0x80,
 
     Spurious = 0xFF,
-
-    #[default]
-    Unknown = 0,
 }
 
 /// Enables interrupts for the current processor.
@@ -64,41 +61,29 @@ pub fn wait_next() {
     unimplemented!();
 }
 
-/// Provides access to the contained instance of `T`, ensuring interrupts are
-/// disabled for the duration of the borrow.
-pub struct InterruptCell<T>(T);
-
-impl<T> InterruptCell<T> {
-    pub const fn new(value: T) -> Self {
-        Self(value)
-    }
-
-    pub fn with<U>(&self, func: impl FnOnce(&T) -> U) -> U {
-        uninterruptable(|| func(&self.0))
-    }
-
-    pub fn with_mut<U>(&mut self, func: impl FnOnce(&mut T) -> U) -> U {
-        uninterruptable(|| func(&mut self.0))
-    }
-}
-
 /// Disables interrupts if they were enabled, executes `func`, then re-enables
 /// interrupts if they were disabled.
 #[inline]
 pub fn uninterruptable<T>(func: impl FnOnce() -> T) -> T {
-    let interrupts_enabled = is_enabled();
+    cfg_select! {
+        test => { func() }
 
-    if interrupts_enabled {
-        disable();
+        not(test) => {
+            let interrupts_enabled = is_enabled();
+
+            if interrupts_enabled {
+                disable();
+            }
+
+            let return_value = func();
+
+            if interrupts_enabled {
+                enable();
+            }
+
+            return_value
+        }
     }
-
-    let return_value = func();
-
-    if interrupts_enabled {
-        enable();
-    }
-
-    return_value
 }
 
 /// Indefinitely waits for the next interrupt on the current processor.
