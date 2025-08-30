@@ -1,5 +1,5 @@
 use crate::arch::x86_64::structures::{
-    gdt::{KCODE_SELECTOR, PrivilegeLevel, SegmentSelector},
+    gdt::{PrivilegeLevel, SegmentSelector, kcode_selector},
     tss::InterruptStackTableIndex,
 };
 use bit_field::BitField;
@@ -14,7 +14,7 @@ impl EntryBuilder {
     pub fn exception() -> Self {
         Self {
             handler_address: 0,
-            code_selector: *KCODE_SELECTOR.get().unwrap(),
+            code_selector: kcode_selector(),
             options: 0b0000_1111_0000_0000,
         }
     }
@@ -22,7 +22,7 @@ impl EntryBuilder {
     pub fn interrupt_service_routine() -> Self {
         Self {
             handler_address: 0,
-            code_selector: *KCODE_SELECTOR.get().unwrap(),
+            code_selector: kcode_selector(),
             options: 0b0000_1110_0000_0000,
         }
     }

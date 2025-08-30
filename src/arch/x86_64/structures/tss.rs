@@ -6,11 +6,9 @@ use core::{num::NonZero, ptr::NonNull};
 use num_enum::{FromPrimitive, IntoPrimitive};
 
 #[cfg(debug_assertions)]
-// Safety: Value is non-zero.
-const PAGES_PER_STACK_TABLE_STACK: NonZero<usize> = unsafe { NonZero::new_unchecked(16) };
+const PAGES_PER_STACK_TABLE_STACK: NonZero<usize> = NonZero::new(16).unwrap();
 #[cfg(not(debug_assertions))]
-// Safety: Value is non-zero.
-const PAGES_PER_STACK_TABLE_STACK: NonZero<usize> = unsafe { NonZero::new_unchecked(4) };
+const PAGES_PER_STACK_TABLE_STACK: NonZero<usize> = NonZero::new(4).unwrap();
 
 // Pre-defined indexes into the interrupt stack table (IST).
 #[repr(u16)]
@@ -58,7 +56,7 @@ impl TaskStateSegment {
         let mut tss = Self {
             privilege_stack_table: [None; _],
             interrupt_stack_table: [None; _],
-            iomap_base: size_of::<Self>() as u16,
+            iomap_base: u16::try_from(size_of::<Self>()).unwrap(),
             _1: [0u8; _],
             _2: [0u8; _],
             _3: [0u8; _],

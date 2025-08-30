@@ -4,21 +4,16 @@ use crate::arch::x86_64::structures::{
 use bit_field::BitField;
 use core::ops::Range;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
-use spin::Once;
 
-pub static KCODE_SELECTOR: Once<SegmentSelector> = Once::new();
-pub static KDATA_SELECTOR: Once<SegmentSelector> = Once::new();
-pub static UDATA_SELECTOR: Once<SegmentSelector> = Once::new();
-pub static UCODE_SELECTOR: Once<SegmentSelector> = Once::new();
-
-#[repr(C, align(0x8))]
-#[derive(Debug, Clone)]
-pub struct GlobalDescriptorTable {
-    table: [u64; 7],
-    len: u16,
+struct SegmentationData {
+    gdt: GlobalDescriptorTable,
+    kcode_selector: SegmentSelector,
+    kdata_selector: SegmentSelector,
+    ucode_selector: SegmentSelector,
+    udata_selector: SegmentSelector,
 }
 
-static GLOBAL_DESCRIPTOR_TABLE: spin::Lazy<GlobalDescriptorTable> = spin::Lazy::new(|| {
+static SEGMENTATION: spin::Lazy<SegmentationData> = spin::Lazy::new(|| {
     let mut gdt = GlobalDescriptorTable {
         table: [0; _],
 
@@ -37,43 +32,66 @@ static GLOBAL_DESCRIPTOR_TABLE: spin::Lazy<GlobalDescriptorTable> = spin::Lazy::
     let udata_selector = gdt.append_segment(GenericSegmentDescriptor::user_data());
     let ucode_selector = gdt.append_segment(GenericSegmentDescriptor::user_code());
 
-    KCODE_SELECTOR.call_once(|| kcode_selector);
-    KDATA_SELECTOR.call_once(|| kdata_selector);
-    UDATA_SELECTOR.call_once(|| udata_selector);
-    UCODE_SELECTOR.call_once(|| ucode_selector);
-
-    trace!("Segment descriptors loaded:");
-    trace!("Kernel code: {kcode_selector:?}");
-    trace!("Kernel data: {kdata_selector:?}");
-    trace!("User data: {udata_selector:?}");
-    trace!("User code: {ucode_selector:?}");
-
-    gdt
+    SegmentationData {
+        gdt,
+        kcode_selector,
+        kdata_selector,
+        ucode_selector,
+        udata_selector,
+    }
 });
+
+fn global_descriptor_table() -> &'static GlobalDescriptorTable {
+    &SEGMENTATION.gdt
+}
+
+pub fn kcode_selector() -> SegmentSelector {
+    SEGMENTATION.kcode_selector
+}
+
+pub fn kdata_selector() -> SegmentSelector {
+    SEGMENTATION.kdata_selector
+}
+
+pub fn ucode_selector() -> SegmentSelector {
+    SEGMENTATION.ucode_selector
+}
+
+pub fn udata_selector() -> SegmentSelector {
+    SEGMENTATION.udata_selector
+}
+
+#[repr(C, align(0x8))]
+#[derive(Debug, Clone)]
+pub struct GlobalDescriptorTable {
+    table: [u64; 7],
+    len: u16,
+}
 
 impl GlobalDescriptorTable {
     pub fn load_static() {
-        // Safety: The GDT is properly formed, and the descriptor table pointer is
-        //         set to the GDT's memory location, with the requisite limit set
-        //         correctly (size in bytes, less 1).
+        // Safety:
+        // The GDT is properly formed, and the descriptor table pointer is set to the
+        // GDT's memory location, with the requisite limit set correctly (size in bytes,
+        // less 1).
         unsafe {
-            GLOBAL_DESCRIPTOR_TABLE.load();
+            global_descriptor_table().load();
         }
 
-        let kcode_selector = *KCODE_SELECTOR.wait();
-        let kdata_selector = *KDATA_SELECTOR.wait();
+        let kcode_selector = kcode_selector();
+        let kdata_selector = kdata_selector();
 
         trace!("Jumping to the new code segment: {kcode_selector:?}");
-        // Safety: This is special since we cannot directly move to CS; x86 requires the
-        // instruction         pointer and CS to be set at the same time. To do
-        // this, we push the new segment selector         and return value onto
-        // the stack and use a "far return" (`retfq`) to reload CS and
-        //         continue at the end of our function.
+        // Safety:
+        // This is special since we cannot directly move to CS; x86 requires the
+        // instruction pointer and CS to be set at the same time. To do this, we push
+        // the new segment selector and return value onto the stack and use a "far
+        // return" (`retf`) to reload CS and continue at the end of our function.
         //
-        //         Note we cannot use a "far call" (`lcall`) or "far jmp" (`ljmp`) to do
-        // this because then we         would only be able to jump to 32-bit
-        // instruction pointers. Only Intel implements support         for
-        // 64-bit far calls/jumps in long-mode, AMD does not.
+        // Note we cannot use a "far call" (`lcall`) or "far jmp" (`ljmp`) to do this
+        // because then we would only be able to jump to 32-bit instruction pointers.
+        // Only Intel implements support for 64-bit far calls/jumps in long-mode, AMD
+        // does not.
         unsafe {
             core::arch::asm!(
                 "
@@ -90,22 +108,23 @@ impl GlobalDescriptorTable {
         }
 
         trace!("Clearing extant segment registers...");
-        // Safety: While setting the ES & DS segment registers to null is perfectly
-        // safe, setting         the FS & GS segment registers (on Intel only,
-        // not AMD) clears the respective         FS/GS base. Thus, it is
-        // imperative that this function not be run after the GS         base
-        // has been loaded with the CPU thread-local state structure pointer.
+        // Safety:
+        // While setting the `ES` & `DS` segment registers to null is perfectly safe,
+        // setting the `FS` & `GS` segment registers (on Intel only, not AMD) clears the
+        // respective `FS`/`GS` base. Thus, it is imperative that this function not be
+        // run after the `GS` base has been loaded with the CPU thread-local state
+        // structure pointer.
         unsafe {
             // Because this is x86, everything is complicated. It's important we load the
-            // extra data segment registers (FS/GS) with the null descriptors,
+            // extra data segment registers (`FS`/`GS`) with the null descriptors,
             // because if they don't point to a null descriptor, then when CPL
             // changes, the processor will clear the base and limit of the
             // relevant descriptor.
             //
-            // This has the fun behavioural side-effect of ALSO clearing the FS/GS _BASE
-            // MSRs, thus making any code involved in the CPL change context
+            // This has the fun behavioural side-effect of *also* clearing the `FS/GS _BASE`
+            // MSRs, thus making any code involved in the privilege level context change
             // unable to access thread-local or process-local state (when those
-            // MSRs are in use for the purpose).
+            // model-specific registers are in use for the purpose).
             core::arch::asm!(
                 "
                 mov ss, {selector:x}
@@ -171,14 +190,15 @@ impl GlobalDescriptorTable {
     }
 
     pub fn with_temporary<T>(func: impl FnOnce(&mut Self) -> T) -> T {
-        let mut temp_gdt = GLOBAL_DESCRIPTOR_TABLE.clone();
+        let static_gdt = global_descriptor_table();
+        let mut temp_gdt = static_gdt.clone();
 
         crate::interrupts::uninterruptable(|| {
             let value = func(&mut temp_gdt);
 
             // Safety: Loading the static GDT is always safe.
             unsafe {
-                GLOBAL_DESCRIPTOR_TABLE.load();
+                static_gdt.load();
             }
 
             value

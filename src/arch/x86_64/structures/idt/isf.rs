@@ -1,8 +1,8 @@
 use crate::arch::x86_64::{
     registers::ProcessorFlags,
     structures::gdt::{
-        KCODE_SELECTOR, KDATA_SELECTOR, PrivilegeLevel, SegmentSelector, UCODE_SELECTOR,
-        UDATA_SELECTOR,
+        PrivilegeLevel, SegmentSelector, kcode_selector, kdata_selector, ucode_selector,
+        udata_selector,
     },
 };
 use core::ptr::NonNull;
@@ -55,10 +55,10 @@ impl InterruptStackFrame {
     ) -> Self {
         Self::new(
             instruction_pointer,
-            *KCODE_SELECTOR.wait(),
+            kcode_selector(),
             ProcessorFlags::INTERRUPT_FLAG,
             stack_pointer,
-            *KDATA_SELECTOR.wait(),
+            kdata_selector(),
         )
     }
 
@@ -68,10 +68,10 @@ impl InterruptStackFrame {
     ) -> Self {
         Self::new(
             instruction_pointer,
-            *UCODE_SELECTOR.wait(),
+            ucode_selector(),
             ProcessorFlags::INTERRUPT_FLAG,
             stack_pointer,
-            *UDATA_SELECTOR.wait(),
+            udata_selector(),
         )
     }
 

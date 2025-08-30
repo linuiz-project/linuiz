@@ -1,10 +1,11 @@
 #![allow(unused_unsafe)]
 
 mod entry;
-
+#[allow(clippy::wildcard_imports)]
 use entry::*;
 
 mod stubs;
+#[allow(clippy::wildcard_imports)]
 use stubs::*;
 
 mod isf;
@@ -299,12 +300,12 @@ pub struct InterruptDescriptorTable {
     /// - The memory access fails the paging-protection checks (user/supervisor,
     ///   read/write, or both).
     /// - A reserved bit in one of the page-translation-table entries is set to
-    ///   1. A `#PF` occurs for this reason only when `CR4.PSE=1` or
+    ///   `1`. A `#PF` occurs for this reason only when `CR4.PSE=1` or
     ///   `CR4.PAE=1`.
     ///
     /// The virtual (linear) address that caused the `#PF` is stored in the
-    /// `CR2` register. The saved instruction pointer points to the
-    /// instruction that caused the `#PF`.
+    /// `CR2` register. The saved instruction pointer points to the instruction
+    /// that caused the `#PF`.
     ///
     /// The page-fault error code is described by the
     /// [`PageFaultErrorCode`](struct.PageFaultErrorCode.html) struct.

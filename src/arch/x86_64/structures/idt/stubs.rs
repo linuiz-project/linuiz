@@ -170,14 +170,14 @@ extern "sysv64" fn __irq_handler(
     isf: &mut InterruptStackFrame,
     regs: &mut Registers,
 ) {
-    match Vector::from(irq_number) {
-        Vector::Timer => {
+    match Vector::try_from(irq_number) {
+        Ok(Vector::Timer) => {
             LocalState::with_scheduler(|scheduler| {
                 scheduler.interrupt_task(isf, regs);
             });
         }
 
-        Vector::Syscall => {
+        Ok(Vector::Syscall) => {
             let result = crate::interrupts::syscall::process(
                 regs.rsi, regs.rdi, regs.rax, regs.rcx, regs.rdx, isf, regs,
             );

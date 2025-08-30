@@ -54,7 +54,8 @@ bitflags! {
 pub struct SelectorErrorCode(u64);
 
 impl SelectorErrorCode {
-    /// Create a [`SelectorErrorCode`]`. Returns [`None`]` if any reserved bits (16-64) are set.
+    /// Create a [`SelectorErrorCode`]`. Returns [`None`]` if any reserved bits
+    /// (16-64) are set.
     pub const fn new(flags: u64) -> Option<Self> {
         if (flags & 0xFFFF_FFFF_FFFF_0000) == 0 {
             Some(Self(flags))
@@ -84,7 +85,8 @@ impl SelectorErrorCode {
         self.0.get_bits(3..16).try_into().unwrap()
     }
 
-    /// If true, the #SS or #GP has returned zero as opposed to a [`DescriptorTableErrorCode`].
+    /// If true, the #SS or #GP has returned zero as opposed to a
+    /// [`DescriptorTableErrorCode`].
     pub const fn is_null(self) -> bool {
         self.0 == 0
     }
@@ -104,6 +106,7 @@ impl core::fmt::Debug for SelectorErrorCode {
 ///
 /// Used by the [`SelectorErrorCode`] to indicate which table caused the error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum DescriptorTableKind {
     /// Global Descriptor Table.
     GDT,
