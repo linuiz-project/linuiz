@@ -51,7 +51,7 @@ impl Entry {
                     }
                 }
 
-                _ => { todo!() }
+                _ => { unimplemented!() }
             }
         });
 
@@ -100,7 +100,7 @@ impl Entry {
                 self.0.get_bit(Self::VALID_BIT_INDEX)
             }
 
-            _ => { todo!() }
+            _ => { unimplemented!() }
         }
     }
 
@@ -120,7 +120,7 @@ impl Entry {
                 self.0.set_bit(Self::VALID_BIT_INDEX, enabled);
             }
 
-            _ => { todo!() }
+            _ => { unimplemented!() }
         }
     }
 
@@ -140,7 +140,7 @@ impl Entry {
                 self.0.get_bit(Self::GLOBAL_BIT_INDEX)
             }
 
-            _ => { todo!() }
+            _ => { unimplemented!() }
         }
     }
 
@@ -158,7 +158,7 @@ impl Entry {
                 self.0.set_bit(Self::GLOBAL_BIT_INDEX, global);
             }
 
-            _ => { todo!() }
+            _ => { unimplemented!() }
         }
     }
 
@@ -167,7 +167,7 @@ impl Entry {
             target_arch = "x86_64" => { self.0.get_bit(Self::USER_BIT_INDEX) }
             target_arch = "riscv64" => { self.0.get_bit(Self::USER_BIT_INDEX) }
 
-            _ => { todo!() }
+            _ => { unimplemented!() }
         }
     }
 
@@ -181,7 +181,7 @@ impl Entry {
                 self.0.set_bit(Self::USER_BIT_INDEX, user_accessible);
             }
 
-            _ => { todo!() }
+            _ => { unimplemented!() }
         }
     }
 
@@ -192,7 +192,7 @@ impl Entry {
                 self.0.get_bit(Self::HUGE_BIT_INDEX)
             }
 
-            _ => { todo!() }
+            _ => { unimplemented!() }
         }
     }
 
@@ -203,7 +203,7 @@ impl Entry {
                 self.0.set_bit(Self::HUGE_BIT_INDEX, huge_page);
             }
 
-            _ => { todo!() }
+            _ => { unimplemented!() }
         }
     }
 
@@ -236,7 +236,7 @@ impl Entry {
                 }
             }
 
-            _ => { todo!() }
+            _ => { unimplemented!() }
         }
     }
 
@@ -267,7 +267,7 @@ impl Entry {
                 }
             }
 
-            _ => { todo!() }
+            _ => { unimplemented!() }
         }
     }
 }
@@ -296,8 +296,8 @@ impl core::fmt::Debug for Entry {
 
         debug_struct
             .field("Global", &self.is_global())
-            .field("Permissions", &self.get_permissions())
-            .field("User Accessible", &self.is_user())
+            .field("Access", &self.get_permissions())
+            .field("User", &self.is_user())
             .finish()
     }
 }

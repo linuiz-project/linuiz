@@ -92,7 +92,7 @@ impl LocalState {
                 }
             }
 
-            _ => { todo!() }
+            _ => { unimplemented!() }
         }
 
         debug!("Local state has been initialized.");

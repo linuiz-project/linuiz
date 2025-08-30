@@ -22,43 +22,47 @@ pub enum Vector {
 
 /// Enables interrupts for the current processor.
 pub fn enable() {
-    #[cfg(target_arch = "x86_64")]
-    crate::arch::x86_64::instructions::__sti();
+    cfg_select! {
+        target_arch = "x86_64" => {
+            crate::arch::x86_64::instructions::__sti();
+        }
 
-    #[cfg(not(any(target_arch = "x86_64")))]
-    unimplemented!();
+        _ => { unimplemented!() }
+    }
 }
 
 /// Disables interrupts for the current processor.
 pub fn disable() {
-    #[cfg(target_arch = "x86_64")]
-    crate::arch::x86_64::instructions::__cli();
+    cfg_select! {
+        target_arch = "x86_64" => {
+            crate::arch::x86_64::instructions::__cli();
+        }
 
-    #[cfg(not(any(target_arch = "x86_64")))]
-    unimplemented!();
+        _ => { unimplemented!() }
+    }
 }
 
 /// Whether or not interrupts are enabled for the current processor.
 pub fn is_enabled() -> bool {
-    #[cfg(target_arch = "x86_64")]
-    {
-        crate::arch::x86_64::registers::ProcessorFlags::read()
-            .contains(crate::arch::x86_64::registers::ProcessorFlags::INTERRUPT_FLAG)
-    }
+    cfg_select! {
+        target_arch = "x86_64" => {
+            crate::arch::x86_64::registers::ProcessorFlags::read()
+                .contains(crate::arch::x86_64::registers::ProcessorFlags::INTERRUPT_FLAG)
+        }
 
-    #[cfg(not(any(target_arch = "x86_64")))]
-    {
-        unimplemented!()
+        _ => { unimplemented!() }
     }
 }
 
 /// Waits for the next interrupt on the current processor.
 pub fn wait_next() {
-    #[cfg(target_arch = "x86_64")]
-    crate::arch::x86_64::instructions::__hlt();
+    cfg_select! {
+        target_arch = "x86_64" => {
+            crate::arch::x86_64::instructions::__hlt();
+        }
 
-    #[cfg(not(any(target_arch = "x86_64")))]
-    unimplemented!();
+        _ => { unimplemented!() }
+    }
 }
 
 /// Disables interrupts if they were enabled, executes `func`, then re-enables

@@ -38,7 +38,7 @@ pub mod prng {
                     (generate_random(), generate_random())
                 }
 
-                _ => { todo!() }
+                _ => { unimplemented!() }
             }
         };
 

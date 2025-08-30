@@ -28,7 +28,7 @@ pub fn use_large_pages() -> bool {
             true
         }
 
-        _ => { todo!() }
+        _ => { unimplemented!() }
     }
 }
 
@@ -40,7 +40,7 @@ pub fn use_huge_pages() -> bool {
                 .is_some_and(|cpuid| cpuid.has_1gib_pages())
         }
 
-        _ => { todo!() }
+        _ => { unimplemented!() }
     }
 }
 
@@ -362,7 +362,7 @@ impl Mapper {
                    );
                }
 
-                _ => { todo!() }
+                _ => { unimplemented!() }
             }
         }
     }
@@ -391,7 +391,7 @@ impl Mapper {
         //                         entry.is_huge() || current_depth ==
         // Depth::max()                     }
 
-        //                     _ => { todo!() }
+        //                     _ => { unimplemented!() }
         //                 }
         //             };
 

@@ -114,6 +114,7 @@ pub fn run(sh: &xshell::Shell, options: Options) -> Result<()> {
         "stdio,id=char0,logfile=.debug/kernel.log,signal=off",
     ])
     .args(["-serial", "chardev:char0"])
+    .args(["-debugcon", "file:.debug/debug.log"])
     .args(["-drive", "format=raw,file=run/disk0.img,id=disk1,if=none"])
     .args(["-net", "none"])
     .args(["-M", "smm=off"])

@@ -6,7 +6,7 @@ impl AddressSpaceId {
     const MAX: usize = {
         cfg_select! {
             target_arch = "x86_64" => { 0b1111_1111_1111 }
-            _ => { todo!() }
+            _ => { unimplemented!() }
         }
     };
 

@@ -6,7 +6,7 @@ use core::{
 };
 
 /// A [spin lock](https://en.m.wikipedia.org/wiki/Spinlock) providing mutually exclusive access to data.
-pub struct Mutex<T> {
+pub struct Mutex<T: ?Sized> {
     lock: Atomic<bool>,
     data: UnsafeCell<T>,
 }
@@ -38,7 +38,9 @@ impl<T> Mutex<T> {
             data: UnsafeCell::new(data),
         }
     }
+}
 
+impl<T: ?Sized> Mutex<T> {
     fn data_ptr(&self) -> NonNull<T> {
         let ptr = self.data.get();
         // Safety: `ptr` comes from an occupied `UnsafeCell<T>`.

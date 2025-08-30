@@ -579,12 +579,14 @@ impl LocalApic {
         Self::set_spurious_vector(Vector::Spurious);
 
         // TODO Set up the IO APIC so we can correctly configure these.
-        // trace!("Configuring the external 0 interrupt...");
-        // LocalVector::<LINT0>::set_vector(Vector::External);
-        // LocalVector::<LINT0>::set_masked(false);
-        // trace!("Configuring the external 1 interrupt...");
-        // LocalVector::<LINT1>::set_vector(Vector::External);
-        // LocalVector::<LINT1>::set_masked(false);
+        trace!("Configuring the external 0 interrupt...");
+        Self::lvt_lint0()
+            .set_vector(Vector::External)
+            .set_masked(false);
+        trace!("Configuring the external 1 interrupt...");
+        Self::lvt_lint1()
+            .set_vector(Vector::External)
+            .set_masked(false);
 
         trace!("Configuring the error interrupt...");
         Self::lvt_error()

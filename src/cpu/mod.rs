@@ -10,7 +10,7 @@ pub fn get_id() -> CoreId {
             crate::arch::x86_64::get_processor_id()
         }
 
-        _ => { todo!() }
+        _ => { unimplemented!() }
     }
 }
 
@@ -28,7 +28,7 @@ pub unsafe fn configure() {
             }
         }
 
-        _ => { todo!() }
+        _ => { unimplemented!() }
     }
 }
 

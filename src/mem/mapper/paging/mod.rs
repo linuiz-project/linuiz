@@ -309,6 +309,6 @@ fn is_intermediate_entry(entry: &Entry) -> bool {
     cfg_select! {
         target_arch = "x86_64" => { !entry.is_huge() }
 
-        _ => { todo!() }
+        _ => { unimplemented!() }
     }
 }
