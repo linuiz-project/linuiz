@@ -111,7 +111,7 @@ pub fn run(sh: &xshell::Shell, options: Options) -> Result<()> {
     .arg("-no-reboot")
     .args([
         "-chardev",
-        "stdio,id=char0,logfile=.debug/kernel.log,signal=off",
+        "stdio,id=char0,logfile=.debug/serial.log,signal=off",
     ])
     .args(["-serial", "chardev:char0"])
     .args(["-debugcon", "file:.debug/debug.log"])
