@@ -47,7 +47,7 @@ jobs:
         run: cargo clippy -- -A clippy::todo -D warnings
       
       - name: Check Build Status
-        run: cargo xtask build -t x86_64
+        run: cargo xtask build -t x86_64 --github-actions
 
       - name: Run Miri Tests
         run: cargo miri test

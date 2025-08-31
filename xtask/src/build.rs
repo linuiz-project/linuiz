@@ -46,6 +46,11 @@ pub struct Options {
     /// Whether to produce a disassembly of the kernel.
     #[arg(short = 'y', long)]
     disassemble: bool,
+
+    /// Optimizes the build for use in GitHub Actions. This will for example
+    /// ignore flags like `--disassemble`.
+    #[arg(long)]
+    github_actions: bool,
 }
 
 pub fn build(sh: &Shell, options: Options) -> Result<()> {
@@ -58,6 +63,12 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
         },
     );
 
+    build_kernel(sh, &options)?;
+
+    if options.github_actions {
+        return Ok(());
+    }
+
     let root_dir = sh.current_dir();
     let kernel_src_path = root_dir.join(format!(
         "target/{}/{}/kernel",
@@ -68,8 +79,6 @@ pub fn build(sh: &Shell, options: Options) -> Result<()> {
 
     let kernel_src_path = kernel_src_path.as_path();
     let kernel_dst_dir = kernel_dst_dir.as_path();
-
-    build_kernel(sh, &options)?;
 
     if !sh.path_exists(kernel_dst_dir) {
         sh.create_dir(kernel_dst_dir)?;
@@ -99,9 +108,7 @@ fn build_kernel(sh: &Shell, options: &Options) -> Result<()> {
     let mut build_cmd = cmd!(sh, "cargo build")
         .arg("--future-incompat-report")
         .args(["--target", target_triple])
-        .args(["-Z", "unstable-options"])
-        .args(["-Z", "build-std=core,compiler_builtins"])
-        .args(["-Z", "build-std-features=compiler-builtins-mem"]);
+        .args(["-Z", "unstable-options"]);
 
     if options.release {
         build_cmd = build_cmd.arg("--release");
