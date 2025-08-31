@@ -43,6 +43,7 @@
     clippy::perf,
     unsafe_op_in_unsafe_fn
 )]
+#![cfg_attr(debug_assertions, allow(clippy::todo))]
 #![allow(
     clippy::cargo_common_metadata,
     clippy::enum_glob_use,
