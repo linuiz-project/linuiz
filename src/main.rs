@@ -36,7 +36,6 @@
 #![warn(
     clippy::as_conversions,
     clippy::pedantic,
-    clippy::todo,
     clippy::undocumented_unsafe_blocks,
     clippy::semicolon_inside_block,
     clippy::semicolon_if_nothing_returned,
