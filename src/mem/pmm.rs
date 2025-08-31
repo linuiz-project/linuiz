@@ -45,6 +45,8 @@ impl<'a: 'static> PhysicalMemoryManager<'a> {
     /// bootloader memory map request.
     pub fn init(memory_map_request: &limine::request::MemoryMapRequest) {
         PHYSICAL_MEMORY_MANAGER.call_once(|| {
+            trace!("Beginning Physical Memory Manager initialization...");
+
             let memory_map = memory_map_request
                 .get_response()
                 .expect("bootloader did not provide a response to the memory map request")

@@ -4,6 +4,7 @@
     allocator_api,
     array_repeat,
     array_windows,
+    ascii_char,
     breakpoint,
     cfg_select,
     core_intrinsics,
@@ -51,6 +52,7 @@
     clippy::missing_const_for_fn,
     clippy::needless_for_each,
     clippy::if_not_else,
+    clippy::similar_names,
     dead_code,
     mismatched_lifetime_syntaxes,
     internal_features
@@ -178,7 +180,7 @@ unsafe extern "C" fn _entry() -> ! {
         crate::panic::tracing::symbols::KernelSymbols::init(&KERNEL_FILE_REQUEST);
     }
 
-    // crate::acpi::init_tables(&RSDP_REQUEST);
+    crate::acpi::init_tables(&RSDP_REQUEST);
 
     crate::mem::pmm::PhysicalMemoryManager::init(&MEMORY_MAP_REQUEST);
     crate::mem::KernelMapper::init(
@@ -190,8 +192,6 @@ unsafe extern "C" fn _entry() -> ! {
     unsafe {
         crate::mem::KernelMapper::swap_into();
     }
-
-    crate::time::KernelStopwatch::init(&RSDP_REQUEST);
 
     // Safety: We've reached the end of the kernel init phase.
     unsafe { crate::cpu::start(Some(&MP_REQUEST), Some(&MEMORY_MAP_REQUEST)) }

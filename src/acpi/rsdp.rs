@@ -1,9 +1,19 @@
-use crate::acpi::Signature;
-use core::{intrinsics::unaligned_volatile_load, num::NonZero, ptr::NonNull};
+use crate::{
+    acpi::rsdt::{self, Rsdt},
+    mem::HigherHalfDirectMap,
+    util::AsciiStr,
+};
+use core::{num::NonZero, ptr::NonNull};
 
-pub struct RootSystemDescriptorPointer(NonNull<u8>);
+#[derive(Debug)]
+pub enum RsdtVariant {
+    Rsdt(Rsdt<rsdt::Standard>),
+    Xsdt(Rsdt<rsdt::Extended>),
+}
 
-impl RootSystemDescriptorPointer {
+pub struct Rsdp(NonNull<u8>);
+
+impl Rsdp {
     pub unsafe fn from_address(address: usize) -> Self {
         let address = NonZero::<usize>::try_from(address).unwrap();
         Self(NonNull::<u8>::with_exposed_provenance(address))
@@ -15,7 +25,13 @@ impl RootSystemDescriptorPointer {
     ///   in memory) to a structure of `T` in memory.
     pub unsafe fn get_field_as<T>(&self, offset: usize) -> T {
         // Safety: Caller is required to maintain safety invariants.
-        unsafe { unaligned_volatile_load(self.0.byte_add(offset).cast::<T>().as_ptr()) }
+        unsafe {
+            self.0
+                .byte_add(offset)
+                .cast::<T>()
+                .as_ptr()
+                .read_unaligned()
+        }
     }
 
     pub fn get_revision(&self) -> u8 {
@@ -54,50 +70,49 @@ impl RootSystemDescriptorPointer {
         checksum == 0
     }
 
-    pub fn get_signature(&self) -> Signature<8> {
-        // Safety:
-        // - `signature` is an 8-byte field at the start of pointer.
-        // - `Signature` is `#[repr(transparent)]` over an array of `N` bytes.
-        unsafe { self.get_field_as::<Signature<8>>(0) }
+    pub fn get_signature(&self) -> AsciiStr<8> {
+        let bytes = unsafe { self.get_field_as::<[u8; 8]>(0) };
+        AsciiStr::new_lossy(bytes)
     }
 
-    pub fn get_oem_id(&self) -> Signature<6> {
-        // Safety:
-        // - `signature` is an 8-byte field at the start of pointer.
-        // - `Signature` is `#[repr(transparent)]` over an array of `N` bytes.
-        unsafe { self.get_field_as::<Signature<6>>(9) }
+    pub fn get_oem_id(&self) -> AsciiStr<6> {
+        let bytes = unsafe { self.get_field_as::<[u8; 6]>(9) };
+        AsciiStr::new_lossy(bytes)
     }
 
-    pub fn get_rsdt_address(&self) -> Option<NonNull<u8>> {
-        let address = {
-            if self.is_v2() {
-                // Safety:
-                // When the ACPI revision is ≥2.0, the address field is a 64-bit zero-based
-                // memory offset at byte 24 of the root system descriptor pointer structure.
-                let address = unsafe { self.get_field_as::<u64>(24) };
-                usize::try_from(address).unwrap()
-            } else {
-                // Safety:
-                // When the ACPI revision is <2.0, the address field is a 32-bit zero-based
-                // memory offset at byte 16 of the root system descriptor pointer structure.
-                let address = unsafe { self.get_field_as::<u32>(16) };
-                usize::try_from(address).unwrap()
-            }
-        };
+    pub fn get_rsdt(&self) -> RsdtVariant {
+        if self.is_v2() {
+            // Safety:
+            // When the ACPI revision is ≥2.0, the address field is a 64-bit zero-based
+            // memory offset at byte 24 of the root system descriptor pointer structure.
+            let address = unsafe { self.get_field_as::<u64>(24) };
+            let address = usize::try_from(address).unwrap();
+            let address = HigherHalfDirectMap::offset(address);
+            let ptr = NonNull::<u8>::with_exposed_provenance(address);
+            let xsdt = unsafe { Rsdt::<rsdt::Extended>::new(ptr) };
 
-        NonZero::<usize>::try_from(address)
-            .map(NonNull::with_exposed_provenance)
-            .ok()
+            RsdtVariant::Xsdt(xsdt)
+        } else {
+            // Safety:
+            // When the ACPI revision is <2.0, the address field is a 32-bit zero-based
+            // memory offset at byte 16 of the root system descriptor pointer structure.
+            let address = unsafe { self.get_field_as::<u32>(16) };
+            let address = usize::try_from(address).unwrap();
+            let address = HigherHalfDirectMap::offset(address);
+            let ptr = NonNull::<u8>::with_exposed_provenance(address);
+            let rsdt = unsafe { Rsdt::<rsdt::Standard>::new(ptr) };
+
+            RsdtVariant::Rsdt(rsdt)
+        }
     }
 }
 
-impl core::fmt::Debug for RootSystemDescriptorPointer {
+impl core::fmt::Debug for Rsdp {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Root System Descriptor Pointer")
             .field("Revision", &self.get_revision())
             .field("Signature", &self.get_signature())
             .field("OEM ID", &self.get_oem_id())
-            .field("RSDT Address", &self.get_rsdt_address())
             .finish()
     }
 }
