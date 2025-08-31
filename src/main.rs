@@ -41,7 +41,8 @@
     clippy::semicolon_if_nothing_returned,
     clippy::unreadable_literal,
     clippy::perf,
-    unsafe_op_in_unsafe_fn
+    unsafe_op_in_unsafe_fn,
+    unused_crate_dependencies
 )]
 #![cfg_attr(debug_assertions, allow(clippy::todo))]
 #![allow(
