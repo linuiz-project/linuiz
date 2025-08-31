@@ -1,14 +1,89 @@
-[workspace]
-resolver = "3"
-exclude = ["src/userspace/nvme", "src/userspace/test_driver", "xtask"]
-members = ["src/kernel"]
+[package]
+name = "kernel"
+version = "0.3.0"
+edition = "2024"
+exclude = ["xtask"]
+
+[features]
+default = ["panic_traces"]
+panic_traces = ["dep:rustc-demangle"]
+buffered_uart = []
+
+[dependencies]
+bit_field = "0.10"
+bitflags = "2.9"
+elf = { version = "0.8.0", default-features = false }
+getrandom = "0.3"
+heapless = { version = "0.9", default-features = false, features = [
+    "nightly",
+    "mpmc_large",
+] }
+ioports = "1.0"
+limine = { version = "0.5", features = ["uuid"] }
+log = { version = "0.4", default-features = false }
+num_enum = { version = "0.7", default-features = false }
+rand_pcg = { version = "0.9", default-features = false }
+safe-mmio = "0.2"
+static_assertions = "1.1.0"
+thiserror = { version = "2.0", default-features = false }
+uart = { version = "3.0", default-features = false, features = [
+    "address_impl",
+] }
+uuid = { version = "1.16", default-features = false, features = ["v4"] }
+
+# source: git
+# acpica = { git = "https://github.com/linuiz-project/acpica", tag = "v0.1.1" }
+bitmap = { git = "https://github.com/linuiz-project/bitmap", tag = "v0.3.0" }
+libsys = { git = "https://github.com/linuiz-project/libsys", tag = "v0.3.4" }
+
+# feature-specific
+rustc-demangle = { version = "0.1", optional = true } # feature: panic_traces
+
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+raw-cpuid = "11.0"
 
 [profile.dev]
 panic = "abort"
+opt-level = 0
 
 [profile.release]
 panic = "abort"
 lto = true
 opt-level = 2
-[profile.release.package.kernel]
 codegen-units = 1
+
+[lints.rust]
+dead_code = "allow"
+mismatched_lifetime_syntaxes = "allow"
+internal_features = "allow"
+unsafe_op_in_unsafe_fn = "warn"
+stable_features = "deny"
+
+[lints.clippy]
+# allow
+cargo_common_metadata = "allow"
+enum_glob_use = "allow"
+inline_always = "allow"
+items_after_statements = "allow"
+must_use_candidate = "allow"
+missing_const_for_fn = "allow"
+needless_for_each = "allow"
+if_not_else = "allow"
+
+# warn
+pedantic = { level = "warn", priority = 1 }
+todo = "warn"
+undocumented_unsafe_blocks = "warn"
+semicolon_inside_block = "warn"
+semicolon_if_nothing_returned = "warn"
+unreadable_literal = "warn"
+
+# deny
+debug_assert_with_mut_call = "deny"
+disallowed_types = "deny"
+float_arithmetic = "deny"
+as_conversions = "deny"
+
+# forbid
+duplicated_attributes = "forbid"
+inline_asm_x86_att_syntax = "forbid"

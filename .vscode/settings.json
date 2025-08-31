@@ -1,7 +1,16 @@
 {
     "git.enableCommitSigning": true,
     "[rust]": {
+        "editor.rulers": [
+            80,
+            100
+        ],
         "editor.defaultFormatter": "rust-lang.rust-analyzer"
+    },
+    "[nasm]": {
+        "editor.rulers": [
+            60
+        ]
     },
     "rust-analyzer.showUnlinkedFileNotification": false,
     "rust-analyzer.linkedProjects": [
@@ -9,5 +18,4 @@
         "xtask/Cargo.toml"
     ],
     "rust-analyzer.cargo.allTargets": false,
-    "rust-analyzer.check.allTargets": false,
 }

@@ -1,5 +1,4 @@
 use anyhow::Result;
-use std::{env::set_var, fs::File, path::Path};
 use xshell::Shell;
 
 /// Possible target platforms to compile for.
@@ -8,7 +7,7 @@ use xshell::Shell;
 #[value(rename_all = "snake_case")]
 pub enum Target {
     x86_64,
-    riscv64gc,
+    riscv64,
     aarch64,
 }
 
@@ -16,7 +15,7 @@ impl Target {
     pub const fn as_triple(&self) -> &'static str {
         match self {
             Target::x86_64 => "x86_64-unknown-none",
-            Target::riscv64gc => unimplemented!(),
+            Target::riscv64 => "riscv64gc-unknown-none",
             Target::aarch64 => unimplemented!(),
         }
     }
@@ -43,79 +42,93 @@ pub struct Options {
 
     #[arg(long)]
     drivers: Vec<String>,
+
+    /// Whether to produce a disassembly of the kernel.
+    #[arg(short = 'y', long)]
+    disassemble: bool,
+
+    /// Optimizes the build for use in GitHub Actions. This will for example
+    /// ignore flags like `--disassemble`.
+    #[arg(long)]
+    github_actions: bool,
 }
 
-pub fn build(sh: &Shell, temp_dir: impl AsRef<Path>, options: Options) -> Result<()> {
-    cmd!(sh, "cargo fmt --check").run()?;
-    cmd!(sh, "cargo sort --workspace --grouped --check").run()?;
+pub fn build(sh: &Shell, options: Options) -> Result<()> {
+    let _cargo_log = sh.push_env(
+        "CARGO_LOG",
+        if options.fingerprint {
+            "cargo::core::compiler::fingerprint=info"
+        } else {
+            ""
+        },
+    );
 
-    // Safety: Single-threaded.
-    unsafe {
-        set_var("LINUIZ_OUT_DIR", temp_dir.as_ref().as_os_str());
-    }
+    build_kernel(sh, &options)?;
 
-    if options.fingerprint {
-        // Safety: Single-threaded.
-        unsafe {
-            set_var("CARGO_LOG", "cargo::core::compiler::fingerprint=info");
-        }
+    if options.github_actions {
+        return Ok(());
     }
 
     let root_dir = sh.current_dir();
+    let kernel_src_path = root_dir.join(format!(
+        "target/{}/{}/kernel",
+        options.target.as_triple(),
+        if options.release { "release" } else { "debug" }
+    ));
+    let kernel_dst_dir = root_dir.join("run/system/linuiz/");
+
+    let kernel_src_path = kernel_src_path.as_path();
+    let kernel_dst_dir = kernel_dst_dir.as_path();
+
+    if !sh.path_exists(kernel_dst_dir) {
+        sh.create_dir(kernel_dst_dir)?;
+    }
+
+    // Copy the kernel binary to the virtual HDD.
+    sh.copy_file(kernel_src_path, kernel_dst_dir)?;
+
+    if options.disassemble {
+        let disassembly_output = cmd!(
+            sh,
+            "objdump --disassemble-all --demangle=rust -M intel {kernel_dst_dir}/kernel"
+        )
+        .output()?;
+        sh.write_file(
+            root_dir.join(".debug/kernel.dump"),
+            disassembly_output.stdout.as_slice(),
+        )?;
+    }
+
+    Ok(())
+}
+
+fn build_kernel(sh: &Shell, options: &Options) -> Result<()> {
+    let target_triple = options.target.as_triple();
 
     let mut build_cmd = cmd!(sh, "cargo build")
-        .arg("--target")
-        .arg(options.target.as_triple())
-        .arg("--artifact-dir")
-        .arg(temp_dir.as_ref().as_os_str())
-        .arg("-Z")
-        .arg("unstable-options");
+        .arg("--future-incompat-report")
+        .args(["--target", target_triple])
+        .args(["-Z", "unstable-options"]);
 
     if options.release {
         build_cmd = build_cmd.arg("--release");
-    } else {
-        // Only provide future-compatibiltiy notifications for development builds.
-        build_cmd = build_cmd.arg("--future-incompat-report")
     }
 
     if options.verbose {
         build_cmd = build_cmd.arg("-vv")
     }
 
-    build_cmd.run()?;
-
-    if !sh.path_exists("run/system/linuiz") {
-        sh.create_dir("run/system/linuiz")?;
-    }
-
-    // Copy the kernel binary to the virtual HDD.
-    sh.copy_file(
-        temp_dir.as_ref().join("kernel"),
-        root_dir.join("run/system/linuiz/kernel"),
-    )?;
-
-    // compress userspace drivers and write to archive file
-    let mut archive_builder = tar::Builder::new(
-        File::create(root_dir.join("run/system/linuiz/drivers"))
-            .expect("failed to create or open the driver package file"),
+    let _rustflags = sh.push_env(
+        "RUSTFLAGS",
+        format!(
+            "--cfg=getrandom_backend=\"custom\" \
+            -C link-arg=-Tbuild/{target_triple}.lds \
+            -C link-arg=build/{target_triple}.a \
+            -C link-arg=-zmax-page-size=0x200000",
+        ),
     );
 
-    sh.read_dir(temp_dir.as_ref())?
-        .into_iter()
-        .filter(|p| {
-            p.file_name()
-                .map(std::ffi::OsStr::to_string_lossy)
-                .filter(|driver_name| options.drivers.iter().any(|s| s.eq(driver_name)))
-                .is_some()
-        })
-        .try_for_each(|path| {
-            println!("Packaging driver: {:?}", path.file_name().unwrap());
-
-            let rel_path = path.strip_prefix(temp_dir.as_ref()).unwrap();
-            archive_builder.append_file(rel_path, &mut File::open(&path)?)
-        })?;
-
-    archive_builder.finish()?;
+    build_cmd.run()?;
 
     Ok(())
 }

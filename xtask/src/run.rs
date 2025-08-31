@@ -1,5 +1,4 @@
 use anyhow::Result;
-use std::path::Path;
 
 #[derive(Debug, ValueEnum, Clone, Copy, PartialEq, Eq)]
 pub enum Cpu {
@@ -23,10 +22,6 @@ pub struct Options {
     #[arg(long, default_value = "qemu64")]
     cpu: Cpu,
 
-    /// Emulation accelerator to use.
-    #[arg(long, default_value = "false")]
-    disable_kvm: bool,
-
     /// Number of CPUs to emulate.
     #[arg(long, default_value = "4")]
     smp: usize,
@@ -35,9 +30,13 @@ pub struct Options {
     #[arg(long, default_value = "512")]
     ram: usize,
 
-    /// Enables debug logging.
-    #[arg(long)]
-    log: bool,
+    /// Enables debug logging for the specified components.
+    #[arg(short, long, default_value = "")]
+    debug: String,
+
+    /// Enables debug logging for the specified components.
+    #[arg(long, default_value = "")]
+    trace: String,
 
     /// Which type of block driver to use for root drive.
     #[arg(long, default_value = "virtio")]
@@ -47,25 +46,29 @@ pub struct Options {
     #[arg(long)]
     nobuild: bool,
 
-    /// Runs the kernel in serial-only mode (no graphics driving).
-    #[arg(long)]
-    nographic: bool,
+    /// If disabled, runs the kernel in serial-only mode (no graphics).
+    #[arg(short, long)]
+    graphic: bool,
 
     #[clap(flatten)]
     build_options: crate::build::Options,
 
-    /// Skips execution and only prints the QEMU command that would have been executed.
+    /// Skips execution and only prints the QEMU command that would have been
+    /// executed.
     #[arg(short, long)]
     norun: bool,
 
-    /// Puts QEMU in GDB debug mode, awaiting signal from the debugger to begin execution.
-    #[arg(short, long)]
+    /// Puts QEMU in GDB debug mode, awaiting signal from the debugger to begin
+    /// execution.
+    #[arg(short = 's', long)]
     gdb: bool,
 }
 
-pub fn run(sh: &xshell::Shell, temp_dir: impl AsRef<Path>, options: Options) -> Result<()> {
+pub fn run(sh: &xshell::Shell, options: Options) -> Result<()> {
+    let temp_dir = sh.create_temp_dir()?;
+
     if !options.nobuild {
-        crate::build::build(sh, temp_dir.as_ref(), options.build_options)?;
+        crate::build::build(sh, options.build_options)?;
     }
 
     // Ensure there's a debug directory for logs or the like.
@@ -83,7 +86,7 @@ pub fn run(sh: &xshell::Shell, temp_dir: impl AsRef<Path>, options: Options) -> 
             Cpu::Host | Cpu::Max | Cpu::Qemu64 => {
                 // Create a temporary copy of the OVMF vars firmware to avoid overwriting
                 // the fresh copy that's saved to the repository.
-                let ovmf_vars_fd_copy = temp_dir.as_ref().join("vars.fd");
+                let ovmf_vars_fd_copy = temp_dir.path().join("vars.fd");
                 sh.copy_file("run/ovmf/x86_64/vars.fd", &ovmf_vars_fd_copy)?;
 
                 cmd!(sh, "qemu-system-x86_64")
@@ -106,8 +109,12 @@ pub fn run(sh: &xshell::Shell, temp_dir: impl AsRef<Path>, options: Options) -> 
     }
     .arg("-no-shutdown")
     .arg("-no-reboot")
+    .args([
+        "-chardev",
+        "stdio,id=char0,logfile=.debug/serial.log,signal=off",
+    ])
+    .args(["-serial", "chardev:char0"])
     .args(["-debugcon", "file:.debug/debug.log"])
-    .args(["-serial", "stdio"])
     .args(["-drive", "format=raw,file=run/disk0.img,id=disk1,if=none"])
     .args(["-net", "none"])
     .args(["-M", "smm=off"])
@@ -131,22 +138,26 @@ pub fn run(sh: &xshell::Shell, temp_dir: impl AsRef<Path>, options: Options) -> 
         },
     ]);
 
-    if !options.disable_kvm {
+    if !options.debug.is_empty() {
+        run_cmd = run_cmd
+            .args(["-D", ".debug/qemu.log"])
+            .args(["-d", options.debug.as_str()]);
+    }
+
+    if !options.trace.is_empty() {
+        run_cmd = run_cmd.args(["-trace", options.trace.as_str()]);
+    }
+
+    if !options.debug.starts_with("int") && !options.debug.contains(",int") {
         run_cmd = run_cmd.arg("-enable-kvm");
     }
 
-    if options.log {
-        run_cmd = run_cmd
-            .args(["-d", "int,guest_errors"])
-            .args(["-D", ".debug/qemu.log"]);
-    }
-
-    if options.nographic {
+    if !options.graphic {
         run_cmd = run_cmd.args(["-display", "none"]);
     }
 
     if options.gdb {
-        run_cmd = run_cmd.args(["-S", "-s"]);
+        run_cmd = run_cmd.arg("-S").arg("-s");
     }
 
     if options.norun {
