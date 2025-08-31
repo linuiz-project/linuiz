@@ -69,7 +69,7 @@ impl Scheduler {
     }
 
     pub fn interrupt_task(&mut self, state: &mut InterruptStackFrame, regs: &mut Registers) {
-        PROCESSES.with_lock(|mut processes| {
+        PROCESSES.with_lock(|processes| {
             // Move the current task, if any, back into the scheduler queue.
             if let Some(mut process) = self.task.take() {
                 trace!("Interrupting: {:?}", process.id());
@@ -80,13 +80,13 @@ impl Scheduler {
                 processes.push_back(process).unwrap();
             }
 
-            self.next_task(&mut processes, state, regs);
+            self.next_task(processes, state, regs);
         });
     }
 
     /// Attempts to schedule the next task in the local task queue.
     pub fn yield_task(&mut self, isf: &mut InterruptStackFrame, regs: &mut Registers) {
-        PROCESSES.with_lock(|mut processes| {
+        PROCESSES.with_lock(|processes| {
             let mut process = self.task.take().expect("no active task in scheduler");
             trace!("Yielding: {:?}", process.id());
 
@@ -95,7 +95,7 @@ impl Scheduler {
 
             processes.push_back(process).unwrap();
 
-            self.next_task(&mut processes, isf, regs);
+            self.next_task(processes, isf, regs);
         });
     }
 
@@ -106,8 +106,8 @@ impl Scheduler {
         let process = self.task.take().expect("no active task in scheduler");
         trace!("Exiting: {:?}", process.id());
 
-        PROCESSES.with_lock(|mut processes| {
-            self.next_task(&mut processes, isf, regs);
+        PROCESSES.with_lock(|processes| {
+            self.next_task(processes, isf, regs);
         });
     }
 

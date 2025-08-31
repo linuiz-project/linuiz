@@ -261,7 +261,8 @@ impl PageTable<ExclusiveBorrow> {
                     }
                 }
 
-                let frame = PhysicalMemoryManager::next_free(core::num::NonZero::<usize>::MIN,true)?;
+                let frame =
+                    PhysicalMemoryManager::next_free(core::num::NonZero::<usize>::MIN, true)?;
 
                 // Safety: Frame is unused.
                 unsafe {

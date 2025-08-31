@@ -8,6 +8,7 @@ pub mod rsdt;
 pub mod waet;
 
 mod address;
+#[allow(unused_imports)]
 pub use address::GenericAddress;
 
 #[repr(C, packed)]
@@ -23,11 +24,22 @@ struct SystemDescriptorTableHeader {
     pub creator_revision: u32,
 }
 
+/// # Safety
+///
+/// - Implementor must be a valid type of ACPI system descriptor table.
+/// - `SystemDescriptorTable::base_ptr` implementation must return the valid
+///   base pointer to the ACPI system descriptor table that the implementing
+///   type reprensents.
 unsafe trait SystemDescriptorTable {
     const SIGNATURE: AsciiStr<4>;
 
     fn base_ptr(&self) -> NonNull<u8>;
 
+    /// Reads (unaligned) a value of type `T` from `base_ptr + offset`.
+    ///
+    /// # Safety
+    ///
+    /// - `offset` must be the correct base-pointer offset for reading `T`.
     unsafe fn read_offset_as<T>(&self, offset: usize) -> T {
         // Safety: Caller is required to maintain safety invariants.
         unsafe {
@@ -39,39 +51,50 @@ unsafe trait SystemDescriptorTable {
     }
 
     fn signature(&self) -> AsciiStr<4> {
+        // Safety: `signature` is 4 bytes @ offset 0.
         let bytes = unsafe { self.read_offset_as::<[u8; 4]>(0) };
         AsciiStr::new_lossy(bytes)
     }
 
     fn length(&self) -> usize {
+        // Safety: `length` is 4 bytes @ offset 4.
         let length = unsafe { self.read_offset_as::<u32>(4) };
         usize::try_from(length).unwrap()
     }
 
     fn oem_id(&self) -> AsciiStr<6> {
+        // Safety: `oem_id` is 6 bytes @ offset 10.
         let bytes = unsafe { self.read_offset_as::<[u8; 6]>(10) };
         AsciiStr::new_lossy(bytes)
     }
 
     fn oem_table_id(&self) -> AsciiStr<8> {
+        // Safety: `oem_table_id` is 8 bytes @ offset 16.
         let bytes = unsafe { self.read_offset_as::<[u8; 8]>(16) };
         AsciiStr::new_lossy(bytes)
     }
 
     fn oem_revision(&self) -> u32 {
+        // Safety: `oem_revision` is 4 bytes @ offset 24.
         unsafe { self.read_offset_as::<u32>(24) }
     }
 
     fn creator_id(&self) -> AsciiStr<4> {
+        // Safety: `creator_id` is 4 bytes @ offset 28.
         let bytes = unsafe { self.read_offset_as::<[u8; 4]>(28) };
         AsciiStr::new_lossy(bytes)
     }
 
     fn creator_revision(&self) -> u32 {
+        // Safety: `creator_revision` is 4 bytes @ offset 32.
         unsafe { self.read_offset_as::<u32>(32) }
     }
 
     fn validate_checksum(&self) -> bool {
+        // Safety:
+        // - `self.base_ptr()` is required to point to the base of this table.
+        // - `self.length()` returns the total length (in bytes) of this table.
+        // - All bytes are guaranteed to be initialized by the firmware.
         let bytes = unsafe { core::slice::from_raw_parts(self.base_ptr().as_ptr(), self.length()) };
         let checksum = bytes.iter().copied().fold(0u8, u8::wrapping_add);
 
@@ -121,6 +144,7 @@ fn for_each_sdt(entries: impl Iterator<Item = SdtVariant>) {
     entries.for_each(|sdt| {
         debug!("{sdt:#?}");
 
+        #[allow(clippy::single_match)]
         match sdt {
             SdtVariant::Fadt(fadt) => {
                 crate::time::KernelStopwatch::init(fadt.pm_timer());

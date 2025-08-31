@@ -1,22 +1,17 @@
 use core::ptr::NonNull;
-
 use libsys::address::{Address, Virtual};
-
-mod page_fault;
 
 mod arch;
 pub use arch::*;
 
 #[doc(hidden)]
 #[inline(never)]
-pub fn handle(exception: &ArchException) {
+pub fn handle(exception: ArchException) {
     match exception {
         // Safety: Function is called once per this page fault exception.
-        ArchException::PageFault(_, _, _, address) => unsafe {
-            if let Err(err) = page_fault::handler(*address) {
-                panic!("error handling page fault: {err}")
-            }
-        },
+        ArchException::PageFault(_, _, error_code, address) => {
+            panic!("page fault: {error_code:?} @ {address:?}")
+        }
 
         exception => panic!("{exception:#X?}"),
     }
@@ -44,7 +39,11 @@ pub struct Exception {
 }
 
 impl Exception {
-    pub const fn new(kind: ExceptionKind, ip: Option<NonNull<u8>>, sp: Option<NonNull<u8>>) -> Self {
+    pub const fn new(
+        kind: ExceptionKind,
+        ip: Option<NonNull<u8>>,
+        sp: Option<NonNull<u8>>,
+    ) -> Self {
         Self { kind, ip, sp }
     }
 }

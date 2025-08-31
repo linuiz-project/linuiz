@@ -14,47 +14,47 @@ use crate::{
 
 #[unsafe(no_mangle)]
 extern "sysv64" fn __de_handler(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    handle(&ArchException::DivideError(stack_frame, gprs));
+    handle(ArchException::DivideError(stack_frame, gprs));
 }
 
 #[unsafe(no_mangle)]
 extern "sysv64" fn __db_handler(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    handle(&ArchException::Debug(stack_frame, gprs));
+    handle(ArchException::Debug(stack_frame, gprs));
 }
 
 #[unsafe(no_mangle)]
 extern "sysv64" fn __nm_handler(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    handle(&ArchException::NonMaskable(stack_frame, gprs));
+    handle(ArchException::NonMaskable(stack_frame, gprs));
 }
 
 #[unsafe(no_mangle)]
 extern "sysv64" fn __bp_handler(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    handle(&ArchException::Breakpoint(stack_frame, gprs));
+    handle(ArchException::Breakpoint(stack_frame, gprs));
 }
 
 #[unsafe(no_mangle)]
 extern "sysv64" fn __of_handler(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    handle(&ArchException::Overflow(stack_frame, gprs));
+    handle(ArchException::Overflow(stack_frame, gprs));
 }
 
 #[unsafe(no_mangle)]
 extern "sysv64" fn __br_handler(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    handle(&ArchException::BoundRangeExceeded(stack_frame, gprs));
+    handle(ArchException::BoundRangeExceeded(stack_frame, gprs));
 }
 
 #[unsafe(no_mangle)]
 extern "sysv64" fn __ud_handler(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    handle(&ArchException::InvalidOpcode(stack_frame, gprs));
+    handle(ArchException::InvalidOpcode(stack_frame, gprs));
 }
 
 #[unsafe(no_mangle)]
 extern "sysv64" fn __na_handler(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    handle(&ArchException::DeviceNotAvailable(stack_frame, gprs));
+    handle(ArchException::DeviceNotAvailable(stack_frame, gprs));
 }
 
 #[unsafe(no_mangle)]
 extern "sysv64" fn __df_handler(stack_frame: &InterruptStackFrame, _: u64, gprs: &Registers) {
-    handle(&ArchException::DoubleFault(stack_frame, gprs));
+    handle(ArchException::DoubleFault(stack_frame, gprs));
     unreachable!("#DF cannot be recovered from");
 }
 
@@ -64,7 +64,7 @@ extern "sysv64" fn __ts_handler(
     error_code: u64,
     gprs: &Registers,
 ) {
-    handle(&ArchException::InvalidTSS(
+    handle(ArchException::InvalidTSS(
         stack_frame,
         SelectorErrorCode::new(error_code).unwrap(),
         gprs,
@@ -77,7 +77,7 @@ extern "sysv64" fn __np_handler(
     error_code: u64,
     gprs: &Registers,
 ) {
-    handle(&ArchException::SegmentNotPresent(
+    handle(ArchException::SegmentNotPresent(
         stack_frame,
         SelectorErrorCode::new(error_code).unwrap(),
         gprs,
@@ -90,7 +90,7 @@ extern "sysv64" fn __ss_handler(
     error_code: u64,
     gprs: &Registers,
 ) {
-    handle(&ArchException::StackSegmentFault(
+    handle(ArchException::StackSegmentFault(
         stack_frame,
         SelectorErrorCode::new(error_code).unwrap(),
         gprs,
@@ -103,7 +103,7 @@ extern "sysv64" fn __gp_handler(
     error_code: u64,
     gprs: &Registers,
 ) {
-    handle(&ArchException::GeneralProtectionFault(
+    handle(ArchException::GeneralProtectionFault(
         stack_frame,
         SelectorErrorCode::new(error_code).unwrap(),
         gprs,
@@ -116,7 +116,7 @@ extern "sysv64" fn __pf_handler(
     err: PageFaultErrorCode,
     gprs: &Registers,
 ) {
-    handle(&ArchException::PageFault(
+    handle(ArchException::PageFault(
         stack_frame,
         gprs,
         err,
@@ -128,7 +128,7 @@ extern "sysv64" fn __pf_handler(
 
 #[unsafe(no_mangle)]
 extern "sysv64" fn __mf_handler(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    handle(&ArchException::x87FloatingPoint(stack_frame, gprs));
+    handle(ArchException::x87FloatingPoint(stack_frame, gprs));
 }
 
 #[unsafe(no_mangle)]
@@ -137,27 +137,23 @@ extern "sysv64" fn __ac_handler(
     error_code: u64,
     gprs: &Registers,
 ) {
-    handle(&ArchException::AlignmentCheck(
-        stack_frame,
-        error_code,
-        gprs,
-    ));
+    handle(ArchException::AlignmentCheck(stack_frame, error_code, gprs));
 }
 
 #[unsafe(no_mangle)]
 extern "sysv64" fn __mc_handler(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    handle(&ArchException::MachineCheck(stack_frame, gprs));
+    handle(ArchException::MachineCheck(stack_frame, gprs));
     unreachable!("#MC cannot be recovered");
 }
 
 #[unsafe(no_mangle)]
 extern "sysv64" fn __xm_handler(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    handle(&ArchException::SimdFlaotingPoint(stack_frame, gprs));
+    handle(ArchException::SimdFlaotingPoint(stack_frame, gprs));
 }
 
 #[unsafe(no_mangle)]
 extern "sysv64" fn __ve_handler(stack_frame: &InterruptStackFrame, gprs: &Registers) {
-    handle(&ArchException::Virtualization(stack_frame, gprs));
+    handle(ArchException::Virtualization(stack_frame, gprs));
 }
 
 // --- reserved 22-30

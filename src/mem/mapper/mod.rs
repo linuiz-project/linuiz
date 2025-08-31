@@ -369,7 +369,7 @@ impl Mapper {
 
     pub fn walk<E>(
         &self,
-        mut func: impl FnMut(Option<(Depth, &Entry)>) -> ControlFlow<E>,
+        _: impl FnMut(Option<(Depth, &Entry)>) -> ControlFlow<E>,
     ) -> ControlFlow<E> {
         todo!()
 

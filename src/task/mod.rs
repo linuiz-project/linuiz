@@ -4,10 +4,10 @@ use crate::{
 };
 use bit_field::BitField;
 use core::{mem::MaybeUninit, num::NonZero, ptr::NonNull};
-use elf::{ElfBytes, endian::AnyEndian, file::FileHeader, segment::ProgramHeader};
+use elf::{ElfBytes, endian::AnyEndian, segment::ProgramHeader};
 use libsys::{
-    address::{Address, Page, Virtual},
-    constants::{page_mask, page_size},
+    address::{Address, Virtual},
+    constants::page_size,
 };
 
 mod context;
@@ -212,7 +212,7 @@ impl<'a> Task<'a> {
     // }
 
     #[allow(clippy::too_many_lines)]
-    pub fn demand_map(&mut self, address: Address<Virtual>) -> Result<(), Error> {
+    pub fn demand_map(&mut self, _: Address<Virtual>) -> Result<(), Error> {
         todo!()
 
         // let fault_page = Address::<Page>::new_truncate(address.get());

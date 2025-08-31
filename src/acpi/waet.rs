@@ -21,6 +21,7 @@ bitflags! {
 /// guest partitions in a virtual machine environment.
 pub struct Waet(NonNull<u8>);
 
+// Safety: `Self::new` requires `self.0` be a valid base pointer.
 unsafe impl SystemDescriptorTable for Waet {
     const SIGNATURE: crate::util::AsciiStr<4> = AsciiStr::new(*b"WAET").unwrap();
 
@@ -35,6 +36,7 @@ impl Waet {
     }
 
     pub fn emulated_device_flags(&self) -> EmulatedDeviceFlags {
+        // Safety: `emulated_device_flags` is 4 bytes @ offset 36.
         let value = unsafe { self.read_offset_as::<u32>(36) };
         EmulatedDeviceFlags::from_bits_truncate(value)
     }

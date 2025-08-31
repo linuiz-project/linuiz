@@ -114,6 +114,7 @@ bitflags! {
 /// ACPI-compatible OS concerning the base system design.
 pub struct Fadt(NonNull<u8>);
 
+// Safety: `Self::new` requires `self.0` be a valid base pointer.
 unsafe impl SystemDescriptorTable for Fadt {
     const SIGNATURE: AsciiStr<4> = AsciiStr::new(*b"FACP").unwrap();
 
@@ -128,8 +129,10 @@ impl Fadt {
     }
 
     pub fn version(&self) -> Version {
+        // Safety: `major` is 1 bytes @ offset 8.
         let major = unsafe { self.read_offset_as::<u8>(8) };
         let (minor, patch) = {
+            // Safety: `minor` and `patch` share 1 byte at offset 131.
             let value = unsafe { self.read_offset_as::<u8>(131) };
             (value.get_bits(..4), value.get_bits(4..))
         };
@@ -144,6 +147,7 @@ impl Fadt {
     /// profile to OSPM. OSPM can use this field to set default power management
     /// policy parameters during OS installation.
     pub fn preferred_power_management_profile(&self) -> PowerManagementProfile {
+        // Safety: `preferred_power_management_profile` is 1 bytes @ offset 45.
         let value = unsafe { self.read_offset_as::<u8>(45) };
         PowerManagementProfile::from(value)
     }
@@ -153,6 +157,7 @@ impl Fadt {
     /// interrupt number of the SCI interrupt. OSPM is required to treat the
     /// ACPI SCI interrupt as a sharable, level, active low interrupt.
     pub fn sci_interrupt_vector(&self) -> u16 {
+        // Safety: `sci_interrupt_vector` is 2 bytes @ offset 46.
         unsafe { self.read_offset_as::<u16>(46) }
     }
 
@@ -165,6 +170,7 @@ impl Fadt {
     /// processor. This field is reserved and must be zero on system that does
     /// not support System Management mode.
     pub fn sci_port_address(&self) -> Option<NonZero<u32>> {
+        // Safety: `sci_port_address` is 4 bytes @ offset 48.
         let value = unsafe { self.read_offset_as::<u32>(48) };
         NonZero::<u32>::new(value)
     }
@@ -177,6 +183,7 @@ impl Fadt {
     /// field is reserved and must be zero on systems that do not support Legacy
     /// Mode.
     pub fn sci_acpi_enable_command(&self) -> Option<NonZero<u8>> {
+        // Safety: `sci_acpi_enable_command` is 1 bytes @ offset 52.
         let value = unsafe { self.read_offset_as::<u8>(52) };
         NonZero::<u8>::new(value)
     }
@@ -190,6 +197,7 @@ impl Fadt {
     /// is reserved and must be zero on systems that do not support Legacy
     /// Mode.
     pub fn sci_acpi_disable_command(&self) -> Option<NonZero<u8>> {
+        // Safety: `sci_acpi_disable_command` is 1 bytes @ offset 53.
         let value = unsafe { self.read_offset_as::<u8>(53) };
         NonZero::<u8>::new(value)
     }
@@ -200,6 +208,7 @@ impl Fadt {
     /// indicates `S4BIOS_REQ` is not supported. (See Section 5.2.10 of the ACPI
     /// specification)
     pub fn sci_s4bios_req_command(&self) -> Option<NonZero<u8>> {
+        // Safety: `sci_s4bios_req_command` is 1 bytes @ offset 54.
         let value = unsafe { self.read_offset_as::<u8>(54) };
         NonZero::<u8>::new(value)
     }
@@ -207,6 +216,7 @@ impl Fadt {
     /// If non-zero, this field contains the value OSPM writes to the `SMI_CMD`
     /// register to assume processor performance state control responsibility.
     pub fn sci_pstate_control_command(&self) -> Option<NonZero<u8>> {
+        // Safety: `sci_pstate_control_command` is 1 bytes @ offset 55.
         let value = unsafe { self.read_offset_as::<u8>(55) };
         NonZero::<u8>::new(value)
     }
@@ -215,6 +225,7 @@ impl Fadt {
     /// register to indicate OS support for the _CST object and C States Changed
     /// notification.
     pub fn sci_cstate_control_command(&self) -> Option<NonZero<u8>> {
+        // Safety: `sci_cstate_control_command` is 1 bytes @ offset 96.
         let value = unsafe { self.read_offset_as::<u8>(96) };
         NonZero::<u8>::new(value)
     }
@@ -238,6 +249,7 @@ impl Fadt {
     /// the `WBINVD` function and indicate this to OSPM by setting the
     /// `WBINVD` field = 1.
     pub fn processor_cache_flush_size(&self) -> u16 {
+        // Safety: `processor_cache_flush_size` is 2 bytes @ offset 100.
         unsafe { self.read_offset_as::<u16>(100) }
     }
 
@@ -250,12 +262,14 @@ impl Fadt {
     /// ACPI-compatible systems are required to support the `WBINVD`
     /// function and indicate this to OSPM by setting `WBINVD=1`.
     pub fn processor_cache_flush_stride(&self) -> u16 {
+        // Safety: `processor_cache_flush_stride` is 2 bytes @ offset 102.
         unsafe { self.read_offset_as::<u16>(102) }
     }
 
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     /// Boot architecture flags.
     pub fn boot_architecture_flags(&self) -> BootArchitectureFlags {
+        // Safety: `boot_architecture_flags` is 2 bytes @ offset 109.
         let value = unsafe { self.read_offset_as::<u16>(109) };
         BootArchitectureFlags::from_bits_truncate(value)
     }
@@ -277,16 +291,19 @@ impl Fadt {
     /// bytes into this field, denoting that no hypervisor is present in the
     /// actual firmware.
     pub fn hypervisor_vendor(&self) -> Option<AsciiStr<8>> {
+        // Safety: `hypervisor_vendor` is 8 bytes @ offset 268.
         let bytes = unsafe { self.read_offset_as::<[u8; 8]>(268) };
         (bytes != [0u8; 8]).then_some(AsciiStr::new_lossy(bytes))
     }
 
     pub fn pm_timer(&self) -> PmTimer {
         fn read_pm_timer_blk(fadt: &Fadt) -> u32 {
+            // Safety: `pm_timer_blk` is 4 bytes @ offset 76.
             unsafe { fadt.read_offset_as::<u32>(76) }
         }
 
         fn read_x_pm_timer_blk(fadt: &Fadt) -> Option<NonNull<u32>> {
+            // Safety: `x_pm_timer_blk` address is 8 bytes @ offset 212.
             let address = unsafe { fadt.read_offset_as::<u64>(212) };
             let address = usize::try_from(address).unwrap();
 
@@ -294,6 +311,7 @@ impl Fadt {
         }
 
         pub fn is_pm_timer_32_bit(fadt: &Fadt) -> bool {
+            // Safety: `pm_timer_len` is 4 bytes @ offset 91.
             match unsafe { fadt.read_offset_as::<u8>(91) } {
                 0 => false,
                 4 => true,
@@ -305,6 +323,7 @@ impl Fadt {
         if self.length() >= 208
             && let Some(timer_ptr) = read_x_pm_timer_blk(self)
         {
+            // Safety: `source` is the implemented and correct address.
             unsafe {
                 PmTimer::new(
                     pm_timer::Source::MemoryIo(timer_ptr),
@@ -314,8 +333,10 @@ impl Fadt {
         } else {
             let timer_port = read_pm_timer_blk(self);
             let timer_port = u16::try_from(timer_port).unwrap();
+            // Safety: Firmware guarantees accuracy of the `PM_TIMER_BLK` address.
             let timer_port = unsafe { ReadOnlyPort::<u32>::new(timer_port) };
 
+            // Safety: `source` is the implemented and correct address.
             unsafe {
                 PmTimer::new(
                     pm_timer::Source::PortIo(timer_port),

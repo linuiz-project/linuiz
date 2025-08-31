@@ -87,6 +87,7 @@ impl LocalState {
 
                 debug_assert!(IA32_KERNEL_GS_BASE::get_local_state_ptr().is_none());
 
+                // Safety: Processor-local state pointer is not in use.
                 unsafe {
                     IA32_KERNEL_GS_BASE::set_local_state_ptr(local_state_ptr);
                 }

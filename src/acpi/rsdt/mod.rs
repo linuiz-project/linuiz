@@ -4,22 +4,29 @@ use core::{marker::PhantomData, ptr::NonNull};
 mod iter;
 pub use iter::*;
 
-pub trait RsdtKind {
+/// # Safety
+///
+/// - `Self::ENTRY_SIZE` must be 4 for the RSDT, or 8 for the XSDT.
+pub unsafe trait RsdtKind {
+    /// Signature of the table ("RSDT"/"XSDT").
     const SIGNATURE: AsciiStr<4>;
 
-    type Entry;
+    /// Size of the table's entries (4 for RSDT, 8 for XSDT).
+    const ENTRY_SIZE: usize;
 }
 
 pub struct Standard;
-impl RsdtKind for Standard {
+// Safety: `Self::ENTRY_SIZE` is 4 (for RSDT).
+unsafe impl RsdtKind for Standard {
     const SIGNATURE: AsciiStr<4> = AsciiStr::new(*b"RSDT").unwrap();
-    type Entry = u32;
+    const ENTRY_SIZE: usize = 4;
 }
 
 pub struct Extended;
-impl RsdtKind for Extended {
+// Safety: `Self::ENTRY_SIZE` is 4 (for XSDT).
+unsafe impl RsdtKind for Extended {
     const SIGNATURE: AsciiStr<4> = AsciiStr::new(*b"XSDT").unwrap();
-    type Entry = u64;
+    const ENTRY_SIZE: usize = 8;
 }
 
 pub struct Rsdt<K> {
@@ -27,6 +34,7 @@ pub struct Rsdt<K> {
     marker: PhantomData<K>,
 }
 
+// Safety: `Self::new` requires `self.0` be a valid base pointer.
 unsafe impl<K: RsdtKind> SystemDescriptorTable for Rsdt<K> {
     const SIGNATURE: AsciiStr<4> = K::SIGNATURE;
 

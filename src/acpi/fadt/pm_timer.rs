@@ -14,6 +14,13 @@ pub struct PmTimer {
 }
 
 impl PmTimer {
+    /// # Safety
+    ///
+    /// - `source` must the ACPI power management timer source address space
+    ///   (either port or memory IO) that is implemented by hardware and
+    ///   firmware on the current machine.
+    /// - `source` must be the correct address to read the 32 or 24 -bit timer
+    ///   value.
     pub unsafe fn new(source: Source, is_32_bit: bool) -> Self {
         Self { source, is_32_bit }
     }
@@ -22,6 +29,7 @@ impl PmTimer {
         match &self.source {
             Source::PortIo(address) => u64::from(address.read()),
             Source::MemoryIo(address) => {
+                // Safety: `Self::new` requires `address` be valid as 32-bit MMIO.
                 let value = unsafe { address.read_volatile() };
                 u64::from(value)
             }

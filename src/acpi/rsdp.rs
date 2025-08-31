@@ -71,11 +71,13 @@ impl Rsdp {
     }
 
     pub fn get_signature(&self) -> AsciiStr<8> {
+        // Safety: `signature` is 8 bytes @ offset 0.
         let bytes = unsafe { self.get_field_as::<[u8; 8]>(0) };
         AsciiStr::new_lossy(bytes)
     }
 
     pub fn get_oem_id(&self) -> AsciiStr<6> {
+        // Safety: `oem_id` is 6 bytes @ offset 9.
         let bytes = unsafe { self.get_field_as::<[u8; 6]>(9) };
         AsciiStr::new_lossy(bytes)
     }
@@ -89,6 +91,9 @@ impl Rsdp {
             let address = usize::try_from(address).unwrap();
             let address = HigherHalfDirectMap::offset(address);
             let ptr = NonNull::<u8>::with_exposed_provenance(address);
+            // Safety:
+            // ACPI guarantees `ptr` will be the address of the XSDT when the
+            // ACPI revision is ≥2.0.
             let xsdt = unsafe { Rsdt::<rsdt::Extended>::new(ptr) };
 
             RsdtVariant::Xsdt(xsdt)
@@ -100,6 +105,9 @@ impl Rsdp {
             let address = usize::try_from(address).unwrap();
             let address = HigherHalfDirectMap::offset(address);
             let ptr = NonNull::<u8>::with_exposed_provenance(address);
+            // Safety:
+            // ACPI guarantees `ptr` will be the address of the RSDT when the
+            // ACPI revision is <2.0.
             let rsdt = unsafe { Rsdt::<rsdt::Standard>::new(ptr) };
 
             RsdtVariant::Rsdt(rsdt)

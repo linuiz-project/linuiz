@@ -10,7 +10,8 @@ pub enum Error {
 /// Enables interrupts for the current processor.
 #[inline(always)]
 pub fn __sti() {
-    // Safety: Caller is required to ensure enabling interrupts will not cause undefined behaviour.
+    // Safety: Caller is required to ensure enabling interrupts will not cause
+    // undefined behaviour.
     unsafe {
         asm!("sti", options(nostack, nomem));
     }
@@ -19,7 +20,8 @@ pub fn __sti() {
 /// Disables interrupts for the current processor.
 #[inline(always)]
 pub fn __cli() {
-    // Safety: Caller is required to ensure disabling interrupts will not cause undefined behaviour.
+    // Safety: Caller is required to ensure disabling interrupts will not cause
+    // undefined behaviour.
     unsafe {
         asm!("cli", options(nostack, nomem));
     }

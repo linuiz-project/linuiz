@@ -7,8 +7,6 @@ use libsys::constants::page_size;
 
 mod global;
 
-
-
 // pub static KERNEL_ALLOCATOR: SlabAllocator<FrameAllocator> =
 // SlabAllocator::new_in(FrameAllocator);
 

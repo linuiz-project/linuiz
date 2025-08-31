@@ -41,6 +41,7 @@
     clippy::semicolon_inside_block,
     clippy::semicolon_if_nothing_returned,
     clippy::unreadable_literal,
+    clippy::perf,
     unsafe_op_in_unsafe_fn
 )]
 #![allow(
