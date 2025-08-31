@@ -51,15 +51,15 @@ impl Version {
         }
     }
 
-    pub fn major(&self) -> u8 {
+    pub fn major(self) -> u8 {
         self.major
     }
 
-    pub fn minor(&self) -> u8 {
+    pub fn minor(self) -> u8 {
         self.minor
     }
 
-    pub fn patch(&self) -> u8 {
+    pub fn patch(self) -> u8 {
         self.patch
     }
 }

@@ -7,6 +7,10 @@ pub struct AsciiStr<const N: usize>([Char; N]);
 impl<const N: usize> AsciiStr<N> {
     pub const fn new(bytes: [u8; N]) -> Option<Self> {
         if bytes.is_ascii() {
+            // Safety:
+            // - `bytes` and `Self.0` are size `N`.
+            // - `bytes` is checked valid as ASCII bytes, so the `u8`s are directly
+            //   transmutable to `core::ascii::Char`.
             let bytes_ascii = unsafe { transmute_copy(&bytes) };
             Some(Self(bytes_ascii))
         } else {
@@ -21,7 +25,10 @@ impl<const N: usize> AsciiStr<N> {
             .for_each(|byte| *byte = b'?');
 
         Self({
-            // Safety: TODO
+            // Safety:
+            // - `bytes` and `Self.0` are size `N`.
+            // - Non-ASCII `u8`s in `bytes` have been replaced, so the `u8`s are directly
+            //   transmutable to `core::ascii::Char`.
             unsafe { transmute_copy(&bytes) }
         })
     }

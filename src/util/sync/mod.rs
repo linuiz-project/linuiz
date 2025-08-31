@@ -1,5 +1,4 @@
-//! Much of the code within this module was taken from:
-//!        https://github.com/zesterer/spin-rs.
+//! Much of the code within this module was taken from: <https://github.com/zesterer/spin-rs>.
 //!
 //! The work done by the community to maintain this extremely useful package is
 //! significant, and it is an amazing useful project for getting started in

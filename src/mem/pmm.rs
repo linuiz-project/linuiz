@@ -37,8 +37,8 @@ pub struct PhysicalMemoryManager<'a> {
 
 static PHYSICAL_MEMORY_MANAGER: Once<PhysicalMemoryManager<'static>> = Once::new();
 
+// Safety: `PhysicalMemoryManager` uses interrupt-safe synchronization.
 unsafe impl Send for PhysicalMemoryManager<'_> {}
-unsafe impl Sync for PhysicalMemoryManager<'_> {}
 
 impl<'a: 'static> PhysicalMemoryManager<'a> {
     /// Initializes the static physical memory manager with the provided
