@@ -170,7 +170,7 @@ mod tests {
                 }
 
                 tx.send(()).unwrap();
-            })
+            });
         });
 
         // Readers try to catch the writer in the act
@@ -181,7 +181,7 @@ mod tests {
             children.push(thread::spawn(move || {
                 arc3.with_shared(|lock| {
                     assert!(*lock >= 0);
-                })
+                });
             }));
         }
 
@@ -204,7 +204,7 @@ mod tests {
         let arc = Arc::new(RwLock::new(1));
         let arc2 = arc.clone();
 
-        let _ = thread::spawn(move || -> () {
+        let _ = thread::spawn(move || {
             struct Unwinder {
                 i: Arc<RwLock<isize>>,
             }
@@ -240,6 +240,6 @@ mod tests {
         let comp: &[i32] = &[4, 2, 5];
         rw.with_shared(|lock| {
             assert_eq!(lock, comp);
-        })
+        });
     }
 }
