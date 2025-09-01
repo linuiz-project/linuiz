@@ -1,3 +1,4 @@
+pub mod elf;
 pub mod sync;
 
 mod array_str;

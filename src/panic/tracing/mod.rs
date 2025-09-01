@@ -7,7 +7,6 @@ use libsys::address::{Address, Virtual};
 
 pub mod symbols;
 
-// TODO remove dependency on `heapless`
 type PanicStringBuffer = heapless::String<0x4000>;
 
 pub(super) fn emit_stack_trace() {

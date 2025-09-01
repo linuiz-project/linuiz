@@ -1,21 +1,39 @@
-use crate::{
-    mem::{
-        KernelMapper, Permissions,
-        mapper::{AutoMappingError, GetMappingError, Mapper},
-    },
-    task::asid::AddressSpaceId,
+use crate::mem::{
+    KernelMapper, Permissions,
+    mapper::{AutoMappingError, GetMappingError, Mapper},
 };
-use core::{
-    cmp::Ordering,
-    num::NonZero,
-    ops::{ControlFlow, Range},
-    ptr::NonNull,
-};
+use core::{cmp::Ordering, num::NonZero, ops::Range, ptr::NonNull};
 use libsys::{
     address::{Address, Page},
     constants::{page_bits, page_size},
 };
 
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct AddressSpaceId(usize);
+
+impl AddressSpaceId {
+    const MAX: usize = {
+        cfg_select! {
+            target_arch = "x86_64" => { 0b1111_1111_1111 }
+            _ => { unimplemented!() }
+        }
+    };
+
+    pub const KERNEL: Self = Self(0);
+
+    pub fn new(id: usize) -> Option<Self> {
+        (id <= Self::MAX).then_some(Self(id))
+    }
+}
+
+impl From<AddressSpaceId> for usize {
+    fn from(value: AddressSpaceId) -> Self {
+        value.0
+    }
+}
+
+#[derive(Debug)]
 pub enum MemoryMapping {
     Exact { range: Range<Address<Page>> },
     Any { count: NonZero<usize> },
@@ -114,24 +132,26 @@ impl AddressSpace {
         let mut start_index = 0;
         let mut run = 0;
 
-        self.mapper
-            .walk(|entry| {
-                if entry.is_none() {
-                    run += 1;
+        todo!();
 
-                    if run == page_count.get() {
-                        return ControlFlow::Break(());
-                    }
-                } else {
-                    run = 0;
-                }
+        // self.mapper
+        //     .walk(|entry| {
+        //         if entry.is_none() {
+        //             run += 1;
 
-                start_index += 1;
+        //             if run == page_count.get() {
+        //                 return ControlFlow::Break(());
+        //             }
+        //         } else {
+        //             run = 0;
+        //         }
 
-                ControlFlow::Continue(())
-            })
-            .break_value()
-            .ok_or(AutoMappingError::OutOfMemory)?;
+        //         start_index += 1;
+
+        //         ControlFlow::Continue(())
+        //     })
+        //     .break_value()
+        //     .ok_or(AutoMappingError::OutOfMemory)?;
 
         match run.cmp(&page_count.get()) {
             Ordering::Equal => {

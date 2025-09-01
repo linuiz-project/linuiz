@@ -1,5 +1,8 @@
-use crate::{cpu::local_state::LocalState, mem::KernelMapper, params::KernelParameters};
+use crate::{
+    cpu::local_state::LocalState, mem::KernelMapper, params::KernelParameters, scheduler::Scheduler,
+};
 
+pub mod context;
 pub mod local_state;
 
 pub type CoreId = u32;
@@ -12,6 +15,14 @@ pub fn get_id() -> CoreId {
 
         _ => { unimplemented!() }
     }
+}
+
+/// Murder—in cold electrons—the current processor.
+#[inline(never)]
+pub fn halt_and_catch_fire() -> ! {
+    crate::interrupts::disable();
+
+    crate::interrupts::wait_indefinite()
 }
 
 /// # Safety
@@ -85,12 +96,11 @@ pub fn begin_multiprocessing(mp_request: &limine::request::MpRequest) -> Option<
     Some(response.cpus().len())
 }
 
-/// Frees bootloader reclaimable memory, then begins local
-/// post-memory-system-initialization operations on each harware thread.
+/// Enters core into the scheduler loop, exiting the kernel's boot phase.
 ///
 /// # Safety
 ///
-/// - Function should only be run once at the end of the kernel init phase.
+/// - Function should only be run once at the end of the kernel boot phase.
 #[allow(clippy::too_many_lines)]
 pub unsafe fn start(
     mp_request: Option<&limine::request::MpRequest>,
@@ -102,38 +112,22 @@ pub unsafe fn start(
             trace!("Detected {processor_count} processors.");
         });
 
-    debug!("Preparing for task scheduling...");
-
     LocalState::init();
 
-    core::arch::breakpoint();
+    debug!("Preparing for task scheduling...");
+    LocalState::with_scheduler(Scheduler::enable);
 
-    // Ensure we enable interrupts prior to enabling the scheduler.
+    trace!("Enabling interrupts...");
     crate::interrupts::enable();
 
-    // // Safety: The processor is ready to be scheduled with tasks.
-    // unsafe {
-    //     crate::cpu::local_state::begin_scheduling();
-    // }
+    LocalState::with_timer(|timer| {
+        trace!("Enabling local timer...");
+        timer.enable();
+        trace!("Setting preemption wait...");
+        timer.set_preemption_wait();
+    });
 
-    // This interrupt wait loop is necessary to ensure the core can jump into the
-    // scheduler.
-    crate::interrupts::wait_indefinite()
-}
-
-/// Gets the current processor's stack pointer.
-#[inline(always)]
-pub fn get_stack_ptr() -> *const u8 {
-    #[cfg(target_arch = "x86_64")]
-    {
-        crate::arch::x86_64::registers::RSP::read()
-    }
-}
-
-/// Murder—in cold electrons—the current processor.
-#[inline(never)]
-pub fn halt_and_catch_fire() -> ! {
-    crate::interrupts::disable();
-
+    trace!("Waiting for preemption...");
+    // Wait loop to ensure the core can jump into the scheduler upon timer fire.
     crate::interrupts::wait_indefinite()
 }

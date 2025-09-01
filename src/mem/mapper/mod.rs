@@ -1,12 +1,9 @@
-use core::ops::ControlFlow;
-
 use crate::{
     mem::{
-        HigherHalfDirectMap, Permissions,
+        AddressSpaceId, HigherHalfDirectMap, Permissions,
         mapper::paging::{Depth, Entry},
         pmm::{FrameError, NextFrameError, PhysicalMemoryManager},
     },
-    task::asid::AddressSpaceId,
     util::{ExclusiveBorrow, SharedBorrow},
 };
 use libsys::address::{Address, Frame, Page};
@@ -181,13 +178,11 @@ impl Mapper {
         lock_frame: bool,
         permissions: Permissions,
     ) -> Result<(), MappingError> {
-        // TODO: Check that `depth` is a supported mapping depth.
-
         trace!(
-            "Mapping: {:#X} -> {:#X} {{ Depth: {}, {permissions:?}, Lock: {lock_frame} }}",
+            "Mapping ({permissions:?}): {:#X} -> {:#X} {{ Size: {:#X}, Lock: {lock_frame} }}",
             page.get().get(),
             frame.get().get(),
-            depth.get()
+            depth.align()
         );
 
         if lock_frame {
@@ -219,10 +214,7 @@ impl Mapper {
                     entry.set_permissions(permissions);
                 }
 
-                // Safety: Caller is required to ensure `frame` is not in use.
-                unsafe {
-                    entry.set_enabled(true);
-                }
+                entry.set_enabled();
 
                 #[cfg(target_arch = "x86_64")]
                 crate::arch::x86_64::instructions::__invlpg(page);
@@ -367,50 +359,17 @@ impl Mapper {
         }
     }
 
-    pub fn walk<E>(
-        &self,
-        _: impl FnMut(Option<(Depth, &Entry)>) -> ControlFlow<E>,
-    ) -> ControlFlow<E> {
-        todo!()
+    pub fn walk_all(&self, func: impl Fn(Depth, usize, &Entry) + Copy) {
+        self.root_table().walk_all(func);
+    }
 
-        //     #[allow(unreachable_code, unused_variables)]
-        //     fn walk_impl<'a, E>(
-        //         page_table: PageTable<SharedBorrow>,
-        //         to_depth: Depth,
-        //         func: &mut impl FnMut(Option<(Depth, &'a Entry)>) ->
-        // ControlFlow<E>,     ) -> ControlFlow<E> {
-        //         todo!(
-        //             "I think this function is actually broken. It doesn't
-        // traverse the address space correctly if huge pages are
-        // enabled."         );
-
-        //         page_table.iter().try_for_each(|entry| {
-        //             let is_entry_intermediate = {
-        //                 cfg_select! {
-        //                     target_arch = "x86_64" => {
-        //                         entry.is_huge() || current_depth ==
-        // Depth::max()                     }
-
-        //                     _ => { unimplemented!() }
-        //                 }
-        //             };
-
-        //             if is_entry_intermediate {
-        //                 func(Some((current_depth, entry)))
-        //             } else if let Some(next_page_table) =
-        // page_table.sub_table(entry_) {
-        // walk_impl(next_page_table, current_depth.next(), to_depth,
-        // func)             } else {                 let (steps, _) =
-        // core::iter::Step::steps_between(&current_depth, &to_depth);
-        // let iterations =
-        // table_index_size().pow(u32::try_from(steps).unwrap());
-        //                 (0..iterations).try_for_each(|_| func(None))
-        //             }
-        //         })
-        //     }
-
-        //     walk_impl(self.page_table(), Depth::min(), Depth::max(), &mut
-        // func)
+    #[cfg(debug_assertions)]
+    pub fn pretty_print_table(&self) {
+        self.walk_all(|depth, index, entry| {
+            #[allow(clippy::as_conversions)]
+            let print_offset = (Depth::min().get() - depth.get()) as usize;
+            trace!("{:|>print_offset$} {index}: {entry:X?}", "");
+        });
     }
 }
 

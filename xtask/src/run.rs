@@ -23,7 +23,7 @@ pub struct Options {
     cpu: Cpu,
 
     /// Number of CPUs to emulate.
-    #[arg(long, default_value = "4")]
+    #[arg(long, default_value = "2")]
     smp: usize,
 
     // RAM size in MB.

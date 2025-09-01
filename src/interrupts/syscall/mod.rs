@@ -1,28 +1,25 @@
-use crate::{
-    arch::x86_64::structures::idt::InterruptStackFrame, cpu::local_state::LocalState,
-    task::Registers,
-};
+use crate::cpu::{context::Context, local_state::LocalState};
 use core::num::NonZero;
 use libsys::syscall::Vector;
 
 mod klog;
 mod task;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct SyscallResult {
     pub code: Option<NonZero<usize>>,
     pub value: usize,
 }
 
 impl SyscallResult {
-    pub fn success() -> Self {
+    pub const fn success() -> Self {
         Self {
             code: None,
             value: 0,
         }
     }
 
-    pub fn invalid_vector() -> Self {
+    pub const fn invalid_vector() -> Self {
         Self {
             code: Some({
                 // Safety: Value is non-zero.
@@ -33,17 +30,17 @@ impl SyscallResult {
     }
 }
 
-impl<TError: core::error::Error + Into<usize>> From<Result<(), TError>> for SyscallResult {
-    fn from(value: Result<(), TError>) -> Self {
+impl<E: core::error::Error + Into<usize>> From<Result<(), E>> for SyscallResult {
+    fn from(value: Result<(), E>) -> Self {
         match value {
             Ok(()) => Self {
                 code: None,
                 value: 0,
             },
 
-            Err(error) => {
+            Err(error_code) => {
                 let error_code =
-                    NonZero::<usize>::new(error.into()).expect("syscall error code was 0");
+                    NonZero::<usize>::new(error_code.into()).expect("syscall error code was 0");
 
                 Self {
                     code: Some(error_code),
@@ -55,14 +52,13 @@ impl<TError: core::error::Error + Into<usize>> From<Result<(), TError>> for Sysc
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn process(
+pub fn handle(
     vector: usize,
     arg1: usize,
     arg2: usize,
     arg3: usize,
     arg4: usize,
-    state: &mut InterruptStackFrame,
-    regs: &mut Registers,
+    context: &mut Context,
 ) -> SyscallResult {
     trace!(
         "Syscall: {{ Vector: {vector:#X}, 1: {arg1:#X}, 2: {arg2:#X}, 3: {arg3:#X}, 4: {arg4:#X}  4:{arg4:X?}"
@@ -82,14 +78,14 @@ pub fn process(
         Ok(Vector::KlogError) => klog::process_klog(log::Level::Error, arg1, arg2).into(),
 
         Ok(Vector::TaskDefer) => {
-            LocalState::with_scheduler(|scheduler| scheduler.yield_task(state, regs));
-
-            SyscallResult::success()
+            LocalState::with_scheduler(|scheduler| scheduler.yield_task(context)).into()
         }
-        Ok(Vector::TaskKill) => {
-            LocalState::with_scheduler(|scheduler| scheduler.kill_task(state, regs));
 
-            SyscallResult::success()
+        Ok(Vector::TaskKill) => {
+            // LocalState::with_scheduler(|scheduler| scheduler.kill_task(state, regs));
+            // SyscallResult::success()
+
+            todo!()
         }
     }
 }

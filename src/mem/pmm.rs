@@ -3,7 +3,7 @@ use crate::{
     util::sync::{Once, RwLock},
 };
 use bitmap::{BitMap, BitMapError};
-use core::num::NonZero;
+use core::{num::NonZero, ptr::NonNull};
 use libsys::{
     address::{Address, Frame},
     constants::{page_bits, page_mask, page_size},
@@ -102,24 +102,17 @@ impl<'a: 'static> PhysicalMemoryManager<'a> {
 
             trace!("Frame bitmap region: {bitmap_region:#X?}");
 
-            // Construct the ptr based on an offset into the higher-half direct map.
-            let bitmap_ptr = core::ptr::with_exposed_provenance_mut::<usize>(
-                HigherHalfDirectMap::offset(bitmap_region.start).get(),
-            );
+            let bitmap_address = HigherHalfDirectMap::offset(bitmap_region.start);
+            let bitmap_ptr = NonNull::with_exposed_provenance(bitmap_address);
+            let bitmap_ptr = NonNull::slice_from_raw_parts(bitmap_ptr, bitmap_size);
 
-            // Pre-initialize the bitmap memory to a known, zeroed out state.
-            // Safety: The memory region should not be in use by any other context.
-            unsafe {
-                core::ptr::write_bytes(bitmap_ptr, 0, bitmap_size_in_bytes);
-            }
-
+            trace!("Physical memory manager bitmap creating...");
             // Safety:
-            // - Region is guaranteed by the memory map to be unused
-            // - Region has been zero-initialized.
-            let bitmap =
-                unsafe { core::slice::from_raw_parts_mut::<'static>(bitmap_ptr, bitmap_size) };
-
-            let mut bitmap = BitMap::<'static>::new(bitmap, total_frames);
+            // - Pointer is aligned to `usize`.
+            // - Pointer has no contexts aliasing it (guaranteed by bootloader memory map to
+            //   be unused).
+            let mut bitmap = unsafe { BitMap::<'static>::new_from_ptr(bitmap_ptr, total_frames) };
+            trace!("Physical memory manager bitmap created.");
 
             // Ensure the bitmap's frames are reserved.
             trace!("Locking: {bitmap_region:#X?}");
@@ -202,10 +195,14 @@ impl<'a: 'static> PhysicalMemoryManager<'a> {
         Self::with_bitmap_mut(|bitmap| {
             let free_frame_index = bitmap.next_free(count).ok_or(NextFrameError::NoneFree)?;
 
-            trace!(
-                "Frames Locked: {:#X?}",
-                free_frame_index..(free_frame_index + count.get())
-            );
+            if count.get() == 1 {
+                trace!("Frame Locked: {free_frame_index:#X}",);
+            } else {
+                trace!(
+                    "Frames Locked: {:#X?}",
+                    free_frame_index..(free_frame_index + count.get())
+                );
+            }
 
             let free_frame_address = free_frame_index << page_bits().get();
             let frame = Address::<Frame>::new(free_frame_address).unwrap();

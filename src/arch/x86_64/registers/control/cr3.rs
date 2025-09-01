@@ -1,4 +1,4 @@
-use crate::task::asid::AddressSpaceId;
+use crate::mem::AddressSpaceId;
 use bit_field::BitField;
 use core::arch::asm;
 use libsys::{

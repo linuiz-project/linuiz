@@ -1,175 +1,97 @@
 use crate::arch::x86_64::{
     registers::ProcessorFlags,
     structures::gdt::{
-        PrivilegeLevel, SegmentSelector, kcode_selector, kdata_selector, ucode_selector,
-        udata_selector,
+        SegmentSelector, kcode_selector, kdata_selector, ucode_selector, udata_selector,
     },
 };
-use core::ptr::NonNull;
 
 /// Represents the interrupt stack frame pushed by the CPU on interrupt or
 /// exception entry.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct InterruptStackFrame {
-    // The instruction pointer at the time of the interrupt.
-    instruction_pointer: Option<NonNull<u8>>,
+    /// The instruction pointer at the time of the interrupt.
+    ///
+    /// # Remarks
+    ///
+    /// This value points to the instruction that should be executed when the
+    /// interrupt handler returns. For most interrupts, this value points to the
+    /// instruction immediately following the last executed instruction.
+    /// However, for some exceptions (e.g., page faults), this value points to
+    /// the faulting instruction, so that the instruction is restarted on
+    /// return. See the documentation of the
+    /// [`InterruptDescriptorTable`][crate::arch::x86_64::structures::idt::InterruptDescriptorTable]
+    /// fields for more details.
+    pub instruction_address: usize,
 
-    // The code segment at the time of the interrupt.
-    code_segment: usize,
+    /// The code segment at the time of the interrupt.
+    pub code_segment: SegmentSelector,
+
+    _cs_padding: [u8; 6],
 
     /// The flags at the time of the interrupt.
-    cpu_flags: usize,
+    pub cpu_flags: usize,
 
     /// The stack pointer at the time of the interrupt.
-    stack_pointer: Option<NonNull<u8>>,
+    pub stack_address: usize,
 
-    /// The stack segment at the time of the interrupt (often zero in 64-bit
-    /// mode).
-    stack_segment: usize,
+    /// The stack segment at the time of the interrupt.
+    pub stack_segment: SegmentSelector,
+
+    _ss_padding: [u8; 6],
 }
 
 impl InterruptStackFrame {
-    // TODO make unsafe? not sure if creating an invalid ISF is actually unsafe,
-    // since it may not always be used.
     /// Constructs a new [`InterruptStackFrame`].
     pub fn new(
-        instruction_pointer: Option<NonNull<u8>>,
+        instruction_address: usize,
         code_segment: SegmentSelector,
         cpu_flags: ProcessorFlags,
-        stack_pointer: Option<NonNull<u8>>,
+        stack_address: usize,
         stack_segment: SegmentSelector,
     ) -> Self {
         Self {
-            instruction_pointer,
-            code_segment: usize::from(code_segment.as_u16()),
+            instruction_address,
+            code_segment,
             cpu_flags: cpu_flags.bits(),
-            stack_pointer,
-            stack_segment: usize::from(stack_segment.as_u16()),
+            stack_address,
+            stack_segment,
+
+            _cs_padding: [0u8; _],
+            _ss_padding: [0u8; _],
         }
     }
 
-    pub fn new_kernel(
-        instruction_pointer: Option<NonNull<u8>>,
-        stack_pointer: Option<NonNull<u8>>,
-    ) -> Self {
+    pub fn new_kernel(instruction_address: usize, stack_address: usize) -> Self {
         Self::new(
-            instruction_pointer,
+            instruction_address,
             kcode_selector(),
             ProcessorFlags::INTERRUPT_FLAG,
-            stack_pointer,
+            stack_address,
             kdata_selector(),
         )
     }
 
-    pub fn new_user(
-        instruction_pointer: Option<NonNull<u8>>,
-        stack_pointer: Option<NonNull<u8>>,
-    ) -> Self {
+    pub fn new_user(instruction_address: usize, stack_address: usize) -> Self {
         Self::new(
-            instruction_pointer,
+            instruction_address,
             ucode_selector(),
             ProcessorFlags::INTERRUPT_FLAG,
-            stack_pointer,
+            stack_address,
             udata_selector(),
         )
     }
-
-    /// Gets the return instruction pointer.
-    ///
-    /// ## Remarks
-    ///
-    /// This value points to the instruction that should be executed when the
-    /// interrupt handler returns. For most interrupts, this value points to
-    /// the instruction immediately following the last executed instruction.
-    /// However, for some exceptions (e.g., page faults), this value points
-    /// to the faulting instruction, so that the instruction is restarted on
-    /// return. See the documentation of the [`InterruptDescriptorTable`] fields
-    /// for more details.
-    pub fn get_instruction_address(&self) -> Option<NonNull<u8>> {
-        self.instruction_pointer
-    }
-
-    /// Stores the new return instruction pointer.
-    ///
-    /// # Safety
-    ///
-    /// TODO
-    pub unsafe fn set_instruction_pointer(&mut self, instruction_pointer: Option<NonNull<u8>>) {
-        self.instruction_pointer = instruction_pointer;
-    }
-
-    /// Get the return code segment selector.
-    pub fn get_code_segment(&self) -> SegmentSelector {
-        let code_segment = u16::try_from(self.code_segment).unwrap();
-
-        SegmentSelector::new(
-            code_segment >> 3,
-            PrivilegeLevel::try_from(code_segment & 0b11).unwrap(),
-        )
-    }
-
-    /// Set the return code segment selector.
-    pub unsafe fn set_code_segment(&mut self, segment_selector: SegmentSelector) {
-        self.code_segment = usize::from(segment_selector.as_u16());
-    }
-
-    /// Get the return cpu flags.
-    pub fn get_cpu_flags(&self) -> ProcessorFlags {
-        ProcessorFlags::from_bits_truncate(self.cpu_flags)
-    }
-
-    /// Set the return cpu flags.
-    ///
-    /// # Safety
-    ///
-    /// TODO
-    pub unsafe fn set_cpu_flags(&mut self, cpu_flags: ProcessorFlags) {
-        self.cpu_flags = cpu_flags.bits();
-    }
-
-    /// Get the return stack pointer.
-    pub fn get_stack_address(&self) -> Option<NonNull<u8>> {
-        self.stack_pointer
-    }
-
-    /// Set the return stack pointer.
-    ///
-    /// # Safety
-    ///
-    /// TODO
-    pub unsafe fn set_stack_pointer(&mut self, stack_pointer: Option<NonNull<u8>>) {
-        self.stack_pointer = stack_pointer;
-    }
-
-    /// Get the return stack segment selector.
-    pub fn get_stack_segment(&self) -> SegmentSelector {
-        let stack_segment = u16::try_from(self.stack_segment).unwrap();
-
-        SegmentSelector::new(
-            stack_segment >> 3,
-            PrivilegeLevel::try_from(stack_segment & 0b11).unwrap(),
-        )
-    }
-
-    /// Set the return stack segment selector.
-    ///
-    /// # Safety
-    ///
-    /// TODO
-    pub unsafe fn set_stack_segment(&mut self, segment_selector: SegmentSelector) {
-        self.stack_segment = usize::from(segment_selector.as_u16());
-    }
 }
 
+#[allow(clippy::missing_fields_in_debug)]
 impl core::fmt::Debug for InterruptStackFrame {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("InterruptStackFrame")
-            .field("instruction_pointer", &self.get_instruction_address())
-            .field("code_segment", &self.get_code_segment())
-            .field("cpu_flags", &self.get_cpu_flags())
-            .field("stack_pointer", &self.get_stack_address())
-            .field("stack_segment", &self.get_stack_segment())
+        f.debug_struct("Interrupt Stack Frame")
+            .field("Instruction Pointer", &self.instruction_address)
+            .field("Code Segment", &self.code_segment)
+            .field("Stack Pointer", &self.stack_address)
+            .field("Stack Segment", &self.stack_segment)
+            .field("CPU Flags", &self.cpu_flags)
             .finish()
     }
 }

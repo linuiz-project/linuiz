@@ -93,7 +93,7 @@ impl Logger {
         let address = {
             cfg_select! {
                 target_arch = "x86_64" => {
-                    // TODO allow specifying the serial port in the kernel parameters?
+                    // TODO Allow specifying the serial port in the kernel parameters?
                     let port_address = NonZero::<u16>::new(0x3F8).unwrap();
                     // Safety: 0x3F8 is *very likely* to be the correct serial port; even
                     //         if not, there's no way to check.

@@ -1,7 +1,6 @@
 use crate::{
     arch::x86_64::structures::idt::{InterruptStackFrame, PageFaultErrorCode, SelectorErrorCode},
-    interrupts::exceptions::{Exception, ExceptionKind, PageFaultReason},
-    task::Registers,
+    cpu::context::Registers,
 };
 use libsys::address::{Address, Virtual};
 
@@ -127,31 +126,4 @@ pub enum ArchException<'a> {
     /// Not an exception; it will never be handled by an interrupt handler. It
     /// is included here for completeness.
     TripleFault,
-}
-
-// TODO Rather than implementing this, we should probably handle specific
-// exceptions at the      exception's unified handler, and then pass a
-// constructed `Exception` to a more general (not      arch-specific) handler.
-impl From<ArchException<'_>> for Exception {
-    fn from(value: ArchException) -> Self {
-        match value {
-            ArchException::PageFault(isf, _, err, address) => {
-                let cause = {
-                    if err.contains(PageFaultErrorCode::PROTECTION_VIOLATION) {
-                        PageFaultReason::BadPermissions
-                    } else {
-                        PageFaultReason::NotMapped
-                    }
-                };
-
-                Exception::new(
-                    ExceptionKind::PageFault { address, cause },
-                    isf.get_instruction_address(),
-                    isf.get_stack_address(),
-                )
-            }
-
-            _ => unimplemented!(),
-        }
-    }
 }

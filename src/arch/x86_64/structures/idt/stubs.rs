@@ -4,12 +4,11 @@ use crate::{
         devices::local_apic::LocalApic,
         structures::idt::{InterruptStackFrame, PageFaultErrorCode, SelectorErrorCode},
     },
-    cpu::local_state::LocalState,
+    cpu::context::{Context, Registers},
     interrupts::{
         Vector,
         exceptions::{ArchException, handle},
     },
-    task::Registers,
 };
 
 #[unsafe(no_mangle)]
@@ -163,27 +162,20 @@ extern "sysv64" fn __ve_handler(stack_frame: &InterruptStackFrame, gprs: &Regist
 #[allow(clippy::similar_names)]
 extern "sysv64" fn __irq_handler(
     irq_number: u8,
-    isf: &mut InterruptStackFrame,
-    regs: &mut Registers,
+    interrupt_stack_frame: &mut InterruptStackFrame,
+    registers: &mut Registers,
 ) {
     match Vector::try_from(irq_number) {
-        Ok(Vector::Timer) => {
-            LocalState::with_scheduler(|scheduler| {
-                scheduler.interrupt_task(isf, regs);
-            });
+        Ok(vector) => {
+            let mut context = Context::new(*interrupt_stack_frame, *registers);
+
+            crate::interrupts::handle(vector, &mut context);
+
+            *interrupt_stack_frame = *context.execution();
+            *registers = *context.registers();
         }
 
-        Ok(Vector::Syscall) => {
-            let result = crate::interrupts::syscall::process(
-                regs.rsi, regs.rdi, regs.rax, regs.rcx, regs.rdx, isf, regs,
-            );
-            trace!("{result:#X?}");
-
-            regs.rdi = result.code.map_or(0, core::num::NonZero::get);
-            regs.rsi = result.value;
-        }
-
-        vector => unimplemented!("unsupported interrupt vector: {vector:?}"),
+        Err(irq_number) => unimplemented!("unsupported interrupt: {irq_number:?}"),
     }
 
     // Safety: This is the end of an interrupt service routine.

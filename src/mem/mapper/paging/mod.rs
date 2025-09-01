@@ -1,5 +1,3 @@
-use core::{marker::PhantomData, num::NonZero, ptr::NonNull};
-
 use crate::{
     mem::{
         HigherHalfDirectMap,
@@ -7,6 +5,7 @@ use crate::{
     },
     util::{ExclusiveBorrow, InteriorBorrow, SharedBorrow},
 };
+use core::{marker::PhantomData, ptr::NonNull};
 use libsys::{
     address::{Address, Frame, Page},
     constants::table_index_size,
@@ -71,36 +70,33 @@ impl<BorrowKind: InteriorBorrow> PageTable<BorrowKind> {
     }
 
     fn table(&self) -> &[Entry; table_index_size()] {
-        let page = HigherHalfDirectMap::frame_to_page(self.frame);
-
-        debug_assert!(page.index() > 0);
-
-        // Safety: All addresses in the higher-half direct map will be non-zero.
-        let page_address = unsafe { NonZero::<usize>::new_unchecked(page.get().get()) };
-        let table_ptr = NonNull::<Entry>::with_exposed_provenance(page_address);
+        let table_address = HigherHalfDirectMap::offset(self.frame.get().get());
+        let table_ptr = NonNull::<Entry>::with_exposed_provenance(table_address);
         let table_ptr = NonNull::slice_from_raw_parts(table_ptr, table_index_size());
 
         // Safety:
-        // - Pointer came from an `Address<Page>`, so is naturally aligned to a page
-        //   boundary.
+        // - Pointer is from `Address<Frame>`, so is naturally page-aligned.
         // - Pointer is from exposed provenance, and so is naturally dereferenceable (as
         //   it does not originate from an allocation).
-        // - `Self::new` requires that the source frame be valid for readingh as a page
-        //   table.
-        // - Pointer is aliased as the same kind of borrow as `self`.
+        // - `Self::new` requires that the `self.frame` be valid as a page table.
+        // - Pointer is aliased identically to `self`.
+        // - `Self::new` required that `self.frame` be at least zero initialized.
         let table = unsafe { table_ptr.as_ref() };
 
         table.try_into().unwrap()
     }
 
     pub fn sub_table(&self, index: usize) -> Option<PageTable<SharedBorrow>> {
-        self.get_entry(index)
-            .and_then(Entry::get_frame)
-            .map(|frame| PageTable::<SharedBorrow> {
+        self.get_entry(index).and_then(|entry| {
+            let frame = entry.get_frame()?;
+            let next_depth = self.depth.next_checked()?;
+
+            Some(PageTable::<SharedBorrow> {
                 frame,
-                depth: self.depth.next(),
+                depth: next_depth,
                 marker: PhantomData,
             })
+        })
     }
 
     pub fn get_entry(&self, index: usize) -> Option<&Entry> {
@@ -127,7 +123,7 @@ impl<BorrowKind: InteriorBorrow> PageTable<BorrowKind> {
         } else {
             // This is a simple runtime check to ensure we don't accidentally mistakenly
             // create large/huge pages along a table walk path.
-            if !is_intermediate_entry(entry) {
+            if !entry.is_intermediate() {
                 return Err(WithEntryError::TerminatingPage);
             }
 
@@ -140,40 +136,52 @@ impl<BorrowKind: InteriorBorrow> PageTable<BorrowKind> {
     pub fn iter(&self) -> core::slice::Iter<Entry> {
         self.table().iter()
     }
+
+    pub fn walk_all(&self, func: impl Fn(Depth, usize, &Entry) + Copy) {
+        let current_depth = self.depth;
+        self.table()
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| entry.is_enabled())
+            .for_each(|(index, entry)| {
+                func(current_depth, index, entry);
+
+                if let Some(next_page_table) = self.sub_table(index) {
+                    next_page_table.walk_all(func);
+                }
+            });
+    }
 }
 
 impl PageTable<ExclusiveBorrow> {
     fn table_mut(&mut self) -> &mut [Entry; table_index_size()] {
-        let page = HigherHalfDirectMap::frame_to_page(self.frame);
-
-        debug_assert!(page.index() > 0);
-
-        // Safety: All addresses in the higher-half direct map will be non-zero.
-        let page_address = unsafe { NonZero::<usize>::new_unchecked(page.get().get()) };
-        let table_ptr = NonNull::<Entry>::with_exposed_provenance(page_address);
+        let table_address = HigherHalfDirectMap::offset(self.frame.get().get());
+        let table_ptr = NonNull::<Entry>::with_exposed_provenance(table_address);
         let mut table_ptr = NonNull::slice_from_raw_parts(table_ptr, table_index_size());
 
         // Safety:
-        // - Pointer came from an `Address<Page>`, so is naturally aligned to a page
-        //   boundary.
+        // - Pointer is from `Address<Frame>`, so is naturally page-aligned.
         // - Pointer is from exposed provenance, and so is naturally dereferenceable (as
         //   it does not originate from an allocation).
-        // - `Self::new` requires that the source frame be valid for readingh as a page
-        //   table.
-        // - Pointer is aliased as the same kind of borrow as `self`.
+        // - `Self::new` requires that the `self.frame` be valid as a page table.
+        // - Pointer is aliased identically to `self`.
+        // - `Self::new` required that `self.frame` be at least zero initialized.
         let table = unsafe { table_ptr.as_mut() };
 
         table.try_into().unwrap()
     }
 
     pub fn sub_table_mut(&mut self, index: usize) -> Option<PageTable<ExclusiveBorrow>> {
-        self.get_entry(index)
-            .and_then(Entry::get_frame)
-            .map(|frame| PageTable::<ExclusiveBorrow> {
+        self.get_entry(index).and_then(|entry| {
+            let frame = entry.get_frame()?;
+            let next_depth = self.depth.next_checked()?;
+
+            Some(PageTable::<ExclusiveBorrow> {
                 frame,
-                depth: self.depth.next(),
+                depth: next_depth,
                 marker: PhantomData,
             })
+        })
     }
 
     pub fn get_entry_mut(&mut self, index: usize) -> Option<&mut Entry> {
@@ -200,7 +208,7 @@ impl PageTable<ExclusiveBorrow> {
         } else {
             // This is a simple runtime check to ensure we don't accidentally mistakenly
             // create large/huge pages along a table walk path.
-            if !is_intermediate_entry(entry) {
+            if !entry.is_intermediate() {
                 return Err(WithEntryError::TerminatingPage);
             }
 
@@ -228,18 +236,26 @@ impl PageTable<ExclusiveBorrow> {
         let entry = unsafe { entry.unwrap_unchecked() };
 
         if current_depth == to_depth {
+            trace!(
+                "Modifying: {:X?} {{ Index: {entry_index}, Depth: {:?}/{:?} }}",
+                page.get().get(),
+                current_depth.get(),
+                to_depth.get()
+            );
+
             Ok(with_fn(entry))
         } else {
-            // Ensure we don't mistakenly create large/huge pages along a table
-            // walk path.
-            if !is_intermediate_entry(entry) {
+            // Ensure we don't create oversized pages along a table walk path.
+            if !entry.is_intermediate() {
                 return Err(CreateEntryError::TerminatingPage);
             }
 
             if !entry.is_enabled() {
                 trace!(
-                    "Creating: {{ page: {page:X?}, to_depth: {}, current_depth: {current_depth:?} }}",
-                    to_depth.get(),
+                    "Creating: {:X?} {{ Index: {entry_index}, Depth: {:?}/{:?} }}",
+                    page.get().get(),
+                    current_depth.get(),
+                    to_depth.get()
                 );
 
                 #[cfg(target_arch = "x86_64")]
@@ -269,19 +285,22 @@ impl PageTable<ExclusiveBorrow> {
                     entry.set_frame(frame);
                 }
 
-                // Safety: Entry is being enabled.
-                unsafe {
-                    entry.set_enabled(true);
-                }
+                entry.set_enabled();
 
                 trace!("Created: {entry:X?}");
             }
 
             let page_table = self.sub_table_mut(entry_index);
             debug_assert!(page_table.is_some());
-
             // Safety: If page table didn't exist, it was just created.
             let mut page_table = unsafe { page_table.unwrap_unchecked() };
+            trace!(
+                "Traversing: {:X?} {{ Index: {entry_index}, Depth: {:?}/{:?} }}",
+                page.get().get(),
+                current_depth.get(),
+                to_depth.get()
+            );
+
             page_table.with_entry_create(page, to_depth, with_fn)
         }
     }
@@ -293,23 +312,6 @@ impl PageTable<ExclusiveBorrow> {
 
 impl<BorrowKind: InteriorBorrow> core::fmt::Debug for PageTable<BorrowKind> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        writeln!(f, "PageTable {{")?;
-
-        self.table()
-            .iter()
-            .enumerate()
-            .try_for_each(|(index, entry)| writeln!(f, "    {index: >3}: {entry:X?}"))?;
-
-        write!(f, "}}")?;
-
-        Ok(())
-    }
-}
-
-fn is_intermediate_entry(entry: &Entry) -> bool {
-    cfg_select! {
-        target_arch = "x86_64" => { !entry.is_huge() }
-
-        _ => { unimplemented!() }
+        f.debug_map().entries(self.iter().enumerate()).finish()
     }
 }

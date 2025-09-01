@@ -1,11 +1,10 @@
-use core::ops::Range;
-
 use crate::{mem::Permissions, util::sync::Lazy};
 use bit_field::BitField;
+use core::ops::Range;
 use libsys::address::{Address, Frame};
 
 #[repr(transparent)]
-#[derive(Clone)]
+#[derive(Default, Clone, PartialEq, Eq)]
 pub struct Entry(usize);
 
 impl Entry {
@@ -38,13 +37,16 @@ impl Entry {
     fn get_frame_address_range() -> Range<usize> {
         static FRAME_ADDRESS_RANGE: Lazy<Range<usize>> = Lazy::new(|| {
             cfg_select! {
-                any(target_arch = "x86", target_arch = "x86_64") => {
+                all(any(target_arch = "x86", target_arch = "x86_64"), test) => {
+                    12..51
+                }
+
+                all(any(target_arch = "x86", target_arch = "x86_64"), not(test)) => {
                     use crate::arch::x86_64::{cpuid::feature_info, registers::control::cr4};
 
                     if feature_info().is_some_and(|cpuid| cpuid.has_pae())
                         && cr4::CR4::read().contains(cr4::Flags::PAE)
                     {
-
                         12..51
                     } else {
                         12..32
@@ -68,15 +70,10 @@ impl Entry {
 
     /// Gets the frame index of the page table entry.
     pub fn get_frame(&self) -> Option<Address<Frame>> {
-        if !self.is_enabled() {
-            return None;
-        }
-
-        let frame_index = self.0.get_bits(Self::get_frame_address_range());
-        let frame_address =
-            Address::<Frame>::from_index(frame_index).expect("entry's frame address is invalid");
-
-        Some(frame_address)
+        self.is_enabled().then(|| {
+            let frame_index = self.0.get_bits(Self::get_frame_address_range());
+            Address::<Frame>::from_index(frame_index).expect("entry's frame address is invalid")
+        })
     }
 
     /// Sets the entry's frame index.
@@ -104,20 +101,35 @@ impl Entry {
         }
     }
 
-    /// Enables or disables the memory region this entry represents.
+    /// Enables the memory region of this entry.
+    pub fn set_enabled(&mut self) {
+        cfg_select! {
+            target_arch = "x86_64" => {
+                self.0.set_bit(Self::PRESENT_BIT_INDEX, true);
+            }
+
+            target_arch = "riscv64" => {
+                self.0.set_bit(Self::VALID_BIT_INDEX, true);
+            }
+
+            _ => { unimplemented!() }
+        }
+    }
+
+    /// Disables the memory region of this entry.
     ///
     /// # Safety
     ///
     /// - Disabling a page table entry may cause a `#PF` if the memory is still
     ///   in use.
-    pub unsafe fn set_enabled(&mut self, enabled: bool) {
+    pub unsafe fn set_disabled(&mut self) {
         cfg_select! {
             target_arch = "x86_64" => {
-                self.0.set_bit(Self::PRESENT_BIT_INDEX, enabled);
+                self.0.set_bit(Self::PRESENT_BIT_INDEX, false);
             }
 
             target_arch = "riscv64" => {
-                self.0.set_bit(Self::VALID_BIT_INDEX, enabled);
+                self.0.set_bit(Self::VALID_BIT_INDEX, false);
             }
 
             _ => { unimplemented!() }
@@ -208,12 +220,12 @@ impl Entry {
     }
 
     #[cfg(target_arch = "x86_64")]
-    /// Sets the `WRITE` bit, but no the `NO_EXECUTE` bit.
+    /// Sets the `WRITE` bit, but not the `NO_EXECUTE` bit.
     ///
     /// # Remarks
     ///
     /// Setting the `WRITE` bit without the `NO_EXECUTE` bit is extremely
-    /// unsafe.T his should **only** be done for intermediate, non-leaf page
+    /// unsafe. This should **only** be done for intermediate, non-leaf page
     /// table entries.
     pub fn set_write_execute(&mut self) {
         self.0.set_bit(Self::WRITABLE_BIT_INDEX, true);
@@ -231,7 +243,7 @@ impl Entry {
                     (true, true) => Permissions::ReadWrite,
                     (false, false) => Permissions::ReadExecute,
 
-                    // This should ONLY be for intermediate entries.
+                    // This should ONLY be used for intermediate entries.
                     (true, false) => Permissions::WriteExecute,
                 }
             }
@@ -270,34 +282,83 @@ impl Entry {
             _ => { unimplemented!() }
         }
     }
-}
 
-impl Default for Entry {
-    fn default() -> Self {
+    /// `true` if the entry is an intermediate entry, or `false` if it's a leaf.
+    pub fn is_intermediate(&self) -> bool {
         cfg_select! {
-            target_arch = "x86_64" => {
-                Self(1 << Self::WRITABLE_BIT_INDEX)
-            }
+            target_arch = "x86_64" => { !self.is_huge() }
+
+            _ => { unimplemented!() }
         }
     }
 }
 
 impl core::fmt::Debug for Entry {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let mut debug_struct = formatter.debug_struct("Entry");
+        let mut d = formatter.debug_struct("Entry");
 
-        debug_struct.field("Enabled", &self.is_enabled()).field(
-            "Physical Address",
-            &self.get_frame().map(|frame| frame.get().get()),
-        );
+        d.field("Enabled", &self.is_enabled());
+
+        if let Some(frame_address) = self.get_frame() {
+            d.field("Address", &frame_address.get().get());
+        }
 
         #[cfg(target_arch = "x86_64")]
-        debug_struct.field("Huge", &self.is_huge());
+        d.field("Huge", &self.is_huge());
 
-        debug_struct
-            .field("Global", &self.is_global())
+        d.field("Global", &self.is_global())
             .field("Access", &self.get_permissions())
             .field("User", &self.is_user())
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Entry;
+    use libsys::address::{Address, Frame};
+
+    #[test]
+    pub fn default() {
+        assert_eq!(Entry::default(), Entry(0));
+    }
+
+    #[test]
+    pub fn enabled() {
+        let mut entry = Entry::default();
+
+        entry.set_enabled();
+        assert_eq!(entry, Entry(1 << 0));
+
+        // Safety: Entry not in use.
+        unsafe {
+            entry.set_disabled();
+        }
+        assert_eq!(entry, Entry(0));
+    }
+
+    #[test]
+    pub fn frame() {
+        const ADDRESS: usize = 0xFFF000;
+
+        let mut entry = Entry::default();
+        assert_eq!(entry, Entry(0));
+
+        // Safety: Address is canonical.
+        let frame = unsafe { Address::<Frame>::new_unchecked(ADDRESS) };
+        // Safety: Entry not in use.
+        unsafe {
+            entry.set_frame(frame);
+        }
+        assert_eq!(entry, Entry(ADDRESS));
+
+        entry.set_enabled();
+        assert_eq!(entry.get_frame(), Some(frame));
+
+        // Safety: Entry not in use.
+        unsafe {
+            entry.clear();
+        }
+        assert_eq!(entry, Entry(0));
     }
 }

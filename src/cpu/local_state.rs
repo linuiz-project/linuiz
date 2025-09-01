@@ -1,23 +1,16 @@
 use crate::{
-    interrupts::exceptions::Exception,
     mem::{HigherHalfDirectMap, pmm::PhysicalMemoryManager},
-    task::Scheduler,
+    scheduler::Scheduler,
     time::LocalTimer,
     util::sync::Mutex,
 };
-use core::{cell::UnsafeCell, ptr::NonNull, sync::atomic::AtomicBool, time::Duration};
+use core::ptr::NonNull;
 
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86_64::structures::tss::TaskStateSegment;
 
 pub const STACK_SIZE: usize = 0x10000;
 pub const SYSCALL_STACK_SIZE: usize = 0x40000;
-
-pub enum ExceptionCatcher {
-    Caught(Exception),
-    Await,
-    Idle,
-}
 
 fn try_get_local_static_ptr() -> Option<NonNull<LocalState>> {
     #[cfg(target_arch = "x86_64")]
@@ -28,10 +21,8 @@ fn try_get_local_static_ptr() -> Option<NonNull<LocalState>> {
 
 /// Local (to the current processor) state structure.
 pub struct LocalState {
-    timer: LocalTimer,
+    timer: Mutex<LocalTimer>,
     scheduler: Mutex<Scheduler>,
-    catch_exception: AtomicBool,
-    exception: UnsafeCell<Option<Exception>>,
 
     #[cfg(target_arch = "x86_64")]
     tss: TaskStateSegment,
@@ -63,10 +54,8 @@ impl LocalState {
         // Safety: Memory was allocated for the size and align of `Self`.
         unsafe {
             local_state_ptr.write(Self {
-                timer,
+                timer: Mutex::new(timer),
                 scheduler: Mutex::new(scheduler),
-                catch_exception: AtomicBool::new(false),
-                exception: UnsafeCell::new(None),
 
                 #[cfg(target_arch = "x86_64")]
                 tss: TaskStateSegment::new(),
@@ -114,76 +103,7 @@ impl LocalState {
         Self::get_local_static().scheduler.with_lock(func)
     }
 
-    /// # Safety
-    ///
-    /// - Function should only be called once the last preemption wait has
-    ///   resolved.
-    pub unsafe fn set_preemption_wait(duration: Duration) {
-        LocalState::get_local_static()
-            .timer
-            .set_wait(duration)
-            .expect("preemption wait duration was too long");
+    pub fn with_timer<T>(func: impl FnOnce(&mut LocalTimer) -> T) -> T {
+        Self::get_local_static().timer.with_lock(func)
     }
 }
-
-// /// TODO inline this function
-// pub unsafe fn begin_scheduling() {
-//     // Enable scheduler ...
-//     with_scheduler(|scheduler| {
-//         assert!(!scheduler.is_enabled());
-//         scheduler.enable();
-//     });
-
-//     // Enable APIC timer ...
-//     // TODO APIC
-//     // let apic = &mut get_mut().apic;
-//     // assert!(apic.get_timer().get_masked());
-//     // // Safety: Calling `begin_scheduling` implies this state change is
-// expected.     // unsafe {
-//     //     apic.get_timer().set_masked(false);
-//     // }
-
-//     // Safety: Calling `begin_scheduling` implies this function is expected
-// to be called.     unsafe {
-//         set_preemption_wait(core::num::NonZeroU16::MIN);
-//     }
-// }
-
-// pub fn provide_exception<T: Into<Exception>>(exception: T) ->
-// core::result::Result<(), T> {     let state = get_state_mut();
-//     if state.catch_exception.load(Ordering::Relaxed) {
-//         let exception_cell = state.exception.get_mut();
-
-//         debug_assert!(exception_cell.is_none());
-//         *exception_cell = Some(exception.into());
-//         Ok(())
-//     } else {
-//         Err(exception)
-//     }
-// }
-
-// /// ## Safety
-// ///
-// /// Caller must ensure `do_func` is effectively stackless, since no stack
-// cleanup will occur on an exception. pub unsafe fn do_catch<T>(do_func: impl
-// FnOnce() -> T) -> core::result::Result<T, Exception> {     let state =
-// get_state_mut();
-
-//     debug_assert!(state.exception.get_mut().is_none());
-
-//     state
-//         .catch_exception
-//         .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
-//         .expect("nested exception catching is not supported");
-
-//     let do_func_result = do_func();
-//     let result = state.exception.get_mut().take().map_or(Ok(do_func_result),
-// Err);
-
-//     state
-//         .catch_exception
-//         .compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed)
-//         .expect("inconsistent local catch state");
-
-//     result
-// }
