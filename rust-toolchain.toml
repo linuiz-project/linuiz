@@ -1,5 +1,13 @@
 [toolchain]
 channel = "nightly-2025-08-21"
-components = ["cargo", "clippy", "miri", "rust-src", "rust-std", "rustfmt"]
+components = [
+  "cargo",
+  "clippy",
+  "miri",
+  "rust-analyzer",
+  "rust-src",
+  "rust-std",
+  "rustfmt",
+]
 targets = ["x86_64-unknown-none", "riscv64gc-unknown-none-elf"]
 profile = "minimal"
