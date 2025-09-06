@@ -46,6 +46,8 @@
 )]
 #![cfg_attr(debug_assertions, allow(clippy::todo))]
 #![allow(
+    clippy::too_many_lines,
+    clippy::too_many_arguments,
     clippy::cargo_common_metadata,
     clippy::enum_glob_use,
     clippy::inline_always,
@@ -128,7 +130,6 @@ static STACK_SIZE_REQUEST: StackSizeRequest =
 
 #[doc(hidden)]
 #[unsafe(no_mangle)]
-#[allow(clippy::too_many_lines)]
 unsafe extern "C" fn _entry() -> ! {
     // All of the code within this function should be run ONLY ONCE. Writing the
     // code sequentially within one function easily ensures that will be the
@@ -194,6 +195,8 @@ unsafe extern "C" fn _entry() -> ! {
     unsafe {
         crate::mem::KernelMapper::swap_into();
     }
+
+    loop {}
 
     // Safety: We've reached the end of the kernel init phase.
     unsafe { crate::cpu::start(Some(&MP_REQUEST), Some(&MEMORY_MAP_REQUEST)) }

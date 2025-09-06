@@ -1,8 +1,11 @@
 use crate::{
     cpu::context::Context,
-    mem::{HigherHalfDirectMap, pmm::PhysicalMemoryManager},
+    mem::{
+        HigherHalfDirectMap,
+        pmm::{PageSize, PhysicalMemoryManager},
+    },
 };
-use core::{mem::MaybeUninit, num::NonZero, ptr::NonNull};
+use core::{mem::MaybeUninit, ptr::NonNull};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use uuid::Uuid;
 
@@ -193,7 +196,7 @@ pub fn queue_procedure(procedure_fn: fn()) {
         crate::cpu::local_state::LocalState::with_scheduler(Scheduler::kill_current_task);
     }
 
-    let stack_address = PhysicalMemoryManager::next_free(NonZero::<usize>::MIN, false)
+    let stack_address = PhysicalMemoryManager::next_free_frame(PageSize::Standard, false)
         .unwrap()
         .get()
         .get();

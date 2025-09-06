@@ -68,25 +68,7 @@ impl Entry {
         self.0 = 0;
     }
 
-    /// Gets the frame index of the page table entry.
-    pub fn get_frame(&self) -> Option<Address<Frame>> {
-        self.is_enabled().then(|| {
-            let frame_index = self.0.get_bits(Self::get_frame_address_range());
-            Address::<Frame>::from_index(frame_index).expect("entry's frame address is invalid")
-        })
-    }
-
-    /// Sets the entry's frame index.
-    ///
-    /// # Safety
-    ///
-    /// - `frame` must be unused or otherwise expected to be pointed to by this
-    ///   entry's address.
-    pub unsafe fn set_frame(&mut self, frame: Address<Frame>) {
-        self.0
-            .set_bits(Self::get_frame_address_range(), frame.index());
-    }
-
+    /// Enables the memory region of this entry.
     pub fn is_enabled(&self) -> bool {
         cfg_select! {
             target_arch = "x86_64" => {
@@ -101,7 +83,6 @@ impl Entry {
         }
     }
 
-    /// Enables the memory region of this entry.
     pub fn set_enabled(&mut self) {
         cfg_select! {
             target_arch = "x86_64" => {
@@ -136,9 +117,32 @@ impl Entry {
         }
     }
 
+    /// Gets the frame index of the page table entry.
+    pub fn get_frame(&self) -> Option<Address<Frame>> {
+        self.is_enabled().then(|| {
+            let frame_index = self.0.get_bits(Self::get_frame_address_range());
+            Address::<Frame>::from_index(frame_index).expect("entry's frame address is invalid")
+        })
+    }
+
+    /// Sets the entry's frame index.
+    ///
+    /// # Safety
+    ///
+    /// - `frame` must be unused or otherwise expected to be pointed to by this
+    ///   entry's address.
+    pub unsafe fn set_frame(&mut self, frame: Address<Frame>) {
+        self.0
+            .set_bits(Self::get_frame_address_range(), frame.index());
+    }
+
     pub fn is_global(&self) -> bool {
         cfg_select! {
-            target_arch = "x86_64" => {
+            all(target_arch = "x86_64", test) => {
+                self.0.get_bit(Self::GLOBAL_BIT_INDEX)
+            }
+
+            all(target_arch = "x86_64", not(test)) => {
                 use crate::arch::x86_64::registers::control::cr4;
 
                 if cr4::CR4::read().contains(cr4::Flags::PGE) {
@@ -158,11 +162,19 @@ impl Entry {
 
     pub fn set_global(&mut self, global: bool) {
         cfg_select! {
-            target_arch = "x86_64" => {
+            all(target_arch = "x86_64", test) => {
+                self.0.set_bit(Self::GLOBAL_BIT_INDEX, global);
+            }
+
+            all(target_arch = "x86_64", not(test)) => {
                 use crate::arch::x86_64::registers::control::cr4;
 
                 if cr4::CR4::read().contains(cr4::Flags::PGE) {
                     self.0.set_bit(Self::GLOBAL_BIT_INDEX, global);
+                } else {
+                    // We don't really care if it's set if it isn't supported.
+                    // Allowing this means it's much easier to manage the global
+                    // bit across different platforms.
                 }
             }
 
@@ -229,7 +241,18 @@ impl Entry {
     /// table entries.
     pub fn set_write_execute(&mut self) {
         self.0.set_bit(Self::WRITABLE_BIT_INDEX, true);
-        self.0.set_bit(Self::NO_EXECUTE_BIT_INDEX, false);
+
+        cfg_select! {
+            test => {
+                self.0.set_bit(Self::NO_EXECUTE_BIT_INDEX, false);
+            }
+
+            not(test) => {
+                if crate::arch::x86_64::registers::model_specific::IA32_EFER::get_no_execute_enable() {
+                    self.0.set_bit(Self::NO_EXECUTE_BIT_INDEX, false);
+                }
+            }
+        }
     }
 
     pub fn get_permissions(&self) -> Permissions {
@@ -316,6 +339,7 @@ impl core::fmt::Debug for Entry {
 #[cfg(test)]
 mod tests {
     use super::Entry;
+    use crate::mem::Permissions;
     use libsys::address::{Address, Frame};
 
     #[test]
@@ -361,4 +385,84 @@ mod tests {
         }
         assert_eq!(entry, Entry(0));
     }
+
+    #[test]
+    fn global() {
+        let mut entry = Entry::default();
+        entry.set_global(true);
+
+        cfg_select! {
+            target_arch = "x86_64" => {
+                assert_eq!(entry, Entry(1 << 8));
+                assert_eq!(entry.is_global(), true);
+            }
+        }
+
+        entry.set_global(false);
+        cfg_select! {
+            target_arch = "x86_64" => {
+                assert_eq!(entry, Entry(0));
+                assert_eq!(entry.is_global(), false);
+            }
+        }
+    }
+
+    #[test]
+    fn user() {
+        let mut entry = Entry::default();
+        entry.set_user(true);
+
+        cfg_select! {
+            target_arch = "x86_64" => {
+                assert_eq!(entry, Entry(1 << 2));
+                assert_eq!(entry.is_user(), true);
+            }
+        }
+
+        entry.set_user(false);
+        cfg_select! {
+            target_arch = "x86_64" => {
+                assert_eq!(entry, Entry(0));
+                assert_eq!(entry.is_user(), false);
+            }
+        }
+    }
+
+    #[test]
+    fn huge() {
+        let mut entry = Entry::default();
+        entry.set_huge(true);
+
+        cfg_select! {
+            target_arch = "x86_64" => {
+                assert_eq!(entry, Entry(1 << 7));
+                assert_eq!(entry.is_huge(), true);
+            }
+        }
+
+        entry.set_huge(false);
+        cfg_select! {
+            target_arch = "x86_64" => {
+                assert_eq!(entry, Entry(0));
+                assert_eq!(entry.is_huge(), false);
+            }
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn set_write_execute() {
+        let mut entry = Entry::default();
+
+        // Safety: Entry not in use.
+        unsafe {
+            entry.set_permissions(Permissions::ReadExecute);
+        }
+        assert_eq!(entry, Entry(0));
+
+        entry.set_write_execute();
+        assert_eq!(entry, Entry(1 << 1));
+    }
+
+    // TODO test `Entry::get/set _permissions`
 }

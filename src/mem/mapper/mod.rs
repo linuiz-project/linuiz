@@ -2,7 +2,7 @@ use crate::{
     mem::{
         AddressSpaceId, HigherHalfDirectMap, Permissions,
         mapper::paging::{Depth, Entry},
-        pmm::{FrameError, NextFrameError, PhysicalMemoryManager},
+        pmm::{FrameError, PageSize, PhysicalMemoryManager},
     },
     util::{ExclusiveBorrow, SharedBorrow},
 };
@@ -98,14 +98,6 @@ pub enum AutoMappingError {
     OutOfMemory,
 }
 
-impl From<NextFrameError> for AutoMappingError {
-    fn from(error: NextFrameError) -> Self {
-        match error {
-            NextFrameError::NoneFree => Self::OutOfMemory,
-        }
-    }
-}
-
 impl From<MappingError> for AutoMappingError {
     fn from(error: MappingError) -> Self {
         match error {
@@ -134,7 +126,7 @@ pub struct Mapper(Address<Frame>);
 
 impl Mapper {
     pub fn new() -> Self {
-        let frame = PhysicalMemoryManager::next_free(core::num::NonZero::<usize>::MIN, true)
+        let frame = PhysicalMemoryManager::next_free_frame(PageSize::Standard, true)
             .expect("failed to allocate frame for new root page table");
 
         Self(frame)
@@ -271,7 +263,8 @@ impl Mapper {
         page: Address<Page>,
         permissions: Permissions,
     ) -> Result<(), AutoMappingError> {
-        let frame = PhysicalMemoryManager::next_free(core::num::NonZero::<usize>::MIN, true)?;
+        let frame = PhysicalMemoryManager::next_free_frame(PageSize::Standard, true)
+            .ok_or(AutoMappingError::OutOfMemory)?;
 
         // Safety:
         // - Frame was just allocated, so not current in use.

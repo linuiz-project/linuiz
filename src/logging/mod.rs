@@ -1,13 +1,10 @@
 use crate::{interrupts::uninterruptable, util::sync::Once};
 
-#[cfg(debug_assertions)]
 mod debug;
-
 mod serial;
 
 /// The kernel logger.
 pub struct KernelLogger {
-    #[cfg(debug_assertions)]
     debug: Option<&'static debug::Logger>,
 
     serial: &'static serial::Logger,
@@ -19,9 +16,7 @@ impl KernelLogger {
             static LOGGER: Once<KernelLogger> = Once::new();
 
             let kernel_logger = LOGGER.call_once(|| Self {
-                #[cfg(debug_assertions)]
                 debug: debug::Logger::init(),
-
                 serial: serial::Logger::init(),
             });
 
@@ -32,14 +27,16 @@ impl KernelLogger {
 }
 
 impl log::Log for KernelLogger {
-    fn enabled(&self, _: &log::Metadata) -> bool {
-        unimplemented!()
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= log::Level::Trace
     }
 
     fn log(&self, record: &log::Record) {
-        #[cfg(debug_assertions)]
-        self.debug.inspect(|logger| logger.log(record));
+        if !self.enabled(record.metadata()) {
+            return;
+        }
 
+        self.debug.inspect(|logger| logger.log(record));
         self.serial.log(record);
     }
 

@@ -25,18 +25,18 @@ pub struct KernelMapper(Mapper);
 static KERNEL_MAPPER: Once<KernelMapper> = Once::new();
 
 impl KernelMapper {
-    #[allow(clippy::too_many_lines)]
     pub fn init(
         memory_map_request: &limine::request::MemoryMapRequest,
         kernel_file_request: &limine::request::ExecutableFileRequest,
         kernel_address_request: &limine::request::ExecutableAddressRequest,
     ) {
-        fn map_range(
+        unsafe fn map_range(
             mapper: &mut Mapper,
             from: Address<Page>,
             to: Address<Frame>,
             byte_count: usize,
             memory_access: Permissions,
+            lock_frames: bool,
         ) {
             trace!(
                 "Map Range (Args): {{ from: {from:X?}, to: {to:X?}, byte_count: {byte_count:#X}, access: {memory_access:?} }}"
@@ -63,9 +63,7 @@ impl KernelMapper {
                 let to = Address::<Frame>::new(to).unwrap();
 
                 if mapper::use_huge_pages()
-                    // check is larger than huge page
                     && remaining_bytes >= huge_page_size()
-                    // check is aligned to huge page
                     && from.get().get().trailing_zeros() >= huge_page_size().trailing_zeros()
                 {
                     // Map a huge page
@@ -73,20 +71,16 @@ impl KernelMapper {
                     // Safety:
                     // - `from` page is not mapped in current page tables.
                     // - `to` frame is apart of the higher-half direct map, so is unused.
-                    // - `memory_access` is calculated based on the type of the memory region, as
-                    //   reported by the bootloader (so should be correct, if the bootloader is not
-                    //   lying).
+                    // - Caller is required to ensure `memory_access` is correct.
                     unsafe {
                         mapper
-                            .map(from, to, Depth::huge(), false, memory_access)
+                            .map(from, to, Depth::huge(), lock_frames, memory_access)
                             .expect("failed to map range");
                     }
 
                     remaining_bytes -= huge_page_size();
                 } else if mapper::use_large_pages()
-                    // check is larger than large page
                     && remaining_bytes >= large_page_size()
-                    // check is aligned to large page
                     && from.get().get().trailing_zeros() >= large_page_size().trailing_zeros()
                 {
                     // Map a large page
@@ -94,12 +88,10 @@ impl KernelMapper {
                     // Safety:
                     // - `from` page is not mapped in current page tables.
                     // - `to` frame is apart of the higher-half direct map, so is unused.
-                    // - `memory_access` is calculated based on the type of the memory region, as
-                    //   reported by the bootloader (so should be correct, if the bootloader is not
-                    //   lying).
+                    // - Caller is required to ensure `memory_access` is correct.
                     unsafe {
                         mapper
-                            .map(from, to, Depth::large(), false, memory_access)
+                            .map(from, to, Depth::large(), lock_frames, memory_access)
                             .expect("failed to map range");
                     }
 
@@ -110,12 +102,10 @@ impl KernelMapper {
                     // Safety:
                     // - `from` page is not mapped in current page tables.
                     // - `to` frame is apart of the higher-half direct map, so is unused.
-                    // - `memory_access` is calculated based on the type of the memory region, as
-                    //   reported by the bootloader (so should be correct, if the bootloader is not
-                    //   lying).
+                    // - Caller is required to ensure `memory_access` is correct.
                     unsafe {
                         mapper
-                            .map(from, to, Depth::max(), false, memory_access)
+                            .map(from, to, Depth::max(), lock_frames, memory_access)
                             .expect("failed to map range");
                     }
 
@@ -126,8 +116,12 @@ impl KernelMapper {
 
         KERNEL_MAPPER.call_once(|| {
             debug!("Preparing kernel memory...");
+
             debug!(
-                "Paging Setup Info: {{\n\tlarge pages: {{ enabled: {}, size: {:#X} }}\n\thuge pages: {{ enabled: {}, size: {:#X} }}\n}}",
+                "Paging Setup Info: {{\n\
+                \tlarge pages: {{ enabled: {}, size: {:#X} }}\n\
+                \thuge pages: {{ enabled: {}, size: {:#X} }}\n\
+                }}",
                 mapper::use_large_pages(),
                 large_page_size(),
                 mapper::use_huge_pages(),
@@ -142,9 +136,9 @@ impl KernelMapper {
                 .expect("bootloader did not provide a response to the memory map request")
                 .entries()
                 .iter()
-                .for_each(|entry| {
+                .map(|entry| {
                     trace!(
-                        "Map Entry: {{ start: {:#X}, length: {:#X}, type: {} }}",
+                        "Mapping Entry: {{ start: {:#X}, length: {:#X}, type: {} }}",
                         entry.base,
                         entry.length,
                         crate::limine_memory_map_entry_type_to_str(entry.entry_type)
@@ -152,8 +146,6 @@ impl KernelMapper {
 
                     let entry_start = usize::try_from(entry.base).unwrap();
                     let entry_length = usize::try_from(entry.length).unwrap();
-                    let entry_frame = Address::<Frame>::new(entry_start).unwrap();
-                    let entry_page = HigherHalfDirectMap::frame_to_page(entry_frame);
                     let entry_permissions = {
                         match entry.entry_type {
                             limine::memory_map::EntryType::USABLE
@@ -176,14 +168,39 @@ impl KernelMapper {
                         }
                     };
 
-                    map_range(
-                        &mut kernel_mapper,
-                        entry_page,
-                        entry_frame,
-                        entry_length,
-                        entry_permissions,
-                    );
-                });
+                    (entry_start, entry_length, entry_permissions)
+                })
+                .reduce(
+                    |(prev_start_address, prev_length, prev_permissions),
+                     (start_address, length, permissions)| {
+                        let prev_end_address = prev_start_address + prev_length;
+                        if prev_end_address == start_address && prev_permissions == permissions {
+                            trace!(
+                                "Compounding: {:#X?} <=> {:#X?}",
+                                prev_start_address..prev_end_address,
+                                start_address..(start_address + length)
+                            );
+
+                            (prev_start_address, prev_length + length, permissions)
+                        } else {
+                            let start_frame = Address::<Frame>::new(prev_start_address).unwrap();
+                            let start_page = HigherHalfDirectMap::frame_to_page(start_frame);
+
+                            unsafe {
+                                map_range(
+                                    &mut kernel_mapper,
+                                    start_page,
+                                    start_frame,
+                                    prev_length,
+                                    prev_permissions,
+                                    false,
+                                );
+                            }
+
+                            (start_address, length, permissions)
+                        }
+                    },
+                );
 
             // Extract the kernel file's physical and virtual addresses.
             let (kernel_physical_address, kernel_virtual_address) = kernel_address_request
@@ -237,13 +254,16 @@ impl KernelMapper {
                     let segment_permissions =
                         segment_to_mapping_permissions(program_header.p_flags);
 
-                    map_range(
-                        &mut kernel_mapper,
-                        segment_page,
-                        segment_frame,
-                        segment_length,
-                        segment_permissions,
-                    );
+                    unsafe {
+                        map_range(
+                            &mut kernel_mapper,
+                            segment_page,
+                            segment_frame,
+                            segment_length,
+                            segment_permissions,
+                            false,
+                        );
+                    }
                 });
 
             #[cfg(target_arch = "x86_64")]
@@ -253,13 +273,16 @@ impl KernelMapper {
 
                 trace!("Mapping the local APIC: {local_apic_frame:X?}");
 
-                map_range(
-                    &mut kernel_mapper,
-                    HigherHalfDirectMap::frame_to_page(local_apic_frame),
-                    local_apic_frame,
-                    page_size(),
-                    Permissions::ReadWrite,
-                );
+                unsafe {
+                    map_range(
+                        &mut kernel_mapper,
+                        HigherHalfDirectMap::frame_to_page(local_apic_frame),
+                        local_apic_frame,
+                        page_size(),
+                        Permissions::ReadWrite,
+                        true,
+                    );
+                }
             }
 
             let kernel_mapper = Self(kernel_mapper);

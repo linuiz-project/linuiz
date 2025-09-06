@@ -1241,8 +1241,7 @@ impl InterruptDescriptorTable {
         let idt = &*INTERRUPT_DESCRIPTOR_TABLE;
         let dtptr = DescriptorTablePointer::from(idt);
 
-        trace!("Loading: {dtptr:X?}");
-        trace!("{idt:#X?}");
+        trace!("Loading:\n{dtptr:X?}\n{idt:#X?}");
 
         // Safety: The descriptor table pointer was properly constructed.
         unsafe {

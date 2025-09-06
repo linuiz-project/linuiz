@@ -104,12 +104,7 @@ impl IA32_APIC_BASE {
 
     /// Gets the base address of the local APIC.
     pub fn get_base_address() -> Address<Frame> {
-        let base_address = Self::read() & !0xFFF;
-
-        // `u32` will always be castable to `usize` (we do not support 16-bit
-        // architectures).
-        #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
-        let base_address = base_address as usize;
+        let base_address = usize::try_from(Self::read() & !0xFFF).unwrap();
 
         // Safety:
         // - `base_address` is page aligned via the `&` operator above.

@@ -47,7 +47,7 @@ pub struct TaskStateSegment {
 const_assert!(size_of::<TaskStateSegment>() == 104);
 
 impl TaskStateSegment {
-    pub fn new() -> Self {
+    pub fn allocate() -> Self {
         fn allocate_stack_table_stack() -> NonNull<u8> {
             allocate_kernel_stack(PAGES_PER_STACK_TABLE_STACK)
                 .expect("failed to allocate a task state segment stack")

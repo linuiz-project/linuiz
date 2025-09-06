@@ -1,7 +1,7 @@
 use crate::{
     mem::{
         HigherHalfDirectMap,
-        pmm::{NextFrameError, PhysicalMemoryManager},
+        pmm::{PageSize, PhysicalMemoryManager},
     },
     util::{ExclusiveBorrow, InteriorBorrow, SharedBorrow},
 };
@@ -35,14 +35,6 @@ pub enum CreateEntryError {
 
     #[error("ran out of memory for allocation")]
     OutOfMemory,
-}
-
-impl From<NextFrameError> for CreateEntryError {
-    fn from(error: NextFrameError) -> Self {
-        match error {
-            NextFrameError::NoneFree => Self::OutOfMemory,
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -251,6 +243,8 @@ impl PageTable<ExclusiveBorrow> {
             }
 
             if !entry.is_enabled() {
+                // We'll populate the entry in this case, to ensure we can continue traversing.
+
                 trace!(
                     "Creating: {:X?} {{ Index: {entry_index}, Depth: {:?}/{:?} }}",
                     page.get().get(),
@@ -266,19 +260,20 @@ impl PageTable<ExclusiveBorrow> {
                     // entry will make the entire block of memory represented
                     // by the entry read-only, regardless of the leaf entry's
                     // permissions.
+                    //
+                    // This mean every intermediate entry needs to be `WRITE`+`EXECUTE`, and any
+                    // intermediate entries that will lead to userspace also need to be marked
+                    // `USER`.
+
                     entry.set_write_execute();
 
-                    // Insert the `USER` bit in all non-leaf, non-higher-half
-                    // pages. This is for compatibility with the x86 paging
-                    // scheme, where non-`USER` pages in a page table walk will
-                    // immediately return an access error.
                     if !HigherHalfDirectMap::is_address_higher_half(page.get()) {
                         entry.set_user(true);
                     }
                 }
 
-                let frame =
-                    PhysicalMemoryManager::next_free(core::num::NonZero::<usize>::MIN, true)?;
+                let frame = PhysicalMemoryManager::next_free_frame(PageSize::Standard, true)
+                    .ok_or(CreateEntryError::OutOfMemory)?;
 
                 // Safety: Frame is unused.
                 unsafe {

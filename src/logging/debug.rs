@@ -3,12 +3,20 @@ use ioports::{ReadOnlyPort, WriteOnlyPort};
 
 pub struct Logger(Mutex<Writer>);
 
-static DEBUG_LOGGER: Once<Logger> = Once::new();
+static DEBUG_LOGGER: Once<Option<Logger>> = Once::new();
 
 impl Logger {
     pub fn init() -> Option<&'static Self> {
         DEBUG_LOGGER
-            .try_call_once(|| {
+            .call_once(|| {
+                cfg_select! {
+                    target_arch = "x86_64" => {
+                        let _ = crate::arch::x86_64::cpuid::hypervisor_info()?;
+                    }
+
+                    _ => { unimplemented!() }
+                }
+
                 // Safety: We're testing if the port exists.
                 let test_port = unsafe { ReadOnlyPort::<u8>::new(0xE9) };
                 if test_port.read() == 0xE9 {
@@ -19,12 +27,12 @@ impl Logger {
                         .iter()
                         .for_each(|byte| debug_port.write(*byte));
 
-                    Ok(Self(Mutex::new(Writer(debug_port))))
+                    Some(Self(Mutex::new(Writer(debug_port))))
                 } else {
-                    Err(())
+                    None
                 }
             })
-            .ok()
+            .as_ref()
     }
 }
 

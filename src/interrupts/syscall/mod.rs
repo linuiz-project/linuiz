@@ -21,10 +21,7 @@ impl SyscallResult {
 
     pub const fn invalid_vector() -> Self {
         Self {
-            code: Some({
-                // Safety: Value is non-zero.
-                unsafe { NonZero::new_unchecked(usize::MAX) }
-            }),
+            code: Some(NonZero::<usize>::MAX),
             value: 0,
         }
     }
@@ -51,7 +48,6 @@ impl<E: core::error::Error + Into<usize>> From<Result<(), E>> for SyscallResult 
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn handle(
     vector: usize,
     arg1: usize,
