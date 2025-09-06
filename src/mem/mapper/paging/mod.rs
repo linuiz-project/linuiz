@@ -1,7 +1,7 @@
 use crate::{
     mem::{
         HigherHalfDirectMap,
-        pmm::{PageSize, PhysicalMemoryManager},
+        pmm::{FrameSize, PhysicalMemoryManager},
     },
     util::{ExclusiveBorrow, InteriorBorrow, SharedBorrow},
 };
@@ -272,7 +272,7 @@ impl PageTable<ExclusiveBorrow> {
                     }
                 }
 
-                let frame = PhysicalMemoryManager::next_free_frame(PageSize::Standard, true)
+                let frame = PhysicalMemoryManager::next_free_frame(FrameSize::Standard, true)
                     .ok_or(CreateEntryError::OutOfMemory)?;
 
                 // Safety: Frame is unused.

@@ -2,7 +2,7 @@ use crate::{
     cpu::context::Context,
     mem::{
         HigherHalfDirectMap,
-        pmm::{PageSize, PhysicalMemoryManager},
+        pmm::{FrameSize, PhysicalMemoryManager},
     },
 };
 use core::{mem::MaybeUninit, ptr::NonNull};
@@ -196,7 +196,7 @@ pub fn queue_procedure(procedure_fn: fn()) {
         crate::cpu::local_state::LocalState::with_scheduler(Scheduler::kill_current_task);
     }
 
-    let stack_address = PhysicalMemoryManager::next_free_frame(PageSize::Standard, false)
+    let stack_address = PhysicalMemoryManager::next_free_frame(FrameSize::Standard, false)
         .unwrap()
         .get()
         .get();

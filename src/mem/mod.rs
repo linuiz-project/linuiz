@@ -7,6 +7,7 @@ use libsys::{
     constants::{huge_page_size, large_page_size, page_size},
 };
 
+pub mod addr;
 pub mod alloc;
 pub mod mapper;
 pub mod pmm;
@@ -18,6 +19,27 @@ mod hhdm;
 pub use hhdm::*;
 
 // pub mod io;
+
+#[derive(Debug, Clone, Copy)]
+pub enum FrameSize {
+    Standard,
+    Large,
+    Huge,
+}
+
+impl FrameSize {
+    pub const fn size_in_bytes(self) -> usize {
+        match self {
+            FrameSize::Standard => page_size(),
+            FrameSize::Large => large_page_size(),
+            FrameSize::Huge => huge_page_size(),
+        }
+    }
+
+    pub const fn size_in_frames(self) -> usize {
+        self.size_in_bytes() >> page_size()
+    }
+}
 
 #[derive(Debug)]
 pub struct KernelMapper(Mapper);
