@@ -1,6 +1,7 @@
+use crate::util::sync::Once;
 use limine::request::ExecutableCmdlineRequest;
 
-use crate::util::sync::Once;
+// TODO Add a parameter for choosing the physical memory allocation strategy.
 
 #[derive(Debug)]
 pub struct KernelParameters {

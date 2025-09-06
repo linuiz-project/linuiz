@@ -196,8 +196,6 @@ unsafe extern "C" fn _entry() -> ! {
         crate::mem::KernelMapper::swap_into();
     }
 
-    loop {}
-
     // Safety: We've reached the end of the kernel init phase.
     unsafe { crate::cpu::start(Some(&MP_REQUEST), Some(&MEMORY_MAP_REQUEST)) }
 }
