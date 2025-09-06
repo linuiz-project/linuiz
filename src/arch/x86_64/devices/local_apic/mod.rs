@@ -1,10 +1,14 @@
 use crate::{
-    arch::x86_64::registers::model_specific::IA32_APIC_BASE, interrupts::Vector,
-    mem::HigherHalfDirectMap, util::sync::Lazy,
+    arch::x86_64::registers::model_specific::IA32_APIC_BASE,
+    interrupts::Vector,
+    mem::{
+        HigherHalfDirectMap,
+        addr::{phys::StandardFrame, virt::StandardPage},
+    },
+    util::sync::Lazy,
 };
 use bit_field::BitField;
 use core::{fmt, num::NonZero, ptr::NonNull};
-use libsys::address::{Address, Frame};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use safe_mmio::{
     UniqueMmioPointer,
@@ -92,11 +96,8 @@ impl Register {
         }
     }
 
-    pub fn as_xapic_address(self, base_address: Address<Frame>) -> NonZero<usize> {
-        let offset = usize::from(u8::from(self)) << 4;
-        let address = base_address.get().get() + offset;
-
-        HigherHalfDirectMap::offset(address)
+    pub fn as_xapic_offset(self) -> usize {
+        usize::from(u8::from(self)) << 4
     }
 
     pub fn as_x2apic_address(self) -> u32 {
@@ -221,11 +222,27 @@ pub enum TimerDivideConfiguration {
 #[derive(Debug, Clone, Copy)]
 #[allow(non_camel_case_types)]
 enum Mode {
-    xApic(Address<Frame>),
+    xApic {
+        frame: StandardFrame,
+        ptr: NonNull<u8>,
+    },
     x2Apic,
 }
 
 pub struct LocalApic(Mode);
+
+// Safety:
+// `LocalApic.Mode.ptr` uses the higher-half direct map, which is mapped into
+// each address space. Additionally, the actual address is functionally
+// identical on every mode of x86_64 CPU we know of in production, so while the
+// address of the processor-local APIC *could* **maybe** be different (and thus
+// not shareable across threads), it seems highly unlikely.
+unsafe impl Send for LocalApic {}
+// Safety:
+// The address that the local APIC in xAPIC mode uses is hardwired to
+// processor-local registers, so while the physical address may be the same for
+// each local APIC, the actual device access is always processor-local.
+unsafe impl Sync for LocalApic {}
 
 static LOCAL_APIC: Lazy<LocalApic> = Lazy::new(|| {
     assert!(
@@ -237,7 +254,12 @@ static LOCAL_APIC: Lazy<LocalApic> = Lazy::new(|| {
         if IA32_APIC_BASE::get_is_x2apic_mode() {
             Mode::x2Apic
         } else {
-            Mode::xApic(IA32_APIC_BASE::get_base_address())
+            let frame = IA32_APIC_BASE::get_base_address();
+            let page = HigherHalfDirectMap::frame_to_page::<_, StandardPage>(frame);
+            let address = NonZero::<usize>::try_from(usize::from(page)).unwrap();
+            let ptr = NonNull::with_exposed_provenance(address);
+
+            Mode::xApic { frame, ptr }
         }
     };
 
@@ -253,16 +275,21 @@ impl LocalApic {
         assert!(register.is_readable());
 
         match Self::get_mode() {
-            Mode::xApic(base_address) => {
-                let register_address = register.as_xapic_address(base_address);
-                let register_ptr =
-                    NonNull::<ReadPure<u32>>::with_exposed_provenance(register_address);
-
+            Mode::xApic { frame: _, ptr } => {
+                // Safety:
+                // Each local APIC register is referred to as an offset from its base address,
+                // which in this case is provided by `register.as_xapic_offset()`.
+                let register = unsafe {
+                    ptr.cast::<ReadPure<u32>>()
+                        .byte_add(register.as_xapic_offset())
+                };
                 // Safety:
                 // - Constructor is required to ensure `base_address` is correct.
                 // - Register is checked to be readable.
                 // - All APIC registers are 32 bits wide.
-                unsafe { UniqueMmioPointer::new(register_ptr) }.read()
+                let register = unsafe { UniqueMmioPointer::new(register) };
+
+                register.read()
             }
 
             Mode::x2Apic => {
@@ -297,16 +324,25 @@ impl LocalApic {
         assert!(register.is_writable());
 
         match Self::get_mode() {
-            Mode::xApic(base_address) => {
-                let register_address = register.as_xapic_address(base_address);
-                let register_ptr =
-                    NonNull::<WriteOnly<u32>>::with_exposed_provenance(register_address);
+            Mode::xApic { frame: _, ptr } => {
+                // Safety:
+                // Each local APIC register is referred to as an offset from its base address,
+                // which in this case is provided by `register.as_xapic_offset()`.
+                let register = unsafe {
+                    ptr.cast::<WriteOnly<u32>>()
+                        .byte_add(register.as_xapic_offset())
+                };
+                // Safety:
+                // - Constructor is required to ensure `base_address` is correct.
+                // - Register is checked to be readable.
+                // - All APIC registers are 32 bits wide.
+                let mut register = unsafe { UniqueMmioPointer::new(register) };
 
                 // Safety:
                 // - Constructor is required to ensure `base_address` is correct.
                 // - Register is checked to writable.
                 // - All APIC registers are 32 bits wide.
-                unsafe { UniqueMmioPointer::new(register_ptr) }.write(value);
+                register.write(value);
             }
 
             Mode::x2Apic => {
@@ -331,7 +367,7 @@ impl LocalApic {
     pub fn get_id() -> u32 {
         let value = Self::read_register(Register::ID);
         match Self::get_mode() {
-            Mode::xApic(_) => value.get_bits(24..32),
+            Mode::xApic { frame: _, ptr: _ } => value.get_bits(24..32),
             Mode::x2Apic => value,
         }
     }
@@ -511,28 +547,34 @@ impl LocalApic {
         let low_bits = interrupt_command.low_bits();
 
         match Self::get_mode() {
-            Mode::xApic(base_address) => {
+            Mode::xApic { frame: _, ptr } => {
                 const ICR_LOW: usize = 0x300;
                 const ICR_HIGH: usize = 0x310;
 
-                let register_low_address =
-                    NonZero::<usize>::new(base_address.get().get() + ICR_LOW).unwrap();
-                let register_low_ptr =
-                    NonNull::<WriteOnly<u32>>::with_exposed_provenance(register_low_address);
-
-                let register_high_address =
-                    NonZero::<usize>::new(base_address.get().get() + ICR_HIGH).unwrap();
-                let register_high_ptr =
-                    NonNull::<WriteOnly<u32>>::with_exposed_provenance(register_high_address);
+                // Safety:
+                // Each local APIC register is referred to as an offset from its base address,
+                // which in this case is provided by `ICR_LOW`/`ICR_HIGH`.
+                let (icr_low_register, icr_high_register) = unsafe {
+                    (
+                        ptr.cast::<WriteOnly<u32>>().byte_add(ICR_LOW),
+                        ptr.cast::<WriteOnly<u32>>().byte_add(ICR_HIGH),
+                    )
+                };
 
                 // Safety:
                 // - Constructor is required to ensure `base_address` is correct.
                 // - ICR registers are writable.
                 // - ICR registeers are 32 bits wide.
-                unsafe {
-                    UniqueMmioPointer::new(register_low_ptr).write(low_bits);
-                    UniqueMmioPointer::new(register_high_ptr).write(high_bits);
-                }
+
+                let (mut icr_low_register, mut icr_high_register) = unsafe {
+                    (
+                        UniqueMmioPointer::new(icr_low_register),
+                        UniqueMmioPointer::new(icr_high_register),
+                    )
+                };
+
+                icr_low_register.write(low_bits);
+                icr_high_register.write(high_bits);
             }
 
             Mode::x2Apic => {

@@ -1,6 +1,5 @@
 use crate::util::sync::Once;
 use elf::{ElfBytes, endian::AnyEndian, string_table::StringTable, symbol::SymbolTable};
-use libsys::address::{Address, Virtual};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -67,15 +66,26 @@ impl KernelSymbols {
         KERNEL_SYMBOLS.get()
     }
 
-    pub fn get_name(address: Address<Virtual>) -> Option<&'static str> {
+    pub fn get_name(trace_address: usize) -> Option<&'static str> {
+        let trace_address = u64::try_from(trace_address)
+            .inspect_err(|error| {
+                warn!("Failed to convert symbol address: {error:?}");
+            })
+            .ok()?;
+
         let (symbols, strings) = KernelSymbols::get_static()?.tables.as_ref()?;
 
         let symbol = symbols.iter().find(|symbol| {
-            (symbol.st_value..(symbol.st_value + symbol.st_size))
-                .contains(&address.get().try_into().unwrap())
+            (trace_address >= symbol.st_value)
+                && ((trace_address - symbol.st_value) <= symbol.st_size)
         })?;
+        let symbol_name_index = usize::try_from(symbol.st_name)
+            .inspect_err(|error| {
+                warn!("Failed to convert symbol name index: {error:?}");
+            })
+            .ok()?;
 
-        let Ok(string) = strings.get(symbol.st_name.try_into().unwrap()) else {
+        let Ok(string) = strings.get(symbol_name_index) else {
             error!("Could not parse symbol name: {:#X}", symbol.st_name);
             return None;
         };

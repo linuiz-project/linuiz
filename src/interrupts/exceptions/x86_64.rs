@@ -2,7 +2,6 @@ use crate::{
     arch::x86_64::structures::idt::{InterruptStackFrame, PageFaultErrorCode, SelectorErrorCode},
     cpu::context::Registers,
 };
-use libsys::address::{Address, Virtual};
 
 /// Exception wrapper type.
 #[repr(C)]
@@ -80,7 +79,7 @@ pub enum ArchException<'a> {
         &'a InterruptStackFrame,
         &'a Registers,
         PageFaultErrorCode,
-        Address<Virtual>,
+        usize,
     ),
 
     /// Occurs when the `fwait` or `wait` instruction (or any floating point

@@ -1,15 +1,15 @@
 use crate::{
     mem::{
         HigherHalfDirectMap,
-        pmm::{FrameSize, PhysicalMemoryManager},
+        addr::{
+            phys::StandardFrame,
+            virt::{StandardPage, VirtualAddress},
+        },
+        pmm::PhysicalMemoryManager,
     },
     util::{ExclusiveBorrow, InteriorBorrow, SharedBorrow},
 };
-use core::{marker::PhantomData, ptr::NonNull};
-use libsys::{
-    address::{Address, Frame, Page},
-    constants::table_index_size,
-};
+use core::{marker::PhantomData, num::NonZero, ptr::NonNull};
 
 mod depth;
 pub use depth::*;
@@ -38,8 +38,8 @@ pub enum CreateEntryError {
 }
 
 #[derive(Clone)]
-pub(super) struct PageTable<BorrowKind: InteriorBorrow> {
-    frame: Address<Frame>,
+pub(super) struct PageTable<BorrowKind> {
+    frame: StandardFrame,
     depth: Depth,
     marker: PhantomData<BorrowKind>,
 }
@@ -53,7 +53,7 @@ impl<BorrowKind: InteriorBorrow> PageTable<BorrowKind> {
     ///   newly allocated and empty frame.
     /// - `depth` must be the correct paging depth associated with the page
     ///   table's frame.
-    pub unsafe fn new(frame: Address<Frame>, depth: Depth) -> Self {
+    pub unsafe fn new(frame: StandardFrame, depth: Depth) -> Self {
         Self {
             frame,
             depth,
@@ -61,10 +61,11 @@ impl<BorrowKind: InteriorBorrow> PageTable<BorrowKind> {
         }
     }
 
-    fn table(&self) -> &[Entry; table_index_size()] {
-        let table_address = HigherHalfDirectMap::offset(self.frame.get().get());
+    fn table(&self) -> &[Entry; PageTableInfo::max_index().get()] {
+        let table_address = HigherHalfDirectMap::frame_to_page::<_, StandardPage>(self.frame);
+        let table_address = NonZero::<usize>::new(usize::from(table_address)).unwrap();
         let table_ptr = NonNull::<Entry>::with_exposed_provenance(table_address);
-        let table_ptr = NonNull::slice_from_raw_parts(table_ptr, table_index_size());
+        let table_ptr = NonNull::slice_from_raw_parts(table_ptr, PageTableInfo::max_index().get());
 
         // Safety:
         // - Pointer is from `Address<Frame>`, so is naturally page-aligned.
@@ -80,7 +81,8 @@ impl<BorrowKind: InteriorBorrow> PageTable<BorrowKind> {
 
     pub fn sub_table(&self, index: usize) -> Option<PageTable<SharedBorrow>> {
         self.get_entry(index).and_then(|entry| {
-            let frame = entry.get_frame()?;
+            let frame = entry.get_address()?;
+            let frame = StandardFrame::try_from(frame).unwrap();
             let next_depth = self.depth.next_checked()?;
 
             Some(PageTable::<SharedBorrow> {
@@ -97,14 +99,14 @@ impl<BorrowKind: InteriorBorrow> PageTable<BorrowKind> {
 
     pub fn with_entry<T>(
         &self,
-        page: Address<Page>,
+        address: VirtualAddress,
         to_depth: Option<Depth>,
         with_fn: impl FnOnce(&Entry) -> T,
     ) -> Result<T, WithEntryError> {
         let current_depth = self.depth;
-        let entry_index = current_depth.index_of(page.get());
+        let entry_index = current_depth.index_of(address);
 
-        debug_assert!(entry_index < table_index_size());
+        debug_assert!(entry_index < PageTableInfo::max_index().get());
 
         let entry = self.get_entry(entry_index);
         // Safety: `entry_index`s maximum value is the same as the entry table size.
@@ -121,7 +123,7 @@ impl<BorrowKind: InteriorBorrow> PageTable<BorrowKind> {
 
             self.sub_table(entry_index)
                 .ok_or(WithEntryError::NotMapped)
-                .and_then(|page_table| page_table.with_entry(page, to_depth, with_fn))
+                .and_then(|page_table| page_table.with_entry(address, to_depth, with_fn))
         }
     }
 
@@ -146,10 +148,12 @@ impl<BorrowKind: InteriorBorrow> PageTable<BorrowKind> {
 }
 
 impl PageTable<ExclusiveBorrow> {
-    fn table_mut(&mut self) -> &mut [Entry; table_index_size()] {
-        let table_address = HigherHalfDirectMap::offset(self.frame.get().get());
+    fn table_mut(&mut self) -> &mut [Entry; PageTableInfo::max_index().get()] {
+        let table_address = HigherHalfDirectMap::frame_to_page::<_, StandardPage>(self.frame);
+        let table_address = NonZero::<usize>::new(usize::from(table_address)).unwrap();
         let table_ptr = NonNull::<Entry>::with_exposed_provenance(table_address);
-        let mut table_ptr = NonNull::slice_from_raw_parts(table_ptr, table_index_size());
+        let mut table_ptr =
+            NonNull::slice_from_raw_parts(table_ptr, PageTableInfo::max_index().get());
 
         // Safety:
         // - Pointer is from `Address<Frame>`, so is naturally page-aligned.
@@ -165,7 +169,8 @@ impl PageTable<ExclusiveBorrow> {
 
     pub fn sub_table_mut(&mut self, index: usize) -> Option<PageTable<ExclusiveBorrow>> {
         self.get_entry(index).and_then(|entry| {
-            let frame = entry.get_frame()?;
+            let frame = entry.get_address()?;
+            let frame = StandardFrame::try_from(frame).unwrap();
             let next_depth = self.depth.next_checked()?;
 
             Some(PageTable::<ExclusiveBorrow> {
@@ -182,14 +187,14 @@ impl PageTable<ExclusiveBorrow> {
 
     pub fn with_entry_mut<T>(
         &mut self,
-        page: Address<Page>,
+        address: VirtualAddress,
         to_depth: Option<Depth>,
         with_fn: impl FnOnce(&mut Entry) -> T,
     ) -> Result<T, WithEntryError> {
         let current_depth = self.depth;
-        let entry_index = current_depth.index_of(page.get());
+        let entry_index = current_depth.index_of(address);
 
-        debug_assert!(entry_index < table_index_size());
+        debug_assert!(entry_index < PageTableInfo::max_index().get());
 
         let entry = self.get_entry_mut(entry_index);
         // Safety: `entry_index`s maximum value is the same as the entry table size.
@@ -206,7 +211,7 @@ impl PageTable<ExclusiveBorrow> {
 
             self.sub_table_mut(entry_index)
                 .ok_or(WithEntryError::NotMapped)
-                .and_then(|mut page_table| page_table.with_entry_mut(page, to_depth, with_fn))
+                .and_then(|mut page_table| page_table.with_entry_mut(address, to_depth, with_fn))
         }
     }
 
@@ -214,14 +219,14 @@ impl PageTable<ExclusiveBorrow> {
     /// given entry's frame, or creates the page table if it doesn't exist.
     pub fn with_entry_create<T>(
         &mut self,
-        page: Address<Page>,
+        address: VirtualAddress,
         to_depth: Depth,
         with_fn: impl FnOnce(&mut Entry) -> T,
     ) -> Result<T, CreateEntryError> {
         let current_depth = self.depth;
-        let entry_index = current_depth.index_of(page.get());
+        let entry_index = current_depth.index_of(address);
 
-        debug_assert!(entry_index < table_index_size());
+        debug_assert!(entry_index < PageTableInfo::max_index().get());
 
         let entry = self.get_entry_mut(entry_index);
         // Safety: `entry_index`s maximum value is the same as the entry table size.
@@ -229,8 +234,7 @@ impl PageTable<ExclusiveBorrow> {
 
         if current_depth == to_depth {
             trace!(
-                "Modifying: {:X?} {{ Index: {entry_index}, Depth: {:?}/{:?} }}",
-                page.get().get(),
+                "Modifying: {address:#X?} {{ Index: {entry_index}, Depth: {:?}/{:?} }}",
                 current_depth.get(),
                 to_depth.get()
             );
@@ -246,8 +250,7 @@ impl PageTable<ExclusiveBorrow> {
                 // We'll populate the entry in this case, to ensure we can continue traversing.
 
                 trace!(
-                    "Creating: {:X?} {{ Index: {entry_index}, Depth: {:?}/{:?} }}",
-                    page.get().get(),
+                    "Creating: {address:#X?} {{ Index: {entry_index}, Depth: {:?}/{:?} }}",
                     current_depth.get(),
                     to_depth.get()
                 );
@@ -267,17 +270,17 @@ impl PageTable<ExclusiveBorrow> {
 
                     entry.set_write_execute();
 
-                    if !HigherHalfDirectMap::is_address_higher_half(page.get()) {
+                    if !HigherHalfDirectMap::is_address_higher_half(address) {
                         entry.set_user(true);
                     }
                 }
 
-                let frame = PhysicalMemoryManager::next_free_frame(FrameSize::Standard, true)
+                let frame = PhysicalMemoryManager::next_free_frame::<StandardFrame>(true)
                     .ok_or(CreateEntryError::OutOfMemory)?;
 
                 // Safety: Frame is unused.
                 unsafe {
-                    entry.set_frame(frame);
+                    entry.set_address(frame);
                 }
 
                 entry.set_enabled();
@@ -290,13 +293,12 @@ impl PageTable<ExclusiveBorrow> {
             // Safety: If page table didn't exist, it was just created.
             let mut page_table = unsafe { page_table.unwrap_unchecked() };
             trace!(
-                "Traversing: {:X?} {{ Index: {entry_index}, Depth: {:?}/{:?} }}",
-                page.get().get(),
+                "Traversing: {address:#X?} {{ Index: {entry_index}, Depth: {:?}/{:?} }}",
                 current_depth.get(),
                 to_depth.get()
             );
 
-            page_table.with_entry_create(page, to_depth, with_fn)
+            page_table.with_entry_create(address, to_depth, with_fn)
         }
     }
 
@@ -308,5 +310,73 @@ impl PageTable<ExclusiveBorrow> {
 impl<BorrowKind: InteriorBorrow> core::fmt::Debug for PageTable<BorrowKind> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_map().entries(self.iter().enumerate()).finish()
+    }
+}
+
+pub struct PageTableInfo;
+
+impl PageTableInfo {
+    pub const fn index_bits() -> NonZero<u32> {
+        NonZero::new(9).unwrap()
+    }
+
+    /// Size (in bytes) of a page table index.
+    pub const fn max_index() -> NonZero<usize> {
+        NonZero::new(1 << Self::index_bits().get()).unwrap()
+    }
+
+    /// Bit-mask of a page table index.
+    pub const fn non_index_bit_mask() -> NonZero<usize> {
+        NonZero::new(Self::max_index().get() - 1).unwrap()
+    }
+
+    /// Whether the current environment supports 2MiB pages.
+    pub fn is_large_pages_enabled() -> bool {
+        cfg_select! {
+            target_arch = "x86_64" => {
+                use crate::arch::x86_64::{cpuid::feature_info, registers::control::cr4};
+
+                debug_assert!(
+                    feature_info().is_some_and(|cpuid| cpuid.has_pae())
+                        && cr4::CR4::read().contains(cr4::Flags::PAE)
+                );
+
+                true
+            }
+
+            _ => { unimplemented!() }
+        }
+    }
+
+    /// Whether the current environment supports 1GiB pages.
+    pub fn is_huge_pages_enabled() -> bool {
+        cfg_select! {
+            target_arch = "x86_64" => {
+                crate::arch::x86_64::cpuid::extended_feature_identifiers()
+                    .is_some_and(|cpuid| cpuid.has_1gib_pages())
+            }
+
+            _ => { unimplemented!() }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use core::num::NonZero;
+
+    use crate::mem::mapper::paging::PageTableInfo;
+
+    fn page_table_info_index_bits() {
+        assert_eq!(PageTableInfo::index_bits(), NonZero::new(9).unwrap());
+    }
+    fn page_table_info_max_index() {
+        assert_eq!(PageTableInfo::max_index(), NonZero::new(512).unwrap());
+    }
+    fn page_table_info_index_bits() {
+        assert_eq!(
+            PageTableInfo::non_index_bit_mask(),
+            NonZero::new(0x1FF).unwrap()
+        );
     }
 }

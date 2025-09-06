@@ -1,9 +1,11 @@
 #![allow(non_camel_case_types)]
 
-use crate::cpu::local_state::LocalState;
+use crate::{
+    cpu::local_state::LocalState,
+    mem::addr::phys::{FrameAddress, StandardFrame},
+};
 use bit_field::BitField;
 use core::{num::NonZero, ptr::NonNull};
-use libsys::address::{Address, Frame};
 
 /// Implements `rdmsr` and `wrmsr` for an x86 model-specific register.
 ///
@@ -103,14 +105,15 @@ impl IA32_APIC_BASE {
     }
 
     /// Gets the base address of the local APIC.
-    pub fn get_base_address() -> Address<Frame> {
+    pub fn get_base_address() -> StandardFrame {
         let base_address = usize::try_from(Self::read() & !0xFFF).unwrap();
 
+        debug_assert_eq!(base_address & StandardFrame::non_index_bit_mask(), 0);
         // Safety:
         // - `base_address` is page aligned via the `&` operator above.
         // - The APIC base is reserved to exactly match the processor's maximum physical
         //   address size.
-        unsafe { Address::<Frame>::new_unchecked(base_address) }
+        unsafe { StandardFrame::new_unchecked(base_address) }
     }
 }
 

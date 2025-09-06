@@ -1,45 +1,18 @@
 use crate::{
     mem::{
         AddressSpaceId, HigherHalfDirectMap, Permissions,
+        addr::{
+            phys::{FrameAddress, StandardFrame},
+            virt::{PageAddress, StandardPage, VirtualAddress},
+        },
         mapper::paging::{Depth, Entry},
-        pmm::{FrameError, FrameSize, PhysicalMemoryManager},
+        pmm::{FrameError, PhysicalMemoryManager},
     },
     util::{ExclusiveBorrow, SharedBorrow},
 };
-use libsys::address::{Address, Frame, Page};
 
 pub mod paging;
 use paging::{CreateEntryError, PageTable, WithEntryError};
-
-/// Whether the current environment supports 2MiB pages.
-pub fn use_large_pages() -> bool {
-    cfg_select! {
-        target_arch = "x86_64" => {
-            use crate::arch::x86_64::{cpuid::feature_info, registers::control::cr4};
-
-            debug_assert!(
-                feature_info().is_some_and(|cpuid| cpuid.has_pae())
-                    && cr4::CR4::read().contains(cr4::Flags::PAE)
-            );
-
-            true
-        }
-
-        _ => { unimplemented!() }
-    }
-}
-
-/// Whether the current environment supports 1GiB pages.
-pub fn use_huge_pages() -> bool {
-    cfg_select! {
-        target_arch = "x86_64" => {
-            crate::arch::x86_64::cpuid::extended_feature_identifiers()
-                .is_some_and(|cpuid| cpuid.has_1gib_pages())
-        }
-
-        _ => { unimplemented!() }
-    }
-}
 
 #[derive(Debug, Error)]
 pub enum MappingError {
@@ -122,17 +95,17 @@ impl From<WithEntryError> for GetMappingError {
 }
 
 #[derive(Clone)]
-pub struct Mapper(Address<Frame>);
+pub struct Mapper(StandardFrame);
 
 impl Mapper {
     pub fn new() -> Self {
-        let frame = PhysicalMemoryManager::next_free_frame(FrameSize::Standard, true)
+        let frame = PhysicalMemoryManager::next_free_frame::<StandardFrame>(true)
             .expect("failed to allocate frame for new root page table");
 
         Self(frame)
     }
 
-    pub fn frame(&self) -> Address<Frame> {
+    pub fn frame(&self) -> StandardFrame {
         self.0
     }
 
@@ -162,18 +135,18 @@ impl Mapper {
     /// - `memory_access` must be the correct memory access permissions for the
     ///   mapping (i.e. mapping a `.bss` section as read-only would cause a
     ///   `#PF`).
-    pub unsafe fn map(
+    pub unsafe fn map<F: FrameAddress, P: PageAddress<Frame = F>>(
         &mut self,
-        page: Address<Page>,
-        frame: Address<Frame>,
-        depth: Depth,
+        frame: F,
+        page: P,
         lock_frame: bool,
         permissions: Permissions,
     ) -> Result<(), MappingError> {
+        let depth = F::paging_depth();
+        let address = VirtualAddress::from(page);
+
         trace!(
-            "Mapping ({permissions:?}): {:#X} -> {:#X} {{ Size: {:#X}, Lock: {lock_frame} }}",
-            page.get().get(),
-            frame.get().get(),
+            "Mapping ({permissions:?}): {page:#X?} -> {frame:#X?} {{ Size: {:#X}, Lock: {lock_frame} }}",
             depth.align()
         );
 
@@ -184,13 +157,13 @@ impl Mapper {
         // If acquisition of the frame is successful, attempt to map the page to the
         // frame index.
         self.root_table_mut()
-            .with_entry_create(page, depth, |entry| {
+            .with_entry_create(address, depth, |entry| {
                 #[cfg(target_arch = "x86_64")]
                 if depth > Depth::max() {
                     entry.set_huge(true);
                 }
 
-                if HigherHalfDirectMap::is_address_higher_half(page.get()) {
+                if HigherHalfDirectMap::is_address_higher_half(address) {
                     entry.set_global(true);
                 } else {
                     entry.set_user(true);
@@ -198,7 +171,7 @@ impl Mapper {
 
                 // Safety: Caller is required to maintain safety invariants.
                 unsafe {
-                    entry.set_frame(frame);
+                    entry.set_address(frame);
                 }
 
                 // Safety: Caller is required to maintain safety invariants.
@@ -209,7 +182,7 @@ impl Mapper {
                 entry.set_enabled();
 
                 #[cfg(target_arch = "x86_64")]
-                crate::arch::x86_64::instructions::__invlpg(page);
+                crate::arch::x86_64::instructions::__invlpg(address);
 
                 trace!("Mapped: {entry:X?}");
             })?;
@@ -224,15 +197,16 @@ impl Mapper {
     ///
     /// Caller must ensure calling this function does not cause memory
     /// corruption.
-    pub unsafe fn unmap(
+    pub unsafe fn unmap<F: FrameAddress, P: PageAddress<Frame = F>>(
         &mut self,
-        page: Address<Page>,
-        to_depth: Option<Depth>,
+        page: P,
         free_frame: bool,
     ) -> Result<(), UnmappingError> {
+        let address = VirtualAddress::from(page);
         self.root_table_mut()
-            .with_entry_mut(page, to_depth, |entry| {
-                let frame = entry.get_frame().ok_or(UnmappingError::NotMapped)?;
+            .with_entry_mut(address, Some(P::paging_depth()), |entry| {
+                let frame = entry.get_address().ok_or(UnmappingError::NotMapped)?;
+                let frame = F::try_from(frame).unwrap();
 
                 // Safety: Caller is required to maintain invariants.
                 unsafe {
@@ -240,12 +214,14 @@ impl Mapper {
                 }
 
                 if free_frame {
-                    PhysicalMemoryManager::free_frame(frame)?;
+                    unsafe {
+                        PhysicalMemoryManager::free_frame(frame)?;
+                    }
                 }
 
                 // Invalidate the page in the TLB.
                 #[cfg(target_arch = "x86_64")]
-                crate::arch::x86_64::instructions::__invlpg(page);
+                crate::arch::x86_64::instructions::__invlpg(address);
 
                 Ok(())
             })?
@@ -260,10 +236,10 @@ impl Mapper {
     ///   be used.
     pub unsafe fn auto_map(
         &mut self,
-        page: Address<Page>,
+        page: StandardPage,
         permissions: Permissions,
     ) -> Result<(), AutoMappingError> {
-        let frame = PhysicalMemoryManager::next_free_frame(FrameSize::Standard, true)
+        let frame = PhysicalMemoryManager::next_free_frame::<StandardFrame>(true)
             .ok_or(AutoMappingError::OutOfMemory)?;
 
         // Safety:
@@ -271,65 +247,40 @@ impl Mapper {
         // - Depth is the maximum paging depth, which is always supported.
         // - Caller is required to ensure permissions are correct.
         unsafe {
-            self.map(page, frame, Depth::max(), false, permissions)?;
+            self.map(frame, page, false, permissions)?;
         }
 
         Ok(())
     }
 
-    /* STATE QUERYING */
-
-    pub fn is_mapped(&self, page: Address<Page>, depth: Option<Depth>) -> bool {
-        self.root_table().with_entry(page, depth, |_| ()).is_ok()
+    pub fn is_mapped(&self, address: VirtualAddress) -> bool {
+        self.root_table().with_entry(address, None, |_| ()).is_ok()
     }
 
-    pub fn is_mapped_to(&self, page: Address<Page>, frame: Address<Frame>) -> bool {
-        self.root_table()
-            .with_entry(page, None, |entry| {
-                entry
-                    .get_frame()
-                    .is_some_and(|entry_frame| entry_frame == frame)
-            })
-            .unwrap_or(false)
-    }
-
-    pub fn get_mapped_to(&self, page: Address<Page>) -> Result<Address<Frame>, GetMappingError> {
-        self.root_table()
-            .with_entry(page, None, |entry| {
-                entry.get_frame().ok_or(GetMappingError::NotMapped)
-            })
-            .map_err(|error| match error {
-                super::mapper::WithEntryError::NotMapped => GetMappingError::NotMapped,
-                super::mapper::WithEntryError::TerminatingPage => unreachable!(),
-            })
-            .flatten()
-    }
-
-    /* STATE CHANGING */
-
-    pub fn get_permissions(&self, page: Address<Page>) -> Result<Permissions, GetMappingError> {
+    pub fn get_permissions(&self, address: VirtualAddress) -> Result<Permissions, GetMappingError> {
         let permissions = self
             .root_table()
-            .with_entry(page, None, Entry::get_permissions)?;
+            .with_entry(address, None, Entry::get_permissions)?;
 
         Ok(permissions)
     }
 
     pub unsafe fn set_page_permissions(
         &mut self,
-        page: Address<Page>,
+        address: VirtualAddress,
         depth: Option<Depth>,
         permissions: Permissions,
     ) -> Result<(), GetMappingError> {
-        self.root_table_mut().with_entry_mut(page, depth, |entry| {
-            // Safety: Caller is required to maintain safety invariants.
-            unsafe {
-                entry.set_permissions(permissions);
-            }
+        self.root_table_mut()
+            .with_entry_mut(address, depth, |entry| {
+                // Safety: Caller is required to maintain safety invariants.
+                unsafe {
+                    entry.set_permissions(permissions);
+                }
 
-            #[cfg(target_arch = "x86_64")]
-            crate::arch::x86_64::instructions::__invlpg(page);
-        })?;
+                #[cfg(target_arch = "x86_64")]
+                crate::arch::x86_64::instructions::__invlpg(address);
+            })?;
 
         Ok(())
     }

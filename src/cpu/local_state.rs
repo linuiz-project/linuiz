@@ -1,13 +1,17 @@
 use crate::{
     mem::{
         HigherHalfDirectMap,
-        pmm::{FrameSize, PhysicalMemoryManager},
+        addr::{
+            phys::{FrameAddress, StandardFrame},
+            virt::StandardPage,
+        },
+        pmm::PhysicalMemoryManager,
     },
     scheduler::Scheduler,
     time::LocalTimer,
     util::sync::Mutex,
 };
-use core::ptr::NonNull;
+use core::{num::NonZero, ptr::NonNull};
 
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86_64::structures::tss::TaskStateSegment;
@@ -31,8 +35,8 @@ pub struct LocalState {
     tss: TaskStateSegment,
 }
 
-const_assert!(size_of::<LocalState>() <= libsys::constants::page_size());
-const_assert!(align_of::<LocalState>() <= libsys::constants::page_size());
+const_assert!(size_of::<LocalState>() <= StandardFrame::size_in_bytes());
+const_assert!(align_of::<LocalState>() <= StandardFrame::size_in_bytes());
 
 impl LocalState {
     /// Initializes the local state structure.
@@ -48,9 +52,12 @@ impl LocalState {
         trace!("Configuring local scheduler...");
         let scheduler = Scheduler::new();
 
-        let local_state_address = PhysicalMemoryManager::next_free_frame(FrameSize::Standard, false)
+        let local_state_frame = PhysicalMemoryManager::next_free_frame::<StandardFrame>(false)
             .expect("failed to allocate space for local state structure");
-        let local_state_address = HigherHalfDirectMap::offset(local_state_address.get().get());
+        let local_state_address =
+            HigherHalfDirectMap::frame_to_page::<_, StandardPage>(local_state_frame);
+        let local_state_address =
+            NonZero::<usize>::try_from(usize::from(local_state_address)).unwrap();
         let mut local_state_ptr = NonNull::<Self>::with_exposed_provenance(local_state_address);
 
         // Safety: Memory was allocated for the size and align of `Self`.

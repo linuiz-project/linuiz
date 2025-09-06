@@ -1,7 +1,9 @@
-use crate::{mem::Permissions, util::sync::Lazy};
+use crate::mem::{
+    Permissions,
+    addr::phys::{FrameAddress, PhysicalAddress},
+};
 use bit_field::BitField;
-use core::ops::Range;
-use libsys::address::{Address, Frame};
+use core::num::NonZero;
 
 #[repr(transparent)]
 #[derive(Default, Clone, PartialEq, Eq)]
@@ -9,56 +11,65 @@ pub struct Entry(usize);
 
 impl Entry {
     #[cfg(target_arch = "x86_64")]
-    const PRESENT_BIT_INDEX: usize = 0;
-    #[cfg(target_arch = "x86_64")]
-    const WRITABLE_BIT_INDEX: usize = 1;
-    #[cfg(target_arch = "x86_64")]
-    const USER_BIT_INDEX: usize = 2;
-    #[cfg(target_arch = "x86_64")]
     const HUGE_BIT_INDEX: usize = 7;
     #[cfg(target_arch = "x86_64")]
-    const GLOBAL_BIT_INDEX: usize = 8;
-    #[cfg(target_arch = "x86_64")]
     const NO_EXECUTE_BIT_INDEX: usize = 63;
-
-    #[cfg(target_arch = "riscv64")]
-    const VALID_BIT_INDEX: usize = 0;
     #[cfg(target_arch = "riscv64")]
     const READABLE_BIT_INDEX: usize = 1;
     #[cfg(target_arch = "riscv64")]
-    const WRITABLE_BIT_INDEX: usize = 2;
-    #[cfg(target_arch = "riscv64")]
     const EXECUTABLE_BIT_INDEX: usize = 3;
-    #[cfg(target_arch = "riscv64")]
-    const USER_BIT_INDEX: usize = 4;
-    #[cfg(target_arch = "riscv64")]
-    const GLOBAL_BIT_INDEX: usize = 5;
 
-    fn get_frame_address_range() -> Range<usize> {
-        static FRAME_ADDRESS_RANGE: Lazy<Range<usize>> = Lazy::new(|| {
-            cfg_select! {
-                all(any(target_arch = "x86", target_arch = "x86_64"), test) => {
-                    12..51
-                }
+    const PRESENT_BIT_INDEX: usize = {
+        cfg_select! {
+            target_arch = "x86_64" => { 0 }
+            target_arch = "riscv64" => { 0 }
+            _ => { unimplemented!() }
+        }
+    };
 
-                all(any(target_arch = "x86", target_arch = "x86_64"), not(test)) => {
-                    use crate::arch::x86_64::{cpuid::feature_info, registers::control::cr4};
+    const WRITABLE_BIT_INDEX: usize = {
+        cfg_select! {
+            target_arch = "x86_64" => { 1 }
+            target_arch = "riscv64" => { 1 }
+            _ => { unimplemented!() }
+        }
+    };
 
-                    if feature_info().is_some_and(|cpuid| cpuid.has_pae())
-                        && cr4::CR4::read().contains(cr4::Flags::PAE)
-                    {
-                        12..51
-                    } else {
-                        12..32
-                    }
-                }
+    const USER_BIT_INDEX: usize = {
+        cfg_select! {
+            target_arch = "x86_64" => { 2 }
+            target_arch = "riscv64" => { 4 }
+            _ => { unimplemented!() }
+        }
+    };
 
-                _ => { unimplemented!() }
+    const GLOBAL_BIT_INDEX: usize = {
+        cfg_select! {
+            target_arch = "x86_64" => { 8 }
+            target_arch = "riscv64" => { 5 }
+            _ => { unimplemented!() }
+        }
+    };
+
+    const FRAME_BIT_MASK: NonZero<usize> = {
+        cfg_select! {
+            target_arch = "x86_64" => {
+                NonZero::<usize>::new(0xF_FFFF_FFFF_F000).unwrap()
             }
-        });
 
-        FRAME_ADDRESS_RANGE.clone()
-    }
+            _ => { unimplemented!() }
+        }
+    };
+
+    const FRAME_BIT_SHIFT: NonZero<u32> = {
+        cfg_select! {
+            target_arch = "x86_64" => {
+                NonZero::<u32>::new(12).unwrap()
+            }
+
+            _ => { unimplemented!() }
+        }
+    };
 
     pub const fn empty() -> Self {
         Self(0)
@@ -117,12 +128,26 @@ impl Entry {
         }
     }
 
-    /// Gets the frame index of the page table entry.
-    pub fn get_frame(&self) -> Option<Address<Frame>> {
-        self.is_enabled().then(|| {
-            let frame_index = self.0.get_bits(Self::get_frame_address_range());
-            Address::<Frame>::from_index(frame_index).expect("entry's frame address is invalid")
-        })
+    /// Gets the address stored in this entry.
+    pub fn get_address(&self) -> Option<PhysicalAddress> {
+        if self.is_enabled() {
+            let address = {
+                cfg_select! {
+                    target_arch = "x86_64" => {
+                        self.0 & Self::FRAME_BIT_MASK.get()
+                    }
+
+                    _ => { unimplemented!() }
+                }
+            };
+
+            // Safety: `address` is checked to only contain canonical physical bits.
+            let address = unsafe { PhysicalAddress::new_unchecked(address) };
+
+            Some(address)
+        } else {
+            None
+        }
     }
 
     /// Sets the entry's frame index.
@@ -131,9 +156,11 @@ impl Entry {
     ///
     /// - `frame` must be unused or otherwise expected to be pointed to by this
     ///   entry's address.
-    pub unsafe fn set_frame(&mut self, frame: Address<Frame>) {
-        self.0
-            .set_bits(Self::get_frame_address_range(), frame.index());
+    pub unsafe fn set_address<F: FrameAddress>(&mut self, frame: F) {
+        let address: usize = frame.into();
+        debug_assert_eq!(address & !Self::FRAME_BIT_MASK.get(), 0);
+
+        self.0 = (self.0 & !Self::FRAME_BIT_MASK.get()) | address;
     }
 
     pub fn is_global(&self) -> bool {
@@ -322,8 +349,8 @@ impl core::fmt::Debug for Entry {
 
         d.field("Enabled", &self.is_enabled());
 
-        if let Some(frame_address) = self.get_frame() {
-            d.field("Address", &frame_address.get().get());
+        if let Some(address) = self.get_address() {
+            d.field("Address", &address);
         }
 
         #[cfg(target_arch = "x86_64")]
@@ -372,12 +399,12 @@ mod tests {
         let frame = unsafe { Address::<Frame>::new_unchecked(ADDRESS) };
         // Safety: Entry not in use.
         unsafe {
-            entry.set_frame(frame);
+            entry.set_address(frame);
         }
         assert_eq!(entry, Entry(ADDRESS));
 
         entry.set_enabled();
-        assert_eq!(entry.get_frame(), Some(frame));
+        assert_eq!(entry.get_address(), Some(frame));
 
         // Safety: Entry not in use.
         unsafe {

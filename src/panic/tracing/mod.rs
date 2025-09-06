@@ -3,7 +3,6 @@ use core::{
     fmt::{Result, Write},
     ptr::NonNull,
 };
-use libsys::address::{Address, Virtual};
 
 pub mod symbols;
 
@@ -27,7 +26,7 @@ pub(super) fn emit_stack_trace() {
 #[derive(Debug)]
 struct StackFrame {
     prev_frame_ptr: Option<NonNull<StackFrame>>,
-    return_address: Address<Virtual>,
+    return_address: usize,
 }
 
 struct StackTracer {
@@ -46,7 +45,7 @@ impl StackTracer {
 }
 
 impl Iterator for StackTracer {
-    type Item = Address<Virtual>;
+    type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
         // Safety: Stack frame pointer will be valid if the correct value is provided to
@@ -81,14 +80,10 @@ fn construct_panic_message(mut buffer: impl Write) -> Result {
     fn print_stack_trace_entry<D: core::fmt::Display>(
         mut buffer: impl Write,
         entry_num: usize,
-        fn_address: Address<Virtual>,
+        fn_address: usize,
         symbol_name: D,
     ) -> Result {
-        writeln!(
-            buffer,
-            "#{entry_num: <4}0x{:X} {symbol_name:#}",
-            fn_address.get()
-        )
+        writeln!(buffer, "#{entry_num: <4}0x{fn_address:#X} {symbol_name:#}",)
     }
 
     let Some(frame_ptr) = NonNull::new(get_stack_frame_ptr()) else {

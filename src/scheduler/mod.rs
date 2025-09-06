@@ -1,9 +1,6 @@
 use crate::{
     cpu::context::Context,
-    mem::{
-        HigherHalfDirectMap,
-        pmm::{FrameSize, PhysicalMemoryManager},
-    },
+    mem::{HigherHalfDirectMap, addr::phys::StandardFrame, pmm::PhysicalMemoryManager},
 };
 use core::{mem::MaybeUninit, ptr::NonNull};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
@@ -196,10 +193,7 @@ pub fn queue_procedure(procedure_fn: fn()) {
         crate::cpu::local_state::LocalState::with_scheduler(Scheduler::kill_current_task);
     }
 
-    let stack_address = PhysicalMemoryManager::next_free_frame(FrameSize::Standard, false)
-        .unwrap()
-        .get()
-        .get();
+    let stack_address = PhysicalMemoryManager::next_free_frame::<StandardFrame>(false).unwrap();
 
     #[allow(clippy::as_conversions)]
     let context = Context::new_from_fn_with_arg(

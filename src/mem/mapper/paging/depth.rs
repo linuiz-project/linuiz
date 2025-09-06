@@ -1,8 +1,11 @@
-use core::iter::Step;
-use libsys::{
-    address::{Address, Virtual},
-    constants::{page_bits, table_index_bits, table_index_mask},
+use crate::mem::{
+    addr::{
+        phys::{FrameAddress, StandardFrame},
+        virt::VirtualAddress,
+    },
+    mapper::paging::PageTableInfo,
 };
+use core::iter::Step;
 
 /// Describes the depth of a page table translation, from min (usually 4) to max
 /// (usually 0).
@@ -12,17 +15,17 @@ pub struct Depth(u32);
 
 impl Depth {
     /// Minimum table depth, typically down to 4KB-sized memory chunks.
-    pub fn max() -> Self {
+    pub const fn max() -> Self {
         Self(1)
     }
 
     /// Minimum table depth, typically down to 2MB-sized memory chunks.
-    pub fn large() -> Self {
+    pub const fn large() -> Self {
         Self(2)
     }
 
     /// Minimum table depth, typically down to 1GB-sized memory chunks.
-    pub fn huge() -> Self {
+    pub const fn huge() -> Self {
         Self(3)
     }
 
@@ -48,14 +51,6 @@ impl Depth {
         Self(depth)
     }
 
-    pub fn max_align() -> usize {
-        Self::max().align()
-    }
-
-    pub fn min_align() -> usize {
-        Self::min().align()
-    }
-
     pub fn new(depth: u32) -> Option<Self> {
         (Self::max().0..=Self::min().0)
             .contains(&depth)
@@ -71,15 +66,17 @@ impl Depth {
         // depth of 1), it means we need to adjust the actual depth number to be
         // zero-based for our calcualtion.
         let depth_zero_based = self.get() - 1;
-        1usize << page_bits().get() << (table_index_bits().get() * depth_zero_based)
+        1usize
+            << StandardFrame::index_bit_shift().get()
+            << (PageTableInfo::index_bits().get() * depth_zero_based)
     }
 
     pub fn next(self) -> Self {
-        Step::forward(self, 1)
+        self.next_checked().expect("depth underflowed")
     }
 
     pub fn next_checked(self) -> Option<Self> {
-        Step::forward_checked(self, 1)
+        self.0.checked_sub(1).and_then(Self::new)
     }
 
     pub fn is_max(self) -> bool {
@@ -90,13 +87,14 @@ impl Depth {
         self == Self::min()
     }
 
-    pub fn index_of(self, address: Address<Virtual>) -> usize {
+    pub fn index_of(self, address: VirtualAddress) -> usize {
         // Because `Depth` is 1-based (i.e. 4-level paging allows us to have a maximum
         // depth of 1), it means we need to adjust the actual depth number to be
         // zero-based for our calcualtion.
         let depth_zero_based = self.get() - 1;
-        let index_bit_shift = (depth_zero_based * table_index_bits().get()) + page_bits().get();
-        (address.get() >> index_bit_shift) & table_index_mask()
+        let index_bit_shift = (depth_zero_based * PageTableInfo::index_bits().get())
+            + StandardFrame::index_bit_shift().get();
+        (usize::from(address) >> index_bit_shift) & PageTableInfo::non_index_bit_mask().get()
     }
 }
 

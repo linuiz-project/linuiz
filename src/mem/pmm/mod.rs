@@ -1,18 +1,22 @@
 use crate::{
-    mem::HigherHalfDirectMap,
-    util::sync::{Once, RwLock},
+    mem::{
+        HigherHalfDirectMap,
+        addr::phys::{FrameAddress, HugeFrame, LargeFrame, StandardFrame},
+    },
+    util::{
+        math::align_up_div,
+        sync::{Once, RwLock},
+    },
 };
 use core::{num::NonZero, ops::Range, ptr::NonNull};
-use libsys::{
-    address::{Address, Frame},
-    constants::{
-        huge_page_size, large_page_bits, large_page_size, page_bits, page_mask, page_size,
-    },
-    math::align_up_div,
-};
 
 mod segment;
 use segment::Segment;
+
+const SEGMENTS_PER_LARGE_PAGE: usize = 1usize
+    << (LargeFrame::index_bit_shift().get()
+        - Segment::INDEX_BITS_SHIFT
+        - StandardFrame::index_bit_shift().get());
 
 #[derive(Debug, Error)]
 pub enum FrameError {
@@ -20,13 +24,11 @@ pub enum FrameError {
     OutOfBounds,
 }
 
-
-
-unsafe fn zero_frame(frame: Address<Frame>, frame_size: FrameSize) {
-    let address = HigherHalfDirectMap::offset(frame.get().get());
+unsafe fn zero_frame<F: FrameAddress>(frame: F) {
+    let address = HigherHalfDirectMap::offset(frame.into());
     let ptr = NonNull::<u8>::with_exposed_provenance(address);
     unsafe {
-        NonNull::write_bytes(ptr, 0, frame_size.size_in_bytes());
+        NonNull::write_bytes(ptr, 0, F::size_in_bytes());
     }
 }
 
@@ -71,8 +73,8 @@ impl PhysicalMemoryManager {
             trace!("Locking: {bitmap_region:#X?}");
             lock_bits(
                 bitmap,
-                bitmap_region.start / page_size(),
-                bitmap_region.end / page_size(),
+                bitmap_region.start / StandardFrame::size_in_bytes(),
+                bitmap_region.end / StandardFrame::size_in_bytes(),
             );
 
             memory_map
@@ -95,8 +97,8 @@ impl PhysicalMemoryManager {
                         );
                         lock_bits(
                             bitmap,
-                            prev_address_range.end / page_size(),
-                            address_range.start / page_size(),
+                            prev_address_range.end / StandardFrame::size_in_bytes(),
+                            address_range.start / StandardFrame::size_in_bytes(),
                         );
                     }
 
@@ -105,8 +107,8 @@ impl PhysicalMemoryManager {
                         trace!("Locking (Used): {address_range:#X?}");
                         lock_bits(
                             bitmap,
-                            address_range.start / page_size(),
-                            address_range.end / page_size(),
+                            address_range.start / StandardFrame::size_in_bytes(),
+                            address_range.end / StandardFrame::size_in_bytes(),
                         );
                     }
 
@@ -130,7 +132,8 @@ impl PhysicalMemoryManager {
             let total_physical_memory =
                 usize::try_from(last_entry.base + last_entry.length).unwrap();
 
-            let total_frames = align_up_div(total_physical_memory, page_bits());
+            let total_frames =
+                align_up_div(total_physical_memory, StandardFrame::index_bit_shift());
             trace!("Total frames: {total_frames} ({total_physical_memory:#X} Bytes)");
 
             // Aligned frame count to the next multiple of `usize`s bit count.
@@ -139,10 +142,12 @@ impl PhysicalMemoryManager {
                 NonZero::new(usize::BITS.trailing_zeros()).unwrap(),
             );
             // Total memory the bitmap will consume as a multiple of frame size.
-            let bitmap_size_in_frames =
-                align_up_div(bitmap_size * core::mem::size_of::<usize>(), page_bits());
+            let bitmap_size_in_frames = align_up_div(
+                bitmap_size * core::mem::size_of::<usize>(),
+                StandardFrame::index_bit_shift(),
+            );
             // Total memory the bitmap will consume as a multiple of bytes.
-            let bitmap_size_in_bytes = bitmap_size_in_frames * page_size();
+            let bitmap_size_in_bytes = bitmap_size_in_frames * StandardFrame::size_in_bytes();
 
             // Inlining the format args breaks rustfmt for some reason.
             #[allow(clippy::uninlined_format_args)]
@@ -167,8 +172,8 @@ impl PhysicalMemoryManager {
                 .map(|region| region.start..(region.start + bitmap_size_in_bytes))
                 .expect("no memory regions large enough for frame bitmap");
 
-            debug_assert_eq!(bitmap_region.start & page_mask(), 0);
-            debug_assert_eq!(bitmap_region.end & page_mask(), 0);
+            debug_assert_eq!(bitmap_region.start & StandardFrame::non_index_bit_mask(), 0);
+            debug_assert_eq!(bitmap_region.end & StandardFrame::non_index_bit_mask(), 0);
 
             trace!("Frame bitmap region: {bitmap_region:#X?}");
 
@@ -182,9 +187,8 @@ impl PhysicalMemoryManager {
             }
 
             trace!("Initializing bitmap...");
-            let mut bitmap_ptr = unsafe {
-                NonNull::slice_from_raw_parts(bitmap_ptr.cast::<Segment>(), bitmap_size_in_bytes)
-            };
+            let mut bitmap_ptr =
+                NonNull::slice_from_raw_parts(bitmap_ptr.cast::<Segment>(), bitmap_size_in_bytes);
 
             init_bitmap_with_memory_map(memory_map, unsafe { bitmap_ptr.as_mut() }, bitmap_region);
             trace!("Bitmap fully initialized.");
@@ -224,9 +228,9 @@ impl PhysicalMemoryManager {
         PHYSICAL_MEMORY_MANAGER.wait().total_frames
     }
 
-    pub fn next_free_frame(frame_size: FrameSize, clear_memory: bool) -> Option<Address<Frame>> {
-        let frame = match frame_size {
-            FrameSize::Standard => {
+    pub fn next_free_frame<F: FrameAddress>(clear_memory: bool) -> Option<F> {
+        let frame_index = match F::size_in_bytes() {
+            size if size == StandardFrame::size_in_bytes() => {
                 let (segment_index, bit_index) = Self::with_bitmap_mut(|bitmap| {
                     bitmap
                         .iter_mut()
@@ -239,14 +243,10 @@ impl PhysicalMemoryManager {
                 })?;
 
                 let bit_index = usize::try_from(bit_index).unwrap();
-                let frame_index = (segment_index << Segment::INDEX_BITS_SHIFT) | bit_index;
-                Address::<Frame>::from_index(frame_index).unwrap()
+                (segment_index << Segment::INDEX_BITS_SHIFT) | bit_index
             }
 
-            FrameSize::Large => {
-                const SEGMENTS_PER_LARGE_PAGE: u32 =
-                    large_page_bits().get() - Segment::INDEX_BITS_SHIFT - page_bits().get();
-
+            size if size == LargeFrame::size_in_bytes() => {
                 let large_page_index = Self::with_bitmap_mut(|bitmap| {
                     #[allow(clippy::as_conversions)]
                     let (large_page_segment_chunks, _) =
@@ -264,63 +264,111 @@ impl PhysicalMemoryManager {
                     Some(large_page_index)
                 })?;
 
-                let frame_index = large_page_index << large_page_bits().get();
-                Address::<Frame>::new(frame_index).unwrap()
+                large_page_index << LargeFrame::index_bit_shift().get()
             }
 
-            FrameSize::Huge => todo!(),
+            size if size == HugeFrame::size_in_bytes() => todo!(),
+
+            _ => unreachable!(),
         };
+
+        let frame = F::from_index(frame_index).ok()?;
 
         if clear_memory {
             unsafe {
-                zero_frame(frame, frame_size);
+                zero_frame(frame);
             }
         }
 
         Some(frame)
     }
 
-    pub fn lock_frame(address: Address<Frame>, frame_size: FrameSize) -> Result<(), FrameError> {
-        let index = address.index();
-        if index > Self::total_frames() {
-            return Err(FrameError::OutOfBounds);
-        }
-
-        let segment_index = index.unbounded_shr(Segment::INDEX_BITS_SHIFT);
-        let bit_index = index & Segment::INDEX_BITS_MASK;
-
-        Self::with_bitmap_mut(|bitmap| {
-            // Safety: Index is checked to be within bounds.
-            let segment = unsafe { bitmap.get_mut(segment_index).unwrap_unchecked() };
-            segment.set_bit(bit_index);
-
+    fn check_is_in_bounds<F: FrameAddress>(frame: F) -> Result<(), FrameError> {
+        if (frame.index() + F::size_in_frames().get()) < Self::total_frames() {
             Ok(())
-        })
+        } else {
+            Err(FrameError::OutOfBounds)
+        }
     }
 
-    pub unsafe fn free_frame(
-        address: Address<Frame>,
-        frame_size: FrameSize,
-    ) -> Result<(), FrameError> {
-        let index = address.index();
-        if index > Self::total_frames() {
-            return Err(FrameError::OutOfBounds);
+    pub fn lock_frame<F: FrameAddress>(frame: F) -> Result<(), FrameError> {
+        Self::check_is_in_bounds(frame)?;
+        let index = frame.index();
+
+        match F::size_in_bytes() {
+            size if size == StandardFrame::size_in_bytes() => {
+                let segment_index = index.unbounded_shr(Segment::INDEX_BITS_SHIFT);
+                let bit_index = index & Segment::INDEX_BITS_MASK;
+
+                Self::with_bitmap_mut(|bitmap| {
+                    // Safety: Index is checked to be within bounds.
+                    let segment = unsafe { bitmap.get_unchecked_mut(segment_index) };
+                    segment.unset_bit(bit_index);
+                });
+
+                Ok(())
+            }
+
+            size if size == LargeFrame::size_in_bytes() => {
+                let segments_start_index = frame.index() * SEGMENTS_PER_LARGE_PAGE;
+                Self::with_bitmap_mut(|bitmap| {
+                    bitmap
+                        .iter_mut()
+                        .skip(segments_start_index)
+                        .take(SEGMENTS_PER_LARGE_PAGE)
+                        .for_each(Segment::set_empty);
+                });
+
+                Ok(())
+            }
+
+            size if size == HugeFrame::size_in_bytes() => todo!(),
+
+            _ => unreachable!(),
         }
-
-        let segment_index = index.unbounded_shr(Segment::INDEX_BITS_SHIFT);
-        let bit_index = index & Segment::INDEX_BITS_MASK;
-
-        Self::with_bitmap_mut(|bitmap| {
-            // Safety: Index is checked to be within bounds.
-            let segment = unsafe { bitmap.get_mut(segment_index).unwrap_unchecked() };
-            segment.unset_bit(bit_index);
-
-            Ok(())
-        })
     }
 
-    pub fn is_locked(address: Address<Frame>) -> Result<bool, FrameError> {
-        let index = address.index();
+    pub unsafe fn free_frame<F: FrameAddress>(frame: F) -> Result<(), FrameError> {
+        Self::check_is_in_bounds(frame)?;
+        let index = frame.index();
+
+        match F::size_in_bytes() {
+            size if size == StandardFrame::size_in_bytes() => {
+                let segment_index = index.unbounded_shr(Segment::INDEX_BITS_SHIFT);
+                let bit_index = index & Segment::INDEX_BITS_MASK;
+
+                Self::with_bitmap_mut(|bitmap| {
+                    // Safety: Index is checked to be within bounds.
+                    let segment = unsafe { bitmap.get_unchecked_mut(segment_index) };
+                    segment.unset_bit(bit_index);
+                });
+
+                Ok(())
+            }
+
+            size if size == LargeFrame::size_in_bytes() => {
+                let segments_start_index = frame.index() * SEGMENTS_PER_LARGE_PAGE;
+                Self::with_bitmap_mut(|bitmap| {
+                    bitmap
+                        .iter_mut()
+                        .skip(segments_start_index)
+                        .take(SEGMENTS_PER_LARGE_PAGE)
+                        .for_each(Segment::set_empty);
+                });
+
+                Ok(())
+            }
+
+            size if size == HugeFrame::size_in_bytes() => todo!(),
+
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn is_locked<F: FrameAddress>(frame: F) -> Result<bool, FrameError> {
+        Self::check_is_in_bounds(frame)?;
+
+        let index = frame.index();
         let segment_index = index.unbounded_shr(Segment::INDEX_BITS_SHIFT);
         let bit_index = index & Segment::INDEX_BITS_MASK;
 

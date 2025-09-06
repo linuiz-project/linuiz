@@ -1,11 +1,14 @@
 use crate::{
-    mem::mapper::{Mapper, paging::Depth},
+    mem::{
+        addr::{
+            phys::{FrameAddress, HugeFrame, LargeFrame, StandardFrame},
+            virt::{HugePage, LargePage, PageAddress, StandardPage},
+        },
+        mapper::{Mapper, paging::PageTableInfo},
+    },
     util::{elf::segment_to_mapping_permissions, sync::Once},
 };
-use libsys::{
-    address::{Address, Frame, Page},
-    constants::{huge_page_size, large_page_size, page_size},
-};
+use core::{num::NonZero, ptr::NonNull};
 
 pub mod addr;
 pub mod alloc;
@@ -20,24 +23,29 @@ pub use hhdm::*;
 
 // pub mod io;
 
-#[derive(Debug, Clone, Copy)]
-pub enum FrameSize {
-    Standard,
-    Large,
-    Huge,
+#[cfg(test)]
+pub fn get_paging_depth() -> NonZero<u32> {
+    NonZero::new(4).unwrap()
 }
 
-impl FrameSize {
-    pub const fn size_in_bytes(self) -> usize {
-        match self {
-            FrameSize::Standard => page_size(),
-            FrameSize::Large => large_page_size(),
-            FrameSize::Huge => huge_page_size(),
-        }
+#[cfg(not(test))]
+pub fn get_paging_depth() -> NonZero<u32> {
+    const CR4_LA57_BIT: usize = 1 << 12;
+
+    let cr4: usize;
+
+    unsafe {
+        core::arch::asm!(
+            "mov {}, cr4",
+            out(reg) cr4,
+            options(nostack, nomem, preserves_flags)
+        );
     }
 
-    pub const fn size_in_frames(self) -> usize {
-        self.size_in_bytes() >> page_size()
+    if (cr4 & CR4_LA57_BIT) == 0 {
+        NonZero::new(4).unwrap()
+    } else {
+        NonZero::new(5).unwrap()
     }
 }
 
@@ -54,41 +62,40 @@ impl KernelMapper {
     ) {
         unsafe fn map_range(
             mapper: &mut Mapper,
-            from: Address<Page>,
-            to: Address<Frame>,
+            from: usize,
+            to: usize,
             byte_count: usize,
             memory_access: Permissions,
             lock_frames: bool,
         ) {
+            debug_assert_eq!((from & StandardFrame::non_index_bit_mask()), 0);
+            debug_assert_eq!((to & StandardFrame::non_index_bit_mask()), 0);
+
             trace!(
                 "Map Range (Args): {{ from: {from:X?}, to: {to:X?}, byte_count: {byte_count:#X}, access: {memory_access:?} }}"
-            );
-
-            let virtual_start = from.get().get();
-            let virtual_end = virtual_start + byte_count;
-            debug!(
-                "Map Range: ({memory_access:?}): {:#X?} -> {:#X}",
-                virtual_start..virtual_end,
-                to.get().get()
             );
 
             let mut remaining_bytes = byte_count;
             while remaining_bytes > 0 {
                 let offset = byte_count - remaining_bytes;
-                let from = from.get().get() + offset;
-                let to = to.get().get() + offset;
+                let from = from + offset;
+                let to = to + offset;
+
                 trace!(
                     "Map Range (Loop): {from:#X} -> {to:#X} {{ Remaining: {remaining_bytes:#X} }}"
                 );
 
-                let from = Address::<Page>::new(from).unwrap();
-                let to = Address::<Frame>::new(to).unwrap();
-
-                if mapper::use_huge_pages()
-                    && remaining_bytes >= huge_page_size()
-                    && from.get().get().trailing_zeros() >= huge_page_size().trailing_zeros()
+                if PageTableInfo::is_huge_pages_enabled()
+                    && remaining_bytes >= HugeFrame::size_in_bytes()
+                    && from.trailing_zeros() >= HugeFrame::size_in_bytes().trailing_zeros()
+                    && to.trailing_zeros() >= HugeFrame::size_in_bytes().trailing_zeros()
                 {
-                    // Map a huge page
+                    remaining_bytes -= HugeFrame::size_in_bytes();
+
+                    // Map a huge page ...
+
+                    let from = HugePage::new(from).expect("non-canonical overrun");
+                    let to = HugeFrame::new(to).expect("non-canonical overrun");
 
                     // Safety:
                     // - `from` page is not mapped in current page tables.
@@ -96,16 +103,20 @@ impl KernelMapper {
                     // - Caller is required to ensure `memory_access` is correct.
                     unsafe {
                         mapper
-                            .map(from, to, Depth::huge(), lock_frames, memory_access)
+                            .map(to, from, lock_frames, memory_access)
                             .expect("failed to map range");
                     }
-
-                    remaining_bytes -= huge_page_size();
-                } else if mapper::use_large_pages()
-                    && remaining_bytes >= large_page_size()
-                    && from.get().get().trailing_zeros() >= large_page_size().trailing_zeros()
+                } else if PageTableInfo::is_large_pages_enabled()
+                    && remaining_bytes >= LargeFrame::size_in_bytes()
+                    && from.trailing_zeros() >= LargeFrame::size_in_bytes().trailing_zeros()
+                    && to.trailing_zeros() >= LargeFrame::size_in_bytes().trailing_zeros()
                 {
-                    // Map a large page
+                    remaining_bytes -= LargeFrame::size_in_bytes();
+
+                    // Map a large page ...
+
+                    let from = LargePage::new(from).expect("non-canonical overrun");
+                    let to = LargeFrame::new(to).expect("non-canonical overrun");
 
                     // Safety:
                     // - `from` page is not mapped in current page tables.
@@ -113,13 +124,17 @@ impl KernelMapper {
                     // - Caller is required to ensure `memory_access` is correct.
                     unsafe {
                         mapper
-                            .map(from, to, Depth::large(), lock_frames, memory_access)
+                            .map(to, from, lock_frames, memory_access)
                             .expect("failed to map range");
                     }
-
-                    remaining_bytes -= large_page_size();
                 } else {
-                    // Map a standard page
+                    remaining_bytes =
+                        remaining_bytes.saturating_sub(StandardFrame::size_in_bytes());
+
+                    // Map a standard page ...
+
+                    let from = StandardPage::new(from).expect("non-canonical overrun");
+                    let to = StandardFrame::new(to).expect("non-canonical overrun");
 
                     // Safety:
                     // - `from` page is not mapped in current page tables.
@@ -127,11 +142,9 @@ impl KernelMapper {
                     // - Caller is required to ensure `memory_access` is correct.
                     unsafe {
                         mapper
-                            .map(from, to, Depth::max(), lock_frames, memory_access)
+                            .map(to, from, lock_frames, memory_access)
                             .expect("failed to map range");
                     }
-
-                    remaining_bytes = remaining_bytes.saturating_sub(page_size());
                 }
             }
         }
@@ -144,10 +157,10 @@ impl KernelMapper {
                 \tlarge pages: {{ enabled: {}, size: {:#X} }}\n\
                 \thuge pages: {{ enabled: {}, size: {:#X} }}\n\
                 }}",
-                mapper::use_large_pages(),
-                large_page_size(),
-                mapper::use_huge_pages(),
-                huge_page_size()
+                PageTableInfo::is_large_pages_enabled(),
+                LargeFrame::size_in_bytes(),
+                PageTableInfo::is_large_pages_enabled(),
+                HugeFrame::size_in_bytes()
             );
 
             let mut kernel_mapper = Mapper::new();
@@ -205,14 +218,11 @@ impl KernelMapper {
 
                             (prev_start_address, prev_length + length, permissions)
                         } else {
-                            let start_frame = Address::<Frame>::new(prev_start_address).unwrap();
-                            let start_page = HigherHalfDirectMap::frame_to_page(start_frame);
-
                             unsafe {
                                 map_range(
                                     &mut kernel_mapper,
-                                    start_page,
-                                    start_frame,
+                                    HigherHalfDirectMap::offset(prev_start_address).get(),
+                                    prev_start_address,
                                     prev_length,
                                     prev_permissions,
                                     false,
@@ -262,10 +272,6 @@ impl KernelMapper {
 
                     let offset =
                         usize::try_from(program_header.p_vaddr).unwrap() - kernel_virtual_address;
-                    let segment_page =
-                        Address::<Page>::new(kernel_virtual_address + offset).unwrap();
-                    let segment_frame =
-                        Address::<Frame>::new(kernel_physical_address + offset).unwrap();
                     // If the segment length is smaller than it's align (for instance with large
                     // page alignments), we want to map based on that.
                     let segment_length = usize::try_from(core::cmp::max(
@@ -279,8 +285,8 @@ impl KernelMapper {
                     unsafe {
                         map_range(
                             &mut kernel_mapper,
-                            segment_page,
-                            segment_frame,
+                            kernel_virtual_address + offset,
+                            kernel_physical_address + offset,
                             segment_length,
                             segment_permissions,
                             false,
@@ -298,9 +304,10 @@ impl KernelMapper {
                 unsafe {
                     map_range(
                         &mut kernel_mapper,
-                        HigherHalfDirectMap::frame_to_page(local_apic_frame),
-                        local_apic_frame,
-                        page_size(),
+                        HigherHalfDirectMap::frame_to_page::<_, StandardPage>(local_apic_frame)
+                            .into(),
+                        usize::from(local_apic_frame),
+                        StandardFrame::size_in_bytes(),
                         Permissions::ReadWrite,
                         true,
                     );
@@ -348,12 +355,12 @@ pub enum Permissions {
 ///
 /// - The higher-half direct mapped memory of `frame` must not be otherwise
 ///   aliased.
-pub unsafe fn zero_frame(frame: Address<Frame>) {
-    let page = HigherHalfDirectMap::frame_to_page(frame);
-    let ptr = core::ptr::with_exposed_provenance_mut::<u8>(page.get().get());
+pub unsafe fn zero_frame<F: FrameAddress>(frame: F) {
+    let hhdm_address = HigherHalfDirectMap::offset(frame.into());
+    let ptr = NonNull::<u8>::with_exposed_provenance(hhdm_address);
 
     // Safety: Caller is required to maintain safety invariants.
     unsafe {
-        core::ptr::write_bytes(ptr, 0, page_size());
+        NonNull::write_bytes(ptr, 0, F::size_in_bytes());
     }
 }
