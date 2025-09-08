@@ -33,7 +33,7 @@ uuid = { version = "1.16", default-features = false, features = ["v4"] }
 
 # source: git
 # acpica = { git = "https://github.com/linuiz-project/acpica", tag = "v0.1.1" }
-bitmap = { git = "https://github.com/linuiz-project/bitmap", tag = "v0.3.0" }
+bitmap = { git = "https://github.com/linuiz-project/bitmap", tag = "v0.3.1" }
 libsys = { git = "https://github.com/linuiz-project/libsys", tag = "v0.3.4" }
 
 # feature-specific
