@@ -5,6 +5,7 @@
     array_repeat,
     array_windows,
     ascii_char,
+    ascii_char_variants,
     breakpoint,
     cfg_select,
     const_from,
@@ -22,6 +23,7 @@
     maybe_uninit_array_assume_init,
     maybe_uninit_slice,
     maybe_uninit_write_slice,
+    nonzero_ops,
     pointer_is_aligned_to,
     pointer_try_cast_aligned,
     ptr_as_ref_unchecked,
@@ -133,8 +135,32 @@ static STACK_SIZE_REQUEST: StackSizeRequest =
     StackSizeRequest::new().with_size(KERNEL_STACK_SIZE as u64);
 
 #[doc(hidden)]
+#[unsafe(naked)]
 #[unsafe(no_mangle)]
 unsafe extern "C" fn _entry() -> ! {
+    // We required a naked function here primarily to clear the frame pointer, so
+    // that on a kernel panic we don't trace anything prior to this function.
+
+    // Safety: We clear the frame pointer (unused at this point).
+    unsafe {
+        cfg_select! {
+            target_arch = "x86_64" => {
+                core::arch::naked_asm!(
+                    "
+                    xor rbp, rbp
+                    call {}
+                    ",
+                    sym main
+                )
+            }
+
+            _ => { unimplemented!() }
+        }
+    }
+}
+
+#[doc(hidden)]
+fn main() -> ! {
     // All of the code within this function should be run ONLY ONCE. Writing the
     // code sequentially within one function easily ensures that will be the
     // case.
@@ -189,7 +215,11 @@ unsafe extern "C" fn _entry() -> ! {
 
     crate::acpi::init_tables(&RSDP_REQUEST);
 
-    crate::mem::pmm::PhysicalMemoryManager::init(&MEMORY_MAP_REQUEST);
+    // Safety: `MEMORY_MAP_REQUEST` has not been allocated from since entry.
+    unsafe {
+        crate::mem::pmm::PhysicalMemoryManager::init(&MEMORY_MAP_REQUEST);
+    }
+
     crate::mem::KernelMapper::init(
         &MEMORY_MAP_REQUEST,
         &KERNEL_FILE_REQUEST,

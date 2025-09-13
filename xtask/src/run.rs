@@ -55,8 +55,8 @@ pub struct Options {
 
     /// Skips execution and only prints the QEMU command that would have been
     /// executed.
-    #[arg(short, long)]
-    norun: bool,
+    #[arg(long)]
+    dry: bool,
 
     /// Puts QEMU in GDB debug mode, awaiting signal from the debugger to begin
     /// execution.
@@ -160,7 +160,7 @@ pub fn run(sh: &xshell::Shell, options: Options) -> Result<()> {
         run_cmd = run_cmd.arg("-S").arg("-s");
     }
 
-    if options.norun {
+    if options.dry {
         println!("cmd: {run_cmd}");
     } else {
         run_cmd.run()?;

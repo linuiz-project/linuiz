@@ -40,6 +40,11 @@ pub struct Options {
     #[arg(long)]
     release: bool,
 
+    /// Whether or not to utilize frame pointers to track function callbacks
+    /// (used primarily for panic-mode stack traces).
+    #[arg(long)]
+    no_frame_pointers: bool,
+
     #[arg(long)]
     drivers: Vec<String>,
 
@@ -118,15 +123,20 @@ fn build_kernel(sh: &Shell, options: &Options) -> Result<()> {
         build_cmd = build_cmd.arg("-vv")
     }
 
-    let _rustflags = sh.push_env(
-        "RUSTFLAGS",
-        format!(
-            "--cfg=getrandom_backend=\"custom\" \
-            -C link-arg=-Tbuild/{target_triple}.lds \
-            -C link-arg=build/{target_triple}.a \
-            -C link-arg=-zmax-page-size=0x200000",
-        ),
-    );
+    let mut rustflags = String::new();
+    rustflags.push_str("--cfg=getrandom_backend=\"custom\" ");
+    rustflags.push_str(&format!("-C link-arg=-Tbuild/{target_triple}.lds "));
+    rustflags.push_str(&format!("-C link-arg=build/{target_triple}.a "));
+    rustflags.push_str("-C link-arg=-zmax-page-size=0x200000 ");
+    rustflags.push_str("-C code-model=kernel ");
+
+    if !options.no_frame_pointers {
+        rustflags.push_str("-C force-frame-pointers=true ");
+    }
+
+    println!("RUSTFLAGS: {rustflags:?}");
+
+    let _rustflags = sh.push_env("RUSTFLAGS", rustflags.trim());
 
     build_cmd.run()?;
 
