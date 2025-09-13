@@ -1,6 +1,6 @@
 use crate::util::sync::Mutex;
 use core::{
-    fmt::{Result, Write},
+    fmt::{Display, Result, Write},
     ptr::NonNull,
 };
 
@@ -77,13 +77,20 @@ fn get_stack_frame_ptr() -> *mut StackFrame {
 }
 
 fn construct_panic_message(mut buffer: impl Write) -> Result {
-    fn print_stack_trace_entry<D: core::fmt::Display>(
+    fn print_stack_trace_entry(
         mut buffer: impl Write,
         entry_num: usize,
         fn_address: usize,
-        symbol_name: D,
+        symbol_name: impl Display,
     ) -> Result {
-        writeln!(buffer, "#{entry_num: <4}0x{fn_address:#X} {symbol_name:#}",)
+        /// The hex-width of a maximum-length `usize`.
+        #[allow(clippy::as_conversions)]
+        const USIZE_PRETTY_WIDTH: usize = (usize::BITS as usize) / 4;
+
+        writeln!(
+            buffer,
+            "{entry_num: >4}  0x{fn_address:0>USIZE_PRETTY_WIDTH$X} {symbol_name:#}"
+        )
     }
 
     let Some(frame_ptr) = NonNull::new(get_stack_frame_ptr()) else {
