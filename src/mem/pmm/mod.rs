@@ -1,8 +1,8 @@
 use crate::{
     mem::{
-        addr::phys::{FrameAddress, HugeFrame, LargeFrame, PhysicalAddress, StandardFrame},
-        pmm::segment::{SegmentRepr, SEGMENT_BITS_USIZE},
         HigherHalfDirectMap,
+        addr::phys::{FrameAddress, HugeFrame, LargeFrame, PhysicalAddress, StandardFrame},
+        pmm::segment::{SEGMENT_BITS_USIZE, SegmentRepr},
     },
     util::{
         math::align_up_div,
@@ -750,7 +750,7 @@ mod tests {
     use super::{BitmapSize, FreeFrameError, LockFrameError, PhysicalMemoryManagerInner, Segment};
     use crate::mem::{
         addr::phys::{FrameAddress, LargeFrame, StandardFrame},
-        pmm::segment::{SegmentRepr, SEGMENT_BITS_USIZE},
+        pmm::segment::{SEGMENT_BITS_USIZE, SegmentRepr},
     };
     use limine::memory_map::{Entry, EntryType};
 
@@ -859,15 +859,18 @@ mod tests {
         let mut subject_bitmap = new_bitmap();
         let pmm = PhysicalMemoryManagerInner::new(&mut subject_bitmap, USABLE_BITMAP_BITS);
 
-        assert!(pmm
-            .is_any_locked(StandardFrame::from_index(449).unwrap())
-            .unwrap());
-        assert!(pmm
-            .is_any_locked(LargeFrame::from_index(0).unwrap())
-            .unwrap());
-        assert!(!pmm
-            .is_any_locked(LargeFrame::from_index(1).unwrap())
-            .unwrap());
+        assert!(
+            pmm.is_any_locked(StandardFrame::from_index(449).unwrap())
+                .unwrap()
+        );
+        assert!(
+            pmm.is_any_locked(LargeFrame::from_index(0).unwrap())
+                .unwrap()
+        );
+        assert!(
+            !pmm.is_any_locked(LargeFrame::from_index(1).unwrap())
+                .unwrap()
+        );
 
         // TODO test huge
     }
@@ -877,15 +880,18 @@ mod tests {
         let mut subject_bitmap = new_bitmap();
         let pmm = PhysicalMemoryManagerInner::new(&mut subject_bitmap, USABLE_BITMAP_BITS);
 
-        assert!(pmm
-            .is_all_locked(StandardFrame::from_index(449).unwrap())
-            .unwrap());
-        assert!(!pmm
-            .is_all_locked(LargeFrame::from_index(0).unwrap())
-            .unwrap());
-        assert!(!pmm
-            .is_all_locked(LargeFrame::from_index(1).unwrap())
-            .unwrap());
+        assert!(
+            pmm.is_all_locked(StandardFrame::from_index(449).unwrap())
+                .unwrap()
+        );
+        assert!(
+            !pmm.is_all_locked(LargeFrame::from_index(0).unwrap())
+                .unwrap()
+        );
+        assert!(
+            !pmm.is_all_locked(LargeFrame::from_index(1).unwrap())
+                .unwrap()
+        );
 
         // TODO test huge
     }
@@ -895,9 +901,10 @@ mod tests {
         let mut subject_bitmap = new_bitmap();
         let pmm = PhysicalMemoryManagerInner::new(&mut subject_bitmap, USABLE_BITMAP_BITS);
 
-        assert!(!pmm
-            .is_all_free(StandardFrame::from_index(449).unwrap())
-            .unwrap());
+        assert!(
+            !pmm.is_all_free(StandardFrame::from_index(449).unwrap())
+                .unwrap()
+        );
         assert!(!pmm.is_all_free(LargeFrame::from_index(0).unwrap()).unwrap());
         assert!(pmm.is_all_free(LargeFrame::from_index(1).unwrap()).unwrap());
 

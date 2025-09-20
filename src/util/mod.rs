@@ -1,6 +1,6 @@
 pub mod elf;
-pub mod sync;
 pub mod math;
+pub mod sync;
 
 mod array_str;
 pub use array_str::*;
