@@ -1,8 +1,16 @@
 use crate::{
     cpu::context::Context,
-    mem::{HigherHalfDirectMap, addr::phys::StandardFrame, pmm::PhysicalMemoryManager},
+    mem::{
+        HigherHalfDirectMap,
+        addr::{
+            phys::{FrameAddress, StandardFrame},
+            virt::StandardPage,
+        },
+        clear_frame_memory,
+        pmm::PhysicalMemoryManager,
+    },
 };
-use core::{mem::MaybeUninit, ptr::NonNull};
+use core::{num::NonZero, ptr::NonNull};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use uuid::Uuid;
 
@@ -20,36 +28,30 @@ pub enum YieldTaskError {
     NoActiveTask = 1,
 }
 
-#[cfg(debug_assertions)]
-const IDLE_STACK_SIZE: usize = 0x100;
-#[cfg(not(debug_assertions))]
-const IDLE_STACK_SIZE: usize = 0x20;
-
-#[repr(align(0x10))]
-struct IdleStack([MaybeUninit<u8>; IDLE_STACK_SIZE]);
-
-impl IdleStack {
-    fn top(&self) -> NonNull<u8> {
-        // Safety: `self.0` max index is `self.0.len() - 1`.
-        let top_byte = unsafe { self.0.get_unchecked(self.0.len() - 1) };
-        let top_ptr = core::ptr::from_ref(top_byte).cast_mut().cast::<u8>();
-
-        // Safety: `top_ptr` is derived from `self.0`, and so cannot be null.
-        unsafe { NonNull::new_unchecked(top_ptr) }
-    }
-}
-
 pub struct Scheduler {
     enabled: bool,
-    idle_stack: IdleStack,
+    idle_stack: NonNull<u8>,
     task: Option<Task>,
 }
 
 impl Scheduler {
     pub fn new() -> Self {
+        let idle_stack = {
+            let frame = PhysicalMemoryManager::next_free_frame::<StandardFrame>()
+                .expect("could not allocate stack for idle thread");
+            let page = HigherHalfDirectMap::frame_to_page::<_, StandardPage>(frame);
+            let address = NonZero::<usize>::try_from(page).unwrap();
+
+            let bottom_ptr = NonNull::<u8>::with_exposed_provenance(address);
+            // Safety: Allocation is at least `SIZE_IN_BYTES`-sized.
+            unsafe { bottom_ptr.byte_add(StandardFrame::SIZE_IN_BYTES.get() - 0x10) }
+        };
+
+        trace!("Idle Stack: {idle_stack:#X?}");
+
         Self {
             enabled: false,
-            idle_stack: IdleStack(core::array::repeat(MaybeUninit::uninit())),
+            idle_stack,
             task: None,
         }
     }
@@ -71,6 +73,8 @@ impl Scheduler {
     }
 
     fn next_task(&mut self, context: &mut Context) {
+        trace!("Old Context: {context:X?}");
+
         if let Some(next_task) = TASKS.dequeue() {
             *context = next_task.context().clone();
 
@@ -80,10 +84,20 @@ impl Scheduler {
 
             self.task = Some(next_task);
         } else {
-            *context = Context::new_idle(self.idle_stack.top().addr());
-
-            trace!("Switched: IDLE");
+            // TODO Fix privileged context switches from blowing up the entire stack.
+            //
+            // When the idle task is interrupted with no ring level change, the stack
+            // pointer is not swapped to the value in `TSS.IST0`. Additionally, the idle
+            // stack is not large enough to accomodate the execution of a full context
+            // switch callstack.
+            //
+            // The solution is likely just a larger stack.
+            // Or perhaps some kind of code to manually switch to a context-switching stack
+            // when coming from ring 0? (hard)
+            *context = Context::new_idle(self.idle_stack.addr());
         }
+
+        trace!("New Context: {context:X?}");
     }
 
     pub fn interrupt_task(&mut self, context: &mut Context) {
@@ -193,13 +207,18 @@ pub fn queue_procedure(procedure_fn: fn()) {
         crate::cpu::local_state::LocalState::with_scheduler(Scheduler::kill_current_task);
     }
 
-    let stack_address = PhysicalMemoryManager::next_free_frame::<StandardFrame>(false).unwrap();
+    let stack_address = PhysicalMemoryManager::next_free_frame::<StandardFrame>()
+        .inspect(|frame| {
+            // Safety: Memory was just allocated, and is not otherwise aliased.
+            unsafe { clear_frame_memory(*frame) }
+        })
+        .unwrap();
 
     #[allow(clippy::as_conversions)]
     let context = Context::new_from_fn_with_arg(
         dispatch_procedure,
         procedure_fn as usize,
-        HigherHalfDirectMap::offset(stack_address),
+        HigherHalfDirectMap::offset(stack_address.into()),
         false,
     );
 

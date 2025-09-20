@@ -5,8 +5,9 @@ use crate::{
             phys::{FrameAddress, StandardFrame},
             virt::{PageAddress, StandardPage, VirtualAddress},
         },
+        clear_frame_memory,
         mapper::paging::{Depth, Entry},
-        pmm::{FrameError, PhysicalMemoryManager},
+        pmm::{FrameError, LockFrameError, PhysicalMemoryManager},
     },
     util::{ExclusiveBorrow, SharedBorrow},
 };
@@ -99,7 +100,13 @@ pub struct Mapper(StandardFrame);
 
 impl Mapper {
     pub fn new() -> Self {
-        let frame = PhysicalMemoryManager::next_free_frame::<StandardFrame>(true)
+        let frame = PhysicalMemoryManager::next_free_frame::<StandardFrame>()
+            .inspect(|frame| {
+                // Safety: Memory was just allocated, and is not otherwise aliased.
+                unsafe {
+                    clear_frame_memory(*frame);
+                }
+            })
             .expect("failed to allocate frame for new root page table");
 
         Self(frame)
@@ -141,17 +148,20 @@ impl Mapper {
         page: P,
         lock_frame: bool,
         permissions: Permissions,
+        invalidate_page: bool,
     ) -> Result<(), MappingError> {
         let depth = F::paging_depth();
         let address = VirtualAddress::from(page);
 
-        trace!(
-            "Mapping ({permissions:?}): {page:#X?} -> {frame:#X?} {{ Size: {:#X}, Lock: {lock_frame} }}",
-            depth.align()
-        );
+        trace!("Mapping ({permissions:?}): {page:X?} -> {frame:X?} {{ Lock: {lock_frame} }}",);
 
         if lock_frame {
-            PhysicalMemoryManager::lock_frame(frame)?;
+            match PhysicalMemoryManager::lock_frame(frame) {
+                Ok(()) | Err(LockFrameError::NotAllFree) => {}
+                Err(error) => {
+                    panic!("failed to lock frame for mapping: {error:?}");
+                }
+            }
         }
 
         // If acquisition of the frame is successful, attempt to map the page to the
@@ -181,8 +191,15 @@ impl Mapper {
 
                 entry.set_enabled();
 
-                #[cfg(target_arch = "x86_64")]
-                crate::arch::x86_64::instructions::__invlpg(address);
+                if invalidate_page {
+                    cfg_select! {
+                        target_arch = "x86_64" => {
+                            crate::arch::x86_64::instructions::__invlpg(address);
+                        }
+
+                        _ => { unimplemented!() }
+                    }
+                }
 
                 trace!("Mapped: {entry:X?}");
             })?;
@@ -214,8 +231,9 @@ impl Mapper {
                 }
 
                 if free_frame {
+                    // Safety: Memory was just allocated.
                     unsafe {
-                        PhysicalMemoryManager::free_frame(frame)?;
+                        PhysicalMemoryManager::free_frame(frame).unwrap();
                     }
                 }
 
@@ -238,8 +256,15 @@ impl Mapper {
         &mut self,
         page: StandardPage,
         permissions: Permissions,
+        invalidate_page: bool,
     ) -> Result<(), AutoMappingError> {
-        let frame = PhysicalMemoryManager::next_free_frame::<StandardFrame>(true)
+        let frame = PhysicalMemoryManager::next_free_frame::<StandardFrame>()
+            .inspect(|frame| {
+                // Safety: Memory was just allocated, and is not otherwise aliased.
+                unsafe {
+                    clear_frame_memory(*frame);
+                }
+            })
             .ok_or(AutoMappingError::OutOfMemory)?;
 
         // Safety:
@@ -247,7 +272,7 @@ impl Mapper {
         // - Depth is the maximum paging depth, which is always supported.
         // - Caller is required to ensure permissions are correct.
         unsafe {
-            self.map(frame, page, false, permissions)?;
+            self.map(frame, page, false, permissions, invalidate_page)?;
         }
 
         Ok(())

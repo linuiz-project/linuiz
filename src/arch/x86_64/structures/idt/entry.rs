@@ -11,19 +11,11 @@ pub struct EntryBuilder {
 }
 
 impl EntryBuilder {
-    pub fn exception() -> Self {
+    pub fn new() -> Self {
         Self {
             handler_address: 0,
             code_selector: kcode_selector(),
             options: 0b0000_1111_0000_0000,
-        }
-    }
-
-    pub fn interrupt_service_routine() -> Self {
-        Self {
-            handler_address: 0,
-            code_selector: kcode_selector(),
-            options: 0b0000_1110_0000_0000,
         }
     }
 

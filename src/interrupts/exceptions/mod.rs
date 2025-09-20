@@ -13,7 +13,7 @@ pub enum PageFaultReason {
 #[inline(never)]
 #[allow(clippy::needless_pass_by_value)]
 pub fn handle(exception: ArchException) {
-    debug!("{exception:?}");
+    debug!("{exception:#X?}");
 
     match exception {
         ArchException::Breakpoint(_, _) => {

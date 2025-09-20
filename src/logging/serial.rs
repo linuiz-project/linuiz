@@ -1,5 +1,5 @@
 use crate::util::sync::{Mutex, Once};
-use core::num::NonZero;
+use core::{ascii::Char as AsciiChar, num::NonZero};
 use uart::{InterruptEnable, LineStatus, address::PortAddress};
 
 #[cfg(target_arch = "x86_64")]
@@ -8,17 +8,72 @@ type UartAddress = uart::address::PortAddress;
 type UartAddress = uart::address::MmioAddress;
 type Uart = uart::Uart<UartAddress, uart::Data>;
 
-const UART_FIFO_SIZE: usize = 16;
-const_assert!(UART_FIFO_SIZE.is_power_of_two());
+static UART: Once<Option<Mutex<UartWriter>>> = Once::new();
 
-static UART: Once<Mutex<Uart>> = Once::new();
+pub struct Logger;
 
-/// ## Safety
-///
-/// - `address` must be a valid serial address pointing to a UART 16550 device.
-/// - `address` must not be read from or written to by another context.
-fn configure_uart(address: UartAddress, buffered: bool) {
-    UART.try_call_once(|| {
+impl Logger {
+    /// Initializes the UART-based serial logging device.
+    pub fn init() -> &'static Self {
+        let address = {
+            cfg_select! {
+                target_arch = "x86_64" => {
+                    let port_address = NonZero::<u16>::new(0x3F8).unwrap();
+                    // Safety: 0x3F8 is *very likely* to be the correct serial port; even
+                    //         if not, there's no way to check.
+                    unsafe { PortAddress::new(port_address) }
+                }
+
+                _ => { unimplemented!() }
+            }
+        };
+
+        // TODO Allow specifying UART parameters via kernel's cmdline.
+        UART.call_once(|| UartWriter::new(address, false, 1).map(Mutex::new));
+
+        &Self
+    }
+}
+
+impl log::Log for Logger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= log::Level::Debug
+    }
+
+    fn log(&self, record: &log::Record) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+
+        let Some(uart) = UART.get().unwrap() else {
+            return;
+        };
+
+        super::with_formatted_log_record(record, |args| {
+            uart.with_lock(|uart| {
+                core::fmt::Write::write_fmt(uart, args).ok();
+            });
+        });
+    }
+
+    fn flush(&self) {
+        unimplemented!()
+    }
+}
+
+struct UartWriter {
+    uart: Uart,
+    fifo_size: usize,
+    chars_written: usize,
+}
+
+impl UartWriter {
+    /// ## Safety
+    ///
+    /// - `address` must be a valid serial address pointing to a UART 16550
+    ///   device.
+    /// - `address` must not be read from or written to by another context.
+    fn new(address: UartAddress, buffered: bool, fifo_size: usize) -> Option<Self> {
         use uart::{Baud, FifoControl, LineControl, ModemControl};
 
         // Safety: Caller is required to maintain safety invariants.
@@ -48,7 +103,7 @@ fn configure_uart(address: UartAddress, buffered: bool) {
         // Test the UART to ensure it's functioning correctly.
         uart.write_byte(0x1F);
         if uart.read_byte() != 0x1F {
-            return Err(());
+            return None;
         }
 
         // Conditionally enable the `TRANSMIT_EMPTY` interrupt.
@@ -60,92 +115,52 @@ fn configure_uart(address: UartAddress, buffered: bool) {
 
         uart.write_modem_control(ModemControl::TERMINAL_READY | ModemControl::OUT_2);
 
-        b"\n-SERIAL LOGGER-\n".iter().for_each(|byte| {
-            uart.write_byte(*byte);
-        });
-
-        Ok(Mutex::new(uart))
-    })
-    .ok();
-}
-
-type UartStringBuffer = heapless::String<0x2000>;
-
-fn with_buffered_uart(func: impl FnOnce(&'static mut UartStringBuffer, &'static mut Uart)) {
-    let Some(uart) = UART.get() else {
-        return;
-    };
-
-    uart.with_lock(|uart| {
-        static WRITE_BUFFER: Mutex<UartStringBuffer> = Mutex::new(UartStringBuffer::new());
-
-        WRITE_BUFFER.with_lock(|write_buffer| {
-            func(write_buffer, uart);
-        });
-    });
-}
-
-pub struct Logger;
-
-impl Logger {
-    /// Initializes the UART-based serial logging device.
-    pub fn init() -> &'static Self {
-        let address = {
-            cfg_select! {
-                target_arch = "x86_64" => {
-                    // TODO Allow specifying the serial port in the kernel parameters?
-                    let port_address = NonZero::<u16>::new(0x3F8).unwrap();
-                    // Safety: 0x3F8 is *very likely* to be the correct serial port; even
-                    //         if not, there's no way to check.
-                    unsafe { PortAddress::new(port_address) }
-                }
-
-                _ => { unimplemented!() }
-            }
+        let mut uart_writer = UartWriter {
+            uart,
+            fifo_size,
+            chars_written: 0,
         };
 
-        configure_uart(address, false);
+        core::fmt::Write::write_str(&mut uart_writer, "\n-SERIAL LOGGER-\n").ok();
 
-        &Self
+        Some(uart_writer)
+    }
+
+    fn is_fifo_maybe_full(&self) -> bool {
+        (self.chars_written & self.fifo_size) == 0
+    }
+
+    fn write_byte(&mut self, b: u8) {
+        // If we're at the beginning or we've iterated one FIFO length ...
+        if self.is_fifo_maybe_full() {
+            // ... then wait for the transmit buffer to empty.
+            while !self.uart.read_line_status().contains(LineStatus::THR_EMPTY) {
+                core::hint::spin_loop();
+            }
+        }
+
+        self.uart.write_byte(b);
+        self.chars_written += 1;
+    }
+
+    fn write_char(&mut self, c: char) {
+        let c_ascii = c.as_ascii().unwrap_or(AsciiChar::QuestionMark);
+        let b = c_ascii.to_u8();
+
+        self.write_byte(b);
     }
 }
 
-impl log::Log for Logger {
-    fn enabled(&self, metadata: &log::Metadata) -> bool {
-        metadata.level() <= log::Level::Debug
+impl core::fmt::Write for UartWriter {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        s.chars().for_each(|c| self.write_char(c));
+
+        Ok(())
     }
 
-    fn log(&self, record: &log::Record) {
-        if !self.enabled(record.metadata()) {
-            return;
-        }
+    fn write_char(&mut self, c: char) -> core::fmt::Result {
+        self.write_char(c);
 
-        super::with_formatted_log_record(record, |args| {
-            with_buffered_uart(|string_buffer, uart| {
-                core::fmt::Write::write_fmt(string_buffer, args).ok();
-
-                string_buffer
-                    .chars()
-                    .enumerate()
-                    .map(|(i, c)| (i, u8::try_from(c).unwrap_or(b'?')))
-                    .for_each(|(iteration, byte)| {
-                        // If we're at the beginning or we've iterated one FIFO length ...
-                        if (iteration & UART_FIFO_SIZE) == 0 {
-                            // ... then wait for the transmit buffer to empty.
-                            while !uart.read_line_status().contains(LineStatus::THR_EMPTY) {
-                                core::hint::spin_loop();
-                            }
-                        }
-
-                        uart.write_byte(byte);
-                    });
-
-                string_buffer.clear();
-            });
-        });
-    }
-
-    fn flush(&self) {
-        unimplemented!()
+        Ok(())
     }
 }

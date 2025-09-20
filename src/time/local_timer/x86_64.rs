@@ -94,15 +94,15 @@ impl LocalTimer {
                 // making their CPUs 10x more difficult to program for than Intel.
                 let frequency = processor_frequency_info()
                     .map(|processor_frequency_info| {
-                        // We read the processor frequency information directly from the CPU, to do
-                        // the math to make it useful.
+                        // We read the processor frequency information directly from the CPU, then
+                        // do the math to make it useful.
                         u64::from(processor_frequency_info.bus_frequency())
                             / (u64::from(processor_frequency_info.processor_base_frequency())
                                 * u64::from(processor_frequency_info.processor_max_frequency()))
                     })
                     .or_else(|| {
-                        // Check if we're in a hypervisor environment and it provides the 0x40000000
-                        // and 0x40000010 hypervisor info leaves.
+                        // Check if we're in a hypervisor environment, and if it provides the
+                        // 0x40000000 and 0x40000010 hypervisor info leaves.
                         feature_info()
                             .filter(raw_cpuid::FeatureInfo::has_hypervisor)
                             .and_then(|_| hypervisor_info().and_then(|cpuid| cpuid.tsc_frequency()))
@@ -167,8 +167,7 @@ impl LocalTimer {
                     .ok_or(Error::InvalidWait)?;
 
                 trace!("Wait (TSC): {{ {wait_us:?}us, {wait_ticks}t }} ");
-                // Safety: If mode is `TscDeadline`, then the timestamp counter
-                //         is supported.
+                // Safety: If mode is `TscDeadline`, then the timestamp counter is supported.
                 unsafe {
                     IA32_TSC_DEADLINE::set(wait_ticks);
                 }

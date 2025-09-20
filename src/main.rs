@@ -14,6 +14,7 @@
     const_try,
     core_intrinsics,
     duration_constants,
+    exact_size_is_empty,
     extern_types,
     generic_atomic,
     if_let_guard,
@@ -113,36 +114,23 @@ impl LinkerSymbol {
     }
 }
 
-/// Specify the Limine revision to use.
-#[doc(hidden)]
-static BASE_REVISION: BaseRevision = BaseRevision::with_revision(4);
-
-const KERNEL_STACK_SIZE: usize = {
-    #[cfg(debug_assertions)]
-    {
-        0x40_0000
-    }
-    #[cfg(not(debug_assertions))]
-    {
-        0x10_0000
+const KERNEL_STACK_SIZE: u64 = {
+    cfg_select! {
+        debug_assertions => { 0x8_0000 }
+        not(debug_assertions) => { 0x1_0000 }
     }
 };
 
-/// Specify the exact stack size the kernel would like to use.
+#[doc(hidden)]
+static BASE_REVISION: BaseRevision = BaseRevision::with_revision(4);
+
 #[doc(hidden)]
 #[allow(clippy::as_conversions)]
-static STACK_SIZE_REQUEST: StackSizeRequest =
-    StackSizeRequest::new().with_size(KERNEL_STACK_SIZE as u64);
+static STACK_SIZE_REQUEST: StackSizeRequest = StackSizeRequest::new().with_size(KERNEL_STACK_SIZE);
 
-#[doc(hidden)]
-#[unsafe(naked)]
-#[unsafe(no_mangle)]
-unsafe extern "C" fn _entry() -> ! {
-    // We required a naked function here primarily to clear the frame pointer, so
-    // that on a kernel panic we don't trace anything prior to this function.
-
-    // Safety: We clear the frame pointer (unused at this point).
-    unsafe {
+#[macro_export]
+macro_rules! naked_asm_clear_frame_pointer_and_call_fn {
+    ($call_fn:ident) => {
         cfg_select! {
             target_arch = "x86_64" => {
                 core::arch::naked_asm!(
@@ -150,17 +138,27 @@ unsafe extern "C" fn _entry() -> ! {
                     xor rbp, rbp
                     call {}
                     ",
-                    sym main
+                    sym $call_fn
                 )
             }
 
             _ => { unimplemented!() }
         }
-    }
+    };
 }
 
 #[doc(hidden)]
-fn main() -> ! {
+#[unsafe(naked)]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn _entry() -> ! {
+    // We require a naked function here primarily to clear the frame pointer, so
+    // that on a kernel panic we don't trace anything prior to this function.
+
+    naked_asm_clear_frame_pointer_and_call_fn!(main)
+}
+
+#[doc(hidden)]
+extern "C" fn main() -> ! {
     // All of the code within this function should be run ONLY ONCE. Writing the
     // code sequentially within one function easily ensures that will be the
     // case.
@@ -231,7 +229,7 @@ fn main() -> ! {
     }
 
     // Safety: We've reached the end of the kernel init phase.
-    unsafe { crate::cpu::start(Some(&MP_REQUEST), Some(&MEMORY_MAP_REQUEST)) }
+    unsafe { init_processor(Some(&MP_REQUEST), Some(&MEMORY_MAP_REQUEST)) }
 }
 
 fn print_env_info(
@@ -315,4 +313,105 @@ fn report_total_usable_memory(memory_map: &[&limine::memory_map::Entry]) {
         "Detected system memory: {}MB",
         total_usable_memory / 1_000_000
     );
+}
+
+/// Iterates the entries in the multiprocessing request, configuring and
+/// subsequently synchronizing the other processors in the system.
+///
+/// # Returns
+///
+/// - If request was satisfied, `Some` of the count of non-bootstrap processor
+///   in the system.
+/// - If request was not satisfied, `None`.
+pub fn begin_multiprocessing(mp_request: &limine::request::MpRequest) -> Option<usize> {
+    let Some(response) = mp_request.get_response() else {
+        warn!("Bootloader did not provide response to multiprocessing request.");
+        return None;
+    };
+
+    debug!("Detecting and starting additional cores.");
+
+    response
+        .cpus()
+        .iter()
+        .filter(|cpu| cpu.lapic_id != response.bsp_lapic_id())
+        .for_each(|cpu| {
+            trace!("Starting processor: ID#{} LAPIC#{}", cpu.id, cpu.lapic_id);
+
+            cpu.goto_address.write({
+                if crate::params::KernelParameters::use_multiprocessing() {
+                    #[unsafe(naked)]
+                    extern "C" fn _mp_entry(_: &limine::mp::Cpu) -> ! {
+                        extern "C" fn mp_main(_: &limine::mp::Cpu) -> ! {
+                            // Safety: Function is run only once for this processor.
+                            unsafe {
+                                crate::cpu::configure();
+                            }
+
+                            // Safety: All currently referenced memory should also be
+                            //         mapped in the kernel page tables.
+                            unsafe {
+                                crate::mem::KernelMapper::swap_into();
+                            }
+
+                            // Safety: processor still in init phase.
+                            unsafe { init_processor(None, None) }
+                        }
+
+                        // We require a naked function here primarily to clear the frame pointer, so
+                        // that on a kernel panic we don't trace anything prior to this function.
+
+                        crate::naked_asm_clear_frame_pointer_and_call_fn!(mp_main)
+                    }
+
+                    _mp_entry
+                } else {
+                    extern "C" fn _idle_forever(_: &limine::mp::Cpu) -> ! {
+                        crate::cpu::halt_and_catch_fire()
+                    }
+
+                    _idle_forever
+                }
+            });
+        });
+
+    Some(response.cpus().len())
+}
+
+/// Enters core into the scheduler loop, exiting the kernel's boot phase.
+///
+/// # Safety
+///
+/// - Function should only be run once at the end of the kernel boot phase.
+#[allow(clippy::too_many_lines)]
+pub unsafe fn init_processor(
+    mp_request: Option<&limine::request::MpRequest>,
+    _memory_map_request: Option<&limine::request::MemoryMapRequest>,
+) -> ! {
+    use crate::{cpu::local_state::LocalState, scheduler::Scheduler};
+
+    mp_request
+        .and_then(begin_multiprocessing)
+        .inspect(|processor_count| {
+            trace!("Detected {processor_count} processors.");
+        });
+
+    LocalState::init();
+
+    debug!("Preparing for task scheduling...");
+    LocalState::with_scheduler(Scheduler::enable);
+
+    trace!("Enabling interrupts...");
+    crate::interrupts::enable();
+
+    LocalState::with_timer(|timer| {
+        trace!("Enabling local timer...");
+        timer.enable();
+        trace!("Setting preemption wait...");
+        timer.set_preemption_wait();
+    });
+
+    trace!("Waiting for preemption...");
+    // Wait loop to ensure the core can jump into the scheduler upon timer fire.
+    crate::interrupts::wait_indefinite()
 }

@@ -1,30 +1,32 @@
 use crate::mem::{
     addr::{NonCanonicalError, phys::FrameAddress},
     get_paging_depth,
-    mapper::paging::{Depth, PageTableInfo},
+    mapper::paging::{Depth, PagingInfo},
 };
 use core::{fmt::Debug, iter::Step, num::NonZero, ptr::NonNull};
 
 #[derive(Debug, Error, Clone, Copy)]
 #[error("tried to convert a null virtual address to a non-null pointer")]
-pub struct NullVirtAddrPtr;
+pub struct ZeroAddressError;
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct VirtualAddress(usize);
 
 impl VirtualAddress {
-    fn canonical_bits() -> NonZero<u32> {
+    pub fn canonical_bits() -> NonZero<u32> {
         use crate::mem::addr::phys::StandardFrame;
 
-        let table_indexes_shift = PageTableInfo::index_bits().get() * get_paging_depth().get();
-        let total_shift = table_indexes_shift + StandardFrame::index_bit_shift().get();
+        let table_indexes_shift = PagingInfo::TABLE_INDEX_BITS.get() * get_paging_depth().get();
+        let total_shift = table_indexes_shift + StandardFrame::INDEX_BIT_SHIFT.get();
 
         debug_assert!(total_shift > 0);
+
+        // Safety: `total_shift` is always non-zero.
         unsafe { NonZero::<u32>::new_unchecked(total_shift) }
     }
 
-    fn check_canonical(address: usize) -> bool {
+    pub fn check_canonical(address: usize) -> bool {
         #[allow(clippy::as_conversions)]
         let canonical_bits = Self::canonical_bits().get() as usize;
         let sign_extension_check_shift = canonical_bits - 1;
@@ -51,7 +53,11 @@ impl VirtualAddress {
             .checked_sub(Self::canonical_bits().get())
             .unwrap();
 
-        #[allow(clippy::as_conversions)]
+        #[allow(
+            clippy::as_conversions,
+            clippy::cast_possible_wrap,
+            clippy::cast_sign_loss
+        )]
         Self(
             (address.unbounded_shl(sign_extension_shift) as isize)
                 .unbounded_shr(sign_extension_shift) as usize,
@@ -93,11 +99,10 @@ impl const From<VirtualAddress> for usize {
 }
 
 impl const TryFrom<VirtualAddress> for NonZero<usize> {
-    type Error = usize;
+    type Error = ZeroAddressError;
 
     fn try_from(value: VirtualAddress) -> Result<Self, Self::Error> {
-        let value = usize::from(value);
-        NonZero::new(value).ok_or(value)
+        NonZero::new(usize::from(value)).ok_or(ZeroAddressError)
     }
 }
 
@@ -138,7 +143,7 @@ pub trait PageAddress:
     fn paging_depth() -> Depth;
 
     fn check_canonical(address: usize) -> bool {
-        ((address & Self::Frame::non_index_bit_mask()) == 0)
+        ((address & Self::Frame::NON_INDEX_BIT_MASK.get()) == 0)
             && VirtualAddress::check_canonical(address)
     }
 
@@ -159,8 +164,8 @@ pub trait PageAddress:
     /// Creates a new [`PageAddress`] with the provided address, truncating any
     /// non-canonical bits.
     fn new_truncate(address: usize) -> Self {
-        let address =
-            usize::from(VirtualAddress::new_truncate(address)) & !Self::Frame::non_index_bit_mask();
+        let address = usize::from(VirtualAddress::new_truncate(address))
+            & !Self::Frame::NON_INDEX_BIT_MASK.get();
         // Safety: `address` has non-canonical bits removed.
         unsafe { Self::new_unchecked(address) }
     }
@@ -178,7 +183,7 @@ pub trait PageAddress:
     /// - [`NonCanonicalError`] if `index` would create a non-canonical address.
     fn from_index(index: usize) -> Result<Self, NonCanonicalError> {
         let address = index
-            .checked_shl(Self::Frame::index_bit_shift().get())
+            .checked_shl(Self::Frame::INDEX_BIT_SHIFT.get())
             .ok_or(NonCanonicalError)?;
 
         Self::new(address)
@@ -186,7 +191,7 @@ pub trait PageAddress:
 
     /// Gets the index of the page this address points to.
     fn index(self) -> usize {
-        Into::<usize>::into(self) << Self::Frame::index_bit_shift().get()
+        Into::<usize>::into(self) << Self::Frame::INDEX_BIT_SHIFT.get()
     }
 }
 
@@ -233,6 +238,14 @@ impl const From<StandardPage> for usize {
     }
 }
 
+impl const TryFrom<StandardPage> for NonZero<usize> {
+    type Error = ZeroAddressError;
+
+    fn try_from(value: StandardPage) -> Result<Self, Self::Error> {
+        NonZero::new(usize::from(value)).ok_or(ZeroAddressError)
+    }
+}
+
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct LargePage(usize);
@@ -276,6 +289,14 @@ impl const From<LargePage> for usize {
     }
 }
 
+impl const TryFrom<LargePage> for NonZero<usize> {
+    type Error = ZeroAddressError;
+
+    fn try_from(value: LargePage) -> Result<Self, Self::Error> {
+        NonZero::new(usize::from(value)).ok_or(ZeroAddressError)
+    }
+}
+
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct HugePage(usize);
@@ -316,5 +337,13 @@ impl Step for HugePage {
 impl const From<HugePage> for usize {
     fn from(value: HugePage) -> Self {
         value.0
+    }
+}
+
+impl const TryFrom<HugePage> for NonZero<usize> {
+    type Error = ZeroAddressError;
+
+    fn try_from(value: HugePage) -> Result<Self, Self::Error> {
+        NonZero::new(usize::from(value)).ok_or(ZeroAddressError)
     }
 }

@@ -1,6 +1,6 @@
 use crate::mem::{
     Permissions,
-    addr::phys::{FrameAddress, PhysicalAddress},
+    addr::phys::{FrameAddress, PhysicalAddress, StandardFrame},
 };
 use bit_field::BitField;
 use core::num::NonZero;
@@ -51,25 +51,26 @@ impl Entry {
         }
     };
 
-    const FRAME_BIT_MASK: NonZero<usize> = {
+    fn non_address_low_bits() -> NonZero<u32> {
         cfg_select! {
             target_arch = "x86_64" => {
-                NonZero::<usize>::new(0xF_FFFF_FFFF_F000).unwrap()
+                // Safety: Value is non-zero.
+                unsafe { NonZero::<u32>::new_unchecked(12) }
             }
 
             _ => { unimplemented!() }
         }
-    };
+    }
 
-    const FRAME_BIT_SHIFT: NonZero<u32> = {
+    fn address_mask() -> NonZero<usize> {
         cfg_select! {
             target_arch = "x86_64" => {
-                NonZero::<u32>::new(12).unwrap()
+                StandardFrame::canonical_mask()
             }
 
             _ => { unimplemented!() }
         }
-    };
+    }
 
     pub const fn empty() -> Self {
         Self(0)
@@ -134,12 +135,18 @@ impl Entry {
             let address = {
                 cfg_select! {
                     target_arch = "x86_64" => {
-                        self.0 & Self::FRAME_BIT_MASK.get()
+                        self.0 & Self::address_mask().get()
                     }
 
                     _ => { unimplemented!() }
                 }
             };
+
+            let address = address
+                .unbounded_shr(Self::non_address_low_bits().get())
+                .unbounded_shl(StandardFrame::INDEX_BIT_SHIFT.get());
+
+            debug_assert!(PhysicalAddress::check_canonical(address));
 
             // Safety: `address` is checked to only contain canonical physical bits.
             let address = unsafe { PhysicalAddress::new_unchecked(address) };
@@ -157,19 +164,29 @@ impl Entry {
     /// - `frame` must be unused or otherwise expected to be pointed to by this
     ///   entry's address.
     pub unsafe fn set_address<F: FrameAddress>(&mut self, frame: F) {
-        let address: usize = frame.into();
-        debug_assert_eq!(address & !Self::FRAME_BIT_MASK.get(), 0);
+        let address = {
+            cfg_select! {
+                target_arch = "x86_64" => { Into::<usize>::into(frame) }
+                _ => { unimplemented!() }
+            }
+        };
 
-        self.0 = (self.0 & !Self::FRAME_BIT_MASK.get()) | address;
+        debug_assert_eq!(address & !Self::address_mask().get(), 0);
+
+        let address = address
+            .unbounded_shr(StandardFrame::INDEX_BIT_SHIFT.get())
+            .unbounded_shl(Self::non_address_low_bits().get());
+
+        self.0 = (self.0 & !Self::address_mask().get()) | address;
     }
 
     pub fn is_global(&self) -> bool {
         cfg_select! {
-            all(target_arch = "x86_64", test) => {
+            test => {
                 self.0.get_bit(Self::GLOBAL_BIT_INDEX)
             }
 
-            all(target_arch = "x86_64", not(test)) => {
+            target_arch = "x86_64" => {
                 use crate::arch::x86_64::registers::control::cr4;
 
                 if cr4::CR4::read().contains(cr4::Flags::PGE) {
@@ -187,26 +204,22 @@ impl Entry {
         }
     }
 
-    pub fn set_global(&mut self, global: bool) {
+    pub fn set_global(&mut self, set: bool) {
         cfg_select! {
-            all(target_arch = "x86_64", test) => {
-                self.0.set_bit(Self::GLOBAL_BIT_INDEX, global);
+            test => {
+                self.0.set_bit(Self::GLOBAL_BIT_INDEX, set);
             }
 
-            all(target_arch = "x86_64", not(test)) => {
+            target_arch = "x86_64" => {
                 use crate::arch::x86_64::registers::control::cr4;
 
                 if cr4::CR4::read().contains(cr4::Flags::PGE) {
-                    self.0.set_bit(Self::GLOBAL_BIT_INDEX, global);
-                } else {
-                    // We don't really care if it's set if it isn't supported.
-                    // Allowing this means it's much easier to manage the global
-                    // bit across different platforms.
+                    self.0.set_bit(Self::GLOBAL_BIT_INDEX, set);
                 }
             }
 
             target_arch = "riscv64" => {
-                self.0.set_bit(Self::GLOBAL_BIT_INDEX, global);
+                self.0.set_bit(Self::GLOBAL_BIT_INDEX, set);
             }
 
             _ => { unimplemented!() }
@@ -215,6 +228,7 @@ impl Entry {
 
     pub fn is_user(&self) -> bool {
         cfg_select! {
+            test => { self.0.get_bit(Self::USER_BIT_INDEX) }
             target_arch = "x86_64" => { self.0.get_bit(Self::USER_BIT_INDEX) }
             target_arch = "riscv64" => { self.0.get_bit(Self::USER_BIT_INDEX) }
 
@@ -222,14 +236,18 @@ impl Entry {
         }
     }
 
-    pub fn set_user(&mut self, user_accessible: bool) {
+    pub fn set_user(&mut self, set: bool) {
         cfg_select! {
+            test => {
+                self.0.set_bit(Self::USER_BIT_INDEX, set);
+            }
+
             target_arch = "x86_64" => {
-                self.0.set_bit(Self::USER_BIT_INDEX, user_accessible);
+                self.0.set_bit(Self::USER_BIT_INDEX, set);
             }
 
             target_arch = "riscv64" => {
-                self.0.set_bit(Self::USER_BIT_INDEX, user_accessible);
+                self.0.set_bit(Self::USER_BIT_INDEX, set);
             }
 
             _ => { unimplemented!() }
@@ -238,23 +256,43 @@ impl Entry {
 
     #[cfg(target_arch = "x86_64")]
     pub fn is_huge(&self) -> bool {
+        self.0.get_bit(Self::HUGE_BIT_INDEX)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    pub fn set_huge(&mut self, set: bool) {
+        self.0.set_bit(Self::HUGE_BIT_INDEX, set);
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn get_no_execute_bit(&self) -> bool {
         cfg_select! {
-            target_arch = "x86_64" => {
-                self.0.get_bit(Self::HUGE_BIT_INDEX)
+            test => {
+                self.0.get_bit(Self::NO_EXECUTE_BIT_INDEX)
             }
 
-            _ => { unimplemented!() }
+            not(test) => {
+                if crate::arch::x86_64::registers::model_specific::IA32_EFER::get_no_execute_enable() {
+                    self.0.get_bit(Self::NO_EXECUTE_BIT_INDEX)
+                } else {
+                    false
+                }
+            }
         }
     }
 
     #[cfg(target_arch = "x86_64")]
-    pub fn set_huge(&mut self, huge_page: bool) {
+    fn set_no_execute_bit(&mut self, set: bool) {
         cfg_select! {
-            target_arch = "x86_64" => {
-                self.0.set_bit(Self::HUGE_BIT_INDEX, huge_page);
+            test => {
+                self.0.set_bit(Self::NO_EXECUTE_BIT_INDEX, set);
             }
 
-            _ => { unimplemented!() }
+            not(test) => {
+                if crate::arch::x86_64::registers::model_specific::IA32_EFER::get_no_execute_enable() {
+                    self.0.set_bit(Self::NO_EXECUTE_BIT_INDEX, set);
+                }
+            }
         }
     }
 
@@ -268,18 +306,7 @@ impl Entry {
     /// table entries.
     pub fn set_write_execute(&mut self) {
         self.0.set_bit(Self::WRITABLE_BIT_INDEX, true);
-
-        cfg_select! {
-            test => {
-                self.0.set_bit(Self::NO_EXECUTE_BIT_INDEX, false);
-            }
-
-            not(test) => {
-                if crate::arch::x86_64::registers::model_specific::IA32_EFER::get_no_execute_enable() {
-                    self.0.set_bit(Self::NO_EXECUTE_BIT_INDEX, false);
-                }
-            }
-        }
+        self.set_no_execute_bit(false);
     }
 
     pub fn get_permissions(&self) -> Permissions {
@@ -287,7 +314,7 @@ impl Entry {
             target_arch = "x86_64" => {
                 match (
                     self.0.get_bit(Self::WRITABLE_BIT_INDEX),
-                    self.0.get_bit(Self::NO_EXECUTE_BIT_INDEX),
+                    self.get_no_execute_bit(),
                 ) {
                     (false, true) => Permissions::ReadOnly,
                     (true, true) => Permissions::ReadWrite,
@@ -310,17 +337,17 @@ impl Entry {
                     // `Permissions::None` is effectively analogous to that.
                     Permissions::None | Permissions::ReadOnly => {
                         self.0.set_bit(Self::WRITABLE_BIT_INDEX, false);
-                        self.0.set_bit(Self::NO_EXECUTE_BIT_INDEX, true);
+                        self.set_no_execute_bit(true);
                     }
 
                     Permissions::ReadWrite => {
                         self.0.set_bit(Self::WRITABLE_BIT_INDEX, true);
-                        self.0.set_bit(Self::NO_EXECUTE_BIT_INDEX, true);
+                        self.set_no_execute_bit(true);
                     }
 
                     Permissions::ReadExecute => {
                         self.0.set_bit(Self::WRITABLE_BIT_INDEX, false);
-                        self.0.set_bit(Self::NO_EXECUTE_BIT_INDEX, false);
+                        self.set_no_execute_bit(false);
                     }
 
                     Permissions::WriteExecute => {
@@ -359,6 +386,7 @@ impl core::fmt::Debug for Entry {
         d.field("Global", &self.is_global())
             .field("Access", &self.get_permissions())
             .field("User", &self.is_user())
+            .field("Raw", &format_args!("{:#X}", self.0))
             .finish()
     }
 }
@@ -366,8 +394,10 @@ impl core::fmt::Debug for Entry {
 #[cfg(test)]
 mod tests {
     use super::Entry;
-    use crate::mem::Permissions;
-    use libsys::address::{Address, Frame};
+    use crate::mem::{
+        Permissions,
+        addr::phys::{FrameAddress, PhysicalAddress, StandardFrame},
+    };
 
     #[test]
     pub fn default() {
@@ -396,7 +426,7 @@ mod tests {
         assert_eq!(entry, Entry(0));
 
         // Safety: Address is canonical.
-        let frame = unsafe { Address::<Frame>::new_unchecked(ADDRESS) };
+        let frame = unsafe { StandardFrame::new_unchecked(ADDRESS) };
         // Safety: Entry not in use.
         unsafe {
             entry.set_address(frame);
@@ -404,7 +434,7 @@ mod tests {
         assert_eq!(entry, Entry(ADDRESS));
 
         entry.set_enabled();
-        assert_eq!(entry.get_address(), Some(frame));
+        assert_eq!(entry.get_address(), Some(PhysicalAddress::from(frame)));
 
         // Safety: Entry not in use.
         unsafe {

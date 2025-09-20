@@ -27,8 +27,6 @@ pub struct InterruptStackFrame {
     /// The code segment at the time of the interrupt.
     pub code_segment: SegmentSelector,
 
-    _cs_padding: [u8; 6],
-
     /// The flags at the time of the interrupt.
     pub cpu_flags: usize,
 
@@ -37,9 +35,9 @@ pub struct InterruptStackFrame {
 
     /// The stack segment at the time of the interrupt.
     pub stack_segment: SegmentSelector,
-
-    _ss_padding: [u8; 6],
 }
+
+const_assert!(size_of::<InterruptStackFrame>() == (size_of::<usize>() * 5));
 
 impl InterruptStackFrame {
     /// Constructs a new [`InterruptStackFrame`].
@@ -56,9 +54,6 @@ impl InterruptStackFrame {
             cpu_flags: cpu_flags.bits(),
             stack_address,
             stack_segment,
-
-            _cs_padding: [0u8; _],
-            _ss_padding: [0u8; _],
         }
     }
 

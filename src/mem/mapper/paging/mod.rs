@@ -2,9 +2,10 @@ use crate::{
     mem::{
         HigherHalfDirectMap,
         addr::{
-            phys::StandardFrame,
+            phys::{FrameAddress, HugeFrame, LargeFrame, PhysicalAddress, StandardFrame},
             virt::{StandardPage, VirtualAddress},
         },
+        clear_frame_memory,
         pmm::PhysicalMemoryManager,
     },
     util::{ExclusiveBorrow, InteriorBorrow, SharedBorrow},
@@ -61,11 +62,11 @@ impl<BorrowKind: InteriorBorrow> PageTable<BorrowKind> {
         }
     }
 
-    fn table(&self) -> &[Entry; PageTableInfo::max_index().get()] {
+    fn table(&self) -> &[Entry; PagingInfo::MAX_TABLE_INDEX.get()] {
         let table_address = HigherHalfDirectMap::frame_to_page::<_, StandardPage>(self.frame);
         let table_address = NonZero::<usize>::new(usize::from(table_address)).unwrap();
         let table_ptr = NonNull::<Entry>::with_exposed_provenance(table_address);
-        let table_ptr = NonNull::slice_from_raw_parts(table_ptr, PageTableInfo::max_index().get());
+        let table_ptr = NonNull::slice_from_raw_parts(table_ptr, PagingInfo::MAX_TABLE_INDEX.get());
 
         // Safety:
         // - Pointer is from `Address<Frame>`, so is naturally page-aligned.
@@ -106,7 +107,7 @@ impl<BorrowKind: InteriorBorrow> PageTable<BorrowKind> {
         let current_depth = self.depth;
         let entry_index = current_depth.index_of(address);
 
-        debug_assert!(entry_index < PageTableInfo::max_index().get());
+        debug_assert!(entry_index < PagingInfo::MAX_TABLE_INDEX.get());
 
         let entry = self.get_entry(entry_index);
         // Safety: `entry_index`s maximum value is the same as the entry table size.
@@ -148,12 +149,12 @@ impl<BorrowKind: InteriorBorrow> PageTable<BorrowKind> {
 }
 
 impl PageTable<ExclusiveBorrow> {
-    fn table_mut(&mut self) -> &mut [Entry; PageTableInfo::max_index().get()] {
+    fn table_mut(&mut self) -> &mut [Entry; PagingInfo::MAX_TABLE_INDEX.get()] {
         let table_address = HigherHalfDirectMap::frame_to_page::<_, StandardPage>(self.frame);
         let table_address = NonZero::<usize>::new(usize::from(table_address)).unwrap();
         let table_ptr = NonNull::<Entry>::with_exposed_provenance(table_address);
         let mut table_ptr =
-            NonNull::slice_from_raw_parts(table_ptr, PageTableInfo::max_index().get());
+            NonNull::slice_from_raw_parts(table_ptr, PagingInfo::MAX_TABLE_INDEX.get());
 
         // Safety:
         // - Pointer is from `Address<Frame>`, so is naturally page-aligned.
@@ -194,7 +195,7 @@ impl PageTable<ExclusiveBorrow> {
         let current_depth = self.depth;
         let entry_index = current_depth.index_of(address);
 
-        debug_assert!(entry_index < PageTableInfo::max_index().get());
+        debug_assert!(entry_index < PagingInfo::MAX_TABLE_INDEX.get());
 
         let entry = self.get_entry_mut(entry_index);
         // Safety: `entry_index`s maximum value is the same as the entry table size.
@@ -226,15 +227,14 @@ impl PageTable<ExclusiveBorrow> {
         let current_depth = self.depth;
         let entry_index = current_depth.index_of(address);
 
-        debug_assert!(entry_index < PageTableInfo::max_index().get());
+        debug_assert!(entry_index < PagingInfo::MAX_TABLE_INDEX.get());
 
-        let entry = self.get_entry_mut(entry_index);
         // Safety: `entry_index`s maximum value is the same as the entry table size.
-        let entry = unsafe { entry.unwrap_unchecked() };
+        let entry = unsafe { self.get_entry_mut(entry_index).unwrap_unchecked() };
 
         if current_depth == to_depth {
             trace!(
-                "Modifying: {address:#X?} {{ Index: {entry_index}, Depth: {:?}/{:?} }}",
+                "Modifying {{ Index: {entry_index}, Depth: {:?}/{:?}, {entry:X?} }}",
                 current_depth.get(),
                 to_depth.get()
             );
@@ -250,7 +250,7 @@ impl PageTable<ExclusiveBorrow> {
                 // We'll populate the entry in this case, to ensure we can continue traversing.
 
                 trace!(
-                    "Creating: {address:#X?} {{ Index: {entry_index}, Depth: {:?}/{:?} }}",
+                    "Creating: {{ Index: {entry_index}, Depth: {:?}/{:?} }}",
                     current_depth.get(),
                     to_depth.get()
                 );
@@ -275,7 +275,13 @@ impl PageTable<ExclusiveBorrow> {
                     }
                 }
 
-                let frame = PhysicalMemoryManager::next_free_frame::<StandardFrame>(true)
+                let frame = PhysicalMemoryManager::next_free_frame::<StandardFrame>()
+                    .inspect(|frame| {
+                        // Safety: Memory was just allocated, and is not otherwise aliased.
+                        unsafe {
+                            clear_frame_memory(*frame);
+                        }
+                    })
                     .ok_or(CreateEntryError::OutOfMemory)?;
 
                 // Safety: Frame is unused.
@@ -288,15 +294,14 @@ impl PageTable<ExclusiveBorrow> {
                 trace!("Created: {entry:X?}");
             }
 
-            let page_table = self.sub_table_mut(entry_index);
-            debug_assert!(page_table.is_some());
-            // Safety: If page table didn't exist, it was just created.
-            let mut page_table = unsafe { page_table.unwrap_unchecked() };
             trace!(
-                "Traversing: {address:#X?} {{ Index: {entry_index}, Depth: {:?}/{:?} }}",
+                "Traversing: {{ Index: {entry_index}, Depth: {:?}/{:?}, {entry:X?} }}",
                 current_depth.get(),
                 to_depth.get()
             );
+
+            // Safety: If page table didn't exist, it was just created.
+            let mut page_table = unsafe { self.sub_table_mut(entry_index).unwrap_unchecked() };
 
             page_table.with_entry_create(address, to_depth, with_fn)
         }
@@ -313,22 +318,14 @@ impl<BorrowKind: InteriorBorrow> core::fmt::Debug for PageTable<BorrowKind> {
     }
 }
 
-pub struct PageTableInfo;
+pub struct PagingInfo;
 
-impl PageTableInfo {
-    pub const fn index_bits() -> NonZero<u32> {
-        NonZero::new(9).unwrap()
-    }
-
-    /// Size (in bytes) of a page table index.
-    pub const fn max_index() -> NonZero<usize> {
-        NonZero::new(1 << Self::index_bits().get()).unwrap()
-    }
-
-    /// Bit-mask of a page table index.
-    pub const fn non_index_bit_mask() -> NonZero<usize> {
-        NonZero::new(Self::max_index().get() - 1).unwrap()
-    }
+impl PagingInfo {
+    pub const TABLE_INDEX_BITS: NonZero<u32> = NonZero::new(9).unwrap();
+    pub const MAX_TABLE_INDEX: NonZero<usize> =
+        NonZero::new(1usize << Self::TABLE_INDEX_BITS.get()).unwrap();
+    pub const TABLE_INDEX_MASK: NonZero<usize> =
+        NonZero::new(Self::MAX_TABLE_INDEX.get() - 1).unwrap();
 
     /// Whether the current environment supports 2MiB pages.
     pub fn is_large_pages_enabled() -> bool {
@@ -361,22 +358,51 @@ impl PageTableInfo {
     }
 }
 
+impl core::fmt::Debug for PagingInfo {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("PagingInfo")
+            .field("Large Pages Enabled", &Self::is_large_pages_enabled())
+            .field("Large Page Size", &LargeFrame::SIZE_IN_BYTES.get())
+            .field("Huge Pages Enabled", &Self::is_huge_pages_enabled())
+            .field("Huge Page Size", &HugeFrame::SIZE_IN_BYTES.get())
+            .field(
+                "Physical Address Bits",
+                &PhysicalAddress::canonical_bits().get(),
+            )
+            .field(
+                "Virtual Address Bits",
+                &VirtualAddress::canonical_bits().get(),
+            )
+            .field("Page Table Index Bits", &Self::TABLE_INDEX_BITS.get())
+            .field("Page Table Index Mask", &Self::TABLE_INDEX_MASK.get())
+            .field("Page Table Max Index", &Self::MAX_TABLE_INDEX.get())
+            .finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use crate::mem::mapper::paging::PagingInfo;
     use core::num::NonZero;
 
-    use crate::mem::mapper::paging::PageTableInfo;
-
-    fn page_table_info_index_bits() {
-        assert_eq!(PageTableInfo::index_bits(), NonZero::new(9).unwrap());
-    }
-    fn page_table_info_max_index() {
-        assert_eq!(PageTableInfo::max_index(), NonZero::new(512).unwrap());
-    }
     fn page_table_info_index_bits() {
         assert_eq!(
-            PageTableInfo::non_index_bit_mask(),
-            NonZero::new(0x1FF).unwrap()
+            PagingInfo::TABLE_INDEX_BITS,
+            NonZero::<u32>::new(9).unwrap()
+        );
+    }
+
+    fn page_table_info_max_index() {
+        assert_eq!(
+            PagingInfo::MAX_TABLE_INDEX,
+            NonZero::<usize>::new(512).unwrap()
+        );
+    }
+
+    fn page_table_info_non_index_bit_mask() {
+        assert_eq!(
+            PagingInfo::TABLE_INDEX_MASK,
+            NonZero::<usize>::new(0x1FF).unwrap()
         );
     }
 }

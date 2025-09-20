@@ -4,7 +4,7 @@ use crate::{
             phys::{FrameAddress, HugeFrame, LargeFrame, StandardFrame},
             virt::{HugePage, LargePage, PageAddress, StandardPage},
         },
-        mapper::{Mapper, paging::PageTableInfo},
+        mapper::{Mapper, paging::PagingInfo},
     },
     util::{elf::segment_to_mapping_permissions, sync::Once},
 };
@@ -14,6 +14,7 @@ pub mod addr;
 pub mod alloc;
 pub mod mapper;
 pub mod pmm;
+// pub mod physical_map;
 
 mod address_space;
 pub use address_space::*;
@@ -25,28 +26,31 @@ pub use hhdm::*;
 
 #[cfg(test)]
 pub fn get_paging_depth() -> NonZero<u32> {
-    NonZero::new(4).unwrap()
+    // Safety: Value is non-zero.
+    unsafe { NonZero::new_unchecked(4) }
 }
 
 #[cfg(not(test))]
 pub fn get_paging_depth() -> NonZero<u32> {
-    const CR4_LA57_BIT: usize = 1 << 12;
+    use crate::util::sync::Lazy;
 
-    let cr4: usize;
+    static PAGING_DEPTH: Lazy<NonZero<u32>> = Lazy::new(|| {
+        cfg_select! {
+            target_arch = "x86_64" => {
+                use crate::arch::x86_64::registers::control::cr4;
 
-    unsafe {
-        core::arch::asm!(
-            "mov {}, cr4",
-            out(reg) cr4,
-            options(nostack, nomem, preserves_flags)
-        );
-    }
+                if cr4::CR4::read().contains(cr4::Flags::LA57) {
+                    // Safety: Value is non-zero.
+                    unsafe{NonZero::new_unchecked(5)}
+                } else {
+                    // Safety: Value is non-zero.
+                    unsafe{NonZero::new_unchecked(4)}
+                }
+            }
+        }
+    });
 
-    if (cr4 & CR4_LA57_BIT) == 0 {
-        NonZero::new(4).unwrap()
-    } else {
-        NonZero::new(5).unwrap()
-    }
+    *PAGING_DEPTH
 }
 
 #[derive(Debug)]
@@ -68,11 +72,11 @@ impl KernelMapper {
             memory_access: Permissions,
             lock_frames: bool,
         ) {
-            debug_assert_eq!((from & StandardFrame::non_index_bit_mask()), 0);
-            debug_assert_eq!((to & StandardFrame::non_index_bit_mask()), 0);
+            debug_assert_eq!((from & StandardFrame::NON_INDEX_BIT_MASK.get()), 0);
+            debug_assert_eq!((to & StandardFrame::NON_INDEX_BIT_MASK.get()), 0);
 
-            trace!(
-                "Map Range (Args): {{ from: {from:X?}, to: {to:X?}, byte_count: {byte_count:#X}, access: {memory_access:?} }}"
+            debug!(
+                "Map Range: {{ From: {from:#X}, To: {to:#X}, Byte Count: {byte_count:#X}, Access: {memory_access:?} }}"
             );
 
             let mut remaining_bytes = byte_count;
@@ -81,17 +85,13 @@ impl KernelMapper {
                 let from = from + offset;
                 let to = to + offset;
 
-                trace!(
-                    "Map Range (Loop): {from:#X} -> {to:#X} {{ Remaining: {remaining_bytes:#X} }}"
-                );
+                trace!("Map Range: {{ Offset: {offset:#X}, Remaining: {remaining_bytes:#X} }}");
 
-                if PageTableInfo::is_huge_pages_enabled()
-                    && remaining_bytes >= HugeFrame::size_in_bytes()
-                    && from.trailing_zeros() >= HugeFrame::size_in_bytes().trailing_zeros()
-                    && to.trailing_zeros() >= HugeFrame::size_in_bytes().trailing_zeros()
+                if PagingInfo::is_huge_pages_enabled()
+                    && remaining_bytes >= HugeFrame::SIZE_IN_BYTES.get()
+                    && from.trailing_zeros() >= HugeFrame::SIZE_IN_BYTES.get().trailing_zeros()
+                    && to.trailing_zeros() >= HugeFrame::SIZE_IN_BYTES.get().trailing_zeros()
                 {
-                    remaining_bytes -= HugeFrame::size_in_bytes();
-
                     // Map a huge page ...
 
                     let from = HugePage::new(from).expect("non-canonical overrun");
@@ -103,16 +103,16 @@ impl KernelMapper {
                     // - Caller is required to ensure `memory_access` is correct.
                     unsafe {
                         mapper
-                            .map(to, from, lock_frames, memory_access)
+                            .map(to, from, lock_frames, memory_access, false)
                             .expect("failed to map range");
                     }
-                } else if PageTableInfo::is_large_pages_enabled()
-                    && remaining_bytes >= LargeFrame::size_in_bytes()
-                    && from.trailing_zeros() >= LargeFrame::size_in_bytes().trailing_zeros()
-                    && to.trailing_zeros() >= LargeFrame::size_in_bytes().trailing_zeros()
-                {
-                    remaining_bytes -= LargeFrame::size_in_bytes();
 
+                    remaining_bytes -= HugeFrame::SIZE_IN_BYTES.get();
+                } else if PagingInfo::is_large_pages_enabled()
+                    && remaining_bytes >= LargeFrame::SIZE_IN_BYTES.get()
+                    && from.trailing_zeros() >= LargeFrame::SIZE_IN_BYTES.get().trailing_zeros()
+                    && to.trailing_zeros() >= LargeFrame::SIZE_IN_BYTES.get().trailing_zeros()
+                {
                     // Map a large page ...
 
                     let from = LargePage::new(from).expect("non-canonical overrun");
@@ -124,13 +124,12 @@ impl KernelMapper {
                     // - Caller is required to ensure `memory_access` is correct.
                     unsafe {
                         mapper
-                            .map(to, from, lock_frames, memory_access)
+                            .map(to, from, lock_frames, memory_access, false)
                             .expect("failed to map range");
                     }
-                } else {
-                    remaining_bytes =
-                        remaining_bytes.saturating_sub(StandardFrame::size_in_bytes());
 
+                    remaining_bytes -= LargeFrame::SIZE_IN_BYTES.get();
+                } else {
                     // Map a standard page ...
 
                     let from = StandardPage::new(from).expect("non-canonical overrun");
@@ -142,43 +141,29 @@ impl KernelMapper {
                     // - Caller is required to ensure `memory_access` is correct.
                     unsafe {
                         mapper
-                            .map(to, from, lock_frames, memory_access)
+                            .map(to, from, lock_frames, memory_access, false)
                             .expect("failed to map range");
                     }
+
+                    remaining_bytes =
+                        remaining_bytes.saturating_sub(StandardFrame::SIZE_IN_BYTES.get());
                 }
             }
         }
 
         KERNEL_MAPPER.call_once(|| {
-            debug!("Preparing kernel memory...");
-
-            debug!(
-                "Paging Setup Info: {{\n\
-                \tlarge pages: {{ enabled: {}, size: {:#X} }}\n\
-                \thuge pages: {{ enabled: {}, size: {:#X} }}\n\
-                }}",
-                PageTableInfo::is_large_pages_enabled(),
-                LargeFrame::size_in_bytes(),
-                PageTableInfo::is_large_pages_enabled(),
-                HugeFrame::size_in_bytes()
-            );
+            info!("Preparing kernel memory...");
+            info!("{PagingInfo:#X?}");
 
             let mut kernel_mapper = Mapper::new();
 
             trace!("Mapping the higher-half direct map...");
-            memory_map_request
+            let mut mmap_entries = memory_map_request
                 .get_response()
                 .expect("bootloader did not provide a response to the memory map request")
                 .entries()
                 .iter()
                 .map(|entry| {
-                    trace!(
-                        "Mapping Entry: {{ start: {:#X}, length: {:#X}, type: {} }}",
-                        entry.base,
-                        entry.length,
-                        crate::limine_memory_map_entry_type_to_str(entry.entry_type)
-                    );
-
                     let entry_start = usize::try_from(entry.base).unwrap();
                     let entry_length = usize::try_from(entry.length).unwrap();
                     let entry_permissions = {
@@ -205,34 +190,44 @@ impl KernelMapper {
 
                     (entry_start, entry_length, entry_permissions)
                 })
-                .reduce(
-                    |(prev_start_address, prev_length, prev_permissions),
-                     (start_address, length, permissions)| {
-                        let prev_end_address = prev_start_address + prev_length;
-                        if prev_end_address == start_address && prev_permissions == permissions {
-                            trace!(
-                                "Compounding: {:#X?} <=> {:#X?}",
-                                prev_start_address..prev_end_address,
-                                start_address..(start_address + length)
-                            );
+                .peekable();
 
-                            (prev_start_address, prev_length + length, permissions)
-                        } else {
-                            unsafe {
-                                map_range(
-                                    &mut kernel_mapper,
-                                    HigherHalfDirectMap::offset(prev_start_address).get(),
-                                    prev_start_address,
-                                    prev_length,
-                                    prev_permissions,
-                                    false,
-                                );
-                            }
+            while let Some((start_address, mut length, permissions)) = mmap_entries.next() {
+                loop {
+                    let end_address = start_address + length;
+                    if let Some((next_start_address, next_length, next_permissions)) =
+                        mmap_entries.peek().copied()
+                        && next_start_address == end_address
+                        && next_permissions == permissions
+                    {
+                        trace!(
+                            "Coalescing: {:#X?} <=> {:#X?}",
+                            start_address..end_address,
+                            end_address..(end_address + next_length)
+                        );
 
-                            (start_address, length, permissions)
+                        length += next_length;
+
+                        match mmap_entries.advance_by(1) {
+                            Ok(()) => continue,
+                            Err(_) => break,
                         }
-                    },
-                );
+                    }
+
+                    break;
+                }
+
+                unsafe {
+                    map_range(
+                        &mut kernel_mapper,
+                        HigherHalfDirectMap::offset(start_address).get(),
+                        start_address,
+                        length,
+                        permissions,
+                        false,
+                    );
+                }
+            }
 
             // Extract the kernel file's physical and virtual addresses.
             let (kernel_physical_address, kernel_virtual_address) = kernel_address_request
@@ -298,19 +293,21 @@ impl KernelMapper {
             {
                 let local_apic_frame =
                 crate::arch::x86_64::registers::model_specific::IA32_APIC_BASE::get_base_address();
+                let local_apic_page =
+                    HigherHalfDirectMap::frame_to_page::<_, StandardPage>(local_apic_frame);
 
-                trace!("Mapping the local APIC: {local_apic_frame:X?}");
+                trace!("Mapping the local APIC: {local_apic_frame:X?} -> {local_apic_page:X?}");
 
                 unsafe {
-                    map_range(
-                        &mut kernel_mapper,
-                        HigherHalfDirectMap::frame_to_page::<_, StandardPage>(local_apic_frame)
-                            .into(),
-                        usize::from(local_apic_frame),
-                        StandardFrame::size_in_bytes(),
-                        Permissions::ReadWrite,
-                        true,
-                    );
+                    kernel_mapper
+                        .map(
+                            local_apic_frame,
+                            local_apic_page,
+                            false,
+                            Permissions::ReadWrite,
+                            false,
+                        )
+                        .unwrap();
                 }
             }
 
@@ -355,12 +352,12 @@ pub enum Permissions {
 ///
 /// - The higher-half direct mapped memory of `frame` must not be otherwise
 ///   aliased.
-pub unsafe fn zero_frame<F: FrameAddress>(frame: F) {
+pub unsafe fn clear_frame_memory<F: FrameAddress>(frame: F) {
     let hhdm_address = HigherHalfDirectMap::offset(frame.into());
     let ptr = NonNull::<u8>::with_exposed_provenance(hhdm_address);
 
     // Safety: Caller is required to maintain safety invariants.
     unsafe {
-        NonNull::write_bytes(ptr, 0, F::size_in_bytes());
+        NonNull::write_bytes(ptr, 0, F::SIZE_IN_BYTES.get());
     }
 }

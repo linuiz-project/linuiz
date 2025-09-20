@@ -5,6 +5,7 @@ use crate::{
             phys::{FrameAddress, StandardFrame},
             virt::StandardPage,
         },
+        clear_frame_memory,
         pmm::PhysicalMemoryManager,
     },
     scheduler::Scheduler,
@@ -35,8 +36,8 @@ pub struct LocalState {
     tss: TaskStateSegment,
 }
 
-const_assert!(size_of::<LocalState>() <= StandardFrame::size_in_bytes());
-const_assert!(align_of::<LocalState>() <= StandardFrame::size_in_bytes());
+const_assert!(size_of::<LocalState>() <= StandardFrame::SIZE_IN_BYTES.get());
+const_assert!(align_of::<LocalState>() <= StandardFrame::SIZE_IN_BYTES.get());
 
 impl LocalState {
     /// Initializes the local state structure.
@@ -52,7 +53,13 @@ impl LocalState {
         trace!("Configuring local scheduler...");
         let scheduler = Scheduler::new();
 
-        let local_state_frame = PhysicalMemoryManager::next_free_frame::<StandardFrame>(false)
+        let local_state_frame = PhysicalMemoryManager::next_free_frame::<StandardFrame>()
+            .inspect(|frame| {
+                // Safety: Memory was just allocated, and is not otherwise aliased.
+                unsafe {
+                    clear_frame_memory(*frame);
+                }
+            })
             .expect("failed to allocate space for local state structure");
         let local_state_address =
             HigherHalfDirectMap::frame_to_page::<_, StandardPage>(local_state_frame);

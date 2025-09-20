@@ -3,30 +3,31 @@ use crate::mem::{
         phys::{FrameAddress, StandardFrame},
         virt::VirtualAddress,
     },
-    mapper::paging::PageTableInfo,
+    mapper::paging::PagingInfo,
 };
 use core::iter::Step;
 
 /// Describes the depth of a page table translation, from min (usually 4) to max
 /// (usually 0).
-#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Depth(u32);
+pub struct Depth(pub u8);
 
 impl Depth {
+    const MAX_DEPTH: u8 = 1;
+
     /// Minimum table depth, typically down to 4KB-sized memory chunks.
     pub const fn max() -> Self {
-        Self(1)
+        Self(Self::MAX_DEPTH)
     }
 
     /// Minimum table depth, typically down to 2MB-sized memory chunks.
     pub const fn large() -> Self {
-        Self(2)
+        Self(Self::MAX_DEPTH + 1)
     }
 
     /// Minimum table depth, typically down to 1GB-sized memory chunks.
     pub const fn huge() -> Self {
-        Self(3)
+        Self(Self::MAX_DEPTH + 2)
     }
 
     /// Minimum table tree depth. On x64, this is 5 levels with LA57 enabled, or
@@ -51,24 +52,24 @@ impl Depth {
         Self(depth)
     }
 
-    pub fn new(depth: u32) -> Option<Self> {
+    pub fn new(depth: u8) -> Option<Self> {
         (Self::max().0..=Self::min().0)
             .contains(&depth)
             .then_some(Self(depth))
     }
 
-    pub fn get(self) -> u32 {
-        self.0
+    pub const fn get(self) -> u32 {
+        u32::from(self.0)
     }
 
-    pub fn align(self) -> usize {
+    pub const fn align(self) -> usize {
         // Because `Depth` is 1-based (i.e. 4-level paging allows us to have a maximum
         // depth of 1), it means we need to adjust the actual depth number to be
         // zero-based for our calcualtion.
-        let depth_zero_based = self.get() - 1;
+        let depth_zero_based = self.get() - u32::from(Self::MAX_DEPTH);
         1usize
-            << StandardFrame::index_bit_shift().get()
-            << (PageTableInfo::index_bits().get() * depth_zero_based)
+            << StandardFrame::INDEX_BIT_SHIFT.get()
+            << (PagingInfo::TABLE_INDEX_BITS.get() * depth_zero_based)
     }
 
     pub fn next(self) -> Self {
@@ -87,14 +88,14 @@ impl Depth {
         self == Self::min()
     }
 
-    pub fn index_of(self, address: VirtualAddress) -> usize {
+    pub const fn index_of(self, address: VirtualAddress) -> usize {
         // Because `Depth` is 1-based (i.e. 4-level paging allows us to have a maximum
         // depth of 1), it means we need to adjust the actual depth number to be
         // zero-based for our calcualtion.
-        let depth_zero_based = self.get() - 1;
-        let index_bit_shift = (depth_zero_based * PageTableInfo::index_bits().get())
-            + StandardFrame::index_bit_shift().get();
-        (usize::from(address) >> index_bit_shift) & PageTableInfo::non_index_bit_mask().get()
+        let depth_zero_based = self.get() - u32::from(Self::MAX_DEPTH);
+        let index_bit_shift = (depth_zero_based * PagingInfo::TABLE_INDEX_BITS.get())
+            + StandardFrame::INDEX_BIT_SHIFT.get();
+        (usize::from(address) >> index_bit_shift) & PagingInfo::TABLE_INDEX_MASK.get()
     }
 }
 
@@ -105,14 +106,14 @@ impl Step for Depth {
     }
 
     fn forward_checked(start: Self, count: usize) -> Option<Self> {
-        let count = u32::try_from(count).ok()?;
+        let count = u8::try_from(count).ok()?;
         let total = start.0.checked_sub(count)?;
 
         Self::new(total)
     }
 
     fn backward_checked(start: Self, count: usize) -> Option<Self> {
-        let count = u32::try_from(count).ok()?;
+        let count = u8::try_from(count).ok()?;
         let total = start.0.checked_add(count)?;
 
         Self::new(total)
@@ -121,8 +122,9 @@ impl Step for Depth {
 
 #[cfg(test)]
 mod tests {
+    use crate::mem::addr::virt::VirtualAddress;
+
     use super::Depth;
-    use libsys::address::{Address, Virtual};
 
     #[test]
     pub fn new() {
@@ -158,7 +160,7 @@ mod tests {
     #[test]
     pub fn index_of() {
         // Safety: Virtual address is canonical and not used as an actual address.
-        let address = unsafe { Address::<Virtual>::new_unchecked(0xFFFF8000FEE00000) };
+        let address = unsafe { VirtualAddress::new_unchecked(0xFFFF8000FEE00000) };
 
         assert_eq!(Depth(4).index_of(address), 256);
         assert_eq!(Depth(3).index_of(address), 3);

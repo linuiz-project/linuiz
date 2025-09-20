@@ -2,7 +2,7 @@
 
 use crate::{
     cpu::local_state::LocalState,
-    mem::addr::phys::{FrameAddress, StandardFrame},
+    mem::addr::phys::{FrameAddress, PhysicalAddress, StandardFrame},
 };
 use bit_field::BitField;
 use core::{num::NonZero, ptr::NonNull};
@@ -107,8 +107,11 @@ impl IA32_APIC_BASE {
     /// Gets the base address of the local APIC.
     pub fn get_base_address() -> StandardFrame {
         let base_address = usize::try_from(Self::read() & !0xFFF).unwrap();
+        // The bits above the max physical address are reserved.
+        let base_address = base_address
+            .unbounded_shl(usize::BITS - PhysicalAddress::canonical_bits().get())
+            .unbounded_shr(usize::BITS - PhysicalAddress::canonical_bits().get());
 
-        debug_assert_eq!(base_address & StandardFrame::non_index_bit_mask(), 0);
         // Safety:
         // - `base_address` is page aligned via the `&` operator above.
         // - The APIC base is reserved to exactly match the processor's maximum physical

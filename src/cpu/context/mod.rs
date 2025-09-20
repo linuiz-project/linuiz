@@ -30,18 +30,16 @@ impl Context {
     }
 
     pub fn new_from_fn(func: fn(), stack_address: NonZero<usize>, is_user: bool) -> Self {
-        let registers = Registers::default();
+        #[allow(clippy::as_conversions)]
         let execution = if is_user {
-            #[allow(clippy::as_conversions)]
             Execution::new_user(func as usize, stack_address.get())
         } else {
-            #[allow(clippy::as_conversions)]
             Execution::new_kernel(func as usize, stack_address.get())
         };
 
         Self {
             execution,
-            registers,
+            registers: Registers::default(),
         }
     }
 

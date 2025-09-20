@@ -1,26 +1,9 @@
-use crate::util::sync::Mutex;
 use core::{
     fmt::{Display, Result, Write},
     ptr::NonNull,
 };
 
 pub mod symbols;
-
-type PanicStringBuffer = heapless::String<0x4000>;
-
-pub(super) fn emit_stack_trace() {
-    static PANIC_STRING_BUFFER: Mutex<PanicStringBuffer> = Mutex::new(PanicStringBuffer::new());
-
-    PANIC_STRING_BUFFER.with_lock(|panic_string_buffer| {
-        panic_string_buffer.clear();
-
-        if let Err(err) = construct_panic_message(&mut *panic_string_buffer) {
-            error!("Failed constructing panic message: {err:?}");
-        }
-
-        error!("STACK TRACE:\n{panic_string_buffer}");
-    });
-}
 
 #[repr(C)]
 #[derive(Debug)]
@@ -76,7 +59,7 @@ fn get_stack_frame_ptr() -> *mut StackFrame {
     }
 }
 
-fn construct_panic_message(mut buffer: impl Write) -> Result {
+pub(super) fn construct_panic_message(mut buffer: impl Write) -> Result {
     fn print_stack_trace_entry(
         mut buffer: impl Write,
         entry_num: usize,

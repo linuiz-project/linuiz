@@ -1,6 +1,7 @@
 use raw_cpuid::{
     ApmInfo, CpuId, CpuIdReaderNative, ExtendedFeatures, ExtendedProcessorFeatureIdentifiers,
-    ExtendedTopologyIter, FeatureInfo, HypervisorInfo, ProcessorFrequencyInfo, VendorInfo,
+    ExtendedTopologyIter, FeatureInfo, HypervisorInfo, ProcessorCapacityAndFeatureInfo,
+    ProcessorFrequencyInfo, VendorInfo,
 };
 
 fn cpuid() -> CpuId<CpuIdReaderNative> {
@@ -25,6 +26,10 @@ pub fn extended_feature_identifiers() -> Option<ExtendedProcessorFeatureIdentifi
 
 pub fn processor_frequency_info() -> Option<ProcessorFrequencyInfo> {
     cpuid().get_processor_frequency_info()
+}
+
+pub fn processor_capacity_info() -> Option<ProcessorCapacityAndFeatureInfo> {
+    cpuid().get_processor_capacity_feature_info()
 }
 
 pub fn advanced_power_management_info() -> Option<ApmInfo> {
@@ -54,6 +59,7 @@ pub fn print_info() {
     debug!("{:#?}", extended_feature_info());
     debug!("{:#?}", extended_feature_identifiers());
     debug!("{:#?}", processor_frequency_info());
+    debug!("{:#?}", processor_capacity_info());
     debug!("{:#?}", advanced_power_management_info());
     debug!("{:#?}", hypervisor_info());
 }

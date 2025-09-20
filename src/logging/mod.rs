@@ -6,7 +6,6 @@ mod serial;
 /// The kernel logger.
 pub struct KernelLogger {
     debug: Option<&'static debug::Logger>,
-
     serial: &'static serial::Logger,
 }
 
@@ -47,8 +46,8 @@ impl log::Log for KernelLogger {
 
 fn with_formatted_log_record(record: &log::Record, func: impl FnOnce(core::fmt::Arguments)) {
     func(format_args!(
-        "[#{hwthread_id}][{level}][{target}] {args}\n",
-        hwthread_id = crate::cpu::get_id(),
+        "[CPU#{processor_id}][{level}][{target}] {args}\n",
+        processor_id = crate::cpu::get_id(),
         level = record.level(),
         target = record.target(),
         args = record.args(),

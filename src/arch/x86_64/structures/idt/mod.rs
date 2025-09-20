@@ -488,66 +488,66 @@ static INTERRUPT_DESCRIPTOR_TABLE: Lazy<InterruptDescriptorTable> = Lazy::new(||
     //  - Entries with specified privilege levels are set correctly.
     unsafe {
         InterruptDescriptorTable {
-            divide_error: EntryBuilder::exception()
+            divide_error: EntryBuilder::new()
                 .with_handler(__de_stub.as_usize())
                 .build(),
-            debug: EntryBuilder::exception()
+            debug: EntryBuilder::new()
                 .with_handler(__db_stub.as_usize())
                 .with_interrupt_stack_table_index(InterruptStackTableIndex::Debug)
                 .build(),
-            non_maskable_interrupt: EntryBuilder::exception()
+            non_maskable_interrupt: EntryBuilder::new()
                 .with_handler(__nm_stub.as_usize())
                 .with_interrupt_stack_table_index(InterruptStackTableIndex::NonMaskableInterrupt)
                 .build(),
-            breakpoint: EntryBuilder::exception()
+            breakpoint: EntryBuilder::new()
                 .with_handler(__bp_stub.as_usize())
                 .build(),
-            overflow: EntryBuilder::exception()
+            overflow: EntryBuilder::new()
                 .with_handler(__of_stub.as_usize())
                 .build(),
-            bound_range_exceeded: EntryBuilder::exception()
+            bound_range_exceeded: EntryBuilder::new()
                 .with_handler(__br_stub.as_usize())
                 .build(),
-            invalid_opcode: EntryBuilder::exception()
+            invalid_opcode: EntryBuilder::new()
                 .with_handler(__ud_stub.as_usize())
                 .build(),
-            device_not_available: EntryBuilder::exception()
+            device_not_available: EntryBuilder::new()
                 .with_handler(__na_stub.as_usize())
                 .build(),
-            double_fault: EntryBuilder::exception()
+            double_fault: EntryBuilder::new()
                 .with_handler(__df_stub.as_usize())
                 .with_interrupt_stack_table_index(InterruptStackTableIndex::DoubleFault)
                 .build(),
             coprocessor_segment_overrun: Entry::missing(),
-            invalid_tss: EntryBuilder::exception()
+            invalid_tss: EntryBuilder::new()
                 .with_handler(__ts_stub.as_usize())
                 .build(),
-            segment_not_present: EntryBuilder::exception()
+            segment_not_present: EntryBuilder::new()
                 .with_handler(__np_stub.as_usize())
                 .build(),
-            stack_segment_fault: EntryBuilder::exception()
+            stack_segment_fault: EntryBuilder::new()
                 .with_handler(__ss_stub.as_usize())
                 .build(),
-            general_protection_fault: EntryBuilder::exception()
+            general_protection_fault: EntryBuilder::new()
                 .with_handler(__gp_stub.as_usize())
                 .build(),
-            page_fault: EntryBuilder::exception()
+            page_fault: EntryBuilder::new()
                 .with_handler(__pf_stub.as_usize())
                 .build(),
-            x87_floating_point: EntryBuilder::exception()
+            x87_floating_point: EntryBuilder::new()
                 .with_handler(__mf_stub.as_usize())
                 .build(),
-            alignment_check: EntryBuilder::exception()
+            alignment_check: EntryBuilder::new()
                 .with_handler(__ac_stub.as_usize())
                 .build(),
-            machine_check: EntryBuilder::exception()
+            machine_check: EntryBuilder::new()
                 .with_handler(__mc_stub.as_usize())
                 .with_interrupt_stack_table_index(InterruptStackTableIndex::MachineCheck)
                 .build(),
-            simd_floating_point: EntryBuilder::exception()
+            simd_floating_point: EntryBuilder::new()
                 .with_handler(__xm_stub.as_usize())
                 .build(),
-            virtualization: EntryBuilder::exception()
+            virtualization: EntryBuilder::new()
                 .with_handler(__ve_stub.as_usize())
                 .build(),
             cp_protection_exception: Entry::missing(),
@@ -555,677 +555,677 @@ static INTERRUPT_DESCRIPTOR_TABLE: Lazy<InterruptDescriptorTable> = Lazy::new(||
             vmm_communication_exception: Entry::missing(),
             security_exception: Entry::missing(),
             interrupts: [
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_32_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_33_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_34_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_35_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_36_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_37_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_39_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_38_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_40_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_41_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_42_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_43_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_44_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_45_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_46_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_47_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_48_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_49_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_50_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_51_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_52_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_53_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_54_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_55_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_56_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_57_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_58_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_59_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_60_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_61_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_62_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_63_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_64_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_65_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_66_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_67_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_68_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_69_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_70_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_71_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_72_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_73_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_74_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_75_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_76_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_77_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_78_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_79_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_80_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_81_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_82_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_83_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_84_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_85_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_86_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_87_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_88_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_89_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_90_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_91_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_92_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_93_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_94_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_95_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_96_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_97_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_98_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_99_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_100_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_101_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_102_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_103_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_104_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_105_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_106_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_107_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_108_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_109_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_110_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_111_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_112_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_113_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_114_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_115_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_116_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_117_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_118_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_119_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_120_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_121_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_122_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_123_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_124_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_125_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_126_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_127_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_128_stub.as_usize())
                     .with_privilege_level(PrivilegeLevel::Ring3)
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_129_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_130_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_131_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_132_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_133_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_134_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_135_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_136_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_137_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_138_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_139_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_140_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_141_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_142_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_143_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_144_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_145_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_146_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_147_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_148_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_149_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_150_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_151_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_152_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_153_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_154_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_155_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_156_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_157_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_158_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_159_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_160_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_161_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_162_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_163_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_164_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_165_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_166_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_167_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_168_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_169_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_170_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_171_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_172_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_173_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_174_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_175_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_176_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_177_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_178_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_179_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_180_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_181_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_182_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_183_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_184_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_185_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_186_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_187_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_188_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_189_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_190_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_191_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_192_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_193_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_194_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_195_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_196_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_197_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_198_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_199_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_200_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_201_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_202_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_203_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_204_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_205_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_206_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_207_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_208_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_209_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_210_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_211_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_212_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_213_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_214_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_215_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_216_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_217_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_218_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_219_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_220_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_221_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_222_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_223_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_224_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_225_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_226_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_227_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_228_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_229_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_230_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_231_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_232_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_233_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_234_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_235_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_236_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_237_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_238_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_239_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_240_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_241_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_242_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_243_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_244_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_245_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_246_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_247_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_248_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_249_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_250_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_251_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_252_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_253_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_254_stub.as_usize())
                     .build(),
-                EntryBuilder::interrupt_service_routine()
+                EntryBuilder::new()
                     .with_handler(__irq_255_stub.as_usize())
                     .build(),
             ],

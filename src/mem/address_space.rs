@@ -42,8 +42,13 @@ impl From<AddressSpaceId> for usize {
 
 #[derive(Debug)]
 pub enum MemoryMapping {
-    Exact { range: Range<StandardPage> },
-    Any { count: NonZero<usize> },
+    Exact {
+        range: Range<StandardPage>,
+        invalidate_pages: bool,
+    },
+    Any {
+        count: NonZero<usize>,
+    },
 }
 
 #[derive(Debug)]
@@ -87,9 +92,12 @@ impl AddressSpace {
         permissions: Permissions,
     ) -> Result<NonNull<[u8]>, AutoMappingError> {
         match mapping {
-            MemoryMapping::Exact { range } => {
+            MemoryMapping::Exact {
+                range,
+                invalidate_pages,
+            } => {
                 // Safety: Caller is required to maintain safety invariants.
-                unsafe { self.map_range(range, permissions) }
+                unsafe { self.map_range(range, permissions, invalidate_pages) }
             }
 
             MemoryMapping::Any { count } => {
@@ -110,15 +118,19 @@ impl AddressSpace {
         &mut self,
         range: Range<StandardPage>,
         permissions: Permissions,
+        invalidate_pages: bool,
     ) -> Result<NonNull<[u8]>, AutoMappingError> {
         range.clone().try_for_each(|offset_page| {
             // Safety: Caller is required to maintain safety invariants.
-            unsafe { self.mapper.auto_map(offset_page, permissions) }
+            unsafe {
+                self.mapper
+                    .auto_map(offset_page, permissions, invalidate_pages)
+            }
         })?;
 
         let mapping_address = NonZero::<usize>::try_from(usize::from(range.start)).unwrap();
         let mapping_ptr = NonNull::<u8>::with_exposed_provenance(mapping_address);
-        let mapping_len = range.count() * <StandardPage as PageAddress>::Frame::size_in_bytes();
+        let mapping_len = range.count() * <StandardPage as PageAddress>::Frame::SIZE_IN_BYTES.get();
 
         Ok(NonNull::slice_from_raw_parts(mapping_ptr, mapping_len))
     }

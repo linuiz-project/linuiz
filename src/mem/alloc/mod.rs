@@ -1,11 +1,22 @@
+use crate::mem::{
+    HigherHalfDirectMap,
+    addr::{
+        phys::{FrameAddress, StandardFrame},
+        virt::StandardPage,
+    },
+    pmm::PhysicalMemoryManager,
+};
 use core::{num::NonZero, ptr::NonNull};
 
 mod global;
 
-// TODO
-// pub static KERNEL_ALLOCATOR: SlabAllocator<FrameAllocator> =
-// SlabAllocator::new_in(FrameAllocator);
+pub fn allocate_blocks(count: NonZero<usize>) -> Option<NonNull<[u8]>> {
+    PhysicalMemoryManager::next_free_segments(count).map(|frames| {
+        let page = HigherHalfDirectMap::frame_to_page::<_, StandardPage>(frames.start);
+        let ptr = NonZero::<usize>::try_from(page)
+            .map(NonNull::<u8>::with_exposed_provenance)
+            .unwrap();
 
-pub fn allocate_kernel_stack(_pages: NonZero<usize>) -> Option<NonNull<u8>> {
-    todo!()
+        NonNull::slice_from_raw_parts(ptr, frames.count() * StandardFrame::SIZE_IN_BYTES.get())
+    })
 }

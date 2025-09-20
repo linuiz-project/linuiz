@@ -1,6 +1,9 @@
-use crate::mem::{
-    addr::NonCanonicalError,
-    mapper::paging::{Depth, PageTableInfo},
+use crate::{
+    mem::{
+        addr::NonCanonicalError,
+        mapper::paging::{Depth, PagingInfo},
+    },
+    util::sync::Lazy,
 };
 use core::{fmt::Debug, iter::Step, num::NonZero};
 
@@ -10,21 +13,50 @@ pub struct PhysicalAddress(usize);
 
 impl PhysicalAddress {
     /// Number of bits in a canonical physical address.
-    pub const fn canonical_bits() -> NonZero<u32> {
-        NonZero::<u32>::new(52).unwrap()
+    pub fn canonical_bits() -> NonZero<u32> {
+        static CANONICAL_BITS: Lazy<NonZero<u32>> = Lazy::new(|| {
+            cfg_select! {
+                any(target_arch = "x86", target_arch = "x86_64") => {
+                    let canonical_bits = crate::arch::x86_64::cpuid::processor_capacity_info()
+                        .map_or_else(
+                            || {
+                                if crate::arch::x86_64::cpuid::feature_info().is_some_and(|i| i.has_pae()) {
+                                    36
+                                } else {
+                                    32
+                                }
+                            },
+                            |capacity_info| capacity_info.physical_address_bits()
+                        );
+
+
+                    let canonical_bits = u32::from(canonical_bits);
+                    // Safety: Value is always non-zero.
+                    unsafe { NonZero::<u32>::new_unchecked(canonical_bits) }
+                }
+
+                _ => { unimplemented!() }
+            }
+        });
+
+        *CANONICAL_BITS
     }
 
     /// The maximum physical address.
-    pub const fn canonical_max() -> NonZero<usize> {
-        NonZero::<usize>::new(1 << Self::canonical_bits().get()).unwrap()
+    pub fn canonical_max() -> NonZero<usize> {
+        let canonical_max = 1usize << Self::canonical_bits().get();
+        // Safety: Value is always non-zero.
+        unsafe { NonZero::<usize>::new_unchecked(canonical_max) }
     }
 
     /// Bit-mask of canonical physical bits.
-    pub const fn canonical_mask() -> NonZero<usize> {
-        NonZero::<usize>::new(Self::canonical_max().get() - 1).unwrap()
+    pub fn canonical_mask() -> NonZero<usize> {
+        let canonical_mask = Self::canonical_max().get() - 1;
+        // Safety: Value is always non-zero.
+        unsafe { NonZero::<usize>::new_unchecked(canonical_mask) }
     }
 
-    pub const fn check_canonical(address: usize) -> bool {
+    pub fn check_canonical(address: usize) -> bool {
         (address & !Self::canonical_mask().get()) == 0
     }
 
@@ -33,7 +65,7 @@ impl PhysicalAddress {
     /// # Errors
     ///
     /// - [`NonCanonicalError`] if `address` contains any non-canonical bits.
-    pub const fn new(address: usize) -> Result<Self, NonCanonicalError> {
+    pub fn new(address: usize) -> Result<Self, NonCanonicalError> {
         if Self::check_canonical(address) {
             Ok(Self(address))
         } else {
@@ -43,7 +75,7 @@ impl PhysicalAddress {
 
     /// Creates a new [`PhysicalAddress`] with the provided address, truncating
     /// any non-canonical bits.
-    pub const fn new_truncate(address: usize) -> Self {
+    pub fn new_truncate(address: usize) -> Self {
         Self(address & Self::canonical_mask().get())
     }
 
@@ -63,7 +95,7 @@ impl const From<PhysicalAddress> for usize {
     }
 }
 
-impl const TryFrom<usize> for PhysicalAddress {
+impl TryFrom<usize> for PhysicalAddress {
     type Error = NonCanonicalError;
 
     fn try_from(value: usize) -> Result<Self, Self::Error> {
@@ -71,46 +103,36 @@ impl const TryFrom<usize> for PhysicalAddress {
     }
 }
 
-#[rustfmt::skip]
-pub const trait FrameAddress:
-    Debug + Clone + Copy + PartialEq + Eq + PartialOrd + Ord + const Into<usize> + const Into<PhysicalAddress> + const TryFrom<PhysicalAddress, Error: Debug> 
+pub trait FrameAddress:
+    Debug
+    + Clone
+    + Copy
+    + PartialEq
+    + Eq
+    + PartialOrd
+    + Ord
+    + TryFrom<PhysicalAddress, Error = NonCanonicalError>
+    + const Into<usize>
+    + const Into<PhysicalAddress>
 {
+    const INDEX_BIT_SHIFT: NonZero<u32>;
+    const SIZE_IN_BYTES: NonZero<usize> =
+        NonZero::new(1usize << Self::INDEX_BIT_SHIFT.get()).unwrap();
+    const SIZE_IN_FRAMES: NonZero<usize> =
+        NonZero::new(Self::SIZE_IN_BYTES.get() >> StandardFrame::INDEX_BIT_SHIFT.get()).unwrap();
+    const NON_INDEX_BIT_MASK: NonZero<usize> = NonZero::new(Self::SIZE_IN_BYTES.get() - 1).unwrap();
 
     fn paging_depth() -> Depth;
 
-    /// Bit shift required to offset this frame's indexes.
-    fn index_bit_shift() -> NonZero<u32>;
-
-    /// Bit-mask of the lower non-index bits.
-    fn non_index_bit_mask() -> usize {
-        Self::size_in_bytes() - 1
-    }
-
-    /// The size of this frame in bytes.
-    fn size_in_bytes() -> usize {
-        1 << Self::index_bit_shift().get()
-    }
-
-    /// Size of this frame in standard frames.
-    fn size_in_frames() -> NonZero<usize> {
-        debug_assert!((Self::size_in_bytes() >> StandardFrame::index_bit_shift().get()) > 0);
-
-        // Safety: Value is non-zero.
-        unsafe {
-            NonZero::new_unchecked(Self::size_in_bytes() >> StandardFrame::index_bit_shift().get())
-        }
-    }
-
     fn canonical_mask() -> NonZero<usize> {
-        NonZero::<usize>::new(
-            PhysicalAddress::canonical_mask().get() & !Self::non_index_bit_mask(),
-        )
-        .unwrap()
-    
+        let canonical_mask =
+            PhysicalAddress::canonical_mask().get() & !Self::NON_INDEX_BIT_MASK.get();
+        // Safety: Value is always non-zero.
+        unsafe { NonZero::<usize>::new_unchecked(canonical_mask) }
     }
 
-    fn check_canonical(address: usize) -> bool  {
-        (address  & !Self::canonical_mask().get()) == 0
+    fn check_canonical(address: usize) -> bool {
+        (address & !Self::canonical_mask().get()) == 0
     }
 
     /// Creates a new [`FrameAddress`] with the provided address.
@@ -121,7 +143,7 @@ pub const trait FrameAddress:
     fn new(address: usize) -> Result<Self, NonCanonicalError> {
         if Self::check_canonical(address) {
             // Safety: Canonicality has been checked.
-            Ok(unsafe { Self::new_unchecked(address)})
+            Ok(unsafe { Self::new_unchecked(address) })
         } else {
             Err(NonCanonicalError)
         }
@@ -132,7 +154,7 @@ pub const trait FrameAddress:
     fn new_truncate(address: usize) -> Self {
         let address = address & Self::canonical_mask().get();
         // Safety: `address` has non-canonical bits removed.
-        unsafe {Self::new_unchecked(address)}
+        unsafe { Self::new_unchecked(address) }
     }
 
     /// Creates a new [`FrameAddress`] without any checks.
@@ -148,18 +170,23 @@ pub const trait FrameAddress:
     /// # Errors
     ///
     /// - [`NonCanonicalError`] if `index` would create a non-canonical address.
-    fn from_index(index: usize) -> Result<Self, NonCanonicalError>{
-     
+    fn from_index(index: usize) -> Result<Self, NonCanonicalError> {
         let address = index
-            .checked_shl(Self::index_bit_shift().get())
+            .checked_shl(Self::INDEX_BIT_SHIFT.get())
             .ok_or(NonCanonicalError)?;
 
-            Self::new(address)
+        Self::new(address)
     }
 
-    /// The index (in strides of [`FrameAddress::size_in_frames`]) of the frame.
+    /// The index (indexed strides of [`FrameAddress::SIZE_IN_FRAMES`]) of the
+    /// frame.
     fn index(self) -> usize {
-        Into::<usize>::into(self) >> Self::index_bit_shift().get()
+        Into::<usize>::into(self) >> Self::INDEX_BIT_SHIFT.get()
+    }
+
+    /// The index (indexed strides of 1) of the frame.
+    fn standard_index(self) -> usize {
+        Into::<usize>::into(self) >> StandardFrame::INDEX_BIT_SHIFT.get()
     }
 }
 
@@ -167,14 +194,11 @@ pub const trait FrameAddress:
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct StandardFrame(usize);
 
-impl const FrameAddress for StandardFrame {
+impl FrameAddress for StandardFrame {
+    const INDEX_BIT_SHIFT: NonZero<u32> = NonZero::new(12).unwrap();
+
     fn paging_depth() -> Depth {
         Depth::max()
-    }
-
-    fn index_bit_shift() -> NonZero<u32> {
-        // Safety: Value is non-zero.
-        unsafe { NonZero::<u32>::new_unchecked(12) }
     }
 
     unsafe fn new_unchecked(address: usize) -> Self {
@@ -195,7 +219,7 @@ impl const From<StandardFrame> for PhysicalAddress {
     }
 }
 
-impl const TryFrom<PhysicalAddress> for StandardFrame {
+impl TryFrom<PhysicalAddress> for StandardFrame {
     type Error = NonCanonicalError;
 
     fn try_from(value: PhysicalAddress) -> Result<Self, Self::Error> {
@@ -227,18 +251,13 @@ impl Step for StandardFrame {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct LargeFrame(usize);
 
-impl const FrameAddress for LargeFrame {
+impl FrameAddress for LargeFrame {
+    const INDEX_BIT_SHIFT: NonZero<u32> = StandardFrame::INDEX_BIT_SHIFT
+        .checked_add(PagingInfo::TABLE_INDEX_BITS.get())
+        .unwrap();
+
     fn paging_depth() -> Depth {
         Depth::large()
-    }
-
-    fn index_bit_shift() -> NonZero<u32> {
-        // Safety: Value is non-zero.
-        unsafe {
-            NonZero::<u32>::new_unchecked(
-                StandardFrame::index_bit_shift().get() + PageTableInfo::index_bits().get(),
-            )
-        }
     }
 
     unsafe fn new_unchecked(address: usize) -> Self {
@@ -259,7 +278,7 @@ impl const From<LargeFrame> for PhysicalAddress {
     }
 }
 
-impl const TryFrom<PhysicalAddress> for LargeFrame {
+impl TryFrom<PhysicalAddress> for LargeFrame {
     type Error = NonCanonicalError;
 
     fn try_from(value: PhysicalAddress) -> Result<Self, Self::Error> {
@@ -291,18 +310,13 @@ impl Step for LargeFrame {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct HugeFrame(usize);
 
-impl const FrameAddress for HugeFrame {
+impl FrameAddress for HugeFrame {
+    const INDEX_BIT_SHIFT: NonZero<u32> = LargeFrame::INDEX_BIT_SHIFT
+        .checked_add(PagingInfo::TABLE_INDEX_BITS.get())
+        .unwrap();
+
     fn paging_depth() -> Depth {
         Depth::huge()
-    }
-
-    fn index_bit_shift() -> NonZero<u32> {
-        // Safety: Value is non-zero.
-        unsafe {
-            NonZero::<u32>::new_unchecked(
-                LargeFrame::index_bit_shift().get() + PageTableInfo::index_bits().get(),
-            )
-        }
     }
 
     unsafe fn new_unchecked(address: usize) -> Self {
@@ -323,7 +337,7 @@ impl const From<HugeFrame> for PhysicalAddress {
     }
 }
 
-impl const TryFrom<PhysicalAddress> for HugeFrame {
+impl TryFrom<PhysicalAddress> for HugeFrame {
     type Error = NonCanonicalError;
 
     fn try_from(value: PhysicalAddress) -> Result<Self, Self::Error> {
