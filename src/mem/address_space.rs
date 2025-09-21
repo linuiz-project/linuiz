@@ -100,9 +100,13 @@ impl AddressSpace {
                 unsafe { self.map_range(range, permissions, invalidate_pages) }
             }
 
-            MemoryMapping::Any { count } => {
-                // Safety: Caller is required to maintain safety invariants.
-                unsafe { self.map_any(count, permissions) }
+            MemoryMapping::Any { count: _ } => {
+                #[allow(clippy::todo)]
+                {
+                    todo!()
+                }
+                // // Safety: Caller is required to maintain safety invariants.
+                // unsafe { self.map_any(count, permissions) }
             }
         }
     }
@@ -135,59 +139,59 @@ impl AddressSpace {
         Ok(NonNull::slice_from_raw_parts(mapping_ptr, mapping_len))
     }
 
-    /// Maps a range of `page_count` length in pages.
-    ///
-    /// # Safety
-    ///
-    /// - `permissions` must be the correct permissions for how the memory will be
-    ///   used.
-    #[rustfmt::skip] // remove this when the function is fixed
-    unsafe fn map_any(
-        &mut self,
-        page_count: NonZero<usize>,
-        permissions: Permissions,
-    ) -> Result<NonNull<[u8]>, AutoMappingError> {
-        let mut start_index = 0;
-        let mut run = 0;
+    // /// Maps a range of `page_count` length in pages.
+    // ///
+    // /// # Safety
+    // ///
+    // /// - `permissions` must be the correct permissions for how the memory will
+    // be ///   used.
+    // #[rustfmt::skip] // remove this when the function is fixed
+    // unsafe fn map_any(
+    //     &mut self,
+    //     page_count: NonZero<usize>,
+    //     permissions: Permissions,
+    // ) -> Result<NonNull<[u8]>, AutoMappingError> {
+    //     let mut start_index = 0;
+    //     let mut run = 0;
 
-        todo!();
+    //     self.mapper
+    //         .walk_all(|depth, page_table_index, entry| {
 
-        // self.mapper
-        //     .walk(|entry| {
-        //         if entry.is_none() {
-        //             run += 1;
+    //             if entry.is_none() {
+    //                 run += 1;
 
-        //             if run == page_count.get() {
-        //                 return ControlFlow::Break(());
-        //             }
-        //         } else {
-        //             run = 0;
-        //         }
+    //                 if run == page_count.get() {
+    //                     return ControlFlow::Break(());
+    //                 }
+    //             } else {
+    //                 run = 0;
+    //             }
 
-        //         start_index += 1;
+    //             start_index += 1;
 
-        //         ControlFlow::Continue(())
-        //     })
-        //     .break_value()
-        //     .ok_or(AutoMappingError::OutOfMemory)?;
+    //             ControlFlow::Continue(())
+    //         })
+    //         .break_value()
+    //         .ok_or(AutoMappingError::OutOfMemory)?;
 
-        // match run.cmp(&page_count.get()) {
-        //     Ordering::Equal => {
-        //         let end_index = start_index + page_count.get();
+    //     match run.cmp(&page_count.get()) {
+    //         Ordering::Equal => {
+    //             let end_index = start_index + page_count.get();
 
-        //         let start_page = Address::<Page>::new(start_index << page_bits().get()).unwrap();
-        //         let end_page = Address::<Page>::new(end_index << page_bits().get()).unwrap();
+    //             let start_page = Address::<Page>::new(start_index <<
+    // page_bits().get()).unwrap();             let end_page =
+    // Address::<Page>::new(end_index << page_bits().get()).unwrap();
 
-        //         // Safety:
-        //         // - Range is checked to be unused.
-        //         // - Caller is required to ensure permissions are correct.
-        //         unsafe { self.map_range(start_page..end_page, permissions) }
-        //     }
+    //             // Safety:
+    //             // - Range is checked to be unused.
+    //             // - Caller is required to ensure permissions are correct.
+    //             unsafe { self.map_range(start_page..end_page, permissions) }
+    //         }
 
-        //     Ordering::Less => Err(AutoMappingError::OutOfMemory),
-        //     Ordering::Greater => unreachable!(),
-        // }
-    }
+    //         Ordering::Less => Err(AutoMappingError::OutOfMemory),
+    //         Ordering::Greater => unreachable!(),
+    //     }
+    // }
 
     pub fn get_permissions(&self, address: VirtualAddress) -> Result<Permissions, GetMappingError> {
         self.mapper.get_permissions(address)

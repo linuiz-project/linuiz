@@ -42,7 +42,7 @@ impl VirtualAddress {
         if Self::check_canonical(address) {
             Ok(Self(address))
         } else {
-            Err(NonCanonicalError)
+            Err(NonCanonicalError::Address(address))
         }
     }
 
@@ -74,13 +74,36 @@ impl VirtualAddress {
     pub const fn is_null(self) -> bool {
         self.0 == 0
     }
+
+    pub fn add_offset(self, offset: usize) -> Result<Self, NonCanonicalError> {
+        self.0
+            .checked_add(offset)
+            .ok_or(NonCanonicalError::PositiveOffset {
+                base: self.0,
+                offset,
+            })
+            .and_then(Self::new)
+    }
+
+    pub fn sub_offset(self, offset: usize) -> Result<Self, NonCanonicalError> {
+        self.0
+            .checked_sub(offset)
+            .ok_or(NonCanonicalError::NegativeOffset {
+                base: self.0,
+                offset,
+            })
+            .and_then(Self::new)
+    }
+
+    pub fn min_align(self) -> u32 {
+        self.0.trailing_zeros()
+    }
 }
 
 impl<P: PageAddress> const From<P> for VirtualAddress {
     fn from(value: P) -> Self {
-        let address: usize = value.into();
-        // Safety: Canonicality of `LargePage` is a super-set of `VirtualAddress`.
-        unsafe { VirtualAddress::new_unchecked(address) }
+        // Safety: Canonicality of `PageAddress` is a super-set of `VirtualAddress`.
+        unsafe { VirtualAddress::new_unchecked(value.into()) }
     }
 }
 
@@ -122,21 +145,55 @@ impl<T> TryFrom<NonNull<T>> for VirtualAddress {
     }
 }
 
+impl core::fmt::LowerHex for VirtualAddress {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        if f.alternate() {
+            f.write_fmt(format_args!("Virtual({:#x})", self.0))
+        } else {
+            f.write_fmt(format_args!("Virtual({:x})", self.0))
+        }
+    }
+}
+
+impl core::fmt::UpperHex for VirtualAddress {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        if f.alternate() {
+            f.write_fmt(format_args!("Virtual({:#X})", self.0))
+        } else {
+            f.write_fmt(format_args!("Virtual({:X})", self.0))
+        }
+    }
+}
+
+impl core::fmt::Binary for VirtualAddress {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        if f.alternate() {
+            f.write_fmt(format_args!("Virtual({:#b})", self.0))
+        } else {
+            f.write_fmt(format_args!("Virtual({:b})", self.0))
+        }
+    }
+}
+
 /// # Remarks
 ///
 /// - This trait does not also require e.g. `Into<*mut T>` because that would
 ///   require indirectly fabricating provenance.
 pub trait PageAddress:
-    Debug
+    core::fmt::Debug
+    + core::fmt::LowerHex
+    + core::fmt::UpperHex
+    + core::fmt::Binary
     + Clone
     + Copy
     + PartialEq
     + Eq
     + PartialOrd
     + Ord
-    + const Into<usize>
-    + Into<VirtualAddress>
     + Step
+    + const Into<usize>
+    + const Into<VirtualAddress>
+    + TryFrom<VirtualAddress>
 {
     type Frame: FrameAddress;
 
@@ -157,7 +214,7 @@ pub trait PageAddress:
             // Safety: `address` is checked to be canonical.
             Ok(unsafe { Self::new_unchecked(address) })
         } else {
-            Err(NonCanonicalError)
+            Err(NonCanonicalError::Address(address))
         }
     }
 
@@ -166,6 +223,7 @@ pub trait PageAddress:
     fn new_truncate(address: usize) -> Self {
         let address = usize::from(VirtualAddress::new_truncate(address))
             & !Self::Frame::NON_INDEX_BIT_MASK.get();
+
         // Safety: `address` has non-canonical bits removed.
         unsafe { Self::new_unchecked(address) }
     }
@@ -184,7 +242,10 @@ pub trait PageAddress:
     fn from_index(index: usize) -> Result<Self, NonCanonicalError> {
         let address = index
             .checked_shl(Self::Frame::INDEX_BIT_SHIFT.get())
-            .ok_or(NonCanonicalError)?;
+            .ok_or(NonCanonicalError::Index {
+                align: 1usize << Self::Frame::INDEX_BIT_SHIFT.get(),
+                index,
+            })?;
 
         Self::new(address)
     }
@@ -193,6 +254,90 @@ pub trait PageAddress:
     fn index(self) -> usize {
         Into::<usize>::into(self) << Self::Frame::INDEX_BIT_SHIFT.get()
     }
+}
+
+macro_rules! page_address_impl {
+    { $($impl_ty:ty) + } => { $(
+        impl core::fmt::LowerHex for $impl_ty {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                if f.alternate() {
+                    f.write_fmt(format_args!(concat!(stringify!($impl_ty), "({:#x})"), self.0))
+                } else {
+                    f.write_fmt(format_args!(concat!(stringify!($impl_ty), "({:x})"), self.0))
+                }
+            }
+        }
+
+        impl core::fmt::UpperHex for $impl_ty {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                if f.alternate() {
+                    f.write_fmt(format_args!(concat!(stringify!($impl_ty), "({:#X})"), self.0))
+                } else {
+                    f.write_fmt(format_args!(concat!(stringify!($impl_ty), "({:X})"), self.0))
+                }
+            }
+        }
+
+        impl core::fmt::Binary for $impl_ty {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                if f.alternate() {
+                    f.write_fmt(format_args!(concat!(stringify!($impl_ty), "({:#b})"), self.0))
+                } else {
+                    f.write_fmt(format_args!(concat!(stringify!($impl_ty), "({:b})"), self.0))
+                }
+            }
+        }
+
+        impl Step for $impl_ty {
+            fn steps_between(start: &Self, end: &Self) -> (usize, Option<usize>) {
+                Step::steps_between(&start.index(), &end.index())
+            }
+
+            fn forward_checked(start: Self, count: usize) -> Option<Self> {
+                start
+                    .index()
+                    .checked_add(count)
+                    .and_then(|next_index| Self::from_index(next_index).ok())
+            }
+
+            fn backward_checked(start: Self, count: usize) -> Option<Self> {
+                start
+                    .index()
+                    .checked_add(count)
+                    .and_then(|next_index| Self::from_index(next_index).ok())
+            }
+        }
+
+        impl const From<$impl_ty> for usize {
+            fn from(value: $impl_ty) -> Self {
+                value.0
+            }
+        }
+
+        impl const TryFrom<$impl_ty> for NonZero<usize> {
+            type Error = ZeroAddressError;
+
+            fn try_from(value: $impl_ty) -> Result<Self, Self::Error> {
+                NonZero::new(usize::from(value)).ok_or(ZeroAddressError)
+            }
+        }
+
+        impl TryFrom<VirtualAddress> for $impl_ty {
+            type Error = NonCanonicalError;
+
+            fn try_from(address: VirtualAddress) -> Result<Self, Self::Error> {
+                (address.min_align()
+                    >= <Self as PageAddress>::Frame::SIZE_IN_BYTES
+                        .get()
+                        .trailing_zeros())
+                .then_some({
+                    // Safety: Canonicality is checked
+                    unsafe { Self::new_unchecked(usize::from(address)) }
+                })
+                .ok_or(NonCanonicalError::Address(usize::from(address)))
+            }
+        }
+    )* };
 }
 
 #[repr(transparent)]
@@ -209,40 +354,6 @@ impl PageAddress for StandardPage {
 
     unsafe fn new_unchecked(address: usize) -> Self {
         Self(address)
-    }
-}
-
-impl Step for StandardPage {
-    fn steps_between(start: &Self, end: &Self) -> (usize, Option<usize>) {
-        Step::steps_between(&start.index(), &end.index())
-    }
-
-    fn forward_checked(start: Self, count: usize) -> Option<Self> {
-        start
-            .index()
-            .checked_add(count)
-            .and_then(|next_index| Self::from_index(next_index).ok())
-    }
-
-    fn backward_checked(start: Self, count: usize) -> Option<Self> {
-        start
-            .index()
-            .checked_add(count)
-            .and_then(|next_index| Self::from_index(next_index).ok())
-    }
-}
-
-impl const From<StandardPage> for usize {
-    fn from(value: StandardPage) -> Self {
-        value.0
-    }
-}
-
-impl const TryFrom<StandardPage> for NonZero<usize> {
-    type Error = ZeroAddressError;
-
-    fn try_from(value: StandardPage) -> Result<Self, Self::Error> {
-        NonZero::new(usize::from(value)).ok_or(ZeroAddressError)
     }
 }
 
@@ -263,40 +374,6 @@ impl PageAddress for LargePage {
     }
 }
 
-impl Step for LargePage {
-    fn steps_between(start: &Self, end: &Self) -> (usize, Option<usize>) {
-        Step::steps_between(&start.index(), &end.index())
-    }
-
-    fn forward_checked(start: Self, count: usize) -> Option<Self> {
-        start
-            .index()
-            .checked_add(count)
-            .and_then(|next_index| Self::from_index(next_index).ok())
-    }
-
-    fn backward_checked(start: Self, count: usize) -> Option<Self> {
-        start
-            .index()
-            .checked_add(count)
-            .and_then(|next_index| Self::from_index(next_index).ok())
-    }
-}
-
-impl const From<LargePage> for usize {
-    fn from(value: LargePage) -> Self {
-        value.0
-    }
-}
-
-impl const TryFrom<LargePage> for NonZero<usize> {
-    type Error = ZeroAddressError;
-
-    fn try_from(value: LargePage) -> Result<Self, Self::Error> {
-        NonZero::new(usize::from(value)).ok_or(ZeroAddressError)
-    }
-}
-
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct HugePage(usize);
@@ -314,36 +391,6 @@ impl PageAddress for HugePage {
     }
 }
 
-impl Step for HugePage {
-    fn steps_between(start: &Self, end: &Self) -> (usize, Option<usize>) {
-        Step::steps_between(&start.index(), &end.index())
-    }
-
-    fn forward_checked(start: Self, count: usize) -> Option<Self> {
-        start
-            .index()
-            .checked_add(count)
-            .and_then(|next_index| Self::from_index(next_index).ok())
-    }
-
-    fn backward_checked(start: Self, count: usize) -> Option<Self> {
-        start
-            .index()
-            .checked_add(count)
-            .and_then(|next_index| Self::from_index(next_index).ok())
-    }
-}
-
-impl const From<HugePage> for usize {
-    fn from(value: HugePage) -> Self {
-        value.0
-    }
-}
-
-impl const TryFrom<HugePage> for NonZero<usize> {
-    type Error = ZeroAddressError;
-
-    fn try_from(value: HugePage) -> Result<Self, Self::Error> {
-        NonZero::new(usize::from(value)).ok_or(ZeroAddressError)
-    }
+page_address_impl! {
+    StandardPage LargePage HugePage
 }

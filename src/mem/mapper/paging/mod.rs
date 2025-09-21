@@ -134,17 +134,13 @@ impl<BorrowKind: InteriorBorrow> PageTable<BorrowKind> {
 
     pub fn walk_all(&self, func: impl Fn(Depth, usize, &Entry) + Copy) {
         let current_depth = self.depth;
-        self.table()
-            .iter()
-            .enumerate()
-            .filter(|(_, entry)| entry.is_enabled())
-            .for_each(|(index, entry)| {
-                func(current_depth, index, entry);
+        self.table().iter().enumerate().for_each(|(index, entry)| {
+            func(current_depth, index, entry);
 
-                if let Some(next_page_table) = self.sub_table(index) {
-                    next_page_table.walk_all(func);
-                }
-            });
+            if let Some(next_page_table) = self.sub_table(index) {
+                next_page_table.walk_all(func);
+            }
+        });
     }
 }
 

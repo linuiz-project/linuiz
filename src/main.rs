@@ -32,6 +32,7 @@
     range_into_bounds,
     slice_ptr_get,
     step_trait,
+    unchecked_shifts,
     unsafe_cell_access
 )]
 #![forbid(clippy::duplicated_attributes, clippy::inline_asm_x86_att_syntax)]

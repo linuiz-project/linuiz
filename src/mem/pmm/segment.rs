@@ -60,13 +60,6 @@ impl Segment {
         self.0 &= !(1 << bit_index);
     }
 
-    pub fn set_empty(&mut self) {
-        *self = Self::EMPTY;
-    }
-
-    pub fn set_full(&mut self) {
-        *self = Self::FULL;
-    }
 
     pub fn next_free(&mut self) -> Option<u32> {
         if self.is_full() {

@@ -37,11 +37,10 @@ pub struct Scheduler {
 impl Scheduler {
     pub fn new() -> Self {
         let idle_stack = {
-            let frame = PhysicalMemoryManager::next_free_frame::<StandardFrame>()
+            let frames = PhysicalMemoryManager::next_free_segment()
                 .expect("could not allocate stack for idle thread");
-            let page = HigherHalfDirectMap::frame_to_page::<_, StandardPage>(frame);
+            let page = HigherHalfDirectMap::frame_to_page::<_, StandardPage>(frames.end);
             let address = NonZero::<usize>::try_from(page).unwrap();
-
             let bottom_ptr = NonNull::<u8>::with_exposed_provenance(address);
             // Safety: Allocation is at least `SIZE_IN_BYTES`-sized.
             unsafe { bottom_ptr.byte_add(StandardFrame::SIZE_IN_BYTES.get() - 0x10) }

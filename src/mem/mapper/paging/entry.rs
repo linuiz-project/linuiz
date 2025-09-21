@@ -374,8 +374,6 @@ impl core::fmt::Debug for Entry {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let mut d = formatter.debug_struct("Entry");
 
-        d.field("Enabled", &self.is_enabled());
-
         if let Some(address) = self.get_address() {
             d.field("Address", &address);
         }

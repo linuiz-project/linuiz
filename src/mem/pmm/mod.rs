@@ -368,10 +368,7 @@ impl PhysicalMemoryManager {
     }
 
     pub fn next_free_frame<F: FrameAddress>() -> Option<F> {
-        trace!(
-            "Next Free Frame ({:#X}): Allocating",
-            F::SIZE_IN_BYTES.get()
-        );
+        trace!("Next Free Frame: {{ Size: {:#X} }}", F::SIZE_IN_BYTES.get());
 
         PHYSICAL_MEMORY_MANAGER
             .get()
@@ -384,6 +381,22 @@ impl PhysicalMemoryManager {
                     F::SIZE_IN_BYTES.get(),
                     Into::<PhysicalAddress>::into(*frame)
                 );
+            })
+    }
+
+    pub fn next_free_segment() -> Option<Range<StandardFrame>> {
+        trace!(
+            "Next Free Segment: {{ Size: {:#X} }}",
+            StandardFrame::SIZE_IN_BYTES.get() * SEGMENT_BITS_USIZE.get()
+        );
+
+        PHYSICAL_MEMORY_MANAGER
+            .get()
+            .unwrap()
+            .0
+            .with_exclusive(PhysicalMemoryManagerInner::next_free_segment)
+            .inspect(|frames| {
+                trace!("Next Free Segment: {frames:#X?}");
             })
     }
 
@@ -400,7 +413,7 @@ impl PhysicalMemoryManager {
             .0
             .with_exclusive(|inner| inner.next_free_segments(count))
             .inspect(|frames| {
-                trace!("Next Free Segments: {frames:X?}");
+                trace!("Next Free Segments: {frames:#X?}");
             })
     }
 }
@@ -699,6 +712,25 @@ impl<'a> PhysicalMemoryManagerInner<'a> {
         Some(frame)
     }
 
+    pub fn next_free_segment(&mut self) -> Option<Range<StandardFrame>> {
+        let (frame_index, segment) = self
+            .bitmap
+            .iter_mut()
+            .enumerate()
+            .find(|(_, segment)| segment.is_empty())?;
+        *segment = Segment::FULL;
+
+        // Safety: Start index is from bitmap, so guaranteed to be valid.
+        let (start_frame, end_frame) = unsafe {
+            (
+                StandardFrame::from_index_unchecked(frame_index),
+                StandardFrame::from_index_unchecked(frame_index + SEGMENT_BITS_USIZE.get()),
+            )
+        };
+
+        Some(start_frame..end_frame)
+    }
+
     pub fn next_free_segments(&mut self, count: NonZero<usize>) -> Option<Range<StandardFrame>> {
         let frame_index = {
             let mut windows = self.bitmap.windows(count.get()).enumerate();
@@ -731,11 +763,13 @@ impl<'a> PhysicalMemoryManagerInner<'a> {
         };
         frame_window.fill(Segment::FULL);
 
-        // Safety: Indexes are from bitmap, so guaranteed to be valid.
+        // Safety: Start index is from bitmap, so guaranteed to be valid.
         let (start_frame, end_frame) = unsafe {
             (
-                StandardFrame::from_index(frame_index).unwrap_unchecked(),
-                StandardFrame::from_index(frame_index + count.get()).unwrap_unchecked(),
+                StandardFrame::from_index_unchecked(frame_index),
+                StandardFrame::from_index_unchecked(
+                    frame_index + (SEGMENT_BITS_USIZE.get() * count.get()),
+                ),
             )
         };
 

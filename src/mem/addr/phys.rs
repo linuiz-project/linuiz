@@ -5,7 +5,7 @@ use crate::{
     },
     util::sync::Lazy,
 };
-use core::{fmt::Debug, iter::Step, num::NonZero};
+use core::{iter::Step, num::NonZero};
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -57,7 +57,7 @@ impl PhysicalAddress {
     }
 
     pub fn check_canonical(address: usize) -> bool {
-        (address & !Self::canonical_mask().get()) == 0
+        address <= Self::canonical_max().get()
     }
 
     /// Creates a new [`PhysicalAddress`] with the provided address.
@@ -69,7 +69,7 @@ impl PhysicalAddress {
         if Self::check_canonical(address) {
             Ok(Self(address))
         } else {
-            Err(NonCanonicalError)
+            Err(NonCanonicalError::Address(address))
         }
     }
 
@@ -87,6 +87,30 @@ impl PhysicalAddress {
     pub const unsafe fn new_unchecked(address: usize) -> Self {
         Self(address)
     }
+
+    pub fn add_offset(self, offset: usize) -> Result<Self, NonCanonicalError> {
+        self.0
+            .checked_add(offset)
+            .ok_or(NonCanonicalError::PositiveOffset {
+                base: self.0,
+                offset,
+            })
+            .and_then(Self::new)
+    }
+
+    pub fn sub_offset(self, offset: usize) -> Result<Self, NonCanonicalError> {
+        self.0
+            .checked_sub(offset)
+            .ok_or(NonCanonicalError::NegativeOffset {
+                base: self.0,
+                offset,
+            })
+            .and_then(Self::new)
+    }
+
+    pub fn min_align(self) -> u32 {
+        self.0.trailing_zeros()
+    }
 }
 
 impl const From<PhysicalAddress> for usize {
@@ -103,8 +127,41 @@ impl TryFrom<usize> for PhysicalAddress {
     }
 }
 
+impl core::fmt::LowerHex for PhysicalAddress {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        if f.alternate() {
+            f.write_fmt(format_args!("Physical({:#x})", self.0))
+        } else {
+            f.write_fmt(format_args!("Physical({:x})", self.0))
+        }
+    }
+}
+
+impl core::fmt::UpperHex for PhysicalAddress {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        if f.alternate() {
+            f.write_fmt(format_args!("Physical({:#X})", self.0))
+        } else {
+            f.write_fmt(format_args!("Physical({:X})", self.0))
+        }
+    }
+}
+
+impl core::fmt::Binary for PhysicalAddress {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        if f.alternate() {
+            f.write_fmt(format_args!("Physical({:#b})", self.0))
+        } else {
+            f.write_fmt(format_args!("Physical({:b})", self.0))
+        }
+    }
+}
+
 pub trait FrameAddress:
-    Debug
+    core::fmt::Debug
+    + core::fmt::LowerHex
+    + core::fmt::UpperHex
+    + core::fmt::Binary
     + Clone
     + Copy
     + PartialEq
@@ -145,7 +202,7 @@ pub trait FrameAddress:
             // Safety: Canonicality has been checked.
             Ok(unsafe { Self::new_unchecked(address) })
         } else {
-            Err(NonCanonicalError)
+            Err(NonCanonicalError::Address(address))
         }
     }
 
@@ -165,17 +222,28 @@ pub trait FrameAddress:
     /// - `address` must have only canonical physical address bits set.
     unsafe fn new_unchecked(address: usize) -> Self;
 
-    /// Creates a new [`FrameAddress`] with the provided frame index.
+    /// Creates a new [`FrameAddress`] from the provided frame index.
     ///
     /// # Errors
     ///
     /// - [`NonCanonicalError`] if `index` would create a non-canonical address.
     fn from_index(index: usize) -> Result<Self, NonCanonicalError> {
-        let address = index
-            .checked_shl(Self::INDEX_BIT_SHIFT.get())
-            .ok_or(NonCanonicalError)?;
+        let address =
+            index
+                .checked_shl(Self::INDEX_BIT_SHIFT.get())
+                .ok_or(NonCanonicalError::Index {
+                    align: 1usize << Self::INDEX_BIT_SHIFT.get(),
+                    index,
+                })?;
 
         Self::new(address)
+    }
+
+    /// Creates a new [`FrameAddress`] from the provided frame index, without
+    /// checking canonicality.
+    unsafe fn from_index_unchecked(index: usize) -> Self {
+        // Safety: Caller is required to maintaqin safety invariants.
+        unsafe { Self::new_unchecked(index.unchecked_shl(Self::INDEX_BIT_SHIFT.get())) }
     }
 
     /// The index (indexed strides of [`FrameAddress::SIZE_IN_FRAMES`]) of the
@@ -188,6 +256,81 @@ pub trait FrameAddress:
     fn standard_index(self) -> usize {
         Into::<usize>::into(self) >> StandardFrame::INDEX_BIT_SHIFT.get()
     }
+}
+
+macro_rules! frame_address_impl {
+    { $($impl_ty:ty)+ } => { $(
+        impl core::fmt::LowerHex for $impl_ty {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                if f.alternate() {
+                    f.write_fmt(format_args!(concat!(stringify!($impl_ty), "({:#x})"), self.0))
+                } else {
+                    f.write_fmt(format_args!(concat!(stringify!($impl_ty), "({:x})"), self.0))
+                }
+            }
+        }
+
+        impl core::fmt::UpperHex for $impl_ty {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                if f.alternate() {
+                    f.write_fmt(format_args!(concat!(stringify!($impl_ty), "({:#X})"), self.0))
+                } else {
+                    f.write_fmt(format_args!(concat!(stringify!($impl_ty), "({:X})"), self.0))
+                }
+            }
+        }
+
+        impl core::fmt::Binary for $impl_ty {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                if f.alternate() {
+                    f.write_fmt(format_args!(concat!(stringify!($impl_ty), "({:#b})"), self.0))
+                } else {
+                    f.write_fmt(format_args!(concat!(stringify!($impl_ty), "({:b})"), self.0))
+                }
+            }
+        }
+
+        impl const From<$impl_ty> for usize {
+            fn from(value: $impl_ty) -> Self {
+                value.0
+            }
+        }
+
+        impl const From<$impl_ty> for PhysicalAddress {
+            fn from(value: $impl_ty) -> Self {
+                // Safety: Canonicality of `Self` is superset of `PhysicalAddress`.
+                unsafe { PhysicalAddress::new_unchecked(value.0) }
+            }
+        }
+
+        impl TryFrom<PhysicalAddress> for $impl_ty {
+            type Error = NonCanonicalError;
+
+            fn try_from(value: PhysicalAddress) -> Result<Self, Self::Error> {
+                Self::new(usize::from(value))
+            }
+        }
+
+        impl Step for $impl_ty {
+            fn steps_between(start: &Self, end: &Self) -> (usize, Option<usize>) {
+                Step::steps_between(&start.index(), &end.index())
+            }
+
+            fn forward_checked(start: Self, count: usize) -> Option<Self> {
+                start
+                    .index()
+                    .checked_add(count)
+                    .and_then(|next_index| Self::from_index(next_index).ok())
+            }
+
+            fn backward_checked(start: Self, count: usize) -> Option<Self> {
+                start
+                    .index()
+                    .checked_sub(count)
+                    .and_then(|next_index| Self::from_index(next_index).ok())
+            }
+        }
+    )+ };
 }
 
 #[repr(transparent)]
@@ -203,47 +346,6 @@ impl FrameAddress for StandardFrame {
 
     unsafe fn new_unchecked(address: usize) -> Self {
         Self(address)
-    }
-}
-
-impl const From<StandardFrame> for usize {
-    fn from(value: StandardFrame) -> Self {
-        value.0
-    }
-}
-
-impl const From<StandardFrame> for PhysicalAddress {
-    fn from(value: StandardFrame) -> Self {
-        // Safety: Canonicality of `Self` is superset of `PhysicalAddress`.
-        unsafe { PhysicalAddress::new_unchecked(value.0) }
-    }
-}
-
-impl TryFrom<PhysicalAddress> for StandardFrame {
-    type Error = NonCanonicalError;
-
-    fn try_from(value: PhysicalAddress) -> Result<Self, Self::Error> {
-        Self::new(usize::from(value))
-    }
-}
-
-impl Step for StandardFrame {
-    fn steps_between(start: &Self, end: &Self) -> (usize, Option<usize>) {
-        Step::steps_between(&start.index(), &end.index())
-    }
-
-    fn forward_checked(start: Self, count: usize) -> Option<Self> {
-        start
-            .index()
-            .checked_add(count)
-            .and_then(|next_index| Self::from_index(next_index).ok())
-    }
-
-    fn backward_checked(start: Self, count: usize) -> Option<Self> {
-        start
-            .index()
-            .checked_sub(count)
-            .and_then(|next_index| Self::from_index(next_index).ok())
     }
 }
 
@@ -265,47 +367,6 @@ impl FrameAddress for LargeFrame {
     }
 }
 
-impl const From<LargeFrame> for usize {
-    fn from(value: LargeFrame) -> Self {
-        value.0
-    }
-}
-
-impl const From<LargeFrame> for PhysicalAddress {
-    fn from(value: LargeFrame) -> Self {
-        // Safety: Canonicality of `Self` is superset of `PhysicalAddress`.
-        unsafe { PhysicalAddress::new_unchecked(value.0) }
-    }
-}
-
-impl TryFrom<PhysicalAddress> for LargeFrame {
-    type Error = NonCanonicalError;
-
-    fn try_from(value: PhysicalAddress) -> Result<Self, Self::Error> {
-        Self::new(usize::from(value))
-    }
-}
-
-impl Step for LargeFrame {
-    fn steps_between(start: &Self, end: &Self) -> (usize, Option<usize>) {
-        Step::steps_between(&start.index(), &end.index())
-    }
-
-    fn forward_checked(start: Self, count: usize) -> Option<Self> {
-        start
-            .index()
-            .checked_add(count)
-            .and_then(|next_index| Self::from_index(next_index).ok())
-    }
-
-    fn backward_checked(start: Self, count: usize) -> Option<Self> {
-        start
-            .index()
-            .checked_sub(count)
-            .and_then(|next_index| Self::from_index(next_index).ok())
-    }
-}
-
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct HugeFrame(usize);
@@ -324,43 +385,6 @@ impl FrameAddress for HugeFrame {
     }
 }
 
-impl const From<HugeFrame> for usize {
-    fn from(value: HugeFrame) -> Self {
-        value.0
-    }
-}
-
-impl const From<HugeFrame> for PhysicalAddress {
-    fn from(value: HugeFrame) -> Self {
-        // Safety: Canonicality of `Self` is superset of `PhysicalAddress`.
-        unsafe { PhysicalAddress::new_unchecked(value.0) }
-    }
-}
-
-impl TryFrom<PhysicalAddress> for HugeFrame {
-    type Error = NonCanonicalError;
-
-    fn try_from(value: PhysicalAddress) -> Result<Self, Self::Error> {
-        Self::new(usize::from(value))
-    }
-}
-
-impl Step for HugeFrame {
-    fn steps_between(start: &Self, end: &Self) -> (usize, Option<usize>) {
-        Step::steps_between(&start.index(), &end.index())
-    }
-
-    fn forward_checked(start: Self, count: usize) -> Option<Self> {
-        start
-            .index()
-            .checked_add(count)
-            .and_then(|next_index| Self::from_index(next_index).ok())
-    }
-
-    fn backward_checked(start: Self, count: usize) -> Option<Self> {
-        start
-            .index()
-            .checked_sub(count)
-            .and_then(|next_index| Self::from_index(next_index).ok())
-    }
+frame_address_impl! {
+    StandardFrame LargeFrame HugeFrame
 }
