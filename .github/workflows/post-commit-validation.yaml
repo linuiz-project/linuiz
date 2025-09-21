@@ -4,7 +4,7 @@ on:
   - pull_request
 
 env:
-  NIGHTLY_VERSION: nightly-2025-08-21
+  NIGHTLY_VERSION: nightly-2025-09-20
 
 defaults:
   run:

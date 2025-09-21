@@ -2,13 +2,12 @@
 #![cfg_attr(not(test), no_main)]
 #![feature(
     allocator_api,
-    array_repeat,
     array_windows,
     ascii_char,
     ascii_char_variants,
     breakpoint,
     cfg_select,
-    const_from,
+    const_convert,
     const_option_ops,
     const_trait_impl,
     const_try,
