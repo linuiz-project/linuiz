@@ -982,7 +982,6 @@ mod tests {
             b[Segment::PER_LARGE_PAGE.get()] = Segment::new(1);
             b
         };
-        let free_standard_bitmap = new_bitmap();
 
         let mut pmm = PhysicalMemoryManagerInner::new(&mut subject_bitmap, USABLE_BITMAP_BITS);
 

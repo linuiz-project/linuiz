@@ -16,7 +16,11 @@ impl PhysicalAddress {
     pub fn canonical_bits() -> NonZero<u32> {
         static CANONICAL_BITS: Lazy<NonZero<u32>> = Lazy::new(|| {
             cfg_select! {
-                any(target_arch = "x86", target_arch = "x86_64") => {
+                test => {
+                    unsafe { NonZero::<u32>::new_unchecked(40) }
+                }
+
+                target_arch = "x86_64" => {
                     let canonical_bits = crate::arch::x86_64::cpuid::processor_capacity_info()
                         .map_or_else(
                             || {
