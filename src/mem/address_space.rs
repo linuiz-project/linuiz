@@ -101,10 +101,8 @@ impl AddressSpace {
             }
 
             MemoryMapping::Any { count: _ } => {
-                #[allow(clippy::todo)]
-                {
-                    todo!()
-                }
+                todo!()
+
                 // // Safety: Caller is required to maintain safety invariants.
                 // unsafe { self.map_any(count, permissions) }
             }
