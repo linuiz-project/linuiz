@@ -23,7 +23,7 @@ pub struct Options {
     cpu: Cpu,
 
     /// Number of CPUs to emulate.
-    #[arg(long, default_value = "4")]
+    #[arg(long, default_value = "2")]
     smp: usize,
 
     // RAM size in MB.
@@ -55,8 +55,8 @@ pub struct Options {
 
     /// Skips execution and only prints the QEMU command that would have been
     /// executed.
-    #[arg(short, long)]
-    norun: bool,
+    #[arg(long)]
+    dry: bool,
 
     /// Puts QEMU in GDB debug mode, awaiting signal from the debugger to begin
     /// execution.
@@ -148,7 +148,7 @@ pub fn run(sh: &xshell::Shell, options: Options) -> Result<()> {
         run_cmd = run_cmd.args(["-trace", options.trace.as_str()]);
     }
 
-    if !options.debug.starts_with("int") && !options.debug.contains(",int") {
+    if !options.gdb && !options.debug.starts_with("int") && !options.debug.contains(",int") {
         run_cmd = run_cmd.arg("-enable-kvm");
     }
 
@@ -160,7 +160,7 @@ pub fn run(sh: &xshell::Shell, options: Options) -> Result<()> {
         run_cmd = run_cmd.arg("-S").arg("-s");
     }
 
-    if options.norun {
+    if options.dry {
         println!("cmd: {run_cmd}");
     } else {
         run_cmd.run()?;

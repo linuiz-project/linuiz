@@ -1,14 +1,16 @@
 use crate::{
     arch::x86_64::structures::gdt::{GlobalDescriptorTable, SystemSegmentDescriptor},
-    mem::alloc::allocate_kernel_stack,
+    mem::alloc::allocate_blocks,
 };
 use core::{num::NonZero, ptr::NonNull};
 use num_enum::{FromPrimitive, IntoPrimitive};
 
-#[cfg(debug_assertions)]
-const PAGES_PER_STACK_TABLE_STACK: NonZero<usize> = NonZero::new(16).unwrap();
-#[cfg(not(debug_assertions))]
-const PAGES_PER_STACK_TABLE_STACK: NonZero<usize> = NonZero::new(4).unwrap();
+const BLOCKS_PER_STACK_TABLE_STACK: NonZero<usize> = {
+    cfg_select! {
+        debug_assertions => { NonZero::new(4).unwrap() }
+        not(debug_assertions) => { NonZero::new(1).unwrap() }
+    }
+};
 
 // Pre-defined indexes into the interrupt stack table (IST).
 #[repr(u16)]
@@ -47,10 +49,17 @@ pub struct TaskStateSegment {
 const_assert!(size_of::<TaskStateSegment>() == 104);
 
 impl TaskStateSegment {
-    pub fn new() -> Self {
+    pub fn allocate() -> Self {
         fn allocate_stack_table_stack() -> NonNull<u8> {
-            allocate_kernel_stack(PAGES_PER_STACK_TABLE_STACK)
-                .expect("failed to allocate a task state segment stack")
+            const MINIMUM_STACK_ALIGN: usize = 0x10;
+
+            let stack_allocation = allocate_blocks(BLOCKS_PER_STACK_TABLE_STACK)
+                .expect("failed to allocate a task state segment stack");
+
+            // Safety: Block sizes are always greater than `MINIMUM_STACK_ALIGN`.
+            unsafe {
+                stack_allocation.get_unchecked_mut(stack_allocation.len() - MINIMUM_STACK_ALIGN)
+            }
         }
 
         let mut tss = Self {

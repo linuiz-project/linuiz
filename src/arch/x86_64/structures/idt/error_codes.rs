@@ -11,7 +11,7 @@ bitflags! {
     pub struct PageFaultErrorCode: u64 {
         /// If this flag is set, the page fault was caused by a page-protection violation,
         /// else the page fault was caused by a not-present page.
-        const PROTECTION_VIOLATION = 1;
+        const PROTECTION_VIOLATION = 1 << 0;
 
         /// If this flag is set, the memory access that caused the page fault was a write.
         /// Else the access that caused the page fault is a memory read. This bit does not

@@ -1,34 +1,15 @@
-use crate::util::sync::Mutex;
 use core::{
-    fmt::{Result, Write},
+    fmt::{Display, Result, Write},
     ptr::NonNull,
 };
-use libsys::address::{Address, Virtual};
 
 pub mod symbols;
-
-// TODO remove dependency on `heapless`
-type PanicStringBuffer = heapless::String<0x4000>;
-
-pub(super) fn emit_stack_trace() {
-    static PANIC_STRING_BUFFER: Mutex<PanicStringBuffer> = Mutex::new(PanicStringBuffer::new());
-
-    PANIC_STRING_BUFFER.with_lock(|panic_string_buffer| {
-        panic_string_buffer.clear();
-
-        if let Err(err) = construct_panic_message(&mut *panic_string_buffer) {
-            error!("Failed constructing panic message: {err:?}");
-        }
-
-        error!("STACK TRACE:\n{panic_string_buffer}");
-    });
-}
 
 #[repr(C)]
 #[derive(Debug)]
 struct StackFrame {
     prev_frame_ptr: Option<NonNull<StackFrame>>,
-    return_address: Address<Virtual>,
+    return_address: usize,
 }
 
 struct StackTracer {
@@ -47,7 +28,7 @@ impl StackTracer {
 }
 
 impl Iterator for StackTracer {
-    type Item = Address<Virtual>;
+    type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
         // Safety: Stack frame pointer will be valid if the correct value is provided to
@@ -78,17 +59,20 @@ fn get_stack_frame_ptr() -> *mut StackFrame {
     }
 }
 
-fn construct_panic_message(mut buffer: impl Write) -> Result {
-    fn print_stack_trace_entry<D: core::fmt::Display>(
+pub(super) fn construct_panic_message(mut buffer: impl Write) -> Result {
+    fn print_stack_trace_entry(
         mut buffer: impl Write,
         entry_num: usize,
-        fn_address: Address<Virtual>,
-        symbol_name: D,
+        fn_address: usize,
+        symbol_name: impl Display,
     ) -> Result {
+        /// The hex-width of a maximum-length `usize`.
+        #[allow(clippy::as_conversions)]
+        const USIZE_PRETTY_WIDTH: usize = (usize::BITS as usize) / 4;
+
         writeln!(
             buffer,
-            "#{entry_num: <4}0x{:X} {symbol_name:#}",
-            fn_address.get()
+            "{entry_num: >4}  0x{fn_address:0>USIZE_PRETTY_WIDTH$X} {symbol_name:#}"
         )
     }
 

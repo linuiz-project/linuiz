@@ -5,10 +5,16 @@
     array_repeat,
     array_windows,
     ascii_char,
+    ascii_char_variants,
     breakpoint,
     cfg_select,
+    const_from,
+    const_option_ops,
+    const_trait_impl,
+    const_try,
     core_intrinsics,
     duration_constants,
+    exact_size_is_empty,
     extern_types,
     generic_atomic,
     if_let_guard,
@@ -18,6 +24,7 @@
     maybe_uninit_array_assume_init,
     maybe_uninit_slice,
     maybe_uninit_write_slice,
+    nonzero_ops,
     pointer_is_aligned_to,
     pointer_try_cast_aligned,
     ptr_as_ref_unchecked,
@@ -25,6 +32,7 @@
     range_into_bounds,
     slice_ptr_get,
     step_trait,
+    unchecked_shifts,
     unsafe_cell_access
 )]
 #![forbid(clippy::duplicated_attributes, clippy::inline_asm_x86_att_syntax)]
@@ -46,6 +54,8 @@
 )]
 #![cfg_attr(debug_assertions, allow(clippy::todo))]
 #![allow(
+    clippy::too_many_lines,
+    clippy::too_many_arguments,
     clippy::cargo_common_metadata,
     clippy::enum_glob_use,
     clippy::inline_always,
@@ -79,7 +89,7 @@ mod mem;
 mod panic;
 mod params;
 mod rand;
-mod task;
+mod scheduler;
 mod time;
 mod util;
 
@@ -105,31 +115,51 @@ impl LinkerSymbol {
     }
 }
 
-/// Specify the Limine revision to use.
-#[doc(hidden)]
-static BASE_REVISION: BaseRevision = BaseRevision::with_revision(4);
-
-const KERNEL_STACK_SIZE: usize = {
-    #[cfg(debug_assertions)]
-    {
-        0x40_0000
-    }
-    #[cfg(not(debug_assertions))]
-    {
-        0x10_0000
+const KERNEL_STACK_SIZE: u64 = {
+    cfg_select! {
+        debug_assertions => { 0x8_0000 }
+        not(debug_assertions) => { 0x1_0000 }
     }
 };
 
-/// Specify the exact stack size the kernel would like to use.
 #[doc(hidden)]
-#[allow(clippy::as_conversions)]
-static STACK_SIZE_REQUEST: StackSizeRequest =
-    StackSizeRequest::new().with_size(KERNEL_STACK_SIZE as u64);
+static BASE_REVISION: BaseRevision = BaseRevision::with_revision(4);
 
 #[doc(hidden)]
+#[allow(clippy::as_conversions)]
+static STACK_SIZE_REQUEST: StackSizeRequest = StackSizeRequest::new().with_size(KERNEL_STACK_SIZE);
+
+#[macro_export]
+macro_rules! naked_asm_clear_frame_pointer_and_call_fn {
+    ($call_fn:ident) => {
+        cfg_select! {
+            target_arch = "x86_64" => {
+                core::arch::naked_asm!(
+                    "
+                    xor rbp, rbp
+                    call {}
+                    ",
+                    sym $call_fn
+                )
+            }
+
+            _ => { unimplemented!() }
+        }
+    };
+}
+
+#[doc(hidden)]
+#[unsafe(naked)]
 #[unsafe(no_mangle)]
-#[allow(clippy::too_many_lines)]
 unsafe extern "C" fn _entry() -> ! {
+    // We require a naked function here primarily to clear the frame pointer, so
+    // that on a kernel panic we don't trace anything prior to this function.
+
+    naked_asm_clear_frame_pointer_and_call_fn!(main)
+}
+
+#[doc(hidden)]
+extern "C" fn main() -> ! {
     // All of the code within this function should be run ONLY ONCE. Writing the
     // code sequentially within one function easily ensures that will be the
     // case.
@@ -184,7 +214,11 @@ unsafe extern "C" fn _entry() -> ! {
 
     crate::acpi::init_tables(&RSDP_REQUEST);
 
-    crate::mem::pmm::PhysicalMemoryManager::init(&MEMORY_MAP_REQUEST);
+    // Safety: `MEMORY_MAP_REQUEST` has not been allocated from since entry.
+    unsafe {
+        crate::mem::pmm::PhysicalMemoryManager::init(&MEMORY_MAP_REQUEST);
+    }
+
     crate::mem::KernelMapper::init(
         &MEMORY_MAP_REQUEST,
         &KERNEL_FILE_REQUEST,
@@ -196,7 +230,7 @@ unsafe extern "C" fn _entry() -> ! {
     }
 
     // Safety: We've reached the end of the kernel init phase.
-    unsafe { crate::cpu::start(Some(&MP_REQUEST), Some(&MEMORY_MAP_REQUEST)) }
+    unsafe { init_processor(Some(&MP_REQUEST), Some(&MEMORY_MAP_REQUEST)) }
 }
 
 fn print_env_info(
@@ -282,95 +316,103 @@ fn report_total_usable_memory(memory_map: &[&limine::memory_map::Entry]) {
     );
 }
 
-// fn load_drivers() {
-//     use crate::task::{AddressSpace, Priority, Task};
-//     use elf::endian::AnyEndian;
+/// Iterates the entries in the multiprocessing request, configuring and
+/// subsequently synchronizing the other processors in the system.
+///
+/// # Returns
+///
+/// - If request was satisfied, `Some` of the count of non-bootstrap processor
+///   in the system.
+/// - If request was not satisfied, `None`.
+pub fn begin_multiprocessing(mp_request: &limine::request::MpRequest) -> Option<usize> {
+    let Some(response) = mp_request.get_response() else {
+        warn!("Bootloader did not provide response to multiprocessing request.");
+        return None;
+    };
 
-//     #[limine::limine_tag]
-//     static LIMINE_MODULES: limine::ModuleRequest =
-// limine::ModuleRequest::new(crate::init::boot::LIMINE_REV);
+    debug!("Detecting and starting additional cores.");
 
-//     debug!("Unpacking kernel drivers...");
+    response
+        .cpus()
+        .iter()
+        .filter(|cpu| cpu.lapic_id != response.bsp_lapic_id())
+        .for_each(|cpu| {
+            trace!("Starting processor: ID#{} LAPIC#{}", cpu.id, cpu.lapic_id);
 
-//     let Some(modules) = LIMINE_MODULES.get_response() else {
-//         warn!("Bootloader provided no modules; skipping driver loading.");
-//         return;
-//     };
+            cpu.goto_address.write({
+                if crate::params::KernelParameters::use_multiprocessing() {
+                    #[unsafe(naked)]
+                    extern "C" fn _mp_entry(_: &limine::mp::Cpu) -> ! {
+                        extern "C" fn mp_main(_: &limine::mp::Cpu) -> ! {
+                            // Safety: Function is run only once for this processor.
+                            unsafe {
+                                crate::cpu::configure();
+                            }
 
-//     let modules = modules.modules();
-//     trace!("Found modules: {:X?}", modules);
+                            // Safety: All currently referenced memory should also be
+                            //         mapped in the kernel page tables.
+                            unsafe {
+                                crate::mem::KernelMapper::swap_into();
+                            }
 
-//     let Some(drivers_module) = modules.iter().find(|module|
-// module.path().ends_with("drivers")) else {         panic!("no drivers module
-// found")     };
+                            // Safety: processor still in init phase.
+                            unsafe { init_processor(None, None) }
+                        }
 
-//     let archive = tar_no_std::TarArchiveRef::new(drivers_module.data());
-//     archive
-//         .entries()
-//         .filter_map(|entry| {
-//             debug!("Attempting to parse driver blob: {}", entry.filename());
+                        // We require a naked function here primarily to clear the frame pointer, so
+                        // that on a kernel panic we don't trace anything prior to this function.
 
-//             match elf::ElfBytes::<AnyEndian>::minimal_parse(entry.data()) {
-//                 Ok(elf) => Some((entry, elf)),
-//                 Err(err) => {
-//                     error!("Failed to parse driver blob into ELF: {:?}",
-// err);                     None
-//                 }
-//             }
-//         })
-//         .for_each(|(entry, elf)| {
-//             // Get and copy the ELF segments into a small box.
-//             let Some(segments_copy) = elf.segments().map(|segments|
-// segments.into_iter().collect()) else {                 error!("ELF has no
-// segments.");                 return;
-//             };
+                        crate::naked_asm_clear_frame_pointer_and_call_fn!(mp_main)
+                    }
 
-//             // Safety: In-place transmutation of initialized bytes for the
-// purpose of copying safely.             // let (_, archive_data, _) = unsafe {
-// entry.data().align_to::<MaybeUninit<u8>>() };             trace!("Allocating
-// ELF data into memory...");             let elf_data =
-// alloc::boxed::Box::from(entry.data());             trace!("ELF data allocated
-// into memory.");
+                    _mp_entry
+                } else {
+                    extern "C" fn _idle_forever(_: &limine::mp::Cpu) -> ! {
+                        crate::cpu::halt_and_catch_fire()
+                    }
 
-//             let Ok((Some(shdrs), Some(_))) =
-// elf.section_headers_with_strtab() else {                 panic!("Error
-// retrieving ELF relocation metadata.")             };
+                    _idle_forever
+                }
+            });
+        });
 
-//             let load_offset = crate::task::MIN_LOAD_OFFSET;
+    Some(response.cpus().len())
+}
 
-//             trace!("Processing relocations localized to fault page.");
-//             let mut relas = alloc::vec::Vec::with_capacity(shdrs.len());
+/// Enters core into the scheduler loop, exiting the kernel's boot phase.
+///
+/// # Safety
+///
+/// - Function should only be run once at the end of the kernel boot phase.
+#[allow(clippy::too_many_lines)]
+pub unsafe fn init_processor(
+    mp_request: Option<&limine::request::MpRequest>,
+    _memory_map_request: Option<&limine::request::MemoryMapRequest>,
+) -> ! {
+    use crate::{cpu::local_state::LocalState, scheduler::Scheduler};
 
-//             shdrs
-//                 .iter()
-//                 .filter(|shdr| shdr.sh_type == elf::abi::SHT_RELA)
-//                 .flat_map(|shdr| elf.section_data_as_relas(&shdr).unwrap())
-//                 .for_each(|rela| {
-//                     use crate::task::ElfRela;
+    mp_request
+        .and_then(begin_multiprocessing)
+        .inspect(|processor_count| {
+            trace!("Detected {processor_count} processors.");
+        });
 
-//                     match rela.r_type {
-//                         elf::abi::R_X86_64_RELATIVE => relas.push(ElfRela {
-//                             address:
-// Address::new(usize::try_from(rela.r_offset).unwrap()).unwrap(),
-// value: load_offset + usize::try_from(rela.r_addend).unwrap(),
-// }),
+    LocalState::init();
 
-//                         _ => unimplemented!(),
-//                     }
-//                 });
+    debug!("Preparing for task scheduling...");
+    LocalState::with_scheduler(Scheduler::enable);
 
-//             trace!("Finished processing relocations, pushing task.");
+    trace!("Enabling interrupts...");
+    crate::interrupts::enable();
 
-//             let task = Task::new(
-//                 Priority::Normal,
-//                 AddressSpace::new_userspace(),
-//                 load_offset,
-//                 elf.ehdr,
-//                 segments_copy,
-//                 relas,
-//                 crate::task::ElfData::Memory(elf_data),
-//             );
+    LocalState::with_timer(|timer| {
+        trace!("Enabling local timer...");
+        timer.enable();
+        trace!("Setting preemption wait...");
+        timer.set_preemption_wait();
+    });
 
-//             crate::task::PROCESSES.lock().push_back(task);
-//         });
-// }
+    trace!("Waiting for preemption...");
+    // Wait loop to ensure the core can jump into the scheduler upon timer fire.
+    crate::interrupts::wait_indefinite()
+}

@@ -1,3 +1,7 @@
+use crate::{
+    cpu::{context::Context, local_state::LocalState},
+    time::LocalTimer,
+};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 pub mod exceptions;
@@ -5,7 +9,7 @@ pub mod syscall;
 
 #[repr(u8)]
 #[derive(Debug, TryFromPrimitive, IntoPrimitive, Clone, Copy, PartialEq, Eq)]
-#[allow(non_camel_case_types, clippy::upper_case_acronyms)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum Vector {
     Watchdog = 0x20,
     Timer = 0x21,
@@ -94,5 +98,34 @@ pub fn uninterruptable<T>(func: impl FnOnce() -> T) -> T {
 pub fn wait_indefinite() -> ! {
     loop {
         wait_next();
+    }
+}
+
+pub fn handle(vector: Vector, context: &mut Context) {
+    match vector {
+        Vector::Timer => {
+            LocalState::with_scheduler(|scheduler| {
+                scheduler.interrupt_task(context);
+            });
+
+            LocalState::with_timer(LocalTimer::set_preemption_wait);
+        }
+
+        Vector::Syscall => {
+            let result = crate::interrupts::syscall::handle(
+                context.registers().syscall_vector(),
+                context.registers().syscall_arg1(),
+                context.registers().syscall_arg2(),
+                context.registers().syscall_arg3(),
+                context.registers().syscall_arg4(),
+                context,
+            );
+
+            trace!("{result:#X?}");
+
+            context.registers_mut().set_syscall_result(result);
+        }
+
+        vector => unimplemented!("unhandled interrupt vector: {vector:?}"),
     }
 }

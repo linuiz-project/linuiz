@@ -1,3 +1,5 @@
+pub mod elf;
+pub mod math;
 pub mod sync;
 
 mod array_str;

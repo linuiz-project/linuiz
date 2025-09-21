@@ -333,4 +333,20 @@ impl<T> Once<T> {
             }
         }
     }
+
+    /// Spins until the [`Once`] contains a value.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the [`Once`] previously panicked while
+    /// attempting to initialize. This is similar to the poisoning behaviour of
+    /// `std::sync`'s primitives.
+    pub fn wait(&self) -> &T {
+        loop {
+            match self.poll() {
+                Some(x) => break x,
+                None => core::hint::spin_loop(),
+            }
+        }
+    }
 }

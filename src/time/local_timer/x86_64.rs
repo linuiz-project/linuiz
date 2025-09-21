@@ -62,88 +62,137 @@ fn measure_lapic() -> u32 {
     frequency
 }
 
+#[derive(Debug)]
 enum Mode {
-    TscDeadline { frequency: u64 },
-    OneShot { frequency: u32 },
+    TscDeadline {
+        ticks_per_sec: u64,
+        ticks_per_ms: u64,
+        ticks_per_us: u64,
+    },
+    OneShot {
+        ticks_per_sec: u32,
+        ticks_per_ms: u32,
+        ticks_per_us: u32,
+    },
 }
 
 pub struct LocalTimer(Mode);
 
 impl LocalTimer {
     pub fn configure() -> Self {
-        if feature_info().is_some_and(|cpuid| cpuid.has_tsc())
-            && feature_info().is_some_and(|cpuid| cpuid.has_tsc_deadline())
-            && advanced_power_management_info().is_some_and(|cpuid| cpuid.has_invariant_tsc())
-        {
-            trace!("Local Timer: Timestamp Counter");
+        let mode = {
+            if feature_info().is_some_and(|cpuid| cpuid.has_tsc())
+                && feature_info().is_some_and(|cpuid| cpuid.has_tsc_deadline())
+                && advanced_power_management_info().is_some_and(|cpuid| cpuid.has_invariant_tsc())
+            {
+                trace!("Local Timer: Timestamp Counter");
 
-            LocalApic::lvt_timer().set_mode(TimerMode::TscDeadline);
+                LocalApic::lvt_timer().set_mode(TimerMode::TscDeadline);
 
-            // Notably, on AMD systems the first check simply won't work, becuase AMD is
-            // cursed and Lisa Su is continuing AMD's time-honored tradition of
-            // making their CPUs 10x more difficult to program for than Intel.
-            let frequency = processor_frequency_info()
-                .map(|processor_frequency_info| {
-                    // We read the processor frequency information directly from the CPU, to do the
-                    // math to make it useful.
-                    u64::from(processor_frequency_info.bus_frequency())
-                        / (u64::from(processor_frequency_info.processor_base_frequency())
-                            * u64::from(processor_frequency_info.processor_max_frequency()))
-                })
-                .or_else(|| {
-                    // Check if we're in a hypervisor environment and it provides the 0x40000000 and
-                    // 0x40000010 hypervisor info leaves.
-                    feature_info()
-                        .filter(raw_cpuid::FeatureInfo::has_hypervisor)
-                        .and_then(|_| hypervisor_info().and_then(|cpuid| cpuid.tsc_frequency()))
-                        .map(u64::from)
-                })
-                .unwrap_or_else(measure_tsc);
+                // Notably, on AMD systems the first check simply won't work, becuase AMD is
+                // cursed and Lisa Su is continuing AMD's time-honored tradition of
+                // making their CPUs 10x more difficult to program for than Intel.
+                let frequency = processor_frequency_info()
+                    .map(|processor_frequency_info| {
+                        // We read the processor frequency information directly from the CPU, then
+                        // do the math to make it useful.
+                        u64::from(processor_frequency_info.bus_frequency())
+                            / (u64::from(processor_frequency_info.processor_base_frequency())
+                                * u64::from(processor_frequency_info.processor_max_frequency()))
+                    })
+                    .or_else(|| {
+                        // Check if we're in a hypervisor environment, and if it provides the
+                        // 0x40000000 and 0x40000010 hypervisor info leaves.
+                        feature_info()
+                            .filter(raw_cpuid::FeatureInfo::has_hypervisor)
+                            .and_then(|_| hypervisor_info().and_then(|cpuid| cpuid.tsc_frequency()))
+                            .map(u64::from)
+                    })
+                    .unwrap_or_else(measure_tsc);
 
-            Self(Mode::TscDeadline { frequency })
-        } else {
-            // We'll have to use the LAPIC, since TSC isn't supported in such a way as to
-            // allow it to be useful.
+                Mode::TscDeadline {
+                    ticks_per_sec: frequency,
+                    ticks_per_ms: frequency / 1_000,
+                    ticks_per_us: frequency / 1_000_000,
+                }
+            } else {
+                // We'll have to use the LAPIC, since TSC isn't supported in such a way as to
+                // allow it to be useful.
 
-            trace!("Local Timer: APIC (one-shot)");
+                trace!("Local Timer: APIC (one-shot)");
 
-            LocalApic::lvt_timer().set_mode(TimerMode::OneShot);
+                LocalApic::lvt_timer().set_mode(TimerMode::OneShot);
 
-            let frequency = hypervisor_info()
-                .and_then(|cpuid| cpuid.apic_frequency())
-                .unwrap_or_else(measure_lapic);
+                let frequency = hypervisor_info()
+                    .and_then(|cpuid| cpuid.apic_frequency())
+                    .unwrap_or_else(measure_lapic);
 
-            Self(Mode::OneShot { frequency })
-        }
+                Mode::OneShot {
+                    ticks_per_sec: frequency,
+                    ticks_per_ms: frequency / 1_000,
+                    ticks_per_us: frequency / 1_000_000,
+                }
+            }
+        };
+
+        trace!("Local Timer: {mode:?}");
+
+        Self(mode)
     }
 
-    pub fn set_wait(&self, duration: Duration) -> Result<(), Error> {
+    /// Enables the timer interrupt.
+    #[allow(clippy::unused_self)]
+    pub fn enable(&mut self) {
+        LocalApic::lvt_timer().set_masked(false);
+    }
+
+    /// Disables the timer interrupt.
+    #[allow(clippy::unused_self)]
+    pub fn disable(&mut self) {
+        LocalApic::lvt_timer().set_masked(true);
+    }
+
+    /// Sets a timer for `duration`, which upon elapsing will fire an interrupt.
+    pub fn set_wait(&mut self, duration: Duration) -> Result<(), Error> {
         match self.0 {
-            Mode::TscDeadline { frequency } => {
+            Mode::TscDeadline {
+                ticks_per_sec: _,
+                ticks_per_ms: _,
+                ticks_per_us,
+            } => {
                 let wait_us =
                     u64::try_from(duration.as_micros()).map_err(|_| Error::InvalidWait)?;
-                let wait_ticks = (frequency / 1_000_000)
+                let wait_ticks = ticks_per_us
                     .checked_mul(wait_us)
                     .ok_or(Error::InvalidWait)?;
 
-                // Safety: If mode is `TscDeadline`, then the timestamp counter
-                //         is supported.
+                trace!("Wait (TSC): {{ {wait_us:?}us, {wait_ticks}t }} ");
+                // Safety: If mode is `TscDeadline`, then the timestamp counter is supported.
                 unsafe {
                     IA32_TSC_DEADLINE::set(wait_ticks);
                 }
             }
 
-            Mode::OneShot { frequency } => {
+            Mode::OneShot {
+                ticks_per_sec: _,
+                ticks_per_ms: _,
+                ticks_per_us,
+            } => {
                 let wait_us =
                     u32::try_from(duration.as_micros()).map_err(|_| Error::InvalidWait)?;
-                let wait_ticks = (frequency / 1_000_000)
+                let wait_ticks = ticks_per_us
                     .checked_mul(wait_us)
                     .ok_or(Error::InvalidWait)?;
 
+                trace!("Wait (APIC): {{ {wait_us:?}us, {wait_ticks}t }} ");
                 LocalApic::set_timer_initial_count(wait_ticks);
             }
         }
 
         Ok(())
+    }
+
+    pub fn set_preemption_wait(&mut self) {
+        self.set_wait(Duration::from_millis(15)).unwrap();
     }
 }

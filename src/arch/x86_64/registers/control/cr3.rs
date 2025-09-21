@@ -1,16 +1,17 @@
-use crate::task::asid::AddressSpaceId;
-use bit_field::BitField;
-use core::arch::asm;
-use libsys::{
-    address::{Address, Frame},
-    constants::{page_bits, physical_address_bits},
+use crate::mem::{
+    AddressSpaceId,
+    addr::phys::{FrameAddress, StandardFrame},
 };
+use core::arch::asm;
 
 pub struct CR3;
 
 impl CR3 {
-    pub unsafe fn write(frame: Address<Frame>, address_space_id: AddressSpaceId) {
-        let frame_address = frame.get().get();
+    const ADDRESS_SPACE_ID_MASK: usize = 0xFFF;
+    const FRAME_ADDRESS_MASK: usize = !0xFFF;
+
+    pub unsafe fn write(frame: StandardFrame, address_space_id: AddressSpaceId) {
+        let frame_address = usize::from(frame);
         let address_space_id = usize::from(address_space_id);
         let bits = frame_address | address_space_id;
 
@@ -27,8 +28,7 @@ impl CR3 {
         trace!("Swapped.");
     }
 
-    #[must_use]
-    pub fn read() -> (Address<Frame>, AddressSpaceId) {
+    pub fn read() -> (StandardFrame, AddressSpaceId) {
         let value: usize;
 
         // Safety: Reading CR3 has no side effects.
@@ -40,15 +40,16 @@ impl CR3 {
             );
         }
 
-        let page_bits = usize::try_from(page_bits().get()).unwrap();
-        let physical_address_bits = usize::try_from(physical_address_bits().get()).unwrap();
-        let address_space_id_bits = value.get_bits(0..page_bits);
-        let frame_index_bits = value.get_bits(page_bits..physical_address_bits);
+        let address_space_id = value & Self::ADDRESS_SPACE_ID_MASK;
+        let frame = value & Self::FRAME_ADDRESS_MASK;
 
-        let frame = Address::<Frame>::from_index(frame_index_bits)
-            .expect("CR3 had non-canonical frame address");
-        let address_space_id = AddressSpaceId::new(address_space_id_bits)
-            .expect("CR3 had an invalid address space ID");
+        debug_assert!(address_space_id <= AddressSpaceId::MAX);
+        debug_assert!(StandardFrame::check_canonical(frame));
+
+        // Safety: Bitwise AND w/ `Self::ADDRESS_SPACE_ID_MASK` ensures value is
+        // ≤`AddressSpaceId::MAX`.
+        let address_space_id = unsafe { AddressSpaceId::new_unchecked(address_space_id) };
+        let frame = StandardFrame::new_truncate(frame);
 
         (frame, address_space_id)
     }

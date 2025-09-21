@@ -1,0 +1,232 @@
+use crate::{
+    cpu::context::Context,
+    mem::{
+        HigherHalfDirectMap,
+        addr::{
+            phys::{FrameAddress, StandardFrame},
+            virt::StandardPage,
+        },
+        clear_frame_memory,
+        pmm::PhysicalMemoryManager,
+    },
+};
+use core::{num::NonZero, ptr::NonNull};
+use num_enum::{IntoPrimitive, TryFromPrimitive};
+use uuid::Uuid;
+
+mod task;
+use task::Task;
+
+type TaskQueue = heapless::mpmc::Queue<Task, 1024>;
+
+pub static TASKS: TaskQueue = TaskQueue::new();
+
+#[repr(usize)]
+#[derive(Debug, Error, IntoPrimitive, TryFromPrimitive, Clone, Copy, PartialEq, Eq)]
+pub enum YieldTaskError {
+    #[error("there was no active task on this processor")]
+    NoActiveTask = 1,
+}
+
+pub struct Scheduler {
+    enabled: bool,
+    idle_stack: NonNull<u8>,
+    task: Option<Task>,
+}
+
+impl Scheduler {
+    pub fn new() -> Self {
+        let idle_stack = {
+            let frames = PhysicalMemoryManager::next_free_segment()
+                .expect("could not allocate stack for idle thread");
+            let page = HigherHalfDirectMap::frame_to_page::<_, StandardPage>(frames.end);
+            let address = NonZero::<usize>::try_from(page).unwrap();
+            let bottom_ptr = NonNull::<u8>::with_exposed_provenance(address);
+            // Safety: Allocation is at least `SIZE_IN_BYTES`-sized.
+            unsafe { bottom_ptr.byte_add(StandardFrame::SIZE_IN_BYTES.get() - 0x10) }
+        };
+
+        trace!("Idle Stack: {idle_stack:#X?}");
+
+        Self {
+            enabled: false,
+            idle_stack,
+            task: None,
+        }
+    }
+
+    /// Enables the scheduler to pop tasks.
+    pub fn enable(&mut self) {
+        self.enabled = true;
+    }
+
+    /// Disables scheduler from popping tasks. Any task pops which are already
+    /// in-flight will not be cancelled.
+    pub fn disable(&mut self) {
+        self.enabled = false;
+    }
+
+    /// Indicates whether the scheduler is enabled.
+    pub const fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn next_task(&mut self, context: &mut Context) {
+        trace!("Old Context: {context:X?}");
+
+        if let Some(next_task) = TASKS.dequeue() {
+            *context = next_task.context().clone();
+
+            // TODO Manage the address space switch.
+
+            trace!("Switched: {:?}", next_task.id());
+
+            self.task = Some(next_task);
+        } else {
+            // TODO Fix privileged context switches from blowing up the entire stack.
+            //
+            // When the idle task is interrupted with no ring level change, the stack
+            // pointer is not swapped to the value in `TSS.IST0`. Additionally, the idle
+            // stack is not large enough to accomodate the execution of a full context
+            // switch callstack.
+            //
+            // The solution is likely just a larger stack.
+            // Or perhaps some kind of code to manually switch to a context-switching stack
+            // when coming from ring 0? (hard)
+            *context = Context::new_idle(self.idle_stack.addr());
+        }
+
+        trace!("New Context: {context:X?}");
+    }
+
+    pub fn interrupt_task(&mut self, context: &mut Context) {
+        // Move the current task, if any, back into the scheduler queue.
+        if let Some(mut task) = self.task.take() {
+            trace!("Interrupting: {:?}", task.id());
+
+            *task.context_mut() = context.clone();
+
+            TASKS.enqueue(task).unwrap();
+        }
+
+        self.next_task(context);
+    }
+
+    /// Attempts to schedule the next task in the local task queue.
+    pub fn yield_task(&mut self, context: &mut Context) -> Result<(), YieldTaskError> {
+        let mut task = self.task.take().ok_or(YieldTaskError::NoActiveTask)?;
+        trace!("Yielding: {:?}", task.id());
+
+        *task.context_mut() = context.clone();
+        self.next_task(context);
+
+        Ok(())
+    }
+
+    // pub fn kill_task(&mut self, isf: &mut InterruptStackFrame, regs: &mut
+    // Registers) {     debug_assert!(!crate::interrupts::is_enabled());
+
+    //     // TODO add process to reap queue to reclaim address space memory
+    //     let process = self.task.take().expect("no active task in scheduler");
+    //     trace!("Exiting: {:?}", process.id());
+
+    //     PROCESSES.with_lock(|processes| {
+    //         self.next_task(processes, isf, regs);
+    //     });
+    // }
+
+    //     // TODO have some kind of queue of preemption waits, to ensure we select
+    // the     // shortest one.
+    //     // Safety: No preemption wait will supercede this one.
+    //     unsafe {
+    //         LocalState::set_preemption_wait(Duration::from_millis(15));
+    //     }
+    // }
+
+    fn kill_current_task(&mut self) {
+        todo!()
+    }
+}
+
+// #[cfg(target_arch = "x86_64")]
+// #[naked]
+// unsafe extern "sysv64" fn exit_into(regs: &mut Registers, state: &mut State)
+// -> ! {     use core::mem::size_of;
+//     use x86_64::structures::idt::InterruptStackFrame;
+
+//     core::arch::asm!(
+//         "
+//         mov rax, rdi    # registers ptr
+
+//         sub rsp, {0}    # make space for stack frame
+//         # state ptr is already in `rsi` from args
+//         mov rdi, rsp    # dest is stack address
+//         mov rcx, {0}    # set the copy length
+
+//         cld             # clear direction for op
+//         rep movsb       # copy memory
+
+//         mov rbx, [rax + (1 * 8)]
+//         mov rcx, [rax + (2 * 8)]
+//         mov rdx, [rax + (3 * 8)]
+//         mov rsi, [rax + (4 * 8)]
+//         mov rdi, [rax + (5 * 8)]
+//         mov rbp, [rax + (6 * 8)]
+//         mov r8, [rax + (7 * 8)]
+//         mov r9, [rax + (8 * 8)]
+//         mov r10, [rax + (9 * 8)]
+//         mov r11, [rax + (10 * 8)]
+//         mov r12, [rax + (11 * 8)]
+//         mov r13, [rax + (12 * 8)]
+//         mov r14, [rax + (13 * 8)]
+//         mov r15, [rax + (14 * 8)]
+//         mov rax, [rax + (0 * 8)]
+
+//         iretq
+//         ",
+//         const size_of::<InterruptStackFrame>(),
+//         options(noreturn)
+//     )
+// }
+
+pub fn queue_procedure(procedure_fn: fn()) {
+    /// This function is technically unsafe, but the signature must be
+    /// maintained for use with [`Context::new_from_fn_with_arg`].
+    ///
+    /// # Safety
+    ///
+    /// - `address` must be the address to an `extern "Rust" fn()`.
+    extern "sysv64" fn dispatch_procedure(address: usize) {
+        let procedure_ptr = core::ptr::with_exposed_provenance::<()>(address);
+        // Safety: Caller is required to maintain safety invariants.
+        let procedure_fn = unsafe { core::mem::transmute::<*const (), fn()>(procedure_ptr) };
+
+        procedure_fn();
+
+        crate::cpu::local_state::LocalState::with_scheduler(Scheduler::kill_current_task);
+    }
+
+    let stack_address = PhysicalMemoryManager::next_free_frame::<StandardFrame>()
+        .inspect(|frame| {
+            // Safety: Memory was just allocated, and is not otherwise aliased.
+            unsafe { clear_frame_memory(*frame) }
+        })
+        .unwrap();
+
+    #[allow(clippy::as_conversions)]
+    let context = Context::new_from_fn_with_arg(
+        dispatch_procedure,
+        procedure_fn as usize,
+        HigherHalfDirectMap::offset(stack_address.into()),
+        false,
+    );
+
+    let procedure = Task::Procedure {
+        id: Uuid::new_v4(),
+        context,
+    };
+
+    trace!("Queueing procedure: {procedure:?}");
+
+    TASKS.enqueue(procedure).unwrap();
+}

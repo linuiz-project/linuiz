@@ -1,5 +1,5 @@
+use crate::mem::addr::virt::VirtualAddress;
 use core::arch::asm;
-use libsys::address::{Address, Page};
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum Error {
@@ -37,10 +37,14 @@ pub fn __hlt() {
 
 /// Invalidates a single page from the TLB (translation look-aside buffer).
 #[inline(always)]
-pub fn __invlpg(page: Address<Page>) {
+pub fn __invlpg(address: VirtualAddress) {
     // Safety: Invalidating a page from the cache has no program side effects.
     unsafe {
-        core::arch::asm!("invlpg [{}]", in(reg) page.get().get(), options(nostack, preserves_flags));
+        core::arch::asm!(
+            "invlpg [{}]",
+            in(reg) usize::from(address),
+            options(nostack, preserves_flags)
+        );
     }
 }
 

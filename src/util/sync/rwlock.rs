@@ -67,37 +67,39 @@ impl<T: ?Sized> RwLock<T> {
     /// respect to the ordering of whether contentious readers or writers will
     /// acquire the lock first.
     pub fn with_shared<'a, U>(&'a self, func: impl FnOnce(&'a T) -> U) -> U {
-        loop {
-            // An arbitrary cap that allows us to catch overflows long before they happen
-            const MAX_READERS: usize = usize::MAX / READER / 2;
+        uninterruptable(|| {
+            loop {
+                // An arbitrary cap that allows us to catch overflows long before they happen
+                const MAX_READERS: usize = usize::MAX / READER / 2;
 
-            let value = self.lock.fetch_add(READER, Ordering::Acquire);
+                let value = self.lock.fetch_add(READER, Ordering::Acquire);
 
-            if value > MAX_READERS * READER {
-                self.lock.fetch_sub(READER, Ordering::Relaxed);
-                panic!("`RwLock` has too many lock readers, cannot safely proceed");
-            }
+                if value > MAX_READERS * READER {
+                    self.lock.fetch_sub(READER, Ordering::Relaxed);
+                    panic!("`RwLock` has too many lock readers, cannot safely proceed");
+                }
 
-            if (value & WRITER) == 0 {
-                // Using a block here ensures the shared borrow of `data` does not escape.
-                let func_value = {
-                    // Safety: `self.data` is atomically checked to allow shared access.
-                    let data = unsafe { self.data.as_ref_unchecked() };
+                if (value & WRITER) == 0 {
+                    // Using a block here ensures the shared borrow of `data` does not escape.
+                    let func_value = {
+                        // Safety: `self.data` is atomically checked to allow shared access.
+                        let data = unsafe { self.data.as_ref_unchecked() };
 
-                    func(data)
-                };
+                        func(data)
+                    };
 
-                // Release the shared borrow.
+                    // Release the shared borrow.
+                    self.lock.fetch_sub(READER, Ordering::Release);
+
+                    return func_value;
+                }
+
+                // Lock is taken, undo.
                 self.lock.fetch_sub(READER, Ordering::Release);
 
-                return func_value;
+                core::hint::spin_loop();
             }
-
-            // Lock is taken, undo.
-            self.lock.fetch_sub(READER, Ordering::Release);
-
-            core::hint::spin_loop();
-        }
+        })
     }
 
     /// Lock this [`RwLock`] with exclusive access, blocking the current thread
@@ -170,7 +172,7 @@ mod tests {
                 }
 
                 tx.send(()).unwrap();
-            })
+            });
         });
 
         // Readers try to catch the writer in the act
@@ -181,7 +183,7 @@ mod tests {
             children.push(thread::spawn(move || {
                 arc3.with_shared(|lock| {
                     assert!(*lock >= 0);
-                })
+                });
             }));
         }
 
@@ -204,7 +206,7 @@ mod tests {
         let arc = Arc::new(RwLock::new(1));
         let arc2 = arc.clone();
 
-        let _ = thread::spawn(move || -> () {
+        let _ = thread::spawn(move || {
             struct Unwinder {
                 i: Arc<RwLock<isize>>,
             }
@@ -240,6 +242,6 @@ mod tests {
         let comp: &[i32] = &[4, 2, 5];
         rw.with_shared(|lock| {
             assert_eq!(lock, comp);
-        })
+        });
     }
 }
