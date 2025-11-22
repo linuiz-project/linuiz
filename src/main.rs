@@ -69,16 +69,6 @@
     internal_features
 )]
 
-use limine::{
-    BaseRevision,
-    mp::RequestFlags,
-    request::{
-        BootloaderInfoRequest, ExecutableAddressRequest, ExecutableCmdlineRequest,
-        ExecutableFileRequest, HhdmRequest, MemoryMapRequest, MpRequest, RsdpRequest,
-        StackSizeRequest,
-    },
-};
-
 mod acpi;
 mod arch;
 mod cpu;
@@ -122,12 +112,15 @@ const KERNEL_STACK_SIZE: u64 = {
 };
 
 #[doc(hidden)]
-static BASE_REVISION: BaseRevision = BaseRevision::with_revision(4);
+static BASE_REVISION: limine::BaseRevision = limine::BaseRevision::with_revision(4);
 
 #[doc(hidden)]
 #[allow(clippy::as_conversions)]
-static STACK_SIZE_REQUEST: StackSizeRequest = StackSizeRequest::new().with_size(KERNEL_STACK_SIZE);
+static STACK_SIZE_REQUEST: limine::request::StackSizeRequest =
+    limine::request::StackSizeRequest::new().with_size(KERNEL_STACK_SIZE);
 
+/// Clear the frame pointer so that on a kernel panic we don't trace anything
+/// prior to this function.
 #[macro_export]
 macro_rules! naked_asm_clear_frame_pointer_and_call_fn {
     ($call_fn:ident) => {
@@ -151,9 +144,6 @@ macro_rules! naked_asm_clear_frame_pointer_and_call_fn {
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
 unsafe extern "C" fn _entry() -> ! {
-    // We require a naked function here primarily to clear the frame pointer, so
-    // that on a kernel panic we don't trace anything prior to this function.
-
     naked_asm_clear_frame_pointer_and_call_fn!(main)
 }
 
@@ -165,14 +155,20 @@ extern "C" fn main() -> ! {
 
     // All limine feature requests (ensures they are not used after bootloader
     // memory is reclaimed)
-    static BOOTLOADER_INFO_REQUEST: BootloaderInfoRequest = BootloaderInfoRequest::new();
-    static KERNEL_FILE_REQUEST: ExecutableFileRequest = ExecutableFileRequest::new();
-    static KERNEL_CMDLINE_REQUEST: ExecutableCmdlineRequest = ExecutableCmdlineRequest::new();
-    static KERNEL_ADDRESS_REQUEST: ExecutableAddressRequest = ExecutableAddressRequest::new();
-    static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
-    static MEMORY_MAP_REQUEST: MemoryMapRequest = MemoryMapRequest::new();
-    static RSDP_REQUEST: RsdpRequest = RsdpRequest::new();
-    static MP_REQUEST: MpRequest = MpRequest::new().with_flags(RequestFlags::X2APIC);
+    static BOOTLOADER_INFO_REQUEST: limine::request::BootloaderInfoRequest =
+        limine::request::BootloaderInfoRequest::new();
+    static KERNEL_FILE_REQUEST: limine::request::ExecutableFileRequest =
+        limine::request::ExecutableFileRequest::new();
+    static KERNEL_CMDLINE_REQUEST: limine::request::ExecutableCmdlineRequest =
+        limine::request::ExecutableCmdlineRequest::new();
+    static KERNEL_ADDRESS_REQUEST: limine::request::ExecutableAddressRequest =
+        limine::request::ExecutableAddressRequest::new();
+    static HHDM_REQUEST: limine::request::HhdmRequest = limine::request::HhdmRequest::new();
+    static MEMORY_MAP_REQUEST: limine::request::MemoryMapRequest =
+        limine::request::MemoryMapRequest::new();
+    static RSDP_REQUEST: limine::request::RsdpRequest = limine::request::RsdpRequest::new();
+    static MP_REQUEST: limine::request::MpRequest =
+        limine::request::MpRequest::new().with_flags(limine::mp::RequestFlags::X2APIC);
 
     // Enable logging first, so we can get feedback on the entire init process.
     crate::logging::KernelLogger::init();
@@ -233,8 +229,8 @@ extern "C" fn main() -> ! {
 }
 
 fn print_env_info(
-    bootloader_info_request: &BootloaderInfoRequest,
-    memory_map_request: &MemoryMapRequest,
+    bootloader_info_request: &limine::request::BootloaderInfoRequest,
+    memory_map_request: &limine::request::MemoryMapRequest,
 ) {
     if let Some(bootloader_info) = bootloader_info_request.get_response() {
         info!(
@@ -261,8 +257,37 @@ fn print_env_info(
         .expect("bootloader did not provide a response to the memory map request")
         .entries();
 
-    report_memory_map_entries(memory_map);
-    report_total_usable_memory(memory_map);
+    memory_map.iter().for_each(|entry| {
+        let entry_start = entry.base;
+        let entry_end = entry_start + entry.length;
+        debug!(
+            "Memory Map: {:#X?}  {}",
+            entry_start..entry_end,
+            limine_memory_map_entry_type_to_str(entry.entry_type)
+        );
+    });
+
+    let total_usable_memory = memory_map
+        .iter()
+        .fold(0u64, |mut total_usable_memory, entry| {
+            match entry.entry_type {
+                limine::memory_map::EntryType::USABLE
+                | limine::memory_map::EntryType::EXECUTABLE_AND_MODULES
+                | limine::memory_map::EntryType::BOOTLOADER_RECLAIMABLE
+                | limine::memory_map::EntryType::ACPI_RECLAIMABLE => {
+                    total_usable_memory += entry.length;
+                }
+
+                _ => {}
+            }
+
+            total_usable_memory
+        });
+
+    debug!(
+        "Detected system memory: {}MB",
+        total_usable_memory / 1_000_000
+    );
 }
 
 fn limine_memory_map_entry_type_to_str(entry_type: limine::memory_map::EntryType) -> &'static str {
@@ -280,104 +305,6 @@ fn limine_memory_map_entry_type_to_str(entry_type: limine::memory_map::EntryType
     }
 }
 
-fn report_memory_map_entries(memory_map: &[&limine::memory_map::Entry]) {
-    memory_map.iter().for_each(|entry| {
-        let entry_start = entry.base;
-        let entry_end = entry_start + entry.length;
-        debug!(
-            "Memory Map: {:#X?}  {}",
-            entry_start..entry_end,
-            limine_memory_map_entry_type_to_str(entry.entry_type)
-        );
-    });
-}
-
-fn report_total_usable_memory(memory_map: &[&limine::memory_map::Entry]) {
-    let total_usable_memory = memory_map
-        .iter()
-        .fold(0u64, |mut total_usable_memory, entry| {
-            if matches!(
-                entry.entry_type,
-                limine::memory_map::EntryType::USABLE
-                    | limine::memory_map::EntryType::EXECUTABLE_AND_MODULES
-                    | limine::memory_map::EntryType::BOOTLOADER_RECLAIMABLE
-                    | limine::memory_map::EntryType::ACPI_RECLAIMABLE
-            ) {
-                total_usable_memory += entry.length;
-            }
-
-            total_usable_memory
-        });
-
-    debug!(
-        "Detected system memory: {}MB",
-        total_usable_memory / 1_000_000
-    );
-}
-
-/// Iterates the entries in the multiprocessing request, configuring and
-/// subsequently synchronizing the other processors in the system.
-///
-/// # Returns
-///
-/// - If request was satisfied, `Some` of the count of non-bootstrap processor
-///   in the system.
-/// - If request was not satisfied, `None`.
-pub fn begin_multiprocessing(mp_request: &limine::request::MpRequest) -> Option<usize> {
-    let Some(response) = mp_request.get_response() else {
-        warn!("Bootloader did not provide response to multiprocessing request.");
-        return None;
-    };
-
-    debug!("Detecting and starting additional cores.");
-
-    response
-        .cpus()
-        .iter()
-        .filter(|cpu| cpu.lapic_id != response.bsp_lapic_id())
-        .for_each(|cpu| {
-            trace!("Starting processor: ID#{} LAPIC#{}", cpu.id, cpu.lapic_id);
-
-            cpu.goto_address.write({
-                if crate::params::KernelParameters::use_multiprocessing() {
-                    #[unsafe(naked)]
-                    extern "C" fn _mp_entry(_: &limine::mp::Cpu) -> ! {
-                        extern "C" fn mp_main(_: &limine::mp::Cpu) -> ! {
-                            // Safety: Function is run only once for this processor.
-                            unsafe {
-                                crate::cpu::configure();
-                            }
-
-                            // Safety: All currently referenced memory should also be
-                            //         mapped in the kernel page tables.
-                            unsafe {
-                                crate::mem::KernelMapper::swap_into();
-                            }
-
-                            // Safety: processor still in init phase.
-                            unsafe { init_processor(None, None) }
-                        }
-
-                        // We require a naked function here primarily to clear the frame pointer, so
-                        // that on a kernel panic we don't trace anything prior to this function.
-
-                        crate::naked_asm_clear_frame_pointer_and_call_fn!(mp_main)
-                    }
-
-                    _mp_entry
-                } else {
-                    extern "C" fn _idle_forever(_: &limine::mp::Cpu) -> ! {
-                        crate::cpu::halt_and_catch_fire()
-                    }
-
-                    _idle_forever
-                }
-            });
-        });
-
-    Some(response.cpus().len())
-}
-
 /// Enters core into the scheduler loop, exiting the kernel's boot phase.
 ///
 /// # Safety
@@ -389,6 +316,73 @@ pub unsafe fn init_processor(
     _memory_map_request: Option<&limine::request::MemoryMapRequest>,
 ) -> ! {
     use crate::{cpu::local_state::LocalState, scheduler::Scheduler};
+
+    /// Iterates the entries in the multiprocessing request, configuring and
+    /// subsequently synchronizing the other processors in the system.
+    ///
+    /// # Returns
+    ///
+    /// - If request was satisfied, `Some` of the count of non-bootstrap
+    ///   processor in the system.
+    /// - If request was not satisfied, `None`.
+    pub fn begin_multiprocessing(mp_request: &limine::request::MpRequest) -> Option<usize> {
+        let Some(response) = mp_request.get_response() else {
+            warn!("Bootloader did not provide response to multiprocessing request.");
+            return None;
+        };
+
+        debug!("Detecting and starting additional cores.");
+
+        let mp_entry = {
+            if crate::params::KernelParameters::use_multiprocessing() {
+                #[unsafe(naked)]
+                extern "C" fn _mp_entry(_: &limine::mp::Cpu) -> ! {
+                    extern "C" fn _mp_main(_: &limine::mp::Cpu) -> ! {
+                        // Safety: Function is run only once for this processor.
+                        unsafe {
+                            crate::cpu::configure();
+                        }
+
+                        // Safety: All currently referenced memory should also be
+                        //         mapped in the kernel page tables.
+                        unsafe {
+                            crate::mem::KernelMapper::swap_into();
+                        }
+
+                        // Safety: processor still in init phase.
+                        unsafe { init_processor(None, None) }
+                    }
+
+                    crate::naked_asm_clear_frame_pointer_and_call_fn!(_mp_main)
+                }
+
+                _mp_entry
+            } else {
+                #[unsafe(naked)]
+                extern "C" fn _idle_entry(_: &limine::mp::Cpu) -> ! {
+                    extern "C" fn _idle_main(_: &limine::mp::Cpu) -> ! {
+                        crate::cpu::halt_and_catch_fire()
+                    }
+
+                    crate::naked_asm_clear_frame_pointer_and_call_fn!(_idle_main)
+                }
+
+                _idle_entry
+            }
+        };
+
+        response
+            .cpus()
+            .iter()
+            .filter(|cpu| cpu.lapic_id != response.bsp_lapic_id())
+            .for_each(|cpu| {
+                trace!("Starting processor: ID#{} LAPIC#{}", cpu.id, cpu.lapic_id);
+
+                cpu.goto_address.write(mp_entry);
+            });
+
+        Some(response.cpus().len())
+    }
 
     mp_request
         .and_then(begin_multiprocessing)
