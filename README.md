@@ -1,32 +1,3 @@
-# **Linuiz OS**
+**THIS REPOSITORY HAS BEEN MOVED TO [CODEBERG](https://codeberg.org/linuiz-project/linuiz).**
 
-## What is it?
-
-*Linuiz* is a semi-modular multi-archutecture operating system written in the Rust programming language.
-
-## Why is it?
-
-Linuiz is an experiment that seeks to abridge the differences between many separate programming and kernel design paradigms. 
-Additionally, Linuiz aims to seamlessly integrate a windowing into the command-line experience—creating a hybrid that allows traditionally technical environments to be more accessible.
-
-<br />
-
-
-# **Testing It Out**
-
-## Building
-The build process is mostly automated via the `cargo xtask` pattern, although the following **prerequisites** must be met:
-  - `cargo` and `rustup` installed and in your `PATH`.
-  - The following packages installed:
-    - `build-essential`,  `libclang-dev`, `qemu`, `qemu-utils`
-
-  - Depending on the architecture you wish to target, you may need one of the following:
-    - `qemu-system-x86`, `qemu-system-arm`, or `qemu-system-misc` *(for risc-v)*
-      - *note: Others can be listed with `apt list | grep qemu-system`*
-
-
-## Running
-
-To run the OS with its default configuration, simply call: `cargo xtask run`
-
-<!-- TODO list some common options related to the command  -->
+_The Linuiz Project_ does not support GitHub's decisions to scrape all of the code hosted on its platform for usage within large language models (LLMs). The environmental, community, psychological, and economic impact of LLMs is far beyond what such a largely pointless and wasteful technology should merit. Technology, and its accompanying software, should strive to _solve_ the problems of our society, rather than creating entirely new systemic risks for us all.
