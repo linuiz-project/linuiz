@@ -13,7 +13,7 @@ buffered_uart = []
 bit_field = "0.10"
 bitflags = "2.9"
 elf = { version = "0.8.0", default-features = false }
-getrandom = "0.3"
+getrandom = "0.4"
 heapless = { version = "0.9", default-features = false, features = [
     "nightly",
     "mpmc_large",
